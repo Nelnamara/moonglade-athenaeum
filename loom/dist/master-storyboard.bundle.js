@@ -382,10 +382,13 @@ ${"=".repeat(48)}
   function anyLoraUnresolved(loras) {
     return (loras || []).some((l) => !l.version_id);
   }
+  function overLoraCap(loras, cap) {
+    return cap != null && (loras || []).length > cap;
+  }
   function snap8(n) {
     return Math.max(64, Math.min(4096, Math.round((Number(n) || 0) / 8) * 8));
   }
-  function resolveGenDims2({ aspectW, aspectH, size, customW, customH } = {}) {
+  function resolveGenDims({ aspectW, aspectH, size, customW, customH } = {}) {
     const cw = Number(customW) || 0, ch = Number(customH) || 0;
     if (cw > 0 && ch > 0) return { w: snap8(cw), h: snap8(ch), custom: true };
     const rw = Number(aspectW) || 1, rh = Number(aspectH) || 1;
@@ -396,7 +399,7 @@ ${"=".repeat(48)}
   }
   function buildImgGenBody(imgModel, imgLoras, imgAdv, prompt) {
     const a = imgAdv || {};
-    const dims = resolveGenDims2({
+    const dims = resolveGenDims({
       aspectW: a.aspectW,
       aspectH: a.aspectH,
       size: a.size,
@@ -1000,6 +1003,7 @@ ${"=".repeat(48)}
 .lv-tab{flex:1;text-align:center;font:600 10px/1 system-ui;padding:6px 4px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);color:var(--subtext);cursor:pointer;}
 .lv-tab.on{background:color-mix(in srgb,var(--accent) 18%,transparent);border-color:var(--accent);color:var(--accent);}
 .lv-in{width:100%;background:var(--base);border:1px solid var(--surface1);border-radius:7px;padding:7px 8px;color:var(--text);font:11px/1.3 system-ui;}
+.cap-off{opacity:.4;cursor:not-allowed;}
 .lv-in:focus{outline:0;border-color:var(--accent);}
 .lv-minichip{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:2px 5px;cursor:pointer;}
 .lv-minichip:hover{border-color:var(--accent);color:var(--accent);}
@@ -1039,12 +1043,18 @@ ${"=".repeat(48)}
    .lv-mpick-veil overlay the Model row's own trigger does (see below), just pre-selected to
    the LoRAs segment -- reuses .lv-chip's chrome unchanged, only what the click DOES changed. */
 .lv-loratoggle{display:inline-block;margin:7px 0 5px;}
+.lv-loracap{margin-left:8px;font-size:10.5px;color:var(--subtext);}
+.lv-loracap.over{color:var(--coral);font-weight:600;}
+.lv-lw{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
+.lv-lw input[type=range]{width:92px;padding:0;background:none;border:none;}
+.lv-lw b{min-width:32px;text-align:right;font-size:11px;font-weight:600;color:var(--amber);font-variant-numeric:tabular-nums;}
 .lv-loras{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
-.lv-lchip{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
+.lv-lchip{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
 .lv-lchip.failed{border-color:var(--coral);}
 .lv-lchip .lv-lnm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lv-lchip.failed .lv-lnm{color:var(--coral);}
 .lv-lchip input{width:52px;background:var(--base);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:10px;padding:2px 4px;}
+.lv-lorver{flex:1 1 100%;margin-top:1px;background:var(--base);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:10px;padding:2px 4px;}
 .lv-lchip .lv-lrm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:13px;padding:0 2px;line-height:1;}
 .lv-lchip .lv-lrm:hover{color:var(--coral);}
 /* picker-parity-round2 (problem 2): the Image tab's model/LoRA picker used to render
@@ -1276,10 +1286,31 @@ ${"=".repeat(48)}
       if (pickerOpen) setPickerMounted(true);
     }, [pickerOpen]);
     const imgModelSeqRef = useRef(0);
+    const loraRange = useMemo(() => {
+      const L = window.MG_LORA;
+      const t = String(imgModel && imgModel.model_type || "").toUpperCase();
+      if (!L) return [-2, 2];
+      return L.ranges && L.ranges[t] || L.fallback || [-2, 2];
+    }, [imgModel]);
+    useEffect(() => {
+      setImgLoras((cur) => {
+        let changed = false;
+        const next = cur.map((l) => {
+          const w = Math.max(loraRange[0], Math.min(loraRange[1], +l.weight));
+          if (w !== l.weight) changed = true;
+          return w === l.weight ? l : { ...l, weight: w };
+        });
+        return changed ? next : cur;
+      });
+    }, [loraRange, setImgLoras]);
+    const basePickerElRef = useRef(null);
+    const loraPickerElRef = useRef(null);
     const bindPicker = useCallback((el) => {
+      basePickerElRef.current = el;
       if (el && !el._mgBound) {
         el._mgBound = true;
         el.addEventListener("mg-pick", (e) => {
+          setPickerOpen(false);
           const m = { model_id: e.detail.model_id, title: e.detail.title, preview_url: e.detail.preview_url || "" };
           setImgModel(m);
           setModelDefaults(null);
@@ -1287,12 +1318,14 @@ ${"=".repeat(48)}
           fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1").then((r) => r.json()).then((d) => {
             if (mySeq !== imgModelSeqRef.current) return;
             const versions = d && d.versions || [], v = versions[0] || {};
-            setImgModel((cur) => cur && cur.model_id === m.model_id ? {
+            setImgModel((cur) => cur ? {
               ...cur,
               version_id: v.version_id || "",
               model_type: v.model_type || "",
               sampling_method: v.sampling_method || "",
               capabilities: v.capabilities || [],
+              compatibility: v.compatibility || {},
+              restrictions: v.restrictions || {},
               versions
             } : cur);
             const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
@@ -1319,7 +1352,9 @@ ${"=".repeat(48)}
         version_id: v.version_id || "",
         model_type: v.model_type || "",
         sampling_method: v.sampling_method || "",
-        capabilities: v.capabilities || []
+        capabilities: v.capabilities || [],
+        compatibility: v.compatibility || {},
+        restrictions: v.restrictions || {}
       }));
       const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
       setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
@@ -1333,6 +1368,7 @@ ${"=".repeat(48)}
       }
     }, [imgModel, setImgModel, setImgAdv, setModelDefaults]);
     const bindLoraPicker = useCallback((el) => {
+      loraPickerElRef.current = el;
       if (el && !el._mgBound) {
         el._mgBound = true;
         el.addEventListener("mg-pick", (e) => {
@@ -1348,6 +1384,11 @@ ${"=".repeat(48)}
         });
       }
     }, [setImgLoras]);
+    useEffect(() => {
+      if (!pickerMounted) return;
+      const vis = pickerKind === "base" ? basePickerElRef.current : loraPickerElRef.current;
+      if (vis && vis.ensureSearched) vis.ensureSearched();
+    }, [pickerMounted, pickerKind]);
     const imgCostRef = useRef(null);
     const editCostRef = useRef(null);
     const refCostRef = useRef(null);
@@ -1798,21 +1839,24 @@ ${"=".repeat(48)}
             },
             l.title,
             !l.version_id ? l.failed ? " \u26A0" : " \u23F3" : incompat ? " \u26A0" : ""
-          ), /* @__PURE__ */ React.createElement(
+          ), /* @__PURE__ */ React.createElement("span", { className: "lv-lw" }, /* @__PURE__ */ React.createElement(
             "input",
             {
-              type: "number",
-              step: "0.05",
-              min: "0",
-              max: "2",
+              type: "range",
+              step: "0.1",
+              min: loraRange[0],
+              max: loraRange[1],
               value: l.weight,
-              title: "Weight",
+              title: "Weight \u2014 " + loraRange[0] + " to " + loraRange[1] + " for this base model" + (loraRange[0] < 0 ? "; negative subtracts this LoRA's influence" : ""),
               onChange: (ev) => {
-                const w = +ev.target.value || 0;
+                const w = Math.max(
+                  loraRange[0],
+                  Math.min(loraRange[1], +ev.target.value || 0)
+                );
                 setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x));
               }
             }
-          ), /* @__PURE__ */ React.createElement(
+          ), /* @__PURE__ */ React.createElement("b", null, (+l.weight).toFixed(1))), /* @__PURE__ */ React.createElement(
             "button",
             {
               type: "button",
@@ -1821,11 +1865,31 @@ ${"=".repeat(48)}
               onClick: () => setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id))
             },
             "\xD7"
+          ), l.versions && l.versions.length > 1 && /* @__PURE__ */ React.createElement(
+            "select",
+            {
+              className: "lv-lorver",
+              value: l.version_id || "",
+              title: "This LoRA's published releases \u2014 PixAI defaults to the latest; pick another to use it instead",
+              onChange: (ev) => {
+                const vid = ev.target.value;
+                const v = l.versions.find((x) => x.version_id === vid);
+                if (!v) return;
+                setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? {
+                  ...x,
+                  version_id: v.version_id || "",
+                  lora_base_type: v.lora_base_model_type || "",
+                  trigger_words: v.trigger_words || "",
+                  failed: !v.version_id
+                } : x));
+              }
+            },
+            l.versions.map((v) => /* @__PURE__ */ React.createElement("option", { key: v.version_id, value: v.version_id }, v.label || v.version_id))
           ));
         })), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-chip lv-loratoggle", onClick: () => {
           setPickerKind("lora");
           setPickerOpen(true);
-        } }, "+ add LoRA"), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Image prompt"), /* @__PURE__ */ React.createElement(
+        } }, "+ add LoRA"), acct && acct.lora_cap != null && /* @__PURE__ */ React.createElement("span", { className: "lv-loracap" + (overLoraCap(imgLoras, acct.lora_cap) ? " over" : "") }, imgLoras.length, " / ", acct.lora_cap, " LoRAs"), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Image prompt"), /* @__PURE__ */ React.createElement(
           "textarea",
           {
             className: "lv-ta",
@@ -1833,45 +1897,61 @@ ${"=".repeat(48)}
             placeholder: "describe the reference still (subject, pose, composition, light)\u2026",
             onChange: (ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))
           }
-        ), sel && /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, c.openFrame && c.openFrame.desc || "", c.lighting || ""].filter(Boolean).join(", ") })) }, "\u21A7 seed from shot description"), /* @__PURE__ */ React.createElement("details", null, /* @__PURE__ */ React.createElement("summary", { style: { cursor: "pointer", color: "var(--subtext)", fontSize: 11 } }, "Advanced"), /* @__PURE__ */ React.createElement(
-          "textarea",
-          {
-            className: "lv-ta",
-            style: { marginTop: 5 },
-            value: imgAdv.negative,
-            placeholder: "lowres, text, watermark\u2026",
-            onChange: (ev) => setImgAdv((a) => ({ ...a, negative: ev.target.value }))
-          }
-        ), /* @__PURE__ */ React.createElement("div", { className: "lv-row2" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab", style: { margin: "6px 0 3px" } }, "Steps"), /* @__PURE__ */ React.createElement(
-          "input",
-          {
-            className: "lv-in",
-            type: "number",
-            min: "1",
-            max: "150",
-            step: "1",
-            value: imgAdv.steps,
-            onChange: (ev) => setImgAdv((a) => ({ ...a, steps: +ev.target.value || 25 }))
-          }
-        )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab", style: { margin: "6px 0 3px" } }, "CFG scale"), /* @__PURE__ */ React.createElement(
-          "input",
-          {
-            className: "lv-in",
-            type: "number",
-            min: "1",
-            max: "30",
-            step: "0.5",
-            value: imgAdv.cfg,
-            onChange: (ev) => setImgAdv((a) => ({ ...a, cfg: +ev.target.value || 7 }))
-          }
-        ))), modelDefaults && /* @__PURE__ */ React.createElement("div", { className: "lv-advnote" }, /* @__PURE__ */ React.createElement("span", null, "\u2713 using this model's tuned preset"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-mini2", style: { margin: 0 }, onClick: () => {
-          setImgAdv((a) => ({
-            ...a,
-            negative: modelDefaults.negative_prompt || a.negative,
-            steps: modelDefaults.sampling_steps || a.steps,
-            cfg: modelDefaults.cfg_scale || a.cfg
-          }));
-        } }, "\u21B6 reset"))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Aspect"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 5, flexWrap: "wrap" } }, [
+        ), sel && /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, c.openFrame && c.openFrame.desc || "", c.lighting || ""].filter(Boolean).join(", ") })) }, "\u21A7 seed from shot description"), (() => {
+          const compat = imgModel && imgModel.compatibility || {};
+          const restr = imgModel && imgModel.restrictions || {};
+          const negOff = compat.negativePrompt === false;
+          const stepsOff = compat.samplingSteps === false;
+          const cfgOff = compat.cfgScale === false;
+          const stepsB = restr.samplingSteps || {};
+          const cfgB = restr.cfgScale || {};
+          const offTitle = "This model doesn\u2019t use this setting";
+          return /* @__PURE__ */ React.createElement("details", null, /* @__PURE__ */ React.createElement("summary", { style: { cursor: "pointer", color: "var(--subtext)", fontSize: 11 } }, "Advanced"), /* @__PURE__ */ React.createElement(
+            "textarea",
+            {
+              className: "lv-ta" + (negOff ? " cap-off" : ""),
+              style: { marginTop: 5 },
+              value: imgAdv.negative,
+              placeholder: "lowres, text, watermark\u2026",
+              disabled: negOff,
+              title: negOff ? offTitle : "",
+              onChange: (ev) => setImgAdv((a) => ({ ...a, negative: ev.target.value }))
+            }
+          ), /* @__PURE__ */ React.createElement("div", { className: "lv-row2" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab", style: { margin: "6px 0 3px" } }, "Steps"), /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              className: "lv-in" + (stepsOff ? " cap-off" : ""),
+              type: "number",
+              min: stepsB.min != null ? stepsB.min : 1,
+              max: stepsB.max != null ? stepsB.max : 150,
+              step: "1",
+              value: imgAdv.steps,
+              disabled: stepsOff,
+              title: stepsOff ? offTitle : "",
+              onChange: (ev) => setImgAdv((a) => ({ ...a, steps: +ev.target.value || 25 }))
+            }
+          )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab", style: { margin: "6px 0 3px" } }, "CFG scale"), /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              className: "lv-in" + (cfgOff ? " cap-off" : ""),
+              type: "number",
+              min: cfgB.min != null ? cfgB.min : 1,
+              max: cfgB.max != null ? cfgB.max : 30,
+              step: "0.5",
+              value: imgAdv.cfg,
+              disabled: cfgOff,
+              title: cfgOff ? offTitle : "",
+              onChange: (ev) => setImgAdv((a) => ({ ...a, cfg: +ev.target.value || 7 }))
+            }
+          ))), modelDefaults && /* @__PURE__ */ React.createElement("div", { className: "lv-advnote" }, /* @__PURE__ */ React.createElement("span", null, "\u2713 using this model's tuned preset"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-mini2", style: { margin: 0 }, onClick: () => {
+            setImgAdv((a) => ({
+              ...a,
+              negative: modelDefaults.negative_prompt || a.negative,
+              steps: modelDefaults.sampling_steps || a.steps,
+              cfg: modelDefaults.cfg_scale || a.cfg
+            }));
+          } }, "\u21B6 reset")));
+        })(), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Aspect"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 5, flexWrap: "wrap" } }, [
           [1, 1, "1:1"],
           [3, 4, "3:4"],
           [4, 3, "4:3"],
@@ -1980,10 +2060,10 @@ ${"=".repeat(48)}
           "button",
           {
             className: "lv-go",
-            disabled: busyI || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)),
+            disabled: busyI || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) || overLoraCap(imgLoras, acct && acct.lora_cap),
             onClick: () => genImage(active)
           },
-          busyI ? gi.msg || "generating\u2026" : anyLoraUnresolved(imgLoras) ? "waiting on LoRA\u2026" : imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) ? "incompatible LoRA \u2014 remove or switch base" : "\u2726 Generate reference image"
+          busyI ? gi.msg || "generating\u2026" : anyLoraUnresolved(imgLoras) ? "waiting on LoRA\u2026" : imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) ? "incompatible LoRA \u2014 remove or switch base" : overLoraCap(imgLoras, acct && acct.lora_cap) ? "remove " + (imgLoras.length - acct.lora_cap) + " LoRA" + (imgLoras.length - acct.lora_cap === 1 ? "" : "s") + " to continue" : "\u2726 Generate reference image"
         ), gi.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gi.msg), gi.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gi.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeImg(routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeImg(routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gi.routed === "cast" ? " on" : ""), onClick: () => routeImg(routeTarget || active, "cast", active.c.id) }, "cast")), gi.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gi.routed, sel ? " \xB7 it now feeds this shot's video gen" : "")));
       } else if (tab === "Edit") {
         const ge = genEditState[active.c.id] || {};
@@ -2911,9 +2991,13 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       const startedAt = Date.now();
       const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
         const cls = classifyTaskStatus(d);
-        if (cls.phase === "done") setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
-        else if (cls.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-        else again(4e3);
+        if (cls.phase === "done") {
+          setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
+          if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
+        } else if (cls.phase === "failed") {
+          setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
+          if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
+        } else again(4e3);
       }).catch(() => again(5e3));
       const again = (ms) => {
         if (Date.now() - startedAt > POLL_CEILING_MS) {
@@ -2957,6 +3041,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.error ? friendlyGenErr(d.error) : "submit failed" } }));
           return;
         }
+        if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, "Image \xB7 " + entry.code + " \xB7 " + (c.title || "untitled"));
         setGenImgState((s) => ({ ...s, [c.id]: { phase: "running", msg: "Generating\u2026" } }));
         pollImg(c.id, d.task_id);
       } catch {
@@ -2974,7 +3059,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       else if (target === "cast") setAssets((a) => [...a, { id: uid(), name: c.title || "", kind: "image", tag: nextTag(a, "@image"), thumbId: "", source: "", mediaId: mid, lock: false }]);
       setGenImgState((s) => ({ ...s, [sid]: { ...s[sid], routed: target } }));
     };
-    const runGen = async (setState, cardId, endpoint, body, priceBody, label) => {
+    const runGen = async (setState, cardId, endpoint, body, priceBody, label, jobLabel) => {
       if (priceBody && !await confirmSpend(priceBody, label)) return;
       setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting\u2026" } }));
       const poll = (tid) => pollTaskWithCeiling(tid, setState, cardId);
@@ -2985,6 +3070,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           setState((s) => ({ ...s, [cardId]: { phase: "error", msg: d.error ? friendlyGenErr(d.error) : "submit failed" } }));
           return;
         }
+        if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, jobLabel);
         setState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Generating\u2026" } }));
         poll(d.task_id);
       } catch {
@@ -3021,7 +3107,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         "/api/edit",
         editBody,
         { mode: "edit", ...editBody },
-        `Edit the open frame of ${c.title || "this shot"}?`
+        `Edit the open frame of ${c.title || "this shot"}?`,
+        "Edit \xB7 " + entry.code + " \xB7 " + (c.title || "untitled")
       );
     };
     const genRef = (entry) => {
@@ -3043,7 +3130,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         "/api/edit",
         refBody,
         { mode: "edit", ...refBody },
-        `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?`
+        `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?`,
+        // The reference COUNT is the one fact this path is about (and the one its own confirm
+        // already surfaces), so it rides in the row rather than being lost to "Reference".
+        "Reference \xD7" + refs.length + " \xB7 " + entry.code + " \xB7 " + (c.title || "untitled")
       );
     };
     const batchGenerate = async (entries) => {
@@ -3515,6 +3605,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     const [dur, setDur] = useState(0);
     const [range, setRange] = useState({ in: trimIn || 0, out: trimOut });
     const [playing, setPlaying] = useState(false);
+    const [soundOn, setSoundOn] = useState(false);
     const [cropping, setCropping] = useState(false);
     const rangeRef = useRef(range);
     rangeRef.current = range;
@@ -3524,6 +3615,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     useEffect(() => {
       setRange({ in: trimIn || 0, out: trimOut });
     }, [trimIn, trimOut]);
+    useEffect(() => {
+      const v = vidRef.current;
+      if (v) v.muted = !(soundOn && playing);
+    }, [soundOn, playing]);
     const effOut = (range.out == null ? dur : range.out) || dur;
     const pct = (s) => dur ? Math.max(0, Math.min(100, s / dur * 100)) : 0;
     const fT = (s) => (s || 0).toFixed(1) + "s";
@@ -3666,7 +3761,16 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       cropping && /* @__PURE__ */ React.createElement("div", { className: "sb-crop-layer", onPointerDown: cropStart }, "drag to crop"),
       !cropping && /* @__PURE__ */ React.createElement("button", { className: "sb-shotprev-play", onClick: togglePlay, title: playing ? "Pause" : "Play" }, playing ? "\u23F8" : "\u25B6"),
       !cropping && /* @__PURE__ */ React.createElement("div", { className: "sb-shotprev-hint" }, "hover to scrub")
-    ), /* @__PURE__ */ React.createElement("div", { className: "sb-shotprev-ctrls" }, /* @__PURE__ */ React.createElement("button", { onClick: () => seek(-0.25), title: "Rewind (step back)" }, "\u23EA"), /* @__PURE__ */ React.createElement("button", { onClick: () => seek(0.25), title: "Fast-forward (step ahead)" }, "\u23E9"), onSplit && /* @__PURE__ */ React.createElement("button", { onClick: doSplit, title: "Split this shot in two at the playhead" }, "\u2702 Split"), onCrop && /* @__PURE__ */ React.createElement(
+    ), /* @__PURE__ */ React.createElement("div", { className: "sb-shotprev-ctrls" }, /* @__PURE__ */ React.createElement("button", { onClick: () => seek(-0.25), title: "Rewind (step back)" }, "\u23EA"), /* @__PURE__ */ React.createElement("button", { onClick: () => seek(0.25), title: "Fast-forward (step ahead)" }, "\u23E9"), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: soundOn ? "on" : "",
+        onClick: () => setSoundOn((v) => !v),
+        "aria-pressed": soundOn,
+        title: soundOn ? "Sound on while playing (scrubbing stays silent)" : "Play this shot with sound"
+      },
+      soundOn ? "\u{1F50A}" : "\u{1F507}"
+    ), onSplit && /* @__PURE__ */ React.createElement("button", { onClick: doSplit, title: "Split this shot in two at the playhead" }, "\u2702 Split"), onCrop && /* @__PURE__ */ React.createElement(
       "button",
       {
         className: cropping ? "on" : "",
@@ -3695,7 +3799,12 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
   function SequencePlayer({ clips, onClose }) {
     const vRef = useRef(null);
     const [i, setI] = useState(0);
+    const [muted, setMuted] = useState(true);
     const clip = clips[i];
+    useEffect(() => {
+      const v = vRef.current;
+      if (v) v.muted = muted;
+    }, [muted, i]);
     useEffect(() => {
       const v = vRef.current;
       if (!v || !clip) return;
@@ -3749,7 +3858,16 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           v.paused ? v.play() : v.pause();
         }
       }
-    ), /* @__PURE__ */ React.createElement("div", { className: "sb-seq-bar" }, /* @__PURE__ */ React.createElement("span", null, "Shot ", i + 1, "/", clips.length, clip.code ? " \xB7 " + clip.code : "", clip.title ? " \u2014 " + clip.title : ""), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => setI(Math.max(0, i - 1)), disabled: i === 0 }, "\u25C0 prev"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => {
+    ), /* @__PURE__ */ React.createElement("div", { className: "sb-seq-bar" }, /* @__PURE__ */ React.createElement("span", null, "Shot ", i + 1, "/", clips.length, clip.code ? " \xB7 " + clip.code : "", clip.title ? " \u2014 " + clip.title : ""), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: "sb-btn ghost sm",
+        onClick: () => setMuted(!muted),
+        title: muted ? "Unmute \u2014 the rendered mp4 has audio" : "Mute",
+        "aria-pressed": !muted
+      },
+      muted ? "\u{1F507} muted" : "\u{1F50A} sound"
+    ), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => setI(Math.max(0, i - 1)), disabled: i === 0 }, "\u25C0 prev"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", onClick: () => {
       if (i < clips.length - 1) setI(i + 1);
       else onClose();
     } }, "next \u25B6"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: onClose }, "\u2715 close"))));

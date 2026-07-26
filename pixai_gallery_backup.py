@@ -35,7 +35,7 @@ QUICK START
   python pixai_gallery_backup.py --max 40    # small test first
 """
 
-__version__ = "2.4.0"
+__version__ = "2.5.0"
 
 import argparse
 import csv
@@ -656,14 +656,14 @@ def _check_read_only(action):
     network call. Raising here, unconditionally, is what makes READ_ONLY override
     --confirm/--apply/--yes rather than just changing their default.
 
-    Nine call sites, not four: submit_generation, submit_fixer, delete_task_gql and
-    claim_reward are the choke points the WEB app's generate/edit/enhance/fix/delete/
-    claim routes all funnel through -- but the CLI's run_generate, run_generate_video,
-    run_reference_video, run_enhance and run_edit_image each build their OWN gql_adhoc
-    call instead of calling through a choke point, and until 2026-07-21 none of them
-    called this. Found by audit: with READ_ONLY=True and --confirm, all five reached
-    the mutation, and the free-card check fired first -- a live network call before the
-    guard even ran. Each of those five now calls this as the FIRST statement of its
+    Eight call sites, not four: submit_generation, submit_fixer, delete_task_gql and
+    claim_reward are the choke points the WEB app's generate/edit/fix/delete/claim
+    routes all funnel through -- but the CLI's run_generate, run_generate_video,
+    run_reference_video and run_edit_image each build their OWN gql_adhoc call instead
+    of calling through a choke point, and until 2026-07-21 none of them called this.
+    Found by audit: with READ_ONLY=True and --confirm, every one of them reached the
+    mutation, and the free-card check fired first -- a live network call before the
+    guard even ran. Each of those runners now calls this as the FIRST statement of its
     actual-submit branch, before any upload or card-check, not just before the mutation
     itself.
 
@@ -1080,13 +1080,15 @@ def resolve_orphan_jobs(out_dir, status_fn, min_age=0, now=None):
     existed, still exactly what every pre-existing test pins:
 
     - A `status_fn` call that comes back genuinely still 'running' for an aged-in job
-      writes a lightweight 'running' heartbeat, refreshing that job's `ts`. Nothing else
-      does this for a web-submitted generate job (api_task_status()'s own 'running' branch
-      never writes to the log at all), so without it, once a job crosses min_age it would
-      get re-asked on literally every subsequent /api/jobs poll for as long as it keeps
-      genuinely running -- a real video generation easily outlives 30 minutes. The
-      heartbeat resets the min_age clock, so a still-genuinely-running job is only
-      re-checked once per min_age, not once per poll.
+      writes a lightweight 'running' heartbeat, refreshing that job's `ts`. This is the
+      only RECURRING writer for a web-submitted generate job: api_task_status()'s own
+      'running' branch writes at most twice per job (once when it first sees it queued,
+      once when a worker starts it -- the queue/render phase the Activity tray renders),
+      deliberately de-duped so it can never become a per-poll heartbeat. So without this,
+      once a job crosses min_age it would get re-asked on literally every subsequent
+      /api/jobs poll for as long as it keeps genuinely running -- a real video generation
+      easily outlives 30 minutes. The heartbeat resets the min_age clock, so a
+      still-genuinely-running job is only re-checked once per min_age, not once per poll.
     - A `status_fn` call that RAISES for an aged-in job is recorded as 'stale' -- a
       distinct, visible, non-terminal status meaning "still stuck, and we couldn't reach
       PixAI to find out why" -- instead of silently left untouched. Un-gated (min_age=0),
@@ -1112,6 +1114,7 @@ def resolve_orphan_jobs(out_dir, status_fn, min_age=0, now=None):
                 append_job_event(out_dir, jid, status="stale",
                                  error="couldn't reach PixAI to verify this job's real status")
             continue
+        started = None
         if isinstance(phase, dict):
             # Tolerate a caller handing us generation_status()'s whole
             # {status, phase, paid_credit} dict rather than the phase string. A real
@@ -1120,11 +1123,29 @@ def resolve_orphan_jobs(out_dir, status_fn, min_age=0, now=None):
             # `except Exception` above swallows errors by design, so a contract
             # violation here is INVISIBLE rather than loud. Accepting both shapes is
             # what actually makes that failure mode impossible.
+            started = phase.get("started")
             phase = phase.get("phase")
         if phase in _JOBS_TERMINAL:
             append_job_event(out_dir, jid, status=phase,
                              error=("task " + phase if phase == "failed" else None))
             resolved += 1
+        elif started is False:
+            # A task PixAI accepted, queued, and never assigned a worker. It stays
+            # NON-TERMINAL for ~60 minutes before being reaped, so the branch above never
+            # fires and the heartbeat below would keep the card spinning as though work
+            # were happening -- which is exactly how five of the owner's generations died
+            # unnoticed between 2026-07-21 and 07-24 (all `cancelled`, all
+            # outputs.reason="waiting timeout", none ever dispatched).
+            #
+            # `stale` is reused rather than inventing a state: it already renders a warning
+            # glyph + message in the tracker, and it is deliberately NOT in _JOBS_TERMINAL,
+            # so if PixAI does eventually start the task a later done/failed still wins.
+            # Tested `started is False`, never `not started`: a caller that omits the field
+            # reports None, and "unknown" must not brand every in-flight job stale.
+            append_job_event(out_dir, jid, status="stale",
+                             error="PixAI accepted this job but has not started it -- no "
+                                   "worker has picked it up. Unstarted tasks are cancelled "
+                                   "and refunded at about 60 minutes.")
         elif min_age:
             append_job_event(out_dir, jid, status="running")   # refresh ts; see docstring
     return resolved
@@ -1286,6 +1307,51 @@ def build_stem_name(prompt_preview, task_id, media_id, max_len, sep="_"):
     tid = str(task_id or "task")
     mid = str(media_id)
     parts = [p for p in (slug, tid, mid) if p]
+    return sep.join(parts)
+
+
+# The two region kinds POST /v2/task/fixer accepts, in the order a filename spells them out
+# (so "hand then face" and "face then hand" produce the same marker).
+_FIX_TAGS = ("face", "hand")
+
+
+def fixer_block(task):
+    """`parameters.chat.fixer` when this getTaskById task is a hand/face Fix, else None.
+
+    PixAI turns a POST /v2/task/fixer submit into an ordinary taskKind=chat generation, so a
+    Fix comes back looking exactly like an instruct Edit apart from this one sub-block -- it
+    is the only thing that identifies the task family after the fact."""
+    chat = ((task or {}).get("parameters") or {}).get("chat")
+    fx = chat.get("fixer") if isinstance(chat, dict) else None
+    return fx if isinstance(fx, dict) else None
+
+
+def fix_marker(boxes):
+    """'fix-face' / 'fix-hand' / 'fix-face-hand' for a Fix output's filename, read off the
+    tags its boxes carried. An untagged box degrades to a plain 'fix' rather than guessing
+    which region kind it was. Hyphens stay literal so the marker reads as ONE token beside
+    the separator-joined parts around it."""
+    tags = {str((b or {}).get("tag") or "").lower()
+            for b in (boxes or []) if isinstance(b, dict)}
+    return "-".join(["fix"] + [t for t in _FIX_TAGS if t in tags])
+
+
+def build_fix_stem_name(source_label, boxes, task_id, media_id, max_len, sep="_"):
+    """`<source-slug>_fix-face_<task_id>_<media_id>` -- the filename stem for a Fix output.
+
+    build_stem_name cannot serve this family: a fixer task's `prompts` is a FIXED template
+    PixAI writes itself ("Image 2 shows the areas in Image 1 that need fixing..."), so every
+    Fix output it ever named got the same meaningless 60-character slug and a folder of them
+    was unbrowsable. The readable half comes from the SOURCE image instead, and the marker
+    says which kind of region was repaired.
+
+    Two ordering rules, both load-bearing: the source slug leads, so a Fix sorts directly
+    beside the image it repaired (same slug, and the source's own name continues with a
+    digit while this one continues with 'f'); and media_id stays LAST, so invariant 7's
+    shared `_<media_id>` matcher -- resume, already_downloaded, organize -- still finds it.
+    The length cap applies to the slug only, so the marker can never be truncated away."""
+    slug = slug_from_prompt(source_label, max_len, sep)
+    parts = [p for p in (slug, fix_marker(boxes), str(task_id or "task"), str(media_id)) if p]
     return sep.join(parts)
 
 
@@ -1690,6 +1756,50 @@ def task_detail_gql(session, task_id):
         return None
 
 
+_DELETE_BATCH_MEDIA_MUT = """
+mutation($id: ID!, $input: UpdateGenerationTaskInput!) {
+  updateGenerationTask(id: $id, input: $input) { id }
+}
+"""
+
+
+def delete_batch_media_gql(session, task_id, media_id):
+    """Delete ONE image out of a task's batch, leaving the task and its siblings alone.
+
+    The finer-grained counterpart to `delete_task_gql`, which is task-level: deleting any
+    one image there takes the whole batch with it. DELETES from your PixAI account and is
+    irreversible on their side.
+
+    Signature discovered by validation-error probing (nothing executed): the mutation is
+    `updateGenerationTask(id: ID!, input: UpdateGenerationTaskInput!)` and the delete rides
+    in as `{deleteBatchMedia: {mediaId}}`. It goes over `gql_adhoc`, so unlike
+    `delete_task_gql` it needs NO persisted hash and cannot break when one rotates.
+
+    Two properties copied deliberately from `delete_task_gql`, because both are safety
+    rather than style:
+      - `_check_read_only` fires BEFORE the network call. READ_ONLY is a promise the Trust
+        & Safety page makes about every account-mutating path; a new destructive path that
+        skipped it would be a silent hole in that promise.
+      - SINGLE ATTEMPT, no retry/backoff. A flaky network must never be able to fire a
+        destructive delete twice."""
+    task_id, media_id = str(task_id or "").strip(), str(media_id or "").strip()
+    if not task_id or not media_id:
+        raise PixAIError(
+            "per-image delete needs BOTH a task id and a media id (got task={!r}, media={!r}) "
+            "-- a blank media id would be an update with nothing to delete, and a blank task "
+            "id has no batch to delete from.".format(task_id, media_id))
+    _check_read_only("delete one image from a task on your PixAI account")
+    # retries=0 is the SINGLE-ATTEMPT promise above, made real. gql_adhoc defaults to
+    # retries=3 and re-POSTs on a RequestException or a 429/5xx -- and a read timeout can
+    # arrive AFTER PixAI has already processed the delete, so the default would re-fire a
+    # destructive mutation against a batch that has already changed underneath it.
+    # delete_task_gql avoids this by hand-rolling its own single session.post; this is the
+    # same guarantee expressed through the shared helper.
+    return gql_adhoc(session, _DELETE_BATCH_MEDIA_MUT,
+                     {"id": task_id, "input": {"deleteBatchMedia": {"mediaId": media_id}}},
+                     retries=0)
+
+
 def delete_task_gql(session, task_id):
     """Replay the deleteGenerationTask persisted mutation for ONE task id.
 
@@ -1917,6 +2027,13 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
             "ref_count": int(m.get("refCount") or 0),
             "author_id": str(m.get("authorId") or ""),
             "cover_url": med.get("publicUrl") or med.get("thumbnailUrl") or "",
+            # GraphQL-only per-viewer state absent here -> False, the mirror of
+            # model_search_market_gql's "REST-only rich fields absent here -> empty so the
+            # card hides them". This endpoint carries no bookmarked/liked equivalent at all,
+            # so False means "this path can't tell you", NOT "confirmed not bookmarked" --
+            # exactly like `official: False` on a GraphQL row. Present-and-falsy (rather than
+            # missing) so a consumer can read the key off either path's rows.
+            "bookmarked": False, "liked": False,
         })
     return {"results": out, "has_more": bool(data.get("hasMore"))}
 
@@ -1925,8 +2042,26 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
 # 2026-07-04). NOTE 'concept' is NOT a real server value (returns empty) -- excluded.
 MARKET_CATEGORIES = ("character", "style", "pose", "clothing", "background", "detail", "other")
 
+# GenerationModelType enum members this app is willing to put INTO a query document, for
+# generationModels(loraBaseModelTypes:[...]) -- see model_search_market_gql's lora_base_type
+# argument. Only these five: the architectures confirmed to exist as a LoRA's BASE family.
+# (MULTI_LORA is a LoRA's OWN type and VIDEO_MODEL is not an image base, so neither is ever a
+# legitimate value here and both are deliberately absent.)
+#
+# This MUST stay a fixed whitelist. A GraphQL enum is a bare token, not a string -- it cannot
+# be bound as a $variable, so the value is interpolated into the query text, exactly like
+# MARKET_CATEGORIES above and for exactly the same reason: caller-supplied text must never
+# reach a query document. Anything not listed here is silently ignored and the search runs
+# UNFILTERED -- fail-open, the same way a non-whitelisted `category` is dropped. An unknown or
+# newly-added architecture must degrade to "no server-side filter" (the per-row
+# annotate_lora_compat badge still tells the truth), never to a rejected query that would
+# break LoRA browsing outright.
+LORA_BASE_MODEL_TYPES = ("SDXL_MODEL", "SD_V1_MODEL", "DIT7B_MODEL", "MMDIT26A_MODEL",
+                         "DIT9_MODEL")
 
-def model_search_market_gql(session, keyword="", category="", sort="", usage="MODEL", limit=24):
+
+def model_search_market_gql(session, keyword="", category="", sort="", usage="MODEL", limit=24,
+                            after=None, lora_base_type=""):
     """Market-style model browse via the GraphQL `generationModels` connection, which -- unlike
     the REST /search -- actually HONORS `category` and a date `orderBy`. Use this for category
     chips + a Newest sort; the REST path (model_search_rest) stays the default for keyword/Popular
@@ -1945,7 +2080,49 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
     sort/badging (see annotate_lora_compat) through this GraphQL connection, which -- unlike
     REST's oRPC search -- actually carries this per-row. Surfaced as `model_type` /
     `lora_base_model_type`, the SAME key names model_search_rest's sibling
-    resolve_version_meta() already uses, so callers don't care which path produced a row."""
+    resolve_version_meta() already uses, so callers don't care which path produced a row.
+
+    `bookmarked` + `liked` (2026-07-24) are VIEWER-SCOPED booleans GenerationModel carries on
+    every connection that returns one -- probed live: bookmarked:true on 50/50 rows of the
+    owner's own bookmark connection, false on 3/3 plain market rows. Genuinely free (two more
+    leaf fields on a request the picker already makes, no extra round trip). REST's oRPC
+    /search has NO equivalent, so model_search_rest defaults both to False and callers must
+    read False as "this path can't tell you" rather than "confirmed not bookmarked" -- the
+    same convention as `official` in the other direction. Nothing renders them yet; the picker
+    tab that consumes them is separate, later work.
+
+    after=<cursor> (owner report 2026-07-24: the picker "scrolls a few rows and stops"):
+    forward Relay-cursor paging -- standard `edges`/`pageInfo` connection shape, the same
+    spec this app already relies on elsewhere (page_variables' before/last cursor pagination
+    for task history, just the other direction). has_more was ALREADY computed correctly
+    from pageInfo.hasNextPage; the real gap was that the query never requested endCursor and
+    never accepted an after: argument, so a client had no way to actually ask for the next
+    page even knowing one existed. Omitted entirely (not sent as an empty string) when
+    absent -- a present-but-empty $a may not mean the same thing to PixAI's resolver as no
+    $a at all, and this is the first page of a fresh search either way. next_cursor in the
+    return is '' whenever has_more is false, even if the server's own endCursor is
+    non-empty -- never hand a caller a cursor that would page forever on an exhausted list.
+
+    lora_base_type=<GenerationModelType> (2026-07-24): SERVER-SIDE architecture filtering for
+    LoRA search, via an argument this connection has accepted all along and this app never
+    used -- generationModels(loraBaseModelTypes:[MMDIT26A_MODEL], ...). Ignored unless
+    usage=LORA (nothing to filter a base-model list by) and unless the value is in
+    LORA_BASE_MODEL_TYPES; see that tuple for why the whitelist is mandatory rather than
+    defensive. Measured live: [MMDIT26A_MODEL] returned 23 of 24 rows compatible with a
+    DiT.2 base, against 24-of-24 SD_V1 with no filter at all -- which is the wall that made
+    LoRA browsing useless for anything but SD 1.5.
+
+    GOTCHA, and it cost real time once already: the values are UNQUOTED GraphQL ENUM tokens.
+    An earlier probe sent them as JSON strings (["MMDIT26A_MODEL"]), got a type error back,
+    and the error was misread as "this argument doesn't exist" -- so the whole capability sat
+    unused for weeks. Enums also cannot be bound as $variables, which is why this one value
+    is interpolated while `keyword` stays a bound variable.
+
+    The filter is APPROXIMATE, not strict: [DIT7B_MODEL] measured back 12 DiT7B rows, 10
+    MMDIT26A and 2 SDXL. A search row's `loraBaseModelTypes` is a coarse browse hint (a union
+    over the model's releases), not the resolved version's singular `loraBaseModelType`. So
+    this narrows the candidate pool cheaply and annotate_lora_compat() remains the precise
+    per-row layer on top -- do not treat the filter as a substitute for the badge."""
     cat = (category or "").strip().lower()
     # category/orderBy come from a fixed whitelist -> safe to interpolate; keyword stays a
     # bound $variable (never interpolate user text into a query).
@@ -1954,12 +2131,29 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
         args.append('category:"%s"' % cat)
     if (sort or "").strip().lower() == "newest":
         args.append('orderBy:"-createdAt"')
-    q = ("query($k:String,$n:Int){ generationModels(" + ", ".join(args) + "){ "
-         "pageInfo{ hasNextPage } edges { node { id title type isNsfw likedCount "
+    # Server-side architecture filter -- LoRA searches only (there is nothing to filter a
+    # base-model list by). The value is a BARE ENUM TOKEN, unquoted: [MMDIT26A_MODEL], never
+    # ["MMDIT26A_MODEL"]. Passing them as strings is a type error the server rejects, and
+    # since an enum cannot be a $variable either, this is interpolated -- hence the
+    # LORA_BASE_MODEL_TYPES whitelist gate, which also makes an unrecognized architecture
+    # fall through to an unfiltered search rather than a rejected query.
+    want_lora = (usage or "MODEL").upper() == "LORA"
+    lbt = (lora_base_type or "").strip().upper()
+    if want_lora and lbt in LORA_BASE_MODEL_TYPES:
+        args.append("loraBaseModelTypes:[%s]" % lbt)
+    after = (after or "").strip()
+    var_decl = "$k:String,$n:Int"
+    variables = {"k": keyword or "", "n": int(limit)}
+    if after:
+        args.append("after:$a")
+        var_decl += ",$a:String"
+        variables["a"] = after
+    q = ("query(" + var_decl + "){ generationModels(" + ", ".join(args) + "){ "
+         "pageInfo{ hasNextPage endCursor } edges { node { id title type isNsfw "
+         "likedCount bookmarked liked "
          "latestVersion { id modelType loraBaseModelType } media { id urls { url } } "
          "tags { name } author { displayName } createdAt } } } }")
-    data = (gql_adhoc(session, q, {"k": keyword or "", "n": int(limit)}) or {}).get("generationModels") or {}
-    want_lora = (usage or "MODEL").upper() == "LORA"
+    data = (gql_adhoc(session, q, variables) or {}).get("generationModels") or {}
     out = []
     for e in data.get("edges") or []:
         n = e.get("node") or {}
@@ -1991,31 +2185,22 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
             # else in this file (never None, so a naive .strip()/comparison never explodes).
             "model_type": lv.get("modelType") or "",
             "lora_base_model_type": lv.get("loraBaseModelType") or "",
+            # Per-viewer state (GraphQL-only). Always a real bool -- a node that omits the
+            # field yields False, never None, same never-None rule as the two fields above.
+            "bookmarked": bool(n.get("bookmarked")),
+            "liked": bool(n.get("liked")),
         })
-    return {"results": out, "has_more": bool((data.get("pageInfo") or {}).get("hasNextPage"))}
-
-
-def workflow_catalog(session, first=80):
-    """List PixAI enhance/panelplugin WORKFLOWS via the `workflows` GraphQL connection ->
-    [{id, name, type, cover_media_id}]. `id` is the numeric workflowId that
-    build_panelplugin_parameters wants. Covers upscale / remove-background / line-art /
-    sketch-colorizer / inpaint / outpaint / style converters / etc. Read-only."""
-    q = "query($n:Int){ workflows(first:$n){ edges { node { id name type coverMediaId } } } }"
-    d = gql_adhoc(session, q, {"n": int(first)}) or {}
-    out = []
-    for e in (d.get("workflows") or {}).get("edges") or []:
-        n = e.get("node") or {}
-        if not n.get("id"):
-            continue
-        out.append({"id": str(n["id"]), "name": n.get("name") or "",
-                    "type": n.get("type") or "", "cover_media_id": str(n.get("coverMediaId") or "")})
-    return out
+    page_info = data.get("pageInfo") or {}
+    has_more = bool(page_info.get("hasNextPage"))
+    return {"results": out, "has_more": has_more,
+            "next_cursor": (page_info.get("endCursor") or "") if has_more else ""}
 
 
 def _empty_version_meta():
     return {"version_id": "", "model_type": "", "lora_base_model_type": "",
             "trigger_words": "", "negative_prompt": "", "sampling_method": "",
-            "sampling_steps": None, "cfg_scale": None, "capabilities": []}
+            "sampling_steps": None, "cfg_scale": None, "capabilities": [],
+            "compatibility": {}, "restrictions": {}}
 
 
 def _version_row_to_meta(r):
@@ -2029,9 +2214,20 @@ def _version_row_to_meta(r):
     - lora_base_model_type: for a LoRA, the base-model family it REQUIRES (null for base models).
       A LoRA runs on a base iff lora_base_model_type == the base's model_type (see is_lora_compatible).
     - trigger_words: the LoRA's activation tokens (extra.triggerWords|trainedWords); '' if none.
-    - the rest: the author's tuned generation preset (extra.*), for prefilling the drawer."""
+    - the rest: the author's tuned generation preset (extra.*), for prefilling the drawer.
+    - compatibility: which Advanced-panel params this model actually HONORS (e.g.
+      {cfgScale:false, samplingSteps:false, negativePrompt:true, ...}, probed live
+      2026-07-06 -- memory pixai-model-capability-schema). A control the model ignores
+      should be hidden/disabled in the drawer, not just always shown as if it did
+      something. Empty dict (not missing) when absent -- callers treat "no entry for this
+      key" as "unknown, don't restrict" (fail open), same convention as capabilities above.
+    - restrictions: real min/max bounds for the params above (e.g.
+      {samplingSteps:{min:16,max:50}}) -- clamp the drawer's own hardcoded bounds to these
+      when present instead of a one-size-fits-all guess."""
     extra = r.get("extra") if isinstance(r.get("extra"), dict) else {}
     caps = extra.get("capabilities")
+    compat = extra.get("compatibility")
+    restrictions = extra.get("restrictions")
     return {
         "version_id": str(r.get("id") or ""),
         "model_type": (r.get("modelType") or "").strip(),
@@ -2042,6 +2238,8 @@ def _version_row_to_meta(r):
         "sampling_steps": extra.get("samplingSteps"),
         "cfg_scale": extra.get("cfgScale"),
         "capabilities": [c for c in caps if isinstance(c, str)] if isinstance(caps, list) else [],
+        "compatibility": compat if isinstance(compat, dict) else {},
+        "restrictions": restrictions if isinstance(restrictions, dict) else {},
     }
 
 
@@ -2051,8 +2249,9 @@ def resolve_version_meta(session, model_id):
     resolve_latest_version() kept only the id. Read-only.
 
     Returns {version_id, model_type, lora_base_model_type, trigger_words, negative_prompt,
-    sampling_method, sampling_steps, cfg_scale, capabilities}. All keys always present
-    (empty/None when the model has no version or the field is absent).
+    sampling_method, sampling_steps, cfg_scale, capabilities, compatibility, restrictions}.
+    All keys always present (empty/None when the model has no version or the field is
+    absent).
 
     NOTE: `/generation-model/{id}/versions` returns MULTIPLE rows per model -- confirmed on
     PixAI's own site, which lists them as separate releases/iterations, all on the SAME
@@ -2235,6 +2434,18 @@ def extract_full_meta(task):
     neg = (params.get("negativePrompts") or detail.get("negativePrompts")
            or extra.get("negativePrompts") or params.get("negativePrompt") or "")
     clip = detail.get("clipSkip", params.get("clipSkip", ""))
+    # A taskKind=chat task -- an instruct Edit, or a hand/face Fix -- keeps its model inside
+    # the `chat` block, and build_chat_edit_parameters sets NO top-level modelId at all, so
+    # without this fallback a chat task's Model rendered as an em-dash on the detail page.
+    # NOTHING ELSE about a chat task is recoverable here, deliberately: it has no seed, no
+    # sampler, no steps and no cfg scale (outputs.detailParameters is absent entirely), and
+    # those stay empty rather than borrowing a plausible-looking number the task never had.
+    chat = params.get("chat") if isinstance(params.get("chat"), dict) else {}
+    model_id = str(params.get("modelId") or chat.get("modelId") or "")
+    # PixAI's two CHAT models are the ones this app already names (EDIT_MODELS), so the label
+    # resolves locally: a Fix's Model reads "Reference Pro" rather than a 19-digit id, with no
+    # extra network round trip. Callers that also run model_name_gql still overwrite it.
+    chat_label = (edit_model_by_id(model_id) or {}).get("label", "") if chat else ""
     return {
         "prompt_full":    params.get("prompts", ""),
         "natural_prompt": extra.get("naturalPrompts", ""),
@@ -2242,8 +2453,8 @@ def extract_full_meta(task):
         "steps":          str(detail.get("steps") or ""),
         "sampler":        detail.get("sampler", ""),
         "cfg_scale":      str(detail.get("cfg_scale") or ""),
-        "model_id":       str(params.get("modelId") or ""),
-        "model_name":     "",  # filled in by caller after model_name_gql
+        "model_id":       model_id,
+        "model_name":     chat_label,  # otherwise filled in by caller after model_name_gql
         "loras":          "",  # filled in by caller via resolve_loras()
         "negative_prompt": neg,
         "clip_skip":      str(clip) if clip != "" else "",
@@ -3821,8 +4032,47 @@ def run_import_local(args):
 
 _GEN_MUTATION = ("mutation createGenerationTask($parameters: JSONObject!) {"
                  " createGenerationTask(parameters: $parameters) { id } }")
-_GEN_STATUS = "query($id: ID!) { task(id: $id) { id status paidCredit } }"
+_GEN_STATUS = ("query($id: ID!) { task(id: $id) "
+               "{ id status paidCredit startedAt outputs } }")
+# startedAt + outputs are load-bearing, not decoration: `startedAt` is the ONLY way to
+# tell a task PixAI queued-but-never-dispatched from one that is genuinely running (both
+# sit at a non-terminal status), and `outputs.reason` carries PixAI's own explanation for
+# a cancellation (e.g. "waiting timeout"). Without them this poller could only ever see
+# `status`, which is how five of the owner's generations died silently across four days.
 DEFAULT_GEN_MODEL = "1983308862240288769"  # Tsubaki.2 v1 (override with --model)
+
+
+# LoRA weight bounds are per BASE ARCHITECTURE. Owner-reported from the live site,
+# 2026-07-25, after using the first (flat) slider:
+#
+#     DiT family (dit1, Tsubaki.2/DiT.2, community DiT) :  0.0 .. 1.2
+#     SD1.5, SDXL                                       : -2.0 .. +2.0
+#
+# There is no single correct range, which is why both earlier attempts were wrong in
+# opposite directions: a 0..2 spinner blocked the legal negatives SD allows, and a flat
+# -2..2 slider offered DiT weights PixAI rejects. Negative weights subtract a LoRA's
+# influence and are legal on the SD architectures only.
+LORA_WEIGHT_STEP = 0.1
+LORA_WEIGHT_RANGES = {
+    "DIT7B_MODEL":    (0.0, 1.2),
+    "DIT9_MODEL":     (0.0, 1.2),
+    "MMDIT26A_MODEL": (0.0, 1.2),
+    "SD_V1_MODEL":    (-2.0, 2.0),
+    "SDXL_MODEL":     (-2.0, 2.0),
+}
+# The union, used as the hard sanity bound in _lora_params (which sees a version id and a
+# number, never an architecture) and as the fallback for an unknown or not-yet-picked base.
+# Deliberately the WIDER of the two rather than the narrower: unknown must not silently
+# remove a capability the account actually has, and the same fail-open reasoning as
+# LORA_BASE_MODEL_TYPES above. A value the architecture rejects surfaces as a refused
+# submit, which costs nothing.
+LORA_WEIGHT_MIN, LORA_WEIGHT_MAX = -2.0, 2.0
+
+
+def lora_weight_range(model_type):
+    """(min, max) for a base model's architecture; the widest range when it is unknown."""
+    return LORA_WEIGHT_RANGES.get(str(model_type or "").strip().upper(),
+                                  (LORA_WEIGHT_MIN, LORA_WEIGHT_MAX))
 
 
 def _lora_params(raw):
@@ -3843,9 +4093,88 @@ def _lora_params(raw):
             w = float(w)
         except (TypeError, ValueError):
             w = 0.7
+        # PixAI's own Advanced panel bounds the weight at -2..2 (step 0.1), negatives
+        # included -- read off the live control. Clamped here for the same reason the
+        # upscale params are: this is the last place before the submit, and a value outside
+        # their range is a rejected generation rather than a stronger effect.
+        w = max(LORA_WEIGHT_MIN, min(LORA_WEIGHT_MAX, w))
         lora_map[vid] = w
         lora_list.append({"weight": w, "versionId": vid})
     return lora_map, lora_list
+
+
+# --- Upscale + boosters (ordinary t2i/i2i generation parameters) --------------
+# PixAI's "Confirm Upscale" dialog offers TWO methods as radio buttons, and each radio's
+# `value` attribute IS the parameter name the submit carries:
+#   enlarge -> `enlarge` (ratio) + `enlargeModel` (which upscaler network runs)
+#   upscale -> `upscale` (ratio) + upscaleDenoisingStrength/Steps/Sampler ("Hires": the
+#              image is re-diffused at the larger size, which is why it has denoising
+#              controls and no upscaler dropdown, and why it costs roughly 3x as much)
+# They are the same family of params as width/height -- NOT a separate plugin surface --
+# so they ride the generation submit we already make.
+ENLARGE_MODELS = ("ESRGAN_4x", "R-ESRGAN 4x+", "R-ESRGAN 4x+ Anime6B", "SwinIR_4x",
+                  "Lollypop")
+DEFAULT_ENLARGE_MODEL = "R-ESRGAN 4x+ Anime6B"      # PixAI's own default selection
+DEFAULT_QUALITY_TAG = "Masterpiece"                 # their "Quality Tag" booster's prefix
+# Captured from a completed Hires job; their dialog hints strength works best 0.4-0.6.
+DEFAULT_UPSCALE_DENOISING_STRENGTH = 0.6
+DEFAULT_UPSCALE_DENOISING_STEPS = 26
+UPSCALE_RATIO_STEP = 0.1                            # both sliders step in tenths
+# A ratio slider's MAXIMUM is not a constant -- it moves with the source dimensions,
+# because what is actually capped is the OUTPUT pixel count. Measured maxima: a 1400x784
+# source allowed 1.9 in enlarge mode (-> 2656x1488) and 1.4 in Hires (-> 1952x1096),
+# while a 768x1280 source allowed 1.5 in Hires (-> 1152x1920). Each measurement brackets
+# the ceiling between "the largest allowed output area" and "the next 0.1 step's area":
+#   enlarge  >= 2656*1488 = 3,952,128  and  < 2800*1568 = 4,390,400
+#   Hires    >= 1152*1920 = 2,211,840  and  < 2096*1176 = 2,464,896  (both samples merged)
+# The values below sit inside those windows and reproduce all three measurements exactly.
+# INFERRED FROM TWO SOURCE SIZES, NOT DOCUMENTED: a source whose own bracket falls outside
+# these windows could be one 0.1 step off, so treat a PixAI rejection here as new data
+# rather than a bug in the arithmetic.
+UPSCALE_PIXEL_CEILING = {"enlarge": 2048 * 2048, "upscale": 2048 * 1152}
+# Every enlargeModel is a 4x network, and no measurement has ever shown a slider past it,
+# so 4.0 is the backstop for a source small enough that the area ceiling never bites.
+UPSCALE_RATIO_HARD_MAX = 4.0
+
+
+def upscale_output_dims(width, height, ratio):
+    """Output size an upscale ratio produces: scaled, then floored to the multiple of 8
+    every SD pipeline needs (the same snap _gen_parameters applies to width/height).
+    This is what their dialog prints under the slider -- 1400x784 at Hires 1.4 reads
+    '1952x1096', not 1960x1096, because the floor happens after the float multiply."""
+    r = float(ratio or 1)
+    return (max(64, int((int(width) * r) // 8) * 8),
+            max(64, int((int(height) * r) // 8) * 8))
+
+
+def max_upscale_ratio(width, height, mode="enlarge"):
+    """Largest ratio `mode` allows for a source of this size, in the slider's own 0.1
+    steps -- derived from UPSCALE_PIXEL_CEILING, never hardcoded, because the same
+    dialog shows different maxima for different source sizes. Walks the steps down from
+    the hard backstop so the answer honours the multiple-of-8 snap the real output uses.
+    Returns 1.0 (= no upscale possible) for a source already at the ceiling."""
+    ceiling = UPSCALE_PIXEL_CEILING.get(str(mode))
+    if ceiling is None:
+        raise PixAIError("unknown upscale mode {!r} -- expected one of {}".format(
+            mode, ", ".join(sorted(UPSCALE_PIXEL_CEILING))))
+    steps = int(round((UPSCALE_RATIO_HARD_MAX - 1.0) / UPSCALE_RATIO_STEP))
+    for i in range(steps, 0, -1):
+        r = round(1.0 + i * UPSCALE_RATIO_STEP, 1)
+        w, h = upscale_output_dims(width, height, r)
+        if w * h <= ceiling:
+            return r
+    return 1.0
+
+
+def _upscale_ratio(raw):
+    """Normalize a requested ratio to the slider's 0.1 step, or None when the caller did
+    not really ask for an upscale. 1.0 (and anything below) IS "no upscale" -- emitting
+    enlarge/upscale at 1.0 would still change the priced shape for no visible gain."""
+    try:
+        r = round(float(raw), 1)
+    except (TypeError, ValueError):
+        return None
+    return r if r > 1.0 else None
 
 
 def _gen_parameters(args):
@@ -3906,6 +4235,57 @@ def _gen_parameters(args):
         except (TypeError, ValueError):
             stg = 0.55
         params["strength"] = max(0.05, min(1.0, stg))
+    # Upscale + boosters. EVERY key here is emitted only when the caller actually asked
+    # for it: these are absent from a plain submit, and an always-present default would
+    # silently change what every existing call site generates (and what it costs).
+    enlarge = _upscale_ratio(getattr(args, "enlarge", None))
+    upscale = _upscale_ratio(getattr(args, "upscale", None))
+    if enlarge and upscale:
+        # Kept short on purpose: the web route clips a builder refusal to 140 characters
+        # for the cost badge's note, so the actionable half must come first.
+        raise PixAIError("enlarge and upscale are mutually exclusive -- they are PixAI's "
+                         "two upscale methods ('Upscale' and 'Hires'), so pick one")
+    # Clamping can land on 1.0 for a source already at the output ceiling; that is "no
+    # upscale is possible at this size", so the block is dropped rather than submitting a
+    # 1.0 ratio that changes the priced shape and produces nothing.
+    if enlarge:
+        enlarge = min(enlarge, max_upscale_ratio(params["width"], params["height"],
+                                                 "enlarge"))
+    elif upscale:
+        upscale = min(upscale, max_upscale_ratio(params["width"], params["height"],
+                                                 "upscale"))
+    if enlarge and enlarge > 1.0:
+        params["enlarge"] = enlarge
+        # An unknown upscaler name would be rejected by PixAI, so fall back to their own
+        # default rather than losing the whole submit over a typo.
+        model = str(getattr(args, "enlarge_model", "") or "").strip()
+        params["enlargeModel"] = model if model in ENLARGE_MODELS else DEFAULT_ENLARGE_MODEL
+    elif upscale and upscale > 1.0:
+        params["upscale"] = upscale
+        dstr = getattr(args, "upscale_denoising_strength", None)
+        dstr = DEFAULT_UPSCALE_DENOISING_STRENGTH if dstr is None else dstr
+        dsteps = getattr(args, "upscale_denoising_steps", None)
+        dsteps = DEFAULT_UPSCALE_DENOISING_STEPS if dsteps is None else dsteps
+        try:
+            dstr = float(dstr)
+        except (TypeError, ValueError):
+            dstr = DEFAULT_UPSCALE_DENOISING_STRENGTH
+        try:
+            dsteps = int(dsteps)
+        except (TypeError, ValueError):
+            dsteps = DEFAULT_UPSCALE_DENOISING_STEPS
+        # Bounds read off the live dialog's own controls: strength 0.01-0.99 step 0.01,
+        # steps 1-50 step 1.
+        params["upscaleDenoisingStrength"] = round(max(0.01, min(0.99, dstr)), 2)
+        params["upscaleDenoisingSteps"] = max(1, min(50, dsteps))
+        # Empty string is what a completed Hires job carried -- Hires has no sampler
+        # dropdown of its own, so this hands the choice back to the base generation.
+        params["upscaleSampler"] = str(getattr(args, "upscale_sampler", "") or "")
+    if getattr(args, "face_fix", False):
+        params["enableADetailer"] = True             # their "Face Fix" booster
+    qtag = str(getattr(args, "quality_tag", "") or "").strip()
+    if qtag:
+        params["qualityTag"] = {"prefix": qtag}      # their "Quality Tag" booster
     if getattr(args, "kaisuuken_id", ""):
         params["kaisuukenId"] = str(args.kaisuuken_id)   # spend a free card instead of credits
     return params
@@ -4155,54 +4535,33 @@ def extract_last_frame(video_path, out_png, at_seconds=None):
         return None
 
 
-def build_panelplugin_parameters(media_id, workflow_id="", *, workflow_name="",
-                                 strength=None, extra_inputs=None, priority=1000,
-                                 is_private=False, kaisuuken_id=""):
-    """Enhance via a PixAI panelplugin WORKFLOW (face-fix / bg-remove / handfix / lineart …).
-    VERIFIED shape (2026-07-02): model 'pixai-panelplugin', `inputs.image = {type:'media',
-    media_id}` (+ optional strength / per-plugin args). A workflow is addressed by either a
-    numeric `workflowId` (VERIFIED path) OR a `workflowName` like 'mymusise/hand-fix' (mined
-    from the app; unverified until fired -- a rejected submit costs no credits). Produces an
-    image output. Builder spends nothing."""
-    inputs = {"image": {"type": "media", "media_id": str(media_id)}}
-    if strength is not None:
-        inputs["strength"] = float(strength)
-    if extra_inputs:
-        inputs.update(extra_inputs)
-    params = {
-        "priority": int(priority),
-        "model": "pixai-panelplugin",
-        "inputs": inputs,
-        "isPrivate": bool(is_private),
-        "enablePreview": True,
-        "hidePrompts": False,
-    }
-    if workflow_name:
-        params["workflowName"] = str(workflow_name)
-    elif workflow_id:
-        params["workflowId"] = str(workflow_id)
-    else:
-        raise PixAIError("panelplugin needs a workflow_id or workflow_name")
-    if kaisuuken_id:
-        params["kaisuukenId"] = str(kaisuuken_id)
-    return params
-
-
-def build_filter_parameters(media_id, filter_id, *, strength=0.77, is_private=False,
-                            kaisuuken_id=""):
-    """Apply a PixAI Art Filter. VERIFIED shape (2026-07-02): model 'pixai-image-filter',
-    top-level `mediaId`, `inputs = {filterId, strength}`. Produces an image. Free builder."""
-    params = {
-        "mediaId": str(media_id),
-        "model": "pixai-image-filter",
-        "inputs": {"filterId": str(filter_id), "strength": float(strength)},
-        "isPrivate": bool(is_private),
-        "enablePreview": False,
-        "hidePrompts": False,
-    }
-    if kaisuuken_id:
-        params["kaisuukenId"] = str(kaisuuken_id)
-    return params
+# The whole --enhance command is gone, both halves of it, and neither is coming back.
+#
+# The panelplugin half (--workflow-id: upscale / remove-background / line-art / relight, plus
+# workflow_catalog and the web routes that drove them): the submit shape was right -- captured
+# from a real task -- but PixAI never assigns a worker to a panelplugin task when the client
+# authenticated with an API key. It accepts the submit, queues it, charges for it, then cancels
+# it at roughly 60 minutes with outputs.reason "waiting timeout" and refunds. Measured
+# 2026-07-24 and isolated by elimination: their own official preset workflow ids behave
+# identically while their web client runs the same workflow in 1-3 seconds, and a taskKind=chat
+# fixer submit from this app dispatched in one second minutes earlier. No workflow id, input key
+# or payload change reaches a runner.
+#
+# The art-filter half (build_filter_parameters, --filter-id): that one worked, and was still
+# the wrong thing to do. PixAI's 7 "art filters" are not inference at all -- each is two or
+# three linear gradients with a blend mode, an opacity and an optional
+# brightness/contrast/saturation trim, served from a PUBLIC unauthenticated config endpoint
+# (GET https://api.pixai.art/config/imageArtFilters) that their own web client reads and
+# composites in the browser, with no Generate button and no price on the panel. Submitting that
+# as an image-filter generation charged credits and waited on a worker queue to perform a
+# handful of gradient fills. static/mg-art-filters.js does the identical composite locally,
+# offline, for nothing, so the paid path is deleted rather than left as a strictly worse
+# second option.
+#
+# Guarded by tests/test_enhance.py, which drives the parser to prove the flags are unaccepted
+# and greps for the two literals a submit could not do without -- the filter model's id and the
+# `inputs` key that named a filter. Neither appears above on purpose: as with "panelplugin",
+# the CONCEPT is named in prose so the exact strings stay a reliable tripwire.
 
 
 def _gen_video_parameters(args):
@@ -4267,6 +4626,14 @@ EDIT_MODELS = {
     },
 }
 DEFAULT_EDIT_MODEL = "edit-pro"
+
+# The model PixAI runs a hand/face Fix on -- the same CHAT model the Edit card calls
+# Reference Pro. A Fix submit (POST /v2/task/fixer, just {mediaId, boxes}) never names a
+# model, so this is how the Fix paths that DO need one -- pricing the request, and labelling
+# the collected output's Model instead of leaving an em-dash -- get it without a second
+# hardcoded copy of the id. Reference Pro is known-flaky; a Fix's intermittent failures are
+# that model, not this app.
+FIXER_MODEL_ID = EDIT_MODELS["reference-pro"]["model_id"]
 
 
 def edit_model_id(key):
@@ -4415,23 +4782,128 @@ def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
     edit submit paths so their poll behaviour can't drift."""
     deadline = time.time() + timeout
     paid_credit = None
+    started_at, last_status = None, ""
     while time.time() < deadline:
         task = (gql_adhoc(session, _GEN_STATUS, {"id": task_id}) or {}).get("task") or {}
         status = str(task.get("status", "")).lower()
+        last_status = status or last_status
+        started_at = task.get("startedAt") or started_at
         if task.get("paidCredit") is not None:
             paid_credit = task.get("paidCredit")     # server-authoritative actual cost
-        vlog("{} poll: {}".format(label, status or "(unknown)"))
+        vlog("{} poll: {}{}".format(label, status or "(unknown)",
+                                    "" if started_at else " (not started yet)"))
         if status in ("completed", "succeeded", "success", "done"):
             if paid_credit is not None:
                 print("  actual cost: {:,} credits".format(int(paid_credit)))
             return paid_credit
         if status in ("failed", "error", "cancelled", "canceled"):
-            raise PixAIError("{} ended with status: {}".format(fail_noun, status))
+            raise PixAIError("{} ended with status: {}{}".format(
+                fail_noun, status, _pixai_reason_suffix(task)))
         time.sleep(interval)
+    if _never_dispatched(last_status, started_at):
+        raise PixAIError(
+            "{} was accepted by PixAI but NEVER started. After {}s it is still queued "
+            "with no start time, so no worker ever picked it up -- waiting longer will "
+            "not help, and --task-id recovery has nothing to fetch. PixAI reaps an "
+            "unstarted task at about 60 minutes and issues a refund then, so the credits "
+            "should come back on their own; check your credit history if they don't. "
+            "(task {})".format(fail_noun, timeout, task_id))
     raise PixAIError(
         "stopped waiting after {}s, but the task is STILL RUNNING on PixAI (task {}). "
         "Nothing is lost: recover it free once it finishes with --task-id {} "
         "(or it arrives in your next --update).".format(timeout, task_id, task_id))
+
+
+def _task_failure_reason(outputs):
+    """PixAI's own explanation for a failure, from whichever key it used this time.
+
+    It does NOT use one key. A task it cancelled says `{"reason": "waiting timeout"}`, while a
+    task its model refused says `{"finish_reason": "ERROR", "modelResponse": [],
+    "failureMessage": "Provider refused to answer", "failure_reason":
+    "PROVIDER_REFUSE_ANSWER"}`. Reading only `reason` made three real, fully-explained
+    content refusals look unexplained, and they were written up as model flakiness -- the
+    opposite advice from what the payload actually said.
+
+    Preference order is deliberate: the human sentence first, then the enum (still far better
+    than nothing), then the cancelled-task key. `finish_reason` is skipped -- "ERROR" is a
+    category, not information.
+
+    NOTE the projection trap: this is the GRAPHQL `outputs`. REST `/v2/task/{id}` returns a
+    DIFFERENT `outputs` ({mediaIds, mediaUrls}) with no failure detail at all, so a probe
+    against REST will report no reason exists when one does."""
+    if not isinstance(outputs, dict):
+        return ""
+    for key in ("failureMessage", "failure_reason", "reason"):
+        val = outputs.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return ""
+
+
+def describe_failure(status, reason="", started=True):
+    """A failure message a person can act on, from what PixAI actually tells us.
+
+    Their status string for a failed generation is genuinely just "failed", and `outputs`
+    frequently comes back empty, so faithfully forwarding their words leaves the user with
+    one useless word -- which is exactly what the owner saw on three consecutive hand-fix
+    attempts (2026-07-25): status `failed`, error `failed`, nothing else. Forwarding is
+    still right when they DO explain themselves; this only fills the silence.
+
+    Three distinct cases, because they send you to three different places:
+      - reason given      -> lead with THEIR words; ours must never bury them.
+      - never dispatched  -> it did not "fail to render", no worker ever took it. Saying
+                             otherwise sends someone off debugging a prompt that was never
+                             read. These are reaped and refunded at ~60 minutes.
+      - ran, then failed  -> their model errored. Nothing to fix in the request, and the
+                             credits come back on their own (observed: charged and refunded
+                             within 2-3 seconds), which is the first thing anyone wants to
+                             know.
+
+    Their reason and our explanation are ADDITIVE, not either/or. "waiting timeout" is
+    their jargon: accurate, and meaningless to anyone who does not already know it means
+    no worker ever picked the task up. Lead with their words, then say what happened."""
+    status = str(status or "failed").strip() or "failed"
+    reason = str(reason or "").strip()
+    parts = [status]
+    if reason:
+        parts.append("PixAI's reason: {}".format(reason))
+        # A provider/content refusal is the moderator declining the content, not a system
+        # fault. Saying so turns a dead end into a next step -- the fix is rewording, and
+        # without this the message reads like something is broken and needs debugging.
+        if "refus" in reason.lower() or "policy" in reason.lower():
+            parts.append("That is a content refusal, not a fault: rewording the prompt "
+                         "usually clears it. Nothing was charged — refused generations "
+                         "are refunded.")
+    if not started:
+        parts.append("It was queued but never started, so nothing rendered — unstarted "
+                     "tasks are cancelled and refunded after about an hour.")
+    elif not reason:
+        parts.append("PixAI ran this and it failed without giving a reason. Failed "
+                     "generations are refunded automatically, so the credits come back.")
+    return " — ".join(parts)
+
+
+def _pixai_reason_suffix(task):
+    """PixAI's own explanation for a terminal status, from `outputs.reason` (e.g.
+    "waiting timeout"). Surfaced because a bare "cancelled" reads as though the USER
+    cancelled something -- the owner saw exactly that five times and had no way to know
+    PixAI had timed the task out of its own queue."""
+    reason = _task_failure_reason((task or {}).get("outputs"))
+    return " (PixAI's reason: {})".format(reason) if reason else ""
+
+
+def _never_dispatched(status, started_at):
+    """True when PixAI accepted a task, queued it, and never assigned it a worker.
+
+    Keys on `startedAt` being absent AND a POSITIVE observation of a pre-run status. Two
+    deliberate exclusions, both of which would otherwise produce a confident lie:
+      - `running` without a `startedAt` has obviously started, so it stays on the
+        reassuring "still running, recover it free" timeout path.
+      - an EMPTY status means we never actually observed the task (e.g. a zero/expired
+        timeout that never entered the poll loop). "Not observed" is not "not dispatched",
+        so that also stays on the reassuring path -- claiming a task is dead because we
+        never looked at it is the same class of error as the message this fix removes."""
+    return not started_at and str(status or "").lower() in ("waiting", "pending", "queued")
 
 
 def _maybe_dump_params(args, result):
@@ -4591,8 +5063,23 @@ def run_generate(args):
             "steps": _pick("steps", "samplingSteps"),
             "cfg_scale": _pick("cfg_scale", "cfgScale"),
             "model_id": _pick("model_id", "modelId"),
-            "model_name": fm.get("model_name", ""),
-            "loras": fm.get("loras", ""),
+            # Resolved here, not just in the backfill. extract_full_meta only fills
+            # model_name for a CHAT task (from the local EDIT_MODELS table); every ordinary
+            # generation left it blank, so every freshly captured image showed a raw
+            # 19-digit model id on its detail page until a later --backfill-full-meta
+            # happened to come past. model_name_gql is process-cached, so this is one call
+            # per distinct model for the whole run, not one per image.
+            "model_name": _resolved_model_name(session, fm, _pick("model_id", "modelId")),
+            # Four fields extract_full_meta hands over that this row used to drop, so they
+            # arrived blank on every live capture and only appeared once a
+            # --backfill-full-meta came past -- which is the manual step the whole
+            # capture-it-as-it-happens path exists to remove. `loras` in particular is
+            # always "" out of extract_full_meta by design: it documents that the CALLER
+            # resolves it, the backfill did, and this did not.
+            "sampler": fm.get("sampler", ""),
+            "natural_prompt": fm.get("natural_prompt", ""),
+            "clip_skip": fm.get("clip_skip", ""),
+            "loras": _resolved_loras(session, result),
             "paid_credit": _paid_credit_str(result),   # actual cost, task-level
             "width": str((info or {}).get("width") or params.get("width") or ""),
             "height": str((info or {}).get("height") or params.get("height") or ""),
@@ -4742,6 +5229,28 @@ def _task_detail_query(session, task_id):
     return (gql_adhoc(session, q, {"id": str(task_id)}) or {}).get("task")
 
 
+def _fix_source_label(task, out):
+    """The readable half of a Fix output's filename: the prompt of the SOURCE image the Fix
+    ran on, looked up in this backup's own catalog by media_id, falling back to that
+    media_id when the source isn't ours (a fresh upload) and to '' when the task names no
+    source at all. Naming a Fix after the image it repaired is what makes a folder of them
+    browsable, and it lands the two files next to each other in a sorted listing.
+
+    Fails soft: an unreadable catalog costs the name its readable half, never the download."""
+    params = (task or {}).get("parameters") or {}
+    chat = params.get("chat") if isinstance(params.get("chat"), dict) else {}
+    src = str(chat.get("mediaId") or params.get("mediaId") or "")
+    if not src:
+        return ""
+    try:
+        row = next((r for r in load_catalog(Path(out) / "catalog.db")
+                    if r.get("media_id") == src), None)
+    except Exception:                      # noqa: BLE001 -- a naming nicety, never a blocker
+        row = None
+    label = ((row or {}).get("prompt_preview") or (row or {}).get("prompt_full") or "").strip()
+    return label or src
+
+
 def _download_image_task(session, result, task_id, out, args, prompt="", model_name=""):
     """Download + catalog the image output(s) of a completed task. Saves the individual batch
     images (not the composite grid) via _task_image_media, storing each image's own seed.
@@ -4753,14 +5262,28 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     thumb_dir = out / "gallery" / "thumbs"
     img_dir = out / "images"
     db_path = out / "catalog.db"
+    # A hand/face Fix is the one task family whose `prompts` is PixAI's own fixed template,
+    # so build_stem_name would give every Fix ever collected the same unreadable name --
+    # build_fix_stem_name names it from the source image + a fix-face/fix-hand marker
+    # instead. Detected here rather than at the call sites so recovering a Fix by --task-id
+    # names it the same way the web collect does. NEW OUTPUT ONLY: nothing renames a file
+    # already on disk.
+    fx = fixer_block(result)
+    fix_label = _fix_source_label(result, out) if fx is not None else ""
+    fm = extract_full_meta(result)
     rows, saved = [], []
     for mid, seed in media:
         url, info = resolve_media(session, mid)
         if not url:
             print("  no url for media", mid)
             continue
-        stem = img_dir / build_stem_name(prompt, task_id, mid, getattr(args, "name_length", 60),
-                                         getattr(args, "name_sep", "_"))
+        name_len = getattr(args, "name_length", 60)
+        name_sep = getattr(args, "name_sep", "_")
+        if fx is not None:
+            stem = img_dir / build_fix_stem_name(fix_label, fx.get("boxes"), task_id, mid,
+                                                 name_len, name_sep)
+        else:
+            stem = img_dir / build_stem_name(prompt, task_id, mid, name_len, name_sep)
         status, path = download(session, url, stem)
         if status not in ("ok", "skip") or not path:
             continue
@@ -4771,7 +5294,27 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
             "url": url, "source": "api", "status": "completed",
             "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
             "prompt_full": prompt, "prompt_preview": (prompt or "")[:100],
-            "model_name": model_name,
+            # Everything extract_full_meta resolved from the task. This row used to write
+            # only the model id, so a generation captured as it happened landed with an
+            # em-dash for Steps, Sampler, CFG, LoRAs and the rest -- not because PixAI never
+            # recorded them, but because they were never written down, and only a later
+            # --backfill-full-meta filled them in. That backfill is the manual step
+            # capturing-as-it-happens exists to remove.
+            #
+            # An em-dash remains the honest answer where the task genuinely recorded
+            # nothing: a CHAT task (Edit/Fix) has no detailParameters at all, so these
+            # resolve to "" and render as before. An explicit model_name from the caller
+            # still wins over the looked-up one.
+            "model_id": fm.get("model_id", ""),
+            "model_name": model_name or _resolved_model_name(session, fm,
+                                                             fm.get("model_id", "")),
+            "steps": fm.get("steps", ""),
+            "sampler": fm.get("sampler", ""),
+            "cfg_scale": fm.get("cfg_scale", ""),
+            "negative_prompt": fm.get("negative_prompt", ""),
+            "natural_prompt": fm.get("natural_prompt", ""),
+            "clip_skip": fm.get("clip_skip", ""),
+            "loras": _resolved_loras(session, result),
             "paid_credit": _paid_credit_str(result),   # actual cost, task-level
             "width": str((info or {}).get("width") or ""),
             "height": str((info or {}).get("height") or ""),
@@ -4827,11 +5370,14 @@ def submit_generation(session, params):
     return str(task_id)
 
 
-def submit_fixer(session, media_id, boxes):
-    """Submit a hand/face fixer task via POST /v2/task/fixer -> task id (poll it like any
-    generation). `boxes` = [{x, y, width, height, tag}] in ORIGINAL-image pixel coords, tag
-    'hand' | 'face' (<=20). Builds a mask from the boxes and repairs those regions. Raises."""
-    _check_read_only("submit a hand/face fix (spends credits)")
+def clean_fix_boxes(boxes):
+    """Filter + normalize hand/face Fix boxes into what POST /v2/task/fixer accepts: tag
+    'hand'|'face' (lowercased), non-negative integer origin, positive size, at most 20.
+    Anything else is dropped, so a stale or malformed client box can't reach the server.
+
+    Shared by submit_fixer and build_fixer_price_parameters deliberately: the shape that
+    gets PRICED has to be the shape that gets SUBMITTED, or the cost badge would quote a
+    request PixAI never receives."""
     clean = []
     for b in (boxes or []):
         tag = str((b or {}).get("tag") or "").lower()
@@ -4844,10 +5390,41 @@ def submit_fixer(session, media_id, boxes):
             continue
         if w > 0 and h > 0:
             clean.append({"x": x, "y": y, "width": w, "height": h, "tag": tag})
+    return clean[:20]
+
+
+def build_fixer_price_parameters(media_id, boxes, *, model_id=None):
+    """createGenerationTask-shaped `parameters` for a hand/face Fix, built ONLY to hand to
+    price_task(). NOTHING submits these -- a Fix is submitted by submit_fixer, which never
+    sees them.
+
+    A Fix goes out as a REST body of just {mediaId, boxes}, and that body is not priceable.
+    What PixAI's server builds from it is a taskKind=chat generation carrying a `chat.fixer`
+    block, and GET /v2/task-price DOES price that: measured 2026-07-25 it answers a flat
+    8000 for a Fix, invariant to box count (1 / 3 / 10), canvas size and priority. Drop the
+    chat block from the same call and it falls back to the 1200 base floor -- the block, not
+    the scalars, is what carries the cost, which is why this synthesizes one instead of
+    passing the REST body through. Nothing here is invented: no width/height, no priority,
+    no prompt, because the measurement showed none of them move the number."""
+    clean = clean_fix_boxes(boxes)
+    if not clean:
+        raise PixAIError("fixer needs at least one hand/face box")
+    mid = str(media_id)
+    model = str(model_id or FIXER_MODEL_ID)
+    return {"mediaId": mid, "modelId": model,
+            "chat": {"fixer": {"boxes": clean}, "mediaId": mid, "modelId": model}}
+
+
+def submit_fixer(session, media_id, boxes):
+    """Submit a hand/face fixer task via POST /v2/task/fixer -> task id (poll it like any
+    generation). `boxes` = [{x, y, width, height, tag}] in ORIGINAL-image pixel coords, tag
+    'hand' | 'face' (<=20). Builds a mask from the boxes and repairs those regions. Raises."""
+    _check_read_only("submit a hand/face fix (spends credits)")
+    clean = clean_fix_boxes(boxes)
     if not clean:
         raise PixAIError("fixer needs at least one hand/face box")
     data = _rest_post(session, "/task/fixer",
-                      {"mediaId": str(media_id), "boxes": clean[:20]}) or {}
+                      {"mediaId": str(media_id), "boxes": clean}) or {}
     tid = data.get("id")
     if not tid:
         raise PixAIError("fixer: no task id returned: " + json.dumps(data)[:200])
@@ -4859,14 +5436,64 @@ _GEN_FAIL = ("failed", "error", "cancelled", "canceled", "rejected")
 
 
 def generation_status(session, task_id):
-    """One status check for a task -> {status, phase, paid_credit}. `phase` normalizes the
-    raw status into 'running' | 'done' | 'failed' for the async poller. Read-only."""
+    """One status check for a task -> {status, phase, paid_credit, started, reason}.
+    `phase` normalizes the raw status into 'running' | 'done' | 'failed' for the async
+    poller. Read-only.
+
+    `started` and `reason` exist because 'what' without 'why' is how five of the owner's
+    generations died unnoticed over four days (2026-07-21..24):
+      - `started` is False until PixAI actually assigns a worker. A task it accepted,
+        queued and never dispatched sits at a NON-TERMINAL status for ~60 minutes before
+        being reaped, so on status alone it is indistinguishable from real work and shows
+        as an indefinite spinner. This is the only field that tells them apart.
+      - `reason` is PixAI's own explanation from `outputs.reason` (e.g. "waiting
+        timeout"). Without it a caller can only report "cancelled", which reads as though
+        the USER cancelled something they never started.
+    Callers that only want the original three keys are unaffected -- those are unchanged."""
     d = gql_adhoc(session, _GEN_STATUS, {"id": str(task_id)}) or {}
     t = d.get("task") or {}
     raw = (t.get("status") or "").lower()
     phase = ("done" if raw in _GEN_DONE else
              "failed" if raw in _GEN_FAIL else "running")
-    return {"status": t.get("status") or "", "phase": phase, "paid_credit": t.get("paidCredit")}
+    return {"status": t.get("status") or "", "phase": phase, "paid_credit": t.get("paidCredit"),
+            "started": bool(t.get("startedAt")),
+            "reason": _task_failure_reason(t.get("outputs"))}
+
+
+def _resolved_loras(session, task):
+    """The task's LoRAs as a readable string, for a row being catalogued live.
+
+    extract_full_meta returns `loras: ""` on purpose and documents that the caller fills it;
+    --backfill-full-meta does, and the live capture did not, so a generation's LoRAs were
+    blank until a backfill happened past. Resolution is name lookups behind model_name_gql's
+    process cache, so a batch costs one call per distinct LoRA at most. A failure costs the
+    label, never the row.
+    """
+    try:
+        return resolve_loras(session, task) or ""
+    except Exception:                                  # noqa: BLE001
+        return ""
+
+
+def _resolved_model_name(session, fm, model_id):
+    """The model's human-readable name for a row being catalogued live.
+
+    extract_full_meta sets model_name only for a chat task (Edit/Fix, resolved locally from
+    EDIT_MODELS); for an ordinary generation it is blank and the caller is expected to fill
+    it -- which the backfill does and the live capture did not. Falls back to whatever
+    extract_full_meta had, then to blank, so a lookup failure costs the label and never the
+    row.
+    """
+    have = str((fm or {}).get("model_name") or "").strip()
+    if have:
+        return have
+    mid = str(model_id or "").strip()
+    if not mid:
+        return ""
+    try:
+        return model_name_gql(session, mid) or ""
+    except Exception:                                  # noqa: BLE001
+        return ""
 
 
 def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_"):
@@ -4963,14 +5590,27 @@ def run_generate_video(args):
     return {"submitted": True, "task_id": task_id, "videos": len(saved)}
 
 
-def _resolve_refs(session, items):
+def _resolve_refs(session, items, media_type="IMAGE"):
     """Resolve reference sources (media_id or local file) to media_ids, uploading any
-    local files. Used by reference-video on --confirm."""
+    local files. Used by reference-video on --confirm.
+
+    `media_type` is the PixAI MediaType to register an uploaded local file under.
+    Live-probed 2026-07-24: MediaType is a real GraphQL enum with exactly two members,
+    IMAGE and VIDEO. Pass media_type=None for a ref kind that has no valid upload type
+    (audio) -- a local file is then refused rather than mislabelled as an image.
+    Existing media_ids pass through untouched regardless."""
     ids = []
     for s in items:
         if _is_local_source(s):
+            if media_type is None:
+                raise PixAIError(
+                    "--ref-audio only takes a media id that already exists on PixAI, not a "
+                    "local file ({}). PixAI's uploader accepts images and videos only, so "
+                    "there is no way to upload a bare audio file. Workaround: put the audio "
+                    "into a video (even a still image with the audio track) and pass that "
+                    "with --ref-video instead.".format(s))
             print("Uploading local reference:", s)
-            ids.append(upload_media(session, s))
+            ids.append(upload_media(session, s, media_type))
         else:
             ids.append(str(s))
     return ids
@@ -5040,8 +5680,9 @@ def run_reference_video(args):
         if override:
             params = json.loads(override)
         else:
-            params = _build(_resolve_refs(session, imgs), _resolve_refs(session, vids),
-                            _resolve_refs(session, auds))
+            params = _build(_resolve_refs(session, imgs, "IMAGE"),
+                            _resolve_refs(session, vids, "VIDEO"),
+                            _resolve_refs(session, auds, None))
         print("Submitting REFERENCE VIDEO task (spends credits unless a free card applies)...")
         _apply_kaisuuken(session, params, args)
         created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
@@ -5060,86 +5701,6 @@ def run_reference_video(args):
     for s in saved:
         print("  " + s)
     return {"submitted": True, "task_id": task_id, "videos": len(saved)}
-
-
-def run_enhance(args):
-    """Apply a PixAI enhance plugin (panelplugin workflow -- face fix / upscale / bg-remove)
-    or an art filter to an image. --src is a catalog media_id OR a local file (auto-uploaded
-    on --confirm). Provide --workflow-id (panelplugin) or --filter-id (art filter); get ids
-    via --dump-params off a real enhance task. Preview-only unless --confirm. Image output."""
-    out = Path(args.out)
-    existing = (getattr(args, "task_id", "") or "").strip()
-    src = (getattr(args, "src", "") or "").strip()
-    workflow_id = (getattr(args, "workflow_id", "") or "").strip()
-    filter_id = (getattr(args, "filter_id", "") or "").strip()
-    override = getattr(args, "params_json", "") or ""
-    strength = getattr(args, "strength", None)
-    kaisuuken = getattr(args, "kaisuuken_id", "") or ""
-
-    if not existing and not override and not src:
-        raise PixAIError("--enhance needs --src <media_id|file>, plus --workflow-id or --filter-id.")
-    if not existing and not override and not (workflow_id or filter_id):
-        raise PixAIError("--enhance needs --workflow-id <id> (a panelplugin, e.g. face fix / "
-                         "upscale) or --filter-id <id> (art filter). Get ids via --dump-params.")
-
-    def _build(media_id):
-        if filter_id:
-            return build_filter_parameters(
-                media_id, filter_id,
-                strength=(strength if strength is not None else 0.77), kaisuuken_id=kaisuuken)
-        return build_panelplugin_parameters(media_id, workflow_id, strength=strength,
-                                            kaisuuken_id=kaisuuken)
-
-    if not existing and not getattr(args, "confirm", False):
-        print("=== PixAI createGenerationTask -- ENHANCE (PREVIEW, no credits spent) ===")
-        if override:
-            print(json.dumps({"parameters": json.loads(override)}, indent=2))
-        else:
-            ph = "<upload:{}>".format(src) if _is_local_source(src) else src
-            print(json.dumps({"parameters": _build(ph)}, indent=2))
-            _preview_card_note(args, _build(ph))
-        print("\nThis would SPEND credits (unless free above). "
-              "Re-run with --confirm to submit.")
-        return {"submitted": False}
-
-    out.mkdir(parents=True, exist_ok=True)
-    db_path = out / "catalog.db"
-    init_db(db_path)
-    session = _make_session(getattr(args, "token", None))
-
-    if existing:
-        task_id = existing
-        print("Fetching existing enhance task (no credits):", task_id)
-    else:
-        # Checked before the upload, not just before the mutation -- see run_reference_video.
-        _check_read_only("submit an enhance task (spends credits unless a card applies)")
-        if override:
-            params = json.loads(override)
-        else:
-            if _is_local_source(src):
-                print("Uploading source image:", src)
-                media_id = upload_media(session, src)
-            else:
-                media_id = src
-            params = _build(media_id)
-        print("Submitting ENHANCE task (spends credits unless a card applies)...")
-        _apply_kaisuuken(session, params, args)
-        created = gql_adhoc(session, _GEN_MUTATION, {"parameters": params})
-        task_id = (created.get("createGenerationTask") or {}).get("id")
-        if not task_id:
-            raise PixAIError("no task id returned: " + json.dumps(created)[:300])
-        print("  task id:", task_id)
-        _bump_card_use(params)
-        _poll_task_status(session, task_id, getattr(args, "poll_timeout", 300), interval=3,
-                          label="enhance", fail_noun="enhance")
-
-    result = task_detail_gql(session, task_id) or {}
-    _maybe_dump_params(args, result)
-    saved = _download_image_task(session, result, task_id, out, args, model_name="Enhance")
-    print("Enhanced + cataloged {} image(s):".format(len(saved)))
-    for s in saved:
-        print("  " + s)
-    return {"submitted": True, "task_id": task_id, "images": len(saved)}
 
 
 def run_upload(args):
@@ -5351,6 +5912,11 @@ def run_fix_models(args):
 # this only reports your credit balance / plan. It never moves money. Buying
 # credits or changing your subscription is deliberately NOT implemented -- do that
 # in the browser.
+# `roles` (2026-07-24) is the account's own role list -- the owner's carries BETA_TO_INVITE,
+# the flag behind PixAI's early-access programs (the Tsubaki.3 / DiT.3 invite). One extra leaf
+# field on the query the header chip, --account and /api/account already run: no extra call,
+# no spend. Only the field NAME was probed, not its exact shape, so every consumer must
+# normalize rather than assume a list (see /api/account).
 _ACCOUNT_QUERY = """
 query {
   me {
@@ -5884,6 +6450,12 @@ _PRICE_SCALARS = frozenset((
 _PRICE_NESTED = frozenset((
     "controlNets", "ipAdapter", "animateDiff", "workflow", "i2vPro", "referenceVideo",
     "t2i2v", "inputs", "chat", "inpaint", "loraParameters"))
+# The upscale keys above are why the cost badge tracks an upscale at all -- the two methods
+# differ by roughly 3x at their maximum ratio. Deliberately NOT listed: enlargeModel,
+# upscaleSampler and qualityTag. They are real submit params, but they are not in this
+# endpoint's input schema and none of them changes the price (the cost is the same whichever
+# upscaler network runs), and an off-schema query param risks a 400 that would make
+# price_task fail soft and blank the badge. Add one only with a measurement showing it priced.
 
 
 def price_task(session, params):
@@ -5907,6 +6479,52 @@ def price_task(session, params):
         return None
     ap = data.get("actualPrice")
     return int(ap) if ap is not None else None
+
+
+def queue_wait_estimate(session, priority, model_version_id):
+    """PixAI's own queue-wait estimate for a (priority, model) pair, in whole seconds, or
+    None. GET /v2/task/wait-time -- the number their site puts beside Generate ("Est. wait
+    ~9 seconds"). READ-ONLY: creates nothing, prices nothing, spends nothing.
+
+    The parameter shape was probed, not guessed, because the route gives up nothing on its
+    own: with no parameters it 400s `expected number, received NaN` on path ["priority"];
+    with a priority alone it 400s "modelVersionId or generationModelId must be provided";
+    `generationModelId` then 404s "Generation model not found" for the very id our submits
+    carry in their `modelId` field, while `modelVersionId` with that same id answers 200. So
+    as far as this route is concerned, a submit's `modelId` IS a model version id. `priority`
+    is a validated enum rather than a free number -- 1 comes back "invalid priority" -- and
+    the two values this app ever submits (500 normal, 1000 --high-priority) both answer.
+
+    Response: {waitDurationSeconds, displayBucket, displaySeconds, displayMinutes}.
+    Measured 2026-07-25: Tsubaki.2 v1 at priority 500 -> 25.4s and at 1000 -> 4.4s;
+    Reference Pro at 500 -> 50.1s; the same pair re-asked minutes later -> 26.7s. So it is
+    per-model AND per-priority, and it tracks real queue depth.
+
+    This is a QUEUE-DEPTH estimate for a submission -- NOT a per-task ETA, and emphatically
+    not progress. PixAI exposes no progress on a task at all (probed against a live control:
+    none of progress/percent/percentage/step/steps/currentStep/eta/estimatedTime/
+    queuePosition/position/waitTime exist on the task object). A caller must present this as
+    the estimate it is, never as a countdown that ticks down.
+    """
+    if not model_version_id:
+        return None                      # the route 400s without one; don't spend the call
+    try:
+        pri = int(priority)
+    except (TypeError, ValueError):
+        pri = 500                        # this app's own submit default (see build params)
+    try:
+        data = _rest_get(session, "/task/wait-time",
+                         params={"priority": pri,
+                                 "modelVersionId": str(model_version_id)}) or {}
+    except (PixAIError, ValueError):
+        return None                      # an estimate is a nicety; never raise for it
+    secs = data.get("waitDurationSeconds")
+    if secs is None:
+        secs = data.get("displaySeconds")
+    try:
+        return max(0, int(round(float(secs))))
+    except (TypeError, ValueError):
+        return None
 
 
 def suggest_prompt(session, media_id):
@@ -6315,6 +6933,7 @@ def run_catalog_stats(args):
         print("Credits tracked     : {:,} spent across {:,} tasks ({:,} free)".format(
             sum(task_cost.values()), len(task_cost),
             sum(1 for v in task_cost.values() if v == 0)))
+    _print_meta_coverage(rows, total)
     disk_count, disk_bytes, thumb_count = _count_backup_images(out)
     if disk_count:
         print("Image files on disk : {}  ({})".format(disk_count, _format_size(disk_bytes)))
@@ -6322,19 +6941,89 @@ def run_catalog_stats(args):
         print("  + {} preview thumbnails (gallery/thumbs, not originals)".format(thumb_count))
 
 
-def _parallel_map(items, work_fn, workers=1, progress=None, delay=0.0):
+# Columns whose EMPTINESS unambiguously means "never fetched". Deliberately NOT `loras`
+# or `negative_prompt`: a generation with no LoRAs and no negative prompt stores those blank
+# too, so a blank one cannot be told apart from one that was never filled, and reporting them
+# as a coverage gap would send you off to re-fetch tasks that are already complete.
+#
+# `paid_credit` IS unambiguous despite free generations existing -- a free task stores "0",
+# and only a never-tracked one stores "".
+_META_COVERAGE = (
+    ("full metadata", "prompt_full", "--backfill-full-meta"),
+    ("model id", "model_id", "--backfill-full-meta"),
+    ("model name", "model_name", "--backfill-full-meta"),
+)
+
+
+def _print_meta_coverage(rows, total):
+    """How much of the catalog actually carries its metadata, and what a sweep would cost.
+
+    Without this the stats screen can say "35,133 entries, all downloaded" about a catalog in
+    which not one row knows which model made it -- the counters only ever described FILES.
+    Coverage is what decides whether a sweep is due, and the unique-task count is what it
+    costs: metadata is fetched once per task, so a 4-image batch is one call, not four.
+    """
+    if not total:
+        return
+    print("Metadata coverage   :")
+    worst_missing_tasks = 0
+    for label, col, fix in _META_COVERAGE:
+        have = sum(1 for r in rows if (r.get(col) or "").strip())
+        gap = [r for r in rows if not (r.get(col) or "").strip()]
+        tasks = len({r.get("task_id") for r in gap if r.get("task_id")})
+        worst_missing_tasks = max(worst_missing_tasks, tasks)
+        line = "  {:<17}: {:,} / {:,} ({:.0f}%)".format(label, have, total,
+                                                        100.0 * have / total)
+        if gap:
+            line += "  -- {:,} missing across {:,} tasks".format(len(gap), tasks)
+        print(line)
+    # Locally imported files have no PixAI task behind them, so they can NEVER carry a model
+    # and are not a gap to chase. Counted separately rather than silently deflating the
+    # percentages above, which would make a complete catalog look permanently short.
+    local = sum(1 for r in rows if (r.get("source") or "").strip() == "local")
+    if local:
+        print("  {:<17}: {:,} imported locally -- no PixAI task, so no model to fetch"
+              .format("of which", local))
+    if worst_missing_tasks:
+        print("  Fill them with    : --backfill-full-meta --workers 8"
+              "   (resumable; skips rows already filled)")
+    costed = sum(1 for r in rows if (r.get("paid_credit") or "").strip())
+    if costed < total:
+        print("  Cost history      : add --with-credit to recover spend on older tasks")
+
+
+def _parallel_map(items, work_fn, workers=1, progress=None, delay=0.0, on_error=None):
     """Run work_fn(item) over items, yielding (item, result) as each finishes.
 
-    workers<=1 runs serially (in order, sleeping `delay` between items to stay
-    polite); higher uses a bounded thread pool for latency-bound network calls
-    (no delay -- concurrency itself paces). progress(done, total, 0) is called on
-    THIS thread, so the caller may safely mutate shared state in the yield body.
-    Exceptions in a worker yield a None result rather than crashing the run."""
+    workers<=1 runs serially, sleeping `delay` between items. Higher uses a bounded thread
+    pool for latency-bound network calls -- and STILL honours `delay`, as a global floor on
+    the interval between request starts, not a per-thread one. It used to be dropped
+    entirely on the parallel path ("concurrency itself paces"), which meant `--workers 8`
+    turned a deliberately paced request stream into eight threads firing as fast as they
+    completed. Being polite to PixAI's servers is a standing rule of this project, and it
+    should not switch itself off because a flag was passed. The pace is global, so raising
+    --workers now buys latency hiding up to that ceiling rather than a bigger burst; lower
+    --delay if you genuinely want more throughput, and know that you are choosing it.
+
+    A worker's exception yields a None result rather than crashing the run -- but it is
+    NEVER swallowed silently: `on_error(item, exc)` is called with it first. It used to be
+    discarded, and a real 17,289-task backfill consequently reported "16,044 failed" with no
+    reason attached to any of them, which is a number you cannot act on.
+
+    progress(done, total, 0) is called on THIS thread, so the caller may safely mutate
+    shared state in the yield body.
+    """
     items = list(items)
     total = len(items)
     if workers <= 1:
         for i, it in enumerate(items):
-            yield it, work_fn(it)
+            try:
+                res = work_fn(it)
+            except Exception as e:                       # noqa: BLE001 -- reported, not hidden
+                res = None
+                if on_error:
+                    on_error(it, e)
+            yield it, res
             if progress:
                 progress(i + 1, total, 0)
             if delay:
@@ -6342,15 +7031,33 @@ def _parallel_map(items, work_fn, workers=1, progress=None, delay=0.0):
         return
     from concurrent.futures import ThreadPoolExecutor, as_completed
     done = 0
+    gate = threading.Lock()
+    next_start = [0.0]
+
+    def _paced(it):
+        if delay:
+            # One global slot at a time: each worker waits for the next free slot and books
+            # the one after it, so the whole pool starts at most one request per `delay`
+            # seconds no matter how many threads are in it.
+            with gate:
+                now = time.monotonic()
+                wait = max(0.0, next_start[0] - now)
+                next_start[0] = max(now, next_start[0]) + delay
+            if wait:
+                time.sleep(wait)
+        return work_fn(it)
+
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = {ex.submit(work_fn, it): it for it in items}
+        futs = {ex.submit(_paced, it): it for it in items}
         for fut in as_completed(futs):
             it = futs[fut]
             done += 1
             try:
                 res = fut.result()
-            except Exception:
+            except Exception as e:                       # noqa: BLE001 -- reported, not hidden
                 res = None
+                if on_error:
+                    on_error(it, e)
             yield it, res
             if progress:
                 progress(done, total, 0)
@@ -6426,8 +7133,22 @@ def run_backfill_full_meta(args):
     # getTaskById returns paidCredit for historical tasks, so rows cataloged before
     # cost tracking existed can recover their real spend. Opt-in, like --with-loras,
     # because it re-fetches every not-yet-costed task (long run on a big catalog).
+    # These four come ONLY from a getTaskById fetch -- the listing feed carries neither.
+    # A row holding none of them has never seen a task detail, whatever else it holds.
+    _DETAIL_ONLY = ("model_id", "steps", "sampler", "cfg_scale")
+
     def _needs(r):
         if not r.get("prompt_full"):
+            return True
+        # prompt_full alone is NOT proof the detail was fetched. Rows exist carrying a
+        # prompt and a seed and nothing else -- no model, no steps, no sampler, no CFG --
+        # and while prompt_full was the sole sentinel every one of them was skipped
+        # forever: the sweep printed "Nothing to backfill" over a catalog that could not
+        # say which model made any of it. Measured on a real catalog before this changed:
+        # 788/800 rows had a prompt, 5/800 had a model id, and a backfill was a no-op.
+        # A task that genuinely returns none of the four is re-fetched on a later sweep
+        # too; that is a bounded, idempotent cost, and far cheaper than the silence.
+        if not any((r.get(c) or "").strip() for c in _DETAIL_ONLY):
             return True
         if with_loras and r.get("task_id") and not r.get("loras"):
             return True
@@ -6435,10 +7156,17 @@ def run_backfill_full_meta(args):
             return True
         return False
     needs_fill = [r for r in rows if _needs(r)]
+    # Named separately in the count below because it is the case that used to be invisible.
+    stalled = [r for r in needs_fill
+               if r.get("prompt_full")
+               and not any((r.get(c) or "").strip() for c in _DETAIL_ONLY)]
     task_ids = list(dict.fromkeys(r["task_id"] for r in needs_fill if r.get("task_id")))
     print("Found {:,} rows to fill across {:,} unique tasks{}{}.".format(
         len(needs_fill), len(task_ids), " (incl. LoRAs)" if with_loras else "",
         " (incl. credit costs)" if with_credit else ""))
+    if stalled:
+        print("  {:,} of them have a prompt but no model/steps/sampler/CFG -- these were "
+              "skipped by every earlier backfill.".format(len(stalled)))
     if not task_ids:
         print("Nothing to backfill.")
         return
@@ -6470,7 +7198,20 @@ def run_backfill_full_meta(args):
     task_cache = {}  # task_id -> full meta dict
     fetched = failed = 0
     _prog = getattr(args, "progress", None)
-    for tid, fm in _parallel_map(task_ids, _fetch_task, workers, _prog, delay=args.delay):
+    # Failures are counted BY REASON. A bare total is unactionable: the same "16,044 failed"
+    # covers a rotated hash, an expired key, a rate limit and a genuinely deleted task, and
+    # those have four different answers.
+    err_kinds = {}
+
+    def _note_error(tid, exc):
+        key = "{}: {}".format(type(exc).__name__, str(exc).strip().splitlines()[0][:120]
+                              if str(exc).strip() else "(no message)")
+        err_kinds[key] = err_kinds.get(key, 0) + 1
+
+    errored = 0
+
+    for tid, fm in _parallel_map(task_ids, _fetch_task, workers, _prog, delay=args.delay,
+                                 on_error=_note_error):
         fm = fm or {}
         task_cache[tid] = fm
         if fm.get("prompt_full"):
@@ -6499,7 +7240,31 @@ def run_backfill_full_meta(args):
             row["height"] = fm["_media_height"]
 
     save_catalog(db_path, rows)
+    # "failed" used to mean two unrelated things at once: the fetch threw, or it returned
+    # fine and simply carried no prompt (a deleted task, or a kind that records none). Those
+    # have completely different answers, and reporting one number for both had us guessing
+    # at a 16,044 and then at a 157. Counted apart now.
+    errored = sum(err_kinds.values())
+    empty = failed - errored
     print("Done. Fetched {:,} tasks, {:,} failed, catalog updated.".format(fetched, failed))
+    if empty > 0:
+        print("  {:,} of those returned fine but carried no prompt -- a deleted task, or a "
+              "kind that records none. Nothing is wrong with them.".format(empty))
+    if err_kinds:
+        print("Why they failed:")
+        for kind, n in sorted(err_kinds.items(), key=lambda kv: -kv[1])[:5]:
+            print("  {:>7,}  {}".format(n, kind))
+        worst = max(err_kinds.values())
+        if worst >= 20 and failed > fetched:
+            # A majority-failure run is not a partial success, and re-running it unchanged
+            # just repeats it. Say so, and say the two things that are actually true: it is
+            # resumable, so nothing already fetched is refetched, and a slower pace is the
+            # first thing to try when a server is pushing back.
+            print("  Most of this run failed. Nothing fetched was lost -- the backfill is "
+                  "resumable and skips what it already filled -- but re-running it exactly "
+                  "as it was will fail the same way.")
+            print("  If that reason looks like the server pushing back, try a gentler pace: "
+                  "--workers 2 --delay 1")
 
 
 def _check_time_capsule(created_at, out_dir):
@@ -7132,11 +7897,24 @@ def main():
     ap.add_argument("--dry-run", action="store_true",
                     help="with --organize / --organize-adv / --undo-organize, show the "
                          "plan without moving anything")
-    ap.add_argument("--full-meta", action="store_true",
-                    help="fetch full prompt, seed, steps, sampler, CFG, and model name for each "
-                         "task via a second API call (TASK_DETAIL_HASH + MODEL_DETAIL_HASH ship with "
-                         "working defaults; no config.json setup needed). One extra call per unique "
-                         "task; batch images share one call.")
+    # ON BY DEFAULT since 2026-07-25. This is a backup tool whose point is the catalog, and
+    # full metadata was the one thing you only got by asking: a plain run or --update left
+    # rows with no prompt, no seed and no model, and the gap was invisible until something
+    # needed it. (Measured on the owner's own library: a stats screen reporting "35,133
+    # entries, all downloaded" over rows that could not say which model made them.) --sync
+    # has always implied it; now every pull does, and the flag stays accepted so existing
+    # scripts, docs and the Panel's whitelisted argv keep working unchanged.
+    ap.add_argument("--full-meta", dest="full_meta", action="store_true", default=True,
+                    help="(now the DEFAULT) fetch full prompt, seed, steps, sampler, CFG and "
+                         "model name for each task via a second API call. One extra call per "
+                         "unique task -- a batch's images share one call. Kept as an explicit "
+                         "flag so existing commands and scripts still work.")
+    ap.add_argument("--no-full-meta", dest="full_meta", action="store_false",
+                    help="skip the per-task metadata call: faster pull, but the catalog rows "
+                         "it creates carry no prompt, seed or model until a later "
+                         "--backfill-full-meta fills them in. On a first backup of a large "
+                         "history this is the quicker route -- the pull's metadata fetch is "
+                         "serial, while --backfill-full-meta --workers N is parallel.")
     ap.add_argument("--backfill-meta", action="store_true",
                     help="fill in missing url/width/height in catalog.db via resolve_media "
                          "for rows that lack them, then exit")
@@ -7231,6 +8009,40 @@ def main():
                      help="add a LoRA by its version id and weight, e.g. "
                           "--lora 1686550608832816741:0.7 (repeatable). Find version ids "
                           "with --list-models")
+    # Upscale + boosters. Flags are named after the PARAMETERS (what --dump-params shows),
+    # with PixAI's own dialog label quoted in the help -- their two radio buttons read
+    # "Upscale" (= the `enlarge` param) and "Hires" (= the `upscale` param), so naming the
+    # flags after the labels instead would have made --upscale mean enlarge.
+    gen.add_argument("--enlarge", type=float, default=None, metavar="RATIO",
+                     help="enlarge the finished image with an upscaler network (PixAI's "
+                          "'Upscale' method), in 0.1 steps from 1.1. Clamped to the largest "
+                          "ratio the output-size ceiling allows for this --width/--height. "
+                          "Mutually exclusive with --upscale")
+    gen.add_argument("--enlarge-model", dest="enlarge_model", default="",
+                     choices=list(ENLARGE_MODELS),
+                     help="which upscaler network --enlarge runs (default: {})".format(
+                         DEFAULT_ENLARGE_MODEL))
+    gen.add_argument("--upscale", type=float, default=None, metavar="RATIO",
+                     help="re-diffuse the image at a larger size (PixAI's 'Hires' method), "
+                          "in 0.1 steps from 1.1. Sharper than --enlarge and roughly 3x the "
+                          "credits; allows a smaller maximum ratio. Mutually exclusive with "
+                          "--enlarge")
+    gen.add_argument("--upscale-denoise", dest="upscale_denoising_strength", type=float,
+                     default=None, metavar="STRENGTH",
+                     help="--upscale denoising strength, 0.01-0.99 (default {}; PixAI's own "
+                          "hint is 0.4-0.6 -- higher redraws more)".format(
+                              DEFAULT_UPSCALE_DENOISING_STRENGTH))
+    gen.add_argument("--upscale-denoise-steps", dest="upscale_denoising_steps", type=int,
+                     default=None, metavar="N",
+                     help="--upscale denoising steps, 1-50 (default {})".format(
+                         DEFAULT_UPSCALE_DENOISING_STEPS))
+    gen.add_argument("--face-fix", dest="face_fix", action="store_true",
+                     help="run PixAI's face restorer over the result (enableADetailer -- "
+                          "the generator's 'Face Fix' booster)")
+    gen.add_argument("--quality-tag", dest="quality_tag", nargs="?",
+                     const=DEFAULT_QUALITY_TAG, default="", metavar="PREFIX",
+                     help="prepend a quality booster to the prompt (the generator's "
+                          "'Quality Tag'). Bare flag uses '{}'".format(DEFAULT_QUALITY_TAG))
     gen.add_argument("--task-id", default="",
                      help="with --generate, fetch + catalog an ALREADY-created task by id "
                           "(no new credits). Recovers a stranded generation that --update "
@@ -7281,18 +8093,9 @@ def main():
                      help="reference video (repeatable; cite as @video1, @video2, ...)")
     gen.add_argument("--ref-audio", dest="ref_audio", action="append", metavar="MEDIA_ID|FILE",
                      help="reference audio (repeatable; cite as @audio1, ...)")
-    # --- enhance (panelplugin workflow OR art filter) ---
-    gen.add_argument("--enhance", dest="enhance", action="store_true",
-                     help="enhance an image: --workflow-id (panelplugin -- face fix / upscale / "
-                          "bg-remove) or --filter-id (art filter) on --src. Preview until --confirm")
-    gen.add_argument("--src", dest="src", default="", metavar="MEDIA_ID|FILE",
-                     help="source image for --enhance (catalog media_id or local file, auto-uploaded)")
-    gen.add_argument("--workflow-id", dest="workflow_id", default="", metavar="ID",
-                     help="panelplugin workflow id for --enhance (get via --dump-params off an enhance task)")
-    gen.add_argument("--filter-id", dest="filter_id", default="", metavar="ID",
-                     help="art-filter id for --enhance (pixai-image-filter, e.g. filter-v1-m2)")
-    gen.add_argument("--strength", dest="strength", type=float, default=None,
-                     help="enhance/filter strength (e.g. 0.5 for plugins, 0.77 for filters)")
+    # --enhance / --src / --filter-id / --strength are gone -- see build_filter_parameters'
+    # former neighbourhood above for both measurements. Art filters run in the browser now
+    # (static/mg-art-filters.js, the gallery's Edit > Enhance tab): free, offline, no submit.
     # --- instruct editing + media upload (the "Edit this image" surface) ---
     gen.add_argument("--edit-image", dest="edit_image", action="store_true",
                      help="instruct-edit an image via PixAI: describe the change in --prompt "
@@ -7482,9 +8285,6 @@ def main():
             return
         if getattr(args, "reference_video", False):
             run_reference_video(args)
-            return
-        if getattr(args, "enhance", False):
-            run_enhance(args)
             return
         if getattr(args, "upload_file", ""):
             run_upload(args)

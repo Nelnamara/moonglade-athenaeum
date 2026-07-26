@@ -1,18 +1,18 @@
-"""READ_ONLY on the five CLI generation entry points -- the gap tests/test_read_only.py's
-own docstring didn't know it had.
+"""READ_ONLY on the CLI generation entry points -- the gap tests/test_read_only.py's own
+docstring didn't know it had.
 
 That file's docstring said "all four choke points... are covered -- both the CLI and the
-web app's generate/edit/enhance/fix/delete/claim routes funnel through these same four
+web app's generate/edit/fix/delete/claim routes funnel through these same four
 functions." That was true for the web app and false for the CLI: run_generate,
-run_generate_video, run_reference_video, run_enhance and run_edit_image each build their
-OWN gql_adhoc call instead of calling through submit_generation()/submit_fixer(), so none
-of them ever called _check_read_only.
+run_generate_video, run_reference_video and run_edit_image each build their OWN gql_adhoc
+call instead of calling through submit_generation()/submit_fixer(), so none of them ever
+called _check_read_only.
 
 Found 2026-07-21 by a 33-agent post-release audit, proved dynamically here rather than
-asserted: with READ_ONLY=True and the CLI's own --confirm passed, all five used to reach
-the mutation, and the free-card check (_apply_kaisuuken) fired FIRST -- a live network call
-before any guard ran at all. Every test below drives the real CLI entry point, the same way
-tests/test_read_only.py's own delete-task test does, and the property that matters is not
+asserted: with READ_ONLY=True and the CLI's own --confirm passed, every one of them used to
+reach the mutation, and the free-card check (_apply_kaisuuken) fired FIRST -- a live network
+call before any guard ran at all. Every test below drives the real CLI entry point, the same
+way tests/test_read_only.py's own delete-task test does, and the property that matters is not
 "does it raise" but that mock_session.post is NEVER CALLED -- no network call fires, from
 _apply_kaisuuken, an upload, or the mutation itself.
 
@@ -21,11 +21,11 @@ one-off inferenceProfile retry submit_generation() didn't have) is gone -- that 
 lives in submit_generation() itself, and run_generate calls through it for the mutation.
 It still needs the direct _check_read_only call below it though, ahead of
 _apply_kaisuuken's free-card network call, which fires before submit_generation() is ever
-reached -- see _check_read_only's own docstring. The other four runners are unchanged.
+reached -- see _check_read_only's own docstring. The other runners are unchanged.
 
-All five use --params-json to reach the actual-submit branch with the fewest required
-args -- every one of the five param-builders checks it first and returns immediately,
-which is also why real callers can use it to recover a task's exact submit shape for free.
+Each uses --params-json to reach the actual-submit branch with the fewest required args --
+every one of the param-builders checks it first and returns immediately, which is also why
+real callers can use it to recover a task's exact submit shape for free.
 """
 from types import SimpleNamespace
 
@@ -108,23 +108,11 @@ class TestRunReferenceVideoReadOnly:
         mock_session.post.assert_not_called()
 
 
-class TestRunEnhanceReadOnly:
-    def test_blocked_when_read_only(self, tmp_path, mock_session, monkeypatch):
-        monkeypatch.setattr(core, "READ_ONLY", True)
-        monkeypatch.setattr(core, "_make_session", lambda token: mock_session)
-        with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.run_enhance(_args(tmp_path))
-        mock_session.post.assert_not_called()
-
-    def test_blocked_before_uploading_local_source(self, tmp_path, mock_session, monkeypatch):
-        monkeypatch.setattr(core, "READ_ONLY", True)
-        monkeypatch.setattr(core, "_make_session", lambda token: mock_session)
-        local_file = tmp_path / "src.png"
-        local_file.write_bytes(b"\x89PNG\r\n")
-        with pytest.raises(core.PixAIError, match="READ_ONLY"):
-            core.run_enhance(_args(tmp_path, params_json="", src=str(local_file),
-                                    workflow_id="wf1"))
-        mock_session.post.assert_not_called()
+# TestRunEnhanceReadOnly is gone with run_enhance itself: --enhance had exactly two halves and
+# both were removed (panelplugin workflows, which PixAI never dispatches for an API-key client,
+# and art filters, which now composite in the browser for free). A guard on a deleted runner
+# would be pinning a husk -- tests/test_enhance.py proves the flags no longer parse, which is
+# the property that actually keeps the spend path closed.
 
 
 class TestRunEditImageReadOnly:

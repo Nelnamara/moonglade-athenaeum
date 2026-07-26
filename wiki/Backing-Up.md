@@ -7,7 +7,27 @@ python pixai_gallery_backup.py --probe        # confirm connection
 python pixai_gallery_backup.py --count        # how many images you have
 python pixai_gallery_backup.py --max 40       # small test download
 python pixai_gallery_backup.py                # download everything (parallel)
-python pixai_gallery_backup.py --full-meta    # download + capture full prompt/seed/model
+python pixai_gallery_backup.py               # full metadata is captured by default
+```
+
+### Where the library lives
+
+By default everything goes in `pixai_backup/` next to the app. To keep it somewhere else — a
+big drive, an external disk — set the folder in **Control Panel ▸ Library at a glance**. It
+takes effect when the server next starts, and it offers to restart for you.
+
+**Changing it never moves anything.** It points Moonglade at a different folder; whatever is
+in the old one stays exactly where it is. If you want to bring an existing library along, move
+the folder yourself first, then point the setting at its new home.
+
+The order of precedence, if you use more than one of these:
+
+1. `--out <folder>` on the command line — always wins, so a one-off run or a scheduled job
+   can point anywhere without disturbing the setting.
+2. `LIBRARY_DIR` in `config.json` — what the Control Panel writes.
+3. `pixai_backup` — the default.
+
+```bash
 ```
 
 Everything lands in `pixai_backup/` (git-ignored): `images/`, `catalog.db`,
@@ -50,8 +70,9 @@ python pixai_gallery_backup.py --workers 8 --page-size 500 # fast full backfill
 ## Full metadata
 
 ```bash
-python pixai_gallery_backup.py --full-meta            # on new downloads
+python pixai_gallery_backup.py                        # captured by default on every pull
 python pixai_gallery_backup.py --backfill-full-meta   # fill existing catalog rows
+python pixai_gallery_backup.py --catalog-stats        # how much is already filled in
 ```
 
 Captures the complete prompt, seed, steps, sampler, CFG, human-readable model name,
@@ -165,3 +186,77 @@ Each runs its pass and exits; all are idempotent and safe to re-run.
 | `--fix-model-names --relabel-removed` | additionally labels ids that no longer resolve (deleted models) as "Unknown or removed model" instead of leaving the raw number |
 | `--backfill-meta` | fills missing url/width/height only (see [Full metadata](#full-metadata) for the full-meta variant) |
 | `--faststart-videos` | losslessly rewrites every video so iOS/Safari can stream it over HTTP (`ffmpeg -c copy +faststart`; needs ffmpeg on PATH; skips already-fixed files; safe to run while the gallery or a live watch is collecting — each remux uses its own unique temp file) |
+
+## Reclaiming disk space
+
+A mature backup accumulates things that are safe to remove. Nothing below touches your
+images — but read the notes, because two of these are *regenerable* rather than *disposable*,
+which is a different promise.
+
+### Safe to delete outright
+
+These are either regenerated on demand or superseded by something newer.
+
+| Path | What it is |
+|---|---|
+| `pixai_backup/catalog.db.bak*` | Old catalog snapshots from past migrations. The live catalog is `catalog.db`; these are point-in-time copies kept in case a migration went wrong. Once you've used the app since, they're dead weight — and they are large, often ~85–100 MB each. |
+| `pixai_backup/catalog.csv` | The **legacy** catalog format. `_ensure_db()` migrated it into `catalog.db` automatically and nothing reads the CSV any more. (`--export-csv` writes a *fresh* one on demand, so deleting this loses nothing.) |
+| `serve.log` | The gallery server's console log. Rotating file logs live in `pixai_backup/logs/` instead. |
+| `__pycache__/`, `.pytest_cache/` | Python bytecode and test caches. Regenerated automatically. |
+| `pixai_gui_settings.json` | Settings for the **PySide6 desktop GUI, which was removed in v2.1.0**. Pure leftover. |
+| A `0`-byte `catalog.db` in the *install root* | Not your catalog — that lives at `pixai_backup/catalog.db`. An empty stray file at the top level is an artefact of an old run. Check the size before deleting: if it isn't 0 bytes, stop and ask. |
+
+```bash
+# check before you delete -- the real catalog should be tens of MB, the stray one 0
+ls -l catalog.db pixai_backup/catalog.db
+```
+
+### Safe once verified
+
+**`pixai_backup/_duplicates/`** is the dedup quarantine — copies `--dedup --apply` moved aside
+rather than deleted, precisely so you could change your mind. There is a command whose whole
+job is to confirm emptying it is safe:
+
+```bash
+python pixai_gallery_backup.py --verify-dupes
+```
+
+It re-checks that every quarantined file still has a surviving copy elsewhere in the backup.
+Only delete the folder once that passes.
+
+### Regenerable, but you'll pay to rebuild
+
+**`pixai_backup/gallery/`** holds the gallery's thumbnails — one per image, so on a large
+library it is tens of thousands of files and several GB. Deleting it costs you nothing
+permanent, but the gallery will regenerate them on demand and the first browse afterwards
+will be slow. Worth doing only if you're genuinely short of space.
+
+### Not cruft — just untidy
+
+If a lot of files sit directly in `pixai_backup/images/` rather than in `YYYY-MM/` month
+folders, they simply predate (or postdate) the last organize run. That's cosmetic, not a
+problem, and it's reversible:
+
+```bash
+python pixai_gallery_backup.py --organize --dry-run   # preview, changes nothing
+python pixai_gallery_backup.py --organize             # normalize into YYYY-MM/
+```
+
+`--organize` writes `organize_manifest.csv` and `--undo-organize` reverses it, so this is a
+safe thing to try.
+
+### Where the space actually goes
+
+Before deleting anything, it's worth knowing the shape of your own backup — on a large
+library the answer is almost always "the images themselves", and the reclaimable cruft is a
+rounding error by comparison:
+
+```bash
+python pixai_gallery_backup.py --catalog-stats
+```
+
+> **A note on where your library lives.** By default `pixai_backup/` sits *inside* the
+> install folder, which is why the app directory looks enormous. Nothing requires that —
+> `--out` points anywhere you like, and keeping the library on a separate path (or drive)
+> makes the app folder itself small, easy to back up, and easy to replace wholesale when you
+> update.

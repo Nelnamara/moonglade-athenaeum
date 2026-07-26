@@ -24,9 +24,17 @@ import {
   friendlyGenErr, classifyTaskStatus,
   buildShotListText, buildPlaySequence, buildExportClips,
   setPromptOverride, clearPromptOverride,
-  loraIncompat, resolveLoraPayload, anyLoraUnresolved,
+  loraIncompat, resolveLoraPayload, anyLoraUnresolved, overLoraCap,
   landInFirstAct, importedFootagePatch,
-  buildImgGenBody,
+  // resolveGenDims was USED below (the Advanced panel's "→ W × H" readout) without ever
+  // being imported. The in-browser Babel path inlines every module into one global scope,
+  // so it happened to resolve there and the omission was invisible; esbuild builds a real
+  // module graph, so `/loom?bundle=1` threw `ReferenceError: resolveGenDims is not defined`
+  // and the whole tab body failed to render. Nothing else in this file is missing from
+  // these two import lists -- checked by diffing every export against every identifier
+  // called here (shotPayload/moveCardToAct look missing but are deliberate local wrappers
+  // over the aliased buildShotPayload/mvCardToAct imports).
+  buildImgGenBody, resolveGenDims,
 } from "./src/loom-mutations.js";
 
 /* =========================================================================
@@ -507,6 +515,7 @@ const V2_STYLES = `
 .lv-tab{flex:1;text-align:center;font:600 10px/1 system-ui;padding:6px 4px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);color:var(--subtext);cursor:pointer;}
 .lv-tab.on{background:color-mix(in srgb,var(--accent) 18%,transparent);border-color:var(--accent);color:var(--accent);}
 .lv-in{width:100%;background:var(--base);border:1px solid var(--surface1);border-radius:7px;padding:7px 8px;color:var(--text);font:11px/1.3 system-ui;}
+.cap-off{opacity:.4;cursor:not-allowed;}
 .lv-in:focus{outline:0;border-color:var(--accent);}
 .lv-minichip{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:2px 5px;cursor:pointer;}
 .lv-minichip:hover{border-color:var(--accent);color:var(--accent);}
@@ -546,12 +555,18 @@ const V2_STYLES = `
    .lv-mpick-veil overlay the Model row's own trigger does (see below), just pre-selected to
    the LoRAs segment -- reuses .lv-chip's chrome unchanged, only what the click DOES changed. */
 .lv-loratoggle{display:inline-block;margin:7px 0 5px;}
+.lv-loracap{margin-left:8px;font-size:10.5px;color:var(--subtext);}
+.lv-loracap.over{color:var(--coral);font-weight:600;}
+.lv-lw{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
+.lv-lw input[type=range]{width:92px;padding:0;background:none;border:none;}
+.lv-lw b{min-width:32px;text-align:right;font-size:11px;font-weight:600;color:var(--amber);font-variant-numeric:tabular-nums;}
 .lv-loras{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
-.lv-lchip{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
+.lv-lchip{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
 .lv-lchip.failed{border-color:var(--coral);}
 .lv-lchip .lv-lnm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lv-lchip.failed .lv-lnm{color:var(--coral);}
 .lv-lchip input{width:52px;background:var(--base);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:10px;padding:2px 4px;}
+.lv-lorver{flex:1 1 100%;margin-top:1px;background:var(--base);border:1px solid var(--surface1);border-radius:4px;color:var(--text);font-size:10px;padding:2px 4px;}
 .lv-lchip .lv-lrm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:13px;padding:0 2px;line-height:1;}
 .lv-lchip .lv-lrm:hover{color:var(--coral);}
 /* picker-parity-round2 (problem 2): the Image tab's model/LoRA picker used to render
@@ -780,10 +795,45 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // selectCard() guards its identical fetch with a local selSeq/mySeq pair: a fast second
   // pick must not let the FIRST pick's now-stale response land after it.
   const imgModelSeqRef = useRef(0);
+  // LoRA weight bounds for the CURRENT base model's architecture. DiT takes 0..1.2, the SD
+  // family -2..+2; an unknown or not-yet-picked base falls back to the widest range rather
+  // than the narrowest, so an unrecognised architecture never silently removes a capability
+  // the account has. Served from core (window.MG_LORA) -- one table, three consumers.
+  const loraRange = useMemo(() => {
+    const L = window.MG_LORA;
+    const t = String((imgModel && imgModel.model_type) || "").toUpperCase();
+    if (!L) return [-2, 2];
+    return (L.ranges && L.ranges[t]) || L.fallback || [-2, 2];
+  }, [imgModel]);
+  // Switching base architecture with LoRAs already attached must bring their weights into
+  // the new range -- a -0.8 left over from SDXL is a weight a DiT model rejects.
+  useEffect(() => {
+    setImgLoras((cur) => {
+      let changed = false;
+      const next = cur.map((l) => {
+        const w = Math.max(loraRange[0], Math.min(loraRange[1], +l.weight));
+        if (w !== l.weight) changed = true;
+        return w === l.weight ? l : { ...l, weight: w };
+      });
+      return changed ? next : cur;
+    });
+  }, [loraRange, setImgLoras]);
+  // Persist the two <mg-model-picker> DOM elements outside the ref-callback closures
+  // (bindPicker/bindLoraPicker below only run on mount/unmount) so the ensureSearched()
+  // effect further down can reach whichever one just became visible on a tab switch.
+  const basePickerElRef = useRef(null);
+  const loraPickerElRef = useRef(null);
   const bindPicker = useCallback((el) => {
+    basePickerElRef.current = el;
     if (el && !el._mgBound) {
       el._mgBound = true;
       el.addEventListener("mg-pick", (e) => {
+        // Owner report 2026-07-24: picking a model left the overlay open, forcing a
+        // manual close -- close it the instant a base model is picked (single-select:
+        // one choice ends the browsing task), mirroring pixai_gallery.py's onBasePick.
+        // LoRA picking (the other <mg-model-picker> mount, kind="lora" multi) is
+        // deliberately left open -- see the "+ add LoRA" toggle below.
+        setPickerOpen(false);
         const m = { model_id: e.detail.model_id, title: e.detail.title, preview_url: e.detail.preview_url || "" };
         setImgModel(m);
         setModelDefaults(null);
@@ -804,9 +854,21 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           .then((d) => {
             if (mySeq !== imgModelSeqRef.current) return;   // a newer pick superseded this fetch
             const versions = (d && d.versions) || [], v = versions[0] || {};
-            setImgModel((cur) => (cur && cur.model_id === m.model_id) ? {
+            // Owner report 2026-07-24: the version dropdown never appeared on the Loom for a
+            // model confirmed (same model, same account) to show one on the Gallery. Root
+            // cause: this updater ALSO required cur.model_id===m.model_id on top of the
+            // mySeq check above -- redundant for the "newer pick superseded this one" case
+            // mySeq already covers, but a real liability for anything else that can touch
+            // imgModel while this fetch is in flight (a shot switch, a project reload) --
+            // any of those silently drops the whole versions/compatibility/restrictions
+            // payload with no error, no retry, nothing visibly wrong. The Gallery's own
+            // onBasePick has never done a model_id re-check here, only the sequence guard --
+            // matching it exactly rather than carrying an extra condition that was never
+            // proven necessary and demonstrably breaks the one thing it must never break.
+            setImgModel((cur) => cur ? {
               ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
               sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
+              compatibility: v.compatibility || {}, restrictions: v.restrictions || {},
               versions,
             } : cur);
             const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
@@ -837,6 +899,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     setImgModel((cur) => ({
       ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
       sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
+      compatibility: v.compatibility || {}, restrictions: v.restrictions || {},
     }));
     const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
     setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
@@ -854,6 +917,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // upsert-by-model_id on selected=true (covers both the initial pending entry and the
   // later resolved-version_id update, same entry re-dispatched), remove on selected=false.
   const bindLoraPicker = useCallback((el) => {
+    loraPickerElRef.current = el;
     if (el && !el._mgBound) {
       el._mgBound = true;
       el.addEventListener("mg-pick", (e) => {
@@ -867,13 +931,26 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       });
     }
   }, [setImgLoras]);
+  // Owner report 2026-07-24 ("still slow"): both pickers mount together on first open
+  // (pickerMounted, so switching tabs never re-fetches -- "each keeps its OWN
+  // last-searched results independently"), but mg-model-picker.js now defers its own
+  // browse-on-open search when it starts hidden (see that file's connectedCallback
+  // comment) -- something has to call ensureSearched() on whichever one just became
+  // visible, or the hidden tab would just never search at all, forever. ensureSearched()
+  // is a no-op after the first real call, so this firing on every pickerKind change costs
+  // nothing once both have searched once.
+  useEffect(() => {
+    if (!pickerMounted) return;
+    const vis = pickerKind === "base" ? basePickerElRef.current : loraPickerElRef.current;
+    if (vis && vis.ensureSearched) vis.ensureSearched();
+  }, [pickerMounted, pickerKind]);
   // D-12 increments 2-4: read-only cost badges for the Image/Edit/Reference tabs -- refs to
   // the <mg-cost-badge> custom elements (imperative setChecking/setPrice/clear API, the same
-  // component the Gallery's Enhance sub-tab uses). Kept ALONGSIDE -- not instead of --
-  // confirmSpend's window.confirm at submit time below, unlike the Gallery's Enhance tab:
-  // these three tabs' confirm dialog IS the fail-closed guardrail that got built after they
-  // used to lie about cost (see confirmSpend's own comment), so the badge is an added
-  // preview, not a replacement for the submit-time gate.
+  // component the Gallery's Generate and Edit tabs use). Kept ALONGSIDE -- not instead of --
+  // confirmSpend's window.confirm at submit time below: these three tabs' confirm dialog IS
+  // the fail-closed guardrail that got built after they used to lie about cost (see
+  // confirmSpend's own comment), so the badge is an added preview, not a replacement for the
+  // submit-time gate.
   const imgCostRef = useRef(null);
   const editCostRef = useRef(null);
   const refCostRef = useRef(null);
@@ -1570,12 +1647,44 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                     title={incompat ? l.title + " — needs a different base architecture than the one selected; remove it or switch the base" : l.title}>
                     {l.title}{!l.version_id ? (l.failed ? " ⚠" : " ⏳") : (incompat ? " ⚠" : "")}
                   </span>
-                  <input type="number" step="0.05" min="0" max="2" value={l.weight}
-                    title="Weight"
-                    onChange={(ev) => { const w = +ev.target.value || 0;
-                      setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x)); }} />
+                  {/* Bounds follow the BASE MODEL's architecture: DiT takes 0..1.2, the SD
+                      family -2..+2 (negative subtracts that LoRA's influence). Served from
+                      core in window.MG_LORA, the same table the gallery drawer reads, so the
+                      two surfaces and the builder's own clamp cannot drift apart. */}
+                  <span className="lv-lw">
+                    <input type="range" step="0.1" min={loraRange[0]} max={loraRange[1]}
+                      value={l.weight}
+                      title={"Weight — " + loraRange[0] + " to " + loraRange[1] +
+                             " for this base model" +
+                             (loraRange[0] < 0 ? "; negative subtracts this LoRA's influence" : "")}
+                      onChange={(ev) => { const w = Math.max(loraRange[0],
+                                                             Math.min(loraRange[1], +ev.target.value || 0));
+                        setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x)); }} />
+                    <b>{(+l.weight).toFixed(1)}</b>
+                  </span>
                   <button type="button" className="lv-lrm" title="Remove"
                     onClick={() => setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id))}>×</button>
+                  {/* Per-LoRA version selection: only when this LoRA actually has more than one
+                      published release (l.versions, resolved alongside version_id itself by
+                      mg-model-picker.js's ?all=1 fetch -- see bindLoraPicker above). Mirrors
+                      the base model's own #gen-version/.lv-versel switcher exactly, just
+                      applied to this one chip's entry instead of the single imgModel. No new
+                      network call -- the full version list is already on the entry. */}
+                  {l.versions && l.versions.length > 1 && (
+                    <select className="lv-lorver" value={l.version_id || ""}
+                      title="This LoRA's published releases — PixAI defaults to the latest; pick another to use it instead"
+                      onChange={(ev) => {
+                        const vid = ev.target.value;
+                        const v = l.versions.find((x) => x.version_id === vid);
+                        if (!v) return;
+                        setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id
+                          ? { ...x, version_id: v.version_id || "", lora_base_type: v.lora_base_model_type || "",
+                              trigger_words: v.trigger_words || "", failed: !v.version_id }
+                          : x));
+                      }}>
+                      {l.versions.map((v) => <option key={v.version_id} value={v.version_id}>{v.label || v.version_id}</option>)}
+                    </select>
+                  )}
                 </div>
                 );
               })}
@@ -1584,6 +1693,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <button type="button" className="lv-chip lv-loratoggle" onClick={() => { setPickerKind("lora"); setPickerOpen(true); }}>
             + add LoRA
           </button>
+          {acct && acct.lora_cap != null && (
+            <span className={"lv-loracap" + (overLoraCap(imgLoras, acct.lora_cap) ? " over" : "")}>
+              {imgLoras.length} / {acct.lora_cap} LoRAs
+            </span>
+          )}
           <label className="lv-lab">Image prompt</label>
           <textarea className="lv-ta" value={active.c.imgPrompt || ""} placeholder="describe the reference still (subject, pose, composition, light)…"
             onChange={(ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))} />
@@ -1594,17 +1708,37 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               names/defaults/order as pixai_gallery.py's #gen-mode-generate, submitted via
               buildImgGenBody() (loom-mutations.js) so the price badge below and the real
               submit in genImage() can never disagree about what these fields do. */}
+          {(() => {
+            // Capability gating (extra.compatibility, probed live 2026-07-06 -- memory
+            // pixai-model-capability-schema): which of these params THIS model actually
+            // honors, mirroring pixai_gallery.py's gateField()/applyCapabilityGating()
+            // exactly. Fails OPEN on unknown/absent data -- only an explicit `false`
+            // disables anything (imgModel==null or a never-probed model -> compat={} ->
+            // every field stays enabled, same as today).
+            const compat = (imgModel && imgModel.compatibility) || {};
+            const restr = (imgModel && imgModel.restrictions) || {};
+            const negOff = compat.negativePrompt === false;
+            const stepsOff = compat.samplingSteps === false;
+            const cfgOff = compat.cfgScale === false;
+            const stepsB = restr.samplingSteps || {};
+            const cfgB = restr.cfgScale || {};
+            const offTitle = "This model doesn’t use this setting";
+            return (
           <details>
             <summary style={{ cursor: "pointer", color: "var(--subtext)", fontSize: 11 }}>Advanced</summary>
-            <textarea className="lv-ta" style={{ marginTop: 5 }} value={imgAdv.negative}
-              placeholder="lowres, text, watermark…"
+            <textarea className={"lv-ta" + (negOff ? " cap-off" : "")} style={{ marginTop: 5 }} value={imgAdv.negative}
+              placeholder="lowres, text, watermark…" disabled={negOff} title={negOff ? offTitle : ""}
               onChange={(ev) => setImgAdv((a) => ({ ...a, negative: ev.target.value }))} />
             <div className="lv-row2">
               <div><label className="lv-lab" style={{ margin: "6px 0 3px" }}>Steps</label>
-                <input className="lv-in" type="number" min="1" max="150" step="1" value={imgAdv.steps}
+                <input className={"lv-in" + (stepsOff ? " cap-off" : "")} type="number"
+                  min={stepsB.min != null ? stepsB.min : 1} max={stepsB.max != null ? stepsB.max : 150} step="1"
+                  value={imgAdv.steps} disabled={stepsOff} title={stepsOff ? offTitle : ""}
                   onChange={(ev) => setImgAdv((a) => ({ ...a, steps: +ev.target.value || 25 }))} /></div>
               <div><label className="lv-lab" style={{ margin: "6px 0 3px" }}>CFG scale</label>
-                <input className="lv-in" type="number" min="1" max="30" step="0.5" value={imgAdv.cfg}
+                <input className={"lv-in" + (cfgOff ? " cap-off" : "")} type="number"
+                  min={cfgB.min != null ? cfgB.min : 1} max={cfgB.max != null ? cfgB.max : 30} step="0.5"
+                  value={imgAdv.cfg} disabled={cfgOff} title={cfgOff ? offTitle : ""}
                   onChange={(ev) => setImgAdv((a) => ({ ...a, cfg: +ev.target.value || 7 }))} /></div>
             </div>
             {modelDefaults && (
@@ -1619,6 +1753,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               </div>
             )}
           </details>
+            );
+          })()}
           <label className="lv-lab">Aspect</label>
           <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
             {[[1, 1, "1:1"], [3, 4, "3:4"], [4, 3, "4:3"], [2, 3, "2:3"], [3, 2, "3:2"],
@@ -1675,11 +1811,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               onChange={(ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))} /> Prompt helper</label>
           <mg-cost-badge ref={imgCostRef} hint="Pick a model and write a prompt to see the cost." card-label="a card"></mg-cost-badge>
           <button className="lv-go"
-            disabled={busyI || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type))}
+            disabled={busyI || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) || overLoraCap(imgLoras, acct && acct.lora_cap)}
             onClick={() => genImage(active)}>
             {busyI ? (gi.msg || "generating…")
               : anyLoraUnresolved(imgLoras) ? "waiting on LoRA…"
               : imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) ? "incompatible LoRA — remove or switch base"
+              : overLoraCap(imgLoras, acct && acct.lora_cap) ? "remove " + (imgLoras.length - acct.lora_cap) + " LoRA" + ((imgLoras.length - acct.lora_cap) === 1 ? "" : "s") + " to continue"
               : "✦ Generate reference image"}
           </button>
           {gi.phase === "error" && <div className="lv-gerr">{gi.msg}</div>}
@@ -2763,9 +2900,23 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     const startedAt = Date.now();
     const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
       const cls = classifyTaskStatus(d);
-      if (cls.phase === "done") setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
-      else if (cls.phase === "failed") setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-      else again(4000);
+      // The two JobsCard.refresh() nudges below mirror pollShot's (and mg-notify.js's own
+      // Jobs.poll()): the /api/task-status response that reports done/failed is the very call
+      // that made the server write the authoritative terminal job event, so refreshing right
+      // here cannot race it. Without them a row registered by genImage/genEdit/genRef would sit
+      // on stale "running" until the tray's own independent ~2.5-7s cycle happened to catch up --
+      // the same "tracker looks frozen / the two surfaces disagree about one task" symptom
+      // already fixed for shots. Deliberately NOT done on the ceiling path in again() below:
+      // hitting the ceiling only means THIS TAB stopped asking, no job event was written, so a
+      // refresh would just re-read the same running row (the server's own orphan-reconciliation
+      // sweep, which /api/jobs runs on every read, owns that case).
+      if (cls.phase === "done") {
+        setState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid } }));
+        if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
+      } else if (cls.phase === "failed") {
+        setState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
+        if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
+      } else again(4000);
     }).catch(() => again(5000));
     const again = (ms) => {
       if (Date.now() - startedAt > POLL_CEILING_MS) {
@@ -2796,6 +2947,28 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
         body: JSON.stringify(body) });
       const d = await r.json();
       if (d.error || !d.task_id) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
+      // Register this submission in the shared Job Tracker (static/mg-notify.js -> /api/jobs)
+      // the moment the server accepts it. This path -- and genEdit/genRef, via runGen below --
+      // never did, so a generation launched from the Loom's Image/Edit/Reference tabs was
+      // invisible in BOTH Activity trays (the Loom's and the gallery's): they render from the
+      // shared job log, and nothing had ever told it the task existed. Found in the owner's field
+      // test 2026-07-24 -- two Image-tab generations, no rows in either tray and not one entry in
+      // jobs.jsonl for the task id, while the generation itself succeeded and the live-mirror
+      // watcher collected all four of its images. The trays were not broken; they were never told.
+      //
+      // register(), not track() -- exactly like generateShot above and for the same reason:
+      // pollImg below already owns real completion handling, so Jobs.track()'s own polling would
+      // be a redundant second poll of the same task id. Terminal state still resolves, because
+      // pollImg -> pollTaskWithCeiling polls /api/task-status, and THAT route's done/failed
+      // branches are what write the authoritative terminal job event -- the poll already running
+      // here is what closes the row out.
+      //
+      // Label order is deliberate: the TAB the owner clicked first, then the shot code + title
+      // (the tail of generateShot's own label, so the two read as one family). .jt-lab is
+      // nowrap + ellipsis in a 366px tray, so a long shot title truncates the END -- whatever
+      // must survive goes first. A bare "Generated" on all three paths would only restate the
+      // standing complaint that this tracker isn't informative.
+      if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, "Image · " + entry.code + " · " + (c.title || "untitled"));
       setGenImgState((s) => ({ ...s, [c.id]: { phase: "running", msg: "Generating…" } }));
       pollImg(c.id, d.task_id);
     } catch { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } })); }
@@ -2814,7 +2987,10 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   };
   // Generic gen runner for the Edit/Reference tabs — submit -> poll -> stash -> route.
   // Parameterized on the state setter so the proven Image path above stays untouched.
-  const runGen = async (setState, cardId, endpoint, body, priceBody, label) => {
+  // `label` is the confirmSpend() QUESTION ("Edit the open frame of X?"); `jobLabel` is the
+  // separate, much shorter Job Tracker row text each caller supplies -- two different strings
+  // for two different surfaces, so neither has to be bent to fit the other.
+  const runGen = async (setState, cardId, endpoint, body, priceBody, label, jobLabel) => {
     if (priceBody && !(await confirmSpend(priceBody, label))) return;
     setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting…" } }));
     // Same unbounded-loop fix as pollImg -- see pollTaskWithCeiling's comment.
@@ -2823,6 +2999,9 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const d = await r.json();
       if (d.error || !d.task_id) { setState((s) => ({ ...s, [cardId]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
+      // Same register-ONLY call, same reasoning, as genImage above -- this helper is the whole
+      // Edit + Reference submit path, and it had the identical never-registered gap.
+      if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, jobLabel);
       setState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Generating…" } }));
       poll(d.task_id);
     } catch { setState((s) => ({ ...s, [cardId]: { phase: "error", msg: "network error" } })); }
@@ -2843,7 +3022,8 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     if (!instruction) { setGenEditState((s) => ({ ...s, [c.id]: { phase: "error", msg: "describe the edit" } })); return; }
     const editBody = { source: src, instruction, edit_model: "edit-pro" };
     runGen(setGenEditState, c.id, "/api/edit", editBody, { mode: "edit", ...editBody },
-      `Edit the open frame of ${c.title || "this shot"}?`);
+      `Edit the open frame of ${c.title || "this shot"}?`,
+      "Edit · " + entry.code + " · " + (c.title || "untitled"));
   };
   const genRef = (entry) => {
     const c = entry.c;
@@ -2853,7 +3033,10 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     if (!prompt) { setGenRefState((s) => ({ ...s, [c.id]: { phase: "error", msg: "enter a prompt" } })); return; }
     const refBody = { source: refs[0], sources: refs, instruction: prompt, edit_model: "reference-pro" };
     runGen(setGenRefState, c.id, "/api/edit", refBody, { mode: "edit", ...refBody },
-      `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?`);
+      `Generate a still for ${c.title || "this shot"} from ${refs.length} reference${refs.length === 1 ? "" : "s"}?`,
+      // The reference COUNT is the one fact this path is about (and the one its own confirm
+      // already surfaces), so it rides in the row rather than being lost to "Reference".
+      "Reference ×" + refs.length + " · " + entry.code + " · " + (c.title || "untitled"));
   };
   // Batch-generate the whole board: fire every not-done shot in sequence, staggered so
   // the submits don't collide. Each shot manages its own status/poll via generateShot.
@@ -3238,11 +3421,25 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
   const [dur, setDur] = useState(0);
   const [range, setRange] = useState({ in: trimIn || 0, out: trimOut });
   const [playing, setPlaying] = useState(false);
+  // Sound defaults OFF, and that is not timidity: this preview scrubs on hover and a board
+  // holds many cards, so audio tied to the element alone would fire from every card the
+  // pointer crossed. See the mute effect below for the other half of the rule.
+  const [soundOn, setSoundOn] = useState(false);
   const [cropping, setCropping] = useState(false);   // crop-draw mode active
   const rangeRef = useRef(range); rangeRef.current = range;
   const durRef = useRef(0); durRef.current = dur;
   const dragRef = useRef(null);
   useEffect(() => { setRange({ in: trimIn || 0, out: trimOut }); }, [trimIn, trimOut]);
+  // Audio only while ACTUALLY PLAYING -- never while scrubbing. Two reasons, and both are the
+  // reason this is not simply `v.muted = !soundOn`: this preview seeks on hover
+  // (onMouseMove={scrub}), so a hover-scrub is the playhead being thrown around and sounds
+  // like noise rather than like the shot; and a board holds many cards, so a pointer crossing
+  // it would fire audio from every card it passed over. Applied imperatively because React
+  // does not reliably reflect a `muted` prop onto a <video>.
+  useEffect(() => {
+    const v = vidRef.current;
+    if (v) v.muted = !(soundOn && playing);
+  }, [soundOn, playing]);
   const effOut = (range.out == null ? dur : range.out) || dur;
   const pct = (s) => (dur ? Math.max(0, Math.min(100, (s / dur) * 100)) : 0);
   const fT = (s) => (s || 0).toFixed(1) + "s";
@@ -3347,6 +3544,10 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
       <div className="sb-shotprev-ctrls">
         <button onClick={() => seek(-0.25)} title="Rewind (step back)">⏪</button>
         <button onClick={() => seek(0.25)} title="Fast-forward (step ahead)">⏩</button>
+        <button className={soundOn ? "on" : ""} onClick={() => setSoundOn((v) => !v)}
+          aria-pressed={soundOn}
+          title={soundOn ? "Sound on while playing (scrubbing stays silent)" : "Play this shot with sound"}>
+          {soundOn ? "\u{1F50A}" : "\u{1F507}"}</button>
         {onSplit && <button onClick={doSplit} title="Split this shot in two at the playhead">✂ Split</button>}
         {onCrop && <button className={cropping ? "on" : ""} onClick={() => { setCropping((v) => !v); setCropDraft(null); }}
           title="Crop the frame — drag a rectangle; applied on export">⛶ Crop</button>}
@@ -3374,7 +3575,23 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
 function SequencePlayer({ clips, onClose }) {
   const vRef = useRef(null);
   const [i, setI] = useState(0);
+  // Starts muted so autoplay is never blocked (browsers refuse autoplay WITH sound without
+  // a user gesture, and a reel that silently fails to start is worse than one that starts
+  // quiet), but the reel is no longer HARD-muted: the exported mp4 carries real audio, so a
+  // storyboard used to be reviewable end to end without ever hearing what the render will
+  // sound like.
+  const [muted, setMuted] = useState(true);
   const clip = clips[i];
+  // Applied imperatively, and re-applied on shot change. Both halves are load-bearing:
+  // React does not reliably reflect a `muted` JSX prop onto a <video>, so the attribute
+  // alone can look right in source and do nothing live; and the element carries
+  // key={clip.mid}, so advancing a shot destroys it and a fresh one returns with the
+  // initial muted attribute -- without `i` in the deps, unmuting would quietly undo itself
+  // at every shot boundary.
+  useEffect(() => {
+    const v = vRef.current;
+    if (v) v.muted = muted;
+  }, [muted, i]);
   useEffect(() => {
     const v = vRef.current; if (!v || !clip) return;
     const seekPlay = () => { try { v.currentTime = clip.in || 0; } catch (e) {} v.play().catch(() => {}); };
@@ -3409,6 +3626,9 @@ function SequencePlayer({ clips, onClose }) {
           onClick={(e) => { const v = e.currentTarget; v.paused ? v.play() : v.pause(); }} />
         <div className="sb-seq-bar">
           <span>Shot {i + 1}/{clips.length}{clip.code ? " · " + clip.code : ""}{clip.title ? " — " + clip.title : ""}</span>
+          <button className="sb-btn ghost sm" onClick={() => setMuted(!muted)}
+            title={muted ? "Unmute — the rendered mp4 has audio" : "Mute"}
+            aria-pressed={!muted}>{muted ? "\u{1F507} muted" : "\u{1F50A} sound"}</button>
           <button className="sb-btn ghost sm" onClick={() => setI(Math.max(0, i - 1))} disabled={i === 0}>&#9664; prev</button>
           <button className="sb-btn ghost sm" onClick={() => { if (i < clips.length - 1) setI(i + 1); else onClose(); }}>next &#9654;</button>
           <button className="sb-btn sm" onClick={onClose}>&#10005; close</button>

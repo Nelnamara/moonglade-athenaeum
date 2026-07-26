@@ -243,3 +243,51 @@ describe("job detail popover is wired into row(), click/keyboard handling, and t
       "a popover left open for a job that just got dismissed/aged out is not closed");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Cost row. /api/task-status now logs PixAI's server-authoritative `paidCredit` onto the
+// done event, so the popover can show what a generation actually cost -- the one number the
+// owner cannot reconstruct later without re-querying PixAI task by task.
+//
+// detailHtml is extracted and CALLED for real (not source-matched) so the 0-vs-absent
+// distinction is exercised rather than asserted about: a card-covered generation genuinely
+// costs 0, and "free" must not render as "unknown". It closes over esc/fmtClock/fmtDuration,
+// supplied here as trivial stand-ins -- the logic under test is the row's presence and its
+// number, not the formatting those helpers already have their own tests for.
+// ---------------------------------------------------------------------------
+describe("detailHtml cost row", () => {
+  const detailBlock = extract(/function detailHtml\(j\)\{[\s\S]*?\n {4}\}/, "detailHtml");
+  const detailHtml = new Function(
+    "var esc=function(s){return String(s==null?'':s);};" +
+    "var fmtClock=function(t){return 'CLOCK';};" +
+    "var fmtDuration=function(s){return 'DUR';};" +
+    detailBlock + "\nreturn detailHtml;"
+  )();
+
+  test("shows the actual cost when the job recorded one", () => {
+    const html = detailHtml({ job_id: "4242", ts: 1000, started_at: 1000,
+                              status: "done", paid_credit: 3700 });
+    assert.match(html, />Cost</, "no Cost row for a job that recorded paid_credit");
+    assert.match(html, /3,700/, "cost not thousands-separated: " + html);
+  });
+
+  test("renders a free (card-covered) generation as 0, not as absent", () => {
+    const html = detailHtml({ job_id: "4243", ts: 1000, started_at: 1000,
+                              status: "done", paid_credit: 0 });
+    assert.match(html, />Cost</, "a genuinely free generation hid its cost row");
+    assert.match(html, /\b0\b/, "free generation did not render an explicit 0: " + html);
+  });
+
+  test("omits the row entirely when cost is unknown", () => {
+    const html = detailHtml({ job_id: "4244", ts: 1000, started_at: 1000, status: "running" });
+    assert.doesNotMatch(html, />Cost</,
+      "showed a Cost row for a job with no cost recorded -- unknown must not read as free");
+  });
+
+  test("still renders the three original rows", () => {
+    const html = detailHtml({ job_id: "4245", ts: 1000, started_at: 1000, status: "done" });
+    assert.match(html, />Task ID</);
+    assert.match(html, />Time Sent</);
+    assert.match(html, />Time Spent</);
+  });
+});

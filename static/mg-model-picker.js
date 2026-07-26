@@ -22,10 +22,14 @@
    byte-for-byte the same behavior as before, zero regression risk to the Gallery's mount,
    which doesn't use this component at all yet. In multi mode:
      - clicking a card TOGGLES membership (add/remove) instead of replacing a single value.
-     - each picked LoRA is resolved via /api/model-version (same as the Gallery's own
-       toggleLora()) to fill version_id/lora_base_type/trigger_words; the failure/pending
-       cases are handled the same way too (an unresolved LoRA is marked `failed`, never
-       silently dropped -- see the Gallery's fail-open fix, audit 2026-07-21).
+     - each picked LoRA is resolved via /api/model-version?all=1 (same endpoint the Gallery's
+       own toggleLora() and the base-model picker's ?all=1 fetch both use) to fill
+       version_id/lora_base_type/trigger_words from the first (latest) release, PLUS a full
+       `versions` array on the entry so a host can offer a per-chip version selector (added
+       2026-07-24 -- previously a plain fetch with no `all` param, silently discarding every
+       release but the latest). The failure/pending cases are handled the same way as before
+       (an unresolved LoRA is marked `failed`, never silently dropped -- see the Gallery's
+       fail-open fix, audit 2026-07-21).
      - mg-pick's detail becomes { model, selected } (selected=true on add/resolve-update,
        false on remove) instead of the raw row -- a deliberate shape difference gated on
        the new opt-in attribute, not a change to the existing single-value contract.
@@ -67,7 +71,15 @@
    server-side (pixai_gallery_backup.py's annotate_lora_compat -- see that function for the
    full compatible/unknown/incompatible reasoning); this component's only job is to render
    the `compat` tag it comes back with as a small badge on the card. No `base-type` set (or
-   kind="base") -> byte-for-byte unaffected, same as `market`'s own opt-in contract. */
+   kind="base") -> byte-for-byte unaffected, same as `market`'s own opt-in contract.
+
+   Continuous scroll (2026-07-24): a scroll listener on .mg-grid fires _loadMore() once the
+   viewport nears the bottom, which fetches the SAME search (via _searchUrl, shared with
+   _search() so a continuation can never silently drift onto different filters) with the
+   last response's `cursor` and APPENDS results instead of replacing them. _hasMore/_cursor
+   reset to false/'' on every fresh _search() (a new query is a new list). Server-side detail
+   in pixai_gallery.py's api_model_search comment -- has_more had been computed correctly
+   the whole time; nothing here had ever read it or asked for a next page. */
 (function () {
   'use strict';
   if (window.customElements && customElements.get('mg-model-picker')) return;
@@ -153,8 +165,24 @@
        item that fills whatever room the (flex-column) host element above has, with its own
        internal scroll for overflow -- see the file header comment for the unconstrained-
        parent fallback behavior. min-height keeps it from ever looking collapsed to nothing
-       while a search is in flight in a very short host. */
-    'mg-model-picker .mg-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:8px;',
+       while a search is in flight in a very short host.
+       grid-auto-rows:min-content -- found live 2026-07-24 (owner report: thumbnails
+       "squished", grid "no longer scrollable"): giving .mg-grid a REAL, definite height
+       (the flex:1 1 auto above) exposed a second bug riding along with the first fix.
+       .mg-card has overflow:hidden, which per spec makes its OWN automatic minimum size
+       (what grid track sizing falls back to) resolve to 0 instead of its content's real
+       min-content height -- so with a definite container height and no card contributing
+       a height floor, every implicit `auto` row track was stretching/compressing to
+       divide the container's fixed height evenly across however many rows existed (empty-
+       looking 320px cap hid this before: fewer visible rows, less pressure). 24 cards
+       measured live: rows collapsed to ~41px each (image forced to a sliver, cropped by
+       the card's own overflow:hidden -- "squished"), and since the compressed rows always
+       exactly filled the container, scrollHeight never exceeded clientHeight either --
+       "no longer scrollable" was the SAME bug, not a second one. min-content forces each
+       auto row to size off its content's own minimum instead, restoring both real card
+       height and real overflow. Verified live: rows back to ~200px, images a real 1:1
+       square, scrollHeight now correctly exceeds clientHeight with 24+ cards. */
+    'mg-model-picker .mg-grid{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:min-content;gap:7px;margin-top:8px;',
     ' flex:1 1 auto;min-height:140px;overflow:auto;transition:opacity .12s;}',
     'mg-model-picker .mg-card{position:relative;background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);',
     ' border-radius:8px;overflow:hidden;cursor:pointer;}',
@@ -187,7 +215,14 @@
     'mg-model-picker .mp-badges{display:flex;gap:5px;margin-top:6px;flex-wrap:wrap;}',
     'mg-model-picker .mp-badges .bdg{font-size:9.5px;padding:2px 6px;border-radius:5px;background:var(--surface0,#211f3a);color:var(--subtext,#9a93ab);}',
     'mg-model-picker .mp-badges .bdg.official{color:var(--accent,#b692e6);}',
-    'mg-model-picker .mp-desc{margin-top:7px;font-size:11px;color:var(--subtext,#9a93ab);line-height:1.45;max-height:88px;overflow:hidden;}'
+    'mg-model-picker .mp-desc{margin-top:7px;font-size:11px;color:var(--subtext,#9a93ab);line-height:1.45;max-height:88px;overflow:hidden;}',
+    // Owner report 2026-07-24: the grid "scrolls about 4 extra rows and then stops -- no
+    // continuous scroll". Root cause was server-side (see api_model_search's own comment) --
+    // has_more was already computed correctly the whole time, nothing client-side ever read
+    // it or asked for a next page. flex:none -- a static line below the (already scrolling)
+    // grid, not part of its own scroll content, so it never needs repositioning as cards append.
+    'mg-model-picker .mg-loadmore{display:none;text-align:center;padding:6px 0 2px;font-size:10.5px;color:var(--subtext,#9a93ab);flex:none;}',
+    'mg-model-picker .mg-loadmore.on{display:block;}'
   ].join('');
 
   function injectStyle() {
@@ -217,18 +252,48 @@
       // kind="lora"; a base-kind mount reads it but never sends it (nothing to compat-sort
       // a base model against).
       this._baseType = this.getAttribute('base-type') || '';
+      // Pagination state (owner report 2026-07-24: no continuous scroll). _cursor/_hasMore
+      // describe the CURRENT search only -- both reset on every fresh _search() (a new
+      // query/filter is a new list, not a continuation of the old one). _loadingMore guards
+      // against the scroll handler firing a second fetch while one is already in flight.
+      this._cursor = '';
+      this._hasMore = false;
+      this._loadingMore = false;
       this.innerHTML =
         '<input class="mg-q" type="text" placeholder="search models…" aria-label="Search models">' +
         (this._market ? this._marketSkeleton() : '') +
         '<div class="mg-empty"></div>' +
         '<div class="mg-grid" role="listbox"></div>' +
+        '<div class="mg-loadmore" aria-hidden="true">loading more…</div>' +
         '<div class="mg-preview" aria-hidden="true"></div>';
       this._input = this.querySelector('.mg-q');
       this._grid = this.querySelector('.mg-grid');
       this._empty = this.querySelector('.mg-empty');
+      this._loadmore = this.querySelector('.mg-loadmore');
       this._preview = this.querySelector('.mg-preview');
       var self = this;
       this._input.addEventListener('input', function () { self._q = self._input.value; self._debounce(); });
+      // Scroll-triggered "load more": _loadMore() is itself idempotent-guarded
+      // (_loadingMore / !_hasMore), so this needs no separate debounce -- a fast scroll
+      // firing the handler many times in a row just re-checks the same cheap arithmetic
+      // until the guard lets exactly one fetch through.
+      // Owner report 2026-07-24: "still slow and a bit choppy". A native scroll event can
+      // fire many times per animation frame (especially with the DOM growing on every
+      // load-more -- more content, more expensive layout). scrollHeight/scrollTop/
+      // clientHeight are all LAYOUT reads -- doing that arithmetic unthrottled, on every
+      // single event, forces a synchronous layout recalculation each time, which is
+      // exactly what scroll jank is made of. requestAnimationFrame collapses any number
+      // of events within one frame down to a single check, right before the browser
+      // paints that frame anyway -- standard scroll-listener discipline, not a guess.
+      var scrollRaf = null;
+      this._grid.addEventListener('scroll', function () {
+        if (scrollRaf) return;
+        scrollRaf = requestAnimationFrame(function () {
+          scrollRaf = null;
+          var g = self._grid;
+          if (g.scrollHeight - g.scrollTop - g.clientHeight < 150) self._loadMore();
+        });
+      });
       if (this._market) {
         this.querySelectorAll('.mg-mktsort button').forEach(function (b) {
           b.addEventListener('click', function () {
@@ -249,7 +314,37 @@
           });
         });
       }
-      this._search(); // browse-on-open: empty query -> the API's popular list
+      // Owner report 2026-07-24: "still slow". Both the Gallery's ensurePickers() and the
+      // Loom's pickerMounted create+mount a kind="base" AND a kind="lora" instance
+      // TOGETHER on first flyout open (so switching tabs never re-fetches -- "each keeps
+      // its OWN last-searched results independently"), but the OTHER one starts hidden
+      // (style.display:none) -- the owner is looking at neither yet, usually the base
+      // model first. Searching it anyway on mount means every single flyout open fired
+      // TWO full searches competing for the same connection, for a tab nobody had asked
+      // to see. Defer: skip the automatic browse-on-open here if the element starts
+      // hidden, and let the host call ensureSearched() (below) the moment it actually
+      // reveals this instance -- see setKind()/the pickerKind effect on each host.
+      //
+      // _stale (AUDIT_2026-07-21 follow-up) is the same idea one step further: this
+      // instance HAS searched, but a filter changed while it was hidden, so its grid no
+      // longer matches its own filters. Only base-type can do that today (see
+      // attributeChangedCallback) -- every other filter lives on a control inside this
+      // element, which nobody can touch without looking at it.
+      this._searched = false;
+      this._stale = false;
+      if (this.style.display !== 'none') { this._searched = true; this._search(); } // browse-on-open: empty query -> the API's popular list
+    }
+
+    // Called by the host right after it makes a previously-hidden instance visible (see
+    // the file header comment above). Normally a no-op after the first real call -- once
+    // searched, switching tabs back and forth must never re-fetch, matching the existing
+    // "each keeps its OWN last-searched results independently" contract. The one exception
+    // is _stale: a base-type change that arrived while this instance was hidden deferred
+    // its re-search to right here, so the newly-revealed grid isn't showing compat
+    // sort/badges for a base model that is no longer selected.
+    ensureSearched() {
+      if (this._searched && !this._stale) return;
+      this._search();
     }
 
     // O13: Popular/Newest sort + the gallery's 6 LoRA category chips, same list as
@@ -278,8 +373,21 @@
       // compat sort/badges reflect the NEW base immediately, not just on the next
       // keystroke/category click. '' is a legitimate value (base cleared), so this fires
       // even when val is falsy -- unlike 'kind' above, which never goes empty in practice.
+      //
+      // AUDIT_2026-07-21 follow-up: "already on screen" is the whole point, and this used
+      // to search unconditionally. Picking a base model sets base-type on a LoRA picker
+      // that is normally still HIDDEN (both hosts mount base+LoRA together and reveal one),
+      // so the common flow fired a full request and built ~24 cards into a display:none
+      // element nobody had asked to see -- and then the reveal fired the IDENTICAL request
+      // a second time. Defer instead, in both hidden cases:
+      //   never searched -> nothing to refresh; the reveal's ensureSearched() will run the
+      //                     first search with the new _baseType already in place.
+      //   searched but hidden -> mark _stale so the next reveal re-searches once, rather
+      //                     than re-rendering a grid nobody is looking at right now.
       if (name === 'base-type' && this._built && (val || '') !== this._baseType) {
-        this._baseType = val || ''; this._search();
+        this._baseType = val || '';
+        if (this.style.display === 'none') { if (this._searched) this._stale = true; return; }
+        this._search();
       }
     }
 
@@ -289,9 +397,10 @@
       this._t = setTimeout(function () { self._search(); }, 250);
     }
 
-    _search() {
-      var mine = ++this._seq, self = this;
-      if (this._grid) this._grid.style.opacity = '.45';
+    // Shared by _search() (fresh list) and _loadMore() (continuation) so the two can never
+    // drift on which filters apply -- a next-page fetch must carry the EXACT same
+    // kind/q/market/base_type as the search it's continuing, only `cursor` differs.
+    _searchUrl(cursor) {
       var u = '/api/model-search?kind=' + encodeURIComponent(this._kind) +
               '&size=24&q=' + encodeURIComponent(this._q || '');
       if (this._market) {
@@ -303,22 +412,74 @@
       if (this._kind === 'lora' && this._baseType) {
         u += '&base_type=' + encodeURIComponent(this._baseType);
       }
-      fetch(u).then(function (r) { return r.json(); }).then(function (d) {
+      if (cursor) u += '&cursor=' + encodeURIComponent(cursor);
+      return u;
+    }
+
+    _search() {
+      // A search is a search, whoever asked for it -- browse-on-open, a keystroke, a
+      // category chip, a base-type change, or ensureSearched(). Marking the flag HERE
+      // rather than at each call site is what stops the flag from drifting out of step
+      // with reality: it previously lived only on the two call sites that knew about it,
+      // so a base-type-triggered search left _searched false and the very next
+      // ensureSearched() re-ran the identical request. _stale clears for the same reason
+      // -- whatever filters this search is carrying, the grid now matches them.
+      this._searched = true;
+      this._stale = false;
+      var mine = ++this._seq, self = this;
+      if (this._grid) this._grid.style.opacity = '.45';
+      this._cursor = ''; this._hasMore = false;   // a fresh search is a new list, not a continuation
+      fetch(this._searchUrl()).then(function (r) { return r.json(); }).then(function (d) {
         if (mine !== self._seq) return;
-        self._render((d && d.results) || [], d && d.error);
+        self._hasMore = !!(d && d.has_more);
+        self._cursor = (d && d.next_cursor) || '';
+        self._render((d && d.results) || [], d && d.error, false);
         if (self._grid) self._grid.style.opacity = '1';
       }).catch(function () {
         if (mine !== self._seq) return;
-        self._render([], 'network error');
+        self._render([], 'network error', false);
         if (self._grid) self._grid.style.opacity = '1';
       });
     }
 
-    _render(rows, err) {
+    // Owner report 2026-07-24: the grid stopped after ~4 extra rows with no continuous
+    // scroll -- has_more/next_cursor were already correct server-side (see
+    // api_model_search's comment), nothing here ever asked for a next page. Guarded by
+    // _hasMore (server said there's more) and _loadingMore (no second fetch while one's
+    // already in flight, e.g. a fast scroll re-triggering the listener). Uses the SAME
+    // `mine`/`_seq` staleness guard as _search() -- a fresh search started while a
+    // load-more was in flight must not let the old page's results land after it.
+    _loadMore() {
+      if (!this._hasMore || this._loadingMore) return;
+      var mine = this._seq, self = this;
+      this._loadingMore = true;
+      if (this._loadmore) this._loadmore.classList.add('on');
+      fetch(this._searchUrl(this._cursor)).then(function (r) { return r.json(); }).then(function (d) {
+        self._loadingMore = false;
+        if (self._loadmore) self._loadmore.classList.remove('on');
+        if (mine !== self._seq) return;   // a fresh search superseded this continuation
+        // A server-side {error:...} response (api_model_search's own except-clause shape)
+        // carries no has_more/next_cursor at all -- leave _hasMore/_cursor exactly as they
+        // were on a transient failure, same as the network-catch below, so the next scroll
+        // near the bottom simply retries instead of a one-shot error permanently wedging
+        // pagination closed with nothing visibly wrong.
+        if (d && d.error) return;
+        self._hasMore = !!(d && d.has_more);
+        self._cursor = (d && d.next_cursor) || '';
+        self._render((d && d.results) || [], null, true);
+      }).catch(function () {
+        self._loadingMore = false;
+        if (self._loadmore) self._loadmore.classList.remove('on');
+        // A failed load-more leaves _hasMore as it was (server never actually said "no
+        // more") -- the next scroll near the bottom simply retries, no dead-end state.
+      });
+    }
+
+    _render(rows, err, append) {
       var g = this._grid, e = this._empty, self = this;
-      g.innerHTML = '';
+      if (!append) g.innerHTML = '';
       if (err) { e.textContent = '⚠ ' + err; e.style.display = 'block'; return; }
-      if (!rows.length) { e.textContent = 'No results — try another search.'; e.style.display = 'block'; return; }
+      if (!append && !rows.length) { e.textContent = 'No results — try another search.'; e.style.display = 'block'; return; }
       e.style.display = 'none';
       rows.forEach(function (m) {
         var c = document.createElement('div');
@@ -382,12 +543,18 @@
       this.dispatchEvent(new CustomEvent('mg-pick', {
         bubbles: true, composed: true, detail: { model: entry, selected: true }
       }));
-      fetch('/api/model-version?model_id=' + encodeURIComponent(m.model_id))
+      // &all=1 (per-LoRA version selection): every published release, not just the
+      // silently-assumed latest -- entry.versions rides along so a host can offer a
+      // per-chip selector, the same split as the base model's #gen-version/.lv-versel
+      // (this component renders the CARDS, the host renders the picked-item chip UI).
+      fetch('/api/model-version?model_id=' + encodeURIComponent(m.model_id) + '&all=1')
         .then(function (r) { return r.json(); })
         .then(function (d) {
-          entry.version_id = d.version_id || '';
-          entry.lora_base_type = d.lora_base_model_type || '';
-          entry.trigger_words = d.trigger_words || '';
+          var versions = (d && d.versions) || [], v = versions[0] || {};
+          entry.version_id = v.version_id || '';
+          entry.lora_base_type = v.lora_base_model_type || '';
+          entry.trigger_words = v.trigger_words || '';
+          entry.versions = versions;
           entry.failed = !entry.version_id;
           self.dispatchEvent(new CustomEvent('mg-pick', {
             bubbles: true, composed: true, detail: { model: entry, selected: true }

@@ -28,13 +28,12 @@ Moonglade Athenaeum is a Python/Flask client for PixAI.art: it backs up the owne
 generations, serves a local searchable web gallery, generates images and videos through
 PixAI's API, and curates the archive. Two surfaces: the CLI (`pixai_gallery_backup.py`) and
 the web app (`pixai_gallery.py`). Work happens on the `loom-v2` branch; `master`'s last release
-is **v2.3.0** (2026-07-23 — the Folio of Honors redesign, LoRA support + cost badges across
-the Loom's Image/Edit/Reference tabs, per-account splits for the last three shared-file
-stores (Toolbox presets, prompt snippets, Loom storyboards), the account-eviction gate, a
-2026-07-22 sweep through the rest of the audit board's high-severity list, and two further
-security fixes — Cache Storage purge on sign-out, and a host-path redaction re-spin covering
-37 sites — both adversarially reviewed before shipping; full detail in `CHANGELOG.md`'s
-`[2.3.0]` block). `loom-v2` and `master` are in sync as of that release — check
+is **v2.4.0** (2026-07-24 — concurrent generations, a trash/quarantine restore panel,
+field-operator search, real credit-cost tracking, a full unification of the model/image
+pickers across the Loom and the gallery, a data-loss video-corruption bug fixed, the last
+open Privacy Blur security gap closed, and the audit board's Tier 1-5 defect list driven to
+zero open items; full detail in `CHANGELOG.md`'s `[2.4.0]` block). `loom-v2` and `master` are
+in sync as of that release — check
 `git rev-list --count origin/master..origin/loom-v2` for the live count rather than trusting
 a number here, since new work may already have landed on `loom-v2` since. See
 `docs/AUDIT_2026-07-21.md` for what's still open. Each release is a `--no-ff` merge of
@@ -271,6 +270,25 @@ users.
   media id" (c999ae6).
 - The Health page's disk walk excludes `gallery/`, `_duplicates/`, `_deleted/` and
   `branding/`, so it agrees with the Panel's catalog-row count.
+- **A remote session says so in the header.** When `_is_local_request()` is false, the
+  head-nav renders `#lan-chip` ("LAN session · local-only tools hidden"), whose tooltip names
+  every LOCALHOST-tier control the page is withholding — Import, Delete from PixAI, Set
+  launcher icon, the destructive Panel jobs — and says to open the gallery on the serving
+  machine's own localhost address to get them. It branches on `is_true_local`, the same value
+  the Import button and `can_delete_cloud` already read, so it is a label on a decision the
+  tier helpers have already made and gates nothing. It replaced an unreachable "read-only LAN
+  view" note hung off `is_local`, which is hardcoded `True` at index()'s render call (and was
+  wrong on the facts as well: a signed-in LAN session browses, generates and drives the Loom
+  and Panel exactly like the owner at the keyboard).
+- **"Delete from PixAI" shows its blast radius before the typed gate.** Cloud deletion is
+  task-level — one selected image takes its whole batch — so `POST /api/delete-preview`
+  (LOCALHOST, read-only, no network) resolves the selection through the same helper
+  `/delete-tasks-bulk` itself uses and `#cloud-del-modal` renders every file that will go,
+  thumbnailed and grouped by task, with the ones the user actually picked outlined and imports
+  called out as local-only removals. Counts always describe the whole selection even when the
+  thumbnail strip is capped (`DELETE_PREVIEW_TASK_CAP`); an unreachable preview falls back to
+  the prose-only confirm rather than a dead click. The typed `DELETE` prompt and the localhost
+  gate are unchanged — this makes the consequence visible, it does not replace a guard.
 - Thumbnails serve stale-while-revalidate under the `pixai-img-v3` service-worker cache;
   write-once originals are cache-first. Bumping the cache key is how a stale-thumbnail sweep is
   forced.
@@ -289,12 +307,271 @@ users.
   gets a `cli-<uuid>` job id (mirroring `panel-`/`bulkdel-`), logged fail-soft so a logging hiccup
   can never break the actual command. A panel-spawned subprocess still logs exactly once (no
   duplicate entry) via the existing `MOONGLADE_PROGRESS=1` path.
-- The Generate drawer's Edit ▸ Enhance sub-tab promotes ten one-click PixAI workflows
-  (upscale / upscale 2×2 / upscale+enhance / remove-bg / precise-inpaint / outpaint / line-art
-  / sketch-colorize / relight-sun / relight-backlight), each firing `Gen.enhance(<workflow_id>)`
-  → `/api/enhance`, priced-and-confirmed before it spends. A search box below browses the rest
-  of PixAI's ComfyUI catalog into `#enh-list`. The Fix sub-tab is a separate box-coordinate
-  hand/face fixer (`/api/fix` → `submit_fixer`).
+  Every WEB generation surface registers too: the gallery's Generate/Edit/Fix/Enhance tabs, the
+  shared Generate drawer, and all four of the Loom's own submit paths (per-shot video plus the
+  Image / Edit / Reference tabs, which had never registered at all until 2026-07-24). Each uses
+  `Jobs.register()` — registration without a second poll loop — because every one of them already
+  owns a private poller that polls `/api/task-status`, the route that writes the authoritative
+  terminal event.
+- **A job PixAI accepts but never starts is detected and surfaced, not left spinning.**
+  `generation_status()` returns `started` (false until PixAI actually assigns a worker) and
+  `reason` (PixAI's own explanation, e.g. `"waiting timeout"`) alongside its original
+  `{status, phase, paid_credit}`; both come from `startedAt` and `outputs` on `_GEN_STATUS`.
+  An undispatched task is non-terminal for ~60 minutes, so status alone cannot tell it from
+  real work. On that: the CLI poller reports a never-dispatched task honestly instead of
+  claiming it is "STILL RUNNING", a terminal `cancelled` carries PixAI's reason, and the orphan
+  reaper marks such a job **`stale`** — a non-terminal status the tracker already renders with
+  a warning glyph, so a task that does eventually start can still resolve to done. The check is
+  `started is False`, never `not started`: a status source that omits the field means *unknown*,
+  and unknown must not brand every in-flight job stale. The reaper's caller passes the whole
+  status dict, not `["phase"]` — sending the bare string makes the detection dead code in
+  production, guarded end-to-end through `/api/jobs`.
+- **The Activity tray shows that phase immediately, not only after the 30-minute sweep.**
+  `/api/task-status` writes `started` into `out_dir/jobs.jsonl`, so the tray — which renders
+  from `/api/jobs`, never from a poll response — draws a distinct **QUEUED** row: the same
+  mascot icon with both animations stopped (`.jt-spin.jt-queued`) plus an uppercase `queued`
+  pill, flipping to the ordinary spinner when a worker takes the job. `started` absent still
+  means *unknown* and keeps the plain spinner, so Control Panel / CLI / delete / import rows
+  and any job logged before this are untouched. Written once per phase change (four pollers ask
+  every 3s; a per-poll write would bloat the log and keep refreshing the `ts` the orphan
+  sweep's age check reads), and the in-process de-dupe entry is dropped at a terminal phase so
+  it stays bounded by in-flight tasks. Because every submit surface's poller — the gallery's,
+  both of the Loom's, and `mg-generate-drawer.js`'s — calls that one route, the signal reaches
+  both trays with no per-host wiring; `tests/test_render_harness.py` measures the rendered
+  result on `/` and `/loom` and asserts they are identical.
+  Alongside it, `queue_wait_estimate()` reads PixAI's own pre-submit queue estimate
+  (`GET /v2/task/wait-time`, params `priority` + `modelVersionId` — a submit's `modelId` is a
+  model *version* id to that route; `priority` is a validated enum, 500/1000) and the tray
+  records it once, when a job is first seen queued, showing `est. Ns wait` and
+  `Est. wait · Ns (PixAI, when queued)` in the detail popover beneath the live Time Spent.
+  There is deliberately **no** percentage, progress bar or countdown for a PixAI generation:
+  PixAI exposes no progress on a task (probed with a control — no `progress`/`percent`/`step`/
+  `eta`/`queuePosition` fields exist), the estimate is never recomputed as the wait grows, and
+  it disappears once the job starts rather than becoming an implied render ETA.
+- **The Fix sub-tab is priced, named and labelled like the rest of the suite** (2026-07-25).
+  A Fix submits as `{mediaId, boxes}` over `POST /v2/task/fixer`, but PixAI turns that into a
+  `taskKind=chat` generation carrying a `chat.fixer` block — which `/v2/task-price` prices
+  (measured flat 8,000, invariant to box count, canvas size and priority; without the chat
+  block the same call returns the 1,200 base floor). So the tab carries an `<mg-cost-badge>`
+  fed by `/api/price` `mode:'fix'` → `build_fixer_price_parameters`, with the number fetched
+  rather than hardcoded, `no_card` forced on (there is no `kaisuukenId` field on
+  `/v2/task/fixer`, so no free card can ever cover a Fix), and the `window.confirm()` kept as
+  a genuine spend gate that quotes the badge. Output naming and metadata match: a Fix is named
+  `<source-prompt>_fix-face_<task>_<media>` from the SOURCE image rather than from the fixed
+  template prompt PixAI writes into every fixer task, and its Model resolves to "Reference
+  Pro" via `EDIT_MODELS` while Seed/Steps/Sampler/CFG stay empty — a chat task records none of
+  them, and an em-dash is the honest answer. Naming applies to new output only.
+
+- **The Generate drawer's Edit ▸ Enhance sub-tab is the art-filters surface — twelve filters,
+  free and offline, and the panel is a side-by-side comparison.** Art filters are gradient-overlay
+  recipes composited in the browser: no Generate button, no price. `static/mg-art-filters.js`
+  holds **two sets**. `FILTERS` is PixAI's seven, baked verbatim from their public unauthenticated
+  config endpoint (`GET https://api.pixai.art/config/imageArtFilters`, verified 2026-07-25) and
+  kept verbatim so refreshing it stays a paste. `MOONGLADE_FILTERS` is **ours** — Moonglade,
+  Nightfallen, Moonlit Silver, Embercourt, Verdant Grove — derived from the five skin palettes,
+  each recipe built from its skin's accent and lead colours and tagged with the `skin` it came
+  from; `tests/..` pins every stop colour to a real token of that skin's CSS block, so a retint
+  that leaves its filter behind fails by name. Ours use **only** the six exactly-mapping blend
+  modes and carry **no** `image_parameters`, so their export is their preview and what shipped is
+  what was approved as swatches. `get()`/`list()` walk both; `groups()` returns
+  `[{source,label,ids}]`, ours first, and drives the rail's two headed sections.
+
+  Rendering is client-side either way: CSS `mix-blend-mode` overlays for the live preview, one
+  canvas gradient fill per layer for the export, both pinned to the same gradient geometry so they
+  agree. Picking a filter makes **zero** network requests (measured). The working surface is
+  `#filters-flyout`, a top-level fixed panel placed by `Gen.placeFilters()` on the `_place()` rule
+  (side with room, then clamp) — beside the drawer in the left/right docks, centred over it
+  otherwise, and centred too whenever the side room is under `AF_MIN_SIDE` (1050px), which is set
+  by the width at which both pictures are still worth judging rather than by what merely fits.
+  Its three columns are **original | filtered preview | swatch rail**, `align-items:stretch` with
+  `flex:1` frames so the pictures are matted and centred instead of stranded above a void, and the
+  original is a **second `<img>`** — sharing one would filter both and leave nothing to compare.
+  Actions: `No filter`, `Save to library` (bakes at full resolution, posts to `/api/import-local`,
+  lands in `imported/` with a thumbnail and a `source='local'` row), `Send to image gen`
+  (`Gen.filterSend()` — composite → `/api/upload`, the free S3 handshake → `media_id` → Edit
+  source; spends nothing, the generation you then run is the priced step), and `Publish`, disabled
+  until Epic C.
+
+  Six of the eight blend modes map exactly to CSS/canvas; `darker-color` and `lighter-color` are
+  Photoshop whole-colour comparisons with no CSS equivalent, approximated by `darken`/`lighten`
+  and flagged `exact:false` in `BLEND_MODE_MAP` with the reason — which is why PixAI's M1/M2/M5/M6
+  can differ slightly from their own render and none of ours can. The paid path
+  (`build_filter_parameters`, `--filter-id`, `--enhance`, `run_enhance`) is gone: it charged
+  credits and waited on a worker queue for a handful of gradient fills.
+- **The QUEUED phase + queue ETA are VERIFIED against a live generation** (2026-07-25, task
+  `2037959839192719439`). `/v2/task/wait-time` is real and per-priority: probed at
+  Tsubaki.2 v1, priority 500 answered 34.8s twice while 1000 answered 30.8s then 26.7s. On
+  the generation itself the tracker quoted **21s** and the job log's own timestamps put the
+  actual queue wait at **26.7s** (`started:false` 1785036905.86 -> `started:true`
+  1785036932.58), then 82s of rendering. So the estimate is sound and honestly labelled as a
+  WAIT, not a countdown; the earlier "both gens said 3 seconds" was a genuinely short queue,
+  not a constant. The one real defect the run exposed — an in-flight card reading
+  "Generated" — is fixed. Wave 2's last item is closed.
+- **Per-image cloud delete shipped** (2026-07-25). `POST /api/delete-image` (LOCALHOST)
+  drives `core.delete_batch_media_gql` — `updateGenerationTask(id, input:{deleteBatchMedia:
+  {mediaId}})` over `gql_adhoc` with **`retries=0`**; the primitive's docstring had promised
+  SINGLE ATTEMPT since it was written, but the call inherited `gql_adhoc`'s `retries=3` until
+  this pass, so a read timeout arriving after PixAI processed the delete could re-fire it.
+  The detail page carries both paths, worded apart: **Delete locally** (quarantine to
+  `_deleted/`, recoverable, a later sync restores it) and **Delete from PixAI** (irreversible,
+  names the surviving sibling count from `_batch_sibling_count`, typed `DELETE`). Cloud call
+  first, local purge only on a clean return — the reverse would leave a catalog hole for an
+  image PixAI still has. Button hidden for a local import (no PixAI task) and for a LAN
+  session.
+- **The library folder is settable again, from the Control Panel** (2026-07-25). It stopped
+  being settable when the PySide6 GUI was removed in v2.1.0 and nothing replaced its folder
+  picker. `resolve_library_dir()` in `pixai_gallery.py` is the order of precedence: an
+  explicit `--out`, then `config.json`'s `LIBRARY_DIR`, then `pixai_backup`. `--out`'s argparse
+  default is now `None` — argparse cannot distinguish "typed the default" from "typed
+  nothing" — and **`Serve Gallery.pyw` no longer hardcodes `--out pixai_backup`**, which it
+  always passed and which made any stored setting permanently unreachable; `serve.txt` still
+  appends, so an explicit `--out` there deliberately pins that launcher. `/api/library-path`
+  is GET=LOGIN (host path withheld from non-local, as `/panel` already does) / POST=LOCALHOST
+  (it rewrites config.json). It validates before writing, asks before creating a missing
+  folder, refuses a path that is a file, and **never moves, copies or deletes anything** —
+  pinned by a test that greps the handler for `shutil.move`/`copytree`/`rename`/`unlink`.
+- **Upscale lives on the image view; the drawer keeps only the Enhance Details booster**
+  (2026-07-25). PixAI invokes Upscale on a picture that already exists, so the drawer's old
+  three-way Off/Upscale/Hires segment is gone — it was not where PixAI offers it, and a drawer
+  has no source, so the ratio cap and predicted output size were derived from the size the
+  generation was about to be. `static/mg-upscale-panel.js` (`<mg-upscale-panel>`) is the
+  surface: a full inline panel on the detail page, and a flyout in the lightbox (z-index 320,
+  above `.lb`'s 300, and the overlay stays open behind it) closed by `closeLightbox`/`lbStep`
+  so it can never outlive the picture it was opened for. Both methods with PixAI's own control
+  asymmetry — `enlarge` + `enlargeModel` (5-option picker) vs `upscale` +
+  `upscaleDenoisingStrength/Steps` — and a ratio cap derived from the SOURCE's real dimensions
+  against `UPSCALE_PIXEL_CEILING`, served to the client via the `__UPSCALE_CONST__` marker
+  (index + detail pages only; four other templates share `BASE_HTML`) so no second hand port
+  exists. Submits through the existing `/api/price` + `/api/generate` as plain i2i
+  (`ref_media_id` + `ref_strength`); there is deliberately **no** `/api/upscale`. Model is
+  prefilled from the row when known, and otherwise falls back to the shared
+  `<mg-model-picker>` — it never guesses, since a different model restyles the picture. New
+  read-only `/api/image-meta/<media_id>` (LOGIN tier) serves the one row the lightbox needs;
+  it withholds `filename` (a host-path fragment).
+- PixAI's one-click **panelplugin workflows** cannot run here at all, and the surface for them is
+  deleted. PixAI never assigns a worker to a panelplugin task submitted with an API key — it
+  accepts it, queues it, charges it, then cancels it at ~60 minutes with `outputs.reason`
+  "waiting timeout" and refunds (their own official preset ids included, while their web client
+  runs the same workflow in 1-3s), so the ten one-click cards, the ComfyUI catalog search,
+  `/api/enhance`, `/api/workflows`, `build_panelplugin_parameters`, `workflow_catalog` and
+  `--workflow-id` were all deleted 2026-07-24. The Enhance pane says so and points at Fix. The
+  Fix sub-tab is a separate box-coordinate hand/face fixer (`/api/fix` → `submit_fixer`) and works.
+- **The LoRA picker now shows and enforces the account's real per-generation LoRA cap, on
+  both the gallery and the Loom** (2026-07-24). `membership.privilege.{lora,freeUserLora}` —
+  real data PixAI's own account API already returns — is fetched by `account_info()`
+  (previously only surfaced in the `--account` CLI dashboard) and now exposed via
+  `/api/account`'s `lora_cap` field, which the Loom already polls into its own `acct` state
+  (no new fetch needed there). Both surfaces show a live "N / cap" count (red once over) and
+  disable Generate with a clear "remove N to continue" message when exceeded — a soft
+  pre-submit guard, not a hard block in the picker itself, since refusing the pick there would
+  leave a card visually selected in `<mg-model-picker>`'s own multi-select state that never
+  actually landed in the host's LoRA list, the same reason the old 6-LoRA cap was never
+  reproduced during the O12 migration. The comparison itself (`overLoraCap`) is a shared pure
+  function in `loom/src/loom-mutations.js`, mirroring the gallery's identical inline logic.
+  Exact coexistence semantics of `lora` vs `freeUserLora` are unconfirmed (no live subscribed
+  account available to probe from this checkout) — `lora` wins when both are present,
+  mirroring the CLI's own field-check order.
+- **Per-LoRA version selection, on both the gallery and the Loom** (2026-07-24). Mirrors the
+  base model's own version switcher (`#gen-version`/`.lv-versel`, picker-parity-round2):
+  resolving a LoRA (`mg-model-picker.js`'s `_toggleMulti`) now hits `/api/model-version`
+  with `&all=1` instead of the plain single fetch, so the entry carries a full `versions`
+  array (every published release), not just the silently-assumed latest. A version `<select>`
+  appears on a LoRA's chip only when it actually has more than one release — the common
+  single-version case renders nothing extra — and switching applies that version's own
+  `version_id`/`lora_base_type`/`trigger_words` with no new network call, since the full list
+  was already resolved at pick time. Shared component change, so both surfaces got the real
+  version data for free; only the per-chip UI (`renderLoras()` in `pixai_gallery.py`, the
+  `imgLoras.map` chip render in `master-storyboard.jsx`) needed writing twice.
+- **Capability gating on the Advanced panel (Negative prompt / Steps / CFG scale), on both
+  the gallery and the Loom** (2026-07-24). `extra.compatibility` (which of these a model
+  actually honors — probed live 2026-07-06, memory `pixai-model-capability-schema`, e.g.
+  Tsubaki.2 ignores CFG scale entirely and runs steps FIXED at 16) and `extra.restrictions`
+  (real min/max bounds) are now extracted by `_version_row_to_meta()` — previously fetched
+  nowhere, so an editable control that silently did nothing was indistinguishable from one
+  that worked. A field the model doesn't honor is disabled (never hidden) with a plain
+  tooltip; fails open on unknown/absent data — only an explicit `false` disables anything,
+  matching every other fail-open gate in this app. **Real bug caught live, not by source
+  reading:** the gallery's first version only set an input's `min`/`max` when the new
+  model's `restrictions` had them, so switching FROM a restricted model TO an unrestricted
+  one left the field's bounds stuck at the previous model's numbers — confirmed
+  reproducible, then fixed so `gateField()` always resolves min/max to either the model's
+  real bounds or the field's own default. The Loom's declarative JSX never had this failure
+  mode (it recomputes fresh every render) — the same class of bug an imperative DOM-mutation
+  copy is prone to and a declarative one structurally can't have.
+- **The picker's continuous scroll, and a real Loom-only version-dropdown bug, both found
+  during the owner's first live test against his real account** (2026-07-24). Three
+  findings, all confirmed against real behavior, not source reading alone:
+  - **Pagination never worked, on either surface.** `has_more` had been computed correctly
+    server-side since picker-parity-round2 — nothing client-side had ever read it or asked
+    for a next page, and for the GraphQL path (every LoRA search, plus any base-model
+    search using a category filter or "Newest" sort) there was no way to even ask: the
+    query requested `pageInfo{hasNextPage}` but not `endCursor`, and accepted no `after`
+    argument. Added forward Relay-cursor paging (`model_search_market_gql`'s `after`
+    param) — the same Relay Connection spec this app already relies on elsewhere
+    (`page_variables`'s before/last cursor paging for task history, just the reverse
+    direction), not a guess. `/api/model-search` now accepts a single opaque `cursor=` the
+    client just echoes back; the route decides what it means per-request (a real GraphQL
+    cursor on the market path, a plain offset on the REST path) so the client never needs
+    to know which path is serving it. `<mg-model-picker>`'s `.mg-grid` now has a scroll
+    listener that fetches and APPENDS a next page near the bottom, sharing one URL-builder
+    with the initial search so a continuation can never silently drift onto different
+    filters, with its own staleness guard (a fresh search supersedes an in-flight
+    continuation) and a visible "loading more…" indicator. A transient error mid-scroll
+    leaves pagination state untouched rather than wedging it closed, so the next scroll
+    simply retries. Live-verified end to end: two mocked pages, confirmed the grid holds
+    both (not replaced), in order, with `has_more`/`cursor` updating correctly at each step.
+  - **A real Loom-only bug in the base-model version-resolve guard**, confirmed by the
+    owner testing the identical model on both surfaces: the gallery showed a version
+    dropdown, the Loom didn't. The Loom's resolve-fetch updater carried an extra
+    `cur.model_id === m.model_id` condition on top of the sequence-counter guard the
+    Gallery's own `onBasePick` has always used alone — redundant for the "a newer pick
+    superseded this one" case the counter already covers correctly, but a real liability
+    for anything else that can touch `imgModel` while the fetch is in flight, silently
+    dropping the entire versions/compatibility/restrictions payload with nothing visibly
+    wrong. Simplified to match the Gallery's proven, simpler guard exactly.
+  - **The architecture-aware LoRA sort/badge mechanism was traced end to end and found
+    structurally correct** — `base-type` is set correctly on both surfaces, the server
+    requests the right GraphQL fields and soft-sorts correctly, the client renders the
+    `compat` badge correctly. No bug found; still needs the owner's live confirmation it's
+    now visibly working, since fixing pagination changes how much of the sorted list is
+    ever on screen at once to judge it by.
+- **Two performance fixes, same day, after the owner reported scrolling "still slow and a
+  bit choppy" and called the picker "a step backward in function" post-pagination.** Both
+  are genuine performance bugs, not correctness bugs — the first round verified the
+  feature worked, not that it worked *well*:
+  - **The scroll listener did an unthrottled layout read on every native scroll event**
+    (`scrollHeight`/`scrollTop`/`clientHeight`), on a grid whose DOM now grows on every
+    load-more instead of staying capped at 24 cards forever like the old flyout did —
+    exactly the shape of real scroll jank. Throttled to one check per animation frame via
+    `requestAnimationFrame`, the standard fix for this class of problem.
+  - **Opening the flyout fired two full searches at once, not one.** Both the Gallery's
+    `ensurePickers()` and the Loom's `pickerMounted` create and mount a `kind="base"` AND a
+    `kind="lora"` picker together on first open (so switching tabs never re-fetches), but
+    the hidden one searched anyway — every open competed a real search against a wasted one
+    for a tab nobody had asked to see. `<mg-model-picker>` now defers its own
+    browse-on-open search when it starts hidden, and each host calls a new `ensureSearched()`
+    the moment it actually reveals that instance — idempotent, so tab-switching still never
+    re-fetches. Live-verified: exactly one search fires on open, one more the first time
+    each tab is actually viewed, none on switching back.
+  - The scroll-triggered load-more chain itself (native scroll event → throttled rAF →
+    fetch) could not be fully exercised end-to-end in this session's sandboxed browser
+    automation — synthetic `dispatchEvent('scroll')` didn't reliably reach the throttled
+    callback, a known simulation gap, not a sign of a bug (`_loadMore()` itself, called
+    directly, appends correctly every time). Needs the owner's real scrolling to confirm
+    the choppiness is actually gone.
+
+- **Upscale and the Generate-tab boosters are ordinary generation parameters**, built by
+  `_gen_parameters` on the same t2i/i2i submit every image gen already uses. PixAI's two
+  upscale methods are mutually exclusive and their radio values are the parameter names:
+  *Upscale* = `enlarge` + `enlargeModel` (one of five upscaler networks), *Hires* = `upscale`
+  + `upscaleDenoisingStrength`/`Steps`/`Sampler`. Boosters are `enableADetailer` (Face Fix)
+  and `qualityTag` (Quality Tag). Every key is emitted **only when asked for**, so a submit
+  that does not opt in is byte-identical to before. The ratio ceiling is **computed**
+  (`max_upscale_ratio`, from a per-method output-pixel ceiling) because the same method
+  allows a different maximum on a different source size; the drawer carries a hand port of it
+  so the slider shows the live max plus `1400×784 → 1952×1096` while dragging, pinned to the
+  Python by a Node parity test. CLI: `--enlarge`/`--enlarge-model`/`--upscale`/
+  `--upscale-denoise`/`--upscale-denoise-steps`/`--face-fix`/`--quality-tag`.
 
 ## Achievements / The Folio of Honors
 
@@ -386,6 +663,18 @@ on record so far, from a read-only code check (no changes made):
 - **CI** (`.github/workflows/tests.yml`) runs both suites on every push and pull request: the
   Python suite (`--ignore=tests/test_similar.py`, no `pixeltable` installed — no test imports
   it) and the Loom's `node --test` after an esbuild rebuild.
+- **`tests/test_render_harness.py` asserts that the CSS renders, not that it exists** — a real
+  chromium (playwright) against the real app on a real ephemeral port, guarding the picker
+  grid's panel fill, `#model-flyout`'s viewport containment, Deep Focus's veil-over-FAB
+  stacking outcome, and per-skin re-tint plus pre-paint application; it skips cleanly without
+  playwright or a browser binary, which is why it currently skips in CI and runs locally.
+- **`tests/csshelp.py` covers the one axis the harness can't reach in CI.** Because the harness
+  skips where no playwright is installed — which is every CI run today — a cascade regression
+  could land on `loom-v2` unseen. This resolves which declaration actually *wins* (`!important`,
+  specificity, document order) from the served HTML in pure stdlib, no browser, so it runs
+  everywhere; `test_portrait_mobile_drawer_rules_actually_win` asserts on it. Strictly weaker
+  than the harness (it proves the winner, not the pixels) and explicitly not a reason to skip
+  writing a rendering test.
 - **`CONTRIBUTING.md`** covers setup, running tests, the invariants that matter most to an
   outside contributor (`media_id` resolution, catalog-schema three-place changes, never
   committing `config.json`), PR expectations, and a private channel for security reports.
@@ -393,7 +682,7 @@ on record so far, from a read-only code check (no changes made):
   generation, submitting a hand/face fix, deleting a task, claiming a reward — from the CLI or
   the web app, and regardless of `--confirm`/`--apply`/`--yes`. The four choke points
   (`submit_generation`, `submit_fixer`, `delete_task_gql`, `claim_reward`) are the only places
-  every generate/edit/enhance/fix/delete/claim path funnels through, CLI and web alike, so
+  every generate/edit/fix/delete/claim path funnels through, CLI and web alike, so
   gating there covers both surfaces from one place. Scoped to the PixAI account specifically —
   `--organize`/`--dedup` are untouched (already dry-run-by-default, never network). Documented
   for users on the wiki's **Trust & Safety** page.
@@ -427,21 +716,25 @@ gates every route; the public surface is exactly four things — `/login`, `/log
 (a compile-time constant the browser fetches unprompted from the login page). There is **no
 localhost bypass**: login is required from `127.0.0.1` exactly as from a LAN address.
 
-Spend-capable routes are **LOGIN**, not localhost — `/api/generate`, `/api/edit`,
-`/api/enhance`, `/api/fix` and `/api/loom/generate` are all reachable by any signed-in
-session, which is deliberate (the tablet generates). LOCALHOST is reserved for writes to the
+Spend-capable routes are **LOGIN**, not localhost — `/api/generate`, `/api/edit`, `/api/fix`
+and `/api/loom/generate` are all reachable by any signed-in session, which is deliberate (the
+tablet generates). LOCALHOST is reserved for writes to the
 server's own disk, credential writes, and irreversible cloud deletion. `tests/test_route_tiers.py`
 is the authority.
 
 **Three tiers.** PUBLIC (the four above) · LOGIN (everything else — any signed-in session,
 local or LAN; this is what makes tablet generation work) · LOCALHOST (a signed-in session
-*and* a loopback address). Eight routes are LOCALHOST — `tests/test_route_tiers.py`'s
-`ROUTE_TIERS` is the authority, not this count; re-derive it from there rather than trust
-this prose if the two ever disagree. Each acts on the server's own files, mints a new
-account, or deletes irreversibly from PixAI: `api_panel_run` (destructive actions only),
-`api_panel_cancel`, `api_panel_schedule` POST, `api_setup_save_key`,
-`api_branding_shortcut`, `delete_tasks_bulk`, `api_import_local`, `api_users_add`.
-`/api/server/stop` and `/restart` are deliberately LOGIN, by owner decision.
+*and* a loopback address). `tests/test_route_tiers.py`'s `ROUTE_TIERS` is the authority for
+which routes are LOCALHOST — read it from there rather than trust this prose if the two ever
+disagree (a hardcoded count here has drifted twice already, so there is deliberately no
+number). Each one acts on the server's own files, mints a new account, or deletes
+irreversibly from PixAI: `api_panel_run` (destructive actions only), `api_panel_cancel`,
+`api_panel_schedule` POST, `api_setup_save_key`, `api_branding_shortcut`,
+`delete_tasks_bulk`, `api_delete_preview`, `api_import_local`, `api_users_add`,
+`api_trash_delete_forever`, `api_trash_empty`. `api_delete_preview` is the one that reads
+rather than writes: it is declared at the tier of the action it previews (step one of
+`delete_tasks_bulk`'s own flow, called from nowhere else), not of the catalog rows it
+returns. `/api/server/stop` and `/restart` are deliberately LOGIN, by owner decision.
 
 `api_users_remove` doesn't fit either bucket cleanly and is declared LOGIN with a nuance
 the tier table can't express structurally: removing your OWN account is allowed from any
@@ -486,6 +779,28 @@ reads as zero accounts and drops the install into bootstrap mode.
 
 ## Next
 
+### Documentation debt, deliberately deferred to after the naming pass (2026-07-25)
+
+The naming pass renames the modules these files are thick with, so updating them now would be
+paying twice. Measured exposure: `wiki/Generating.md` 17 `pixai_*` references,
+`docs/architecture.md` 11. What is owed, specifically:
+
+- **`docs/architecture.md`** knows none of wave 2's surfaces. Zero mentions of
+  `/api/image-meta`, `/api/delete-image`, `/api/library-path`, `static/mg-upscale-panel.js`
+  or `resolve_library_dir` — so both its route table and its "Shared web components"
+  section are incomplete, on top of the renames.
+- **`wiki/Generating.md`** has the new Upscale section but will need every command example
+  re-pointed.
+
+Already reconciled and NOT owed: `CHANGELOG.md` (four entries that the per-wave passes had
+missed were added — the two filters-panel review bugs, the delete mutation's single-attempt
+enforcement, the failure-reason tally and the pool pacing), `docs/AUDIT_2026-07-21.md` (the
+HIGH `upscale-boosters-are-plain-params` row still read "PARTIALLY DONE — do not close" and
+"the PLACEMENT is wrong", which had become the opposite of true; closed), `wiki/Deleting.md`
+(it described cloud deletion as task-level only — a safety page under-describing a live
+irreversible action, so it was done despite the deferral), and this file.
+
+
 ### Documentation
 
 - **The wiki backlog is closed — and branding/mascots stays deliberately undocumented there
@@ -522,10 +837,9 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   by that feature's own explicit design).
 - `<mg-cost-badge>` now covers the drawer's `.mgd-cost` (`static/mg-generate-drawer.js`,
   shared by the gallery Video tab and the Loom's Video tab), `pixai_gallery.py`'s Generate
-  and Edit tabs, the Gallery's Enhance sub-tab (`enhance-cost`, reshaped select-then-run —
-  its old `window.confirm()` is gone, the badge is the only warning), and the Loom's Image/
-  Edit/Reference Deep Focus tabs (D-12, 2026-07-22) — each of those three kept its existing
-  `confirmSpend`/`window.confirm()` gate alongside the new badge, deliberately: that dialog
+  and Edit tabs, and the Loom's Image/Edit/Reference Deep Focus tabs (D-12, 2026-07-22) —
+  each of those three Loom tabs kept its existing `confirmSpend`/`window.confirm()` gate
+  alongside the new badge, deliberately: that dialog
   is this project's original fail-closed guardrail, built after those exact tabs used to lie
   about cost, so the badge there is an added preview, not a replacement. Still no badge:
   `generateShot`'s own `priceShot` + `window.confirm` gate for shot-level/batch video
@@ -568,6 +882,96 @@ What's still CLI-only, tracked so the web surface stays complete:
   by owner decision — D-6, `docs/AUDIT_2026-07-21.md`.)
 
 ---
+
+## The naming pass — decisions locked 2026-07-25
+
+**Flat names, package folder LATER** (owner call). Rename-only; **no shims** (clean cut).
+
+| from | to |
+|---|---|
+| `pixai_gallery_backup.py` | `moonglade_backup.py` |
+| `pixai_gallery.py` | `moonglade_gallery.py` |
+| `pixai_similar.py` | `moonglade_similar.py` |
+| `pixai_logging.py` | `moonglade_logging.py` |
+
+**There is a FOURTH module.** `pixai_logging` (36 refs). Easy to miss — it is imported by both
+main modules and earlier notes framed this as a three-module rename.
+
+**`pixai_backup` (81 refs) is NOT renamed** — the output directory, named in every install's
+config.json. See the prefix trap in the priority list below.
+
+**Measured scope** (`python tools/name_inventory.py modules`, 2026-07-25): **941 references in
+135 files** — code 430, docs 414, js 66, other 21, cfg 10. Nine are in machine-local
+git-ignored files the branch cannot fix. `pixai_gui` / `pixai_gui_settings` (8) are dead
+mentions of the PySide6 GUI removed in v2.1.0; sweep as encountered so they stop reading as
+live modules.
+
+**Docs split, and only one half moves with the rename:**
+- **Live instructions change in the same pass**, or the release ships commands that do not
+  exist: `CLAUDE.md` (43), `wiki/Backing-Up.md` (48), this file (26).
+- **Historical record stays as written**: `CHANGELOG.md` (45), `docs/AUDIT_2026-07-21.md`
+  (109). A v1.9 entry naming `pixai_gallery_backup.py` is TRUE about v1.9.
+- Deferred by owner call: `docs/architecture.md`, `wiki/Generating.md` (see the doc-debt
+  section above).
+
+**Verification cannot be the test suite alone.** Both renamed modules are runnable scripts;
+a green suite proves imports, not the ~116 documented `python pixai_*.py` invocations, the
+launcher's child command (`Serve Gallery.pyw`), or the Panel's subprocess runner
+(`_cli_path`). Verify the COMMAND surface separately.
+
+**Sequencing, 2026-07-25:** the priority list's rebase warning does not bite — `master` has
+NOT diverged (`loom-v2` +85, `master` +0, fast-forwardable). So: dedicated branch off
+`loom-v2` → verify → merge to `loom-v2` → `master` → tag **2.5.0**, keeping the rename in the
+same release so the new commands are learned once rather than across two.
+
+### The folder tidy (separate, later pass)
+Owner's motivation for `/moonglade`, 2026-07-25: achievement and branding files sit loose in
+the install root, and **"a tidy install folder says a lot and implies good design etiquette
+across the suite."** A different job from renaming four modules, so it gets its own pass and
+"rename-only" stays honest.
+
+## Banked idea: package the assets like an MPQ (possible epic, NOT scoped)
+
+Owner, 2026-07-25. **Explicitly not DRM** — his framing: *"if someone pokes around and just
+reads a json file all the secrets are out. just not trying to leave breadcrumbs."* Plus the
+presentation goal: a tidy install that reflects the work.
+
+**Mechanism, best first:**
+- **SQLite as the container.** One file; a table of `(path, bytes, sha256, mtime)`;
+  hash-indexed random access; transactional updates; no extraction step. Behaviourally the
+  closest thing to MPQ, and closer still to CASC (content-addressed). No new dependency — the
+  catalog already links SQLite.
+- **A zip.** Read natively by Python, servable straight from Flask. Simpler, more
+  inspectable; marginally worse at many-tiny-file random access, irrelevant at this scale.
+- **Not `zipapp`/`.pyz`** — bundles code, not runtime assets.
+
+**Delivers:** a tidy install; atomic versioned distribution (one file, cannot half-install);
+tamper-evidence via a signed hash manifest, so a swapped mark becomes DETECTABLE; and a
+container whose format you must know rather than a folder you can browse.
+
+**Cannot deliver, and must not be scoped as:** secrecy for displayed art. What the browser
+renders, the browser has.
+
+**The spoiler half is a SEPARATE decision, and packaging does not solve it — but something
+simpler does.** `docs/achievements_roster_57.json` is **2.98 MB and committed to the public
+repo**, so the whole roster is readable on GitHub and no install-folder packaging un-publishes
+it. **Checked 2026-07-25: NO runtime code loads that file.** `pixai_gallery.py:1528` only cites
+it in a comment (the runtime roster is the `ACHIEVEMENTS` catalog in the module itself), and
+its only reader is `tools/build_roster_board.py`, a dev-only board generator that already
+accepts a `--roster` path. Owner's recollection was right: it is the build-time record from
+when the 57 were designed, not a shipped asset.
+
+So moving it to git-ignored `private/` would remove the breadcrumb from GitHub AND 2.98 MB from
+the repo, at the cost of one dev tool's default path. The real price is that the canonical
+design record leaves version control — it would live only on the owner's disks and needs to be
+inside his own backup. That is the owner call here, and it is a SEPARATE change from the naming
+pass (rename-only). (Server-side masking already works and is unaffected — unearned feats are
+cloaked and their metrics scrubbed before reaching any client, which is real protection
+precisely because those bytes never leave the machine.)
+
+**Design tension to respect:** branding is DROP-IN today (a file in `out_dir/branding/` is
+picked up) and "make it yours" is a shipped, intended feature. A sealed container must keep an
+override layer — packaged defaults, loose files winning — or that feature dies to tidiness.
 
 ## Priority order (agreed 2026-07-19)
 

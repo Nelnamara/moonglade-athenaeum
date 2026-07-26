@@ -57,6 +57,19 @@ def test_model_search_rest_preview_card_fields(monkeypatch):
     assert m["comment_count"] == 0 and m["cover_url"] == "https://cdn/pub/x"
 
 
+def test_model_search_rest_defaults_the_graphql_only_viewer_flags(monkeypatch):
+    """The oRPC /v2 search carries no per-viewer bookmarked/liked state at all, so a REST row
+    must still expose those keys, falsy -- the SAME convention model_search_market_gql already
+    applies in the other direction ("REST-only rich fields absent here -> empty so the card
+    hides them"), so a consumer can read row["bookmarked"] without caring which search path
+    produced the row. False on a REST row means "this path can't tell you", NOT "confirmed not
+    bookmarked" -- same as `official: False` on a GraphQL row, which likewise only means the
+    connection doesn't carry curations."""
+    monkeypatch.setattr(core, "_rest_get", lambda *a, **k: _SEARCH)
+    m = core.model_search_rest(object())["results"][0]
+    assert m["bookmarked"] is False and m["liked"] is False
+
+
 def test_model_search_rest_omits_empty_keyword(monkeypatch):
     seen = {}
     monkeypatch.setattr(core, "_rest_get",
@@ -98,10 +111,39 @@ def test_resolve_version_meta_full_shape(monkeypatch):
     assert b["trigger_words"] == "" and b["negative_prompt"] == "nsfw, worst quality"
     assert b["sampling_method"] == "Euler a" and b["sampling_steps"] == 28 and b["cfg_scale"] == 5
     assert b["capabilities"] == ["better-hands"]
+    assert b["compatibility"] == {} and b["restrictions"] == {}   # none given -> empty, not missing
 
     monkeypatch.setattr(core, "_rest_get", lambda *a, **k: [])   # no versions -> empty shape
     e = core.resolve_version_meta(object(), "x")
     assert e["version_id"] == "" and e["model_type"] == "" and e["capabilities"] == []
+    assert e["compatibility"] == {} and e["restrictions"] == {}
+
+
+def test_resolve_version_meta_extracts_compatibility_and_restrictions(monkeypatch):
+    """extra.compatibility says which Advanced-panel params a model actually HONORS (a
+    control the model ignores should be hidden/disabled in the drawer, not just always
+    shown); extra.restrictions gives real min/max bounds for the ones it does. Both were
+    probed live 2026-07-06 (memory: pixai-model-capability-schema) but never extracted --
+    resolve_version_meta/list_model_versions kept only sampling_steps/cfg_scale's DEFAULT
+    values, discarding whether the model honors them at all or what range is valid."""
+    row = [{"id": "V9", "modelType": "SDXL_MODEL", "loraBaseModelType": None,
+            "extra": {"samplingSteps": 16, "cfgScale": None,
+                      "compatibility": {"cfgScale": False, "samplingSteps": False,
+                                         "controlnet": False, "vae": False, "upscale": False,
+                                         "negativePrompt": True, "styleKey": True, "watermark": True},
+                      "restrictions": {"samplingSteps": {"min": 16, "max": 50}}}}]
+    monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: row)
+    m = core.resolve_version_meta(object(), "B9")
+    assert m["compatibility"] == {"cfgScale": False, "samplingSteps": False, "controlnet": False,
+                                   "vae": False, "upscale": False, "negativePrompt": True,
+                                   "styleKey": True, "watermark": True}
+    assert m["restrictions"] == {"samplingSteps": {"min": 16, "max": 50}}
+
+    # non-dict/garbage values must fail open to {} (never crash, never mis-shape the picker)
+    monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: [
+        {"id": "V10", "extra": {"compatibility": "not-a-dict", "restrictions": None}}])
+    g = core.resolve_version_meta(object(), "B10")
+    assert g["compatibility"] == {} and g["restrictions"] == {}
 
 
 def test_is_lora_compatible_exact_equality_fails_open():
@@ -279,6 +321,43 @@ def test_model_search_market_gql(monkeypatch):
     assert [m["model_id"] for m in r2["results"]] == ["2"] and r2["results"][0]["should_blur"] is True
 
 
+def test_model_search_market_gql_supports_cursor_pagination(monkeypatch):
+    """Owner report 2026-07-24: the picker 'scrolls a few rows and stops -- no continuous
+    scroll'. Root cause: `generationModels` already returned pageInfo.hasNextPage (has_more
+    was computed and returned all along), but the query never requested endCursor and never
+    accepted an `after` variable, so there was no way to actually ask for a next page even
+    though the server would have one. Standard Relay Connection shape (edges+pageInfo) --
+    the same spec this app already relies on elsewhere (page_variables' before/last cursor
+    pagination for task history) -- so `after`/`endCursor` is the expected forward-paging
+    pair, not a guess. First call (no `after`) must NOT send the $a variable or after: arg
+    at all -- an empty/null cursor is not the same as a real one, and PixAI's own resolver
+    may reject a present-but-empty $a differently than an absent one."""
+    captured = {}
+    def fake_gql(session, query, vars=None):
+        captured["query"] = query
+        captured["vars"] = vars
+        return {"generationModels": {"pageInfo": {"hasNextPage": True, "endCursor": "CURSOR_ABC"},
+                                       "edges": [{"node": {"id": "1", "title": "X", "type": "SDXL_MODEL",
+                                       "latestVersion": {"id": "v1"}, "media": {"urls": []},
+                                       "tags": [], "author": {}}}]}}
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+
+    r = core.model_search_market_gql(object(), usage="MODEL", limit=24)
+    assert "after:" not in captured["query"] and "$a" not in captured["query"]
+    assert r["has_more"] is True and r["next_cursor"] == "CURSOR_ABC"
+
+    r2 = core.model_search_market_gql(object(), usage="MODEL", limit=24, after="CURSOR_ABC")
+    assert "after:$a" in captured["query"] and "$a:String" in captured["query"]
+    assert captured["vars"]["a"] == "CURSOR_ABC"
+
+    # no next page -> next_cursor must be empty, never a stale/previous cursor a client
+    # could accidentally keep paging on forever
+    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, vars=None: {
+        "generationModels": {"pageInfo": {"hasNextPage": False, "endCursor": "IGNORED"}, "edges": []}})
+    r3 = core.model_search_market_gql(object(), usage="MODEL")
+    assert r3["has_more"] is False and r3["next_cursor"] == ""
+
+
 def test_model_search_market_gql_requests_and_surfaces_architecture_fields(monkeypatch):
     """picker-parity-round2 (problem 3): the query gained latestVersion{modelType
     loraBaseModelType} -- confirmed live against the owner's real account (real rows come
@@ -304,6 +383,148 @@ def test_model_search_market_gql_requests_and_surfaces_architecture_fields(monke
     assert r["results"][0]["model_type"] == "MULTI_LORA"
     assert r["results"][0]["lora_base_model_type"] == "SD_V1_MODEL"
     assert r["results"][1]["model_type"] == "" and r["results"][1]["lora_base_model_type"] == ""
+
+
+def test_model_search_market_gql_surfaces_viewer_bookmarked_and_liked(monkeypatch):
+    """`bookmarked` + `liked` are VIEWER-SCOPED booleans that GenerationModel carries on every
+    connection returning one -- probed live 2026-07-24 against the owner's real account:
+    bookmarked:true on 50/50 rows of his own bookmark connection, false on 3/3 plain market
+    rows. They are genuinely free: two more leaf fields on a request the picker already makes,
+    no extra round trip. Surfaced under the server's own names (the row dict's existing style
+    -- liked_count / ref_count / model_type), and ALWAYS a real bool: a node that omits them
+    yields False, never None, so a naive `if row["liked"]` can't explode (the same
+    never-None rule model_type/lora_base_model_type follow)."""
+    captured = {}
+
+    def fake_gql(session, query, vars=None):
+        captured["query"] = query
+        return {"generationModels": {"pageInfo": {"hasNextPage": False}, "edges": [
+            {"node": {"id": "1", "title": "Saved + liked", "type": "SDXL_MODEL", "likedCount": 9,
+                      "bookmarked": True, "liked": True, "latestVersion": {"id": "v1"},
+                      "media": {"urls": []}, "tags": [], "author": {}, "createdAt": ""}},
+            {"node": {"id": "2", "title": "Plain market row", "type": "SDXL_MODEL", "likedCount": 1,
+                      "bookmarked": False, "liked": False, "latestVersion": {"id": "v2"},
+                      "media": {"urls": []}, "tags": [], "author": {}, "createdAt": ""}},
+            {"node": {"id": "3", "title": "Fields absent", "type": "SDXL_MODEL",
+                      "latestVersion": {}, "media": {"urls": []}, "tags": [], "author": {}}},
+        ]}}
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+    r = core.model_search_market_gql(object(), usage="MODEL")
+    # asserted as the exact selection fragment: a bare "liked" substring would also match
+    # likedCount, which the query has requested all along
+    assert "likedCount bookmarked liked" in captured["query"]
+    a, b, c = r["results"]
+    assert a["bookmarked"] is True and a["liked"] is True
+    assert b["bookmarked"] is False and b["liked"] is False
+    assert c["bookmarked"] is False and c["liked"] is False      # absent -> False, never None
+
+
+def _gql_capture(monkeypatch, rows=None):
+    """Stub gql_adhoc and hand back the captured query text. Node shape matches the confirmed
+    live one (latestVersion carries modelType + loraBaseModelType)."""
+    captured = {}
+    rows = rows if rows is not None else [
+        {"id": "1", "title": "A LoRA", "type": "MULTI_LORA", "isNsfw": False, "likedCount": 2,
+         "latestVersion": {"id": "v1", "modelType": "MULTI_LORA",
+                            "loraBaseModelType": "MMDIT26A_MODEL"},
+         "media": {"urls": []}, "tags": [], "author": {}, "createdAt": ""},
+    ]
+
+    def fake_gql(session, query, vars=None):
+        captured["query"] = query
+        captured["vars"] = vars
+        return {"generationModels": {"pageInfo": {"hasNextPage": True, "endCursor": "C1"},
+                                      "edges": [{"node": r} for r in rows]}}
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+    return captured
+
+
+# ---- lora_base_type: SERVER-SIDE architecture filtering (AUDIT_2026-07-21) ----------------
+# The `generationModels` connection has always accepted loraBaseModelTypes:[...]; this app
+# never used it, so a DiT.2 user's LoRA browse came back 24-of-24 SD 1.5 rows. Measured live:
+# [MMDIT26A_MODEL] -> 23 of 24 compatible. THE gotcha: the values are UNQUOTED GraphQL ENUM
+# tokens. An earlier probe sent them as JSON strings, got a type error, and the error was
+# misread as "the argument doesn't exist".
+
+def test_lora_base_type_emits_an_unquoted_enum_token(monkeypatch):
+    captured = _gql_capture(monkeypatch)
+    core.model_search_market_gql(object(), usage="LORA", lora_base_type="MMDIT26A_MODEL")
+    assert "loraBaseModelTypes:[MMDIT26A_MODEL]" in captured["query"]
+    # the failure mode that cost real time: quoted strings are a server-side TYPE error
+    assert 'loraBaseModelTypes:["MMDIT26A_MODEL"]' not in captured["query"]
+    assert "'MMDIT26A_MODEL'" not in captured["query"]
+    # a GraphQL enum cannot be a bound $variable, so it must NOT appear in variables at all
+    assert "MMDIT26A_MODEL" not in str(captured["vars"])
+
+
+def test_lora_base_type_is_whitelisted_never_interpolated_raw(monkeypatch):
+    """The value lands in the query DOCUMENT (an enum can't be a $variable), so it must come
+    from a fixed whitelist -- the same rule, and the same reason, as `category` above.
+    Anything unrecognized falls through to an UNFILTERED search (fail-open): a stale or
+    newly-added architecture must degrade to 'no filter', never to a rejected query that
+    breaks LoRA browsing outright."""
+    for bad in ["MMDIT26A_MODEL] evil", "SDXL_MODEL, SD_V1_MODEL", '"] {__typename} #',
+                "MULTI_LORA", "VIDEO_MODEL", "SD3_MODEL", "", "   ", None]:
+        captured = _gql_capture(monkeypatch)
+        core.model_search_market_gql(object(), usage="LORA", lora_base_type=bad)
+        assert "loraBaseModelTypes" not in captured["query"], bad
+        assert "__typename" not in captured["query"]
+    # every whitelisted value, on the other hand, does get through
+    for good in core.LORA_BASE_MODEL_TYPES:
+        captured = _gql_capture(monkeypatch)
+        core.model_search_market_gql(object(), usage="LORA", lora_base_type=good.lower())
+        assert "loraBaseModelTypes:[%s]" % good in captured["query"]
+
+
+def test_lora_base_type_is_ignored_for_a_base_model_search(monkeypatch):
+    """There is nothing to filter a base-model list by -- a base model has no LoRA base
+    family. kind=base must produce the exact same query it always did."""
+    captured = _gql_capture(monkeypatch)
+    core.model_search_market_gql(object(), usage="MODEL", lora_base_type="SDXL_MODEL")
+    assert "loraBaseModelTypes" not in captured["query"]
+
+
+def test_lora_base_type_filter_survives_category_sort_and_pagination(monkeypatch):
+    """Verified across more than one page and more than one architecture: the filter must
+    ride along with EVERY other argument, on page 2 as well as page 1 -- a continuation that
+    silently dropped it would append unfiltered rows onto filtered ones."""
+    for arch in ("SDXL_MODEL", "DIT9_MODEL"):
+        captured = _gql_capture(monkeypatch)
+        r = core.model_search_market_gql(object(), keyword="eris", category="style",
+                                         sort="newest", usage="LORA", limit=24,
+                                         lora_base_type=arch)
+        q = captured["query"]
+        assert "loraBaseModelTypes:[%s]" % arch in q
+        assert 'category:"style"' in q and 'orderBy:"-createdAt"' in q and "keyword:$k" in q
+        assert r["next_cursor"] == "C1"
+
+        captured2 = _gql_capture(monkeypatch)
+        core.model_search_market_gql(object(), keyword="eris", category="style", sort="newest",
+                                     usage="LORA", limit=24, after=r["next_cursor"],
+                                     lora_base_type=arch)
+        assert "loraBaseModelTypes:[%s]" % arch in captured2["query"]
+        assert "after:$a" in captured2["query"] and captured2["vars"]["a"] == "C1"
+
+
+def test_lora_base_type_filter_does_not_replace_the_per_row_compat_badge(monkeypatch):
+    """The filter is APPROXIMATE (measured live: [DIT7B_MODEL] returned 12 DiT7B, 10
+    MMDIT26A, 2 SDXL -- a search row's loraBaseModelTypes is a coarse union over releases,
+    not the resolved version's singular loraBaseModelType). So a filtered page can still
+    contain a genuinely incompatible row, and annotate_lora_compat must still be the layer
+    that judges each one."""
+    mixed = [
+        {"id": "1", "title": "Real DiT7B", "type": "MULTI_LORA", "latestVersion":
+            {"id": "v1", "modelType": "MULTI_LORA", "loraBaseModelType": "DIT7B_MODEL"},
+         "media": {"urls": []}, "tags": [], "author": {}},
+        {"id": "2", "title": "Actually MMDiT", "type": "MULTI_LORA", "latestVersion":
+            {"id": "v2", "modelType": "MULTI_LORA", "loraBaseModelType": "MMDIT26A_MODEL"},
+         "media": {"urls": []}, "tags": [], "author": {}},
+    ]
+    _gql_capture(monkeypatch, rows=mixed)
+    res = core.model_search_market_gql(object(), usage="LORA",
+                                       lora_base_type="DIT7B_MODEL")["results"]
+    tagged = core.annotate_lora_compat(res, "DIT7B_MODEL")
+    assert {t["model_id"]: t["compat"] for t in tagged} == {"1": "yes", "2": "no"}
 
 
 def test_task_image_media_prefers_batch_over_grid():
@@ -419,17 +640,6 @@ def test_task_detail_query_adhoc_fallback(monkeypatch):
     monkeypatch.setattr(core, "TASK_DETAIL_HASH", "deadbeef")
     monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {"id": tid, "via": "persisted"})
     assert core._task_detail_query(object(), "T8") == {"id": "T8", "via": "persisted"}
-
-
-def test_workflow_catalog(monkeypatch):
-    monkeypatch.setattr(core, "gql_adhoc", lambda s, q, v=None: {"workflows": {"edges": [
-        {"node": {"id": "1794855217667308480", "name": "Image Upscale",
-                  "type": "UPSCALE", "coverMediaId": "9"}},
-        {"node": {"id": "", "name": "no-id skipped"}},
-    ]}})
-    out = core.workflow_catalog(object())
-    assert len(out) == 1 and out[0]["id"] == "1794855217667308480"
-    assert out[0]["name"] == "Image Upscale" and out[0]["cover_media_id"] == "9"
 
 
 def test_submit_generation(monkeypatch):

@@ -219,7 +219,7 @@ python pixai_gallery_backup.py                            # full download (4 wor
 python pixai_gallery_backup.py --update                   # fast incremental: stop at already-downloaded history
 python pixai_gallery_backup.py --update --workers 8       # incremental + higher concurrency
 python pixai_gallery_backup.py --workers 8 --page-size 500  # fast full backfill
-python pixai_gallery_backup.py --full-meta                # download + full prompt/seed/model
+python pixai_gallery_backup.py --no-full-meta             # faster pull, but rows land with no prompt/seed/model
 python pixai_gallery_backup.py --backfill-full-meta       # fill existing rows
 python pixai_gallery_backup.py --sync                     # ONE-SHOT refresh: pull+full-meta → fix-models → backfill → thumbnails → reconcile-deleted (idempotent)
 python pixai_gallery_backup.py --organize --dry-run       # preview month-folder normalize

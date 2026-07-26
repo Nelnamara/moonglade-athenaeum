@@ -82,6 +82,12 @@ python pixai_gallery_backup.py --generate --task-id <id>
 | `--priority` / `--high-priority` | `500` | 500 = standard (cheaper), 1000 = high |
 | `--no-prompt-helper` | off | use the prompt literally |
 | `--width`/`--height`/`--steps`/`--cfg`/`--batch-size`/`--seed` | 512/512/25/7/1/random | |
+| `--enlarge RATIO` | off | upscale the finished image with an upscaler network (PixAI's **Upscale** method). 0.1 steps, clamped to the biggest ratio your `--width`/`--height` allows |
+| `--enlarge-model NAME` | `R-ESRGAN 4x+ Anime6B` | which upscaler `--enlarge` runs: `ESRGAN_4x`, `R-ESRGAN 4x+`, `R-ESRGAN 4x+ Anime6B`, `SwinIR_4x`, `Lollypop` |
+| `--upscale RATIO` | off | re-render at the larger size (PixAI's **Hires** method) — adds detail rather than just resolution, allows a smaller maximum ratio, costs roughly 3× `--enlarge`. Mutually exclusive with it |
+| `--upscale-denoise` / `--upscale-denoise-steps` | `0.6` / `26` | Hires denoising (strength 0.01–0.99, steps 1–50). PixAI's own hint: strength works better between 0.4 and 0.6 |
+| `--face-fix` | off | run PixAI's face restorer over the result (their **Face Fix** booster) |
+| `--quality-tag [PREFIX]` | off | prepend a quality booster to the prompt (their **Quality Tag**; bare flag uses `Masterpiece`) |
 | `--confirm` | off | **required** to spend credits |
 | `--task-id` | — | fetch/catalog an existing task instead of creating one |
 | `--poll-timeout` | `300` | seconds to wait for a submitted task to finish before giving up (every create path) |
@@ -89,6 +95,18 @@ python pixai_gallery_backup.py --generate --task-id <id>
 
 Generated images are tagged `source='api'` — filter to them in the gallery via
 **Source → Generated**.
+
+> **The two upscale methods, and why the flag names look backwards.** PixAI's own dialog
+> labels them *Upscale* and *Hires*, but the parameters those two buttons actually send are
+> named `enlarge` and `upscale` — so the flags are named after the parameters (what
+> `--dump-params` shows you) rather than the buttons. *Upscale*/`--enlarge` runs an upscaler
+> network over the finished picture; *Hires*/`--upscale` re-renders it larger and can invent
+> new detail. **The maximum ratio is not fixed** — it falls out of an output-size ceiling, so
+> the same method offers a bigger ratio on a small image than on a large one (a 1400×784
+> image tops out at 1.9× with `--enlarge` but 1.4× with `--upscale`). Ask for more and it is
+> clamped down to what your size allows; ask on an image that is already at the ceiling and
+> the upscale is dropped rather than submitted as a pointless 1×. The web Generate drawer
+> shows the live maximum and the resulting size (`1400×784 → 1952×1096`) as you drag.
 
 ---
 
@@ -184,29 +202,93 @@ The four are clamped to what the chosen model really supports before submit — 
 Reference Pro only offers 2K/4K and has no quality knob, so out-of-range values are
 corrected (and shown in the preview) rather than rejected.
 
-## Enhance an image (`--enhance`) — one-click PixAI workflows
+## Upscale — on the picture, not in the drawer
 
-Run one of PixAI's own preset enhance tools on an image: a **panelplugin workflow**
-(`--workflow-id` — face fix, upscale, background removal, and similar one-click tools) or an
-**art filter** (`--filter-id`). Source is a catalog `media_id` or a local file (auto-uploaded on
-`--confirm`). Preview-only until `--confirm`, same as every other spend-capable command here.
+PixAI upscales an image you already have, so that is where Moonglade puts it. Open any image
+and use **↱ Upscale** — from the **Details** page, or from the lightbox, where it opens as a
+flyout so you can still see the picture while you choose.
 
-**Web:** the Generate drawer's **Edit ▸ Enhance** sub-tab lists PixAI's own curated workflow
-shelf and a search box over the rest of its ComfyUI catalog — that's the easiest way to find a
-real `--workflow-id`/`--filter-id` without guessing. `--dump-params` off a real enhance task
-(recovered via `--task-id`) also prints the exact ids and shape it used.
+Two methods, and they are genuinely different jobs:
 
-```bash
-# preview a panelplugin workflow (e.g. an upscale) on a catalog image:
-python pixai_gallery_backup.py --enhance --src <media_id> --workflow-id <id>
-# apply an art filter, with strength, spending credits:
-python pixai_gallery_backup.py --enhance --src <media_id> --filter-id filter-v1-m2 --strength 0.77 --confirm
-```
+| | **Upscale** (ESRGAN) | **Hires** |
+|---|---|---|
+| what it does | runs an upscaler network over the finished picture | re-renders it at the larger size |
+| result | the same picture, larger | more detail, not just more pixels |
+| controls | a choice of 5 upscaler networks | denoising strength and steps |
+| ratio | bigger ratios allowed | smaller ratios allowed |
+| cost | cheaper | roughly 3× |
 
-> **No cost preview.** Unlike every other spend-capable command in this file, `--enhance` has
-> no `--price`-style estimate before `--confirm` — PixAI's own cost-preview endpoint doesn't
-> cover this task family. Preview mode (no `--confirm`) still shows you exactly what would be
-> submitted, so you can sanity-check the workflow/filter id and source image first.
+**The maximum ratio depends on the picture.** It is worked out from that image's real width
+and height against a pixel ceiling, so the panel tells you the real answer for the image in
+front of you — "max 2.7× for this picture" — and shows the exact output size as you drag.
+
+**Upscaling needs a model.** Normally the panel fills it in from the image itself. Two cases
+where it cannot: your catalog has not captured it yet (run `--backfill-full-meta`, and see
+[Backing up](Backing-Up)), or you imported the file from your own computer, in which case
+PixAI has no record of it and never will. Either way you can pick a model yourself — it is
+the same picker the Generate drawer uses. The panel never picks one for you, because
+upscaling under a different model changes how the picture looks.
+
+The cost is shown before you commit, and a matching free card is applied automatically, the
+same as any other generation.
+
+> **In the Generate drawer** you will find **Enhance Details** among the boosters instead.
+> That is PixAI's Hires applied to the image you are about to make — the same family of
+> settings, but part of the generation rather than something you do to a finished picture.
+
+## Art filters — free, in your browser
+
+**Art filters** are not generations. Each one is two or three gradient overlays with a blend mode
+and an opacity, plus an optional brightness/contrast/saturation trim. PixAI's seven come from a
+public config endpoint that their own site reads and composites in the browser — which is why
+their Filters tab has no Generate button and never quotes a price.
+
+Moonglade does the same thing locally, and adds five of its own. Open the Generate drawer →
+**Edit** → **Enhance** → **Open filters**:
+
+| Set | Filters |
+|---|---|
+| **Moonglade** | Moonglade · Nightfallen · Moonlit Silver · Embercourt · Verdant Grove |
+| **PixAI** | M1 – M7 |
+
+The five Moonglade filters are derived from the app's five **skins**, each built from that skin's
+own accent and lead colours, so a filtered image reads as the app rather than as a generic wash —
+and they stay matched to the skins they came from, because a retinted skin fails the test that
+pins them to it. They are also **exact-only**: every blend mode they use has a real CSS and canvas
+equivalent, so the saved PNG is the preview, pixel for pixel.
+
+The panel is a comparison. The **original** sits on the left, the **filtered preview** beside it,
+and the swatch rail with the strength and angle sliders on the right — judging a filter means
+seeing both at once, not toggling one image back and forth. Picking a filter costs **nothing** and
+makes **no network request at all**; it works with the connection down.
+
+Four actions sit under the rail:
+
+- **No filter** — clear the preview back to the original.
+- **Save to library** — bake the result at full resolution into `imported/`, with a thumbnail and
+  a catalog row, exactly as importing any local file does. Nothing is uploaded to PixAI.
+- **Send to image gen** — upload the filtered image to PixAI (free, the same handshake as
+  **↑ Import**) and load it straight into the Edit tab as the source, so you can generate *from*
+  the filtered version. The upload spends nothing; only the generation you then run costs.
+- **Publish** — not built yet, and shown disabled with that reason.
+
+Two of the eight blend modes PixAI uses are Photoshop's whole-colour *Darker Color* / *Lighter
+Color*, which have no CSS or canvas equivalent; they are rendered with `darken` / `lighten`
+(per-channel min/max), so PixAI's M1, M2, M5 and M6 can differ slightly from PixAI's own render
+where a gradient crosses the image's hue. Every other filter — including all five Moonglade ones
+— is exact.
+
+There is no CLI flag for this — it's a browser-side composite, and the old credit-spending
+`--enhance --filter-id` submit was removed rather than kept as a worse way to get the same
+pixels.
+
+> **PixAI's one-click *workflow* tools are not available here.** Their tiled upscale,
+> background removal, line-art and relight presets run only on pixai.art itself: a task
+> submitted with an API key is accepted and queued, then cancelled about an hour later without
+> ever being started. There is no `--workflow-id`, and the web drawer's **Enhance** sub-tab
+> says the same thing. For hands and faces, use the **Fixer** instead — it goes through a
+> different endpoint and works. Plain **Upscale** and **Hires** do work: they're ordinary
+> generation settings on the Generate tab, not workflows.
 
 ## Multi-reference video (`--reference-video`)
 
@@ -226,7 +308,8 @@ python pixai_gallery_backup.py --reference-video --ref-image <id1> --ref-image <
 
 | Flag | Meaning |
 |---|---|
-| `--ref-image` / `--ref-video` / `--ref-audio` | a reference (media_id or local file), **repeatable** — `@image1`, `@image2`, … |
+| `--ref-image` / `--ref-video` | a reference (media_id **or** a local file, uploaded for you), **repeatable** — `@image1`, `@image2`, … |
+| `--ref-audio` | a reference — **media_id only**, *not* a local file, **repeatable**. PixAI's uploader takes images and videos only, so there's nothing to upload a bare audio file as. To use audio from your own machine, put it into a video (even just a still image with the audio track) and pass that with `--ref-video`. |
 | `--prompt` | cite refs by `@imageN` / `@videoN` / `@audioN` |
 | `--duration` / `--video-mode` / `--audio` | as with `--generate-video` (15s uses 3 V4.0 cards) |
 | `--confirm` | **required** to submit |
@@ -318,10 +401,18 @@ so a tablet or second device can generate too; see [Trust & Safety](Trust-and-Sa
 what *is* restricted to the server's own machine.
 
 - **Generate** — pick a base model in the pop-out browser (hover any card for a full preview),
-  attach up to 6 **LoRAs with weights**, aspect/mode/count, live credit cost with the free-card
-  check up front.
-- **Edit** — instruct edits ("make it night"), the one-click **Enhance** workflow catalog, and
-  the drag-a-box hand/face **Fixer**, in sub-tabs over one source image.
+  attach **LoRAs with weights** up to your account's own limit (read live from your PixAI
+  membership and shown as `LORAS · n/max` — it is not a fixed number, and Generate blocks
+  rather than letting you submit over it), aspect/mode/count, live credit cost with the
+  free-card check up front.
+- **Edit** — instruct edits ("make it night") and the drag-a-box hand/face **Fixer**, in
+  sub-tabs over one source image. The third sub-tab, **Enhance**, is where PixAI's seven
+  **art filters** live: gradient overlays applied right in your browser, so they cost nothing,
+  make no request, and work offline.
+  The Fixer shows its live credit cost as soon as you mark a region, and always asks before
+  it submits: unlike everything else in the drawer, a fix can't be covered by a free card, so
+  it always spends. Fixed images are filed under the name of the image they repaired plus a
+  `fix-face` / `fix-hand` marker, so a repair sits next to its original in the folder.
 - **Video** — first-frame / first+last / multi-reference shots; pick reference images straight
   from your own gallery (badged `@image1…`, removable, hover to preview); typing `@image1` in
   the prompt turns into a chip; model + duration + audio; live cost shows **FREE + how many

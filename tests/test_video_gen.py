@@ -518,9 +518,9 @@ def _seed_one(tmp_path, mid="733917871331404290"):
 
 def test_every_input_path_uploads_the_catalog_reference(tmp_path, monkeypatch):
     """The first fix for the invalid_media_id bug patched ONLY the video route, leaving
-    /api/enhance, /api/edit and /api/fix silently broken the same way -- the owner's next
-    enhance died on it. PixAI refuses a generation-OUTPUT id as an INPUT on every one of
-    these paths, so all four must resolve through _input_media_id.
+    /api/edit and /api/fix silently broken the same way. PixAI refuses a generation-OUTPUT
+    id as an INPUT on every one of these paths, so all three must resolve through
+    _input_media_id.
 
     Parametrised deliberately: a new input endpoint that forgets to resolve is the exact
     way this returns, and this fails by name when it does."""
@@ -536,8 +536,6 @@ def test_every_input_path_uploads_the_catalog_reference(tmp_path, monkeypatch):
                         lambda s, params: seen.update(params=params) or "t1")
     monkeypatch.setattr(core, "submit_fixer",
                         lambda s, src, boxes: seen.update(fix_src=src) or "t2")
-    monkeypatch.setattr(core, "build_panelplugin_parameters",
-                        lambda src, wid: seen.update(enh_src=src) or {"p": 1})
 
     cli = login_test_client(create_app(tmp_path))
 
@@ -546,15 +544,11 @@ def test_every_input_path_uploads_the_catalog_reference(tmp_path, monkeypatch):
                     "images": [mid], "duration": 5}).status_code == 200
     assert seen["params"]["i2vPro"]["mediaId"] == "999000111222"
 
-    # 2. enhance -- the path the owner's stuck job died on
-    cli.post("/api/enhance", json={"source": mid, "workflow_id": "wf1"})
-    assert seen.get("enh_src") == "999000111222", "enhance passed the raw catalog id"
-
-    # 3. fix
+    # 2. fix
     cli.post("/api/fix", json={"source": mid, "boxes": [{"x": 1, "y": 1, "w": 2, "h": 2}]})
     assert seen.get("fix_src") == "999000111222", "fix passed the raw catalog id"
 
-    # 4. edit
+    # 3. edit
     seen.pop("params", None)
     cli.post("/api/edit", json={"source": mid, "instruction": "make it night"})
     chat = (seen.get("params") or {}).get("chat") or {}
@@ -634,3 +628,37 @@ def test_download_video_task_catalogs_video_even_if_poster_fails(monkeypatch, tm
     core._download_video_task(object(), {}, "T7", tmp_path, SimpleNamespace(name_length=60), {})
     assert any(r.get("media_id") == "V7" and r.get("is_video") == "1" for r in saved), \
         "the finished video must be cataloged even when the poster thumbnail fails"
+
+
+# ---- reference-video: local files must upload with the RIGHT MediaType ----
+
+def test_local_video_reference_uploads_as_VIDEO(monkeypatch):
+    """`_resolve_refs` served all three ref kinds through one call that let
+    `upload_media`'s media_type default to IMAGE, so a local --ref-video file was
+    registered on PixAI as an IMAGE. Probed against the live schema 2026-07-24:
+    `MediaType` is a real GraphQL enum whose only members are IMAGE and VIDEO."""
+    seen = []
+    monkeypatch.setattr(core, "upload_media",
+                        lambda s, p, mt="IMAGE": seen.append(mt) or "up-1")
+    monkeypatch.setattr(core, "_is_local_source", lambda s: str(s).startswith("/local"))
+
+    assert core._resolve_refs(object(), ["/local/a.png"], "IMAGE") == ["up-1"]
+    assert core._resolve_refs(object(), ["/local/b.mp4"], "VIDEO") == ["up-1"]
+    assert seen == ["IMAGE", "VIDEO"], \
+        "local refs uploaded as {} -- a local video must register as VIDEO".format(seen)
+
+
+def test_local_audio_reference_is_refused_not_mislabelled():
+    """There is NO `AUDIO` member of PixAI's MediaType enum (live-probed 2026-07-24:
+    "Value \"AUDIO\" does not exist in \"MediaType\" enum"). So a local audio file has
+    no correct type to upload under -- silently sending it as an IMAGE produces a junk
+    media_id and a baffling downstream failure. Refuse it with a usable message
+    instead. A bare media_id still passes straight through."""
+    with pytest.raises(core.PixAIError) as e:
+        core._resolve_refs(object(), [__file__], None)
+    msg = str(e.value)
+    assert "--ref-video" in msg, "the error must name the workaround, not just say no"
+
+    # an existing media_id is untouched -- only the local-file case is refused
+    assert core._resolve_refs(object(), ["746928310596368107"], None) == \
+        ["746928310596368107"]

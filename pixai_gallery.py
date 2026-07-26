@@ -2321,6 +2321,15 @@ def collection_health(out_dir, db_path):
         total_rows   = _scalar("SELECT COUNT(*) FROM catalog")
         with_image   = _scalar("SELECT COUNT(*) FROM catalog WHERE filename != ''")
         with_full    = _scalar("SELECT COUNT(*) FROM catalog WHERE COALESCE(prompt_full,'') != ''")
+        # prompt_full alone overstates it badly. A row can hold a prompt and a seed while
+        # holding no model, steps, sampler or CFG -- so this panel read 98% on a catalog
+        # where 1% of rows could say which model made them. model_id is the honest second
+        # number: it comes only from a task-detail fetch, and it is what an image-view
+        # upscale needs. Locally imported rows have no PixAI task and so can never carry
+        # one; they are excluded rather than counted as a permanent shortfall.
+        with_model   = _scalar("SELECT COUNT(*) FROM catalog WHERE COALESCE(model_id,'') != ''")
+        model_base   = _scalar("SELECT COUNT(*) FROM catalog "
+                               "WHERE COALESCE(source,'') != 'local'")
         rated        = _scalar("SELECT COUNT(*) FROM catalog "
                                "WHERE COALESCE(NULLIF(rating,''),'0') NOT IN ('0')")
         by_month = con.execute(
@@ -2409,6 +2418,8 @@ def collection_health(out_dir, db_path):
         "with_image": with_image,
         "with_full_meta": with_full,
         "full_meta_pct": round(100 * with_full / with_image) if with_image else 0,
+        "with_model": with_model,
+        "model_pct": round(100 * with_model / model_base) if model_base else 0,
         "rated": rated,
         "missing": missing,
         "uncataloged": len(uncataloged),
@@ -2559,6 +2570,13 @@ def find_image_file(out_dir, media_id, filename):
 # Accidental bulk deletes should be recoverable: purges MOVE files here instead of
 # destroying them (the catalog row is still removed, so the gallery stays clean).
 DELETED_DIRNAME = "_deleted"
+
+# How many tasks /api/delete-preview describes image-by-image before it stops and just
+# counts the rest. A DISPLAY bound only -- the totals it returns are always exact for
+# the whole selection. 24 tasks is up to ~100 thumbnails, which is already more than
+# anyone reads in a confirm dialog; selecting a thousand images would otherwise build a
+# megabyte of JSON and a thumbnail wall the modal cannot scroll through.
+DELETE_PREVIEW_TASK_CAP = 24
 
 
 def _trash_meta_path(out_dir, media_id):
@@ -3136,6 +3154,45 @@ DESIGN_TOKENS_CSS = r"""
   }
 """
 
+
+def _upscale_const_js():
+    """The upscale constants, handed to the client from core, through the
+    __UPSCALE_CONST__ marker (same idiom as __DESIGN_TOKENS__).
+
+    Two things ride along and both have one source of truth here rather than a retyped
+    copy in a template or a component:
+
+    * the five upscaler names, which PixAI matches LITERALLY -- mixed underscores, spaces
+      and plus signs and all ("R-ESRGAN 4x+ Anime6B") -- so a typo is a rejected submit;
+    * UPSCALE_PIXEL_CEILING, so <mg-upscale-panel> can derive the same dynamic ratio cap
+      the server clamps to WITHOUT a second hand port of max_upscale_ratio. The Generate
+      drawer still carries its own ported copy (documented, and pinned against the Python
+      by tests/test_upscale_boosters.py); this exists so the new surface does not add a
+      third place for those numbers to drift.
+
+    Substituted into INDEX_HTML and DETAIL_HTML only -- the two pages with upscale UI --
+    rather than into BASE_HTML, which four other templates also derive from and which
+    would leave the raw marker visible on /login, /health, /dupes and /panel.
+    """
+    import pixai_gallery_backup as core
+    return ("<script>window.MG_UPSCALE={};window.MG_LORA={};</script>".format(
+        json.dumps({
+            "enlargeModels": list(core.ENLARGE_MODELS),
+            "defaultEnlargeModel": core.DEFAULT_ENLARGE_MODEL,
+            "ceiling": core.UPSCALE_PIXEL_CEILING,
+            "denoise": {"strength": core.DEFAULT_UPSCALE_DENOISING_STRENGTH,
+                        "steps": core.DEFAULT_UPSCALE_DENOISING_STEPS},
+        }, separators=(",", ":")),
+        # LoRA weight bounds per base architecture -- DiT allows 0..1.2, the SD family
+        # -2..2. One table, served, so the drawer's slider and the builder's clamp cannot
+        # drift into offering a weight the architecture rejects.
+        json.dumps({
+            "ranges": {k: list(v) for k, v in core.LORA_WEIGHT_RANGES.items()},
+            "fallback": [core.LORA_WEIGHT_MIN, core.LORA_WEIGHT_MAX],
+            "step": core.LORA_WEIGHT_STEP,
+        }, separators=(",", ":"))))
+
+
 # ---------------------------------------------------------------------------
 # Global 401 guard, injected into EVERY page head (BASE_HTML and _LOOM_SHELL).
 #
@@ -3271,6 +3328,7 @@ __BABEL_LIB_TAG__
 <script src="/static/mg-cost-badge.js"></script>
 <script src="/static/mg-generate-drawer.js"></script>
 <script src="/static/mg-notify.js"></script>
+__UPSCALE_CONST__
 </head><body>
 <div id="root"></div>
 <div id="jobs-fab" onclick="JobsCard.open()" title="Activity"><span class="jf-dot"></span><span class="jf-badge" id="jobs-fab-badge"></span><span>Activity</span></div>
@@ -3357,6 +3415,30 @@ def _build_stamp():
     except Exception:
         sha = ""
     return "v{}".format(ver) + (" · {}".format(sha) if sha else "")
+
+
+LIBRARY_DIR_KEY = "LIBRARY_DIR"
+DEFAULT_LIBRARY_DIR = "pixai_backup"
+
+
+def resolve_library_dir(explicit=None):
+    """Where the library lives: an explicit --out, then config.json's LIBRARY_DIR, then the
+    default. Explicit beats stored on purpose -- a one-off `--out somewhere`, a scheduled
+    job, or a second install pointed elsewhere must not be overridden by a shared setting,
+    and must not quietly rewrite it either.
+
+    Read fresh from disk rather than through core's module-level _cfg cache: the Panel
+    writes this and then restarts, and a cache populated at the OLD process's start is
+    exactly the value the restart exists to get away from.
+    """
+    if explicit:
+        return str(explicit)
+    try:
+        import pixai_gallery_backup as _core
+        stored = str((_core._load_config() or {}).get(LIBRARY_DIR_KEY) or "").strip()
+    except Exception:                                   # noqa: BLE001
+        stored = ""
+    return stored or DEFAULT_LIBRARY_DIR
 
 
 def _supervised():
@@ -3477,8 +3559,31 @@ def create_app(out_dir: Path):
             if not path or len(path) < 4 or path in seen:
                 continue
             seen.add(path)
-            if path in out:
-                out = out.replace(path, "<host-path>")
+            # Case-INSENSITIVE, and separator-agnostic on Windows. The obvious
+            # `path in out` / `out.replace(path, ...)` is case-SENSITIVE, while the paths
+            # being redacted live on a case-insensitive filesystem: a third-party library or
+            # a normalized OS string can hand back the same directory in a different case,
+            # or with forward slashes instead of backslashes, and an exact-substring match
+            # silently misses it -- shipping the real host path and the OS username to a LAN
+            # caller while this function reports success. Both variants are real; neither is
+            # exotic.
+            #
+            # Split the RAW path on separators FIRST, then escape each segment, then rejoin
+            # with a separator class. Order matters and the obvious way round is broken:
+            # escaping first and then substituting separators inside the escaped string also
+            # rewrites the backslash that re.escape added in front of other characters -- a
+            # directory named "John Smith" escapes to "John\ Smith", whose backslash then
+            # gets swallowed into a separator class, producing "John[\\/]+ Smith" and a
+            # pattern that matches NOTHING, not even the plain case it used to handle.
+            #
+            # Every segment stays re.escape'd, so the pattern can still only ever match this
+            # exact path -- the separator class is the ONLY looseness introduced, which
+            # matters because a looser matcher here is precisely how the
+            # eats-ordinary-messages bug (see the resolve() note above) comes back. The
+            # length floor above remains the second, independent guard.
+            segments = re.split(r'[\\/]+', path)
+            pattern = r'[\\/]+'.join(re.escape(s) for s in segments)
+            out = re.sub(pattern, "<host-path>", out, flags=re.IGNORECASE)
         return out
 
     @app.context_processor
@@ -3853,18 +3958,94 @@ def create_app(out_dir: Path):
                 if ent["waiters"] <= 0:
                     _collect_inflight.pop(tid, None)   # keep the map from growing forever
 
+    def _log_mirrored_media(tid, got):
+        """Record WHAT the watcher just collected against the job we already track, in the
+        EXACT event shape /api/task-status's done branch writes (status='done', media_ids,
+        is_video) -- so a reader of jobs.jsonl can't tell which collector produced it.
+
+        The bug this closes (owner's production jobs.jsonl, 2026-07-24, two back-to-back
+        generations): TWO writers can mark a generation terminal, and only one of them used
+        to say what the task produced. /api/task-status's done branch logs media_ids;
+        _reconcile_job, firing off the same WebSocket event, logs a BARE done. While the
+        browser was still collecting gen #1 (several full-size downloads), the push event
+        for gen #2 arrived and _reconcile_job won the race -- so gen #2's job went terminal
+        carrying no media_ids, and nothing ever revisited it (the orphan sweep only
+        re-checks jobs stuck at 'running'; this one was already 'done'). Its four images
+        were downloaded and catalogued perfectly -- no data was lost -- but the Activity
+        card rendered blank forever, because static/mg-notify.js builds its thumbnail from
+        `(j.media_ids||[])[0]`. _watch_mirror had the answer in hand the whole time
+        (_collect_single_flight returns {media_ids, saved, is_video}) and discarded it.
+        Now whichever writer wins the race, the media ids get recorded.
+
+        `duration` is deliberately NOT logged even though collect_generation returns one
+        for videos: /api/task-status only puts it in its HTTP response, never in the job
+        log, and the two writers must stay indistinguishable in the log.
+
+        Three deliberate abstentions:
+          * EMPTY media_ids writes nothing at all -- an empty list is indistinguishable
+            from a real result to the tray, and would blank an entry another writer had
+            already filled in correctly. Recording nothing beats recording nothing-shaped.
+          * a task with NO job entry of its own writes nothing -- the same contract
+            _reconcile_job keeps ("never invents one for a task generated on the website"),
+            or every pixai.art generation would sprout a new Activity row here.
+          * a job that ALREADY carries media_ids writes nothing -- there's nothing to add,
+            and that's the common non-racing case (the browser poll got there first), so
+            skipping keeps one event per generation instead of two.
+
+        Unlike _close_orphan_if_resolved this does NOT require the job to be non-terminal:
+        a job already sitting at a bare 'done' is precisely the case being fixed. Reads the
+        raw reconstructed log for the same reason that helper does (an entry read_jobs()
+        would already be hiding past JOBS_MAX_AGE still gets its media recorded), and skips
+        a dismissed job rather than resurrecting it with a new event. Fails soft, and
+        cannot raise into _watch_mirror's daemon thread: mirroring must never break,
+        or lose its 'mirrored' count, because logging did."""
+        try:
+            import pixai_gallery_backup as _core
+            mids = (got or {}).get("media_ids") or []
+            if not mids:
+                return
+            jobs_by_id, _order, _n = _core._reconstruct_jobs(out_dir)
+            j = jobs_by_id.get(str(tid))
+            if not j or j.get("dismissed") or (j.get("media_ids") or []):
+                return
+            _log_job(str(tid), status="done", media_ids=mids,
+                     is_video=got.get("is_video", False))
+        except Exception:                          # noqa: BLE001 -- logging must not break mirroring
+            pass
+
     def _watch_mirror(tid):
         """Download + catalog one finished task off the watcher's event loop (own
-        session per call, matching the CLI's --watch-backup pattern)."""
+        session per call, matching the CLI's --watch-backup pattern), then record what it
+        collected in the job log -- see _log_mirrored_media for why throwing that answer
+        away left a raced generation's Activity card permanently blank.
+
+        Deliberately does NOT write a terminal 'failed' when the collect raises, matching
+        the reasoning in api_task_status's catch-all `except` (a false terminal failure
+        bricks the card for a generation that actually succeeded) -- and the case for
+        abstaining is STRONGER here than there. api_task_status treats EmptyOutputsError as
+        terminal because it asked PixAI for the task's status itself and got 'done' from
+        the same read-your-writes surface the detail query then answered from: two
+        consistent reads. This path's 'done' arrives on a different channel entirely (the
+        WS push), so an empty-outputs read moments later is just as plausibly the detail
+        query lagging the push as a genuinely empty task -- and writing 'failed' off it
+        would overwrite a perfectly good done+media_ids event in read_jobs()'s
+        last-event-wins merge. The authoritative failure writers stay /api/task-status and
+        the orphan sweep; a mirror problem is recorded where it belongs, in
+        _watch_status['last_error'] (surfaced by /api/watch/status and the Panel)."""
         import pixai_gallery_backup as core
         try:
             session = core._make_session(None)
-            _collect_single_flight(core, session, tid)
+            got = _collect_single_flight(core, session, tid)
             with _watch_lock:
                 _watch_status["mirrored"] += 1
         except Exception as e:
             with _watch_lock:
                 _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
+            return
+        # Outside the except above ON PURPOSE: _log_mirrored_media swallows its own
+        # failures, and keeping it out of that handler makes it structurally impossible for
+        # a logging problem to be reported as a mirror error on the watch-status line.
+        _log_mirrored_media(tid, got)
 
     # The closures above are unreachable from outside create_app; the test suite
     # drives the watcher-mirror path through this seam (conftest disables the real
@@ -3907,13 +4088,24 @@ def create_app(out_dir: Path):
         def _status(tid):
             if box["s"] is None:
                 box["s"] = core._make_session(None)
-            # ["phase"], not the whole dict: resolve_orphan_jobs compares this return
-            # against ("done","failed"), and generation_status returns
-            # {status, phase, paid_credit}. Passing the dict straight through meant the
-            # comparison never matched, so the reaper resolved NOTHING -- it just
-            # returned 0 forever while looking healthy. The unit tests stubbed status_fn
-            # with the documented string, so nothing caught the caller disagreeing.
-            return core.generation_status(box["s"], tid)["phase"]
+            # The WHOLE dict, deliberately -- and this line has now been wrong in both
+            # directions, so read before changing it.
+            #
+            # Originally the dict was passed through while resolve_orphan_jobs compared
+            # the return against ("done","failed"): the comparison never matched, the
+            # reaper resolved NOTHING, and it returned 0 forever while looking healthy.
+            # The fix at the time was to send `["phase"]` instead. The reaper has since
+            # been taught to accept BOTH shapes, and it now needs more than the phase: it
+            # reads `started` to spot a task PixAI accepted but never dispatched (which
+            # stays non-terminal for ~60min and otherwise spins silently). Sending the
+            # bare string again would make that branch dead code in production while
+            # every unit test around it still passed, because those call the library
+            # function directly with their own stub.
+            #
+            # Guarded end-to-end by tests/test_jobs.py's
+            # test_api_jobs_endpoint_marks_a_never_started_orphan_stale, which drives the
+            # real endpoint rather than the library function.
+            return core.generation_status(box["s"], tid)
         try:
             core.resolve_orphan_jobs(out_dir, _status, min_age=min_age)
         except Exception:                          # noqa: BLE001
@@ -4210,17 +4402,12 @@ __DESIGN_TOKENS__
     .bulk-bar .actions-menu { left: 8px; right: 8px; min-width: 0; }
     .bulk-tip { display: none; }
 
-    /* DRAWER + LIGHTBOX: full-width sheet, reachable centered model flyout, stacked selects,
-       lightbox arrows off the image, touch-sized controls. */
-    #gen-drawer, #gen-drawer.wide, #gen-drawer.dock-left { width: 100%; max-width: 100vw; }
-    #model-flyout, #gen-drawer.dock-left #model-flyout,
-    #gen-drawer.dock-top #model-flyout, #gen-drawer.dock-bottom #model-flyout {
-      position: fixed; top: 50%; left: 50%; right: auto; bottom: auto; transform: translate(-50%, -50%);
-      width: 94vw; max-width: 94vw; max-height: 82vh;
-      border: 1px solid var(--surface1); border-radius: 12px; box-shadow: 0 22px 60px rgba(0,0,0,.6); }
-    .gen-row { flex-wrap: wrap; } .gen-row > * { flex: 1 1 100%; }
-    .dock-ctl button { width: 34px; height: 34px; }
-    .gen-head .x { font-size: 28px; min-width: 40px; }
+    /* LIGHTBOX: arrows off the image, touch-sized controls.
+       The Generate DRAWER's own portrait rules used to sit here too, and were DEAD --
+       they lost the cascade to the drawer's base rules, which live in a LATER <style>
+       block. They now live at the end of that same stylesheet, immediately after the
+       rules they override; search for "the drawer's own mobile pass" for the full
+       writeup. Do not move drawer/flyout overrides back up into this block. */
     #lb-img, #lb-video { max-width: 100vw; max-height: 74vh; }
     .lb-nav { top: auto; bottom: 12px; transform: none; min-width: 48px; min-height: 48px; padding: 0;
       display: flex; align-items: center; justify-content: center; font-size: 24px; }
@@ -4717,8 +4904,23 @@ document.addEventListener('DOMContentLoaded', function() {
     <button type="button" class="btn b-art" onclick="YourArt.open()" title="How your published art is doing &mdash; views, likes, comments">&#128200; My Art</button>
     {% if is_local %}
     <a class="btn b-panel" href="{{ url_for('panel') }}" title="Maintenance jobs, logs, settings">&#9881; Panel</a>
-    {% else %}
-    <span class="lan-note" title="Creation &amp; maintenance tools live on the owner's machine, or need you to sign in.">&#128065; read-only LAN view</span>
+    {% endif %}
+    {# The LAN indicator, in the slot the old (unreachable) "read-only LAN view" note
+       used to occupy. It branches on `is_true_local`, NOT `is_local`: `is_local` is
+       hardcoded True at index()'s render call, so anything hung off its `{% else %}`
+       could never render -- and the note that used to live there was wrong anyway,
+       since a signed-in LAN session is not read-only (it browses, generates, and
+       drives the Loom and the Panel exactly like the owner at the keyboard).
+       What genuinely differs is the LOCALHOST tier: Import, "Delete from PixAI",
+       "Set launcher icon" and the file-moving Panel jobs are hidden for a remote
+       caller (see the head-nav comment above, and _is_local_request()). Nothing on
+       the page said so, so the same owner in the same browser saw a different set of
+       buttons depending only on whether the address bar said `localhost` or the
+       machine's LAN IP -- which reads as the app being broken, not as a tier. This
+       is a LABEL for a decision the tier helpers already made: it introduces no new
+       notion of trust, and every route keeps its own gate. #}
+    {% if not is_true_local %}
+    <span class="lan-note" id="lan-chip" title="You reached this gallery across the network, so the controls restricted to the machine running it are hidden: &#8593; Import, Delete from PixAI, Set launcher icon, and the destructive Panel jobs (Organize, Dedup, Rebuild thumbnails). Everything else — browsing, Generate, The Loom, the Panel — works normally here. Open the gallery on that machine's own localhost address to get the rest.">&#127760; LAN session &middot; local-only tools hidden</span>
     {% endif %}
     <a class="btn b-health" href="{{ url_for('health') }}" title="Collection health dashboard">&#9825; Health</a>
     {% if logged_in_user %}
@@ -5054,6 +5256,8 @@ document.addEventListener('DOMContentLoaded', function() {
       <button class="btn" onclick="lbEdit()" title="Open in the Edit tab">✎ Edit</button>
       <button class="btn" onclick="lbVideo()" title="Send to the Video tab as a reference">▶ To Video</button>
       <button class="btn" onclick="lbSimilar()" title="Find visually similar images">✧ Similar</button>
+      <button class="btn" id="lb-upscale" onclick="lbUpscale()"
+              title="Upscale this image (PixAI Upscale or Hires)">⇱ Upscale</button>
       <a id="lb-details" class="btn" href="#">Details</a>
       <button class="btn" id="lb-play" onclick="toggleSlideshow()">▶ Slideshow</button>
       <button class="btn" onclick="closeLightbox()">✕ Close</button>
@@ -5064,6 +5268,8 @@ document.addEventListener('DOMContentLoaded', function() {
   <video id="lb-video" controls loop playsinline style="display:none"></video>
   <button class="lb-nav lb-next" onclick="lbStep(1)" aria-label="Next">&#8250;</button>
 </div>
+<mg-upscale-panel id="up-flyout"></mg-upscale-panel>
+__UPSCALE_CONST__
 
 {% if not rows %}
 <div class="empty">
@@ -5547,22 +5753,111 @@ function confirmBulkDelete() {
   };
   document.getElementById('del-modal-form').action = '#';
 }
-function confirmBulkDeleteCloud() {
-  var ids = [...selGet()];
-  if (!ids.length) return;
-  if (!confirm('Delete ' + ids.length + ' selected image(s) from your PixAI account AND locally?\\n\\n'
-    + '⚠ This deletes the whole TASK for each selection (all images in a batch), '
-    + 'from the cloud AND your backup. It is IRREVERSIBLE.')) return;
-  var typed = prompt('This permanently deletes from PixAI. Type DELETE to confirm:');
-  if (typed !== 'DELETE') { alert('Cancelled.'); return; }
-  var f = document.createElement('form');
-  f.method = 'post'; f.action = '/delete-tasks-bulk';
-  function add(n, v){ var i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; f.appendChild(i); }
-  add('back', location.href);
-  ids.forEach(function(mid){ add('media_ids', mid); });
-  localStorage.removeItem('gallery_sel');
-  document.body.appendChild(f); f.submit();
-}
+/* ---- "Delete from PixAI": show the blast radius, then the typed gate ------------
+   Deleting on PixAI is TASK-level: selecting one image of a batch deletes the whole
+   batch, cloud AND local. This flow used to say that in prose and stop there, so the
+   one irreversible action in the app was also the only one whose real scope the user
+   could not see -- the siblings about to go were never counted, named or shown.
+   /api/delete-preview resolves the selection through the SAME helper
+   /delete-tasks-bulk itself uses, and this dialog renders what it came back with.
+   The typed DELETE prompt behind Continue is unchanged: this makes a consequence
+   visible, it does not replace a guard. */
+var CloudDel = (function(){
+  var ids = [], busy = false;
+  function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function n(v, one, many){ return v + ' ' + (v === 1 ? one : many); }
+  function close(){ document.getElementById('cloud-del-modal').classList.remove('open'); }
+  function strip(items){
+    var s = '<div class="cd-strip">';
+    items.forEach(function(m){
+      s += '<div class="cd-thumb' + (m.selected ? ' on' : '') + '" title="' + esc(m.media_id)
+         + (m.selected ? ' (you selected this)' : ' (comes with the batch)') + '">'
+         + (m.thumb ? '<img src="/thumbs/' + encodeURIComponent(m.thumb) + '.jpg" alt="" loading="lazy">'
+                    : '<span class="cd-noimg">' + esc(m.media_id) + '</span>')
+         + (m.is_video ? '<span class="cd-vid">&#9654;</span>' : '') + '</div>';
+    });
+    return s + '</div>';
+  }
+  function open(sel, d){
+    ids = sel;
+    var t = d.totals, body = '';
+    // Two genuinely different sentences, not one with holes punched in it: a selection
+    // of nothing but local imports deletes NOTHING on PixAI, and saying "across 0
+    // tasks will be deleted from your PixAI account" about it would be a lie.
+    var head = t.tasks === 0
+      ? '<b>' + n(t.media, 'file', 'files') + '</b> will be removed from your backup. None of them is '
+        + 'on PixAI (local imports), so nothing is deleted from your account.'
+      : '<b>' + n(t.media, 'file', 'files') + '</b> across <b>' + n(t.tasks, 'task', 'tasks')
+        + '</b> will be deleted from your PixAI account <b>and</b> from your backup.';
+    if (t.tasks > 0 && t.unselected > 0) {
+      head += ' You picked ' + n(t.selected, 'file', 'files') + '; the other '
+            + (t.unselected === 1 ? '1 comes with its batch.'
+                                  : t.unselected + ' come with their batches.');
+    }
+    // Don't let the headline count imply an import is going to be deleted from PixAI:
+    // it has no task there at all, and only its local copy moves.
+    if (t.tasks > 0 && t.local_only > 0) {
+      head += t.local_only === 1
+        ? ' One is a local import with no PixAI task &mdash; that one only leaves your backup.'
+        : ' ' + t.local_only + ' are local imports with no PixAI task &mdash; those only leave '
+          + 'your backup.';
+    }
+    document.getElementById('cd-summary').innerHTML = head;
+    d.tasks.forEach(function(tk){
+      body += '<div class="cd-task"><div class="cd-tlbl">whole batch'
+            + '<span class="cd-tid">task ' + esc(tk.task_id) + '</span>'
+            + '<span>' + n(tk.media.length, 'file', 'files') + '</span></div>'
+            + strip(tk.media) + '</div>';
+    });
+    if (d.local_only.length) {
+      body += '<div class="cd-task"><div class="cd-tlbl">no PixAI task &middot; removed locally only'
+            + '<span>' + n(t.local_only, 'file', 'files') + '</span></div>'
+            + strip(d.local_only) + '</div>';
+    }
+    if (d.truncated) {
+      body += '<div class="cd-more">Not every batch is shown above &mdash; the counts in the '
+            + 'first line cover the whole selection.</div>';
+    }
+    document.getElementById('cd-tasks').innerHTML = body;
+    document.getElementById('cloud-del-modal').classList.add('open');
+  }
+  // Fail-soft: an unreachable preview (server restarting, offline tab) must not turn the
+  // button into a dead click NOR silently drop the warning -- fall back to the prose-only
+  // confirm this dialog replaced, and say that the detail is missing rather than implying
+  // the selection is all that goes.
+  function blind(sel){
+    ids = sel;
+    if (!confirm('Delete ' + sel.length + ' selected file(s) from your PixAI account AND locally?\\n\\n'
+      + 'The preview of exactly what that takes could not be loaded, so: this deletes the whole '
+      + 'TASK behind each selection (every image in the batch, including ones you did not '
+      + 'select), from the cloud AND your backup. It is IRREVERSIBLE.')) return;
+    proceed();
+  }
+  function proceed(){
+    close();
+    var typed = prompt('This permanently deletes from PixAI. Type DELETE to confirm:');
+    if (typed !== 'DELETE') { alert('Cancelled.'); return; }
+    var f = document.createElement('form');
+    f.method = 'post'; f.action = '/delete-tasks-bulk';
+    function add(k, v){ var i=document.createElement('input'); i.type='hidden'; i.name=k; i.value=v; f.appendChild(i); }
+    add('back', location.href);
+    ids.forEach(function(mid){ add('media_ids', mid); });
+    localStorage.removeItem('gallery_sel');
+    document.body.appendChild(f); f.submit();
+  }
+  function ask(){
+    var sel = [...selGet()];
+    if (!sel.length || busy) return;
+    busy = true;
+    fetch('/api/delete-preview', {method:'POST', headers:{'Content-Type':'application/json'},
+                                  body: JSON.stringify({media_ids: sel})})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){ busy = false; if (d && d.totals) { open(sel, d); } else { blind(sel); } })
+      .catch(function(){ busy = false; blind(sel); });
+  }
+  return {ask:ask, close:close, proceed:proceed};
+})();
+function confirmBulkDeleteCloud() { CloudDel.ask(); }
 
 /* ---- Lightbox + keyboard navigation ---- */
 var lbCards = [], lbIdx = -1, lbTimer = null, lbZoom = false;
@@ -5609,6 +5904,7 @@ function lbNavUrl(href, where) {
 }
 function lbStep(d) {
   if (!lbCards.length) return;
+  lbUpscaleClose();          // ditto: never leave it pointed at the picture you moved off
   var ni = lbIdx + d;
   if (ni >= lbCards.length) {           // past the last card -> next page (open at its first)
     var nx = document.getElementById('pg-next');
@@ -5622,6 +5918,7 @@ function lbStep(d) {
   lbIdx = ni; lbShow();
 }
 function closeLightbox() {
+  lbUpscaleClose();          // the flyout is bound to this picture; it must not outlive it
   document.getElementById('lightbox').classList.remove('open');
   var vid = document.getElementById('lb-video');
   if (vid) { vid.pause(); vid.removeAttribute('src'); vid.load(); }
@@ -5773,6 +6070,7 @@ document.addEventListener('DOMContentLoaded', function(){
   .gen-lbl{color:var(--overlay0);font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px;}
   .gen-ta{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:7px 9px;font-size:13px;font-family:inherit;resize:vertical;}
   .gen-ta:focus,.gen-sel:focus{outline:none;border-color:var(--accent-soft);box-shadow:0 0 0 2px rgba(79,201,154,.25);}
+  .cap-off{opacity:.4;cursor:not-allowed;}
   #gen-selname{color:var(--lavender);font-size:12.5px;margin-bottom:8px;}
   .gen-aspects{display:flex;gap:5px;flex-wrap:wrap;}
   .gen-aspects button{padding:4px 9px;font-size:11px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
@@ -5810,15 +6108,12 @@ document.addEventListener('DOMContentLoaded', function(){
      when only one submission is ever in flight. */
   .gen-result-line{margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1);}
   .gen-result-line:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none;}
-  #enh-list{max-height:230px;overflow-y:auto;margin-top:2px;}
-  .enh-item{display:block;width:100%;text-align:left;padding:6px 9px;margin-bottom:4px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;font-size:12px;line-height:1.3;}
-  .enh-item:hover{border-color:var(--overlay0);}
-  .enh-item .ty{color:var(--overlay0);font-size:10px;}
-  .enh-shelf{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 12px;}
-  .enh-sec{flex:0 0 100%;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--overlay0);margin:7px 0 1px;}
-  .enh-sec:first-child{margin-top:0;}
-  .enh-card{padding:6px 11px;border-radius:7px;background:var(--surface1);color:var(--text);border:1px solid var(--surface1);cursor:pointer;font-size:12px;line-height:1.2;}
-  .enh-card:hover{border-color:var(--accent);background:var(--surface0);}
+  /* The Enhance sub-tab's shelf/list/card rules (#enh-list, .enh-item, .enh-shelf, .enh-sec,
+     .enh-card) went with the panelplugin controls they styled -- see the sub-tab's own comment
+     for why that surface cannot work. .enh-note is the pane's explanatory copy, shaped like
+     .lora-trig below (the drawer's other inline explanation) minus its accent tint. */
+  .enh-note{font-size:11.5px;line-height:1.5;padding:9px 11px;border-radius:7px;background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);}
+  .enh-note b{color:var(--text);}
   .fix-tags{display:flex;gap:5px;margin-bottom:6px;}
   .fix-tags button{padding:4px 10px;font-size:11px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
   .fix-tags button.on{background:var(--surface1);color:var(--text);border-color:var(--overlay0);}
@@ -5826,6 +6121,8 @@ document.addEventListener('DOMContentLoaded', function(){
   #fix-img{max-width:100%;display:block;border-radius:8px;}
   #fix-canvas{position:absolute;top:0;left:0;cursor:crosshair;touch-action:none;}
   #gen-loras{display:flex;flex-direction:column;gap:5px;}
+  .lora-cap{color:var(--subtext);font-weight:400;text-transform:none;letter-spacing:0;}
+  .lora-cap.over{color:var(--red);font-weight:600;}
   #gen-lora-note{display:flex;flex-direction:column;gap:5px;}
   #gen-lora-note:empty{display:none;}
   .lora-warn{font-size:11px;line-height:1.4;padding:6px 9px;border-radius:6px;background:rgba(243,139,168,.09);border:1px solid var(--red);color:var(--red);}
@@ -5836,11 +6133,18 @@ document.addEventListener('DOMContentLoaded', function(){
   .lora-trig button.done{background:var(--surface1);color:var(--subtext);cursor:default;}
   .lora-chip.incompat{border-color:var(--red);}
   .lora-chip.incompat .nm{color:var(--red);}
-  .lora-chip{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:12px;color:var(--text);}
+  .lora-chip{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:5px 8px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:12px;color:var(--text);}
   .lora-chip img{width:24px;height:24px;border-radius:4px;object-fit:cover;flex:0 0 auto;}
   .lora-chip .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .lora-chip input{width:58px;background:var(--surface1);border:1px solid var(--overlay0);border-radius:4px;color:var(--text);font-size:11.5px;padding:2px 4px;}
+  /* The weight control: a slider plus its own value. `.lora-chip input` above still
+     exists for anything else in a chip, and these out-specify it for the range. */
+  .lora-chip .lw{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
+  .lora-chip .lw input[type=range]{width:92px;padding:0;background:none;border:none;}
+  .lora-chip .lw b{min-width:32px;text-align:right;font-size:11px;font-weight:600;
+    color:var(--lavender);font-variant-numeric:tabular-nums;}
   .lora-chip .rm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:14px;padding:0 2px;}
+  .lora-chip select.ver{flex:1 1 100%;margin-top:1px;background:var(--surface1);border:1px solid var(--overlay0);border-radius:4px;color:var(--text);font-size:10.5px;padding:2px 4px;}
   .lora-chip .rm:hover{color:var(--red);}
   #lora-add{width:100%;margin-top:5px;padding:5px 0;font-size:11.5px;border-radius:6px;background:transparent;color:var(--subtext);border:1px dashed var(--surface1);cursor:pointer;}
   #lora-add:hover{color:var(--text);border-color:var(--overlay0);}
@@ -5875,6 +6179,87 @@ document.addEventListener('DOMContentLoaded', function(){
   #model-flyout .gen-body{overflow:hidden;display:flex;flex-direction:column;min-height:0;}
   #model-flyout #gen-picker-host{flex:1;min-height:0;display:flex;flex-direction:column;}
   #model-flyout mg-model-picker{flex:1;min-height:0;}
+  /* ---- Art filters flyout (Edit > Enhance) --------------------------------------------
+     Same chrome as #model-flyout above (--mantle box, .gen-head/.gen-body, one heavy shadow)
+     but placed the way #model-preview is: position:fixed with left/top written by JS, the
+     rule mg-model-picker's _place() uses -- prefer the side with room, then clamp to the
+     viewport. #model-flyout's pure-CSS `right:100%` edge pop cannot carry this panel: it is
+     side-by-side, so it is far wider than the 372px flyout that rule was written for, and at
+     that width running off the left edge stops being hypothetical on a laptop.
+
+     It is a TOP-LEVEL element, deliberately not a child of #gen-drawer. The drawer carries
+     `transform: translateX(...)`, and a transform makes its box the containing block for
+     position:fixed descendants -- so viewport coordinates from getBoundingClientRect() would
+     be re-interpreted relative to the drawer and the panel would land off-screen. That is also
+     why #model-flyout, which IS inside the drawer, has to use position:absolute. */
+  #filters-flyout{position:fixed;z-index:222;display:none;flex-direction:column;
+    background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;
+    box-shadow:0 22px 60px rgba(0,0,0,.6);overflow:hidden;}
+  #filters-flyout.open{display:flex;}
+  #filters-flyout .gen-head{padding:11px 13px 0;}
+  #filters-flyout .gen-head .x{margin-left:auto;}
+  #filters-flyout .gen-body{padding:11px 13px 13px;overflow:auto;min-height:0;}
+  /* Three columns: ORIGINAL, PREVIEW, then the palette rail. Judging a filter is a
+     comparison, and the panel could not host one while it showed a single image -- you had to
+     toggle No filter back and forth and hold the difference in your head. `flex-wrap` still
+     carries the narrow case, degrading to a stack rather than squeezing all three to unusable.
+
+     The two image columns take an EXPLICIT flex-basis, never `auto`: with `auto` a column's
+     base size is the image's max-content width -- its INTRINSIC width, 900px for a typical
+     generation, because `max-width:100%` on the img can't resolve against a container the img
+     is itself sizing. The hypothetical sizes then exceed the panel, flex-wrap breaks the line,
+     and the rail ends up under the pictures at every panel width. (Measured on the old
+     two-column build: a 604px image in a 647px panel wrapped; from a 0 basis the same image
+     rendered 375px wide, beside the controls.) A 250px basis keeps that fix and additionally
+     decides the wrap POINT -- 250+250+236+gaps, so the columns drop only when there is
+     genuinely no room for three. min-width:0 lets them shrink below the basis before wrapping,
+     which a flex item does not do by default. */
+  #filters-flyout .af-wrap{display:flex;gap:14px;align-items:stretch;flex-wrap:wrap;}
+  #filters-flyout .af-col{flex:1 1 250px;min-width:0;display:flex;flex-direction:column;}
+  #filters-flyout .af-rail{flex:0 0 236px;}
+  /* `align-items:stretch` + `flex:1` on the frame is what fills the panel. The rail is the
+     tall column -- twelve swatches, two sliders and the action group -- while a landscape
+     source is wide and short, so with `flex-start` the pictures sat in the top corner above
+     several hundred px of nothing. Stretching makes the frames two equal boxes that own the
+     height, with the picture centred inside; the leftover room reads as matting rather than
+     as a layout that failed to fill. It also lines the captions up with each other when the
+     two pictures differ in height, and a comparison that jitters is worse than none.
+
+     The picture is centred by the frame, NOT letterboxed by the image: #af-img keeps
+     width/height:auto so #af-stage stays exactly its box (see below) -- `object-fit:contain`
+     here would keep the element at full frame size and the overlay gradients, which know
+     nothing about object-fit, would paint across the matting too. */
+  #filters-flyout .af-frame{flex:1;display:flex;align-items:center;justify-content:center;
+    background:var(--crust);border:1px solid var(--surface0);border-radius:10px;
+    padding:6px;min-height:120px;}
+  #filters-flyout .af-cap{font-size:11px;color:var(--subtext);text-align:center;margin-top:6px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #filters-flyout .af-cap b{color:var(--text);font-weight:600;}
+  #filters-flyout .af-grp{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--overlay0);margin:11px 0 5px;display:flex;align-items:center;gap:6px;}
+  #filters-flyout .af-grp:first-child{margin-top:0;}
+  #filters-flyout .af-grp::after{content:"";flex:1;height:1px;background:var(--surface0);}
+  #filters-flyout .af-acts{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:11px;}
+  #filters-flyout .af-acts .gen-go{width:100%;padding:7px 4px;font-size:11.5px;}
+  #filters-flyout .af-acts .gen-go[disabled]{opacity:.45;cursor:not-allowed;}
+  /* The stage is MgArtFilters' preview host: it stacks overlay divs at `inset:0` over the
+     <img>, so its box has to be the image's box EXACTLY -- inline-block + line-height:0 + a
+     block img, the same pairing #fix-wrap needs to keep its canvas registered with the photo.
+     Deliberately NOT `width:100%` + `object-fit:contain`: that keeps the element's box at the
+     full column width and letterboxes the picture inside it, and the overlays -- which know
+     nothing about object-fit -- would then paint the filter's gradient across the bars too. */
+  #af-stage{position:relative;display:inline-block;line-height:0;border-radius:9px;
+    overflow:hidden;}
+  #af-img,#af-orig{display:block;max-width:100%;max-height:52vh;width:auto;height:auto;}
+  .af-tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
+  .af-tile{cursor:pointer;background:none;border:none;padding:0;display:block;}
+  .af-tile .sw{width:100%;aspect-ratio:1;border-radius:7px;border:2px solid var(--surface1);}
+  .af-tile.on .sw{border-color:var(--lavender);box-shadow:0 0 9px rgba(182,146,230,.6);}
+  .af-tile .cap{font-size:9.5px;color:var(--subtext);text-align:center;margin-top:2px;
+    line-height:1.25;overflow-wrap:anywhere;}
+  .af-tile.on .cap{color:var(--text);}
+  #af-msg{font-size:11px;color:var(--subtext);margin-top:7px;min-height:14px;}
+  #af-msg.bad{color:var(--red);}
   /* O13: #pick-scrim/#pick-modal/.pick-filters and their CSS are gone -- <mg-gallery-picker>
      (static/mg-gallery-picker.js) brings its own complete self-contained overlay/box/filter
      chrome, injected client-side. #similar-modal below is UNRELATED (Similar.js, not Picker)
@@ -5910,6 +6295,47 @@ document.addEventListener('DOMContentLoaded', function(){
   #model-preview .mp-badges .bdg{font-size:10px;font-weight:600;letter-spacing:.02em;border-radius:5px;padding:1px 7px;background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);text-transform:uppercase;}
   #model-preview .mp-badges .bdg.base{color:#c9b8ff;border-color:#4a3f78;}
   #model-preview .mp-badges .bdg.official{color:#0f1017;background:linear-gradient(180deg,#ffd27a,#e6a94b);border-color:#e6a94b;}
+
+  /* ---- Portrait phones (<=480px): the drawer's own mobile pass. ----
+     These rules USED to live up in the gallery's main <style> block, inside the shared
+     @media (max-width: 480px). They were entirely DEAD there. Every one of them leans on
+     the bare #gen-drawer / #model-flyout / .dock-ctl button / .gen-head .x selector, and
+     that media block sits EARLIER in the document than THIS stylesheet -- so at equal
+     specificity the base rules just above won on document order. A media query adds no
+     specificity; being inside one buys an override nothing.
+
+     Measured in a real browser at 375x812 before the move:
+       - the open drawer in its DEFAULT dock (the right-hand one) was 352.5px wide
+         (94vw from the base rule, not the 100%/100vw asked for here) -- a 22.5px dead
+         gutter down the side of what is supposed to be a full-width sheet
+       - the model flyout kept `transform: translate(-50%,-50%)` from here (the base rule
+         sets no transform, so nothing contested it) while `position`/`top`/`right` lost
+         to the base rule -- landing it at rect y = -332.9px, i.e. half the panel above
+         the top of the viewport and unreachable
+       - .dock-ctl button stayed 22px and .gen-head .x stayed 22px, so the touch targets
+         this block exists to enlarge never grew
+     The `.wide` and `.dock-left` drawer variants LOOKED correct throughout, which is why
+     this survived: their compound selectors out-specify the bare base rule, so only the
+     plain default dock was visibly broken.
+
+     Keeping them HERE, immediately after the rules they override, is the actual fix
+     rather than a specificity trick: the override can no longer be separated from its
+     base by an edit elsewhere in the file, and IF this CSS is ever moved as a unit the
+     base rules and their responsive overrides travel together. (Extraction to a real
+     .css file was tried and DISCARDED -- docs/AUDIT_2026-07-21.md T5-CSS -- so that is
+     a property worth having, not a plan.) Do not move these back up into the shared
+     mobile block. */
+  @media (max-width: 480px) {
+    #gen-drawer,#gen-drawer.wide,#gen-drawer.dock-left{width:100%;max-width:100vw;}
+    #model-flyout,#gen-drawer.dock-left #model-flyout,
+    #gen-drawer.dock-top #model-flyout,#gen-drawer.dock-bottom #model-flyout{
+      position:fixed;top:50%;left:50%;right:auto;bottom:auto;transform:translate(-50%,-50%);
+      width:94vw;max-width:94vw;max-height:82vh;
+      border:1px solid var(--surface1);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.6);}
+    .gen-row{flex-wrap:wrap;} .gen-row > *{flex:1 1 100%;}
+    .dock-ctl button{width:34px;height:34px;}
+    .gen-head .x{font-size:28px;min-width:40px;}
+  }
 </style>
 <div id="gen-scrim" onclick="Gen.close()"></div>
 <aside id="gen-drawer" aria-hidden="true" aria-label="Generate">
@@ -5942,7 +6368,7 @@ document.addEventListener('DOMContentLoaded', function(){
               title="This model's published releases -- PixAI defaults to the latest; pick another to generate against it instead" aria-label="Model version"></select>
       <div id="gen-caps"></div>
     </div>
-    <div class="gen-lbl">LoRAs</div>
+    <div class="gen-lbl">LoRAs <span id="gen-lora-cap" class="lora-cap"></span></div>
     <div id="gen-loras"></div>
     <div id="gen-lora-note"></div>
     <button type="button" id="lora-add" onclick="Gen.openLoraBrowser()">+ Add LoRA</button>
@@ -6013,6 +6439,33 @@ document.addEventListener('DOMContentLoaded', function(){
       </div>
       <div style="margin-top:8px;"><div class="gen-lbl">Seed <span style="text-transform:none;color:var(--subtext);">&middot; blank = random</span></div>
         <input id="gen-seed" class="gen-sel" type="number" placeholder="random" autocomplete="off" style="width:100%;"></div>
+      <div class="gen-lbl">Boosters <span style="text-transform:none;color:var(--subtext);">&middot; each one costs extra credits</span></div>
+      <div class="gen-aspects">
+        <button type="button" id="gen-facefix" onclick="Gen.toggleBooster('facefix')"
+                title="PixAI's Face Fix: re-renders faces at higher detail after the main pass (enableADetailer)">Face Fix</button>
+        <button type="button" id="gen-qtag" data-prefix="Masterpiece" onclick="Gen.toggleBooster('qtag')"
+                title="PixAI's Quality Tag: prepends &lsquo;Masterpiece&rsquo; to the prompt">Quality Tag</button>
+        <!-- PixAI's third booster. It is the Hires (`upscale`) family and nothing else: their
+             ESRGAN `enlarge` method lives on the image view, where a real source exists. -->
+        <button type="button" id="gen-hires" onclick="Gen.toggleBooster('hires')"
+                title="PixAI's Enhance Details: re-renders the finished image at a larger size (hi-res fix), so it adds detail rather than just resolution. To upscale a picture you already have, open it and use Upscale there.">Enhance Details</button>
+      </div>
+      <div id="gen-up-ctl" style="display:none;">
+        <div class="gen-lbl">Ratio <span id="gen-up-rval" style="color:var(--lavender);">1.2&times;</span>
+          <span id="gen-up-max" style="text-transform:none;color:var(--overlay0);"></span></div>
+        <input type="range" id="gen-up-ratio" min="1.1" max="1.9" step="0.1" value="1.2" style="width:100%;"
+               oninput="Gen.upRatio()">
+        <div id="gen-up-dims" style="font-size:11px;color:var(--subtext);margin-top:3px;"></div>
+        <div id="gen-up-denoise">
+          <div class="gen-lbl">Denoising strength <span id="gen-up-dval" style="color:var(--lavender);">0.60</span>
+            <span style="text-transform:none;color:var(--overlay0);">&middot; PixAI: works better 0.4&ndash;0.6</span></div>
+          <input type="range" id="gen-up-denoise-str" min="0.01" max="0.99" step="0.01" value="0.6" style="width:100%;"
+                 oninput="Gen.upDenoise(this.value)">
+          <div class="gen-lbl">Denoising steps</div>
+          <input id="gen-up-denoise-steps" class="gen-sel" type="number" min="1" max="50" step="1" value="26"
+                 onchange="Gen.refreshCost()" style="width:100%;">
+        </div>
+      </div>
       <label class="gen-check" title="This IS the site's Turbo tier (priority=1000): a faster runner. Costs more credits when paid, but a matching free card covers it (paidCredit 0) — verified against a real Turbo gen."><input type="checkbox" id="gen-hp"> High priority &middot; Turbo (faster)</label>
       <label class="gen-check"><input type="checkbox" id="gen-ph" checked> Prompt helper</label>
       <mg-cost-badge id="gen-cost" hint="Pick a model to see the cost." card-label="a card"></mg-cost-badge>
@@ -6061,31 +6514,40 @@ document.addEventListener('DOMContentLoaded', function(){
         <button id="edit-go" class="gen-go" onclick="Gen.edit()">Apply edit</button>
         <div id="edit-result" class="gen-result" style="display:none;"></div>
       </div>
+      {# This pane is the art-filters entry point. The ten one-click panelplugin cards, the
+         ComfyUI catalog search and the Run button that used to live here are gone: PixAI never
+         assigns a worker to a panelplugin task submitted with an API key -- it accepts it,
+         queues it, charges for it, then cancels it at roughly 60 minutes with outputs.reason
+         "waiting timeout" and refunds. Measured 2026-07-24 against their live API and proven by
+         elimination -- the same payload built with PixAI's own official preset workflow id also
+         never dispatches, while their web client runs that workflow in 1-3 seconds, and a
+         taskKind=chat Fix from this app dispatched in one second minutes earlier. No workflow
+         id, input key or payload shape changes that, so there was nothing to repair.
+
+         Art filters are the opposite story: they were never inference to begin with, so they
+         run here in full, locally and free (static/mg-art-filters.js). The working surface is
+         #filters-flyout below, because judging a filter needs the image at size and this drawer
+         column is 420px (600px in Edit). Guarded by tests/test_enhance.py, test_web_pick.py and
+         the rendering harness, which measures the panel's layout in a real browser. #}
       <div id="edit-sub-enhance" style="display:none;">
-        <div class="gen-lbl">One-click tools <span style="text-transform:none;color:var(--subtext);">&middot; official PixAI workflows &middot; runs on the source</span></div>
-        <div class="enh-shelf">
-          <div class="enh-sec">Upscale</div>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1794855217667308480','Upscale')" title="Upscale the image">Upscale</button>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1804744873525448983','Upscale 2×2')" title="Upscale in 2x2 tiles (higher detail)">Upscale 2&times;2</button>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1803967880822088690','Upscale + Enhance')" title="Upscale and re-detail">Upscale + Enhance</button>
-          <div class="enh-sec">Cleanup</div>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1793505053210462325','Remove BG')" title="Remove the background">Remove BG</button>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1793473388466817128','Precise inpaint')" title="Precise masked inpaint / edit">Precise inpaint</button>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1793713293591365899','Outpaint')" title="Extend the frame outward (outpaint)">Outpaint</button>
-          <div class="enh-sec">Convert</div>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1796053397111789217','To line art')" title="Convert to line art">To line art</button>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1793447160259872021','Sketch colorizer')" title="Colorize a sketch / line art">Sketch colorizer</button>
-          <div class="enh-sec">Light</div>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1801729774701480692','Relight: sun')" title="Relight: warm sunshine">Relight: sun</button>
-          <button type="button" class="enh-card" onclick="Gen.selectEnhance('1801752508134768728','Relight: backlight')" title="Relight: backlighting">Relight: backlight</button>
+        <div class="gen-lbl" style="margin-top:0;">Art filters
+          <span style="text-transform:none;color:var(--emerald);">&middot; free, no generation</span></div>
+        <button type="button" id="af-open" class="gen-go" onclick="Gen.toggleFilters()"
+                style="background:var(--surface0);color:var(--text);border:1px solid var(--surface1);">
+          &#9673; Open filters</button>
+        <div class="enh-note" style="margin-top:9px;">
+          PixAI's seven art filters are gradient overlays, not AI &mdash; so they are applied
+          right here in the browser: <b>no credits, no request, works offline</b>. Pick a source
+          image above, then open the panel to compare and save.
+          <br><br>
+          Still <b>pixai.art</b> only: their one-click ComfyUI workflows (background removal,
+          line art, sketch colouring, relight). Submitted with an API key those queue and are
+          cancelled unstarted about an hour later, so this app can't offer them. But run one
+          <i>on their site</i> and the result still lands in your library automatically &mdash;
+          only the submit button is missing, never the collecting. What also works here:
+          <b>Upscale</b> and <b>Hires</b> on the <b>Generate</b> tab's Upscale row (plain
+          generation settings, not workflows), and <b>Fix</b> above for hands and faces.
         </div>
-        <div class="gen-lbl">Browse all workflows <span style="text-transform:none;color:var(--subtext);">&middot; 140+ community ComfyUI</span></div>
-        <input class="gen-search" id="enh-q" placeholder="Search workflows &mdash; upscale, background, line art&hellip;" autocomplete="off">
-        <div id="enh-list"></div>
-        <div class="gen-lbl" id="enh-selected" style="display:none;"></div>
-        <mg-cost-badge id="enhance-cost" hint="Pick a tool to see the cost." card-label="an Edit card"></mg-cost-badge>
-        <button type="button" class="gen-go" id="enh-go" disabled onclick="Gen.runEnhance()">Run</button>
-        <div id="enh-result" class="gen-result" style="display:none;"></div>
       </div>
       <div id="edit-sub-fix" style="display:none;">
         <div class="gen-lbl">Fix hands / faces <span style="text-transform:none;color:var(--subtext);">&middot; drag a box</span></div>
@@ -6095,7 +6557,11 @@ document.addEventListener('DOMContentLoaded', function(){
           <button type="button" onclick="Gen.fixClear()">Clear</button>
         </div>
         <div id="fix-wrap"><img id="fix-img" alt="fix source"><canvas id="fix-canvas"></canvas></div>
-        <button id="fix-go" class="gen-go" onclick="Gen.fix()" style="margin-top:8px;">Fix marked regions</button>
+        {# No card-label: a Fix can never be covered by a free card (POST /v2/task/fixer has
+           no kaisuukenId field), so /api/price forces no_card for this mode and the badge's
+           `free` branch is unreachable here by construction. #}
+        <mg-cost-badge id="fix-cost" hint="Drag a box over a hand or face to see the cost."></mg-cost-badge>
+        <button id="fix-go" class="gen-go" onclick="Gen.fix()">Fix marked regions</button>
         <div id="fix-result" class="gen-result" style="display:none;"></div>
       </div>
     </div>
@@ -6127,6 +6593,58 @@ document.addEventListener('DOMContentLoaded', function(){
     </div>
   </div>
 </aside>
+<!-- The art-filters panel. OUTSIDE </aside> on purpose: #gen-drawer carries a transform, which
+     makes its box the containing block for position:fixed descendants, so a fixed panel placed
+     from getBoundingClientRect() coordinates has to be a sibling of the drawer, not a child.
+     Same reason #model-preview sits out here. Gen.placeFilters() does the placement. -->
+<div id="filters-flyout" aria-hidden="true" aria-label="Art filters">
+  <div class="gen-head"><span class="t">&#9673; Art filters</span>
+    <button class="x" onclick="Gen.toggleFilters()" aria-label="Close">&times;</button></div>
+  <div class="gen-body">
+    <div class="af-wrap">
+      <!-- The comparison pair. #af-orig is deliberately a SECOND <img> of the same /full/ url
+           rather than a clone of the preview: the preview's <img> is inside #af-stage, which
+           MgArtFilters mutates (a CSS `filter` for image_parameters, overlay divs at inset:0),
+           and anything sharing that element would be filtered too -- leaving nothing to
+           compare against. Same-origin and already cached, so the second one costs a cache
+           hit, not a download. -->
+      <div class="af-col">
+        <div class="af-frame"><img id="af-orig" alt="the unfiltered original"></div>
+        <div class="af-cap">Original</div>
+      </div>
+      <div class="af-col">
+        <div class="af-frame"><div id="af-stage"><img id="af-img" alt="filtered preview"></div></div>
+        <div class="af-cap" id="af-cap">Preview &middot; <b>no filter</b></div>
+      </div>
+      <div class="af-rail">
+        <div id="af-swatches"></div>
+        <div class="gen-lbl">Strength <span id="af-sval" style="color:var(--lavender);">1.00</span></div>
+        <input type="range" id="af-strength" min="0" max="1" step="0.01" value="1" style="width:100%;"
+               oninput="Gen.filterStrength(this.value)">
+        <div class="gen-lbl">Angle <span id="af-aval" style="color:var(--lavender);">180&deg;</span></div>
+        <input type="range" id="af-angle" min="0" max="345" step="15" value="180" style="width:100%;"
+               oninput="Gen.filterAngle(this.value)">
+        <div class="af-acts">
+          <button type="button" id="af-none" class="gen-go" onclick="Gen.filterClear()"
+                  style="background:var(--surface0);color:var(--text);border:1px solid var(--surface1);">
+            No filter</button>
+          <button type="button" id="af-save" class="gen-go" onclick="Gen.filterSave()">Save to library</button>
+          <button type="button" id="af-send" class="gen-go" onclick="Gen.filterSend()"
+                  style="background:var(--surface0);color:var(--text);border:1px solid var(--surface1);"
+                  title="Upload the filtered image to PixAI (free) and load it as the Edit source">
+            Send to image gen</button>
+          <!-- Parked, not forgotten: publishing to PixAI is Epic C, and the mutation it needs
+               (createArtwork) is deliberately not wired up yet. Shown disabled with the reason
+               rather than hidden, so the button group matches the agreed layout and the
+               capability is discoverable. -->
+          <button type="button" id="af-publish" class="gen-go" disabled
+                  title="Publishing to PixAI is not built yet">Publish</button>
+        </div>
+        <div id="af-msg"></div>
+      </div>
+    </div>
+  </div>
+</div>
 <!-- O13: the gallery's picker is <mg-gallery-picker> now (mounted/unmounted by the
      Picker IIFE below on open()/close()) -- no static markup needed here anymore. -->
 <div id="similar-scrim" onclick="Similar.close()"></div>
@@ -6187,6 +6705,25 @@ document.addEventListener('DOMContentLoaded', function(){
     <div class="ct-foot" id="art-foot"></div>
   </div>
 </div>
+{# "Delete from PixAI" -- the blast-radius dialog. Same .modal-bg/.modal chrome as
+   #del-modal ("Delete locally") on purpose: these two buttons sit beside each other in
+   the Actions menu and the more dangerous of the pair should not look like a different
+   feature. It replaces only the FIRST of the flow's two prompts (the prose confirm()
+   that described the batch rule but never showed it); the typed DELETE prompt behind
+   Continue is untouched, and so is /delete-tasks-bulk's localhost gate. #}
+<div class="modal-bg" id="cloud-del-modal" onclick="if(event.target===this)CloudDel.close()">
+  <div class="modal cd-modal" role="dialog" aria-label="Delete from PixAI">
+    <h2>Delete from PixAI</h2>
+    <p id="cd-summary"></p>
+    <div id="cd-tasks" class="cd-tasks"></div>
+    <p class="cd-foot">Irreversible on PixAI. The local copies move to
+      <b>_deleted/</b> and can be put back from the Control Panel&rsquo;s Trash panel.</p>
+    <div class="modal-actions">
+      <button class="btn" onclick="CloudDel.close()">Cancel</button>
+      <button class="btn btn-danger" onclick="CloudDel.proceed()">Continue&hellip;</button>
+    </div>
+  </div>
+</div>
 <style>
   .art-tot{display:flex;gap:22px;margin:16px 0 4px;}
   .art-tot .cell{display:flex;flex-direction:column;}
@@ -6244,6 +6781,26 @@ document.addEventListener('DOMContentLoaded', function(){
   #tag-suggest .ts-head{display:flex;justify-content:space-between;gap:14px;color:var(--overlay0);font-size:10px;padding:3px 8px;text-transform:uppercase;letter-spacing:.05em;}
   #tag-suggest button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);font-size:12.5px;padding:6px 9px;border-radius:5px;cursor:pointer;}
   #tag-suggest button.hot,#tag-suggest button:hover{background:var(--surface0);color:var(--lavender);}
+  /* "Delete from PixAI" blast radius. Wider than the shared .modal's 400px because the
+     point is the thumbnails; the strip scrolls inside min(46vh, 380px) so a many-task
+     selection can never push Cancel/Continue off the bottom of the screen -- measured at
+     1280x900 (566px tall modal) and 375x812 (625px, actions still above the fold). */
+  .cd-modal{max-width:640px;}
+  .cd-tasks{max-height:min(46vh,380px);overflow-y:auto;margin-bottom:16px;display:flex;flex-direction:column;gap:10px;}
+  .cd-task{background:var(--surface0);border:1px solid var(--surface1);border-radius:9px;padding:8px 9px;}
+  .cd-tlbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--overlay0);margin-bottom:6px;display:flex;gap:7px;align-items:baseline;}
+  .cd-tlbl .cd-tid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:none;letter-spacing:0;color:var(--subtext);}
+  .cd-strip{display:flex;flex-wrap:wrap;gap:6px;}
+  .cd-thumb{position:relative;width:58px;height:58px;border-radius:6px;overflow:hidden;background:var(--surface1);border:1px solid var(--surface1);flex:0 0 auto;}
+  /* The selected ones are outlined, not the doomed ones: EVERYTHING here is doomed, and
+     the only thing the user cannot already infer is which of these they actually picked. */
+  .cd-thumb.on{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold);}
+  .cd-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+  .cd-thumb .cd-noimg{display:flex;width:100%;height:100%;align-items:center;justify-content:center;font-size:9px;color:var(--overlay0);padding:2px;text-align:center;word-break:break-all;}
+  .cd-thumb .cd-vid{position:absolute;bottom:2px;right:3px;font-size:9px;color:var(--text);text-shadow:0 1px 3px #000;}
+  .cd-more,.cd-foot{font-size:11.5px;color:var(--overlay0);}
+  .cd-more{font-style:italic;}
+  .modal p.cd-foot{margin-bottom:16px;}
 </style>
 <script src="/static/picker-core.js"></script>
 <!-- O12/O13 (Phase 2): the Generate tab's model/LoRA flyout and the gallery's own picker are
@@ -6265,6 +6822,11 @@ document.addEventListener('DOMContentLoaded', function(){
      tab's model-flyout and Picker, unrelated to the drawer; the drawer's own mg-pick-request
      is wired to the gallery Picker in the inline JS below, same as always. -->
 <script src="/static/mg-generate-drawer.js"></script>
+<!-- PixAI's 7 art filters, baked in as data and composited locally (Edit > Enhance). Loaded
+     unconditionally rather than lazily: ~26KB of pure data + pure functions, with no network
+     access of its own, and the pane it drives has to work with the connection down. -->
+<script src="/static/mg-art-filters.js"></script>
+<script src="/static/mg-upscale-panel.js"></script>
 <script src="/static/mg-notify.js"></script>
 <script>
 var Contests = (function(){
@@ -6410,6 +6972,11 @@ var Acct = (function(){
   function chip(){ return document.getElementById('acct-chip'); }
   function claimEl(){ return document.getElementById('acct-claim'); }
   var CKEY='mg_acct';
+  // The real, live per-generation LoRA cap for this account (membership.privilege.lora,
+  // falling back to freeUserLora -- see /api/account). Not cached across reloads like the
+  // rest of the chip's data: it's read fresh every refresh() so it never drifts stale
+  // against an actual subscription change, and Gen reads it live via Acct.loraCap().
+  var loraCap=null;
   function daysUntil(d){ if(!d) return 999; var t=(new Date(d+'T00:00:00')).getTime();
     return isNaN(t)?999:Math.ceil((t-Date.now())/86400000); }
   function paint(d){
@@ -6440,6 +7007,8 @@ var Acct = (function(){
       // Only a fully-successful read (credits present) updates the chip; a transient
       // miss or error keeps the last-known value instead of blanking it.
       if(d.error || d.credits==null){ coverage(d); return; }
+      loraCap = (d.lora_cap!=null) ? d.lora_cap : null;
+      if(window.Gen && Gen.refreshLoraCap) Gen.refreshLoraCap();
       var good={credits:d.credits, cards:(d.cards!=null?d.cards:0), cards_by:d.cards_by,
                 card_expiry:d.card_expiry, claim_credits:d.claim_credits, sub:d.sub};
       try{ localStorage.setItem(CKEY, JSON.stringify(good)); }catch(e){}
@@ -6464,7 +7033,7 @@ var Acct = (function(){
       +' generation tasks archived locally'+(pct>=99.5?' \\u2014 complete backup \\u2728':'');
     b.style.display='';
   }
-  return {refresh:refresh, claim:claim};
+  return {refresh:refresh, claim:claim, loraCap:function(){ return loraCap; }};
 })();
 /* ---- First-run wizard: paste a key, then trigger the first sync as a Panel job ---- */
 var Setup = (function(){
@@ -6558,8 +7127,12 @@ var Snips = (function(){
 })();
 var Gen = (function(){
   var kind='base', selected=null, costSeq=0, costTimer=null;
-  var workflows=null, enhTimer=null;
-  var fixTag_='face', fixBoxes=[], fixStart=null;
+  // The Fix sub-tab's price check gets its OWN debounce timer and stale-response counter
+  // rather than sharing costSeq/costTimer with Generate and Edit. It has to: setEditSource
+  // refreshes the Edit badge AND the Fix badge for the same source, so on one shared timer
+  // each would cancel the other's debounce, and on one shared counter whichever response
+  // landed second would silently invalidate the first badge's own answer.
+  var fixTag_='face', fixBoxes=[], fixStart=null, fixSeq=0, fixTimer=null, fixCostVal=null;
   function el(id){return document.getElementById(id);}
   function open(){
     el('gen-drawer').classList.add('open'); el('gen-scrim').classList.add('open');
@@ -6570,6 +7143,11 @@ var Gen = (function(){
     el('gen-drawer').classList.remove('open'); el('gen-scrim').classList.remove('open');
     el('gen-drawer').setAttribute('aria-hidden','true');
     var f=el('model-flyout'); if(f){ f.classList.remove('open'); f.setAttribute('aria-hidden','true'); }
+    // The filters panel is a SIBLING of the drawer (it has to be -- see its CSS), so closing
+    // the drawer does not hide it the way a child would be hidden. Close it explicitly or it
+    // is left floating over the gallery, anchored to a drawer that has slid away.
+    var af=el('filters-flyout');
+    if(af && af.classList.contains('open')) toggleFilters();
     hidePreview();
   }
   // O12 (Phase 2): the flyout's own grid/search/market UI is the shared <mg-model-picker>
@@ -6616,6 +7194,12 @@ var Gen = (function(){
     ['left','top','bottom'].forEach(function(x){ dr.classList.toggle('dock-'+x, d===x); });
     document.querySelectorAll('.dock-ctl button').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-dock')===d); });
     try{ localStorage.setItem('gen-dock', d); }catch(e){}
+    // #model-flyout re-anchors on a dock change through CSS alone (its position is written in
+    // `#gen-drawer.dock-* #model-flyout` rules). The filters panel is placed by JS, so it has to
+    // be told: without this it keeps the coordinates of the dock it was opened against. Deferred
+    // past the drawer's own .2s width/transform transition, or it measures the OLD box.
+    if(el('filters-flyout') && el('filters-flyout').classList.contains('open'))
+      setTimeout(placeFilters, 220);
   }
   function setKind(k){
     if(k===kind) return; kind=k;
@@ -6624,6 +7208,12 @@ var Gen = (function(){
     ensurePickers();
     if(basePickerEl) basePickerEl.style.display = (k==='base') ? '' : 'none';
     if(loraPickerEl) loraPickerEl.style.display = (k==='lora') ? '' : 'none';
+    // Owner report 2026-07-24 ("still slow"): both pickers used to search on mount even
+    // while hidden, so opening the flyout always fired two searches at once for a tab
+    // nobody had asked to see yet. ensureSearched() is a no-op after the first real call,
+    // so switching tabs back and forth still never re-fetches.
+    var vis = (k==='base') ? basePickerEl : loraPickerEl;
+    if(vis && vis.ensureSearched) vis.ensureSearched();
   }
   function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
   function fmt(n){ return (n||0).toLocaleString(); }
@@ -6725,13 +7315,21 @@ var Gen = (function(){
   // generation could fire missing a LoRA the user believed was included, with nothing on
   // screen but an hourglass that never explained itself.
   function anyLoraUnresolved(){ return loras.some(function(l){ return !l.version_id; }); }
-  function updateGoState(){ var go=el('gen-go'); if(go) go.disabled = !(selected&&selected.version_id) || anyIncompat() || anyLoraUnresolved(); }
+  function overLoraCap(){ var cap=window.Acct&&Acct.loraCap?Acct.loraCap():null; return cap!=null && loras.length>cap; }
+  function updateGoState(){ var go=el('gen-go'); if(go) go.disabled = !(selected&&selected.version_id) || anyIncompat() || anyLoraUnresolved() || overLoraCap(); }
   function triggersInPrompt(tw){
     var first=(tw||'').split(',')[0].trim().toLowerCase();
     return first && (el('gen-prompt').value||'').toLowerCase().indexOf(first)>=0;
   }
   function refreshLoraNotes(){
     var box=el('gen-lora-note'); if(!box) return; box.innerHTML='';
+    if(overLoraCap()){                               // over the account's real cap (blocking)
+      var cap=Acct.loraCap();
+      var w0=document.createElement('div'); w0.className='lora-warn';
+      w0.innerHTML='\\u26a0 Your account allows <b>'+cap+' LoRA'+(cap===1?'':'s')+'</b> per generation \\u2014 remove '
+        +(loras.length-cap)+' to continue.';
+      box.appendChild(w0);
+    }
     loras.forEach(function(e){                      // incompatibility warnings (blocking)
       if(!loraIncompat(e)) return;
       var w=document.createElement('div'); w.className='lora-warn';
@@ -6758,19 +7356,86 @@ var Gen = (function(){
   }
   function renderLoras(){
     var box=el('gen-loras'); if(!box) return; box.innerHTML='';
+    var lrange=loraRange();
     loras.forEach(function(l,i){
       var d=document.createElement('div'); d.className='lora-chip'+((loraIncompat(l)||l.failed)?' incompat':'');
       var badge=l.version_id?'':(l.failed?' \\u26a0':' \\u23f3');
       var titleAttr=l.failed?(esc(l.title)+' \\u2014 could not load; remove it (\\u00d7) and re-add to retry'):esc(l.title);
+      // Per-LoRA version selection: only when the LoRA actually HAS more than one
+      // published release (l.versions, resolved alongside version_id itself -- see
+      // mg-model-picker.js's _toggleMulti ?all=1 fetch) -- the common single-version
+      // case renders nothing extra. Wraps onto its own line (.lora-chip's flex-wrap)
+      // rather than cramming a third control into the name/weight/remove row.
+      var verSel=(l.versions&&l.versions.length>1)
+        ?('<select class="ver" title="This LoRA\\u2019s published releases \\u2014 PixAI defaults to the latest; pick another to use it instead" onchange="Gen.loraPickVersion('+i+', this.value)">'
+          +l.versions.map(function(v){ return '<option value="'+esc(v.version_id)+'"'+(v.version_id===l.version_id?' selected':'')+'>'+esc(v.label||v.version_id)+'</option>'; }).join('')
+          +'</select>') : '';
       d.innerHTML=(l.preview_url?'<img src="'+esc(l.preview_url)+'" alt="">':'')
         +'<span class="nm" title="'+titleAttr+'">'+esc(l.title)+badge+'</span>'
-        +'<input type="number" step="0.05" min="0" max="2" value="'+l.weight+'" title="Weight" onchange="Gen.loraWeight('+i+', this.value)">'
-        +'<button type="button" class="rm" title="Remove" onclick="Gen.loraRemove('+i+')">&times;</button>';
+        // A slider with its value beside it, rather than a spinner you have to click 40
+        // times to cross the range. `oninput` (not onchange) so the number tracks the drag,
+        // and the cost re-check behind it is already debounced. Bounds come from the base
+        // model's architecture -- see loraRange().
+        +'<span class="lw"><input type="range" step="0.1" min="'+lrange[0]+'" max="'+lrange[1]
+        +'" value="'+l.weight+'" title="Weight \\u2014 '+lrange[0]+' to '+lrange[1]+' for this base model'
+        +(lrange[0]<0?'; negative subtracts this LoRA\\u2019s influence':'')+'"'
+        +' oninput="Gen.loraWeight('+i+', this.value)"><b>'+(+l.weight).toFixed(1)+'</b></span>'
+        +'<button type="button" class="rm" title="Remove" onclick="Gen.loraRemove('+i+')">&times;</button>'
+        +verSel;
       box.appendChild(d);
     });
+    paintLoraCap();
+  }
+  // The account's real per-generation LoRA entitlement (Acct.loraCap(), sourced from
+  // membership.privilege via /api/account -- see that route's comment). Purely informational
+  // + a pre-submit guard (updateGoState below), never hides the "+ Add LoRA" button or blocks
+  // the picker's own selection -- refusing an add there would leave a card visually selected
+  // in the picker that never actually landed in `loras` (the exact reason the old 6-LoRA cap
+  // was NOT reproduced during the O12 migration, see CHANGELOG). Unknown cap (null, e.g. a
+  // fresh account or a transient /api/account miss) shows nothing rather than a false "no
+  // limit" or a made-up number.
+  function paintLoraCap(){
+    var s=el('gen-lora-cap'); if(!s) return;
+    var cap=window.Acct&&Acct.loraCap?Acct.loraCap():null;
+    if(cap==null){ s.textContent=''; return; }
+    var over=loras.length>cap;
+    s.textContent='\\u00b7 '+loras.length+' / '+cap;
+    s.classList.toggle('over', over);
+    updateGoState();   // the cap can arrive (or change) after LoRAs are already picked
+  }
+  // LoRA weight bounds follow the BASE MODEL's architecture: DiT allows 0..1.2, the SD
+  // family -2..2 (negative weights subtract that LoRA's influence). Served from core in
+  // window.MG_LORA so this cannot drift from the builder's own clamp. An unknown or
+  // not-yet-picked base falls back to the widest range rather than the narrowest -- the
+  // same fail-open reasoning the LoRA base-type filter uses, and a weight the architecture
+  // refuses comes back as a refused submit, which costs nothing.
+  function loraRange(){
+    var L=window.MG_LORA, t=(selected&&selected.model_type)||'';
+    if(!L) return [-2,2];
+    return (L.ranges&&L.ranges[String(t).toUpperCase()]) || L.fallback || [-2,2];
+  }
+  // Re-clamp every chip when the base model changes: switching from SDXL to a DiT model
+  // with a -0.8 LoRA attached would otherwise leave a weight on screen, and in the payload,
+  // that the new architecture rejects.
+  function reclampLoras(){
+    var r=loraRange(), changed=false;
+    loras.forEach(function(l){
+      var w=Math.max(r[0], Math.min(r[1], +l.weight));
+      if(w!==l.weight){ l.weight=w; changed=true; }
+    });
+    renderLoras();
+    if(changed) debouncedCost();
   }
   function loraWeight(i, v){ if(!loras[i]) return;
-    v=parseFloat(v); loras[i].weight=(isNaN(v)?0.7:Math.max(0,Math.min(2,v))); debouncedCost(); }
+    v=parseFloat(v);
+    var r=loraRange();
+    loras[i].weight=(isNaN(v)?Math.max(r[0],Math.min(r[1],0.7)):Math.max(r[0],Math.min(r[1],v)));
+    // Repaint the readout in place rather than re-rendering the chip list -- rebuilding the
+    // row mid-drag would destroy the very slider the pointer is holding.
+    var chip=el('gen-loras')&&el('gen-loras').children[i];
+    var out=chip&&chip.querySelector('.lw b');
+    if(out) out.textContent=loras[i].weight.toFixed(1);
+    debouncedCost(); }
   // Note (O12): removing a LoRA via its chip's own x no longer re-searches the picker grid
   // (there IS no search() anymore -- see the ensurePickers block above). The LoRA picker's
   // OWN card for the removed entry can stay visually highlighted until the user interacts
@@ -6780,6 +7445,18 @@ var Gen = (function(){
   // highlight state. Flagged as a precise, known, low-severity remainder rather than
   // silently left unexplained.
   function loraRemove(i){ loras.splice(i,1); renderLoras(); refreshLoraNotes(); debouncedCost(); }
+  // Switch an already-added LoRA to a different published release -- mirrors pickVersion()
+  // (the base model's own version switcher) exactly, just applied to loras[i] instead of the
+  // single `selected` object. No extra network call: l.versions was already resolved in full
+  // when the LoRA was first picked (mg-model-picker.js's _toggleMulti, ?all=1).
+  function loraPickVersion(i, vid){
+    var l=loras[i]; if(!l||!l.versions) return;
+    var v=l.versions.filter(function(x){ return x.version_id===vid; })[0];
+    if(!v) return;
+    l.version_id=v.version_id||''; l.lora_base_type=v.lora_base_model_type||'';
+    l.trigger_words=v.trigger_words||''; l.failed=!l.version_id;
+    renderLoras(); refreshLoraNotes(); updateGoState(); debouncedCost();
+  }
   function openLoraBrowser(){
     var f=el('model-flyout');
     if(!f.classList.contains('open')) toggleFlyout();
@@ -6792,6 +7469,12 @@ var Gen = (function(){
   // what selectCard did AFTER that: resolve the real version + metadata and refresh
   // every downstream surface (LoRA compat notes, model-defaults prefill, cost).
   function onBasePick(m){
+    // Owner report 2026-07-24: picking a model left the flyout open, forcing a manual
+    // close to get back to the form -- close it the instant a base model is picked
+    // (single-select: one choice ends the browsing task). LoRA picking is deliberately
+    // left open (multi-select -- see onLoraPick/toggleLora), matching the existing
+    // separate "+ Add LoRA" button as the explicit way to continue into LoRA selection.
+    if(el('model-flyout').classList.contains('open')) toggleFlyout();
     selected=Object.assign({}, m); var mySeq=++selSeq;
     var th=el('gen-selthumb');
     if(m.preview_url){ th.src=m.preview_url; th.style.display=''; } else { th.style.display='none'; }
@@ -6823,7 +7506,42 @@ var Gen = (function(){
     selected.negative_prompt=v.negative_prompt||''; selected.sampling_steps=v.sampling_steps||null;
     selected.cfg_scale=v.cfg_scale||null; selected.sampling_method=v.sampling_method||'';
     selected.capabilities=v.capabilities||[];
+    selected.compatibility=v.compatibility||{}; selected.restrictions=v.restrictions||{};
     if(loraPickerEl) loraPickerEl.setAttribute('base-type', selected.model_type||'');
+    reclampLoras();          // DiT allows 0..1.2, SD -2..2 -- the chips must follow the base
+    applyCapabilityGating();
+  }
+  // extra.compatibility (probed live 2026-07-06, memory pixai-model-capability-schema) says
+  // which Advanced-panel params THIS model actually honors -- e.g. Tsubaki.2 ignores CFG
+  // scale and runs sampling steps FIXED at 16 regardless of what the field says. Showing an
+  // editable control that silently does nothing is worse than showing nothing: disable it
+  // (not hide -- the owner can still see the field exists and why it's off) with a plain
+  // tooltip. Fails OPEN on unknown data (compatibility==={} for a model never probed, or any
+  // key simply absent) -- only an EXPLICIT `false` disables anything, matching every other
+  // fail-open gate in this app (is_lora_compatible, annotate_lora_compat, ...). restrictions
+  // (real min/max bounds, e.g. {samplingSteps:{min:16,max:50}}) clamp the field's own
+  // hardcoded HTML bounds when the model publishes tighter ones.
+  //
+  // defMin/defMax are ALWAYS applied when bounds doesn't cover them -- caught live: an
+  // earlier version only set min/max when `bounds` had them, so switching FROM a model with
+  // real restrictions TO one with none left the field's min/max stuck at the PREVIOUS
+  // model's numbers (imperative DOM attributes persist across calls unless explicitly
+  // touched -- unlike React's declarative re-render, which recomputes from scratch every
+  // time and never had this bug on the Loom's own copy of this same gate).
+  function gateField(id, honored, bounds, defMin, defMax){
+    var f=el(id); if(!f) return;
+    var off = honored===false;
+    f.disabled = off;
+    f.title = off ? 'This model doesn\\u2019t use this setting' : '';
+    f.classList.toggle('cap-off', off);
+    if(defMin!=null) f.min = (bounds&&bounds.min!=null) ? bounds.min : defMin;
+    if(defMax!=null) f.max = (bounds&&bounds.max!=null) ? bounds.max : defMax;
+  }
+  function applyCapabilityGating(){
+    var s=selected||{}, compat=s.compatibility||{}, restr=s.restrictions||{};
+    gateField('gen-neg', compat.negativePrompt, null);
+    gateField('gen-steps', compat.samplingSteps, restr.samplingSteps, 1, 150);
+    gateField('gen-cfg', compat.cfgScale, restr.cfgScale, 1, 30);
   }
   // problem 4: PixAI's own model/LoRA cards offer a version selector; resolve_version_meta
   // always silently took the newest release and discarded the rest. #gen-version lists every
@@ -6846,12 +7564,21 @@ var Gen = (function(){
     var wrap=el('gen-selmeta'), sel=el('gen-version');
     if(!wrap||!sel) return;
     if(!versions.length){ wrap.classList.remove('show'); sel.innerHTML=''; renderCaps([]); return; }
-    sel.innerHTML=versions.map(function(v){
+    // Only offer the <select> when there's actually more than one release to choose from --
+    // the same versions.length>1 gate the per-LoRA chips above (renderLoras) and the Loom's
+    // own .lv-versel already use. A one-option dropdown is a control that cannot do
+    // anything; most models have exactly one release, so this row was showing on almost
+    // every pick. #gen-selmeta still opens for the capability badges alone, which are
+    // independent of how many versions exist.
+    var multi=versions.length>1;
+    sel.innerHTML=multi?versions.map(function(v){
       return '<option value="'+esc(v.version_id)+'"'+(v.version_id===currentId?' selected':'')+'>'+esc(v.label||v.version_id)+'</option>';
-    }).join('');
+    }).join(''):'';
+    sel.style.display=multi?'':'none';
     var cur=versions.filter(function(v){ return v.version_id===currentId; })[0]||versions[0];
     renderCaps(cur.capabilities);
-    wrap.classList.add('show');
+    var caps=(cur.capabilities||[]).length;
+    wrap.classList.toggle('show', multi||caps>0);
   }
   // problem 5: `extra.capabilities` (PixAI's own descriptive tags -- "high-resolution",
   // "pose-accuracy", ...) was resolved by resolve_version_meta and never shown anywhere.
@@ -6918,14 +7645,88 @@ var Gen = (function(){
     return {w:d8(w), h:d8(h), custom:false};
   }
   function updateDimNote(){ var n=el('gen-dim-note'); if(!n) return; var d=dims();
-    n.textContent='\\u2192 '+d.w+' \\u00d7 '+d.h+(d.custom?' \\u00b7 custom':' px'); }
+    n.textContent='\\u2192 '+d.w+' \\u00d7 '+d.h+(d.custom?' \\u00b7 custom':' px');
+    syncUpscale(); }
+  // --- Boosters (Face Fix / Quality Tag / Enhance Details) --------------------
+  // PixAI has TWO upscale methods and they live in different places. `enlarge` (their
+  // ESRGAN "Upscale") and `upscale` (their "Hires") are both offered from the IMAGE VIEW,
+  // on a picture that already exists -- that is <mg-upscale-panel>, not this drawer. What
+  // belongs here is only their `Enhance Details (HiRes)` BOOSTER, which is the `upscale`
+  // family and sits with Face Fix and Quality Tag.
+  //
+  // This used to be a three-way Off/Upscale/Hires segment in the generation panel, which
+  // was wrong twice over: it is not where PixAI puts it, and the drawer has no source
+  // image, so the ratio cap and the "-> 1952x1096" output line were derived from the size
+  // the generation is ABOUT to be rather than from a real picture.
+  //
+  // upCeil/upDims/upMax are a HAND PORT of core.UPSCALE_PIXEL_CEILING /
+  // upscale_output_dims / max_upscale_ratio (pixai_gallery_backup.py) -- the server
+  // re-derives and clamps the ratio on every price check AND submit, so this copy exists
+  // only so the slider can't offer a ratio the server would silently pull back, and so
+  // the output size can be shown while dragging with no round-trip. Same hand-maintained
+  // duplication risk as friendlyGenErr below: if those ceilings change, change these too.
+  // (static/mg-upscale-panel.js carries the same port for the same reason, and
+  // tests/test_upscale_boosters.py runs BOTH against the Python.) Both languages use
+  // IEEE-754 doubles, so the floor-to-multiple-of-8 below reproduces the Python side (and
+  // PixAI's own dialog) exactly, 1952 and not 1960 at 1400x1.4.
+  var upCeil={enlarge:2048*2048, upscale:2048*1152};
+  var boosters={facefix:false, qtag:false, hires:false};
+  var BOOSTER_BTN={facefix:'gen-facefix', qtag:'gen-qtag', hires:'gen-hires'};
+  function upDims(w,h,r){ return [Math.max(64,Math.floor(w*r/8)*8), Math.max(64,Math.floor(h*r/8)*8)]; }
+  function upMax(w,h,mode){
+    for(var i=30;i>0;i--){ var r=Math.round((1+i*0.1)*10)/10, o=upDims(w,h,r);
+      if(o[0]*o[1]<=upCeil[mode]) return r; }
+    return 1;
+  }
+  function syncUpscale(){
+    if(!boosters.hires) return;
+    var d=dims(), s=el('gen-up-ratio'); if(!s) return;
+    // Re-derived from the CURRENT output size every time, so it moves with Aspect / Size /
+    // custom W&H. Always the 'upscale' ceiling: the drawer only does Hires now.
+    var mx=upMax(d.w,d.h,'upscale');
+    s.max=mx; s.disabled=(mx<=1);
+    if(+s.value>mx) s.value=mx;
+    var r=+s.value, o=upDims(d.w,d.h,r);
+    el('gen-up-rval').textContent=r.toFixed(1)+'\\u00d7';
+    el('gen-up-max').textContent = (mx<=1) ? '' : ('\\u00b7 max '+mx.toFixed(1)+'\\u00d7 at this size');
+    el('gen-up-dims').textContent = (mx<=1)
+      ? 'This size is already at PixAI\\'s ceiling for Hires \\u2014 generate smaller to enhance details.'
+      : (d.w+'\\u00d7'+d.h+' \\u2192 '+o[0]+'\\u00d7'+o[1]);
+  }
+  function upRatio(){ syncUpscale(); debouncedCost(); }
+  function upDenoise(v){ el('gen-up-dval').textContent=(+v).toFixed(2); debouncedCost(); }
+  function toggleBooster(k){
+    boosters[k]=!boosters[k];
+    var b=el(BOOSTER_BTN[k]);
+    if(b) b.classList.toggle('on', boosters[k]);
+    // Enhance Details is the one booster with settings of its own; the ratio panel is its
+    // disclosure, so it opens and closes with the chip rather than living on screen at all
+    // times the way the old segment's controls did.
+    if(k==='hires'){
+      el('gen-up-ctl').style.display = boosters.hires ? '' : 'none';
+      syncUpscale();
+    }
+    debouncedCost();
+  }
   function payload(){ var a=dims();
+    var upR=(!boosters.hires||el('gen-up-ratio').disabled)?null:+el('gen-up-ratio').value;
+    var qt=el('gen-qtag');
     return { version_id:(selected&&selected.version_id)||'', model_id:(selected&&selected.model_id)||'', prompt:el('gen-prompt').value.trim(),
       negative:el('gen-neg').value.trim(), width:a.w, height:a.h, mode:el('gen-mode').value,
       steps:+el('gen-steps').value||25, cfg:+el('gen-cfg').value||7,
       count:+el('gen-count').value, seed:(el('gen-seed')?el('gen-seed').value.trim():''),
       high_priority:el('gen-hp').checked, prompt_helper:el('gen-ph').checked,
       ref_media_id:(genRef?genRef.media_id:''), ref_strength:+el('gen-ref-strength').value,
+      // null (not 0/1) when Enhance Details is off -- the server omits every upscale key
+      // unless a real ratio above 1 arrives, so an untouched drawer submits exactly what it
+      // submitted before these controls existed. `enlarge` is never sent from here at all:
+      // the drawer offers Hires only, and a stray enlarge alongside it is the one
+      // combination the builder refuses outright.
+      upscale:upR,
+      upscale_denoise:+el('gen-up-denoise-str').value,
+      upscale_denoise_steps:+el('gen-up-denoise-steps').value,
+      face_fix:boosters.facefix,
+      quality_tag:(boosters.qtag?(qt&&qt.getAttribute('data-prefix')||''):''),
       loras:loras.filter(function(l){return l.version_id;}).map(function(l){return {version_id:l.version_id, weight:l.weight};}) }; }
   function refreshCost(){
     updateDimNote();
@@ -7023,7 +7824,7 @@ var Gen = (function(){
       var pane=el('gen-mode-'+x); if(pane) pane.style.display=(x===m)?'':'none';
       var btn=el('gm-'+x); if(btn) btn.classList.toggle('on', x===m); });
     el('gen-drawer').classList.toggle('wide', m==='video'||m==='edit');
-    if(m==='edit'){ setEditModel(editModel); loadWorkflows().then(renderWorkflows); if(!presetsLoaded) loadPresets(); }
+    if(m==='edit'){ setEditModel(editModel); if(!presetsLoaded) loadPresets(); }
     // Video is the <mg-generate-drawer> web component now -- it self-renders on connect and
     // owns its own state; nothing to (re)build here (the old renderVideoSlots is gone).
   }
@@ -7031,8 +7832,7 @@ var Gen = (function(){
     ['edit','enhance','fix'].forEach(function(x){
       var pane=el('edit-sub-'+x); if(pane) pane.style.display=(x===s)?'':'none';
       var b=el('es-'+x); if(b) b.classList.toggle('on', x===s); });
-    if(s==='enhance') loadWorkflows().then(renderWorkflows);
-    if(s==='fix') fixResize();
+    if(s==='fix'){ fixResize(); fixCost(); }   // arriving on the tab re-prices whatever is marked
   }
   function editSrc(){ return el('edit-src').value.trim(); }
   function setEditSource(mid){
@@ -7040,9 +7840,12 @@ var Gen = (function(){
     var img=el('edit-src-img');
     if(mid){ img.onerror=function(){img.style.display='none';}; img.src='/thumbs/'+mid+'.jpg'; img.style.display='block'; fixInit(); fixLoad(mid); }
     else { img.style.display='none'; }
+    // An open filters panel is showing the OLD image until it is told otherwise -- reloading it
+    // here is what stops a preview from being judged against the wrong source.
+    if(el('filters-flyout') && el('filters-flyout').classList.contains('open')) afLoadSource();
     renderEditRefs();   // primary changed -> @image1 slot + cap count update
     debEditCost();
-    debEnhanceCost();   // Enhance's price also depends on the shared edit-src (D-12)
+    fixCost();          // fixLoad() dropped the boxes with the old source; clear its badge too
   }
   var EDIT_CAPS={
     'edit-pro':{max_refs:4,resolutions:['1K','2K'],qualities:['low','medium','high'],
@@ -7123,9 +7926,12 @@ var Gen = (function(){
   }
   function editCost(){
     var cost=el('edit-cost');
+    // Bump BEFORE the early return -- see fixCost's note. Same contract, same defect: a
+    // response for the previous source stayed valid across a source change and repainted
+    // its price over the new one.
+    var mine=++costSeq;
     if(!editSrc()){ cost.clear(); return; }
     cost.setChecking();
-    var mine=++costSeq;
     fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(editPayload())})
       .then(function(r){return r.json();})
       // <mg-cost-badge> owns the whole classification now (idle / checking / free / paid /
@@ -7150,7 +7956,7 @@ var Gen = (function(){
             {past:'Edited', btn:el('edit-go'), busy:'Editing\\u2026', idle:'Apply edit'});
   }
   function fixTag(t){ fixTag_=t; el('fix-tag-face').classList.toggle('on',t==='face'); el('fix-tag-hand').classList.toggle('on',t==='hand'); }
-  function fixClear(){ fixBoxes=[]; fixRedraw(); }
+  function fixClear(){ fixBoxes=[]; fixRedraw(); fixCost(); }
   function fixColor(tag){ return tag==='face' ? '#b692e6' : '#4fc99a'; }
   function fixRedraw(){
     var cv=el('fix-canvas'); if(!cv || !cv.getContext) return;
@@ -7175,10 +7981,43 @@ var Gen = (function(){
     function pos(e){ var r=cv.getBoundingClientRect(); var t=e.touches&&e.touches[0]?e.touches[0]:e; return {x:t.clientX-r.left,y:t.clientY-r.top}; }
     function down(e){ fixStart=pos(e); e.preventDefault(); }
     function move(e){ if(!fixStart)return; var p=pos(e); fixRedraw(); var ctx=cv.getContext('2d'); ctx.strokeStyle=fixColor(fixTag_); ctx.lineWidth=2; ctx.strokeRect(fixStart.x,fixStart.y,p.x-fixStart.x,p.y-fixStart.y); e.preventDefault(); }
-    function up(e){ if(!fixStart)return; var p=e.changedTouches&&e.changedTouches[0]?{x:e.changedTouches[0].clientX-cv.getBoundingClientRect().left,y:e.changedTouches[0].clientY-cv.getBoundingClientRect().top}:pos(e); var x=Math.min(fixStart.x,p.x),y=Math.min(fixStart.y,p.y),w=Math.abs(p.x-fixStart.x),h=Math.abs(p.y-fixStart.y); fixStart=null; if(w>6&&h>6) fixBoxes.push({x:x,y:y,w:w,h:h,tag:fixTag_}); fixRedraw(); }
+    function up(e){ if(!fixStart)return; var p=e.changedTouches&&e.changedTouches[0]?{x:e.changedTouches[0].clientX-cv.getBoundingClientRect().left,y:e.changedTouches[0].clientY-cv.getBoundingClientRect().top}:pos(e); var x=Math.min(fixStart.x,p.x),y=Math.min(fixStart.y,p.y),w=Math.abs(p.x-fixStart.x),h=Math.abs(p.y-fixStart.y); fixStart=null; if(w>6&&h>6){ fixBoxes.push({x:x,y:y,w:w,h:h,tag:fixTag_}); debFixCost(); } fixRedraw(); }
     cv.addEventListener('mousedown',down); cv.addEventListener('mousemove',move); window.addEventListener('mouseup',up);
     cv.addEventListener('touchstart',down,{passive:false}); cv.addEventListener('touchmove',move,{passive:false}); cv.addEventListener('touchend',up);
   }
+  // The boxes as PixAI sees them: the canvas renders the source at whatever width the drawer
+  // gives it, so every box has to be scaled back to ORIGINAL-image pixels first. One helper
+  // for both callers on purpose -- the badge has to quote the exact request the button sends,
+  // and two copies of this arithmetic is how that stops being true.
+  function fixBoxesScaled(){
+    var img=el('fix-img');
+    var scale=(img && img.naturalWidth && img.clientWidth) ? (img.naturalWidth/img.clientWidth) : 1;
+    return fixBoxes.map(function(b){ return {x:Math.round(b.x*scale),y:Math.round(b.y*scale),
+      width:Math.round(b.w*scale),height:Math.round(b.h*scale),tag:b.tag}; });
+  }
+  function fixCost(){
+    var cost=el('fix-cost'); if(!cost) return;
+    fixCostVal=null;
+    // Bump BEFORE any return. This sequence number is what makes a late response
+    // discardable, so bailing out has to count as an invalidation too: without it, a
+    // request fired for a real selection is still "current" after the user hits Clear or
+    // swaps the source, and its response repaints a confident price for boxes that no
+    // longer exist.
+    var mine=++fixSeq;
+    if(!editSrc() || !fixBoxes.length){ cost.clear(); return; }
+    cost.setChecking();
+    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({mode:'fix', source:editSrc(), boxes:fixBoxesScaled()})})
+      .then(function(r){return r.json();})
+      // Same host contract as editCost: the badge owns every bit of the idle / checking /
+      // paid / could-not-verify classification, this function owns only the request, the
+      // debounce and the stale-response guard. fixCostVal caches the settled number for the
+      // submit confirm below so the dialog and the badge can never disagree.
+      .then(function(d){ if(mine!==fixSeq) return; cost.setPrice(d); fixCostVal=cost.settled?cost.cost:null; })
+      // setPrice(null), not clear(): a failed fetch is could-not-verify, never "not priced yet".
+      .catch(function(){ if(mine===fixSeq){ cost.setPrice(null); fixCostVal=null; } });
+  }
+  function debFixCost(){ clearTimeout(fixTimer); fixTimer=setTimeout(fixCost,250); }
   function fix(){
     var src=editSrc(); if(!src){ el('edit-src').focus(); return; }
     if(!fixBoxes.length){
@@ -7188,69 +8027,260 @@ var Gen = (function(){
       fr.appendChild(w);   // append, not overwrite -- a fix task already in flight keeps its own line
       return;
     }
-    // No price check exists for this action (audit 2026-07-21, unfiled-workflow-findings):
-    // /v2/task/fixer is a separate endpoint from the createGenerationTask family /v2/task-price
-    // mirrors, so it cannot be priced the way every other spend surface in this app is -- a
-    // client-side badge would just always show nothing. Until PixAI's own API can price a fixer
-    // task, a plain confirm is this app's established fail-closed guardrail for exactly that
-    // situation (the same shape the Loom's Deep Focus tabs already use for their own confirmSpend).
-    if(!window.confirm('Fix hand/face regions? This spends PixAI credits -- no cost preview is available for this action yet.')) return;
-    var img=el('fix-img'); var scale = (img.naturalWidth && img.clientWidth) ? (img.naturalWidth/img.clientWidth) : 1;
-    var boxes=fixBoxes.map(function(b){ return {x:Math.round(b.x*scale),y:Math.round(b.y*scale),width:Math.round(b.w*scale),height:Math.round(b.h*scale),tag:b.tag}; });
-    runTask('/api/fix', {source:src, boxes:boxes}, el('fix-result'),
+    // The confirm stays, but it can name the number now. /v2/task-price DOES price a Fix,
+    // given the chat.fixer-shaped params PixAI's server builds out of a /v2/task/fixer submit
+    // (see build_fixer_price_parameters) -- so the <mg-cost-badge> above this button carries
+    // the live figure and this dialog quotes it. It is not redundant with the badge: a Fix can
+    // never be covered by a free card, so every press of this button spends real credits, and
+    // an unverified price has to read as a warning rather than as silence.
+    var n=fixBoxes.length, what='Fix '+n+' marked region'+(n===1?'':'s')+'?';
+    if(!window.confirm(fixCostVal!=null
+        ? what+' This spends about '+fixCostVal.toLocaleString()+' PixAI credits.'
+        : what+" The cost check didn't come back, so this may spend PixAI credits.")) return;
+    runTask('/api/fix', {source:src, boxes:fixBoxesScaled()}, el('fix-result'),
             {past:'Fixed', btn:el('fix-go'), busy:'Fixing\\u2026', idle:'Fix marked regions'});
   }
   function openEdit(mid){ open(); setMode('edit'); setEditSource(mid); }
-  function loadWorkflows(){
-    if(workflows) return Promise.resolve(workflows);
-    return fetch('/api/workflows').then(function(r){return r.json();})
-      .then(function(d){ workflows=d.workflows||[]; return workflows; })
-      .catch(function(){ workflows=[]; return workflows; });
+
+  // ---- Art filters (Edit > Enhance) --------------------------------------------------
+  // The panelplugin client half (loadWorkflows / renderWorkflows / selectEnhance /
+  // enhanceCost / runEnhance) is gone with the controls it drove -- see the sub-tab's markup
+  // for why a panelplugin submit can never complete from an API key. What lives here instead
+  // spends nothing and, until you press Save, makes no request at all: window.MgArtFilters
+  // (static/mg-art-filters.js) carries PixAI's own 7 filter recipes as baked data and does the
+  // whole composite on the client -- CSS mix-blend-mode for the preview, one canvas fill per
+  // layer for the export, both pinned to the same gradient geometry so they agree.
+  var afId=null;
+  function afOpts(){
+    return {strength:parseFloat(el('af-strength').value),
+            angle:parseFloat(el('af-angle').value)};
   }
-  function renderWorkflows(){
-    var list=el('enh-list'); if(!list) return;
-    var qq=(el('enh-q').value||'').toLowerCase().trim();
-    list.innerHTML='';
-    (workflows||[]).filter(function(w){ return !qq || w.name.toLowerCase().indexOf(qq)>=0; })
-      .slice(0,50).forEach(function(w){
-        var b=document.createElement('button'); b.type='button'; b.className='enh-item';
-        var nm=w.name.split('|')[0].split('/')[0].trim();
-        b.innerHTML=esc(nm)+' <span class="ty">'+esc((w.type||'').toLowerCase())+'</span>';
-        b.onclick=function(){ selectEnhance(w.id, nm); }; list.appendChild(b);
+  function afMsg(t, bad){
+    var m=el('af-msg'); if(!m) return;
+    m.textContent=t||''; m.classList.toggle('bad', !!bad);
+  }
+  function afBuildSwatches(){
+    var AF=window.MgArtFilters, host=el('af-swatches');
+    if(!AF || !host || host.children.length) return;   // built once, like ensurePickers()
+    // Two headed sections, ours first -- AF.groups() owns that order. Grouping matters
+    // because the sets do not behave alike: the Moonglade five use exact-mapping blend modes
+    // only, so their export is their preview, while four of PixAI's seven lean on Photoshop
+    // whole-colour modes CSS can only approximate. Each tile's tooltip says which it is.
+    AF.groups().forEach(function(g){
+      var h=document.createElement('div'); h.className='af-grp'; h.textContent=g.label;
+      host.appendChild(h);
+      var grid=document.createElement('div'); grid.className='af-tiles';
+      host.appendChild(grid);
+      g.ids.forEach(function(id){
+        var f=AF.get(id), approx=f.filters.some(function(L){
+          var e=AF.BLEND_MODE_MAP[L.blendMode]; return e && e.exact===false;
+        });
+        var t=document.createElement('button');
+        t.type='button'; t.className='af-tile'; t.setAttribute('data-af', id);
+        t.title=f.name+' \\u00b7 free, applied in your browser'
+               +(f.note ? ' \\u2014 '+f.note : '')
+               +(approx ? ' \\u00b7 uses a blend mode CSS can only approximate, so the saved '
+                          +'file differs slightly from this preview' : '');
+        var sw=document.createElement('div'); sw.className='sw';
+        var cap=document.createElement('div'); cap.className='cap';
+        cap.textContent=(f.name||id).replace('Filter ','');
+        t.appendChild(sw); t.appendChild(cap);
+        t.onclick=function(){ afPick(id); };
+        grid.appendChild(t);
+        AF.renderSwatch(sw, id);    // the tile IS that filter's own gradients, no art needed
       });
+    });
   }
-  // D-12: was click-runs-immediately (price -> window.confirm -> fire), the one Enhance
-  // path never converted to the persistent <mg-cost-badge> pattern every other price
-  // surface already uses. Now select-then-run, mirroring the Edit sub-tab's own shape:
-  // clicking a tool only SELECTS it (updates the badge), a separate Run button fires it,
-  // and the badge alone is the warning -- no window.confirm left, same as everywhere else.
-  var enhWid='', enhName='';
-  function selectEnhance(wid, name){
-    enhWid=wid; enhName=name||'';
-    var sel=el('enh-selected');
-    if(sel){ sel.style.display=''; sel.innerHTML='Selected: <b style="color:var(--text);">'+esc(enhName)+'</b>'; }
-    el('enh-go').disabled=false;
-    debEnhanceCost();
+  // Built from nodes, not innerHTML: the name is baked data today, but a caption is exactly
+  // the kind of thing a later "custom filters" pass starts feeding user-typed names into.
+  function afCap(t){
+    var c=el('af-cap'); if(!c) return;
+    c.textContent='Preview \\u00b7 ';
+    var b=document.createElement('b'); b.textContent=t; c.appendChild(b);
   }
-  function enhanceCost(){
-    var cost=el('enhance-cost');
-    if(!enhWid || !editSrc()){ cost.clear(); return; }
-    cost.setChecking();
-    var mine=++costSeq;
-    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({mode:'enhance', source:editSrc(), workflow_id:enhWid})})
-      .then(function(r){return r.json();})
-      .then(function(d){ if(mine===costSeq) cost.setPrice(d); })
-      .catch(function(){ if(mine===costSeq) cost.setPrice(null); });
+  function afPaintTiles(){
+    var tiles=el('af-swatches').querySelectorAll('.af-tile');
+    for(var i=0;i<tiles.length;i++)
+      tiles[i].classList.toggle('on', tiles[i].getAttribute('data-af')===afId);
   }
-  function debEnhanceCost(){ clearTimeout(costTimer); costTimer=setTimeout(enhanceCost,250); }
-  function runEnhance(){
-    var src=editSrc();
-    if(!src){ el('edit-src').focus(); return; }
-    if(!enhWid){ return; }
-    runTask('/api/enhance', {source:src, workflow_id:enhWid}, el('enh-result'),
-            {past:'Enhanced', btn:el('enh-go'), busy:'Running\\u2026', idle:'Run'});
+  function afPick(id){
+    var AF=window.MgArtFilters; if(!AF) return;
+    afId=id; afPaintTiles();
+    var n=AF.applyPreview(el('af-stage'), id, afOpts());
+    // normalizeLayers reports any layer it had to drop -- an unmapped blend mode, a stop colour
+    // that isn't a plain literal. The preview still renders, just without that layer, so saying
+    // so is the difference between "this filter looks off" and a silent wrong result.
+    afMsg(n.warnings.length ? n.warnings[0]
+                            : (AF.get(id).name+' \\u00b7 nothing sent, nothing spent'),
+          n.warnings.length > 0);
+    afCap(AF.get(id).name||id);
   }
+  function filterClear(){
+    var AF=window.MgArtFilters; if(!AF) return;
+    afId=null; afPaintTiles(); AF.clearPreview(el('af-stage')); afMsg('');
+    afCap('no filter');
+  }
+  function filterStrength(v){
+    el('af-sval').textContent=(parseFloat(v)||0).toFixed(2);
+    if(afId) afPick(afId);
+  }
+  function filterAngle(v){
+    el('af-aval').textContent=v+'\\u00b0';
+    if(afId) afPick(afId);
+  }
+  function afLoadSource(){
+    var mid=editSrc(), img=el('af-img'), og=el('af-orig');
+    if(!mid){
+      img.removeAttribute('src'); if(og) og.removeAttribute('src');
+      afMsg('Pick a source image above first.', true); return false;
+    }
+    // /full/ is this app's OWN route, which is what makes Save work: composite() draws the
+    // source into a canvas, and a cross-origin image without CORS taints that canvas so
+    // toBlob() throws SecurityError. A PixAI CDN url dropped in here would do exactly that.
+    var want='/full/'+encodeURIComponent(mid);
+    if(img.getAttribute('src')!==want) img.src=want;
+    if(og && og.getAttribute('src')!==want) og.src=want;   // same url -> served from cache
+    return true;
+  }
+  // Placement follows mg-model-picker's _place(): open toward whichever side has room, then clamp
+  // to the viewport. #model-flyout's pure-CSS `right:100%` pop is not enough for this one -- it is
+  // a side-by-side panel, so it is far wider than the drawer, and the drawer can be docked to any
+  // of four edges at either 420px or (in Edit/Video) 600px. Called on open, on the source image's
+  // load (its height decides the panel's), on a dock change and on resize.
+  //
+  // The width ADAPTS to the room rather than being fixed, because a fixed one doesn't fit: at
+  // 1280x720 -- an ordinary laptop -- a 600px-wide Edit drawer leaves 647px beside it, so
+  // demanding AF_W would center the panel on top of the drawer it is supposed to sit next to.
+  // Below AF_MIN_SIDE there is no honest side-by-side left (the controls column alone is 232px),
+  // so it centres over the drawer instead -- which is #model-flyout's own documented behaviour
+  // for the top and bottom docks, where the drawer is a full-width bar and nothing can sit beside
+  // it: "an edge-popped flyout gets clipped ... render it as a centered overlay instead".
+  // Three columns now, so both numbers went up -- and AF_MIN_SIDE is set by what the panel
+  // is FOR, not by what technically fits. Two pictures fit beside the rail from about 790px
+  // (250+250+236 + two 14px gaps + 26px padding), but at that width they render ~250px each,
+  // which is smaller than the single 373px picture the old two-column panel gave you: the
+  // comparison would arrive as a downgrade. The floor is therefore the width at which each
+  // picture is worth judging -- ~380px, so 380*2 + 236 + 28 + 26 = 1050. Below it there is no
+  // honest side-by-side left and the panel centres over the drawer instead, which is
+  // #model-flyout's documented behaviour for the top and bottom docks.
+  //
+  // Measured at 1600x1000 with a 600px right-docked Edit drawer: 982px of side room is under
+  // the floor, so it centres at AF_W and each picture renders ~430px -- comfortably past the
+  // old single-image size rather than under it.
+  var AF_W=1180, AF_MIN_SIDE=1050;
+  function placeFilters(){
+    var f=el('filters-flyout');
+    if(!f || !f.classList.contains('open')) return;
+    var r=el('gen-drawer').getBoundingClientRect();
+    var vw=window.innerWidth, vh=window.innerHeight, pad=8, gap=10;
+    var leftRoom=r.left-gap-pad, rightRoom=vw-r.right-gap-pad;
+    var w, x;
+    if(Math.max(leftRoom, rightRoom) >= AF_MIN_SIDE){
+      if(leftRoom>=rightRoom){ w=Math.min(AF_W, leftRoom); x=r.left-gap-w; }
+      else { w=Math.min(AF_W, rightRoom); x=r.right+gap; }
+    } else {
+      w=Math.min(AF_W, vw-pad*2); x=(vw-w)/2;
+    }
+    f.style.width=Math.round(w)+'px';
+    f.style.maxHeight=(vh-pad*2)+'px';
+    var h=f.offsetHeight;                    // the real height: needs .open and the width set
+    f.style.left=Math.round(Math.max(pad, x))+'px';
+    f.style.top=Math.round(Math.max(pad, Math.min(r.top+8, vh-h-pad)))+'px';
+  }
+  function toggleFilters(){
+    var f=el('filters-flyout'), on=!f.classList.contains('open');
+    f.classList.toggle('open', on); f.setAttribute('aria-hidden', on?'false':'true');
+    if(!on) return;
+    afBuildSwatches();
+    var ok=afLoadSource();
+    if(ok && !afId) afMsg('Free \\u2014 applied in your browser, nothing leaves this machine.');
+    placeFilters();
+    var img=el('af-img');
+    img.onload=function(){ placeFilters(); if(afId) afPick(afId); };
+  }
+  // toggleFilters() is a TOGGLE. Both actions below run across an await, and the panel's
+  // own x, #gen-scrim and the global Escape -> Gen.close() all stay live while a request is
+  // in flight (only the pressed button is disabled), so calling the toggle blind on resolve
+  // RE-OPENS a panel the user already dismissed -- orphaned over a closed drawer and placed
+  // off its slid-away rect, which is the exact state Gen.close() exists to prevent.
+  function closeFiltersIfOpen(){
+    var f=el('filters-flyout');
+    if(f && f.classList.contains('open')) toggleFilters();
+  }
+  // The filter being ACTED ON, captured before the await. afId is module state and the tiles
+  // and No filter stay clickable during a request, so reading it back on resolve can name a
+  // different filter -- or null, and AF.get(null) is null, so `.name` on it throws inside a
+  // .then SUCCESS handler, where the sibling rejection handler cannot catch it: every side
+  // effect still lands and the only trace is an unhandled rejection in the console.
+  function afActing(){
+    var AF=window.MgArtFilters, r=(AF && afId) ? AF.get(afId) : null;
+    return r ? {id:afId, name:r.name||afId} : null;
+  }
+  function filterSave(){
+    var AF=window.MgArtFilters, mid=editSrc(), img=el('af-img');
+    if(!AF) return;
+    var acting=afActing();
+    if(!acting){ afMsg('Pick a filter first.', true); return; }
+    if(!mid || !img.naturalWidth){ afMsg('The source image has not finished loading.', true); return; }
+    var btn=el('af-save'), idle=btn.textContent;
+    btn.disabled=true; btn.textContent='Saving\\u2026';
+    function done(t, bad){ btn.disabled=false; btn.textContent=idle; afMsg(t, bad); }
+    AF.toBlob(img, acting.id, afOpts()).then(function(b){
+      // Saved through /api/import-local -- the SAME route the Picker's file import uses -- so
+      // the composite lands in imported/ with a thumbnail and a source='local' catalog row like
+      // any other local file. Nothing is uploaded to PixAI; no generation is created.
+      var fd=new FormData();
+      fd.append('files', b, mid+'_'+acting.id+'.png');
+      return fetch('/api/import-local', {method:'POST', body:fd}).then(function(r){ return r.json(); });
+    }).then(function(d){
+      if(d && d.error){ done(d.error, true); return; }
+      var n=(d && d.imported) || 0;
+      done(n ? ('Saved to your library \\u00b7 reload the gallery to see it')
+             : 'Already in your library \\u2014 nothing to add.', !n);
+      if(n && window.Toast) Toast.show({kind:'ok', title:'Filtered image saved',
+                                        msg:acting.name+' \\u00b7 no credits spent'});
+    }, function(e){
+      done('Could not save: '+((e && e.message) || e), true);
+    });
+  }
+  // "Send to image gen": bake the filter in, hand the PNG to /api/upload -- the same free
+  // 3-step S3 handshake the Picker's file import uses -- and drop the returned media_id into
+  // the Edit source. A filtered composite exists only in this browser until something gives
+  // it an id, and every i2i path (edit, reference, video) is keyed on a media_id, so the
+  // upload is what makes the result usable as an input at all. It spends no credits; the
+  // generation you then run from the drawer is the thing that costs, priced as usual.
+  function filterSend(){
+    var AF=window.MgArtFilters, img=el('af-img');
+    if(!AF) return;
+    var acting=afActing();
+    if(!acting){ afMsg('Pick a filter first.', true); return; }
+    if(!img.naturalWidth){ afMsg('The source image has not finished loading.', true); return; }
+    var btn=el('af-send'), idle=btn.textContent;
+    btn.disabled=true; btn.textContent='Uploading\\u2026';
+    function done(t, bad){ btn.disabled=false; btn.textContent=idle; afMsg(t, bad); }
+    AF.toBlob(img, acting.id, afOpts()).then(function(b){
+      var fd=new FormData();
+      fd.append('file', b, 'filtered_'+acting.id+'.png');
+      return fetch('/api/upload', {method:'POST', body:fd}).then(function(r){ return r.json(); });
+    }).then(function(d){
+      if(!d || d.error || !d.media_id){ done((d && d.error) || 'Upload failed.', true); return; }
+      done('');
+      // Close the panel before switching the drawer's source: leaving it open would keep
+      // showing the OLD source beside a preview of an image that is now the input, which
+      // reads as though nothing happened. A no-op if the panel (or the whole drawer) was
+      // already dismissed mid-upload -- the upload still landed, so the source is still
+      // switched and the toast still says so; it is simply found there next time the drawer
+      // is opened, rather than the panel springing back open unasked.
+      closeFiltersIfOpen();
+      setMode('edit'); setEditSource(String(d.media_id));
+      if(window.Toast) Toast.show({kind:'ok', title:'Filtered image is your edit source',
+                                   msg:acting.name+' \\u00b7 uploaded free, nothing generated yet'});
+    }, function(e){
+      done('Could not send: '+((e && e.message) || e), true);
+    });
+  }
+  window.addEventListener('resize', placeFilters);
+
   function genDrawerEl(){ var w=el('gen-mode-video'); return w?w.querySelector('mg-generate-drawer'):null; }
   function addVideoRefs(refs){
     // Gallery bulk-send ("make a video from these"): feed the picked images straight into
@@ -7265,13 +8295,17 @@ var Gen = (function(){
   return {open:open, close:close, setKind:setKind,
           refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
           editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit,
-          selectEnhance:selectEnhance, runEnhance:runEnhance,
-          renderWorkflows:renderWorkflows, fixTag:fixTag, fixClear:fixClear, fix:fix,
+          fixTag:fixTag, fixClear:fixClear, fix:fix,
+          toggleFilters:toggleFilters, filterStrength:filterStrength, filterAngle:filterAngle,
+          filterClear:filterClear, filterSave:filterSave, filterSend:filterSend,
           setDock:setDock, toggleFlyout:toggleFlyout,
           previewSelected:previewSelected, hidePreview:hidePreview,
           refPick:refPick, refStrength:refStrength, presetImport:presetImport,
+          upRatio:upRatio, upDenoise:upDenoise,
+          toggleBooster:toggleBooster,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
-          insertTriggers:insertTriggers,
+          reclampLoras:reclampLoras,
+          insertTriggers:insertTriggers, refreshLoraCap:paintLoraCap, loraPickVersion:loraPickVersion,
           // addVideoRefs stays: it's the gallery bulk-send entry, rewired to feed
           // <mg-generate-drawer>.prefill(). The old video machinery (setVideoMode /
           // videoGenerate / renderVideoSlots / videoCost / vp* / videoPromptText/Set) is
@@ -7362,6 +8396,20 @@ var Tags = (function(){
 function lbMid(){ var m=(document.getElementById('lb-details').href||'').match(/\\/image\\/([^/?]+)/); return m?decodeURIComponent(m[1]):''; }
 function lbEdit(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Gen.openEdit(mid); }
 function lbVideo(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Gen.addVideoRefs([{mid:mid, thumb:'/thumbs/'+mid+'.jpg'}]); }
+// Unlike Edit/To Video/Similar, this does NOT close the lightbox: judging a ratio means
+// seeing the picture, which is the whole reason it is a flyout over the overlay rather than
+// somewhere you navigate to. That is also why the element's z-index has to clear .lb's 300.
+function lbUpscale(){
+  var mid=lbMid(), p=document.getElementById('up-flyout');
+  if(mid && p) p.open(mid);
+}
+// It is bound to ONE picture, so it must never outlive the picture it was opened for --
+// stepping to the next image or closing the overlay closes it too. Retargeting it silently
+// would leave a half-configured panel pointed at something else.
+function lbUpscaleClose(){
+  var p=document.getElementById('up-flyout');
+  if(p && p.close) p.close();
+}
 function lbSimilar(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Similar.open(mid); }
 var Ctx = (function(){
   var mid='', isVideo=false;
@@ -7472,12 +8520,11 @@ document.addEventListener('DOMContentLoaded', function(){
   if(document.getElementById('em-edit-pro') && window.Gen) Gen.setEditModel('edit-pro');  // populate the option lists
   var es=document.getElementById('edit-src');
   if(es) es.addEventListener('input', function(){ Gen.setEditSource(es.value.trim()); });
-  var eq=document.getElementById('enh-q'); if(eq) eq.addEventListener('input', Gen.renderWorkflows);
   var em=new URLSearchParams(location.search).get('edit');
   if(em) Gen.openEdit(em);
 });
 </script>
-""")
+""").replace("__UPSCALE_CONST__", _upscale_const_js())
 
     DETAIL_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
 <script>
@@ -7619,6 +8666,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <span class="rating-label">{{ row.rating + ' / 5' if row.rating else 'unrated' }}</span>
   </div>
 
+__UPSCALE_CONST__
   <div class="detail-actions">
     {% if img_url %}
     <a class="btn" href="{{ url_for('full_image', media_id=row.media_id) }}?dl=1">&#8681; Download</a>
@@ -7645,6 +8693,8 @@ document.addEventListener('DOMContentLoaded', function() {
       title="Ask PixAI to read this image back into a prompt (free)">&#9998; Suggest prompt</button>
     <a class="btn btn-primary" href="/?edit={{ row.media_id }}"
       title="Open this image in the Edit tab">&#10022; Edit this</a>
+    <button class="btn" id="upscale-btn" onclick="toggleUpscale()"
+      title="Upscale this image with PixAI Upscale (ESRGAN) or Hires">&#8689; Upscale</button>
     {% endif %}
     {% if row.is_video != '1' %}
     <button class="btn"
@@ -7661,12 +8711,27 @@ document.addEventListener('DOMContentLoaded', function() {
        title="Show the rest of this batch">View Batch</a>
     {% endif %}
     <button class="btn" id="edit-prompt-btn" onclick="toggleEdit()">Edit Prompt</button>
+    <!-- Two delete paths, and the split is deliberate and load-bearing. LOCAL moves the
+         file to _deleted/ and drops the catalog row; PixAI still has the image, so a later
+         sync brings it back. CLOUD is irreversible on their side and asks you to type
+         DELETE. They were separated as a safety net and stay separated here, at image
+         granularity now -- the gallery's own "Delete from PixAI" is TASK-level and takes
+         every image of a batch with it. -->
     <button class="btn btn-danger"
       onclick="confirmDelete('{{ url_for('delete_one', media_id=row.media_id) }}?back={{ back|urlencode }}',
-        'Permanently delete this image? This cannot be undone.')">
-      Delete
+        'Remove this image from your local library? The file moves to _deleted/ and is recoverable, and PixAI still has it \u2014 a later sync brings it back.')">
+      Delete locally
     </button>
+    {% if can_delete_cloud and row.task_id %}
+    <button class="btn btn-danger" id="del-cloud-btn"
+      data-mid="{{ row.media_id }}" data-siblings="{{ siblings }}"
+      onclick="deleteFromPixai(this)"
+      title="Delete just this image from your PixAI account (irreversible)">
+      Delete from PixAI
+    </button>
+    {% endif %}
   </div>
+  <mg-upscale-panel id="up-panel" inline></mg-upscale-panel>
   <div id="prompt-editor" style="display:none;margin-top:12px;">
     <textarea id="prompt-text" style="width:100%;min-height:120px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);border-radius:6px;padding:8px;font-size:13px;font-family:var(--font-mono,monospace);">{{ row.prompt_full or row.prompt_preview or '' }}</textarea>
     <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
@@ -7676,7 +8741,54 @@ document.addEventListener('DOMContentLoaded', function() {
     </div>
   </div>
 </div>
+<!-- picker-core + mg-model-picker are what the panel's model fallback mounts: an image whose
+     model the catalog does not know (never swept, or imported from this computer) still needs
+     one to upscale under, and it uses the SAME picker the Generate drawer opens rather than a
+     second model-choosing UI. -->
+<script src="/static/picker-core.js"></script>
+<script src="/static/mg-model-picker.js"></script>
+<script src="/static/mg-cost-badge.js"></script>
+<script src="/static/mg-upscale-panel.js"></script>
 <script>
+function deleteFromPixai(btn){
+  var mid=btn.getAttribute('data-mid'), sibs=+btn.getAttribute('data-siblings')||1;
+  // Say what is about to happen BEFORE the typed prompt, and say it differently for the two
+  // cases: trimming one frame out of a batch is not the same act as deleting the only image
+  // a task ever made, and a dialog that words them identically hides that.
+  var what = (sibs > 1)
+    ? ('This deletes ONLY this image from PixAI.\\n\\nThe other ' + (sibs - 1) +
+       ' image' + (sibs === 2 ? '' : 's') + ' in its batch stay on your account.')
+    : 'This deletes this image from PixAI. It is the only image its task made.';
+  if(!confirm(what + '\\n\\nIt is also removed from your local library. This cannot be undone.'))
+    return;
+  var typed = prompt('This permanently deletes from PixAI. Type DELETE to confirm:');
+  if(typed !== 'DELETE'){ alert('Cancelled.'); return; }
+  var idle = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Deleting\\u2026';
+  fetch('/api/delete-image', {method:'POST', headers:{'Content-Type':'application/json'},
+                              body:JSON.stringify({media_id:mid, confirm:true})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d || d.error){
+        btn.disabled=false; btn.textContent=idle;
+        alert((d && d.error) || 'Could not delete it.');
+        return;
+      }
+      // The image this page is ABOUT no longer exists, so staying here would show a detail
+      // page for something deleted. Back to wherever the user came from.
+      location.href = {{ back|tojson }};
+    }, function(e){
+      btn.disabled=false; btn.textContent=idle;
+      alert('Could not delete it: ' + ((e && e.message) || e));
+    });
+}
+function toggleUpscale(){
+  var p=document.getElementById('up-panel'), b=document.getElementById('upscale-btn');
+  if(!p) return;
+  var on=!p.hasAttribute('open');
+  if(on) p.open('{{ row.media_id }}'); else p.close();
+  if(b) b.classList.toggle('btn-primary', on);
+}
 // Published-artwork engagement: live views (per artwork_id) + the captured granular NSFW
 // breakdown (nsfw_scores JSON). Both only present for synced published works.
 document.addEventListener('DOMContentLoaded', function(){
@@ -7764,7 +8876,7 @@ function savePrompt() {
    });
 }
 </script>
-""")
+""").replace("__UPSCALE_CONST__", _upscale_const_js())
 
     LOGIN_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
 {# Splash background: three tinted radial washes, a procedurally-generated star
@@ -7984,6 +9096,7 @@ function savePrompt() {
     {{ stat('Storage used', h.total_size_h) }}
     {{ stat('Catalog rows', '{:,}'.format(h.catalog_rows)) }}
     {{ stat('Full-meta', h.full_meta_pct|string + '%') }}
+    {{ stat('Model known', h.model_pct|string + '%') }}
     {{ stat('Rated', '{:,}'.format(h.rated)) }}
     {{ stat('Published', '{:,}'.format(h.published)) }}
     {{ stat('Total likes', '{:,}'.format(h.total_likes)) }}
@@ -8217,6 +9330,20 @@ function savePrompt() {
     <div style="margin-top:14px;">
       <a class="btn" href="{{ url_for('export_csv_download') }}" download>&#11015; Download catalog (CSV)</a>
       <span style="font-size:11.5px;color:var(--overlay0);margin-left:8px;">saves to your Downloads &mdash; doesn&rsquo;t touch the backup folder</span>
+    </div>
+    <div id="libwrap" style="margin-top:16px;display:none;">
+      <div class="p-note" style="margin-top:0;">Where this library lives. Changing it points
+        Moonglade at a different folder next time it starts &mdash; <b>nothing is moved,
+        copied or deleted</b>, and the folder you leave behind stays exactly as it is.</div>
+      <div style="display:flex;gap:8px;margin-top:9px;flex-wrap:wrap;">
+        <input id="libpath" type="text" spellcheck="false" autocomplete="off"
+               style="flex:1 1 320px;min-width:0;background:var(--surface0);color:var(--text);
+                      border:1px solid var(--surface1);border-radius:7px;padding:7px 9px;
+                      font-size:12.5px;font-family:var(--font-mono,monospace);">
+        <button type="button" class="jobbtn" style="flex:0 0 auto;min-width:0;"
+                onclick="saveLib(false)"><span class="t">Save folder</span></button>
+      </div>
+      <div id="libmsg" style="font-size:11.5px;color:var(--overlay0);margin-top:7px;"></div>
     </div>
   </div>
 
@@ -8978,7 +10105,49 @@ function _watchServer(comeBack){
     if(tries>50){ clearInterval(iv); el('srv-msg').textContent=comeBack?'Still restarting\\u2026 give it a moment, then refresh.':'Server stopped.'; el('srv-spin').style.display='none'; }
   }, 800);
 }
-renderJobs(); loadAcct(); loadSchedule(); loadBrand(); loadSkins(); loadWatchStatus();
+function loadLib(){
+  fetch('/api/library-path').then(function(r){return r.json();}).then(function(d){
+    // Hidden entirely for a LAN session: the field would be empty (the host path is
+    // withheld, exactly as /panel already withholds it) and the save is localhost-only, so
+    // showing it would be a control that cannot work -- the dead-end click the LAN chip
+    // exists to prevent.
+    if(!d || !d.local) return;
+    el('libwrap').style.display='';
+    el('libpath').value = d.path || '';
+    // `configured` answers "is a folder set?" without carrying the path itself, so this
+    // keeps working whatever the route decides to withhold.
+    el('libmsg').textContent = d.configured ? '' :
+      'Currently the default folder. Set one to move the library somewhere else.';
+  }).catch(function(){});
+}
+function saveLib(create){
+  var path=el('libpath').value.trim(), m=el('libmsg');
+  if(!path){ m.textContent='Enter a folder path.'; return; }
+  m.textContent='Saving\u2026';
+  fetch('/api/library-path',{method:'POST',headers:{'Content-Type':'application/json'},
+                             body:JSON.stringify({path:path, create:!!create})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d && d.needs_create){
+        m.textContent='';
+        if(confirm('That folder does not exist yet.\\n\\n'+d.path+'\\n\\nCreate it?')) saveLib(true);
+        else m.textContent='Not saved.';
+        return;
+      }
+      if(!d || d.error){ m.textContent=(d&&d.error)||'Could not save.'; return; }
+      if(!d.restart_needed){ m.textContent='Saved \u2014 that is already the folder in use.'; return; }
+      // The setting is read at STARTUP, so it does nothing until the server restarts. Saying
+      // "saved" and stopping would leave the owner looking at an unchanged library.
+      var warn = d.has_catalog ? '' :
+        ' There is no catalog there yet, so it will start empty until you sync.';
+      if(d.supervised){
+        m.textContent='Saved.'+warn+' Restarting to pick it up\u2026';
+        restartServer();
+      } else {
+        m.textContent='Saved.'+warn+' Restart Moonglade to start using it.';
+      }
+    }).catch(function(){ m.textContent='Could not save.'; });
+}
+renderJobs(); loadAcct(); loadSchedule(); loadBrand(); loadSkins(); loadWatchStatus(); loadLib();
 setInterval(loadWatchStatus, 8000);
 // if a job was already running when the page loaded, resume polling
 fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){ if(d.status==='running'){ el('joblog').style.display='block'; polling=true; poll(); } });
@@ -9573,6 +10742,82 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         _schedule_server_exit(0)
         return jsonify({"ok": True, "action": "stop"})
 
+    @app.route("/api/library-path", methods=["GET", "POST"])
+    def api_library_path():
+        """Read or set the library folder (config.json's LIBRARY_DIR).
+
+        LOCALHOST-ONLY on write: it rewrites config.json, the file that also holds
+        AUTH_SECRET_KEY and AUTH_USERS, so it sits in the same trust class as
+        /api/setup/save-key and /api/branding/shortcut. GET is LOGIN -- the Panel shows the
+        current folder to whoever can already see the Panel, and it is the same host path
+        /panel already withholds from non-local callers, so it is withheld here too.
+
+        Setting this NEVER MOVES ANYTHING. It points the app at a different folder on the
+        next start; the old folder is left exactly as it is. That is the whole contract, and
+        it is why there is no "migrate" option here to get wrong.
+        """
+        import pixai_gallery_backup as _core
+        if request.method == "GET":
+            local = _is_local_request()
+            # BOTH path fields are withheld from a non-local caller, not just the first.
+            # POST stores an ABSOLUTE path, so `stored` is the host path too -- blanking
+            # `path` while returning `stored` handed it straight back, defeating the
+            # withholding that /panel and this route's own docstring promise. `configured`
+            # says whether a folder is set without saying where it is, which is all the
+            # Panel needs to decide what to show.
+            stored = str((_core._load_config() or {}).get(LIBRARY_DIR_KEY) or "")
+            return jsonify({
+                "path": str(out_dir) if local else "",
+                "stored": stored if local else "",
+                "configured": bool(stored),
+                "default": DEFAULT_LIBRARY_DIR,
+                "local": local,
+                "supervised": _supervised(),
+            })
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        want = str(body.get("path") or "").strip().strip('"')
+        if not want:
+            return jsonify({"error": "Enter a folder path."}), 200
+        try:
+            target = Path(want).expanduser()
+            # Stored absolute: the server's working directory is the launcher's folder, and
+            # a relative path stored here would silently mean somewhere else the moment
+            # anything started it from elsewhere (a scheduled task, a terminal, a shortcut).
+            target = target.resolve() if target.is_absolute() else (Path.cwd() / target).resolve()
+        except (OSError, ValueError) as e:
+            return jsonify({"error": "That path isn't usable: {}".format(e)[:160]}), 200
+        if target.exists() and not target.is_dir():
+            return jsonify({"error": "That path is a file, not a folder."}), 200
+        if not target.exists():
+            if not body.get("create"):
+                return jsonify({"needs_create": True, "path": str(target),
+                                "error": "That folder doesn't exist yet."}), 200
+            try:
+                target.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                return jsonify({"error": "Couldn't create it: {}".format(
+                    _redact_host_paths(str(e)))[:160]}), 200
+        # Written only AFTER the folder is known good -- never write first and hope, the
+        # same order /api/setup/save-key follows for the API key.
+        # Under _accounts_lock, which serializes every read-modify-write of config.json
+        # in this process. Without it this handler can read the file, a concurrent /logout
+        # can bump AUTH_EPOCH_SEQ, and this write then puts the stale epoch back -- which
+        # un-revokes the session that just logged out. config.json holds auth state, not
+        # just settings, so any writer of it belongs inside this lock.
+        try:
+            with _core._accounts_lock:
+                cfg = _core._load_config() or {}
+                cfg[LIBRARY_DIR_KEY] = str(target)
+                _core._save_config(cfg)
+        except OSError as e:
+            return jsonify({"error": "Couldn't save the setting: {}".format(
+                _redact_host_paths(str(e)))[:160]}), 200
+        has_catalog = (target / "catalog.db").exists()
+        return jsonify({"ok": True, "path": str(target), "has_catalog": has_catalog,
+                        "supervised": _supervised(), "restart_needed": str(target) != str(out_dir)})
+
     @app.route("/api/server/restart", methods=["POST"])
     def api_server_restart():
         """Restart the server from the browser. Needs the managed launcher (Serve Gallery),
@@ -9962,10 +11207,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # unauthenticated LAN viewer could land here and see the "paste your API key" setup
         # wizard; that conjunct hid it from them. That viewer can no longer reach this line.
         # `is_local` below (the header template's flag for showing the owner-only
-        # Generate/Loom/Panel controls vs. the read-only note) is hardcoded True for the
-        # identical reason -- same call site, same guarantee: those three are genuinely
-        # LOGIN-tier, matching their own route gating.
-        # `is_true_local` is the REAL, un-hardcoded _is_local_request() result. It now
+        # Generate/Loom/Panel controls) is hardcoded True for the identical reason --
+        # same call site, same guarantee: those three are genuinely LOGIN-tier,
+        # matching their own route gating. The name is a misnomer and the dead
+        # `{% else %}` note it used to carry ("read-only LAN view") is gone: a
+        # signed-in LAN session is not read-only, and the header now says what really
+        # differs about it off `is_true_local` (see the #lan-chip comment there).
+        # `is_true_local` is the REAL, un-hardcoded _is_local_request() result. It
         # gates the Import button's own visibility (see the head-nav comment above it),
         # FIXED 2026-07-24 (docs/AUDIT_2026-07-21.md P3/S5-3): a signed-in, non-local
         # LAN session used to see a working-looking Import button that always 403'd,
@@ -9976,6 +11224,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # to /delete-tasks-bulk, which is gated to the same stricter _is_local_request()
         # (irreversible cloud deletion, same trust tier as /api/branding/shortcut), so a
         # logged-in LAN session sees "Delete locally" but not "Delete from PixAI".
+        # The header's #lan-chip is the third reader of the same value, and the only one
+        # that renders on the FALSE side: it names the controls the two above withhold,
+        # so a remote session sees a reason instead of a hole.
         import pixai_gallery_backup as _core
         _fresh_cfg = _core._load_config()
         needs_key = not bool(_fresh_cfg.get("PIXAI_API_KEY") or _fresh_cfg.get("U3T"))
@@ -10065,7 +11316,73 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         return render_template_string(
             DETAIL_HTML, row=row, img_url=img_url, back=back,
             prev_id=prev_id, next_id=next_id, poster_url=poster_url,
+            # Same value the gallery's own "Delete from PixAI" is gated on. A LAN session
+            # can browse and spend, but not destroy on the owner's real cloud account.
+            can_delete_cloud=_is_local_request(),
+            siblings=_batch_sibling_count(row.get("task_id")),
         )
+
+    def _batch_sibling_count(task_id):
+        """How many catalog rows share this task. Used to say, before anything is deleted,
+        whether the picture is one of a batch or the only one this task made -- because
+        `deleteBatchMedia` on a task's last image is a different act from trimming one frame
+        out of four, and the dialog should not make them look the same."""
+        tid = str(task_id or "").strip()
+        if not tid:
+            return 0
+        try:
+            with sqlite3.connect(str(db_path)) as con:
+                return int(con.execute(
+                    "SELECT COUNT(*) FROM catalog WHERE task_id = ?", (tid,)).fetchone()[0])
+        except sqlite3.Error:
+            return 0
+
+    @app.route("/api/delete-image", methods=["POST"])
+    def api_delete_image():
+        """Delete ONE image from its task on PixAI, leaving the task and its siblings alone.
+
+        The finer-grained partner to /delete-tasks-bulk, which is task-level: deleting any
+        image there takes the whole batch. Same trust tier and for the same reason --
+        LOCALHOST-only, because this destroys on the owner's real cloud account, and a
+        logged-in LAN session unlocks browsing and spending, not irreversible deletion.
+
+        Local purge follows the cloud delete, exactly as the task-level path does, so cloud
+        and catalog never drift. Order matters: if the cloud call fails, nothing local is
+        touched and the image is still there to try again. The reverse order would leave a
+        hole in the catalog for an image that still exists on PixAI.
+
+        `confirm` is required -- the typed-DELETE prompt is the client's half of the same
+        gate, and a route that acted without it would make that prompt decorative.
+        """
+        import pixai_gallery_backup as core          # lazy: avoid import cycle
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        if not body.get("confirm"):
+            return jsonify({"error": "not confirmed"}), 400
+        mid = str(body.get("media_id") or "").strip()
+        row = get_row(db_path, mid) if mid else None
+        if not row:
+            return jsonify({"error": "No such image in the catalog."}), 200
+        tid = str(row.get("task_id") or "").strip()
+        if not tid:
+            # An imported local file has no PixAI task behind it, so there is nothing on
+            # their side to delete. Saying so beats a confusing API error, and points at the
+            # control that DOES apply to it.
+            return jsonify({"error": "This image was imported from your computer \u2014 PixAI "
+                                     "has no copy to delete. Use Delete to remove it here."}), 200
+        try:
+            # _make_session takes a REQUIRED positional; every other call site in this
+            # file passes None. Omitting it raised TypeError on every click, which the
+            # except below turned into a 200 error body -- so the feature was dead while
+            # looking like a PixAI-side failure.
+            _core_session = core._make_session(None)
+            core.delete_batch_media_gql(_core_session, tid, mid)
+        except Exception as e:                        # noqa: BLE001
+            return jsonify({"error": _redact_host_paths(str(e))[:240]}), 200
+        purge_media_local(out_dir, thumb_dir, db_path, mid, row.get("filename"))
+        telem_bump("culled", out_dir=out_dir)
+        return jsonify({"ok": True, "media_id": mid, "task_id": tid})
 
     @app.route("/delete/<media_id>", methods=["POST"])
     def delete_one(media_id):
@@ -10096,6 +11413,141 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Remove a media's catalog row + thumbnail; quarantine its file to _deleted/
         (recoverable) rather than destroying it."""
         purge_media_local(out_dir, thumb_dir, db_path, media_id, filename)
+
+    def _resolve_delete_targets(con, media_ids):
+        """The shared selection -> (task ids, local-only rows) resolution behind BOTH
+        /api/delete-preview and delete_tasks_bulk. Shared rather than copied so the
+        preview cannot drift from the action it previews: a dialog that lists a different
+        blast radius than the delete then takes is worse than showing nothing at all.
+
+        Returns (sel_rows, task_ids, local_only) where task_ids is sorted+deduped (one
+        cloud delete per task no matter how many of its images were selected) and
+        local_only holds the rows with no task id at all -- imports, which have nothing
+        on PixAI to delete and are purged locally only."""
+        sel_rows = [con.execute(
+            "SELECT media_id, task_id, filename FROM catalog WHERE media_id=?", (m,)
+        ).fetchone() for m in media_ids]
+        sel_rows = [dict(r) for r in sel_rows if r]
+        task_ids = sorted({(r.get("task_id") or "").strip()
+                           for r in sel_rows if (r.get("task_id") or "").strip()})
+        local_only = [r for r in sel_rows if not (r.get("task_id") or "").strip()]
+        return sel_rows, task_ids, local_only
+
+    # sqlite's default host-parameter ceiling is 999, and this is well inside it while
+    # still cutting a big selection to a handful of passes.
+    _TASK_CHUNK = 400
+
+    def _members_of_tasks(con, task_ids):
+        """{task_id: [row, ...]} for every media in the given tasks, in ONE chunked pass
+        instead of a query per task.
+
+        `catalog` indexes media_id (its PRIMARY KEY), created_at, model_name, rating and
+        batch -- there is NO index on task_id, so each `WHERE task_id=?` is a full table
+        scan. Measured on a 36,000-row catalog: 24 such queries cost 216ms, 100 cost
+        1.04s and 800 cost 8.6s, all of it inside the request /api/delete-preview's
+        dialog is waiting on; the same 800 tasks fetched with chunked `IN` cost 38ms.
+        Rows come back grouped and sorted here rather than relying on the query's order,
+        because one statement now returns several tasks interleaved."""
+        out = {}
+        for i in range(0, len(task_ids), _TASK_CHUNK):
+            chunk = task_ids[i:i + _TASK_CHUNK]
+            rows = con.execute(
+                "SELECT media_id, task_id, is_video, poster_media_id FROM catalog "
+                "WHERE task_id IN ({})".format(",".join("?" * len(chunk))), chunk)
+            for r in rows:
+                out.setdefault(r["task_id"], []).append(r)
+        for members in out.values():
+            members.sort(key=lambda r: r["media_id"])
+        return out
+
+    def _preview_entry(row, selected_ids):
+        """One /api/delete-preview media entry: what it is, whether the user actually
+        picked it, and the media_id whose thumbnail exists on disk -- or None for
+        `thumb`, so the client renders an id chip instead of a broken image. Videos fall
+        back to their still-frame poster's thumb exactly as the gallery grid does (older
+        sync runs never generated the video's own)."""
+        mid = row["media_id"]
+        thumb = None
+        if (thumb_dir / "{}.jpg".format(mid)).exists():
+            thumb = mid
+        elif row["is_video"] == "1" and row["poster_media_id"]:
+            poster = row["poster_media_id"]
+            if (thumb_dir / "{}.jpg".format(poster)).exists():
+                thumb = poster
+        return {"media_id": mid, "is_video": row["is_video"] == "1",
+                "selected": mid in selected_ids, "thumb": thumb}
+
+    @app.route("/api/delete-preview", methods=["POST"])
+    def api_delete_preview():
+        """What "Delete from PixAI" would actually take, listed image by image, before
+        anything fires. Read-only: a few catalog reads, no network, no PixAI call.
+
+        Deleting on PixAI is TASK-level -- selecting one image of a batch deletes the
+        whole batch, cloud AND local. The confirm dialog said that in prose but never
+        showed WHICH siblings, so the single irreversible action in this app was also
+        the only one whose real scope the user could not see before committing to it.
+        This resolves the selection through _resolve_delete_targets (the same helper
+        delete_tasks_bulk uses, deliberately) and then expands each task to its full
+        catalog membership.
+
+        LOCALHOST, mirroring the action it previews rather than the data it reads. The
+        catalog rows themselves are ordinary LOGIN-tier browsing material (a LAN
+        session can already list a whole batch via ?batch=<task_id>), so this is not
+        about hiding them -- it is that the preview exists only as step one of a
+        LOCALHOST flow whose button a LAN session cannot even see, and a preview
+        reachable at a lower tier than its action is a gap waiting to be mistaken for
+        an entry point. Weakens nothing: /delete-tasks-bulk still re-checks for itself.
+
+        Truncation is DISPLAY-only (DELETE_PREVIEW_TASK_CAP): `totals` always describes
+        the entire selection, because the totals are what the user reads to decide."""
+        if not _is_local_request():
+            return jsonify({"error": "deleting from PixAI is localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        # dict.fromkeys: deduped, order preserved. The blast radius is a set of FILES, so
+        # a repeated id must not inflate "you picked N" (or drive `unselected` negative)
+        # just because a caller sent the same one twice.
+        media_ids = list(dict.fromkeys(
+            str(m) for m in (body.get("media_ids") or []) if str(m).strip()))
+        if not media_ids:
+            return jsonify({"error": "no media_ids given"}), 400
+
+        con = _connect(db_path)
+        try:
+            sel_rows, task_ids, local_only = _resolve_delete_targets(con, media_ids)
+            selected = {r["media_id"] for r in sel_rows}
+            members_by_task = _members_of_tasks(con, task_ids)
+            tasks, total_media = [], 0
+            for tid in task_ids:
+                members = members_by_task.get(tid, [])
+                total_media += len(members)
+                if len(tasks) >= DELETE_PREVIEW_TASK_CAP:
+                    continue          # keep counting, stop describing
+                tasks.append({"task_id": tid,
+                              "media": [_preview_entry(m, selected) for m in members]})
+            # Imports have no task, so nothing about them is task-level -- but they ARE
+            # part of what the button removes, and the dialog has to show them or its
+            # file count won't add up. Capped on the same DISPLAY budget as the tasks.
+            shown_local = [con.execute(
+                "SELECT media_id, is_video, poster_media_id FROM catalog WHERE media_id=?",
+                (r["media_id"],)).fetchone()
+                for r in local_only[:DELETE_PREVIEW_TASK_CAP]]
+            local_entries = [_preview_entry(m, selected) for m in shown_local if m]
+        finally:
+            con.close()
+
+        return jsonify({
+            "tasks": tasks,
+            "local_only": local_entries,
+            "truncated": (len(task_ids) > len(tasks)
+                          or len(local_only) > len(local_entries)),
+            "totals": {
+                "selected": len(sel_rows),
+                "tasks": len(task_ids),
+                "media": total_media + len(local_only),
+                "unselected": total_media + len(local_only) - len(sel_rows),
+                "local_only": len(local_only),
+            },
+        })
 
     @app.route("/delete-tasks-bulk", methods=["POST"])
     def delete_tasks_bulk():
@@ -10129,15 +11581,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
         con = _connect(db_path)
         try:
-            sel_rows = [con.execute(
-                "SELECT media_id, task_id, filename FROM catalog WHERE media_id=?", (m,)
-            ).fetchone() for m in sel]
+            # Same helper /api/delete-preview calls, on purpose: whatever the confirm
+            # dialog showed the user has to be what this route then acts on.
+            sel_rows, task_ids, local_only = _resolve_delete_targets(con, sel)
         finally:
             con.close()
-        sel_rows = [dict(r) for r in sel_rows if r]
-        task_ids = sorted({(r.get("task_id") or "").strip()
-                           for r in sel_rows if (r.get("task_id") or "").strip()})
-        local_only = [r for r in sel_rows if not (r.get("task_id") or "").strip()]
         total = len(task_ids) + len(local_only)
         if not total:
             return redirect(back)
@@ -10763,10 +12211,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         spends nothing. Cached per media_id for the process lifetime.
 
         This lives at create_app scope, called by EVERY path that feeds a user-chosen
-        image to PixAI -- /api/loom/generate, /api/enhance, /api/edit, /api/fix. The
-        first fix for this bug only patched the video route, which left enhance/edit/fix
-        silently broken in exactly the same way; a shared helper is what stops the next
-        input path from reintroducing it.
+        image to PixAI -- /api/loom/generate, /api/edit, /api/fix. The first fix for this
+        bug only patched the video route, which left the other input routes silently broken
+        in exactly the same way; a shared helper is what stops the next input path from
+        reintroducing it.
 
         Falls back to the value unchanged on ANY failure (no local copy, upload error)
         so PixAI's own error surfaces rather than a mystery 'no reference'.
@@ -10793,7 +12241,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_model_search():
         """Search PixAI models/LoRAs for the picker grid. Read-only, owner's key. Login required
         (any session, local or LAN).
-        ?q=&kind=base|lora&size=N&offset=N&category=&sort=popular|newest&base_type=.
+        ?q=&kind=base|lora&size=N&cursor=&category=&sort=popular|newest&base_type=.
 
         Three data sources by design: REST /search (base models' default) has RICH rows
         (description / refCount / official badge) but silently ignores market filters AND
@@ -10808,31 +12256,60 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         only for category/Newest) -- architecture filtering is a LoRA-picker concept only,
         base models don't get compat-sorted against anything.
 
+        cursor= (owner report 2026-07-24: the picker "scrolls a few rows and stops -- no
+        continuous scroll"): an OPAQUE token from a previous response's `next_cursor` --
+        the client just echoes it back with no idea which search path is serving it; THIS
+        route decides what it means for the CURRENT request. On the GraphQL path it's the
+        real Relay endCursor, passed straight through as `after=`. On the REST path (which
+        has no cursor concept, only a raw int offset) it's a base-10 offset string, parsed
+        here and passed as `offset=`; the response's own `next_cursor` is then computed as
+        offset+size so the next request stays a plain opaque round-trip either way. Always
+        '' when the underlying `has_more` is false, regardless of what math would otherwise
+        produce -- a client must never be handed a cursor that pages past a real end.
+        Absent/malformed cursor == first page, same as no cursor was ever sent.
+
         base_type=<model_type>: the CALLER's already-resolved selected base model's own
         model_type (the Gallery/Loom already resolve this today for the post-selection
-        is_lora_compatible() gate -- this just reuses it). When present on a kind=lora
-        request, results are soft-sorted (compatible-or-unknown first, confirmed-mismatch
-        last) and each row gets a `compat` tag -- see annotate_lora_compat(). Absent/kind=base
-        -> results pass through unmodified, exactly as before this param existed."""
+        is_lora_compatible() gate -- this just reuses it). ONE caller-supplied value, three
+        layers, coarsest first:
+          1. SERVER-SIDE FILTER (added 2026-07-24, the real fix): threaded into
+             model_search_market_gql as lora_base_type, which asks PixAI for LoRAs whose
+             base family matches -- generationModels(loraBaseModelTypes:[<enum>]). This is
+             what stops a DiT.2 user's LoRA browse from being 24-of-24 SD 1.5 rows, which
+             was the actual complaint (the standing workaround was keyword-searching "sdxl"
+             on PixAI's own site). Approximate, not strict, and only applied for architecture
+             values on core's whitelist -- anything else falls through unfiltered.
+          2. per-page soft SORT (compatible-or-unknown first, confirmed-mismatch last).
+          3. per-row `compat` tag -- the PRECISE layer, see annotate_lora_compat(). Kept
+             deliberately: layer 1 is a coarse browse hint, so only this one can be trusted
+             to badge an individual row.
+        Absent/kind=base -> results pass through unmodified, exactly as before."""
         q = (request.args.get("q") or "").strip()
         usage = "LORA" if (request.args.get("kind") or "base").lower() == "lora" else "MODEL"
         category = (request.args.get("category") or "").strip().lower()
         sort = (request.args.get("sort") or "").strip().lower()
         base_type = (request.args.get("base_type") or "").strip()
+        cursor = (request.args.get("cursor") or "").strip()
         try:
             size = max(1, min(int(request.args.get("size") or 24), 50))
-            offset = max(0, int(request.args.get("offset") or 0))
         except ValueError:
-            size, offset = 24, 0
+            size = 24
         try:
             core, session = _gen_session()
             use_market = usage == "LORA" or category in core.MARKET_CATEGORIES or sort == "newest"
             if use_market:
                 payload = core.model_search_market_gql(
-                    session, keyword=q, category=category, sort=sort, usage=usage, limit=size)
+                    session, keyword=q, category=category, sort=sort, usage=usage,
+                    limit=size, after=(cursor or None),
+                    # Same caller-supplied value that feeds the compat sort/badge below --
+                    # resolved once by the client, used at every layer. core ignores it for
+                    # a base-model search and for any architecture off its whitelist.
+                    lora_base_type=(base_type if usage == "LORA" else ""))
             else:
+                offset = int(cursor) if cursor.isdigit() else 0
                 payload = core.model_search_rest(session, keyword=q, usage=usage,
                                                   size=size, offset=offset)
+                payload["next_cursor"] = str(offset + size) if payload.get("has_more") else ""
             if usage == "LORA" and base_type:
                 payload["results"] = core.annotate_lora_compat(payload["results"], base_type)
             return jsonify(payload)
@@ -10861,6 +12338,46 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify(core.resolve_version_meta(session, mid))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "version_id": ""}), 200
+
+    @app.route("/api/image-meta/<media_id>")
+    def api_image_meta(media_id):
+        """The one catalog row the Upscale panel needs, by media_id. Read-only, no network.
+
+        Scoped deliberately narrow: the fields an i2i upscale submits (real pixel size, the
+        model that made it, and the prompt it is re-rendered under) plus what the panel shows
+        about them. NOT a general row dump -- `filename` in particular is a HOST PATH
+        fragment and stays out, matching the same withholding /panel does for non-local
+        callers.
+
+        Not localhost-gated, for the reason /api/gallery-images spells out: it reads only the
+        local catalog and returns what the gallery already serves openly, so a gate would add
+        no protection while breaking the panel for the owner browsing over his own LAN.
+        Spending stays gated on /api/generate, which is where the upscale is actually
+        submitted.
+        """
+        row = get_row(db_path, media_id)
+        if not row:
+            return jsonify({"error": "no such image"}), 404
+        # A model id is what makes an upscale submittable without asking. Locally imported
+        # files have no PixAI task behind them and so can never carry one -- the panel says
+        # so and offers its picker, rather than presenting a blank as though it were a
+        # catalog gap the owner could go and fill.
+        source = str(row.get("source") or "")
+        return jsonify({
+            "media_id": str(row.get("media_id") or ""),
+            "task_id": str(row.get("task_id") or ""),
+            "width": str(row.get("width") or ""),
+            "height": str(row.get("height") or ""),
+            "model_id": str(row.get("model_id") or ""),
+            "model_name": str(row.get("model_name") or ""),
+            "prompt": str(row.get("prompt_full") or row.get("prompt_preview") or ""),
+            "negative": str(row.get("negative_prompt") or ""),
+            "steps": str(row.get("steps") or ""),
+            "cfg": str(row.get("cfg_scale") or ""),
+            "is_video": str(row.get("is_video") or "") == "1",
+            "source": source,
+            "local_import": source == "local",
+        })
 
     @app.route("/api/gallery-images")
     def api_gallery_images():
@@ -11133,6 +12650,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     except (TypeError, ValueError):
                         pass
             sub = me.get("subscription") or {}
+            # Real per-account LoRA-per-generation entitlement, straight from PixAI's own
+            # membership data -- already fetched by account_info() for the CLI's --account
+            # dashboard (run_account_info), never previously reached the web app, so the
+            # picker had no real cap to enforce or show. `lora` wins when present (mirrors
+            # the CLI's own field-check order -- an account's live paid entitlement);
+            # `freeUserLora` is the fallback for an account with no `lora` value at all.
+            # Exact coexistence semantics of the two fields are unconfirmed (no live account
+            # to probe against from this checkout) -- treated as a soft pre-submit guard the
+            # client can warn from, not a hard block, since PixAI's own server is the real
+            # authority on any submit that slips past it.
+            priv = ((me.get("membership") or {}).get("privilege")) or {}
+            lora_cap = priv.get("lora")
+            if lora_cap is None:
+                lora_cap = priv.get("freeUserLora")
             # Backup coverage: server's lifetime TASK count vs distinct tasks we hold locally.
             # Both are task counts (not images), so the ratio is honest.
             try:
@@ -11150,7 +12681,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                             "server_tasks": server_tasks, "local_tasks": local_tasks,
                             "coverage_pct": coverage,
                             "followers": me.get("followerCount"),
-                            "following": me.get("followingCount")})
+                            "following": me.get("followingCount"),
+                            "lora_cap": lora_cap})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
@@ -11731,6 +13263,16 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             prompt_helper=(str(p.get("prompt_helper", "1")) not in ("0", "false", "off")),
             ref_media_id=str(p.get("ref_media_id") or "").strip(),
             ref_strength=num("ref_strength", 0.55, float),
+            # Upscale + boosters. num() returns its default for a missing/blank value, so
+            # None here means "the drawer's Upscale control is Off" and the builder omits
+            # every one of these keys -- an absent control must not change the submit.
+            enlarge=num("enlarge", None, float),
+            enlarge_model=str(p.get("enlarge_model") or "").strip(),
+            upscale=num("upscale", None, float),
+            upscale_denoising_strength=num("upscale_denoise", None, float),
+            upscale_denoising_steps=num("upscale_denoise_steps", None, int),
+            face_fix=(p.get("face_fix") in (True, "1", "true", "on")),
+            quality_tag=str(p.get("quality_tag") or "").strip(),
             kaisuuken_id="", no_card=bool(p.get("no_card")))
 
     _presets_lock = threading.Lock()
@@ -11982,7 +13524,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"presets": presets})
 
     def _params_and_nocard(core, p, user):
-        """Route a drawer payload to generate, edit, or video params. Returns (params,
+        """Route a drawer payload to generate, edit, fix, or video params. Returns (params,
         no_card, note). note is set (params None) when something's missing. `user` is
         only consulted on the edit path (a preset lookup is per-account)."""
         p = p or {}
@@ -11990,6 +13532,24 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             params = _edit_params_from_payload(core, p, user)
             return (params, bool(p.get("no_card")),
                     None if params else "pick an image to edit")
+        if p.get("mode") == "fix":
+            # A hand/face Fix is submitted over POST /v2/task/fixer, whose {mediaId, boxes}
+            # body /v2/task-price cannot read -- but the taskKind=chat task PixAI builds from
+            # it IS priceable, so build_fixer_price_parameters synthesizes that chat.fixer
+            # shape (see its docstring for the measurement).
+            src = str(p.get("source") or "").strip()
+            if not src:
+                return None, True, "pick an image to fix"
+            try:
+                params = core.build_fixer_price_parameters(src, p.get("boxes") or [])
+            except core.PixAIError:
+                return None, True, "drag a box over a hand or face"
+            # no_card is forced True here and is NOT read off the payload: /v2/task/fixer
+            # takes only mediaId + boxes, with no kaisuukenId field anywhere on it, so a free
+            # card can never be spent on a Fix however well /v2/kaisuuken/check matches the
+            # synthesized params. Letting the card check run would paint the badge emerald
+            # "FREE -- a card covers this" over an action about to charge full credits.
+            return params, True, None
         if p.get("mode") in ("I2V", "FLF", "R2V"):
             imgs = [str(i) for i in (p.get("images") or []) if str(i).strip()]
             vids = [str(v) for v in (p.get("video_refs") or []) if str(v).strip()]
@@ -12016,19 +13576,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             except core.PixAIError as e:
                 return None, bool(p.get("no_card")), _redact_host_paths(str(e))[:140]
             return params, bool(p.get("no_card")), None
-        if p.get("mode") == "enhance":
-            src = str(p.get("source") or "").strip()
-            wid = str(p.get("workflow_id") or "").strip()
-            if not (src and wid):
-                return None, bool(p.get("no_card")), "pick an image + a tool"
-            try:
-                return core.build_panelplugin_parameters(src, wid), bool(p.get("no_card")), None
-            except Exception:                        # noqa: BLE001
-                return None, bool(p.get("no_card")), "could not build that workflow"
         args = _gen_args_from_payload(p)
         if not args.model:
             return None, args.no_card, "pick a model"
-        return core._gen_parameters(args), args.no_card, None
+        try:
+            return core._gen_parameters(args), args.no_card, None
+        except core.PixAIError as e:
+            # Same shape as the I2V branch above: a builder refusal (asking for both
+            # upscale methods at once) becomes the badge's own note, not a 500.
+            return None, args.no_card, _redact_host_paths(str(e))[:140]
 
     @app.route("/api/price", methods=["POST"])
     def api_price():
@@ -12148,31 +13704,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
 
-    @app.route("/api/enhance", methods=["POST"])
-    def api_enhance():
-        """One-click enhance (panelplugin) on the Edit tab's source image. Login required;
-        auto-applies a card if one matches. A rejected/unknown workflow just errors (no
-        credits spent). Returns {task_id, media_ids, paid_credit}."""
-        try:
-            from types import SimpleNamespace
-            core, session = _gen_session()
-            p = request.get_json(silent=True) or {}
-            src = _input_media_id(core, session, str(p.get("source") or "").strip())
-            wid = str(p.get("workflow_id") or "").strip()
-            if not src:
-                return jsonify({"error": "pick an image first"}), 400
-            if not wid:
-                return jsonify({"error": "pick an enhance workflow"}), 400
-            params = core.build_panelplugin_parameters(src, wid)
-            core._apply_kaisuuken(session, params,
-                                  SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
-            task_id = core.submit_generation(session, params)
-            telem_bump("enhances", out_dir=out_dir)       # first-enhance milestone
-            telem_set_add("tools", "enhance", out_dir=out_dir)
-            telem_set_add("enhance_workflows", wid, out_dir=out_dir)  # Enhance Adept: distinct rituals
-            return jsonify({"task_id": task_id})
-        except Exception as e:
-            return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
+    # /api/enhance is gone. It submitted a panelplugin task, which PixAI accepts, queues,
+    # charges for and then cancels unstarted at roughly 60 minutes ("waiting timeout") whenever
+    # the client authenticated with an API key -- their own official preset workflow ids
+    # included. Nothing about the payload changes that, so the route could only ever bill an
+    # hour of waiting for no output. See the Enhance sub-tab's markup for the full measurement;
+    # tests/test_enhance.py guards against it coming back.
 
     @app.route("/api/fix", methods=["POST"])
     def api_fix():
@@ -12337,7 +13874,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         wants_bundle = request.args.get("bundle") in ("1", "true", "yes")
         bundle_file = loom_dir / "dist" / "master-storyboard.bundle.js"
         if wants_bundle and bundle_file.is_file():
-            return LOOM_PAGE_BUNDLE
+            return LOOM_PAGE_BUNDLE.replace("__UPSCALE_CONST__", _upscale_const_js())
 
         # ---- Babel-standalone path (default + bundle-requested-but-not-built) ----
         # loom/src/loom-core.js AND loom/src/loom-mutations.js (Phase 2, the
@@ -12378,7 +13915,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if mut_inline:
             mut_inline += "\nconst mvCardToAct = moveCardToAct;\n"
         jsx = jsx.replace("export default function App()", "function App()")
-        return LOOM_PAGE.replace("__JSX__", core_inline + "\n" + mut_inline + "\n" + jsx)
+        return (LOOM_PAGE.replace("__JSX__", core_inline + "\n" + mut_inline + "\n" + jsx)
+                .replace("__UPSCALE_CONST__", _upscale_const_js()))
 
     @app.route("/api/loom/get")
     def loom_get():
@@ -12891,6 +14429,80 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         return jsonify({"project": project, "thumbs": data.get("thumbs") or {},
                         "media_added": len(rows)})
 
+    # ---- queue-vs-render phase, recorded for the Activity tray -----------------------
+    # Maps a task id to the `started` value already written to the job log for it. The tray
+    # (static/mg-notify.js) renders from /api/jobs, never from api_task_status()'s response,
+    # so `started` has to be written DOWN to reach it -- and writing it here is what makes
+    # the signal identical on both hosts, because the gallery's Jobs.poll(), the Loom's
+    # pollShot/pollTaskWithCeiling and mg-generate-drawer.js's own poll all hit this one
+    # route and none of them has to know the field exists.
+    #
+    # De-duped rather than written per poll for two concrete reasons: four pollers ask every
+    # 3s per job, so a task PixAI sits on for its whole ~60-minute reap window would add
+    # 1,200+ lines to jobs.jsonl; and each write refreshes that job's `ts`, which is the
+    # clock JOBS_ORPHAN_SWEEP_AGE is measured against -- a heartbeat every 3s would mean the
+    # ongoing orphan-reconciliation sweep never sees a job age in at all. At most two lines
+    # per job survive this (queued, then started), and the entry is dropped the moment the
+    # job reaches a terminal phase so the map stays bounded by tasks IN FLIGHT, not by uptime.
+    _gen_phase_seen = {}
+    _gen_phase_lock = threading.Lock()
+
+    def _queue_estimate(core, session, tid):
+        """PixAI's own queue-wait estimate for the model THIS task was submitted with, in
+        seconds, or None. Two read-only calls (the task's stored submit parameters, then
+        /v2/task/wait-time -- see core.queue_wait_estimate); fails soft, because an estimate
+        must never turn a status poll into an error."""
+        try:
+            params = (core._task_detail_query(session, tid) or {}).get("parameters") or {}
+            if not isinstance(params, dict):
+                return None
+            return core.queue_wait_estimate(session, params.get("priority"),
+                                            params.get("modelId"))
+        except Exception:                          # noqa: BLE001 -- a nicety, never fatal
+            return None
+
+    def _note_gen_phase(core, session, tid, started):
+        """Write a generate job's queued/rendering phase to the job log, once per change.
+
+        On the FIRST sighting of a job PixAI has accepted but not started, also record its
+        queue estimate. Fetched here rather than per poll: a generation a worker picks up
+        before its first poll costs zero extra calls, and one that really is queued costs
+        two, once. The number is stored as the estimate PixAI gave when the job was seen
+        queued and is rendered that way -- nothing recomputes it as the wait grows, and it
+        is never presented as a countdown.
+
+        Those two calls ride ONE poll of an already-queued job, which is why they are done
+        inline rather than off-thread: the poll interval is 3s and this route already makes an
+        un-timed PixAI call of its own on every single poll, so a second pair on one poll of
+        one job is not the thing worth adding a thread for.
+        """
+        with _gen_phase_lock:
+            if _gen_phase_seen.get(tid) == started:
+                return
+            first = tid not in _gen_phase_seen
+            _gen_phase_seen[tid] = started
+        fields = {"status": "running", "started": started}
+        if first and not started:
+            eta = _queue_estimate(core, session, tid)
+            if eta is not None:
+                fields["eta_seconds"] = eta
+            # RE-CHECK before writing. The estimate above is two network calls long, and a
+            # worker can pick the job up while we are inside it -- in which case a later poll
+            # has already claimed and written the newer 'rendering' phase. Writing our
+            # pre-fetch 'queued' on top of that would be permanent: the seen-map already
+            # holds the newer value, so every subsequent poll returns early at the dedupe
+            # check above and nothing ever corrects it. The job would render to completion
+            # still displaying QUEUED. Dropping a stale write costs nothing; the newer phase
+            # is already in the log.
+            with _gen_phase_lock:
+                if _gen_phase_seen.get(tid) != started:
+                    return
+        _log_job(tid, **fields)
+
+    def _forget_gen_phase(tid):
+        with _gen_phase_lock:
+            _gen_phase_seen.pop(tid, None)
+
     @app.route("/api/task-status")
     def api_task_status():
         """Poll a submitted task: {phase: running|done|failed}. On 'done' it downloads +
@@ -12908,19 +14520,45 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core, session = _gen_session()
             st = core.generation_status(session, tid)
             if st["phase"] == "done":
+                _forget_gen_phase(tid)
                 got = _collect_single_flight(core, session, tid)
                 # authoritative done event -- written server-side so the Jobs card gets the
                 # outcome even if the browser tab that submitted it has since closed.
+                # paid_credit is PixAI's server-authoritative actual cost. Logged, not just
+                # returned to the browser: it is the one number that cannot be
+                # reconstructed later without re-querying PixAI per task, and it is what
+                # makes an unexpected spend visible in the Activity tray afterwards. Passed
+                # through even when 0 -- a card-covered generation really is free, and
+                # "free" must stay distinguishable from "unknown".
                 _log_job(tid, status="done", media_ids=got["media_ids"],
-                         is_video=got.get("is_video", False))
+                         is_video=got.get("is_video", False),
+                         paid_credit=st.get("paid_credit"))
                 return jsonify({"phase": "done", "media_ids": got["media_ids"],
                                 "is_video": got.get("is_video", False),
                                 "duration": got.get("duration"),
                                 "paid_credit": st["paid_credit"]})
             if st["phase"] == "failed":
-                _log_job(tid, status="failed", error=(st.get("status") or "failed"))
-                return jsonify({"phase": "failed", "status": st["status"]})
-            return jsonify({"phase": "running", "status": st["status"]})
+                _forget_gen_phase(tid)
+                # Carry PixAI's OWN reason (outputs.reason, e.g. "waiting timeout") into
+                # both the job log and the response. This branch already fired correctly
+                # for the owner's five reaped enhances -- it just logged the bare status,
+                # so the tracker and the CLI could say no more than "cancelled", which
+                # reads as though HE cancelled a job that in fact never started.
+                reason = (st.get("reason") or "").strip()
+                detail = core.describe_failure(st.get("status"), reason,
+                                               started=bool(st.get("started")))
+                _log_job(tid, status="failed", error=detail)
+                return jsonify({"phase": "failed", "status": st["status"],
+                                "reason": reason, "error": detail})
+            # `started` distinguishes "queued, no worker has taken it" from real work --
+            # both are phase=running over the wire, and without it a task PixAI never
+            # dispatches is an indefinite spinner for the ~60 min until it is reaped.
+            # Recorded in the job log as well as returned, because the Activity tray reads
+            # the log (see _note_gen_phase); the response alone only reaches whoever polled.
+            started = bool(st.get("started"))
+            _note_gen_phase(core, session, tid, started)
+            return jsonify({"phase": "running", "status": st["status"],
+                            "started": started})
         except _core.EmptyOutputsError as e:
             # TERMINAL, unlike the transient case below: PixAI already told us the
             # task reached 'done', and collect then found its outputs empty. The task
@@ -13005,15 +14643,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             _log_job(jid, dismissed=True)
         return jsonify({"ok": True})
 
-    @app.route("/api/workflows")
-    def api_workflows():
-        """Live enhance-workflow catalog (id + name + type) for the Edit tab picker.
-        Read-only; login required (uses the owner's key)."""
-        try:
-            core, session = _gen_session()
-            return jsonify({"workflows": core.workflow_catalog(session)})
-        except Exception as e:
-            return jsonify({"error": _redact_host_paths(str(e))[:200], "workflows": []}), 200
+    # /api/workflows is gone too: its only consumer was the Enhance sub-tab's ComfyUI catalog
+    # search, and every id it returned addressed a panelplugin task PixAI will not run for an
+    # API-key client (see /api/enhance's note above).
 
     @app.after_request
     def _gzip_html(resp):
@@ -13105,8 +14737,14 @@ def port_owner(host, port, timeout=0.4):
 
 def main():
     ap = argparse.ArgumentParser(description="Local PixAI gallery server.")
-    ap.add_argument("--out", default="pixai_backup",
-                    help="backup folder containing catalog.csv (default: pixai_backup)")
+    # default=None, not "pixai_backup": argparse cannot tell "the user typed the default"
+    # from "the user typed nothing", and the managed launcher used to always pass the
+    # literal default -- which made config.json's LIBRARY_DIR permanently unreachable no
+    # matter what was stored in it. None is the only value that means "not specified".
+    ap.add_argument("--out", default=None,
+                    help="backup folder containing the catalog. Defaults to LIBRARY_DIR in "
+                         "config.json (set it in the Control Panel), or pixai_backup if that "
+                         "is unset. An explicit --out here always wins.")
     ap.add_argument("--port", type=int, default=5000)
     ap.add_argument("--host", default="127.0.0.1",
                     help="bind address (default 127.0.0.1; use 0.0.0.0 for LAN)")
@@ -13134,7 +14772,7 @@ def main():
                          "regardless of this flag")
     args = ap.parse_args()
 
-    out_dir = Path(args.out)
+    out_dir = Path(resolve_library_dir(args.out))
     import pixai_logging
     pixai_logging.setup_logging(out_dir, verbose=args.verbose)
     # A fresh clone has neither the (git-ignored) output folder nor a catalog -- refusing
