@@ -12,6 +12,7 @@ import pixai_gallery_backup as core
 from pixai_gallery import CATALOG_FIELDS, _account_key, create_app, save_catalog
 
 from tests.conftest import login_client, login_existing_client
+from tests.csshelp import css_rules, element, winning
 
 
 def _row(**kw):
@@ -263,6 +264,31 @@ def test_model_flyout_surfaces_version_picker_and_capabilities(tmp_path):
     assert "if(loraPickerEl) loraPickerEl.setAttribute('base-type', selected.model_type||'');" in html
 
 
+def test_base_model_version_dropdown_is_hidden_when_there_is_only_one_version(tmp_path):
+    """AUDIT_2026-07-21 follow-up: renderVersions() rendered the base-model version <select>
+    even for a single-option list -- a control that cannot do anything, on the majority of
+    picks (most models publish exactly one release). The gate already existed in TWO other
+    places in this codebase and is reused verbatim rather than reinvented: the Gallery's own
+    per-LoRA chips (renderLoras -> `l.versions&&l.versions.length>1`) and the Loom's
+    .lv-versel (`imgModel.versions.length > 1`).
+
+    #gen-selmeta itself must still open for the capability badges alone -- those are
+    independent of how many versions exist -- so the gate hides the <select>, not the row."""
+    cli = _authed_client(tmp_path, [])
+    html = cli.get("/").get_data(as_text=True)
+    assert "var multi=versions.length>1;" in html
+    assert "sel.style.display=multi?'':'none';" in html
+    # the <option> list is only built when there's a real choice...
+    assert "sel.innerHTML=multi?versions.map(function(v){" in html
+    # ...and the containing row still shows for capabilities-only models
+    assert "wrap.classList.toggle('show', multi||caps>0);" in html
+    # the established gate this copies, still present on the per-LoRA chips
+    assert "var verSel=(l.versions&&l.versions.length>1)" in html
+    # submit still reads selected.version_id, never the <select>'s value -- hiding the
+    # control must not be able to change what gets generated
+    assert "return { version_id:(selected&&selected.version_id)||''," in html
+
+
 def test_model_search_lora_always_uses_graphql_even_without_market_filters(tmp_path, monkeypatch):
     """picker-parity-round2 (problem 3): LoRA search needs real per-row architecture data
     (modelType/loraBaseModelType) on EVERY search, not just category/Newest browsing -- REST
@@ -305,6 +331,76 @@ def test_model_search_base_type_annotates_lora_results_only(tmp_path, monkeypatc
     # base kind ignores base_type entirely (nothing to compat-sort a base model against)
     d3 = cli.get("/api/model-search?kind=base&base_type=SDXL_MODEL").get_json()
     assert "compat" not in d3["results"][0]
+
+
+def test_model_search_threads_base_type_into_the_server_side_filter(tmp_path, monkeypatch):
+    """AUDIT_2026-07-21: `base_type=` already reached this route for the compat sort/badge;
+    it now ALSO drives PixAI's own generationModels(loraBaseModelTypes:) filter, which this
+    app had never used -- the reason a DiT.2 user's LoRA browse came back 24-of-24 SD 1.5.
+    One caller-supplied value, reused at every layer rather than a second parameter."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    gql = []
+    monkeypatch.setattr(core, "model_search_market_gql", lambda *a, **k: (
+        gql.append(k) or {"results": [{"model_id": "1", "lora_base_model_type": "MMDIT26A_MODEL"}],
+                          "has_more": False, "next_cursor": ""}))
+    monkeypatch.setattr(core, "model_search_rest",
+                        lambda *a, **k: {"results": [{"model_id": "9"}], "has_more": False})
+    cli = _authed_client(tmp_path, [])
+
+    d = cli.get("/api/model-search?kind=lora&base_type=MMDIT26A_MODEL").get_json()
+    assert gql[-1]["lora_base_type"] == "MMDIT26A_MODEL"
+    # the PRECISE per-row layer is still applied on top of the coarse server-side filter
+    assert d["results"][0]["compat"] == "yes"
+
+    # no base picked yet -> no filter (browsing before a pick must be untouched)
+    cli.get("/api/model-search?kind=lora")
+    assert gql[-1]["lora_base_type"] == ""
+
+    # a base-model search never sends it, even if a client passes one
+    cli.get("/api/model-search?kind=base&sort=newest&base_type=MMDIT26A_MODEL")
+    assert gql[-1]["lora_base_type"] == ""
+
+
+def test_model_search_threads_cursor_to_whichever_path_is_in_use(tmp_path, monkeypatch):
+    """Owner report 2026-07-24: the picker never loads more than its first page. The
+    unused `offset=` param is replaced by a unified `cursor=` the client just echoes back
+    without needing to know which search path is serving it -- the route decides what an
+    opaque cursor MEANS based on which path is active for THIS request. GraphQL: the
+    literal cursor string, passed through as `after=`. REST: a plain base-10 offset,
+    computed here (not inside model_search_rest, which only knows a raw int offset)."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    gql_calls = []
+    monkeypatch.setattr(core, "model_search_market_gql", lambda *a, **k: (
+        gql_calls.append(k) or {"results": [], "has_more": True, "next_cursor": "GQL_NEXT"}))
+    rest_calls = []
+    monkeypatch.setattr(core, "model_search_rest", lambda *a, **k: (
+        rest_calls.append(k) or {"results": [], "has_more": True}))
+    cli = _authed_client(tmp_path, [])
+
+    # GraphQL path (kind=lora always uses it): cursor passed straight through as `after`,
+    # and the server's own next_cursor rides back to the client unchanged.
+    d = cli.get("/api/model-search?kind=lora&cursor=GQL_PREV").get_json()
+    assert gql_calls[-1]["after"] == "GQL_PREV"
+    assert d["next_cursor"] == "GQL_NEXT"
+
+    # REST path (plain base-model keyword search): cursor is a base-10 offset string;
+    # next_cursor is computed as offset+size since model_search_rest has no cursor concept.
+    d2 = cli.get("/api/model-search?kind=base&cursor=24&size=24").get_json()
+    assert rest_calls[-1]["offset"] == 24
+    assert d2["next_cursor"] == "48"
+
+    # first page (no cursor at all) -> REST offset 0, GraphQL after=None (not sent)
+    cli.get("/api/model-search?kind=base")
+    assert rest_calls[-1]["offset"] == 0
+    cli.get("/api/model-search?kind=lora")
+    assert gql_calls[-1]["after"] is None
+
+    # has_more False -> next_cursor must be empty, on EITHER path, regardless of what the
+    # underlying offset math would otherwise compute -- never hand back a cursor that
+    # would page a client past the real end of the list.
+    monkeypatch.setattr(core, "model_search_rest", lambda *a, **k: {"results": [], "has_more": False})
+    d3 = cli.get("/api/model-search?kind=base&cursor=24").get_json()
+    assert d3["next_cursor"] == ""
 
 
 def test_collections_endpoint(tmp_path):
@@ -1040,6 +1136,70 @@ def test_redaction_covers_a_second_independent_call_site(tmp_path, monkeypatch):
     assert "<host-path>" in body
 
 
+def test_redaction_is_case_insensitive_because_windows_paths_are(tmp_path, monkeypatch):
+    """`_redact_host_paths` matched with `str.replace`, which is case-SENSITIVE, while the
+    paths it is redacting live on a case-INSENSITIVE filesystem. A third-party library or a
+    normalized OS string can hand back the same directory in a different case (Users vs
+    users, drive letter either way), and the exact-case check silently misses it, shipping the real
+    host path and the OS username to a LAN caller while the guard reports success.
+
+    Bite: revert the matching to `path in out` / `out.replace(path, ...)` and this fails."""
+    out_dir = tmp_path / "Jane Smith" / "pixai_backup"
+    out_dir.mkdir(parents=True)
+    save_catalog(out_dir / "catalog.db", [_row(media_id="1", filename="a_1.png",
+                                          created_at="2025-01-01T00:00:00")])
+    cli = login_client(out_dir)
+
+    # the SAME directory, spelled in a different case -- what a normalizing library returns
+    shouty = str(out_dir).upper()
+
+    def boom(*a, **k):
+        raise RuntimeError("could not read {}\\config.json: permission denied".format(shouty))
+    monkeypatch.setattr(core, "_make_session", boom)
+
+    body = cli.post("/api/price", json={"model_id": "1", "prompt": "x"}).get_data(as_text=True)
+    assert "JANE SMITH" not in body, "upper-cased host path leaked verbatim: " + body[:300]
+    assert "<host-path>" in body
+
+
+def test_redaction_catches_a_slash_flipped_windows_path(tmp_path, monkeypatch):
+    """Same failure mode, second real variant: plenty of libraries hand back a Windows path
+    with forward slashes (`C:/Users/...`). That is the same directory and must redact too --
+    an exact-substring match against the backslash spelling never sees it."""
+    out_dir = tmp_path / "Jane Smith" / "pixai_backup"
+    out_dir.mkdir(parents=True)
+    save_catalog(out_dir / "catalog.db", [_row(media_id="1", filename="a_1.png",
+                                          created_at="2025-01-01T00:00:00")])
+    cli = login_client(out_dir)
+    flipped = str(out_dir).replace("\\", "/")
+
+    def boom(*a, **k):
+        raise RuntimeError("could not read {}/config.json: denied".format(flipped))
+    monkeypatch.setattr(core, "_make_session", boom)
+
+    body = cli.post("/api/price", json={"model_id": "1", "prompt": "x"}).get_data(as_text=True)
+    assert "Jane Smith" not in body, "slash-flipped host path leaked: " + body[:300]
+    assert "<host-path>" in body
+
+
+def test_redaction_still_does_not_eat_ordinary_messages(tmp_path, monkeypatch):
+    """The degenerate-candidate guard must survive the case-insensitive rewrite: an ordinary
+    message containing no host path at all comes back untouched. This is the regression the
+    length floor and the resolve() both exist for -- a looser matcher is exactly how that
+    class of bug returns."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+
+    def boom(*a, **k):
+        raise RuntimeError("upstream said: retry in 0.5s (attempt 2 of 3)")
+    monkeypatch.setattr(core, "list_contests", boom)
+
+    body = cli.get("/api/contests").get_data(as_text=True)
+    assert "<host-path>" not in body, "redacted an ordinary message: " + body[:300]
+    assert "retry in 0.5s" in body
+
+
 def test_catalog_counts(tmp_path):
     import pixai_gallery as g
     g.save_catalog(tmp_path / "catalog.db", [
@@ -1300,57 +1460,189 @@ def test_branding_absent_is_404(tmp_path):
     assert cli.get("/branding/../catalog.db").status_code == 404    # traversal rejected
 
 
-def test_enhance_shelf_promotes_official_tools(tmp_path):
-    """The Enhance sub-tab leads with a grouped shelf of curated one-click official tools
-    (Upscale / Cleanup / Convert / Light) above the flat 140+ community list — so real
-    tools aren't buried among junk workflows. Each card fires Gen.selectEnhance(<workflow_id>,
-    <name>) -- D-12: select-then-run now, not click-runs-immediately (see below)."""
+def test_enhance_subtab_is_the_local_art_filters_surface(tmp_path):
+    """The Enhance sub-tab is where art filters live, and they run entirely in the browser.
+
+    Every control that submitted a `pixai-panelplugin` task is gone -- PixAI never dispatches
+    one from an API key (see tests/test_enhance.py's test_no_panelplugin_submit_path_survives
+    for the measurement) -- and so is the paid `pixai-image-filter` submit that used to be the
+    other half of the same command. PixAI's seven art filters are gradient composites served
+    from a public config endpoint, so the tab now applies them locally: no credits, no request.
+
+    What must remain: the sub-tab button, the filters entry point, the flyout it opens, and a
+    line saying which PixAI tools still only run on their own site. What must NOT: any element
+    the deleted panelplugin JS addressed, and no route that would send a filter to a worker."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
-    assert 'class="enh-shelf"' in html
-    for section in ("Upscale", "Cleanup", "Convert", "Light"):
-        assert ">" + section + "<" in html
-    # a few of the curated official workflow ids are wired as one-click cards
-    for wid in ("1794855217667308480",   # Image Upscale
-                "1793505053210462325",   # Remove background
-                "1793713293591365899",   # Basic Outpainting
-                "1801729774701480692"):  # relight sunshine
-        assert "Gen.selectEnhance('" + wid + "'," in html
-    assert 'id="enh-q"' in html          # the browse-all search still present below the shelf
+    assert "Gen.setEditSub('enhance')" in html            # the tab itself survives
+    assert 'id="edit-sub-enhance"' in html
+    assert "pixai.art" in html                            # the pane says what does NOT run here
+    # the local filters surface: the module, the entry point, and the side-by-side flyout
+    assert '/static/mg-art-filters.js' in html
+    assert 'Gen.toggleFilters()' in html
+    assert 'id="filters-flyout"' in html
+    for part in ('id="af-stage"', 'id="af-img"', 'id="af-swatches"', 'id="af-strength"',
+                 'id="af-save"'):
+        assert part in html, part + " is missing from the filters flyout"
+    for dead in ('class="enh-shelf"', 'class="enh-card"', 'id="enh-q"', 'id="enh-list"',
+                 'id="enh-go"', 'id="enh-result"', 'id="enh-selected"',
+                 'id="enhance-cost"', "Gen.selectEnhance(", "Gen.runEnhance(",
+                 "function selectEnhance", "function runEnhance", "function renderWorkflows",
+                 "/api/workflows", "/api/enhance", "pixai-image-filter"):
+        assert dead not in html, dead + " is still in the page"
 
 
-def test_enhance_is_select_then_run_with_a_persistent_badge(tmp_path):
-    """D-12: the one Enhance path that never got the <mg-cost-badge> treatment -- it used
-    to price + window.confirm() on every click, the exact pattern every other price
-    surface (Image/Edit/Video, and now this one) already replaced with a persistent
-    badge. Now: click selects (no spend), a separate Run button fires it, and the badge
-    is the only warning -- no window.confirm left anywhere in this path."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+def test_art_filters_flyout_is_a_comparison_and_placed_like_the_model_flyout(tmp_path):
+    """Three properties of the filters panel that a plain "the ids are present" check misses.
+
+    1. THREE COLUMNS, in order: the untouched original, the filtered preview, then the palette
+       rail. Judging a filter is a COMPARISON -- with one image you had to toggle No filter
+       back and forth and hold the difference in your head. The two pictures also have to be
+       two distinct <img> elements: MgArtFilters mutates the preview's element (a CSS `filter`
+       for image_parameters, overlay divs at inset:0), so anything sharing it would be filtered
+       too and there would be nothing left to compare against.
+    2. The image columns take an EXPLICIT flex-basis, never `auto`. From an `auto` basis a
+       column's base size is the image's INTRINSIC width, which overflows the panel and makes
+       flex-wrap drop the rail under the pictures at every width -- measured on the old
+       two-column build, and the whole point of the panel is lost.
+    3. Positioned by the in-repo overlay idiom, not a new one. #filters-flyout is a top-level
+       fixed panel placed by JS (the same shape as #model-preview, which mg-model-picker's
+       _place() drives) -- it must NOT be a child of #gen-drawer, because the drawer carries
+       `transform: translateX(...)` and a transform makes its box the containing block for
+       position:fixed descendants, so viewport coordinates computed from
+       getBoundingClientRect() would land relative to the drawer instead.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
-    assert '<mg-cost-badge id="enhance-cost"' in html
-    assert 'id="enh-go" disabled' in html                 # nothing selected yet -> Run starts disabled
-    assert "function selectEnhance(wid, name){" in html
-    assert "function runEnhance(){" in html
-    assert "window.confirm('This Enhance tool spends credits" not in html   # old inline confirm is gone
-    assert "window.confirm('Run this Enhance tool?" not in html
-    # selecting enables Run and (re)prices; switching source also reprices Enhance, not just Edit
-    assert "el('enh-go').disabled=false;" in html
-    assert "debEnhanceCost();" in html and "debEditCost();" in html         # setEditSource fires both
+    # (1) the layout rule, not just the markup
+    assert "#filters-flyout .af-wrap{display:flex;" in html
+    orig_at = html.index('id="af-orig"')
+    stage_at = html.index('id="af-stage"')
+    rail_at = html.index('id="af-swatches"')
+    assert orig_at < stage_at < rail_at, (
+        "column order must read original -> preview -> palette rail")
+    assert html.count('id="af-orig"') == 1 and html.count('id="af-img"') == 1
+    assert orig_at < html.index('id="af-img"'), (
+        "the original must not live inside #af-stage -- the filter would be applied to it too")
+    # (2) explicit basis on the growing columns, fixed width on the rail
+    assert "#filters-flyout .af-col{flex:1 1 250px;" in html
+    assert "#filters-flyout .af-rail{flex:0 0 236px;" in html
+    # (3) fixed + JS-placed, and OUTSIDE the transformed drawer
+    assert "#filters-flyout{position:fixed;" in html
+    drawer_at = html.index('<aside id="gen-drawer"')
+    drawer_end = html.index("</aside>", drawer_at)
+    flyout_at = html.index('id="filters-flyout"')
+    assert flyout_at > drawer_end, (
+        "#filters-flyout is inside #gen-drawer, whose transform would capture its "
+        "position:fixed coordinates")
+    assert "function placeFilters(" in html
 
 
-def test_enhance_price_uses_the_selected_tool_and_shared_source(tmp_path, monkeypatch):
-    """/api/price's mode=enhance branch (already handled server-side, unchanged by D-12)
-    still gets exactly {mode, source, workflow_id} -- this pins the client-side payload
-    shape the new badge wiring builds, not just that the server accepts it."""
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    seen = {}
-    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 4200)
-    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    r = cli.post("/api/price", json={"mode": "enhance", "source": "12345", "workflow_id": "999"})
-    assert r.get_json()["cost"] == 4200
-    assert seen["p"]["model"] == "pixai-panelplugin" and seen["p"]["workflowId"] == "999"
+def test_art_filters_rail_groups_both_sets_and_offers_four_actions(tmp_path):
+    """The rail is two headed sets, and the action row is the agreed four buttons.
+
+    Ours lead because they are the house set; PixAI's follow. The grouping is not decoration --
+    the sets do not behave alike (four of PixAI's seven use Photoshop whole-colour blend modes
+    that CSS can only approximate, so their saved file differs from their preview; the
+    Moonglade five are exact-only), and a tile's tooltip is where that is said.
+
+    Publish is present but DISABLED: publishing to PixAI is Epic C and its mutation is
+    deliberately not wired. Shown-with-a-reason rather than hidden, so the group matches the
+    agreed layout instead of silently growing a fourth button later.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "AF.groups().forEach(" in html, "the rail must be built from the grouped API"
+    assert ".af-grp{" in html and ".af-tiles{" in html
+    for bid in ("af-none", "af-save", "af-send", "af-publish"):
+        assert 'id="%s"' % bid in html, "missing action button: " + bid
+    pub = html.index('id="af-publish"')
+    assert "disabled" in html[pub:pub + 260], "Publish must ship disabled until Epic C lands"
+    assert "Gen.filterSend()" in html and "filterSend:filterSend" in html
+
+
+def test_art_filters_send_uploads_for_free_and_never_touches_the_local_import(tmp_path):
+    """"Send to image gen" goes through /api/upload -- the free 3-step S3 handshake -- and
+    hands the returned media_id to the Edit source.
+
+    Two things this pins. It must NOT reuse /api/import-local: that route writes into the
+    owner's library and returns no media_id, so an i2i path keyed on a media_id would get
+    nothing. And it must not submit anything: the upload spends no credits, and the generation
+    the drawer then runs is the priced step. A regression that made this button generate would
+    charge for a button whose label says it only sends.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    body = html[html.index("function filterSend("):]
+    body = body[:body.index("window.addEventListener('resize', placeFilters)")]
+    assert "'/api/upload'" in body
+    assert "import-local" not in body, "Send must not go through the library-import route"
+    assert "/api/generate" not in body and "/api/edit" not in body, (
+        "Send uploads only -- it must not submit a generation")
+    assert "setEditSource(String(d.media_id))" in body
+
+
+def test_filter_actions_close_the_panel_without_re_opening_it(tmp_path):
+    """`toggleFilters()` is a TOGGLE, and both filter actions run across an await.
+
+    Nothing disables the panel's own close paths while a request is in flight -- only the
+    pressed button is disabled -- so the header's x, `#gen-scrim` and the unconditional
+    global `Escape -> Gen.close()` all stay live. Calling the toggle blind on resolve
+    therefore RE-OPENS a panel the user already dismissed, and `placeFilters()` then measures
+    a drawer that has slid away (`transform:translateX(100%)`), landing the panel over the
+    gallery with nothing behind it -- the exact state `Gen.close()` exists to prevent.
+
+    So the resolve handlers must go through `closeFiltersIfOpen()`, which checks `.open`
+    first, and must never call `toggleFilters()` directly.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "function closeFiltersIfOpen(" in html
+    guard = html[html.index("function closeFiltersIfOpen("):]
+    guard = guard[:guard.index("function afActing(")]
+    assert "classList.contains('open')" in guard, (
+        "closeFiltersIfOpen must check the panel is open before toggling it")
+
+    for fn in ("function filterSave(", "function filterSend("):
+        body = html[html.index(fn):]
+        body = body[:body.index("\n  function ", 10)] if "\n  function " in body[10:] else body
+        body = body[:body.index("window.addEventListener('resize', placeFilters)")] \
+            if "window.addEventListener('resize', placeFilters)" in body else body
+        assert "toggleFilters()" not in body, (
+            fn + " calls the toggle directly -- it re-opens a panel closed mid-request")
+
+
+def test_filter_actions_capture_the_filter_before_the_await(tmp_path):
+    """`afId` is module state and the tiles and **No filter** stay clickable during a
+    request, so it can change or be cleared before the resolve handler runs.
+
+    `AF.get()` answers an unknown id with `null` -- deliberately, so an unmapped filter is
+    never silently rendered as something else -- which makes `AF.get(afId).name` a TypeError
+    thrown inside a `.then` SUCCESS handler. The sibling rejection handler on the same
+    `.then` cannot catch its own success handler's throw, so every side effect still lands
+    and the only trace is an unhandled rejection in the console: the panel closes, the source
+    switches, and no toast ever appears.
+
+    Both actions must therefore resolve the filter ONCE, before the await, via afActing().
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "function afActing(" in html
+    for fn in ("function filterSave(", "function filterSend("):
+        body = html[html.index(fn):]
+        body = body[:body.index("window.addEventListener('resize', placeFilters)")] \
+            if "window.addEventListener('resize', placeFilters)" in body else body[:4000]
+        assert "afActing()" in body, fn + " does not capture the acting filter"
+        # The capture has to happen BEFORE the network call, not inside the handler.
+        assert body.index("afActing()") < body.index("AF.toBlob("), fn
+        assert "AF.get(afId)" not in body, (
+            fn + " still reads afId after the await -- AF.get() can return null there")
 
 
 def test_edit_model_id_and_quality_omit():
@@ -1448,14 +1740,112 @@ def test_portrait_mobile_pass(tmp_path):
     html = cli.get("/").get_data(as_text=True)
     assert "@media (max-width: 480px)" in html
     assert "repeat(2, minmax(0, 1fr)) !important" in html           # 2-up grid, ignores saved --thumb
-    assert "#model-flyout" in html and "translate(-50%, -50%)" in html  # flyout centered (was clipped)
-    # Isolate the mobile breakpoint itself -- a bare substring check let this pass off
-    # the DESKTOP #gen-drawer.wide{width:600px;} rule (a different breakpoint entirely),
-    # so a broken/missing mobile override could ship invisibly. The tablet media query
-    # right after this one is a stable end marker for the slice.
-    mobile_block = html.split("@media (max-width: 480px)")[1].split("@media (min-width: 681px)")[0]
-    assert "#gen-drawer, #gen-drawer.wide, #gen-drawer.dock-left { width: 100%" in mobile_block, \
-        "the mobile full-width drawer rule is missing from inside the 480px breakpoint"  # full-width sheet
+    # The drawer/flyout half of this pass is asserted by CASCADE, not by substring --
+    # see test_portrait_mobile_drawer_rules_actually_win below for why.
+
+
+PHONE, DESKTOP = 375, 1280
+
+
+def test_portrait_mobile_drawer_rules_actually_win(tmp_path):
+    """The Generate drawer's <=480px overrides must WIN the cascade, not merely exist.
+
+    This test replaces a presence check that could not fail. The old version asserted
+    the mobile rule's TEXT was inside the 480px block -- and it was, correct and
+    completely dead, for as long as the rule had shipped. Every declaration below
+    leans on a bare `#gen-drawer` / `#model-flyout` / `.dock-ctl button` /
+    `.gen-head .x` selector, and the 480px block sat ~1,500 lines ABOVE the drawer's
+    own <style> block. Equal specificity + earlier position = the base rules won; a
+    media query adds no specificity. Measured in a real browser at 375x812 while the
+    old test was green: the open dock-right drawer was 352.5px wide (a 22.5px dead
+    gutter beside a "full-width" sheet) and the flyout sat at rect y=-332.9px, half
+    of it above the top of the viewport. `.wide` and `.dock-left` looked right the
+    whole time -- their compound selectors out-specify the bare base rule -- which is
+    why eyeballing the phone layout never caught it either.
+
+    So: resolve the winner the way a browser does (!important, specificity, document
+    order) and assert on that. Moving these rules back above the drawer's stylesheet
+    now fails here instead of shipping silently.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    rules = css_rules(cli.get("/").get_data(as_text=True))
+
+    def win(levels, prop, width):
+        w = winning(rules, levels, prop, width)
+        assert w is not None, "nothing declares {!r} for this element".format(prop)
+        return w
+
+    # --- the drawer is a full-width sheet on a phone, in every dock/width variant ---
+    for extra in ({}, {"wide"}, {"dock-left"}, {"dock-top"}, {"dock-bottom"}):
+        drawer = element(id="gen-drawer", classes={"open"} | set(extra))
+        label = "+".join(sorted(extra)) or "default dock"
+        assert win(drawer, "width", PHONE).value == "100%", \
+            "phone drawer width lost the cascade ({})".format(label)
+        assert win(drawer, "max-width", PHONE).value == "100vw", \
+            "phone drawer max-width lost the cascade ({})".format(label)
+
+    # --- the model flyout is a centered, reachable overlay in every dock ---
+    for dock in ({}, {"dock-left"}, {"dock-top"}, {"dock-bottom"}):
+        flyout = element(id="model-flyout", classes={"open"},
+                         ancestors=[dict(id="gen-drawer", classes={"open"} | set(dock))])
+        label = "+".join(sorted(dock)) or "default dock"
+        # position/top/left are the three the base rule actually contested and won.
+        assert win(flyout, "position", PHONE).value == "fixed", \
+            "phone flyout position lost the cascade ({})".format(label)
+        assert win(flyout, "top", PHONE).value == "50%", \
+            "phone flyout top lost the cascade ({})".format(label)
+        assert win(flyout, "left", PHONE).value == "50%", \
+            "phone flyout left lost the cascade ({})".format(label)
+        # transform was the one declaration that DID survive -- the base rule sets no
+        # transform, so nothing contested it. That is exactly what stranded the panel
+        # off-screen: a centering transform applied to un-centered coordinates.
+        assert win(flyout, "transform", PHONE).value == "translate(-50%,-50%)", \
+            "phone flyout transform lost the cascade ({})".format(label)
+        assert win(flyout, "width", PHONE).value == "94vw", \
+            "phone flyout width lost the cascade ({})".format(label)
+
+    # --- the touch targets this pass exists to enlarge ---
+    dock_btn = element(tag="button", ancestors=[dict(classes={"dock-ctl"})])
+    assert win(dock_btn, "width", PHONE).value == "34px"     # was stuck at the 22px base
+    assert win(dock_btn, "height", PHONE).value == "34px"
+    close_x = element(classes={"x"}, ancestors=[dict(classes={"gen-head"})])
+    assert win(close_x, "font-size", PHONE).value == "28px"  # was stuck at the 22px base
+    assert win(close_x, "min-width", PHONE).value == "40px"
+
+    # --- and none of it leaks onto desktop: the base rules still win at 1280px ---
+    desktop_drawer = element(id="gen-drawer", classes={"open"})
+    assert win(desktop_drawer, "width", DESKTOP).value == "420px"
+    assert win(desktop_drawer, "max-width", DESKTOP).value == "94vw"
+    assert win(element(id="gen-drawer", classes={"open", "wide"}), "width", DESKTOP).value == "600px"
+    desktop_flyout = element(id="model-flyout", classes={"open"},
+                             ancestors=[dict(id="gen-drawer", classes={"open"})])
+    assert win(desktop_flyout, "position", DESKTOP).value == "absolute"
+    assert win(desktop_flyout, "top", DESKTOP).value == "0"
+    assert win(desktop_flyout, "width", DESKTOP).value == "372px"
+    assert winning(rules, desktop_flyout, "transform", DESKTOP) is None
+    assert win(dock_btn, "width", DESKTOP).value == "22px"
+    assert win(close_x, "font-size", DESKTOP).value == "22px"
+
+
+def test_css_cascade_resolver_can_actually_fail(tmp_path):
+    """Guard the guard. tests/csshelp.py is the only reason the test above can bite,
+    so prove its verdict tracks document order rather than just reporting whatever it
+    finds last: feed it the SAME two rules in both orders and require the answers to
+    differ. Without this, a resolver bug that always returned the base rule would make
+    every assertion above vacuously green -- which is precisely the failure mode
+    (a test that cannot fail) this whole pass exists to remove.
+    """
+    base = "<style>#d{width:420px;}</style>"
+    mobile = "<style>@media (max-width: 480px){#d{width:100%;}}</style>"
+    target = element(id="d")
+
+    assert winning(css_rules(base + mobile), target, "width", PHONE).value == "100%"
+    assert winning(css_rules(mobile + base), target, "width", PHONE).value == "420px"
+    # ...and the media query is genuinely evaluated, not ignored.
+    assert winning(css_rules(base + mobile), target, "width", DESKTOP).value == "420px"
+    # A higher-specificity earlier rule still beats a later bare one.
+    assert winning(css_rules("<style>#d.x{width:1px;}#d{width:2px;}</style>"),
+                   element(id="d", classes={"x"}), "width", PHONE).value == "1px"
 
 
 def test_dead_css_selectors_removed_in_broader_sweep():
@@ -1474,8 +1864,13 @@ def test_dead_css_selectors_removed_in_broader_sweep():
         element; nothing else in the repo references it either.
     Removing them is a no-op for real rendering: the bare #gen-drawer / #model-flyout selectors
     already at the front of those same comma-lists match unconditionally, so the mobile
-    full-width-drawer / centered-flyout behavior (checked by test_portrait_mobile_pass above)
-    is unaffected. Their LIVE siblings (dock-left/top/bottom, the rest of .mp-*) must survive."""
+    full-width-drawer / centered-flyout behavior (checked by
+    test_portrait_mobile_drawer_rules_actually_win above) is unaffected. Their LIVE siblings
+    (dock-left/top/bottom, the rest of .mp-*) must survive.
+
+    NOTE the assertion below is a blunt substring check over the whole module, so it also
+    trips on the WORD in ordinary prose, not just on a live selector. If a comment needs to
+    describe that dock, spell it "the right-hand dock" rather than hyphenating it."""
     src = (Path(__file__).resolve().parents[1] / "pixai_gallery.py").read_text(encoding="utf-8")
     assert "dock-right" not in src
     assert "mp-tags" not in src
@@ -1540,10 +1935,114 @@ def test_toasts_anchored_top_right(tmp_path):
     assert "#mg-toasts{position:fixed;right:16px;top:64px" in notify_js   # top-right, clear of the header
 
 
+def test_flyout_open_does_not_search_the_hidden_tab(tmp_path):
+    """Owner report 2026-07-24 ("still slow"): ensurePickers() creates AND mounts both the
+    base and LoRA pickers together the moment the flyout first opens, so both used to fire
+    a full network search immediately -- including the one nobody had asked to see yet,
+    competing with the real search for the same connection. setKind() must call
+    ensureSearched() on whichever picker just became visible instead, so only ONE search
+    fires on open."""
+    picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-model-picker.js").read_text(encoding="utf-8")
+    assert "this._searched = false;" in picker_js
+    assert "if (this.style.display !== 'none') { this._searched = true; this._search(); }" in picker_js
+    assert "ensureSearched() {" in picker_js
+    assert "if (this._searched && !this._stale) return;" in picker_js
+
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "if(vis && vis.ensureSearched) vis.ensureSearched();" in html
+
+
+def test_picking_a_base_model_does_not_double_search_the_hidden_lora_picker(tmp_path):
+    """AUDIT_2026-07-21 follow-up: the deferred-search fix closed only one of two redundant
+    requests. Picking a base model sets `base-type` on the LoRA picker -- which is normally
+    still HIDDEN, since both hosts mount base+LoRA together and reveal one -- and
+    attributeChangedCallback searched unconditionally, without ever setting `_searched`. So
+    the hidden instance fetched and built ~24 cards nobody had asked to see, and then the
+    first reveal's ensureSearched() fired the IDENTICAL request all over again.
+
+    Two halves, both required: `_search()` must own the `_searched` flag (so ANY search
+    counts), and a base-type change on a hidden instance must defer rather than search."""
+    picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-model-picker.js").read_text(encoding="utf-8")
+    # 1) _search() owns the flag -- not just the two call sites that knew about it
+    body = picker_js.split("    _search() {", 1)[1][:900]
+    assert "this._searched = true;" in body and "this._stale = false;" in body
+
+    # 2) a hidden instance defers; a visible one still re-searches on the spot
+    assert ("if (this.style.display === 'none') { if (this._searched) this._stale = true; return; }"
+            in picker_js)
+    assert "this._stale = false;" in picker_js   # initialized, never undefined on first reveal
+
+    # The Gallery still feeds the resolved architecture straight into the LoRA picker -- the
+    # deferral changes WHEN the search happens, never whether base_type reaches the server.
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "if(loraPickerEl) loraPickerEl.setAttribute('base-type', selected.model_type||'');" in html
+
+
 def test_generate_card_has_seed_field(tmp_path):
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
     assert 'id="gen-seed"' in html and "seed:(el('gen-seed')" in html   # UI + payload wire the seed
+
+
+def test_generate_drawer_gates_on_the_real_account_lora_cap(tmp_path):
+    """The account's real LoRA-per-generation cap (Acct.loraCap(), sourced from
+    membership.privilege via /api/account) now shows next to the LoRAs label, blocks
+    Generate when exceeded, and warns with the exact count to remove -- rather than the
+    old behavior of no cap at all (see the O12 CHANGELOG note on why a silent hard-refuse
+    in the picker itself was deliberately rejected)."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert 'id="gen-lora-cap"' in html                      # the indicator next to "LoRAs"
+    assert "function overLoraCap(){ var cap=window.Acct&&Acct.loraCap?Acct.loraCap():null; return cap!=null && loras.length>cap; }" in html
+    assert "anyIncompat() || anyLoraUnresolved() || overLoraCap()" in html   # Go button gate
+    assert "Your account allows " in html                   # the over-cap warning text
+    assert "if(window.Gen && Gen.refreshLoraCap) Gen.refreshLoraCap();" in html   # Acct pushes the cap into Gen on every refresh
+
+
+def test_generate_drawer_gates_advanced_controls_by_model_compatibility(tmp_path):
+    """extra.compatibility (probed live 2026-07-06, memory pixai-model-capability-schema)
+    says which Advanced-panel params a model actually HONORS -- e.g. Tsubaki.2 ignores CFG
+    scale entirely and runs sampling steps FIXED at 16. An editable control that silently
+    does nothing was worse than no control at all -- gateField() disables it (never hides;
+    the owner can still see it exists and why it's off) and fails OPEN on unknown/absent
+    data (only an explicit `false` disables anything), same convention as every other
+    fail-open gate in this app."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "function gateField(id, honored, bounds, defMin, defMax){" in html
+    assert "var off = honored===false;" in html                # fail open: undefined/true never disables
+    assert "f.title = off ? 'This model doesn\\u2019t use this setting' : '';" in html
+    # min/max must ALWAYS resolve to something (the model's own bounds, or the field's real
+    # default) -- never left conditionally untouched, or a stale bound from a PREVIOUSLY
+    # selected model leaks forward onto one with no restrictions at all (caught live 2026-07-24).
+    assert "if(defMin!=null) f.min = (bounds&&bounds.min!=null) ? bounds.min : defMin;" in html
+    assert "if(defMax!=null) f.max = (bounds&&bounds.max!=null) ? bounds.max : defMax;" in html
+    assert "gateField('gen-neg', compat.negativePrompt, null);" in html
+    assert "gateField('gen-steps', compat.samplingSteps, restr.samplingSteps, 1, 150);" in html
+    assert "gateField('gen-cfg', compat.cfgScale, restr.cfgScale, 1, 30);" in html
+    assert "selected.compatibility=v.compatibility||{}; selected.restrictions=v.restrictions||{};" in html
+    assert "applyCapabilityGating();" in html                  # called from applyVersion, covers both onBasePick + pickVersion
+
+
+def test_generate_drawer_offers_a_per_lora_version_selector(tmp_path):
+    """resolve_version_meta() (and the old single-fetch LoRA resolve) always silently took
+    the newest release; PixAI's own model/LoRA cards offer a version selector, the base
+    model already got one (picker-parity-round2). This closes the matching gap for an
+    already-added LoRA chip: a <select> appears only when the LoRA actually has more than
+    one published release (mirrors the base model's #gen-version -- the common single-
+    version case renders nothing extra), and picking a different one applies its OWN
+    version_id/lora_base_type/trigger_words with no new network call (the full version list
+    was already resolved when the LoRA was first picked, by mg-model-picker.js's
+    ?all=1 fetch)."""
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = cli.get("/").get_data(as_text=True)
+    assert "l.versions&&l.versions.length>1" in html          # conditional, not always-shown
+    assert 'onchange="Gen.loraPickVersion(' in html
+    assert "function loraPickVersion(i, vid){" in html
+    assert "l.version_id=v.version_id||''; l.lora_base_type=v.lora_base_model_type||'';" in html
+    assert "loraPickVersion:loraPickVersion" in html           # exposed on Gen's public API
 
 
 def test_generate_drawer_blocks_submit_on_unresolved_lora(tmp_path):
@@ -1576,24 +2075,21 @@ def test_generate_drawer_blocks_submit_on_unresolved_lora(tmp_path):
     assert "entry.failed = !entry.version_id;" in picker_js
 
 
-def test_enhance_price_routes_panelplugin_and_guards_spend(tmp_path, monkeypatch):
-    """/api/price mode=enhance builds panelplugin params so a real cost can be shown.
-
-    The spend guardrail used to be a hardcoded window.confirm() claiming "free cards do
-    not cover Enhance workflows" -- D-12 replaced it with the persistent <mg-cost-badge>
-    (test_enhance_is_select_then_run_with_a_persistent_badge), which reflects PixAI's
-    REAL per-request match_kaisuuken result instead of a fixed claim baked into a string.
-    This test now only pins the price-routing params; the badge test above owns the
-    guardrail assertion."""
+def test_price_no_longer_has_an_enhance_mode(tmp_path, monkeypatch):
+    """/api/price used to accept mode=enhance and build panelplugin params for it. That
+    branch went with the surface: pricing a task PixAI will never dispatch only ever
+    produced a credible-looking number for an hour of queuing. The payload now falls
+    through to the ordinary image-generation branch, which answers "pick a model" -- an
+    honest refusal, and NOT a price."""
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    cli.post("/api/price", json={"mode": "enhance", "source": "55",
-                                 "workflow_id": "1794855217667308480"})
-    assert seen["p"]["model"] == "pixai-panelplugin"
-    assert str(seen["p"].get("workflowId")) == "1794855217667308480"
+    r = cli.post("/api/price", json={"mode": "enhance", "source": "55",
+                                     "workflow_id": "1794855217667308480"})
+    assert r.get_json().get("cost") is None
+    assert not seen, "a removed mode still reached the pricing endpoint"
 
 
 def test_import_task_by_id(tmp_path, monkeypatch):
@@ -1723,6 +2219,60 @@ def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch):
     assert d["card_expiry"] == "2026-07-17" and len(d["cards_by"]) == 2
     assert d["claim_credits"] == 30000 and "pixai-daily-credits" in d["claim_ids"]
     assert d["sub"]["end"] == "2026-07-27" and d["sub"]["cancel"] is True
+
+
+def test_account_endpoint_still_serves_credits_after_the_roles_removal(tmp_path, monkeypatch):
+    """This test used to assert /api/account returned a normalized `roles` list. That whole
+    feature is gone, because fetching it was breaking everything else: `me.roles` is a
+    RoleConnection, and selecting it bare failed GraphQL validation for the ENTIRE account
+    query -- so the credits chip read 0/0, the membership-derived LoRA cap emptied, and the
+    first-run setup wizard would have rejected a valid API key.
+
+    It was never read by any UI. Nothing that no consumer wants should be able to take the
+    account read down with it. What this now guards is the thing that actually matters and
+    that the roles work silently broke: the endpoint still serves real credits.
+    """
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 1850640})
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                         created_at="2025-01-01T00:00:00")])
+    body = cli.get("/api/account").get_json()
+    assert body["credits"] == 1850640, "the credits chip lost its number again: {!r}".format(body)
+    assert "roles" not in body, "roles is back in the payload; see _ACCOUNT_QUERY's guard"
+
+
+def test_account_surfaces_the_real_membership_lora_cap(tmp_path, monkeypatch):
+    """PixAI's own account API already returns the account's real per-generation LoRA
+    entitlement (membership.privilege.{lora,freeUserLora}) -- account_info() already fetches
+    it (see the CLI's --account dashboard, run_account_info), but nothing ever exposed it to
+    the web app, so the picker had no idea what the real cap was. `lora` wins when both are
+    present (mirrors the CLI's own field-check order); `free_user_lora` is the fallback for
+    an account with no paid `lora` entitlement at all."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "account_info", lambda s: {
+        "quotaAmount": 140,
+        "membership": {"privilege": {"lora": 15, "freeUserLora": 2}}})
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    d = cli.get("/api/account").get_json()
+    assert d["lora_cap"] == 15
+
+
+def test_account_lora_cap_falls_back_to_free_user_lora(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "account_info", lambda s: {
+        "quotaAmount": 140,
+        "membership": {"privilege": {"freeUserLora": 2}}})
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    d = cli.get("/api/account").get_json()
+    assert d["lora_cap"] == 2
+
+
+def test_account_lora_cap_null_when_membership_absent(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 140})
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    d = cli.get("/api/account").get_json()
+    assert d["lora_cap"] is None
 
 
 def test_claim_endpoint_gated_and_claims_ready(tmp_path, monkeypatch):
@@ -2007,13 +2557,13 @@ def test_import_collection_choice_does_not_persist_between_imports(tmp_path):
         "reset() leaves the collection selection or the typed new-collection name behind")
 
 
-def test_fix_tab_has_a_spend_confirm_since_it_cannot_be_priced(tmp_path):
-    """Audit 2026-07-21, unfiled-workflow-findings: the Fix sub-tab (hand/face box-fixer)
-    fires /api/fix with zero warning of any kind -- no price badge (POST /v2/task/fixer
-    is a different endpoint from the createGenerationTask family /v2/task-price mirrors,
-    confirmed in private/GENERATOR_SURFACE.md's parameter schema, so it genuinely cannot
-    be priced the way every other spend surface here is) and, before this fix, no
-    window.confirm() either -- the only credit-spending action in the app with neither."""
+def test_fix_tab_warns_before_it_spends(tmp_path):
+    """The Fix sub-tab (hand/face box-fixer) used to fire /api/fix with zero warning of any
+    kind -- the only credit-spending action in the app with neither a price nor a confirm.
+    It carries both now: an <mg-cost-badge> priced through /api/price and a confirm that
+    quotes the badge's number. The confirm is not redundant, because a Fix can never be
+    covered by a free card -- every press spends. Cost-badge and pricing detail live in
+    tests/test_fix.py; this stays the guard that the SUBMIT is gated."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                          created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)

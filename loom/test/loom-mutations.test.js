@@ -9,7 +9,7 @@ import {
   friendlyGenErr, classifyTaskStatus,
   buildShotListText, buildPlaySequence, buildExportClips,
   setPromptOverride, clearPromptOverride,
-  loraIncompat, resolveLoraPayload, anyLoraUnresolved,
+  loraIncompat, resolveLoraPayload, anyLoraUnresolved, overLoraCap,
   landInFirstAct, importedFootagePatch,
   snap8, resolveGenDims, buildImgGenBody,
 } from "../src/loom-mutations.js";
@@ -522,6 +522,16 @@ describe("resolveLoraPayload / anyLoraUnresolved (D-11)", () => {
     assert.equal(anyLoraUnresolved([{ version_id: "v1" }, { version_id: "" }]), true);
     assert.equal(anyLoraUnresolved([{ version_id: "", failed: true }]), true);
     assert.equal(anyLoraUnresolved([]), false);
+  });
+  test("overLoraCap is false while the cap is unknown (null) -- never a false 'no limit'", () => {
+    assert.equal(overLoraCap([{ model_id: "1" }, { model_id: "2" }], null), false);
+    assert.equal(overLoraCap([], null), false);
+  });
+  test("overLoraCap compares real counts -- exactly at cap is NOT over", () => {
+    assert.equal(overLoraCap([{ model_id: "1" }, { model_id: "2" }], 2), false);
+    assert.equal(overLoraCap([{ model_id: "1" }, { model_id: "2" }, { model_id: "3" }], 2), true);
+    assert.equal(overLoraCap([], 0), false);
+    assert.equal(overLoraCap(undefined, 2), false);
   });
 });
 

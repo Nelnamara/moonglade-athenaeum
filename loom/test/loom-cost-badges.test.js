@@ -5,11 +5,10 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 // D-12 increments 2-4: the Image tab already had a working submit path (confirmSpend's
-// window.confirm) but no live preview of the cost before you click Go -- same gap the
-// Gallery's Enhance sub-tab had (increment 1, already shipped). Fixed the same way: a
+// window.confirm) but no live preview of the cost before you click Go. Fixed with a
 // <mg-cost-badge> per tab, kept live via a debounced read-only /api/price check.
 //
-// UNLIKE the Gallery's Enhance tab, these three tabs' window.confirm is NOT removed --
+// These three tabs' window.confirm is NOT removed alongside it --
 // confirmSpend was built as this project's fail-closed guardrail after these exact tabs
 // "used to lie" about cost (see confirmSpend's own comment in master-storyboard.jsx), so
 // the badge here is an ADDED preview, not a replacement for the submit-time gate. Every
@@ -61,7 +60,11 @@ test("confirmSpend's window.confirm gate is UNCHANGED and still runs at submit t
   // loom-mutations.test.js's "buildImgGenBody" suite for the body-shape coverage.
   assert.match(src, /const body = buildImgGenBody\(imgModel, imgLoras, imgAdv, prompt\);\s*\n\s*if \(!\(await confirmSpend\(body, `Generate a reference image/,
     "genImage must still gate its real submit on confirmSpend, pricing the exact body it submits");
-  assert.match(src, /const runGen = async \(setState, cardId, endpoint, body, priceBody, label\) => \{\s*\n\s*if \(priceBody && !\(await confirmSpend\(priceBody, label\)\)\) return;/,
+  // The trailing `jobLabel` param (2026-07-24 Job Tracker registration fix -- see
+  // loom-image-job-register.test.js) is additive and sits AFTER `label`; the gate below is
+  // what this assertion is about, so the signature is matched up to `label` rather than
+  // pinned to an exact arity that any future additive param would break again.
+  assert.match(src, /const runGen = async \(setState, cardId, endpoint, body, priceBody, label[^)]*\) => \{\s*\n\s*if \(priceBody && !\(await confirmSpend\(priceBody, label\)\)\) return;/,
     "runGen (genEdit/genRef's shared submit path) must still gate on confirmSpend");
   assert.match(src, /return window\.confirm\(`\$\{label\}/,
     "confirmSpend itself must still fall through to a real window.confirm");

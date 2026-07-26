@@ -891,6 +891,28 @@ def test_account_info_parses_me(mocker):
     assert me["followerCount"] == 30
 
 
+def test_account_query_does_not_ask_for_roles(mocker):
+    """This test used to assert the OPPOSITE, and that is why the account query shipped broken.
+
+    It checked `"roles" in _ACCOUNT_QUERY` and then mocked a response containing roles -- so it
+    passed while the real query was rejected outright by PixAI. `me.roles` is a
+    `RoleConnection`; selected bare it fails GraphQL VALIDATION, which fails the whole
+    document, so account_info() returned nothing and the credits chip read 0/0 while the
+    membership-derived LoRA cap, the --account dashboard and the first-run setup wizard's key
+    validation all silently lost their data too.
+
+    A mocked response can never catch that class of bug: the failure is server-side schema
+    validation, and the mock replaces exactly the thing that would have failed. If roles are
+    ever genuinely wanted, query them SEPARATELY with a subfield selection so a mistake there
+    cannot take the account read down with it.
+    """
+    assert "roles" not in core._ACCOUNT_QUERY, (
+        "roles is back in the account query -- bare, it fails validation and takes credits, "
+        "membership, the LoRA cap and the setup wizard with it")
+    mocker.patch.object(core, "gql_adhoc", return_value={"me": {
+        "id": "42", "quotaAmount": 1850640}})
+    assert core.account_info(mocker.MagicMock())["quotaAmount"] == 1850640
+
 def test_account_info_empty_on_error(mocker):
     mocker.patch.object(core, "gql_adhoc", side_effect=core.PixAIError("boom"))
     assert core.account_info(mocker.MagicMock()) == {}          # soft-fail (web relies on this)
@@ -926,10 +948,14 @@ def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker):
         # t1: meta missing -> fetched by a plain --backfill-full-meta run
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "task_id": "t1",
                                            "filename": "a.png"},
-        # t2: meta complete, cost unknown -> fetched only with --with-credit
+        # t2: meta genuinely complete, cost unknown -> fetched only with --with-credit.
+        # "Complete" has to include a detail-only field (model_id/steps/sampler/cfg_scale):
+        # a prompt and a seed alone are NOT proof the task detail was ever fetched, and
+        # treating them as proof is what stranded such rows -- see the test below.
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "m2", "task_id": "t2",
                                            "filename": "b.png", "prompt_full": "kept",
-                                           "seed": "77"},
+                                           "seed": "77", "model_id": "9001",
+                                           "steps": "25", "sampler": "Euler a"},
     ])
     tasks = {
         "t1": {"parameters": {"prompts": "night elf druid"}, "outputs": {"seed": 5},
@@ -954,3 +980,272 @@ def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker):
     rows = {r["media_id"]: r for r in load_catalog(db)}
     assert rows["m2"]["paid_credit"] == "0"
     assert rows["m2"]["prompt_full"] == "kept" and rows["m2"]["seed"] == "77"
+
+
+def test_live_capture_writes_every_field_the_backfill_would(monkeypatch, tmp_path):
+    """The point of capturing a generation as it happens is not having to go back for it.
+
+    extract_full_meta hands over twelve fields; the live row wrote eight of them and dropped
+    sampler, natural_prompt, clip_skip and loras, so those arrived blank and only appeared
+    once a --backfill-full-meta came past -- the exact manual step this path exists to
+    remove. `loras` is the clearest case: extract_full_meta returns "" for it BY DESIGN and
+    documents that the caller resolves it. The backfill did. This did not.
+
+    Asserted against extract_full_meta's own output rather than a hardcoded list, so a field
+    added there later shows up here as a failure instead of silently going unwritten.
+    """
+    import pathlib
+    from pixai_gallery import CATALOG_FIELDS
+
+    task = {
+        "id": "T1", "createdAt": "2026-07-26T00:00:00Z", "status": "completed",
+        "parameters": {"prompts": "night elf druid", "modelId": "42",
+                       "extra": {"naturalPrompts": "a druid, at night"},
+                       "lora": {"L1": 0.8}},
+        "outputs": {"seed": 5, "batch": [{"mediaId": "m1", "seed": 5}],
+                    "detailParameters": {"steps": 25, "sampler": "Euler a",
+                                         "cfg_scale": 7, "clipSkip": 2}},
+    }
+    fm = core.extract_full_meta(task)
+    # Every field extract_full_meta resolves for an ordinary generation must reach the row.
+    expected = {k for k, v in fm.items()
+                if k in CATALOG_FIELDS and str(v or "").strip()}
+    expected |= {"loras"}          # "" by design out of extract_full_meta; caller resolves it
+    src = (pathlib.Path(__file__).resolve().parent.parent
+           / "pixai_gallery_backup.py").read_text(encoding="utf-8")
+    # _download_image_task is the SHARED downloader: collect_generation (the web
+    # app + job tracker) goes through it, so it is the path that matters most.
+    body = src[src.index("def _download_image_task("):]
+    body = body[:body.index(chr(10) + "        rows.append(full)")]
+    missing = sorted(f for f in expected if '"{}"'.format(f) not in body)
+    assert not missing, (
+        "the live capture never writes {} -- they stay blank until a backfill comes past"
+        .format(missing))
+
+
+def test_a_freshly_captured_generation_gets_its_model_NAME_not_just_its_id(monkeypatch, tmp_path):
+    """extract_full_meta fills model_name only for a CHAT task (Edit/Fix, resolved locally
+    from EDIT_MODELS). For an ordinary generation it is blank and the caller must fill it --
+    which --backfill-full-meta did and the live capture did not, so every image captured as
+    it was generated showed a raw 19-digit model id on its detail page until a backfill
+    happened past. Reported from the owner's own gallery: "Model 1983308862240288769".
+    """
+    assert core._resolved_model_name(object(), {"model_name": "Reference Pro"}, "1") ==         "Reference Pro", "a chat task's locally-resolved label must win"
+    monkeypatch.setattr(core, "model_name_gql", lambda s, mid: "Tsubaki .2")
+    assert core._resolved_model_name(object(), {}, "1983308862240288769") == "Tsubaki .2"
+    assert core._resolved_model_name(object(), {}, "") == "", "no id, nothing to resolve"
+
+    def boom(s, mid):
+        raise core.PixAIError("lookup down")
+
+    monkeypatch.setattr(core, "model_name_gql", boom)
+    assert core._resolved_model_name(object(), {}, "1") == "", (
+        "a failed lookup must cost the label, never the row")
+
+
+def test_the_backfill_separates_errors_from_tasks_that_carried_no_prompt(tmp_path, mocker,
+                                                                         capsys):
+    """One number covered two unrelated things: the fetch threw, or it returned fine and
+    simply carried no prompt (a deleted task, or a kind that records none). Those have
+    completely different answers, and a single "157 failed" had us guessing twice."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+
+    base = {f: "" for f in CATALOG_FIELDS}
+    save_catalog(tmp_path / "catalog.db",
+                 [base | {"media_id": "m%d" % i, "task_id": "t%d" % i,
+                          "filename": "%d.png" % i} for i in range(4)])
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    mocker.patch.object(core, "model_name_gql", side_effect=lambda s, m: "M")
+    mocker.patch.object(core, "resolve_loras", side_effect=lambda s, t: "")
+
+    def detail(_s, tid):
+        if tid == "t0":
+            raise core.PixAIError("HTTP 429 rate limited")
+        if tid == "t1":
+            return {"parameters": {"prompts": "real"}, "outputs": {}}
+        return {"parameters": {}, "outputs": {}}          # fetched fine, no prompt
+
+    mocker.patch.object(core, "task_detail_gql", side_effect=detail)
+    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    out = capsys.readouterr().out
+    assert "Why they failed:" in out and "429" in out, "the real error must be named"
+    assert "carried no prompt" in out, (
+        "the two tasks that returned fine must not be reported as errors")
+
+
+def test_parallel_map_reports_failures_instead_of_swallowing_them():
+    """A worker's exception used to be discarded outright (`except Exception: res = None`).
+
+    A real 17,289-task backfill consequently printed "16,044 failed" with no reason attached
+    to any of them -- a number nobody can act on, and one that makes a 93%-failure run look
+    the same as a successful one apart from the digits. The same total covers a rotated hash,
+    an expired key, a rate limit and a genuinely deleted task, and those have four different
+    answers.
+    """
+    seen = []
+
+    def boom(i):
+        if i % 2:
+            raise RuntimeError("rate limited (429)")
+        return i
+
+    out = list(core._parallel_map(range(6), boom, workers=4,
+                                  on_error=lambda it, e: seen.append((it, str(e)))))
+    assert len(out) == 6, "a failing worker must not drop its item from the stream"
+    assert [r for _, r in out].count(None) == 3, "failures still yield None, as before"
+    assert sorted(i for i, _ in seen) == [1, 3, 5]
+    assert all("429" in msg for _, msg in seen), "the reason must reach the caller"
+
+
+def test_parallel_map_paces_the_whole_pool_not_each_thread():
+    """--delay was dropped entirely once workers > 1, on the reasoning that "concurrency
+    itself paces". It does not: eight threads firing as fast as they complete is a burst, and
+    being polite to PixAI's servers is a standing rule of this project that should not switch
+    itself off because a flag was passed.
+
+    The pace is GLOBAL -- one request start per `delay` across the whole pool -- so raising
+    --workers buys latency hiding up to that ceiling rather than a bigger burst.
+    """
+    import time
+
+    starts = []
+
+    def stamp(i):
+        starts.append(time.monotonic())
+        return i
+
+    t0 = time.monotonic()
+    list(core._parallel_map(range(8), stamp, workers=8, delay=0.05))
+    span = time.monotonic() - t0
+    # 8 starts one slot apart is 7 gaps; allow slack for scheduling, but a pool that ignored
+    # the pace finishes in ~0s and cannot reach this.
+    assert span >= 0.05 * 7 * 0.8, (
+        "8 workers finished in {:.3f}s -- the pool ignored the pace".format(span))
+    starts.sort()
+    assert all(b - a >= 0.04 for a, b in zip(starts, starts[1:])), (
+        "two requests started inside one delay slot")
+
+
+def test_backfill_names_why_tasks_failed(tmp_path, mocker, capsys):
+    """The summary is by REASON, not just a total, and a majority-failure run says plainly
+    that re-running it unchanged repeats it -- while making clear nothing already fetched is
+    lost, because the backfill is resumable."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+
+    base = {f: "" for f in CATALOG_FIELDS}
+    save_catalog(tmp_path / "catalog.db",
+                 [base | {"media_id": "m%d" % i, "task_id": "t%d" % i,
+                          "filename": "%d.png" % i} for i in range(40)])
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    mocker.patch.object(core, "task_detail_gql",
+                        side_effect=core.PixAIError("HTTP 429 rate limited"))
+    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+                                                workers=4))
+    out = capsys.readouterr().out
+    assert "Why they failed:" in out
+    assert "429" in out, "the actual reason must be printed, not just a count"
+    assert "resumable" in out, "a mass failure must say nothing fetched was lost"
+    assert "--workers 2 --delay 1" in out, "it must suggest a gentler pace"
+
+
+def test_full_metadata_is_the_default_on_a_pull(monkeypatch, tmp_path):
+    """Full metadata used to be the thing you only got by asking, so a plain run or --update
+    created rows with no prompt, no seed and no model -- and nothing said so until something
+    needed one. It is the default now, with --no-full-meta as the explicit opt-out.
+
+    Driven through main()'s real parser and its real dispatch, so what is asserted is the
+    value the command actually receives rather than what the help text claims. --catalog-stats
+    is the vehicle because it is the one command that needs no API key; the command itself is
+    stubbed, so nothing runs and no network is touched. --full-meta stays accepted so existing
+    commands, the docs and the Panel's whitelisted argv (`resync-full` sends exactly that
+    flag) keep working unchanged.
+    """
+    seen = {}
+    monkeypatch.setattr(core, "run_catalog_stats", lambda a: seen.__setitem__("ns", a))
+
+    def parsed(argv):
+        seen.clear()
+        monkeypatch.setattr("sys.argv", ["pixai_gallery_backup.py", "--catalog-stats",
+                                         "--out", str(tmp_path)] + argv)
+        core.main()
+        return seen["ns"]
+
+    assert parsed([]).full_meta is True, "a plain pull must fetch metadata"
+    assert parsed(["--update"]).full_meta is True
+    assert parsed(["--full-meta"]).full_meta is True, "the old flag must still be accepted"
+    assert parsed(["--no-full-meta"]).full_meta is False
+    # Order must not matter -- the opt-out is the last word wherever it appears.
+    assert parsed(["--no-full-meta", "--update"]).full_meta is False
+
+
+def test_catalog_stats_reports_metadata_coverage(tmp_path, capsys):
+    """The stats screen only ever described FILES: it could say "35,133 entries, all
+    downloaded" about a catalog in which not one row knew which model made it. Coverage is
+    what decides whether a sweep is due, and the unique-TASK count is what the sweep costs --
+    metadata is fetched once per task, so a batch's images are one call, not four.
+
+    `loras` is deliberately absent from the report: a generation with no LoRAs stores that
+    column blank too, so a blank one cannot be told apart from one never fetched, and
+    reporting it would send you re-fetching tasks that are already complete.
+    """
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+
+    base = {f: "" for f in CATALOG_FIELDS}
+    save_catalog(tmp_path / "catalog.db", [
+        base | {"media_id": "m1", "task_id": "t1", "filename": "a.png",
+                "prompt_full": "p", "model_id": "1", "model_name": "WAI"},
+        # two rows of ONE task, both missing everything -> 2 rows, 1 task to fetch
+        base | {"media_id": "m2", "task_id": "t2", "filename": "b.png"},
+        base | {"media_id": "m3", "task_id": "t2", "filename": "c.png"},
+        # imported locally: no PixAI task behind it, so it can never carry a model
+        base | {"media_id": "m4", "filename": "d.png", "source": "local"},
+    ])
+    core.run_catalog_stats(SimpleNamespace(out=str(tmp_path), progress=None))
+    out = capsys.readouterr().out
+    assert "Metadata coverage" in out
+    assert "1 / 4" in out, "model coverage must be counted per row"
+    assert "3 missing across 1 tasks" in out, (
+        "the sweep's cost is unique TASKS, not rows -- a batch is one call")
+    assert "imported locally" in out, (
+        "locally imported rows can never have a model and must not read as a gap to chase")
+    assert "--backfill-full-meta" in out, "the report must name the command that fixes it"
+    assert "loras" not in out.lower(), "a blank loras column is ambiguous, not a gap"
+
+
+def test_backfill_full_meta_refetches_rows_that_have_only_a_prompt(tmp_path, mocker):
+    """A row can hold a prompt and a seed while holding no model, steps, sampler or CFG.
+
+    prompt_full was the ONLY sentinel for "this row has its full metadata", so every such
+    row was skipped by every backfill, forever, and the sweep printed "Nothing to backfill"
+    over a catalog that could not say which model made any of it. Measured on a real catalog
+    before this changed: 788 of 800 rows had a prompt, 5 had a model id, and a backfill was
+    a no-op. The model id is not cosmetic -- an image-view upscale submits i2i and needs it.
+    """
+    from pixai_gallery import save_catalog, load_catalog, CATALOG_FIELDS
+
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "task_id": "t1",
+                                           "filename": "a.png",
+                                           "prompt_full": "night elf druid", "seed": "5"},
+    ])
+    task = {"parameters": {"prompts": "night elf druid", "modelId": "4242"},
+            "outputs": {"seed": 5, "detailParameters": {"samplingSteps": 25,
+                                                        "samplingMethod": "Euler a"}}}
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    mocker.patch.object(core, "task_detail_gql", side_effect=lambda s, tid: task)
+    mocker.patch.object(core, "model_name_gql", side_effect=lambda s, mid: "WAI v17")
+    mocker.patch.object(core, "resolve_loras", side_effect=lambda s, t: "")
+
+    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    row = {r["media_id"]: r for r in load_catalog(db)}["m1"]
+    assert row["model_id"] == "4242", "the prompt-only row was skipped again"
+    assert row["model_name"] == "WAI v17"
+
+    # And it settles: a second pass has nothing left to do, so this does not become a row
+    # that is re-fetched on every sweep forever.
+    calls = []
+    mocker.patch.object(core, "task_detail_gql",
+                        side_effect=lambda s, tid: calls.append(tid) or task)
+    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    assert calls == [], "the filled row is being re-fetched on every run"

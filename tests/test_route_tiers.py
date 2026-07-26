@@ -7,10 +7,10 @@ tests/test_web_auth.py hand-maintains four lists of paths
 (_PREVIOUSLY_UNGATED_JSON_GET / _JSON_POST / _HTML_GET / _HTML_POST). A
 hand-maintained list is precisely what the front-door refactor
 (pixai_gallery.py's _enforce_front_door()) was undertaken to eliminate, and those
-lists had ALREADY drifted: five credit-spending routes -- /api/generate,
-/api/edit, /api/enhance, /api/fix, /api/loom/generate -- appear in none of them.
-They are gated today, but nothing in the suite said so, and nothing would have
-noticed if they stopped being.
+lists had ALREADY drifted: every credit-spending route -- /api/generate,
+/api/edit, /api/fix, /api/loom/generate -- appears in none of them. They are
+gated today, but nothing in the suite said so, and nothing would have noticed
+if they stopped being.
 
 This file does not enumerate paths. It enumerates `app.url_map` -- the single
 source of truth for what is actually routable -- and asserts that EVERY
@@ -102,7 +102,20 @@ ROUTE_TIERS = {
     ("api_panel_run", "POST"): LOCALHOST,           # destructive actions only -- see PROBE_BODIES
     ("api_panel_schedule", "POST"): LOCALHOST,      # writes the schedule + global workers count
     ("api_setup_save_key", "POST"): LOCALHOST,      # rewrites config.json
+    # The library folder. GET is LOGIN -- the Panel shows the current folder to whoever
+    # can already open the Panel, and it withholds the host path from a non-local caller
+    # exactly as /panel does. POST rewrites config.json too, so it matches save-key above.
+    ("api_library_path", "GET"): LOGIN,
+    ("api_library_path", "POST"): LOCALHOST,
     ("delete_tasks_bulk", "POST"): LOCALHOST,       # irreversible cloud deletion
+    # Per-image cloud delete. Same tier and the same reason as the task-level
+    # delete above: it destroys on the owner's real PixAI account, and a logged-in
+    # LAN session unlocks browsing and spending, not irreversible deletion.
+    ("api_delete_image", "POST"): LOCALHOST,
+    # Read-only (one catalog query, no network) but declared at the tier of the action
+    # it previews, not the data it reads: it is step one of delete_tasks_bulk's flow and
+    # nothing else calls it. See its docstring.
+    ("api_delete_preview", "POST"): LOCALHOST,
     ("api_import_local", "POST"): LOCALHOST,         # writes files into the backup + shells thumbnails
     ("api_users_add", "POST"): LOCALHOST,           # mints a new persistent login (2026-07-22)
     ("api_trash_delete_forever", "POST"): LOCALHOST,  # irreversible local file deletion (2026-07-24)
@@ -155,11 +168,10 @@ ROUTE_TIERS = {
     ("api_trash_list", "GET"): LOGIN,
     ("api_trash_restore", "POST"): LOGIN,
 
-    # credit-spending generation surface -- the five routes the hand-maintained
+    # credit-spending generation surface -- the routes the hand-maintained
     # lists in test_web_auth.py never covered.
     ("api_generate", "POST"): LOGIN,
     ("api_edit", "POST"): LOGIN,
-    ("api_enhance", "POST"): LOGIN,
     ("api_fix", "POST"): LOGIN,
     ("loom_generate", "POST"): LOGIN,
     ("api_upload", "POST"): LOGIN,
@@ -174,6 +186,12 @@ ROUTE_TIERS = {
     ("api_collections", "GET"): LOGIN,
     ("api_contests", "GET"): LOGIN,
     ("api_gallery_images", "GET"): LOGIN,
+    # Read-only single-row lookup for <mg-upscale-panel>. LOGIN, same as its sibling
+    # above and for the same reason: it reads only the local catalog and returns what
+    # the gallery already serves openly, so a LOCALHOST gate would add no protection
+    # while breaking the panel for the owner browsing over his own LAN. The spend is
+    # gated on /api/generate, which is where an upscale is actually submitted.
+    ("api_image_meta", "GET"): LOGIN,
     ("api_model_search", "GET"): LOGIN,
     ("api_model_version", "GET"): LOGIN,
     ("api_ping", "GET"): LOGIN,
@@ -182,7 +200,6 @@ ROUTE_TIERS = {
     ("api_tag_suggest", "GET"): LOGIN,
     ("api_task_status", "GET"): LOGIN,
     ("api_watch_status", "GET"): LOGIN,
-    ("api_workflows", "GET"): LOGIN,
     ("api_your_art", "GET"): LOGIN,
 
     # jobs -- ONE rule string, TWO endpoints (the case a rule-keyed dict drops)
@@ -461,9 +478,9 @@ def test_every_registered_route_declares_a_tier(app):
             "                      return jsonify({{\"error\": \"localhost-only\"}}), 403\n"
             "  PUBLIC    - the login surface only; also requires an entry in\n"
             "              PUBLIC_EXPECTED_STATUS.\n"
-            "This failure is not bureaucracy: five credit-spending routes\n"
-            "(/api/generate, /api/edit, /api/enhance, /api/fix, /api/loom/generate)\n"
-            "were missing from the hand-maintained lists in tests/test_web_auth.py\n"
+            "This failure is not bureaucracy: every credit-spending route\n"
+            "(/api/generate, /api/edit, /api/fix, /api/loom/generate) was\n"
+            "missing from the hand-maintained lists in tests/test_web_auth.py\n"
             "for exactly this reason, and nothing noticed."
             .format(len(undeclared),
                     "\n".join("    (\"{}\", \"{}\")".format(e, m) for e, m in undeclared)))
@@ -781,6 +798,44 @@ def test_panel_withholds_set_launcher_icon_and_destructive_buttons_from_lan(app)
     # dropdown for everyone, local or LAN, so there was never anything to hide there.
     all_actions_json = html.split("var ALL_ACTIONS = ", 1)[1].split(";", 1)[0]
     assert '"action": "organize"' in all_actions_json
+
+
+def test_index_tells_a_lan_session_it_is_being_served_as_one(app):
+    """The other half of hiding LOCALHOST-tier controls: SAY SO. Hiding Import and
+    "Delete from PixAI" from a LAN session (the two tests above) fixes a dead-end
+    click but creates a silent one -- the same owner, same account, same browser, sees
+    a different set of buttons depending only on whether the address bar says
+    `localhost` or the machine's LAN IP, with nothing on the page naming the
+    difference. A whole day was spent browsing via the LAN IP without noticing, with
+    the app looking simply broken.
+
+    The chip keys off `is_true_local` -- the real `_is_local_request()` result index()
+    already computes for the Import button and `can_delete_cloud` -- NOT a second
+    notion of trust, and it gates nothing: it is a label for a decision the tier
+    helpers have already made."""
+    cli = _login(app)
+    html = cli.get("/", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
+    assert 'id="lan-chip"' in html, (
+        "a LAN session's index page has no indicator that it is being served as a "
+        "remote caller -- the LOCALHOST-tier controls just silently vanish")
+    chip = html.split('id="lan-chip"', 1)[1].split("</span>", 1)[0]
+    # The chip must name the controls it explains, or it is decoration: "why is this
+    # button missing" has to answer itself without a trip to the docs.
+    assert "Import" in chip and "Delete from PixAI" in chip, (
+        "the LAN chip does not name the controls that are hidden, so it does not "
+        "actually answer 'why is this button missing'")
+
+
+def test_index_does_not_flag_the_owners_own_local_session(app):
+    """The companion: at the keyboard on the server, every LOCALHOST control is
+    present, so there is nothing to explain and the header stays clean. Without this
+    test an unconditional chip would pass the LAN test above while nagging the one
+    caller it has no news for."""
+    cli = _login(app)
+    html = cli.get("/").get_data(as_text=True)   # loopback REMOTE_ADDR by default
+    assert 'id="lan-chip"' not in html, (
+        "the owner's own local index page shows the LAN-session chip, which has "
+        "nothing to tell them -- every local-only control is right there")
 
 
 def test_panel_shows_set_launcher_icon_and_destructive_buttons_to_localhost(app):

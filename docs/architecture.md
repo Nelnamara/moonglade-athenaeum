@@ -42,8 +42,9 @@ gallery.
 | `gql_adhoc()` | Generic ad-hoc GraphQL **POST** (full query document, no persisted hash). Works for queries AND mutations under the API-key Bearer. The foundation for client ops beyond the reverse-engineered listing path; `media_file_gql` + `account_info` use it. Raises `PixAIError` on GraphQL/HTTP error |
 | `account_info()` / `run_account_info()` | Read-only account dashboard (credits/membership/subscription) via `gql_adhoc`. **Never moves money** — no payment/subscription mutations are implemented, by design |
 | `run_generate()` | `--generate`: create images via `createGenerationTask` (ad-hoc POST), poll, download, catalog as `source='api'`. Preview unless `--confirm`. `--task-id` recovers an already-created task for free |
+| `max_upscale_ratio()` / `upscale_output_dims()` | The upscale ratio cap and the size it produces. PixAI's dialog offers two **mutually exclusive** upscale methods, and each radio's `value` is the param name: *Upscale* → `enlarge` + `enlargeModel`, *Hires* → `upscale` + `upscaleDenoisingStrength`/`Steps`/`Sampler`. `_gen_parameters` emits these (and the `enableADetailer`/`qualityTag` boosters) **only when asked** — an always-present default would change every existing call site's output and cost. The maximum ratio is **derived from a per-method output-pixel ceiling**, never a constant: the same method allows 1.9× on a 1400×784 source and only 1.4× in Hires. The Generate drawer carries a hand port of both helpers so the slider can show a live max + output size, pinned to these by a Node parity test |
 | `build_video_parameters()` / `run_generate_video()` | `--generate-video`: image-to-video (`i2vPro`) — VERIFIED submit `{priority, i2vPro:{model,mediaId,[tailMediaId],mode,duration,generateAudio,audioLanguage,[cameraMovement]…}, isPrivate, enablePreview, hidePrompts, modelId}`. **No top-level `channel` field** — `--video-channel` maps to the boolean `isPrivate`, not a `channel` key. Enums banked (`--camera-movement`, `--video-channel`, duration 5/6/10/15). Preview unless `--confirm`; captures `paidCredit`; downloads mp4 into `videos/` |
-| `build_reference_video_parameters()` / `run_reference_video()` | `--reference-video`: multi-image/video/audio reference — VERIFIED **top-level `referenceVideo`** block (NOT i2vPro): `{priority, referenceVideo:{model,prompt,duration(int),referenceImageMediaIds/…VideoMediaIds/…AudioMediaIds}, isPrivate, modelId}`. `--ref-image/--ref-video/--ref-audio` (media_id OR local file, auto-uploaded), cited in `--prompt` as `@image1/@video1/@audio1`. Preview unless `--confirm` |
+| `build_reference_video_parameters()` / `run_reference_video()` | `--reference-video`: multi-image/video/audio reference — VERIFIED **top-level `referenceVideo`** block (NOT i2vPro): `{priority, referenceVideo:{model,prompt,duration(int),referenceImageMediaIds/…VideoMediaIds/…AudioMediaIds}, isPrivate, modelId}`. `--ref-image/--ref-video` (media_id OR local file, auto-uploaded as `IMAGE`/`VIDEO` respectively); `--ref-audio` is **media_id-only** — `MediaType` has exactly two members (`IMAGE`, `VIDEO`), no `AUDIO`, so a local audio file is refused rather than mislabelled. Cited in `--prompt` as `@image1/@video1/@audio1`. Preview unless `--confirm` |
 | `_download_video_task()` | Shared video download+catalog (used by both i2v and reference-video): `video_outputs` → `media_file_gql.fileUrl` → `download` → catalog `is_video='1'` + poster thumbnail → `video_faststart` (deliberately run on download status `"skip"` too, so it backfills clips downloaded before auto-faststart shipped) |
 | `video_faststart()` | Lossless `ffmpeg -c copy -movflags +faststart` remux so iOS/Safari can stream a clip (PixAI serves moov-at-the-end mp4s). Concurrency-safe: the remux temp name is **unique per invocation** (uuid suffix, real extension last so ffmpeg picks the muxer) — two collectors can legitimately remux the same clip at once (gallery live-mirror + a task-status poll, or the separate `--watch-backup` process), and a deterministic temp name let their ffmpeg runs interleave into one file, corrupting the survivor mid-clip. Failures never raise (a collect must not die on a cosmetic remux) but are `vlog()`ed |
 | `_maybe_dump_params()` | `--dump-params`: print a task's full submit `parameters` (esp. on `--task-id` recovery) — bank any shape (multiRef/referenceVideo/…) with NO browser capture |
@@ -51,6 +52,7 @@ gallery.
 | `build_chat_edit_parameters()` / `run_edit_image()` | `--edit-image`: instruct editing via `createGenerationTask` with a `chat` block (`prompts`+`mediaId`/`mediaIds`+`modelId`+`modelConfig`). `--edit-src` takes a catalog `media_id` OR a local file (auto-uploaded on `--confirm`); repeat for multi-image reference. Preview unless `--confirm` |
 | `list_kaisuukens()` / `match_kaisuuken()` / `_apply_kaisuuken()` / `run_cards()` | Free-generation cards ("kaisuuken" / 回数券) live on the oRPC **`/v2` REST API**, not GraphQL. `list_kaisuukens` = `GET /v2/kaisuuken/summary` (one row per template w/ count + locked model); `match_kaisuuken` = `POST /v2/kaisuuken/check {type:"generation-task", parameters}` → matching ticket ids. **Cards auto-apply**: `_apply_kaisuuken` runs on `--confirm` for every create path, calls `check`, and attaches the nearest-expiry `kaisuukenId` → 0 credits (like the website). Preview shows FREE/paid up-front. `--no-card` opts out; `--kaisuuken-id` forces one. `--cards` = read-only display. All fail soft. REST base `REST_API_BASE` + helpers `_rest_get`/`_rest_post` |
 | `price_task()` | `GET /v2/task-price`: compute a generation's credit cost WITHOUT creating it (mirrors GraphQL `pricingTask`). Scalars → query params, nested blocks (`i2vPro`/`referenceVideo`/`chat`/`loraParameters`/…) → URL-encoded JSON. Returns `actualPrice` (int) or None. **READ-ONLY, spends nothing** — used in previews to show the real cost + card savings |
+| `queue_wait_estimate()` | `GET /v2/task/wait-time`: PixAI's own queue-wait estimate for a `(priority, modelVersionId)` pair, in whole seconds — the number their site shows beside Generate. A submit's `modelId` is a model *version* id to this route (`generationModelId` 404s for it); `priority` is a validated enum (500 normal / 1000 high). Returns `waitDurationSeconds` rounded, or None. **READ-ONLY, spends nothing.** A queue-depth estimate for a submission, **not** a per-task ETA and not progress — PixAI exposes no progress on a task at all. `/api/task-status` records it once, when a job is first seen queued, for the Activity tray |
 | `suggest_prompt()` / `run_suggest_prompt()` | `--suggest-prompt <media_id\|file>`: image-to-prompt via `GET /v2/tag/suggest-prompt/{mediaId}` → `{output:[…]}` (a Danbooru-style tag list + natural-language description variants). Local files upload first (free). **FREE / read-only**, no `--confirm` |
 | `list_claims()` / `claim_reward()` / `run_claims()` | `--claims`: list claimable rewards (daily credits, agent stamina) via `GET /v2/claim` — **read-only**. `--claim <id\|all>`: claim ready rewards via `POST /v2/claim/{id}` — **gated behind `--confirm`**, previews otherwise, and never fires on a not-yet-claimable reward. Grants free credits/stamina to the owner's own account (no money moves) |
 
@@ -255,8 +257,8 @@ manifest. It's idempotent, byte-safe, and dry-runnable. See the
 
 The Flask gallery (`pixai_gallery.py`) is a full creation suite, not just a browser.
 Spend-capable routes are **LOGIN**-tier, not localhost: `/api/generate`, `/api/edit`,
-`/api/enhance`, `/api/fix` and `/api/loom/generate` are reachable by any signed-in session,
-because generating from the tablet is the point. **LOCALHOST** (`_is_local_request`) is
+`/api/fix` and `/api/loom/generate` are reachable by any signed-in session, because
+generating from the tablet is the point. **LOCALHOST** (`_is_local_request`) is
 reserved for a different category — writes to the server's own filesystem, credential writes,
 and irreversible cloud deletion. `tests/test_route_tiers.py` declares every route's tier and
 asserts it against a live request, so it is the authority when prose and code disagree.
@@ -264,8 +266,9 @@ asserts it against a live request, so it is the authority when prose and code di
 - **Generate drawer** (header ✦, dockable, persisted position): three tabs — *Generate*
   (base model + LoRA chips with weights, model/LoRA flyout with a hover preview card, live
   cost + free-card check), *Edit* (sub-tabs Edit | Enhance | Fix over a shared source —
-  instruct-edit, the enhance-workflow catalog, hand/face fixer), *Video* (I2V / FLF / R2V
-  modes, gallery Picker slots with @image badges, contenteditable prompt with @image chips,
+  instruct-edit, an Enhance pane explaining that PixAI's one-click workflow tools run only on
+  their own site, hand/face fixer), *Video* (I2V / FLF / R2V modes, gallery Picker slots with
+  @image badges, contenteditable prompt with @image chips,
   model picker, audio toggle, live cost + card count).
 - **Picker** (`/api/gallery-images` + `/api/upload`): whole-catalog infinite scroll,
   search, Collection/Source/Rating/Sort filters, upload → media_id.
@@ -275,7 +278,7 @@ asserts it against a live request, so it is the authority when prose and code di
   Send-to-Video.
 - **The Loom** (`/loom`): the storyboard surface — current shape lives in `docs/STATE.md`;
   usage manual is `docs/LOOM.md`.
-- **Async engine**: submit (`/api/generate|edit|enhance|fix|loom/generate`) → poll
+- **Async engine**: submit (`/api/generate|edit|fix|loom/generate`) → poll
   (`/api/task-status`) → auto-download + catalog (`source='api'`). Free cards auto-apply
   on every create path. `/api/task-status`'s 'running' branch deliberately never writes to
   `jobs.jsonl` (only its `done`/`failed` branches do), so a job's log entry can be

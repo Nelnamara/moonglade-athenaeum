@@ -393,11 +393,33 @@
     '.jt-spin{position:relative;width:48px;height:48px;}',
     '.jt-spin .jt-nel{inset:6px;width:36px;height:36px;border-radius:50%;object-fit:cover;object-position:60% 32%;animation:gen-spin 1.6s linear infinite;}',
     '.jt-spin .gen-ring{position:absolute;inset:2px;border-radius:50%;border:2px solid rgba(182,146,230,.22);border-top-color:var(--lavender);animation:gen-spin .8s linear infinite;}',
+    // OWN the keyframes both rules above animate. They used to live ONLY in the gallery's own
+    // page CSS (inside create_app, beside .header-stats), so this file silently depended on
+    // its host to supply them: on the gallery the spinner animated by accident, and on the
+    // Loom -- whose _LOOM_SHELL does not carry that CSS -- `animation: gen-spin` named a
+    // keyframe that did not exist and did nothing at all. A running job sat frozen, visually
+    // identical to a stalled one, on the surface where that distinction matters most.
+    // This file is host-neutral by design; it must define every animation it references.
+    '@keyframes gen-spin{to{transform:rotate(360deg);}}',
+    // QUEUED: PixAI has accepted the task and no worker has picked it up. Deliberately the
+    // SAME .jt-spin element with its two animations stopped, rather than a separate glyph --
+    // motion is the thing that reads as "work is happening", and for a queued job that is
+    // the entire lie being told. Stopped and dimmed reads as waiting; the ring keeps its
+    // shape so the row still lines up with its neighbours.
+    '.jt-spin.jt-queued .jt-nel{animation:none;opacity:.62;}',
+    '.jt-spin.jt-queued .gen-ring{animation:none;border-color:var(--surface1);border-top-color:var(--overlay0);}',
     '.jt-empty-nel{width:104px;height:104px;object-fit:contain;margin:0 auto 8px;display:block;opacity:.92;}',
     '.jt-main{flex:1;min-width:0;}',
     '.jt-lab{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
     '.jt-sub{font-size:10.5px;margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;}',
     '.jt-sub .jt-when{color:var(--overlay0);} .jt-sub .jt-kind{color:var(--subtext);text-transform:capitalize;}',
+    // A quiet uppercase pill, borrowing .jt-title's own typographic treatment so it reads as
+    // a STATE rather than as more prose. Pointedly not --peach/--red: those belong to
+    // `stale` and `done_with_errors` (.st-warn), and a generation sitting in an ordinary
+    // ~25s queue is not a problem -- dressing it as one would make every gen look broken for
+    // its first half-minute.
+    '.jt-sub .jt-phase{color:var(--overlay0);border:1px solid var(--surface1);border-radius:999px;padding:0 6px;font-size:9.5px;line-height:15px;letter-spacing:.07em;text-transform:uppercase;}',
+    '.jt-sub .jt-eta{color:var(--overlay0);}',
     '.jt-errmsg{color:var(--red);font-size:10.5px;margin-top:3px;white-space:normal;}',
     '.jt-bar{height:4px;border-radius:3px;background:var(--surface1);margin-top:6px;overflow:hidden;}',
     '.jt-bar i{display:block;height:100%;background:var(--lavender);border-radius:3px;transition:width .3s;}',
@@ -1140,6 +1162,23 @@
     var KIND_LABEL = { cli: 'Terminal', panel: 'Control Panel', generate: 'Generate',
                        'delete': 'Delete', 'import': 'Import' };
     function kindLabel(t){ return KIND_LABEL[t] || t || 'Job'; }
+    // The stored `label` is the COMPLETION wording: runTask passes opts.past ('Generated',
+    // 'Edited', ...) and it is written to the job log at SUBMIT time, so an in-flight card
+    // read "Generated" while the thing was still sitting in PixAI's queue -- owner report,
+    // 2026-07-25, alongside a 21s queue wait that was itself correct. Terminal rows keep the
+    // stored wording (it is right by then, and the completion toast reads off the same
+    // field); an in-progress row gets the present tense from this table. Anything not in it
+    // falls through to the stored label UNCHANGED rather than being guessed at -- a label
+    // this table has never heard of is better shown as-is than mangled by a rule.
+    var LABEL_ING = {
+      'Generated': 'Generating', 'Edited': 'Editing', 'Rendered': 'Rendering',
+      'Fixed': 'Fixing', 'Upscaled': 'Upscaling', 'Imported': 'Importing',
+      'Uploaded': 'Uploading'
+    };
+    function labelFor(j, terminal){
+      var l = j.label || 'Generation';
+      return terminal ? l : (LABEL_ING[l] || l);
+    }
     function row(j){
       // done_with_errors (D-4): the job itself completed (exit 0 by design), but some
       // files failed after retries -- distinct from both a clean 'done' and a hard
@@ -1154,6 +1193,14 @@
       // task-id recovery closes it), but shown + dismissable like one so it never just
       // looks like an ordinary still-in-progress spinner forever.
       var st=j.status||'running';
+      // queued: PixAI has accepted the task and no worker has taken it yet, so nothing is
+      // rendering. `started` is written to the job log by /api/task-status; it is ABSENT on
+      // every job that isn't a PixAI task (panel/cli/delete/import) and on any generate job
+      // logged before this shipped, so the test is `=== false`, never `!j.started` -- absent
+      // means UNKNOWN, and unknown keeps the plain spinner it always had rather than
+      // labelling every Control Panel job queued. Same distinction resolve_orphan_jobs makes
+      // server-side, where the aged-in version of this state escalates to `stale`.
+      var queued=(st==='running' && j.started===false);
       var fin=(st==='done'||st==='failed'||st==='done_with_errors'||st==='stale');
       var ic = st==='done'
              ? '<span class="jt-ok jt-glyph">✓</span><img class="jt-nel" src="/branding/mascots/trk_done.png" onerror="this.remove()">'
@@ -1163,13 +1210,31 @@
              ? '<span class="jt-err jt-glyph">⚠</span><img class="jt-nel" src="/branding/mascots/trk_fail.png" onerror="this.remove()">'
              : st==='stale'
              ? '<span class="jt-warn jt-glyph">?</span><img class="jt-nel" src="/branding/mascots/trk_fail.png" onerror="this.remove()">'
-             : '<span class="jt-spin"><img class="jt-nel" src="/branding/gen_nel.png" onerror="this.remove()"><i class="gen-ring"></i></span>';
+             : '<span class="jt-spin'+(queued?' jt-queued':'')+'"><img class="jt-nel" src="/branding/gen_nel.png" onerror="this.remove()"><i class="gen-ring"></i></span>';
       var mid=(j.media_ids||[])[0]||'';
       var thumb=(st==='done'&&mid)?'<a class="jt-thumb" href="/image/'+encodeURIComponent(mid)+'"><img src="/thumbs/'+encodeURIComponent(mid)+'.jpg" alt=""></a>':'';
       var bar='';
       if(st==='running' && j.total){ var pct=Math.min(100, Math.round((j.done||0)/j.total*100)); bar='<div class="jt-bar"><i style="width:'+pct+'%"></i></div>'; }
       var errmsg=((st==='failed'||st==='done_with_errors'||st==='stale')&&j.error)?'<div class="jt-errmsg">'+esc(j.error)+'</div>':'';
-      var sub='<div class="jt-sub"><span class="jt-kind">'+esc(kindLabel(j.type))+'</span><span class="jt-when">'+ago(j.ts)+'</span></div>';
+      // The phase chip, and beside it the queue wait PixAI itself predicted. `eta_seconds`
+      // is recorded ONCE, when the job was first seen queued (GET /v2/task/wait-time; see
+      // /api/task-status's _note_gen_phase). It is an estimate of the WAIT, frozen at that
+      // moment -- nothing recomputes it as the wait grows, and PixAI publishes no progress
+      // or per-task ETA at all, so it must never read as time remaining. Hence the wording,
+      // the title, and the fact it vanishes the instant the job starts rendering: a queue
+      // estimate left on screen next to a job that HAS started would imply a render ETA we
+      // do not have. isFinite, not truthiness -- an empty queue really is 0s, and "no wait"
+      // must stay distinguishable from "never asked" (same reasoning as the Cost row).
+      var phase=queued?'<span class="jt-phase" title="PixAI has accepted this generation and '
+             +'no worker has picked it up yet — it has not started rendering.">queued</span>':'';
+      var eta=(queued && typeof j.eta_seconds==='number' && isFinite(j.eta_seconds))
+             ? '<span class="jt-eta" title="The queue wait PixAI predicted for this model when '
+               +'the job was accepted. An estimate of the WAIT, not a countdown, and not '
+               +'progress — PixAI reports no progress on a running task.">est. '
+               +esc(fmtDuration(j.eta_seconds))+' wait</span>'
+             : '';
+      var sub='<div class="jt-sub"><span class="jt-kind">'+esc(kindLabel(j.type))+'</span>'
+             +phase+eta+'<span class="jt-when">'+ago(j.ts)+'</span></div>';
       var x=fin?'<button class="jt-x" data-job="'+esc(j.job_id)+'" title="Dismiss">×</button>':'';
       var cls=st==='failed'?' st-failed':((st==='done_with_errors'||st==='stale')?' st-warn':'');
       // data-job + tabindex/role: the row itself opens the detail popover (task id, time
@@ -1177,7 +1242,7 @@
       // below. Guarded there so clicking the thumbnail link or the dismiss button still does
       // ONLY that, not both.
       return '<div class="jt-item'+cls+'" data-job="'+esc(j.job_id)+'" tabindex="0" role="button" aria-haspopup="true"><div class="jt-ic">'+ic+'</div>'
-           +'<div class="jt-main"><div class="jt-lab">'+esc(j.label||'Generation')+'</div>'+sub+bar+errmsg+'</div>'
+           +'<div class="jt-main"><div class="jt-lab">'+esc(labelFor(j, fin))+'</div>'+sub+bar+errmsg+'</div>'
            +thumb+x+'</div>';
     }
     // ================================================================================
@@ -1203,11 +1268,37 @@
       var startedAt=j.started_at||j.ts||0;
       var running=(j.status||'running')==='running';
       var spentSecs=(running?(Date.now()/1000):(j.ts||startedAt))-startedAt;
+      // The queue wait PixAI predicted, spelled out. It only MEANS anything read against
+      // Time Spent directly above it -- "27s (PixAI, when queued)" beside "6m 12s so far" is
+      // the whole diagnosis, and it is the reason this row belongs here rather than only in
+      // the 366px-wide tray row, which has no space to say when the estimate was taken.
+      // Kept on a finished job too: after the fact it is the record of how far off the
+      // estimate was.
+      var wait='';
+      if(typeof j.eta_seconds==='number' && isFinite(j.eta_seconds)){
+        wait='<div class="jd-row"><span class="jd-k">Est. wait</span><span class="jd-v">'
+            +esc(fmtDuration(j.eta_seconds))+' (PixAI, when queued)</span></div>';
+      }
+      // Actual cost, from PixAI's server-authoritative paidCredit recorded on the done
+      // event. Shown ONLY when a real number was recorded: `typeof`/isFinite rather than a
+      // truthiness check, because a card-covered generation genuinely costs 0 and must
+      // render as "0 credits", while an unknown cost must show no row at all -- collapsing
+      // those two would advertise every in-flight job as free. Grouped by hand (no
+      // toLocaleString) to match fmtClock/fmtDuration right above: identical output
+      // regardless of the browser's ICU/locale data, and trivially unit-testable.
+      var cost='';
+      if(typeof j.paid_credit==='number' && isFinite(j.paid_credit)){
+        var s=String(Math.round(Math.abs(j.paid_credit))), grp='', i=0;
+        for(var k=s.length-1;k>=0;k--){ grp=s.charAt(k)+grp; if(++i%3===0 && k>0) grp=','+grp; }
+        cost='<div class="jd-row"><span class="jd-k">Cost</span><span class="jd-v">'
+            +esc(grp)+' credits</span></div>';
+      }
       return '<div class="jd-row"><span class="jd-k">Task ID</span>'
            +'<span class="jd-v jd-id">'+esc(tid)+'</span>'
            +'<button class="jd-copy" data-copy="'+esc(tid)+'" title="Copy task ID">copy</button></div>'
            +'<div class="jd-row"><span class="jd-k">Time Sent</span><span class="jd-v">'+esc(fmtClock(startedAt))+'</span></div>'
-           +'<div class="jd-row"><span class="jd-k">Time Spent</span><span class="jd-v" data-spent="1">'+esc(fmtDuration(spentSecs))+(running?' so far':'')+'</span></div>';
+           +'<div class="jd-row"><span class="jd-k">Time Spent</span><span class="jd-v" data-spent="1">'+esc(fmtDuration(spentSecs))+(running?' so far':'')+'</span></div>'
+           +wait+cost;
     }
     function renderDetail(j){
       var d=detailEl();
