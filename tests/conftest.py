@@ -5,6 +5,7 @@ import re
 import pytest
 
 import moonglade_backup as core
+import moonglade_gallery as gallery
 
 
 @pytest.fixture(autouse=True)
@@ -50,6 +51,25 @@ def _isolated_auth_config(tmp_path, monkeypatch):
     their __file__-based resolution with an equivalent tmp_path-based one) rather
     than a second, conflicting source of truth."""
     monkeypatch.setattr(core, "_config_path", lambda: tmp_path / "config.json")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_branding(tmp_path, monkeypatch):
+    """Branding art moved OUT of the library folder and into the app root on 2026-07-26, so
+    branding_root() now resolves from __file__ -- meaning the real checkout, for every test that
+    exercises a mark, badge, mascot or banner.
+
+    Same hazard and same remedy as _isolated_auth_config above: without this, a test that writes a
+    fake mark would drop PNGs into the developer's actual branding folder, and a test asserting
+    "no marks installed" would instead pick up whatever real art is sitting there -- passing or
+    failing based on the machine it ran on rather than the code.
+
+    Redirecting the resolver to tmp_path restores exactly the semantics the whole suite was
+    already written against (branding under the per-test directory), so every existing branding
+    test keeps working unchanged and this is a no-op for them. Note _branding_path() derives
+    branding.json as a SIBLING of this, which lands it at tmp_path/branding.json -- the path
+    tests/test_branding.py already expects."""
+    monkeypatch.setattr(gallery, "branding_root", lambda: tmp_path / "branding")
 
 
 @pytest.fixture(autouse=True)

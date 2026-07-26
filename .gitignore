@@ -99,3 +99,14 @@ Thumbs.db
 # before implementing it (the locked pixel source lives in the Claude artifact, not
 # here). Never committed -- they would rot instantly against the real surface.
 static/_mockup_*.html
+
+# Branding art and the selections that go with it. Moved out of the library folder to the app
+# root on 2026-07-26, which puts USER CONTENT inside a git-managed directory for the first time --
+# so this entry ships in the SAME commit as the move. Without it the first person to drop a mascot
+# into a slot sees their own art as untracked repo content, and `git add -A` is already banned here
+# for exactly that class of accident.
+#
+# The folders are empty by design on a fresh install: finding them is the "Under the Hood" easter
+# egg, so they must exist and must not carry anyone else's art.
+/branding/
+/branding.json

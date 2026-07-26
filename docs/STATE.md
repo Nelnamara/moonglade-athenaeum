@@ -1142,7 +1142,7 @@ verified 2026-07-26:
 | the slot list | only `branding/marks` and `branding/favicon` appear in code. The panel needs the full set. |
 | the achievement + roast | **the roast already exists** (`:1353`). The metric and trigger do not. |
 
-### DECIDED 2026-07-26: branding moves to the APP ROOT (`branding/`)
+### ✅ SHIPPED 2026-07-26: branding lives in the APP ROOT (`branding/`)
 
 Currently `Path(out_dir) / "branding"`, and `out_dir` now comes from `resolve_library_dir()` — the
 library-folder setting shipped 2026-07-25. **That is a live bug nobody has hit yet**: point the app
@@ -1168,7 +1168,7 @@ The resulting root reads correctly: `moonglade/` is obviously the machinery, `br
 theirs, and it sits beside `Serve Gallery.pyw` — both user-facing, both top level. Step 2 also gets
 simpler, because then everything moving into `/moonglade/` is code with no exceptions.
 
-**Two things this needs and does not yet have:**
+**Both conditions this was made contingent on shipped with it:**
 - **A gitignore entry, added in the same commit as the move.** Otherwise the first person to drop a
   mascot in and run `git status` sees their own art as untracked repo content, and `git add -A` is
   already banned here for exactly that class of accident.
@@ -1177,6 +1177,27 @@ simpler, because then everything moving into `/moonglade/` is code with no excep
   relocates his own files by hand on the production install once the change ships. Worth stating
   because the obvious instinct is to write a compatibility shim, and he explicitly does not want one
   for a single install he controls. Do not add one.
+
+**What landed.** One resolver, `moonglade_gallery.branding_root()`, replacing nine independent
+derivations; `_branding_path()` keeps `branding.json` as its SIBLING so an existing setup moves as
+two entries in the same relationship rather than a reshuffle. The exclusions in
+`moonglade_gallery.py` and `moonglade_backup.py` that kept branding out of gallery scans were
+**deliberately left pointing at the old library location** — an install predating the move still has
+files there, and `--import-local` would otherwise catalogue someone's banner and mascots as gallery
+images; excluding an absent path costs nothing.
+
+Testing needed one non-obvious piece. `branding_root()` resolves from `__file__`, so every test that
+writes a fake mark would have dropped PNGs into the real checkout, and any test asserting "no marks
+installed" would have picked up whatever real art was sitting there — passing or failing based on the
+machine. `tests/conftest.py` gained an autouse `_isolated_branding` fixture redirecting the resolver
+to `tmp_path`, matching what `_isolated_auth_config` already does for `config.json`; that keeps all
+existing branding tests working unchanged. But it also means the suite passing proves nothing about
+the production path, so two tests in `tests/test_branding.py` deliberately bypass the fixture: one
+pins the absolute app-root location and asserts no library value can steer it, the other pins the
+sibling relationship.
+
+**Still owner-side:** relocating `branding/` and `branding.json` on the production install. Until
+then that install renders default chrome.
 
 ### Do not
 - Do not make the panel available ungated — that deletes the feature.
