@@ -982,6 +982,81 @@ def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker):
     assert rows["m2"]["prompt_full"] == "kept" and rows["m2"]["seed"] == "77"
 
 
+def test_parallel_map_reports_failures_instead_of_swallowing_them():
+    """A worker's exception used to be discarded outright (`except Exception: res = None`).
+
+    A real 17,289-task backfill consequently printed "16,044 failed" with no reason attached
+    to any of them -- a number nobody can act on, and one that makes a 93%-failure run look
+    the same as a successful one apart from the digits. The same total covers a rotated hash,
+    an expired key, a rate limit and a genuinely deleted task, and those have four different
+    answers.
+    """
+    seen = []
+
+    def boom(i):
+        if i % 2:
+            raise RuntimeError("rate limited (429)")
+        return i
+
+    out = list(core._parallel_map(range(6), boom, workers=4,
+                                  on_error=lambda it, e: seen.append((it, str(e)))))
+    assert len(out) == 6, "a failing worker must not drop its item from the stream"
+    assert [r for _, r in out].count(None) == 3, "failures still yield None, as before"
+    assert sorted(i for i, _ in seen) == [1, 3, 5]
+    assert all("429" in msg for _, msg in seen), "the reason must reach the caller"
+
+
+def test_parallel_map_paces_the_whole_pool_not_each_thread():
+    """--delay was dropped entirely once workers > 1, on the reasoning that "concurrency
+    itself paces". It does not: eight threads firing as fast as they complete is a burst, and
+    being polite to PixAI's servers is a standing rule of this project that should not switch
+    itself off because a flag was passed.
+
+    The pace is GLOBAL -- one request start per `delay` across the whole pool -- so raising
+    --workers buys latency hiding up to that ceiling rather than a bigger burst.
+    """
+    import time
+
+    starts = []
+
+    def stamp(i):
+        starts.append(time.monotonic())
+        return i
+
+    t0 = time.monotonic()
+    list(core._parallel_map(range(8), stamp, workers=8, delay=0.05))
+    span = time.monotonic() - t0
+    # 8 starts one slot apart is 7 gaps; allow slack for scheduling, but a pool that ignored
+    # the pace finishes in ~0s and cannot reach this.
+    assert span >= 0.05 * 7 * 0.8, (
+        "8 workers finished in {:.3f}s -- the pool ignored the pace".format(span))
+    starts.sort()
+    assert all(b - a >= 0.04 for a, b in zip(starts, starts[1:])), (
+        "two requests started inside one delay slot")
+
+
+def test_backfill_names_why_tasks_failed(tmp_path, mocker, capsys):
+    """The summary is by REASON, not just a total, and a majority-failure run says plainly
+    that re-running it unchanged repeats it -- while making clear nothing already fetched is
+    lost, because the backfill is resumable."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+
+    base = {f: "" for f in CATALOG_FIELDS}
+    save_catalog(tmp_path / "catalog.db",
+                 [base | {"media_id": "m%d" % i, "task_id": "t%d" % i,
+                          "filename": "%d.png" % i} for i in range(40)])
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    mocker.patch.object(core, "task_detail_gql",
+                        side_effect=core.PixAIError("HTTP 429 rate limited"))
+    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+                                                workers=4))
+    out = capsys.readouterr().out
+    assert "Why they failed:" in out
+    assert "429" in out, "the actual reason must be printed, not just a count"
+    assert "resumable" in out, "a mass failure must say nothing fetched was lost"
+    assert "--workers 2 --delay 1" in out, "it must suggest a gentler pace"
+
+
 def test_full_metadata_is_the_default_on_a_pull(monkeypatch, tmp_path):
     """Full metadata used to be the thing you only got by asking, so a plain run or --update
     created rows with no prompt, no seed and no model -- and nothing said so until something
