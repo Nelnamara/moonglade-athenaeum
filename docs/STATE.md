@@ -883,6 +883,96 @@ What's still CLI-only, tracked so the web surface stays complete:
 
 ---
 
+## The naming pass — decisions locked 2026-07-25
+
+**Flat names, package folder LATER** (owner call). Rename-only; **no shims** (clean cut).
+
+| from | to |
+|---|---|
+| `pixai_gallery_backup.py` | `moonglade_backup.py` |
+| `pixai_gallery.py` | `moonglade_gallery.py` |
+| `pixai_similar.py` | `moonglade_similar.py` |
+| `pixai_logging.py` | `moonglade_logging.py` |
+
+**There is a FOURTH module.** `pixai_logging` (36 refs). Easy to miss — it is imported by both
+main modules and earlier notes framed this as a three-module rename.
+
+**`pixai_backup` (81 refs) is NOT renamed** — the output directory, named in every install's
+config.json. See the prefix trap in the priority list below.
+
+**Measured scope** (`python tools/name_inventory.py modules`, 2026-07-25): **941 references in
+135 files** — code 430, docs 414, js 66, other 21, cfg 10. Nine are in machine-local
+git-ignored files the branch cannot fix. `pixai_gui` / `pixai_gui_settings` (8) are dead
+mentions of the PySide6 GUI removed in v2.1.0; sweep as encountered so they stop reading as
+live modules.
+
+**Docs split, and only one half moves with the rename:**
+- **Live instructions change in the same pass**, or the release ships commands that do not
+  exist: `CLAUDE.md` (43), `wiki/Backing-Up.md` (48), this file (26).
+- **Historical record stays as written**: `CHANGELOG.md` (45), `docs/AUDIT_2026-07-21.md`
+  (109). A v1.9 entry naming `pixai_gallery_backup.py` is TRUE about v1.9.
+- Deferred by owner call: `docs/architecture.md`, `wiki/Generating.md` (see the doc-debt
+  section above).
+
+**Verification cannot be the test suite alone.** Both renamed modules are runnable scripts;
+a green suite proves imports, not the ~116 documented `python pixai_*.py` invocations, the
+launcher's child command (`Serve Gallery.pyw`), or the Panel's subprocess runner
+(`_cli_path`). Verify the COMMAND surface separately.
+
+**Sequencing, 2026-07-25:** the priority list's rebase warning does not bite — `master` has
+NOT diverged (`loom-v2` +85, `master` +0, fast-forwardable). So: dedicated branch off
+`loom-v2` → verify → merge to `loom-v2` → `master` → tag **2.5.0**, keeping the rename in the
+same release so the new commands are learned once rather than across two.
+
+### The folder tidy (separate, later pass)
+Owner's motivation for `/moonglade`, 2026-07-25: achievement and branding files sit loose in
+the install root, and **"a tidy install folder says a lot and implies good design etiquette
+across the suite."** A different job from renaming four modules, so it gets its own pass and
+"rename-only" stays honest.
+
+## Banked idea: package the assets like an MPQ (possible epic, NOT scoped)
+
+Owner, 2026-07-25. **Explicitly not DRM** — his framing: *"if someone pokes around and just
+reads a json file all the secrets are out. just not trying to leave breadcrumbs."* Plus the
+presentation goal: a tidy install that reflects the work.
+
+**Mechanism, best first:**
+- **SQLite as the container.** One file; a table of `(path, bytes, sha256, mtime)`;
+  hash-indexed random access; transactional updates; no extraction step. Behaviourally the
+  closest thing to MPQ, and closer still to CASC (content-addressed). No new dependency — the
+  catalog already links SQLite.
+- **A zip.** Read natively by Python, servable straight from Flask. Simpler, more
+  inspectable; marginally worse at many-tiny-file random access, irrelevant at this scale.
+- **Not `zipapp`/`.pyz`** — bundles code, not runtime assets.
+
+**Delivers:** a tidy install; atomic versioned distribution (one file, cannot half-install);
+tamper-evidence via a signed hash manifest, so a swapped mark becomes DETECTABLE; and a
+container whose format you must know rather than a folder you can browse.
+
+**Cannot deliver, and must not be scoped as:** secrecy for displayed art. What the browser
+renders, the browser has.
+
+**The spoiler half is a SEPARATE decision, and packaging does not solve it — but something
+simpler does.** `docs/achievements_roster_57.json` is **2.98 MB and committed to the public
+repo**, so the whole roster is readable on GitHub and no install-folder packaging un-publishes
+it. **Checked 2026-07-25: NO runtime code loads that file.** `pixai_gallery.py:1528` only cites
+it in a comment (the runtime roster is the `ACHIEVEMENTS` catalog in the module itself), and
+its only reader is `tools/build_roster_board.py`, a dev-only board generator that already
+accepts a `--roster` path. Owner's recollection was right: it is the build-time record from
+when the 57 were designed, not a shipped asset.
+
+So moving it to git-ignored `private/` would remove the breadcrumb from GitHub AND 2.98 MB from
+the repo, at the cost of one dev tool's default path. The real price is that the canonical
+design record leaves version control — it would live only on the owner's disks and needs to be
+inside his own backup. That is the owner call here, and it is a SEPARATE change from the naming
+pass (rename-only). (Server-side masking already works and is unaffected — unearned feats are
+cloaked and their metrics scrubbed before reaching any client, which is real protection
+precisely because those bytes never leave the machine.)
+
+**Design tension to respect:** branding is DROP-IN today (a file in `out_dir/branding/` is
+picked up) and "make it yours" is a shipped, intended feature. A sealed container must keep an
+override layer — packaged defaults, loose files winning — or that feature dies to tidiness.
+
 ## Priority order (agreed 2026-07-19)
 
 Ranked, with the reason each sits where it does.
