@@ -1114,6 +1114,41 @@ verified 2026-07-26:
 | the slot list | only `branding/marks` and `branding/favicon` appear in code. The panel needs the full set. |
 | the achievement + roast | **the roast already exists** (`:1353`). The metric and trigger do not. |
 
+### DECIDED 2026-07-26: branding moves to the APP ROOT (`branding/`)
+
+Currently `Path(out_dir) / "branding"`, and `out_dir` now comes from `resolve_library_dir()` — the
+library-folder setting shipped 2026-07-25. **That is a live bug nobody has hit yet**: point the app
+at a different library and every mark, mascot and banner disappears from its view. The files are
+still on disk in the old folder; the app simply stops looking there. Only one library has ever
+existed, which is why it has gone unnoticed.
+
+**Root, not `/moonglade/`.** The naming pass's step 2 moves the core modules into `/moonglade/`, and
+three reasons keep branding out of it:
+1. `/moonglade/` will be the CODE package. Putting user art inside it re-creates the exact problem
+   step 2 exists to fix — the owner's words were that he noticed achievements and suchlike sitting
+   in the core folder and wanted them tucked away. Moving code IN is the tidy; moving content in
+   undoes it.
+2. A package folder acquires `__pycache__`, probably an `__init__.py`, and is the natural unit to zip
+   or install. Images inside that boundary will eventually be treated as code by something.
+3. **It would break the easter egg, which is the deciding reason.** A tinkerer opens the app folder
+   and scans the top level. `branding/` there is findable. `/moonglade/branding/` is a level deeper
+   inside a folder that looks like source — they would open it, see a wall of `.py` files, and back
+   out. Discovery through the filesystem IS the mechanic, so the folder has to be where a curious
+   person's eye lands.
+
+The resulting root reads correctly: `moonglade/` is obviously the machinery, `branding/` is obviously
+theirs, and it sits beside `Serve Gallery.pyw` — both user-facing, both top level. Step 2 also gets
+simpler, because then everything moving into `/moonglade/` is code with no exceptions.
+
+**Two things this needs and does not yet have:**
+- **A gitignore entry, added in the same commit as the move.** Otherwise the first person to drop a
+  mascot in and run `git status` sees their own art as untracked repo content, and `git add -A` is
+  already banned here for exactly that class of accident.
+- **A migration for the owner's existing marks on the D: install.** Moving the default does not move
+  files, and that install is read-only to this project. Recommended: read BOTH locations for a
+  while, preferring the new one — a few lines, and he never has a broken banner while he gets round
+  to copying them. NOT yet decided by the owner.
+
 ### Do not
 - Do not make the panel available ungated — that deletes the feature.
 - Do not block this on the bundling epic; they are independent.
