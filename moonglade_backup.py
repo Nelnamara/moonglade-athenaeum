@@ -2137,6 +2137,34 @@ LORA_SOURCE_TYPES = {
 # shareImagesOnline, shouldCreditAuthor}.
 PERMITTED_USES = ("COMMERCIAL",)
 
+# Their "Posted at" options, and the offset each one means. Captured from the live request: the
+# UI sends a DateRange of {"gt": "<ISO instant>"} and nothing else -- no upper bound, no `lt`.
+POSTED_AT_DAYS = {"yesterday": 1, "7d": 7, "30d": 30}
+
+
+def posted_at_range(token):
+    """One of POSTED_AT_DAYS -> the DateRange dict PixAI expects, or None for "All Time".
+
+    Measured, not guessed: selecting Past 7 Days on 2026-07-26 sent
+    {"gt": "2026-07-19T07:00:00.000Z"}. Note what that value is NOT -- it is not
+    now-minus-168-hours. 07:00:00.000Z is local MIDNIGHT at UTC-7, so the boundary is the start
+    of the day N days back, in the viewer's own timezone. Matching that matters for more than
+    tidiness: a start-of-day boundary is a stable cache key, whereas a rolling
+    now-minus-N-seconds mints a fresh one on every keystroke and would defeat their caching (and
+    ours) for no benefit.
+
+    Milliseconds and a literal Z, matching JSON.stringify(new Date()) in their client. An
+    unrecognised token returns None, so the filter is simply absent and the search runs
+    unfiltered -- the same fail-open contract as every other filter here."""
+    days = POSTED_AT_DAYS.get((token or "").strip().lower())
+    if not days:
+        return None
+    local_midnight = (datetime.datetime.now().astimezone()
+                      .replace(hour=0, minute=0, second=0, microsecond=0)
+                      - datetime.timedelta(days=days))
+    utc = local_midnight.astimezone(datetime.timezone.utc)
+    return {"gt": utc.strftime("%Y-%m-%dT%H:%M:%S.") + "{:03d}Z".format(utc.microsecond // 1000)}
+
 # CORRECTION, 2026-07-26. Comments in this file state that "an enum cannot be a $variable", which
 # is why `loraBaseModelTypes` is interpolated behind a whitelist. That claim is WRONG: PixAI's own
 # query documents declare `$types: [GenerationModelType]`, `$permittedUse: PermittedUse` and

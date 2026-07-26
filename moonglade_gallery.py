@@ -12298,6 +12298,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         src = (request.args.get("src") or "market").strip().lower()
         source = (request.args.get("source") or "").strip().lower()
         license_ = (request.args.get("license") or "").strip().upper()
+        # Posted-at. The DateRange shape was CAPTURED from the live site 2026-07-26 --
+        # {"gt": "<ISO instant>"}, start of day N days back in local time -- so core
+        # builds it from a whitelisted token and an unknown token yields None (no filter).
+        posted = (request.args.get("posted") or "").strip().lower()
         try:
             size = max(1, min(int(request.args.get("size") or 24), 50))
         except ValueError:
@@ -12326,7 +12330,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     # resolved once by the client, used at every layer. core ignores it for
                     # a base-model search and for any architecture off its whitelist.
                     lora_base_type=(base_type if usage == "LORA" else ""),
-                    source=source, permitted_use=license_)
+                    source=source, permitted_use=license_,
+                    time_range=core.posted_at_range(posted))
             else:
                 offset = int(cursor) if cursor.isdigit() else 0
                 payload = core.model_search_rest(session, keyword=q, usage=usage,
