@@ -975,14 +975,32 @@ PixAI's Apollo rejects requests it considers CSRF-able with a `BAD_REQUEST` unle
 **both**, which is exactly why the API-key path never hit this and a fresh probe did immediately.
 Any hand-rolled request needs them.
 
-### Still open
-Whether the **mutation** response returns a refreshed `token` header. PixAI *does* expose `token`
-to JS (`Access-Control-Expose-Headers: token, x-intercom-user-jwt, x-country-code, x-msid`,
-verified), but it was absent on a read-only query. If it is present on mutations, every generation
-renews the credential and the owner never pastes again. If not, the fallback is a paste roughly
-every 27 days — which is not the constant-harvest regression he rejected. `refreshToken` (a
-no-argument mutation, in the harvest) is the explicit alternative and is **deliberately untested**:
-rotation could log his browser out mid-session.
+### Renewal: ANSWERED — not header-based, and it does not matter
+**Measured 2026-07-26:** there is **no `token` response header** on a mutation response, nor on a
+read-only query. `Access-Control-Expose-Headers` does still list `token`, so the mechanism exists
+somewhere in their own flow (login, or their near-expiry refresh), but not on any call this app
+would make. **The design must not depend on it.**
+
+That is fine, because the pain was never the JWT:
+- **`U3T` was the problem.** A ~1-hour credential stored as a static string in `config.json` —
+  stale within the same sitting, invisibly, with no signal. That is what "constant harvesting"
+  actually was. It is fixed structurally by using a `requests.Session` cookie jar, since `_udt`
+  and `_bsid` are refreshed by Set-Cookie on every response.
+- **The JWT lasts ~27 days**, and its expiry is readable **locally** from its own `exp` claim with
+  no network call.
+
+So the shipped design is a **visible countdown, not silent staleness**:
+1. decode the JWT's `exp` at startup (offline; the probe already does this in ~10 lines),
+2. the Panel shows "PixAI mirror: N days left" beside the toggle,
+3. under 5 days it becomes a warning with a paste field,
+4. `_udt` / `_bsid` need no attention at all.
+
+That is roughly 13 deliberate ten-second pastes a year, each one announced in advance — a
+different category of annoyance from the invisible hourly failure the owner rejected.
+
+**`refreshToken` is therefore NOT a dependency.** It stays an optional nicety to weigh later, on
+its own merits, and remains untested on purpose: it is a credential mutation and rotation could
+log the owner's browser out mid-session.
 
 ### ❌ NOT the fix, and do not re-propose it
 Auto-favouriting each gen via `upsertBookmark`. Rejected by the owner 2026-07-26, and he says he
