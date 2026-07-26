@@ -930,6 +930,121 @@ the install root, and **"a tidy install folder says a lot and implies good desig
 across the suite."** A different job from renaming four modules, so it gets its own pass and
 "rename-only" stays honest.
 
+## THE API SURFACE IS NOW HARVESTED WHOLESALE (`tools/harvest_api_surface.py`, 2026-07-26)
+
+Every hand-probe uncovered another layer, so the probing stopped and the whole surface got
+mined instead. **182 operations — 102 queries, 80 mutations/subscriptions — each with its full
+GraphQL document, typed variables, and a sha256 hash.** Run `fetch` then `extract`; `show
+--grep <word>`, `doc <op>` and `diff` read the result. Output lands in git-ignored
+`private/harvest/`.
+
+### What was measured, replacing what was assumed
+- **PixAI is NOT a Next.js app.** It is React Router bundled with Rolldown. Two attempts inside
+  this tool failed on the old assumption before anyone looked.
+- **Their JS is not served from pixai.art at all** but from a VERSIONED CDN path:
+  `https://cdn.pixai.art/artifacts/app-1.0.2605/assets/<name>-<HASH>.js`, referenced by
+  `<link rel="modulepreload">` — 526 on the homepage alone, 868 reached by crawling imports.
+  `app-1.0.2605` is a build fingerprint, so `diff` reports "they shipped a new build", not just
+  "a hash moved".
+- **The crawl follows imports transitively.** This is the fix for the documented scoping bug: a
+  previous pass scanned "all 204 chunks on the enhancement page" and concluded a value did not
+  exist, when it sat in a LAZY chunk that page never loaded.
+- **The sha256 hashes are NOT in the bundle** — zero 64-hex strings across 868 chunks / 16 MB.
+  Apollo computes them at runtime.
+- **But the documents ARE, as pre-parsed AST literals** (`{kind:"Document",definitions:[..]}`,
+  191 in one chunk), with complete field projections and typed variable definitions.
+
+### Hashes are DERIVED, and the derivation is PROVEN
+Apollo hashes the printed document, so the tool prints the AST exactly as graphql-js does and
+sha256s it. Three hashes seen on real requests are baked in as an oracle; `extract` tries four
+print variants and keeps only one that reproduces **all three**. Exactly one did —
+`typename,no-newline` (Apollo injects `__typename` before hashing; no trailing newline). If none
+passes it writes no hashes at all, because plausible-and-wrong is worse than absent.
+
+**This is the answer to "what happens when PixAI changes their frontend."** Re-run fetch+extract
+and the hashes re-pin themselves. The `Recapture procedure` in CLAUDE.md is now a fallback, not
+the first move.
+
+### Notable operations we had no idea existed
+- `subscribeGeneratorPreviewEvents` — a live subscription streaming in-progress preview images
+  by `taskId`. This is the mechanism behind their new generation page.
+- `cancelGenerationTask`, `rerunGenerationTask`, `updateGenerationTask` — the Job Tracker
+  currently cannot cancel or rerun anything.
+- Bookmarks are full CRUD: `upsertBookmark`, `deleteBookmark`, `updateBookmarkItem`,
+  `listMyBookmarkItems` (this is what "Manage Bookmarks" opens), `listBookmarkItems`.
+- `listSimilarLoras`, `listLoraRecommendationsByModel` — their own similar/recommended LoRA
+  endpoints, adjacent to our Pixeltable work.
+- `createWebhook` / `listMyWebhooks` / `deleteWebhook` — webhooks, which could push events to
+  us instead of us polling.
+- `createAccessToken` / `listMyAccessTokens` / `revokeAccessToken`, `listMySessions` /
+  `terminateSession` — API-key and session management.
+- `getMyTaskStats`, `listMyQuotaLogs` (credit history), `getUserYearWrappedStats`.
+- `getManga` / `getMangaChapter` / `markManga` — a manga feature we did not know they had.
+- Moderation ops ship in the public bundle (`opBanUser`, `opModerationNSFW`, …). They would
+  fail without permissions; do not call them.
+- Payment ops exist (`intentToPay`, `cancelSubscription`, …) and stay **permanently out of
+  scope** per the standing money rule.
+
+### Safety, by construction
+`fetch` and `extract` never touch api.pixai.art — static CDN files only. `replay` takes ONE
+operation, refuses any mutation outright, requires an allowlist entry or explicit `--force`, and
+refuses to send an unproven hash. There is deliberately **no** "replay everything" mode: calling
+a harvested catalog blind could delete tasks, submit generations and spend real credits.
+
+## CAPTURED SPEC: LoRA training (read from the page + bundle, 2026-07-26, zero credits spent)
+
+The owner has **8 free trainings**. A paid run is **75,000 credits** — roughly 23 Hires
+upscales — so the free slots are worth real money and none were spent to get this.
+
+`createTrainingTask` is in the harvest with its hash and return projection. Input types live in
+the schema, not the document, so the inner field names came from the training page's own chunk
+(`_app.train-lora-main-*.js`), where the form assembles the object:
+
+    CreateTrainingTaskInput {
+      baseModelId          required
+      mediaIds             the dataset
+      title                required, length >= 1
+      type                 UserMultiLora  (matches the USER_MULTI_LORA seen on his own LoRAs)
+      triggerWords
+      primaryLoraModelId   set when retraining FROM an existing LoRA
+      trainingTaskId       set when reusing a previous dataset
+      category
+      kaisuukenId          ** the free card **
+    }
+
+**`kaisuukenId` is the headline.** The free trainings are kaisuuken cards — the same mechanism
+`_apply_kaisuuken` already implements for image generation. Our existing free-card path applies
+directly rather than needing a new one.
+
+**Validation rules, read off their code (not inferred):**
+- `mediaIds` under 10 is rejected **unless `trainingTaskId` is set** — reusing a dataset waives
+  the ten-image minimum.
+- Max 100 images, and submit is blocked while any image is still uploading.
+- `triggerWords`: empty rejected; over 256 rejected; and **under 30 characters rejected when the
+  model type is MMDIT26** — that is the "Tsubaki.2 needs a 30-character trigger word" rule,
+  enforced per architecture.
+- Three price tiers, in their own precedence order: free-to-train → 0; `datasetId` present →
+  `prices.reuse`; `primaryLoraModelId` present → `prices.retrain`; otherwise `prices.price`.
+- Failure returns `INSUFFICIENT_BALANCE`; success returns `refId`, the new model's id, and the
+  site navigates to `/model/<refId>`.
+
+**From the page itself:** Model Type on the TRAINING page is DiT.2 (NEW) / DiT.1 / SDXL /
+Other… — note **DiT.3 is absent here though it appears in the generate picker**, so DiT.3 is
+generate-only for now, which is part of why its enum never got captured. Model Theme offers
+Illustrious-v1.0, NoobAI XL, Hinata v2, Illustrious-v0.1 and more. Dataset sources are upload,
+**import from generation history**, or reuse a previous dataset. Rebates go up to 5% of credits
+when others generate with your LoRA. Membership grants 3/5/10 free trainings a month for
+Starter/Plus/Premium.
+
+**Their category dropdown is currently rendering raw i18n keys** (`market:lora-categories.*`),
+a live bug on their side, which handed over the canonical list: character, animal, style,
+realistic, pose, clothing, background, detail, other. That confirms our `MARKET_CATEGORIES` is
+missing **animal** and **realistic**.
+
+**Still not obtainable without a real run:** whether the submit is accepted from an API key.
+That is the same question panelplugin failed, and it cannot be answered by reading — only by
+submitting. Do not build a training feature as though it is settled.
+
 ## CAPTURED SPEC: PixAI's model + LoRA pickers (live capture 2026-07-25)
 
 Read off the running site with the owner driving Chrome, plus a network capture of the picker's
