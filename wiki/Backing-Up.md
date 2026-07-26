@@ -7,7 +7,7 @@ python pixai_gallery_backup.py --probe        # confirm connection
 python pixai_gallery_backup.py --count        # how many images you have
 python pixai_gallery_backup.py --max 40       # small test download
 python pixai_gallery_backup.py                # download everything (parallel)
-python pixai_gallery_backup.py --full-meta    # download + capture full prompt/seed/model
+python pixai_gallery_backup.py               # full metadata is captured by default
 ```
 
 Everything lands in `pixai_backup/` (git-ignored): `images/`, `catalog.db`,
@@ -50,8 +50,9 @@ python pixai_gallery_backup.py --workers 8 --page-size 500 # fast full backfill
 ## Full metadata
 
 ```bash
-python pixai_gallery_backup.py --full-meta            # on new downloads
+python pixai_gallery_backup.py                        # captured by default on every pull
 python pixai_gallery_backup.py --backfill-full-meta   # fill existing catalog rows
+python pixai_gallery_backup.py --catalog-stats        # how much is already filled in
 ```
 
 Captures the complete prompt, seed, steps, sampler, CFG, human-readable model name,

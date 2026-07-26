@@ -948,10 +948,14 @@ def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker):
         # t1: meta missing -> fetched by a plain --backfill-full-meta run
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "task_id": "t1",
                                            "filename": "a.png"},
-        # t2: meta complete, cost unknown -> fetched only with --with-credit
+        # t2: meta genuinely complete, cost unknown -> fetched only with --with-credit.
+        # "Complete" has to include a detail-only field (model_id/steps/sampler/cfg_scale):
+        # a prompt and a seed alone are NOT proof the task detail was ever fetched, and
+        # treating them as proof is what stranded such rows -- see the test below.
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "m2", "task_id": "t2",
                                            "filename": "b.png", "prompt_full": "kept",
-                                           "seed": "77"},
+                                           "seed": "77", "model_id": "9001",
+                                           "steps": "25", "sampler": "Euler a"},
     ])
     tasks = {
         "t1": {"parameters": {"prompts": "night elf druid"}, "outputs": {"seed": 5},
@@ -976,3 +980,106 @@ def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker):
     rows = {r["media_id"]: r for r in load_catalog(db)}
     assert rows["m2"]["paid_credit"] == "0"
     assert rows["m2"]["prompt_full"] == "kept" and rows["m2"]["seed"] == "77"
+
+
+def test_full_metadata_is_the_default_on_a_pull(monkeypatch, tmp_path):
+    """Full metadata used to be the thing you only got by asking, so a plain run or --update
+    created rows with no prompt, no seed and no model -- and nothing said so until something
+    needed one. It is the default now, with --no-full-meta as the explicit opt-out.
+
+    Driven through main()'s real parser and its real dispatch, so what is asserted is the
+    value the command actually receives rather than what the help text claims. --catalog-stats
+    is the vehicle because it is the one command that needs no API key; the command itself is
+    stubbed, so nothing runs and no network is touched. --full-meta stays accepted so existing
+    commands, the docs and the Panel's whitelisted argv (`resync-full` sends exactly that
+    flag) keep working unchanged.
+    """
+    seen = {}
+    monkeypatch.setattr(core, "run_catalog_stats", lambda a: seen.__setitem__("ns", a))
+
+    def parsed(argv):
+        seen.clear()
+        monkeypatch.setattr("sys.argv", ["pixai_gallery_backup.py", "--catalog-stats",
+                                         "--out", str(tmp_path)] + argv)
+        core.main()
+        return seen["ns"]
+
+    assert parsed([]).full_meta is True, "a plain pull must fetch metadata"
+    assert parsed(["--update"]).full_meta is True
+    assert parsed(["--full-meta"]).full_meta is True, "the old flag must still be accepted"
+    assert parsed(["--no-full-meta"]).full_meta is False
+    # Order must not matter -- the opt-out is the last word wherever it appears.
+    assert parsed(["--no-full-meta", "--update"]).full_meta is False
+
+
+def test_catalog_stats_reports_metadata_coverage(tmp_path, capsys):
+    """The stats screen only ever described FILES: it could say "35,133 entries, all
+    downloaded" about a catalog in which not one row knew which model made it. Coverage is
+    what decides whether a sweep is due, and the unique-TASK count is what the sweep costs --
+    metadata is fetched once per task, so a batch's images are one call, not four.
+
+    `loras` is deliberately absent from the report: a generation with no LoRAs stores that
+    column blank too, so a blank one cannot be told apart from one never fetched, and
+    reporting it would send you re-fetching tasks that are already complete.
+    """
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+
+    base = {f: "" for f in CATALOG_FIELDS}
+    save_catalog(tmp_path / "catalog.db", [
+        base | {"media_id": "m1", "task_id": "t1", "filename": "a.png",
+                "prompt_full": "p", "model_id": "1", "model_name": "WAI"},
+        # two rows of ONE task, both missing everything -> 2 rows, 1 task to fetch
+        base | {"media_id": "m2", "task_id": "t2", "filename": "b.png"},
+        base | {"media_id": "m3", "task_id": "t2", "filename": "c.png"},
+        # imported locally: no PixAI task behind it, so it can never carry a model
+        base | {"media_id": "m4", "filename": "d.png", "source": "local"},
+    ])
+    core.run_catalog_stats(SimpleNamespace(out=str(tmp_path), progress=None))
+    out = capsys.readouterr().out
+    assert "Metadata coverage" in out
+    assert "1 / 4" in out, "model coverage must be counted per row"
+    assert "3 missing across 1 tasks" in out, (
+        "the sweep's cost is unique TASKS, not rows -- a batch is one call")
+    assert "imported locally" in out, (
+        "locally imported rows can never have a model and must not read as a gap to chase")
+    assert "--backfill-full-meta" in out, "the report must name the command that fixes it"
+    assert "loras" not in out.lower(), "a blank loras column is ambiguous, not a gap"
+
+
+def test_backfill_full_meta_refetches_rows_that_have_only_a_prompt(tmp_path, mocker):
+    """A row can hold a prompt and a seed while holding no model, steps, sampler or CFG.
+
+    prompt_full was the ONLY sentinel for "this row has its full metadata", so every such
+    row was skipped by every backfill, forever, and the sweep printed "Nothing to backfill"
+    over a catalog that could not say which model made any of it. Measured on a real catalog
+    before this changed: 788 of 800 rows had a prompt, 5 had a model id, and a backfill was
+    a no-op. The model id is not cosmetic -- an image-view upscale submits i2i and needs it.
+    """
+    from pixai_gallery import save_catalog, load_catalog, CATALOG_FIELDS
+
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "task_id": "t1",
+                                           "filename": "a.png",
+                                           "prompt_full": "night elf druid", "seed": "5"},
+    ])
+    task = {"parameters": {"prompts": "night elf druid", "modelId": "4242"},
+            "outputs": {"seed": 5, "detailParameters": {"samplingSteps": 25,
+                                                        "samplingMethod": "Euler a"}}}
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    mocker.patch.object(core, "task_detail_gql", side_effect=lambda s, tid: task)
+    mocker.patch.object(core, "model_name_gql", side_effect=lambda s, mid: "WAI v17")
+    mocker.patch.object(core, "resolve_loras", side_effect=lambda s, t: "")
+
+    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    row = {r["media_id"]: r for r in load_catalog(db)}["m1"]
+    assert row["model_id"] == "4242", "the prompt-only row was skipped again"
+    assert row["model_name"] == "WAI v17"
+
+    # And it settles: a second pass has nothing left to do, so this does not become a row
+    # that is re-fetched on every sweep forever.
+    calls = []
+    mocker.patch.object(core, "task_detail_gql",
+                        side_effect=lambda s, tid: calls.append(tid) or task)
+    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    assert calls == [], "the filled row is being re-fetched on every run"
