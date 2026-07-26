@@ -12290,21 +12290,43 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         sort = (request.args.get("sort") or "").strip().lower()
         base_type = (request.args.get("base_type") or "").strip()
         cursor = (request.args.get("cursor") or "").strip()
+        # --- picker parity round 3 (2026-07-26).
+        # `src` is WHICH LIST to browse (market / bookmark / mine) -- the thing PixAI renders as
+        # tabs. `source` is a market FILTER (all / pixai / external), which they express through
+        # the connection's `types` argument. Two different concepts with confusingly similar
+        # names in their own UI; keeping our query keys distinct so a caller cannot mix them up.
+        src = (request.args.get("src") or "market").strip().lower()
+        source = (request.args.get("source") or "").strip().lower()
+        license_ = (request.args.get("license") or "").strip().upper()
         try:
             size = max(1, min(int(request.args.get("size") or 24), 50))
         except ValueError:
             size = 24
         try:
             core, session = _gen_session()
-            use_market = usage == "LORA" or category in core.MARKET_CATEGORIES or sort == "newest"
-            if use_market:
+            if src == "bookmark":
+                # Its own operation -- the market connection has no bookmark argument, so this
+                # cannot be folded into the call below. Same row shape, so the grid does not care.
+                payload = core.model_bookmarks_gql(
+                    session, keyword=q, usage=usage, limit=size, after=(cursor or None),
+                    lora_base_type=(base_type if usage == "LORA" else ""))
+            elif src == "mine":
+                # "My LoRAs" is NOT a separate operation: it is the ordinary market connection
+                # filtered by the signed-in user's own id, exactly as their MY LORA tab does it.
+                payload = core.model_search_market_gql(
+                    session, keyword=q, category=category, sort=sort, usage=usage,
+                    limit=size, after=(cursor or None),
+                    lora_base_type=(base_type if usage == "LORA" else ""),
+                    author_id=core.USER_ID or "")
+            elif usage == "LORA" or category in core.MARKET_CATEGORIES or sort == "newest":
                 payload = core.model_search_market_gql(
                     session, keyword=q, category=category, sort=sort, usage=usage,
                     limit=size, after=(cursor or None),
                     # Same caller-supplied value that feeds the compat sort/badge below --
                     # resolved once by the client, used at every layer. core ignores it for
                     # a base-model search and for any architecture off its whitelist.
-                    lora_base_type=(base_type if usage == "LORA" else ""))
+                    lora_base_type=(base_type if usage == "LORA" else ""),
+                    source=source, permitted_use=license_)
             else:
                 offset = int(cursor) if cursor.isdigit() else 0
                 payload = core.model_search_rest(session, keyword=q, usage=usage,
