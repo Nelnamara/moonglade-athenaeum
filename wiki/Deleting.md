@@ -65,7 +65,7 @@ separately as a local-only removal, so the count adds up. Nothing is sent until 
 Deleting a task on PixAI doesn't touch your local backup (by design). To find and
 prune those orphans:
 
-1. Run **`python pixai_gallery_backup.py --reconcile-deleted`** (it's also the last step of
+1. Run **`python moonglade_backup.py --reconcile-deleted`** (it's also the last step of
    `--sync`, and a scheduler action). It pages your live feed (~1–2 min) and flags catalog
    rows whose task is gone.
 2. Gallery → **Source → "Deleted on PixAI"** → select → **Delete locally**.
@@ -76,8 +76,8 @@ isn't false-flagged), and aborts if the feed comes back empty.
 ## CLI
 
 ```bash
-python pixai_gallery_backup.py --reconcile-deleted     # flag cloud-deleted orphans
-python pixai_gallery_backup.py --delete-task <taskid>  # preview deleting one task from PixAI (cloud only; add --apply to do it)
+python moonglade_backup.py --reconcile-deleted     # flag cloud-deleted orphans
+python moonglade_backup.py --delete-task <taskid>  # preview deleting one task from PixAI (cloud only; add --apply to do it)
 ```
 
 `--delete-task` is dry-run until `--apply`, and is **cloud-only** — your local files and

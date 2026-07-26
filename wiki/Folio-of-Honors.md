@@ -146,9 +146,9 @@ run, a `--dedup --apply`, a `--claim`, and every free card auto-applied to a gen
 all count toward your trophies:
 
 ```bash
-python pixai_gallery_backup.py --organize          # Keeper of Order
-python pixai_gallery_backup.py --dedup --apply     # The Great Sweep
-python pixai_gallery_backup.py --claim all --confirm   # Claimant
+python moonglade_backup.py --organize          # Keeper of Order
+python moonglade_backup.py --dedup --apply     # The Great Sweep
+python moonglade_backup.py --claim all --confirm   # Claimant
 ```
 
 Your earned dates, the skin you're wearing, and which unlocks have already been

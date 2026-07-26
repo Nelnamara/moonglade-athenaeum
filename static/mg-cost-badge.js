@@ -125,7 +125,7 @@
   var ERR_TITLE = "Couldn't verify the cost or free-card coverage. Generating may spend credits.";
 
   // A free card's expiresAt is ISO8601, or null for a card that never expires (see
-  // match_kaisuuken in pixai_gallery_backup.py) -- null/unparseable just renders nothing
+  // match_kaisuuken in moonglade_backup.py) -- null/unparseable just renders nothing
   // rather than an "Invalid Date". Epoch numbers are tolerated in case a caller pre-parses.
   function expiryNote(v) {
     if (v == null || v === '') return null;

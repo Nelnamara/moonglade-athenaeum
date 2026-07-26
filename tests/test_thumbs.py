@@ -3,9 +3,9 @@ locally-extracted frame instead of staying blank forever; --rebuild-thumbs re-re
 every image thumb at today's settings and sweeps orphans. All fail-soft."""
 from types import SimpleNamespace
 
-import pixai_gallery as g
-import pixai_gallery_backup as core
-from pixai_gallery import CATALOG_FIELDS, save_catalog
+import moonglade_gallery as g
+import moonglade_backup as core
+from moonglade_gallery import CATALOG_FIELDS, save_catalog
 
 
 def _row(**kw):

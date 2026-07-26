@@ -4,8 +4,8 @@ nothing touches a real Desktop or PowerShell."""
 import json
 import re
 
-import pixai_gallery as g
-from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+import moonglade_gallery as g
+from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client
 
@@ -131,7 +131,7 @@ def test_shortcut_refuses_authenticated_lan_session(tmp_path, monkeypatch):
     gate from _is_local_request() to the wider _is_authorized_request(),
     flagged and reverted 2026-07-19."""
     import subprocess
-    import pixai_gallery_backup as core
+    import moonglade_backup as core
     _cut_fake_marks(tmp_path)
 
     class R:

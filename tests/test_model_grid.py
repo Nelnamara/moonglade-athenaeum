@@ -2,8 +2,8 @@
 conftest blocks live /v2; no network, no spend."""
 from types import SimpleNamespace
 
-import pixai_gallery
-import pixai_gallery_backup as core
+import moonglade_gallery
+import moonglade_backup as core
 
 _SEARCH = {"data": [
     {"id": "1982880136609467518", "title": "Tsubaki.2", "type": "MMDIT26A_MODEL",
@@ -563,7 +563,7 @@ def _stub_generate_network(monkeypatch, outputs):
         return "https://cdn/" + mid, {"width": 512, "height": 512}
     monkeypatch.setattr(core, "resolve_media", fake_resolve)
     monkeypatch.setattr(core, "download", lambda s, url, stem, **k: ("ok", stem.with_suffix(".png")))
-    monkeypatch.setattr(pixai_gallery, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(moonglade_gallery, "make_thumbnail", lambda *a, **k: None)
     return seen_mids
 
 
@@ -766,7 +766,7 @@ def test_run_generate_persists_paid_credit(monkeypatch, tmp_path):
     args = SimpleNamespace(out=str(tmp_path), params_json='{"prompts": "x", "modelId": "v"}',
                            confirm=True, task_id="", token=None)
     core.run_generate(args)
-    rows = pixai_gallery.load_catalog(tmp_path / "catalog.db")
+    rows = moonglade_gallery.load_catalog(tmp_path / "catalog.db")
     assert {r["media_id"]: r.get("paid_credit") for r in rows} == {"A": "2750", "B": "2750"}
 
 
@@ -782,8 +782,8 @@ def test_collect_generation_persists_paid_credit_zero_not_blank(monkeypatch, tmp
                         lambda s, m: ("https://cdn/" + m, {"width": 8, "height": 8}))
     monkeypatch.setattr(core, "download",
                         lambda s, url, stem, **k: ("ok", stem.with_suffix(".png")))
-    monkeypatch.setattr(pixai_gallery, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(moonglade_gallery, "make_thumbnail", lambda *a, **k: None)
     got = core.collect_generation(object(), "T1", str(tmp_path))
     assert got["media_ids"] == ["M1"]
-    rows = pixai_gallery.load_catalog(tmp_path / "catalog.db")
+    rows = moonglade_gallery.load_catalog(tmp_path / "catalog.db")
     assert rows[0].get("paid_credit") == "0"

@@ -8,7 +8,7 @@ escaper (or textContent) at each sink, so a future edit that drops it fails here
 belt-and-suspenders proof that a crafted payload does NOT execute is a Playwright pass, which
 can't run in CI (no browser); it lives in the verification harness instead.
 """
-from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 from tests.conftest import login_client
 
 

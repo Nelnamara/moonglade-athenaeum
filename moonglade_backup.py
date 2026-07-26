@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-pixai_gallery_backup.py  (v4 - media resolution)
+moonglade_backup.py  (v4 - media resolution)
 ================================================
 Bulk-download YOUR OWN PixAI.art generated images. Replays PixAI's persisted
 GraphQL query (listUserTaskSummaries) to page backward through your entire
@@ -30,9 +30,9 @@ QUICK START
 --------------------------------------------------------------------------------
   pip install requests truststore
   set PIXAI_TOKEN ...   (your OS's way)
-  python pixai_gallery_backup.py --probe     # resolve full-res media URL, sanity-check
-  python pixai_gallery_backup.py             # download everything (backward)
-  python pixai_gallery_backup.py --max 40    # small test first
+  python moonglade_backup.py --probe     # resolve full-res media URL, sanity-check
+  python moonglade_backup.py             # download everything (backward)
+  python moonglade_backup.py --max 40    # small test first
 """
 
 __version__ = "2.5.0"
@@ -52,7 +52,7 @@ import time
 from collections import defaultdict, Counter
 from pathlib import Path
 
-from pixai_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, load_catalog,
+from moonglade_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, load_catalog,
                             save_catalog, migrate_csv_to_db, export_csv, _db_is_empty,
                             media_id_of, find_files_for_media_id, build_thumbnails,
                             _NO_WINDOW, DELETED_DIRNAME)
@@ -149,13 +149,13 @@ def set_verbose(on):
 def vlog(msg):
     """Print a diagnostic line prefixed with seconds-since-enabled, but only in
     verbose mode. Writes to stdout so the GUI log pane captures it too. Also
-    always forwarded to the persistent file logger (pixai_logging), regardless
+    always forwarded to the persistent file logger (moonglade_logging), regardless
     of verbose state, so a run's diagnostics are on record even if -v wasn't
     passed -- this is the one call site touched to give every existing vlog()
     caller file-logging for free, rather than threading a logger through ~100
     of them individually."""
-    import pixai_logging
-    pixai_logging.get_logger().debug(msg)
+    import moonglade_logging
+    moonglade_logging.get_logger().debug(msg)
     if not _VERBOSE:
         return
     t0 = _VERBOSE_T0 if _VERBOSE_T0 is not None else time.monotonic()
@@ -244,7 +244,7 @@ def _save_config(cfg):
 
 
 # ---------------------------------------------------------------------------
-# Web gallery login accounts -- session-based auth for pixai_gallery.py's Flask
+# Web gallery login accounts -- session-based auth for moonglade_gallery.py's Flask
 # app (gates EVERY request, local or remote -- there is no localhost bypass; see
 # _is_authorized_request() there).
 # Stored in config.json (the existing convention for secrets -- it already holds
@@ -253,14 +253,14 @@ def _save_config(cfg):
 # werkzeug, timing-safe compare built in; no new pip install, werkzeug already
 # ships with Flask). Account lifecycle used to be CLI-only; as of the web-based
 # bootstrap + Panel Users tab (2026-07-19) it's also reachable from the browser
-# (see pixai_gallery.py's /login bootstrap POST and /api/users/add|remove) --
+# (see moonglade_gallery.py's /login bootstrap POST and /api/users/add|remove) --
 # --add-web-user / --remove-web-user / --list-web-users remain a valid recovery
 # path. If AUTH_USERS is empty, logging in from the LAN is simply impossible --
 # there is no default/backdoor account, ever.
 #
 # _accounts_lock serializes every read-modify-write of AUTH_USERS (and the
 # atomic check-and-mutate helpers below) against every OTHER thread doing the
-# same, within this one process. pixai_gallery.py runs `app.run(...,
+# same, within this one process. moonglade_gallery.py runs `app.run(...,
 # threaded=True)`, so two browser tabs/devices hitting /login's bootstrap POST
 # (or the Panel's Add/Remove-user endpoints) concurrently used to run
 # add_or_update_web_user()/remove_web_user()'s _load_config -> mutate ->
@@ -482,7 +482,7 @@ def add_web_user_if_new(username, password):
     resetting a stranger's password -- the whole "does it exist" check and the
     write happen under ONE `_accounts_lock` acquisition, so two concurrent
     requests trying to claim the same brand-new username can never both
-    succeed. Used by the Panel's /api/users/add (pixai_gallery.py); the plain
+    succeed. Used by the Panel's /api/users/add (moonglade_gallery.py); the plain
     add_or_update_web_user()'s update-or-add semantics stay reserved for the
     CLI's --add-web-user recovery case. Returns True if added, False if the
     username was already taken (nothing written)."""
@@ -564,7 +564,7 @@ def remove_web_user_guarded(username, min_remaining=1):
 def get_web_user_session_epoch(username):
     """Current `sess_epoch` for `username`, or None if the account doesn't exist
     (e.g. removed via --remove-web-user). A session's cookie embeds the epoch that
-    was current at login time; pixai_gallery.py's _is_authorized_request()
+    was current at login time; moonglade_gallery.py's _is_authorized_request()
     re-checks it against this on every request, so:
       - removing the account invalidates any outstanding session for it immediately
         (this returns None -> no epoch can ever match again), and
@@ -840,7 +840,7 @@ def _make_progress(out_dir=None, job_id=None):
 # tail and collapse by job_id (last event wins; a terminal done/failed never
 # reverts to running). Append-only sidesteps the read-modify-write races a
 # single mutated JSON blob would have across processes. It doubles as a plain
-# debug dump -- open jobs.jsonl and read it. Consumed by pixai_gallery.py.
+# debug dump -- open jobs.jsonl and read it. Consumed by moonglade_gallery.py.
 # ---------------------------------------------------------------------------
 JOBS_LOG_NAME = "jobs.jsonl"
 JOBS_KEEP = 50                 # show at most this many most-recent jobs
@@ -849,7 +849,7 @@ _JOBS_TERMINAL = ("done", "failed", "done_with_errors")
 _JOBS_COMPACT_AT = 2000        # rewrite the raw log once it passes this many lines
 
 # How stale a 'running' job has to be before the ongoing /api/jobs reconciliation
-# sweep (resolve_orphan_jobs, called with min_age=this from pixai_gallery.py's
+# sweep (resolve_orphan_jobs, called with min_age=this from moonglade_gallery.py's
 # api_jobs()) will re-ask PixAI for its real status. This is a *different* clock
 # from --poll-timeout: --poll-timeout (300s generate / 600s video, see argparse
 # defaults) bounds how long the CLI waits on ONE task it's actively watching --
@@ -913,9 +913,9 @@ def append_job_event(out_dir, job_id, status=None, **fields):
 
 # ---------------------------------------------------------------------------
 # CLI-side job logging: gives a command run straight from a terminal
-# (python pixai_gallery_backup.py --sync / --update / --generate / ...) the SAME
+# (python moonglade_backup.py --sync / --update / --generate / ...) the SAME
 # jobs.jsonl activity trail a panel-spawned subprocess already gets from
-# pixai_gallery.py's _panel_run/_panel_reader (job_id "panel-<uuid>") and
+# moonglade_gallery.py's _panel_run/_panel_reader (job_id "panel-<uuid>") and
 # delete_tasks_bulk (job_id "bulkdel-<uuid>") -- this is the "cli-<uuid>" flavor.
 # Deliberately a no-op under the Control Panel itself (MOONGLADE_PROGRESS=1): the
 # panel already logs its OWN "panel-<uuid>" job for that exact subprocess, so
@@ -2846,7 +2846,7 @@ def cmd_dedup(args, out, db_path):
 
     if moved or removed:
         try:      # The Great Sweep: cumulative pieces removed via --dedup
-            from pixai_gallery import telem_bump
+            from moonglade_gallery import telem_bump
             telem_bump("culled", moved + removed, out_dir=out)
         except Exception:
             pass
@@ -3197,7 +3197,7 @@ def cmd_organize(args, out, img_dir, db_path):
         print("Embedded metadata into {:,} images.".format(embedded))
     print("Reversible manifest: {}  (run --undo-organize to revert)".format(manifest_path))
     try:      # Keeper of Order: a real (non-dry-run) organize completed
-        from pixai_gallery import telem_bump
+        from moonglade_gallery import telem_bump
         telem_bump("organize_runs", out_dir=out)
     except Exception:
         pass
@@ -3686,7 +3686,7 @@ def run_sync_videos(args):
 
     # Generate a gallery poster thumbnail for a video (keyed by the VIDEO media
     # id) from its still frame, so previews work without a separate image backup.
-    from pixai_gallery import make_thumbnail
+    from moonglade_gallery import make_thumbnail
     thumb_dir = out / "gallery" / "thumbs"
     poster_tmp = out / "gallery" / "_postertmp"
 
@@ -3805,12 +3805,12 @@ def video_poster_thumb(video_path, thumb_path):
     fallback for i2v videos with no still-frame poster.
 
     Thin delegate: the ONE ffmpeg-extract implementation lives in
-    pixai_gallery.make_video_thumbnail (which build_thumbnails' poster-less
+    moonglade_gallery.make_video_thumbnail (which build_thumbnails' poster-less
     fallback also uses) -- two copies of this wheel WILL drift. The `_ffmpeg_path`
     guard stays here because import-local and sync-videos gate on it."""
     if not _ffmpeg_path():
         return False
-    from pixai_gallery import make_video_thumbnail
+    from moonglade_gallery import make_video_thumbnail
     return make_video_thumbnail(video_path, thumb_path)
 
 
@@ -3929,7 +3929,7 @@ def run_import_local(args):
     filename (no still to thumbnail, so they show a placeholder + the video badge)."""
     import hashlib
     import shutil
-    from pixai_gallery import make_thumbnail
+    from moonglade_gallery import make_thumbnail
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     db_path = out / "catalog.db"
@@ -4976,7 +4976,7 @@ def run_generate(args):
     init_db(db_path)                  # generation can seed a fresh backup
     session = _make_session(getattr(args, "token", None))
     thumb_dir = out / "gallery" / "thumbs"
-    from pixai_gallery import make_thumbnail
+    from moonglade_gallery import make_thumbnail
 
     if existing_task:
         # Recover an already-created generation by id (no new credits). Tool/API
@@ -5092,7 +5092,7 @@ def run_generate(args):
         save_catalog(db_path, rows)
         if existing_task:
             try:      # Against the Void: a stranded task pulled back by id
-                from pixai_gallery import telem_bump
+                from moonglade_gallery import telem_bump
                 telem_bump("recover_events", out_dir=out)
             except Exception:
                 pass
@@ -5112,7 +5112,7 @@ def _download_video_task(session, result, task_id, out, args, params):
     sent = (params.get("i2vPro") or params.get("referenceVideo") or {}) if isinstance(params, dict) else {}
     prompt = shared.get("prompt") or sent.get("prompts") or sent.get("prompt") or ""
 
-    from pixai_gallery import make_thumbnail
+    from moonglade_gallery import make_thumbnail
     thumb_dir = out / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
     vdir = out / "videos"
@@ -5258,7 +5258,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     outputs = result.get("outputs") or {}
     media = _task_image_media(outputs)
     _outputs_or_raise(result, media, "task completed but no media ids found")
-    from pixai_gallery import make_thumbnail
+    from moonglade_gallery import make_thumbnail
     thumb_dir = out / "gallery" / "thumbs"
     img_dir = out / "images"
     db_path = out / "catalog.db"
@@ -5332,7 +5332,7 @@ def _bump_card_use(params):
     (a card attached to a rejected submit was never spent). Fail-soft no-op."""
     if isinstance(params, dict) and params.get("kaisuukenId"):
         try:
-            from pixai_gallery import telem_bump
+            from moonglade_gallery import telem_bump
             telem_bump("free_cards_applied")
         except Exception:
             pass
@@ -5753,7 +5753,7 @@ def run_edit_image(args):
     init_db(db_path)
     session = _make_session(getattr(args, "token", None))
     thumb_dir = out / "gallery" / "thumbs"
-    from pixai_gallery import make_thumbnail
+    from moonglade_gallery import make_thumbnail
 
     params = {}
     if existing_task:
@@ -6088,7 +6088,7 @@ async def _watch_events_async(auth_header, on_event, seconds):
     silent (see `_WS_STALE_TIMEOUT`'s comment for why that happens and how the
     number was picked). WatchStaleError is just another exception out of this
     coroutine, so any caller that already reconnects on failure -- `_watch_loop`
-    in pixai_gallery.py's outer while-True/backoff, and `run_watch` below's own
+    in moonglade_gallery.py's outer while-True/backoff, and `run_watch` below's own
     try/except -- handles it for free with no special-casing needed at the call
     site; it exists only so a caller that WANTS to tell "went stale" apart from
     "socket errored" can."""
@@ -6557,7 +6557,7 @@ def run_suggest_prompt(args):
 
     PixAI's suggest-prompt endpoint is image-only and 500s on a video; the web gallery
     already hides the "Suggest prompt" button for a video row (`row.is_video != '1'`
-    in pixai_gallery.py). Mirror that same gate here (B18 residual) so the CLI refuses
+    in moonglade_gallery.py). Mirror that same gate here (B18 residual) so the CLI refuses
     early with a clear message instead of surfacing that raw 500."""
     src = (getattr(args, "suggest_prompt", "") or "").strip()
     if not src:
@@ -6676,7 +6676,7 @@ def run_claims(args):
             print("Failed to claim {}: {}".format(r["id"], str(e)[:150]))
     if claimed:
         try:      # Claimant: the Void pays a small stipend
-            from pixai_gallery import telem_bump
+            from moonglade_gallery import telem_bump
             telem_bump("claims", claimed)
         except Exception:
             pass
@@ -6879,7 +6879,7 @@ def run_rebuild_similar(args):
     marker). No network; needs torch/pixeltable. Run it when the gallery is NOT serving
     Similar queries (both touch the same embedded Postgres)."""
     try:
-        import pixai_similar as ps
+        import moonglade_similar as ps
     except Exception as e:
         sys.exit("Similar index unavailable (pixeltable/torch not installed): {}".format(e))
     if not ps.is_available():
@@ -7277,7 +7277,7 @@ def _check_time_capsule(created_at, out_dir):
         if not s:
             return
         if (datetime.now() - datetime.fromisoformat(s)).days > 730:
-            from pixai_gallery import telem_flag
+            from moonglade_gallery import telem_flag
             telem_flag("old_piece_backed_up", out_dir=out_dir)
     except Exception:
         pass
@@ -7365,7 +7365,7 @@ def run_download(args, progress=None):
             # the file but not to write it) must NOT count as "already done" here --
             # indexing it means it is skipped FOREVER: no --update/--sync ever
             # re-attempts a media_id already in this index, and
-            # reconcile_catalog_with_disk's strict matcher (pixai_gallery.py) finds
+            # reconcile_catalog_with_disk's strict matcher (moonglade_gallery.py) finds
             # nothing wrong either, so the row's filename is left pointing at a dead
             # file with no signal to the user. A stat() race (size is None) is treated
             # as fine, matching prior behaviour -- we can't tell either way, and this
@@ -7729,7 +7729,7 @@ def run_rebuild_thumbs(args):
     frame extract, and thumbs whose media left the catalog are swept."""
     out = Path(args.out)
     db_path = _ensure_db(out)
-    from pixai_gallery import build_thumbnails, load_catalog
+    from moonglade_gallery import build_thumbnails, load_catalog
     thumb_dir = out / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
     rows = load_catalog(db_path)
@@ -8170,8 +8170,8 @@ def main():
                     help="list gallery web-login usernames (never password hashes), then exit")
     args = ap.parse_args()
     set_verbose(getattr(args, "verbose", False))
-    import pixai_logging
-    pixai_logging.setup_logging(args.out, verbose=getattr(args, "verbose", False))
+    import moonglade_logging
+    moonglade_logging.setup_logging(args.out, verbose=getattr(args, "verbose", False))
     # Give every command a progress callback (terminal bar, or Control Panel markers under
     # MOONGLADE_PROGRESS=1). Commands that report progress (audit/dedup/sync/...) pick it up;
     # the rest ignore it.
@@ -8179,7 +8179,7 @@ def main():
 
     if args.probe and args.count:
         print("Note: --probe exits before --count runs. Run them separately:\n"
-              "  python pixai_gallery_backup.py --count\n"
+              "  python moonglade_backup.py --count\n"
               "Continuing with --probe only.\n")
 
     # Web-login account management: no PixAI token/network/out-dir needed at all,
@@ -8199,7 +8199,7 @@ def main():
     db_path  = out / "catalog.db"
     csv_path = out / "catalog.csv"
     try:      # achievement telemetry: bare telem_* bumps land in this install's ledger
-        from pixai_gallery import set_telemetry_out
+        from moonglade_gallery import set_telemetry_out
         set_telemetry_out(out)
     except Exception:
         pass

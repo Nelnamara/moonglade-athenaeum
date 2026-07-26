@@ -8,7 +8,7 @@
 WHY TWO MODES. "Naming" has meant two unrelated things in this project and
 conflating them wasted a round trip:
 
-  modules  Internal Python module names (pixai_gallery, pixai_gallery_backup, ...).
+  modules  Internal Python module names (moonglade_gallery, moonglade_backup, ...).
            A mechanical rename, deliberately deferred to its own branch. This mode
            sizes it so the decision is made against a number, not a guess.
 
@@ -37,7 +37,7 @@ SKIP_SUFFIX = {".png", ".jpg", ".jpeg", ".webp", ".ico", ".db", ".ogg", ".mp4", 
 # Git-ignored files the rename must STILL touch. They exist per machine, not in the
 # repo, so the rename branch can't fix them -- each machine has to, and the sizing has
 # to count them or the naming pass walks past them (.claude/launch.json invokes
-# pixai_gallery.py; config.json names the pixai_backup out dir; private/ docs cite the
+# moonglade_gallery.py; config.json names the pixai_backup out dir; private/ docs cite the
 # modules throughout). Existence-guarded: any subset may be absent on a given machine.
 IGNORED_IN_SCOPE = [".claude/launch.json", "config.json", "serve.txt", "private"]
 
@@ -46,7 +46,7 @@ def _git_files(*args):
     # -z (NUL-delimited) is load-bearing: a whitespace .split() on plain output
     # shattered "Serve Gallery.pyw" into two nonexistent paths, and read()'s OSError
     # catch turned that into a silent skip of the launcher -- one of the exact files
-    # the rename must not miss (it invokes pixai_gallery by name).
+    # the rename must not miss (it invokes moonglade_gallery by name).
     out = subprocess.run(["git", "ls-files", "-z", *args], cwd=ROOT,
                          capture_output=True, text=True).stdout
     return [f for f in out.split("\0") if f]
@@ -134,7 +134,7 @@ PIXAI_VOCAB = {
 def labels():
     """Flag controls whose submitted values are PixAI vocabulary but whose visible
     label doesn't use PixAI's word for it."""
-    surfaces = [p for p in (ROOT / "pixai_gallery.py",
+    surfaces = [p for p in (ROOT / "moonglade_gallery.py",
                             ROOT / "static" / "mg-generate-drawer.js",
                             ROOT / "loom" / "master-storyboard.jsx") if p.is_file()]
     # <div class="...lbl">LABEL</div> ... <select ...><option value="VOCAB">

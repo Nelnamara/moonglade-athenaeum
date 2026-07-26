@@ -20,7 +20,7 @@
    contract, see that file's header comment):
      1. master-storyboard.jsx imports this as a real ES module; esbuild
         bundles it in (loom/scripts/build.mjs -> loom/dist/).
-     2. The Flask /loom route (pixai_gallery.py, `loom()`) inlines this
+     2. The Flask /loom route (moonglade_gallery.py, `loom()`) inlines this
         file's source ahead of the JSX for the in-browser Babel-standalone
         fallback path, stripping `export` the same way it already does for
         loom-core.js. Do not add anything here a classic (non-module)
@@ -286,7 +286,7 @@ export function buildExportClips(entries) {
 }
 
 // ---------- LoRA (D-11) ----------
-// Ported from pixai_gallery.py's loraIncompat() -- same rule, same "fail open on
+// Ported from moonglade_gallery.py's loraIncompat() -- same rule, same "fail open on
 // unknown" contract, kept as a pure/tested function per this file's own header
 // convention instead of a third hand-copy embedded in JSX. A LoRA runs on a base
 // ONLY if its loraBaseModelType == the base's modelType (exact enum equality,
@@ -315,7 +315,7 @@ export function anyLoraUnresolved(loras) {
 }
 
 // The account's real per-generation LoRA cap (membership.privilege.lora / freeUserLora,
-// fetched via /api/account -- see pixai_gallery.py's api_account for the field's own
+// fetched via /api/account -- see moonglade_gallery.py's api_account for the field's own
 // comment). Mirrors the gallery's overLoraCap() exactly: cap==null (unknown -- a fresh
 // account, or a transient /api/account miss) never blocks, only a REAL known cap does.
 export function overLoraCap(loras, cap) {
@@ -323,7 +323,7 @@ export function overLoraCap(loras, cap) {
 }
 
 // ---------- Image-tab generation dimensions + submit/price body (L536) ----------
-// Ported from pixai_gallery.py's Gen.d8(): round to the nearest multiple of 8 and clamp to
+// Ported from moonglade_gallery.py's Gen.d8(): round to the nearest multiple of 8 and clamp to
 // PixAI's real [64,4096] bounds -- the server's own _dim only floors to /8 and never clamps,
 // so a client that skips this could ask for a size the server accepts but PixAI's own site
 // never would.
@@ -331,7 +331,7 @@ export function snap8(n) {
   return Math.max(64, Math.min(4096, Math.round((Number(n) || 0) / 8) * 8));
 }
 
-// Ported from pixai_gallery.py's Gen.dims(), minus the DOM reads: custom W×H (both > 0)
+// Ported from moonglade_gallery.py's Gen.dims(), minus the DOM reads: custom W×H (both > 0)
 // wins; otherwise an aspect-ratio pair scaled so the long edge equals `size`. Same shape,
 // now unit-tested here instead of only ever exercised by hand in a browser.
 export function resolveGenDims({ aspectW, aspectH, size, customW, customH } = {}) {
@@ -348,7 +348,7 @@ export function resolveGenDims({ aspectW, aspectH, size, customW, customH } = {}
 // the debounced cost badge and the real submit, so the badge can never show a price for
 // different settings than what actually submits (see master-storyboard.jsx's imgCostRef
 // effect and genImage()). `imgAdv` is the Advanced-section state L536 added for full
-// PixAI field parity with pixai_gallery.py's own Generate tab -- this is the JS mirror of
+// PixAI field parity with moonglade_gallery.py's own Generate tab -- this is the JS mirror of
 // that tab's payload(), same field names/defaults, minus the DOM reads.
 export function buildImgGenBody(imgModel, imgLoras, imgAdv, prompt) {
   const a = imgAdv || {};

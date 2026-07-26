@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 
 def _patch_chain(monkeypatch, calls, *, reconcile_exc=None):

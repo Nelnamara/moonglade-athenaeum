@@ -19,8 +19,8 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-import pixai_gallery_backup as core  # noqa: E402
-from pixai_gallery import (CATALOG_FIELDS, DEFAULT_LIBRARY_DIR, LIBRARY_DIR_KEY,  # noqa: E402
+import moonglade_backup as core  # noqa: E402
+from moonglade_gallery import (CATALOG_FIELDS, DEFAULT_LIBRARY_DIR, LIBRARY_DIR_KEY,  # noqa: E402
                            resolve_library_dir, save_catalog)
 
 from tests.conftest import login_client  # noqa: E402
@@ -121,7 +121,7 @@ def test_the_folder_setting_never_offers_to_move_anything(tmp_path):
                                          created_at="2025-01-01T00:00:00")])
     html = cli.get("/panel").get_data(as_text=True)
     assert "nothing is moved" in html.lower()
-    src = (ROOT / "pixai_gallery.py").read_text(encoding="utf-8")
+    src = (ROOT / "moonglade_gallery.py").read_text(encoding="utf-8")
     body = src[src.index("def api_library_path("):]
     body = body[:body.index("@app.route(\"/api/server/restart\"")]
     for danger in ("shutil.move", "shutil.copytree", "os.rename", "os.replace", ".unlink("):

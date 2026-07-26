@@ -8,7 +8,7 @@ import path from "node:path";
 // Advanced panel's "-> W x H" readout) but never appeared in its import list from
 // ./src/loom-mutations.js. The two delivery paths disagree about whether that matters:
 //
-//   /loom            -> pixai_gallery.py inlines every module into ONE global scope and hands
+//   /loom            -> moonglade_gallery.py inlines every module into ONE global scope and hands
 //                       it to in-browser Babel, so a missing import still resolves. Silent.
 //   /loom?bundle=1   -> esbuild builds a REAL module graph. The module's own function got
 //                       renamed to `resolveGenDims2` and the call site was left as a free

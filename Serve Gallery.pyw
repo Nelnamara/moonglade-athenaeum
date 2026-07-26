@@ -5,7 +5,7 @@ Double-click to start the web gallery and open it in your browser, with NO termi
 window (.pyw runs under pythonw.exe). This is the "click to launch straight into the
 web interface" entry point.
 
-It runs as a tiny SUPERVISOR: it starts pixai_gallery.py as a child and watches it.
+It runs as a tiny SUPERVISOR: it starts moonglade_gallery.py as a child and watches it.
 That's what makes the browser Stop / Restart buttons (Control Panel -> Server) work
 like Homebridge -- no Task Manager, no terminal:
   * Restart from the web UI  -> the child exits with code 42, and this loop relaunches it.
@@ -90,7 +90,7 @@ if _moonglade_on_port(PORT):
         pass
     sys.exit(0)
 
-cmd = [sys.executable, os.path.join(here, "pixai_gallery.py")] + SERVE_ARGS
+cmd = [sys.executable, os.path.join(here, "moonglade_gallery.py")] + SERVE_ARGS
 env = dict(os.environ, MOONGLADE_SUPERVISED="1")
 
 

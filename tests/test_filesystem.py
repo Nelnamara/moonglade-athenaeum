@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 
 # ---------------------------------------------------------------------------
@@ -59,7 +59,7 @@ def isolated_creds(tmp_path, monkeypatch):
     config.json (loaded into core._cfg at import) short-circuits every fallback
     and these tests fail on machines that have a live config."""
     monkeypatch.setattr(core, "_cfg", {})
-    monkeypatch.setattr(core, "__file__", str(tmp_path / "pixai_gallery_backup.py"))
+    monkeypatch.setattr(core, "__file__", str(tmp_path / "moonglade_backup.py"))
     monkeypatch.chdir(tmp_path)            # no config.json / token.txt in CWD
     monkeypatch.delenv("PIXAI_API_KEY", raising=False)
     monkeypatch.delenv("PIXAI_TOKEN", raising=False)
@@ -97,7 +97,7 @@ def test_load_token_raises_when_none(isolated_creds):
 def test_load_config_reads_file(tmp_path):
     cfg = {"USER_ID": "u1", "U3T": "t1", "PERSISTED_QUERY_HASH": "h1"}
     (tmp_path / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
-    monkeypath_module_file = str(tmp_path / "pixai_gallery_backup.py")
+    monkeypath_module_file = str(tmp_path / "moonglade_backup.py")
     # Temporarily redirect module __file__ and reload config
     orig = core.__file__
     try:
@@ -110,7 +110,7 @@ def test_load_config_reads_file(tmp_path):
 
 
 def test_load_config_missing_returns_empty(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "__file__", str(tmp_path / "pixai_gallery_backup.py"))
+    monkeypatch.setattr(core, "__file__", str(tmp_path / "moonglade_backup.py"))
     monkeypatch.chdir(tmp_path)  # prevent CWD fallback from finding a real config.json
     result = core._load_config()
     assert result == {}
@@ -121,7 +121,7 @@ def test_load_config_missing_returns_empty(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 from types import SimpleNamespace
-from pixai_gallery import load_catalog as _load_cat
+from moonglade_gallery import load_catalog as _load_cat
 
 
 def test_import_local_scans_and_is_idempotent(tmp_path):
@@ -145,7 +145,7 @@ def test_import_local_skips_already_backed_up_pixai_files(tmp_path):
     """Regression: an organized PixAI file is named <mediaid>.ext and its catalog
     'filename' string may differ from the on-disk path, but media_id_of() matches
     the existing row -- so import must NOT re-catalog it as a duplicate 'local'."""
-    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    from moonglade_gallery import save_catalog, CATALOG_FIELDS
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} |
                       {"media_id": "375806477215601884", "filename": "images/old_name.png"}])
@@ -165,7 +165,7 @@ def test_import_local_skips_deleted_quarantine(tmp_path):
     scan that doesn't skip _deleted/ finds the orphaned file, sees no existing row/
     media_id for it, and resurrects it as a brand-new source='local' row. A purged
     image must stay purged, not come back to life on the next --import-local."""
-    from pixai_gallery import DELETED_DIRNAME
+    from moonglade_gallery import DELETED_DIRNAME
     qdir = tmp_path / DELETED_DIRNAME
     qdir.mkdir(parents=True)
     (qdir / "old_prompt_task1_999.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
@@ -313,7 +313,7 @@ def test_run_faststart_videos_no_ffmpeg(tmp_path, monkeypatch):
 def test_import_local_skips_branding_folder(tmp_path, monkeypatch):
     """The branding folder (banner/logo/marks) is app chrome, NOT gallery content —
     a backup scan must never sweep it into the catalog, or the gallery fills with UI art."""
-    from pixai_gallery import load_catalog
+    from moonglade_gallery import load_catalog
     monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
     (tmp_path / "branding" / "marks").mkdir(parents=True)
     (tmp_path / "branding" / "banner.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
@@ -328,7 +328,7 @@ def test_import_local_skips_branding_folder(tmp_path, monkeypatch):
 
 
 def test_organize_normalizes_to_month_descriptive_no_batches(tmp_path):
-    from pixai_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    from moonglade_gallery import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     save_catalog(db, [
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "task_id": "T1",
@@ -382,7 +382,7 @@ def test_organize_never_touches_deleted_quarantine(tmp_path):
     replaces it into the organized tree in place of the live file. Either way the
     _deleted/ file must never be touched at all -- this asserts exactly that,
     regardless of which of the two on-disk copies the walk happens to visit first."""
-    from pixai_gallery import save_catalog, CATALOG_FIELDS, DELETED_DIRNAME
+    from moonglade_gallery import save_catalog, CATALOG_FIELDS, DELETED_DIRNAME
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m9", "task_id": "T9",
         "prompt_preview": "alpha", "created_at": "2024-03-01T00:00:00", "filename": "alpha_T9_m9.png"}])
@@ -404,7 +404,7 @@ def test_organize_never_touches_deleted_quarantine(tmp_path):
 
 
 def test_undo_organize_reverts_moves(tmp_path):
-    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    from moonglade_gallery import save_catalog, CATALOG_FIELDS
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "task_id": "T1",
         "prompt_preview": "alpha", "created_at": "2024-03-01T00:00:00", "filename": "alpha_T1_m1.png"}])
@@ -434,7 +434,7 @@ def test_organize_drops_byte_identical_duplicate(tmp_path):
     the redundant one and keep exactly one file -- this is the one line in the whole
     command that unlink()s a real file on a path that runs live by default (no
     --dry-run gate), so it must never fire on the wrong side of a comparison."""
-    from pixai_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    from moonglade_gallery import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "dup1", "task_id": "T9",
         "prompt_preview": "dup", "created_at": "2024-07-01T00:00:00"}])
@@ -458,7 +458,7 @@ def test_organize_keeps_differing_content_side_by_side(tmp_path):
     """INVARIANT 5's other half: two on-disk copies of the SAME media_id that are NOT
     byte-identical (a genuine conflict, not a redundant dupe) must both survive --
     cmd_organize must never silently pick one and discard the other's real content."""
-    from pixai_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    from moonglade_gallery import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "dup2", "task_id": "T8",
         "prompt_preview": "dup", "created_at": "2024-07-01T00:00:00"}])
@@ -479,7 +479,7 @@ def test_organize_keeps_differing_content_side_by_side(tmp_path):
 
 
 def test_reconcile_flags_deleted_server_side(tmp_path, monkeypatch):
-    from pixai_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    from moonglade_gallery import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     old = "2024-01-01T00:00:00"
     save_catalog(db, [
@@ -511,7 +511,7 @@ def test_generate_preview_spends_nothing(tmp_path):
 # SQLite catalog helpers
 # ---------------------------------------------------------------------------
 
-from pixai_gallery import (CATALOG_FIELDS, init_db, save_catalog, load_catalog,
+from moonglade_gallery import (CATALOG_FIELDS, init_db, save_catalog, load_catalog,
                             update_rating, delete_from_catalog,
                             update_prompt_full, bulk_replace_prompt,
                             migrate_csv_to_db, export_csv, _db_is_empty)
@@ -572,7 +572,7 @@ def test_migrations_backfill_every_field_added_after_the_original_schema(tmp_pat
     was found. The test is not vacuous regardless -- see the report for the mutation
     check that proves it fails when a migration entry is missing.)"""
     import sqlite3
-    from pixai_gallery import CATALOG_FIELDS, _connect
+    from moonglade_gallery import CATALOG_FIELDS, _connect
 
     original_fields = [   # cc2aeb1's _CREATE_TABLE, verbatim -- none of these have ever
         "task_id", "media_id", "filename", "url", "width", "height",   # needed a migration
@@ -606,7 +606,7 @@ def test_migration_adds_paid_credit_to_existing_db_without_data_loss(tmp_path):
     _MIGRATIONS on a plain _connect() with the existing row's data intact -- and the
     migrated db must round-trip a real credit value."""
     import sqlite3
-    from pixai_gallery import _connect
+    from moonglade_gallery import _connect
 
     assert "paid_credit" in CATALOG_FIELDS   # the contract half: the field exists at all
     pre_fields = [f for f in CATALOG_FIELDS if f != "paid_credit"]
@@ -810,7 +810,7 @@ def test_export_csv_roundtrip(tmp_path):
 def test_count_backup_images_excludes_thumbnails(tmp_path):
     """The disk counter must count ORIGINALS only -- not the one-per-image gallery/thumbs
     previews (which made files-on-disk look ~2x the catalog) and not quarantined _duplicates."""
-    import pixai_gallery_backup as core
+    import moonglade_backup as core
     (tmp_path / "images").mkdir()
     (tmp_path / "2026-07").mkdir()
     (tmp_path / "gallery" / "thumbs").mkdir(parents=True)

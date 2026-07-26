@@ -2,8 +2,8 @@
 rebuilt catalog rows and silently blanked local curation (collections, ratings,
 tags, published state). carry_local_fields() must merge fresh download fields
 OVER the existing row so curated data always survives a re-pull."""
-import pixai_gallery_backup as core
-from pixai_gallery import CATALOG_FIELDS, save_catalog, load_catalog
+import moonglade_backup as core
+from moonglade_gallery import CATALOG_FIELDS, save_catalog, load_catalog
 
 
 def test_carry_preserves_local_fields_over_download():

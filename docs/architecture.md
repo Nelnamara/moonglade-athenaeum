@@ -3,21 +3,21 @@
 Moonglade Athenaeum is four Python modules around one SQLite catalog.
 
 ```
-pixai_gallery_backup.py   CLI engine: download, organize, generate, sync, delete, reconcile
-pixai_gallery.py          Flask web gallery + ALL SQLite catalog helpers (the shared base)
-pixai_similar.py          "more like this" CLIP sidecar index (optional `pixeltable` dep)
+moonglade_backup.py   CLI engine: download, organize, generate, sync, delete, reconcile
+moonglade_gallery.py          Flask web gallery + ALL SQLite catalog helpers (the shared base)
+moonglade_similar.py          "more like this" CLIP sidecar index (optional `pixeltable` dep)
 moonglade_mcp.py          local stdio MCP server: curation tools over the same helpers
 ```
 
-`pixai_gallery_backup.py` and `moonglade_mcp.py` both import `pixai_gallery.py` for
-catalog access — so catalog logic lives in exactly one place. `pixai_similar.py` owns no
+`moonglade_backup.py` and `moonglade_mcp.py` both import `moonglade_gallery.py` for
+catalog access — so catalog logic lives in exactly one place. `moonglade_similar.py` owns no
 catalog SQL; it's a sidecar index the gallery imports lazily inside the `/api/similar`
 handler, never at startup. The forward architecture is two surfaces — the CLI and the web
 gallery.
 
 ## Module reference
 
-### `pixai_gallery_backup.py`
+### `moonglade_backup.py`
 
 | Function | Role |
 |---|---|
@@ -38,7 +38,7 @@ gallery.
 | `reconcile_catalog_with_disk()` | Repoint each catalog row's filename/batch at the surviving on-disk file |
 | `delete_task_gql()` | Replay the `deleteGenerationTask` persisted **mutation** (POST, not the GET listing path). VOID mutation: returns `null` on success, raises on error. Single-attempt — no retry, so a flaky network can't double-fire a delete |
 | `run_delete_tasks()` | Guarded `--delete-task` driver: dry-run by default, `--apply` + typed `delete` confirm (or `--yes`), counts deleted/failed. Leaves local files + `catalog.db` untouched |
-| `vlog()` / `set_verbose()` | `-v/--verbose` diagnostics: timestamped per-page / per-image / download timing to stdout, and always forwarded to `pixai_logging`'s file logger regardless of `-v` |
+| `vlog()` / `set_verbose()` | `-v/--verbose` diagnostics: timestamped per-page / per-image / download timing to stdout, and always forwarded to `moonglade_logging`'s file logger regardless of `-v` |
 | `gql_adhoc()` | Generic ad-hoc GraphQL **POST** (full query document, no persisted hash). Works for queries AND mutations under the API-key Bearer. The foundation for client ops beyond the reverse-engineered listing path; `media_file_gql` + `account_info` use it. Raises `PixAIError` on GraphQL/HTTP error |
 | `account_info()` / `run_account_info()` | Read-only account dashboard (credits/membership/subscription) via `gql_adhoc`. **Never moves money** — no payment/subscription mutations are implemented, by design |
 | `run_generate()` | `--generate`: create images via `createGenerationTask` (ad-hoc POST), poll, download, catalog as `source='api'`. Preview unless `--confirm`. `--task-id` recovers an already-created task for free |
@@ -56,7 +56,7 @@ gallery.
 | `suggest_prompt()` / `run_suggest_prompt()` | `--suggest-prompt <media_id\|file>`: image-to-prompt via `GET /v2/tag/suggest-prompt/{mediaId}` → `{output:[…]}` (a Danbooru-style tag list + natural-language description variants). Local files upload first (free). **FREE / read-only**, no `--confirm` |
 | `list_claims()` / `claim_reward()` / `run_claims()` | `--claims`: list claimable rewards (daily credits, agent stamina) via `GET /v2/claim` — **read-only**. `--claim <id\|all>`: claim ready rewards via `POST /v2/claim/{id}` — **gated behind `--confirm`**, previews otherwise, and never fires on a not-yet-claimable reward. Grants free credits/stamina to the owner's own account (no money moves) |
 
-### `pixai_logging.py`
+### `moonglade_logging.py`
 
 Shared logging baseline for both surfaces, `setup_logging(out_dir, verbose)` called early in
 each entry point. A `TimedRotatingFileHandler` writes `out_dir/logs/moonglade.log` (midnight
@@ -70,7 +70,7 @@ CRITICAL before handing off to the previous hook unchanged (Ctrl+C excluded). `g
 returns the shared logger; `log_path(out_dir)` is the file's path for a future Panel/CLI
 show-logs affordance (not built yet).
 
-### `pixai_gallery.py`
+### `moonglade_gallery.py`
 
 | Symbol | Role |
 |---|---|
@@ -82,13 +82,13 @@ show-logs affordance (not built yet).
 | `query_catalog()` | SQL-backed filter/sort/paginate for gallery index. Its `q` string supports `key:value` field operators (`model:`, `rating:>=3`, `created:2026-07`, …) parsed by `_build_where`/`_operator_clause`; grammar + examples in `wiki/Gallery.md` § Search operators |
 | `list_media_ids()` | Returns ordered media IDs for prev/next navigation |
 | `backfill_batches()` | Scans `batches/` on disk and fills empty `batch` column; called on gallery startup |
-| `media_id_of()` | Canonical media_id from a path (last `_`-chunk of stem). Invariant 1 — but NOT actually a single source: `backfill_batches()` (above, this same module) and `pixai_similar.py`'s `scan_dir` both re-implement the identical `stem.split("_")[-1]` inline instead of calling it |
+| `media_id_of()` | Canonical media_id from a path (last `_`-chunk of stem). Invariant 1 — but NOT actually a single source: `backfill_batches()` (above, this same module) and `moonglade_similar.py`'s `scan_dir` both re-implement the identical `stem.split("_")[-1]` inline instead of calling it |
 | `find_files_for_media_id()` | All on-disk files for a media_id, BOTH layouts (prefixed `*_<mid>.*` AND bare `<mid>.*`), exact-id checked, gallery excluded. Used by the gallery's `find_image_file` — **not** by resume or the audit, which each still walk the tree independently (see Invariant 7) |
 | `create_app()` | Flask app factory; calls `init_db` + `backfill_batches` before serving |
 
 ## CLI flags
 
-`python pixai_gallery_backup.py --help` is the authoritative per-flag text (every flag has
+`python moonglade_backup.py --help` is the authoritative per-flag text (every flag has
 help text; keep it that way when adding one). This map exists because the tuning knobs are
 easy to miss next to the headline commands — the user-facing walkthroughs live in `wiki/`
 (Backing-Up, Generating).
@@ -141,11 +141,11 @@ clean catalog costs almost nothing):
 ## The catalog (`catalog.db`)
 
 SQLite, one row per media, keyed by `media_id`. All I/O goes through helpers in
-`pixai_gallery.py` — never raw SQL elsewhere. Schema migrations go in **three
+`moonglade_gallery.py` — never raw SQL elsewhere. Schema migrations go in **three
 places**: the `CATALOG_FIELDS` list, the `_CREATE_TABLE` DDL, and the
 `_MIGRATIONS` list (run on every connect, so existing DBs auto-upgrade).
 `_IMAGE_EXTS` is the single source of truth for recognized image extensions —
-defined once here, imported by `pixai_gallery_backup.py`, never redefined locally.
+defined once here, imported by `moonglade_backup.py`, never redefined locally.
 
 Notable columns: identity/timing (`media_id`, `task_id`, `filename`, `created_at`),
 full meta (`prompt_full`, `seed`, `steps`, `sampler`, `cfg_scale`, `model_id/name`,
@@ -199,7 +199,7 @@ pixai_backup/
 ```
 
 **Not shown above — the Pixeltable semantic-search index lives OUTSIDE `out_dir`.**
-`pixai_similar.py` never points Pixeltable at `out_dir`, so its embedded-Postgres CLIP
+`moonglade_similar.py` never points Pixeltable at `out_dir`, so its embedded-Postgres CLIP
 table (dir `moonglade`, table `moonglade.images`) lands in Pixeltable's own default
 home, `~/.pixeltable` (`%USERPROFILE%\.pixeltable` on Windows) — a machine-local sidecar
 keyed by `media_id` against `catalog.db`, not part of a backup of `out_dir`, and rebuilt
@@ -255,7 +255,7 @@ manifest. It's idempotent, byte-safe, and dry-runnable. See the
 
 ## The web suite
 
-The Flask gallery (`pixai_gallery.py`) is a full creation suite, not just a browser.
+The Flask gallery (`moonglade_gallery.py`) is a full creation suite, not just a browser.
 Spend-capable routes are **LOGIN**-tier, not localhost: `/api/generate`, `/api/edit`,
 `/api/fix` and `/api/loom/generate` are reachable by any signed-in session, because
 generating from the tablet is the point. **LOCALHOST** (`_is_local_request`) is
@@ -323,7 +323,7 @@ Five framework-neutral custom elements (the "Option-A cohesion migration") live 
 `static/` as plain `mg-*.js` globals — no build step, no shadow DOM, loaded via a plain
 `<script src>` tag, each self-injecting its own `<style>` that reads the shared
 `DESIGN_TOKENS_CSS` custom properties so it re-skins with the rest of the app. Both the
-vanilla gallery (`pixai_gallery.py`) and the React Loom (`loom/master-storyboard.jsx`)
+vanilla gallery (`moonglade_gallery.py`) and the React Loom (`loom/master-storyboard.jsx`)
 mount the same files instead of each hand-duplicating the UI:
 
 | File | Element / global | Role |

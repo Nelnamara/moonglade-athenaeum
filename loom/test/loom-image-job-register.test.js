@@ -24,7 +24,7 @@ import path from "node:path";
 //
 // Terminal resolution is already safe: pollImg and runGen's poll both route through
 // pollTaskWithCeiling, which polls /api/task-status -- the SAME endpoint whose done/failed
-// branches write the authoritative terminal job event (pixai_gallery.py:13148/13155). So a
+// branches write the authoritative terminal job event (moonglade_gallery.py:13148/13155). So a
 // registered job gets resolved by the very poll that was already running; registration cannot
 // leave these jobs spinning at 'running' forever.
 //
@@ -274,7 +274,7 @@ describe("nothing that is registered can be left spinning forever (the make-it-w
   test("registration uses type 'generate' + a numeric task id, so the server's orphan sweep can reap it", () => {
     // Backstop for a tab closed mid-render: these three paths (unlike pollShot) have no
     // resume-on-reload, so if the page goes away nothing client-side ever polls again.
-    // resolve_orphan_jobs (pixai_gallery_backup.py) only considers jobs whose type is
+    // resolve_orphan_jobs (moonglade_backup.py) only considers jobs whose type is
     // 'generate' and whose job_id is all digits -- which is exactly what Jobs.register posts
     // for a PixAI task id.
     assert.match(notify, /type:'generate'/,

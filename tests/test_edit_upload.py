@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 
 # ---- build_chat_edit_parameters (pinned to the captured Edit-Pro submit) ----

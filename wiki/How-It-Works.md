@@ -3,14 +3,14 @@
 Four Python modules around one SQLite catalog, plus the Loom's JS surface.
 
 ```
-pixai_gallery_backup.py   CLI engine: download, organize, generate, sync, delete, reconcile
-pixai_gallery.py          Flask web gallery + ALL SQLite catalog helpers (the shared base)
-pixai_similar.py          "more like this" sidecar: CLIP embeddings in Pixeltable (optional dep)
+moonglade_backup.py   CLI engine: download, organize, generate, sync, delete, reconcile
+moonglade_gallery.py          Flask web gallery + ALL SQLite catalog helpers (the shared base)
+moonglade_similar.py          "more like this" sidecar: CLIP embeddings in Pixeltable (optional dep)
 moonglade_mcp.py          local stdio MCP server: curation tools over the catalog
 loom/                     The Loom's JS surface: esbuild bundle + its own `node --test` suite
 ```
 
-The CLI engine and the MCP server both import `pixai_gallery.py` for catalog access — so
+The CLI engine and the MCP server both import `moonglade_gallery.py` for catalog access — so
 catalog logic lives in exactly one place. The two surfaces are the CLI and the web gallery:
 the Loom, Control Panel, achievements, collections, and contact sheet are browser-only.
 `--watch` and `--claims` have web equivalents too, not CLI-only surfaces: the gallery runs
@@ -37,7 +37,7 @@ Task summaries carry `mediaId` / `batchMediaIds`, not URLs. Full-res comes from
 
 ## The catalog (`catalog.db`)
 SQLite, one row per media, keyed by `media_id`. All I/O goes through helpers in
-`pixai_gallery.py`. Schema migrations live in **three places**: `CATALOG_FIELDS`,
+`moonglade_gallery.py`. Schema migrations live in **three places**: `CATALOG_FIELDS`,
 the `_CREATE_TABLE` DDL, and `_MIGRATIONS` (run on every connect, so existing DBs
 auto-upgrade). Columns span identity/timing, full meta (prompt/seed/steps/sampler/
 cfg/model/loras/negative/clip-skip), published-artwork data, video fields, `source`

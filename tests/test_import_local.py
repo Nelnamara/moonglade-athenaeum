@@ -6,8 +6,8 @@ import zipfile
 
 import pytest
 
-import pixai_gallery_backup as core
-from pixai_gallery import load_catalog
+import moonglade_backup as core
+from moonglade_gallery import load_catalog
 
 from tests.conftest import login_client
 

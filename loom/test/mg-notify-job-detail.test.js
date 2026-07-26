@@ -119,7 +119,7 @@ describe("fmtDuration -- Time Spent, an honest two-unit elapsed duration", () =>
 // ---------------------------------------------------------------------------
 // copyText(s) -- the one-click copy button. Per spec: a graceful fallback / silent no-op if
 // the clipboard API isn't available, never a thrown error -- unlike this app's OTHER copy
-// buttons (pixai_gallery.py's copyPrompt/copyCmd), which call navigator.clipboard.writeText
+// buttons (moonglade_gallery.py's copyPrompt/copyCmd), which call navigator.clipboard.writeText
 // direct and unguarded. Real behavioral tests against a mocked global `navigator`, since the
 // bug this guards against (a bare, unguarded `navigator.clipboard.writeText(s)`) throws
 // synchronously the instant navigator.clipboard is missing -- exactly reproducing that

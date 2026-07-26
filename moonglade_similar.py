@@ -193,7 +193,7 @@ def scan_dir(root, cap=None):
     the last '_'-delimited stem chunk). For bootstrap builds off the organized backup tree.
 
     Skips gallery/ (thumbnails) plus the two quarantine dirs, _duplicates/ (--dedup) and
-    _deleted/ (gallery delete) -- the same exclusion set pixai_gallery.py's
+    _deleted/ (gallery delete) -- the same exclusion set moonglade_gallery.py's
     find_image_file/find_files_for_media_id use (INVARIANT 6), so a purged or quarantined
     image never gets (re-)embedded into the similarity index."""
     exts = {".png", ".jpg", ".jpeg", ".webp"}
@@ -207,6 +207,6 @@ def scan_dir(root, cap=None):
                 return
 
 
-# This module must be IMPORTED, never run as `python pixai_similar.py` — Pixeltable rejects
+# This module must be IMPORTED, never run as `python moonglade_similar.py` — Pixeltable rejects
 # UDFs defined in the __main__ namespace. Drive builds via a runner that does
-# `import pixai_similar; pixai_similar.sync(pixai_similar.scan_dir(root))` or the gallery/panel.
+# `import moonglade_similar; moonglade_similar.sync(moonglade_similar.scan_dir(root))` or the gallery/panel.

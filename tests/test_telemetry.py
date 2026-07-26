@@ -8,8 +8,8 @@ import datetime as _dt
 from pathlib import Path
 from unittest import mock
 
-import pixai_gallery as g
-from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+import moonglade_gallery as g
+from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client
 
@@ -141,7 +141,7 @@ def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
 
 
 def test_points_rung_scaled_feats_zero_and_aggregates():
-    from pixai_gallery import compute_achievements, achievement_points, ACHIEVEMENTS
+    from moonglade_gallery import compute_achievements, achievement_points, ACHIEVEMENTS
     by_id = {a["id"]: a for a in ACHIEVEMENTS}
     # the Archive (images) ladder reproduces the owner's locked example exactly
     seq = ["first-light", "archivist", "hoardsmith", "loremaster", "the-great-library"]
@@ -240,7 +240,7 @@ def test_new_sql_metrics(tmp_path):
 
 
 def test_time_capsule_only_fires_on_old_insert(tmp_path):
-    import pixai_gallery_backup as core
+    import moonglade_backup as core
     core._check_time_capsule("2020-01-01T00:00:00", tmp_path)
     assert g.telemetry_metrics(tmp_path)["old_piece_backed_up"] == 1
     (tmp_path / "telemetry.json").unlink()
@@ -252,7 +252,7 @@ def test_time_capsule_only_fires_on_old_insert(tmp_path):
 # ---- per-criterion checklists (closed-universe set masteries) ----------------
 
 def test_achievement_criteria_pure():
-    from pixai_gallery import achievement_criteria
+    from moonglade_gallery import achievement_criteria
     c = achievement_criteria({"tools": ["edit", "fix"], "video_modes": ["i2v"]})
     assert {x["key"]: x["done"] for x in c["full-toolbox"]} == {
         "edit": True, "enhance": False, "fix": True}
@@ -266,7 +266,7 @@ def test_achievement_criteria_pure():
 
 
 def test_compute_attaches_criteria_only_with_sets():
-    from pixai_gallery import compute_achievements
+    from moonglade_gallery import compute_achievements
     r = compute_achievements({"tools_used": 2}, sets={"tools": ["edit", "enhance"]})
     by = {a["id"]: a for a in r["achievements"]}
     assert {x["key"]: x["done"] for x in by["full-toolbox"]["criteria"]} == {
