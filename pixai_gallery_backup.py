@@ -1789,8 +1789,15 @@ def delete_batch_media_gql(session, task_id, media_id):
             "-- a blank media id would be an update with nothing to delete, and a blank task "
             "id has no batch to delete from.".format(task_id, media_id))
     _check_read_only("delete one image from a task on your PixAI account")
+    # retries=0 is the SINGLE-ATTEMPT promise above, made real. gql_adhoc defaults to
+    # retries=3 and re-POSTs on a RequestException or a 429/5xx -- and a read timeout can
+    # arrive AFTER PixAI has already processed the delete, so the default would re-fire a
+    # destructive mutation against a batch that has already changed underneath it.
+    # delete_task_gql avoids this by hand-rolling its own single session.post; this is the
+    # same guarantee expressed through the shared helper.
     return gql_adhoc(session, _DELETE_BATCH_MEDIA_MUT,
-                     {"id": task_id, "input": {"deleteBatchMedia": {"mediaId": media_id}}})
+                     {"id": task_id, "input": {"deleteBatchMedia": {"mediaId": media_id}}},
+                     retries=0)
 
 
 def delete_task_gql(session, task_id):

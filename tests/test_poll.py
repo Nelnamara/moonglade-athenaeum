@@ -202,9 +202,16 @@ def test_delete_one_image_sends_the_right_mutation(monkeypatch):
     `{deleteBatchMedia: {mediaId}}`."""
     seen = {}
     monkeypatch.setattr(core, "gql_adhoc",
-                        lambda s, q, v=None: seen.update(q=q, v=v or {}) or
+                        lambda s, q, v=None, retries=3: seen.update(q=q, v=v or {},
+                                                                    retries=retries) or
                         {"updateGenerationTask": {"id": "T1"}})
     core.delete_batch_media_gql(object(), "T1", "M9")
+    # gql_adhoc defaults to retries=3 and re-POSTs on a RequestException or a 429/5xx. A
+    # read timeout can arrive AFTER PixAI has processed the delete, so the default would
+    # re-fire a destructive mutation against a batch that has already changed. The
+    # docstring promised SINGLE ATTEMPT from the day this was written; the call did not
+    # pass retries=0 until 2026-07-25, so the promise was prose only.
+    assert seen["retries"] == 0, "a destructive mutation must never be retried"
     assert "updateGenerationTask" in seen["q"]
     assert seen["v"]["id"] == "T1"
     assert seen["v"]["input"] == {"deleteBatchMedia": {"mediaId": "M9"}}, \

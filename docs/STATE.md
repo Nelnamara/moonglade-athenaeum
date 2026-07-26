@@ -398,6 +398,17 @@ users.
   can differ slightly from their own render and none of ours can. The paid path
   (`build_filter_parameters`, `--filter-id`, `--enhance`, `run_enhance`) is gone: it charged
   credits and waited on a worker queue for a handful of gradient fills.
+- **Per-image cloud delete shipped** (2026-07-25). `POST /api/delete-image` (LOCALHOST)
+  drives `core.delete_batch_media_gql` — `updateGenerationTask(id, input:{deleteBatchMedia:
+  {mediaId}})` over `gql_adhoc` with **`retries=0`**; the primitive's docstring had promised
+  SINGLE ATTEMPT since it was written, but the call inherited `gql_adhoc`'s `retries=3` until
+  this pass, so a read timeout arriving after PixAI processed the delete could re-fire it.
+  The detail page carries both paths, worded apart: **Delete locally** (quarantine to
+  `_deleted/`, recoverable, a later sync restores it) and **Delete from PixAI** (irreversible,
+  names the surviving sibling count from `_batch_sibling_count`, typed `DELETE`). Cloud call
+  first, local purge only on a clean return — the reverse would leave a catalog hole for an
+  image PixAI still has. Button hidden for a local import (no PixAI task) and for a LAN
+  session.
 - **The library folder is settable again, from the Control Panel** (2026-07-25). It stopped
   being settable when the PySide6 GUI was removed in v2.1.0 and nothing replaced its folder
   picker. `resolve_library_dir()` in `pixai_gallery.py` is the order of precedence: an

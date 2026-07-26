@@ -17,6 +17,22 @@ git tags. Full prose notes for tagged versions live on
 
 ### Changed
 
+- **You can now delete a single image from PixAI, instead of its whole batch.** The
+  gallery's existing **Delete from PixAI** is task-level: deleting any one image takes every
+  image that task made. An image's own page now offers **Delete from PixAI** for just that
+  picture, using PixAI's `deleteBatchMedia` — the siblings stay on your account.
+
+  The two delete paths stay separated, because that split is a safety net: **Delete locally**
+  moves the file to `_deleted/` and drops the catalog row, PixAI still has the image, and a
+  later sync brings it back. The cloud one is irreversible, tells you how many images of the
+  batch will survive, and asks you to type `DELETE`. Localhost-only, like every destructive
+  cloud path — a logged-in LAN session may browse and spend, never destroy — and the button
+  is not drawn at all for a locally imported file, which PixAI has no copy of.
+
+  Order matters and is tested: the cloud delete happens first, and only a clean return purges
+  the local copy. A failure leaves the image exactly where it was, on both sides, to try
+  again.
+
 - **You can set the library folder again, from the Control Panel.** This went missing when
   the desktop GUI was removed in v2.1.0 — the GUI's folder picker left with it and nothing
   replaced it, so a 47 GB library was addressable only by hand-editing an untracked launcher

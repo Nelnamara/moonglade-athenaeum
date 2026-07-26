@@ -8654,11 +8654,25 @@ __UPSCALE_CONST__
        title="Show the rest of this batch">View Batch</a>
     {% endif %}
     <button class="btn" id="edit-prompt-btn" onclick="toggleEdit()">Edit Prompt</button>
+    <!-- Two delete paths, and the split is deliberate and load-bearing. LOCAL moves the
+         file to _deleted/ and drops the catalog row; PixAI still has the image, so a later
+         sync brings it back. CLOUD is irreversible on their side and asks you to type
+         DELETE. They were separated as a safety net and stay separated here, at image
+         granularity now -- the gallery's own "Delete from PixAI" is TASK-level and takes
+         every image of a batch with it. -->
     <button class="btn btn-danger"
       onclick="confirmDelete('{{ url_for('delete_one', media_id=row.media_id) }}?back={{ back|urlencode }}',
-        'Permanently delete this image? This cannot be undone.')">
-      Delete
+        'Remove this image from your local library? The file moves to _deleted/ and is recoverable, and PixAI still has it \u2014 a later sync brings it back.')">
+      Delete locally
     </button>
+    {% if can_delete_cloud and row.task_id %}
+    <button class="btn btn-danger" id="del-cloud-btn"
+      data-mid="{{ row.media_id }}" data-siblings="{{ siblings }}"
+      onclick="deleteFromPixai(this)"
+      title="Delete just this image from your PixAI account (irreversible)">
+      Delete from PixAI
+    </button>
+    {% endif %}
   </div>
   <mg-upscale-panel id="up-panel" inline></mg-upscale-panel>
   <div id="prompt-editor" style="display:none;margin-top:12px;">
@@ -8679,6 +8693,38 @@ __UPSCALE_CONST__
 <script src="/static/mg-cost-badge.js"></script>
 <script src="/static/mg-upscale-panel.js"></script>
 <script>
+function deleteFromPixai(btn){
+  var mid=btn.getAttribute('data-mid'), sibs=+btn.getAttribute('data-siblings')||1;
+  // Say what is about to happen BEFORE the typed prompt, and say it differently for the two
+  // cases: trimming one frame out of a batch is not the same act as deleting the only image
+  // a task ever made, and a dialog that words them identically hides that.
+  var what = (sibs > 1)
+    ? ('This deletes ONLY this image from PixAI.\\n\\nThe other ' + (sibs - 1) +
+       ' image' + (sibs === 2 ? '' : 's') + ' in its batch stay on your account.')
+    : 'This deletes this image from PixAI. It is the only image its task made.';
+  if(!confirm(what + '\\n\\nIt is also removed from your local library. This cannot be undone.'))
+    return;
+  var typed = prompt('This permanently deletes from PixAI. Type DELETE to confirm:');
+  if(typed !== 'DELETE'){ alert('Cancelled.'); return; }
+  var idle = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Deleting\\u2026';
+  fetch('/api/delete-image', {method:'POST', headers:{'Content-Type':'application/json'},
+                              body:JSON.stringify({media_id:mid, confirm:true})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d || d.error){
+        btn.disabled=false; btn.textContent=idle;
+        alert((d && d.error) || 'Could not delete it.');
+        return;
+      }
+      // The image this page is ABOUT no longer exists, so staying here would show a detail
+      // page for something deleted. Back to wherever the user came from.
+      location.href = {{ back|tojson }};
+    }, function(e){
+      btn.disabled=false; btn.textContent=idle;
+      alert('Could not delete it: ' + ((e && e.message) || e));
+    });
+}
 function toggleUpscale(){
   var p=document.getElementById('up-panel'), b=document.getElementById('upscale-btn');
   if(!p) return;
@@ -10011,7 +10057,9 @@ function loadLib(){
     if(!d || !d.local) return;
     el('libwrap').style.display='';
     el('libpath').value = d.path || '';
-    el('libmsg').textContent = d.stored ? '' :
+    // `configured` answers "is a folder set?" without carrying the path itself, so this
+    // keeps working whatever the route decides to withhold.
+    el('libmsg').textContent = d.configured ? '' :
       'Currently the default folder. Set one to move the library somewhere else.';
   }).catch(function(){});
 }
@@ -10653,12 +10701,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """
         import pixai_gallery_backup as _core
         if request.method == "GET":
-            cur = str(out_dir)
+            local = _is_local_request()
+            # BOTH path fields are withheld from a non-local caller, not just the first.
+            # POST stores an ABSOLUTE path, so `stored` is the host path too -- blanking
+            # `path` while returning `stored` handed it straight back, defeating the
+            # withholding that /panel and this route's own docstring promise. `configured`
+            # says whether a folder is set without saying where it is, which is all the
+            # Panel needs to decide what to show.
+            stored = str((_core._load_config() or {}).get(LIBRARY_DIR_KEY) or "")
             return jsonify({
-                "path": cur if _is_local_request() else "",
-                "stored": str((_core._load_config() or {}).get(LIBRARY_DIR_KEY) or ""),
+                "path": str(out_dir) if local else "",
+                "stored": stored if local else "",
+                "configured": bool(stored),
                 "default": DEFAULT_LIBRARY_DIR,
-                "local": _is_local_request(),
+                "local": local,
                 "supervised": _supervised(),
             })
         if not _is_local_request():
@@ -10688,10 +10744,16 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     _redact_host_paths(str(e)))[:160]}), 200
         # Written only AFTER the folder is known good -- never write first and hope, the
         # same order /api/setup/save-key follows for the API key.
-        cfg = _core._load_config() or {}
-        cfg[LIBRARY_DIR_KEY] = str(target)
+        # Under _accounts_lock, which serializes every read-modify-write of config.json
+        # in this process. Without it this handler can read the file, a concurrent /logout
+        # can bump AUTH_EPOCH_SEQ, and this write then puts the stale epoch back -- which
+        # un-revokes the session that just logged out. config.json holds auth state, not
+        # just settings, so any writer of it belongs inside this lock.
         try:
-            _core._save_config(cfg)
+            with _core._accounts_lock:
+                cfg = _core._load_config() or {}
+                cfg[LIBRARY_DIR_KEY] = str(target)
+                _core._save_config(cfg)
         except OSError as e:
             return jsonify({"error": "Couldn't save the setting: {}".format(
                 _redact_host_paths(str(e)))[:160]}), 200
@@ -11197,7 +11259,73 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         return render_template_string(
             DETAIL_HTML, row=row, img_url=img_url, back=back,
             prev_id=prev_id, next_id=next_id, poster_url=poster_url,
+            # Same value the gallery's own "Delete from PixAI" is gated on. A LAN session
+            # can browse and spend, but not destroy on the owner's real cloud account.
+            can_delete_cloud=_is_local_request(),
+            siblings=_batch_sibling_count(row.get("task_id")),
         )
+
+    def _batch_sibling_count(task_id):
+        """How many catalog rows share this task. Used to say, before anything is deleted,
+        whether the picture is one of a batch or the only one this task made -- because
+        `deleteBatchMedia` on a task's last image is a different act from trimming one frame
+        out of four, and the dialog should not make them look the same."""
+        tid = str(task_id or "").strip()
+        if not tid:
+            return 0
+        try:
+            with sqlite3.connect(str(db_path)) as con:
+                return int(con.execute(
+                    "SELECT COUNT(*) FROM catalog WHERE task_id = ?", (tid,)).fetchone()[0])
+        except sqlite3.Error:
+            return 0
+
+    @app.route("/api/delete-image", methods=["POST"])
+    def api_delete_image():
+        """Delete ONE image from its task on PixAI, leaving the task and its siblings alone.
+
+        The finer-grained partner to /delete-tasks-bulk, which is task-level: deleting any
+        image there takes the whole batch. Same trust tier and for the same reason --
+        LOCALHOST-only, because this destroys on the owner's real cloud account, and a
+        logged-in LAN session unlocks browsing and spending, not irreversible deletion.
+
+        Local purge follows the cloud delete, exactly as the task-level path does, so cloud
+        and catalog never drift. Order matters: if the cloud call fails, nothing local is
+        touched and the image is still there to try again. The reverse order would leave a
+        hole in the catalog for an image that still exists on PixAI.
+
+        `confirm` is required -- the typed-DELETE prompt is the client's half of the same
+        gate, and a route that acted without it would make that prompt decorative.
+        """
+        import pixai_gallery_backup as core          # lazy: avoid import cycle
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        if not body.get("confirm"):
+            return jsonify({"error": "not confirmed"}), 400
+        mid = str(body.get("media_id") or "").strip()
+        row = get_row(db_path, mid) if mid else None
+        if not row:
+            return jsonify({"error": "No such image in the catalog."}), 200
+        tid = str(row.get("task_id") or "").strip()
+        if not tid:
+            # An imported local file has no PixAI task behind it, so there is nothing on
+            # their side to delete. Saying so beats a confusing API error, and points at the
+            # control that DOES apply to it.
+            return jsonify({"error": "This image was imported from your computer \u2014 PixAI "
+                                     "has no copy to delete. Use Delete to remove it here."}), 200
+        try:
+            # _make_session takes a REQUIRED positional; every other call site in this
+            # file passes None. Omitting it raised TypeError on every click, which the
+            # except below turned into a 200 error body -- so the feature was dead while
+            # looking like a PixAI-side failure.
+            _core_session = core._make_session(None)
+            core.delete_batch_media_gql(_core_session, tid, mid)
+        except Exception as e:                        # noqa: BLE001
+            return jsonify({"error": _redact_host_paths(str(e))[:240]}), 200
+        purge_media_local(out_dir, thumb_dir, db_path, mid, row.get("filename"))
+        telem_bump("culled", out_dir=out_dir)
+        return jsonify({"ok": True, "media_id": mid, "task_id": tid})
 
     @app.route("/delete/<media_id>", methods=["POST"])
     def delete_one(media_id):
