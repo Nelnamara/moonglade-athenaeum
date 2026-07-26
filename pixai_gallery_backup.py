@@ -4042,9 +4042,37 @@ _GEN_STATUS = ("query($id: ID!) { task(id: $id) "
 DEFAULT_GEN_MODEL = "1983308862240288769"  # Tsubaki.2 v1 (override with --model)
 
 
-# Read off PixAI's own Advanced panel, 2026-07-24. NEGATIVE weights are legal there -- a
-# LoRA at a negative weight subtracts its influence -- which is why the floor is -2 and not 0.
-LORA_WEIGHT_MIN, LORA_WEIGHT_MAX, LORA_WEIGHT_STEP = -2.0, 2.0, 0.1
+# LoRA weight bounds are per BASE ARCHITECTURE. Owner-reported from the live site,
+# 2026-07-25, after using the first (flat) slider:
+#
+#     DiT family (dit1, Tsubaki.2/DiT.2, community DiT) :  0.0 .. 1.2
+#     SD1.5, SDXL                                       : -2.0 .. +2.0
+#
+# There is no single correct range, which is why both earlier attempts were wrong in
+# opposite directions: a 0..2 spinner blocked the legal negatives SD allows, and a flat
+# -2..2 slider offered DiT weights PixAI rejects. Negative weights subtract a LoRA's
+# influence and are legal on the SD architectures only.
+LORA_WEIGHT_STEP = 0.1
+LORA_WEIGHT_RANGES = {
+    "DIT7B_MODEL":    (0.0, 1.2),
+    "DIT9_MODEL":     (0.0, 1.2),
+    "MMDIT26A_MODEL": (0.0, 1.2),
+    "SD_V1_MODEL":    (-2.0, 2.0),
+    "SDXL_MODEL":     (-2.0, 2.0),
+}
+# The union, used as the hard sanity bound in _lora_params (which sees a version id and a
+# number, never an architecture) and as the fallback for an unknown or not-yet-picked base.
+# Deliberately the WIDER of the two rather than the narrower: unknown must not silently
+# remove a capability the account actually has, and the same fail-open reasoning as
+# LORA_BASE_MODEL_TYPES above. A value the architecture rejects surfaces as a refused
+# submit, which costs nothing.
+LORA_WEIGHT_MIN, LORA_WEIGHT_MAX = -2.0, 2.0
+
+
+def lora_weight_range(model_type):
+    """(min, max) for a base model's architecture; the widest range when it is unknown."""
+    return LORA_WEIGHT_RANGES.get(str(model_type or "").strip().upper(),
+                                  (LORA_WEIGHT_MIN, LORA_WEIGHT_MAX))
 
 
 def _lora_params(raw):
@@ -5042,7 +5070,16 @@ def run_generate(args):
             # happened to come past. model_name_gql is process-cached, so this is one call
             # per distinct model for the whole run, not one per image.
             "model_name": _resolved_model_name(session, fm, _pick("model_id", "modelId")),
-            "loras": fm.get("loras", ""),
+            # Four fields extract_full_meta hands over that this row used to drop, so they
+            # arrived blank on every live capture and only appeared once a
+            # --backfill-full-meta came past -- which is the manual step the whole
+            # capture-it-as-it-happens path exists to remove. `loras` in particular is
+            # always "" out of extract_full_meta by design: it documents that the CALLER
+            # resolves it, the backfill did, and this did not.
+            "sampler": fm.get("sampler", ""),
+            "natural_prompt": fm.get("natural_prompt", ""),
+            "clip_skip": fm.get("clip_skip", ""),
+            "loras": _resolved_loras(session, result),
             "paid_credit": _paid_credit_str(result),   # actual cost, task-level
             "width": str((info or {}).get("width") or params.get("width") or ""),
             "height": str((info or {}).get("height") or params.get("height") or ""),
@@ -5257,13 +5294,27 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
             "url": url, "source": "api", "status": "completed",
             "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
             "prompt_full": prompt, "prompt_preview": (prompt or "")[:100],
-            # The task's own model, which this row never carried -- a Fix's detail page
-            # showed an em-dash for Model even though the task names one. An explicit
-            # model_name from the caller still wins. seed/steps/sampler/cfg_scale stay
-            # whatever the task actually had (nothing, for a chat task): an em-dash is the
-            # honest answer where a number was never recorded.
+            # Everything extract_full_meta resolved from the task. This row used to write
+            # only the model id, so a generation captured as it happened landed with an
+            # em-dash for Steps, Sampler, CFG, LoRAs and the rest -- not because PixAI never
+            # recorded them, but because they were never written down, and only a later
+            # --backfill-full-meta filled them in. That backfill is the manual step
+            # capturing-as-it-happens exists to remove.
+            #
+            # An em-dash remains the honest answer where the task genuinely recorded
+            # nothing: a CHAT task (Edit/Fix) has no detailParameters at all, so these
+            # resolve to "" and render as before. An explicit model_name from the caller
+            # still wins over the looked-up one.
             "model_id": fm.get("model_id", ""),
-            "model_name": model_name or fm.get("model_name", ""),
+            "model_name": model_name or _resolved_model_name(session, fm,
+                                                             fm.get("model_id", "")),
+            "steps": fm.get("steps", ""),
+            "sampler": fm.get("sampler", ""),
+            "cfg_scale": fm.get("cfg_scale", ""),
+            "negative_prompt": fm.get("negative_prompt", ""),
+            "natural_prompt": fm.get("natural_prompt", ""),
+            "clip_skip": fm.get("clip_skip", ""),
+            "loras": _resolved_loras(session, result),
             "paid_credit": _paid_credit_str(result),   # actual cost, task-level
             "width": str((info or {}).get("width") or ""),
             "height": str((info or {}).get("height") or ""),
@@ -5407,6 +5458,21 @@ def generation_status(session, task_id):
     return {"status": t.get("status") or "", "phase": phase, "paid_credit": t.get("paidCredit"),
             "started": bool(t.get("startedAt")),
             "reason": _task_failure_reason(t.get("outputs"))}
+
+
+def _resolved_loras(session, task):
+    """The task's LoRAs as a readable string, for a row being catalogued live.
+
+    extract_full_meta returns `loras: ""` on purpose and documents that the caller fills it;
+    --backfill-full-meta does, and the live capture did not, so a generation's LoRAs were
+    blank until a backfill happened past. Resolution is name lookups behind model_name_gql's
+    process cache, so a batch costs one call per distinct LoRA at most. A failure costs the
+    label, never the row.
+    """
+    try:
+        return resolve_loras(session, task) or ""
+    except Exception:                                  # noqa: BLE001
+        return ""
 
 
 def _resolved_model_name(session, fm, model_id):

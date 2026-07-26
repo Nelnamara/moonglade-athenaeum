@@ -3175,13 +3175,22 @@ def _upscale_const_js():
     would leave the raw marker visible on /login, /health, /dupes and /panel.
     """
     import pixai_gallery_backup as core
-    return "<script>window.MG_UPSCALE={};</script>".format(json.dumps({
-        "enlargeModels": list(core.ENLARGE_MODELS),
-        "defaultEnlargeModel": core.DEFAULT_ENLARGE_MODEL,
-        "ceiling": core.UPSCALE_PIXEL_CEILING,
-        "denoise": {"strength": core.DEFAULT_UPSCALE_DENOISING_STRENGTH,
-                    "steps": core.DEFAULT_UPSCALE_DENOISING_STEPS},
-    }, separators=(",", ":")))
+    return ("<script>window.MG_UPSCALE={};window.MG_LORA={};</script>".format(
+        json.dumps({
+            "enlargeModels": list(core.ENLARGE_MODELS),
+            "defaultEnlargeModel": core.DEFAULT_ENLARGE_MODEL,
+            "ceiling": core.UPSCALE_PIXEL_CEILING,
+            "denoise": {"strength": core.DEFAULT_UPSCALE_DENOISING_STRENGTH,
+                        "steps": core.DEFAULT_UPSCALE_DENOISING_STEPS},
+        }, separators=(",", ":")),
+        # LoRA weight bounds per base architecture -- DiT allows 0..1.2, the SD family
+        # -2..2. One table, served, so the drawer's slider and the builder's clamp cannot
+        # drift into offering a weight the architecture rejects.
+        json.dumps({
+            "ranges": {k: list(v) for k, v in core.LORA_WEIGHT_RANGES.items()},
+            "fallback": [core.LORA_WEIGHT_MIN, core.LORA_WEIGHT_MAX],
+            "step": core.LORA_WEIGHT_STEP,
+        }, separators=(",", ":"))))
 
 
 # ---------------------------------------------------------------------------
@@ -3319,6 +3328,7 @@ __BABEL_LIB_TAG__
 <script src="/static/mg-cost-badge.js"></script>
 <script src="/static/mg-generate-drawer.js"></script>
 <script src="/static/mg-notify.js"></script>
+__UPSCALE_CONST__
 </head><body>
 <div id="root"></div>
 <div id="jobs-fab" onclick="JobsCard.open()" title="Activity"><span class="jf-dot"></span><span class="jf-badge" id="jobs-fab-badge"></span><span>Activity</span></div>
@@ -7346,6 +7356,7 @@ var Gen = (function(){
   }
   function renderLoras(){
     var box=el('gen-loras'); if(!box) return; box.innerHTML='';
+    var lrange=loraRange();
     loras.forEach(function(l,i){
       var d=document.createElement('div'); d.className='lora-chip'+((loraIncompat(l)||l.failed)?' incompat':'');
       var badge=l.version_id?'':(l.failed?' \\u26a0':' \\u23f3');
@@ -7363,9 +7374,11 @@ var Gen = (function(){
         +'<span class="nm" title="'+titleAttr+'">'+esc(l.title)+badge+'</span>'
         // A slider with its value beside it, rather than a spinner you have to click 40
         // times to cross the range. `oninput` (not onchange) so the number tracks the drag,
-        // and the cost re-check behind it is already debounced.
-        +'<span class="lw"><input type="range" step="0.1" min="-2" max="2" value="'+l.weight
-        +'" title="Weight \\u2014 PixAI allows -2 to 2; negative subtracts this LoRA\\u2019s influence"'
+        // and the cost re-check behind it is already debounced. Bounds come from the base
+        // model's architecture -- see loraRange().
+        +'<span class="lw"><input type="range" step="0.1" min="'+lrange[0]+'" max="'+lrange[1]
+        +'" value="'+l.weight+'" title="Weight \\u2014 '+lrange[0]+' to '+lrange[1]+' for this base model'
+        +(lrange[0]<0?'; negative subtracts this LoRA\\u2019s influence':'')+'"'
         +' oninput="Gen.loraWeight('+i+', this.value)"><b>'+(+l.weight).toFixed(1)+'</b></span>'
         +'<button type="button" class="rm" title="Remove" onclick="Gen.loraRemove('+i+')">&times;</button>'
         +verSel;
@@ -7390,11 +7403,33 @@ var Gen = (function(){
     s.classList.toggle('over', over);
     updateGoState();   // the cap can arrive (or change) after LoRAs are already picked
   }
+  // LoRA weight bounds follow the BASE MODEL's architecture: DiT allows 0..1.2, the SD
+  // family -2..2 (negative weights subtract that LoRA's influence). Served from core in
+  // window.MG_LORA so this cannot drift from the builder's own clamp. An unknown or
+  // not-yet-picked base falls back to the widest range rather than the narrowest -- the
+  // same fail-open reasoning the LoRA base-type filter uses, and a weight the architecture
+  // refuses comes back as a refused submit, which costs nothing.
+  function loraRange(){
+    var L=window.MG_LORA, t=(selected&&selected.model_type)||'';
+    if(!L) return [-2,2];
+    return (L.ranges&&L.ranges[String(t).toUpperCase()]) || L.fallback || [-2,2];
+  }
+  // Re-clamp every chip when the base model changes: switching from SDXL to a DiT model
+  // with a -0.8 LoRA attached would otherwise leave a weight on screen, and in the payload,
+  // that the new architecture rejects.
+  function reclampLoras(){
+    var r=loraRange(), changed=false;
+    loras.forEach(function(l){
+      var w=Math.max(r[0], Math.min(r[1], +l.weight));
+      if(w!==l.weight){ l.weight=w; changed=true; }
+    });
+    renderLoras();
+    if(changed) debouncedCost();
+  }
   function loraWeight(i, v){ if(!loras[i]) return;
     v=parseFloat(v);
-    // -2, not 0: negative weights are legal on PixAI and this clamp was silently making
-    // half their range unreachable.
-    loras[i].weight=(isNaN(v)?0.7:Math.max(-2,Math.min(2,v)));
+    var r=loraRange();
+    loras[i].weight=(isNaN(v)?Math.max(r[0],Math.min(r[1],0.7)):Math.max(r[0],Math.min(r[1],v)));
     // Repaint the readout in place rather than re-rendering the chip list -- rebuilding the
     // row mid-drag would destroy the very slider the pointer is holding.
     var chip=el('gen-loras')&&el('gen-loras').children[i];
@@ -7473,6 +7508,7 @@ var Gen = (function(){
     selected.capabilities=v.capabilities||[];
     selected.compatibility=v.compatibility||{}; selected.restrictions=v.restrictions||{};
     if(loraPickerEl) loraPickerEl.setAttribute('base-type', selected.model_type||'');
+    reclampLoras();          // DiT allows 0..1.2, SD -2..2 -- the chips must follow the base
     applyCapabilityGating();
   }
   // extra.compatibility (probed live 2026-07-06, memory pixai-model-capability-schema) says
@@ -8268,6 +8304,7 @@ var Gen = (function(){
           upRatio:upRatio, upDenoise:upDenoise,
           toggleBooster:toggleBooster,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
+          reclampLoras:reclampLoras,
           insertTriggers:insertTriggers, refreshLoraCap:paintLoraCap, loraPickVersion:loraPickVersion,
           // addVideoRefs stays: it's the gallery bulk-send entry, rewired to feed
           // <mg-generate-drawer>.prefill(). The old video machinery (setVideoMode /
@@ -13837,7 +13874,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         wants_bundle = request.args.get("bundle") in ("1", "true", "yes")
         bundle_file = loom_dir / "dist" / "master-storyboard.bundle.js"
         if wants_bundle and bundle_file.is_file():
-            return LOOM_PAGE_BUNDLE
+            return LOOM_PAGE_BUNDLE.replace("__UPSCALE_CONST__", _upscale_const_js())
 
         # ---- Babel-standalone path (default + bundle-requested-but-not-built) ----
         # loom/src/loom-core.js AND loom/src/loom-mutations.js (Phase 2, the
@@ -13878,7 +13915,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if mut_inline:
             mut_inline += "\nconst mvCardToAct = moveCardToAct;\n"
         jsx = jsx.replace("export default function App()", "function App()")
-        return LOOM_PAGE.replace("__JSX__", core_inline + "\n" + mut_inline + "\n" + jsx)
+        return (LOOM_PAGE.replace("__JSX__", core_inline + "\n" + mut_inline + "\n" + jsx)
+                .replace("__UPSCALE_CONST__", _upscale_const_js()))
 
     @app.route("/api/loom/get")
     def loom_get():

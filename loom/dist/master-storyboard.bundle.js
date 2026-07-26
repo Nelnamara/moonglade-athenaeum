@@ -1286,6 +1286,23 @@ ${"=".repeat(48)}
       if (pickerOpen) setPickerMounted(true);
     }, [pickerOpen]);
     const imgModelSeqRef = useRef(0);
+    const loraRange = useMemo(() => {
+      const L = window.MG_LORA;
+      const t = String(imgModel && imgModel.model_type || "").toUpperCase();
+      if (!L) return [-2, 2];
+      return L.ranges && L.ranges[t] || L.fallback || [-2, 2];
+    }, [imgModel]);
+    useEffect(() => {
+      setImgLoras((cur) => {
+        let changed = false;
+        const next = cur.map((l) => {
+          const w = Math.max(loraRange[0], Math.min(loraRange[1], +l.weight));
+          if (w !== l.weight) changed = true;
+          return w === l.weight ? l : { ...l, weight: w };
+        });
+        return changed ? next : cur;
+      });
+    }, [loraRange, setImgLoras]);
     const basePickerElRef = useRef(null);
     const loraPickerElRef = useRef(null);
     const bindPicker = useCallback((el) => {
@@ -1827,12 +1844,15 @@ ${"=".repeat(48)}
             {
               type: "range",
               step: "0.1",
-              min: "-2",
-              max: "2",
+              min: loraRange[0],
+              max: loraRange[1],
               value: l.weight,
-              title: "Weight \u2014 PixAI allows -2 to 2; negative subtracts this LoRA's influence",
+              title: "Weight \u2014 " + loraRange[0] + " to " + loraRange[1] + " for this base model" + (loraRange[0] < 0 ? "; negative subtracts this LoRA's influence" : ""),
               onChange: (ev) => {
-                const w = Math.max(-2, Math.min(2, +ev.target.value || 0));
+                const w = Math.max(
+                  loraRange[0],
+                  Math.min(loraRange[1], +ev.target.value || 0)
+                );
                 setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x));
               }
             }
