@@ -492,6 +492,38 @@ def test_lora_weight_bounds_follow_the_base_architecture(tmp_path):
     assert core.lora_weight_range("") == (-2.0, 2.0)
     assert core.lora_weight_range("SOMETHING_NEW") == (-2.0, 2.0)
 
+    # 2026-07-26: the table held five architectures when the enum has twenty-five members,
+    # enumerated from PixAI's own bundle. Because an unrecognised architecture falls through to
+    # the SD range, every missing DiT was being offered -2..+2 against a real ceiling of 1.2.
+    #
+    # DIT7_MODEL is the one that mattered: it is what their base-model picker actually SENDS for
+    # "DiT.1" (measured off a live request), and only DIT7B_MODEL was listed, so the commonest
+    # DiT case was very likely already wrong.
+    assert core.lora_weight_range("DIT7_MODEL") == (0.0, 1.2)
+    # DiT.3, which had no entry at all -- its token was unknown to this project until today.
+    assert core.lora_weight_range("MMDIT26B_MODEL") == (0.0, 1.2)
+    # A user-TRAINED DiT.2, which is what the owner's own LoRAs are.
+    assert core.lora_weight_range("USER_DIT26A_MODEL") == (0.0, 1.2)
+    for variant in ("DIT7A_MODEL", "DIT7C_MODEL", "DIT7D_MODEL"):
+        assert core.lora_weight_range(variant) == (0.0, 1.2), variant
+
+    # Every DiT-family member the table knows about must be 0..1.2. Guards the real failure mode:
+    # someone adds a new DiT token to the browse whitelist and forgets the range, which is
+    # silent -- it just widens a slider.
+    for arch, rng in core.LORA_WEIGHT_RANGES.items():
+        if "DIT" in arch:
+            assert rng == (0.0, 1.2), "{} is a DiT architecture but ranges {}".format(arch, rng)
+        else:
+            assert rng == (-2.0, 2.0), "{} is not DiT but ranges {}".format(arch, rng)
+
+    # DELIBERATELY unmapped: the owner's ranges covered DiT.1/DiT.2/Community DiT/SD1.5/SDXL and
+    # said nothing about these two. They must keep falling through to the widest range rather
+    # than being guessed at, since narrowing a slider on a guess removes a real capability.
+    assert "SD3_MEDIUM_MODEL" not in core.LORA_WEIGHT_RANGES
+    assert "Z_IMAGE_V1_MODEL" not in core.LORA_WEIGHT_RANGES
+    assert core.lora_weight_range("SD3_MEDIUM_MODEL") == (-2.0, 2.0)
+
+
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = login_client(tmp_path).get("/").get_data(as_text=True)
@@ -545,3 +577,24 @@ def test_drawer_ratio_cap_agrees_with_the_python_one(tmp_path):
     want = [[core.max_upscale_ratio(w, h, "enlarge"), core.max_upscale_ratio(w, h, "upscale"),
              list(core.upscale_output_dims(w, h, 1.4))] for w, h in sizes]
     assert got == want
+
+
+def test_model_type_filter_mapping_is_measured_not_guessed():
+    """Their Model Type filter maps a label to a GenerationModelType, and the ones that matter
+    were read off live requests rather than inferred.
+
+    Recorded because a wrong token here does not error -- `types` with an unrecognised member
+    would simply return the wrong rows, or none, and look like an empty result.
+    """
+    m = dict(core.MODEL_TYPE_FILTERS)
+    # Measured 2026-07-26 by driving their base-model picker and reading the request.
+    assert m["All"] == "ANY_MODEL", "All sends ANY_MODEL; it does NOT omit the argument"
+    assert m["DiT.3"] == "MMDIT26B_MODEL"
+    assert m["DiT.2"] == "MMDIT26A_MODEL"
+    assert m["DiT.1"] == "DIT7_MODEL", "their DiT.1 is DIT7_MODEL, not DIT7B_MODEL"
+    # Every mapped token must be one this app is willing to send.
+    for label, token in core.MODEL_TYPE_FILTERS:
+        if token.startswith("ANY_"):
+            continue
+        assert token in core.LORA_BASE_MODEL_TYPES, \
+            "{} maps to {}, which is not on the send whitelist".format(label, token)
