@@ -11,7 +11,7 @@ Tier enforcement (login-required) is asserted by tests/test_route_tiers.py.
 """
 import json
 
-from pixai_gallery import _account_key, create_app
+from moonglade_gallery import _account_key, create_app
 from tests.conftest import login_client
 
 
@@ -128,7 +128,7 @@ def test_one_account_cannot_see_or_clobber_anothers_saved_views(tmp_path):
     Bite: point _view_presets_path() back at one shared file and both halves fail --
     bob sees alice's view, and bob's same-named save overwrites hers.
     """
-    from pixai_gallery import create_app
+    from moonglade_gallery import create_app
     from tests.conftest import login_test_client
     app = create_app(tmp_path)
 
@@ -161,7 +161,7 @@ def test_saved_views_are_independent_for_accounts_differing_only_by_case(tmp_pat
     before the fix on this filesystem: nel's read/save clobbers Nel's, exactly like
     the alice/bob test above would if _view_presets_path() were reverted to a
     shared file."""
-    from pixai_gallery import create_app
+    from moonglade_gallery import create_app
     from tests.conftest import login_test_client
     app = create_app(tmp_path)
 

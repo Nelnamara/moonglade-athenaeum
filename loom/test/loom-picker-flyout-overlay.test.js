@@ -36,7 +36,7 @@ describe("Image tab's Model/LoRA picker is a floating overlay, not inline (probl
       "the old 'Model {imgModel...}' inline label must be replaced by the overlay-opening trigger row");
   });
 
-  test("a trigger row opens the overlay pre-selected to Models, mirroring pixai_gallery.py's #gen-selrow", () => {
+  test("a trigger row opens the overlay pre-selected to Models, mirroring moonglade_gallery.py's #gen-selrow", () => {
     assert.match(src, /<button type="button" className="lv-selrow" onClick=\{\(\) => \{ setPickerKind\("base"\); setPickerOpen\(true\); \}\}>/,
       "the Model row must be a clickable trigger that opens the overlay on the base segment");
   });
@@ -69,7 +69,7 @@ describe("Image tab's Model/LoRA picker is a floating overlay, not inline (probl
   });
 
   test("both pickers are lazy-mounted on first open, then stay mounted (never lose search state on reopen)", () => {
-    // Mirrors pixai_gallery.py's ensurePickers() -- "only fetch on first open", not an
+    // Mirrors moonglade_gallery.py's ensurePickers() -- "only fetch on first open", not an
     // always-mounted base+LoRA fetch on every Loom load just because the right rail is
     // expanded (the right rail's default tab is Video, not Image).
     assert.match(src, /const \[pickerMounted, setPickerMounted\] = useState\(false\);/);

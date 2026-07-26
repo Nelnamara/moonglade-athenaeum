@@ -33,9 +33,9 @@ pip install requests pillow flask truststore websockets
    ```
 3. Go:
    ```bash
-   python pixai_gallery.py --out pixai_backup   # launch the web gallery (browse · generate · curate)
-   python pixai_gallery_backup.py --count       # …or headless: how many images you have
-   python pixai_gallery_backup.py               # back up everything
+   python moonglade_gallery.py --out pixai_backup   # launch the web gallery (browse · generate · curate)
+   python moonglade_backup.py --count       # …or headless: how many images you have
+   python moonglade_backup.py               # back up everything
    ```
 4. First time opening the web gallery: sign in from the machine running the server — the
    login page doubles as an account-creation form the very first time, before any account

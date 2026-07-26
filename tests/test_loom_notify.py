@@ -5,7 +5,7 @@ see mg-notify.js's own top-of-file comment; only the visible Job Tracker card do
 import re
 from pathlib import Path
 
-import pixai_gallery
+import moonglade_gallery
 from tests.conftest import login_client
 
 
@@ -31,7 +31,7 @@ def test_loom_shell_lifts_activity_and_help_widgets_above_the_overlay(tmp_path):
     assert "right:18px;z-index:401;width:38px" in body                # #eb-help-btn
     assert "inset:0;z-index:402;background:rgba(6,4,16,.72)" in body   # #eb-help modal
     # the raise is Loom-scoped: mg-notify.js still ships the base 234 (gallery unaffected)
-    notify = (Path(pixai_gallery.__file__).parent / "static" / "mg-notify.js").read_text(encoding="utf-8")
+    notify = (Path(moonglade_gallery.__file__).parent / "static" / "mg-notify.js").read_text(encoding="utf-8")
     assert "z-index:234" in notify
     assert "z-index:401" not in notify and "z-index:402" not in notify
 
@@ -125,7 +125,7 @@ def test_cli_jobs_are_labelled_in_words_not_command_slugs():
     Noun phrases on purpose: the same string has to read correctly while running, when done,
     and inside that toast.
     """
-    src = (Path(__file__).resolve().parents[1] / "pixai_gallery_backup.py").read_text(encoding="utf-8")
+    src = (Path(__file__).resolve().parents[1] / "moonglade_backup.py").read_text(encoding="utf-8")
     # Checked as exact call forms rather than by scanning the argument text: the download
     # site reads `"Incremental update" if getattr(args, "update", False) else "Full backup"`,
     # and a naive search for the slug "update" matches that getattr's ATTRIBUTE NAME, which
@@ -172,7 +172,7 @@ def test_loom_shell_body_declares_a_font_for_what_mounts_outside_root():
     """The shell mounts the Activity chip/tray, the toasts and the ? FAB outside #root, so
     they inherit from body, not from .sb-root's own font-family. Belt to mg-notify's braces:
     the shell should not hand anything an unstyled baseline."""
-    src = (Path(__file__).resolve().parents[1] / "pixai_gallery.py").read_text(encoding="utf-8")
+    src = (Path(__file__).resolve().parents[1] / "moonglade_gallery.py").read_text(encoding="utf-8")
     shell = src[src.index("_LOOM_SHELL = r"):]
     body_rule = shell[shell.index("body {"):shell.index("}", shell.index("body {"))]
     assert "font-family" in body_rule, (

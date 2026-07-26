@@ -3,7 +3,7 @@
 free-card id wires through. Pure; no network."""
 from types import SimpleNamespace
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 
 def _gen_args(**kw):

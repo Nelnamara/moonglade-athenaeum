@@ -1,14 +1,14 @@
 """Control Panel "Users" tab: list/add/remove gallery web-login accounts from the
-browser instead of the CLI (see pixai_gallery.py's panel()/api_users_add()/
-api_users_remove(), and pixai_gallery_backup.py's list_web_users/
+browser instead of the CLI (see moonglade_gallery.py's panel()/api_users_add()/
+api_users_remove(), and moonglade_backup.py's list_web_users/
 add_or_update_web_user/remove_web_user). Companion to tests/test_web_auth.py's
 bootstrap-form tests -- this file covers the OTHER half of browser-first account
 management: managing accounts once you're already past the front door.
 """
 import re
 
-import pixai_gallery_backup as core
-from pixai_gallery import create_app
+import moonglade_backup as core
+from moonglade_gallery import create_app
 
 from tests.conftest import login_client, login_test_client
 

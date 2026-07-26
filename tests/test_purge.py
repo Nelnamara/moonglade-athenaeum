@@ -2,8 +2,8 @@
 the app (it deletes files). Covers purge_media_local (quarantine vs hard-delete) and
 the gallery /delete-tasks-bulk route (cloud delete is mocked; we assert local side
 effects + that the cloud call fires task-level)."""
-import pixai_gallery as g
-from pixai_gallery import (CATALOG_FIELDS, save_catalog, load_catalog,
+import moonglade_gallery as g
+from moonglade_gallery import (CATALOG_FIELDS, save_catalog, load_catalog,
                            purge_media_local, create_app)
 
 from tests.conftest import login_client
@@ -64,7 +64,7 @@ def test_quarantined_file_is_invisible_to_resolution(tmp_path):
 
 
 def test_delete_tasks_bulk_route_quarantines_and_calls_cloud(tmp_path, monkeypatch):
-    import pixai_gallery_backup as core
+    import moonglade_backup as core
     db = _seed(tmp_path, [
         _row(media_id="100", task_id="T1", filename="100.png"),
         _row(media_id="101", task_id="T1", filename="101.png"),   # same task, NOT selected
@@ -96,7 +96,7 @@ def test_delete_tasks_bulk_route_quarantines_and_calls_cloud(tmp_path, monkeypat
 def test_bulk_delete_async_logs_a_job_that_completes(tmp_path, monkeypatch):
     """The async delete registers a 'delete' job that shows in /api/jobs and reaches 'done'."""
     import time
-    import pixai_gallery_backup as core
+    import moonglade_backup as core
     _seed(tmp_path, [_row(media_id="a1", task_id="TA", filename="a1.png")], {"a1.png": b"x"})
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: None)
@@ -256,12 +256,12 @@ def test_bulk_delete_cloud_is_localhost_only(tmp_path, monkeypatch):
 
     Before the global front-door hook existed, this route's own defense-in-depth
     check redirected back to the gallery with a `delerr` banner; now the global
-    hook (_enforce_front_door(), see pixai_gallery.py) denies the request before
+    hook (_enforce_front_door(), see moonglade_gallery.py) denies the request before
     this route's body ever runs, redirecting to /login instead -- the
     security-relevant invariants below (nothing fired, nothing deleted) are
     unchanged."""
     import time
-    import pixai_gallery_backup as core
+    import moonglade_backup as core
     db = _seed(tmp_path, [_row(media_id="z1", task_id="TZ", filename="z1.png")], {"z1.png": b"x"})
     fired = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
@@ -289,7 +289,7 @@ def test_bulk_delete_cloud_refuses_authenticated_lan_session(tmp_path, monkeypat
     and test_branding.py::test_shortcut_refuses_authenticated_lan_session, which
     already covered this shape. Flagged by adversarial review and fixed 2026-07-19."""
     import time
-    import pixai_gallery_backup as core
+    import moonglade_backup as core
     db = _seed(tmp_path, [_row(media_id="z2", task_id="TZ2", filename="z2.png")], {"z2.png": b"x"})
     fired = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())

@@ -3,7 +3,7 @@ declaration actually WINS.
 
 Why this exists
 ---------------
-pixai_gallery.py ships its CSS as several inline <style> blocks inside one document,
+moonglade_gallery.py ships its CSS as several inline <style> blocks inside one document,
 so rules for the same element live thousands of lines apart. An override written in
 an EARLIER block silently loses to an equal-specificity base rule in a LATER one --
 media queries add no specificity, so at equal specificity document order decides.

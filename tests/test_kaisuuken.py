@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 
 # ---- _normalize_kaisuuken: the real summary template-row shape ----

@@ -21,7 +21,7 @@
    rather than crashing a host that only wants toasts + the tracker.
 
    De-duplication: this is now the SINGLE SOURCE for these four systems -- the gallery's own
-   inline copies are deleted in favor of this file (see pixai_gallery.py), closing out the same
+   inline copies are deleted in favor of this file (see moonglade_gallery.py), closing out the same
    kind of two-copies-drift-apart gap this codebase has hit before (the mg-generate-drawer.js
    twin-drawer situation, the friendlyGenErr/GIVE_UP_MS duplications). */
 (function () {
@@ -1145,7 +1145,7 @@
     // Copy-to-clipboard: fully guarded (per spec) -- navigator.clipboard is absent on
     // non-HTTPS/non-localhost origins and on some older embedded webviews, and the promise
     // itself can reject (permission denied). Either must degrade to a silent no-op, never a
-    // thrown error, unlike this app's other copy buttons (pixai_gallery.py's copyPrompt/
+    // thrown error, unlike this app's other copy buttons (moonglade_gallery.py's copyPrompt/
     // copyCmd), which call navigator.clipboard.writeText direct and unguarded.
     function copyText(s){
       try{
@@ -1250,7 +1250,7 @@
     // to get their task id (the one thing the existing "Import task" recovery flow needs)
     // without server access. A small secondary card, not a modal: task id (+ one-click
     // copy), a real clock "Time Sent", and "Time Spent" (elapsed, live while running).
-    // `started_at` comes from the backend collapse fix in pixai_gallery_backup.py's
+    // `started_at` comes from the backend collapse fix in moonglade_backup.py's
     // _reconstruct_jobs -- falls back to `ts` for any job logged before that fix shipped,
     // so an old log line degrades to "0s" rather than throwing on a missing field.
     // ================================================================================

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-pixai_gallery.py
+moonglade_gallery.py
 ================
 Local Flask web gallery for your PixAI backup collection.
 
@@ -12,8 +12,8 @@ Requirements:
     pip install flask pillow
 
 Usage:
-    python pixai_gallery.py
-    python pixai_gallery.py --out pixai_backup --port 5000
+    python moonglade_gallery.py
+    python moonglade_gallery.py --out pixai_backup --port 5000
 """
 
 import argparse
@@ -2514,7 +2514,7 @@ def find_files_for_media_id(out_dir, media_id, include_gallery=False, exts=None)
     default -- e.g. tests/test_loom_export_bundle.py pins that video media resolves
     via a separate catalog-row fallback, NOT this matcher). Pass `exts=_VIDEO_EXTS`
     (B16, audit 2026-07-21) for a video-aware sibling -- see already_downloaded_video
-    in pixai_gallery_backup.py -- so the SAME exact-match + quarantine-exclusion
+    in moonglade_backup.py -- so the SAME exact-match + quarantine-exclusion
     contract applies to videos, not just images.
     """
     mid = str(media_id)
@@ -2729,7 +2729,7 @@ def _find_quarantined_file(out_dir, media_id):
     media_id as the real file (its stem IS the media_id), so this explicitly
     restricts the extension to real media -- a naive media_id_of() match alone would
     pick either file depending on directory order."""
-    import pixai_gallery_backup as core
+    import moonglade_backup as core
     qdir = Path(out_dir) / DELETED_DIRNAME
     if not qdir.exists():
         return None
@@ -2767,7 +2767,7 @@ def list_quarantined(out_dir, page=1, page_size=60):
     wrote one before this feature existed). Only os.scandir() + stat() (metadata
     only, no content read) touches every file in the backlog; JSON parsing is
     bounded by however many sidecars actually exist. Returns (items, total, total_bytes)."""
-    import pixai_gallery_backup as core
+    import moonglade_backup as core
     qdir = Path(out_dir) / DELETED_DIRNAME
     if not qdir.exists():
         return [], 0, 0
@@ -2956,7 +2956,7 @@ def empty_trash(out_dir, thumb_dir):
     qdir = Path(out_dir) / DELETED_DIRNAME
     if not qdir.exists():
         return 0
-    import pixai_gallery_backup as core
+    import moonglade_backup as core
     media_exts = _IMAGE_EXTS | core._VIDEO_EXTS
     removed = 0
     for p in list(qdir.glob("*")):
@@ -3174,7 +3174,7 @@ def _upscale_const_js():
     rather than into BASE_HTML, which four other templates also derive from and which
     would leave the raw marker visible on /login, /health, /dupes and /panel.
     """
-    import pixai_gallery_backup as core
+    import moonglade_backup as core
     return ("<script>window.MG_UPSCALE={};window.MG_LORA={};</script>".format(
         json.dumps({
             "enlargeModels": list(core.ENLARGE_MODELS),
@@ -3197,7 +3197,7 @@ def _upscale_const_js():
 # Global 401 guard, injected into EVERY page head (BASE_HTML and _LOOM_SHELL).
 #
 # Why an interceptor and not a helper at each call site: there are ~90 fetch()
-# calls across pixai_gallery.py's inline JS, static/*.js and the Loom bundle, and
+# calls across moonglade_gallery.py's inline JS, static/*.js and the Loom bundle, and
 # a browser crawl found that NOT ONE of them inspects response status. The gate
 # answers an expired session with a JSON 401 -- valid JSON -- so `r.json()`
 # resolves happily, `.catch` never fires, and callers read the error body as
@@ -3213,7 +3213,7 @@ def _upscale_const_js():
 # Defined ONCE here and injected into both shells. Today produced two separate
 # bugs from hand-synced duplicate copies (the Loom hook preamble, and a login
 # CSS block) -- not adding a third.
-_AUTH_401_GUARD_JS = r"""<script>/* Global 401 guard -- see _AUTH_401_GUARD_JS in pixai_gallery.py */
+_AUTH_401_GUARD_JS = r"""<script>/* Global 401 guard -- see _AUTH_401_GUARD_JS in moonglade_gallery.py */
 (function(){
   if (!window.fetch) return;
   var orig = window.fetch, redirecting = false;
@@ -3400,7 +3400,7 @@ def _build_stamp():
     startup. If you pull without restarting, this keeps showing the OLD sha -- which
     is precisely how you tell a stale server from a fresh one. Fails soft."""
     try:
-        import pixai_gallery_backup as _core
+        import moonglade_backup as _core
         ver = getattr(_core, "__version__", "?")
     except Exception:
         ver = "?"
@@ -3434,7 +3434,7 @@ def resolve_library_dir(explicit=None):
     if explicit:
         return str(explicit)
     try:
-        import pixai_gallery_backup as _core
+        import moonglade_backup as _core
         stored = str((_core._load_config() or {}).get(LIBRARY_DIR_KEY) or "").strip()
     except Exception:                                   # noqa: BLE001
         stored = ""
@@ -3463,7 +3463,7 @@ def _account_key(username):
     helper every per-account store (saved views, prompt snippets, Loom storyboards,
     toolbox presets) keys its own file/directory with (B14 residual).
 
-    Account identity in this app is case-SENSITIVE: pixai_gallery_backup.py's
+    Account identity in this app is case-SENSITIVE: moonglade_backup.py's
     _find_web_user compares the raw username with `==`, and username_problem()
     rejects only empty/too-long/control-char names -- nothing about case. So "Nel"
     and "nel" are two distinct AUTH_USERS rows. But every one of these stores
@@ -3494,12 +3494,12 @@ def create_app(out_dir: Path):
     # so restarting the server doesn't silently log everyone out. See
     # _is_authorized_request() below for the gate this session backs, and
     # /login /logout for the routes that populate it.
-    import pixai_gallery_backup as _core_auth
+    import moonglade_backup as _core_auth
     app.secret_key = _core_auth.get_or_create_secret_key()
     app.config["SESSION_COOKIE_HTTPONLY"] = True   # JS can never read the session cookie
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"   # blocks cross-site POST/nav CSRF vectors
     # SESSION_COOKIE_SECURE is deliberately left False: this app is typically served
-    # over plain HTTP on a LAN (`python pixai_gallery.py`, no TLS terminator). A Secure
+    # over plain HTTP on a LAN (`python moonglade_gallery.py`, no TLS terminator). A Secure
     # cookie would just get silently dropped by the browser over http:// and break
     # login entirely. Real hardening of this flag needs HTTPS, which means putting a
     # reverse proxy (nginx/Caddy) in front of this process -- out of scope for a
@@ -3594,14 +3594,14 @@ def create_app(out_dir: Path):
 
     # ------------------------------------------------------------------
     # Control Panel: run maintenance CLI ops as background jobs with live
-    # logs. Each action is a WHITELISTED argv against pixai_gallery_backup.py
+    # logs. Each action is a WHITELISTED argv against moonglade_backup.py
     # (never an arbitrary command); destructive ones require confirm=True.
     # One job at a time. Localhost-gated at the routes. Runs the CLI as a
     # subprocess (isolation from the Flask process + natural stdout capture, so
     # the unmodified CLI script's own print output streams straight to the
     # Jobs card) with cwd = the checkout dir (where config.json lives).
     # ------------------------------------------------------------------
-    _cli_path = str(Path(__file__).resolve().parent / "pixai_gallery_backup.py")
+    _cli_path = str(Path(__file__).resolve().parent / "moonglade_backup.py")
     _cli_dir = str(Path(__file__).resolve().parent)
     # catalog media_id -> upload-kind media_id, for references sent from the gallery.
     # PixAI refuses a generation-output id as an input (see resolve_img), so each
@@ -3614,8 +3614,8 @@ def create_app(out_dir: Path):
     _panel_job = {"status": "idle", "action": "", "label": "", "lines": [],
                   "rc": None, "started_at": None, "progress": None,
                   "proc": None, "cancelled": False, "warn_count": 0}
-    _PROG_PREFIX = "~=MGPROG=~"        # matches PANEL_PROGRESS_PREFIX in pixai_gallery_backup.py
-    _WARN_PREFIX = "~=MGWARN=~"        # matches PANEL_WARN_PREFIX in pixai_gallery_backup.py (D-4)
+    _PROG_PREFIX = "~=MGPROG=~"        # matches PANEL_PROGRESS_PREFIX in moonglade_backup.py
+    _WARN_PREFIX = "~=MGWARN=~"        # matches PANEL_WARN_PREFIX in moonglade_backup.py (D-4)
     # The Loom's ffmpeg export job (trim + concat finished shots -> one mp4).
     _export_lock = threading.Lock()
     _export_job = {"status": "idle", "progress": 0, "elapsed": 0.0,
@@ -3820,7 +3820,7 @@ def create_app(out_dir: Path):
         """Append a job event to out_dir/jobs.jsonl for the Jobs card. Fails soft --
         activity logging must never break the request that triggered it."""
         try:
-            import pixai_gallery_backup as _core
+            import moonglade_backup as _core
             _core.append_job_event(out_dir, job_id, **fields)
         except Exception:
             pass
@@ -3874,7 +3874,7 @@ def create_app(out_dir: Path):
     threading.Thread(target=_scheduler_loop, daemon=True).start()
 
     # ---- Live-mirror watcher: event-driven backup over PixAI's push WebSocket -----
-    # Keeps the CLI's --watch/--watch-backup machinery (pixai_gallery_backup.py)
+    # Keeps the CLI's --watch/--watch-backup machinery (moonglade_backup.py)
     # connected for as long as the gallery runs, auto-reconnecting with backoff on any
     # drop. Each generation is downloaded + cataloged the INSTANT it completes -- this
     # is what makes --update a fallback instead of the only way gens land locally.
@@ -4000,7 +4000,7 @@ def create_app(out_dir: Path):
         cannot raise into _watch_mirror's daemon thread: mirroring must never break,
         or lose its 'mirrored' count, because logging did."""
         try:
-            import pixai_gallery_backup as _core
+            import moonglade_backup as _core
             mids = (got or {}).get("media_ids") or []
             if not mids:
                 return
@@ -4032,7 +4032,7 @@ def create_app(out_dir: Path):
         last-event-wins merge. The authoritative failure writers stay /api/task-status and
         the orphan sweep; a mirror problem is recorded where it belongs, in
         _watch_status['last_error'] (surfaced by /api/watch/status and the Panel)."""
-        import pixai_gallery_backup as core
+        import moonglade_backup as core
         try:
             session = core._make_session(None)
             got = _collect_single_flight(core, session, tid)
@@ -4057,7 +4057,7 @@ def create_app(out_dir: Path):
         generation whose Generate-card poller was closed (you navigated into the panel)
         still lands as done/failed instead of hanging at 'running' forever. Only touches a
         job we already track -- never invents one for a task generated on the website."""
-        import pixai_gallery_backup as core
+        import moonglade_backup as core
         try:
             term = "failed" if ws_status in core._GEN_FAIL else "done"
             j = next((x for x in core.read_jobs(out_dir)
@@ -4083,7 +4083,7 @@ def create_app(out_dir: Path):
         about at all -- see resolve_orphan_jobs()'s and JOBS_ORPHAN_SWEEP_AGE's own
         docstrings for why 0 there would be wrong (re-checks a live video gen on every
         poll) and why --poll-timeout's 300s would ALSO be wrong (false-flags one)."""
-        import pixai_gallery_backup as core
+        import moonglade_backup as core
         box = {"s": None}
         def _status(tid):
             if box["s"] is None:
@@ -4114,7 +4114,7 @@ def create_app(out_dir: Path):
     def _watch_loop():
         import asyncio
         import time as _time
-        import pixai_gallery_backup as core
+        import moonglade_backup as core
         backed = set()   # task ids already mirrored this process's lifetime (a
                          # 'completed' event can repeat)
         with _watch_lock:
@@ -7660,7 +7660,7 @@ var Gen = (function(){
   // the generation is ABOUT to be rather than from a real picture.
   //
   // upCeil/upDims/upMax are a HAND PORT of core.UPSCALE_PIXEL_CEILING /
-  // upscale_output_dims / max_upscale_ratio (pixai_gallery_backup.py) -- the server
+  // upscale_output_dims / max_upscale_ratio (moonglade_backup.py) -- the server
   // re-derives and clamps the ratio on every price check AND submit, so this copy exists
   // only so the slider can't offer a ratio the server would silently pull back, and so
   // the output size can be shown while dragging with no round-trip. Same hand-maintained
@@ -7938,7 +7938,7 @@ var Gen = (function(){
       // could-not-verify), so this function keeps only what a HOST must own: the request, the
       // 250ms debounce (debEditCost) and the stale-response guard. Not just tidying -- the
       // branch this replaces rendered a {cost:null, free:false} response as the price-shaped
-      // "~ ? credits". That shape is NOT rare: price_task() in pixai_gallery_backup.py fails
+      // "~ ? credits". That shape is NOT rare: price_task() in moonglade_backup.py fails
       // soft and returns None on any /v2/task-price error, so a transient PixAI hiccup used to
       // put a neutral, price-looking string on the one line whose job is to say whether this
       // spends money. The badge renders it red instead.
@@ -8698,7 +8698,7 @@ __UPSCALE_CONST__
     {% endif %}
     {% if row.is_video != '1' %}
     <button class="btn"
-      data-cmd='python pixai_gallery_backup.py --generate-video --image {{ row.media_id }} --prompt "describe the motion"'
+      data-cmd='python moonglade_backup.py --generate-video --image {{ row.media_id }} --prompt "describe the motion"'
       onclick="copyCmd(this)"
       title="Copy a ready-to-run Animate (image→video) command; add --confirm to run">Animate this → cmd</button>
     {% endif %}
@@ -9409,7 +9409,7 @@ function savePrompt() {
       <button class="jobbtn" style="flex:0 0 auto;min-width:0;" id="sch-save" onclick="saveSchedule()"><span class="t">Save schedule</span></button>
       <span id="sch-status" style="font-size:12.5px;color:var(--subtext);"></span>
     </div>
-    <div class="p-note">Only safe jobs can be scheduled (no file deletion). It fires <b>while the app is open</b> &mdash; this isn't an OS cron. For always-on, point Windows Task Scheduler at <code>pixai_gallery_backup.py --update</code>.</div>
+    <div class="p-note">Only safe jobs can be scheduled (no file deletion). It fires <b>while the app is open</b> &mdash; this isn't an OS cron. For always-on, point Windows Task Scheduler at <code>moonglade_backup.py --update</code>.</div>
   </div>
 
   <div class="p-sec">
@@ -10203,7 +10203,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         /login credential POST and the local-only first-account bootstrap POST
         below (factored out so the two paths can never drift apart on what a
         session looks like)."""
-        import pixai_gallery_backup as core
+        import moonglade_backup as core
         session.clear()
         session["user"] = username
         session["sess_epoch"] = core.get_web_user_session_epoch(username)
@@ -10246,7 +10246,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         checked explicitly right below, not inferred from CSRF validity."""
         error = None
         next_url = _safe_next(request.values.get("next", "")) or ""
-        import pixai_gallery_backup as core
+        import moonglade_backup as core
         no_accounts = not core.list_web_users()
         is_local = _is_local_request()
         bootstrap_mode = no_accounts and is_local
@@ -10412,8 +10412,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         only). Its ABSENCE means global: a truncated or hand-built POST has to fail
         toward MORE revocation, never less, because the whole mechanism exists to
         kill a cookie captured off plain-HTTP LAN traffic (see
-        pixai_gallery_backup.get_web_user_session_epoch's docstring)."""
-        import pixai_gallery_backup as core
+        moonglade_backup.get_web_user_session_epoch's docstring)."""
+        import moonglade_backup as core
         user = session.get("user")
         # A DEAD cookie must not be allowed to REVOKE. /logout is in _PUBLIC_PATHS so
         # _enforce_front_door() never runs here, and app.secret_key persists across
@@ -10587,7 +10587,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                        for k, v in PANEL_ACTIONS.items()]
         actions = [a for a, (k, v) in zip(all_actions, PANEL_ACTIONS.items())
                   if v.get("panel_visible", True) and (panel_is_local or not v["destructive"])]
-        import pixai_gallery_backup as core
+        import moonglade_backup as core
         # Reuse whatever csrf token this session already carries (set at login
         # time by _establish_session) -- only mint one here if it's somehow
         # missing. Unlike /login's form, the Users tab's Add/Remove actions are
@@ -10662,7 +10662,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        import pixai_gallery_backup as core
+        import moonglade_backup as core
         username = str(body.get("username") or "").strip()
         password = str(body.get("password") or "")
         confirm = str(body.get("confirm") or "")
@@ -10719,7 +10719,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         username = str(body.get("username") or "").strip()
         if username != session.get("user") and not _is_local_request():
             return jsonify({"error": "localhost-only to remove another account"}), 403
-        import pixai_gallery_backup as core
+        import moonglade_backup as core
         result = core.remove_web_user_guarded(username)
         if result == "not_found":
             return jsonify({"error": "No such account."}), 404
@@ -10756,7 +10756,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         next start; the old folder is left exactly as it is. That is the whole contract, and
         it is why there is no "migrate" option here to get wrong.
         """
-        import pixai_gallery_backup as _core
+        import moonglade_backup as _core
         if request.method == "GET":
             local = _is_local_request()
             # BOTH path fields are withheld from a non-local caller, not just the first.
@@ -10915,7 +10915,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         action instead of resurrecting it with a new event). Fails soft: the recovery
         itself must succeed even if this bookkeeping doesn't."""
         try:
-            import pixai_gallery_backup as _core
+            import moonglade_backup as _core
             jobs_by_id, _order, _n = _core._reconstruct_jobs(out_dir)
             orig = jobs_by_id.get(tid)
             if orig and not orig.get("dismissed") and orig.get("status") not in _core._JOBS_TERMINAL:
@@ -11227,7 +11227,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # The header's #lan-chip is the third reader of the same value, and the only one
         # that renders on the FALSE side: it names the controls the two above withhold,
         # so a remote session sees a reason instead of a hole.
-        import pixai_gallery_backup as _core
+        import moonglade_backup as _core
         _fresh_cfg = _core._load_config()
         needs_key = not bool(_fresh_cfg.get("PIXAI_API_KEY") or _fresh_cfg.get("U3T"))
         catalog_empty = not needs_key and (stats["images"] + stats["videos"]) == 0
@@ -11354,7 +11354,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         `confirm` is required -- the typed-DELETE prompt is the client's half of the same
         gate, and a route that acted without it would make that prompt decorative.
         """
-        import pixai_gallery_backup as core          # lazy: avoid import cycle
+        import moonglade_backup as core          # lazy: avoid import cycle
         if not _is_local_request():
             return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
@@ -11565,7 +11565,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         see CHANGELOG.md.)"""
         import urllib.parse
         import uuid
-        import pixai_gallery_backup as core   # lazy: avoid import cycle
+        import moonglade_backup as core   # lazy: avoid import cycle
         back = request.form.get("back") or url_for("index")
 
         def _back(**params):
@@ -11939,7 +11939,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         import zipfile
         import shutil
         import tempfile
-        import pixai_gallery_backup as core
+        import moonglade_backup as core
         # Two entry points: a curated SELECTION (media_ids from the grid) or a whole
         # COLLECTION by name. For a collection we resolve its FULL membership here in SQL
         # (up to the same 2000 cap) rather than trusting the rendered checkboxes -- "download
@@ -12058,7 +12058,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         below). Deliberately has NO localhost/loopback bypass -- login is
         required on every path, localhost hostname or IP included; no request
         address is a trusted tier. A fresh install creates its
-        first account either via `python pixai_gallery_backup.py --add-web-user`
+        first account either via `python moonglade_backup.py --add-web-user`
         or, while no accounts exist yet, through /login's own local-only
         bootstrap_mode form -- see login()'s docstring below for the real,
         shipped web-based bootstrap flow; account creation is NOT CLI-only.
@@ -12092,7 +12092,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         user = session.get("user")
         if user is None:
             return False
-        import pixai_gallery_backup as core
+        import moonglade_backup as core
         current_epoch = core.get_web_user_session_epoch(user)
         if current_epoch is None or current_epoch != session.get("sess_epoch"):
             session.clear()   # stale/revoked -- drop it so later requests short-circuit above
@@ -12109,7 +12109,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     # lockout threshold becomes (workers x _LOGIN_MAX_FAILS) instead of the real
     # one -- a genuine multi-worker deployment would need a shared store (Redis, a
     # DB table) instead. Fine as-is for this app's normal deployment: one process,
-    # `python pixai_gallery.py`.
+    # `python moonglade_gallery.py`.
     _login_lock = threading.Lock()
     _login_attempts = {}   # ip -> {"fails": int, "first_fail": epoch, "locked_until": epoch|None}
     _LOGIN_MAX_FAILS = 5
@@ -12194,7 +12194,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             _login_attempts.pop(ip, None)
 
     def _gen_session():
-        import pixai_gallery_backup as core
+        import moonglade_backup as core
         return core, core._make_session(None)
 
     def _input_media_id(core, session, val):
@@ -12430,7 +12430,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/similar/<media_id>")
     def api_similar(media_id):
         """'More like this': the k catalog images most visually similar to media_id, via the
-        pixai_similar CLIP sidecar index. Mirrors /api/gallery-images's shape so the client
+        moonglade_similar CLIP sidecar index. Mirrors /api/gallery-images's shape so the client
         reuses the same .card rendering. Read-only; fails soft to an empty list if the sidecar
         index or its ML stack isn't available/built yet, so it never 500s the gallery."""
         try:
@@ -12444,8 +12444,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if not img_path:
             return jsonify({"images": [], "total": 0, "error": "image file not found"}), 200
         try:
-            import pixai_similar
-            hits = pixai_similar.similar(str(img_path), k=k, exclude_media_id=media_id)
+            import moonglade_similar
+            hits = moonglade_similar.similar(str(img_path), k=k, exclude_media_id=media_id)
         except Exception as e:
             return jsonify({"images": [], "total": 0,
                             "error": "similarity index unavailable: " + _redact_host_paths(str(e))[:180]}), 200
@@ -12714,7 +12714,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         key = (body.get("api_key") or "").strip()
         if not key:
             return jsonify({"error": "paste your API key first"}), 400
-        import pixai_gallery_backup as core
+        import moonglade_backup as core
         import requests as _requests
         test_session = _requests.Session()
         test_session.headers.update({
@@ -13193,7 +13193,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         import tempfile
         import shutil
         from types import SimpleNamespace
-        import pixai_gallery_backup as core
+        import moonglade_backup as core
         files = request.files.getlist("files")
         if not files:
             return jsonify({"error": "no files"}), 400
@@ -14069,7 +14069,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             vid = _find_local_video_file(mid)
             if vid is None:
                 return jsonify({"error": "video file not found locally", "duration": None}), 200
-            import pixai_gallery_backup as core
+            import moonglade_backup as core
             return jsonify({"duration": core.probe_video_duration(str(vid))})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "duration": None}), 200
@@ -14309,7 +14309,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     # have it); one that isn't gets copied into imported/ and cataloged fresh. That also
     # makes re-importing the same bundle twice a no-op the second time.
     _BUNDLE_VIDEO_EXTS = {".mp4", ".webm", ".mov", ".mkv", ".m4v"}  # mirrors backup.py's
-    # _VIDEO_EXTS; not imported directly -- pixai_gallery.py is the lower module in the
+    # _VIDEO_EXTS; not imported directly -- moonglade_gallery.py is the lower module in the
     # three-file layering (backup.py imports this file, never the reverse).
 
     def _loom_collect_media_ids(project):
@@ -14512,7 +14512,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # and an except expression is evaluated while handling the exception -- so if
         # _gen_session() were the thing that raised, a try-scoped name would turn a
         # handled error into a NameError.
-        import pixai_gallery_backup as _core
+        import moonglade_backup as _core
         tid = (request.args.get("task_id") or "").strip()
         if not tid:
             return jsonify({"phase": "failed", "error": "task_id required"}), 400
@@ -14599,7 +14599,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         /api/task-status was closed, or the live-mirror watcher missed the WS event, and
         the task finished on PixAI's side with nothing here ever the wiser. Fails soft
         (see _reconcile_orphan_jobs); a reconciliation problem must never break the card."""
-        import pixai_gallery_backup as core
+        import moonglade_backup as core
         try:
             _reconcile_orphan_jobs(min_age=core.JOBS_ORPHAN_SWEEP_AGE)
             jobs = core.read_jobs(out_dir)
@@ -14627,7 +14627,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def api_jobs_dismiss():
         """Dismiss one job (job_id) or every finished job (finished:true) from the card --
         this is how a sticky failure gets cleared. Login required (any session, local or LAN)."""
-        import pixai_gallery_backup as core
+        import moonglade_backup as core
         body = request.get_json(silent=True) or {}
         if body.get("finished"):
             try:
@@ -14706,7 +14706,7 @@ def port_owner(host, port, timeout=0.4):
 
     `Serve Gallery.pyw` already probes the X-Moonglade header to decide "one of our
     servers is already up here" before launching. That check lived ONLY in the
-    launcher, so `python pixai_gallery.py --port N` -- how every script, test
+    launcher, so `python moonglade_gallery.py --port N` -- how every script, test
     harness and background agent starts this thing -- walked straight past it.
     Same probe, moved to where it cannot be bypassed.
 
@@ -14773,8 +14773,8 @@ def main():
     args = ap.parse_args()
 
     out_dir = Path(resolve_library_dir(args.out))
-    import pixai_logging
-    pixai_logging.setup_logging(out_dir, verbose=args.verbose)
+    import moonglade_logging
+    moonglade_logging.setup_logging(out_dir, verbose=args.verbose)
     # A fresh clone has neither the (git-ignored) output folder nor a catalog -- refusing
     # to start here used to be the ONLY thing a brand-new user saw: a console exit, before
     # the web app's own first-run wizard (paste a key, run the first sync) ever had a
@@ -14794,7 +14794,7 @@ def main():
         init_db(db_path)
         print("No catalog yet in {} -- starting anyway. "
               "Use the setup wizard on the gallery's home page, "
-              "or run `python pixai_gallery_backup.py --sync` yourself.".format(out_dir))
+              "or run `python moonglade_backup.py --sync` yourself.".format(out_dir))
 
     thumb_dir = out_dir / "gallery" / "thumbs"
     print("Loading catalog...")

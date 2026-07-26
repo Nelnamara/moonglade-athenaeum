@@ -2,7 +2,7 @@
 --confirm and never fires on unclaimable rewards. Mocked -- conftest blocks live /v2."""
 from types import SimpleNamespace
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 _REWARDS = [
     {"id": "pixai-daily-credits", "amount": 30000, "canClaim": False,

@@ -14,8 +14,8 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-import pixai_gallery_backup as core  # noqa: E402
-from pixai_gallery import CATALOG_FIELDS, save_catalog  # noqa: E402
+import moonglade_backup as core  # noqa: E402
+from moonglade_gallery import CATALOG_FIELDS, save_catalog  # noqa: E402
 
 from tests.conftest import login_client  # noqa: E402
 

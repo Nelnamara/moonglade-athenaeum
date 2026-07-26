@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client
 
@@ -88,7 +88,7 @@ def _hook_list(text, label):
 def test_loom_hook_preamble_matches_source_in_every_delivery_path():
     """The Loom ships two ways, and BOTH strip master-storyboard.jsx's `import React,
     {...}` line and inject their own `const {...} = React;` preamble in its place:
-    pixai_gallery.py's LOOM_PAGE (the default Babel-standalone path) and
+    moonglade_gallery.py's LOOM_PAGE (the default Babel-standalone path) and
     loom/dist/master-storyboard.bundle.js (the ?bundle=1 path, emitted by
     loom/scripts/build.mjs).
 
@@ -118,11 +118,11 @@ def test_loom_hook_preamble_matches_source_in_every_delivery_path():
                   jsx.read_text(encoding="utf-8"), flags=re.M).group(0),
         "master-storyboard.jsx")
 
-    # 1. The default Babel path's preamble, as literally written in pixai_gallery.py.
-    py = (root / "pixai_gallery.py").read_text(encoding="utf-8")
+    # 1. The default Babel path's preamble, as literally written in moonglade_gallery.py.
+    py = (root / "moonglade_gallery.py").read_text(encoding="utf-8")
     m = re.search(r"const \{[^}]*\} = React;", py)
-    assert m, "pixai_gallery.py no longer contains a `const {...} = React;` preamble"
-    assert _hook_list(m.group(0), "pixai_gallery.py LOOM_PAGE") == src_hooks, (
+    assert m, "moonglade_gallery.py no longer contains a `const {...} = React;` preamble"
+    assert _hook_list(m.group(0), "moonglade_gallery.py LOOM_PAGE") == src_hooks, (
         "LOOM_PAGE's hook preamble has drifted from master-storyboard.jsx's import.\n"
         "  jsx imports : {}\n  LOOM_PAGE   : {}\n"
         "Any hook in the source but missing here is a ReferenceError on mount."

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 
 def _post_response(mocker, status_code=200, json_body=None, text="", ssl_error=False):

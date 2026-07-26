@@ -267,7 +267,7 @@ describe("frame/cast @imageN slot collision (owner live-test 2026-07-23, 3rd man
 /* Owner-flagged real PixAI limits: at most 6 image refs, at most 3 @video refs on a
    reference-video generation. Reserving 2 frame slots ahead of cast/refs must not let a
    busy shot silently exceed either cap -- it must apply the same "keep the highest-priority
-   N, the rest are left out" truncation pixai_gallery.py's bulkSendVideo()/Gen.addVideoRefs()
+   N, the rest are left out" truncation moonglade_gallery.py's bulkSendVideo()/Gen.addVideoRefs()
    already establishes for the gallery's own bulk-send-to-video path (trims to the same
    6-image limit before ever reaching submit). Frames are reserved FIRST specifically so they
    are never among the casualties when a shot has to drop something to fit under the cap. */

@@ -15,7 +15,27 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **A generation could be submitted — and charged for — twice.** Every credit-spending
+  submit went out through the shared GraphQL helper on its default of three retries, which
+  re-POSTs on a network error or a 429/5xx. That is right for a *read*, and wrong here: a
+  lost **response** looks exactly like a lost **request**, so a read timeout, a dropped
+  connection, or a proxy's 502 arriving *after* PixAI had already created the task left the
+  client thinking nothing happened — and the retry submitted a second generation and paid
+  for it. Image generation, video, reference video, edits, the web Generate/Edit routes,
+  The Loom, and media uploads were all on that path. The per-image delete had spotted the
+  same hazard a day earlier and opted out by hand, which is precisely the shape of fix that
+  the next call site forgets.
+
+  Fixed structurally rather than one call site at a time: mutations now go through
+  `gql_mutate()`, which hard-codes a single attempt and **offers no retries argument at
+  all**, so the unsafe value cannot be asked for. As a backstop, the underlying helper's
+  own default is document-aware — a query still retries three times, a mutation never
+  does — so a future spend path cannot inherit the retrying default by accident either.
+  Queries are untouched: a flaky network still must not fail a read on the first blip. The
+  two REST spend paths (hand/face Fix, reward claims) were already single-attempt and are
+  now pinned as such rather than left to assumption.
 
 ## [2.5.0] - 2026-07-25 — Upscale where PixAI puts it, five filters of our own, metadata that captures itself, and a settable library folder
 

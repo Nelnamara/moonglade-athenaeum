@@ -86,7 +86,7 @@
        body.privacy-blur rule at all -- picking through <mg-gallery-picker> (the Loom's own
        gallery picker) painted the whole catalog unblurred regardless of the toggle. body is
        real light DOM (no shadow root here), so the host page's class reaches straight in,
-       same shape as .card/.pick-cell in pixai_gallery.py. */
+       same shape as .card/.pick-cell in moonglade_gallery.py. */
     'body.privacy-blur mg-gallery-picker .mg-pk-cell img{filter:blur(16px);transition:filter .12s;}',
     'body.privacy-blur mg-gallery-picker .mg-pk-cell[data-nsfw="1"] img{filter:blur(28px);}',
     'body.privacy-blur mg-gallery-picker .mg-pk-cell:hover img{filter:none;}'
