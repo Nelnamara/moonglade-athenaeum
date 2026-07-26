@@ -930,6 +930,66 @@ the install root, and **"a tidy install folder says a lot and implies good desig
 across the suite."** A different job from renaming four modules, so it gets its own pass and
 "rename-only" stays honest.
 
+## ✅ SOLVED: app generations DO mirror to the PixAI library (live test 2026-07-26)
+
+**Confirmed by a real submission.** One generation submitted with the owner's **browser session
+JWT** instead of the API key appeared in the pixai.art generations list and **stayed there through
+a refresh**. This closes the question first raised 2026-07-05 and re-raised repeatedly since:
+*"app gens pop up on the website then vanish unless favourited."*
+
+The cause was never a missing parameter. It is the **credential**, exactly as the 2026-07-11
+capture concluded: a browser JWT files a generation into the account; a bare API key does not, no
+matter how the request is dressed (that was tested too — API key plus browser-id header plus
+pixai.art origin was accepted, created, charged, and still dropped off the feed).
+
+### What the fix actually is
+A **credential switch**, not a new feature:
+- **Mirror to PixAI** → submit with the JWT. The gen lands in the library like a website gen.
+- **Local only** → submit with the API key. Stays private, temp-storage media, download at once.
+
+Both still download locally, so the redundancy the owner asked for is real either way. The
+plumbing largely exists: `_make_session` already builds `Authorization: Bearer` from whatever
+token it is handed and its own error text still offers the legacy `U3T + token.txt` path, and
+`submit_generation` submits through `gql_adhoc(session, ...)` — so handing it a JWT-authenticated
+session is most of the work.
+
+### The credential facts, measured not assumed (2026-07-26)
+| what | length | life | how it is maintained |
+|---|---|---|---|
+| the JWT | 287 chars | **~27 days** | one paste; possibly self-renewing (see below) |
+| `_udt` (= the `u3t` value) | 45 chars | **~1 hour** | **refreshed by Set-Cookie on every response** |
+| `_bsid` (browser session id) | 36 chars, a UUID | ~30 min | refreshed by Set-Cookie |
+
+**This is why the old token path felt like endless harvesting:** `U3T` is stored as a static
+string in `config.json` and it has a ONE-HOUR life. It was stale almost immediately. A
+`requests.Session` keeps a cookie jar, so `_udt`/`_bsid` maintain themselves — they were never
+things to harvest, they were things to stop hard-coding. Note also that a read-only query
+succeeded with **no `u3t` sent at all**, so it is not required for auth on that path.
+
+Token lifetime moved from ~12 days (2026-07-11) to ~27 days (2026-07-26) — one of several signs
+their site is actively changing under us.
+
+### Apollo CSRF: the gotcha that will bite any new client code
+PixAI's Apollo rejects requests it considers CSRF-able with a `BAD_REQUEST` unless one of
+`x-apollo-operation-name` / `apollo-require-preflight` is present. `_make_session` already sends
+**both**, which is exactly why the API-key path never hit this and a fresh probe did immediately.
+Any hand-rolled request needs them.
+
+### Still open
+Whether the **mutation** response returns a refreshed `token` header. PixAI *does* expose `token`
+to JS (`Access-Control-Expose-Headers: token, x-intercom-user-jwt, x-country-code, x-msid`,
+verified), but it was absent on a read-only query. If it is present on mutations, every generation
+renews the credential and the owner never pastes again. If not, the fallback is a paste roughly
+every 27 days — which is not the constant-harvest regression he rejected. `refreshToken` (a
+no-argument mutation, in the harvest) is the explicit alternative and is **deliberately untested**:
+rotation could log his browser out mid-session.
+
+### ❌ NOT the fix, and do not re-propose it
+Auto-favouriting each gen via `upsertBookmark`. Rejected by the owner 2026-07-26, and he says he
+disliked it when it was first raised. Bookmarking puts things in the FAVOURITES shelf, not the
+generations library — the wrong shelf. An earlier note recorded it as an agreed plan; that was
+wrong and has been corrected at the source.
+
 ## THE API SURFACE IS NOW HARVESTED WHOLESALE (`tools/harvest_api_surface.py`, 2026-07-26)
 
 Every hand-probe uncovered another layer, so the probing stopped and the whole surface got
