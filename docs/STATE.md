@@ -930,6 +930,98 @@ the install root, and **"a tidy install folder says a lot and implies good desig
 across the suite."** A different job from renaming four modules, so it gets its own pass and
 "rename-only" stays honest.
 
+## CAPTURED SPEC: PixAI's model + LoRA pickers (live capture 2026-07-25)
+
+Read off the running site with the owner driving Chrome, plus a network capture of the picker's
+own calls. Every value here is measured, not inferred. This settles the long-open
+"bookmarked LoRA" question that `private/API_OPERATIONS.md` and a 2026-07-04 recon flatly
+contradicted each other about.
+
+### The two operations, solved
+
+**BOOKMARK tab** — a persisted query, its own operation:
+
+    operation / operationName : listMyBookmarkedGenerationModels
+    variables                 : {modelTypes: ["ANY_LORA"],
+                                 loraBaseModelTypes: ["MMDIT26A_MODEL"],
+                                 first: 36}
+    persistedQuery sha256Hash : 2281653492ff54ef17707104736fd74e7a8d70dc314e024e595f0e71ff2945b9
+
+**MY LORA tab** — NOT a separate operation. The ordinary list, filtered by author:
+
+    operation / operationName : listGenerationModels
+    variables                 : {last: 36, types: ["ANY_LORA"], feed: "trending",
+                                 loraBaseModelTypes: ["MMDIT26A_MODEL"],
+                                 authorId: "<the signed-in user's own id>"}
+    persistedQuery sha256Hash : b7a2d663bc0381dd6eb26f8c68f702cb928bea720982f6f5553ea1629a8e871d
+
+Note the argument names DIFFER between the two and must not be assumed shared: bookmarks take
+`modelTypes` + `first`, the list takes `types` + `last` + `feed`. `feed` is how the sort is
+expressed (`"trending"` for Trending).
+
+### Why our ad-hoc probe said both were ABSENT
+`listMyBookmarkedGenerationModels` probed as *"Cannot query field ... on type Query"* over
+`gql_adhoc`, yet the website calls it successfully. It is reachable **only through the
+persisted-query path** (operation name + sha256Hash + u3t), the same mechanism this repo
+already uses for the listing and task-detail operations — not through an ad-hoc POST document.
+So the contradiction in the private docs was not an error in either: the op is real AND absent
+from the ad-hoc Query root.
+
+**A heuristic that looked clever and was WRONG, recorded so it is not trusted again.** PixAI
+redacts the content of GraphQL's "Did you mean ...?" hint but not its existence, so a probe was
+built treating "absent, but a hint fired" as a near-miss. Two invented names produced hints; the
+REAL name produced none. Driving the browser answered in three clicks what the probe had
+actively misled us about. For a surface the website itself uses, capture the request — do not
+probe the schema.
+
+### Architecture mapping, one confirmed
+**`MMDIT26A_MODEL` = DiT.2** (the picker sent it while Tsubaki.2 was the selected base). Their
+Model Type filter offers **All / DiT.3 / DiT.2 / DiT.1 / SDXL / Community DiT / SD 1.5**, so
+**DiT.3 is a real type we have no enum for** — `LORA_BASE_MODEL_TYPES` carries five values and
+the owner's LoRA-weight ranges (DiT 0..1.2, SD -2..+2) never mentioned DiT.3 either. Treat the
+weight-range table as having a known hole until DiT.3's enum and range are captured the same way.
+
+### Filter vocabulary, read off the UI
+| picker | control | values |
+|---|---|---|
+| base model | tabs | PRESET · MARKET · BOOKMARK |
+| base model | sort (MARKET) | Trending · Most Liked · Most Used · Latest |
+| base model | sort (BOOKMARK) | Oldest · Latest **only** |
+| base model | Model Type | All · DiT.3 · DiT.2 · DiT.1 · SDXL · Community DiT · SD 1.5 |
+| base model | Posted at | All Time · Yesterday · Past 7 Days · Past 30 Days |
+| base model | License Type | All · Allows Commercial Use |
+| LoRA | tabs | MARKET · BOOKMARK · MY LORA |
+| LoRA | sort (MARKET) | Trending · Most Liked · Most Used · Latest |
+| LoRA | sort (BOOKMARK / MY LORA) | Latest, and **no Filters button at all** |
+| LoRA | Source | All · PixAI · External |
+| LoRA | LoRA category | All · Character · Animal · Style · Realistic · Pose · Clothing · Background · Detail Enhancement · Other |
+| LoRA | Posted at / License Type | as base model |
+
+### Gaps against what we ship
+- **They call it `strength`; we label it "Weight."** Their selected-LoRA panel reads
+  `strength (?)` with the value beside a slider. Cheap label-fidelity fix.
+- **`MARKET_CATEGORIES` is short by two** — ours has 7, theirs 10: missing **Animal** and
+  **Realistic** (our `detail` is presumably their *Detail Enhancement*).
+- **No `Source` filter** (PixAI vs External) and **no `License Type` filter** anywhere in our
+  code — zero references to either.
+- **Cap is displayed as `Max Allowed: n/15`** in the form and `Selected LoRAs (n/15)` in the
+  picker, corroborating the `membership.privilege.lora` work.
+- **`Train your own LoRA`** is a first-class button we have no equivalent for.
+- **Bookmark is also an ACTION** on the selected LoRA in the right-hand panel, and
+  **`Manage Bookmarks`** appears on both bookmark tabs.
+- **Incompatible LoRAs are GROUPED, not hidden**: compatible above, then a
+  `Not compatible with the selected model` divider, incompatible greyed below but still listed.
+  A better answer than hiding, and worth copying.
+- The generator form shows **`Est. wait ~26 seconds`** beside Generate — the same queue
+  estimate we shipped in the Job Tracker, in their own words.
+
+### Still uncaptured
+The strength slider's min/max labels (the handle sat at 0.7, consistent with a 0..1.2 DiT
+range), what `Manage Bookmarks` opens, DiT.3's enum token, and the base-model picker's PRESET
+tab (it shows no sort or filter controls). Screenshots live in
+`C:\Users\gwilkins\Desktop\Screenshots for Moonglade refs` along with unread recordings
+(`Model-lora picker`, `Loom issue`) and a `diagrams/` folder.
+
 ## Banked idea: package the assets like an MPQ (possible epic, NOT scoped)
 
 Owner, 2026-07-25. **Explicitly not DRM** — his framing: *"if someone pokes around and just
