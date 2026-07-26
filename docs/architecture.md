@@ -271,6 +271,8 @@ asserts it against a live request, so it is the authority when prose and code di
   their own site, hand/face fixer), *Video* (I2V / FLF / R2V modes, gallery Picker slots with
   @image badges, contenteditable prompt with @image chips,
   model picker, audio toggle, live cost + card count).
+- **Model browse** (`/api/model-search`): `?kind=base|lora`, plus `src=market|bookmark|mine` for WHICH list, and `sort` / `category` / `posted` / `source` / `license` as filters on it. `src` and `source` are different things and their similar names are PixAI's, not ours: `src` picks the list, `source` filters a market list by PixAI-trained vs external. Bookmarks come from `model_bookmarks_gql`, which is a separate operation because the market connection has no bookmark argument; it returns the same row shape via the shared `_market_row`, so the grid cannot tell them apart. Posted-at is built by `posted_at_range`, whose `{"gt": <ISO>}` shape was captured off the live site.
+- **Per-image** (`/api/image-meta/<media_id>`, LOGIN, withholds the local filename; `/api/delete-image`, LOCALHOST) and the library-folder setting (`/api/library-path`, GET LOGIN / POST LOCALHOST, serialised under the accounts lock because config.json also carries the auth epoch).
 - **Picker** (`/api/gallery-images` + `/api/upload`): whole-catalog infinite scroll,
   search, Collection/Source/Rating/Sort filters, upload → media_id.
 - **Tag Suggestions** (`/api/tag-suggest` → GraphQL `tags(q:...)`): Danbooru-style
@@ -320,7 +322,7 @@ asserts it against a live request, so it is the authority when prose and code di
 
 ## Shared web components (`static/`)
 
-Five framework-neutral custom elements (the "Option-A cohesion migration") live in
+Seven framework-neutral custom elements (the "Option-A cohesion migration") live in
 `static/` as plain `mg-*.js` globals — no build step, no shadow DOM, loaded via a plain
 `<script src>` tag, each self-injecting its own `<style>` that reads the shared
 `DESIGN_TOKENS_CSS` custom properties so it re-skins with the rest of the app. Both the
@@ -329,11 +331,13 @@ mount the same files instead of each hand-duplicating the UI:
 
 | File | Element / global | Role |
 |---|---|---|
-| `mg-model-picker.js` | `<mg-model-picker>` | Model/LoRA picker: search box + cover cards + hover preview card |
+| `mg-model-picker.js` | `<mg-model-picker>` | Model/LoRA picker: search box + cover cards + hover preview card. With the opt-in `market` attribute it also renders the browse chrome: a **source** row (Market / Bookmarked / Mine — Mine is LoRA-only), sort, nine category chips, and Posted-at / Source / License dropdowns. Filters are hidden **and not sent** on the bookmark source, which honours only a keyword and the architecture filter |
 | `mg-gallery-picker.js` | `<mg-gallery-picker>` | Whole-catalog image picker modal (search, Collection/Source/Rating/Sort filters, infinite scroll); wraps `picker-core.js` |
 | `mg-generate-drawer.js` | `<mg-generate-drawer>` | The full Generate/Edit/Video form (Multi-ref slots, cost line, submit+poll) |
 | `mg-cost-badge.js` | `<mg-cost-badge>` | The one renderer for "this costs N credits" / "a free card covers it" |
 | `mg-notify.js` | `Ach` / `Toast` / `Jobs` / `JobsCard` (plain globals, not a custom element) | Achievement-toast celebrations, the corner Toast utility, and the Job activity tracker |
+| `mg-art-filters.js` | `AF` (plain global) | Art filters: PixAI's own recipes kept verbatim, plus five derived from this app's skins. Applied locally on a canvas, so they are free and spend nothing |
+| `mg-upscale-panel.js` | `<mg-upscale-panel>` | The image-view upscale surface. Two distinct mechanisms, deliberately not conflated: `enlarge` (ESRGAN, a model choice) and `upscale` (Hires, denoising strength + steps). The ratio cap is computed from the source's own dimensions against the pixel ceiling, not fixed |
 
 `static/picker-core.js` is a sixth file worth knowing about but is not one of the five: it's
 the framework-agnostic browse/filter/paginate/infinite-scroll logic that `mg-gallery-picker`
