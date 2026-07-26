@@ -264,7 +264,9 @@
     '.hall-card .hcd-bar{height:5px;border-radius:3px;background:var(--surface1);margin-top:6px;overflow:hidden;}',
     '.hall-card .hcd-bar i{display:block;height:100%;background:var(--accent);border-radius:3px;}',
     '.hall-card .hcd-bar+.hcd-num{font-size:10px;color:var(--overlay0);margin-top:2px;font-variant-numeric:tabular-nums;}',
-    '.hall-card .hcd-roast{grid-column:1/-1;font-size:10.5px;color:#c9b8e6;line-height:1.4;margin-top:6px;padding:5px 8px;background:rgba(182,146,230,.07);border-left:2px solid var(--lavender);border-radius:0 7px 7px 0;font-style:italic;}',
+    // Scoped to .hall-card originally; the carousel reuses the same class rather than
+    // carrying a second copy of the style, so the selector has to admit both.
+    '.hall-card .hcd-roast,.hall-carousel .hcd-roast{grid-column:1/-1;font-size:10.5px;color:#c9b8e6;line-height:1.4;margin-top:6px;padding:5px 8px;background:rgba(182,146,230,.07);border-left:2px solid var(--lavender);border-radius:0 7px 7px 0;font-style:italic;}',
     '.hall-card .hcd-bannerflag{font-size:10px;color:var(--gold);margin-top:4px;}',
     // 9-slice frame overlay for legendary/feat CARDS (same technique + real served frame
     // assets the unlock toast already uses -- see .ach-m2 .t-legendary .tframe below --
@@ -626,6 +628,18 @@
         +'<div class="hc-eyebrow">'+esc(ladder.name)+'&ensp;&middot;&ensp;'+earnedCount+'/'+ladder.tiers.length+' tiers</div>'
         +'<div class="hc-name">'+esc(tier.name)+'</div>'
         +'<div class="hc-desc">'+esc(tier.desc)+'</div>'
+        // The roast, on the SAME terms as the Folio card (:543) and the unlock toast (:884):
+        // earned only, and the uncensored variant when the toggle is on. The carousel used to
+        // render `desc` and stop, which is why the owner saw every other surface respond to the
+        // toggle and this one sit still -- it had nothing gated to swap.
+        //
+        // Reusing that card's `.hcd-roast` class on purpose: a carousel-specific copy is exactly
+        // how the "written twice and already drifted" problems on the board got started.
+        +(function(){
+          if(!tier.earned) return '';
+          var hot=unleashed()&&tier.roast_nsfw, rr=hot?tier.roast_nsfw:tier.roast;
+          return rr ? '<div class="hcd-roast'+(hot?' hot':'')+'">'+esc(rr)+'</div>' : '';
+        })()
         +'<div class="hc-meta">'+tierPill(tier.tier).replace('hall-tierpill-mini','hc-tierpill')
         +(tier.points?'<span class="hc-ptspill">+'+tier.points+' pts</span>':'')
         +'<span class="hc-thresh">'+esc(fmt(tier.threshold))+(tier.earned&&ea?' &middot; earned '+esc(ea):'')+'</span></div>'
