@@ -9473,6 +9473,13 @@ function savePrompt() {
       {% for u in web_users %}
       <div class="u-row" data-username="{{ u.username }}">
         <span class="u-name">{{ u.username }}{% if u.username == current_username %}<span class="u-you">you</span>{% endif %}</span>
+        {# Resetting SOMEONE ELSE'S password is owner-machine only, and the control is
+           HIDDEN rather than shown-disabled on the LAN (owner's choice 2026-07-26). Your own
+           password is changed through the form below instead, which requires the current one --
+           so there is deliberately no Reset button on your own row. #}
+        {% if panel_is_local and u.username != current_username %}
+        <button type="button" class="btn" onclick="resetUserPassword(this)">Reset password</button>
+        {% endif %}
         {% if panel_is_local or u.username == current_username %}
         <button type="button" class="btn btn-danger" onclick="removeUser(this)">Remove</button>
         {% endif %}
@@ -9481,6 +9488,27 @@ function savePrompt() {
       <div class="p-note" id="users-empty">No accounts.</div>
       {% endfor %}
     </div>
+  </div>
+  <div class="p-sec">
+    <h2>Your password</h2>
+    <form id="own-pw-form" onsubmit="return changeOwnPassword(event)">
+      <div class="setup-row login-fields" style="max-width:380px;">
+        <input type="password" id="pw-current" placeholder="Current password"
+               autocomplete="current-password" required>
+        <input type="password" id="pw-new" placeholder="New password"
+               autocomplete="new-password" required>
+        <input type="password" id="pw-confirm" placeholder="Confirm new password"
+               autocomplete="new-password" required>
+        <button type="submit" class="btn btn-primary">Change password</button>
+      </div>
+    </form>
+    <div id="own-pw-status" style="margin-top:8px;"></div>
+    <div class="p-note">Changing your password signs you out on every OTHER device
+      immediately &mdash; this one stays signed in. Your current password is required even here,
+      so an unlocked browser left open somewhere can't be used to lock you out of your own
+      account.{% if not panel_is_local %} Forgotten it entirely? It can only be reset from the
+      machine running the gallery &mdash; being at that machine is the proof of who you are, which
+      is the job an emailed reset link does elsewhere.{% endif %}</div>
   </div>
   <div class="p-sec">
     <h2>Add user</h2>
@@ -9757,6 +9785,40 @@ function addUser(evt){
       st.innerHTML='<span class="st-done">✓ Account "'+escH2(d.username)+'" created.</span>';
     }).catch(function(){ st.innerHTML='<span class="st-failed">⚠ network error</span>'; });
   return false;
+}
+function changeOwnPassword(evt){
+  evt.preventDefault();
+  var cur=el('pw-current').value, nw=el('pw-new').value, cf=el('pw-confirm').value;
+  var st=el('own-pw-status');
+  // Confirm-match is checked HERE and not server-side on purpose: the route takes one new
+  // password, and a typo in a field the user cannot read back is a client concern.
+  if(nw!==cf){ st.innerHTML='<span class="st-failed">&#9888; The two new passwords do not match.</span>'; return false; }
+  fetch('/api/users/password',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({current_password:cur, new_password:nw, csrf:CSRF})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d.error){ st.innerHTML='<span class="st-failed">&#9888; '+escH2(d.error)+'</span>'; return; }
+      el('pw-current').value=''; el('pw-new').value=''; el('pw-confirm').value='';
+      st.innerHTML='<span class="st-done">&#10003; Password changed. Other devices have been signed out.</span>';
+    }).catch(function(){ st.innerHTML='<span class="st-failed">&#9888; network error</span>'; });
+  return false;
+}
+function resetUserPassword(btn){
+  // Username off the row's data attribute, never a templated JS argument -- see addUser().
+  // Reusing the row also means the name is never re-typed, so the wrong account cannot be
+  // reset by a typo.
+  var row=btn.closest('.u-row');
+  var username=row.getAttribute('data-username');
+  var nw=prompt('Set a new password for "'+username+'".\\n\\nThey will be signed out on every device immediately.');
+  if(nw===null) return;                       // cancelled
+  nw=String(nw);
+  if(!nw.trim()){ return; }
+  var st=el('add-user-status');
+  fetch('/api/users/password',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:username, new_password:nw, csrf:CSRF})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d.error){ st.innerHTML='<span class="st-failed">&#9888; '+escH2(d.error)+'</span>'; return; }
+      st.innerHTML='<span class="st-done">&#10003; Password reset for "'+escH2(username)+'". They have been signed out.</span>';
+    }).catch(function(){ st.innerHTML='<span class="st-failed">&#9888; network error</span>'; });
 }
 function removeUser(btn){
   // Read the username back off the row's data attribute rather than a
