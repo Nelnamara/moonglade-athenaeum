@@ -2089,7 +2089,13 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
 
 # Model-Market categories the GraphQL `generationModels` connection actually honors (probed
 # 2026-07-04). NOTE 'concept' is NOT a real server value (returns empty) -- excluded.
-MARKET_CATEGORIES = ("character", "style", "pose", "clothing", "background", "detail", "other")
+# PixAI's own nine, in their own order. Confirmed 2026-07-26 from the training page, where
+# their category dropdown is currently rendering RAW i18n keys
+# ("market:lora-categories.animal.label", ...) -- a bug on their side that handed over the
+# canonical list. We were short two: **animal** and **realistic**. `detail` is their
+# "Detail Enhancement".
+MARKET_CATEGORIES = ("character", "animal", "style", "realistic", "pose", "clothing",
+                    "background", "detail", "other")
 
 # GenerationModelType enum members this app is willing to put INTO a query document, for
 # generationModels(loraBaseModelTypes:[...]) -- see model_search_market_gql's lora_base_type
@@ -2108,9 +2114,82 @@ MARKET_CATEGORIES = ("character", "style", "pose", "clothing", "background", "de
 LORA_BASE_MODEL_TYPES = ("SDXL_MODEL", "SD_V1_MODEL", "DIT7B_MODEL", "MMDIT26A_MODEL",
                          "DIT9_MODEL")
 
+# Their "Source" filter (All / PixAI / External) is NOT a separate argument -- it is expressed
+# through `types`. Read straight out of their ModelFilter chunk, which maps the UI value to an
+# enum member and back:
+#     .with({type:"lora", source:"pixai"},    () => [AnyUserLora])
+#     .with({type:"lora", source:"external"}, () => [AnyNonUserLora])
+# and the tokens themselves are in the bundle: ANY_LORA / ANY_USER_LORA / ANY_NON_USER_LORA
+# (ANY_SDXL_LORA and ANY_NON_SDXL_LORA also exist, unused here).
+#
+# A LoRA the OWNER trained carries type USER_MULTI_LORA -- seen on his own rows -- which is why
+# "PixAI" means user-trained and "External" means uploaded from elsewhere.
+LORA_SOURCE_TYPES = {
+    "": "",                          # All -- send no `types` at all, preserving today's behaviour
+    "pixai": "ANY_USER_LORA",
+    "external": "ANY_NON_USER_LORA",
+}
+
+# Their License Type filter has exactly ONE meaningful value. Their handler is literally
+#     onChange: r => a("permittedUse", r === "COMMERCIAL" ? "COMMERCIAL" : undefined)
+# so it is COMMERCIAL or the argument is omitted. PermittedUse:COMMERCIAL was also observed on a
+# real row. The data behind it is extra.permissions{personalUses, commercialUses,
+# shareImagesOnline, shouldCreditAuthor}.
+PERMITTED_USES = ("COMMERCIAL",)
+
+# CORRECTION, 2026-07-26. Comments in this file state that "an enum cannot be a $variable", which
+# is why `loraBaseModelTypes` is interpolated behind a whitelist. That claim is WRONG: PixAI's own
+# query documents declare `$types: [GenerationModelType]`, `$permittedUse: PermittedUse` and
+# `$loraBaseModelTypes: [GenerationModelType!]` and bind them normally. Verified by reading their
+# documents (tools/harvest_api_surface.py).
+#
+# So the filters added below are BOUND VARIABLES, never interpolated -- caller text cannot reach
+# the query document at all, which is strictly safer than interpolating it after a whitelist
+# check. The whitelists stay, for a different reason worth keeping: an unrecognised value is
+# DROPPED so the search runs unfiltered (fail-open), rather than binding a bad enum and having the
+# server reject the whole query. That is the behaviour the existing filters promise and the picker
+# depends on. The older interpolated path is left alone deliberately -- it works, it is guarded,
+# and rewriting it is a separate change with its own risk.
+
+
+def _market_row(n):
+    """One `generationModels`-shaped node -> the picker's row dict.
+
+    Extracted 2026-07-26 so the BOOKMARK tab returns rows that are IDENTICAL to MARKET's, field
+    for field. Two near-copies of a 20-field dict is how a picker ends up rendering a card that
+    silently loses its architecture badge on one tab only."""
+    lv = n.get("latestVersion") or {}
+    return {
+        "title": n.get("title") or "",
+        "type": n.get("type") or "",
+        "model_id": str(n.get("id") or ""),
+        "liked_count": int(n.get("likedCount") or 0),
+        "should_blur": bool(n.get("isNsfw")),
+        "preview_url": _model_preview_url(n.get("media")),
+        "has_version": bool(lv.get("id")),
+        # REST-only rich fields absent here -> empty so the card hides them.
+        "description": "", "base_model": "", "curations": [], "official": False,
+        "comment_count": 0, "ref_count": 0, "author_id": "",
+        "cover_url": _model_preview_url(n.get("media")),
+        # GraphQL-only extras.
+        "tags": [t.get("name") for t in (n.get("tags") or []) if t.get("name")][:8],
+        "author": (n.get("author") or {}).get("displayName") or "",
+        "created_at": n.get("createdAt") or "",
+        # Architecture, for LoRA compat sort/badging (annotate_lora_compat) -- '' when
+        # the connection has no version yet, same empty-string convention as everywhere
+        # else in this file (never None, so a naive .strip()/comparison never explodes).
+        "model_type": lv.get("modelType") or "",
+        "lora_base_model_type": lv.get("loraBaseModelType") or "",
+        # Per-viewer state (GraphQL-only). Always a real bool -- a node that omits the
+        # field yields False, never None, same never-None rule as the two fields above.
+        "bookmarked": bool(n.get("bookmarked")),
+        "liked": bool(n.get("liked")),
+    }
+
 
 def model_search_market_gql(session, keyword="", category="", sort="", usage="MODEL", limit=24,
-                            after=None, lora_base_type=""):
+                            after=None, lora_base_type="", author_id="",
+                            source="", permitted_use="", time_range=None):
     """Market-style model browse via the GraphQL `generationModels` connection, which -- unlike
     the REST /search -- actually HONORS `category` and a date `orderBy`. Use this for category
     chips + a Newest sort; the REST path (model_search_rest) stays the default for keyword/Popular
@@ -2197,6 +2276,44 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
         args.append("after:$a")
         var_decl += ",$a:String"
         variables["a"] = after
+
+    # --- picker-parity round 3 (2026-07-26). All BOUND variables, all fail-open: an
+    # unrecognised value is dropped and the search runs unfiltered rather than being rejected.
+    #
+    # authorId is the whole "MY LORA" tab -- their own MY LORA is this same connection filtered
+    # by the signed-in user's id, not a separate operation.
+    au = str(author_id or "").strip()
+    if au:
+        args.append("authorId:$au")
+        var_decl += ",$au:ID"
+        variables["au"] = au
+
+    # Source -> `types`. Only sent when a source is explicitly chosen; "All" sends nothing, so
+    # the default request is byte-for-byte what it was before this change.
+    src = str(source or "").strip().lower()
+    src_enum = LORA_SOURCE_TYPES.get(src, "")
+    if want_lora and src_enum:
+        args.append("types:$ty")
+        var_decl += ",$ty:[GenerationModelType]"
+        variables["ty"] = [src_enum]
+
+    pu = str(permitted_use or "").strip().upper()
+    if pu in PERMITTED_USES:
+        args.append("permittedUse:$pu")
+        var_decl += ",$pu:PermittedUse"
+        variables["pu"] = pu
+
+    # timeRange takes a DateRange input object. Its FIELD NAMES are not yet captured -- they are
+    # not in any query document (input types never are) and the one promising bundle hit turned
+    # out to be an unrelated error payload. So this passes the caller's dict straight through and
+    # omits the argument entirely when there is nothing to send. Nothing constructs a DateRange
+    # here on a guess: a wrong shape would be a rejected query, and the picker must never break
+    # on a filter. Capture the shape from one live request (set Posted at -> Past 7 Days with the
+    # network tab open and read `timeRange`), then the only change needed is in the caller.
+    if isinstance(time_range, dict) and time_range:
+        args.append("timeRange:$tr")
+        var_decl += ",$tr:DateRange"
+        variables["tr"] = time_range
     q = ("query(" + var_decl + "){ generationModels(" + ", ".join(args) + "){ "
          "pageInfo{ hasNextPage endCursor } edges { node { id title type isNsfw "
          "likedCount bookmarked liked "
@@ -2212,37 +2329,146 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
             continue
         if not want_lora and (is_lora or "VIDEO" in mtype):
             continue
-        lv = n.get("latestVersion") or {}
-        out.append({
-            "title": n.get("title") or "",
-            "type": n.get("type") or "",
-            "model_id": str(n.get("id") or ""),
-            "liked_count": int(n.get("likedCount") or 0),
-            "should_blur": bool(n.get("isNsfw")),
-            "preview_url": _model_preview_url(n.get("media")),
-            "has_version": bool(lv.get("id")),
-            # REST-only rich fields absent here -> empty so the card hides them.
-            "description": "", "base_model": "", "curations": [], "official": False,
-            "comment_count": 0, "ref_count": 0, "author_id": "",
-            "cover_url": _model_preview_url(n.get("media")),
-            # GraphQL-only extras.
-            "tags": [t.get("name") for t in (n.get("tags") or []) if t.get("name")][:8],
-            "author": (n.get("author") or {}).get("displayName") or "",
-            "created_at": n.get("createdAt") or "",
-            # Architecture, for LoRA compat sort/badging (annotate_lora_compat) -- '' when
-            # the connection has no version yet, same empty-string convention as everywhere
-            # else in this file (never None, so a naive .strip()/comparison never explodes).
-            "model_type": lv.get("modelType") or "",
-            "lora_base_model_type": lv.get("loraBaseModelType") or "",
-            # Per-viewer state (GraphQL-only). Always a real bool -- a node that omits the
-            # field yields False, never None, same never-None rule as the two fields above.
-            "bookmarked": bool(n.get("bookmarked")),
-            "liked": bool(n.get("liked")),
-        })
+        out.append(_market_row(n))
     page_info = data.get("pageInfo") or {}
     has_more = bool(page_info.get("hasNextPage"))
     return {"results": out, "has_more": has_more,
             "next_cursor": (page_info.get("endCursor") or "") if has_more else ""}
+
+
+# Derived offline from PixAI's own bundle and validated against three hashes seen on real
+# requests (tools/harvest_api_surface.py). Only the FALLBACK needs it -- the ad-hoc path below
+# carries its own document, so a rotated hash cannot break the primary route.
+BOOKMARKED_MODELS_OP = "listMyBookmarkedGenerationModels"
+BOOKMARKED_MODELS_HASH = "2281653492ff54ef17707104736fd74e7a8d70dc314e024e595f0e71ff2945b9"
+
+_BOOKMARK_NODE_FIELDS = (
+    "id title type isNsfw likedCount bookmarked liked "
+    "latestVersion { id modelType loraBaseModelType } media { id urls { url } } "
+    "tags { name } author { displayName } createdAt")
+
+
+def model_bookmarks_gql(session, keyword="", usage="MODEL", limit=24, after=None,
+                        lora_base_type=""):
+    """The owner's BOOKMARKED models/LoRAs, in the SAME row shape as model_search_market_gql.
+    Read-only, spends nothing.
+
+    `listMyBookmarkedGenerationModels` is an operation NAME, not a field: its document queries
+    `me { bookmarkedGenerationModels(...) }`. An earlier probe asked whether the operation name
+    existed on type Query, got "Cannot query field ... on type Query", and that was recorded as
+    "reachable ONLY through the persisted-query path". It does not follow -- the name was never a
+    field, and `me` is plainly reachable ad-hoc (resolve_user_id uses `query{ me{ id } }`).
+
+    So this tries AD-HOC first with our own projection, and falls back to the persisted GET with
+    the derived hash only if that is refused. Two reasons for that order: the ad-hoc document
+    cannot rot when PixAI redeploys, and it lets us request exactly the fields a row needs instead
+    of their much larger fragment. `_last_path` records which route served, so a caller (or a
+    test) can tell without guessing.
+
+    The field accepts the same filters MARKET does -- keyword, modelTypes, loraBaseModelTypes,
+    loraBaseModelIds -- plus full before/after/first/last paging, so the bookmark tab is not a
+    stripped-down list. Note their own UI hides its Filters button on this tab while keeping the
+    architecture filter live, which is consistent with what the arguments allow."""
+    want_lora = (usage or "MODEL").upper() == "LORA"
+    kw = (keyword or "").strip()
+    after = (after or "").strip()
+    lbt = (lora_base_type or "").strip().upper()
+
+    args = ["first:$n"]
+    var_decl = "$n:Int"
+    variables = {"n": int(limit)}
+    if kw:
+        args.append("keyword:$k")
+        var_decl += ",$k:String"
+        variables["k"] = kw
+    if after:
+        args.append("after:$a")
+        var_decl += ",$a:String"
+        variables["a"] = after
+    if want_lora:
+        # ANY_LORA is what their own bookmark request sends for the LoRA tab.
+        args.append("modelTypes:$mt")
+        var_decl += ",$mt:[GenerationModelType]"
+        variables["mt"] = ["ANY_LORA"]
+    if want_lora and lbt in LORA_BASE_MODEL_TYPES:
+        args.append("loraBaseModelTypes:$lb")
+        var_decl += ",$lb:[GenerationModelType!]"
+        variables["lb"] = [lbt]
+
+    q = ("query(" + var_decl + "){ me { id bookmarkedGenerationModels(" + ", ".join(args)
+         + "){ totalCount pageInfo{ hasNextPage endCursor } edges { node { "
+         + _BOOKMARK_NODE_FIELDS + " } } } } }")
+
+    conn, path = None, ""
+    try:
+        data = gql_adhoc(session, q, variables) or {}
+        conn = ((data.get("me") or {}).get("bookmarkedGenerationModels")) or {}
+        path = "adhoc"
+    except PixAIError as e:
+        vlog("bookmarks: ad-hoc refused ({}); trying the persisted hash".format(e))
+        conn = _bookmarks_persisted(session, variables, want_lora, lbt, kw, after, int(limit))
+        path = "persisted"
+
+    out = []
+    for e in conn.get("edges") or []:
+        n = e.get("node") or {}
+        mtype = (n.get("type") or "").upper()
+        is_lora = "LORA" in mtype
+        # A bookmark list mixes base models and LoRAs exactly as the market connection does, so
+        # the same split applies -- otherwise the LoRA tab shows base models and vice versa.
+        if want_lora and not is_lora:
+            continue
+        if not want_lora and (is_lora or "VIDEO" in mtype):
+            continue
+        out.append(_market_row(n))
+
+    page_info = conn.get("pageInfo") or {}
+    has_more = bool(page_info.get("hasNextPage"))
+    return {"results": out, "has_more": has_more,
+            "next_cursor": (page_info.get("endCursor") or "") if has_more else "",
+            "total": conn.get("totalCount"), "_path": path}
+
+
+def _bookmarks_persisted(session, variables, want_lora, lbt, kw, after, limit):
+    """Fallback: the same query over the persisted-GET path, using the derived hash.
+
+    Their document names its variables differently from our ad-hoc one, so the payload is rebuilt
+    rather than reusing `variables` -- passing `n`/`mt`/`lb` to a document expecting
+    `first`/`modelTypes`/`loraBaseModelTypes` would fail for a reason that looks like a
+    permissions problem and would send the next person down the wrong path entirely."""
+    v = {"first": limit}
+    if kw:
+        v["keyword"] = kw
+    if after:
+        v["after"] = after
+    if want_lora:
+        v["modelTypes"] = ["ANY_LORA"]
+    if want_lora and lbt in LORA_BASE_MODEL_TYPES:
+        v["loraBaseModelTypes"] = [lbt]
+    params = {
+        "operation": BOOKMARKED_MODELS_OP,
+        "u3t": U3T or "",
+        "operationName": BOOKMARKED_MODELS_OP,
+        "variables": json.dumps(v, separators=(",", ":")),
+        "extensions": json.dumps(
+            {"clientLibrary": CLIENT_LIBRARY,
+             "persistedQuery": {"version": 1, "sha256Hash": BOOKMARKED_MODELS_HASH}},
+            separators=(",", ":")),
+    }
+    r = session.get(API_URL, params=params, timeout=60)
+    try:
+        body = r.json()
+    except ValueError:
+        raise PixAIError("bookmarks: HTTP {} non-JSON response".format(r.status_code))
+    if body.get("errors"):
+        blob = json.dumps(body["errors"])[:400]
+        if "PersistedQueryNotFound" in blob:
+            raise PixAIError(
+                "bookmarks: the persisted hash has rotated. Re-run "
+                "`python tools/harvest_api_surface.py fetch` then `extract` to re-derive it "
+                "-- the hashes are computed from PixAI's own bundle, so this is self-healing.")
+        raise PixAIError("bookmarks: " + blob)
+    return ((body.get("data") or {}).get("me") or {}).get("bookmarkedGenerationModels") or {}
 
 
 def _empty_version_meta():
