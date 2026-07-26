@@ -2125,6 +2125,35 @@ LORA_BASE_MODEL_TYPES = ("SDXL_MODEL", "SD_V1_MODEL", "SD3_MEDIUM_MODEL",
 #   * "All" sends types:["ANY_MODEL"] -- it does not omit the argument.
 #   * It is MULTI-SELECT. Choosing DiT.3 then DiT.1 sent types:["MMDIT26B_MODEL","DIT7_MODEL"].
 #     A single-value control here would silently be the wrong shape.
+# PixAI's four market sorts, every value captured off a live request 2026-07-26. `feed` selects
+# the backend ranking and `orderBy` the field within it; Trending needs no orderBy because the
+# trending feed IS the ordering.
+#
+# `markInfo.refCount` is the "uses" figure printed on their cards -- the same field identified
+# earlier as the number on a card -- so Most Used is genuinely most-used, not most-liked again.
+#
+# One difference deliberately NOT copied: their trending and latest feeds page BACKWARD
+# (`last`/`before`) while meilisearch pages forward (`first`/`after`). This app pages forward
+# everywhere, which the connection accepts for all four, and switching direction per sort would
+# mean two cursor conventions in one picker for no user-visible gain.
+MARKET_SORTS = {
+    "trending":   ("trending", ""),
+    "liked":      ("meilisearch", "-markInfo.likedCount"),
+    "used":       ("meilisearch", "-markInfo.refCount"),
+    "newest":     ("latest", "-createdAt"),
+}
+# What the old two-button UI sent, kept working so an older client or a bookmarked URL does not
+# silently lose its sort.
+MARKET_SORT_ALIASES = {"popular": "trending", "latest": "newest", "": "trending"}
+
+
+def market_sort(name):
+    """(feed, orderBy) for a sort name, falling back to Trending for anything unrecognised."""
+    key = (name or "").strip().lower()
+    key = MARKET_SORT_ALIASES.get(key, key)
+    return MARKET_SORTS.get(key, MARKET_SORTS["trending"])
+
+
 # ALL SEVEN MEASURED off live requests (2026-07-26) -- none is inferred from its name.
 MODEL_TYPE_FILTERS = (
     ("All", "ANY_MODEL"),
@@ -2323,8 +2352,12 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
     args = ["keyword:$k", "first:$n"]
     if cat in MARKET_CATEGORIES:
         args.append('category:"%s"' % cat)
-    if (sort or "").strip().lower() == "newest":
-        args.append('orderBy:"-createdAt"')
+    # Sort is a FEED plus an orderBy, both from a fixed table -- safe to interpolate, and an
+    # unrecognised name falls back to Trending rather than producing a broken query.
+    feed, order_by = market_sort(sort)
+    args.append('feed:"%s"' % feed)
+    if order_by:
+        args.append('orderBy:"%s"' % order_by)
     # Server-side architecture filter -- LoRA searches only (there is nothing to filter a
     # base-model list by). The value is a BARE ENUM TOKEN, unquoted: [MMDIT26A_MODEL], never
     # ["MMDIT26A_MODEL"]. Passing them as strings is a type error the server rejects, and
