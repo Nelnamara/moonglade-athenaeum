@@ -1017,6 +1017,25 @@ disliked it when it was first raised. Bookmarking puts things in the FAVOURITES 
 generations library — the wrong shelf. An earlier note recorded it as an agreed plan; that was
 wrong and has been corrected at the source.
 
+## DECIDED: which of PixAI's community features Moonglade gets (owner, 2026-07-26)
+
+The whole surface is mapped -- 39 operations with hashes, from
+`tools/harvest_api_surface.py`. The owner picked from that list rather than from a proposal:
+
+| capability | verdict | note |
+|---|---|---|
+| **Like / react** | **YES** | `markGenerationModel` / `markArtwork` share one shape: `($id, $type, $target)`. So liking a LoRA and liking an image are ONE function with a different id, not two features. `liked` already comes back on every picker row, so this lights up a field we already fetch. |
+| **Bookmark write** | **YES** | Read is shipped. Write is `upsertBookmark` + `updateBookmarkItem`, so you can bookmark from our picker instead of bouncing to their site. |
+| **Follow** | **YES** | The owner's only wanted social link, and specifically because of the model-market click-through below — follow/unfollow a creator whose page you just opened. `setFollowState($userId, $target, $private)`. |
+| **Publish** | **YES** | Epic C, already roadmapped. Their publish page still needs capturing; note their MOBILE app offers a Mio-powered helper that writes the description for you, which is worth seeing before we design ours. |
+| **Notifications** | **YES** | `listMyNotifications`. Pairs with the training page's credit-rebate promise — it is how you would learn someone used your LoRA. |
+| **Comments** | **NO, and solved differently** | There is no post/read/delete comment operation in their bundle at all — all three comment ops are *turnstile* (anti-bot) controls. So it was never optional, it was absent. The owner's answer is better than building anything: comments live on a model's MARKET PAGE, so make a selected model in the Generate panel **clickable through to that page** and their social side stays theirs. Same instinct as reusing the Loom's existing controls rather than inventing UI. |
+| **Block / report** | **NO** | Moderation tools for a site we do not host. Owner: "Not going to be flagging my OWN work." |
+
+**The click-through is the piece that makes the rest small.** With it, we never build a comment
+surface, a creator feed, or a moderation queue — one link covers all three, and follow/unfollow is
+the only social write we own.
+
 ## THE API SURFACE IS NOW HARVESTED WHOLESALE (`tools/harvest_api_surface.py`, 2026-07-26)
 
 Every hand-probe uncovered another layer, so the probing stopped and the whole surface got
