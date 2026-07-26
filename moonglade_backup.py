@@ -2111,8 +2111,28 @@ MARKET_CATEGORIES = ("character", "animal", "style", "realistic", "pose", "cloth
 # newly-added architecture must degrade to "no server-side filter" (the per-row
 # annotate_lora_compat badge still tells the truth), never to a rejected query that would
 # break LoRA browsing outright.
-LORA_BASE_MODEL_TYPES = ("SDXL_MODEL", "SD_V1_MODEL", "DIT7B_MODEL", "MMDIT26A_MODEL",
-                         "DIT9_MODEL")
+LORA_BASE_MODEL_TYPES = ("SDXL_MODEL", "SD_V1_MODEL", "SD3_MEDIUM_MODEL",
+                         "DIT7_MODEL", "DIT7A_MODEL", "DIT7B_MODEL", "DIT7C_MODEL",
+                         "DIT7D_MODEL", "DIT9_MODEL",
+                         "MMDIT26A_MODEL", "MMDIT26B_MODEL", "USER_DIT26A_MODEL",
+                         "Z_IMAGE_V1_MODEL")
+
+# Their Model Type filter, as a label -> enum mapping. The first four rows are MEASURED off live
+# requests (drove their base-model picker 2026-07-26 and read what it sent); the last two are
+# inferred from the naming and are marked as such rather than presented as fact.
+#
+# Two behaviours of their filter worth copying, both observed rather than assumed:
+#   * "All" sends types:["ANY_MODEL"] -- it does not omit the argument.
+#   * It is MULTI-SELECT. Choosing DiT.3 then DiT.1 sent types:["MMDIT26B_MODEL","DIT7_MODEL"].
+#     A single-value control here would silently be the wrong shape.
+MODEL_TYPE_FILTERS = (
+    ("All", "ANY_MODEL"),                    # measured
+    ("DiT.3", "MMDIT26B_MODEL"),             # measured
+    ("DiT.2", "MMDIT26A_MODEL"),             # measured
+    ("DiT.1", "DIT7_MODEL"),                 # measured
+    ("SDXL", "SDXL_MODEL"),                  # inferred from the naming, not captured
+    ("SD 1.5", "SD_V1_MODEL"),               # inferred from the naming, not captured
+)
 
 # Their "Source" filter (All / PixAI / External) is NOT a separate argument -- it is expressed
 # through `types`. Read straight out of their ModelFilter chunk, which maps the UI value to an
@@ -4356,12 +4376,31 @@ DEFAULT_GEN_MODEL = "1983308862240288769"  # Tsubaki.2 v1 (override with --model
 # -2..2 slider offered DiT weights PixAI rejects. Negative weights subtract a LoRA's
 # influence and are legal on the SD architectures only.
 LORA_WEIGHT_STEP = 0.1
+# The owner's rule, given 2026-07-25: every DiT family is 0..1.2; only SD1.5 and SDXL are
+# -2..+2. Extended 2026-07-26 once the full enum was enumerated from PixAI's bundle -- this table
+# held five architectures when there are twenty-five members, and the fallback for an unrecognised
+# one is the SD range, so a DiT LoRA was being offered -2..+2 against a real ceiling of 1.2.
+#
+# DIT7_MODEL is the important addition: it is what their picker sends for "DiT.1", and only
+# DIT7B_MODEL was listed here, so the commonest DiT case was very likely already falling through.
 LORA_WEIGHT_RANGES = {
-    "DIT7B_MODEL":    (0.0, 1.2),
-    "DIT9_MODEL":     (0.0, 1.2),
-    "MMDIT26A_MODEL": (0.0, 1.2),
-    "SD_V1_MODEL":    (-2.0, 2.0),
-    "SDXL_MODEL":     (-2.0, 2.0),
+    # DiT, every variant in the bundle -- 0..1.2.
+    "DIT7_MODEL":        (0.0, 1.2),
+    "DIT7A_MODEL":       (0.0, 1.2),
+    "DIT7B_MODEL":       (0.0, 1.2),
+    "DIT7C_MODEL":       (0.0, 1.2),
+    "DIT7D_MODEL":       (0.0, 1.2),
+    "DIT9_MODEL":        (0.0, 1.2),   # "Community DiT" in their UI
+    "MMDIT26A_MODEL":    (0.0, 1.2),   # DiT.2 / Tsubaki.2
+    "MMDIT26B_MODEL":    (0.0, 1.2),   # DiT.3 -- had no entry at all before today
+    "USER_DIT26A_MODEL": (0.0, 1.2),   # a user-TRAINED DiT.2, which is what the owner's own are
+    # Stable Diffusion -- the only two the owner specified as -2..+2.
+    "SD_V1_MODEL":       (-2.0, 2.0),
+    "SDXL_MODEL":        (-2.0, 2.0),
+    # DELIBERATELY ABSENT: SD3_MEDIUM_MODEL and Z_IMAGE_V1_MODEL. Both are real members, but the
+    # owner's ranges never covered them, and they fall through to the widest range on purpose --
+    # narrowing a slider on a guess would remove a capability the account may really have, while
+    # a value the architecture rejects merely surfaces as a refused submit, which costs nothing.
 }
 # The union, used as the hard sanity bound in _lora_params (which sees a version id and a
 # number, never an architecture) and as the fallback for an unknown or not-yet-picked base.
