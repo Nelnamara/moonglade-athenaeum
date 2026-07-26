@@ -17,6 +17,39 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The art-filters panel could reopen itself over a closed drawer, and could swallow its own
+  confirmation.** Two bugs in the same pair of actions, both only reachable across the upload:
+  **Save to library** and **Send to image gen** closed the panel by calling its *toggle*, and
+  nothing disables the panel's own close paths while a multi-megabyte PNG uploads — the
+  ✕, the scrim and the global Escape all stay live. Dismiss it mid-upload and the resolve
+  handler put it back, floating over the gallery with no drawer behind it. Both also read the
+  filter's name *after* the upload, and the tiles and **No filter** stay clickable, so the
+  name could have changed or been cleared — and an unknown id answers `null` by design,
+  which made `.name` throw inside a promise success handler where its own error handler
+  cannot catch it. The upload landed, the panel closed, the source switched, and no toast or
+  error ever appeared.
+
+- **A destructive delete could be retried, despite promising not to be.**
+  `delete_batch_media_gql` has documented SINGLE ATTEMPT since it was written, but it called
+  a shared helper that defaults to three retries and re-POSTs on a network error or a
+  429/5xx — and a read timeout can arrive *after* PixAI has already processed the delete.
+  The promise was prose; it is now enforced, and asserted rather than assumed.
+
+- **A failed bulk fetch reported a number and nothing else.** A 17,289-task metadata backfill
+  came back "1,245 fetched, 16,044 failed" with not one reason attached, because worker
+  exceptions were discarded outright — so a 93%-failure run was indistinguishable from a
+  successful one apart from the digits, and the same total covers a rotated hash, an expired
+  key, a rate limit and a deleted task. Failures are now tallied **by reason**, and a
+  majority-failure run says plainly that nothing already fetched was lost and that re-running
+  it unchanged will fail the same way.
+
+- **`--delay` was ignored entirely once `--workers` was above 1.** The reasoning was that
+  "concurrency itself paces" — it does not: eight threads firing as fast as they complete
+  is a burst, not a paced request stream, and being polite to PixAI's servers is not
+  something that should switch itself off because a flag was passed. The pool now honours
+  `--delay` as a global floor between request starts, so raising `--workers` buys latency
+  hiding up to that ceiling rather than a bigger burst.
+
 - **The Activity card said "Generated" about a job that was still queued.** The stored label
   is the *completion* wording — the drawer passes it at submit time — so an in-flight card
   read in the past tense for the whole wait. In-progress rows now read **Generating /

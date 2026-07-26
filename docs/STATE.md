@@ -779,6 +779,28 @@ reads as zero accounts and drops the install into bootstrap mode.
 
 ## Next
 
+### Documentation debt, deliberately deferred to after the naming pass (2026-07-25)
+
+The naming pass renames the modules these files are thick with, so updating them now would be
+paying twice. Measured exposure: `wiki/Generating.md` 17 `pixai_*` references,
+`docs/architecture.md` 11. What is owed, specifically:
+
+- **`docs/architecture.md`** knows none of wave 2's surfaces. Zero mentions of
+  `/api/image-meta`, `/api/delete-image`, `/api/library-path`, `static/mg-upscale-panel.js`
+  or `resolve_library_dir` — so both its route table and its "Shared web components"
+  section are incomplete, on top of the renames.
+- **`wiki/Generating.md`** has the new Upscale section but will need every command example
+  re-pointed.
+
+Already reconciled and NOT owed: `CHANGELOG.md` (four entries that the per-wave passes had
+missed were added — the two filters-panel review bugs, the delete mutation's single-attempt
+enforcement, the failure-reason tally and the pool pacing), `docs/AUDIT_2026-07-21.md` (the
+HIGH `upscale-boosters-are-plain-params` row still read "PARTIALLY DONE — do not close" and
+"the PLACEMENT is wrong", which had become the opposite of true; closed), `wiki/Deleting.md`
+(it described cloud deletion as task-level only — a safety page under-describing a live
+irreversible action, so it was done despite the deferral), and this file.
+
+
 ### Documentation
 
 - **The wiki backlog is closed — and branding/mascots stays deliberately undocumented there
