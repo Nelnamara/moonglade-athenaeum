@@ -1074,6 +1074,34 @@ Enhance Adept became unearnable. Move it there later if the creator ships.
   owner has two) and first generation mirrored to the PixAI library — only become meaningful once
   training and the JWT toggle are real. Minting them early repeats the Enhance Adept mistake.
 
+## ❌ DECIDED, PERMANENTLY: no email, and no logged-out password reset (owner, 2026-07-26)
+
+**This will read like a gap to any audit. It is not.** There is no `smtplib`, no SMTP config and no
+mail path anywhere in the project — verified, not assumed — and a "forgot password?" link on the
+login page is deliberately never going to exist.
+
+The reasoning, so it does not have to be re-derived:
+
+**Physical access to the server machine IS the out-of-band identity proof.** That is exactly the job
+an emailed reset link performs in a hosted app: prove you control a channel outside the login. Being
+at the machine proves it more strongly, and this app is locally hosted with closed registration, so
+the channel is already there.
+
+**Without an out-of-band channel, a logged-out reset would be a vulnerability rather than a
+feature.** Any device on the LAN could trigger a reset against the owner's account. Adding email to
+close that would mean SMTP credentials living in `config.json` beside `AUTH_SECRET_KEY`,
+deliverability problems on a home network, and a token-expiry surface to get wrong — all to replace
+walking to the machine.
+
+So the recovery story is complete as it stands, and it is three sentences:
+- **Know your password** → change it from anywhere, Panel → Users → Your password.
+- **Forgot it** → someone at the server machine resets it, Panel → Users → Reset password.
+- **You are the only account and you forgot it** → `--add-web-user` at the machine, whose
+  add-or-update semantics still double as a reset. That CLI path is kept for exactly this case.
+
+Related and consistent: web signup is closed by design, and invite links were deferred on the same
+reasoning (2026-07-20). Do not propose email as a way to reopen either.
+
 ## SCOPED: "Under the Hood" — the easter egg that unlocks custom branding
 
 **The gate IS the feature.** Recorded emphatically because I proposed removing it and had to be
