@@ -6127,6 +6127,12 @@ document.addEventListener('DOMContentLoaded', function(){
   .lora-chip img{width:24px;height:24px;border-radius:4px;object-fit:cover;flex:0 0 auto;}
   .lora-chip .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .lora-chip input{width:58px;background:var(--surface1);border:1px solid var(--overlay0);border-radius:4px;color:var(--text);font-size:11.5px;padding:2px 4px;}
+  /* The weight control: a slider plus its own value. `.lora-chip input` above still
+     exists for anything else in a chip, and these out-specify it for the range. */
+  .lora-chip .lw{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
+  .lora-chip .lw input[type=range]{width:92px;padding:0;background:none;border:none;}
+  .lora-chip .lw b{min-width:32px;text-align:right;font-size:11px;font-weight:600;
+    color:var(--lavender);font-variant-numeric:tabular-nums;}
   .lora-chip .rm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:14px;padding:0 2px;}
   .lora-chip select.ver{flex:1 1 100%;margin-top:1px;background:var(--surface1);border:1px solid var(--overlay0);border-radius:4px;color:var(--text);font-size:10.5px;padding:2px 4px;}
   .lora-chip .rm:hover{color:var(--red);}
@@ -7355,7 +7361,12 @@ var Gen = (function(){
           +'</select>') : '';
       d.innerHTML=(l.preview_url?'<img src="'+esc(l.preview_url)+'" alt="">':'')
         +'<span class="nm" title="'+titleAttr+'">'+esc(l.title)+badge+'</span>'
-        +'<input type="number" step="0.05" min="0" max="2" value="'+l.weight+'" title="Weight" onchange="Gen.loraWeight('+i+', this.value)">'
+        // A slider with its value beside it, rather than a spinner you have to click 40
+        // times to cross the range. `oninput` (not onchange) so the number tracks the drag,
+        // and the cost re-check behind it is already debounced.
+        +'<span class="lw"><input type="range" step="0.1" min="-2" max="2" value="'+l.weight
+        +'" title="Weight \\u2014 PixAI allows -2 to 2; negative subtracts this LoRA\\u2019s influence"'
+        +' oninput="Gen.loraWeight('+i+', this.value)"><b>'+(+l.weight).toFixed(1)+'</b></span>'
         +'<button type="button" class="rm" title="Remove" onclick="Gen.loraRemove('+i+')">&times;</button>'
         +verSel;
       box.appendChild(d);
@@ -7380,7 +7391,16 @@ var Gen = (function(){
     updateGoState();   // the cap can arrive (or change) after LoRAs are already picked
   }
   function loraWeight(i, v){ if(!loras[i]) return;
-    v=parseFloat(v); loras[i].weight=(isNaN(v)?0.7:Math.max(0,Math.min(2,v))); debouncedCost(); }
+    v=parseFloat(v);
+    // -2, not 0: negative weights are legal on PixAI and this clamp was silently making
+    // half their range unreachable.
+    loras[i].weight=(isNaN(v)?0.7:Math.max(-2,Math.min(2,v)));
+    // Repaint the readout in place rather than re-rendering the chip list -- rebuilding the
+    // row mid-drag would destroy the very slider the pointer is holding.
+    var chip=el('gen-loras')&&el('gen-loras').children[i];
+    var out=chip&&chip.querySelector('.lw b');
+    if(out) out.textContent=loras[i].weight.toFixed(1);
+    debouncedCost(); }
   // Note (O12): removing a LoRA via its chip's own x no longer re-searches the picker grid
   // (there IS no search() anymore -- see the ensurePickers block above). The LoRA picker's
   // OWN card for the removed entry can stay visually highlighted until the user interacts

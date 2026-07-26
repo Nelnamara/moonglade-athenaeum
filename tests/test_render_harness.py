@@ -710,6 +710,60 @@ def test_the_upscale_panel_derives_its_ratio_cap_from_the_real_picture(logged_in
     assert not hires["upscalerShown"], "Hires has no upscaler dropdown"
 
 
+def test_choosing_a_model_scrolls_the_picker_into_view(logged_in_page):
+    """Owner report, from the lightbox flyout: "asks me to choose a model but a picker does
+    not open."
+
+    It did open. The panel scrolls (overflow:auto) and the Model row sits near the bottom, so
+    mounting the picker without moving to it put the whole thing BELOW the fold -- the click
+    looked like it did nothing. Measured before the fix in that exact flyout: the panel was
+    711px tall in an 828px box with the picker appended past the visible area.
+
+    This asserts the OUTCOME -- the picker ends up inside the panel's visible box -- rather
+    than that scrollIntoView was called, because the first is what the owner experiences.
+    """
+    # A SHORT viewport on purpose: the panel is max-height:calc(100vh - 72px), so it only
+    # scrolls -- and can therefore only hide the picker -- once its content exceeds that.
+    # At 1280x900 it fits whole and the bug does not reproduce, which is exactly why the
+    # first version of this test passed against the broken build.
+    page = logged_in_page(width=1280, height=420)
+    _visit(page, "/")
+    page.evaluate("() => openLightbox(null, 1)")        # media 101: no model -> offers the picker
+    page.wait_for_selector("#lightbox.open", state="attached")
+    page.click("#lb-upscale")
+    page.wait_for_selector("mg-upscale-panel[open]", state="attached")
+    _settle(page)
+    page.evaluate("""() => {
+      const p = document.getElementById('up-flyout');
+      const b = [...p.querySelectorAll('button')].find(x => /choose a model/i.test(x.textContent));
+      b.click();
+    }""")
+    page.wait_for_selector("#up-flyout mg-model-picker", state="attached")
+    _settle(page)
+    page.wait_for_timeout(500)                          # the scroll is smooth + rAF-deferred
+    m = page.evaluate("""() => {
+      const p = document.getElementById('up-flyout');
+      const el = p.querySelector('mg-model-picker');
+      const pr = p.getBoundingClientRect(), er = el.getBoundingClientRect();
+      return {picker: {top: er.top, bottom: er.bottom, h: er.height},
+              panel: {top: pr.top, bottom: pr.bottom},
+              // How much of the picker is ACTUALLY on screen. "its top edge is inside the
+              // box" is not enough: measured against the broken build at this viewport, the
+              // top edge sat 9px above the panel's bottom edge -- technically inside, and
+              // nine pixels of a 254px control is not a picker anyone can see or use.
+              shown: Math.max(0, Math.min(pr.bottom, er.bottom) - Math.max(pr.top, er.top)),
+              zIndex: getComputedStyle(p).zIndex};
+    }""")
+    assert m["picker"]["h"] > 40, "the picker mounted with no height"
+    assert m["shown"] >= 120, (
+        "only {:.0f}px of the picker is on screen (it sits at y={:.0f}, the panel's visible "
+        "box is {:.0f}..{:.0f}) -- it opened below the fold, which reads as nothing "
+        "happening".format(m["shown"], m["picker"]["top"], m["panel"]["top"],
+                           m["panel"]["bottom"]))
+    # It must also be ABOVE the lightbox it is opened over, not behind the picture.
+    assert int(m["zIndex"]) > 300, "the flyout is behind the lightbox overlay"
+
+
 def test_the_upscale_panel_offers_a_picker_when_the_model_is_unknown(logged_in_page):
     """An upscale is an i2i generation and every generation needs a model. Row 101 has none --
     the state a catalog that has never been swept is in, and the permanent state of anything
@@ -1068,5 +1122,7 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
     assert seen["gallery"] == seen["loom"], (
         "the shared Activity tray renders the queued state DIFFERENTLY on the two hosts:\n"
         "  gallery: {!r}\n  loom:    {!r}".format(seen["gallery"], seen["loom"]))
+
+
 
 

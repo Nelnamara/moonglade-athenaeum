@@ -982,6 +982,56 @@ def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker):
     assert rows["m2"]["prompt_full"] == "kept" and rows["m2"]["seed"] == "77"
 
 
+def test_a_freshly_captured_generation_gets_its_model_NAME_not_just_its_id(monkeypatch, tmp_path):
+    """extract_full_meta fills model_name only for a CHAT task (Edit/Fix, resolved locally
+    from EDIT_MODELS). For an ordinary generation it is blank and the caller must fill it --
+    which --backfill-full-meta did and the live capture did not, so every image captured as
+    it was generated showed a raw 19-digit model id on its detail page until a backfill
+    happened past. Reported from the owner's own gallery: "Model 1983308862240288769".
+    """
+    assert core._resolved_model_name(object(), {"model_name": "Reference Pro"}, "1") ==         "Reference Pro", "a chat task's locally-resolved label must win"
+    monkeypatch.setattr(core, "model_name_gql", lambda s, mid: "Tsubaki .2")
+    assert core._resolved_model_name(object(), {}, "1983308862240288769") == "Tsubaki .2"
+    assert core._resolved_model_name(object(), {}, "") == "", "no id, nothing to resolve"
+
+    def boom(s, mid):
+        raise core.PixAIError("lookup down")
+
+    monkeypatch.setattr(core, "model_name_gql", boom)
+    assert core._resolved_model_name(object(), {}, "1") == "", (
+        "a failed lookup must cost the label, never the row")
+
+
+def test_the_backfill_separates_errors_from_tasks_that_carried_no_prompt(tmp_path, mocker,
+                                                                         capsys):
+    """One number covered two unrelated things: the fetch threw, or it returned fine and
+    simply carried no prompt (a deleted task, or a kind that records none). Those have
+    completely different answers, and a single "157 failed" had us guessing twice."""
+    from pixai_gallery import save_catalog, CATALOG_FIELDS
+
+    base = {f: "" for f in CATALOG_FIELDS}
+    save_catalog(tmp_path / "catalog.db",
+                 [base | {"media_id": "m%d" % i, "task_id": "t%d" % i,
+                          "filename": "%d.png" % i} for i in range(4)])
+    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
+    mocker.patch.object(core, "model_name_gql", side_effect=lambda s, m: "M")
+    mocker.patch.object(core, "resolve_loras", side_effect=lambda s, t: "")
+
+    def detail(_s, tid):
+        if tid == "t0":
+            raise core.PixAIError("HTTP 429 rate limited")
+        if tid == "t1":
+            return {"parameters": {"prompts": "real"}, "outputs": {}}
+        return {"parameters": {}, "outputs": {}}          # fetched fine, no prompt
+
+    mocker.patch.object(core, "task_detail_gql", side_effect=detail)
+    core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    out = capsys.readouterr().out
+    assert "Why they failed:" in out and "429" in out, "the real error must be named"
+    assert "carried no prompt" in out, (
+        "the two tasks that returned fine must not be reported as errors")
+
+
 def test_parallel_map_reports_failures_instead_of_swallowing_them():
     """A worker's exception used to be discarded outright (`except Exception: res = None`).
 

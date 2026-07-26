@@ -439,6 +439,45 @@ def test_the_upscale_panel_reuses_the_generate_routes(tmp_path):
         "those are not badge methods; calling them fails silently")
 
 
+def test_lora_weight_spans_pixais_real_range_on_every_surface(tmp_path):
+    """PixAI's Advanced panel bounds LoRA weight at -2..2, step 0.1, and NEGATIVE weights are
+    legal there -- a LoRA at a negative weight subtracts its influence.
+
+    Ours was a number spinner clamped at 0, so half of their range was unreachable: this was
+    a capability gap hiding behind a widget choice, not only a styling preference. Both
+    surfaces must agree, because both submit through the same builder.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = login_client(tmp_path).get("/").get_data(as_text=True)
+    assert 'type="range" step="0.1" min="-2" max="2"' in html
+    assert 'step="0.05" min="0" max="2"' not in html, "the old 0..2 spinner survives"
+    assert "Math.max(-2,Math.min(2,v))" in html, "the handler still clamps negatives away"
+
+    # The Loom's Image tab shares the model, so it must share the control.
+    jsx = (root / "loom" / "master-storyboard.jsx").read_text(encoding="utf-8")
+    assert 'type="range" step="0.1" min="-2" max="2"' in jsx
+    # ...and the SHIPPED bundle must actually carry it. A source-only assertion passes
+    # happily against a stale dist/ that no rebuild ever touched.
+    bundle = (root / "loom" / "dist" / "master-storyboard.bundle.js").read_text(
+        encoding="utf-8", errors="replace")
+    assert 'min: "-2"' in bundle and 'type: "range"' in bundle, (
+        "the Loom bundle is stale -- run `npm run build --prefix loom`")
+
+
+def test_core_clamps_the_lora_weight_to_pixais_bounds():
+    """The last place before the submit. A value outside PixAI's own range is a rejected
+    generation, not a stronger effect, so it is clamped here the same way the upscale ratio
+    is -- and NOT clamped at 0, which would silently discard a legal negative weight."""
+    assert (core.LORA_WEIGHT_MIN, core.LORA_WEIGHT_MAX) == (-2.0, 2.0)
+    m, lst = core._lora_params([("v1", -0.8), ("v2", 5), ("v3", -9), ("v4", "0.55")])
+    assert m["v1"] == -0.8, "a legal negative weight was clamped away"
+    assert m["v2"] == 2.0 and m["v3"] == -2.0, "out-of-range weights must clamp to the bounds"
+    assert m["v4"] == 0.55
+    assert {e["versionId"]: e["weight"] for e in lst} == m, "the two shapes disagree"
+
+
 def test_drawer_ratio_cap_agrees_with_the_python_one(tmp_path):
     """The drawer carries a HAND PORT of max_upscale_ratio/upscale_output_dims so the
     slider can show a live max and output size without a round-trip. Run the real ported

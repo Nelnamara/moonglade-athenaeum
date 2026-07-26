@@ -557,6 +557,9 @@ const V2_STYLES = `
 .lv-loratoggle{display:inline-block;margin:7px 0 5px;}
 .lv-loracap{margin-left:8px;font-size:10.5px;color:var(--subtext);}
 .lv-loracap.over{color:var(--coral);font-weight:600;}
+.lv-lw{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
+.lv-lw input[type=range]{width:92px;padding:0;background:none;border:none;}
+.lv-lw b{min-width:32px;text-align:right;font-size:11px;font-weight:600;color:var(--amber);font-variant-numeric:tabular-nums;}
 .lv-loras{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
 .lv-lchip{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:5px 7px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
 .lv-lchip.failed{border-color:var(--coral);}
@@ -1621,10 +1624,17 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                     title={incompat ? l.title + " — needs a different base architecture than the one selected; remove it or switch the base" : l.title}>
                     {l.title}{!l.version_id ? (l.failed ? " ⚠" : " ⏳") : (incompat ? " ⚠" : "")}
                   </span>
-                  <input type="number" step="0.05" min="0" max="2" value={l.weight}
-                    title="Weight"
-                    onChange={(ev) => { const w = +ev.target.value || 0;
-                      setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x)); }} />
+                  {/* Slider, and -2..2 -- PixAI's own Advanced panel allows negative
+                      weights (a LoRA at a negative weight subtracts its influence) and the
+                      old min=0 made half their range unreachable. Matches the gallery
+                      drawer's control exactly; the two surfaces share this model. */}
+                  <span className="lv-lw">
+                    <input type="range" step="0.1" min="-2" max="2" value={l.weight}
+                      title="Weight — PixAI allows -2 to 2; negative subtracts this LoRA's influence"
+                      onChange={(ev) => { const w = Math.max(-2, Math.min(2, +ev.target.value || 0));
+                        setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x)); }} />
+                    <b>{(+l.weight).toFixed(1)}</b>
+                  </span>
                   <button type="button" className="lv-lrm" title="Remove"
                     onClick={() => setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id))}>×</button>
                   {/* Per-LoRA version selection: only when this LoRA actually has more than one

@@ -15,7 +15,40 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Upscale flyout's model picker opened where you couldn't see it.** Reported from the
+  lightbox: "asks me to choose a model but a picker does not open." It did open — below the
+  fold. The flyout is 420px wide, which makes it 709px of content tall, and it is capped at
+  `100vh - 72px` with its own scrollbar, so on any window shorter than about 780px the picker
+  mounted outside the visible area and the click read as doing nothing. Measured at a 420px
+  window: **9 pixels of a 254px control on screen**. It now scrolls the panel so the picker
+  lands at the top, and focuses its search box. The Details page never showed this because
+  that panel is wide, and therefore short enough not to scroll.
+
+- **A freshly generated image showed a raw model id instead of the model's name.**
+  `extract_full_meta` only fills `model_name` for a chat task (Edit/Fix, resolved from the
+  local table); for an ordinary generation it is blank and the caller has to look it up —
+  which `--backfill-full-meta` did and the live capture never did. So every image captured as
+  it was generated read `Model 1983308862240288769` on its detail page until a backfill
+  happened past it. Now resolved at capture time, through the same process-wide cache, so it
+  costs one call per distinct model for a whole run rather than one per image.
+
+- **`--backfill-full-meta` counted two unrelated things as "failed".** A fetch that threw and
+  a fetch that returned fine but carried no prompt (a deleted task, or a kind that records
+  none) landed in one number, so a run reporting "157 failed" gave no way to tell which had
+  happened — and the two have completely different answers. They are counted and reported
+  apart now.
+
 ### Changed
+
+- **LoRA weight is a slider, and it spans PixAI's real range.** It was a number spinner
+  clamped to 0–2; PixAI's own Advanced panel allows **−2 to +2** in steps of 0.1, and a
+  negative weight subtracts that LoRA's influence. Half their range was unreachable — a
+  capability gap hiding behind a widget choice. Both surfaces got the same control (the
+  Generate drawer and the Loom's Image tab), and the value is clamped to those bounds in the
+  builder too, since a value outside them is a rejected generation rather than a stronger
+  effect.
 
 - **You can now delete a single image from PixAI, instead of its whole batch.** The
   gallery's existing **Delete from PixAI** is task-level: deleting any one image takes every

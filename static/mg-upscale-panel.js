@@ -380,6 +380,32 @@
         self._price();
       });
       this._pickHost.appendChild(this._picker);
+      // The panel scrolls (overflow:auto, and it is tall once the picker is in it), and the
+      // Model row sits near the bottom -- so revealing the picker without moving to it puts
+      // it BELOW the fold and the click reads as "nothing happened". Reported from the
+      // lightbox flyout, where the panel is only 420px wide and correspondingly taller.
+      // Deferred a frame so the element has been laid out before we scroll to it.
+      var host = this._pickHost;
+      requestAnimationFrame(function () {
+        // 'start', not 'nearest'. `nearest` scrolls the MINIMUM distance, which on a short
+        // window leaves the picker's top edge just inside the box and 33px of a 254px
+        // control on screen -- measured. Sending it to the top of the scroll container is
+        // what actually shows the thing that was just opened.
+        // Scroll the panel itself rather than asking scrollIntoView to work it out. In the
+        // flyout the panel IS the scroll container (position:fixed + overflow:auto), and
+        // scrollIntoView moved it 24px and stopped -- 33px of a 254px control on screen,
+        // measured. Setting scrollTop puts the picker's top at the panel's top outright.
+        // The inline mount is not a scroll container, so it falls through to the page.
+        if (self.scrollHeight > self.clientHeight + 1) {
+          self.scrollTop = Math.max(0, host.offsetTop - self.offsetTop - 8);
+        } else {
+          try { host.scrollIntoView({ block: 'nearest' }); } catch (e) { /* older engines */ }
+        }
+        // Same courtesy the Generate drawer's own picker does on open: land in the search
+        // box, so the next keystroke goes where it obviously should.
+        var q = host.querySelector('.mg-q');
+        if (q && q.focus) q.focus();
+      });
     }
 
     // ---- open / close ------------------------------------------------------------------
