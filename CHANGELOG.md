@@ -15,6 +15,35 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Changed
+
+- **Full metadata is now captured by default on every pull, and the catalog can finally
+  tell you how much of it is missing.** Prompt, seed, steps, sampler, CFG and model were
+  the one thing you only got by asking for them (`--full-meta`), so a plain run or
+  `--update` created rows that could not say which model made them — and nothing surfaced
+  that until something needed one. It is the default now; `--no-full-meta` is the explicit
+  opt-out for a faster pull, and `--full-meta` stays accepted so existing commands, scripts
+  and the Control Panel's whitelisted jobs keep working unchanged. The cost is one extra
+  call per unique **task**, not per image — a four-image batch shares one call, model
+  names were already cached, and LoRAs ride along in the same response.
+
+  `--catalog-stats` now reports **metadata coverage** — per field, with the number of
+  unique tasks a sweep would have to fetch, since that is what it actually costs — and
+  `/health` gains a **Model known %** tile beside its existing Full-meta %. Both were
+  needed because the old numbers only ever described *files*: a stats screen could say
+  "35,133 entries, all downloaded" about a catalog in which not one row knew its model.
+  `loras` is deliberately left out of the report — a generation with no LoRAs stores that
+  column blank too, so a blank one cannot be told apart from one never fetched.
+
+- **`--backfill-full-meta` no longer skips rows that have a prompt but nothing else.** It
+  used `prompt_full` as its only sentinel for "this row is complete", so a row holding a
+  prompt and a seed while holding no model, steps, sampler or CFG was skipped by every
+  backfill, forever — the sweep printed "Nothing to backfill" and the gap stayed exactly
+  where it was. Measured on a real catalog before the fix: **788 of 800 rows had a prompt,
+  5 had a model id**, and a backfill was a no-op. It now also refetches any row carrying
+  none of the four detail-only fields, reports how many such rows it found, and settles —
+  a filled row is not refetched on the next run.
+
 ### Added
 
 - **Five art filters of our own, derived from the skins — and the filters panel is a

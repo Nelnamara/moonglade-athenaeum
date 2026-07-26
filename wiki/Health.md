@@ -2,7 +2,16 @@
 
 The **`/health`** page is your analytics dashboard over `catalog.db`:
 
-- Storage used, full-meta coverage %, missing files, uncataloged files, total likes.
+- Storage used, **Full-meta %** and **Model known %**, missing files, uncataloged files,
+  total likes.
+
+> **Two coverage numbers, not one.** *Full-meta* counts rows that have a prompt. *Model
+> known* counts rows that have a model id — which only ever comes from a per-task detail
+> fetch, and is what an image-view upscale needs. They can differ enormously: a catalog can
+> read 98% full-meta while 1% of its rows can say which model made them, because a prompt
+> and a seed can arrive without the rest. If the second number is low, run
+> `--backfill-full-meta`. Locally imported files are left out of *Model known* — they have
+> no PixAI task behind them, so they can never carry a model.
 - Images-by-month.
 - Top models, top LoRAs, top tags.
 - A prompt word-cloud.

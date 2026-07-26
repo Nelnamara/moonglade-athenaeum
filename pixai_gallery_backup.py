@@ -6823,11 +6823,63 @@ def run_catalog_stats(args):
         print("Credits tracked     : {:,} spent across {:,} tasks ({:,} free)".format(
             sum(task_cost.values()), len(task_cost),
             sum(1 for v in task_cost.values() if v == 0)))
+    _print_meta_coverage(rows, total)
     disk_count, disk_bytes, thumb_count = _count_backup_images(out)
     if disk_count:
         print("Image files on disk : {}  ({})".format(disk_count, _format_size(disk_bytes)))
     if thumb_count:
         print("  + {} preview thumbnails (gallery/thumbs, not originals)".format(thumb_count))
+
+
+# Columns whose EMPTINESS unambiguously means "never fetched". Deliberately NOT `loras`
+# or `negative_prompt`: a generation with no LoRAs and no negative prompt stores those blank
+# too, so a blank one cannot be told apart from one that was never filled, and reporting them
+# as a coverage gap would send you off to re-fetch tasks that are already complete.
+#
+# `paid_credit` IS unambiguous despite free generations existing -- a free task stores "0",
+# and only a never-tracked one stores "".
+_META_COVERAGE = (
+    ("full metadata", "prompt_full", "--backfill-full-meta"),
+    ("model id", "model_id", "--backfill-full-meta"),
+    ("model name", "model_name", "--backfill-full-meta"),
+)
+
+
+def _print_meta_coverage(rows, total):
+    """How much of the catalog actually carries its metadata, and what a sweep would cost.
+
+    Without this the stats screen can say "35,133 entries, all downloaded" about a catalog in
+    which not one row knows which model made it -- the counters only ever described FILES.
+    Coverage is what decides whether a sweep is due, and the unique-task count is what it
+    costs: metadata is fetched once per task, so a 4-image batch is one call, not four.
+    """
+    if not total:
+        return
+    print("Metadata coverage   :")
+    worst_missing_tasks = 0
+    for label, col, fix in _META_COVERAGE:
+        have = sum(1 for r in rows if (r.get(col) or "").strip())
+        gap = [r for r in rows if not (r.get(col) or "").strip()]
+        tasks = len({r.get("task_id") for r in gap if r.get("task_id")})
+        worst_missing_tasks = max(worst_missing_tasks, tasks)
+        line = "  {:<17}: {:,} / {:,} ({:.0f}%)".format(label, have, total,
+                                                        100.0 * have / total)
+        if gap:
+            line += "  -- {:,} missing across {:,} tasks".format(len(gap), tasks)
+        print(line)
+    # Locally imported files have no PixAI task behind them, so they can NEVER carry a model
+    # and are not a gap to chase. Counted separately rather than silently deflating the
+    # percentages above, which would make a complete catalog look permanently short.
+    local = sum(1 for r in rows if (r.get("source") or "").strip() == "local")
+    if local:
+        print("  {:<17}: {:,} imported locally -- no PixAI task, so no model to fetch"
+              .format("of which", local))
+    if worst_missing_tasks:
+        print("  Fill them with    : --backfill-full-meta --workers 8"
+              "   (resumable; skips rows already filled)")
+    costed = sum(1 for r in rows if (r.get("paid_credit") or "").strip())
+    if costed < total:
+        print("  Cost history      : add --with-credit to recover spend on older tasks")
 
 
 def _parallel_map(items, work_fn, workers=1, progress=None, delay=0.0):
@@ -6934,8 +6986,22 @@ def run_backfill_full_meta(args):
     # getTaskById returns paidCredit for historical tasks, so rows cataloged before
     # cost tracking existed can recover their real spend. Opt-in, like --with-loras,
     # because it re-fetches every not-yet-costed task (long run on a big catalog).
+    # These four come ONLY from a getTaskById fetch -- the listing feed carries neither.
+    # A row holding none of them has never seen a task detail, whatever else it holds.
+    _DETAIL_ONLY = ("model_id", "steps", "sampler", "cfg_scale")
+
     def _needs(r):
         if not r.get("prompt_full"):
+            return True
+        # prompt_full alone is NOT proof the detail was fetched. Rows exist carrying a
+        # prompt and a seed and nothing else -- no model, no steps, no sampler, no CFG --
+        # and while prompt_full was the sole sentinel every one of them was skipped
+        # forever: the sweep printed "Nothing to backfill" over a catalog that could not
+        # say which model made any of it. Measured on a real catalog before this changed:
+        # 788/800 rows had a prompt, 5/800 had a model id, and a backfill was a no-op.
+        # A task that genuinely returns none of the four is re-fetched on a later sweep
+        # too; that is a bounded, idempotent cost, and far cheaper than the silence.
+        if not any((r.get(c) or "").strip() for c in _DETAIL_ONLY):
             return True
         if with_loras and r.get("task_id") and not r.get("loras"):
             return True
@@ -6943,10 +7009,17 @@ def run_backfill_full_meta(args):
             return True
         return False
     needs_fill = [r for r in rows if _needs(r)]
+    # Named separately in the count below because it is the case that used to be invisible.
+    stalled = [r for r in needs_fill
+               if r.get("prompt_full")
+               and not any((r.get(c) or "").strip() for c in _DETAIL_ONLY)]
     task_ids = list(dict.fromkeys(r["task_id"] for r in needs_fill if r.get("task_id")))
     print("Found {:,} rows to fill across {:,} unique tasks{}{}.".format(
         len(needs_fill), len(task_ids), " (incl. LoRAs)" if with_loras else "",
         " (incl. credit costs)" if with_credit else ""))
+    if stalled:
+        print("  {:,} of them have a prompt but no model/steps/sampler/CFG -- these were "
+              "skipped by every earlier backfill.".format(len(stalled)))
     if not task_ids:
         print("Nothing to backfill.")
         return
@@ -7640,11 +7713,24 @@ def main():
     ap.add_argument("--dry-run", action="store_true",
                     help="with --organize / --organize-adv / --undo-organize, show the "
                          "plan without moving anything")
-    ap.add_argument("--full-meta", action="store_true",
-                    help="fetch full prompt, seed, steps, sampler, CFG, and model name for each "
-                         "task via a second API call (TASK_DETAIL_HASH + MODEL_DETAIL_HASH ship with "
-                         "working defaults; no config.json setup needed). One extra call per unique "
-                         "task; batch images share one call.")
+    # ON BY DEFAULT since 2026-07-25. This is a backup tool whose point is the catalog, and
+    # full metadata was the one thing you only got by asking: a plain run or --update left
+    # rows with no prompt, no seed and no model, and the gap was invisible until something
+    # needed it. (Measured on the owner's own library: a stats screen reporting "35,133
+    # entries, all downloaded" over rows that could not say which model made them.) --sync
+    # has always implied it; now every pull does, and the flag stays accepted so existing
+    # scripts, docs and the Panel's whitelisted argv keep working unchanged.
+    ap.add_argument("--full-meta", dest="full_meta", action="store_true", default=True,
+                    help="(now the DEFAULT) fetch full prompt, seed, steps, sampler, CFG and "
+                         "model name for each task via a second API call. One extra call per "
+                         "unique task -- a batch's images share one call. Kept as an explicit "
+                         "flag so existing commands and scripts still work.")
+    ap.add_argument("--no-full-meta", dest="full_meta", action="store_false",
+                    help="skip the per-task metadata call: faster pull, but the catalog rows "
+                         "it creates carry no prompt, seed or model until a later "
+                         "--backfill-full-meta fills them in. On a first backup of a large "
+                         "history this is the quicker route -- the pull's metadata fetch is "
+                         "serial, while --backfill-full-meta --workers N is parallel.")
     ap.add_argument("--backfill-meta", action="store_true",
                     help="fill in missing url/width/height in catalog.db via resolve_media "
                          "for rows that lack them, then exit")

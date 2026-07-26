@@ -2321,6 +2321,15 @@ def collection_health(out_dir, db_path):
         total_rows   = _scalar("SELECT COUNT(*) FROM catalog")
         with_image   = _scalar("SELECT COUNT(*) FROM catalog WHERE filename != ''")
         with_full    = _scalar("SELECT COUNT(*) FROM catalog WHERE COALESCE(prompt_full,'') != ''")
+        # prompt_full alone overstates it badly. A row can hold a prompt and a seed while
+        # holding no model, steps, sampler or CFG -- so this panel read 98% on a catalog
+        # where 1% of rows could say which model made them. model_id is the honest second
+        # number: it comes only from a task-detail fetch, and it is what an image-view
+        # upscale needs. Locally imported rows have no PixAI task and so can never carry
+        # one; they are excluded rather than counted as a permanent shortfall.
+        with_model   = _scalar("SELECT COUNT(*) FROM catalog WHERE COALESCE(model_id,'') != ''")
+        model_base   = _scalar("SELECT COUNT(*) FROM catalog "
+                               "WHERE COALESCE(source,'') != 'local'")
         rated        = _scalar("SELECT COUNT(*) FROM catalog "
                                "WHERE COALESCE(NULLIF(rating,''),'0') NOT IN ('0')")
         by_month = con.execute(
@@ -2409,6 +2418,8 @@ def collection_health(out_dir, db_path):
         "with_image": with_image,
         "with_full_meta": with_full,
         "full_meta_pct": round(100 * with_full / with_image) if with_image else 0,
+        "with_model": with_model,
+        "model_pct": round(100 * with_model / model_base) if model_base else 0,
         "rated": rated,
         "missing": missing,
         "uncataloged": len(uncataloged),
@@ -8920,6 +8931,7 @@ function savePrompt() {
     {{ stat('Storage used', h.total_size_h) }}
     {{ stat('Catalog rows', '{:,}'.format(h.catalog_rows)) }}
     {{ stat('Full-meta', h.full_meta_pct|string + '%') }}
+    {{ stat('Model known', h.model_pct|string + '%') }}
     {{ stat('Rated', '{:,}'.format(h.rated)) }}
     {{ stat('Published', '{:,}'.format(h.published)) }}
     {{ stat('Total likes', '{:,}'.format(h.total_likes)) }}
