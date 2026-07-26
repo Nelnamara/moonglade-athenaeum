@@ -86,24 +86,27 @@ def _embedding_fn():
     when it cannot open the existing one, so the orphaned index was replaced by an empty one with
     no exception raised anywhere.
 
-    The header's original objection to the built-in was speed: it ran on CPU at roughly 13 img/s.
-    That may no longer hold -- it now selects a device itself, and torch reports CUDA available
-    here -- but it is an empirical claim and NOT verified in this change. If a rebuild crawls,
-    set MG_SIMILAR_EMBED=custom and rebuild again; the fallback stays wired for exactly that.
-    A rebuild is required either way for the fix to take effect, since the stored reference only
-    changes when the index is recreated."""
-    import os
-    if (os.environ.get("MG_SIMILAR_EMBED") or "").strip().lower() == "custom":
-        return clip_gpu
-    try:
-        from pixeltable.functions.huggingface import clip as _builtin_clip
-    except Exception:
-        return clip_gpu                      # older pixeltable, or a moved symbol -- degrade
+    THERE IS DELIBERATELY NO FALLBACK TO clip_gpu, and restoring one would reintroduce a live
+    failure. Measured 2026-07-26 on the production install:
+
+        RequestError: The function `clip_gpu` is not a valid image embedding:
+                      it must take a single image parameter
+
+    A Pixeltable upgrade tightened embedding-function validation, and `clip_gpu` is a BATCHED udf
+    (Batch[Image] -> Batch[Array]) which the new index code refuses. That is what actually broke
+    "More like this" -- not the module rename, which was the first and wrong diagnosis. The stored
+    index metadata became undeserialisable, so `get_table` AND `create_table` both failed, the
+    latter because resolving a path collision loads the same unreadable metadata.
+
+    So preferring the built-in is load-bearing rather than tidy: it takes a single image and
+    passes validation. `clip_gpu` is kept below only because the batched-GPU technique is worth
+    not losing, and because it documents why the custom path existed -- it is no longer reachable
+    from here on purpose."""
+    from pixeltable.functions.huggingface import clip as _builtin_clip
     try:
         return _builtin_clip.using(model_id=MODEL)
-    except Exception:
-        # Signature differs across versions; a bare reference is still rename-proof, which is
-        # the whole point of preferring it.
+    except TypeError:
+        # `using` signature differs across versions; a bare reference still validates.
         return _builtin_clip
 
 
@@ -198,7 +201,24 @@ def rebuild(items, progress=None, batch: int = 400):
     table. Drops the sidecar table (plus any stale dev-probe tables), forgets the cached
     handle, then a fresh sync() recreates ONE clean named index and re-embeds every image.
     Returns rows inserted (skipped-row count on sync.last_errors, via sync())."""
-    for name in (_TBL, "mg_probe.imgs", "mg_probe2.imgs", "mg_probe4.imgs"):
+    # Drop failures used to be swallowed here, which is how a broken table survived a
+    # "rebuild": the drop failed, sync() then hit the same unreadable metadata, and the job
+    # reported a confusing downstream error instead of the real one. The MAIN table's failure is
+    # now raised with instructions; the dev-probe tables stay best-effort, since their absence is
+    # normal and their presence is incidental.
+    try:
+        pxt.drop_table(_TBL, force=True, if_not_exists="ignore")
+    except Exception as e:
+        raise RuntimeError(
+            "Could not drop the existing similarity index, so it cannot be rebuilt in place: "
+            "{}. This happens when the stored index metadata is no longer readable by the "
+            "installed Pixeltable -- every API call that touches the table, including the drop, "
+            "has to load that metadata first. Clear Pixeltable's store directory "
+            "(~/.pixeltable) and run this again. That directory holds this index plus Pixeltable's "
+            "own media and file caches -- roughly 300 MB here -- and every byte of it is "
+            "regenerable from the image library, so clearing it loses no original data."
+            .format(e)) from e
+    for name in ("mg_probe.imgs", "mg_probe2.imgs", "mg_probe4.imgs"):
         try:
             pxt.drop_table(name, force=True, if_not_exists="ignore")
         except Exception:
