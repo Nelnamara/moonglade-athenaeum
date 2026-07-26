@@ -2336,14 +2336,22 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
         var_decl += ",$au:ID"
         variables["au"] = au
 
-    # Source -> `types`. Only sent when a source is explicitly chosen; "All" sends nothing, so
-    # the default request is byte-for-byte what it was before this change.
+    # `types` is ALWAYS sent, which is what their own pickers do -- LoRA tabs send ANY_LORA even
+    # with Source set to All, and the base-model tab sends ANY_MODEL. Both were read off live
+    # requests.
+    #
+    # This is a fix, not just parity. We used to send no `types` at all and filter by row type in
+    # Python after the fetch, so asking for 24 could yield a mixed page and hand the grid far
+    # fewer once the wrong kind was discarded -- short pages, almost certainly the "scrolls a few
+    # rows and stops" report. Filtering server-side means a full page of the kind actually wanted.
+    #
+    # An explicit Source (PixAI-trained / external) narrows further and replaces ANY_LORA; their
+    # own MY LORA request pairs ANY_LORA with authorId exactly as this does.
     src = str(source or "").strip().lower()
-    src_enum = LORA_SOURCE_TYPES.get(src, "")
-    if want_lora and src_enum:
-        args.append("types:$ty")
-        var_decl += ",$ty:[GenerationModelType]"
-        variables["ty"] = [src_enum]
+    src_enum = LORA_SOURCE_TYPES.get(src, "") if want_lora else ""
+    args.append("types:$ty")
+    var_decl += ",$ty:[GenerationModelType]"
+    variables["ty"] = [src_enum or ("ANY_LORA" if want_lora else "ANY_MODEL")]
 
     pu = str(permitted_use or "").strip().upper()
     if pu in PERMITTED_USES:
@@ -2433,11 +2441,12 @@ def model_bookmarks_gql(session, keyword="", usage="MODEL", limit=24, after=None
         args.append("after:$a")
         var_decl += ",$a:String"
         variables["a"] = after
-    if want_lora:
-        # ANY_LORA is what their own bookmark request sends for the LoRA tab.
-        args.append("modelTypes:$mt")
-        var_decl += ",$mt:[GenerationModelType]"
-        variables["mt"] = ["ANY_LORA"]
+    # Same reasoning as the market path: ask for the kind we want rather than discarding the
+    # wrong kind afterwards, so a bookmark page arrives full. ANY_LORA is what their own bookmark
+    # request sends for the LoRA tab; ANY_MODEL mirrors their base-model tab.
+    args.append("modelTypes:$mt")
+    var_decl += ",$mt:[GenerationModelType]"
+    variables["mt"] = ["ANY_LORA" if want_lora else "ANY_MODEL"]
     if want_lora and lbt in LORA_BASE_MODEL_TYPES:
         args.append("loraBaseModelTypes:$lb")
         var_decl += ",$lb:[GenerationModelType!]"
