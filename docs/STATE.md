@@ -26,8 +26,8 @@
 
 Moonglade Athenaeum is a Python/Flask client for PixAI.art: it backs up the owner's own AI
 generations, serves a local searchable web gallery, generates images and videos through
-PixAI's API, and curates the archive. Two surfaces: the CLI (`pixai_gallery_backup.py`) and
-the web app (`pixai_gallery.py`). Work happens on the `loom-v2` branch; `master`'s last release
+PixAI's API, and curates the archive. Two surfaces: the CLI (`moonglade_backup.py`) and
+the web app (`moonglade_gallery.py`). Work happens on the `loom-v2` branch; `master`'s last release
 is **v2.4.0** (2026-07-24 — concurrent generations, a trash/quarantine restore panel,
 field-operator search, real credit-cost tracking, a full unification of the model/image
 pickers across the Loom and the gallery, a data-loss video-corruption bug fixed, the last
@@ -48,7 +48,7 @@ users.
 | Question | Command |
 |---|---|
 | Test count | `python -m pytest` from the repo root (add `--ignore=tests/test_similar.py` when pixeltable isn't installed); the Loom's pure-logic suite is `node --test` from `loom/` |
-| Current version | `grep __version__ pixai_gallery_backup.py` |
+| Current version | `grep __version__ moonglade_backup.py` |
 | How far `loom-v2` leads `master` | `git rev-list --count origin/master..origin/loom-v2` |
 | Which tags have a GitHub Release | `gh release list` against `git tag` |
 | Whether the C: repo and the D: run-copy agree | `git log -1` in each |
@@ -299,7 +299,7 @@ users.
 - The Loom nav button is hidden below 480px and visible from tablet up; the gallery's filters
   become a bottom sheet at the same breakpoint. The Job Tracker/Activity tray (`#jobs-tray`,
   `static/mg-notify.js`) and the snippet/tag popups (`#snip-menu`, `#tag-suggest`,
-  `pixai_gallery.py`) clamp their `max-width` to `calc(100vw - Npx)` so none of them run off a
+  `moonglade_gallery.py`) clamp their `max-width` to `calc(100vw - Npx)` so none of them run off a
   320px-wide screen (below their previous flat max-widths).
 - **All three Job Tracker sources now log to the same `out_dir/jobs.jsonl` activity feed**:
   Control Panel actions and bulk cloud-delete (already wired), and now a bare CLI run from a
@@ -407,12 +407,21 @@ users.
   WAIT, not a countdown; the earlier "both gens said 3 seconds" was a genuinely short queue,
   not a constant. The one real defect the run exposed — an in-flight card reading
   "Generated" — is fixed. Wave 2's last item is closed.
+- **No mutation that spends or changes the account can be retried** (2026-07-26).
+  `gql_mutate()` is the one way a mutation goes out: it hard-codes `retries=0` and takes no
+  retries argument, so the unsafe value cannot be asked for. `submit_generation` (and with
+  it every web generate/edit route), the CLI's `run_generate_video` /
+  `run_reference_video` / `run_edit_image`, `upload_media` and `delete_batch_media_gql` all
+  ride it. Before this, only the delete passed `retries=0` by hand and every spending path
+  inherited `gql_adhoc`'s three retries — so a lost RESPONSE (read timeout, dropped
+  connection, a proxy's 502 *after* PixAI already created and charged for the task) made the
+  retry submit and pay for a second generation. `gql_adhoc`'s own default is now
+  document-aware as a backstop (0 for a mutation, 3 for a query). The REST spend paths
+  (`submit_fixer`, `claim_reward` over `_rest_post`) were already single-attempt and are now
+  pinned as such. Guarded by `tests/test_spend_no_retry.py`.
 - **Per-image cloud delete shipped** (2026-07-25). `POST /api/delete-image` (LOCALHOST)
   drives `core.delete_batch_media_gql` — `updateGenerationTask(id, input:{deleteBatchMedia:
-  {mediaId}})` over `gql_adhoc` with **`retries=0`**; the primitive's docstring had promised
-  SINGLE ATTEMPT since it was written, but the call inherited `gql_adhoc`'s `retries=3` until
-  this pass, so a read timeout arriving after PixAI processed the delete could re-fire it.
-  The detail page carries both paths, worded apart: **Delete locally** (quarantine to
+  {mediaId}})`, single attempt. The detail page carries both paths, worded apart: **Delete locally** (quarantine to
   `_deleted/`, recoverable, a later sync restores it) and **Delete from PixAI** (irreversible,
   names the surviving sibling count from `_batch_sibling_count`, typed `DELETE`). Cloud call
   first, local purge only on a clean return — the reverse would leave a catalog hole for an
@@ -420,7 +429,7 @@ users.
   session.
 - **The library folder is settable again, from the Control Panel** (2026-07-25). It stopped
   being settable when the PySide6 GUI was removed in v2.1.0 and nothing replaced its folder
-  picker. `resolve_library_dir()` in `pixai_gallery.py` is the order of precedence: an
+  picker. `resolve_library_dir()` in `moonglade_gallery.py` is the order of precedence: an
   explicit `--out`, then `config.json`'s `LIBRARY_DIR`, then `pixai_backup`. `--out`'s argparse
   default is now `None` — argparse cannot distinguish "typed the default" from "typed
   nothing" — and **`Serve Gallery.pyw` no longer hardcodes `--out pixai_backup`**, which it
@@ -480,7 +489,7 @@ users.
   single-version case renders nothing extra — and switching applies that version's own
   `version_id`/`lora_base_type`/`trigger_words` with no new network call, since the full list
   was already resolved at pick time. Shared component change, so both surfaces got the real
-  version data for free; only the per-chip UI (`renderLoras()` in `pixai_gallery.py`, the
+  version data for free; only the per-chip UI (`renderLoras()` in `moonglade_gallery.py`, the
   `imgLoras.map` chip render in `master-storyboard.jsx`) needed writing twice.
 - **Capability gating on the Advanced panel (Negative prompt / Steps / CFG scale), on both
   the gallery and the Loom** (2026-07-24). `extra.compatibility` (which of these a model
@@ -588,7 +597,7 @@ users.
   every ladder grouped under a glowing pill divider, then Milestones/Masteries/Feats the
   same way. Real badge art (`/badge-thumb/<id>.png`) throughout, not placeholder images —
   each ladder's badge is its first rung's art, chosen deliberately over the top (spoiler)
-  tier's. `pixai_gallery.py`'s `ACHIEVEMENTS`/`compute_achievements()` gained `track`/
+  tier's. `moonglade_gallery.py`'s `ACHIEVEMENTS`/`compute_achievements()` gained `track`/
   `rung`/`rungs_total` per ladder achievement plus a top-level `ladders` list (`LADDER_TRACKS`)
   so the client can group without a second hand-maintained id→name map.
 - Points are tier base + 5×(rung−1), driven by `_TIER_POINTS` (common 5 / rare 10 / epic 25 /
@@ -634,7 +643,7 @@ himself first, and has flagged this for the actual design pass, not a quick patc
 on record so far, from a read-only code check (no changes made):
 - The gating as written: server-side, `roast_nsfw` is blanked to `""` for every achievement
   unless the **Triggered** feat (poke the narrator until it snaps) is earned on that account
-  (`api_achievements()`, `pixai_gallery.py` — `unleashed = any(a["id"]=="triggered" and
+  (`api_achievements()`, `moonglade_gallery.py` — `unleashed = any(a["id"]=="triggered" and
   a["earned"] ...)`). Client-side, `card()` (`static/mg-notify.js`) shows exactly ONE roast
   string per card — `roast_nsfw` only if BOTH the server sent a non-empty one AND the local
   "Unleash the AI" checkbox (`Ach.setUnleash`, a `localStorage` preference, separate from the
@@ -654,7 +663,7 @@ on record so far, from a read-only code check (no changes made):
   What's specifically wrong about it was not established — do not reuse Claude's toggle
   theory as a starting point next time without re-deriving it. Owner wants to compare the
   `roast` and `roast_nsfw` fields for himself (both sit side by side per-achievement in
-  `pixai_gallery.py`'s `ACHIEVEMENTS` list, easy to diff directly) on his work machine before
+  `moonglade_gallery.py`'s `ACHIEVEMENTS` list, easy to diff directly) on his work machine before
   deciding anything.
 - **Do not resume work on this without the owner's go** — explicit scope boundary he set.
 
@@ -701,7 +710,7 @@ on record so far, from a read-only code check (no changes made):
   actually succeeds — never written first and rolled back. "Sync now" reuses the existing
   Panel job machinery (`/api/panel/run` action `sync`, polled via `/api/panel/status`) — no
   new job-running code. A second fix was needed for the wizard to be reachable on a genuine
-  fresh clone at all: `pixai_gallery.py`'s CLI entry point used to `sys.exit` outright when
+  fresh clone at all: `moonglade_gallery.py`'s CLI entry point used to `sys.exit` outright when
   the (git-ignored) output folder or `catalog.db` didn't exist yet — a console error before
   Flask ever started, with no page for the wizard to render on. It now creates the folder and
   an empty, schema-initialized catalog and boots normally instead.
@@ -836,7 +845,7 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   `c.promptOverride`/`c.promptOverrideText` (a frozen, never-re-woven verbatim replacement,
   by that feature's own explicit design).
 - `<mg-cost-badge>` now covers the drawer's `.mgd-cost` (`static/mg-generate-drawer.js`,
-  shared by the gallery Video tab and the Loom's Video tab), `pixai_gallery.py`'s Generate
+  shared by the gallery Video tab and the Loom's Video tab), `moonglade_gallery.py`'s Generate
   and Edit tabs, and the Loom's Image/Edit/Reference Deep Focus tabs (D-12, 2026-07-22) —
   each of those three Loom tabs kept its existing `confirmSpend`/`window.confirm()` gate
   alongside the new badge, deliberately: that dialog
@@ -863,7 +872,7 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 What's still CLI-only, tracked so the web surface stays complete:
 
 - **Password reset.** The only way to reset a forgotten password today is
-  `python pixai_gallery_backup.py --add-web-user` on the server machine (it *adds or
+  `python moonglade_backup.py --add-web-user` on the server machine (it *adds or
   updates*, so re-running it for an existing username doubles as a reset — `wiki/Setup.md`
   documents this). Owner request, 2026-07-22: give this a home in the Panel's Users tab
   too, so a forgotten password doesn't require CLI access. Would need its own trust call
@@ -871,7 +880,7 @@ What's still CLI-only, tracked so the web surface stays complete:
   new account?) rather than inheriting one by default — not decided yet, not started.
 - (`--restore-orphans` and `--undo-organize` now render Panel buttons. `reconcile-deleted`
   runs via `/api/panel/run` and the scheduler but renders no button by design,
-  `panel_visible: False`. `PANEL_ACTIONS` in `pixai_gallery.py`. Still genuinely CLI-only,
+  `panel_visible: False`. `PANEL_ACTIONS` in `moonglade_gallery.py`. Still genuinely CLI-only,
   with no web route at all: `--convert-existing` (bulk-converts already-downloaded `.webp`
   files to the `--convert` format) and `--backfill-meta`/`--backfill-full-meta` (fill in
   missing catalog fields for existing rows). `--faststart-videos` is deliberately CLI-only
@@ -889,12 +898,12 @@ What's still CLI-only, tracked so the web surface stays complete:
 
 | from | to |
 |---|---|
-| `pixai_gallery_backup.py` | `moonglade_backup.py` |
-| `pixai_gallery.py` | `moonglade_gallery.py` |
-| `pixai_similar.py` | `moonglade_similar.py` |
-| `pixai_logging.py` | `moonglade_logging.py` |
+| `moonglade_backup.py` | `moonglade_backup.py` |
+| `moonglade_gallery.py` | `moonglade_gallery.py` |
+| `moonglade_similar.py` | `moonglade_similar.py` |
+| `moonglade_logging.py` | `moonglade_logging.py` |
 
-**There is a FOURTH module.** `pixai_logging` (36 refs). Easy to miss — it is imported by both
+**There is a FOURTH module.** `moonglade_logging` (36 refs). Easy to miss — it is imported by both
 main modules and earlier notes framed this as a three-module rename.
 
 **`pixai_backup` (81 refs) is NOT renamed** — the output directory, named in every install's
@@ -910,7 +919,7 @@ live modules.
 - **Live instructions change in the same pass**, or the release ships commands that do not
   exist: `CLAUDE.md` (43), `wiki/Backing-Up.md` (48), this file (26).
 - **Historical record stays as written**: `CHANGELOG.md` (45), `docs/AUDIT_2026-07-21.md`
-  (109). A v1.9 entry naming `pixai_gallery_backup.py` is TRUE about v1.9.
+  (109). A v1.9 entry naming `moonglade_backup.py` is TRUE about v1.9.
 - Deferred by owner call: `docs/architecture.md`, `wiki/Generating.md` (see the doc-debt
   section above).
 
@@ -929,6 +938,344 @@ Owner's motivation for `/moonglade`, 2026-07-25: achievement and branding files 
 the install root, and **"a tidy install folder says a lot and implies good design etiquette
 across the suite."** A different job from renaming four modules, so it gets its own pass and
 "rename-only" stays honest.
+
+## ✅ SOLVED: app generations DO mirror to the PixAI library (live test 2026-07-26)
+
+**Confirmed by a real submission.** One generation submitted with the owner's **browser session
+JWT** instead of the API key appeared in the pixai.art generations list and **stayed there through
+a refresh**. This closes the question first raised 2026-07-05 and re-raised repeatedly since:
+*"app gens pop up on the website then vanish unless favourited."*
+
+The cause was never a missing parameter. It is the **credential**, exactly as the 2026-07-11
+capture concluded: a browser JWT files a generation into the account; a bare API key does not, no
+matter how the request is dressed (that was tested too — API key plus browser-id header plus
+pixai.art origin was accepted, created, charged, and still dropped off the feed).
+
+### What the fix actually is
+A **credential switch**, not a new feature:
+- **Mirror to PixAI** → submit with the JWT. The gen lands in the library like a website gen.
+- **Local only** → submit with the API key. Stays private, temp-storage media, download at once.
+
+Both still download locally, so the redundancy the owner asked for is real either way. The
+plumbing largely exists: `_make_session` already builds `Authorization: Bearer` from whatever
+token it is handed and its own error text still offers the legacy `U3T + token.txt` path, and
+`submit_generation` submits through `gql_mutate(session, ...)` — so handing it a JWT-authenticated
+session is most of the work.
+
+### The credential facts, measured not assumed (2026-07-26)
+| what | length | life | how it is maintained |
+|---|---|---|---|
+| the JWT | 287 chars | **~27 days** | one paste; possibly self-renewing (see below) |
+| `_udt` (= the `u3t` value) | 45 chars | **~1 hour** | **refreshed by Set-Cookie on every response** |
+| `_bsid` (browser session id) | 36 chars, a UUID | ~30 min | refreshed by Set-Cookie |
+
+**This is why the old token path felt like endless harvesting:** `U3T` is stored as a static
+string in `config.json` and it has a ONE-HOUR life. It was stale almost immediately. A
+`requests.Session` keeps a cookie jar, so `_udt`/`_bsid` maintain themselves — they were never
+things to harvest, they were things to stop hard-coding. Note also that a read-only query
+succeeded with **no `u3t` sent at all**, so it is not required for auth on that path.
+
+Token lifetime moved from ~12 days (2026-07-11) to ~27 days (2026-07-26) — one of several signs
+their site is actively changing under us.
+
+### Apollo CSRF: the gotcha that will bite any new client code
+PixAI's Apollo rejects requests it considers CSRF-able with a `BAD_REQUEST` unless one of
+`x-apollo-operation-name` / `apollo-require-preflight` is present. `_make_session` already sends
+**both**, which is exactly why the API-key path never hit this and a fresh probe did immediately.
+Any hand-rolled request needs them.
+
+### Renewal: ANSWERED — not header-based, and it does not matter
+**Measured 2026-07-26:** there is **no `token` response header** on a mutation response, nor on a
+read-only query. `Access-Control-Expose-Headers` does still list `token`, so the mechanism exists
+somewhere in their own flow (login, or their near-expiry refresh), but not on any call this app
+would make. **The design must not depend on it.**
+
+That is fine, because the pain was never the JWT:
+- **`U3T` was the problem.** A ~1-hour credential stored as a static string in `config.json` —
+  stale within the same sitting, invisibly, with no signal. That is what "constant harvesting"
+  actually was. It is fixed structurally by using a `requests.Session` cookie jar, since `_udt`
+  and `_bsid` are refreshed by Set-Cookie on every response.
+- **The JWT lasts ~27 days**, and its expiry is readable **locally** from its own `exp` claim with
+  no network call.
+
+So the shipped design is a **visible countdown, not silent staleness**:
+1. decode the JWT's `exp` at startup (offline; the probe already does this in ~10 lines),
+2. the Panel shows "PixAI mirror: N days left" beside the toggle,
+3. under 5 days it becomes a warning with a paste field,
+4. `_udt` / `_bsid` need no attention at all.
+
+That is roughly 13 deliberate ten-second pastes a year, each one announced in advance — a
+different category of annoyance from the invisible hourly failure the owner rejected.
+
+**`refreshToken` is therefore NOT a dependency.** It stays an optional nicety to weigh later, on
+its own merits, and remains untested on purpose: it is a credential mutation and rotation could
+log the owner's browser out mid-session.
+
+### ❌ NOT the fix, and do not re-propose it
+Auto-favouriting each gen via `upsertBookmark`. Rejected by the owner 2026-07-26, and he says he
+disliked it when it was first raised. Bookmarking puts things in the FAVOURITES shelf, not the
+generations library — the wrong shelf. An earlier note recorded it as an agreed plan; that was
+wrong and has been corrected at the source.
+
+## THE API SURFACE IS NOW HARVESTED WHOLESALE (`tools/harvest_api_surface.py`, 2026-07-26)
+
+Every hand-probe uncovered another layer, so the probing stopped and the whole surface got
+mined instead. **182 operations — 102 queries, 80 mutations/subscriptions — each with its full
+GraphQL document, typed variables, and a sha256 hash.** Run `fetch` then `extract`; `show
+--grep <word>`, `doc <op>` and `diff` read the result. Output lands in git-ignored
+`private/harvest/`.
+
+### What was measured, replacing what was assumed
+- **PixAI is NOT a Next.js app.** It is React Router bundled with Rolldown. Two attempts inside
+  this tool failed on the old assumption before anyone looked.
+- **Their JS is not served from pixai.art at all** but from a VERSIONED CDN path:
+  `https://cdn.pixai.art/artifacts/app-1.0.2605/assets/<name>-<HASH>.js`, referenced by
+  `<link rel="modulepreload">` — 526 on the homepage alone, 868 reached by crawling imports.
+  `app-1.0.2605` is a build fingerprint, so `diff` reports "they shipped a new build", not just
+  "a hash moved".
+- **The crawl follows imports transitively.** This is the fix for the documented scoping bug: a
+  previous pass scanned "all 204 chunks on the enhancement page" and concluded a value did not
+  exist, when it sat in a LAZY chunk that page never loaded.
+- **The sha256 hashes are NOT in the bundle** — zero 64-hex strings across 868 chunks / 16 MB.
+  Apollo computes them at runtime.
+- **But the documents ARE, as pre-parsed AST literals** (`{kind:"Document",definitions:[..]}`,
+  191 in one chunk), with complete field projections and typed variable definitions.
+
+### Hashes are DERIVED, and the derivation is PROVEN
+Apollo hashes the printed document, so the tool prints the AST exactly as graphql-js does and
+sha256s it. Three hashes seen on real requests are baked in as an oracle; `extract` tries four
+print variants and keeps only one that reproduces **all three**. Exactly one did —
+`typename,no-newline` (Apollo injects `__typename` before hashing; no trailing newline). If none
+passes it writes no hashes at all, because plausible-and-wrong is worse than absent.
+
+**This is the answer to "what happens when PixAI changes their frontend."** Re-run fetch+extract
+and the hashes re-pin themselves. The `Recapture procedure` in CLAUDE.md is now a fallback, not
+the first move.
+
+### Notable operations we had no idea existed
+- `subscribeGeneratorPreviewEvents` — a live subscription streaming in-progress preview images
+  by `taskId`. This is the mechanism behind their new generation page.
+- `cancelGenerationTask`, `rerunGenerationTask`, `updateGenerationTask` — the Job Tracker
+  currently cannot cancel or rerun anything.
+- Bookmarks are full CRUD: `upsertBookmark`, `deleteBookmark`, `updateBookmarkItem`,
+  `listMyBookmarkItems` (this is what "Manage Bookmarks" opens), `listBookmarkItems`.
+- `listSimilarLoras`, `listLoraRecommendationsByModel` — their own similar/recommended LoRA
+  endpoints, adjacent to our Pixeltable work.
+- `createWebhook` / `listMyWebhooks` / `deleteWebhook` — webhooks, which could push events to
+  us instead of us polling.
+- `createAccessToken` / `listMyAccessTokens` / `revokeAccessToken`, `listMySessions` /
+  `terminateSession` — API-key and session management.
+- `getMyTaskStats`, `listMyQuotaLogs` (credit history), `getUserYearWrappedStats`.
+- `getManga` / `getMangaChapter` / `markManga` — a manga feature we did not know they had.
+- Moderation ops ship in the public bundle (`opBanUser`, `opModerationNSFW`, …). They would
+  fail without permissions; do not call them.
+- Payment ops exist (`intentToPay`, `cancelSubscription`, …) and stay **permanently out of
+  scope** per the standing money rule.
+
+### Safety, by construction
+`fetch` and `extract` never touch api.pixai.art — static CDN files only. `replay` takes ONE
+operation, refuses any mutation outright, requires an allowlist entry or explicit `--force`, and
+refuses to send an unproven hash. There is deliberately **no** "replay everything" mode: calling
+a harvested catalog blind could delete tasks, submit generations and spend real credits.
+
+## CAPTURED SPEC: LoRA training (read from the page + bundle, 2026-07-26, zero credits spent)
+
+The owner has **8 free trainings**. A paid run is **75,000 credits** — roughly 23 Hires
+upscales — so the free slots are worth real money and none were spent to get this.
+
+`createTrainingTask` is in the harvest with its hash and return projection. Input types live in
+the schema, not the document, so the inner field names came from the training page's own chunk
+(`_app.train-lora-main-*.js`), where the form assembles the object:
+
+    CreateTrainingTaskInput {
+      baseModelId          required
+      mediaIds             the dataset
+      title                required, length >= 1
+      type                 UserMultiLora  (matches the USER_MULTI_LORA seen on his own LoRAs)
+      triggerWords
+      primaryLoraModelId   set when retraining FROM an existing LoRA
+      trainingTaskId       set when reusing a previous dataset
+      category
+      kaisuukenId          ** the free card **
+    }
+
+**`kaisuukenId` is the headline.** The free trainings are kaisuuken cards — the same mechanism
+`_apply_kaisuuken` already implements for image generation. Our existing free-card path applies
+directly rather than needing a new one.
+
+**Validation rules, read off their code (not inferred):**
+- `mediaIds` under 10 is rejected **unless `trainingTaskId` is set** — reusing a dataset waives
+  the ten-image minimum.
+- Max 100 images, and submit is blocked while any image is still uploading.
+- `triggerWords`: empty rejected; over 256 rejected; and **under 30 characters rejected when the
+  model type is MMDIT26** — that is the "Tsubaki.2 needs a 30-character trigger word" rule,
+  enforced per architecture.
+- Three price tiers, in their own precedence order: free-to-train → 0; `datasetId` present →
+  `prices.reuse`; `primaryLoraModelId` present → `prices.retrain`; otherwise `prices.price`.
+- Failure returns `INSUFFICIENT_BALANCE`; success returns `refId`, the new model's id, and the
+  site navigates to `/model/<refId>`.
+
+**From the page itself:** Model Type on the TRAINING page is DiT.2 (NEW) / DiT.1 / SDXL /
+Other… — note **DiT.3 is absent here though it appears in the generate picker**, so DiT.3 is
+generate-only for now, which is part of why its enum never got captured. Model Theme offers
+Illustrious-v1.0, NoobAI XL, Hinata v2, Illustrious-v0.1 and more. Dataset sources are upload,
+**import from generation history**, or reuse a previous dataset. Rebates go up to 5% of credits
+when others generate with your LoRA. Membership grants 3/5/10 free trainings a month for
+Starter/Plus/Premium.
+
+**Their category dropdown is currently rendering raw i18n keys** (`market:lora-categories.*`),
+a live bug on their side, which handed over the canonical list: character, animal, style,
+realistic, pose, clothing, background, detail, other. That confirms our `MARKET_CATEGORIES` is
+missing **animal** and **realistic**.
+
+**Still not obtainable without a real run:** whether the submit is accepted from an API key.
+That is the same question panelplugin failed, and it cannot be answered by reading — only by
+submitting. Do not build a training feature as though it is settled.
+
+## CAPTURED SPEC: PixAI's model + LoRA pickers (live capture 2026-07-25)
+
+Read off the running site with the owner driving Chrome, plus a network capture of the picker's
+own calls. Every value here is measured, not inferred. This settles the long-open
+"bookmarked LoRA" question that `private/API_OPERATIONS.md` and a 2026-07-04 recon flatly
+contradicted each other about.
+
+### The two operations, solved
+
+**BOOKMARK tab** — a persisted query, its own operation:
+
+    operation / operationName : listMyBookmarkedGenerationModels
+    variables                 : {modelTypes: ["ANY_LORA"],
+                                 loraBaseModelTypes: ["MMDIT26A_MODEL"],
+                                 first: 36}
+    persistedQuery sha256Hash : 2281653492ff54ef17707104736fd74e7a8d70dc314e024e595f0e71ff2945b9
+
+**MY LORA tab** — NOT a separate operation. The ordinary list, filtered by author:
+
+    operation / operationName : listGenerationModels
+    variables                 : {last: 36, types: ["ANY_LORA"], feed: "trending",
+                                 loraBaseModelTypes: ["MMDIT26A_MODEL"],
+                                 authorId: "<the signed-in user's own id>"}
+    persistedQuery sha256Hash : b7a2d663bc0381dd6eb26f8c68f702cb928bea720982f6f5553ea1629a8e871d
+
+Note the argument names DIFFER between the two and must not be assumed shared: bookmarks take
+`modelTypes` + `first`, the list takes `types` + `last` + `feed`. `feed` is how the sort is
+expressed (`"trending"` for Trending).
+
+### Why our ad-hoc probe said both were ABSENT
+`listMyBookmarkedGenerationModels` probed as *"Cannot query field ... on type Query"* over
+`gql_adhoc`, yet the website calls it successfully. It is reachable **only through the
+persisted-query path** (operation name + sha256Hash + u3t), the same mechanism this repo
+already uses for the listing and task-detail operations — not through an ad-hoc POST document.
+So the contradiction in the private docs was not an error in either: the op is real AND absent
+from the ad-hoc Query root.
+
+**A heuristic that looked clever and was WRONG, recorded so it is not trusted again.** PixAI
+redacts the content of GraphQL's "Did you mean ...?" hint but not its existence, so a probe was
+built treating "absent, but a hint fired" as a near-miss. Two invented names produced hints; the
+REAL name produced none. Driving the browser answered in three clicks what the probe had
+actively misled us about. For a surface the website itself uses, capture the request — do not
+probe the schema.
+
+### GO/NO-GO: both operations WORK with our own API key (measured 2026-07-25)
+Called with the captured hashes over the persisted-GET path using the owner's API key rather
+than a browser `u3t` session. **HTTP 200, real data, both of them.** This was the one thing
+that could have killed the feature: `listMyBookmarkedGenerationModels` is absent from the
+ad-hoc Query root, so the persisted path is the only door, and panelplugin had already taught
+us that a door the website walks through can be shut to an API key. It is not shut here.
+`totalCount: 3` came back for MY LORA, matching the three LoRAs in his picker.
+
+**Do not re-litigate this.** It is measured, not inferred.
+
+### Response projection (what a picker can render)
+`generationModels { edges { node {...} cursor } pageInfo {...} totalCount }` — a standard Relay
+connection. On each `node`:
+
+    id  authorId  title  mediaId  createdAt  updatedAt
+    type                 e.g. USER_MULTI_LORA for the owner's own LoRAs
+    category             e.g. "character" (mirrors the LoRA-category filter)
+    loraBaseModelTypes   [..]  the architecture list we already gate on
+    isNsfw  isDownloadable  isPrivate  visibilityType  permittedUse  userPermission
+    likedCount  liked  refCount  commentCount
+    flag { shouldBlur }
+    media { id type width height imageType urls[{variant,url}] flag{shouldBlur} ... }
+    extra { baseModelId description triggerWords category isRealistic isSensitive
+            isEarlyAccess accessRoleList archived archivedByPicture
+            permissions { personalUses commercialUses shareImagesOnline shouldCreditAuthor }
+            nsfwPredict { porn sexy hentai neutral drawings }
+            censorSensitiveFlag  recognizedNsfw  sensitiveKeywords[..]  ... }
+
+`pageInfo { hasNextPage hasPreviousPage startCursor endCursor }` plus `totalCount`, and a
+`cursor` on every edge.
+
+**Four things this answers that were open:**
+- **`refCount` is the number printed on each card.** The picker's "184" is refCount (uses), not
+  likes — `likedCount` was 0 on the same row. Our own grid labels that figure; check it matches.
+- **`extra.permissions` is the data behind their License Type filter.**
+  `commercialUses` is what "Allows Commercial Use" filters on. We have no such filter and now
+  know exactly what it would read.
+- **`type: USER_MULTI_LORA`** is the token for a user's own LoRA. `LORA_BASE_MODEL_TYPES`'s
+  comment already notes MULTI_LORA is "a LoRA's OWN type"; USER_MULTI_LORA is the variant the
+  owner's trained models carry.
+- **`extra.censorSensitiveFlag` / `archivedByPicture` most likely explain the grey "No Cover"
+  tiles** in the picker screenshots — a model whose cover art was moderation-rejected still
+  lists, with no usable thumbnail. Worth confirming before our grid renders a broken image
+  where PixAI renders a placeholder.
+
+### Still uncaptured after this pass
+- The `feed` tokens for the other three sorts (only `"trending"` seen; Most Liked / Most Used /
+  Latest unknown).
+- The cursor ARGUMENT names for paging (`pageInfo` gives cursors back; whether the request
+  takes `after`/`before` alongside `first`/`last` was not exercised).
+- **DiT.3's enum token** — see the hole in the LoRA weight-range table below. Same technique
+  fixes it: select a DiT.3 base in the picker and read the `loraBaseModelTypes` it sends.
+
+### Architecture mapping, one confirmed
+**`MMDIT26A_MODEL` = DiT.2** (the picker sent it while Tsubaki.2 was the selected base). Their
+Model Type filter offers **All / DiT.3 / DiT.2 / DiT.1 / SDXL / Community DiT / SD 1.5**, so
+**DiT.3 is a real type we have no enum for** — `LORA_BASE_MODEL_TYPES` carries five values and
+the owner's LoRA-weight ranges (DiT 0..1.2, SD -2..+2) never mentioned DiT.3 either. Treat the
+weight-range table as having a known hole until DiT.3's enum and range are captured the same way.
+
+### Filter vocabulary, read off the UI
+| picker | control | values |
+|---|---|---|
+| base model | tabs | PRESET · MARKET · BOOKMARK |
+| base model | sort (MARKET) | Trending · Most Liked · Most Used · Latest |
+| base model | sort (BOOKMARK) | Oldest · Latest **only** |
+| base model | Model Type | All · DiT.3 · DiT.2 · DiT.1 · SDXL · Community DiT · SD 1.5 |
+| base model | Posted at | All Time · Yesterday · Past 7 Days · Past 30 Days |
+| base model | License Type | All · Allows Commercial Use |
+| LoRA | tabs | MARKET · BOOKMARK · MY LORA |
+| LoRA | sort (MARKET) | Trending · Most Liked · Most Used · Latest |
+| LoRA | sort (BOOKMARK / MY LORA) | Latest, and **no Filters button at all** |
+| LoRA | Source | All · PixAI · External |
+| LoRA | LoRA category | All · Character · Animal · Style · Realistic · Pose · Clothing · Background · Detail Enhancement · Other |
+| LoRA | Posted at / License Type | as base model |
+
+### Gaps against what we ship
+- **They call it `strength`; we label it "Weight."** Their selected-LoRA panel reads
+  `strength (?)` with the value beside a slider. Cheap label-fidelity fix.
+- **`MARKET_CATEGORIES` is short by two** — ours has 7, theirs 10: missing **Animal** and
+  **Realistic** (our `detail` is presumably their *Detail Enhancement*).
+- **No `Source` filter** (PixAI vs External) and **no `License Type` filter** anywhere in our
+  code — zero references to either.
+- **Cap is displayed as `Max Allowed: n/15`** in the form and `Selected LoRAs (n/15)` in the
+  picker, corroborating the `membership.privilege.lora` work.
+- **`Train your own LoRA`** is a first-class button we have no equivalent for.
+- **Bookmark is also an ACTION** on the selected LoRA in the right-hand panel, and
+  **`Manage Bookmarks`** appears on both bookmark tabs.
+- **Incompatible LoRAs are GROUPED, not hidden**: compatible above, then a
+  `Not compatible with the selected model` divider, incompatible greyed below but still listed.
+  A better answer than hiding, and worth copying.
+- The generator form shows **`Est. wait ~26 seconds`** beside Generate — the same queue
+  estimate we shipped in the Job Tracker, in their own words.
+
+### Still uncaptured
+The strength slider's min/max labels (the handle sat at 0.7, consistent with a 0..1.2 DiT
+range), what `Manage Bookmarks` opens, DiT.3's enum token, and the base-model picker's PRESET
+tab (it shows no sort or filter controls). Screenshots live in
+`C:\Users\gwilkins\Desktop\Screenshots for Moonglade refs` along with unread recordings
+(`Model-lora picker`, `Loom issue`) and a `diagrams/` folder.
 
 ## Banked idea: package the assets like an MPQ (possible epic, NOT scoped)
 
@@ -955,7 +1302,7 @@ renders, the browser has.
 **The spoiler half is a SEPARATE decision, and packaging does not solve it — but something
 simpler does.** `docs/achievements_roster_57.json` is **2.98 MB and committed to the public
 repo**, so the whole roster is readable on GitHub and no install-folder packaging un-publishes
-it. **Checked 2026-07-25: NO runtime code loads that file.** `pixai_gallery.py:1528` only cites
+it. **Checked 2026-07-25: NO runtime code loads that file.** `moonglade_gallery.py:1528` only cites
 it in a comment (the runtime roster is the `ACHIEVEMENTS` catalog in the module itself), and
 its only reader is `tools/build_roster_board.py`, a dev-only board generator that already
 accepts a `--roster` path. Owner's recollection was right: it is the build-time record from
@@ -982,8 +1329,8 @@ Ranked, with the reason each sits where it does.
    git-ignored files (`.claude/launch.json` · `config.json` · `serve.txt` · `private/`) the
    branch can't fix and each machine must touch itself. Do it on its own branch in its own
    session, after clearing the runway — `loom-v2` currently leads `master`, and a rename that
-   moves this much makes a later rebase miserable. Two traps: `pixai_gallery` is a strict prefix
-   of `pixai_gallery_backup` **and** `pixai_backup` is the output directory named in every
+   moves this much makes a later rebase miserable. Two traps: `moonglade_gallery` is a strict prefix
+   of `moonglade_backup` **and** `pixai_backup` is the output directory named in every
    install's `config.json`, so a prefix-wildcard sweep silently repoints people's archives at
    nothing; and both modules are runnable scripts invoked as `python pixai_*.py` in ~116
    documented commands, the launchers and the Panel's subprocess runner — an import-only shim
@@ -1030,7 +1377,7 @@ waiting; the "together" grouping still applies to what's left below.
   real section in the Folio of Honors today, currently showing only **skin** unlocks. Open
   (not a shape question — a build-more question): extend it to also cover **banner** and
   **icon** unlocks, plus the easter egg (see below). Exact current render location in
-  `pixai_gallery.py` / `static/mg-notify.js` not yet re-confirmed against the
+  `moonglade_gallery.py` / `static/mg-notify.js` not yet re-confirmed against the
   post-Folio-of-Honors code — ask the owner to point at it directly rather than re-deriving
   from git history next time this comes up.
 - **The reward system's real shape, per the owner (2026-07-23) — bigger than one banner.**
@@ -1072,7 +1419,7 @@ waiting; the "together" grouping still applies to what's left below.
   achievement. Optionally, a new top-level `roster.bundles[]` catalog (sibling to
   `buckets`/`tracks`) gives each theme one place to name its actual mark id / skin id / banner
   asset — today that mapping exists only as prose in this file. **Two reconciliation notes for
-  whoever builds this:** (1) `pixai_gallery.py`'s `ACHIEVEMENTS` list (`:781`) is a
+  whoever builds this:** (1) `moonglade_gallery.py`'s `ACHIEVEMENTS` list (`:781`) is a
   hand-transcribed runtime copy of the JSON roster, not loaded from the JSON at runtime (same
   pattern as the `LADDER_TRACKS` comment at `:1526-1530`) — any new field lands in both places
   by hand, whenever it's actually populated; (2) the existing `skin`/`banner_reward` values on
@@ -1096,7 +1443,7 @@ waiting; the "together" grouping still applies to what's left below.
   already shipped, not tied to any achievement).
 
   **Open tension found while compiling, not recorded in any prior doc:** `nightfallen` and
-  `moonglade` are the two skins flagged `"free": True` in `SKINS` (`pixai_gallery.py:1512-1523`)
+  `moonglade` are the two skins flagged `"free": True` in `SKINS` (`moonglade_gallery.py:1512-1523`)
   — Nightfallen is not achievement-gated at all today. The Moonwell-Eclipse-unlocks-with-
   Nightfallen decision doesn't say whether Nightfallen should become gated too, or stay free
   while only its matching mark is the gated half of that bundle. Needs an explicit owner call.
@@ -1133,7 +1480,7 @@ waiting; the "together" grouping still applies to what's left below.
   `common`, or wants its own `reward_kind`, isn't stated anywhere yet.
 
   **Ready to wire up once tiers are assigned (not built):** `compute_achievements()`
-  (`pixai_gallery.py:1759-1817`) is where `earned_skins` gets built and `banner_reward` passed
+  (`moonglade_gallery.py:1759-1817`) is where `earned_skins` gets built and `banner_reward` passed
   through today — there is no equivalent mark/bundle logic yet. `SKINS` (`:1512-1524`) is the
   only existing reward-asset catalog; there is no parallel `MARKS` list gating icons to
   achievements — the marks system (`list_marks`/`load_branding`, `:1562-1620`) is purely a
@@ -1163,7 +1510,7 @@ waiting; the "together" grouping still applies to what's left below.
   payoff should work when defaults are already unlocked for everyone.
   **Three trigger-redesign options, scoped 2026-07-24 (not picked — needs the owner's go):**
   1. **Non-default mark, not just any mark.** Keep the existing `list_marks()`-based detection
-     (`sweep_telemetry()`, `pixai_gallery.py:2048-2058`) but compare against a known
+     (`sweep_telemetry()`, `moonglade_gallery.py:2048-2058`) but compare against a known
      shipped-default id set instead of "count ≥ 1" — fire only when a mark id absent from that
      set appears. Smallest change (still file-drop detection, still literally "you dropped in
      your own mark"), but needs the shipped defaults to be identifiable in code (today
@@ -1183,7 +1530,7 @@ waiting; the "together" grouping still applies to what's left below.
      unlinked API route/query param. Closest to the name and the roast text ("you opened a
      door you had no business finding") and fully decoupled from the branding-defaults problem
      — no precondition about what ships in `branding/` at all. `api_ach_event()`
-     (`pixai_gallery.py:10780-10792`) already whitelists named front-end event beacons
+     (`moonglade_gallery.py:10780-10792`) already whitelists named front-end event beacons
      (`konami`/`docs`/`narrator`) into `telem_flag()` calls — a console hook could reuse that
      exact mechanism with one new event name, so this is less new infrastructure than it first
      sounds. Tradeoff: several sub-choices (console hook vs. CLI flag vs. URL param), each with

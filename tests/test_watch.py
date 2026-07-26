@@ -6,7 +6,7 @@ import json
 
 import websockets
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 
 class _FakeWS:

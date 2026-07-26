@@ -1,7 +1,7 @@
 """Tests for pure / stateless functions (no network, no filesystem)."""
 import pytest
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 
 # ---------------------------------------------------------------------------
@@ -438,9 +438,10 @@ def test_parallel_map_progress_called_per_item():
 
 def test_make_progress_marker_is_strip_safe():
     """Under the panel (MOONGLADE_PROGRESS=1) the progress callback emits a machine marker the
-    Control Panel parses into a bar; in a terminal it draws the  bar (no marker). The marker
+    Control Panel parses into a bar; in a terminal it draws the 
+ bar (no marker). The marker
     prefix must survive str.strip() (it must NOT start with a whitespace-classified char)."""
-    import io, os, contextlib, pixai_gallery_backup as core
+    import io, os, contextlib, moonglade_backup as core
     os.environ.pop("MOONGLADE_PROGRESS", None)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):

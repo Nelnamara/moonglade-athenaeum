@@ -172,7 +172,7 @@
     /* Privacy blur (audit 2026-07-21 S5): the reference-slot thumbnails (mgd-slot, set via
        slotBox()) never carried the host page's body.privacy-blur rule -- once picked, an
        NSFW reference image sat here in full, regardless of the toggle. Same shape as
-       .card/.pick-cell in pixai_gallery.py; body is real light DOM, so it reaches straight
+       .card/.pick-cell in moonglade_gallery.py; body is real light DOM, so it reaches straight
        through this element's own plain (non-shadow) markup. */
     'body.privacy-blur mg-generate-drawer .mgd-slot img{filter:blur(16px);transition:filter .12s;}',
     'body.privacy-blur mg-generate-drawer .mgd-slot[data-nsfw="1"] img{filter:blur(28px);}',

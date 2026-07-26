@@ -7,7 +7,7 @@ on the same PixAI video engine.
 Open it from the gallery header (**▰ The Loom**) or go to `/loom`:
 
 ```bash
-python pixai_gallery.py --out pixai_backup      # then http://127.0.0.1:5000/loom
+python moonglade_gallery.py --out pixai_backup      # then http://127.0.0.1:5000/loom
 ```
 
 You need to be signed in, exactly like the rest of the gallery — so the Loom works from a

@@ -12,7 +12,7 @@ That has burned this project twice. Both times the "fix that didn't work" had in
 worked perfectly, in a process nobody was talking to.
 
 `Serve Gallery.pyw` already probed the X-Moonglade header before launching, but that
-check lived only in the launcher -- and `python pixai_gallery.py --port N`, which is
+check lived only in the launcher -- and `python moonglade_gallery.py --port N`, which is
 how every script, harness and background process starts this thing, walked past it.
 port_owner() is that probe moved somewhere it cannot be bypassed.
 """
@@ -22,7 +22,7 @@ import time
 
 import pytest
 
-from pixai_gallery import create_app, port_owner
+from moonglade_gallery import create_app, port_owner
 
 
 def _free_port():

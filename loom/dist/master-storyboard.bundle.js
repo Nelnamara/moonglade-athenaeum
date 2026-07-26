@@ -431,7 +431,7 @@ ${"=".repeat(48)}
   var { useState, useEffect, useRef, useCallback, useMemo } = React;
   var STYLES = `
 :root{
-  /* Loom palette now INHERITS the gallery's design tokens (pixai_gallery.py's
+  /* Loom palette now INHERITS the gallery's design tokens (moonglade_gallery.py's
      DESIGN_TOKENS_CSS, shared with BASE_HTML) instead of hardcoding its own --
      switching skin in the gallery header re-colors the Loom too. --line
      deliberately maps to --overlay0 rather than --surface1 (which --panel2
@@ -447,7 +447,7 @@ ${"=".repeat(48)}
 }
 *{box-sizing:border-box}
 /* System fonts only (no CDN) -- matches the gallery's own body{font-family:system-ui,
-   sans-serif} exactly (pixai_gallery.py) and its ui-monospace,monospace mono
+   sans-serif} exactly (moonglade_gallery.py) and its ui-monospace,monospace mono
    convention, rather than inventing a new stack. */
 .sb-root{font-family:system-ui,sans-serif;background:
   radial-gradient(1200px 600px at 80% -10%,rgba(255,255,255,.05),transparent 60%),var(--bg);
@@ -1014,7 +1014,7 @@ ${"=".repeat(48)}
 .lv-mini2{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:3px 7px;cursor:pointer;margin:5px 0;}
 .lv-mini2:hover{border-color:var(--accent);color:var(--accent);}
 /* L536: Image tab field-parity additions -- a 2-up row (Size/Custom W\xD7H, Mode/Count) and a
-   labeled checkbox row, mirroring pixai_gallery.py's .gen-row/.gen-check at the same sizing. */
+   labeled checkbox row, mirroring moonglade_gallery.py's .gen-row/.gen-check at the same sizing. */
 .lv-row2{display:flex;gap:8px;margin-top:8px;}
 .lv-row2>div{flex:1;min-width:0;}
 .lv-ck{display:flex;align-items:center;gap:7px;color:var(--subtext);font-size:11px;margin-top:8px;cursor:pointer;}
@@ -1036,7 +1036,7 @@ ${"=".repeat(48)}
 .lv-df-frames .sb-frame{flex:1 1 0;min-width:0;}
 .lv-gerr{font-size:10px;color:var(--coral);margin-top:6px;}
 /* D-11: LoRA chips in the Image tab -- mirrors the Gallery's own .lora-chip shape
-   (pixai_gallery.py) at the Loom's smaller scale/token set, not a copy-paste of it. */
+   (moonglade_gallery.py) at the Loom's smaller scale/token set, not a copy-paste of it. */
 /* picker-parity-round2 (2026-07-24): this used to be a show/hide toggle that expanded the
    LoRA <mg-model-picker> INLINE into this ~280px rail column -- the owner's exact complaint
    ("cramped mess... does not have a flyout like the gallery"). It now opens the SAME
@@ -1060,7 +1060,7 @@ ${"=".repeat(48)}
 /* picker-parity-round2 (problem 2): the Image tab's model/LoRA picker used to render
    <mg-model-picker> INLINE in this ~280px rail (cramped: results, a toggle button, a
    SECOND search box, more results, all stacked). Now a trigger row (mirrors
-   pixai_gallery.py's own #gen-selrow) that opens a floating overlay -- .lv-mpick-veil below
+   moonglade_gallery.py's own #gen-selrow) that opens a floating overlay -- .lv-mpick-veil below
    -- matching the Gallery's #model-flyout presentation: ONE picker experience, not a
    cramped-inline one here and a proper flyout there. */
 .lv-selrow{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border-radius:6px;background:var(--panel);border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:11.5px;text-align:left;}

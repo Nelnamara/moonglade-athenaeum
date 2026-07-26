@@ -487,7 +487,7 @@ describe("buildExportClips", () => {
   });
 });
 
-describe("loraIncompat (D-11, ported from pixai_gallery.py's identical function)", () => {
+describe("loraIncompat (D-11, ported from moonglade_gallery.py's identical function)", () => {
   test("exact match is compatible", () => {
     assert.equal(loraIncompat("SDXL_MODEL", "SDXL_MODEL"), false);
   });
@@ -535,7 +535,7 @@ describe("resolveLoraPayload / anyLoraUnresolved (D-11)", () => {
   });
 });
 
-describe("snap8 (L536, ported from pixai_gallery.py's Gen.d8())", () => {
+describe("snap8 (L536, ported from moonglade_gallery.py's Gen.d8())", () => {
   test("rounds to the nearest multiple of 8", () => {
     assert.equal(snap8(1000), 1000);
     assert.equal(snap8(1001), 1000);   // rounds down, unambiguous
@@ -553,7 +553,7 @@ describe("snap8 (L536, ported from pixai_gallery.py's Gen.d8())", () => {
   });
 });
 
-describe("resolveGenDims (L536, ported from pixai_gallery.py's Gen.dims())", () => {
+describe("resolveGenDims (L536, ported from moonglade_gallery.py's Gen.dims())", () => {
   test("square aspect at a preset size", () => {
     assert.deepEqual(resolveGenDims({ aspectW: 1, aspectH: 1, size: 1024 }),
       { w: 1024, h: 1024, custom: false });

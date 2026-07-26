@@ -1,7 +1,7 @@
 """__version__ must match the newest cut release in CHANGELOG.md.
 
 v2.3.0 was tagged and cut into the CHANGELOG on 2026-07-23 while
-pixai_gallery_backup.__version__ still said "2.2.0" -- the Panel footer and the
+moonglade_backup.__version__ still said "2.2.0" -- the Panel footer and the
 gallery banner (both render core.__version__) kept reporting the OLD release for a
 full day after the owner pulled the new one, and only a human noticed. The version
 constant and the CHANGELOG cut are two hand-edited copies of the same fact; this
@@ -25,7 +25,7 @@ lapses quietly).
 import re
 from pathlib import Path
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -45,7 +45,7 @@ def _newest_cut():
 def test_version_constant_matches_newest_changelog_cut():
     newest_cut, _ = _newest_cut()
     assert core.__version__ == newest_cut, (
-        "pixai_gallery_backup.__version__ is {!r} but CHANGELOG.md's newest cut "
+        "moonglade_backup.__version__ is {!r} but CHANGELOG.md's newest cut "
         "release is [{}] -- the banner and Panel footer render __version__, so "
         "bump the constant in the same commit that cuts the release.".format(
             core.__version__, newest_cut))

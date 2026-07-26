@@ -1,4 +1,4 @@
-"""pixai_similar: the CLIP visual-similarity sidecar. Pixeltable + torch are heavy and the
+"""moonglade_similar: the CLIP visual-similarity sidecar. Pixeltable + torch are heavy and the
 UDF needs a GPU, so every test mocks the table handle (_get_table) and, where needed,
 indexed_ids — the logic under test (dedup, the row-by-row fallback, self-exclusion) is
 pure Python around those. Importing the module pulls in pixeltable but no torch/model
@@ -10,7 +10,7 @@ pytest.importorskip("pixeltable")  # optional heavy dep, not in requirements.txt
 # running plain `pytest`. CLAUDE.md's --ignore=tests/test_similar.py flag is still the
 # documented way to exclude this file explicitly; this is the fallback for someone who
 # doesn't know that yet.
-import pixai_similar as S
+import moonglade_similar as S
 
 
 # --- fakes ---------------------------------------------------------------------
@@ -117,7 +117,7 @@ def test_scan_dir_excludes_quarantine_dirs(tmp_path):
     were already quarantined (_duplicates/, from --dedup) or purged (_deleted/, from the
     gallery's delete). scan_dir already skipped gallery/ (thumbnails) -- this pins the same
     treatment for the two quarantine dirs, matching find_image_file/find_files_for_media_id's
-    exclusion set (pixai_gallery.py, INVARIANT 6) that the rest of the codebase already uses
+    exclusion set (moonglade_gallery.py, INVARIANT 6) that the rest of the codebase already uses
     to keep purged/quarantined files out of every other surface."""
     (tmp_path / "images").mkdir()
     (tmp_path / "gallery").mkdir()
@@ -157,7 +157,7 @@ def test_similar_excludes_self_and_limits_k(monkeypatch):
 def test_api_similar_route(tmp_path, monkeypatch):
     """Hydrates neighbours like /api/gallery-images, drops ids no longer in the catalog,
     and soft-404s an unknown media_id — the sidecar itself is mocked."""
-    from pixai_gallery import save_catalog, CATALOG_FIELDS
+    from moonglade_gallery import save_catalog, CATALOG_FIELDS
     from tests.conftest import login_client
 
     def row(**kw):
@@ -169,8 +169,8 @@ def test_api_similar_route(tmp_path, monkeypatch):
     ])
     (tmp_path / "q.png").write_bytes(b"x")   # so find_image_file resolves the query
 
-    import pixai_similar
-    monkeypatch.setattr(pixai_similar, "similar",
+    import moonglade_similar
+    monkeypatch.setattr(moonglade_similar, "similar",
                         lambda p, k=24, exclude_media_id=None: [("n1", 0.9), ("gone", 0.8)])
 
     cli = login_client(tmp_path)

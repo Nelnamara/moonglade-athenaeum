@@ -46,7 +46,7 @@ import {
 
 const STYLES = `
 :root{
-  /* Loom palette now INHERITS the gallery's design tokens (pixai_gallery.py's
+  /* Loom palette now INHERITS the gallery's design tokens (moonglade_gallery.py's
      DESIGN_TOKENS_CSS, shared with BASE_HTML) instead of hardcoding its own --
      switching skin in the gallery header re-colors the Loom too. --line
      deliberately maps to --overlay0 rather than --surface1 (which --panel2
@@ -62,7 +62,7 @@ const STYLES = `
 }
 *{box-sizing:border-box}
 /* System fonts only (no CDN) -- matches the gallery's own body{font-family:system-ui,
-   sans-serif} exactly (pixai_gallery.py) and its ui-monospace,monospace mono
+   sans-serif} exactly (moonglade_gallery.py) and its ui-monospace,monospace mono
    convention, rather than inventing a new stack. */
 .sb-root{font-family:system-ui,sans-serif;background:
   radial-gradient(1200px 600px at 80% -10%,rgba(255,255,255,.05),transparent 60%),var(--bg);
@@ -526,7 +526,7 @@ const V2_STYLES = `
 .lv-mini2{font-size:9px;color:var(--subtext);background:var(--base);border:1px solid var(--surface1);border-radius:5px;padding:3px 7px;cursor:pointer;margin:5px 0;}
 .lv-mini2:hover{border-color:var(--accent);color:var(--accent);}
 /* L536: Image tab field-parity additions -- a 2-up row (Size/Custom W×H, Mode/Count) and a
-   labeled checkbox row, mirroring pixai_gallery.py's .gen-row/.gen-check at the same sizing. */
+   labeled checkbox row, mirroring moonglade_gallery.py's .gen-row/.gen-check at the same sizing. */
 .lv-row2{display:flex;gap:8px;margin-top:8px;}
 .lv-row2>div{flex:1;min-width:0;}
 .lv-ck{display:flex;align-items:center;gap:7px;color:var(--subtext);font-size:11px;margin-top:8px;cursor:pointer;}
@@ -548,7 +548,7 @@ const V2_STYLES = `
 .lv-df-frames .sb-frame{flex:1 1 0;min-width:0;}
 .lv-gerr{font-size:10px;color:var(--coral);margin-top:6px;}
 /* D-11: LoRA chips in the Image tab -- mirrors the Gallery's own .lora-chip shape
-   (pixai_gallery.py) at the Loom's smaller scale/token set, not a copy-paste of it. */
+   (moonglade_gallery.py) at the Loom's smaller scale/token set, not a copy-paste of it. */
 /* picker-parity-round2 (2026-07-24): this used to be a show/hide toggle that expanded the
    LoRA <mg-model-picker> INLINE into this ~280px rail column -- the owner's exact complaint
    ("cramped mess... does not have a flyout like the gallery"). It now opens the SAME
@@ -572,7 +572,7 @@ const V2_STYLES = `
 /* picker-parity-round2 (problem 2): the Image tab's model/LoRA picker used to render
    <mg-model-picker> INLINE in this ~280px rail (cramped: results, a toggle button, a
    SECOND search box, more results, all stacked). Now a trigger row (mirrors
-   pixai_gallery.py's own #gen-selrow) that opens a floating overlay -- .lv-mpick-veil below
+   moonglade_gallery.py's own #gen-selrow) that opens a floating overlay -- .lv-mpick-veil below
    -- matching the Gallery's #model-flyout presentation: ONE picker experience, not a
    cramped-inline one here and a proper flyout there. */
 .lv-selrow{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border-radius:6px;background:var(--panel);border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:11.5px;text-align:left;}
@@ -730,7 +730,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // picker-parity-round2 (problem 2): replaces the old loraOpen boolean (D-11), which just
   // toggled the LoRA <mg-model-picker> INLINE into this rail -- the owner's exact complaint.
   // pickerOpen/pickerKind instead drive the floating .lv-mpick-veil overlay (mirrors
-  // pixai_gallery.py's #model-flyout open state + Models/LoRAs segment), opened via either
+  // moonglade_gallery.py's #model-flyout open state + Models/LoRAs segment), opened via either
   // the Model row's trigger (kind="base") or "+ add LoRA" (kind="lora").
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerKind, setPickerKind] = useState("base");
@@ -783,7 +783,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     return () => window.removeEventListener("keydown", onKey);
   }, [pickerOpen]);
   // picker-parity-round2: lazy-mount both <mg-model-picker> instances on FIRST open (mirrors
-  // pixai_gallery.py's ensurePickers() -- "only fetch on first open", not an always-mounted
+  // moonglade_gallery.py's ensurePickers() -- "only fetch on first open", not an always-mounted
   // base+LoRA fetch on every Loom load just because the right rail happens to be expanded).
   // Once true, stays true -- the pickers then persist (hidden via .lv-mpick-veil's own
   // display:none/.open) so a close/reopen never loses either one's search/scroll state.
@@ -830,7 +830,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       el.addEventListener("mg-pick", (e) => {
         // Owner report 2026-07-24: picking a model left the overlay open, forcing a
         // manual close -- close it the instant a base model is picked (single-select:
-        // one choice ends the browsing task), mirroring pixai_gallery.py's onBasePick.
+        // one choice ends the browsing task), mirroring moonglade_gallery.py's onBasePick.
         // LoRA picking (the other <mg-model-picker> mount, kind="lora" multi) is
         // deliberately left open -- see the "+ add LoRA" toggle below.
         setPickerOpen(false);
@@ -840,14 +840,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         // L536 + D-11: resolve model_type (so the LoRA compat warning has a real base to
         // compare against -- the Loom never fetched this at all before) and prefill the
         // model author's own tuned preset (negative/steps/cfg), mirroring
-        // pixai_gallery.py's Gen.applyModelDefaults() exactly: only for fields the model
+        // moonglade_gallery.py's Gen.applyModelDefaults() exactly: only for fields the model
         // actually has data for, and it OVERWRITES whatever's currently in imgAdv, same as
         // the Gallery's own (deliberate, already-shipped) behavior on every base-model pick.
         // picker-parity-round2 (problem 4/5): ?all=1 replaces the old single-version fetch --
         // ONE request either way (same endpoint), but now returns every published release
         // (versions[0] is the same "latest" the old fetch always resolved) so the version
         // picker + sampling_method + capabilities the app was resolving and discarding can
-        // finally be shown, mirroring pixai_gallery.py's onBasePick/applyVersion exactly.
+        // finally be shown, mirroring moonglade_gallery.py's onBasePick/applyVersion exactly.
         const mySeq = ++imgModelSeqRef.current;
         fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1")
           .then((r) => r.json())
@@ -1604,7 +1604,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         <div>
           <label className="lv-lab">Model</label>
           {/* picker-parity-round2 (problem 2): a trigger row, not an inline-mounted picker --
-              mirrors pixai_gallery.py's own #gen-selrow. The actual <mg-model-picker
+              mirrors moonglade_gallery.py's own #gen-selrow. The actual <mg-model-picker
               kind="base"> lives in the always-mounted .lv-mpick-veil overlay below (outside
               this tab-conditional block, next to <mg-generate-drawer>), matching that
               element's own "survive tab switches, CSS-hide instead of unmount" contract. */}
@@ -1705,13 +1705,13 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           {/* L536: full PixAI field parity with the gallery's own Generate tab (owner-decided
               scope, 2026-07-23) -- Advanced (negative/steps/cfg), 8 aspect-ratio buttons,
               Size + custom W×H, Mode, Count, Seed, High-priority, Prompt helper. Same field
-              names/defaults/order as pixai_gallery.py's #gen-mode-generate, submitted via
+              names/defaults/order as moonglade_gallery.py's #gen-mode-generate, submitted via
               buildImgGenBody() (loom-mutations.js) so the price badge below and the real
               submit in genImage() can never disagree about what these fields do. */}
           {(() => {
             // Capability gating (extra.compatibility, probed live 2026-07-06 -- memory
             // pixai-model-capability-schema): which of these params THIS model actually
-            // honors, mirroring pixai_gallery.py's gateField()/applyCapabilityGating()
+            // honors, mirroring moonglade_gallery.py's gateField()/applyCapabilityGating()
             // exactly. Fails OPEN on unknown/absent data -- only an explicit `false`
             // disables anything (imgModel==null or a never-probed model -> compat={} ->
             // every field stays enabled, same as today).
@@ -2117,7 +2117,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // AUDIT_2026-07-21.md `state-owner-defects`: .lv-df-veil (z-index 450) renders as a
   // DESCENDANT of .lv-overlay (z-index 400), so from the root stacking context it's part
   // of the SAME 400 atom, not a real 450 -- the body-level corner FABs (#jobs-fab/#jobs-
-  // tray, z-index 401/402; see pixai_gallery.py's "Lift the Activity chip" comment) then
+  // tray, z-index 401/402; see moonglade_gallery.py's "Lift the Activity chip" comment) then
   // paint OVER Deep Focus's veil and everything nested inside it, though the numbering
   // says they shouldn't. The full fix (hoisting Deep Focus out to .sb-root level) is a
   // bigger DOM refactor, deferred; this raises .lv-overlay's own root-context z-index to
@@ -2596,7 +2596,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   const [imgModel, setImgModel] = useState(null);        // {model_id,title} for reference-image gen
   const [imgLoras, setImgLoras] = useState([]);           // D-11: [{model_id,title,version_id,weight,lora_base_type,trigger_words,failed}]
   // L536: the Image tab's Advanced/aspect/size/mode/count/seed/checkbox state -- full PixAI
-  // field parity with pixai_gallery.py's own Generate tab (owner-decided scope, 2026-07-23:
+  // field parity with moonglade_gallery.py's own Generate tab (owner-decided scope, 2026-07-23:
   // "full PixAI parity, not a curated subset, for BOTH the Gallery and the Loom"). Lives
   // alongside imgModel/imgLoras (drawer-wide, not per-shot) for the same reason those do --
   // one Image-tab "form" shared across whichever shot is active, matching the Gallery's own
@@ -2608,7 +2608,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     mode: "auto", count: 1, seed: "", highPriority: false, promptHelper: true,
   }));
   // The model author's own tuned preset (negative/steps/cfg), fetched via /api/model-version
-  // when a BASE model resolves -- mirrors pixai_gallery.py's Gen.applyModelDefaults() (D-11
+  // when a BASE model resolves -- mirrors moonglade_gallery.py's Gen.applyModelDefaults() (D-11
   // audit note: "resolve_version_meta already fetches these; the drawer just never used
   // them" -- true of the Gallery's OWN drawer at the time; the Loom never fetched
   // /api/model-version for its base model at all, so it never even had the data). Only

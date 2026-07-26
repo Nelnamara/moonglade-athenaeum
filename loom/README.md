@@ -2,7 +2,7 @@
 
 This folder holds the Loom's **source and its Node toolchain**. The Loom itself is not a
 standalone page any more: it is a surface of the web app, served at **`/loom`** by
-`pixai_gallery.py`, and its React source is **`master-storyboard.jsx`**.
+`moonglade_gallery.py`, and its React source is **`master-storyboard.jsx`**.
 
 **The user-facing manual is [`docs/LOOM.md`](../docs/LOOM.md)** — features, shortcuts, the
 storyboard model. This file only covers what lives in `loom/`.
@@ -67,7 +67,7 @@ to `loom/` via `loom/package.json`.
   import) into `loom/dist/master-storyboard.bundle.js` via esbuild
   (`cd loom && npm run build`; `npm install` once first).
 
-**Two delivery paths, both live in `pixai_gallery.py`:**
+**Two delivery paths, both live in `moonglade_gallery.py`:**
 - `/loom` (default) — unchanged in-browser Babel-standalone transpile. `loom()` inlines
   `loom-core.js` ahead of the JSX (stripping `export`, same trick already used for
   `export default function App()`) so it works without a build step, exactly as before.

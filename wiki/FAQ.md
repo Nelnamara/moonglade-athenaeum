@@ -62,7 +62,7 @@ yours it goes back to sign-in only and no one on your network can register thems
 by design — it's your library and your PixAI account behind it, not a public signup.
 
 Locked out with an account already there? On the server machine,
-`python pixai_gallery_backup.py --add-web-user` prompts (hidden) for a username and password and
+`python moonglade_backup.py --add-web-user` prompts (hidden) for a username and password and
 writes it to `config.json`. It *adds or updates*, so it also resets a forgotten password;
 `--list-web-users` and `--remove-web-user <name>` are the companions. Full flow in
 [Setup](Setup).

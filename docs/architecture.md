@@ -3,21 +3,21 @@
 Moonglade Athenaeum is four Python modules around one SQLite catalog.
 
 ```
-pixai_gallery_backup.py   CLI engine: download, organize, generate, sync, delete, reconcile
-pixai_gallery.py          Flask web gallery + ALL SQLite catalog helpers (the shared base)
-pixai_similar.py          "more like this" CLIP sidecar index (optional `pixeltable` dep)
+moonglade_backup.py   CLI engine: download, organize, generate, sync, delete, reconcile
+moonglade_gallery.py          Flask web gallery + ALL SQLite catalog helpers (the shared base)
+moonglade_similar.py          "more like this" CLIP sidecar index (optional `pixeltable` dep)
 moonglade_mcp.py          local stdio MCP server: curation tools over the same helpers
 ```
 
-`pixai_gallery_backup.py` and `moonglade_mcp.py` both import `pixai_gallery.py` for
-catalog access — so catalog logic lives in exactly one place. `pixai_similar.py` owns no
+`moonglade_backup.py` and `moonglade_mcp.py` both import `moonglade_gallery.py` for
+catalog access — so catalog logic lives in exactly one place. `moonglade_similar.py` owns no
 catalog SQL; it's a sidecar index the gallery imports lazily inside the `/api/similar`
 handler, never at startup. The forward architecture is two surfaces — the CLI and the web
 gallery.
 
 ## Module reference
 
-### `pixai_gallery_backup.py`
+### `moonglade_backup.py`
 
 | Function | Role |
 |---|---|
@@ -38,8 +38,9 @@ gallery.
 | `reconcile_catalog_with_disk()` | Repoint each catalog row's filename/batch at the surviving on-disk file |
 | `delete_task_gql()` | Replay the `deleteGenerationTask` persisted **mutation** (POST, not the GET listing path). VOID mutation: returns `null` on success, raises on error. Single-attempt — no retry, so a flaky network can't double-fire a delete |
 | `run_delete_tasks()` | Guarded `--delete-task` driver: dry-run by default, `--apply` + typed `delete` confirm (or `--yes`), counts deleted/failed. Leaves local files + `catalog.db` untouched |
-| `vlog()` / `set_verbose()` | `-v/--verbose` diagnostics: timestamped per-page / per-image / download timing to stdout, and always forwarded to `pixai_logging`'s file logger regardless of `-v` |
-| `gql_adhoc()` | Generic ad-hoc GraphQL **POST** (full query document, no persisted hash). Works for queries AND mutations under the API-key Bearer. The foundation for client ops beyond the reverse-engineered listing path; `media_file_gql` + `account_info` use it. Raises `PixAIError` on GraphQL/HTTP error |
+| `vlog()` / `set_verbose()` | `-v/--verbose` diagnostics: timestamped per-page / per-image / download timing to stdout, and always forwarded to `moonglade_logging`'s file logger regardless of `-v` |
+| `gql_adhoc()` | Generic ad-hoc GraphQL **POST** (full query document, no persisted hash). Works for queries AND mutations under the API-key Bearer. The foundation for client ops beyond the reverse-engineered listing path; `media_file_gql` + `account_info` use it. Raises `PixAIError` on GraphQL/HTTP error. **Retries are document-aware**: the default (`retries=None`) is 3 for a query and **0 for a mutation**, because re-POSTing after a lost response can double-apply a mutation the server already ran. An explicit count still wins |
+| `gql_mutate()` | `gql_adhoc` for a mutation that must not fire twice — hard-codes `retries=0` and **takes no `retries` argument at all**, so a spending path cannot ask for the unsafe value. Every credit-spending or account-mutating GraphQL call goes through it: `createGenerationTask` (image / edit / video / reference video), `uploadMedia`, `deleteBatchMedia`. A lost RESPONSE is indistinguishable from a lost REQUEST — a read timeout, a dropped connection or a proxy 502 after PixAI already created and **charged for** the task would otherwise make the retry submit and pay for a second generation. Pinned by `tests/test_spend_no_retry.py`, which fails both if a spend path calls `gql_adhoc` directly and if a mutation is POSTed twice |
 | `account_info()` / `run_account_info()` | Read-only account dashboard (credits/membership/subscription) via `gql_adhoc`. **Never moves money** — no payment/subscription mutations are implemented, by design |
 | `run_generate()` | `--generate`: create images via `createGenerationTask` (ad-hoc POST), poll, download, catalog as `source='api'`. Preview unless `--confirm`. `--task-id` recovers an already-created task for free |
 | `max_upscale_ratio()` / `upscale_output_dims()` | The upscale ratio cap and the size it produces. PixAI's dialog offers two **mutually exclusive** upscale methods, and each radio's `value` is the param name: *Upscale* → `enlarge` + `enlargeModel`, *Hires* → `upscale` + `upscaleDenoisingStrength`/`Steps`/`Sampler`. `_gen_parameters` emits these (and the `enableADetailer`/`qualityTag` boosters) **only when asked** — an always-present default would change every existing call site's output and cost. The maximum ratio is **derived from a per-method output-pixel ceiling**, never a constant: the same method allows 1.9× on a 1400×784 source and only 1.4× in Hires. The Generate drawer carries a hand port of both helpers so the slider can show a live max + output size, pinned to these by a Node parity test |
@@ -48,7 +49,7 @@ gallery.
 | `_download_video_task()` | Shared video download+catalog (used by both i2v and reference-video): `video_outputs` → `media_file_gql.fileUrl` → `download` → catalog `is_video='1'` + poster thumbnail → `video_faststart` (deliberately run on download status `"skip"` too, so it backfills clips downloaded before auto-faststart shipped) |
 | `video_faststart()` | Lossless `ffmpeg -c copy -movflags +faststart` remux so iOS/Safari can stream a clip (PixAI serves moov-at-the-end mp4s). Concurrency-safe: the remux temp name is **unique per invocation** (uuid suffix, real extension last so ffmpeg picks the muxer) — two collectors can legitimately remux the same clip at once (gallery live-mirror + a task-status poll, or the separate `--watch-backup` process), and a deterministic temp name let their ffmpeg runs interleave into one file, corrupting the survivor mid-clip. Failures never raise (a collect must not die on a cosmetic remux) but are `vlog()`ed |
 | `_maybe_dump_params()` | `--dump-params`: print a task's full submit `parameters` (esp. on `--task-id` recovery) — bank any shape (multiRef/referenceVideo/…) with NO browser capture |
-| `upload_media()` | `--upload`: local file → `media_id` via the 3-step S3 handshake (`uploadMedia` presign → PUT bytes → `uploadMedia` register). Plain mutation over `gql_adhoc`; **free**. Unblocks inpaint / Edit / LoRA "bring your own image" |
+| `upload_media()` | `--upload`: local file → `media_id` via the 3-step S3 handshake (`uploadMedia` presign → PUT bytes → `uploadMedia` register). Plain mutation over `gql_mutate` (single attempt — a re-registered `externalId` can leave a second media object); **free**. Unblocks inpaint / Edit / LoRA "bring your own image" |
 | `build_chat_edit_parameters()` / `run_edit_image()` | `--edit-image`: instruct editing via `createGenerationTask` with a `chat` block (`prompts`+`mediaId`/`mediaIds`+`modelId`+`modelConfig`). `--edit-src` takes a catalog `media_id` OR a local file (auto-uploaded on `--confirm`); repeat for multi-image reference. Preview unless `--confirm` |
 | `list_kaisuukens()` / `match_kaisuuken()` / `_apply_kaisuuken()` / `run_cards()` | Free-generation cards ("kaisuuken" / 回数券) live on the oRPC **`/v2` REST API**, not GraphQL. `list_kaisuukens` = `GET /v2/kaisuuken/summary` (one row per template w/ count + locked model); `match_kaisuuken` = `POST /v2/kaisuuken/check {type:"generation-task", parameters}` → matching ticket ids. **Cards auto-apply**: `_apply_kaisuuken` runs on `--confirm` for every create path, calls `check`, and attaches the nearest-expiry `kaisuukenId` → 0 credits (like the website). Preview shows FREE/paid up-front. `--no-card` opts out; `--kaisuuken-id` forces one. `--cards` = read-only display. All fail soft. REST base `REST_API_BASE` + helpers `_rest_get`/`_rest_post` |
 | `price_task()` | `GET /v2/task-price`: compute a generation's credit cost WITHOUT creating it (mirrors GraphQL `pricingTask`). Scalars → query params, nested blocks (`i2vPro`/`referenceVideo`/`chat`/`loraParameters`/…) → URL-encoded JSON. Returns `actualPrice` (int) or None. **READ-ONLY, spends nothing** — used in previews to show the real cost + card savings |
@@ -56,7 +57,7 @@ gallery.
 | `suggest_prompt()` / `run_suggest_prompt()` | `--suggest-prompt <media_id\|file>`: image-to-prompt via `GET /v2/tag/suggest-prompt/{mediaId}` → `{output:[…]}` (a Danbooru-style tag list + natural-language description variants). Local files upload first (free). **FREE / read-only**, no `--confirm` |
 | `list_claims()` / `claim_reward()` / `run_claims()` | `--claims`: list claimable rewards (daily credits, agent stamina) via `GET /v2/claim` — **read-only**. `--claim <id\|all>`: claim ready rewards via `POST /v2/claim/{id}` — **gated behind `--confirm`**, previews otherwise, and never fires on a not-yet-claimable reward. Grants free credits/stamina to the owner's own account (no money moves) |
 
-### `pixai_logging.py`
+### `moonglade_logging.py`
 
 Shared logging baseline for both surfaces, `setup_logging(out_dir, verbose)` called early in
 each entry point. A `TimedRotatingFileHandler` writes `out_dir/logs/moonglade.log` (midnight
@@ -70,7 +71,7 @@ CRITICAL before handing off to the previous hook unchanged (Ctrl+C excluded). `g
 returns the shared logger; `log_path(out_dir)` is the file's path for a future Panel/CLI
 show-logs affordance (not built yet).
 
-### `pixai_gallery.py`
+### `moonglade_gallery.py`
 
 | Symbol | Role |
 |---|---|
@@ -82,13 +83,13 @@ show-logs affordance (not built yet).
 | `query_catalog()` | SQL-backed filter/sort/paginate for gallery index. Its `q` string supports `key:value` field operators (`model:`, `rating:>=3`, `created:2026-07`, …) parsed by `_build_where`/`_operator_clause`; grammar + examples in `wiki/Gallery.md` § Search operators |
 | `list_media_ids()` | Returns ordered media IDs for prev/next navigation |
 | `backfill_batches()` | Scans `batches/` on disk and fills empty `batch` column; called on gallery startup |
-| `media_id_of()` | Canonical media_id from a path (last `_`-chunk of stem). Invariant 1 — but NOT actually a single source: `backfill_batches()` (above, this same module) and `pixai_similar.py`'s `scan_dir` both re-implement the identical `stem.split("_")[-1]` inline instead of calling it |
+| `media_id_of()` | Canonical media_id from a path (last `_`-chunk of stem). Invariant 1 — but NOT actually a single source: `backfill_batches()` (above, this same module) and `moonglade_similar.py`'s `scan_dir` both re-implement the identical `stem.split("_")[-1]` inline instead of calling it |
 | `find_files_for_media_id()` | All on-disk files for a media_id, BOTH layouts (prefixed `*_<mid>.*` AND bare `<mid>.*`), exact-id checked, gallery excluded. Used by the gallery's `find_image_file` — **not** by resume or the audit, which each still walk the tree independently (see Invariant 7) |
 | `create_app()` | Flask app factory; calls `init_db` + `backfill_batches` before serving |
 
 ## CLI flags
 
-`python pixai_gallery_backup.py --help` is the authoritative per-flag text (every flag has
+`python moonglade_backup.py --help` is the authoritative per-flag text (every flag has
 help text; keep it that way when adding one). This map exists because the tuning knobs are
 easy to miss next to the headline commands — the user-facing walkthroughs live in `wiki/`
 (Backing-Up, Generating).
@@ -141,11 +142,11 @@ clean catalog costs almost nothing):
 ## The catalog (`catalog.db`)
 
 SQLite, one row per media, keyed by `media_id`. All I/O goes through helpers in
-`pixai_gallery.py` — never raw SQL elsewhere. Schema migrations go in **three
+`moonglade_gallery.py` — never raw SQL elsewhere. Schema migrations go in **three
 places**: the `CATALOG_FIELDS` list, the `_CREATE_TABLE` DDL, and the
 `_MIGRATIONS` list (run on every connect, so existing DBs auto-upgrade).
 `_IMAGE_EXTS` is the single source of truth for recognized image extensions —
-defined once here, imported by `pixai_gallery_backup.py`, never redefined locally.
+defined once here, imported by `moonglade_backup.py`, never redefined locally.
 
 Notable columns: identity/timing (`media_id`, `task_id`, `filename`, `created_at`),
 full meta (`prompt_full`, `seed`, `steps`, `sampler`, `cfg_scale`, `model_id/name`,
@@ -199,7 +200,7 @@ pixai_backup/
 ```
 
 **Not shown above — the Pixeltable semantic-search index lives OUTSIDE `out_dir`.**
-`pixai_similar.py` never points Pixeltable at `out_dir`, so its embedded-Postgres CLIP
+`moonglade_similar.py` never points Pixeltable at `out_dir`, so its embedded-Postgres CLIP
 table (dir `moonglade`, table `moonglade.images`) lands in Pixeltable's own default
 home, `~/.pixeltable` (`%USERPROFILE%\.pixeltable` on Windows) — a machine-local sidecar
 keyed by `media_id` against `catalog.db`, not part of a backup of `out_dir`, and rebuilt
@@ -255,7 +256,7 @@ manifest. It's idempotent, byte-safe, and dry-runnable. See the
 
 ## The web suite
 
-The Flask gallery (`pixai_gallery.py`) is a full creation suite, not just a browser.
+The Flask gallery (`moonglade_gallery.py`) is a full creation suite, not just a browser.
 Spend-capable routes are **LOGIN**-tier, not localhost: `/api/generate`, `/api/edit`,
 `/api/fix` and `/api/loom/generate` are reachable by any signed-in session, because
 generating from the tablet is the point. **LOCALHOST** (`_is_local_request`) is
@@ -323,7 +324,7 @@ Five framework-neutral custom elements (the "Option-A cohesion migration") live 
 `static/` as plain `mg-*.js` globals — no build step, no shadow DOM, loaded via a plain
 `<script src>` tag, each self-injecting its own `<style>` that reads the shared
 `DESIGN_TOKENS_CSS` custom properties so it re-skins with the rest of the app. Both the
-vanilla gallery (`pixai_gallery.py`) and the React Loom (`loom/master-storyboard.jsx`)
+vanilla gallery (`moonglade_gallery.py`) and the React Loom (`loom/master-storyboard.jsx`)
 mount the same files instead of each hand-duplicating the UI:
 
 | File | Element / global | Role |

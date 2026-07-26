@@ -3,10 +3,10 @@
 A local web gallery over your whole catalog.
 
 ```bash
-python pixai_gallery.py --out pixai_backup                 # http://127.0.0.1:5000
-python pixai_gallery.py --out pixai_backup --port 5757
-python pixai_gallery.py --out pixai_backup --host 0.0.0.0 --https   # LAN + PWA
-python pixai_gallery.py --out pixai_backup --rebuild-thumbs         # regenerate thumbnails
+python moonglade_gallery.py --out pixai_backup                 # http://127.0.0.1:5000
+python moonglade_gallery.py --out pixai_backup --port 5757
+python moonglade_gallery.py --out pixai_backup --host 0.0.0.0 --https   # LAN + PWA
+python moonglade_gallery.py --out pixai_backup --rebuild-thumbs         # regenerate thumbnails
 ```
 
 …or double-click **`Serve Gallery.pyw`** for a no-console launcher. The gallery is a
@@ -115,7 +115,7 @@ images and videos with the arrow keys without leaving the overlay.
   *Find Similar (model)* above: right-click any image card, or **✧ Similar** in the
   lightbox, for the 48 closest images in your catalog. Images only. Needs the optional
   CLIP index — `pip install pixeltable`, then build it once with
-  `python pixai_gallery_backup.py --rebuild-similar` (run that while the gallery isn't
+  `python moonglade_backup.py --rebuild-similar` (run that while the gallery isn't
   serving Similar queries — both use the same embedded database). Without the index the
   panel just tells you so; nothing else breaks.
 

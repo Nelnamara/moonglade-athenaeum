@@ -9,7 +9,7 @@
    Two consumers, both must keep working:
      1. master-storyboard.jsx imports this as a real ES module and esbuild
         bundles the two together (loom/scripts/build.mjs -> loom/dist/).
-     2. The Flask /loom route (pixai_gallery.py, `loom()`) ALSO inlines this
+     2. The Flask /loom route (moonglade_gallery.py, `loom()`) ALSO inlines this
         file's source ahead of the JSX for the in-browser Babel-standalone
         fallback path -- stripping the `export` keywords the same way it
         already strips `export default function App()`. That keeps the
@@ -165,7 +165,7 @@ export const shotImageRefs = (entry, project, imgSrc) => {
   // PixAI's real cap: a generation takes at most 6 image refs. Reserving frames first means
   // a shot that has to drop something under this cap always drops a lower-priority cast/ref,
   // never a structurally load-bearing frame -- the same "keep the highest-priority N, leave
-  // the rest out" truncation pixai_gallery.py's bulkSendVideo()/Gen.addVideoRefs() already
+  // the rest out" truncation moonglade_gallery.py's bulkSendVideo()/Gen.addVideoRefs() already
   // apply to the gallery's own bulk-send-to-video path (same real 6-image limit, trimmed
   // before ever reaching submit). shotPayload() is what actually builds the /api/loom/
   // generate body (both batchGenerate's direct call and the drawer's own prefill route
@@ -317,7 +317,7 @@ export const shotPayload = (entry, project, imgSrc) => {
 // batchGenerate's own price-confirm dialog) ----------
 
 // The only shotPayload fields the server's price math actually reads (verified against
-// pixai_gallery_backup.py's price_task/_PRICE_SCALARS/_PRICE_NESTED allowlist) -- prompt
+// moonglade_backup.py's price_task/_PRICE_SCALARS/_PRICE_NESTED allowlist) -- prompt
 // text, camera, lighting, notes, title never affect cost, so a fingerprint built from just
 // these fields lets a cost-estimate cache skip re-pricing on every keystroke elsewhere.
 export const PRICE_FIELDS = ["mode", "images", "video_refs", "duration", "quality", "generate_audio", "audio_language"];

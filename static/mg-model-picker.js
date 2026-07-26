@@ -41,7 +41,7 @@
    When present, renders a Popular/Newest sort toggle + the same 6 category chips
    (character/style/pose/clothing/background/detail) the gallery's own #model-flyout has
    for LoRAs, and threads sort=/category= into /api/model-search (the server already
-   honors both -- see pixai_gallery.py's api_model_search -- only the client-side UI was
+   honors both -- see moonglade_gallery.py's api_model_search -- only the client-side UI was
    missing). Independent of `kind`: the HOST decides when market makes sense (the gallery
    only ever sets it on its LoRA mount, matching its own long-standing "sort/category are a
    LoRA taxonomy, base models don't get them" design), the same way `show-type` on
@@ -58,7 +58,7 @@
    standalone verification page below, or any future plain mount) this behaves EXACTLY like
    `display:block` did (a flex column with no assigned height sizes to its content, same as
    a block), so nothing regresses there; a HOST that actually constrains the element's
-   height (via its own CSS -- see pixai_gallery.py's `#model-flyout mg-model-picker` and the
+   height (via its own CSS -- see moonglade_gallery.py's `#model-flyout mg-model-picker` and the
    Loom's `.lv-mpick-body mg-model-picker`) now gets a grid that fills exactly that height
    and scrolls internally, instead of a second independent 320px cap fighting the host's own
    scroll container.
@@ -68,7 +68,7 @@
    the currently-selected base model's resolved `model_type` (both hosts already resolve
    this today for their own post-selection is_lora_compatible() gate -- this just reuses
    it). Threaded into /api/model-search as `base_type=`, which soft-sorts + tags results
-   server-side (pixai_gallery_backup.py's annotate_lora_compat -- see that function for the
+   server-side (moonglade_backup.py's annotate_lora_compat -- see that function for the
    full compatible/unknown/incompatible reasoning); this component's only job is to render
    the `compat` tag it comes back with as a small badge on the card. No `base-type` set (or
    kind="base") -> byte-for-byte unaffected, same as `market`'s own opt-in contract.
@@ -78,7 +78,7 @@
    _search() so a continuation can never silently drift onto different filters) with the
    last response's `cursor` and APPENDS results instead of replacing them. _hasMore/_cursor
    reset to false/'' on every fresh _search() (a new query is a new list). Server-side detail
-   in pixai_gallery.py's api_model_search comment -- has_more had been computed correctly
+   in moonglade_gallery.py's api_model_search comment -- has_more had been computed correctly
    the whole time; nothing here had ever read it or asked for a next page. */
 (function () {
   'use strict';
@@ -111,7 +111,7 @@
     return (t.split('_')[0] || 'model').toLowerCase();
   }
   // picker-parity-round2: render the server's `compat` tag (annotate_lora_compat,
-  // pixai_gallery_backup.py) as a small badge. Hardcoded strings per branch, never the raw
+  // moonglade_backup.py) as a small badge. Hardcoded strings per branch, never the raw
   // tag value as visible text -- there's nothing untrusted in a same-origin JSON enum, but
   // matching this file's existing esc()-everything-dynamic discipline costs nothing.
   // 'unknown' (or no tag at all, i.e. no base selected) renders NOTHING -- see
@@ -348,7 +348,7 @@
     }
 
     // O13: Popular/Newest sort + the gallery's 6 LoRA category chips, same list as
-    // pixai_gallery.py's #mkt-cats (All is the '' category, not a real server value).
+    // moonglade_gallery.py's #mkt-cats (All is the '' category, not a real server value).
     _marketSkeleton() {
       return (
         '<div class="mg-mktsort"><button type="button" class="on" data-sort="popular">Popular</button>' +
@@ -496,7 +496,7 @@
         // Debounced (D-11): a raw mouseenter re-triggered an instant, un-animated,
         // freshly-repositioned popup on every card the mouse passed over while
         // scanning the grid -- what "browsing" actually is. Same fix as the Gallery's
-        // own #model-flyout (pixai_gallery.py's scheduleShowPreview/cancelPreview) --
+        // own #model-flyout (moonglade_gallery.py's scheduleShowPreview/cancelPreview) --
         // two independently-drifted copies, both needed it.
         c.addEventListener('mouseenter', function () { self._schedulePreview(m, c); });
         c.addEventListener('mouseleave', function () { self._cancelPreview(); });

@@ -15,8 +15,8 @@ import json
 
 import pytest
 
-import pixai_gallery_backup as core
-from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+import moonglade_backup as core
+from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client
 
@@ -43,7 +43,7 @@ def _authed_client(tmp_path, rows=()):
 def _redirect_config_to(monkeypatch, tmp_path):
     """core.__file__'s directory is where config.json is read/written. Point it at a
     throwaway tmp_path directory so a test can never touch the real one."""
-    fake_module_file = tmp_path / "pixai_gallery_backup.py"
+    fake_module_file = tmp_path / "moonglade_backup.py"
     monkeypatch.setattr(core, "__file__", str(fake_module_file))
 
 

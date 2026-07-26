@@ -3,7 +3,7 @@ Mocked -- no live network, no sleeping (completed/failed return or raise before 
 sleep; timeout=0 never enters the loop)."""
 import pytest
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 
 def _one_poll_then_timeout(monkeypatch, task):
@@ -206,11 +206,12 @@ def test_delete_one_image_sends_the_right_mutation(monkeypatch):
                                                                     retries=retries) or
                         {"updateGenerationTask": {"id": "T1"}})
     core.delete_batch_media_gql(object(), "T1", "M9")
-    # gql_adhoc defaults to retries=3 and re-POSTs on a RequestException or a 429/5xx. A
-    # read timeout can arrive AFTER PixAI has processed the delete, so the default would
-    # re-fire a destructive mutation against a batch that has already changed. The
-    # docstring promised SINGLE ATTEMPT from the day this was written; the call did not
-    # pass retries=0 until 2026-07-25, so the promise was prose only.
+    # A retry re-POSTs on a RequestException or a 429/5xx, and a read timeout can arrive
+    # AFTER PixAI has processed the delete -- re-firing a destructive mutation against a
+    # batch that has already changed. The docstring promised SINGLE ATTEMPT from the day
+    # this was written; the call did not pass retries=0 until 2026-07-25, so the promise
+    # was prose only. It now rides gql_mutate, which hard-codes it for every mutating
+    # path -- tests/test_spend_no_retry.py holds the general rule.
     assert seen["retries"] == 0, "a destructive mutation must never be retried"
     assert "updateGenerationTask" in seen["q"]
     assert seen["v"]["id"] == "T1"

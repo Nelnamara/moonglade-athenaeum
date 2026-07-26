@@ -8,8 +8,8 @@ import os
 import re
 from pathlib import Path
 
-import pixai_gallery_backup as core
-from pixai_gallery import CATALOG_FIELDS, _account_key, create_app, save_catalog
+import moonglade_backup as core
+from moonglade_gallery import CATALOG_FIELDS, _account_key, create_app, save_catalog
 
 from tests.conftest import login_client, login_existing_client
 from tests.csshelp import css_rules, element, winning
@@ -143,7 +143,7 @@ def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces(tmp_path):
     the gallery too, not just the Loom). Picker.open's mg-pick bridge converts the
     component's boolean is_nsfw back to the app-wide '1'/'' STRING convention at the
     boundary, since Gen.renderGenRef's #gen-ref-slot setter (checked below) still does a
-    strict === '1' comparison -- this is the one place left in pixai_gallery.py that needs
+    strict === '1' comparison -- this is the one place left in moonglade_gallery.py that needs
     is_nsfw to reach it as a real value, not just be forwarded blindly."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
@@ -293,7 +293,7 @@ def test_model_search_lora_always_uses_graphql_even_without_market_filters(tmp_p
     """picker-parity-round2 (problem 3): LoRA search needs real per-row architecture data
     (modelType/loraBaseModelType) on EVERY search, not just category/Newest browsing -- REST
     has no such field to request (confirmed by inspecting its full response shape -- see
-    pixai_gallery_backup.py's model_search_rest), so kind=lora now always routes through
+    moonglade_backup.py's model_search_rest), so kind=lora now always routes through
     model_search_market_gql (GraphQL), regardless of category/sort. Base-model search
     (kind=base) is UNCHANGED -- REST by default, GraphQL only for category/Newest."""
     calls = {"rest": 0, "gql": 0}
@@ -616,7 +616,7 @@ def test_one_account_cannot_see_or_clobber_anothers_snippets(tmp_path):
     """Same split saved views already got (test_view_presets.py), same reason: prompt
     snippets were install-wide (one shared prompt_snippets.json), so any signed-in
     account could read AND wholesale-overwrite every other account's saved snippets."""
-    from pixai_gallery import create_app
+    from moonglade_gallery import create_app
     from tests.conftest import login_test_client
     app = create_app(tmp_path)
 
@@ -640,7 +640,7 @@ def test_snippets_are_independent_for_accounts_differing_only_by_case(tmp_path):
     though account identity is case-SENSITIVE (same alice/bob split as above, just
     unlucky enough to collide on disk). FAILS before the fix on this filesystem:
     nel's snippets read/save clobbers Nel's."""
-    from pixai_gallery import create_app
+    from moonglade_gallery import create_app
     from tests.conftest import login_test_client
     app = create_app(tmp_path)
 
@@ -709,7 +709,7 @@ def test_suggest_prompt_route(tmp_path, monkeypatch):
 
 
 def test_rows_for_media_ids_preserves_order_drops_missing():
-    import pixai_gallery as g
+    import moonglade_gallery as g
 
     class FakeCon:
         def execute(self, sql, params):
@@ -758,7 +758,7 @@ def test_contact_sheet_photo_and_strip(tmp_path):
 
 def test_loom_handoff_extracts_and_uploads(tmp_path, monkeypatch):
     """Frame handoff: find the shot's clip -> extract last frame -> upload -> media_id."""
-    import pixai_gallery as g
+    import moonglade_gallery as g
     (tmp_path / "videos").mkdir()
     clip = tmp_path / "videos" / "shot_V9.mp4"
     clip.write_bytes(b"fake")
@@ -788,7 +788,7 @@ def test_loom_handoff_is_trim_aware(tmp_path, monkeypatch):
     """A trimmed previous shot must hand off the frame at its trimOut (the point the cut
     ends on), not the untrimmed clip's real final frame -- else the continuity chain shows
     a frame the edit never plays."""
-    import pixai_gallery as g
+    import moonglade_gallery as g
     (tmp_path / "videos").mkdir()
     clip = tmp_path / "videos" / "shot_V9.mp4"
     clip.write_bytes(b"fake")
@@ -826,7 +826,7 @@ def test_loom_handoff_ignores_deleted_quarantine(tmp_path, monkeypatch):
     so a purged clip could be extracted and uploaded to seed the next (paid) shot.
     No catalog row for this media_id, so the fast path can't shortcut past the
     fallback -- this exercises exactly the buggy branch."""
-    import pixai_gallery as g
+    import moonglade_gallery as g
     qdir = tmp_path / g.DELETED_DIRNAME
     qdir.mkdir()
     (qdir / "shot_V9.mp4").write_bytes(b"fake")
@@ -846,7 +846,7 @@ def test_loom_handoff_requires_exact_media_id_match(tmp_path, monkeypatch):
     """B17 (audit 2026-07-21): the fallback glob had no media_id_of(p) == mid check,
     so a SHORTER media_id could match as a substring of a longer, UNRELATED one's
     filename -- e.g. a request for 'V9' resolving to a clip whose real id is '9V9'."""
-    import pixai_gallery as g
+    import moonglade_gallery as g
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "other_9V9.mp4").write_bytes(b"fake")   # real media_id is "9V9"
 
@@ -898,7 +898,7 @@ def test_loom_video_duration_ignores_deleted_quarantine(tmp_path, monkeypatch):
     """Same B17 quarantine contract as /api/loom/handoff (shared resolver,
     _find_local_video_file): a file sitting under _deleted/ must not be probed as if
     it were a live survivor."""
-    import pixai_gallery as g
+    import moonglade_gallery as g
     qdir = tmp_path / g.DELETED_DIRNAME
     qdir.mkdir()
     (qdir / "shot_V9.mp4").write_bytes(b"fake")
@@ -972,7 +972,7 @@ def test_one_account_cannot_see_or_clobber_anothers_presets(tmp_path, monkeypatc
     """Same split saved views/snippets/Loom storyboards already got: Toolbox presets
     were install-wide (one shared toolbox_presets.json), so any signed-in account
     could read AND wholesale-overwrite every other account's imported presets."""
-    from pixai_gallery import create_app
+    from moonglade_gallery import create_app
     from tests.conftest import login_test_client
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
@@ -1002,7 +1002,7 @@ def test_presets_are_independent_for_accounts_differing_only_by_case(tmp_path, m
     _view_presets_path's exact quote(username, safe="") keying -- inheriting the same
     case-collision bug. FAILS before the fix on this filesystem: nel's presets
     read/save clobbers Nel's."""
-    from pixai_gallery import create_app
+    from moonglade_gallery import create_app
     from tests.conftest import login_test_client
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
@@ -1201,7 +1201,7 @@ def test_redaction_still_does_not_eat_ordinary_messages(tmp_path, monkeypatch):
 
 
 def test_catalog_counts(tmp_path):
-    import pixai_gallery as g
+    import moonglade_gallery as g
     g.save_catalog(tmp_path / "catalog.db", [
         _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00",
              collections="faves,wips"),
@@ -1214,7 +1214,7 @@ def test_catalog_counts(tmp_path):
 
 
 def test_distinct_task_count(tmp_path):
-    import pixai_gallery as g
+    import moonglade_gallery as g
     g.save_catalog(tmp_path / "catalog.db", [
         _row(media_id="1", task_id="tA", filename="a_1.png", created_at="2025-01-01T00:00:00"),
         _row(media_id="2", task_id="tA", filename="b_2.png", created_at="2025-01-02T00:00:00"),  # same task (batch)
@@ -1276,7 +1276,7 @@ def test_api_contests_route(tmp_path, monkeypatch):
 
 
 def test_your_art_ranks_published_and_enriches_views(tmp_path, monkeypatch):
-    import pixai_gallery as g
+    import moonglade_gallery as g
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     # views come from a per-artwork call; mock it deterministically off the artwork_id
     monkeypatch.setattr(core, "artwork_views", lambda s, aid: {"aw1": 500, "aw2": 90}.get(aid, 0))
@@ -1313,7 +1313,7 @@ def test_unauthenticated_lan_request_to_index_is_redirected_to_login(tmp_path):
     hidden, a small banner shown instead) -- `/` had no gate of its own at all back
     then. That whole in-between tier is retired: `/` now carries no allowlist
     exemption from the global front-door hook (_enforce_front_door(), see
-    pixai_gallery.py's docstring), so an unauthenticated LAN request never reaches
+    moonglade_gallery.py's docstring), so an unauthenticated LAN request never reaches
     index() at all -- it's redirected to /login instead of rendering anything."""
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
@@ -1851,7 +1851,7 @@ def test_css_cascade_resolver_can_actually_fail(tmp_path):
 def test_dead_css_selectors_removed_in_broader_sweep():
     """O9's broader mechanical sweep (audit 2026-07-21): after the two NAMED dead rules
     (.vp-chip/.gen-ce) were deleted in a prior pass, this extracts every class selector out of
-    pixai_gallery.py's inline <style> blocks and checks each for a real producer (a template
+    moonglade_gallery.py's inline <style> blocks and checks each for a real producer (a template
     element, or a classList.add/className site in the inline JS). Two more turned up with zero
     producers anywhere in the repo:
       - .dock-right on #gen-drawer -- Gen.setDock(d) only ever toggles 'dock-'+x for x in
@@ -1871,7 +1871,7 @@ def test_dead_css_selectors_removed_in_broader_sweep():
     NOTE the assertion below is a blunt substring check over the whole module, so it also
     trips on the WORD in ordinary prose, not just on a live selector. If a comment needs to
     describe that dock, spell it "the right-hand dock" rather than hyphenating it."""
-    src = (Path(__file__).resolve().parents[1] / "pixai_gallery.py").read_text(encoding="utf-8")
+    src = (Path(__file__).resolve().parents[1] / "moonglade_gallery.py").read_text(encoding="utf-8")
     assert "dock-right" not in src
     assert "mp-tags" not in src
     for still_alive in ("dock-left", "dock-top", "dock-bottom",
@@ -1913,7 +1913,7 @@ def test_cost_badge_ships_with_every_price_surface(tmp_path):
     can't silently break them the way it breaks a badge (audit: tests-that-dont-bite,
     doc-lie, 2026-07-21 -- the docstring used to claim "every surface", which this
     test's own assertions never covered)."""
-    import pixai_gallery as pg
+    import moonglade_gallery as pg
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                          created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
@@ -2059,7 +2059,7 @@ def test_generate_drawer_blocks_submit_on_unresolved_lora(tmp_path):
     entry.failed) moved into <mg-model-picker>'s own _toggleMulti() -- the gallery's
     onLoraPick() only consumes the ALREADY-resolved-or-failed entry the component hands
     it. So the failed-tracking assertions now check mg-model-picker.js; everything that
-    still lives in pixai_gallery.py (the Go-button gate, generate()'s submit-time guard,
+    still lives in moonglade_gallery.py (the Go-button gate, generate()'s submit-time guard,
     anyLoraUnresolved() itself) is unchanged and still checked against the gallery page."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)
@@ -2195,7 +2195,7 @@ def test_import_task_leaves_a_dismissed_orphan_alone(tmp_path, monkeypatch):
 
     cli.post("/api/import-task", json={"task_id": tid})
 
-    from pixai_gallery_backup import _reconstruct_jobs
+    from moonglade_backup import _reconstruct_jobs
     jobs_by_id, _order, _n = _reconstruct_jobs(tmp_path)
     assert jobs_by_id[tid]["status"] == "running"       # untouched
     assert jobs_by_id[tid]["dismissed"] is True

@@ -3,11 +3,11 @@
 ## First run
 
 ```bash
-python pixai_gallery_backup.py --probe        # confirm connection
-python pixai_gallery_backup.py --count        # how many images you have
-python pixai_gallery_backup.py --max 40       # small test download
-python pixai_gallery_backup.py                # download everything (parallel)
-python pixai_gallery_backup.py               # full metadata is captured by default
+python moonglade_backup.py --probe        # confirm connection
+python moonglade_backup.py --count        # how many images you have
+python moonglade_backup.py --max 40       # small test download
+python moonglade_backup.py                # download everything (parallel)
+python moonglade_backup.py               # full metadata is captured by default
 ```
 
 ### Where the library lives
@@ -38,10 +38,10 @@ Everything lands in `pixai_backup/` (git-ignored): `images/`, `catalog.db`,
 The download path is parallel and incremental. For routine "grab what's new":
 
 ```bash
-python pixai_gallery_backup.py --sync                      # one-shot: the whole refresh chain
-python pixai_gallery_backup.py --update                    # stops when it reaches what you have
-python pixai_gallery_backup.py --update --workers 8        # more concurrency
-python pixai_gallery_backup.py --workers 8 --page-size 500 # fast full backfill
+python moonglade_backup.py --sync                      # one-shot: the whole refresh chain
+python moonglade_backup.py --update                    # stops when it reaches what you have
+python moonglade_backup.py --update --workers 8        # more concurrency
+python moonglade_backup.py --workers 8 --page-size 500 # fast full backfill
 ```
 
 - `--sync` is the one-shot refresh: incremental pull **with** full metadata (same as
@@ -70,9 +70,9 @@ python pixai_gallery_backup.py --workers 8 --page-size 500 # fast full backfill
 ## Full metadata
 
 ```bash
-python pixai_gallery_backup.py                        # captured by default on every pull
-python pixai_gallery_backup.py --backfill-full-meta   # fill existing catalog rows
-python pixai_gallery_backup.py --catalog-stats        # how much is already filled in
+python moonglade_backup.py                        # captured by default on every pull
+python moonglade_backup.py --backfill-full-meta   # fill existing catalog rows
+python moonglade_backup.py --catalog-stats        # how much is already filled in
 ```
 
 Captures the complete prompt, seed, steps, sampler, CFG, human-readable model name,
@@ -91,9 +91,9 @@ or the daily free tier).
 ## Videos & published artwork
 
 ```bash
-python pixai_gallery_backup.py --sync-videos          # back up image-to-video mp4s
-python pixai_gallery_backup.py --sync-artworks        # published titles/tags/likes/aesthetic
-python pixai_gallery_backup.py --sync-artworks --with-videos
+python moonglade_backup.py --sync-videos          # back up image-to-video mp4s
+python moonglade_backup.py --sync-artworks        # published titles/tags/likes/aesthetic
+python moonglade_backup.py --sync-artworks --with-videos
 ```
 
 ## Converting formats (`--convert`)
@@ -101,9 +101,9 @@ python pixai_gallery_backup.py --sync-artworks --with-videos
 PixAI serves `.webp`; if you'd rather keep `.png` or `.jpeg` on disk (needs Pillow):
 
 ```bash
-python pixai_gallery_backup.py --convert png            # convert as files download
-python pixai_gallery_backup.py --convert-existing       # convert what's already on disk (no token needed)
-python pixai_gallery_backup.py --convert-existing --dry-run   # preview first
+python moonglade_backup.py --convert png            # convert as files download
+python moonglade_backup.py --convert-existing       # convert what's already on disk (no token needed)
+python moonglade_backup.py --convert-existing --dry-run   # preview first
 ```
 
 | Flag | Default | Meaning |
@@ -120,9 +120,9 @@ A live WebSocket feed of your account: watch generations complete in real time, 
 optionally auto-collect each one the moment it finishes.
 
 ```bash
-python pixai_gallery_backup.py --watch                     # stream events until Ctrl-C
-python pixai_gallery_backup.py --watch --watch-backup      # + download each finished gen immediately
-python pixai_gallery_backup.py --watch --watch-seconds 600 # auto-stop after 10 minutes
+python moonglade_backup.py --watch                     # stream events until Ctrl-C
+python moonglade_backup.py --watch --watch-backup      # + download each finished gen immediately
+python moonglade_backup.py --watch --watch-seconds 600 # auto-stop after 10 minutes
 ```
 
 ## Importing your own media
@@ -130,8 +130,8 @@ python pixai_gallery_backup.py --watch --watch-seconds 600 # auto-stop after 10 
 From the **CLI**:
 
 ```bash
-python pixai_gallery_backup.py --import-local         # catalog files dropped into the backup
-python pixai_gallery_backup.py --import-local <DIR>   # copy an external folder in
+python moonglade_backup.py --import-local         # catalog files dropped into the backup
+python moonglade_backup.py --import-local <DIR>   # copy an external folder in
 ```
 
 Or from the **gallery** — click **↑ Import** in the header (next to Generate) to open the
@@ -154,10 +154,10 @@ One mode: normalize the whole backup into `YYYY-MM/` month folders with readable
 **reversible**.
 
 ```bash
-python pixai_gallery_backup.py --organize --dry-run        # preview
-python pixai_gallery_backup.py --organize                  # do it
-python pixai_gallery_backup.py --organize --embed-metadata # also embed meta into PNG/JPEG
-python pixai_gallery_backup.py --undo-organize             # roll back via the manifest
+python moonglade_backup.py --organize --dry-run        # preview
+python moonglade_backup.py --organize                  # do it
+python moonglade_backup.py --organize --embed-metadata # also embed meta into PNG/JPEG
+python moonglade_backup.py --undo-organize             # roll back via the manifest
 ```
 
 Organizing never breaks the gallery — file lookup is by `media_id`, so images can
@@ -167,10 +167,10 @@ Organize.)
 ## Duplicate audit & dedup
 
 ```bash
-python pixai_gallery_backup.py --audit          # report -> audit_report.csv
-python pixai_gallery_backup.py --dedup          # dry-run plan
-python pixai_gallery_backup.py --dedup --apply  # quarantine redundant copies
-python pixai_gallery_backup.py --verify-dupes   # confirm quarantine is safe to delete
+python moonglade_backup.py --audit          # report -> audit_report.csv
+python moonglade_backup.py --dedup          # dry-run plan
+python moonglade_backup.py --dedup --apply  # quarantine redundant copies
+python moonglade_backup.py --verify-dupes   # confirm quarantine is safe to delete
 ```
 
 `--verify-dupes` is read-only — unless you add `--restore-orphans`, which moves any
@@ -218,7 +218,7 @@ rather than deleted, precisely so you could change your mind. There is a command
 job is to confirm emptying it is safe:
 
 ```bash
-python pixai_gallery_backup.py --verify-dupes
+python moonglade_backup.py --verify-dupes
 ```
 
 It re-checks that every quarantined file still has a surviving copy elsewhere in the backup.
@@ -238,8 +238,8 @@ folders, they simply predate (or postdate) the last organize run. That's cosmeti
 problem, and it's reversible:
 
 ```bash
-python pixai_gallery_backup.py --organize --dry-run   # preview, changes nothing
-python pixai_gallery_backup.py --organize             # normalize into YYYY-MM/
+python moonglade_backup.py --organize --dry-run   # preview, changes nothing
+python moonglade_backup.py --organize             # normalize into YYYY-MM/
 ```
 
 `--organize` writes `organize_manifest.csv` and `--undo-organize` reverses it, so this is a
@@ -252,7 +252,7 @@ library the answer is almost always "the images themselves", and the reclaimable
 rounding error by comparison:
 
 ```bash
-python pixai_gallery_backup.py --catalog-stats
+python moonglade_backup.py --catalog-stats
 ```
 
 > **A note on where your library lives.** By default `pixai_backup/` sits *inside* the

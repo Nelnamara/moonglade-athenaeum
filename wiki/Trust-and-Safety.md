@@ -24,6 +24,15 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   behind a flag, not commented out, not planned. `--account` only ever *reads* your
   credits/membership status.
 - **Touch anyone's account but yours.** Every request rides your own API key.
+- **Charge you twice for one generation.** A submit is sent **once**, never re-sent. That
+  sounds obvious, but it isn't free: the tool retries ordinary *reads* when the network
+  hiccups, and until **2026-07-26** a submit was treated the same way. The danger is that a
+  lost reply looks exactly like a lost request — if PixAI creates and charges for your
+  generation and the answer never makes it back (a timeout, a dropped connection, a proxy
+  erroring after the fact), a retry would quietly buy a second one. Now it can't: submits,
+  edits, videos, uploads and cloud deletes all go out through a path that has no retry to
+  give. If the network eats one, you get an error and decide for yourself whether to try
+  again.
 - **Be reached by anyone who hasn't signed in.** As of **v2.0.0** the gallery is default-deny:
   every route except the login page itself requires an account, and that applies on the
   machine running the server exactly as it does over the network. Nothing is browsable

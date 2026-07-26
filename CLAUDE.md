@@ -120,6 +120,12 @@ shipped bug.
 - No real credentials or user-specific values should appear in any committed file.
 - All traffic is HTTPS with verification on; do not add `verify=False` anywhere.
 - **Server page-size cap:** `last` above ~8,000–10,000 triggers a Prisma `Internal server error`. Keep download `--page-size` ≤ ~8,000.
+- **A mutation that spends or changes the account goes through `gql_mutate()`, never
+  `gql_adhoc()`.** `gql_mutate` hard-codes `retries=0` and offers no retries argument; a
+  re-POST after a lost response (read timeout, dropped connection, proxy 502 *after* the
+  backend succeeded) submits and pays for a SECOND generation. `gql_adhoc`'s default is
+  document-aware as a backstop (0 for a mutation, 3 for a query), but new spend paths call
+  `gql_mutate` so the intent is reviewable. Guarded by `tests/test_spend_no_retry.py`.
 - **`READ_ONLY` in config.json overrides `--confirm`/`--apply`/`--yes`.** Any new code path that
   submits a generation, submits a fix, deletes a task, or claims a reward must call
   `_check_read_only(...)` before the network call fires — it is not optional per-path opt-in,
@@ -151,7 +157,7 @@ shipped bug.
 ## Logging (`-v` / `--verbose`, and the persistent file log)
 
 - `set_verbose()` + `vlog()`: timestamped diagnostics (per-page fetch, per-image resolve/download timing, startup disk-scan time) to stdout. Console output is a no-op until enabled with `-v` / `--verbose`.
-- `pixai_logging.py` is the persistent baseline: a rotating file at `out_dir/logs/moonglade.log`, always on regardless of `-v` (only the console mirror is verbose-gated). See `docs/architecture.md`'s module reference for the full design.
+- `moonglade_logging.py` is the persistent baseline: a rotating file at `out_dir/logs/moonglade.log`, always on regardless of `-v` (only the console mirror is verbose-gated). See `docs/architecture.md`'s module reference for the full design.
 
 ## Recapture procedure (when PixAI changes their frontend)
 
@@ -163,7 +169,7 @@ recapture is in `private/RE_NOTES.md`.
 ## Creating, the web suite, and feature history
 
 All creation (generate/video/reference-video/edit/upload/cards) rides one
-`createGenerationTask` mutation over `gql_adhoc`, and every credit-spending path is
+`createGenerationTask` mutation over `gql_mutate`, and every credit-spending path is
 preview-only until `--confirm` — see `docs/architecture.md`'s function reference for the
 per-command shapes and the **Quick command reference** below for usage. The Flask gallery
 is a full web creation suite (Generate drawer, Picker, The Loom, live-events push, Control
@@ -212,46 +218,46 @@ branches, merge to master with `--no-ff`, tag releases.
 ## Quick command reference
 
 ```
-python pixai_gallery_backup.py --probe                    # connection sanity check
-python pixai_gallery_backup.py --count                    # tally tasks + images
-python pixai_gallery_backup.py --max 40                   # small test download
-python pixai_gallery_backup.py                            # full download (4 workers, 250/page)
-python pixai_gallery_backup.py --update                   # fast incremental: stop at already-downloaded history
-python pixai_gallery_backup.py --update --workers 8       # incremental + higher concurrency
-python pixai_gallery_backup.py --workers 8 --page-size 500  # fast full backfill
-python pixai_gallery_backup.py --no-full-meta             # faster pull, but rows land with no prompt/seed/model
-python pixai_gallery_backup.py --backfill-full-meta       # fill existing rows
-python pixai_gallery_backup.py --sync                     # ONE-SHOT refresh: pull+full-meta → fix-models → backfill → thumbnails → reconcile-deleted (idempotent)
-python pixai_gallery_backup.py --organize --dry-run       # preview month-folder normalize
-python pixai_gallery_backup.py --organize                 # normalize into YYYY-MM/ (reversible; --organize-adv is an alias)
-python pixai_gallery_backup.py --catalog-stats            # summarize catalog.db
-python pixai_gallery_backup.py --export-csv               # export catalog.db → CSV
-python pixai_gallery_backup.py --sync-artworks            # merge published-artwork metadata (title/likes/tags) by media_id
-python pixai_gallery_backup.py --audit                    # read-only duplicate report → audit_report.csv
-python pixai_gallery_backup.py --audit --no-content       # fast: same-media_id location dupes only
-python pixai_gallery_backup.py --dedup                    # dry-run dedup plan (nothing changes)
-python pixai_gallery_backup.py --dedup --apply            # quarantine redundant copies to _duplicates/
-python pixai_gallery_backup.py --dedup --apply --dedup-delete  # delete instead of quarantine
-python pixai_gallery_backup.py --verify-dupes             # confirm _duplicates/ is safe to delete
-python pixai_gallery.py --out pixai_backup                # launch gallery at :5000 (+ /health dashboard)
-python pixai_gallery_backup.py --delete-task <id> [<id> ...]        # DRY-RUN: list what would be deleted (nothing happens)
-python pixai_gallery_backup.py --delete-task <id> --apply --yes     # actually delete from your account (irreversible; null=success)
-python pixai_gallery_backup.py -v --update                # verbose: per-page / per-image timing diagnostics
-python pixai_gallery_backup.py --watch                    # live event stream (WS push): watch tasks complete
-python pixai_gallery_backup.py --watch --watch-backup     # + auto-collect each finished gen as it completes
-python pixai_gallery_backup.py --contests                 # list live PixAI contests (read-only)
+python moonglade_backup.py --probe                    # connection sanity check
+python moonglade_backup.py --count                    # tally tasks + images
+python moonglade_backup.py --max 40                   # small test download
+python moonglade_backup.py                            # full download (4 workers, 250/page)
+python moonglade_backup.py --update                   # fast incremental: stop at already-downloaded history
+python moonglade_backup.py --update --workers 8       # incremental + higher concurrency
+python moonglade_backup.py --workers 8 --page-size 500  # fast full backfill
+python moonglade_backup.py --no-full-meta             # faster pull, but rows land with no prompt/seed/model
+python moonglade_backup.py --backfill-full-meta       # fill existing rows
+python moonglade_backup.py --sync                     # ONE-SHOT refresh: pull+full-meta → fix-models → backfill → thumbnails → reconcile-deleted (idempotent)
+python moonglade_backup.py --organize --dry-run       # preview month-folder normalize
+python moonglade_backup.py --organize                 # normalize into YYYY-MM/ (reversible; --organize-adv is an alias)
+python moonglade_backup.py --catalog-stats            # summarize catalog.db
+python moonglade_backup.py --export-csv               # export catalog.db → CSV
+python moonglade_backup.py --sync-artworks            # merge published-artwork metadata (title/likes/tags) by media_id
+python moonglade_backup.py --audit                    # read-only duplicate report → audit_report.csv
+python moonglade_backup.py --audit --no-content       # fast: same-media_id location dupes only
+python moonglade_backup.py --dedup                    # dry-run dedup plan (nothing changes)
+python moonglade_backup.py --dedup --apply            # quarantine redundant copies to _duplicates/
+python moonglade_backup.py --dedup --apply --dedup-delete  # delete instead of quarantine
+python moonglade_backup.py --verify-dupes             # confirm _duplicates/ is safe to delete
+python moonglade_gallery.py --out pixai_backup                # launch gallery at :5000 (+ /health dashboard)
+python moonglade_backup.py --delete-task <id> [<id> ...]        # DRY-RUN: list what would be deleted (nothing happens)
+python moonglade_backup.py --delete-task <id> --apply --yes     # actually delete from your account (irreversible; null=success)
+python moonglade_backup.py -v --update                # verbose: per-page / per-image timing diagnostics
+python moonglade_backup.py --watch                    # live event stream (WS push): watch tasks complete
+python moonglade_backup.py --watch --watch-backup     # + auto-collect each finished gen as it completes
+python moonglade_backup.py --contests                 # list live PixAI contests (read-only)
 # --- creating (all preview-only until --confirm; --task-id recovers a task for free) ---
-python pixai_gallery_backup.py --account                  # read-only credits/membership dashboard
-python pixai_gallery_backup.py --cards                    # read-only free-card (kaisuuken) balances + ids
-python pixai_gallery_backup.py --claims                   # read-only claimable rewards (daily credits, stamina)
-python pixai_gallery_backup.py --claim all --confirm      # claim ready rewards (gated; grants to your account)
-python pixai_gallery_backup.py --suggest-prompt <id|file> # image-to-prompt: tags + description (free)
-python pixai_gallery_backup.py --upload path/to/image.png # local file -> media_id (free; S3 upload)
-python pixai_gallery_backup.py --generate --prompt "..."               # preview an image gen (add --confirm to spend)
-python pixai_gallery_backup.py --generate-video --image <media_id> --prompt "..."   # preview i2v (EXPENSIVE; --confirm)
-python pixai_gallery_backup.py --reference-video --ref-image <id1> --ref-image <id2> --prompt "@image1 ... @image2 ..."  # preview multi-ref video
-python pixai_gallery_backup.py --edit-image --edit-src <media_id|file> --prompt "make it night"  # preview an edit
-python pixai_gallery_backup.py --generate-video --task-id <id> --dump-params  # recover a task (free) + print its full submit shape
+python moonglade_backup.py --account                  # read-only credits/membership dashboard
+python moonglade_backup.py --cards                    # read-only free-card (kaisuuken) balances + ids
+python moonglade_backup.py --claims                   # read-only claimable rewards (daily credits, stamina)
+python moonglade_backup.py --claim all --confirm      # claim ready rewards (gated; grants to your account)
+python moonglade_backup.py --suggest-prompt <id|file> # image-to-prompt: tags + description (free)
+python moonglade_backup.py --upload path/to/image.png # local file -> media_id (free; S3 upload)
+python moonglade_backup.py --generate --prompt "..."               # preview an image gen (add --confirm to spend)
+python moonglade_backup.py --generate-video --image <media_id> --prompt "..."   # preview i2v (EXPENSIVE; --confirm)
+python moonglade_backup.py --reference-video --ref-image <id1> --ref-image <id2> --prompt "@image1 ... @image2 ..."  # preview multi-ref video
+python moonglade_backup.py --edit-image --edit-src <media_id|file> --prompt "make it night"  # preview an edit
+python moonglade_backup.py --generate-video --task-id <id> --dump-params  # recover a task (free) + print its full submit shape
 ```
 
 **Free cards auto-apply** (shipped 2026-07-03): on `--confirm`, `_apply_kaisuuken` calls PixAI's

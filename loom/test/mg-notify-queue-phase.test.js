@@ -235,7 +235,7 @@ describe("the queued state is styled, and styled the same on both hosts", () => 
     // touches ONLY #jobs-fab/#jobs-tray bottom + z-index. If it ever starts restyling .jt-*
     // the two hosts can drift apart again, which is a defect that has already happened once
     // (the tray's font-family, 2026-07-21).
-    const shell = readFileSync(path.join(__dirname, "../../pixai_gallery.py"), "utf8")
+    const shell = readFileSync(path.join(__dirname, "../../moonglade_gallery.py"), "utf8")
       .match(/_LOOM_SHELL = r"""[\s\S]*?"""/)[0];
     assert.doesNotMatch(shell, /\.jt-[a-z]/,
       "the Loom shell has started styling .jt-* classes -- the shared tray would then " +

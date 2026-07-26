@@ -119,13 +119,13 @@ describe("recipe data integrity (baked from PixAI's public imageArtFilters confi
 // ("moonglade") is the `:root` block of DESIGN_TOKENS_CSS; the other four are
 // `html[data-skin="..."]` overrides after it. Read straight out of the app so a retinted
 // skin fails the cross-check below instead of quietly drifting from its filter.
-const APP_PY = readFileSync(path.join(__dirname, "../../pixai_gallery.py"), "utf8");
+const APP_PY = readFileSync(path.join(__dirname, "../../moonglade_gallery.py"), "utf8");
 
 function skinPalette(skin) {
   const start = skin === "moonglade"
     ? APP_PY.indexOf("DESIGN_TOKENS_CSS")
     : APP_PY.indexOf('html[data-skin="' + skin + '"]');
-  assert.ok(start > -1, "no palette block in pixai_gallery.py for skin: " + skin);
+  assert.ok(start > -1, "no palette block in moonglade_gallery.py for skin: " + skin);
   // To the end of that rule only -- `:root {` for the default, the `}` of the override
   // otherwise -- so one skin's colours can never satisfy another skin's filter.
   const open = APP_PY.indexOf("{", start);
@@ -220,7 +220,7 @@ describe("the Moonglade set (ours, derived from the skins)", () => {
 
   test("every colour is a real token of the skin the filter claims to come from", () => {
     // The cross-file pin. These are DERIVED, not invented: if a skin gets retinted in
-    // pixai_gallery.py and its filter is left behind, the set stops being a matched set and
+    // moonglade_gallery.py and its filter is left behind, the set stops being a matched set and
     // this fails by name instead of drifting quietly.
     AF.MOONGLADE_FILTERS.forEach((f) => {
       const palette = skinPalette(f.skin);

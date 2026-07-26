@@ -58,19 +58,19 @@ A LoRA can't be the **base** model. The base picker excludes LoRAs; add them via
 
 ```bash
 # preview only (no credits):
-python pixai_gallery_backup.py --generate --prompt "a night elf druid, moonlit grove"
+python moonglade_backup.py --generate --prompt "a night elf druid, moonlit grove"
 
 # really generate (spends credits):
-python pixai_gallery_backup.py --generate --confirm \
+python moonglade_backup.py --generate --confirm \
     --prompt "..." --negative "lowres, text" \
     --model 1983308862240288769 --batch-size 1 \
     --mode standard --lora 1686550608832816741:0.7
 
 # find model / LoRA version ids:
-python pixai_gallery_backup.py --list-models "anime"
+python moonglade_backup.py --list-models "anime"
 
 # recover an already-created task by id (no new credits):
-python pixai_gallery_backup.py --generate --task-id <id>
+python moonglade_backup.py --generate --task-id <id>
 ```
 
 | Flag | Default | Meaning |
@@ -125,12 +125,12 @@ free-card check show first).
 
 ```bash
 # preview (free): prints the exact request + the ~credit cost
-python pixai_gallery_backup.py --generate-video --image <media_id> --prompt "she turns slowly toward camera"
+python moonglade_backup.py --generate-video --image <media_id> --prompt "she turns slowly toward camera"
 # really animate (EXPENSIVE — spends credits):
-python pixai_gallery_backup.py --generate-video --image <media_id> --prompt "..." \
+python moonglade_backup.py --generate-video --image <media_id> --prompt "..." \
     --video-model v4.0.1 --duration 5 --video-mode professional --confirm
 # recover a finished clip for free:
-python pixai_gallery_backup.py --generate-video --task-id <id>
+python moonglade_backup.py --generate-video --task-id <id>
 ```
 
 ### Video models and shot-mode gating
@@ -186,9 +186,9 @@ type the change, set resolution/aspect/quality, then submit.
 
 ```bash
 # preview (free; local files show as placeholders, nothing uploads):
-python pixai_gallery_backup.py --edit-image --edit-src <media_id> --prompt "make it nighttime, add snow"
+python moonglade_backup.py --edit-image --edit-src <media_id> --prompt "make it nighttime, add snow"
 # edit a LOCAL image (uploads it, then edits) — spends credits:
-python pixai_gallery_backup.py --edit-image --edit-src "C:\pics\her.png" --prompt "..." --confirm
+python moonglade_backup.py --edit-image --edit-src "C:\pics\her.png" --prompt "..." --confirm
 ```
 
 | Flag | Default | Meaning |
@@ -298,11 +298,11 @@ instead of a single start frame. You cite each reference in the prompt with `@im
 
 ```bash
 # preview (free): shows the exact referenceVideo request
-python pixai_gallery_backup.py --reference-video \
+python moonglade_backup.py --reference-video \
     --ref-image <id1> --ref-image "C:\pics\pose.png" \
     --prompt "@image1 in the outfit from @image2, slow orbit"
 # really generate — a matching V4.0 card is auto-applied (0 credits); --no-card to pay instead:
-python pixai_gallery_backup.py --reference-video --ref-image <id1> --ref-image <id2> \
+python moonglade_backup.py --reference-video --ref-image <id1> --ref-image <id2> \
     --prompt "@image1 ... @image2 ..." --confirm
 ```
 
@@ -320,7 +320,7 @@ Get a reusable `media_id` for any local file — **free**. Useful to pre-upload 
 reuse the id across edit/video runs.
 
 ```bash
-python pixai_gallery_backup.py --upload "C:\pics\her.png"     # prints: Uploaded media_id: <id>
+python moonglade_backup.py --upload "C:\pics\her.png"     # prints: Uploaded media_id: <id>
 ```
 
 ## Image → prompt (`--suggest-prompt`)
@@ -331,8 +331,8 @@ Danbooru-style **tag list** plus one or two **natural-language descriptions**. *
 read-only — no `--confirm`.
 
 ```bash
-python pixai_gallery_backup.py --suggest-prompt 739411069833281443    # a catalog media_id
-python pixai_gallery_backup.py --suggest-prompt "C:\pics\ref.png"     # a local file (uploads first)
+python moonglade_backup.py --suggest-prompt 739411069833281443    # a catalog media_id
+python moonglade_backup.py --suggest-prompt "C:\pics\ref.png"     # a local file (uploads first)
 ```
 
 > **Images only.** This calls PixAI's own image-to-prompt endpoint, which reads back tags
@@ -365,7 +365,7 @@ and events. Each is **locked to one model**.
 > ```
 
 ```bash
-python pixai_gallery_backup.py --cards        # read-only: your cards, counts, model, expiry
+python moonglade_backup.py --cards        # read-only: your cards, counts, model, expiry
 ```
 
 Just generate on a model you have a card for — the match is automatic:
@@ -383,8 +383,8 @@ forces a specific card. Cards closest to expiry are used first.
 ## Contests (`--contests`)
 
 ```bash
-python pixai_gallery_backup.py --contests                 # live contests (read-only)
-python pixai_gallery_backup.py --contests --all-contests  # include ended ones too
+python moonglade_backup.py --contests                 # live contests (read-only)
+python moonglade_backup.py --contests --all-contests  # include ended ones too
 ```
 
 Lists PixAI's contests — name, dates, entry tag — so you can aim a generation at one.

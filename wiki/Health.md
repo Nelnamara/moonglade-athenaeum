@@ -25,7 +25,7 @@ Reach it from the gallery header (**♡ Health**) or
 no row in `catalog.db` at all — the mirror image of "missing files" (a catalog row with
 no file). This happens when files land on disk outside the normal backup flow. When the
 count is nonzero, `/health` shows a note pointing at the fix: the gallery's **↑ Import**
-button, or `python pixai_gallery_backup.py --import-local` from the CLI — both catalog
+button, or `python moonglade_backup.py --import-local` from the CLI — both catalog
 any not-yet-known file it finds (see [Backing Up → Importing your own media](Backing-Up)).
 
 ## Duplicates review
@@ -42,7 +42,7 @@ isn't). Health resolves video/local rows by filename, so they aren't reported as
 false "missing". Regenerate thumbnails any time:
 
 ```bash
-python pixai_gallery.py --out pixai_backup --rebuild-thumbs
+python moonglade_gallery.py --out pixai_backup --rebuild-thumbs
 ```
 
 ---

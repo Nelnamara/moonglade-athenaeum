@@ -21,7 +21,7 @@ feature existed -- pinned at the WHERE-clause level below.
 """
 import pytest
 
-from pixai_gallery import CATALOG_FIELDS, save_catalog, query_catalog, _build_where
+from moonglade_gallery import CATALOG_FIELDS, save_catalog, query_catalog, _build_where
 
 
 def _row(**kw):

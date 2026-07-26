@@ -31,7 +31,7 @@ All sizes below were measured there on 2026-07-17.
 
 ### 1.1 The tokens
 
-Transcribed from `DESIGN_TOKENS_CSS`, **`pixai_gallery.py:2405-2416`**. That block is the single
+Transcribed from `DESIGN_TOKENS_CSS`, **`moonglade_gallery.py:2405-2416`**. That block is the single
 source: `BASE_HTML` and `LOOM_PAGE` both inline it via the `__DESIGN_TOKENS__` marker, so the
 gallery and the Loom re-skin together. Re-derive this table from those lines; never edit a hex here
 without editing it there.

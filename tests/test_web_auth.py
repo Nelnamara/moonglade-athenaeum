@@ -1,7 +1,7 @@
 """Session-based web-gallery login auth: the auth pass that gates EVERY request
 behind a login, including from the server's own machine -- there is no
-localhost bypass (see pixai_gallery.py's _is_authorized_request() and /login /logout, and
-pixai_gallery_backup.py's get_or_create_secret_key/add_or_update_web_user/
+localhost bypass (see moonglade_gallery.py's _is_authorized_request() and /login /logout, and
+moonglade_backup.py's get_or_create_secret_key/add_or_update_web_user/
 remove_web_user/verify_web_user/list_web_users).
 
 NOT about PIXAI_API_KEY auth -- that's tests/test_auth.py. This file is about
@@ -11,8 +11,8 @@ import sys
 
 import pytest
 
-import pixai_gallery_backup as core
-from pixai_gallery import create_app
+import moonglade_backup as core
+from moonglade_gallery import create_app
 
 
 def _client(tmp_path):
@@ -127,7 +127,7 @@ def test_verify_web_user_checks_hash(tmp_path):
 def test_cli_add_web_user_prompts_hashes_and_persists(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda prompt="": "alice")
     monkeypatch.setattr(core.getpass, "getpass", lambda prompt="": "hunter2-valid-pw")
-    monkeypatch.setattr(sys, "argv", ["pixai_gallery_backup.py", "--add-web-user"])
+    monkeypatch.setattr(sys, "argv", ["moonglade_backup.py", "--add-web-user"])
     core.main()
     users = core.list_web_users()
     assert users == [{"username": "alice"}]
@@ -140,7 +140,7 @@ def test_cli_add_web_user_rejects_mismatched_confirmation(tmp_path, monkeypatch)
     monkeypatch.setattr("builtins.input", lambda prompt="": "alice")
     passwords = iter(["hunter2-valid-pw", "totally-different"])
     monkeypatch.setattr(core.getpass, "getpass", lambda prompt="": next(passwords))
-    monkeypatch.setattr(sys, "argv", ["pixai_gallery_backup.py", "--add-web-user"])
+    monkeypatch.setattr(sys, "argv", ["moonglade_backup.py", "--add-web-user"])
     import pytest
     with pytest.raises(SystemExit):
         core.main()
@@ -152,7 +152,7 @@ def test_cli_add_web_user_enforces_the_same_password_policy(tmp_path, monkeypatc
     the web forms enforce -- a weak password must be refused here too."""
     monkeypatch.setattr("builtins.input", lambda prompt="": "alice")
     monkeypatch.setattr(core.getpass, "getpass", lambda prompt="": "1111")
-    monkeypatch.setattr(sys, "argv", ["pixai_gallery_backup.py", "--add-web-user"])
+    monkeypatch.setattr(sys, "argv", ["moonglade_backup.py", "--add-web-user"])
     import pytest
     with pytest.raises(SystemExit):
         core.main()
@@ -163,14 +163,14 @@ def test_cli_remove_web_user_flag(tmp_path, monkeypatch):
     core.add_or_update_web_user("alice", "pw-a")
     core.add_or_update_web_user("bob", "pw-b")
     monkeypatch.setattr(sys, "argv",
-                        ["pixai_gallery_backup.py", "--remove-web-user", "alice"])
+                        ["moonglade_backup.py", "--remove-web-user", "alice"])
     core.main()
     assert {u["username"] for u in core.list_web_users()} == {"bob"}
 
 
 def test_cli_list_web_users_flag_runs_without_error(tmp_path, monkeypatch, capsys):
     core.add_or_update_web_user("alice", "pw-a")
-    monkeypatch.setattr(sys, "argv", ["pixai_gallery_backup.py", "--list-web-users"])
+    monkeypatch.setattr(sys, "argv", ["moonglade_backup.py", "--list-web-users"])
     core.main()
     out = capsys.readouterr().out
     assert "alice" in out
@@ -720,7 +720,7 @@ def test_local_request_without_session_is_now_denied_too(tmp_path):
 def test_nonlocal_request_without_session_is_denied(tmp_path):
     cli = _client(tmp_path).test_client()
     r = cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN})
-    # The global front-door hook (pixai_gallery.py's _enforce_front_door()) now denies
+    # The global front-door hook (moonglade_gallery.py's _enforce_front_door()) now denies
     # this before api_jobs()'s own body ever runs, with ONE standard JSON shape for
     # every /api/* route rather than api_jobs()'s old bespoke {"jobs": []} fallback --
     # see that hook's docstring for why a single shape replaced 43 bespoke ones.
@@ -857,7 +857,7 @@ def test_empty_auth_users_makes_lan_login_impossible(tmp_path):
 # ---------------------------------------------------------------------------
 # Front-door coverage: every route a prior adversarial review found reachable
 # with ZERO auth check of any kind (see _enforce_front_door()'s docstring in
-# pixai_gallery.py for the full list) must now be denied for an unauthenticated,
+# moonglade_gallery.py for the full list) must now be denied for an unauthenticated,
 # non-local request. This is the direct proof that the global gate (replacing 43
 # scattered per-route checks, and closing these routes that had never had one at
 # all) actually did what it was built for -- not just architectural confidence.

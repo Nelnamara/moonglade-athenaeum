@@ -1,7 +1,7 @@
 """CLI-side job logging: running the CLI straight from a terminal
-(python pixai_gallery_backup.py --sync / --update / --generate / --generate-video)
+(python moonglade_backup.py --sync / --update / --generate / --generate-video)
 must log into out_dir/jobs.jsonl the same way the Control Panel already does for
-panel-spawned subprocess runs (job_id "panel-<uuid>" -- see pixai_gallery.py's
+panel-spawned subprocess runs (job_id "panel-<uuid>" -- see moonglade_gallery.py's
 _panel_run/_panel_reader) and bulk-delete (job_id "bulkdel-<uuid>"). The CLI's own
 flavor is "cli-<uuid>". Everything here drives core.main() directly (argv +
 monkeypatch), analogous to tests/test_sync.py and
@@ -13,7 +13,7 @@ import sys
 
 import pytest
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 
 def _patch_sync_chain(monkeypatch, calls, *, download_exc=None):
@@ -272,7 +272,7 @@ def test_generate_video_preview_logs_a_cli_job_that_completes(monkeypatch, tmp_p
 
 def test_panel_spawned_run_does_not_double_log_a_cli_job(monkeypatch, tmp_path):
     """Under the Control Panel (MOONGLADE_PROGRESS=1) the panel already logs its OWN
-    'panel-<uuid>' job for this exact subprocess (see pixai_gallery.py's _panel_run).
+    'panel-<uuid>' job for this exact subprocess (see moonglade_gallery.py's _panel_run).
     The CLI must NOT also create a 'cli-<uuid>' job here, or the Jobs card would show
     two entries for one real run."""
     calls = []

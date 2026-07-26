@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 
 @pytest.fixture(autouse=True)
@@ -35,7 +35,7 @@ def _no_ambient_api_key(monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolated_auth_config(tmp_path, monkeypatch):
     """Web-login auth (AUTH_SECRET_KEY/AUTH_USERS) lives in config.json.
-    pixai_gallery.create_app() -- called by ~every test in this suite -- now
+    moonglade_gallery.create_app() -- called by ~every test in this suite -- now
     generates + PERSISTS a session secret key via get_or_create_secret_key() the
     first time it runs if config.json has none. Without this fixture, that write
     would land in the REAL, git-ignored config.json next to the checkout (the one
@@ -58,7 +58,7 @@ def _no_live_watch(monkeypatch):
     live-mirror watcher thread would call _make_session(None), which re-reads THIS
     machine's real config.json (whatever real credentials happen to be there) and open
     a genuine WebSocket to wss://gw.pixai.art -- during every single test run. Skip its
-    auto-start entirely in tests; see MOONGLADE_DISABLE_WATCH in pixai_gallery.py."""
+    auto-start entirely in tests; see MOONGLADE_DISABLE_WATCH in moonglade_gallery.py."""
     monkeypatch.setenv("MOONGLADE_DISABLE_WATCH", "1")
 
 
@@ -92,7 +92,7 @@ def mock_session(mocker):
 # ---------------------------------------------------------------------------
 # Real-login test helpers
 # ---------------------------------------------------------------------------
-# pixai_gallery.py's _is_authorized_request() has NO localhost bypass -- login is
+# moonglade_gallery.py's _is_authorized_request() has NO localhost bypass -- login is
 # required via every path, localhost hostname or IP included. It is true only for a request
 # carrying a valid logged-in session. Every test that just needs to be past the
 # front door (not testing the gate itself) should log in for real through these
@@ -146,6 +146,6 @@ def login_client(tmp_path, username=_TEST_USERNAME, password=_TEST_PASSWORD):
     Returns the authenticated test client, ready to use exactly like
     create_app(tmp_path).test_client() used to be before the local-request bypass
     was removed."""
-    from pixai_gallery import create_app
+    from moonglade_gallery import create_app
     return login_test_client(create_app(tmp_path), username=username, password=password)
 

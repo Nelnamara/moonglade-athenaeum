@@ -222,7 +222,7 @@
 
   // ---- the Moonglade set: ours, derived from this app's own skins ---------------------
   // Authored here, not fetched: each one takes its skin's accent and lead colours out of
-  // SKINS in pixai_gallery.py, so a filtered image reads as this app rather than as a
+  // SKINS in moonglade_gallery.py, so a filtered image reads as this app rather than as a
   // generic wash. Same key shape as PixAI's payload, so normalizeLayers() and both renderers
   // treat them identically and neither array needs a special case anywhere.
   //
