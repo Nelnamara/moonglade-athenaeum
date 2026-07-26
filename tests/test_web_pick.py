@@ -312,6 +312,69 @@ def test_model_search_lora_always_uses_graphql_even_without_market_filters(tmp_p
     assert calls == {"rest": 1, "gql": 1}
 
 
+def test_base_filters_never_fall_through_to_the_backend_that_ignores_them(tmp_path, monkeypatch):
+    """Owner report 2026-07-26: "With popular selected, sorting by model type does nothing. With
+    Newest selected it works as expected. Time based sorting also does nothing in Popular."
+
+    The filters were fine. The ROUTE sent those two combinations to different backends: base +
+    Popular fell to model_search_rest, whose own docstring says it "silently ignores market
+    filters", while base + Newest went to GraphQL, which honours them. A filter that silently
+    does nothing is the worst kind of broken -- it looks like the data has no matches.
+
+    So: any real filter, or any non-default sort, must reach GraphQL. REST survives only for a
+    bare default browse, where its richer rows (description / refCount / official badge) are
+    worth keeping and there is nothing to ignore.
+    """
+    calls = {"rest": 0, "gql": 0}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "model_search_rest",
+                        lambda *a, **k: calls.__setitem__("rest", calls["rest"] + 1)
+                        or {"results": [], "has_more": False})
+    monkeypatch.setattr(core, "model_search_market_gql",
+                        lambda *a, **k: calls.__setitem__("gql", calls["gql"] + 1)
+                        or {"results": [], "has_more": False})
+    cli = _authed_client(tmp_path, [])
+
+    # Every one of these is a filter the owner watched do nothing under the old routing.
+    for qs in ("kind=base&sort=trending&model_type=SDXL_MODEL",
+               "kind=base&sort=trending&posted=7d",
+               "kind=base&sort=trending&license=COMMERCIAL",
+               "kind=base&sort=liked",
+               "kind=base&sort=used",
+               "kind=base&sort=newest"):
+        calls["rest"] = calls["gql"] = 0
+        assert cli.get("/api/model-search?" + qs).status_code == 200
+        assert calls["gql"] == 1 and calls["rest"] == 0, \
+            "{} must be served by GraphQL -- REST drops market filters".format(qs)
+
+    # ...and the bare default browse still gets REST's richer rows.
+    calls["rest"] = calls["gql"] = 0
+    cli.get("/api/model-search?kind=base&sort=trending")
+    assert calls == {"rest": 1, "gql": 0}
+
+
+def test_market_sorts_are_the_four_pixai_actually_has(monkeypatch):
+    """feed + orderBy per sort, every pair captured off a live request 2026-07-26.
+
+    A wrong feed does not error -- it returns a differently-ordered list that looks plausible --
+    so these are pinned rather than trusted to stay right.
+    """
+    assert core.market_sort("trending") == ("trending", "")
+    assert core.market_sort("liked") == ("meilisearch", "-markInfo.likedCount")
+    assert core.market_sort("used") == ("meilisearch", "-markInfo.refCount")
+    assert core.market_sort("newest") == ("latest", "-createdAt")
+
+    # markInfo.refCount is the "uses" figure printed on their cards -- the same field identified
+    # earlier as the number on a card -- so Most Used is genuinely most-used, not liked again.
+    assert core.market_sort("used")[1] != core.market_sort("liked")[1]
+
+    # The old two-button vocabulary keeps working, so an older client does not lose its sort.
+    assert core.market_sort("popular") == core.market_sort("trending")
+    assert core.market_sort("") == core.market_sort("trending")
+    # Anything unrecognised falls back instead of building a broken query.
+    assert core.market_sort("nonsense; DROP TABLE") == core.market_sort("trending")
+
+
 def test_model_search_base_type_annotates_lora_results_only(tmp_path, monkeypatch):
     """base_type= (the caller's already-resolved selected base model_type) threads into
     annotate_lora_compat for kind=lora only -- a base-model search has nothing to

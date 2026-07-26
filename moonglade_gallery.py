@@ -12327,7 +12327,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     limit=size, after=(cursor or None),
                     lora_base_type=(base_type if usage == "LORA" else ""),
                     author_id=core.USER_ID or "")
-            elif usage == "LORA" or category in core.MARKET_CATEGORIES or sort == "newest":
+            # GraphQL whenever ANY market filter or sort is in play. The owner reported that
+            # under Popular the Model Type and Posted-at filters did nothing: base+Popular used
+            # to fall through to REST, whose own docstring says it "silently ignores market
+            # filters". REST survives only for a bare, unfiltered base browse, where its richer
+            # rows (description / refCount / official badge) are worth having.
+            elif (usage == "LORA" or category in core.MARKET_CATEGORIES
+                  or posted or license_ or model_types
+                  or (sort and sort not in ("trending", "popular"))):
                 payload = core.model_search_market_gql(
                     session, keyword=q, category=category, sort=sort, usage=usage,
                     limit=size, after=(cursor or None),

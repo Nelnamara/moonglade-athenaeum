@@ -150,7 +150,8 @@
     'mg-model-picker .mg-q:focus{outline:0;border-color:var(--accent,#b692e6);}',
     /* O13 market UI (sort + category), opt-in via the `market` attribute -- same shape as
        the gallery's own #mkt-sort/#mkt-cats. flex:none -- natural size, never stretched. */
-    'mg-model-picker .mg-mktsort{display:flex;gap:6px;margin-top:8px;flex:none;}',
+    'mg-model-picker .mg-mktsort{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;flex:none;}',
+    'mg-model-picker .mg-mktsort button{min-width:72px;}',
     'mg-model-picker .mg-mktsort button{flex:1;padding:5px 0;font-size:11px;border-radius:6px;background:var(--surface0,#211f3a);',
     ' color:var(--subtext,#9a93ab);border:1px solid var(--surface1,#3a3460);cursor:pointer;}',
     'mg-model-picker .mg-mktsort button.on{background:var(--surface1,#3a3460);color:var(--text,#d6d2e2);',
@@ -262,7 +263,7 @@
       this._multi = this.hasAttribute('multi');
       this._selected = [];
       this._market = this.hasAttribute('market');
-      this._sort = 'popular';
+      this._sort = 'trending';
       this._category = '';
       // picker-parity round 3. `_src` is WHICH LIST is being browsed; `_source` is a market
       // FILTER. PixAI's own UI overloads the word "source" for both, which is why these are
@@ -429,8 +430,11 @@
         '<div class="mg-mktsrc"><button type="button" class="on" data-src="market">Market</button>' +
         '<button type="button" data-src="bookmark">Bookmarked</button>' + mine + '</div>' +
         '<div class="mg-mktfilters">' +
-        '<div class="mg-mktsort"><button type="button" class="on" data-sort="popular">Popular</button>' +
-        '<button type="button" data-sort="newest">Newest</button></div>' +
+        // PixAI's own four, not our old Popular/Newest pair. Trending is their default.
+        '<div class="mg-mktsort"><button type="button" class="on" data-sort="trending">Trending</button>' +
+        '<button type="button" data-sort="liked">Most Liked</button>' +
+        '<button type="button" data-sort="used">Most Used</button>' +
+        '<button type="button" data-sort="newest">Latest</button></div>' +
         // LoRAs filter by CATEGORY; base models filter by ARCHITECTURE. Two different controls,
         // matching PixAI, rather than one shared row that half-applies.
         (this._kind === 'lora'

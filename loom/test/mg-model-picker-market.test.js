@@ -20,10 +20,17 @@ test("market is an opt-in attribute, read once at connect", () => {
     "would silently grow a sort/category UI it never asked for");
 });
 
-test("the sort toggle and all 9 PixAI category chips are rendered when market is on", () => {
+test("all four PixAI sorts and all 9 category chips are rendered when market is on", () => {
   assert.match(src, /_marketSkeleton\(\)\s*\{/);
-  assert.match(src, /data-sort="popular"/);
-  assert.match(src, /data-sort="newest"/);
+  // PixAI's four real sorts, captured 2026-07-26. The old Popular/Newest pair could not express
+  // Most Liked or Most Used at all, and Popular routed to a backend that ignored every filter.
+  [["trending", "Trending"], ["liked", "Most Liked"], ["used", "Most Used"],
+   ["newest", "Latest"]].forEach(([key, label]) => {
+    assert.match(src, new RegExp('data-sort="' + key + '">' + label),
+      'missing the \"' + label + '\" sort');
+  });
+  assert.ok(!/data-sort="popular"/.test(src),
+    "the old Popular button routed base searches to REST, which ignores market filters");
   // Nine, not six. PixAI's canonical list, confirmed 2026-07-26 from their training page --
   // whose category dropdown is currently rendering raw i18n keys
   // ("market:lora-categories.animal.label"), a bug on their side that handed over the exact
