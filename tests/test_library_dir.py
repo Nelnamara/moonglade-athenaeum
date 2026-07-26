@@ -126,3 +126,61 @@ def test_the_folder_setting_never_offers_to_move_anything(tmp_path):
     body = body[:body.index("@app.route(\"/api/server/restart\"")]
     for danger in ("shutil.move", "shutil.copytree", "os.rename", "os.replace", ".unlink("):
         assert danger not in body, "the folder setting must never touch files: " + danger
+
+
+def test_the_host_path_is_withheld_from_a_lan_caller_in_every_field(tmp_path):
+    """`path` was blanked for a non-local caller and `stored` was returned regardless -- and
+    since POST stores an ABSOLUTE path, `stored` IS the host path. The withholding was
+    defeated by the line under it, handing a LAN session the server's install location that
+    /panel refuses it.
+
+    `configured` exists so the Panel can still tell whether a folder is set without being
+    told where it is.
+    """
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a.png",
+                                         created_at="2025-01-01T00:00:00")])
+    target = tmp_path / "libhere"
+    cli.post("/api/library-path", json={"path": str(target), "create": True})
+
+    lan = cli.get("/api/library-path", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
+    if lan.status_code != 200:
+        pytest.skip("LAN GET is refused outright on this build, which is stricter still")
+    d = lan.get_json()
+    assert d["local"] is False
+    assert d["path"] == "" and d["stored"] == "", (
+        "the host path reached a LAN caller: {!r}".format(d))
+    assert d["configured"] is True, "it must still be able to say a folder IS set"
+    blob = json.dumps(d)
+    assert str(target) not in blob and str(tmp_path) not in blob
+
+    # Locally it is still shown -- withholding it from the owner at the keyboard would make
+    # the field unusable.
+    loc = cli.get("/api/library-path").get_json()
+    assert loc["stored"] == str(target.resolve())
+
+
+def test_the_config_write_holds_the_accounts_lock(tmp_path, monkeypatch):
+    """config.json holds AUTH_SECRET_KEY, AUTH_USERS and AUTH_EPOCH_SEQ, not just settings,
+    and core._accounts_lock exists to serialize every read-modify-write of it in-process.
+
+    Writing outside the lock is a real auth regression, not an abstract race: this handler
+    can read the file, a concurrent /logout can bump AUTH_EPOCH_SEQ to revoke that session,
+    and this write then puts the stale epoch back -- un-revoking the session that just
+    logged out.
+    """
+    held = {}
+    real_save = core._save_config
+
+    def _spy(cfg):
+        held["locked"] = core._accounts_lock.locked()
+        return real_save(cfg)
+
+    monkeypatch.setattr(core, "_save_config", _spy)
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a.png",
+                                         created_at="2025-01-01T00:00:00")])
+    target = tmp_path / "locked"
+    d = cli.post("/api/library-path", json={"path": str(target), "create": True}).get_json()
+    assert d.get("ok") is True
+    assert held.get("locked") is True, (
+        "config.json was written without _accounts_lock -- a concurrent /logout's "
+        "AUTH_EPOCH_SEQ bump can be clobbered, restoring a revoked session")

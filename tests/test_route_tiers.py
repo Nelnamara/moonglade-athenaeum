@@ -108,6 +108,10 @@ ROUTE_TIERS = {
     ("api_library_path", "GET"): LOGIN,
     ("api_library_path", "POST"): LOCALHOST,
     ("delete_tasks_bulk", "POST"): LOCALHOST,       # irreversible cloud deletion
+    # Per-image cloud delete. Same tier and the same reason as the task-level
+    # delete above: it destroys on the owner's real PixAI account, and a logged-in
+    # LAN session unlocks browsing and spending, not irreversible deletion.
+    ("api_delete_image", "POST"): LOCALHOST,
     # Read-only (one catalog query, no network) but declared at the tier of the action
     # it previews, not the data it reads: it is step one of delete_tasks_bulk's flow and
     # nothing else calls it. See its docstring.
