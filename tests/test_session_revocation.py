@@ -3,7 +3,7 @@
 Three separate defects were found in this one mechanism -- by two independent
 reviews plus a cloud pass -- and they were fixed as ONE change, because
 spot-patching each in isolation is how you end up with a fourth. This file pins
-all three. See pixai_gallery_backup._next_sess_epoch()'s docstring for the design.
+all three. See moonglade_backup._next_sess_epoch()'s docstring for the design.
 
   D1  The epoch lived only in the account record, so deleting an account destroyed
       the counter and re-creating the username reset it to 0 -- the exact value
@@ -30,8 +30,8 @@ cookie string.
 import re
 import threading
 
-import pixai_gallery_backup as core
-from pixai_gallery import create_app
+import moonglade_backup as core
+from moonglade_gallery import create_app
 
 LAN = "203.0.113.5"
 

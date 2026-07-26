@@ -70,7 +70,7 @@ jobs:
       # THE STALE-BUNDLE GATE.
       #
       # loom/dist/master-storyboard.bundle.js is COMMITTED and served verbatim by
-      # /loom?bundle=1 (pixai_gallery.py's loom() reads it straight off disk). Nothing
+      # /loom?bundle=1 (moonglade_gallery.py's loom() reads it straight off disk). Nothing
       # else in the repo forces a rebuild, so editing master-storyboard.jsx and
       # forgetting `npm run build` silently leaves that route serving the OLD code --
       # which is exactly how the `useMemo` blank-page bug shipped: the .jsx and the

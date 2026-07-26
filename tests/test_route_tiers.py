@@ -6,7 +6,7 @@ WHY THIS FILE EXISTS
 tests/test_web_auth.py hand-maintains four lists of paths
 (_PREVIOUSLY_UNGATED_JSON_GET / _JSON_POST / _HTML_GET / _HTML_POST). A
 hand-maintained list is precisely what the front-door refactor
-(pixai_gallery.py's _enforce_front_door()) was undertaken to eliminate, and those
+(moonglade_gallery.py's _enforce_front_door()) was undertaken to eliminate, and those
 lists had ALREADY drifted: every credit-spending route -- /api/generate,
 /api/edit, /api/fix, /api/loom/generate -- appears in none of them. They are
 gated today, but nothing in the suite said so, and nothing would have noticed
@@ -42,9 +42,9 @@ import re
 
 import pytest
 
-import pixai_gallery
-import pixai_gallery_backup as core
-from pixai_gallery import create_app
+import moonglade_gallery
+import moonglade_backup as core
+from moonglade_gallery import create_app
 
 
 LAN = "203.0.113.5"      # TEST-NET-3 -- the "some other device on the LAN" stand-in
@@ -68,7 +68,7 @@ _REDIRECT_CODES = (301, 302, 303, 307, 308)
 # ---------------------------------------------------------------------------
 # THE DECLARATION TABLE -- keyed (endpoint, method)
 # ---------------------------------------------------------------------------
-# Adding a route to pixai_gallery.py? Add it here too, or
+# Adding a route to moonglade_gallery.py? Add it here too, or
 # test_every_registered_route_declares_a_tier fails and names it. Pick the tier
 # by what the handler can DO, not by what feels convenient:
 #   LOGIN     -- browse the library, spend the owner's credits, manage your OWN
@@ -394,7 +394,7 @@ def armed(monkeypatch):
                 .format(what))
         return _fire
 
-    monkeypatch.setattr(pixai_gallery, "_schedule_server_exit", blocked("process exit"))
+    monkeypatch.setattr(moonglade_gallery, "_schedule_server_exit", blocked("process exit"))
     for name in ("Popen", "run", "call", "check_output", "check_call"):
         monkeypatch.setattr(subprocess, name, blocked("subprocess." + name),
                             raising=False)
@@ -524,7 +524,7 @@ def test_no_route_is_reachable_without_a_session(app, armed):
         "Each line below is a route reachable with no credentials whatsoever:\n"
         "{}\n\n"
         "FIX: routes are gated centrally by _enforce_front_door() in\n"
-        "pixai_gallery.py -- if one of these got through, either it was added to\n"
+        "moonglade_gallery.py -- if one of these got through, either it was added to\n"
         "_PUBLIC_PATHS/_PUBLIC_PREFIXES (revert that unless it is genuinely part\n"
         "of the login surface) or the hook itself regressed, which would be a\n"
         "whole-app authentication bypass and should be treated as such."

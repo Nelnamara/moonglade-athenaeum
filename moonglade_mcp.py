@@ -1,7 +1,7 @@
 """moonglade_mcp.py -- MCP server exposing the Moonglade Athenaeum catalog for
 AI-assisted curation of the local PixAI backup. LOCAL stdio, owner-only.
 
-Reuses pixai_gallery.py's catalog helpers + pixai_similar.similar() -- no SQL is
+Reuses moonglade_gallery.py's catalog helpers + moonglade_similar.similar() -- no SQL is
 reimplemented here. Read-mostly; set_rating / add_to_collection are the only writes.
 
 Config: env MOONGLADE_OUT = the backup dir that holds catalog.db (e.g.
@@ -23,7 +23,7 @@ from pathlib import Path
 from fastmcp import FastMCP
 from fastmcp.utilities.types import Image
 
-import pixai_gallery as g   # catalog helpers -- the single source of truth for SQL
+import moonglade_gallery as g   # catalog helpers -- the single source of truth for SQL
 
 OUT = Path(os.environ.get("MOONGLADE_OUT") or (Path(__file__).resolve().parent / "pixai_backup"))
 DB = str(OUT / "catalog.db")
@@ -104,7 +104,7 @@ def similar(media_id: str, limit: int = 24) -> dict:
     if not path:
         return {"error": "image file not on disk", "neighbors": []}
     try:
-        import pixai_similar as ps
+        import moonglade_similar as ps
         hits = ps.similar(str(path), k=max(1, min(limit, 96)), exclude_media_id=media_id)
     except Exception as e:
         return {"error": "similar index unavailable: {}".format(e), "neighbors": []}

@@ -10,8 +10,8 @@ list / dismiss endpoints and their localhost gate.
 import threading
 import time
 
-import pixai_gallery_backup as core
-from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+import moonglade_backup as core
+from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client, login_test_client
 
@@ -372,7 +372,7 @@ def test_jobs_endpoints_are_localhost_only(tmp_path):
     cli = _client(tmp_path)
     core.append_job_event(tmp_path, "j1", status="running")
     # GET from the LAN reveals nothing and 401s (the global front-door hook, not
-    # api_jobs()'s own body -- see pixai_gallery.py's _enforce_front_door())
+    # api_jobs()'s own body -- see moonglade_gallery.py's _enforce_front_door())
     r = _lan(cli, "get", "/api/jobs")
     assert r.status_code == 401 and "jobs" not in r.get_json()
     # register + dismiss are refused from the LAN
@@ -556,7 +556,7 @@ def test_collect_is_single_flight_across_watcher_and_poll(tmp_path, monkeypatch)
     same clip in the first place). The watcher-mirror closure is driven through the
     app.extensions seam create_app exposes for exactly this."""
     import threading
-    from pixai_gallery import create_app
+    from moonglade_gallery import create_app
 
     save_catalog(tmp_path / "catalog.db", [
         _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])

@@ -25,16 +25,16 @@ if (!match) {
 }
 const localFriendlyGenErr = new Function("return (" + match[0] + ")")();
 
-// pixai_gallery.py's Gen IIFE (the Image tab's own inline <script>) is a THIRD hand-copy,
+// moonglade_gallery.py's Gen IIFE (the Image tab's own inline <script>) is a THIRD hand-copy,
 // same reason as the drawer's -- see its own duplication-risk comment right above
 // renderResultInto(). Extracted the same way: pull the function's source as text out of
 // the Python file (it's a plain JS function embedded in a Python string, no Python syntax
 // inside it) and turn it into a live function.
-const gallerySrc = readFileSync(path.join(__dirname, "../../pixai_gallery.py"), "utf8");
+const gallerySrc = readFileSync(path.join(__dirname, "../../moonglade_gallery.py"), "utf8");
 const galleryMatch = gallerySrc.match(/function friendlyGenErr\(raw\)\{[\s\S]*?\n  \}/);
 if (!galleryMatch) {
   throw new Error(
-    "pixai_gallery.py's local friendlyGenErr(raw) was not found by this test's regex -- " +
+    "moonglade_gallery.py's local friendlyGenErr(raw) was not found by this test's regex -- " +
     "its signature or indentation changed. Update this test's extraction pattern to match, " +
     "don't just delete the test."
   );
@@ -63,7 +63,7 @@ describe("mg-generate-drawer.js's local friendlyGenErr stays in parity with loom
   });
 });
 
-describe("pixai_gallery.py's local friendlyGenErr (Gen IIFE) stays in parity with loom-mutations.js's real one", () => {
+describe("moonglade_gallery.py's local friendlyGenErr (Gen IIFE) stays in parity with loom-mutations.js's real one", () => {
   CASES.forEach((c) => {
     test(`matches real friendlyGenErr for input ${JSON.stringify(c)}`, () => {
       assert.equal(localFriendlyGenErrPy(c), friendlyGenErr(c));

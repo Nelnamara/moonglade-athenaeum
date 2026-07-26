@@ -2,9 +2,9 @@
 gated behind confirm, one at a time. The subprocess spawn is monkeypatched so no CLI
 actually runs."""
 import re
-import pixai_gallery as g
-import pixai_gallery_backup as core
-from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+import moonglade_gallery as g
+import moonglade_backup as core
+from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client, login_existing_client
 
@@ -227,7 +227,7 @@ def test_run_argv_is_whitelisted_flags_only(tmp_path, monkeypatch):
     import time
     time.sleep(0.05)
     argv = captured["argv"]
-    assert argv[1].endswith("pixai_gallery_backup.py")
+    assert argv[1].endswith("moonglade_backup.py")
     assert "--audit" in argv and "--no-content" in argv and "--out" in argv
     assert all(isinstance(a, str) for a in argv)
 

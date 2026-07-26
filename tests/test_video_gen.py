@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 
 def test_build_video_parameters_matches_real_submit():
@@ -195,7 +195,7 @@ class TestOutputsOrRaise:
         """The actual bug: all four call sites said 'task completed' unconditionally,
         even when PixAI's own status said the task never completed at all -- which read
         as a Moonglade bug reporting a PixAI-side rejection. Case-insensitive, since
-        pixai_gallery_backup.py's own generation_status() lowercases before comparing
+        moonglade_backup.py's own generation_status() lowercases before comparing
         against this same _GEN_FAIL tuple."""
         with pytest.raises(core.EmptyOutputsError) as exc:
             core._outputs_or_raise({"status": raw_status}, found=[],
@@ -423,7 +423,7 @@ def test_download_video_task_with_poster_skips_ffmpeg(monkeypatch, tmp_path):
         p = Path(str(stem)); p.parent.mkdir(parents=True, exist_ok=True)
         p = p.with_suffix(p.suffix or ".bin"); p.write_bytes(b"data"); return "ok", p
     monkeypatch.setattr(core, "download", _fake_download)
-    monkeypatch.setattr("pixai_gallery.make_thumbnail",
+    monkeypatch.setattr("moonglade_gallery.make_thumbnail",
                         lambda src, dst: (Path(dst).write_bytes(b"jpg"), True)[1])
 
     called = []
@@ -450,7 +450,7 @@ def test_gallery_catalog_ref_is_uploaded_not_passed_through(tmp_path, monkeypatc
 
     Pins the fix: a catalog id whose file we hold on disk must be uploaded, and the
     UPLOADED id is what reaches PixAI."""
-    from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
     from tests.conftest import login_test_client
 
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
@@ -481,7 +481,7 @@ def test_gallery_catalog_ref_is_uploaded_not_passed_through(tmp_path, monkeypatc
 
 def test_gallery_ref_upload_is_cached_per_media_id(tmp_path, monkeypatch):
     """Referencing the same image twice in one R2V must upload it once, not per slot."""
-    from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
     from tests.conftest import login_test_client
 
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
@@ -507,7 +507,7 @@ def test_gallery_ref_upload_is_cached_per_media_id(tmp_path, monkeypatch):
 
 
 def _seed_one(tmp_path, mid="733917871331404290"):
-    from pixai_gallery import CATALOG_FIELDS, save_catalog
+    from moonglade_gallery import CATALOG_FIELDS, save_catalog
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
     (tmp_path / "2025-01" / ("s_%s.png" % mid)).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
@@ -524,7 +524,7 @@ def test_every_input_path_uploads_the_catalog_reference(tmp_path, monkeypatch):
 
     Parametrised deliberately: a new input endpoint that forgets to resolve is the exact
     way this returns, and this fails by name when it does."""
-    from pixai_gallery import create_app
+    from moonglade_gallery import create_app
     from tests.conftest import login_test_client
     mid = _seed_one(tmp_path)
     seen = {}
@@ -560,7 +560,7 @@ def test_pricing_never_uploads(tmp_path, monkeypatch):
     """/api/price only needs the SHAPE to compute a cost. Resolving there would upload
     the same file over and over while the user types, so _edit_params_from_payload
     takes `session` only on the real submit path."""
-    from pixai_gallery import create_app
+    from moonglade_gallery import create_app
     from tests.conftest import login_test_client
     mid = _seed_one(tmp_path, "555111222333")
     uploads = []

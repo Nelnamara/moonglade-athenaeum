@@ -20,7 +20,7 @@ READ-ONLY BY CONTRACT. The roster JSON is the design source of truth; this scrip
 for reading and never writes to it. `--out` is refused if it resolves to the roster path.
 
 WHERE THE NUMBERS COME FROM. Points are not a field in the JSON — they are derived, and
-this mirrors `pixai_gallery.achievement_points()` exactly so the board cannot quote a score
+this mirrors `moonglade_gallery.achievement_points()` exactly so the board cannot quote a score
 the app would disagree with: tier base (common 5 / rare 10 / epic 25 / legendary 50) plus
 5 per rung above the first, and feats always score 0 by design so a points total can never
 betray a hidden feat. The app *derives* rung by grouping ladder entries by metric and
@@ -53,7 +53,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_ROSTER = ROOT / "docs" / "achievements_roster_57.json"
 DEFAULT_OUT = ROOT / "docs" / "achievements_roster_57_board.html"
 
-# Mirrors pixai_gallery._TIER_POINTS -- keep in step with it, not with a doc.
+# Mirrors moonglade_gallery._TIER_POINTS -- keep in step with it, not with a doc.
 TIER_POINTS = {"common": 5, "rare": 10, "epic": 25, "legendary": 50, "feat": 0}
 
 # docs/ART.md 1.1 palette + 1.2 tier chrome. Feat uses gunmetal/ruby, never pink.
@@ -364,7 +364,7 @@ def build(data, source, show_chibis=True):
 <main>{parts}</main>
 <footer>Generated {when} by tools/build_roster_board.py from {source} (read-only —
  the roster JSON is the design source of truth and is never written by this tool).
- Points mirror pixai_gallery.achievement_points(): tier base + 5 per rung above the first,
+ Points mirror moonglade_gallery.achievement_points(): tier base + 5 per rung above the first,
  feats score 0. "cand #N" thumbs are art <em>candidates</em> from the roster's chibis map,
  not placed badge art.</footer>
 <script>{js}</script></body></html>

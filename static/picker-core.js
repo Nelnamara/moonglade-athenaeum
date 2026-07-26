@@ -1,5 +1,5 @@
 /* picker-core.js -- shared browse/filter/paginate/infinite-scroll logic for BOTH image
-   pickers in this app: the gallery's vanilla-JS `Picker` IIFE (pixai_gallery.py) and the
+   pickers in this app: the gallery's vanilla-JS `Picker` IIFE (moonglade_gallery.py) and the
    Loom's React `GalleryPick` component (loom/master-storyboard.jsx). Both fetch the same
    /api/gallery-images + /api/collections and reimplemented the same querystring/paging/
    debounce/scroll logic twice; this is the ONE place that logic lives now.

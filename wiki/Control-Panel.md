@@ -18,7 +18,7 @@ still does that, for scripting).
 
 ## Running a maintenance job
 
-Click a button and the job starts as a background run of `pixai_gallery_backup.py`:
+Click a button and the job starts as a background run of `moonglade_backup.py`:
 
 - **One job runs at a time.** While one is running the other buttons are disabled, and a
   second request comes back with *"a job is already running"*.
@@ -115,7 +115,7 @@ Tick **Enabled**, pick a job under **Run**, pick an interval under **Every** (1 
   Scheduler at the CLI instead:
 
 ```bash
-python pixai_gallery_backup.py --out pixai_backup --update
+python moonglade_backup.py --out pixai_backup --update
 ```
 
 - Saving the schedule (like the destructive jobs) requires a request from the server's own

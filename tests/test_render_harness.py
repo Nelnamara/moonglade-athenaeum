@@ -24,7 +24,7 @@ Design, and why
 * **A live server, not Flask's test client.** A test client never renders. The real app is
   bound to an ephemeral port (`make_server(..., 0, ...)`) in a daemon thread against a
   throwaway catalog, started once for the module so the cost is paid once.
-* **Real login, no bypass.** `pixai_gallery.py`'s `_is_authorized_request()` has no
+* **Real login, no bypass.** `moonglade_gallery.py`'s `_is_authorized_request()` has no
   localhost bypass and re-validates the session against `config.json`'s `AUTH_USERS` on
   every request, so the harness posts the real `/login` form with a real scrypt-hashed
   account made by `core.add_or_update_web_user` -- the same thing `tests/conftest.py`'s
@@ -81,8 +81,8 @@ import threading
 
 import pytest
 
-import pixai_gallery_backup as core
-from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+import moonglade_backup as core
+from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
 # No playwright (or no browser) => this whole module skips. It is not installed by
 # .github/workflows/tests.yml, so these tests SKIP in CI today and run locally.

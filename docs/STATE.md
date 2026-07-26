@@ -26,8 +26,8 @@
 
 Moonglade Athenaeum is a Python/Flask client for PixAI.art: it backs up the owner's own AI
 generations, serves a local searchable web gallery, generates images and videos through
-PixAI's API, and curates the archive. Two surfaces: the CLI (`pixai_gallery_backup.py`) and
-the web app (`pixai_gallery.py`). Work happens on the `loom-v2` branch; `master`'s last release
+PixAI's API, and curates the archive. Two surfaces: the CLI (`moonglade_backup.py`) and
+the web app (`moonglade_gallery.py`). Work happens on the `loom-v2` branch; `master`'s last release
 is **v2.4.0** (2026-07-24 — concurrent generations, a trash/quarantine restore panel,
 field-operator search, real credit-cost tracking, a full unification of the model/image
 pickers across the Loom and the gallery, a data-loss video-corruption bug fixed, the last
@@ -48,7 +48,7 @@ users.
 | Question | Command |
 |---|---|
 | Test count | `python -m pytest` from the repo root (add `--ignore=tests/test_similar.py` when pixeltable isn't installed); the Loom's pure-logic suite is `node --test` from `loom/` |
-| Current version | `grep __version__ pixai_gallery_backup.py` |
+| Current version | `grep __version__ moonglade_backup.py` |
 | How far `loom-v2` leads `master` | `git rev-list --count origin/master..origin/loom-v2` |
 | Which tags have a GitHub Release | `gh release list` against `git tag` |
 | Whether the C: repo and the D: run-copy agree | `git log -1` in each |
@@ -299,7 +299,7 @@ users.
 - The Loom nav button is hidden below 480px and visible from tablet up; the gallery's filters
   become a bottom sheet at the same breakpoint. The Job Tracker/Activity tray (`#jobs-tray`,
   `static/mg-notify.js`) and the snippet/tag popups (`#snip-menu`, `#tag-suggest`,
-  `pixai_gallery.py`) clamp their `max-width` to `calc(100vw - Npx)` so none of them run off a
+  `moonglade_gallery.py`) clamp their `max-width` to `calc(100vw - Npx)` so none of them run off a
   320px-wide screen (below their previous flat max-widths).
 - **All three Job Tracker sources now log to the same `out_dir/jobs.jsonl` activity feed**:
   Control Panel actions and bulk cloud-delete (already wired), and now a bare CLI run from a
@@ -420,7 +420,7 @@ users.
   session.
 - **The library folder is settable again, from the Control Panel** (2026-07-25). It stopped
   being settable when the PySide6 GUI was removed in v2.1.0 and nothing replaced its folder
-  picker. `resolve_library_dir()` in `pixai_gallery.py` is the order of precedence: an
+  picker. `resolve_library_dir()` in `moonglade_gallery.py` is the order of precedence: an
   explicit `--out`, then `config.json`'s `LIBRARY_DIR`, then `pixai_backup`. `--out`'s argparse
   default is now `None` — argparse cannot distinguish "typed the default" from "typed
   nothing" — and **`Serve Gallery.pyw` no longer hardcodes `--out pixai_backup`**, which it
@@ -480,7 +480,7 @@ users.
   single-version case renders nothing extra — and switching applies that version's own
   `version_id`/`lora_base_type`/`trigger_words` with no new network call, since the full list
   was already resolved at pick time. Shared component change, so both surfaces got the real
-  version data for free; only the per-chip UI (`renderLoras()` in `pixai_gallery.py`, the
+  version data for free; only the per-chip UI (`renderLoras()` in `moonglade_gallery.py`, the
   `imgLoras.map` chip render in `master-storyboard.jsx`) needed writing twice.
 - **Capability gating on the Advanced panel (Negative prompt / Steps / CFG scale), on both
   the gallery and the Loom** (2026-07-24). `extra.compatibility` (which of these a model
@@ -588,7 +588,7 @@ users.
   every ladder grouped under a glowing pill divider, then Milestones/Masteries/Feats the
   same way. Real badge art (`/badge-thumb/<id>.png`) throughout, not placeholder images —
   each ladder's badge is its first rung's art, chosen deliberately over the top (spoiler)
-  tier's. `pixai_gallery.py`'s `ACHIEVEMENTS`/`compute_achievements()` gained `track`/
+  tier's. `moonglade_gallery.py`'s `ACHIEVEMENTS`/`compute_achievements()` gained `track`/
   `rung`/`rungs_total` per ladder achievement plus a top-level `ladders` list (`LADDER_TRACKS`)
   so the client can group without a second hand-maintained id→name map.
 - Points are tier base + 5×(rung−1), driven by `_TIER_POINTS` (common 5 / rare 10 / epic 25 /
@@ -634,7 +634,7 @@ himself first, and has flagged this for the actual design pass, not a quick patc
 on record so far, from a read-only code check (no changes made):
 - The gating as written: server-side, `roast_nsfw` is blanked to `""` for every achievement
   unless the **Triggered** feat (poke the narrator until it snaps) is earned on that account
-  (`api_achievements()`, `pixai_gallery.py` — `unleashed = any(a["id"]=="triggered" and
+  (`api_achievements()`, `moonglade_gallery.py` — `unleashed = any(a["id"]=="triggered" and
   a["earned"] ...)`). Client-side, `card()` (`static/mg-notify.js`) shows exactly ONE roast
   string per card — `roast_nsfw` only if BOTH the server sent a non-empty one AND the local
   "Unleash the AI" checkbox (`Ach.setUnleash`, a `localStorage` preference, separate from the
@@ -654,7 +654,7 @@ on record so far, from a read-only code check (no changes made):
   What's specifically wrong about it was not established — do not reuse Claude's toggle
   theory as a starting point next time without re-deriving it. Owner wants to compare the
   `roast` and `roast_nsfw` fields for himself (both sit side by side per-achievement in
-  `pixai_gallery.py`'s `ACHIEVEMENTS` list, easy to diff directly) on his work machine before
+  `moonglade_gallery.py`'s `ACHIEVEMENTS` list, easy to diff directly) on his work machine before
   deciding anything.
 - **Do not resume work on this without the owner's go** — explicit scope boundary he set.
 
@@ -701,7 +701,7 @@ on record so far, from a read-only code check (no changes made):
   actually succeeds — never written first and rolled back. "Sync now" reuses the existing
   Panel job machinery (`/api/panel/run` action `sync`, polled via `/api/panel/status`) — no
   new job-running code. A second fix was needed for the wizard to be reachable on a genuine
-  fresh clone at all: `pixai_gallery.py`'s CLI entry point used to `sys.exit` outright when
+  fresh clone at all: `moonglade_gallery.py`'s CLI entry point used to `sys.exit` outright when
   the (git-ignored) output folder or `catalog.db` didn't exist yet — a console error before
   Flask ever started, with no page for the wizard to render on. It now creates the folder and
   an empty, schema-initialized catalog and boots normally instead.
@@ -836,7 +836,7 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
   `c.promptOverride`/`c.promptOverrideText` (a frozen, never-re-woven verbatim replacement,
   by that feature's own explicit design).
 - `<mg-cost-badge>` now covers the drawer's `.mgd-cost` (`static/mg-generate-drawer.js`,
-  shared by the gallery Video tab and the Loom's Video tab), `pixai_gallery.py`'s Generate
+  shared by the gallery Video tab and the Loom's Video tab), `moonglade_gallery.py`'s Generate
   and Edit tabs, and the Loom's Image/Edit/Reference Deep Focus tabs (D-12, 2026-07-22) —
   each of those three Loom tabs kept its existing `confirmSpend`/`window.confirm()` gate
   alongside the new badge, deliberately: that dialog
@@ -863,7 +863,7 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 What's still CLI-only, tracked so the web surface stays complete:
 
 - **Password reset.** The only way to reset a forgotten password today is
-  `python pixai_gallery_backup.py --add-web-user` on the server machine (it *adds or
+  `python moonglade_backup.py --add-web-user` on the server machine (it *adds or
   updates*, so re-running it for an existing username doubles as a reset — `wiki/Setup.md`
   documents this). Owner request, 2026-07-22: give this a home in the Panel's Users tab
   too, so a forgotten password doesn't require CLI access. Would need its own trust call
@@ -871,7 +871,7 @@ What's still CLI-only, tracked so the web surface stays complete:
   new account?) rather than inheriting one by default — not decided yet, not started.
 - (`--restore-orphans` and `--undo-organize` now render Panel buttons. `reconcile-deleted`
   runs via `/api/panel/run` and the scheduler but renders no button by design,
-  `panel_visible: False`. `PANEL_ACTIONS` in `pixai_gallery.py`. Still genuinely CLI-only,
+  `panel_visible: False`. `PANEL_ACTIONS` in `moonglade_gallery.py`. Still genuinely CLI-only,
   with no web route at all: `--convert-existing` (bulk-converts already-downloaded `.webp`
   files to the `--convert` format) and `--backfill-meta`/`--backfill-full-meta` (fill in
   missing catalog fields for existing rows). `--faststart-videos` is deliberately CLI-only
@@ -889,12 +889,12 @@ What's still CLI-only, tracked so the web surface stays complete:
 
 | from | to |
 |---|---|
-| `pixai_gallery_backup.py` | `moonglade_backup.py` |
-| `pixai_gallery.py` | `moonglade_gallery.py` |
-| `pixai_similar.py` | `moonglade_similar.py` |
-| `pixai_logging.py` | `moonglade_logging.py` |
+| `moonglade_backup.py` | `moonglade_backup.py` |
+| `moonglade_gallery.py` | `moonglade_gallery.py` |
+| `moonglade_similar.py` | `moonglade_similar.py` |
+| `moonglade_logging.py` | `moonglade_logging.py` |
 
-**There is a FOURTH module.** `pixai_logging` (36 refs). Easy to miss — it is imported by both
+**There is a FOURTH module.** `moonglade_logging` (36 refs). Easy to miss — it is imported by both
 main modules and earlier notes framed this as a three-module rename.
 
 **`pixai_backup` (81 refs) is NOT renamed** — the output directory, named in every install's
@@ -910,7 +910,7 @@ live modules.
 - **Live instructions change in the same pass**, or the release ships commands that do not
   exist: `CLAUDE.md` (43), `wiki/Backing-Up.md` (48), this file (26).
 - **Historical record stays as written**: `CHANGELOG.md` (45), `docs/AUDIT_2026-07-21.md`
-  (109). A v1.9 entry naming `pixai_gallery_backup.py` is TRUE about v1.9.
+  (109). A v1.9 entry naming `moonglade_backup.py` is TRUE about v1.9.
 - Deferred by owner call: `docs/architecture.md`, `wiki/Generating.md` (see the doc-debt
   section above).
 
@@ -955,7 +955,7 @@ renders, the browser has.
 **The spoiler half is a SEPARATE decision, and packaging does not solve it — but something
 simpler does.** `docs/achievements_roster_57.json` is **2.98 MB and committed to the public
 repo**, so the whole roster is readable on GitHub and no install-folder packaging un-publishes
-it. **Checked 2026-07-25: NO runtime code loads that file.** `pixai_gallery.py:1528` only cites
+it. **Checked 2026-07-25: NO runtime code loads that file.** `moonglade_gallery.py:1528` only cites
 it in a comment (the runtime roster is the `ACHIEVEMENTS` catalog in the module itself), and
 its only reader is `tools/build_roster_board.py`, a dev-only board generator that already
 accepts a `--roster` path. Owner's recollection was right: it is the build-time record from
@@ -982,8 +982,8 @@ Ranked, with the reason each sits where it does.
    git-ignored files (`.claude/launch.json` · `config.json` · `serve.txt` · `private/`) the
    branch can't fix and each machine must touch itself. Do it on its own branch in its own
    session, after clearing the runway — `loom-v2` currently leads `master`, and a rename that
-   moves this much makes a later rebase miserable. Two traps: `pixai_gallery` is a strict prefix
-   of `pixai_gallery_backup` **and** `pixai_backup` is the output directory named in every
+   moves this much makes a later rebase miserable. Two traps: `moonglade_gallery` is a strict prefix
+   of `moonglade_backup` **and** `pixai_backup` is the output directory named in every
    install's `config.json`, so a prefix-wildcard sweep silently repoints people's archives at
    nothing; and both modules are runnable scripts invoked as `python pixai_*.py` in ~116
    documented commands, the launchers and the Panel's subprocess runner — an import-only shim
@@ -1030,7 +1030,7 @@ waiting; the "together" grouping still applies to what's left below.
   real section in the Folio of Honors today, currently showing only **skin** unlocks. Open
   (not a shape question — a build-more question): extend it to also cover **banner** and
   **icon** unlocks, plus the easter egg (see below). Exact current render location in
-  `pixai_gallery.py` / `static/mg-notify.js` not yet re-confirmed against the
+  `moonglade_gallery.py` / `static/mg-notify.js` not yet re-confirmed against the
   post-Folio-of-Honors code — ask the owner to point at it directly rather than re-deriving
   from git history next time this comes up.
 - **The reward system's real shape, per the owner (2026-07-23) — bigger than one banner.**
@@ -1072,7 +1072,7 @@ waiting; the "together" grouping still applies to what's left below.
   achievement. Optionally, a new top-level `roster.bundles[]` catalog (sibling to
   `buckets`/`tracks`) gives each theme one place to name its actual mark id / skin id / banner
   asset — today that mapping exists only as prose in this file. **Two reconciliation notes for
-  whoever builds this:** (1) `pixai_gallery.py`'s `ACHIEVEMENTS` list (`:781`) is a
+  whoever builds this:** (1) `moonglade_gallery.py`'s `ACHIEVEMENTS` list (`:781`) is a
   hand-transcribed runtime copy of the JSON roster, not loaded from the JSON at runtime (same
   pattern as the `LADDER_TRACKS` comment at `:1526-1530`) — any new field lands in both places
   by hand, whenever it's actually populated; (2) the existing `skin`/`banner_reward` values on
@@ -1096,7 +1096,7 @@ waiting; the "together" grouping still applies to what's left below.
   already shipped, not tied to any achievement).
 
   **Open tension found while compiling, not recorded in any prior doc:** `nightfallen` and
-  `moonglade` are the two skins flagged `"free": True` in `SKINS` (`pixai_gallery.py:1512-1523`)
+  `moonglade` are the two skins flagged `"free": True` in `SKINS` (`moonglade_gallery.py:1512-1523`)
   — Nightfallen is not achievement-gated at all today. The Moonwell-Eclipse-unlocks-with-
   Nightfallen decision doesn't say whether Nightfallen should become gated too, or stay free
   while only its matching mark is the gated half of that bundle. Needs an explicit owner call.
@@ -1133,7 +1133,7 @@ waiting; the "together" grouping still applies to what's left below.
   `common`, or wants its own `reward_kind`, isn't stated anywhere yet.
 
   **Ready to wire up once tiers are assigned (not built):** `compute_achievements()`
-  (`pixai_gallery.py:1759-1817`) is where `earned_skins` gets built and `banner_reward` passed
+  (`moonglade_gallery.py:1759-1817`) is where `earned_skins` gets built and `banner_reward` passed
   through today — there is no equivalent mark/bundle logic yet. `SKINS` (`:1512-1524`) is the
   only existing reward-asset catalog; there is no parallel `MARKS` list gating icons to
   achievements — the marks system (`list_marks`/`load_branding`, `:1562-1620`) is purely a
@@ -1163,7 +1163,7 @@ waiting; the "together" grouping still applies to what's left below.
   payoff should work when defaults are already unlocked for everyone.
   **Three trigger-redesign options, scoped 2026-07-24 (not picked — needs the owner's go):**
   1. **Non-default mark, not just any mark.** Keep the existing `list_marks()`-based detection
-     (`sweep_telemetry()`, `pixai_gallery.py:2048-2058`) but compare against a known
+     (`sweep_telemetry()`, `moonglade_gallery.py:2048-2058`) but compare against a known
      shipped-default id set instead of "count ≥ 1" — fire only when a mark id absent from that
      set appears. Smallest change (still file-drop detection, still literally "you dropped in
      your own mark"), but needs the shipped defaults to be identifiable in code (today
@@ -1183,7 +1183,7 @@ waiting; the "together" grouping still applies to what's left below.
      unlinked API route/query param. Closest to the name and the roast text ("you opened a
      door you had no business finding") and fully decoupled from the branding-defaults problem
      — no precondition about what ships in `branding/` at all. `api_ach_event()`
-     (`pixai_gallery.py:10780-10792`) already whitelists named front-end event beacons
+     (`moonglade_gallery.py:10780-10792`) already whitelists named front-end event beacons
      (`konami`/`docs`/`narrator`) into `telem_flag()` calls — a console hook could reuse that
      exact mechanism with one new event name, so this is less new infrastructure than it first
      sounds. Tradeoff: several sub-choices (console hook vs. CLI flag vs. URL param), each with

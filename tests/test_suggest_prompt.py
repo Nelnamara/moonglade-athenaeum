@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 
 def test_suggest_prompt_returns_output(monkeypatch):
@@ -58,12 +58,12 @@ def test_run_suggest_prompt_local_file_uploads_first(monkeypatch, tmp_path):
 
 
 # ---- B18 residual: --suggest-prompt needs the same video gate the web template has ----
-# (`{% if row.is_video != '1' %}` around the Suggest Prompt button in pixai_gallery.py).
+# (`{% if row.is_video != '1' %}` around the Suggest Prompt button in moonglade_gallery.py).
 # PixAI's suggest-prompt endpoint is image-only and 500s on a video; the CLI must refuse
 # early with a clear message instead of surfacing that raw 500.
 
 def test_run_suggest_prompt_refuses_a_known_video_media_id(tmp_path, monkeypatch):
-    from pixai_gallery import CATALOG_FIELDS, save_catalog
+    from moonglade_gallery import CATALOG_FIELDS, save_catalog
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "9001", "is_video": "1", "filename": "2025-01/v_9001.mp4"}])
     # Proves the gate fires BEFORE any session/network setup -- not just before the

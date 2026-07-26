@@ -1,5 +1,5 @@
-"""Shared logging baseline for both surfaces (pixai_gallery_backup.py's CLI and
-pixai_gallery.py's web server): a persistent, rotating file under
+"""Shared logging baseline for both surfaces (moonglade_backup.py's CLI and
+moonglade_gallery.py's web server): a persistent, rotating file under
 out_dir/logs/moonglade.log, always on regardless of -v/--verbose -- so a crash
 or failure is on record even if nobody remembered the flag, or the terminal
 window that would have shown it is already gone.
@@ -15,7 +15,7 @@ ceiling, so their messages reach the handlers regardless. Flask's own internal
 `app.logger.error(..., exc_info=...)` call on an unhandled request exception
 already logs at ERROR -- above the WARNING ceiling -- so it reaches the file
 with no bespoke @app.errorhandler needed, and it works under whatever name
-`app.logger` resolves to (`__main__` when run as a script, `pixai_gallery`
+`app.logger` resolves to (`__main__` when run as a script, `moonglade_gallery`
 when imported) without this module needing to know or care which.
 """
 import logging

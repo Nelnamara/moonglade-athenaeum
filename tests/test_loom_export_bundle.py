@@ -9,7 +9,7 @@ import zipfile
 
 from PIL import Image
 
-from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_existing_client, login_test_client
 

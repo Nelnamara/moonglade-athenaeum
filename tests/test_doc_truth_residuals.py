@@ -37,7 +37,7 @@ def test_head_nav_comment_names_import_as_the_localhost_exception():
     together, but /api/import-local -- unlike Generate and The Loom -- is actually
     LOCALHOST-tier (re-checked server-side via _is_local_request()). The comment right
     above that gate must say so, not just describe Generate/Loom/Panel/balance."""
-    src = _read("pixai_gallery.py")
+    src = _read("moonglade_gallery.py")
     start = src.index('<div class="head-nav">')
     end = src.index("ImportUI.open()", start)
     window = src[start:end]
@@ -56,7 +56,7 @@ def test_is_local_hardcode_comment_names_import_as_the_documented_exception():
     call out Import as the one control that needs the stricter, real
     `is_true_local` check instead -- so a reader has no doubt Import is actually
     LOCALHOST-tier, not LOGIN-tier like its neighbors."""
-    src = _read("pixai_gallery.py")
+    src = _read("moonglade_gallery.py")
     start = src.index("# `is_local` below")
     end = src.index("is_local=True", start)
     window = src[start:end]
@@ -80,7 +80,7 @@ def test_task_detail_query_docstring_names_its_real_caller_and_the_two_that_bypa
     proof it never reaches this function's fallback), and both call sites in
     run_download's --full-meta branch (parallel and serial) call task_detail_gql
     directly. collect_generation is the only real caller of _task_detail_query."""
-    import pixai_gallery_backup as core
+    import moonglade_backup as core
     doc = core._task_detail_query.__doc__ or ""
     assert "collect_generation" in doc, (
         "docstring doesn't name its one real caller (collect_generation)")
@@ -99,7 +99,7 @@ def test_task_detail_query_docstring_names_its_real_caller_and_the_two_that_bypa
 
 def test_invariant_1_media_id_of_is_not_documented_as_a_single_source():
     """media_id_of() is re-implemented inline elsewhere instead of being called --
-    verified by grep: pixai_gallery.py's own backfill_batches() and pixai_similar.py's
+    verified by grep: moonglade_gallery.py's own backfill_batches() and moonglade_similar.py's
     scan_dir both do a bare `stem.split("_")[-1]` rather than calling the shared
     function. The module table's "single source" claim is false."""
     arch = _read("docs/architecture.md")
@@ -110,7 +110,7 @@ def test_invariant_1_media_id_of_is_not_documented_as_a_single_source():
         "unqualified, which is false (see backfill_batches/scan_dir duplicates)")
     assert "backfill_batches" in row and "scan_dir" in row, (
         "media_id_of()'s module-table row doesn't name the known inline duplicates "
-        "(backfill_batches in this module, pixai_similar.py's scan_dir)")
+        "(backfill_batches in this module, moonglade_similar.py's scan_dir)")
 
 
 def test_invariant_2_resume_ordering_caveats_full_meta_and_sync():

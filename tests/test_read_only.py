@@ -12,7 +12,7 @@ instead of calling through these choke points and, until 2026-07-21, none of the
 READ_ONLY at all -- see tests/test_read_only_cli_paths.py for that half."""
 import pytest
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 
 def test_read_only_defaults_to_false():

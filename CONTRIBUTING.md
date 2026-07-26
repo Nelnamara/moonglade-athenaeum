@@ -60,7 +60,7 @@ whole files. A few conventions that matter more than usual here:
   the full list and the current, verified state of each one.
 - **Catalog schema changes** touch three places together: `CATALOG_FIELDS`, the `_CREATE_TABLE`
   DDL, and the `_MIGRATIONS` list (so existing databases pick up the column automatically).
-  All three live in `pixai_gallery.py`.
+  All three live in `moonglade_gallery.py`.
 - **Never commit `config.json`** or anything with a real API key, user id, or hash in it.
   `config.example.json` is the template; it ships with placeholder values only.
 - **HTTPS verification stays on.** Don't add `verify=False` anywhere, even temporarily.

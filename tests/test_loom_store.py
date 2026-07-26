@@ -4,7 +4,7 @@ legacy single store.json. The React app's window.storage API is unchanged; this
 tests the server backend underneath it."""
 import json
 
-from pixai_gallery import _account_key
+from moonglade_gallery import _account_key
 from tests.conftest import login_client
 
 
@@ -75,7 +75,7 @@ def test_one_account_cannot_see_or_clobber_or_list_anothers_storyboards(tmp_path
     """Same split saved views/snippets already got, same reason: Loom storyboards were
     install-wide (one shared out_dir/loom/kv/), so any signed-in account could read AND
     overwrite AND enumerate every other account's boards."""
-    from pixai_gallery import create_app
+    from moonglade_gallery import create_app
     from tests.conftest import login_test_client
     app = create_app(tmp_path)
 
@@ -102,7 +102,7 @@ def test_storyboards_are_independent_for_accounts_differing_only_by_case(tmp_pat
     directory on NTFS (case-insensitive-but-preserving), even though account
     identity is case-SENSITIVE. FAILS before the fix on this filesystem: nel's
     board read/write clobbers Nel's, exactly like the alice/bob test above."""
-    from pixai_gallery import create_app
+    from moonglade_gallery import create_app
     from tests.conftest import login_test_client
     app = create_app(tmp_path)
 

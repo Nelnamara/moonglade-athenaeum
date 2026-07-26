@@ -12,7 +12,7 @@ same technique test_web_pick.py's B4 drawer-wiring tests use (no JS runtime in t
 accept, per-submission result lines -- is a separate file with its own test coverage:
 loom/test/mg-generate-drawer-concurrent.test.js.)
 """
-from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client
 

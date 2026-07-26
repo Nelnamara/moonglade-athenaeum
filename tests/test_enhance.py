@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-import pixai_gallery_backup as core
-import pixai_gallery
+import moonglade_backup as core
+import moonglade_gallery
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -31,7 +31,7 @@ def test_no_art_filter_submit_path_survives():
     Asserted against the SOURCE as well as the module namespace: a builder that survives under
     another name, or a stray `pixai-image-filter` model literal, is the same defect back."""
     assert not hasattr(core, "build_filter_parameters")
-    for mod in ("pixai_gallery.py", "pixai_gallery_backup.py"):
+    for mod in ("moonglade_gallery.py", "moonglade_backup.py"):
         src = (ROOT / mod).read_text(encoding="utf-8")
         assert "pixai-image-filter" not in src, mod + " still names the paid filter model"
         assert "filterId" not in src, mod + " still builds a filter task's inputs"
@@ -48,7 +48,7 @@ def test_the_enhance_command_is_gone_from_the_cli(monkeypatch, capsys):
     a flag accepted no matter what the source around run_enhance looks like. main() is pure
     argparse up to parse_args(), so no command runs and no network is touched."""
     assert not hasattr(core, "run_enhance")
-    monkeypatch.setattr("sys.argv", ["pixai_gallery_backup.py", "--enhance", "--src", "1",
+    monkeypatch.setattr("sys.argv", ["moonglade_backup.py", "--enhance", "--src", "1",
                                      "--filter-id", "filter-v1-m2", "--strength", "0.77"])
     with pytest.raises(SystemExit) as ex:
         core.main()
@@ -94,11 +94,11 @@ def test_no_panelplugin_submit_path_survives():
     # The two literals a submit path cannot do without: the model id and the parameter that
     # names the workflow. Both are absent from the modules -- the word "panelplugin" on its own
     # still appears in the comments that explain WHY, which is the point of leaving them.
-    for mod in ("pixai_gallery.py", "pixai_gallery_backup.py"):
+    for mod in ("moonglade_gallery.py", "moonglade_backup.py"):
         src = (ROOT / mod).read_text(encoding="utf-8")
         assert "pixai-panelplugin" not in src, mod + " still names the panelplugin model"
         assert "workflowId" not in src, mod + " still addresses a panelplugin workflow"
-    core_src = (ROOT / "pixai_gallery_backup.py").read_text(encoding="utf-8")
+    core_src = (ROOT / "moonglade_backup.py").read_text(encoding="utf-8")
     assert '"--workflow-id"' not in core_src        # the CLI flag that fed it
     assert not hasattr(core, "build_panelplugin_parameters")
     assert not hasattr(core, "workflow_catalog")
@@ -108,7 +108,7 @@ def test_no_route_reaches_a_panelplugin_or_filter_submit(tmp_path):
     """The route-level half of the guards above: neither the submit route nor the catalog route
     that populated its picker may exist, so no reachable request can queue a task PixAI will
     never run -- or pay for a composite the browser does for free."""
-    app = pixai_gallery.create_app(tmp_path)
+    app = moonglade_gallery.create_app(tmp_path)
     rules = {str(r.rule) for r in app.url_map.iter_rules()}
     assert "/api/enhance" not in rules
     assert "/api/workflows" not in rules
@@ -125,7 +125,7 @@ def test_enhance_plugins_dict_and_dead_plugin_branch_are_gone():
     still guards the plugin-name shortcut specifically, so a future refinement surface cannot
     resurrect it as a way back into a panelplugin submit. hand-fix and face-fix are superseded
     by the real, working box-based /api/fix (submit_fixer)."""
-    assert not hasattr(pixai_gallery, "ENHANCE_PLUGINS")
-    src = (ROOT / "pixai_gallery.py").read_text(encoding="utf-8")
+    assert not hasattr(moonglade_gallery, "ENHANCE_PLUGINS")
+    src = (ROOT / "moonglade_gallery.py").read_text(encoding="utf-8")
     assert "ENHANCE_PLUGINS" not in src
     assert 'p.get("plugin")' not in src

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 // Audit 2026-07-21, O12 (Phase 1): <mg-model-picker> sent size=12 while the gallery's
-// own hand-rolled #model-flyout (pixai_gallery.py's old Gen.search(), since deleted --
+// own hand-rolled #model-flyout (moonglade_gallery.py's old Gen.search(), since deleted --
 // see O12 Phase 2 below) sent size=24 -- a silent gap that would have made the shared
 // component a strict downgrade the moment the gallery tried to adopt it (half as many
 // results per page, no pagination on either side to make up the difference -- see O12's

@@ -11,7 +11,7 @@ version_id outright. Problem 4 sharpened that: the owner wanted a real version P
 one of model_id's own real versions (validated server-side against core.list_model_versions
 -- never trusted blind), and falls back to the newest exactly like before otherwise. No
 network, no spend (everything mocked)."""
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 from tests.conftest import login_client
 

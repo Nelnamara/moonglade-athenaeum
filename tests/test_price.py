@@ -2,7 +2,7 @@
 creating a task). Mocked _rest_get; conftest blocks live /v2. No network, no spend."""
 import json
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 
 def test_price_scalars_and_nested_split(monkeypatch):

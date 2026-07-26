@@ -10,9 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
-import pixai_gallery_backup as core
-import pixai_gallery
-from pixai_gallery import CATALOG_FIELDS, save_catalog
+import moonglade_backup as core
+import moonglade_gallery
+from moonglade_gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
 
@@ -98,7 +98,7 @@ def _stub_collect(monkeypatch, tmp_path):
                         lambda s, m: ("https://cdn/" + m, {"width": 1024, "height": 1536}))
     monkeypatch.setattr(core, "download",
                         lambda s, url, stem, **k: ("ok", stem.with_suffix(".jpg")))
-    monkeypatch.setattr(pixai_gallery, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(moonglade_gallery, "make_thumbnail", lambda *a, **k: None)
 
 
 def test_collect_names_a_fix_from_its_source_image_not_the_template(monkeypatch, tmp_path):
@@ -111,7 +111,7 @@ def test_collect_names_a_fix_from_its_source_image_not_the_template(monkeypatch,
     _stub_collect(monkeypatch, tmp_path)
     monkeypatch.setattr(core, "_task_detail_query", lambda s, t: _fixer_task())
     core.collect_generation(object(), "T1", str(tmp_path))
-    row = next(r for r in pixai_gallery.load_catalog(tmp_path / "catalog.db")
+    row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
     assert row["filename"] == "images/a_night_elf_druid_moonlight_fix-hand_T1_M9.jpg"
     assert "Image_2_shows" not in row["filename"]
@@ -124,7 +124,7 @@ def test_collect_falls_back_to_the_source_media_id_when_it_is_not_in_the_catalog
     _stub_collect(monkeypatch, tmp_path)
     monkeypatch.setattr(core, "_task_detail_query", lambda s, t: _fixer_task(source="700"))
     core.collect_generation(object(), "T1", str(tmp_path))
-    row = next(r for r in pixai_gallery.load_catalog(tmp_path / "catalog.db")
+    row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
     assert row["filename"] == "images/700_fix-hand_T1_M9.jpg"
 
@@ -137,7 +137,7 @@ def test_collect_still_names_an_ordinary_generation_from_its_prompt(monkeypatch,
         "parameters": {"prompts": "a night elf druid", "modelId": "V1"},
         "outputs": {"mediaId": "M9", "seed": 42}})
     core.collect_generation(object(), "T1", str(tmp_path))
-    row = next(r for r in pixai_gallery.load_catalog(tmp_path / "catalog.db")
+    row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
     assert row["filename"] == "images/a_night_elf_druid_T1_M9.jpg"
 
@@ -173,7 +173,7 @@ def test_collect_writes_the_fix_model_and_leaves_the_rest_empty(monkeypatch, tmp
     _stub_collect(monkeypatch, tmp_path)
     monkeypatch.setattr(core, "_task_detail_query", lambda s, t: _fixer_task())
     core.collect_generation(object(), "T1", str(tmp_path))
-    row = next(r for r in pixai_gallery.load_catalog(tmp_path / "catalog.db")
+    row = next(r for r in moonglade_gallery.load_catalog(tmp_path / "catalog.db")
                if r["media_id"] == "M9")
     assert row["model_id"] == REFERENCE_PRO and row["model_name"] == "Reference Pro"
     assert row["width"] == "1024" and row["height"] == "1536"     # dimensions already survived

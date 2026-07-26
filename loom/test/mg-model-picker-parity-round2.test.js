@@ -16,7 +16,7 @@ import path from "node:path";
 //
 // Problem 3 (LoRA architecture filtering): a `base-type` opt-in attribute threads the
 // selected base model's model_type into /api/model-search as base_type=, and the component
-// renders the server's `compat` tag (pixai_gallery_backup.py's annotate_lora_compat) as a
+// renders the server's `compat` tag (moonglade_backup.py's annotate_lora_compat) as a
 // small badge.
 //
 // static/mg-model-picker.js is a plain global script with no jsdom harness in this runner --

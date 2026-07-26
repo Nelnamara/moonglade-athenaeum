@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-import pixai_gallery_backup as core
-from pixai_gallery import (media_id_of, find_files_for_media_id, find_image_file,
+import moonglade_backup as core
+from moonglade_gallery import (media_id_of, find_files_for_media_id, find_image_file,
                            init_db, save_catalog, load_catalog)
 
 
@@ -115,7 +115,7 @@ def test_audit_ignores_deleted_quarantine(tmp_path):
     verify_quarantine) excluded gallery/ and _duplicates/ but never learned about
     _deleted/ -- so a locally-purged image is reported back as a live Class A
     duplicate of its own quarantined self, and counted in the audit's file total."""
-    from pixai_gallery import DELETED_DIRNAME
+    from moonglade_gallery import DELETED_DIRNAME
     (tmp_path / "images").mkdir()
     (tmp_path / DELETED_DIRNAME).mkdir()
     (tmp_path / "images" / "a_111.webp").write_bytes(b"AAAA")

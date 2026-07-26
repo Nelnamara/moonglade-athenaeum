@@ -2,7 +2,7 @@
 year dropdowns, and per-page (via query_catalog)."""
 import pytest
 
-from pixai_gallery import (CATALOG_FIELDS, init_db, save_catalog, query_catalog,
+from moonglade_gallery import (CATALOG_FIELDS, init_db, save_catalog, query_catalog,
                            catalog_years, _like_pattern, collection_health)
 
 
@@ -265,7 +265,7 @@ def test_media_type_filter(tmp_path):
 
 
 def test_catalog_model_options_most_used_first(tmp_path):
-    from pixai_gallery import catalog_model_options
+    from moonglade_gallery import catalog_model_options
     db = tmp_path / "catalog.db"
     save_catalog(db, [
         _row(media_id="1", filename="a.png", model_name="Tsubaki", model_id="111"),
@@ -306,7 +306,7 @@ def test_source_filter(tmp_path):
 
 
 def test_collections_add_remove_filter(tmp_path):
-    from pixai_gallery import (add_to_collection, remove_from_collection,
+    from moonglade_gallery import (add_to_collection, remove_from_collection,
                                unique_collections)
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id=m, filename=m + ".png") for m in ("a", "b", "c")])
@@ -323,7 +323,7 @@ def test_collections_add_remove_filter(tmp_path):
 
 
 def test_collection_add_route(tmp_path):
-    from pixai_gallery import load_catalog
+    from moonglade_gallery import load_catalog
     from tests.conftest import login_client
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id="m1", filename="a.png"), _row(media_id="m2", filename="b.png")])
@@ -341,7 +341,7 @@ def test_collection_remove_route_and_ui(tmp_path):
     """The remove path end to end: the button only appears while a collection filter
     is active (that's what tells it WHICH collection to remove from), and the route
     drops the label without touching the row."""
-    from pixai_gallery import load_catalog, add_to_collection
+    from moonglade_gallery import load_catalog, add_to_collection
     from tests.conftest import login_client
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id="m1", filename="a.png"), _row(media_id="m2", filename="b.png")])
@@ -512,7 +512,7 @@ def test_export_zip_by_collection_resolves_full_membership(tmp_path):
 
 def test_contact_sheet_collection_button_appears_with_active_filter(tmp_path):
     """O5 (audit 2026-07-21): /contact-sheet?collection=<name> is fully implemented
-    server-side (see contact_sheet() in pixai_gallery.py) but had NO ui entry point anywhere
+    server-side (see contact_sheet() in moonglade_gallery.py) but had NO ui entry point anywhere
     -- every emitter that builds a contact-sheet link passed ids= only. Its ZIP-export twin
     ('Download collection', downloadCollection()) IS wired into the filter bar, right next to
     the Collection dropdown, gated on the exact same "a collection filter is active"
@@ -543,7 +543,7 @@ def test_contact_sheet_collection_js_builds_the_collection_query():
     not navigate away from it)."""
     from pathlib import Path
     import re
-    src = (Path(__file__).resolve().parents[1] / "pixai_gallery.py").read_text(encoding="utf-8")
+    src = (Path(__file__).resolve().parents[1] / "moonglade_gallery.py").read_text(encoding="utf-8")
     m = re.search(r"function contactSheetCollection\(name\)\s*\{([\s\S]*?)\n\}", src)
     assert m, "contactSheetCollection(name) JS function not found"
     body = m.group(1)
@@ -592,7 +592,7 @@ def test_collection_health_detects_duplicate(tmp_path):
 
 
 def test_duplicate_groups_finds_cross_folder_copies(tmp_path):
-    from pixai_gallery import duplicate_groups
+    from moonglade_gallery import duplicate_groups
     (tmp_path / "images").mkdir()
     (tmp_path / "2024-03").mkdir()
     # 111 lives in two buckets -> a group; 222 lives only in images -> not a group
@@ -609,7 +609,7 @@ def test_duplicate_groups_finds_cross_folder_copies(tmp_path):
 
 
 def test_duplicate_groups_ignores_gallery_and_quarantine(tmp_path):
-    from pixai_gallery import duplicate_groups
+    from moonglade_gallery import duplicate_groups
     (tmp_path / "images").mkdir()
     (tmp_path / "gallery" / "thumbs").mkdir(parents=True)
     (tmp_path / "_duplicates").mkdir()
@@ -625,7 +625,7 @@ def test_duplicate_groups_ignores_deleted(tmp_path):
     view) excluded gallery/ and _duplicates/ but never _deleted/ -- so a locally
     purged image is reported as a live cross-bucket duplicate of its own quarantined
     self."""
-    from pixai_gallery import duplicate_groups, DELETED_DIRNAME
+    from moonglade_gallery import duplicate_groups, DELETED_DIRNAME
     (tmp_path / "images").mkdir()
     (tmp_path / DELETED_DIRNAME).mkdir()
     (tmp_path / "images" / "a_111.webp").write_bytes(b"d")
@@ -670,8 +670,8 @@ def test_video_row_renders_and_serves(tmp_path):
 
 
 def test_delete_tasks_bulk_purges_whole_task_cloud_and_local(tmp_path, monkeypatch):
-    import pixai_gallery_backup as core
-    from pixai_gallery import load_catalog
+    import moonglade_backup as core
+    from moonglade_gallery import load_catalog
     from tests.conftest import login_client
     db = tmp_path / "catalog.db"
     save_catalog(db, [
@@ -708,7 +708,7 @@ def test_delete_tasks_bulk_purges_whole_task_cloud_and_local(tmp_path, monkeypat
 
 
 def test_edit_prompt_and_bulk_replace_routes(tmp_path):
-    from pixai_gallery import load_catalog
+    from moonglade_gallery import load_catalog
     from tests.conftest import login_client
     db = tmp_path / "catalog.db"
     save_catalog(db, [

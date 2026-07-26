@@ -3,7 +3,7 @@ Mocked -- no live network, no sleeping (completed/failed return or raise before 
 sleep; timeout=0 never enters the loop)."""
 import pytest
 
-import pixai_gallery_backup as core
+import moonglade_backup as core
 
 
 def _one_poll_then_timeout(monkeypatch, task):

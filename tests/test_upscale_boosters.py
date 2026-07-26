@@ -12,8 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import pixai_gallery_backup as core
-from pixai_gallery import CATALOG_FIELDS, save_catalog
+import moonglade_backup as core
+from moonglade_gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
 

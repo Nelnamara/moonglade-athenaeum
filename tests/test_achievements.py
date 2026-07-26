@@ -3,8 +3,8 @@ persisted cosmetic state + the /api/achievements and /api/skin routes. All local
 read-only catalog data (no network, no spend)."""
 from pathlib import Path
 
-import pixai_gallery as g
-from pixai_gallery import CATALOG_FIELDS, create_app, save_catalog
+import moonglade_gallery as g
+from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client
 
@@ -146,7 +146,7 @@ def test_ach_grid_stacks_its_sections_instead_of_tiling_them():
 
 def test_the_hall_was_renamed_the_folio_of_honors(tmp_path):
     """2026-07-22 owner decision, off the STATE.md rename shortlist -- guards against a
-    straggler reference surviving a future edit to the modal skeleton in pixai_gallery.py."""
+    straggler reference surviving a future edit to the modal skeleton in moonglade_gallery.py."""
     cli, _ = _client(tmp_path, [])
     html = cli.get("/").get_data(as_text=True)
     assert "The Folio of Honors" in html

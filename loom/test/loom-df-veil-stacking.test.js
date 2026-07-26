@@ -9,7 +9,7 @@ import path from "node:path";
 // descendant of .lv-overlay, so its z-index:450 only ever competes inside .lv-overlay's OWN
 // stacking context, not the root one. .lv-overlay itself is only z-index:400 at the root,
 // which loses to the body-level corner FABs (#jobs-fab/#jobs-tray, z-index 401/402 -- see
-// pixai_gallery.py's "Lift the Activity chip" comment), so those FABs painted over Deep
+// moonglade_gallery.py's "Lift the Activity chip" comment), so those FABs painted over Deep
 // Focus and everything nested inside it. Fixed without a DOM move: .lv-overlay itself picks
 // up a `.lv-overlay-df` modifier class while Deep Focus is open, raising its OWN root-context
 // z-index to 450 (matching .lv-df-veil's own intended value) so the corner FABs lose the

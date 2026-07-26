@@ -12,7 +12,7 @@ pip install -r requirements.txt
 |---|---|
 | `requests` | all network operations (required) |
 | `pillow` | thumbnails, conversion, metadata embedding |
-| `flask` | the local web gallery (`pixai_gallery.py`) |
+| `flask` | the local web gallery (`moonglade_gallery.py`) |
 | `websockets` | `--watch` / `--watch-backup`, and the web gallery's auto-starting live-mirror thread |
 | `truststore` | optional — fixes HTTPS cert errors behind corporate proxies / AV |
 | `cryptography` (**not** in `requirements.txt` — `pip install cryptography` separately) | optional — only for the gallery's `--https` mode |
@@ -52,7 +52,7 @@ optional overrides; leave them blank. More detail: [How It Works](How-It-Works).
 
 Web gallery (browse, generate, The Loom) — at [localhost:5000](http://localhost:5000):
 ```bash
-python pixai_gallery.py --out pixai_backup
+python moonglade_gallery.py --out pixai_backup
 ```
 
 **Create your login (v2.0.0+).** The gallery requires an account on every path, including on
@@ -70,7 +70,7 @@ there. Any signed-in session can: every account carries equal trust, there's no 
 role.
 
 **Locked out, or resetting a forgotten password.** On the server machine,
-`python pixai_gallery_backup.py --add-web-user` prompts for a username (typed normally) and a
+`python moonglade_backup.py --add-web-user` prompts for a username (typed normally) and a
 password (hidden — never echoed) and writes the hash straight to `config.json`. It *adds or updates*, so it doubles
 as a password reset for an existing name. Companions: `--list-web-users` shows who exists,
 `--remove-web-user <name>` deletes one. (Remove the last account and the first-run bootstrap
@@ -81,10 +81,10 @@ gallery (and supervises it) without a terminal window.
 
 Headless:
 ```bash
-python pixai_gallery_backup.py --probe   # connection sanity check
-python pixai_gallery_backup.py --count   # how many images you have
-python pixai_gallery_backup.py --max 40  # small test download
-python pixai_gallery_backup.py           # download everything
+python moonglade_backup.py --probe   # connection sanity check
+python moonglade_backup.py --count   # how many images you have
+python moonglade_backup.py --max 40  # small test download
+python moonglade_backup.py           # download everything
 ```
 
 Everything lands in `pixai_backup/` (git-ignored). Next: **[Backing Up](Backing-Up)**.
