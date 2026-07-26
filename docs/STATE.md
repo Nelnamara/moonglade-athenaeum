@@ -398,6 +398,15 @@ users.
   can differ slightly from their own render and none of ours can. The paid path
   (`build_filter_parameters`, `--filter-id`, `--enhance`, `run_enhance`) is gone: it charged
   credits and waited on a worker queue for a handful of gradient fills.
+- **The QUEUED phase + queue ETA are VERIFIED against a live generation** (2026-07-25, task
+  `2037959839192719439`). `/v2/task/wait-time` is real and per-priority: probed at
+  Tsubaki.2 v1, priority 500 answered 34.8s twice while 1000 answered 30.8s then 26.7s. On
+  the generation itself the tracker quoted **21s** and the job log's own timestamps put the
+  actual queue wait at **26.7s** (`started:false` 1785036905.86 -> `started:true`
+  1785036932.58), then 82s of rendering. So the estimate is sound and honestly labelled as a
+  WAIT, not a countdown; the earlier "both gens said 3 seconds" was a genuinely short queue,
+  not a constant. The one real defect the run exposed — an in-flight card reading
+  "Generated" — is fixed. Wave 2's last item is closed.
 - **Per-image cloud delete shipped** (2026-07-25). `POST /api/delete-image` (LOCALHOST)
   drives `core.delete_batch_media_gql` — `updateGenerationTask(id, input:{deleteBatchMedia:
   {mediaId}})` over `gql_adhoc` with **`retries=0`**; the primitive's docstring had promised

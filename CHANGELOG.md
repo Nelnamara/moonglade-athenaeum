@@ -17,6 +17,13 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The Activity card said "Generated" about a job that was still queued.** The stored label
+  is the *completion* wording — the drawer passes it at submit time — so an in-flight card
+  read in the past tense for the whole wait. In-progress rows now read **Generating /
+  Editing / Rendering / Fixing**; a finished row keeps the stored wording, which is right by
+  then and is what the completion toast beside it reads off. A label the tense table has
+  never seen passes through untouched rather than being guessed at.
+
 - **The Upscale flyout's model picker opened where you couldn't see it.** Reported from the
   lightbox: "asks me to choose a model but a picker does not open." It did open — below the
   fold. The flyout is 420px wide, which makes it 709px of content tall, and it is capped at
