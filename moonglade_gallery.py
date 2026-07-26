@@ -8454,7 +8454,11 @@ var Similar = (function(){
     fetch('/api/similar/'+encodeURIComponent(mid)+'?k=48').then(function(r){return r.json();}).then(function(d){
       g.innerHTML='';
       var imgs=(d&&d.images)||[];
-      if(!imgs.length){ em.textContent=(d&&d.error)?d.error:'No similar images yet \\u2014 the index may still be building.'; em.style.display='block'; return; }
+      // Was an unconditional 'the index may still be building', which reads as a transient
+      // state and is what hid a permanently orphaned index for three days. The route now
+      // distinguishes an EMPTY index -- with instructions -- from a genuine no-matches
+      // result, so trust its error text and only guess when it stays silent.
+      if(!imgs.length){ em.textContent=(d&&d.error)?d.error:'No similar images found for this one.'; em.style.display='block'; return; }
       imgs.forEach(function(it){
         var c=document.createElement('div');
         c.className='card'; c.setAttribute('data-mid', it.media_id);
@@ -12560,6 +12564,22 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         except Exception as e:
             return jsonify({"images": [], "total": 0,
                             "error": "similarity index unavailable: " + _redact_host_paths(str(e))[:180]}), 200
+        # An EMPTY index is not the same as "no matches", and conflating the two hid a real
+        # regression for three days. The 2026-07-25 module rename orphaned the stored index;
+        # moonglade_similar._get_table() then CREATED a fresh empty one instead of raising, so this
+        # route returned zero hits with no error at all and the client fell back to "the index may
+        # still be building" -- a benign transient message covering a permanent broken state.
+        # Reporting the size lets the client tell the truth and say what to do about it.
+        if not hits:
+            try:
+                indexed = int(moonglade_similar.count())
+            except Exception:
+                indexed = None
+            if indexed == 0:
+                return jsonify({"images": [], "total": 0, "indexed": 0,
+                                "error": "The similarity index is empty, so there is nothing to "
+                                         "compare against. Rebuild it from the Control Panel "
+                                         "(Rebuild similar index)."}), 200
         telem_bump("similar_uses", out_dir=out_dir)       # Kindred Spirits
         out = []
         for mid, score in hits:
