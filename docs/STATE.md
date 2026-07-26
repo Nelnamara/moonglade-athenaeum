@@ -1074,6 +1074,51 @@ Enhance Adept became unearnable. Move it there later if the creator ships.
   owner has two) and first generation mirrored to the PixAI library — only become meaningful once
   training and the JWT toggle are real. Minting them early repeats the Enhance Adept mistake.
 
+## SCOPED: "Under the Hood" — the easter egg that unlocks custom branding
+
+**The gate IS the feature.** Recorded emphatically because I proposed removing it and had to be
+corrected: I suggested making the branding panel plainly available and demoting the achievement to
+recognition, reasoning that gating utility behind an unbuilt epic creates deadlocks. Sound in
+general, wrong here. The owner's framing:
+
+> "The point is to reward the nosy power user. A generic user just playing with this to grab their
+> gallery and run gens isn't going to give my branding a 2nd thought... The point is to leave the
+> folders available for those people that poke around and look for the nuts and bolts. This is one
+> of the rarest unlocks in the bunch. You have to tinker and play to find the sauce."
+
+**The copy already committed to this.** The roast at `moonglade_gallery.py:1353` reads *"Look who
+went spelunking in the walls... **Custom branding: unlocked.** Tell no one."* The design was written
+down in the product's own voice; it just was not written down anywhere a doc sweep would look.
+
+### The intended flow
+1. A fresh install has the branding slot folders present but **empty**, nested.
+2. The deepest folder holds a single README breadcrumb — something like *"Maybe something goes in
+   here"*. That is the only hint, and finding it is the point.
+3. The user drops any PNG/JPEG into a slot folder (a mark, a mascot, a banner). The app **adopts it
+   into that slot**.
+4. That adoption fires the achievement.
+5. The achievement unlocks a **Control Panel branding tab** showing every available slot, a file
+   picker (from the gallery or from disk), and spec guidance per slot (banner dimensions and so on).
+
+### The real prerequisites — NOT the asset bundling
+The MPQ-style bundling is a SEPARATE want (a tidy install folder) and does not gate this. The
+owner's art already never ships: `pixai_backup/` is git-ignored wholesale, so branding lives only in
+his machine-local output directory and a fresh install contains none of it. What is actually missing,
+verified 2026-07-26:
+
+| gap | state |
+|---|---|
+| the nested empty folder tree | **nothing creates it.** No `mkdir` for branding subfolders anywhere. This is the true blocker — today there is nothing to find. |
+| the breadcrumb README | does not exist |
+| detecting a dropped file | **no watcher.** Checking on Panel/branding load is sufficient; a real filesystem watcher is not needed. |
+| the slot list | only `branding/marks` and `branding/favicon` appear in code. The panel needs the full set. |
+| the achievement + roast | **the roast already exists** (`:1353`). The metric and trigger do not. |
+
+### Do not
+- Do not make the panel available ungated — that deletes the feature.
+- Do not block this on the bundling epic; they are independent.
+- Do not add a hint anywhere in the UI. Discovery through the filesystem IS the mechanic.
+
 ## ⚠️ DO NOT "FIX": the Feats section is cloaked on purpose (owner-confirmed 2026-07-26)
 
 The board carries this as a defect — *"with no feats earned yet, the whole Feats section
