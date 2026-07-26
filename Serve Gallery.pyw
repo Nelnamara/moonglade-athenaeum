@@ -29,7 +29,12 @@ here = os.path.dirname(os.path.abspath(__file__))
 os.chdir(here)                     # so config.json / pixai_backup resolve here
 sys.path.insert(0, here)
 
-SERVE_ARGS = ["--out", "pixai_backup"]     # base args (folder). Extra flags go in serve.txt (below).
+# No --out here on purpose. The server resolves its own folder (an explicit --out, then
+# config.json's LIBRARY_DIR, then pixai_backup), and a hardcoded flag here would always beat
+# the stored setting -- which is precisely why the Control Panel's folder field could not
+# work while this line passed one. Put an explicit --out in serve.txt if you want THIS
+# launcher pinned to a folder regardless of the setting; it still wins.
+SERVE_ARGS = []                             # base args. Extra flags go in serve.txt (below).
 RESTART_CODE = 42                           # child exit code that means "relaunch me"
 
 # Machine-local overrides WITHOUT editing this tracked file (so `git pull` never conflicts):

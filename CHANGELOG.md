@@ -17,6 +17,27 @@ git tags. Full prose notes for tagged versions live on
 
 ### Changed
 
+- **You can set the library folder again, from the Control Panel.** This went missing when
+  the desktop GUI was removed in v2.1.0 — the GUI's folder picker left with it and nothing
+  replaced it, so a 47 GB library was addressable only by hand-editing an untracked launcher
+  file. **Panel ▸ Library at a glance** now has the folder, and it takes effect on the next
+  start (it offers the restart itself when you are running under the managed launcher).
+
+  **Nothing is ever moved.** Changing this points Moonglade at a different folder; the one
+  you leave behind is untouched, and there is deliberately no migrate option to get wrong.
+  A folder that does not exist is not created silently — it asks first, because a typo
+  would otherwise quietly make an empty library that looks like the real one vanished — and
+  a path that turns out to be a file is refused before anything is written.
+
+  Three pieces had to agree, and the middle one was the reason a setting could not have
+  worked before: the server resolves its folder as **an explicit `--out`, then
+  `LIBRARY_DIR` in config.json, then `pixai_backup`**; the **launcher no longer hardcodes
+  `--out pixai_backup`**, which it always passed and which would have beaten any stored
+  setting permanently; and `serve.txt` still appends, so an explicit `--out` there continues
+  to pin that launcher regardless. Writing is localhost-only — it rewrites config.json, the
+  file that also holds `AUTH_SECRET_KEY` and `AUTH_USERS` — and the field is not drawn at
+  all for a LAN session rather than being drawn and refusing.
+
 - **Upscale moved to where you actually look at a picture.** PixAI invokes Upscale on an
   image that already exists, not on one you are about to make — so the Generate drawer's
   three-way Off/Upscale/Hires segment is gone. What stays there is PixAI's **Enhance

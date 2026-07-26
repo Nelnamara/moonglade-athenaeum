@@ -102,6 +102,11 @@ ROUTE_TIERS = {
     ("api_panel_run", "POST"): LOCALHOST,           # destructive actions only -- see PROBE_BODIES
     ("api_panel_schedule", "POST"): LOCALHOST,      # writes the schedule + global workers count
     ("api_setup_save_key", "POST"): LOCALHOST,      # rewrites config.json
+    # The library folder. GET is LOGIN -- the Panel shows the current folder to whoever
+    # can already open the Panel, and it withholds the host path from a non-local caller
+    # exactly as /panel does. POST rewrites config.json too, so it matches save-key above.
+    ("api_library_path", "GET"): LOGIN,
+    ("api_library_path", "POST"): LOCALHOST,
     ("delete_tasks_bulk", "POST"): LOCALHOST,       # irreversible cloud deletion
     # Read-only (one catalog query, no network) but declared at the tier of the action
     # it previews, not the data it reads: it is step one of delete_tasks_bulk's flow and
