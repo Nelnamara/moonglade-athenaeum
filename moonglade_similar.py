@@ -1,7 +1,10 @@
 """Moonglade Athenaeum — "more like this" visual similarity.
 
 A SIDECAR index over the catalog's images: CLIP embeddings held in a Pixeltable table,
-GPU-embedded via a custom UDF (Pixeltable's stock `huggingface.clip` runs on CPU ~13 img/s;
+embedded via Pixeltable's BUILT-IN `huggingface.clip` by default since 2026-07-26 --
+see _embedding_fn() for why that is a bug fix rather than a preference. The custom
+`clip_gpu` UDF below remains as a fallback (MG_SIMILAR_EMBED=custom); its original
+reason to exist was that the stock function ran on CPU ~13 img/s;
 ours runs on the GPU ~decode-bound). `catalog.db` stays the source of truth — this module
 only maps a media_id -> its nearest media_ids and never owns curation.
 
@@ -68,6 +71,42 @@ def clip_gpu(imgs: Batch[PIL.Image.Image]) -> Batch[pxt.Array[(512,), pxt.Float]
     return [arr[i] for i in range(arr.shape[0])]
 
 
+def _embedding_fn():
+    """The embedding function to register on the index -- Pixeltable's BUILT-IN CLIP by
+    preference, our `clip_gpu` UDF as a fallback.
+
+    This is a bug fix, not a preference. Pixeltable stores the embedding function's
+    FULLY-QUALIFIED PATH inside the index, so registering a UDF defined in this module ties the
+    index to this module's NAME. The 2026-07-25 rename (pixai_similar -> moonglade_similar)
+    therefore orphaned a working index: the stored reference still read "pixai_similar.clip_gpu"
+    and no longer resolved. The built-in's path lives inside the pixeltable package, where our
+    renames cannot reach it, so this cannot happen again.
+
+    It also silently made the failure invisible -- see _get_table(), which CREATES a fresh table
+    when it cannot open the existing one, so the orphaned index was replaced by an empty one with
+    no exception raised anywhere.
+
+    The header's original objection to the built-in was speed: it ran on CPU at roughly 13 img/s.
+    That may no longer hold -- it now selects a device itself, and torch reports CUDA available
+    here -- but it is an empirical claim and NOT verified in this change. If a rebuild crawls,
+    set MG_SIMILAR_EMBED=custom and rebuild again; the fallback stays wired for exactly that.
+    A rebuild is required either way for the fix to take effect, since the stored reference only
+    changes when the index is recreated."""
+    import os
+    if (os.environ.get("MG_SIMILAR_EMBED") or "").strip().lower() == "custom":
+        return clip_gpu
+    try:
+        from pixeltable.functions.huggingface import clip as _builtin_clip
+    except Exception:
+        return clip_gpu                      # older pixeltable, or a moved symbol -- degrade
+    try:
+        return _builtin_clip.using(model_id=MODEL)
+    except Exception:
+        # Signature differs across versions; a bare reference is still rename-proof, which is
+        # the whole point of preferring it.
+        return _builtin_clip
+
+
 def _get_table():
     """Get-or-create the sidecar table. On an EXISTING table return it as-is and NEVER
     re-touch the index: re-adding an embedding index on every open — and, worse, an
@@ -87,7 +126,8 @@ def _get_table():
                         primary_key=["media_id"],
                         if_exists="ignore",
                     )
-                    t.add_embedding_index("img", idx_name=_IDX, embedding=clip_gpu,
+                    t.add_embedding_index("img", idx_name=_IDX,
+                                          embedding=_embedding_fn(),
                                           if_exists="ignore")
                 _table["t"] = t
     return _table["t"]
