@@ -17,6 +17,32 @@ git tags. Full prose notes for tagged versions live on
 
 ### Changed
 
+- **Upscale moved to where you actually look at a picture.** PixAI invokes Upscale on an
+  image that already exists, not on one you are about to make — so the Generate drawer's
+  three-way Off/Upscale/Hires segment is gone. What stays there is PixAI's **Enhance
+  Details** booster (their Hires family), sitting with Face Fix and Quality Tag where it
+  belongs. The old placement was wrong twice over: it is not where PixAI offers it, and a
+  drawer has no source picture, so the ratio cap and the predicted output size were computed
+  from the size the generation was *about to be* rather than from anything real.
+
+  Both real upscale methods now live in a new **Upscale panel** on the image view — a full
+  panel on the detail page, and a flyout off one icon in the lightbox, which stays open
+  behind it because judging a ratio means seeing the picture. The panel offers **Upscale**
+  (ESRGAN: the 5-option upscaler picker, cheaper, bigger ratios) and **Hires** (re-diffuses
+  at the larger size: denoising strength and steps, roughly 3× the cost) with the control
+  asymmetry PixAI's own dialog has, and the **ratio cap is derived from that picture's real
+  dimensions** against a per-mode pixel ceiling served from core — so it says "max 2.7× for
+  this picture", not a constant. It submits through the existing `/api/price` and
+  `/api/generate` as an ordinary i2i generation; there is deliberately no `/api/upscale`,
+  because a second submit path is a second place for the read-only guard, the free-card
+  check and the job-tracker registration to be forgotten.
+
+  An upscale needs a model, and the catalog does not always know which one made a picture —
+  never, for anything imported from your own computer. The panel prefills it when the
+  catalog knows, says which case it is when it does not, and offers the **same model picker
+  the Generate drawer uses** rather than a second model-choosing UI. It never guesses:
+  guessing a model on an upscale silently restyles the picture.
+
 - **Full metadata is now captured by default on every pull, and the catalog can finally
   tell you how much of it is missing.** Prompt, seed, steps, sampler, CFG and model were
   the one thing you only got by asking for them (`--full-meta`), so a plain run or

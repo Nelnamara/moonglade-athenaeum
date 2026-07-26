@@ -5222,6 +5222,8 @@ document.addEventListener('DOMContentLoaded', function() {
       <button class="btn" onclick="lbEdit()" title="Open in the Edit tab">✎ Edit</button>
       <button class="btn" onclick="lbVideo()" title="Send to the Video tab as a reference">▶ To Video</button>
       <button class="btn" onclick="lbSimilar()" title="Find visually similar images">✧ Similar</button>
+      <button class="btn" id="lb-upscale" onclick="lbUpscale()"
+              title="Upscale this image (PixAI Upscale or Hires)">⇱ Upscale</button>
       <a id="lb-details" class="btn" href="#">Details</a>
       <button class="btn" id="lb-play" onclick="toggleSlideshow()">▶ Slideshow</button>
       <button class="btn" onclick="closeLightbox()">✕ Close</button>
@@ -5232,6 +5234,7 @@ document.addEventListener('DOMContentLoaded', function() {
   <video id="lb-video" controls loop playsinline style="display:none"></video>
   <button class="lb-nav lb-next" onclick="lbStep(1)" aria-label="Next">&#8250;</button>
 </div>
+<mg-upscale-panel id="up-flyout"></mg-upscale-panel>
 __UPSCALE_CONST__
 
 {% if not rows %}
@@ -5867,6 +5870,7 @@ function lbNavUrl(href, where) {
 }
 function lbStep(d) {
   if (!lbCards.length) return;
+  lbUpscaleClose();          // ditto: never leave it pointed at the picture you moved off
   var ni = lbIdx + d;
   if (ni >= lbCards.length) {           // past the last card -> next page (open at its first)
     var nx = document.getElementById('pg-next');
@@ -5880,6 +5884,7 @@ function lbStep(d) {
   lbIdx = ni; lbShow();
 }
 function closeLightbox() {
+  lbUpscaleClose();          // the flyout is bound to this picture; it must not outlive it
   document.getElementById('lightbox').classList.remove('open');
   var vid = document.getElementById('lb-video');
   if (vid) { vid.pause(); vid.removeAttribute('src'); vid.load(); }
@@ -6781,6 +6786,7 @@ document.addEventListener('DOMContentLoaded', function(){
      unconditionally rather than lazily: ~26KB of pure data + pure functions, with no network
      access of its own, and the pane it drives has to work with the connection down. -->
 <script src="/static/mg-art-filters.js"></script>
+<script src="/static/mg-upscale-panel.js"></script>
 <script src="/static/mg-notify.js"></script>
 <script>
 var Contests = (function(){
@@ -8309,6 +8315,20 @@ var Tags = (function(){
 function lbMid(){ var m=(document.getElementById('lb-details').href||'').match(/\\/image\\/([^/?]+)/); return m?decodeURIComponent(m[1]):''; }
 function lbEdit(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Gen.openEdit(mid); }
 function lbVideo(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Gen.addVideoRefs([{mid:mid, thumb:'/thumbs/'+mid+'.jpg'}]); }
+// Unlike Edit/To Video/Similar, this does NOT close the lightbox: judging a ratio means
+// seeing the picture, which is the whole reason it is a flyout over the overlay rather than
+// somewhere you navigate to. That is also why the element's z-index has to clear .lb's 300.
+function lbUpscale(){
+  var mid=lbMid(), p=document.getElementById('up-flyout');
+  if(mid && p) p.open(mid);
+}
+// It is bound to ONE picture, so it must never outlive the picture it was opened for --
+// stepping to the next image or closing the overlay closes it too. Retargeting it silently
+// would leave a half-configured panel pointed at something else.
+function lbUpscaleClose(){
+  var p=document.getElementById('up-flyout');
+  if(p && p.close) p.close();
+}
 function lbSimilar(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Similar.open(mid); }
 var Ctx = (function(){
   var mid='', isVideo=false;
@@ -8592,6 +8612,8 @@ __UPSCALE_CONST__
       title="Ask PixAI to read this image back into a prompt (free)">&#9998; Suggest prompt</button>
     <a class="btn btn-primary" href="/?edit={{ row.media_id }}"
       title="Open this image in the Edit tab">&#10022; Edit this</a>
+    <button class="btn" id="upscale-btn" onclick="toggleUpscale()"
+      title="Upscale this image with PixAI Upscale (ESRGAN) or Hires">&#8689; Upscale</button>
     {% endif %}
     {% if row.is_video != '1' %}
     <button class="btn"
@@ -8614,6 +8636,7 @@ __UPSCALE_CONST__
       Delete
     </button>
   </div>
+  <mg-upscale-panel id="up-panel" inline></mg-upscale-panel>
   <div id="prompt-editor" style="display:none;margin-top:12px;">
     <textarea id="prompt-text" style="width:100%;min-height:120px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);border-radius:6px;padding:8px;font-size:13px;font-family:var(--font-mono,monospace);">{{ row.prompt_full or row.prompt_preview or '' }}</textarea>
     <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
@@ -8623,7 +8646,22 @@ __UPSCALE_CONST__
     </div>
   </div>
 </div>
+<!-- picker-core + mg-model-picker are what the panel's model fallback mounts: an image whose
+     model the catalog does not know (never swept, or imported from this computer) still needs
+     one to upscale under, and it uses the SAME picker the Generate drawer opens rather than a
+     second model-choosing UI. -->
+<script src="/static/picker-core.js"></script>
+<script src="/static/mg-model-picker.js"></script>
+<script src="/static/mg-cost-badge.js"></script>
+<script src="/static/mg-upscale-panel.js"></script>
 <script>
+function toggleUpscale(){
+  var p=document.getElementById('up-panel'), b=document.getElementById('upscale-btn');
+  if(!p) return;
+  var on=!p.hasAttribute('open');
+  if(on) p.open('{{ row.media_id }}'); else p.close();
+  if(b) b.classList.toggle('btn-primary', on);
+}
 // Published-artwork engagement: live views (per artwork_id) + the captured granular NSFW
 // breakdown (nsfw_scores JSON). Both only present for synced published works.
 document.addEventListener('DOMContentLoaded', function(){
@@ -11975,6 +12013,46 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify(core.resolve_version_meta(session, mid))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "version_id": ""}), 200
+
+    @app.route("/api/image-meta/<media_id>")
+    def api_image_meta(media_id):
+        """The one catalog row the Upscale panel needs, by media_id. Read-only, no network.
+
+        Scoped deliberately narrow: the fields an i2i upscale submits (real pixel size, the
+        model that made it, and the prompt it is re-rendered under) plus what the panel shows
+        about them. NOT a general row dump -- `filename` in particular is a HOST PATH
+        fragment and stays out, matching the same withholding /panel does for non-local
+        callers.
+
+        Not localhost-gated, for the reason /api/gallery-images spells out: it reads only the
+        local catalog and returns what the gallery already serves openly, so a gate would add
+        no protection while breaking the panel for the owner browsing over his own LAN.
+        Spending stays gated on /api/generate, which is where the upscale is actually
+        submitted.
+        """
+        row = get_row(db_path, media_id)
+        if not row:
+            return jsonify({"error": "no such image"}), 404
+        # A model id is what makes an upscale submittable without asking. Locally imported
+        # files have no PixAI task behind them and so can never carry one -- the panel says
+        # so and offers its picker, rather than presenting a blank as though it were a
+        # catalog gap the owner could go and fill.
+        source = str(row.get("source") or "")
+        return jsonify({
+            "media_id": str(row.get("media_id") or ""),
+            "task_id": str(row.get("task_id") or ""),
+            "width": str(row.get("width") or ""),
+            "height": str(row.get("height") or ""),
+            "model_id": str(row.get("model_id") or ""),
+            "model_name": str(row.get("model_name") or ""),
+            "prompt": str(row.get("prompt_full") or row.get("prompt_preview") or ""),
+            "negative": str(row.get("negative_prompt") or ""),
+            "steps": str(row.get("steps") or ""),
+            "cfg": str(row.get("cfg_scale") or ""),
+            "is_video": str(row.get("is_video") or "") == "1",
+            "source": source,
+            "local_import": source == "local",
+        })
 
     @app.route("/api/gallery-images")
     def api_gallery_images():

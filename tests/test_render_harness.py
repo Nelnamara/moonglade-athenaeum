@@ -203,6 +203,12 @@ def render_server(tmp_path_factory):
             "media_id": str(100 + i), "filename": "harness_%d.png" % i,
             "prompt_preview": "harness row %d" % i,
             "created_at": "2025-01-%02dT00:00:00" % (i + 1)}
+        # Row 0 alone carries what a swept catalog holds: the REAL size of the bitmap written
+        # below, plus a model. The upscale panel derives its ratio cap from those dimensions,
+        # so a fake size would make every assertion about the cap meaningless, and without a
+        # model the panel correctly refuses to submit and there would be nothing to measure.
+        | ({"width": "900", "height": "600", "model_id": "4242",
+            "model_name": "Harness Model", "prompt_full": "harness prompt"} if i == 0 else {})
         for i in range(6)
     ])
     # A REAL bitmap on disk for the first row, so /full/100 serves a decodable image through
@@ -632,6 +638,103 @@ def test_art_filters_flyout_is_fully_inside_the_viewport_at_mobile_portrait(logg
         "the viewport rather than being clamped into it")
 
 
+_UPSCALE_JS = """() => {
+  const p = document.getElementById('up-panel');
+  // Addressed by their own data hooks rather than by "is there a visible <select>": the
+  // panel has a second one for the model fallback, and probing by tag matched THAT and
+  // reported the upscaler as visible under Hires, where it is not.
+  const vis = sel => { const e = p.querySelector(sel);
+                       return !!e && getComputedStyle(e).display !== 'none'; };
+  const ratio = p.querySelector('input[type=range]');
+  return {
+    open: p.hasAttribute('open'),
+    ratioMax: parseFloat(ratio.max),
+    ratioDisabled: ratio.disabled,
+    // The upscaler dropdown exists only for enlarge; the denoising pair only for Hires.
+    upscalerShown: vis('[data-mgu="upscaler"]'),
+    denoiseShown: vis('[data-mgu="denoise"]'),
+    pickerOffered: vis('.mgu-pick') || [...p.querySelectorAll('button')]
+                     .some(b => /choose a model/i.test(b.textContent)
+                                && getComputedStyle(b).display !== 'none'),
+    text: p.innerText,
+    goDisabled: p.querySelector('.mgu-go').disabled,
+    // 'idle' means the badge was never fed at all. It is the state an invented API name
+    // leaves it in -- a custom element swallows an unknown method call, so the panel looks
+    // finished while its price line silently never updates.
+    costState: (p.querySelector('mg-cost-badge') || {}).state || 'missing',
+  };
+}"""
+
+
+def test_the_upscale_panel_derives_its_ratio_cap_from_the_real_picture(logged_in_page):
+    """The whole reason Upscale moved out of the Generate drawer: the cap is DYNAMIC, derived
+    from the source's own dimensions against a per-mode pixel ceiling, and a drawer has no
+    source. Here there is one -- a real 900x600 bitmap with a catalog row to match -- so the
+    number the slider offers can be checked against the Python the server clamps to.
+
+    Also asserts the control asymmetry, which is PixAI's and not a layout shortcut: the
+    upscaler dropdown exists only for `enlarge`, the denoising pair only for Hires.
+    """
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/image/100")
+    page.click("#upscale-btn")
+    page.wait_for_selector("mg-upscale-panel[open]", state="attached")
+    page.wait_for_function("() => { const r = document.querySelector('mg-upscale-panel "
+                           "input[type=range]'); return r && parseFloat(r.max) > 1; }")
+    _settle(page)
+
+    enlarge = page.evaluate(_UPSCALE_JS)
+    assert enlarge["open"]
+    assert enlarge["ratioMax"] == core.max_upscale_ratio(900, 600, "enlarge"), (
+        "the slider offers {}x but the server clamps 900x600 enlarge to {}x -- a client that "
+        "offers more has the ratio silently pulled back with nothing on screen to say so"
+        .format(enlarge["ratioMax"], core.max_upscale_ratio(900, 600, "enlarge")))
+    assert enlarge["upscalerShown"], "enlarge must offer the 5-option upscaler picker"
+    assert not enlarge["denoiseShown"], "enlarge has no denoising controls -- that is Hires"
+    assert "900\u00d7600" in enlarge["text"], "the panel must name the real source size"
+    assert not enlarge["goDisabled"], "the row has a model, so the submit must be available"
+    # This harness has no API key, so the price check fails -- which is exactly why it is
+    # worth asserting: the badge must have been FED (checking, then an error), not left
+    # untouched on its idle hint.
+    assert enlarge["costState"] != "idle", (
+        "the cost badge was never fed -- the panel is calling a method it does not have")
+
+    # Switch to Hires: a different ceiling, a different cap, and the opposite control set.
+    page.click("mg-upscale-panel .mgu-seg button:nth-child(2)")
+    _settle(page)
+    hires = page.evaluate(_UPSCALE_JS)
+    assert hires["ratioMax"] == core.max_upscale_ratio(900, 600, "upscale")
+    assert hires["ratioMax"] != enlarge["ratioMax"], (
+        "both methods offered the same cap -- the per-mode ceiling is not being applied")
+    assert hires["denoiseShown"], "Hires must offer denoising strength and steps"
+    assert not hires["upscalerShown"], "Hires has no upscaler dropdown"
+
+
+def test_the_upscale_panel_offers_a_picker_when_the_model_is_unknown(logged_in_page):
+    """An upscale is an i2i generation and every generation needs a model. Row 101 has none --
+    the state a catalog that has never been swept is in, and the permanent state of anything
+    imported from this computer, which has no PixAI task behind it at all.
+
+    The panel must not guess one (guessing a model on an upscale silently restyles the
+    picture) and must not simply refuse either (the upscale needs *a* model, not necessarily
+    the original). So: submit stays disabled, the reason is named along with the command that
+    fixes it, and the SAME picker the Generate drawer uses is offered.
+    """
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/image/101")
+    page.click("#upscale-btn")
+    page.wait_for_selector("mg-upscale-panel[open]", state="attached")
+    _settle(page)
+    m = page.evaluate(_UPSCALE_JS)
+    assert m["goDisabled"], "no model, but the panel would still submit"
+    assert "backfill-full-meta" in m["text"], (
+        "the panel must name the command that fixes it, not just refuse")
+    assert m["pickerOffered"], "the owner must be able to pick a model rather than be blocked"
+    # It is the shared component, not a bespoke model list built for this panel.
+    assert page.evaluate("() => !!window.customElements.get('mg-model-picker')"), (
+        "the detail page must load the shared picker the fallback mounts")
+
+
 # ---------------------------------------------------------------------------
 # 4. Deep Focus's veil vs the corner FABs  (stacking OUTCOME, not a z-index number)
 # ---------------------------------------------------------------------------
@@ -965,4 +1068,5 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
     assert seen["gallery"] == seen["loom"], (
         "the shared Activity tray renders the queued state DIFFERENTLY on the two hosts:\n"
         "  gallery: {!r}\n  loom:    {!r}".format(seen["gallery"], seen["loom"]))
+
 

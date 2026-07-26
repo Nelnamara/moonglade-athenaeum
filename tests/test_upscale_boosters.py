@@ -5,6 +5,7 @@ Pure builders + one mocked /v2/task-price and the web drawer's payload mapping; 
 network, no spend."""
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 from types import SimpleNamespace
@@ -322,6 +323,120 @@ def test_the_other_base_html_pages_do_not_leak_the_marker(tmp_path):
         if r.status_code != 200:
             continue
         assert "__UPSCALE_CONST__" not in r.get_data(as_text=True), path
+
+
+def test_image_meta_route_serves_what_an_upscale_needs_and_no_host_path(tmp_path):
+    """The lightbox is driven from card elements that carry a thumbnail and an index, so the
+    panel asks for the one row it needs rather than every card's markup growing fields only
+    one feature reads.
+
+    Scoped narrow on purpose: `filename` is a HOST PATH fragment and stays out, matching the
+    withholding /panel already does for non-local callers.
+    """
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="1", filename="C:/secret/place/a_1.png", created_at="2025-01-01T00:00:00",
+             width="1400", height="784", model_id="4242", model_name="WAI v17",
+             prompt_full="night elf druid"),
+    ])
+    cli = login_client(tmp_path)
+    d = cli.get("/api/image-meta/1").get_json()
+    assert d["width"] == "1400" and d["height"] == "784"
+    assert d["model_id"] == "4242" and d["model_name"] == "WAI v17"
+    assert d["prompt"] == "night elf druid"
+    assert d["local_import"] is False
+    assert "filename" not in d, "the host path must not ride along"
+    assert cli.get("/api/image-meta/nope").status_code == 404
+
+
+def test_image_meta_flags_a_locally_imported_file(tmp_path):
+    """A locally imported file has no PixAI task behind it, so it can NEVER carry a model.
+    That is a different answer from "your catalog has not been swept yet" -- one is fixable
+    with --backfill-full-meta and the other never will be -- and the panel says so only
+    because the route distinguishes them."""
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="2", filename="b_2.png", created_at="2025-01-01T00:00:00",
+             width="512", height="512", source="local"),
+    ])
+    d = login_client(tmp_path).get("/api/image-meta/2").get_json()
+    assert d["local_import"] is True and d["model_id"] == ""
+
+
+def test_upscale_lives_on_the_image_view_on_both_surfaces(tmp_path):
+    """PixAI invokes Upscale on a picture that already exists, so it belongs where you look
+    at one: the detail page as a full panel, and the lightbox as a flyout off one icon.
+
+    The flyout must be a SIBLING of #lightbox, not a child -- `.lb` is a flex overlay that
+    centres its children, so a panel inside it would be laid out as another centred item
+    instead of floating over the picture.
+    """
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = login_client(tmp_path)
+
+    index = cli.get("/").get_data(as_text=True)
+    assert 'id="lb-upscale"' in index and "lbUpscale()" in index
+    assert '<mg-upscale-panel id="up-flyout">' in index
+    assert "/static/mg-upscale-panel.js" in index
+    lb_at = index.index('<div id="lightbox"')
+    lb_end = index.index("</div>", index.index('id="lb-next"') if 'id="lb-next"' in index
+                         else index.index("lbStep(1)"))
+    assert index.index('<mg-upscale-panel id="up-flyout">') > lb_end, (
+        "the flyout is inside #lightbox, whose flex centring would lay it out as another "
+        "centred item rather than floating over the picture")
+
+    detail = cli.get("/image/1").get_data(as_text=True)
+    assert 'id="upscale-btn"' in detail and "toggleUpscale()" in detail
+    assert '<mg-upscale-panel id="up-panel" inline>' in detail
+    # The panel's price line IS <mg-cost-badge>, and the detail page loaded no components
+    # before this, so the badge would silently render as an unknown element without it.
+    assert "/static/mg-cost-badge.js" in detail
+    assert "/static/mg-upscale-panel.js" in detail
+
+
+def test_the_upscale_flyout_never_outlives_the_picture_it_was_opened_for(tmp_path):
+    """It is bound to ONE media_id. Stepping to the next image or closing the overlay must
+    close it, or a half-configured panel is left pointed at a picture you have moved off --
+    the same class of bug as the filters panel's toggle-used-as-close."""
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = login_client(tmp_path).get("/").get_data(as_text=True)
+    for fn in ("function closeLightbox()", "function lbStep(d)"):
+        body = html[html.index(fn):]
+        body = body[:body.index("\nfunction ", 5)]
+        assert "lbUpscaleClose()" in body, fn + " leaves the upscale flyout open"
+
+
+def test_the_upscale_panel_reuses_the_generate_routes(tmp_path):
+    """An image-view upscale is an ordinary i2i generation -- mediaId + strength on a normal
+    submit -- so it posts the SAME /api/price and /api/generate the drawer uses.
+
+    There is deliberately no /api/upscale: a second submit path is a second place for the
+    read-only guard, the free-card check and the job-tracker registration to be forgotten.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    js = (root / "static" / "mg-upscale-panel.js").read_text(encoding="utf-8")
+    assert "'/api/price'" in js and "'/api/generate'" in js
+    # The QUOTED form, i.e. an actual fetch target -- the file's own header names
+    # /api/upscale in prose while explaining why it does not exist.
+    assert "'/api/upscale'" not in js and '"/api/upscale"' not in js
+    assert "ref_media_id" in js and "ref_strength" in js, "an image-view upscale is i2i"
+    # The ceilings come from the server (core.UPSCALE_PIXEL_CEILING via window.MG_UPSCALE),
+    # not a second hand port. A drifted copy would offer a ratio the server then silently
+    # clamps, with nothing on screen to say the number changed.
+    assert "window.MG_UPSCALE" in js
+    assert "2048" not in js, "the pixel ceilings must come from the server, not be retyped"
+    for name in core.ENLARGE_MODELS:
+        assert name not in js, name + " is retyped in the component instead of served"
+    # <mg-cost-badge>'s real API is setChecking()/setPrice(). An invented one (.loading()/
+    # .show()) is silently a no-op on a custom element -- the panel renders, the price line
+    # simply never updates, and nothing anywhere reports a problem.
+    badge = (root / "static" / "mg-cost-badge.js").read_text(encoding="utf-8")
+    for meth in ("setChecking", "setPrice"):
+        assert meth + "(" in js, "the panel must call the badge's " + meth
+        assert meth + "(" in badge, meth + " is not actually on the badge"
+    # Scoped to the badge handle -- Toast.show() is a real, different API on this page.
+    assert "_cost.show(" not in js and "_cost.loading(" not in js, (
+        "those are not badge methods; calling them fails silently")
 
 
 def test_drawer_ratio_cap_agrees_with_the_python_one(tmp_path):

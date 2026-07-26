@@ -202,6 +202,40 @@ The four are clamped to what the chosen model really supports before submit — 
 Reference Pro only offers 2K/4K and has no quality knob, so out-of-range values are
 corrected (and shown in the preview) rather than rejected.
 
+## Upscale — on the picture, not in the drawer
+
+PixAI upscales an image you already have, so that is where Moonglade puts it. Open any image
+and use **↱ Upscale** — from the **Details** page, or from the lightbox, where it opens as a
+flyout so you can still see the picture while you choose.
+
+Two methods, and they are genuinely different jobs:
+
+| | **Upscale** (ESRGAN) | **Hires** |
+|---|---|---|
+| what it does | runs an upscaler network over the finished picture | re-renders it at the larger size |
+| result | the same picture, larger | more detail, not just more pixels |
+| controls | a choice of 5 upscaler networks | denoising strength and steps |
+| ratio | bigger ratios allowed | smaller ratios allowed |
+| cost | cheaper | roughly 3× |
+
+**The maximum ratio depends on the picture.** It is worked out from that image's real width
+and height against a pixel ceiling, so the panel tells you the real answer for the image in
+front of you — "max 2.7× for this picture" — and shows the exact output size as you drag.
+
+**Upscaling needs a model.** Normally the panel fills it in from the image itself. Two cases
+where it cannot: your catalog has not captured it yet (run `--backfill-full-meta`, and see
+[Backing up](Backing-Up)), or you imported the file from your own computer, in which case
+PixAI has no record of it and never will. Either way you can pick a model yourself — it is
+the same picker the Generate drawer uses. The panel never picks one for you, because
+upscaling under a different model changes how the picture looks.
+
+The cost is shown before you commit, and a matching free card is applied automatically, the
+same as any other generation.
+
+> **In the Generate drawer** you will find **Enhance Details** among the boosters instead.
+> That is PixAI's Hires applied to the image you are about to make — the same family of
+> settings, but part of the generation rather than something you do to a finished picture.
+
 ## Art filters — free, in your browser
 
 **Art filters** are not generations. Each one is two or three gradient overlays with a blend mode
