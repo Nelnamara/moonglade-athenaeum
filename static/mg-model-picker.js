@@ -150,7 +150,8 @@
     'mg-model-picker .mg-q:focus{outline:0;border-color:var(--accent,#b692e6);}',
     /* O13 market UI (sort + category), opt-in via the `market` attribute -- same shape as
        the gallery's own #mkt-sort/#mkt-cats. flex:none -- natural size, never stretched. */
-    'mg-model-picker .mg-mktsort{display:flex;gap:6px;margin-top:8px;flex:none;}',
+    'mg-model-picker .mg-mktsort{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;flex:none;}',
+    'mg-model-picker .mg-mktsort button{min-width:72px;}',
     'mg-model-picker .mg-mktsort button{flex:1;padding:5px 0;font-size:11px;border-radius:6px;background:var(--surface0,#211f3a);',
     ' color:var(--subtext,#9a93ab);border:1px solid var(--surface1,#3a3460);cursor:pointer;}',
     'mg-model-picker .mg-mktsort button.on{background:var(--surface1,#3a3460);color:var(--text,#d6d2e2);',
@@ -160,6 +161,23 @@
     ' color:var(--subtext,#9a93ab);border:1px solid var(--surface1,#3a3460);cursor:pointer;}',
     'mg-model-picker .mg-mktcats button.on{background:var(--accent,#b692e6);color:var(--base,#0c0a1c);',
     ' border-color:var(--accent,#b692e6);font-weight:600;}',
+    /* picker-parity round 3: the SOURCE row (Market / Bookmarked / Mine). Same button-row
+       mechanism as .mg-mktsort so no new UI language is introduced, but deliberately louder --
+       taller, heavier, and it takes the ACCENT fill when active where sort settles for the muted
+       surface fill. Owner asked for these to be "more apparent"; that is the whole difference. */
+    'mg-model-picker .mg-mktsrc{display:flex;gap:6px;margin-top:8px;flex:none;}',
+    'mg-model-picker .mg-mktsrc button{flex:1;padding:7px 0;font-size:12px;font-weight:600;',
+    ' letter-spacing:.02em;border-radius:7px;background:var(--surface0,#211f3a);',
+    ' color:var(--subtext,#9a93ab);border:1px solid var(--surface1,#3a3460);cursor:pointer;}',
+    'mg-model-picker .mg-mktsrc button.on{background:var(--accent,#b692e6);color:var(--base,#0c0a1c);',
+    ' border-color:var(--accent,#b692e6);}',
+    /* Posted-at + License. Dropdowns rather than more chips: neither is a browsing mode you
+       flip between constantly, and three more chip rows would bury the grid. */
+    'mg-model-picker .mg-mktsel{display:flex;gap:6px;margin-top:6px;flex:none;}',
+    'mg-model-picker .mg-mktsel select{flex:1;min-width:0;background:var(--surface0,#211f3a);',
+    ' border:1px solid var(--surface1,#3a3460);border-radius:6px;color:var(--subtext,#9a93ab);',
+    ' font:10.5px/1.3 system-ui;padding:4px 6px;cursor:pointer;}',
+    'mg-model-picker .mg-mktsel select.on{color:var(--text,#d6d2e2);border-color:var(--accent,#b692e6);}',
     /* picker-parity-round2: was a fixed max-height:320px (the O12/O13-round bug -- a tall
        host left dead space below this fixed cap instead of the grid using it). Now a flex
        item that fills whatever room the (flex-column) host element above has, with its own
@@ -245,8 +263,19 @@
       this._multi = this.hasAttribute('multi');
       this._selected = [];
       this._market = this.hasAttribute('market');
-      this._sort = 'popular';
+      this._sort = 'trending';
       this._category = '';
+      // picker-parity round 3. `_src` is WHICH LIST is being browsed; `_source` is a market
+      // FILTER. PixAI's own UI overloads the word "source" for both, which is why these are
+      // kept distinct here and in the query string.
+      this._src = 'market';
+      this._source = '';
+      this._posted = '';
+      this._license = '';
+      // Base-model architecture filter. An ARRAY because their Model Type control is
+      // multi-select -- successive clicks accumulate, measured off live requests. Empty means
+      // "All", which the server turns into ANY_MODEL.
+      this._modelTypes = [];
       // picker-parity-round2: the currently-selected base model's resolved model_type, set
       // (and kept updated) by the host -- see the file header comment. Only meaningful for
       // kind="lora"; a base-kind mount reads it but never sends it (nothing to compat-sort
@@ -295,6 +324,49 @@
         });
       });
       if (this._market) {
+        this._syncFilterVisibility();
+        this.querySelectorAll('.mg-mktsrc button').forEach(function (b) {
+          b.addEventListener('click', function () {
+            var v = b.getAttribute('data-src');
+            if (v === self._src) return;
+            self._src = v;
+            self.querySelectorAll('.mg-mktsrc button').forEach(function (x) {
+              x.classList.toggle('on', x === b);
+            });
+            self._syncFilterVisibility();
+            self._search();
+          });
+        });
+        // Model Type chips (base only). Multi-select: All clears, anything else toggles.
+        this.querySelectorAll('.mg-mkttypes button').forEach(function (b) {
+          b.addEventListener('click', function () {
+            var v = b.getAttribute('data-mt');
+            if (!v) {
+              if (!self._modelTypes.length) return;
+              self._modelTypes = [];
+            } else {
+              var at = self._modelTypes.indexOf(v);
+              if (at >= 0) self._modelTypes.splice(at, 1);
+              else self._modelTypes.push(v);
+            }
+            self.querySelectorAll('.mg-mkttypes button').forEach(function (x) {
+              var xv = x.getAttribute('data-mt');
+              x.classList.toggle('on', xv ? self._modelTypes.indexOf(xv) >= 0
+                                          : !self._modelTypes.length);
+            });
+            self._search();
+          });
+        });
+        this.querySelectorAll('.mg-mktsel select').forEach(function (sel) {
+          sel.addEventListener('change', function () {
+            if (sel.classList.contains('mg-posted')) self._posted = sel.value;
+            else if (sel.classList.contains('mg-source')) self._source = sel.value;
+            else if (sel.classList.contains('mg-license')) self._license = sel.value;
+            // A set filter is worth showing at a glance without opening the dropdown.
+            sel.classList.toggle('on', !!sel.value);
+            self._search();
+          });
+        });
         this.querySelectorAll('.mg-mktsort button').forEach(function (b) {
           b.addEventListener('click', function () {
             var s = b.getAttribute('data-sort');
@@ -350,17 +422,70 @@
     // O13: Popular/Newest sort + the gallery's 6 LoRA category chips, same list as
     // moonglade_gallery.py's #mkt-cats (All is the '' category, not a real server value).
     _marketSkeleton() {
+      // "Mine" is LoRA-only: you author LoRAs, not base models, and PixAI's own base-model
+      // picker offers no equivalent tab either.
+      var mine = this._kind === 'lora'
+        ? '<button type="button" data-src="mine">Mine</button>' : '';
       return (
-        '<div class="mg-mktsort"><button type="button" class="on" data-sort="popular">Popular</button>' +
-        '<button type="button" data-sort="newest">Newest</button></div>' +
-        '<div class="mg-mktcats"><button type="button" class="on" data-cat="">All</button>' +
-        '<button type="button" data-cat="character">Character</button>' +
-        '<button type="button" data-cat="style">Style</button>' +
-        '<button type="button" data-cat="pose">Pose</button>' +
-        '<button type="button" data-cat="clothing">Clothing</button>' +
-        '<button type="button" data-cat="background">Background</button>' +
-        '<button type="button" data-cat="detail">Detail</button></div>'
+        '<div class="mg-mktsrc"><button type="button" class="on" data-src="market">Market</button>' +
+        '<button type="button" data-src="bookmark">Bookmarked</button>' + mine + '</div>' +
+        '<div class="mg-mktfilters">' +
+        // PixAI's own four, not our old Popular/Newest pair. Trending is their default.
+        '<div class="mg-mktsort"><button type="button" class="on" data-sort="trending">Trending</button>' +
+        '<button type="button" data-sort="liked">Most Liked</button>' +
+        '<button type="button" data-sort="used">Most Used</button>' +
+        '<button type="button" data-sort="newest">Latest</button></div>' +
+        // LoRAs filter by CATEGORY; base models filter by ARCHITECTURE. Two different controls,
+        // matching PixAI, rather than one shared row that half-applies.
+        (this._kind === 'lora'
+          // Nine categories, matching PixAI exactly. Animal and Realistic were missing; their
+          // own training page leaked the canonical list by rendering raw i18n keys.
+          ? '<div class="mg-mktcats"><button type="button" class="on" data-cat="">All</button>' +
+            '<button type="button" data-cat="character">Character</button>' +
+            '<button type="button" data-cat="animal">Animal</button>' +
+            '<button type="button" data-cat="style">Style</button>' +
+            '<button type="button" data-cat="realistic">Realistic</button>' +
+            '<button type="button" data-cat="pose">Pose</button>' +
+            '<button type="button" data-cat="clothing">Clothing</button>' +
+            '<button type="button" data-cat="background">Background</button>' +
+            '<button type="button" data-cat="detail">Detail</button>' +
+            '<button type="button" data-cat="other">Other</button></div>'
+          // Model Type. Every token measured off a live request -- a wrong enum here returns
+          // the wrong rows rather than erroring, so none of these is a guess. MULTI-SELECT:
+          // "All" clears the set, any other chip toggles.
+          : '<div class="mg-mktcats mg-mkttypes">' +
+            '<button type="button" class="on" data-mt="">All</button>' +
+            '<button type="button" data-mt="MMDIT26B_MODEL">DiT.3</button>' +
+            '<button type="button" data-mt="MMDIT26A_MODEL">DiT.2</button>' +
+            '<button type="button" data-mt="DIT7_MODEL">DiT.1</button>' +
+            '<button type="button" data-mt="USER_DIT26A_MODEL">Community DiT</button>' +
+            '<button type="button" data-mt="SDXL_MODEL">SDXL</button>' +
+            '<button type="button" data-mt="SD_V1_MODEL">SD 1.5</button></div>') +
+        '<div class="mg-mktsel">' +
+          '<select class="mg-posted" aria-label="Posted at">' +
+            '<option value="">Any time</option>' +
+            '<option value="yesterday">Yesterday</option>' +
+            '<option value="7d">Past 7 days</option>' +
+            '<option value="30d">Past 30 days</option></select>' +
+          (this._kind === 'lora'
+            ? '<select class="mg-source" aria-label="Source">' +
+              '<option value="">Any source</option>' +
+              '<option value="pixai">PixAI-trained</option>' +
+              '<option value="external">External</option></select>' : '') +
+          '<select class="mg-license" aria-label="License">' +
+            '<option value="">Any licence</option>' +
+            '<option value="COMMERCIAL">Commercial use OK</option></select>' +
+        '</div></div>'
       );
+    }
+
+    // Only show filters the CURRENT source can actually honour. The bookmark list accepts a
+    // keyword and the architecture filter and nothing else, so leaving sort/category/dropdowns
+    // on screen there would be controls that silently do nothing -- which is exactly how the
+    // Enhance cards wasted everyone's time. PixAI hides its own Filters button on that tab.
+    _syncFilterVisibility() {
+      var box = this.querySelector('.mg-mktfilters');
+      if (box) box.style.display = this._src === 'bookmark' ? 'none' : '';
     }
 
     static get observedAttributes() { return ['kind', 'base-type']; }
@@ -404,7 +529,20 @@
       var u = '/api/model-search?kind=' + encodeURIComponent(this._kind) +
               '&size=24&q=' + encodeURIComponent(this._q || '');
       if (this._market) {
-        u += '&sort=' + encodeURIComponent(this._sort) + '&category=' + encodeURIComponent(this._category);
+        u += '&src=' + encodeURIComponent(this._src);
+        // Only send what this source honours, so a stale dropdown value cannot quietly
+        // change a bookmark listing.
+        if (this._src !== 'bookmark') {
+          u += '&sort=' + encodeURIComponent(this._sort) +
+               '&category=' + encodeURIComponent(this._category) +
+               '&posted=' + encodeURIComponent(this._posted) +
+               '&source=' + encodeURIComponent(this._source) +
+               '&license=' + encodeURIComponent(this._license);
+          // Repeated param, because the filter is multi-select server-side too.
+          this._modelTypes.forEach(function (t) {
+            u += '&model_type=' + encodeURIComponent(t);
+          });
+        }
       }
       // picker-parity-round2: architecture-aware compat sort/badge -- LoRA only (nothing
       // to compat-sort a base-model search against), and only once a base is actually

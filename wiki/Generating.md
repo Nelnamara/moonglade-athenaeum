@@ -54,6 +54,27 @@ itself instead of a friendly message, see
 A LoRA can't be the **base** model. The base picker excludes LoRAs; add them via the
 **LoRAs** row.
 
+### Finding a model or LoRA
+The picker opens on **Market** — everything on PixAI. Two other places to look sit next
+to it:
+
+- **Bookmarked** — whatever you have bookmarked on pixai.art. It reads your live
+  bookmarks, so anything you bookmark on their site shows up here.
+- **Mine** — LoRAs you trained yourself. LoRAs only; you don't author base models.
+
+On Market you can also narrow by **category** (character, animal, style, realistic, pose,
+clothing, background, detail, other), by **when it was posted**, by **source**
+(PixAI-trained or brought in from elsewhere), and to models that **allow commercial use**.
+
+The filter row disappears on **Bookmarked**, and that is deliberate rather than an
+oversight: PixAI's bookmark list only supports a search term, so a category or date
+control there would look like it worked and quietly do nothing. Search still works, and if
+you have a base model selected the list is still limited to LoRAs that fit it.
+
+**If Bookmarked looks emptier than you expect**, that is usually the compatibility filter
+rather than a fault — with a base model selected, only LoRAs matching its architecture are
+shown. Clear the base model to see all of them.
+
 ## On the CLI
 
 ```bash

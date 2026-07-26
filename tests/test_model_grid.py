@@ -321,6 +321,47 @@ def test_model_search_market_gql(monkeypatch):
     assert [m["model_id"] for m in r2["results"]] == ["2"] and r2["results"][0]["should_blur"] is True
 
 
+def test_market_asks_the_server_for_the_right_KIND_of_model(monkeypatch):
+    """The types argument is always sent, so a page arrives full, not thinned afterwards.
+
+    Measured off their own requests: the LoRA tab sends ANY_LORA even with Source set to All, the
+    base tab sends ANY_MODEL, and their MY LORA pairs ANY_LORA with authorId. We previously sent
+    no  and filtered by row type in Python AFTER the fetch -- correct, but it means asking
+    for 24 and handing the grid however many survived. That is almost certainly the owner's
+    2026-07-24 "scrolls a few rows and stops": the cursor fix made next-pages reachable, but
+    nothing had made the pages themselves full.
+    """
+    captured = {}
+    def fake_gql(session, query, vars=None):
+        captured["query"], captured["vars"] = query, vars
+        return {"generationModels": {"pageInfo": {}, "edges": []}}
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+
+    core.model_search_market_gql(object(), usage="LORA")
+    assert captured["vars"]["ty"] == ["ANY_LORA"]
+    core.model_search_market_gql(object(), usage="MODEL")
+    assert captured["vars"]["ty"] == ["ANY_MODEL"]
+
+    # An explicit Source narrows further and REPLACES ANY_LORA (their own mapping).
+    core.model_search_market_gql(object(), usage="LORA", source="pixai")
+    assert captured["vars"]["ty"] == ["ANY_USER_LORA"]
+    core.model_search_market_gql(object(), usage="LORA", source="external")
+    assert captured["vars"]["ty"] == ["ANY_NON_USER_LORA"]
+
+    # Source is a LoRA concept; a base search must ignore it rather than narrow to user LoRAs.
+    core.model_search_market_gql(object(), usage="MODEL", source="pixai")
+    assert captured["vars"]["ty"] == ["ANY_MODEL"]
+
+    # Unrecognised source falls open to the plain kind rather than being interpolated or refused.
+    core.model_search_market_gql(object(), usage="LORA", source="; DROP TABLE")
+    assert captured["vars"]["ty"] == ["ANY_LORA"]
+
+    # BOUND, never interpolated -- no enum token may appear in the document text itself.
+    assert "$ty:[GenerationModelType]" in captured["query"]
+    for tok in ("ANY_LORA", "ANY_MODEL", "ANY_USER_LORA", "DROP TABLE"):
+        assert tok not in captured["query"], tok
+
+
 def test_model_search_market_gql_supports_cursor_pagination(monkeypatch):
     """Owner report 2026-07-24: the picker 'scrolls a few rows and stops -- no continuous
     scroll'. Root cause: `generationModels` already returned pageInfo.hasNextPage (has_more

@@ -2089,7 +2089,13 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
 
 # Model-Market categories the GraphQL `generationModels` connection actually honors (probed
 # 2026-07-04). NOTE 'concept' is NOT a real server value (returns empty) -- excluded.
-MARKET_CATEGORIES = ("character", "style", "pose", "clothing", "background", "detail", "other")
+# PixAI's own nine, in their own order. Confirmed 2026-07-26 from the training page, where
+# their category dropdown is currently rendering RAW i18n keys
+# ("market:lora-categories.animal.label", ...) -- a bug on their side that handed over the
+# canonical list. We were short two: **animal** and **realistic**. `detail` is their
+# "Detail Enhancement".
+MARKET_CATEGORIES = ("character", "animal", "style", "realistic", "pose", "clothing",
+                    "background", "detail", "other")
 
 # GenerationModelType enum members this app is willing to put INTO a query document, for
 # generationModels(loraBaseModelTypes:[...]) -- see model_search_market_gql's lora_base_type
@@ -2105,12 +2111,180 @@ MARKET_CATEGORIES = ("character", "style", "pose", "clothing", "background", "de
 # newly-added architecture must degrade to "no server-side filter" (the per-row
 # annotate_lora_compat badge still tells the truth), never to a rejected query that would
 # break LoRA browsing outright.
-LORA_BASE_MODEL_TYPES = ("SDXL_MODEL", "SD_V1_MODEL", "DIT7B_MODEL", "MMDIT26A_MODEL",
-                         "DIT9_MODEL")
+LORA_BASE_MODEL_TYPES = ("SDXL_MODEL", "SD_V1_MODEL", "SD3_MEDIUM_MODEL",
+                         "DIT7_MODEL", "DIT7A_MODEL", "DIT7B_MODEL", "DIT7C_MODEL",
+                         "DIT7D_MODEL", "DIT9_MODEL",
+                         "MMDIT26A_MODEL", "MMDIT26B_MODEL", "USER_DIT26A_MODEL",
+                         "Z_IMAGE_V1_MODEL")
+
+# Their Model Type filter, as a label -> enum mapping. The first four rows are MEASURED off live
+# requests (drove their base-model picker 2026-07-26 and read what it sent); the last two are
+# inferred from the naming and are marked as such rather than presented as fact.
+#
+# Two behaviours of their filter worth copying, both observed rather than assumed:
+#   * "All" sends types:["ANY_MODEL"] -- it does not omit the argument.
+#   * It is MULTI-SELECT. Choosing DiT.3 then DiT.1 sent types:["MMDIT26B_MODEL","DIT7_MODEL"].
+#     A single-value control here would silently be the wrong shape.
+# PixAI's four market sorts, every value captured off a live request 2026-07-26. `feed` selects
+# the backend ranking and `orderBy` the field within it; Trending needs no orderBy because the
+# trending feed IS the ordering.
+#
+# `markInfo.refCount` is the "uses" figure printed on their cards -- the same field identified
+# earlier as the number on a card -- so Most Used is genuinely most-used, not most-liked again.
+#
+# One difference deliberately NOT copied: their trending and latest feeds page BACKWARD
+# (`last`/`before`) while meilisearch pages forward (`first`/`after`). This app pages forward
+# everywhere, which the connection accepts for all four, and switching direction per sort would
+# mean two cursor conventions in one picker for no user-visible gain.
+MARKET_SORTS = {
+    "trending":   ("trending", ""),
+    "liked":      ("meilisearch", "-markInfo.likedCount"),
+    "used":       ("meilisearch", "-markInfo.refCount"),
+    "newest":     ("latest", "-createdAt"),
+}
+# What the old two-button UI sent, kept working so an older client or a bookmarked URL does not
+# silently lose its sort.
+MARKET_SORT_ALIASES = {"popular": "trending", "latest": "newest", "": "trending"}
+
+
+def market_sort(name):
+    """(feed, orderBy) for a sort name, falling back to Trending for anything unrecognised."""
+    key = (name or "").strip().lower()
+    key = MARKET_SORT_ALIASES.get(key, key)
+    return MARKET_SORTS.get(key, MARKET_SORTS["trending"])
+
+
+# ALL SEVEN MEASURED off live requests (2026-07-26) -- none is inferred from its name.
+MODEL_TYPE_FILTERS = (
+    ("All", "ANY_MODEL"),
+    ("DiT.3", "MMDIT26B_MODEL"),
+    ("DiT.2", "MMDIT26A_MODEL"),
+    ("DiT.1", "DIT7_MODEL"),
+    ("Community DiT", "USER_DIT26A_MODEL"),
+    ("SDXL", "SDXL_MODEL"),
+    ("SD 1.5", "SD_V1_MODEL"),
+)
+# HOW THESE WERE CAPTURED, because the technique is reusable and three attempts failed first.
+# Apollo's cache is IN-MEMORY, so a full page reload empties it; selecting a filter as the very
+# FIRST action on a fresh load therefore has to hit the network. Earlier tries kept selecting
+# other options first, and the cache could always answer.
+#
+# "Community DiT" was the last unknown and the one worth not guessing: USER_DIT26A_MODEL turned
+# out to be right, but DIT9_MODEL was equally plausible, and a wrong enum member here fails
+# SILENTLY -- the wrong rows, or none, reading as an empty result rather than an error.
+#
+# The filter is MULTI-SELECT: successive clicks sent ["USER_DIT26A_MODEL"], then
+# [..., "SDXL_MODEL"], then [..., "SD_V1_MODEL"], which is also what settled the last two.
+#
+# The full 46-member GenerationModelType enum is not copied here on purpose. It is
+# recoverable at any time, and stays current, via tools/harvest_api_surface.py -- their
+# own contract chunk carries it verbatim. A hand-copied list would just rot.
+
+# Their "Source" filter (All / PixAI / External) is NOT a separate argument -- it is expressed
+# through `types`. Read straight out of their ModelFilter chunk, which maps the UI value to an
+# enum member and back:
+#     .with({type:"lora", source:"pixai"},    () => [AnyUserLora])
+#     .with({type:"lora", source:"external"}, () => [AnyNonUserLora])
+# and the tokens themselves are in the bundle: ANY_LORA / ANY_USER_LORA / ANY_NON_USER_LORA
+# (ANY_SDXL_LORA and ANY_NON_SDXL_LORA also exist, unused here).
+#
+# A LoRA the OWNER trained carries type USER_MULTI_LORA -- seen on his own rows -- which is why
+# "PixAI" means user-trained and "External" means uploaded from elsewhere.
+LORA_SOURCE_TYPES = {
+    "": "",                          # All -- send no `types` at all, preserving today's behaviour
+    "pixai": "ANY_USER_LORA",
+    "external": "ANY_NON_USER_LORA",
+}
+
+# Their License Type filter has exactly ONE meaningful value. Their handler is literally
+#     onChange: r => a("permittedUse", r === "COMMERCIAL" ? "COMMERCIAL" : undefined)
+# so it is COMMERCIAL or the argument is omitted. PermittedUse:COMMERCIAL was also observed on a
+# real row. The data behind it is extra.permissions{personalUses, commercialUses,
+# shareImagesOnline, shouldCreditAuthor}.
+PERMITTED_USES = ("COMMERCIAL",)
+
+# Their "Posted at" options, and the offset each one means. Captured from the live request: the
+# UI sends a DateRange of {"gt": "<ISO instant>"} and nothing else -- no upper bound, no `lt`.
+POSTED_AT_DAYS = {"yesterday": 1, "7d": 7, "30d": 30}
+
+
+def posted_at_range(token):
+    """One of POSTED_AT_DAYS -> the DateRange dict PixAI expects, or None for "All Time".
+
+    Measured, not guessed: selecting Past 7 Days on 2026-07-26 sent
+    {"gt": "2026-07-19T07:00:00.000Z"}. Note what that value is NOT -- it is not
+    now-minus-168-hours. 07:00:00.000Z is local MIDNIGHT at UTC-7, so the boundary is the start
+    of the day N days back, in the viewer's own timezone. Matching that matters for more than
+    tidiness: a start-of-day boundary is a stable cache key, whereas a rolling
+    now-minus-N-seconds mints a fresh one on every keystroke and would defeat their caching (and
+    ours) for no benefit.
+
+    Milliseconds and a literal Z, matching JSON.stringify(new Date()) in their client. An
+    unrecognised token returns None, so the filter is simply absent and the search runs
+    unfiltered -- the same fail-open contract as every other filter here."""
+    days = POSTED_AT_DAYS.get((token or "").strip().lower())
+    if not days:
+        return None
+    local_midnight = (datetime.datetime.now().astimezone()
+                      .replace(hour=0, minute=0, second=0, microsecond=0)
+                      - datetime.timedelta(days=days))
+    utc = local_midnight.astimezone(datetime.timezone.utc)
+    return {"gt": utc.strftime("%Y-%m-%dT%H:%M:%S.") + "{:03d}Z".format(utc.microsecond // 1000)}
+
+# CORRECTION, 2026-07-26. Comments in this file state that "an enum cannot be a $variable", which
+# is why `loraBaseModelTypes` is interpolated behind a whitelist. That claim is WRONG: PixAI's own
+# query documents declare `$types: [GenerationModelType]`, `$permittedUse: PermittedUse` and
+# `$loraBaseModelTypes: [GenerationModelType!]` and bind them normally. Verified by reading their
+# documents (tools/harvest_api_surface.py).
+#
+# So the filters added below are BOUND VARIABLES, never interpolated -- caller text cannot reach
+# the query document at all, which is strictly safer than interpolating it after a whitelist
+# check. The whitelists stay, for a different reason worth keeping: an unrecognised value is
+# DROPPED so the search runs unfiltered (fail-open), rather than binding a bad enum and having the
+# server reject the whole query. That is the behaviour the existing filters promise and the picker
+# depends on. The older interpolated path is left alone deliberately -- it works, it is guarded,
+# and rewriting it is a separate change with its own risk.
+
+
+def _market_row(n):
+    """One `generationModels`-shaped node -> the picker's row dict.
+
+    Extracted 2026-07-26 so the BOOKMARK tab returns rows that are IDENTICAL to MARKET's, field
+    for field. Two near-copies of a 20-field dict is how a picker ends up rendering a card that
+    silently loses its architecture badge on one tab only."""
+    lv = n.get("latestVersion") or {}
+    return {
+        "title": n.get("title") or "",
+        "type": n.get("type") or "",
+        "model_id": str(n.get("id") or ""),
+        "liked_count": int(n.get("likedCount") or 0),
+        "should_blur": bool(n.get("isNsfw")),
+        "preview_url": _model_preview_url(n.get("media")),
+        "has_version": bool(lv.get("id")),
+        # REST-only rich fields absent here -> empty so the card hides them.
+        "description": "", "base_model": "", "curations": [], "official": False,
+        "comment_count": 0, "ref_count": 0, "author_id": "",
+        "cover_url": _model_preview_url(n.get("media")),
+        # GraphQL-only extras.
+        "tags": [t.get("name") for t in (n.get("tags") or []) if t.get("name")][:8],
+        "author": (n.get("author") or {}).get("displayName") or "",
+        "created_at": n.get("createdAt") or "",
+        # Architecture, for LoRA compat sort/badging (annotate_lora_compat) -- '' when
+        # the connection has no version yet, same empty-string convention as everywhere
+        # else in this file (never None, so a naive .strip()/comparison never explodes).
+        "model_type": lv.get("modelType") or "",
+        "lora_base_model_type": lv.get("loraBaseModelType") or "",
+        # Per-viewer state (GraphQL-only). Always a real bool -- a node that omits the
+        # field yields False, never None, same never-None rule as the two fields above.
+        "bookmarked": bool(n.get("bookmarked")),
+        "liked": bool(n.get("liked")),
+    }
 
 
 def model_search_market_gql(session, keyword="", category="", sort="", usage="MODEL", limit=24,
-                            after=None, lora_base_type=""):
+                            after=None, lora_base_type="", author_id="",
+                            source="", permitted_use="", time_range=None,
+                            model_types=()):
     """Market-style model browse via the GraphQL `generationModels` connection, which -- unlike
     the REST /search -- actually HONORS `category` and a date `orderBy`. Use this for category
     chips + a Newest sort; the REST path (model_search_rest) stays the default for keyword/Popular
@@ -2178,8 +2352,12 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
     args = ["keyword:$k", "first:$n"]
     if cat in MARKET_CATEGORIES:
         args.append('category:"%s"' % cat)
-    if (sort or "").strip().lower() == "newest":
-        args.append('orderBy:"-createdAt"')
+    # Sort is a FEED plus an orderBy, both from a fixed table -- safe to interpolate, and an
+    # unrecognised name falls back to Trending rather than producing a broken query.
+    feed, order_by = market_sort(sort)
+    args.append('feed:"%s"' % feed)
+    if order_by:
+        args.append('orderBy:"%s"' % order_by)
     # Server-side architecture filter -- LoRA searches only (there is nothing to filter a
     # base-model list by). The value is a BARE ENUM TOKEN, unquoted: [MMDIT26A_MODEL], never
     # ["MMDIT26A_MODEL"]. Passing them as strings is a type error the server rejects, and
@@ -2197,6 +2375,62 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
         args.append("after:$a")
         var_decl += ",$a:String"
         variables["a"] = after
+
+    # --- picker-parity round 3 (2026-07-26). All BOUND variables, all fail-open: an
+    # unrecognised value is dropped and the search runs unfiltered rather than being rejected.
+    #
+    # authorId is the whole "MY LORA" tab -- their own MY LORA is this same connection filtered
+    # by the signed-in user's id, not a separate operation.
+    au = str(author_id or "").strip()
+    if au:
+        args.append("authorId:$au")
+        var_decl += ",$au:ID"
+        variables["au"] = au
+
+    # `types` is ALWAYS sent, which is what their own pickers do -- LoRA tabs send ANY_LORA even
+    # with Source set to All, and the base-model tab sends ANY_MODEL. Both were read off live
+    # requests.
+    #
+    # This is a fix, not just parity. We used to send no `types` at all and filter by row type in
+    # Python after the fetch, so asking for 24 could yield a mixed page and hand the grid far
+    # fewer once the wrong kind was discarded -- short pages, almost certainly the "scrolls a few
+    # rows and stops" report. Filtering server-side means a full page of the kind actually wanted.
+    #
+    # An explicit Source (PixAI-trained / external) narrows further and replaces ANY_LORA; their
+    # own MY LORA request pairs ANY_LORA with authorId exactly as this does.
+    src = str(source or "").strip().lower()
+    src_enum = LORA_SOURCE_TYPES.get(src, "") if want_lora else ""
+
+    # A base search can also narrow to specific ARCHITECTURES -- their Model Type filter, which is
+    # MULTI-SELECT (choosing DiT.3 then DiT.1 sends both tokens, observed on a live request). Only
+    # whitelisted members survive, so an unknown value is dropped and the search stays unfiltered
+    # rather than being refused: the same fail-open contract as every other filter here.
+    chosen = [t for t in (str(x).strip().upper() for x in (model_types or []))
+              if t in LORA_BASE_MODEL_TYPES]
+    args.append("types:$ty")
+    var_decl += ",$ty:[GenerationModelType]"
+    if chosen and not want_lora:
+        variables["ty"] = chosen
+    else:
+        variables["ty"] = [src_enum or ("ANY_LORA" if want_lora else "ANY_MODEL")]
+
+    pu = str(permitted_use or "").strip().upper()
+    if pu in PERMITTED_USES:
+        args.append("permittedUse:$pu")
+        var_decl += ",$pu:PermittedUse"
+        variables["pu"] = pu
+
+    # timeRange takes a DateRange input object. Its FIELD NAMES are not yet captured -- they are
+    # not in any query document (input types never are) and the one promising bundle hit turned
+    # out to be an unrelated error payload. So this passes the caller's dict straight through and
+    # omits the argument entirely when there is nothing to send. Nothing constructs a DateRange
+    # here on a guess: a wrong shape would be a rejected query, and the picker must never break
+    # on a filter. Capture the shape from one live request (set Posted at -> Past 7 Days with the
+    # network tab open and read `timeRange`), then the only change needed is in the caller.
+    if isinstance(time_range, dict) and time_range:
+        args.append("timeRange:$tr")
+        var_decl += ",$tr:DateRange"
+        variables["tr"] = time_range
     q = ("query(" + var_decl + "){ generationModels(" + ", ".join(args) + "){ "
          "pageInfo{ hasNextPage endCursor } edges { node { id title type isNsfw "
          "likedCount bookmarked liked "
@@ -2212,37 +2446,147 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
             continue
         if not want_lora and (is_lora or "VIDEO" in mtype):
             continue
-        lv = n.get("latestVersion") or {}
-        out.append({
-            "title": n.get("title") or "",
-            "type": n.get("type") or "",
-            "model_id": str(n.get("id") or ""),
-            "liked_count": int(n.get("likedCount") or 0),
-            "should_blur": bool(n.get("isNsfw")),
-            "preview_url": _model_preview_url(n.get("media")),
-            "has_version": bool(lv.get("id")),
-            # REST-only rich fields absent here -> empty so the card hides them.
-            "description": "", "base_model": "", "curations": [], "official": False,
-            "comment_count": 0, "ref_count": 0, "author_id": "",
-            "cover_url": _model_preview_url(n.get("media")),
-            # GraphQL-only extras.
-            "tags": [t.get("name") for t in (n.get("tags") or []) if t.get("name")][:8],
-            "author": (n.get("author") or {}).get("displayName") or "",
-            "created_at": n.get("createdAt") or "",
-            # Architecture, for LoRA compat sort/badging (annotate_lora_compat) -- '' when
-            # the connection has no version yet, same empty-string convention as everywhere
-            # else in this file (never None, so a naive .strip()/comparison never explodes).
-            "model_type": lv.get("modelType") or "",
-            "lora_base_model_type": lv.get("loraBaseModelType") or "",
-            # Per-viewer state (GraphQL-only). Always a real bool -- a node that omits the
-            # field yields False, never None, same never-None rule as the two fields above.
-            "bookmarked": bool(n.get("bookmarked")),
-            "liked": bool(n.get("liked")),
-        })
+        out.append(_market_row(n))
     page_info = data.get("pageInfo") or {}
     has_more = bool(page_info.get("hasNextPage"))
     return {"results": out, "has_more": has_more,
             "next_cursor": (page_info.get("endCursor") or "") if has_more else ""}
+
+
+# Derived offline from PixAI's own bundle and validated against three hashes seen on real
+# requests (tools/harvest_api_surface.py). Only the FALLBACK needs it -- the ad-hoc path below
+# carries its own document, so a rotated hash cannot break the primary route.
+BOOKMARKED_MODELS_OP = "listMyBookmarkedGenerationModels"
+BOOKMARKED_MODELS_HASH = "2281653492ff54ef17707104736fd74e7a8d70dc314e024e595f0e71ff2945b9"
+
+_BOOKMARK_NODE_FIELDS = (
+    "id title type isNsfw likedCount bookmarked liked "
+    "latestVersion { id modelType loraBaseModelType } media { id urls { url } } "
+    "tags { name } author { displayName } createdAt")
+
+
+def model_bookmarks_gql(session, keyword="", usage="MODEL", limit=24, after=None,
+                        lora_base_type=""):
+    """The owner's BOOKMARKED models/LoRAs, in the SAME row shape as model_search_market_gql.
+    Read-only, spends nothing.
+
+    `listMyBookmarkedGenerationModels` is an operation NAME, not a field: its document queries
+    `me { bookmarkedGenerationModels(...) }`. An earlier probe asked whether the operation name
+    existed on type Query, got "Cannot query field ... on type Query", and that was recorded as
+    "reachable ONLY through the persisted-query path". It does not follow -- the name was never a
+    field, and `me` is plainly reachable ad-hoc (resolve_user_id uses `query{ me{ id } }`).
+
+    So this tries AD-HOC first with our own projection, and falls back to the persisted GET with
+    the derived hash only if that is refused. Two reasons for that order: the ad-hoc document
+    cannot rot when PixAI redeploys, and it lets us request exactly the fields a row needs instead
+    of their much larger fragment. `_last_path` records which route served, so a caller (or a
+    test) can tell without guessing.
+
+    The field accepts the same filters MARKET does -- keyword, modelTypes, loraBaseModelTypes,
+    loraBaseModelIds -- plus full before/after/first/last paging, so the bookmark tab is not a
+    stripped-down list. Note their own UI hides its Filters button on this tab while keeping the
+    architecture filter live, which is consistent with what the arguments allow."""
+    want_lora = (usage or "MODEL").upper() == "LORA"
+    kw = (keyword or "").strip()
+    after = (after or "").strip()
+    lbt = (lora_base_type or "").strip().upper()
+
+    args = ["first:$n"]
+    var_decl = "$n:Int"
+    variables = {"n": int(limit)}
+    if kw:
+        args.append("keyword:$k")
+        var_decl += ",$k:String"
+        variables["k"] = kw
+    if after:
+        args.append("after:$a")
+        var_decl += ",$a:String"
+        variables["a"] = after
+    # Same reasoning as the market path: ask for the kind we want rather than discarding the
+    # wrong kind afterwards, so a bookmark page arrives full. ANY_LORA is what their own bookmark
+    # request sends for the LoRA tab; ANY_MODEL mirrors their base-model tab.
+    args.append("modelTypes:$mt")
+    var_decl += ",$mt:[GenerationModelType]"
+    variables["mt"] = ["ANY_LORA" if want_lora else "ANY_MODEL"]
+    if want_lora and lbt in LORA_BASE_MODEL_TYPES:
+        args.append("loraBaseModelTypes:$lb")
+        var_decl += ",$lb:[GenerationModelType!]"
+        variables["lb"] = [lbt]
+
+    q = ("query(" + var_decl + "){ me { id bookmarkedGenerationModels(" + ", ".join(args)
+         + "){ totalCount pageInfo{ hasNextPage endCursor } edges { node { "
+         + _BOOKMARK_NODE_FIELDS + " } } } } }")
+
+    conn, path = None, ""
+    try:
+        data = gql_adhoc(session, q, variables) or {}
+        conn = ((data.get("me") or {}).get("bookmarkedGenerationModels")) or {}
+        path = "adhoc"
+    except PixAIError as e:
+        vlog("bookmarks: ad-hoc refused ({}); trying the persisted hash".format(e))
+        conn = _bookmarks_persisted(session, variables, want_lora, lbt, kw, after, int(limit))
+        path = "persisted"
+
+    out = []
+    for e in conn.get("edges") or []:
+        n = e.get("node") or {}
+        mtype = (n.get("type") or "").upper()
+        is_lora = "LORA" in mtype
+        # A bookmark list mixes base models and LoRAs exactly as the market connection does, so
+        # the same split applies -- otherwise the LoRA tab shows base models and vice versa.
+        if want_lora and not is_lora:
+            continue
+        if not want_lora and (is_lora or "VIDEO" in mtype):
+            continue
+        out.append(_market_row(n))
+
+    page_info = conn.get("pageInfo") or {}
+    has_more = bool(page_info.get("hasNextPage"))
+    return {"results": out, "has_more": has_more,
+            "next_cursor": (page_info.get("endCursor") or "") if has_more else "",
+            "total": conn.get("totalCount"), "_path": path}
+
+
+def _bookmarks_persisted(session, variables, want_lora, lbt, kw, after, limit):
+    """Fallback: the same query over the persisted-GET path, using the derived hash.
+
+    Their document names its variables differently from our ad-hoc one, so the payload is rebuilt
+    rather than reusing `variables` -- passing `n`/`mt`/`lb` to a document expecting
+    `first`/`modelTypes`/`loraBaseModelTypes` would fail for a reason that looks like a
+    permissions problem and would send the next person down the wrong path entirely."""
+    v = {"first": limit}
+    if kw:
+        v["keyword"] = kw
+    if after:
+        v["after"] = after
+    if want_lora:
+        v["modelTypes"] = ["ANY_LORA"]
+    if want_lora and lbt in LORA_BASE_MODEL_TYPES:
+        v["loraBaseModelTypes"] = [lbt]
+    params = {
+        "operation": BOOKMARKED_MODELS_OP,
+        "u3t": U3T or "",
+        "operationName": BOOKMARKED_MODELS_OP,
+        "variables": json.dumps(v, separators=(",", ":")),
+        "extensions": json.dumps(
+            {"clientLibrary": CLIENT_LIBRARY,
+             "persistedQuery": {"version": 1, "sha256Hash": BOOKMARKED_MODELS_HASH}},
+            separators=(",", ":")),
+    }
+    r = session.get(API_URL, params=params, timeout=60)
+    try:
+        body = r.json()
+    except ValueError:
+        raise PixAIError("bookmarks: HTTP {} non-JSON response".format(r.status_code))
+    if body.get("errors"):
+        blob = json.dumps(body["errors"])[:400]
+        if "PersistedQueryNotFound" in blob:
+            raise PixAIError(
+                "bookmarks: the persisted hash has rotated. Re-run "
+                "`python tools/harvest_api_surface.py fetch` then `extract` to re-derive it "
+                "-- the hashes are computed from PixAI's own bundle, so this is self-healing.")
+        raise PixAIError("bookmarks: " + blob)
+    return ((body.get("data") or {}).get("me") or {}).get("bookmarkedGenerationModels") or {}
 
 
 def _empty_version_meta():
@@ -4102,12 +4446,31 @@ DEFAULT_GEN_MODEL = "1983308862240288769"  # Tsubaki.2 v1 (override with --model
 # -2..2 slider offered DiT weights PixAI rejects. Negative weights subtract a LoRA's
 # influence and are legal on the SD architectures only.
 LORA_WEIGHT_STEP = 0.1
+# The owner's rule, given 2026-07-25: every DiT family is 0..1.2; only SD1.5 and SDXL are
+# -2..+2. Extended 2026-07-26 once the full enum was enumerated from PixAI's bundle -- this table
+# held five architectures when there are twenty-five members, and the fallback for an unrecognised
+# one is the SD range, so a DiT LoRA was being offered -2..+2 against a real ceiling of 1.2.
+#
+# DIT7_MODEL is the important addition: it is what their picker sends for "DiT.1", and only
+# DIT7B_MODEL was listed here, so the commonest DiT case was very likely already falling through.
 LORA_WEIGHT_RANGES = {
-    "DIT7B_MODEL":    (0.0, 1.2),
-    "DIT9_MODEL":     (0.0, 1.2),
-    "MMDIT26A_MODEL": (0.0, 1.2),
-    "SD_V1_MODEL":    (-2.0, 2.0),
-    "SDXL_MODEL":     (-2.0, 2.0),
+    # DiT, every variant in the bundle -- 0..1.2.
+    "DIT7_MODEL":        (0.0, 1.2),
+    "DIT7A_MODEL":       (0.0, 1.2),
+    "DIT7B_MODEL":       (0.0, 1.2),
+    "DIT7C_MODEL":       (0.0, 1.2),
+    "DIT7D_MODEL":       (0.0, 1.2),
+    "DIT9_MODEL":        (0.0, 1.2),   # "Community DiT" in their UI
+    "MMDIT26A_MODEL":    (0.0, 1.2),   # DiT.2 / Tsubaki.2
+    "MMDIT26B_MODEL":    (0.0, 1.2),   # DiT.3 -- had no entry at all before today
+    "USER_DIT26A_MODEL": (0.0, 1.2),   # a user-TRAINED DiT.2, which is what the owner's own are
+    # Stable Diffusion -- the only two the owner specified as -2..+2.
+    "SD_V1_MODEL":       (-2.0, 2.0),
+    "SDXL_MODEL":        (-2.0, 2.0),
+    # DELIBERATELY ABSENT: SD3_MEDIUM_MODEL and Z_IMAGE_V1_MODEL. Both are real members, but the
+    # owner's ranges never covered them, and they fall through to the widest range on purpose --
+    # narrowing a slider on a guess would remove a capability the account may really have, while
+    # a value the architecture rejects merely surfaces as a refused submit, which costs nothing.
 }
 # The union, used as the hard sanity bound in _lora_params (which sees a version id and a
 # number, never an architecture) and as the fallback for an unknown or not-yet-picked base.

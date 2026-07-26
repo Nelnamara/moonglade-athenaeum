@@ -83,6 +83,18 @@ Thumbs.db
 # genuinely shareable project config (agents, hooks) can still be tracked later. ----
 /.claude/launch.json
 
+# Agent worktrees. Claude Code checks out throwaway copies of the repo under here, each a full
+# tree, so an untracked-file listing fills with thousands of duplicates of the project. Scoped to
+# this ONE directory for the same reason launch.json above is: .claude/setup.sh is tracked and must
+# stay that way.
+#
+# Not cosmetic. On 2026-07-26 a rename script used rglob(), which does not consult gitignore, and
+# rewrote files INSIDE five live agent worktrees while a workflow was reading them -- corrupting
+# all five mid-run. Ignoring the directory does not by itself stop a script that walks the
+# filesystem directly, but it does stop these trees showing up as repo content, and it documents
+# that nothing in here is ever project state.
+/.claude/worktrees/
+
 # Ephemeral design mockups: throwaway single-file HTML built to verify a design
 # before implementing it (the locked pixel source lives in the Claude artifact, not
 # here). Never committed -- they would rot instantly against the real surface.
