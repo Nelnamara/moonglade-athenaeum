@@ -1555,14 +1555,41 @@ MARK_ANIMS = ["classic", "glow", "shine", "aurora", "twinkle", "shoot", "halo",
 _BRAND_DEFAULTS = {"mark": "mark_4", "anim": "classic"}
 
 
+def branding_root():
+    """Where branding lives: the APP folder, beside the launcher -- NOT inside the library.
+
+    Moved 2026-07-26 (owner decision) for two reasons, the first of which was a live bug.
+
+    It used to be `Path(out_dir) / "branding"`, and out_dir comes from resolve_library_dir(), so
+    the library-folder setting shipped the day before silently relocated it. Point the app at a
+    different library and every mark, mascot and banner disappeared from its view -- the files
+    still on disk in the old folder, the app just no longer looking there. Nobody hit it because
+    only one library has ever existed.
+
+    And the "Under the Hood" easter egg depends on a curious user FINDING the empty slot folders.
+    They scan the top level of the app directory; they do not go rummaging inside a picture
+    library full of month folders and thumbnail caches. Discovery through the filesystem is the
+    mechanic, so the folders have to be where a tinkerer's eye lands. Deliberately NOT inside the
+    /moonglade package that the naming pass will create either -- that is for code, and user art
+    in a package boundary gets treated as code by something eventually.
+
+    Every caller goes through here. Nine sites used to derive this path independently, which is
+    exactly how the out_dir coupling above went unnoticed."""
+    return Path(__file__).resolve().parent / "branding"
+
+
 def _branding_path(out_dir):
-    return Path(out_dir) / "branding.json"
+    # Sibling of the art directory, which preserves EXACTLY the arrangement this had inside
+    # the library (branding.json next to branding/). Anyone moving an existing setup keeps
+    # the same two entries in the same relationship, so the move is a drag of both rather
+    # than a reshuffle -- and .gitignore covers the pair with two lines.
+    return branding_root().parent / "branding.json"
 
 
 def list_marks(out_dir):
     """Marks available on THIS machine: branding/marks/marks.json entries whose
     .png actually exists. Empty on a fresh install (assets are machine-local)."""
-    mdir = Path(out_dir) / "branding" / "marks"
+    mdir = branding_root() / "marks"
     try:
         data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -1611,7 +1638,7 @@ def brand_context(out_dir):
     processor, so old installs with only logo.png render exactly as before)."""
     cfg = load_branding(out_dir)
     marks = {m["id"]: m for m in list_marks(out_dir)}
-    has_banner = (Path(out_dir) / "branding" / "banner.png").exists()
+    has_banner = (branding_root() / "banner.png").exists()
     if cfg["mark"] in marks:
         m = marks[cfg["mark"]]
         return {"mark_url": m["png"], "mark_anim": cfg["anim"], "mark_kind": m["kind"],
@@ -1630,7 +1657,7 @@ def make_launcher_shortcut(out_dir, mark_id):
     chosen mark's .ico, targeting Serve Gallery.pyw via pythonw. Returns the
     .lnk path. Machine-local action -- caller must gate to localhost."""
     import subprocess
-    ico = Path(out_dir) / "branding" / "marks" / (str(mark_id) + ".ico")
+    ico = branding_root() / "marks" / (str(mark_id) + ".ico")
     if not ico.exists():
         raise RuntimeError("no .ico cut for %s yet (branding/marks/)" % mark_id)
     repo = Path(__file__).resolve().parent
@@ -1855,10 +1882,10 @@ def _badge_thumb(out_dir, aid, size=256):
     a full open doesn't pull the masters. Masters stay the source of truth; the cache
     self-heals when a master is re-cut (mtime check). Falls back to the master on any
     trouble, so a tile always resolves to *something*."""
-    src = Path(out_dir) / "branding" / "badges" / (aid + ".png")
+    src = branding_root() / "badges" / (aid + ".png")
     if not src.is_file():
         return None
-    dst = Path(out_dir) / "branding" / "_thumbs" / (aid + ".png")
+    dst = branding_root() / "_thumbs" / (aid + ".png")
     try:
         if dst.is_file() and dst.stat().st_mtime >= src.stat().st_mtime:
             return dst
@@ -2255,6 +2282,9 @@ def collection_health(out_dir, db_path):
     gallery_dir = out_dir / "gallery"
     quarantine_dir = out_dir / "_duplicates"
     deleted_dir = out_dir / DELETED_DIRNAME
+    # Kept as an exclusion even though branding no longer lives under out_dir: an old
+    # install still has files there, and excluding a path that is now absent is a harmless
+    # no-op, whereas dropping the exclusion would sweep a legacy folder into a scan.
     branding_dir = out_dir / "branding"
 
     def _under(p, parent):
@@ -12672,7 +12702,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Serve drop-in branding art from out_dir/branding/ (banner.png, logo, icons).
         Absent files 404 so the header's onerror simply removes the <img>. Path-safe."""
         from flask import send_from_directory, abort
-        bdir = (out_dir / "branding").resolve()
+        bdir = branding_root().resolve()
         try:
             target = (bdir / fname).resolve()
             target.relative_to(bdir)          # reject path traversal

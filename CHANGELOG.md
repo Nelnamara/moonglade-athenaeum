@@ -17,6 +17,19 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Changing the library folder made all branding vanish.** Marks, mascots, badges, frames,
+  banners and the login art all resolved from `out_dir / "branding"`, and `out_dir` started coming
+  from the library-folder setting the day before. So pointing the app at a different library left
+  every piece of branding on disk in the old folder with the app no longer looking there — it
+  quietly fell back to the built-in defaults, which is the failure mode that looks like nothing is
+  wrong. Nine call sites had each derived that path independently, which is how the coupling went
+  unnoticed; they now all go through one `branding_root()` that resolves from the app directory, so
+  branding no longer moves when the library does. **Branding therefore lives in the app folder
+  now** (`branding/` and `branding.json`, beside `Serve Gallery.pyw`) rather than inside the picture
+  library, which is also where a curious person can actually find it. Existing installs keep their
+  art where it is until it is moved across by hand — deliberately no migration step, and the
+  gitignore entry ships in the same commit so nobody's own art shows up as untracked repo content.
+
 - **A generation could be submitted — and charged for — twice.** Every credit-spending
   submit went out through the shared GraphQL helper on its default of three retries, which
   re-POSTs on a network error or a 429/5xx. That is right for a *read*, and wrong here: a

@@ -4403,6 +4403,11 @@ def run_import_local(args):
     existing_mids = {r.get("media_id") for r in catalog_rows if r.get("media_id")}
     gallery_dir = out / "gallery"
     quarantine = out / "_duplicates"
+    # Branding moved to the APP root on 2026-07-26, so this no longer names a live
+    # directory -- kept because an install that predates the move still has files here,
+    # and --import-local would otherwise catalogue someone's banner and mascots as
+    # gallery images. Excluding an absent path costs nothing; dropping the exclusion
+    # would silently sweep a legacy folder into the library.
     branding_dir = out / "branding"   # app chrome (banner/logo/marks) -- never gallery content
     # B11 (audit 2026-07-21): purge_media_local() clears a purged image's catalog
     # row when it moves the file to _deleted/, so without this exclusion the scan
