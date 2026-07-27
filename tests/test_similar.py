@@ -180,3 +180,65 @@ def test_api_similar_route(tmp_path, monkeypatch):
     assert d["images"][0]["score"] == 0.9
     assert d["images"][0]["thumb"] == "/thumbs/n1.jpg"
     assert cli.get("/api/similar/nope").status_code == 404       # unknown id, soft
+
+
+# --- --sync-similar: the incremental entry point --------------------------------
+
+def test_run_sync_similar_tops_up_and_never_rebuilds(tmp_path, monkeypatch):
+    """--sync-similar must go through sync() and must NEVER drop the table.
+
+    This is the whole point of the flag. Before it existed, the only way to reach the
+    already-incremental sync() was rebuild(), which drops the table first -- so the single
+    available action was also the most destructive one. On 2026-07-26 a machine-wide memory
+    exhaustion killed a rebuild at 75%, and reaching for the only button on offer would have
+    discarded the 26,400 rows that survived and cost ~38 min instead of ~12.
+
+    rebuild is stubbed to RAISE rather than merely counted: if this entry point is ever rewired
+    through it, the test fails loudly at the call instead of on a subtle assertion afterwards."""
+    import moonglade_backup as core
+
+    calls = []
+
+    def fake_sync(items, progress=None, batch=400):
+        calls.append("sync")
+        return 8706
+    fake_sync.last_errors = 0
+
+    def never(*a, **k):
+        raise AssertionError("--sync-similar must never call rebuild() -- it drops the table")
+
+    monkeypatch.setattr(S, "is_available", lambda: True)
+    monkeypatch.setattr(S, "scan_dir", lambda out: [("a", "p")])
+    monkeypatch.setattr(S, "count", lambda: 26400)
+    monkeypatch.setattr(S, "sync", fake_sync)
+    monkeypatch.setattr(S, "rebuild", never)
+
+    class Args:
+        out = str(tmp_path)
+        progress = None
+
+    core.run_sync_similar(Args())
+
+    assert calls == ["sync"]
+
+
+def test_run_sync_similar_reports_an_already_complete_index(tmp_path, monkeypatch):
+    """Adding nothing is a normal, successful outcome -- the index was already complete. It must
+    read that way rather than looking like a job that silently did nothing, which is exactly how
+    the empty-index bug hid for three days on the /api/similar route."""
+    import moonglade_backup as core
+
+    def fake_sync(items, progress=None, batch=400):
+        return 0
+    fake_sync.last_errors = 0
+
+    monkeypatch.setattr(S, "is_available", lambda: True)
+    monkeypatch.setattr(S, "scan_dir", lambda out: [])
+    monkeypatch.setattr(S, "count", lambda: 35106)
+    monkeypatch.setattr(S, "sync", fake_sync)
+
+    class Args:
+        out = str(tmp_path)
+        progress = None
+
+    core.run_sync_similar(Args())   # must not raise, must not sys.exit

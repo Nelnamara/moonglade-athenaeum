@@ -1205,6 +1205,58 @@ def resolve_orphan_jobs(out_dir, status_fn, min_age=0, now=None):
     return resolved
 
 
+# Job-id prefixes for work the SERVER PROCESS itself owns -- it spawns these and nothing else
+# will ever report them finished. Deliberately EXCLUDES "cli-": a CLI job belongs to a separate
+# process with its own lifetime that the server knows nothing about, so sweeping one would mark a
+# genuinely-running terminal command as dead. Numeric ids are PixAI generate tasks and belong to
+# resolve_orphan_jobs() instead.
+_JOBS_SERVER_OWNED_PREFIXES = ("panel-", "import-", "bulkdel-")
+
+
+def resolve_interrupted_local_jobs(out_dir, now=None):
+    """Mark server-owned jobs left non-terminal by a previous process as failed. Returns the count.
+
+    Call this ONCE at server startup. The rule needs no age heuristic and no clock comparison,
+    which is what makes it reliable: at the moment the server boots it has not yet created any
+    job of its own, so every server-owned job still sitting at a non-terminal status necessarily
+    belongs to a process that is gone. There is nothing left to ask, and nothing will ever arrive.
+
+    This closes a real gap. resolve_orphan_jobs() reaps only PixAI-task-keyed generate jobs -- its
+    docstring notes that panel/delete jobs "are local and self-report", which is true right up
+    until the process is killed. Then the terminal event is simply never written, and the Job
+    Tracker shows "running" forever. Owner's production case (2026-07-26): `panel-3d49d9bffea2`,
+    a Similar-index rebuild killed by a machine-wide memory exhaustion, still displaying as
+    running after the reboot. The silent-death detection shipped 2026-07-25 does not cover this
+    class at all, because it is built around asking PixAI about a task id that these jobs do not
+    have.
+
+    Uses the existing "failed" status and an `error` message rather than inventing an
+    "interrupted" state: failed is already terminal, already rendered by the tracker, and already
+    carries a message -- and the job did, in fact, fail. A new status would need matching UI in
+    mg-notify.js and a new entry in _JOBS_TERMINAL for no gain.
+
+    ONE known imprecision, stated rather than hidden: a panel job runs as a SUBPROCESS, so if the
+    server is restarted while one is genuinely still running, this marks it failed early. That
+    self-corrects -- _reconstruct_jobs() only blocks a NON-terminal record from overwriting a
+    terminal one, so the subprocess's own later "done" still lands (verified at the
+    `cur.get("status") in _JOBS_TERMINAL` branch). Recording the owning pid on each event would
+    remove the imprecision entirely; it is not worth the extra surface for a case that resolves
+    itself."""
+    n = 0
+    for j in read_jobs(out_dir, now=now):
+        if j.get("status") in _JOBS_TERMINAL:
+            continue
+        jid = str(j.get("job_id") or "")
+        if not jid.startswith(_JOBS_SERVER_OWNED_PREFIXES):
+            continue
+        append_job_event(
+            out_dir, jid, status="failed",
+            error="Interrupted -- the app stopped before this finished. Nothing was corrupted; "
+                  "run it again when you're ready.")
+        n += 1
+    return n
+
+
 def maybe_compact_jobs(out_dir, keep=JOBS_KEEP, max_age=JOBS_MAX_AGE):
     """Opportunistically rewrite jobs.jsonl down to exactly the records _select_jobs keeps,
     so the append-only log can't grow without bound. Only fires once the raw file passes
@@ -7380,6 +7432,45 @@ def run_rebuild_similar(args):
         n, ps.count(), ps.sync.last_errors))
 
 
+def run_sync_similar(args):
+    """--sync-similar: TOP UP the visual-similarity index -- embed only images it doesn't
+    already have. The incremental counterpart to --rebuild-similar.
+
+    This exists because sync() was always incremental (it skips media_ids already in the index)
+    while the only way to reach it was rebuild(), which DROPS the table first. So the sole
+    available action was also the most destructive one, and after an interrupted build the
+    obvious move threw away every row that had survived.
+
+    Measured on the owner's library, 2026-07-26, after a machine-wide memory exhaustion killed a
+    rebuild at 75%: topping up the missing 8,706 images took 11.7 min, against ~38 min to
+    re-embed all 35,106 from scratch -- and it could not lose the 26,400 rows already there,
+    whereas a fresh rebuild dying again would have left strictly less than it started with.
+
+    Prefer this. Reach for --rebuild-similar only to cure an index that is actually broken
+    (duplicate/corrupt), not merely incomplete. No network; needs torch/pixeltable. Run it while
+    the gallery is NOT serving Similar queries -- both use the same embedded Postgres."""
+    try:
+        import moonglade_similar as ps
+    except Exception as e:
+        sys.exit("Similar index unavailable (pixeltable/torch not installed): {}".format(e))
+    if not ps.is_available():
+        sys.exit("Similar index needs torch -- install the ML deps (torch/transformers/pixeltable).")
+    out = Path(args.out)
+    if not out.exists():
+        sys.exit("No backup dir at {}.".format(out))
+    before = ps.count()
+    print("Topping up the Similar index from {} -- {:,} already indexed, embedding only what's "
+          "missing.".format(out, before))
+    n = ps.sync(ps.scan_dir(out), progress=getattr(args, "progress", None))
+    print()  # finish the \r progress line
+    after = ps.count()
+    if not n:
+        print("Similar index already complete: {:,} images, nothing to add.".format(after))
+    else:
+        print("Similar index topped up: embedded {:,} new images ({:,} -> {:,} in index, "
+              "{} skipped).".format(n, before, after, ps.sync.last_errors))
+
+
 def run_catalog_stats(args):
     """Summarize the existing catalog (no network needed)."""
     out = Path(args.out)
@@ -8643,6 +8734,11 @@ def main():
                     help="drop + re-embed the visual-similarity ('Similar') index from scratch off "
                          "the on-disk backup. Cures a corrupted/duplicate index; builds ONE clean "
                          "named index. ~decode-bound, no network. Needs torch/pixeltable.")
+    ap.add_argument("--sync-similar", action="store_true",
+                    help="TOP UP the 'Similar' index: embed only images it doesn't already have. "
+                         "The incremental counterpart to --rebuild-similar and the one you "
+                         "normally want -- it cannot lose existing rows, and after an interrupted "
+                         "build it resumes instead of starting over. Needs torch/pixeltable.")
     webauth = ap.add_argument_group("web gallery login accounts (session-based auth)")
     webauth.add_argument("--add-web-user", action="store_true",
                     help="add or update a gallery web-login account: interactively prompts "
@@ -8699,6 +8795,9 @@ def main():
             return
         if getattr(args, "rebuild_similar", False):
             run_rebuild_similar(args)
+            return
+        if getattr(args, "sync_similar", False):
+            run_sync_similar(args)
             return
         if args.export_csv:
             if not db_path.exists():

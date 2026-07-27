@@ -15,7 +15,33 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Added
+
+- **`--sync-similar` — top up the visual-similarity index instead of rebuilding it.** Also a
+  Control Panel job, *Top up the Similar index (adds only what's missing)*, listed above Rebuild
+  so the non-destructive action reads first. `sync()` was always incremental — it skips
+  media_ids already indexed — but the only way to reach it was `rebuild()`, which drops the
+  table first. So the single available action was also the most destructive one, and after an
+  interrupted build the obvious move discarded every row that had survived. Measured on a
+  library of 35,106 images whose rebuild was killed at 75%: topping up the missing 8,706 took
+  **11.7 min against ~38 min** to re-embed everything, and it cannot lose the rows already
+  there — whereas a fresh rebuild dying again leaves strictly less than it started with. Reach
+  for `--rebuild-similar` only to cure an index that is genuinely broken, not merely incomplete.
+
 ### Fixed
+
+- **A maintenance job left "running" was never resolved after a restart.** Panel, import and
+  bulk-delete jobs are spawned by the server, and the Job Tracker's reaper only ever asked PixAI
+  about *generation* jobs — reasonably, since local jobs "self-report" when they finish. But a
+  killed process never reports anything, so the job displayed as running forever with no way to
+  clear it. The silent-death detection added the day before did not cover this class at all,
+  because it is built around asking about a task id these jobs do not have. Now swept once at
+  startup, and the rule needs no timeout guesswork: when the server boots it has not yet created
+  any job of its own, so a server-owned job still marked non-terminal necessarily belongs to a
+  process that is gone. They are marked failed with *"Interrupted — the app stopped before this
+  finished. Nothing was corrupted; run it again when you're ready."* CLI jobs are deliberately
+  left alone — those belong to a separate process the server knows nothing about, and sweeping
+  one would brand a genuinely-running command dead.
 
 - **Changing the library folder made all branding vanish.** Marks, mascots, badges, frames,
   banners and the login art all resolved from `out_dir / "branding"`, and `out_dir` started coming
