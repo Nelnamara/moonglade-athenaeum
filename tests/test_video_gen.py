@@ -810,3 +810,46 @@ def test_the_failure_log_never_breaks_the_error_path(tmp_path, monkeypatch):
 
     assert r.status_code == 200
     assert "the real failure" in r.get_json()["error"]
+
+
+def test_audio_fields_only_go_to_models_that_take_them():
+    """SURVEYED 2026-07-26, one successful task per model, via getTaskById.
+
+    Sending audio to a model that does not take it is not harmless: PixAI answers
+    "This image contains sensitive or NSFW content" -- a CONTENT complaint for a
+    CAPABILITY mismatch. A controlled pair proved it (media 747704233721405654, v3.0.2:
+    website without the fields rendered, this app with them was refused), and that wrong
+    error sent an entire evening's debugging after a moderation problem that did not exist.
+
+    Pinned as an exact set because narrowing it by guesswork already happened once -- an
+    earlier cut assumed "v4.0 family only" and v3.2 really does carry audio."""
+    assert set(core.VIDEO_AUDIO_MODELS) == {"v3.2", "v4.0", "v4.0.1"}
+
+    for model in core.VIDEO_AUDIO_MODELS:
+        i2v = core.build_video_parameters("x", "1", model=model, generate_audio=True,
+                                         audio_language="japanese")["i2vPro"]
+        assert i2v["generateAudio"] is True, model
+        assert i2v["audioLanguage"] == "japanese", model
+
+    for model in ("v3.0.2", "v2.7", "v3.0.1", "v3.0"):
+        i2v = core.build_video_parameters("x", "1", model=model, generate_audio=True,
+                                          audio_language="english")["i2vPro"]
+        assert "generateAudio" not in i2v, model + " must omit generateAudio entirely"
+        assert "audioLanguage" not in i2v, model + " must omit audioLanguage entirely"
+
+
+def test_video_prompt_over_the_limit_is_caught_before_submitting():
+    """PixAI caps a video prompt at 2000 characters and rejects the whole submit with a raw
+    GraphQL validation error. Measured: the owner's working website task carried 1986, so he
+    writes right up against it. Catching it here means the message can name the real number
+    instead of spending a round trip on a cryptic maxLength error."""
+    long_prompt = "x" * 2500
+    with pytest.raises(core.PixAIError) as e:
+        core.build_shot_video_params("I2V", long_prompt, image_ids=["1"], model="v4.0.1")
+    msg = str(e.value)
+    assert "2,500" in msg and "2,000" in msg, msg    # actual length AND the limit
+    assert "500" in msg                              # how much to cut
+    assert "nothing was created or charged" in msg
+
+    ok = core.build_shot_video_params("I2V", "x" * 2000, image_ids=["1"], model="v4.0.1")
+    assert ok["i2vPro"]["prompts"] == "x" * 2000     # exactly at the limit is fine
