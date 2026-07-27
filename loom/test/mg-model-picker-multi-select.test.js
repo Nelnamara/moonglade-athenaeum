@@ -46,5 +46,9 @@ test("an unresolved/failed LoRA is marked failed, never silently dropped", () =>
   // never resolves must not be able to vanish from a submit unnoticed. Both the
   // "resolved but empty" and the network-failure paths must set entry.failed.
   assert.match(src, /entry\.failed\s*=\s*!entry\.version_id/);
-  assert.match(src, /\.catch\(function \(\) \{\s*entry\.failed = true;/);
+  // The catch may first drop out for an entry the user un-picked while the resolve was
+  // in flight (that guard is what stops a removed LoRA being resurrected), so match the
+  // assignment inside the catch rather than requiring it to be the very first statement.
+  assert.match(src, /\.catch\(function \(\) \{[\s\S]{0,200}?entry\.failed = true;/,
+    "a resolve that fails must still mark the entry failed, never drop it silently");
 });
