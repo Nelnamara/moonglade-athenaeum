@@ -7711,7 +7711,16 @@ var Gen = (function(){
   // therefore payload()) is always correct immediately, regardless of the grid's own
   // highlight state. Flagged as a precise, known, low-severity remainder rather than
   // silently left unexplained.
-  function loraRemove(i){ loras.splice(i,1); renderLoras(); refreshLoraNotes(); debouncedCost(); }
+  function loraRemove(i){
+    var gone=loras[i];
+    loras.splice(i,1);
+    // Tell the picker too. It keeps its OWN copy of what's picked, and removing a chip
+    // here never touched it: the card stayed lit, clicking it again read as a remove
+    // rather than a re-add, and a version resolve still in flight for that LoRA saw it
+    // as live and re-dispatched it straight back into this list.
+    if(gone && loraPickerEl && loraPickerEl.deselect) loraPickerEl.deselect(gone.model_id);
+    renderLoras(); refreshLoraNotes(); updateGoState(); debouncedCost();
+  }
   // Switch an already-added LoRA to a different published release -- mirrors pickVersion()
   // (the base model's own version switcher) exactly, just applied to loras[i] instead of the
   // single `selected` object. No extra network call: l.versions was already resolved in full
