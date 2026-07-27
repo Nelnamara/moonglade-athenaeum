@@ -4885,9 +4885,12 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
         "prompts": prompt or "",
         "mode": mode,                        # "basic" | "professional"
         "duration": str(duration),           # seconds, as a string ("5"/"10"/"15")
-        "generateAudio": bool(generate_audio),
-        "audioLanguage": audio_language,
     }
+    # Only for models that support it -- see VIDEO_AUDIO_MODELS. Sending these to v3.0.2 got a
+    # misleading NSFW refusal on an image the website accepted.
+    if str(model).strip() in VIDEO_AUDIO_MODELS:
+        i2v["generateAudio"] = bool(generate_audio)
+        i2v["audioLanguage"] = audio_language
     if tail_media_id:
         i2v["tailMediaId"] = str(tail_media_id)
     if negative:
@@ -4959,6 +4962,36 @@ def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_
 VIDEO_15S_MODELS = ("v4.0", "v4.0.1")
 
 
+# PixAI rejects a video prompt over this with a raw GraphQL validation error
+# ("maxLength must NOT have more than 2000 characters") and no task is created. Measured
+# 2026-07-26: the owner's working submit on PixAI's own site carried 1986 characters, so the
+# limit is real and he was writing right up against it. Checked here rather than letting the
+# round trip fail, so the message can say the actual count and how much to cut.
+VIDEO_PROMPT_MAXLEN = 2000
+
+
+# Which video models actually take the audio fields. SURVEYED 2026-07-26 across the owner's own
+# successful tasks, one per model, via getTaskById (read-only, free) -- not inferred:
+#
+#   v3.2     generateAudio=True   audioLanguage=english     <- audio supported
+#   v4.0     generateAudio=True   audioLanguage=english     <- audio supported
+#   v4.0.1   generateAudio=True   audioLanguage=english     <- audio supported
+#   v3.0.2   (both fields ABSENT)                           <- omit
+#   v2.7     (both fields ABSENT)                           <- omit
+#   v3.0.1   generateAudio=False, audioLanguage absent      <- omit (never seen carrying audio)
+#
+# Sending them regardless is NOT harmless, and this is the bug that cost an evening. A controlled
+# pair on media id 747704233721405654 with model v3.0.2: PixAI's own site submitted it WITHOUT the
+# audio fields and the video rendered; this app submitted it WITH them and was refused
+# "This image contains sensitive or NSFW content." Same image, same model, audio the differing
+# variable -- so an unsupported audio flag surfaces as a CONTENT complaint, which sent the whole
+# investigation chasing a moderation problem that did not exist.
+#
+# An earlier cut of this guessed "v4.0 family only" and a pre-existing test caught it: v3.2 really
+# does carry audio. Hence the survey. Do not narrow this list without measuring the model first.
+VIDEO_AUDIO_MODELS = ("v3.2", "v4.0", "v4.0.1")
+
+
 def _snap_video_duration(d, model=""):
     """Snap a requested duration (seconds) to the nearest allowed PixAI video length.
 
@@ -4990,6 +5023,14 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
     2026-07-02 has no negativePrompts field at all. A genuine PixAI API gap, not an
     oversight here -- R2V/V2V shots silently ignore a negative prompt if one is set."""
     m = (mode or "R2V").upper()
+    # Both submit shapes cap the prompt, under different field names
+    # (i2vPro.prompts / referenceVideo.prompt), so check once here where they converge.
+    if prompt and len(prompt) > VIDEO_PROMPT_MAXLEN:
+        raise PixAIError(
+            "Your video prompt is {:,} characters and PixAI's limit is {:,} -- trim {:,} and "
+            "resubmit. (PixAI rejects the whole submit on this, so nothing was created or "
+            "charged.)".format(len(prompt), VIDEO_PROMPT_MAXLEN,
+                               len(prompt) - VIDEO_PROMPT_MAXLEN))
     imgs = [str(i) for i in (image_ids or []) if str(i).strip()]
     vids = [str(v) for v in (video_ids or []) if str(v).strip()]
     auds = [str(a) for a in (audio_ids or []) if str(a).strip()]
