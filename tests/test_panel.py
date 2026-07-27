@@ -732,6 +732,10 @@ def test_new_parity_actions_spawn_the_right_whitelisted_argv(tmp_path, monkeypat
         ("audit-full",      ["--audit"],                              False),
         ("verify-dupes",    ["--verify-dupes"],                       False),
         ("rebuild-similar", ["--rebuild-similar"],                    False),
+        # The incremental counterpart. Both are non-destructive by the Panel's definition
+        # (nothing leaves the disk), but only this one is safe to reach for after an
+        # interrupted build -- rebuild-similar drops the table first.
+        ("sync-similar",    ["--sync-similar"],                       False),
         ("sync-videos",     ["--sync-videos"],                        False),
         ("sync-artworks",   ["--sync-artworks"],                      False),
         ("dedup-delete",    ["--dedup", "--apply", "--dedup-delete"], True),

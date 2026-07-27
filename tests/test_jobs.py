@@ -1226,3 +1226,87 @@ def test_a_slow_eta_fetch_cannot_overwrite_a_newer_rendering_phase(tmp_path, mon
     job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["race1"]
     assert job.get("started") is True, (
         "a rendering job was left showing queued by the slow poll's stale write: {!r}".format(job))
+
+# ---------------------------------------------------------------------------
+# resolve_interrupted_local_jobs: a server-owned job cannot outlive the server
+# ---------------------------------------------------------------------------
+
+def test_sweep_resolves_a_server_owned_job_left_running(tmp_path):
+    """The owner's production case: a panel job killed mid-flight shows 'running' forever.
+
+    resolve_orphan_jobs() cannot fix it -- that works by asking PixAI about a task id, and a
+    panel job has none. Nothing else ever writes the terminal event, because the process that
+    would have written it is gone."""
+    core.append_job_event(tmp_path, "panel-3d49d9bffea2", status="running",
+                          type="panel", label="Rebuild the Similar index")
+
+    assert core.resolve_interrupted_local_jobs(tmp_path) == 1
+
+    job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["panel-3d49d9bffea2"]
+    assert job["status"] == "failed"
+    assert job["status"] in core._JOBS_TERMINAL      # so it leaves the live list
+    assert "Interrupted" in job["error"]
+    assert "corrupted" in job["error"]               # tells the user it is safe to re-run
+
+
+def test_sweep_leaves_cli_jobs_alone(tmp_path):
+    """A `cli-` job belongs to a SEPARATE process with its own lifetime.
+
+    This is the one that would do real damage: the server knows nothing about a command running
+    in a terminal, so sweeping it would brand a genuinely-running job dead and, worse, do it
+    while the job is still writing its own events."""
+    core.append_job_event(tmp_path, "cli-abc123", status="running", type="cli", label="--sync")
+
+    assert core.resolve_interrupted_local_jobs(tmp_path) == 0
+    assert core.read_jobs(tmp_path)[0]["status"] == "running"
+
+
+def test_sweep_leaves_pixai_generate_jobs_alone(tmp_path):
+    """Numeric ids are PixAI tasks and belong to resolve_orphan_jobs(), which can actually ASK
+    whether they finished. Reaping them here would destroy a real running generation's record
+    and lose the reward/claim that follows it."""
+    core.append_job_event(tmp_path, "1672848509142493791", status="running", type="generate")
+
+    assert core.resolve_interrupted_local_jobs(tmp_path) == 0
+    assert core.read_jobs(tmp_path)[0]["status"] == "running"
+
+
+def test_sweep_is_idempotent_and_skips_finished_jobs(tmp_path):
+    """Runs on every boot, so a second pass must be a no-op -- otherwise each restart appends
+    another failure event to a job that was already resolved."""
+    core.append_job_event(tmp_path, "panel-aaa", status="running", type="panel")
+    core.append_job_event(tmp_path, "panel-bbb", status="done", type="panel")
+    core.append_job_event(tmp_path, "bulkdel-ccc", status="done_with_errors", type="panel")
+
+    assert core.resolve_interrupted_local_jobs(tmp_path) == 1     # only panel-aaa
+    assert core.resolve_interrupted_local_jobs(tmp_path) == 0     # nothing left to do
+
+    by_id = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
+    assert by_id["panel-bbb"]["status"] == "done"                 # untouched
+    assert by_id["bulkdel-ccc"]["status"] == "done_with_errors"   # untouched
+
+
+def test_sweep_covers_every_server_owned_prefix(tmp_path):
+    """import-/bulkdel- are spawned by the server exactly like panel-, so all three must be
+    swept. Pinned as a set so adding a new server-spawned prefix without adding it here fails
+    loudly rather than leaving a whole job class stuck at 'running'."""
+    assert set(core._JOBS_SERVER_OWNED_PREFIXES) == {"panel-", "import-", "bulkdel-"}
+    for jid in ("panel-1", "import-2", "bulkdel-3"):
+        core.append_job_event(tmp_path, jid, status="running", type="panel")
+
+    assert core.resolve_interrupted_local_jobs(tmp_path) == 3
+
+
+def test_a_surviving_subprocess_can_still_correct_a_premature_failure(tmp_path):
+    """The documented imprecision, pinned so the safety net cannot silently disappear.
+
+    A panel job is a SUBPROCESS, so a server restart while one genuinely runs marks it failed
+    early. That self-corrects only because _reconstruct_jobs() blocks a NON-terminal record from
+    overwriting a terminal one but permits terminal -> terminal. If that ever changed, this sweep
+    would start permanently mislabelling live work."""
+    core.append_job_event(tmp_path, "panel-live", status="running", type="panel")
+    core.resolve_interrupted_local_jobs(tmp_path)
+    assert core.read_jobs(tmp_path)[0]["status"] == "failed"
+
+    core.append_job_event(tmp_path, "panel-live", status="done")   # the subprocess survived
+    assert core.read_jobs(tmp_path)[0]["status"] == "done"

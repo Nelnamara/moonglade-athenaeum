@@ -3518,6 +3518,28 @@ def _account_key(username):
 def create_app(out_dir: Path):
     app = Flask(__name__)
 
+    # A job the SERVER owns cannot outlive the server, so anything still marked running when we
+    # boot is from a process that is gone -- nothing will ever report it finished. Sweep those to
+    # a terminal state now, or the Job Tracker shows a phantom "running" row forever (owner hit
+    # exactly this after a 2026-07-26 machine reset: panel-3d49d9bffea2, a Similar rebuild killed
+    # mid-flight, still displaying as running after the reboot). resolve_orphan_jobs() cannot
+    # cover these -- it works by asking PixAI about a task id that local jobs do not have.
+    # Fails soft: a startup nicety must never be able to stop the server from starting. But it
+    # REPORTS the failure rather than swallowing it -- a silent `except: pass` here is how a sweep
+    # that never actually ran would look identical to one with nothing to do. `core` is imported
+    # locally because this module has no module-level alias for it, and there is no module-level
+    # logger either; moonglade_logging.setup_logging() configures the root logger.
+    import logging as _logging
+    try:
+        import moonglade_backup as _core
+        _swept = _core.resolve_interrupted_local_jobs(out_dir)
+        if _swept:
+            _logging.getLogger(__name__).info(
+                "Marked %d interrupted job(s) from a previous session as failed.", _swept)
+    except Exception:
+        _logging.getLogger(__name__).warning(
+            "interrupted-job sweep skipped", exc_info=True)
+
     # ---- Session-based auth: secret key + cookie hardening ------------------
     # AUTH_SECRET_KEY is generated once (secrets.token_hex(32)) and persisted to
     # config.json by get_or_create_secret_key() -- reused on every subsequent start
@@ -3676,6 +3698,13 @@ def create_app(out_dir: Path):
         "audit-full":    {"args": ["--audit"], "label": "Duplicate audit (full — byte-compare, slower)", "destructive": False},
         "verify-dupes":  {"args": ["--verify-dupes"],
                           "label": "Verify _duplicates/ is safe to delete", "destructive": False},
+        # Listed BEFORE rebuild so the non-destructive, usually-correct action reads first.
+        # "Rebuild" drops the table and re-embeds everything; this adds only what is missing and
+        # cannot lose existing rows. After an interrupted build the top-up resumes -- reaching for
+        # rebuild there costs ~3x the time AND discards every row that survived.
+        "sync-similar":  {"args": ["--sync-similar"],
+                          "label": "Top up the Similar index (adds only what's missing)",
+                          "destructive": False},
         "rebuild-similar": {"args": ["--rebuild-similar"],
                             "label": "Rebuild the Similar index (slow, needs pixeltable)",
                             "destructive": False},
