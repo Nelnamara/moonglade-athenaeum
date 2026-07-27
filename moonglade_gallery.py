@@ -13883,7 +13883,24 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             import logging as _logging
             shape = ""
             if params:
-                shape = " params=" + _json.dumps(params, ensure_ascii=False, default=str)[:700]
+                # Truncate the PROMPT separately, then serialise. A flat [:700] on the whole
+                # dict let a long prompt consume the entire budget and cut off isPrivate,
+                # modelId, duration and mode -- the structural fields that ARE the diagnosis.
+                # Hit immediately: the first real failure this logged (2026-07-26) lost exactly
+                # those, and the shape had to be reconstructed from PixAI's site instead.
+                slim = dict(params)
+                for _blk in ("i2vPro", "referenceVideo"):
+                    if isinstance(slim.get(_blk), dict):
+                        inner = dict(slim[_blk])
+                        for _k in ("prompts", "negativePrompts"):
+                            if isinstance(inner.get(_k), str) and len(inner[_k]) > 120:
+                                inner[_k] = inner[_k][:120] + "...<truncated {} chars>".format(
+                                    len(slim[_blk][_k]) - 120)
+                        slim[_blk] = inner
+                for _k in ("prompts", "negativePrompts"):
+                    if isinstance(slim.get(_k), str) and len(slim[_k]) > 120:
+                        slim[_k] = slim[_k][:120] + "...<truncated>"
+                shape = " params=" + _json.dumps(slim, ensure_ascii=False, default=str)[:900]
             _logging.getLogger(__name__).error(
                 "%s failed: %s: %s%s", where, type(exc).__name__, msg[:400], shape)
         except Exception:
@@ -14395,14 +14412,36 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             updir = out_dir / "loom" / "_uploads"
             updir.mkdir(parents=True, exist_ok=True)
 
+            # I2V/FLF take a catalog media_id DIRECTLY; R2V still uploads. Measured 2026-07-26,
+            # twice over. First by running the identical job on PixAI's own site and reading its
+            # submit shape back with --dump-params (task 2038288375164786990, free): it sent
+            # i2vPro.mediaId=747704233721405654 and tailMediaId=747643660108554296, BOTH rows in
+            # this catalog -- generation OUTPUTS used as i2v INPUTS -- and the video rendered.
+            # Then by surveying the owner's own history via getTaskById: 5 of 5 i2vPro tasks used
+            # in-catalog ids, across three models, 2026-06-08 through 2026-07-22, including two
+            # on 2026-07-20 itself.
+            #
+            # _input_media_id() assumes the opposite for every path, and its own cited evidence
+            # shows why that overreached: `invalid_media_id` / `invalid_reference_image_media_id`
+            # -- the second is the REFERENCE-VIDEO field. The requirement was real for R2V's
+            # referenceImageMediaIds and got applied everywhere by a shared helper.
+            #
+            # For i2v it is worse than unnecessary. Uploading turns an image PixAI already holds
+            # and already vetted into a BRAND-NEW upload, which its content scanner then checks
+            # -- and that is what refused this owner's video with 403 NSFW_DETECTED while the
+            # same frames sailed through on the website. The upload was manufacturing the
+            # rejection. R2V still uploads; nothing measured about that path has changed.
+            i2v_direct = (p.get("mode") or "R2V").upper() in ("I2V", "FLF")
+
             def resolve_img(val):
                 s = str(val or "").strip()
                 if not s:
                     return ""
                 if s.isdigit():
-                    # Shared with /api/enhance, /api/edit and /api/fix -- see
-                    # _input_media_id. A catalog id is a generation OUTPUT and PixAI
-                    # refuses it as an input, so upload the local file we hold.
+                    if i2v_direct:
+                        return s                  # i2vPro takes the catalog id as-is
+                    # R2V's referenceImageMediaIds genuinely refuse a generation output --
+                    # upload the local copy we hold. See _input_media_id.
                     return _input_media_id(core, session, s)
                 if s.startswith("data:"):             # a Loom thumbnail -> upload it
                     try:
@@ -14420,20 +14459,63 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             image_ids = [m for m in (resolve_img(x) for x in (p.get("images") or [])) if m]
             video_ids = [str(v) for v in (p.get("video_refs") or []) if str(v).strip().isdigit()]
             audio_ids = [str(a) for a in (p.get("audio_refs") or []) if str(a).strip().isdigit()]
-            params = core.build_shot_video_params(
-                p.get("mode") or "R2V", (p.get("prompt") or "").strip(),
-                image_ids=image_ids, video_ids=video_ids, audio_ids=audio_ids,
-                duration=p.get("duration") or 5,
-                generate_audio=bool(p.get("generate_audio") or p.get("audio")),
-                model=(p.get("video_model") or ""),
-                camera_movement=(p.get("camera_movement") or ""),
-                quality=(p.get("quality") or "professional"),
-                audio_language=(p.get("audio_language") or "english"),
-                negative=(p.get("negative") or "").strip(),
-                is_private=bool(p.get("is_private")))
-            core._apply_kaisuuken(session, params,
-                                  SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
-            task_id = core.submit_generation(session, params)
+
+            def _params_for(imgs):
+                return core.build_shot_video_params(
+                    p.get("mode") or "R2V", (p.get("prompt") or "").strip(),
+                    image_ids=imgs, video_ids=video_ids, audio_ids=audio_ids,
+                    duration=p.get("duration") or 5,
+                    generate_audio=bool(p.get("generate_audio") or p.get("audio")),
+                    model=(p.get("video_model") or ""),
+                    camera_movement=(p.get("camera_movement") or ""),
+                    quality=(p.get("quality") or "professional"),
+                    audio_language=(p.get("audio_language") or "english"),
+                    negative=(p.get("negative") or "").strip(),
+                    is_private=bool(p.get("is_private")))
+
+            def _card(prm):
+                core._apply_kaisuuken(
+                    session, prm,
+                    SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
+
+            params = _params_for(image_ids)
+            _card(params)
+            try:
+                task_id = core.submit_generation(session, params)
+            except core.PixAIError as e:
+                # SURVEYED, not guessed. getTaskById across the owner's own video history
+                # (2026-07-26, read-only, no credits) found EVERY i2vPro task carrying an
+                # in-catalog media id -- 5 of 5, zero uploads, across v3.2 / v4.0 / v4.0.1 and
+                # spanning 2026-06-08 to 2026-07-22. Two of them are dated 2026-07-20, the very
+                # day the "catalog ids are refused" bug was recorded, and they rendered fine.
+                #
+                # So PixAI never changed and i2vPro has always accepted a generation-OUTPUT id.
+                # The July conclusion was generalised from the R2V error name
+                # `invalid_reference_image_media_id`, and the resulting shared helper made every
+                # gallery i2v re-upload its frame for a week.
+                #
+                # This fallback is therefore INSURANCE, not a coin-flip: cheap, already tested,
+                # and it keeps a spend path working if that July observation turns out to be real
+                # under some condition this survey did not cover.
+                #
+                # The passthrough attempt is what MATTERS for NSFW work: uploading converts an
+                # image PixAI already holds and already vetted into a brand-new upload, and the
+                # content scanner then refuses it (403 NSFW_DETECTED, no task) while the very
+                # same frames pass on the website. The upload was manufacturing the rejection.
+                #
+                # Safe by submit_generation's own argument for its inferenceProfile retry: a
+                # PixAIError means PixAI answered with a GraphQL error and REJECTED the task, so
+                # there is nothing created and nothing charged to duplicate.
+                if not (i2v_direct and "invalid_media_id" in str(e)):
+                    raise
+                _logging_ = __import__("logging")
+                _logging_.getLogger(__name__).info(
+                    "i2v passthrough refused (invalid_media_id); uploading frames and retrying")
+                image_ids = [m for m in (_input_media_id(core, session, x)
+                                         for x in (p.get("images") or [])) if m]
+                params = _params_for(image_ids)
+                _card(params)
+                task_id = core.submit_generation(session, params)
             try:                       # Master of the Loom + Storyweaver telemetry
                 mode = str(p.get("mode") or "R2V").upper()
                 if mode in ("I2V", "FLF", "R2V"):

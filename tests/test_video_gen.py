@@ -468,15 +468,32 @@ def test_gallery_catalog_ref_is_uploaded_not_passed_through(tmp_path, monkeypatc
                         lambda session, params: submitted.update(params) or "task-1")
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
 
+    # UPDATED 2026-07-26. i2v now sends the catalog id FIRST, because uploading a copy is what
+    # drags the frame through PixAI's content scanner and got an NSFW 403 on work their own site
+    # accepts. The July behaviour is preserved as the FALLBACK, and that is what this now pins:
+    # when PixAI answers invalid_media_id, the route must upload and retry, exactly as before.
+    # Simulated by rejecting the first submit the way PixAI did in July.
+    calls = []
+
+    def _submit(session, params):
+        calls.append(params.get("i2vPro", {}).get("mediaId"))
+        if len(calls) == 1:
+            raise core.PixAIError("GraphQL error: invalid_media_id")
+        submitted.update(params)
+        return "task-1"
+    monkeypatch.setattr(core, "submit_generation", _submit)
+
     cli = login_test_client(create_app(tmp_path))
     r = cli.post("/api/loom/generate", json={
         "mode": "I2V", "prompt": "test", "images": ["733917871331404290"], "duration": 5})
     assert r.status_code == 200, r.get_data(as_text=True)
 
-    assert uploaded, "the catalog reference was passed through instead of uploaded"
+    assert calls[0] == "733917871331404290", "the catalog id must be TRIED first"
+    assert uploaded, "invalid_media_id did not trigger the upload fallback"
     assert img.name in uploaded[0]
-    # The UPLOADED id must be what PixAI receives -- not the catalog id that it rejects.
+    # After the fallback, the UPLOADED id is what reaches PixAI -- the July guarantee.
     assert submitted["i2vPro"]["mediaId"] == "999000111222"
+    assert len(calls) == 2, "expected exactly one retry, not a loop"
 
 
 def test_gallery_ref_upload_is_cached_per_media_id(tmp_path, monkeypatch):
@@ -518,9 +535,12 @@ def _seed_one(tmp_path, mid="733917871331404290"):
 
 def test_every_input_path_uploads_the_catalog_reference(tmp_path, monkeypatch):
     """The first fix for the invalid_media_id bug patched ONLY the video route, leaving
-    /api/edit and /api/fix silently broken the same way. PixAI refuses a generation-OUTPUT
-    id as an INPUT on every one of these paths, so all three must resolve through
+    /api/edit and /api/fix silently broken the same way, so those must resolve through
     _input_media_id.
+
+    NOT every path any more: i2v was measured on 2026-07-26 to accept a catalog id directly
+    (PixAI's own site does exactly that), and uploading there actively caused an NSFW rejection
+    on content their site accepts. R2V, edit and fix are unchanged.
 
     Parametrised deliberately: a new input endpoint that forgets to resolve is the exact
     way this returns, and this fails by name when it does."""
@@ -539,10 +559,18 @@ def test_every_input_path_uploads_the_catalog_reference(tmp_path, monkeypatch):
 
     cli = login_test_client(create_app(tmp_path))
 
-    # 1. video
+    # 1. video -- i2v is now the EXCEPTION: it sends the catalog id directly (2026-07-26,
+    # measured off PixAI's own completed task). The upload remains for R2V and for the
+    # invalid_media_id fallback, both covered by their own tests.
     assert cli.post("/api/loom/generate", json={"mode": "I2V", "prompt": "x",
                     "images": [mid], "duration": 5}).status_code == 200
-    assert seen["params"]["i2vPro"]["mediaId"] == "999000111222"
+    assert seen["params"]["i2vPro"]["mediaId"] == mid, "i2v should pass the catalog id through"
+
+    # R2V still uploads -- that path's requirement was measured separately and is unchanged.
+    seen.pop("params", None)
+    assert cli.post("/api/loom/generate", json={"mode": "R2V", "prompt": "x",
+                    "images": [mid], "duration": 5}).status_code == 200
+    assert seen["params"]["referenceVideo"]["referenceImageMediaIds"] == ["999000111222"]
 
     # 2. fix
     cli.post("/api/fix", json={"source": mid, "boxes": [{"x": 1, "y": 1, "w": 2, "h": 2}]})
