@@ -1879,7 +1879,11 @@ ${"=".repeat(48)}
               type: "button",
               className: "lv-lrm",
               title: "Remove",
-              onClick: () => setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id))
+              onClick: () => {
+                const p = loraPickerElRef.current;
+                if (p && p.deselect) p.deselect(l.model_id);
+                setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id));
+              }
             },
             "\xD7"
           ), l.versions && l.versions.length > 1 && /* @__PURE__ */ React.createElement(

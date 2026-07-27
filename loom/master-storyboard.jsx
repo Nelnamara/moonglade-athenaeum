@@ -1673,8 +1673,16 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                         setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x)); }} />
                     <b>{(+l.weight).toFixed(1)}</b>
                   </span>
+                  {/* deselect() as well as dropping it here: the picker keeps its own copy
+                      of what's picked and never saw this removal, so the card stayed lit,
+                      clicking it again read as a remove rather than a re-add, and a version
+                      resolve still in flight re-dispatched the LoRA straight back in. */}
                   <button type="button" className="lv-lrm" title="Remove"
-                    onClick={() => setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id))}>×</button>
+                    onClick={() => {
+                      const p = loraPickerElRef.current;
+                      if (p && p.deselect) p.deselect(l.model_id);
+                      setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id));
+                    }}>×</button>
                   {/* Per-LoRA version selection: only when this LoRA actually has more than one
                       published release (l.versions, resolved alongside version_id itself by
                       mg-model-picker.js's ?all=1 fetch -- see bindLoraPicker above). Mirrors
