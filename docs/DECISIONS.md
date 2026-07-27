@@ -1172,11 +1172,15 @@ A 76-record scoping survey exists: 38 flags already possible today, 18 small add
 
 **Why.** The survey is expensive to redo and its headline findings change what the work IS (a population problem, not a build problem, for aesthetic score; SQL rather than ML for near-dupes). Keeping the workflow id so the full records can be found.
 
-### Mobile Gallery — working port of the Figma Make mock  ·  *2026-07-26*
+### Mobile Gallery — working port of the Figma Make mock, parity pass done  ·  *2026-07-27*
 
-https://claude.ai/code/artifact/e0ce50a0-2475-48e2-adc0-efceee17d518 — the phone layout and pixel source for the mobile design pass: 3-tab shell (Gallery / Create / Control), 5 skins, 160px stats hero, 2-column staggered grid, lightbox, and the full Control tab. Status: Current DIRECTION for the mobile pass, NOT locked. The local copy is git-ignored, so THE ARTIFACT IS THE DURABLE COPY; refreshed 2026-07-26. It predates a lot of shipped work (upscale panel, art filters, the LoRA row and its architecture-aware weights, the Job Tracker, boosters, Mode, seed, picker sources/filters), so bringing it to parity is the FIRST job of the design pass — not something to build from as-is.
+https://claude.ai/code/artifact/e0ce50a0-2475-48e2-adc0-efceee17d518 — the phone layout and pixel source for the mobile design pass: 3-tab shell (Gallery / Create / Control), 5 skins, 160px stats hero, 2-column staggered grid, lightbox, and the full Control tab. Status: Current DIRECTION for the mobile pass, still NOT locked — locking is the owner's call. The local copy is git-ignored, so THE ARTIFACT IS THE DURABLE COPY.
 
-**Why.** It is a REVIEWED port, not a raw Figma dump, and the only durable copy exists as the artifact. The "not locked / parity first" framing stops someone treating a stale mock as a spec.
+The parity gap this entry used to describe is closed: Create now has the real Mode (quality-tier select) / Seed / Boosters (Face Fix, Quality Tag, Enhance Details + its Ratio/Denoise disclosure) / LoRA row with architecture-aware weight ranges (DiT 0–1.2, SD/SDXL ±2) and a red incompatible-architecture warning; the video sub-tabs were corrected to the real three modes (First Frame / First & Last Frames / Multi-Reference) with a conditional End Frame slot and a condensed multi-reference note (real desktop is 6 image + 3 video + audio slots individually — condensed here); the lightbox gained an Upscale flyout (Method segment, Ratio slider, cost) and a full-screen Art Filters take-over (12 filters, Moonglade-then-PixAI grouping, Strength/Angle); a Job Tracker FAB + tray covers every real state including the rare `total`-bearing progress bar; and a Models & LoRAs picker sheet (tabs, source row, sort chips, category/model-type chips) backs the new "+ Add LoRA" button. Built from three research passes over the real desktop code, not from prose recall.
+
+Known gaps, deliberately not guessed at: video-tab boosters/seed/LoRA parity was never confirmed against the real app, so nothing was added there. The picker's Models tab has no sample data (LoRAs tab does) — it shows an honest placeholder rather than invented cards. The 5 ESRGAN upscaler names and the 6 sample LoRAs are plausible stand-ins (same convention as the mock's existing MODELS_IMAGE list), not captured exact values.
+
+**Why.** Records that the "parity first" blocker this artifact carried is resolved, and exactly which surfaces still don't have confirmed real-app data, so a future pass doesn't have to re-diff the whole file against the desktop app to find out.
 
 ### Other captured facts from the LoRA training page  ·  *2026-07-26*
 
