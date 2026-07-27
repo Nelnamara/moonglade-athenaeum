@@ -42,19 +42,14 @@ mass commit. Follow this protocol:
 Long sessions get compacted; summaries lose design intent. Standing rule:
 
 1. **Checkpoint** after every shipped increment (and before starting any new build): update
-   **`docs/STATE.md`** (the now-only state doc — present tense, no history) +
-   `CHANGELOG.md [Unreleased]` (what shipped, dated) + memory with what shipped, what's in
-   flight, the decided NEXT STEPS, and the locked design artifacts by id (the artifact ledger
-   lives in `STATE.md`). **This includes `wiki/` — there was a standing pre-1.9.1 practice of
-   updating docs AND the wiki on every commit as needed; it silently dropped because it was
-   never written down here, only followed by habit. Writing it down now (2026-07-15) so it
-   can't drop again the same way.** If a shipped change is user-facing, check whether any
-   `wiki/` page describes the area it touched and update it in the same pass — don't let the
-   wiki decay into a separate, forgotten catch-up task. **`STATE.md`'s writing rule is
-   load-bearing: a fact that stops being true is DELETED, never annotated. Its predecessor,
-   `docs/ROADMAP_LOOM_ACHIEVEMENTS.md` (now frozen in `docs/archive/`), died holding 40 stale
-   claims precisely because it was an append-only journal — do not recreate that habit.**
-2. **After any compaction**, the FIRST act is to re-read **`docs/STATE.md`** and re-open every
+   **`docs/DECISIONS.md`** + `CHANGELOG.md [Unreleased]` (what shipped, dated) + memory with
+   what shipped, what's in flight, and the decided NEXT STEPS. **This includes `wiki/` — there
+   was a standing pre-1.9.1 practice of updating docs AND the wiki on every commit as needed;
+   it silently dropped because it was never written down here, only followed by habit. Writing
+   it down now (2026-07-15) so it can't drop again the same way.** If a shipped change is
+   user-facing, check whether any `wiki/` page describes the area it touched and update it in
+   the same pass — don't let the wiki decay into a separate, forgotten catch-up task.
+2. **After any compaction**, the FIRST act is to re-read **`docs/DECISIONS.md`** and re-open every
    artifact/doc the next task depends on — never build from the conversation summary alone.
    Say what was re-read before proceeding.
 3. **Flair/user-visible features** name their locked design source (artifact id / doc
@@ -68,10 +63,9 @@ Long sessions get compacted; summaries lose design intent. Standing rule:
    merged into STANDARDS.md 2026-07-17).
 5. **Hierarchy when sources disagree:** for a measurable fact (test count, version, branch lead,
    release status) the **code/git/pytest/gh answer wins over every doc** — never trust a number a
-   command can answer. For project state, `docs/STATE.md` wins. For how it works, the code, then
-   `docs/architecture.md`. For owner preferences, memory wins. A memory that describes code is
-   verified against the code before acting on it. Frozen files under `docs/archive/` are historical
-   record, never current fact.
+   command can answer. For decisions already taken, `docs/DECISIONS.md` wins. For how it works,
+   the code, then `docs/architecture.md`. For owner preferences, memory wins. A memory that
+   describes code is verified against the code before acting on it.
 
 ## Architecture / request flow
 
@@ -177,8 +171,7 @@ preview-only until `--confirm` — see `docs/architecture.md`'s function referen
 per-command shapes and the **Quick command reference** below for usage. The Flask gallery
 is a full web creation suite (Generate drawer, Picker, The Loom, live-events push, Control
 Panel jobs, branding) — its structure lives in `docs/architecture.md`'s "The web suite"
-section; what's currently shipped/in-flight on top of that structure lives in
-**`docs/STATE.md`**; dated history in `CHANGELOG.md`. Don't restate feature detail here —
+section; dated history in `CHANGELOG.md`. Don't restate feature detail here —
 that's how this file drifted badly enough to need `tests/test_docs_dont_hardcode_counts.py`.
 
 `--sync`'s reconcile step (`run_reconcile_deleted`) is caught with a deliberately **BROAD
@@ -186,8 +179,8 @@ that's how this file drifted badly enough to need `tests/test_docs_dont_hardcode
 during the advisory reconcile scan can crash a sync that already succeeded. Guarded by
 `tests/test_sync.py`; full rationale in `docs/architecture.md`.
 
-Achievement/Folio-of-Honors current shape lives in `docs/STATE.md`; art direction (badge style
-anchor, tier palette, prompt bank) lives in `docs/ART.md` — don't restate hexes or sizes here.
+Achievement/Folio-of-Honors art direction (badge style anchor, tier palette, prompt bank)
+lives in `docs/ART.md` — don't restate hexes or sizes here.
 
 ## Test suite
 
@@ -200,11 +193,17 @@ recently within hours of a "correction." All tests must pass before merging to m
 
 ## Current state
 
-Current state is not tracked here — it rots when two files both describe "now". See **`docs/STATE.md`**
-(what's shipped / in flight / next / open owner calls / known defects / the
-locked-artifact ledger). Version, branch lead, and release status are commands, not prose — `STATE.md`
-names them. Owner: Nelnamara / Kil'jaeden — Balance Druid, WoW addon dev. Branch strategy: feature
-branches, merge to master with `--no-ff`, tag releases.
+**`docs/STATE.md` was stripped and deleted on 2026-07-27**, together with
+`docs/AUDIT_2026-07-21.md` and the whole `docs/archive/` tree. It is gone on purpose: it
+accumulated contradictions faster than they could be reconciled, which is the exact failure
+its own "delete a fact that stops being true, never annotate" rule existed to prevent. Do
+not recreate it, do not cite it, and do not treat any older instruction to checkpoint into
+it as live — an instruction to update `STATE.md` is out of date by definition.
+
+What survived lives in **`docs/DECISIONS.md`** (decisions already taken). Version, branch
+lead, and release status are commands, not prose — ask git/pytest/gh, never a doc. Owner:
+Nelnamara / Kil'jaeden — Balance Druid, WoW addon dev. Branch strategy: feature branches,
+merge to master with `--no-ff`, tag releases.
 
 ## Changelog & releases
 

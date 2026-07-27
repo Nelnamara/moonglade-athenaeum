@@ -110,3 +110,9 @@ static/_mockup_*.html
 # egg, so they must exist and must not carry anyone else's art.
 /branding/
 /branding.json
+
+# Local triage worksheet from the 2026-07-27 adversarial code review. Working material:
+# findings get parsed out into Decisions.md and the file is deleted. Never committed --
+# it is a snapshot of defects, and a stale copy in the repo would be exactly the kind of
+# contradictory state doc this review was scoped to avoid.
+/bugreview.md
