@@ -4832,6 +4832,22 @@ ENLARGE_MODELS = ("ESRGAN_4x", "R-ESRGAN 4x+", "R-ESRGAN 4x+ Anime6B", "SwinIR_4
                   "Lollypop")
 DEFAULT_ENLARGE_MODEL = "R-ESRGAN 4x+ Anime6B"      # PixAI's own default selection
 DEFAULT_QUALITY_TAG = "Masterpiece"                 # their "Quality Tag" booster's prefix
+# What an upscale runs on when nothing better is known. PixAI's own upscale dialog has NO
+# model control at all: their submit spreads the enlarge/upscale params and then sets a
+# FIXED modelId, pulling prompts/width/height off the source's original task. So a model is
+# not something the user is meant to choose here, and demanding one turned an image whose
+# model the catalog never recorded -- every locally imported file, and anything predating a
+# full meta sweep -- into an upscale that could not be started at all.
+#
+# It is a model VERSION id, not a model id. A submit's `modelId` is a version id throughout
+# (see _gen_parameters and queue_wait_estimate), and this value was read straight out of
+# their submit builder, so it must be handed to the web routes as `version_id` -- passing it
+# as `model_id` sends it into the model->versions lookup, which finds nothing and answers
+# "pick a model first".
+#
+# Used only as the fallback: when the catalog DOES know what made the picture, that model is
+# still the better answer, because Hires re-diffuses and the original keeps the style.
+UPSCALE_FALLBACK_VERSION_ID = "1861558740588989558"
 # Captured from a completed Hires job; their dialog hints strength works best 0.4-0.6.
 DEFAULT_UPSCALE_DENOISING_STRENGTH = 0.6
 DEFAULT_UPSCALE_DENOISING_STEPS = 26

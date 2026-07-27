@@ -3239,6 +3239,11 @@ def _upscale_const_js():
             "enlargeModels": list(core.ENLARGE_MODELS),
             "defaultEnlargeModel": core.DEFAULT_ENLARGE_MODEL,
             "ceiling": core.UPSCALE_PIXEL_CEILING,
+            # So the panel can upscale an image whose model the catalog never recorded,
+            # instead of refusing until one is picked -- PixAI's own dialog has no model
+            # control at all. Served rather than retyped, like everything else here. It is
+            # a VERSION id, so the panel sends it as version_id; see core for why.
+            "fallbackVersionId": core.UPSCALE_FALLBACK_VERSION_ID,
             "denoise": {"strength": core.DEFAULT_UPSCALE_DENOISING_STRENGTH,
                         "steps": core.DEFAULT_UPSCALE_DENOISING_STEPS},
         }, separators=(",", ":")),
