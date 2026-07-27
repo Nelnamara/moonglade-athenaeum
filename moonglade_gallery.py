@@ -2669,6 +2669,11 @@ def purge_media_local(out_dir, thumb_dir, db_path, media_id, filename, quarantin
     file to out_dir/_deleted/ (default, recoverable) or hard-delete it. Returns the
     new quarantine location (Path) when moved, else None.
 
+    Raises OSError if the file could not be moved/removed, WITHOUT touching the
+    catalog row -- see the move itself for why. Callers must handle that: the row is
+    still there and so is the file, so nothing was lost, but nothing was deleted
+    either and the user has to be told.
+
     When quarantining, also snapshots the about-to-be-deleted catalog row to a JSON
     sidecar (see _snapshot_before_purge) so a later restore can recover more than a
     bare filename. Skipped in hard-delete mode (quarantine=False): nothing is left
@@ -2684,16 +2689,17 @@ def purge_media_local(out_dir, thumb_dir, db_path, media_id, filename, quarantin
             if dest.exists():                       # don't clobber an earlier delete
                 dest = qdir / "{}_{}{}".format(img.stem, media_id, img.suffix)
             _snapshot_before_purge(db_path, out_dir, media_id)
-            try:
-                img.replace(dest)                   # atomic move on the same volume
-                moved = dest
-            except OSError:
-                pass
+            # Deliberately NOT caught: a failed move (antivirus or a sync client holding
+            # the file for a moment, or a library on a different volume than out_dir,
+            # which makes this rename cross-device) leaves the file exactly where it
+            # was. Swallowing it and clearing the row anyway orphaned the file -- gone
+            # from the gallery AND absent from _deleted/, so the trash panel, which
+            # scans that directory, could never offer back a delete the UI had already
+            # promised was recoverable.
+            img.replace(dest)                       # atomic move on the same volume
+            moved = dest
         else:
-            try:
-                img.unlink()
-            except OSError:
-                pass
+            img.unlink()                            # same contract: no row drop if it fails
     tp = Path(thumb_dir) / "{}.jpg".format(media_id)
     if tp.exists():
         try:
@@ -11734,16 +11740,39 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             core.delete_batch_media_gql(_core_session, tid, mid)
         except Exception as e:                        # noqa: BLE001
             return jsonify({"error": _redact_host_paths(str(e))[:240]}), 200
-        purge_media_local(out_dir, thumb_dir, db_path, mid, row.get("filename"))
+        try:
+            purge_media_local(out_dir, thumb_dir, db_path, mid, row.get("filename"))
+        except OSError as e:
+            # The cloud delete above already happened and cannot be taken back, so a local
+            # purge that fails has to come back through this route's own error contract
+            # rather than a 500: the row (and the file) are still here, now pointing at an
+            # image PixAI no longer has, and only the user can decide to retry.
+            return jsonify({"error": "Deleted on PixAI, but the local copy could not be "
+                                     "moved to the trash folder: "
+                                     + _redact_host_paths(str(e))[:160]}), 200
         telem_bump("culled", out_dir=out_dir)
         return jsonify({"ok": True, "media_id": mid, "task_id": tid})
+
+    def _back_with(back, **params):
+        """Redirect to `back` carrying a banner param (the grid renders `delerr`)."""
+        import urllib.parse
+        sep = "&" if "?" in back else "?"
+        return redirect(back + sep + urllib.parse.urlencode(params))
 
     @app.route("/delete/<media_id>", methods=["POST"])
     def delete_one(media_id):
         back = _safe_back(request.args.get("back")) or url_for("index")
         row = get_row(db_path, media_id)
         if row:
-            purge_media_local(out_dir, thumb_dir, db_path, media_id, row.get("filename"))
+            try:
+                purge_media_local(out_dir, thumb_dir, db_path, media_id, row.get("filename"))
+            except OSError as e:
+                # Nothing was lost (a failed move keeps both the file and its row), but
+                # nothing was deleted either -- say so on the banner instead of redirecting
+                # to a grid that still shows the image with no explanation.
+                return _back_with(back, delerr="could not move the file to the trash "
+                                               "folder, so nothing was deleted: "
+                                               + _redact_host_paths(str(e))[:120])
         return redirect(back)
 
     @app.route("/delete-bulk", methods=["POST"])
@@ -11756,11 +11785,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         to_delete = {mid: get_row(db_path, mid) for mid in media_ids}
         to_delete = {mid: r for mid, r in to_delete.items() if r}
 
+        purged = failed = 0
         for mid, row in to_delete.items():
-            purge_media_local(out_dir, thumb_dir, db_path, mid, row.get("filename"))
+            try:
+                purge_media_local(out_dir, thumb_dir, db_path, mid, row.get("filename"))
+                purged += 1
+            except OSError:
+                failed += 1     # one file the OS won't release must not strand the rest
 
-        if to_delete:
-            telem_bump("culled", len(to_delete), out_dir=out_dir)   # The Great Sweep
+        if purged:
+            telem_bump("culled", purged, out_dir=out_dir)           # The Great Sweep
+        if failed:
+            return _back_with(back, delerr="{} of {} could not be moved to the trash "
+                                           "folder and were left alone".format(
+                                               failed, len(to_delete)))
         return redirect(back)
 
     def _purge_local(media_id, filename):
@@ -11978,10 +12016,20 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     finally:
                         con2.close()
                     for m in media:
-                        _purge_local(m[0], m[1]); removed += 1
+                        try:
+                            _purge_local(m[0], m[1]); removed += 1
+                        except OSError:
+                            # This task's cloud delete has ALREADY fired, so one file the
+                            # OS won't let go of must not take the whole loop down with it:
+                            # every task still queued would be left deleted on PixAI but
+                            # live in the catalog, and nothing would say so.
+                            failed += 1
                     done += 1; _tick()
                 for r in local_only:
-                    _purge_local(r["media_id"], r.get("filename")); removed += 1
+                    try:
+                        _purge_local(r["media_id"], r.get("filename")); removed += 1
+                    except OSError:
+                        failed += 1
                     done += 1; _tick()
                 summary = "Deleted {} · purged {} local · {} failed".format(deleted, removed, failed)
                 # ANY failure is a non-clean result -- surface it RED on the card. Don't bury
