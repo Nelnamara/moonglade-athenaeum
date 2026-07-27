@@ -1142,6 +1142,40 @@ verified 2026-07-26:
 | the slot list | only `branding/marks` and `branding/favicon` appear in code. The panel needs the full set. |
 | the achievement + roast | **the roast already exists** (`:1353`). The metric and trigger do not. |
 
+### ⚠ OPEN: the V3.0 Lite video decline is NOT solved — only made diagnosable
+
+**Do not close this as fixed.** Owner reported (2026-07-26): submitting a video on **V3.0 Lite**
+from the gallery generator declines instantly, nothing appears on PixAI's side, and the error read
+*"PixAI's content filter blocked this generation — that's decided on PixAI's side, not in the
+Loom."* His diagnostic instinct was the useful part: a real denial normally stays visible on their
+account for a while, even for API gens, so nothing appearing there means no task was created.
+
+**What was ruled OUT, by free read-only price probes** (`price_task` takes the same `parameters`
+dict as a submit and spends nothing — four probes, no generation):
+
+| shape | result |
+|---|---|
+| v3.0.2 (V3.0 Lite) · `mode=professional` · 10s — **his exact settings** | priced OK, **18,000** |
+| v3.0.2 · `mode=basic` · 10s | priced OK, 14,000 |
+| v4.0.1 · `mode=professional` · 10s | priced OK, 55,000 |
+| v3.0.2 · `mode` **omitted** · 10s | priced OK, **50,000** |
+
+So the param shape is VALID and PixAI quotes it. An earlier working theory that the label was
+simply lying is **not supported for his case** — the failure happens after the shape check, and a
+prompt-level moderation rejection (which would create no task) remains a live possibility. The
+duration gate found alongside this is NOT his cause either: he was on 10s, not 15s.
+
+**Next step is data, not more theory.** Spend failures now log the raw error and the param shape
+server-side, so ONE retry writes the answer into `<library>/logs/moonglade.log`. Read it there
+before theorising further.
+
+**Banked side finding — an omitted `mode` is the EXPENSIVE default.** Omitting `i2vPro.mode`
+priced at **50,000** against 18,000 for an explicit `professional` — nearly 3×. Anywhere the code
+drops that field to be "safe" is silently choosing the costliest option. `build_shot_video_params`
+always sends it (defaults to `professional`), so this is latent rather than live, but it is a real
+trap for any future caller and for the image path's "omit it and let PixAI pick the default"
+pattern, which is documented as *always safe* — that claim is about VALIDITY, not cost.
+
 ### Similarity index: COMPLETE at 35,106 — and what the 2026-07-26 hard lock taught us
 
 **State: complete.** 35,106 rows, which is exactly the unique-media_id count of the library.

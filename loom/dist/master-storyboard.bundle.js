@@ -305,13 +305,15 @@ var LoomBundle = (() => {
   var parseCastIdsFromSearch = (search) => (search || "").replace(/^\?/, "").split("&").map((kv) => kv.split("=")).filter(([k]) => k === "cast").flatMap(([, v]) => (v || "").split(",")).map((s) => decodeURIComponent(s).trim()).filter((s) => /^\d+$/.test(s));
   function friendlyGenErr(raw) {
     const s = String(raw || "");
+    if (!s) return "generation failed";
+    let hint = "";
     if (/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s))
-      return "Out of balance for this model \u2014 no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.";
-    if (/moderat|content.?policy|flagged|prohibit|sensitive|not.?allowed|violat/i.test(s))
-      return "PixAI's content filter blocked this generation \u2014 that's decided on PixAI's side, not in the Loom.";
-    if (/inferenceProfile/i.test(s))
-      return "That quality setting isn't available for this model \u2014 try Auto instead.";
-    return s || "generation failed";
+      hint = "Out of balance for this model \u2014 no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.";
+    else if (/moderat|content.?polic|flagged|nsfw/i.test(s) || /prohibit|sensitive|not.?allowed|violat/i.test(s) && /content|prompt|polic|guideline|term|image/i.test(s))
+      hint = "PixAI's content filter blocked this generation \u2014 that's decided on PixAI's side, not here.";
+    else if (/inferenceProfile|i2vPro|unknown mode/i.test(s))
+      hint = "That quality setting isn't available for this model \u2014 try a different Mode.";
+    return hint ? hint + " (PixAI said: " + s.slice(0, 160) + ")" : s;
   }
   function classifyTaskStatus(d) {
     if (!d) return { phase: "pending" };
