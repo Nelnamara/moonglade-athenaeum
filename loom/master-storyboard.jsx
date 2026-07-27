@@ -2464,18 +2464,28 @@ function useProjectStore(setSelShot) {
     if (list.length <= 1) { window.alert("This is your only storyboard — make another before deleting this one."); return; }
     const tgt = list.find((x) => x.id === id);
     if (!window.confirm(`Delete "${(tgt && tgt.name) || "this storyboard"}"? This can't be undone.`)) return;
-    // A pending 600ms autosave timer for THIS project can otherwise fire during the
-    // awaits below (sGet/sDel/sSet all hit the network) and re-create the very key
-    // sDel just removed, silently resurrecting a "permanently deleted" board.
-    clearTimeout(saveTimer.current);
     if (id === activeId) {
       // Switch to a survivor WITHOUT flushing the doomed project first — openProject()'s
       // flushSave(activeId) would re-create the very project we're deleting.
       const next = list.find((x) => x.id !== id);
       let p = null; try { const raw = await sGet(PPRE + next.id); if (raw) p = JSON.parse(raw); } catch {}
+      // A survivor that won't read is a hiccup, never an empty board: readProjList()
+      // above only lists keys it just parsed successfully. Opening it as a fresh
+      // seedProject() would hand the 600ms autosave a blank board to write over that
+      // survivor's own key — one dropped read costing TWO storyboards, the second of
+      // which nobody asked to delete. Stop instead: nothing removed, nothing
+      // overwritten, and the delete can simply be retried.
+      if (!p) { window.alert("Couldn't read the next storyboard, so nothing was deleted. Try again."); return; }
+      // A pending 600ms autosave timer for THIS project can otherwise fire during the
+      // awaits below (sDel/sSet both hit the network) and re-create the very key
+      // sDel just removed, silently resurrecting a "permanently deleted" board. The
+      // timer belongs to whichever board is OPEN, so it is only ever cancelled when
+      // the open board is the one being deleted — cancelling it while deleting some
+      // other board would silently discard unsaved edits to the board still on screen.
+      clearTimeout(saveTimer.current);
       await sDel(PPRE + id);
       await sSet(ACTIVE_KEY, next.id);
-      setActiveId(next.id); setProject(p || seedProject()); setSelShot(null);
+      setActiveId(next.id); setProject(p); setSelShot(null);
     } else {
       await sDel(PPRE + id);
     }
