@@ -14411,6 +14411,24 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         from urllib.parse import quote
         return _loom_kv_dir(user) / (quote(str(key), safe="") + ".json")
 
+    def _loom_tomb_path(user, key):
+        """Marks a legacy key this account has DELETED.
+
+        Deleting only ever unlinked the account's own copy, and a board it had merely
+        inherited from the legacy shared layer had no own copy to unlink -- so the delete
+        reported success, the read fell straight back through to the legacy file, and the
+        board came back. Every board predating the per-account split behaved that way:
+        undeletable, with a fresh one deleting perfectly, which is what made it look like
+        the list was showing the same board twice.
+
+        A tombstone rather than deleting the legacy file itself, because that layer is
+        shared and read-only to every account by design -- one account tidying its own
+        board list must not remove a board out from under another. `.deleted` cannot
+        collide with a real key: `quote(safe="")` percent-encodes any dot in a key name.
+        """
+        from urllib.parse import quote
+        return _loom_kv_dir(user) / (quote(str(key), safe="") + ".deleted")
+
     def _loom_kv_write(user, key, value):
         """Atomically persist one key's value into the ACCOUNT'S OWN dir (tmp +
         os.replace). Never writes the legacy shared dir -- that stays exactly as
@@ -14419,6 +14437,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
         tmp.write_text(json.dumps(value), encoding="utf-8")
         os.replace(tmp, p)
+        # Writing a key un-buries it: an own copy now exists, so the tombstone has nothing
+        # left to suppress, and leaving one behind would hide a board that was deliberately
+        # re-created under the same key.
+        try:
+            _loom_tomb_path(user, key).unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
 
     def _loom_kv_read(user, key):
         """This account's value for `key`, falling back read-only to the legacy shared
@@ -14431,6 +14458,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 return json.loads(own.read_text(encoding="utf-8"))
             except (ValueError, OSError):
                 return None
+        if _loom_tomb_path(user, key).exists():
+            return None      # this account deleted it; don't resurrect it from the legacy layer
         try:
             return json.loads(_legacy_loom_kv_path(key).read_text(encoding="utf-8"))
         except (ValueError, OSError):
@@ -14604,7 +14633,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # never omits a board a bare "get" on the same key would still return.
             own_keys = {unquote(f.stem) for f in _loom_kv_dir(user).glob("*.json")}
             legacy_keys = {unquote(f.stem) for f in _legacy_loom_kv_dir().glob("*.json")}
-            keys = own_keys | legacy_keys
+            # Minus anything this account has deleted. Without it a legacy board the
+            # account never saved its own copy of stayed in the list forever: the delete
+            # had nothing of its own to unlink, so it reported success and changed nothing.
+            buried = {unquote(f.stem) for f in _loom_kv_dir(user).glob("*.deleted")}
+            keys = (own_keys | legacy_keys) - buried
         return jsonify({"keys": sorted(k for k in keys if k.startswith(pre))})
 
     @app.route("/api/loom/delete", methods=["POST"])
@@ -14617,14 +14650,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             _loom_migrate()
             if k:
                 # Unlinks only the account's OWN copy, never the legacy shared file --
-                # matches _view_presets: the legacy layer is never written back to.
-                # An account that never saved its own copy of an inherited/shared key
-                # can't make a delete "stick" this way (a later GET still falls through
-                # to the legacy value) -- accepted gap, not a bug: this only bites a
-                # second account deleting a board it never touched itself, which doesn't
-                # happen in the single-owner-plus-occasional-LAN-device use case this
-                # feature was built for. Revisit with a per-key tombstone file if that
-                # ever changes.
+                # matches _view_presets: the legacy layer is never written back to, so one
+                # account tidying its board list cannot remove a board out from under
+                # another.
+                # That alone was not enough. A board the account had merely INHERITED from
+                # the legacy layer has no own copy to unlink, so this reported success and
+                # changed nothing: the next read fell straight back through to the legacy
+                # file and the board returned. Every board predating the per-account split
+                # was undeletable that way, while a freshly created one deleted perfectly
+                # -- which reads as the list showing the same board twice. The gap was
+                # known and judged not to bite a single owner; it does. Hence the tombstone
+                # this comment used to propose.
                 try:
                     _loom_kv_path(user, k).unlink()
                 except FileNotFoundError:
@@ -14635,6 +14671,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     # {"ok": true} came back even though the file is still sitting there --
                     # matches loom_set's own OSError handling just above in this file.
                     return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:120]}), 500
+                # Bury it only when the legacy layer would otherwise hand it straight back.
+                # Fails soft: an unwritable tombstone leaves the old behaviour (the board
+                # reappears), which is exactly what happened before and is not worth
+                # turning a working delete into an error.
+                if _legacy_loom_kv_path(k).exists():
+                    try:
+                        _loom_tomb_path(user, k).write_text("", encoding="utf-8")
+                    except OSError:
+                        pass
         return jsonify({"ok": True})
 
     def _find_local_video_file(mid):
