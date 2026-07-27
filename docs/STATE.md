@@ -27,18 +27,11 @@
 Moonglade Athenaeum is a Python/Flask client for PixAI.art: it backs up the owner's own AI
 generations, serves a local searchable web gallery, generates images and videos through
 PixAI's API, and curates the archive. Two surfaces: the CLI (`moonglade_backup.py`) and
-the web app (`moonglade_gallery.py`). Work happens on the `loom-v2` branch; `master`'s last release
-is **v2.4.0** (2026-07-24 — concurrent generations, a trash/quarantine restore panel,
-field-operator search, real credit-cost tracking, a full unification of the model/image
-pickers across the Loom and the gallery, a data-loss video-corruption bug fixed, the last
-open Privacy Blur security gap closed, and the audit board's Tier 1-5 defect list driven to
-zero open items; full detail in `CHANGELOG.md`'s `[2.4.0]` block). `loom-v2` and `master` are
-in sync as of that release — check
-`git rev-list --count origin/master..origin/loom-v2` for the live count rather than trusting
-a number here, since new work may already have landed on `loom-v2` since. See
-`docs/AUDIT_2026-07-21.md` for what's still open. Each release is a `--no-ff` merge of
-`loom-v2` → `master`, tagged and published as
-a GitHub Release. **The Loom is a single storyboard surface** — the V2 shell. Classic V1 (its render
+the web app (`moonglade_gallery.py`). **`master` is the trunk** — work happens on short-lived
+feature branches merged back with `--no-ff`, then tagged and published as a GitHub Release. The
+long-running `loom-v2` and `naming-pass` branches are both merged and **deleted**; any instruction
+to check one out is out of date (CLAUDE.md carries the same warning). See
+`docs/AUDIT_2026-07-21.md` for what's still open. **The Loom is a single storyboard surface** — the V2 shell. Classic V1 (its render
 tree, the `v2` toggle, and the `CardView`/`CardEditor` components) was retired 2026-07-17; `/loom`
 opens straight into the V2 shell with no layout switch. The repo is public and has real external
 users.
@@ -48,8 +41,8 @@ users.
 | Question | Command |
 |---|---|
 | Test count | `python -m pytest` from the repo root (add `--ignore=tests/test_similar.py` when pixeltable isn't installed); the Loom's pure-logic suite is `node --test` from `loom/` |
-| Current version | `grep __version__ moonglade_backup.py` |
-| How far `loom-v2` leads `master` | `git rev-list --count origin/master..origin/loom-v2` |
+| Current version | `grep __version__ moonglade_backup.py`, or `git describe --tags --abbrev=0` |
+| Whether local `master` is pushed | `git rev-list --count origin/master..master` (0 = in sync) |
 | Which tags have a GitHub Release | `gh release list` against `git tag` |
 | Whether the C: repo and the D: run-copy agree | `git log -1` in each |
 
@@ -1748,6 +1741,57 @@ waiting; the "together" grouping still applies to what's left below.
   list.)
 
 ---
+
+## ✅ DECIDED 2026-07-26 (owner, working the triage board) — stop asking about these
+
+**1. Frames: only Feats keep them.** No Epic-tier frame art, and the **Legendary** per-tile frames
+are being **dropped** too. Owner's reasoning: only a Feat is "truly opening a new tier", so only
+Feats carry special framing. This closes the long-running epic-frame question by removing the
+premise rather than answering it — and it means `mg-notify.js`'s framed-tile logic needs the
+legendary branch taken OUT, not an epic branch added. `docs/ART.md`'s frame guidance needs the
+same correction.
+
+**2. The default bundle is settled.** **Moonglade** is the default shipping skin, **Void Sentinel**
+the default icon, and the **current banner** the default banner — all free, all ungated.
+
+**3. Nightfallen becomes gated.** It is `free: True` today only because the plan had not landed.
+It gates behind the **Night Keeper** achievement, and the **Moonwell Eclipse** icon gates *with*
+it — one bundle, two pieces, one achievement. This answers the open "should Nightfallen stay free"
+tension directly.
+
+**4. Not every achievement gets a reward.** Owner, verbatim: *"We don't give a reward for every
+fucking one."* So the 53-blank "gap" was never a gap to fill — the reward-assignment work is
+choosing WHICH achievements carry a reward, not populating all 57. **What he actually needs first
+is the list of what is currently PROMISED** (existing `skin` / `banner_reward` values plus anything
+the UI already tells a user they will get), so the promises can be honoured before anything new is
+assigned.
+
+**5. The empty branding folders wait on the packaged-assets discussion.** Sequence is: bundle the
+default assets first, and *then* the empty slot folders are ungated. So the "Under the Hood"
+trigger redesign is BLOCKED on packaged assets, not on a trigger decision.
+
+**6. Gallery search / front-end real estate — a real spec, not just a note.** The left of the
+gallery screen is largely unused, and the filter controls are buried under the far-right **More**
+link. Wanted:
+- Move **search up with the main controls**, or another obvious place.
+- An **advanced-search affordance on the search field itself**, opening either the left panel or
+  (preferred) a **small floating pop-up panel** carrying the deeper options: **Search prompt,
+  Media, Collection, Sort, per page**.
+- **Filter and Reset must stay** reachable on the same page for convenience.
+- **Thumb size moves into Deep Focus.**
+- Owner explicitly wants **design inspiration** here — this is the one item on the board he asked
+  for options on rather than a decision from.
+
+**7. The 57-vs-60 gap is still open, and that is fine.** Owner: *"Don't rush me LOL. We are
+thinking."* Do not re-ask.
+
+**8. Generation Flags was scoped 2026-07-26 and the results are recovered.** A 76-record agent
+survey: **38 already possible today**, 18 small additions, 9 needing a new dependency, 11 not
+feasible. Headline findings worth not re-deriving: the **aesthetic-score flag is already built end
+to end and 0% populated**; ~**54%** of the library is already-known near-duplicates answerable in
+plain SQL; **43,072 CLIP vectors** already exist on disk as raw material; **bad hands / anatomy
+errors is not feasible** and zero-shot CLIP NSFW scoring was measured and fails. Recovered from
+workflow `wf_8cba73eb-ff2`; full records saved alongside this pass.
 
 ## Open owner calls
 
