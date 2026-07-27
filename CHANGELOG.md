@@ -30,6 +30,63 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Generations stopped working the day a membership lapsed.** Every submit carried
+  `priority: 500`, described in the code as the cheap standard tier. It is not: 500 is PixAI's
+  **Turbo** channel, which is members-only. That is invisible while a membership is live — it
+  simply runs fast and free — and the moment it lapses PixAI refuses *every* create path at
+  once ("Only member can use turbo mode"). Their own client never hits this because it
+  downgrades Turbo to standard for a non-member before submitting; Moonglade now corrects from
+  the other end, resubmitting at standard speed on that specific refusal and remembering, so
+  only the first generation of a session pays for the discovery. High priority is never
+  downgraded — that one is chosen deliberately and costs credits. The tier names were also
+  backwards in the code and the wiki: **1000 is High (costs extra), 500 is Turbo (free, members
+  only), 0 is standard.**
+- **Upscale refused pictures that plainly had a model.** The catalog stores a model *version*
+  id (it comes from the task's own `modelId`), but the panel sent it in the field for model
+  ids, so the server resolved it against nothing and answered "pick a model first". Separately,
+  having no recorded model at all was treated as a hard stop — every locally imported file had
+  a dead Go button, with the picker the only way out and no way at all if the picker failed to
+  render. PixAI's own upscale dialog has no model control; this now falls back to the same
+  model theirs submits, and the picker stays as an override.
+- **Deleting a storyboard could blank a different one,** and storyboards inherited from the
+  pre-per-account store could not be deleted at all — the delete unlinked only an account's own
+  copy, so a board it had merely inherited came straight back on the next read. Deletes are now
+  recorded per-account, and the shared layer is still never written to.
+- **The similarity index could build completely empty.** Its folder exclusions matched every
+  ancestor up to the drive root, so a library living under any folder named `gallery`,
+  `_duplicates` or `_deleted` — e.g. `D:\Photos\Gallery\pixai_backup` — skipped every image
+  with no error and nothing indexed.
+- **Imported files could silently vanish.** Two different pictures sharing a filename meant the
+  second was never stored while still being counted as imported. Imports are now content-
+  addressed (`<name>_local_<hash>.<ext>`, matching the id-last convention backed-up files use),
+  so a name collision is no longer an identity collision; existing imports migrate on the next
+  run, carrying their rating, collections and title across.
+- **`--sync-videos` wiped curation on every run,** rebuilding each video's row from a blank
+  template instead of merging, which erased ratings, collections, titles, tags and published
+  flags. Plain image-to-video generations were also catalogued with a blank prompt and duration,
+  because only the multi-reference parameter block was ever read.
+- **Read-only mode did not apply to a running server.** It was read once at startup, so turning
+  the safety catch on while the gallery was up changed nothing for that process — against what
+  the Trust & Safety page promises. Turning it on now takes effect immediately; turning it off
+  still wants a restart, which is the direction worth being slow in.
+- **Stop and Restart orphaned a running maintenance job.** The Panel already greys both buttons
+  while a job runs, but the routes did not know that, so a stale tab could still post past them
+  and `os._exit` left the job's subprocess running unsupervised — worst case a half-finished
+  `dedup --delete`. Both now refuse with the same 409 the Panel already implies.
+- **Two reflected-XSS holes and a set of open redirects** on the image detail page, the
+  printable contact sheet, and the delete/collection redirect targets.
+- **Deleting a picture could clear its catalog row while leaving the file behind** when the move
+  to `_deleted/` failed (a locked file, or a library on another volume), making it invisible to
+  both the gallery and the Trash panel — against the recoverability the Deleting page promises.
+- Assorted: a right-click during select-mode silently toggled selection (and that selection is
+  what "Delete from PixAI" acts on); the Fix dialog could quote a price for a different set of
+  marked boxes; a video selected then scrolled out of view slipped into image-only sends; the
+  Edit and Generate tabs shared one debounce timer; a failed shot in the Loom sat at "wip"
+  forever and was skipped by every later batch; a stalled job never raised a toast; restoring an
+  older quarantined video came back as a broken image; saving a new API key did nothing until
+  restart; a disk error during download silently dropped the file; and `--collect-only` counted
+  pages instead of tasks, overshooting `--max`.
+
 - **The live mirror now catches up on anything it missed instead of losing it.** It watches a
   live push feed, which means it only ever sees what finishes *while it is connected* — and
   reconnecting never went back for the gap. So a dropped socket, a stale connection or an app
