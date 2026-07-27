@@ -213,19 +213,32 @@ export const parseCastIdsFromSearch = (search) =>
 
 // Turn a raw gen error (esp. PixAI's GraphQL "insufficient balance") into a human message.
 export function friendlyGenErr(raw) {
-  const s = String(raw || "");
-  if (/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s))
-    return "Out of balance for this model — no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.";
-  if (/moderat|content.?policy|flagged|prohibit|sensitive|not.?allowed|violat/i.test(s))
-    return "PixAI's content filter blocked this generation — that's decided on PixAI's side, not in the Loom.";
-  // inferenceProfile (the Mode quality setting) is model-type-specific -- PixAI rejects
-  // an unsupported value outright ('unknown inferenceProfile "ultra" for model type
-  // "SDXL_MODEL"'). submit_generation() on the server now retries this automatically
-  // (drops the mode, resubmits on the model's default), so this is a backstop for
-  // whatever slips past that -- not the primary fix. Found live 2026-07-24.
-  if (/inferenceProfile/i.test(s))
-    return "That quality setting isn't available for this model — try Auto instead.";
-  return s || "generation failed";
+  // A friendly label NEVER replaces the raw text -- it is APPENDED. 2026-07-26: a video
+  // decline read "PixAI's content filter blocked this generation" while PixAI had created no
+  // task at all, and the real cause was unrecoverable because this function discarded the raw
+  // string (and no route logged it either). Guidance AND ground truth, always.
+  //
+  // The moderation test deliberately does NOT fire on a bare "not allowed" / "violates" /
+  // "sensitive" / "prohibited": those are ordinary words in PARAMETER rejections, and matching
+  // them relabelled a validation error as a content-filter block -- which sends someone off to
+  // rewrite a prompt that was never the problem. They now need a content-ish noun beside them.
+  // Falling through to the raw text is safe; mislabelling is not.
+  //
+  // i2vPro is in the quality branch because VIDEO's quality field is `i2vPro.mode`, not
+  // `inferenceProfile` -- so before this, the one message written to explain a quality mismatch
+  // could never fire for a video error, and it fell into the moderation test instead.
+    const s = String(raw || '');
+    if (!s) return 'generation failed';
+    let hint = '';
+    if (/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s))
+      hint = 'Out of balance for this model — no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.';
+    else if (/moderat|content.?polic|flagged|nsfw/i.test(s)
+      || (/prohibit|sensitive|not.?allowed|violat/i.test(s)
+          && /content|prompt|polic|guideline|term|image/i.test(s)))
+      hint = "PixAI's content filter blocked this generation — that's decided on PixAI's side, not here.";
+    else if (/inferenceProfile|i2vPro|unknown mode/i.test(s))
+      hint = "That quality setting isn't available for this model — try a different Mode.";
+    return hint ? hint + ' (PixAI said: ' + s.slice(0, 160) + ')' : s;
 }
 
 // Classify a /api/task-status response the same way pollShot/pollImg/runGen's
