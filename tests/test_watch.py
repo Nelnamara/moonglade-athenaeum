@@ -239,3 +239,56 @@ def test_mirror_and_reconcile_agree_on_what_done_means():
     # And the constant it now shares really is the broader set.
     assert core._WS_DONE_STATUS in core._GEN_DONE
     assert len(core._GEN_DONE) > 1
+
+
+def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
+    """The mirror back-fills what it missed while disconnected, and does so safely.
+
+    A push mirror is blind whenever its socket is down, and reconnecting does not replay the gap
+    -- so before this, a drop stranded those generations until someone ran a manual sync. The
+    owner's objection was the right one: he should not have to press a button for it.
+
+    But this is UNATTENDED network activity on his machine, so the guardrails matter as much as
+    the feature. Pinned at source level because _watch_catchup is a closure inside create_app,
+    invoked only from a background thread the test suite deliberately never starts
+    (MOONGLADE_DISABLE_WATCH) -- there is no seam to call it through without refactoring the
+    watcher, and a guard on the intent beats no guard."""
+    import pathlib as _p
+    src = _p.Path(__file__).resolve().parent.parent / "moonglade_gallery.py"
+    text = src.read_text(encoding="utf-8")
+
+    assert "def _watch_catchup(reason):" in text
+
+    i = text.index("def _watch_catchup(reason):")
+    body = text[i:i + 3200]
+
+    # Bounded: one page, never a history walk.
+    assert "WATCH_CATCHUP_TASKS = 30" in text
+    assert "core.page_variables(WATCH_CATCHUP_TASKS)" in body
+
+    # Rate-limited: a reconnect storm must not become a request storm.
+    assert "WATCH_CATCHUP_MIN_GAP" in body and "_catchup_at" in body
+
+    # Only collects what is genuinely absent -- re-collecting present media is pure waste.
+    assert "if all(get_row(db_path, m) for m in mids):" in body
+
+    # Paced, so it stays polite to PixAI's servers.
+    assert "_time.sleep(1.0)" in body
+
+    # Cannot kill the watcher thread that calls it.
+    assert "except Exception as e:" in body
+
+    # Only finished tasks are candidates.
+    assert "core._GEN_DONE" in body
+
+    # And it is invoked OFF the WebSocket event loop, at both trigger points.
+    assert 'threading.Thread(target=_watch_catchup, args=("startup",), daemon=True).start()' in text
+    assert 'threading.Thread(target=_watch_catchup, args=("reconnect",),' in text
+
+
+def test_catchup_does_not_run_in_the_test_suite():
+    """Belt and braces: the sweep must never fire during tests, or the suite would hit PixAI with
+    whatever real credentials are on the machine. It is reachable only from the watcher thread,
+    which conftest disables via MOONGLADE_DISABLE_WATCH."""
+    import os
+    assert os.environ.get("MOONGLADE_DISABLE_WATCH") == "1"
