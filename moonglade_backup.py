@@ -703,6 +703,35 @@ _cfg = _load_config()
 # account" would be a different, weaker promise than the one this flag makes.
 READ_ONLY = bool(_cfg.get("READ_ONLY", False))
 
+# Cached view of what config.json says RIGHT NOW, refreshed only when the file's
+# (mtime, size) stamp changes -- see _read_only_now().
+_read_only_state = {"stamp": None, "value": None}
+
+
+def _read_only_now():
+    """READ_ONLY as config.json holds it at THIS moment, not as it was at import.
+
+    The module-level READ_ONLY above is an import-time snapshot, and the gallery
+    server is a process that stays up for days: flipping the switch on in
+    config.json did nothing to a running server, which kept spending credits and
+    deleting for its whole lifetime. The Trust & Safety wiki page presents this
+    flag as the thing standing between the tool and the account, so a snapshot
+    that can't be turned on is a safety promise the code doesn't keep.
+
+    Re-reading is gated on the file's stat stamp because _check_read_only() sits
+    on every credit-spending path: an unchanged config costs one stat(), not a
+    JSON parse. If the file can't be stat'd (no config.json at all -- --help and
+    the offline modes run without one) the import-time snapshot stands."""
+    try:
+        st = os.stat(_config_path())
+        stamp = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return READ_ONLY
+    if _read_only_state["stamp"] != stamp:
+        _read_only_state["value"] = bool(_load_config().get("READ_ONLY", False))
+        _read_only_state["stamp"] = stamp
+    return _read_only_state["value"]
+
 
 def _check_read_only(action):
     """Called at the top of every branch that actually fires an account-mutating
@@ -735,8 +764,13 @@ def _check_read_only(action):
     of the four actions CLAUDE.md's contract lists (submit a generation, submit a fix,
     delete a task, claim a reward). Whether READ_ONLY should also block a free upload
     is an open question, tracked in docs/AUDIT_2026-07-21.md, not resolved by this
-    docstring."""
-    if READ_ONLY:
+    docstring.
+
+    Both the import-time snapshot AND the live file are consulted, and EITHER one
+    being set refuses the call. Turning the switch ON therefore takes effect on a
+    server that is already running; turning it OFF still needs a restart, which is
+    the direction it is safe to be slow in."""
+    if READ_ONLY or _read_only_now():
         raise PixAIError(
             "READ_ONLY is set in config.json -- refusing to {}. "
             "Remove it (or set it to false) to allow this.".format(action))
@@ -1435,6 +1469,103 @@ def build_stem_name(prompt_preview, task_id, media_id, max_len, sep="_"):
 _FIX_TAGS = ("face", "hand")
 
 
+def local_media_id(path):
+    """Content-addressed id for an imported (non-PixAI) file: local_<12 hex>.
+
+    Derived from the file's BYTES. The id used to be a hash of the file's PATH, which
+    let the name decide the identity -- two different pictures both landing on
+    `imported/image.png` collided on the catalog row as well as on disk, and one of
+    them was silently never stored. Hashing content makes that collision impossible,
+    and makes the same picture imported twice from two folders recognisable as one
+    picture instead of two. Returns None when the file can't be read."""
+    h = _file_sha(path)
+    return ("local_" + h[:12]) if h else None
+
+
+_LOCAL_SUFFIX_RE = re.compile(r"(?:_local_[0-9a-f]{12})+$")
+
+
+def build_local_name(path, mid):
+    """<readable-stem>_<media_id><ext> -- build_stem_name()'s counterpart for a file
+    with no PixAI task behind it, keeping that convention's load-bearing half: the id
+    goes LAST, so anything that matches on a trailing _<media_id> treats an imported
+    file exactly like a backed-up one.
+
+    Any id already on the stem is stripped first, which is what makes this safe to run
+    over its own output: without it a second pass slugs `image_local_ab12` and produces
+    `image_local_ab12_local_ab12`, growing the name on every run."""
+    slug = slug_from_prompt(_LOCAL_SUFFIX_RE.sub("", path.stem), 60)
+    ext = path.suffix.lower()
+    return "{}_{}{}".format(slug, mid, ext) if slug else "{}{}".format(mid, ext)
+
+
+def migrate_local_filenames(out, db_path, thumb_dir):
+    """Bring already-imported files onto the content-addressed scheme, so the library
+    carries ONE naming convention rather than two. Returns (renamed, skipped).
+
+    Curation rides along: the entire row is carried over and only media_id/filename
+    change, so ratings, collections, titles and tags survive. The thumbnail is named
+    after the media id, so it is renamed in step -- otherwise every migrated file
+    would quietly lose its thumbnail and regenerate as a placeholder.
+
+    Deliberately never deletes: a destination that already exists holds the same
+    content (the name contains the content hash), so the row is left exactly as it
+    is for a human to look at rather than resolved by removing one of them."""
+    from moonglade_gallery import delete_from_catalog
+    out = Path(out)
+    thumb_dir = Path(thumb_dir)
+    renamed = skipped = 0
+    for r in load_catalog(db_path):
+        if (r.get("source") or "") != "local":
+            continue
+        rel = (r.get("filename") or "").replace("\\", "/")
+        # imported/ ONLY -- that folder holds files the importer itself copied in, so
+        # their names are ours to choose. A file the owner dropped into videos/ or
+        # anywhere else under the backup was named by him and is merely CATALOGUED in
+        # place (run_import_local's in-place mode never moves anything); renaming those
+        # would be this tool reaching into files it did not put there.
+        if not rel.startswith("imported/"):
+            continue
+        src = out / rel
+        if not src.exists():
+            continue
+        new_mid = local_media_id(src)
+        if not new_mid:
+            skipped += 1
+            continue
+        new_name = build_local_name(src, new_mid)
+        old_mid = r.get("media_id") or ""
+        if src.name == new_name and old_mid == new_mid:
+            continue                                  # already on the new scheme
+        dest = src.with_name(new_name)
+        if dest != src:
+            if dest.exists():
+                skipped += 1                          # same content already there
+                continue
+            try:
+                src.replace(dest)
+            except OSError:
+                skipped += 1                          # locked right now; next run gets it
+                continue
+        # Row first, old row second: a crash between them leaves a stale extra row
+        # (visible, fixable) rather than no row at all for a file that just moved.
+        row = dict(r)
+        row["media_id"] = new_mid
+        row["filename"] = str(dest.relative_to(out)).replace("\\", "/")
+        save_catalog(db_path, [row])
+        if old_mid and old_mid != new_mid:
+            delete_from_catalog(db_path, old_mid)
+            old_thumb = thumb_dir / "{}.jpg".format(old_mid)
+            if old_thumb.exists():
+                try:
+                    old_thumb.replace(thumb_dir / "{}.jpg".format(new_mid))
+                except OSError:
+                    pass                              # regenerable; not worth failing over
+        renamed += 1
+        vlog("renamed import {} -> {}".format(rel, row["filename"]))
+    return renamed, skipped
+
+
 def fixer_block(task):
     """`parameters.chat.fixer` when this getTaskById task is a hand/face Fix, else None.
 
@@ -1646,13 +1777,23 @@ def embed_metadata(path, fields):
     PNG -> text chunks (lossless re-save). JPEG -> EXIF ImageDescription with
     quality='keep' (no recompression). WebP and others -> skipped ('unsupported').
     Returns a short status note. Never raises.
-    """
+
+    The re-save goes to a same-directory temp and is then renamed over the original
+    through _atomic_replace(), like every other on-disk writer here. Writing back
+    over the source directly meant a crash, a power loss or a full disk partway
+    through left a truncated image and NO original to fall back on -- this file is
+    the backup, so an in-place rewrite is the one copy of the picture. The temp
+    name ends in .part so the resume/organize scans that already ignore .part
+    leftovers never mistake one for a finished download."""
     try:
         from PIL import Image, PngImagePlugin
     except ImportError:
         return "pillow-missing"
     ext = path.suffix.lower()
+    if ext not in (".png", ".jpg", ".jpeg"):
+        return "unsupported"
     pairs = [(str(k), str(v)) for k, v in fields.items() if v not in (None, "")]
+    tmp = path.with_name("{}.meta-{}.part".format(path.name, os.getpid()))
     try:
         if ext == ".png":
             with Image.open(path) as im:
@@ -1660,18 +1801,22 @@ def embed_metadata(path, fields):
                 meta = PngImagePlugin.PngInfo()
                 for k, v in pairs:
                     meta.add_text(k, v)
-                im.save(path, "PNG", pnginfo=meta, optimize=True)
-            return "ok"
-        if ext in (".jpg", ".jpeg"):
+                im.save(tmp, "PNG", pnginfo=meta, optimize=True)
+        else:
             with Image.open(path) as im:
                 im.load()
                 exif = im.getexif()
                 desc = "; ".join("{}={}".format(k, v) for k, v in pairs)
                 exif[0x010E] = desc[:1500]  # ImageDescription
-                im.save(path, "JPEG", quality="keep", exif=exif)
-            return "ok"
-        return "unsupported"
+                im.save(tmp, "JPEG", quality="keep", exif=exif)
+        _atomic_replace(tmp, path)
+        return "ok"
     except Exception as e:
+        try:
+            if tmp.exists():
+                tmp.unlink()   # the temp is unique to THIS call -- only ever our own leftover
+        except OSError:
+            pass
         return "error: {}".format(str(e)[:60])
 
 
@@ -4163,6 +4308,12 @@ def run_sync_videos(args):
     (is_video=1) with the still frame as its poster."""
     out = Path(args.out)
     db_path = _ensure_db(out)
+    # Pre-pass snapshot of the existing rows, keyed by media_id: the rows built
+    # below start from an all-blank CATALOG_FIELDS template, so upserting them raw
+    # blanked every locally-owned column (rating, collections, art_tags, title,
+    # is_published, aes_score, blurhash) on EVERY re-run of this sync. Merged back
+    # at save time via carry_local_fields, the same way the download passes do.
+    known = {r["media_id"]: r for r in load_catalog(db_path) if r.get("media_id")}
     session = _make_session(getattr(args, "token", None))
     vdir = out / "videos"
     workers = max(1, getattr(args, "workers", 1) or 1)
@@ -4285,7 +4436,7 @@ def run_sync_videos(args):
             elif item == "missing":
                 missing += 1
     if new_rows:
-        save_catalog(db_path, new_rows)
+        save_catalog(db_path, [carry_local_fields(r, known) for r in new_rows])
     print("Videos saved/present: {}{}.".format(
         ok, " | {} had no resolvable file url".format(missing) if missing else ""))
     return {"i2v_tasks": len(i2v_nodes), "videos": ok}
@@ -4439,7 +4590,6 @@ def run_import_local(args):
     Idempotent: files already cataloged (by relative path) are skipped, so it's
     safe to re-run. Images get a gallery thumbnail; videos play via the catalog
     filename (no still to thumbnail, so they show a placeholder + the video badge)."""
-    import hashlib
     import shutil
     from moonglade_gallery import make_thumbnail
     out = Path(args.out)
@@ -4505,17 +4655,38 @@ def run_import_local(args):
         if external:
             dest_dir = out / ("videos" if is_vid else "imported")
             dest_dir.mkdir(parents=True, exist_ok=True)
-            dest = dest_dir / p.name
+            mid = local_media_id(p)
+            if not mid:
+                skipped += 1              # unreadable source; nothing to copy or key on
+                continue
+            # Decided BEFORE the copy, not after: the id comes from the source's own
+            # bytes, so content already in the library can be recognised without
+            # writing anything. Copying first and skipping later left the file sitting
+            # in imported/ with no row pointing at it.
+            if mid in existing_mids:
+                skipped += 1
+                continue
+            # The stored name ends in the CONTENT hash, so a destination that already
+            # exists holds the same bytes -- there is nothing to overwrite and nothing
+            # to lose. Naming by basename alone silently threw away the second of two
+            # different files that happened to share a name (image.png / 00001.png out
+            # of separate folders is ordinary, not a corner case) while still counting
+            # it as imported, so the loss only surfaced once the original was gone.
+            dest = dest_dir / build_local_name(p, mid)
             if not dest.exists():
                 shutil.copy2(p, dest)
             stored = dest
         else:
             stored = p
+            mid = local_media_id(stored)
+            if not mid:
+                skipped += 1
+                continue
         rel = str(stored.relative_to(out)).replace("\\", "/")
-        if rel in existing or media_id_of(stored) in existing_mids:
-            skipped += 1                  # already cataloged (by path OR PixAI media id)
+        if rel in existing or mid in existing_mids or media_id_of(stored) in existing_mids:
+            skipped += 1                  # already cataloged (by path, content, or PixAI id)
             continue
-        mid = "local_" + hashlib.sha1(rel.encode("utf-8")).hexdigest()[:12]
+        existing_mids.add(mid)            # two sources, one content: catalog it once
         try:
             created = time.strftime("%Y-%m-%dT%H:%M:%S",
                                     time.localtime(stored.stat().st_mtime))
@@ -4541,6 +4712,15 @@ def run_import_local(args):
         save_catalog(db_path, rows)
     print("Imported {} new local file(s){}; {} already cataloged.".format(
         made, " (copied into the backup)" if external else "", skipped))
+    # Anything imported before content-addressing came in still carries its original
+    # basename and a path-derived id. Bring those onto the same scheme here rather
+    # than leaving the library split across two conventions.
+    migrated, mig_skipped = migrate_local_filenames(out, db_path, thumb_dir)
+    if migrated or mig_skipped:
+        print("Renamed {} earlier import(s) to the current naming{}.".format(
+            migrated,
+            "; {} left alone (locked or already present)".format(mig_skipped)
+            if mig_skipped else ""))
     # media_ids of the rows created THIS run -- the web importer uses them to tag an
     # optional collection; CLI callers that only read imported/skipped are unaffected.
     return {"imported": made, "skipped": skipped,
