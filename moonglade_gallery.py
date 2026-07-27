@@ -3918,6 +3918,14 @@ def create_app(out_dir: Path):
         threading.Thread(target=_panel_reader, args=(proc,), daemon=True).start()
         return True
 
+    def _job_busy():
+        """The running job's label, or "" when the slot is free -- the server-side half of
+        the rule the Panel already draws (Stop and Restart carry class 'jobbtn', which
+        poll() disables while a job runs). Returned as a label rather than a bool so the
+        refusal can name what is in the way."""
+        with _panel_lock:
+            return _panel_job["label"] if _panel_job["status"] == "running" else ""
+
     # ---- Automated tasks: run a SAFE job on an interval while the app is open ----
     # Persisted to out_dir/schedule.json. Only non-destructive actions are schedulable.
     # An in-process daemon: fires while the gallery is running (it is NOT an OS-level
@@ -7286,6 +7294,25 @@ var Setup = (function(){
     msg('setup-sync-msg', text, 'err');
     if(syncBtn) syncBtn.disabled=false;
   }
+  // "See the Panel for details" is no help HERE: this is the one screen a brand-new user
+  // can reach, and it is the first thing they ever do. /api/panel/status already carries
+  // the job's own stdout and its exit code, so the reason gets said on the spot rather
+  // than sending someone who has not finished setting up off to find it. msg() assigns
+  // textContent, so the subprocess's output cannot inject markup on the way through.
+  function syncReason(d){
+    var lines=(d&&d.lines)||[];
+    var rc=(d&&d.rc!=null)?(' (exit '+d.rc+')'):'';
+    // A non-loopback caller gets one placeholder line instead of the real output.
+    if(lines.length===1 && String(lines[0]).indexOf('only on the server')!==-1){
+      return 'Sync failed'+rc+' \\u2014 open Moonglade on the server itself to see why.';
+    }
+    var tail=[];
+    for(var i=lines.length-1;i>=0 && tail.length<3;i--){
+      var t=String(lines[i]||'').trim(); if(t) tail.unshift(t);
+    }
+    return tail.length ? ('Sync failed'+rc+': '+tail.join(' \\u00b7 '))
+                       : ('Sync failed'+rc+' \\u2014 the job ended without printing a reason.');
+  }
   function firstSync(){
     var btn=event&&event.target; if(btn) syncBtn=btn;
     if(syncBtn) syncBtn.disabled=true;
@@ -7306,7 +7333,7 @@ var Setup = (function(){
         return;
       }
       clearInterval(poll); poll=null;
-      if(d.status==='failed'){ syncFailed('Sync failed \\u2014 see the Panel for details.'); return; }
+      if(d.status==='failed'){ syncFailed(syncReason(d)); return; }
       msg('setup-sync-msg','Done! Reloading\\u2026','ok');
       setTimeout(function(){ location.reload(); },900);
     }).catch(function(){
@@ -11166,7 +11193,19 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/api/server/stop", methods=["POST"])
     def api_server_stop():
         """Shut the server down cleanly from the browser (Homebridge-style) instead of Task
-        Manager. Login required (any session, local or LAN). Under the managed launcher this ends the whole app."""
+        Manager. Login required (any session, local or LAN). Under the managed launcher this ends the whole app.
+
+        Refused while a maintenance job is running, because os._exit kills only THIS
+        process: the job's subprocess would outlive it, still walking the library with
+        nothing reading its output and nothing able to cancel it. The Panel already says
+        so -- Stop and Restart carry class 'jobbtn', which poll() disables for the life of
+        a job -- but that is the browser's copy of the rule, and a tab loaded before the
+        job started (or a second tab) still has live buttons. This is the same rule, kept
+        where it cannot be bypassed. Cancel the job first; that is what it is for."""
+        busy = _job_busy()
+        if busy:
+            return jsonify({"error": "\"{}\" is still running — stop that job first "
+                                     "(the server can't shut down while it works).".format(busy)}), 409
         _schedule_server_exit(0)
         return jsonify({"ok": True, "action": "stop"})
 
@@ -11253,6 +11292,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if not _supervised():
             return jsonify({"error": "Restart needs the managed launcher — start via "
                                      "'Serve Gallery'. (Stop still works.)"}), 409
+        busy = _job_busy()                       # same rule as Stop -- see api_server_stop
+        if busy:
+            return jsonify({"error": "\"{}\" is still running — stop that job first "
+                                     "(the server can't restart while it works).".format(busy)}), 409
         _schedule_server_exit(42)
         return jsonify({"ok": True, "action": "restart"})
 
