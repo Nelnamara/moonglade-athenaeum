@@ -258,9 +258,15 @@ def scan_dir(root, cap=None):
     image never gets (re-)embedded into the similarity index."""
     exts = {".png", ".jpg", ".jpeg", ".webp"}
     excluded_dirs = {"gallery", "_duplicates", "_deleted"}
+    root = Path(root)
     n = 0
-    for p in Path(root).rglob("*"):
-        if p.suffix.lower() in exts and not excluded_dirs & {q.lower() for q in p.parts}:
+    for p in root.rglob("*"):
+        # Match the exclusion against the path UNDER root only. Path.parts walks all the way up
+        # to the drive root, so testing the whole path let an ANCESTOR folder that happens to
+        # share one of these names -- a library living at D:\Photos\Gallery\pixai_backup -- skip
+        # every image in the library: the index then built EMPTY, with no error, just nothing
+        # indexed.
+        if p.suffix.lower() in exts and not excluded_dirs & {q.lower() for q in p.relative_to(root).parts}:
             yield (p.stem.split("_")[-1], p)
             n += 1
             if cap and n >= cap:

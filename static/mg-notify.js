@@ -1387,7 +1387,14 @@
       }
     }
     function toastTransitions(jobs){
-      var TERMINAL = {done:1, failed:1, done_with_errors:1};
+      // `stale` toasts alongside the real terminal statuses even though the server keeps it
+      // OUT of its own terminal set on purpose (resolve_orphan_jobs, so a later sweep can
+      // still resolve the job for real). It is written for a generation PixAI accepted and
+      // never dispatched, or one stuck so long we can no longer reach PixAI to ask -- and a
+      // job in that state stops counting as running, so the busy dot and the badge both go
+      // quiet. Leaving it out here meant the one outcome nobody can see coming was also the
+      // only one that arrived in silence: five unstarted generations died unnoticed that way.
+      var TERMINAL = {done:1, failed:1, done_with_errors:1, stale:1};
       jobs.forEach(function(j){
         var st=j.status||'running', prev=last[j.job_id];
         if(seeded && !TERMINAL[prev] && TERMINAL[st]){
@@ -1398,6 +1405,12 @@
           } else if(st==='done_with_errors'){
             Toast.show({kind:'err', sticky:true, title:(j.label||'Job')+' finished with errors',
                         msg:j.error||'Some files failed — see the activity card.'});
+          } else if(st==='stale'){
+            // Deliberately not worded as a failure -- nothing reported one. The server writes
+            // the message that says WHICH stall it is (never dispatched vs. unreachable), so
+            // pass it through; sticky, like the other outcomes that need a human to go look.
+            Toast.show({kind:'err', sticky:true, title:(j.label||'Job')+' — stalled',
+                        msg:j.error||'See the activity card.'});
           } else {
             Toast.show({kind:'err', sticky:true, title:(j.label||'Job')+' failed', msg:j.error||'See the activity card.'});
           }
