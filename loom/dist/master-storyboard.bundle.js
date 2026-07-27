@@ -2629,15 +2629,21 @@ ${"=".repeat(48)}
       const tgt = list.find((x) => x.id === id);
       if (!window.confirm(`Delete "${tgt && tgt.name || "this storyboard"}"? This can't be undone.`)) return;
       if (id === activeId) {
-        const next = list.find((x) => x.id !== id);
-        let p = null;
-        try {
-          const raw = await sGet(PPRE + next.id);
-          if (raw) p = JSON.parse(raw);
-        } catch {
+        let next = null, p = null;
+        for (const cand of list) {
+          if (cand.id === id) continue;
+          try {
+            const raw = await sGet(PPRE + cand.id);
+            if (raw) {
+              p = JSON.parse(raw);
+              next = cand;
+              break;
+            }
+          } catch {
+          }
         }
         if (!p) {
-          window.alert("Couldn't read the next storyboard, so nothing was deleted. Try again.");
+          window.alert("Couldn't open another storyboard, so nothing was deleted. Try again.");
           return;
         }
         clearTimeout(saveTimer.current);

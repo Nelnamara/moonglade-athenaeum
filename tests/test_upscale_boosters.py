@@ -598,3 +598,84 @@ def test_model_type_filter_mapping_is_measured_not_guessed():
             continue
         assert token in core.LORA_BASE_MODEL_TYPES, \
             "{} maps to {}, which is not on the send whitelist".format(label, token)
+
+
+def test_upscale_works_without_a_recorded_model(monkeypatch, tmp_path):
+    """An image whose model the catalog never recorded must still be upscalable.
+
+    PixAI's own upscale dialog has NO model control -- their submit sets a fixed modelId
+    and takes prompts/width/height off the source's original task. This app invented the
+    requirement, and it made every locally imported file (and anything predating a full
+    meta sweep) impossible to upscale: Go stayed dead behind "pick a model first", and if
+    the picker failed to render there was no way to satisfy it at all.
+
+    The fallback is a model VERSION id, so it must travel as `version_id`. Sent as
+    `model_id` it enters the model->versions lookup, matches nothing, and comes back
+    "pick a model first" -- the very error it exists to prevent.
+    """
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="u1", filename="u1.png", source="local",
+                       created_at="2026-07-01T00:00:00", width="1959", height="1097")])
+    seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(core, "submit_generation",
+                        lambda _s, params: seen.setdefault("params", params) and "t1" or "t1")
+    cli = login_client(tmp_path)
+    r = cli.post("/api/generate", json={
+        "version_id": core.UPSCALE_FALLBACK_VERSION_ID,
+        "prompt": "x", "width": 1959, "height": 1097, "count": 1,
+        "enlarge": 1.4, "enlarge_model": core.DEFAULT_ENLARGE_MODEL,
+        "ref_media_id": "u1", "ref_strength": 0.55,
+    })
+    d = r.get_json()
+    assert r.status_code == 200 and not d.get("error"), d
+    assert seen["params"]["modelId"] == core.UPSCALE_FALLBACK_VERSION_ID
+    assert seen["params"]["enlarge"] == 1.4
+
+
+def test_upscale_panel_offers_the_fallback_instead_of_blocking():
+    """The panel must not dead-disable Go when the catalog has no model, and the constant
+    must be SERVED rather than retyped into the component."""
+    src = pathlib.Path("static/mg-upscale-panel.js").read_text(encoding="utf-8")
+    paint = src[src.index("_paintModel()"):src.index("_openPicker()")]
+    assert "this._go.disabled = true;" not in paint, \
+        "the no-model branch must not leave Go permanently dead"
+    assert core.UPSCALE_FALLBACK_VERSION_ID not in src, \
+        "the id must come from window.MG_UPSCALE, not a second copy in the component"
+    assert "fallbackVersion()" in src
+
+
+def test_upscale_sends_the_images_model_as_a_version_id(monkeypatch, tmp_path):
+    """The catalog's model_id is the task's submitted `modelId`, which IS a model VERSION
+    id -- so an upscale must send it as version_id.
+
+    Sent as model_id it entered /api/generate's model->versions lookup, matched nothing,
+    and came back "pick a model first" on a picture whose model the panel was displaying
+    on screen. Only a model chosen in the PICKER is a real model id.
+    """
+    src = pathlib.Path("static/mg-upscale-panel.js").read_text(encoding="utf-8")
+    i = src.index("_payload()")
+    body = src[i:src.index("_price()", i)]
+    assert "model_id: s.model_picked ? (s.model_id || '') : ''" in body, \
+        "only a PICKED model may travel as model_id"
+    assert "version_id: s.model_picked ? '' : (s.model_id || fallbackVersion())" in body, \
+        "the image's own model id is a version id and must travel as version_id"
+
+
+def test_generate_rejects_a_version_id_sent_as_a_model_id(monkeypatch, tmp_path):
+    """Pins the server behaviour the above exists to avoid, so the reason stays visible:
+    a version id in the model_id field resolves to nothing and is refused."""
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="u2", filename="u2.png", created_at="2026-07-01T00:00:00",
+                       width="900", height="600")])
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(core, "list_model_versions", lambda *a, **k: [])   # not a model id
+    monkeypatch.setattr(core, "submit_generation", lambda *a, **k: "nope")
+    cli = login_client(tmp_path)
+    r = cli.post("/api/generate", json={
+        "model_id": core.UPSCALE_FALLBACK_VERSION_ID, "prompt": "x",
+        "width": 900, "height": 600, "count": 1, "ref_media_id": "u2",
+    })
+    assert r.status_code == 400 and "pick a model first" in (r.get_json() or {}).get("error", "")
