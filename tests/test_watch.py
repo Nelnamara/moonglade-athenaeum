@@ -209,3 +209,33 @@ def test_watch_pings_reset_the_staleness_clock(monkeypatch):
     got = []
     asyncio.run(core._watch_events_async("Bearer x", got.append, None))   # must not raise
     assert any(m.get("type") == "pong" for m in ws.sent)   # still answered every ping
+
+
+def test_mirror_and_reconcile_agree_on_what_done_means():
+    """The live mirror's COLLECT branch and its RECONCILE branch read the same event, so they
+    must agree on which statuses mean finished.
+
+    They did not. Collect matched `status == _WS_DONE_STATUS` -- one exact string -- while
+    reconcile accepted `status in _GEN_DONE`, which is five. A done-status PixAI spelled any
+    other way would therefore resolve the Activity row while silently NOT mirroring the file,
+    which looks exactly like the "my video never came into the gallery" report that found this
+    (2026-07-26) and is just as invisible after the fact.
+
+    Asserted against the source because the branch lives inside a nested on_event closure in a
+    background thread, which no unit test can reach directly. A source check that pins the
+    intent beats no check at all here."""
+    import pathlib as _p
+    src = _p.Path(__file__).resolve().parent.parent / "moonglade_gallery.py"
+    text = src.read_text(encoding="utf-8")
+
+    i = text.index("def _watch_loop()")
+    loop = text[i:i + 4000]
+
+    assert "if status in core._GEN_DONE and tid and tid not in backed:" in loop, (
+        "the mirror's collect branch must accept every _GEN_DONE status, not one exact string")
+    assert "status == core._WS_DONE_STATUS" not in loop, (
+        "the single-status collect trigger is back -- see this test's docstring")
+
+    # And the constant it now shares really is the broader set.
+    assert core._WS_DONE_STATUS in core._GEN_DONE
+    assert len(core._GEN_DONE) > 1

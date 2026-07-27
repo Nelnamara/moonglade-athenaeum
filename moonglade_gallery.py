@@ -4172,12 +4172,21 @@ def create_app(out_dir: Path):
 
     def _watch_loop():
         import asyncio
+        import logging as _logging
         import time as _time
         import moonglade_backup as core
+        # The mirror's state used to exist ONLY in _watch_status, in memory, readable solely
+        # through /api/watch/status while the process lived. So when a generation failed to
+        # mirror there was no way to answer "was it connected at the time?" -- not from the log,
+        # not afterwards, not at all. Every transition below is now recorded in
+        # out_dir/logs/moonglade.log. Transitions and mirrored tasks only, never per-event:
+        # this stream can carry a lot of traffic and a per-event line would bury the signal.
+        _log = _logging.getLogger(__name__)
         backed = set()   # task ids already mirrored this process's lifetime (a
                          # 'completed' event can repeat)
         with _watch_lock:
             _watch_status["started_at"] = _time.time()
+        _log.info("live mirror: starting")
         _reconcile_orphan_jobs()   # clear any job left hanging at 'running' from a prior session
         backoff = 5
         while True:
@@ -4193,6 +4202,7 @@ def create_app(out_dir: Path):
                         with _watch_lock:
                             _watch_status["connected"] = True
                             _watch_status["last_error"] = None
+                        _log.info("live mirror: connected and subscribed")
                         return
                     tu = ev.get("taskUpdated")
                     if not tu:
@@ -4202,8 +4212,15 @@ def create_app(out_dir: Path):
                         _watch_status["last_event_at"] = _time.time()
                     status = tu.get("status")
                     tid = str(tu.get("id") or "")
-                    if status == core._WS_DONE_STATUS and tid and tid not in backed:
+                    # `in _GEN_DONE`, not `== _WS_DONE_STATUS`. This branch used to match ONE
+                    # exact string while the reconcile branch below accepts five, off the same
+                    # event -- so a done-status PixAI spells any other way would skip mirroring
+                    # while still resolving the Activity row. Every task checked on 2026-07-26
+                    # reports "completed", so this was not that day's cause, but the asymmetry
+                    # produces exactly that symptom and is just as invisible.
+                    if status in core._GEN_DONE and tid and tid not in backed:
                         backed.add(tid)
+                        _log.info("live mirror: task %s reported %s -- mirroring", tid, status)
                         threading.Thread(target=_watch_mirror, args=(tid,), daemon=True).start()
                     # Reconcile the Activity log from the SAME event stream, so a job resolves
                     # even if the Generate card that was polling /api/task-status is gone.
@@ -4211,6 +4228,7 @@ def create_app(out_dir: Path):
                         _reconcile_job(tid, status)
 
                 asyncio.run(core._watch_events_async(auth, on_event, None))
+                _log.info("live mirror: disconnected cleanly; reconnecting in %ss", backoff)
                 backoff = 5   # a clean disconnect resets the backoff
             except core.WatchStaleError as e:
                 # core._watch_events_async's own recv() timeout fired: the socket
@@ -4226,9 +4244,17 @@ def create_app(out_dir: Path):
                     _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
                     _watch_status["stale_reconnects"] += 1
                     _watch_status["last_stale_reconnect_at"] = _time.time()
+                # WARNING, not info: this is the failure mode where the socket looked healthy
+                # on every signal while seeing nothing, so anything that completed during the
+                # silence was missed and will NOT arrive later. Worth finding in the log.
+                _log.warning("live mirror: socket went silent (no traffic for %ss) -- "
+                             "reconnecting. Anything that completed during the silence was "
+                             "NOT mirrored.", getattr(core, "_WS_STALE_TIMEOUT", "?"))
             except Exception as e:
                 with _watch_lock:
                     _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
+                _log.warning("live mirror: %s: %s -- reconnecting in %ss",
+                             type(e).__name__, _redact_host_paths(str(e))[:200], backoff)
             with _watch_lock:
                 _watch_status["connected"] = False
             _time.sleep(backoff)
