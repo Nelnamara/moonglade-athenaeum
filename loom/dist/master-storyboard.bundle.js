@@ -2624,7 +2624,6 @@ ${"=".repeat(48)}
       }
       const tgt = list.find((x) => x.id === id);
       if (!window.confirm(`Delete "${tgt && tgt.name || "this storyboard"}"? This can't be undone.`)) return;
-      clearTimeout(saveTimer.current);
       if (id === activeId) {
         const next = list.find((x) => x.id !== id);
         let p = null;
@@ -2633,10 +2632,15 @@ ${"=".repeat(48)}
           if (raw) p = JSON.parse(raw);
         } catch {
         }
+        if (!p) {
+          window.alert("Couldn't read the next storyboard, so nothing was deleted. Try again.");
+          return;
+        }
+        clearTimeout(saveTimer.current);
         await sDel(PPRE + id);
         await sSet(ACTIVE_KEY, next.id);
         setActiveId(next.id);
-        setProject(p || seedProject());
+        setProject(p);
         setSelShot(null);
       } else {
         await sDel(PPRE + id);
