@@ -375,3 +375,134 @@ def test_remove_user_js_distinguishes_self_from_other(tmp_path):
     assert "var isSelf = !!row.querySelector('.u-you');" in html
     assert "You will be signed out immediately, on every device." in html
     assert "if(isSelf){ location.href='/login'; return; }" in html
+
+# ---------------------------------------------------------------------------
+# /api/users/password -- the last CLI-only account operation.
+#
+# Until 2026-07-26 a forgotten gallery password could only be reset by running
+# --add-web-user on the server machine. Owner decision: change your OWN from
+# anywhere, change anyone else's only from the owner machine. That reduces to one
+# rule, and both halves of it are load-bearing:
+#
+#     LOCALHOST     may set ANY password without proving the current one
+#     non-local     may set only its OWN, and must prove the current one
+#
+# Drop the first half and the forgotten-password case is not fixed at all. Drop
+# the second and an unlocked tablet on the LAN can silently change the owner's
+# password using nothing but an open tab.
+# ---------------------------------------------------------------------------
+
+def test_lan_session_changes_its_own_password_with_the_current_one(tmp_path):
+    """The everyday case: a signed-in user rotating their own password remotely."""
+    cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
+    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    r = cli.post("/api/users/password", environ_overrides={"REMOTE_ADDR": LAN},
+                 json={"current_password": "a-real-test-password-1",
+                       "new_password": "a-brand-new-password-2", "csrf": csrf})
+    assert r.status_code == 200, r.get_json()
+    assert core.verify_web_user("tester", "a-brand-new-password-2")
+    assert not core.verify_web_user("tester", "a-real-test-password-1")
+
+
+def test_lan_session_cannot_change_its_own_password_without_the_current_one(tmp_path):
+    """The unlocked-tablet attack. An already-authenticated session is NOT enough:
+    without the old password it cannot replace the password, so a borrowed device
+    cannot lock the owner out of his own account."""
+    cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
+    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    r = cli.post("/api/users/password", environ_overrides={"REMOTE_ADDR": LAN},
+                 json={"new_password": "attacker-chosen-pw-9", "csrf": csrf})
+    assert r.status_code == 400
+    r2 = cli.post("/api/users/password", environ_overrides={"REMOTE_ADDR": LAN},
+                  json={"current_password": "not-the-right-one",
+                        "new_password": "attacker-chosen-pw-9", "csrf": csrf})
+    assert r2.status_code == 403
+    # The original password still works, both times.
+    assert core.verify_web_user("tester", "a-real-test-password-1")
+    assert not core.verify_web_user("tester", "attacker-chosen-pw-9")
+
+
+def test_lan_session_cannot_change_anyone_elses_password(tmp_path):
+    """Even knowing the victim's current password. The username check refuses first,
+    exactly as api_users_remove does, so a LAN caller can never aim this at the owner."""
+    core.add_or_update_web_user("victim", "pw-victim-account")
+    cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
+    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    r = cli.post("/api/users/password", environ_overrides={"REMOTE_ADDR": LAN},
+                 json={"username": "victim", "current_password": "pw-victim-account",
+                       "new_password": "stolen-account-pw-3", "csrf": csrf})
+    assert r.status_code == 403
+    assert "localhost-only" in r.get_json()["error"]
+    assert core.verify_web_user("victim", "pw-victim-account")   # untouched
+
+
+def test_local_session_resets_another_account_without_its_password(tmp_path):
+    """THE recovery path, and the whole point of the item: at the machine, the owner
+    can reset a forgotten password without knowing the old one."""
+    core.add_or_update_web_user("forgetful", "the-password-nobody-recalls")
+    cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
+    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    r = cli.post("/api/users/password",
+                 json={"username": "forgetful", "new_password": "a-fresh-start-pw-4",
+                       "csrf": csrf})
+    assert r.status_code == 200, r.get_json()
+    assert core.verify_web_user("forgetful", "a-fresh-start-pw-4")
+
+
+def test_local_session_resets_its_own_password_without_the_current_one(tmp_path):
+    """Requiring the old password at the machine would protect nothing -- anyone
+    sitting there can edit config.json directly -- and would leave the owner's OWN
+    forgotten password unrecoverable, which is the case the item is about."""
+    cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
+    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    r = cli.post("/api/users/password",
+                 json={"new_password": "recovered-locally-pw-5", "csrf": csrf})
+    assert r.status_code == 200, r.get_json()
+    assert core.verify_web_user("tester", "recovered-locally-pw-5")
+
+
+def test_changing_your_own_password_keeps_you_signed_in_here(tmp_path):
+    """The write bumps sess_epoch, which invalidates every cookie issued under the old
+    password -- correct on other devices, rude on this one. The route re-issues the
+    caller's own epoch, so the browser in front of you survives and the Panel still
+    loads immediately afterwards."""
+    cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
+    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    r = cli.post("/api/users/password", environ_overrides={"REMOTE_ADDR": LAN},
+                 json={"current_password": "a-real-test-password-1",
+                       "new_password": "still-here-after-pw-6", "csrf": csrf})
+    assert r.status_code == 200
+    assert cli.get("/panel").status_code == 200
+
+
+def test_password_reset_refuses_an_unknown_account(tmp_path):
+    """Unlike --add-web-user, whose add-or-update semantics doubled as the reset, this
+    REFUSES a name that does not exist rather than minting it. A reset for a
+    non-existent user is a typo to report, not an invitation."""
+    cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
+    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    r = cli.post("/api/users/password",
+                 json={"username": "ghost", "new_password": "should-not-exist-7",
+                       "csrf": csrf})
+    assert r.status_code == 404
+    assert {u["username"] for u in core.list_web_users()} == {"tester"}
+
+
+def test_password_reset_reuses_the_add_user_password_policy(tmp_path):
+    """One policy, one place. A password too weak to REGISTER must be too weak to SET,
+    or the Users tab would enforce a rule this route quietly undercuts."""
+    cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
+    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    r = cli.post("/api/users/password",
+                 json={"new_password": "x", "csrf": csrf})
+    assert r.status_code == 400
+    assert core.verify_web_user("tester", "a-real-test-password-1")   # unchanged
+
+
+def test_password_change_requires_csrf(tmp_path):
+    """Same guard every other Panel mutation carries."""
+    cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
+    r = cli.post("/api/users/password",
+                 json={"new_password": "no-token-supplied-8"})
+    assert r.status_code == 400
+    assert core.verify_web_user("tester", "a-real-test-password-1")

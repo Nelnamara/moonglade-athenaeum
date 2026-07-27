@@ -1,7 +1,10 @@
 """Moonglade Athenaeum — "more like this" visual similarity.
 
 A SIDECAR index over the catalog's images: CLIP embeddings held in a Pixeltable table,
-GPU-embedded via a custom UDF (Pixeltable's stock `huggingface.clip` runs on CPU ~13 img/s;
+embedded via Pixeltable's BUILT-IN `huggingface.clip` by default since 2026-07-26 --
+see _embedding_fn() for why that is a bug fix rather than a preference. The custom
+`clip_gpu` UDF below remains as a fallback (MG_SIMILAR_EMBED=custom); its original
+reason to exist was that the stock function ran on CPU ~13 img/s;
 ours runs on the GPU ~decode-bound). `catalog.db` stays the source of truth — this module
 only maps a media_id -> its nearest media_ids and never owns curation.
 
@@ -68,6 +71,45 @@ def clip_gpu(imgs: Batch[PIL.Image.Image]) -> Batch[pxt.Array[(512,), pxt.Float]
     return [arr[i] for i in range(arr.shape[0])]
 
 
+def _embedding_fn():
+    """The embedding function to register on the index -- Pixeltable's BUILT-IN CLIP by
+    preference, our `clip_gpu` UDF as a fallback.
+
+    This is a bug fix, not a preference. Pixeltable stores the embedding function's
+    FULLY-QUALIFIED PATH inside the index, so registering a UDF defined in this module ties the
+    index to this module's NAME. The 2026-07-25 rename (pixai_similar -> moonglade_similar)
+    therefore orphaned a working index: the stored reference still read "pixai_similar.clip_gpu"
+    and no longer resolved. The built-in's path lives inside the pixeltable package, where our
+    renames cannot reach it, so this cannot happen again.
+
+    It also silently made the failure invisible -- see _get_table(), which CREATES a fresh table
+    when it cannot open the existing one, so the orphaned index was replaced by an empty one with
+    no exception raised anywhere.
+
+    THERE IS DELIBERATELY NO FALLBACK TO clip_gpu, and restoring one would reintroduce a live
+    failure. Measured 2026-07-26 on the production install:
+
+        RequestError: The function `clip_gpu` is not a valid image embedding:
+                      it must take a single image parameter
+
+    A Pixeltable upgrade tightened embedding-function validation, and `clip_gpu` is a BATCHED udf
+    (Batch[Image] -> Batch[Array]) which the new index code refuses. That is what actually broke
+    "More like this" -- not the module rename, which was the first and wrong diagnosis. The stored
+    index metadata became undeserialisable, so `get_table` AND `create_table` both failed, the
+    latter because resolving a path collision loads the same unreadable metadata.
+
+    So preferring the built-in is load-bearing rather than tidy: it takes a single image and
+    passes validation. `clip_gpu` is kept below only because the batched-GPU technique is worth
+    not losing, and because it documents why the custom path existed -- it is no longer reachable
+    from here on purpose."""
+    from pixeltable.functions.huggingface import clip as _builtin_clip
+    try:
+        return _builtin_clip.using(model_id=MODEL)
+    except TypeError:
+        # `using` signature differs across versions; a bare reference still validates.
+        return _builtin_clip
+
+
 def _get_table():
     """Get-or-create the sidecar table. On an EXISTING table return it as-is and NEVER
     re-touch the index: re-adding an embedding index on every open — and, worse, an
@@ -87,7 +129,8 @@ def _get_table():
                         primary_key=["media_id"],
                         if_exists="ignore",
                     )
-                    t.add_embedding_index("img", idx_name=_IDX, embedding=clip_gpu,
+                    t.add_embedding_index("img", idx_name=_IDX,
+                                          embedding=_embedding_fn(),
                                           if_exists="ignore")
                 _table["t"] = t
     return _table["t"]
@@ -158,7 +201,24 @@ def rebuild(items, progress=None, batch: int = 400):
     table. Drops the sidecar table (plus any stale dev-probe tables), forgets the cached
     handle, then a fresh sync() recreates ONE clean named index and re-embeds every image.
     Returns rows inserted (skipped-row count on sync.last_errors, via sync())."""
-    for name in (_TBL, "mg_probe.imgs", "mg_probe2.imgs", "mg_probe4.imgs"):
+    # Drop failures used to be swallowed here, which is how a broken table survived a
+    # "rebuild": the drop failed, sync() then hit the same unreadable metadata, and the job
+    # reported a confusing downstream error instead of the real one. The MAIN table's failure is
+    # now raised with instructions; the dev-probe tables stay best-effort, since their absence is
+    # normal and their presence is incidental.
+    try:
+        pxt.drop_table(_TBL, force=True, if_not_exists="ignore")
+    except Exception as e:
+        raise RuntimeError(
+            "Could not drop the existing similarity index, so it cannot be rebuilt in place: "
+            "{}. This happens when the stored index metadata is no longer readable by the "
+            "installed Pixeltable -- every API call that touches the table, including the drop, "
+            "has to load that metadata first. Clear Pixeltable's store directory "
+            "(~/.pixeltable) and run this again. That directory holds this index plus Pixeltable's "
+            "own media and file caches -- roughly 300 MB here -- and every byte of it is "
+            "regenerable from the image library, so clearing it loses no original data."
+            .format(e)) from e
+    for name in ("mg_probe.imgs", "mg_probe2.imgs", "mg_probe4.imgs"):
         try:
             pxt.drop_table(name, force=True, if_not_exists="ignore")
         except Exception:

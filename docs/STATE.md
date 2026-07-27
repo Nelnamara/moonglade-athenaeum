@@ -871,19 +871,46 @@ Order lives in `docs/archive/SUITE_ARCHITECTURE_AUDIT_2026-07-13.md` §6.
 
 What's still CLI-only, tracked so the web surface stays complete:
 
+> **Read this list before filing a "no Panel button" item.** The board has twice raised
+> "maintenance commands have no Panel button", and both times the answer was already here. The
+> commands below are CLI-only by DECISION, not by omission, and a recurring correction is worth
+> stating once: a modifier (`--embed-metadata`, `--convert`) does not want a button, an already
+> integrated step (`--faststart-videos`) does not want a second trigger, and a repair tool
+> (`--backfill-meta`) actively should not have one, because a button implies you ought to press it.
+
+
 - **Password reset.** The only way to reset a forgotten password today is
   `python moonglade_backup.py --add-web-user` on the server machine (it *adds or
   updates*, so re-running it for an existing username doubles as a reset — `wiki/Setup.md`
   documents this). Owner request, 2026-07-22: give this a home in the Panel's Users tab
-  too, so a forgotten password doesn't require CLI access. Would need its own trust call
-  (self-only, like `api_users_remove`'s self-removal carve-out? or LOCALHOST like adding a
-  new account?) rather than inheriting one by default — not decided yet, not started.
+  too, so a forgotten password doesn't require CLI access.
+  **DECIDED 2026-07-26 (owner): a user may reset THEIR OWN password from anywhere; resetting
+  anyone else's is an owner-machine action only.** So it splits into two paths rather than one
+  trust call: self-service reset inherits the self-only carve-out `api_users_remove` already
+  uses, and admin reset-for-another-user is LOCALHOST, like adding an account. That was the
+  blocker on this item; it is now a build, not a question.
+
+  Worth stating the boundary plainly because it is the kind of thing that drifts: "reset my own"
+  must not accept a username parameter at all — it acts on the session's own account, so a LAN
+  visitor cannot aim it at the owner's login by editing a request.
 - (`--restore-orphans` and `--undo-organize` now render Panel buttons. `reconcile-deleted`
   runs via `/api/panel/run` and the scheduler but renders no button by design,
   `panel_visible: False`. `PANEL_ACTIONS` in `moonglade_gallery.py`. Still genuinely CLI-only,
   with no web route at all: `--convert-existing` (bulk-converts already-downloaded `.webp`
   files to the `--convert` format) and `--backfill-meta`/`--backfill-full-meta` (fill in
-  missing catalog fields for existing rows). `--faststart-videos` is deliberately CLI-only
+  missing catalog fields for existing rows).
+  **Why `--backfill-meta` still exists, asked and answered 2026-07-26** — nobody could
+  remember, and the reason is that its purpose was absorbed by another command as a side
+  effect. `--backfill-full-meta`'s own docstring says it *"also fills url/width/height from
+  the task's media object as a free side effect"* — the exact three columns the light one
+  fills — and `--full-meta` is `default=True` on a normal pull, so new rows arrive complete.
+  The light version is therefore SUPERSEDED, not obsolete, and retains exactly ONE unique
+  capability: the two take different routes to the data. Light resolves via
+  `resolve_media(media_id)`; full goes via `getTaskById`. So light alone can repair a row
+  whose MEDIA still resolves but whose TASK is gone — a generation deleted from the PixAI
+  account, where the local image survives but the record describing it does not. Rare, and
+  it recovers dimensions only, not prompt or seed. **Keep it, never surface it:** a button
+  would imply pressing it achieves something the sync has not already done. `--faststart-videos` is deliberately CLI-only
   for a different reason: it's a one-time remux for videos downloaded before the
   auto-faststart path shipped — every current video-acquisition path (`run_sync_videos`,
   `_download_video_task`, `run_import_local`) already calls `video_faststart()` at collect
@@ -1016,6 +1043,264 @@ Auto-favouriting each gen via `upsertBookmark`. Rejected by the owner 2026-07-26
 disliked it when it was first raised. Bookmarking puts things in the FAVOURITES shelf, not the
 generations library — the wrong shelf. An earlier note recorded it as an agreed plan; that was
 wrong and has been corrected at the source.
+
+## BANKED for the design pass: the three free achievement slots, and Enhance Adept's replacement
+
+**"Enhance Adept" is dead and must be retooled or retired.** Its metric computes from a counter
+nothing increments any more — Enhance was deleted — so it can never be earned. It is the only
+achievement in that state; all 36 metrics were checked. Its shape is *"five different X"*, epic
+tier, mastery bucket, and the cleanest fix keeps the shape and changes the X.
+
+**Recommended: "generate on five different base architectures"** (DiT.1 / DiT.2 / DiT.3 / SDXL /
+SD 1.5). The enum work of 2026-07-26 is exactly what makes this measurable — the tokens are now
+known and `model_id` is already stored per image, so the metric is one `COUNT(DISTINCT)`. It also
+survives the rename thematically: "refinement in every register" becomes fluency in every dialect,
+and it rewards breadth of craft rather than clicking something five times.
+
+**Alternative the owner raised: five distinct art filters applied.** A direct like-for-like swap,
+and filters are local and free so it is earnable without spend. Weaker for an EPIC, because it is
+a clicking achievement.
+
+**Alternative to resist for now: gate it behind the filter creator.** The best fit of the three,
+but the creator is not built — and gating an epic behind an unbuilt feature is precisely how
+Enhance Adept became unearnable. Move it there later if the creator ships.
+
+### The three free slots (57 of 60 used)
+- **One is earmarked for a Dungeon Crawler Carl reference.** The native hook is DESCENT — something
+  that fires on reaching the true bottom (the oldest image, or the literal end of 35,000). Carl art
+  already exists in the chibi library. The other DCC-native option is an achievement whose ROAST is
+  written as a sponsor announcement, letting the voice do the work instead of the metric.
+- **The other two should stay unspent.** The two most obvious candidates — first LoRA trained (the
+  owner has two) and first generation mirrored to the PixAI library — only become meaningful once
+  training and the JWT toggle are real. Minting them early repeats the Enhance Adept mistake.
+
+## ❌ DECIDED, PERMANENTLY: no email, and no logged-out password reset (owner, 2026-07-26)
+
+**This will read like a gap to any audit. It is not.** There is no `smtplib`, no SMTP config and no
+mail path anywhere in the project — verified, not assumed — and a "forgot password?" link on the
+login page is deliberately never going to exist.
+
+The reasoning, so it does not have to be re-derived:
+
+**Physical access to the server machine IS the out-of-band identity proof.** That is exactly the job
+an emailed reset link performs in a hosted app: prove you control a channel outside the login. Being
+at the machine proves it more strongly, and this app is locally hosted with closed registration, so
+the channel is already there.
+
+**Without an out-of-band channel, a logged-out reset would be a vulnerability rather than a
+feature.** Any device on the LAN could trigger a reset against the owner's account. Adding email to
+close that would mean SMTP credentials living in `config.json` beside `AUTH_SECRET_KEY`,
+deliverability problems on a home network, and a token-expiry surface to get wrong — all to replace
+walking to the machine.
+
+So the recovery story is complete as it stands, and it is three sentences:
+- **Know your password** → change it from anywhere, Panel → Users → Your password.
+- **Forgot it** → someone at the server machine resets it, Panel → Users → Reset password.
+- **You are the only account and you forgot it** → `--add-web-user` at the machine, whose
+  add-or-update semantics still double as a reset. That CLI path is kept for exactly this case.
+
+Related and consistent: web signup is closed by design, and invite links were deferred on the same
+reasoning (2026-07-20). Do not propose email as a way to reopen either.
+
+## SCOPED: "Under the Hood" — the easter egg that unlocks custom branding
+
+**The gate IS the feature.** Recorded emphatically because I proposed removing it and had to be
+corrected: I suggested making the branding panel plainly available and demoting the achievement to
+recognition, reasoning that gating utility behind an unbuilt epic creates deadlocks. Sound in
+general, wrong here. The owner's framing:
+
+> "The point is to reward the nosy power user. A generic user just playing with this to grab their
+> gallery and run gens isn't going to give my branding a 2nd thought... The point is to leave the
+> folders available for those people that poke around and look for the nuts and bolts. This is one
+> of the rarest unlocks in the bunch. You have to tinker and play to find the sauce."
+
+**The copy already committed to this.** The roast at `moonglade_gallery.py:1353` reads *"Look who
+went spelunking in the walls... **Custom branding: unlocked.** Tell no one."* The design was written
+down in the product's own voice; it just was not written down anywhere a doc sweep would look.
+
+### The intended flow
+1. A fresh install has the branding slot folders present but **empty**, nested.
+2. The deepest folder holds a single README breadcrumb — something like *"Maybe something goes in
+   here"*. That is the only hint, and finding it is the point.
+3. The user drops any PNG/JPEG into a slot folder (a mark, a mascot, a banner). The app **adopts it
+   into that slot**.
+4. That adoption fires the achievement.
+5. The achievement unlocks a **Control Panel branding tab** showing every available slot, a file
+   picker (from the gallery or from disk), and spec guidance per slot (banner dimensions and so on).
+
+### The real prerequisites — NOT the asset bundling
+The MPQ-style bundling is a SEPARATE want (a tidy install folder) and does not gate this. The
+owner's art already never ships: `pixai_backup/` is git-ignored wholesale, so branding lives only in
+his machine-local output directory and a fresh install contains none of it. What is actually missing,
+verified 2026-07-26:
+
+| gap | state |
+|---|---|
+| the nested empty folder tree | **nothing creates it.** No `mkdir` for branding subfolders anywhere. This is the true blocker — today there is nothing to find. |
+| the breadcrumb README | does not exist |
+| detecting a dropped file | **no watcher.** Checking on Panel/branding load is sufficient; a real filesystem watcher is not needed. |
+| the slot list | only `branding/marks` and `branding/favicon` appear in code. The panel needs the full set. |
+| the achievement + roast | **the roast already exists** (`:1353`). The metric and trigger do not. |
+
+### Similarity index: COMPLETE at 35,106 — and what the 2026-07-26 hard lock taught us
+
+**State: complete.** 35,106 rows, which is exactly the unique-media_id count of the library.
+Verified queryable with a real vector search (top hits 0.8979 / 0.8796 / 0.8460). A crashed rebuild
+was resumed rather than restarted: 26,400 survived the reset, `sync()` added the missing 8,706 in
+11.7 min at 12.4 img/s with **zero** errors, and post-resume scores were byte-identical to
+pre-resume ones — proof the surviving rows were untouched.
+
+**The machine lock was commit-charge exhaustion, not Pixeltable and not disk.** The postgres log
+carries Windows error **1455** and exception **0xC000012D** repeatedly — both mean the commit limit
+(RAM + pagefile) was hit — alongside `out of memory`, `could not fork autovacuum worker`,
+`could not reattach to shared memory`, and `could not create signal handler thread`. Owner
+identified the other party: a forgotten **Pinokio** process (Forge/WAI-Illustrious) holding GPU and
+several GB while the rebuild ran. The embed job's own footprint is ~**18.5 GB** working set, so the
+two together exceeded what the box could commit. Not a code defect — but it means this job should
+never be run alongside anything heavy, and that is worth saying wherever the job is launched.
+
+**Postgres survived cleanly.** WAL replay succeeded; nothing was corrupt. Do not reach for a
+store wipe on the next hard reset without checking first — the recovery path works.
+
+## THREE REAL DEFECTS found in the wreckage (owner is filing these on GitHub from 2026-07-26)
+
+**1. `--rebuild-similar` has no resume counterpart, and the only button is the destructive one.**
+`sync()` was written to be incremental — it skips already-indexed media_ids — but the sole entry
+point (`--rebuild-similar`, and the Panel's "Rebuild the Similar index" job) calls `rebuild()`, which
+DROPS the table and starts from zero. So after the crash, the obvious action would have destroyed
+26,400 good rows and cost ~38 min instead of ~12. The resume had to be run by hand. A
+`--sync-similar` flag is a thin wrapper over an already-tested function. **This also reprioritises
+the parked thumbnail-embedding work**: that idea existed to make a full REBUILD faster, but the real
+lesson is that a full rebuild is almost never the right operation. Incremental top-up beats a faster
+rebuild, so ship the flag first and treat thumbnails as a genuine optional optimisation afterwards.
+
+**2. Pixeltable's postgres start times out at 10s; a cold start here needs ~36s.** Reproducible —
+it failed the first probe outright. Startup spends ~35s on `syncing data directory (fsync)` after
+hitting `could not open file "./log": sharing violation`, and postgres's own HINT blames
+antivirus/backup software. So a cold "More like this" or rebuild can fail at the starting line with a
+confusing `TimeoutExpired` from `pg_ctl` that says nothing about the real cause. A Defender exclusion
+for `~/.pixeltable` is the likely permanent fix — owner's call, a security setting is not ours to
+change. Worth catching the timeout and reporting it in plain language either way.
+
+**3. A `panel-*` job left "running" is never resolved after a server restart.** Live example:
+`panel-3d49d9bffea2`, still showing running in the tracker after the reboot. `resolve_orphan_jobs()`
+only checks **PixAI-task-keyed** generate jobs — its docstring says panel/delete jobs "are local and
+self-report", which is true right up until the process is killed, and then nothing ever writes the
+terminal event. The silent-death detection shipped 2026-07-25 does not cover this class at all. The
+clean rule needs no timeout heuristic: **a local job's owning process IS the server, so any
+non-terminal local job whose last event predates this server process's start is dead by definition.**
+Sweep those at startup and mark them interrupted.
+
+**No app restart was needed to pick up the finished index** — confirmed by evidence, not assumption:
+the running gallery had zero TCP connections to Pixeltable's postgres and a 33 MB working set (torch
+alone is ~2 GB), so it had never opened the index and connects fresh on first use.
+
+### ✅ SHIPPED 2026-07-26: branding lives in the APP ROOT (`branding/`)
+
+Currently `Path(out_dir) / "branding"`, and `out_dir` now comes from `resolve_library_dir()` — the
+library-folder setting shipped 2026-07-25. **That is a live bug nobody has hit yet**: point the app
+at a different library and every mark, mascot and banner disappears from its view. The files are
+still on disk in the old folder; the app simply stops looking there. Only one library has ever
+existed, which is why it has gone unnoticed.
+
+**Root, not `/moonglade/`.** The naming pass's step 2 moves the core modules into `/moonglade/`, and
+three reasons keep branding out of it:
+1. `/moonglade/` will be the CODE package. Putting user art inside it re-creates the exact problem
+   step 2 exists to fix — the owner's words were that he noticed achievements and suchlike sitting
+   in the core folder and wanted them tucked away. Moving code IN is the tidy; moving content in
+   undoes it.
+2. A package folder acquires `__pycache__`, probably an `__init__.py`, and is the natural unit to zip
+   or install. Images inside that boundary will eventually be treated as code by something.
+3. **It would break the easter egg, which is the deciding reason.** A tinkerer opens the app folder
+   and scans the top level. `branding/` there is findable. `/moonglade/branding/` is a level deeper
+   inside a folder that looks like source — they would open it, see a wall of `.py` files, and back
+   out. Discovery through the filesystem IS the mechanic, so the folder has to be where a curious
+   person's eye lands.
+
+The resulting root reads correctly: `moonglade/` is obviously the machinery, `branding/` is obviously
+theirs, and it sits beside `Serve Gallery.pyw` — both user-facing, both top level. Step 2 also gets
+simpler, because then everything moving into `/moonglade/` is code with no exceptions.
+
+**Both conditions this was made contingent on shipped with it:**
+- **A gitignore entry, added in the same commit as the move.** Otherwise the first person to drop a
+  mascot in and run `git status` sees their own art as untracked repo content, and `git add -A` is
+  already banned here for exactly that class of accident.
+- **No migration code.** Owner, 2026-07-26: *"I can move my own branding folder after the update."*
+  So the move is a plain default change with no dual-read, no copy step and no fallback path — he
+  relocates his own files by hand on the production install once the change ships. Worth stating
+  because the obvious instinct is to write a compatibility shim, and he explicitly does not want one
+  for a single install he controls. Do not add one.
+
+**What landed.** One resolver, `moonglade_gallery.branding_root()`, replacing nine independent
+derivations; `_branding_path()` keeps `branding.json` as its SIBLING so an existing setup moves as
+two entries in the same relationship rather than a reshuffle. The exclusions in
+`moonglade_gallery.py` and `moonglade_backup.py` that kept branding out of gallery scans were
+**deliberately left pointing at the old library location** — an install predating the move still has
+files there, and `--import-local` would otherwise catalogue someone's banner and mascots as gallery
+images; excluding an absent path costs nothing.
+
+Testing needed one non-obvious piece. `branding_root()` resolves from `__file__`, so every test that
+writes a fake mark would have dropped PNGs into the real checkout, and any test asserting "no marks
+installed" would have picked up whatever real art was sitting there — passing or failing based on the
+machine. `tests/conftest.py` gained an autouse `_isolated_branding` fixture redirecting the resolver
+to `tmp_path`, matching what `_isolated_auth_config` already does for `config.json`; that keeps all
+existing branding tests working unchanged. But it also means the suite passing proves nothing about
+the production path, so two tests in `tests/test_branding.py` deliberately bypass the fixture: one
+pins the absolute app-root location and asserts no library value can steer it, the other pins the
+sibling relationship.
+
+**Still owner-side:** relocating `branding/` and `branding.json` on the production install. Until
+then that install renders default chrome.
+
+### Do not
+- Do not make the panel available ungated — that deletes the feature.
+- Do not block this on the bundling epic; they are independent.
+- Do not add a hint anywhere in the UI. Discovery through the filesystem IS the mechanic.
+
+## ⚠️ DO NOT "FIX": the Feats section is cloaked on purpose (owner-confirmed 2026-07-26)
+
+The board carries this as a defect — *"with no feats earned yet, the whole Feats section
+disappears instead of showing mystery tiles."* It is **correct behaviour**, and the owner confirmed
+the intent in his own words:
+
+> "The feats are a true mystery until the first lands, then the unearned ones have the mystery
+> card. That way unlocking them really feels like opening a new tier."
+
+So there are **two** states, not one, and the distinction is the whole point:
+
+| state | what shows |
+|---|---|
+| no feat earned yet | the section does not exist at all — a true unknown |
+| first feat lands | the section appears, and unearned feats become **mystery cards** |
+
+Enforced at four call sites in `static/mg-notify.js` (`:684`, `:737`, `:765`, `:803`), all gated on
+`d.feats_revealed`, which `moonglade_gallery.py:13004` computes from whether any feat is earned.
+The comment at `:737` already said "deliberately".
+
+**Why this is recorded rather than left to the code comment.** The failure mode here is a HELPFUL
+fix. A sweep reads "section disappears", finds the mystery-tile machinery sitting right there
+unused (`/branding/mystery/secret_feat.png`, the `.hall-card.hidden-feat` style), concludes someone
+forgot to wire it up, and wires it up — destroying the reveal in the name of consistency. The
+mystery tile is not unused; it is waiting for the second state.
+
+## DECIDED: which of PixAI's community features Moonglade gets (owner, 2026-07-26)
+
+The whole surface is mapped -- 39 operations with hashes, from
+`tools/harvest_api_surface.py`. The owner picked from that list rather than from a proposal:
+
+| capability | verdict | note |
+|---|---|---|
+| **Like / react** | **YES** | `markGenerationModel` / `markArtwork` share one shape: `($id, $type, $target)`. So liking a LoRA and liking an image are ONE function with a different id, not two features. `liked` already comes back on every picker row, so this lights up a field we already fetch. |
+| **Bookmark write** | **YES** | Read is shipped. Write is `upsertBookmark` + `updateBookmarkItem`, so you can bookmark from our picker instead of bouncing to their site. |
+| **Follow** | **YES** | The owner's only wanted social link, and specifically because of the model-market click-through below — follow/unfollow a creator whose page you just opened. `setFollowState($userId, $target, $private)`. |
+| **Publish** | **YES** | Epic C, already roadmapped. Their publish page still needs capturing; note their MOBILE app offers a Mio-powered helper that writes the description for you, which is worth seeing before we design ours. |
+| **Notifications** | **YES** | `listMyNotifications`. Pairs with the training page's credit-rebate promise — it is how you would learn someone used your LoRA. |
+| **Comments** | **NO, and solved differently** | There is no post/read/delete comment operation in their bundle at all — all three comment ops are *turnstile* (anti-bot) controls. So it was never optional, it was absent. The owner's answer is better than building anything: comments live on a model's MARKET PAGE, so make a selected model in the Generate panel **clickable through to that page** and their social side stays theirs. Same instinct as reusing the Loom's existing controls rather than inventing UI. |
+| **Block / report** | **NO** | Moderation tools for a site we do not host. Owner: "Not going to be flagging my OWN work." |
+
+**The click-through is the piece that makes the rest small.** With it, we never build a comment
+surface, a creator feed, or a moderation queue — one link covers all three, and follow/unfollow is
+the only social write we own.
 
 ## THE API SURFACE IS NOW HARVESTED WHOLESALE (`tools/harvest_api_surface.py`, 2026-07-26)
 

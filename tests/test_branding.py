@@ -2,12 +2,19 @@
 All hermetic -- fake mark assets are written into tmp, subprocess is mocked, and
 nothing touches a real Desktop or PowerShell."""
 import json
+import pathlib
 import re
 
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client
+
+# Captured at IMPORT time -- collection runs before any autouse fixture, so this is the genuine
+# resolver rather than the tmp_path-redirected one conftest._isolated_branding installs. Needed
+# because that fixture is what lets every other test in this file keep its old semantics, and it
+# would otherwise hide the production behaviour completely.
+_REAL_BRANDING_ROOT = g.branding_root
 
 
 def _csrf(html):
@@ -197,3 +204,43 @@ def test_shortcut_requires_cut_ico(tmp_path, monkeypatch):
     cli = _client(tmp_path)      # no marks cut at all
     r = cli.post("/api/branding/shortcut", json={"mark": "mark_4"})
     assert r.status_code == 400 and "ico" in r.get_json()["error"].lower()
+
+
+def test_branding_root_is_the_app_folder_not_the_library(tmp_path):
+    """Branding resolves from the APP directory, and is unaffected by the library folder.
+
+    This is the regression that prompted the move. It used to be `out_dir / "branding"`, and
+    out_dir comes from resolve_library_dir() -- so once the library folder became a setting
+    (2026-07-25), pointing the app at a different library made every mark, mascot and banner
+    disappear from its view. The files stayed on disk in the old library; the app simply stopped
+    looking. Nobody hit it because only one library has ever existed, which is exactly why it
+    needs a test rather than a memory.
+
+    Deliberately calls the CAPTURED resolver: conftest redirects the module attribute to tmp_path
+    for every other test, so asserting through the module here would only re-test the fixture."""
+    root = _REAL_BRANDING_ROOT()
+    app_dir = pathlib.Path(g.__file__).resolve().parent
+
+    assert root == app_dir / "branding"
+    # The point of the move: it does NOT live under any library, including this test's.
+    assert tmp_path not in root.parents and root != tmp_path / "branding"
+    # It takes no arguments at all, so there is no library value that could steer it.
+    assert _REAL_BRANDING_ROOT.__code__.co_argcount == 0
+
+
+def test_branding_json_sits_beside_the_art_directory():
+    """branding.json is a SIBLING of branding/, preserving the arrangement it had inside the
+    library. Someone moving an existing setup keeps both entries in the same relationship, and
+    .gitignore covers the pair. Guards the `.parent` derivation in _branding_path() -- if that
+    ever changes to nest the file inside branding/, an existing install's selections go missing
+    silently and the app just renders defaults.
+
+    Asserts the RELATIONSHIP rather than an absolute path, resolving both sides through the module
+    so it holds wherever branding_root() points -- the app root in production, tmp_path under
+    conftest's fixture. test_branding_root_is_the_app_folder_not_the_library above is what pins
+    the absolute location; mixing the two concerns here just re-tested the fixture."""
+    cfg = g._branding_path(pathlib.Path("/some/unrelated/library"))
+
+    assert cfg == g.branding_root().parent / "branding.json"
+    assert cfg.parent == g.branding_root().parent      # siblings, not nested
+    assert "library" not in str(cfg)                   # the argument is genuinely ignored
