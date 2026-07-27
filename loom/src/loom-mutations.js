@@ -232,13 +232,15 @@ export function friendlyGenErr(raw) {
     let hint = '';
     if (/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s))
       hint = 'Out of balance for this model — no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.';
+    else if (/maxLength|too long|exceeds maximum/i.test(s))
+      hint = 'That prompt is too long for video — PixAI allows 2000 characters. Trim it and resubmit; nothing was created or charged.';
     else if (/image contains (sensitive|nsfw|prohibited)|NSFW_DETECTED|40300032/i.test(s))
       hint = 'PixAI refused the SOURCE IMAGE on content grounds, not the prompt — rewriting the text will not help. Try a different frame.';
     else if (/moderat|content.?polic|flagged|nsfw/i.test(s)
       || (/prohibit|sensitive|not.?allowed|violat/i.test(s)
           && /content|prompt|polic|guideline|term|image/i.test(s)))
       hint = "PixAI's content filter blocked this generation — that's decided on PixAI's side, not here.";
-    else if (/inferenceProfile|i2vPro|unknown mode/i.test(s))
+    else if (/inferenceProfile|i2vPro[./]mode|unknown mode/i.test(s))
       hint = "That quality setting isn't available for this model — try a different Mode.";
     return hint ? hint + ' (PixAI said: ' + s.slice(0, 160) + ')' : s;
 }
