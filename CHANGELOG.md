@@ -30,6 +30,25 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Animating your own images could be refused as NSFW when the same job worked on PixAI's site.**
+  The gallery's video path re-uploaded every source frame before submitting, and a fresh upload gets
+  content-scanned — an image PixAI already hosts does not. So a frame you could animate fine on
+  their site came back `403 NSFW_DETECTED` through the app, *before* a task existed, which is why
+  nothing showed on your account and why it felt like moderation coming in waves. The content was
+  never the problem: **the upload was manufacturing the rejection.** It existed because a
+  2026-07-20 bug (`invalid_media_id` / `invalid_reference_image_media_id`) was fixed across every
+  input path at once, but that second error name is the *reference-video* field — the requirement
+  was real for reference video and never applied to image-to-video. Confirmed by surveying your own
+  history: **every image-to-video task PixAI has run for you used a catalog id directly** — five of
+  five, three different models, June 8th through July 22nd, including two on July 20th itself.
+  Image-to-video now passes the id straight through, and if PixAI ever does refuse one the app
+  uploads and retries automatically, so nothing breaks either way.
+- **A failure's parameters were being cut off in the log by a long prompt.** The failure logging
+  added the same day truncated the whole parameter block at 700 characters, so the first real
+  failure it recorded lost `isPrivate`, `modelId` and `duration` — the fields that identify the
+  problem — to a very long prompt. Prompts are now shortened separately so the structure always
+  survives.
+
 - **A failed generation told you the wrong thing, and left no trace to check it against.** A
   video submit that PixAI declined reported *"PixAI's content filter blocked this generation"* —
   in the gallery, worded as though you were in the Loom, and for a submit that never created a

@@ -1142,6 +1142,44 @@ verified 2026-07-26:
 | the slot list | only `branding/marks` and `branding/favicon` appear in code. The panel needs the full set. |
 | the achievement + roast | **the roast already exists** (`:1353`). The metric and trigger do not. |
 
+### ✅ SOLVED 2026-07-26: the video decline was OUR re-upload tripping PixAI's content scanner
+
+**Root cause.** `_input_media_id()` re-uploaded every gallery i2v frame, and a fresh upload gets
+content-scanned. The owner's own already-hosted images do not. So an NSFW frame he could animate
+fine on PixAI's site was refused through our tool with `403 NSFW_DETECTED` (`40300032`) at
+`createGenerationTask` — before any task existed, which is why nothing appeared on his account.
+The content was never the problem and neither was V3.0 Lite; **our upload manufactured the
+rejection.**
+
+**Why the upload was there, and why it was wrong.** A 2026-07-20 production bug recorded
+`invalid_media_id` / `invalid_reference_image_media_id` for bare catalog ids, and the fix routed
+EVERY input path through one helper. That second error name is the **reference-video** field: the
+requirement was real for R2V and generalised to i2v, where it never applied.
+
+**Surveyed to be sure** (getTaskById over his own history, read-only, no credits): **5 of 5
+`i2vPro` tasks carried an in-catalog media id** — zero uploads — across v3.2 / v4.0 / v4.0.1,
+2026-06-08 through 2026-07-22, **including two dated 2026-07-20 itself** which rendered fine. So
+PixAI never changed; i2vPro has always accepted a generation-OUTPUT id.
+
+**Shipped.** I2V/FLF pass the catalog id straight through; on `invalid_media_id` the route uploads
+and retries once, so the July behaviour survives as insurance on a spend path. Safe by
+`submit_generation`'s own argument — a `PixAIError` means the task was rejected, so there is
+nothing created to double-charge.
+
+**Diagnosis only existed because of the logging shipped an hour earlier**, and that logging had a
+flaw the first real failure exposed: a flat 700-char truncation let a long prompt eat the budget
+and cut off `isPrivate`/`modelId`/`duration`. Prompts are now truncated separately so the
+structural fields always survive.
+
+**Two follow-ups this opened:**
+- **R2V may not need uploads either.** The same survey found `referenceVideo` tasks split 3
+  catalog-id / 3 uploaded. Deliberately NOT changed — its error name was specific and the
+  evidence is mixed — but if it holds, the same NSFW trap applies to reference video.
+- **The website sends fields we do not**, from that same dump: `width`/`height` (1536×864),
+  `channel: "private"`, and `lora: {}`; it OMITS `generateAudio`/`audioLanguage`, which we always
+  send. Note `build_video_parameters`'s docstring asserts *"There is NO `channel` field"* —
+  demonstrably false now. Unknown whether any of it matters; worth a probe before assuming.
+
 ### ⚠ OPEN: the V3.0 Lite video decline is NOT solved — only made diagnosable
 
 **Do not close this as fixed.** Owner reported (2026-07-26): submitting a video on **V3.0 Lite**
