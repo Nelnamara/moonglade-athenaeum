@@ -2937,8 +2937,9 @@ def restore_quarantined_media(out_dir, thumb_dir, db_path, media_id):
 
     If a purge-time sidecar exists (every purge since 2026-07-24), the FULL row --
     rating, collections, prompt, task_id, everything -- comes back. Older quarantined
-    files (or a sidecar write that failed) get a minimal row: just media_id/filename,
-    so the file is visible in the gallery again even though its history is genuinely
+    files (or a sidecar write that failed) get a minimal row: media_id/filename plus
+    is_video read off the file's own extension, so the file is visible in the gallery
+    again -- and a video comes back as a video -- even though its history is genuinely
     gone (there was never a manifest before this feature -- see
     docs/AUDIT_2026-07-21.md's scoping note on this row). A live re-fetch of the
     task via getTaskById (mentioned as possible in that same note) is deliberately
@@ -2947,6 +2948,7 @@ def restore_quarantined_media(out_dir, thumb_dir, db_path, media_id):
     orphans, not "needed to make the file visible again".
 
     Returns {"ok": True, "media_id":, "filename":} or {"ok": False, "error":}."""
+    import moonglade_backup as core
     out_dir = Path(out_dir)
     src = _find_quarantined_file(out_dir, media_id)
     if not src:
@@ -2966,6 +2968,12 @@ def restore_quarantined_media(out_dir, thumb_dir, db_path, media_id):
     row = {f: (meta.get(f, "") if meta else "") for f in CATALOG_FIELDS}
     row["media_id"] = media_id
     row["filename"] = dest.name
+    # Only a sidecar carries is_video, and the ~12k legacy files in _deleted/ have none
+    # (nothing wrote one before 2026-07-24), so restoring a legacy VIDEO left the flag
+    # blank and the gallery served it back as a broken image instead of a player. The
+    # extension is the same signal list_quarantined() reads for exactly this reason.
+    if not row["is_video"]:
+        row["is_video"] = "1" if dest.suffix.lower() in core._VIDEO_EXTS else ""
     save_catalog(db_path, [row])
 
     meta_path = _trash_meta_path(out_dir, media_id)
@@ -3090,6 +3098,7 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
     ffmpeg frame-extract instead of staying blank forever. `force` deliberately
     does NOT overwrite an existing video thumb -- the poster came from the
     network and can't be regenerated from the local file."""
+    import moonglade_backup as core
     if Image is None:
         print("Warning: Pillow not installed -- thumbnails will not be generated.")
         return
@@ -3112,7 +3121,10 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
         if is_vid:
             vp = Path(out_dir) / (filename or "")
             if not vp.exists():
-                m = find_files_for_media_id(Path(out_dir), mid)
+                # exts=_VIDEO_EXTS, not the matcher's image-only default: this fallback
+                # exists for a video whose stored filename is stale or blank, and an
+                # image-only match can never find one, so the row stayed thumbless.
+                m = find_files_for_media_id(Path(out_dir), mid, exts=core._VIDEO_EXTS)
                 vp = m[0] if m else None
             return bool(vp and make_video_thumbnail(vp, thumb_path))
         img_path = find_image_file(out_dir, mid, filename)
@@ -5720,6 +5732,13 @@ function toggleSelectMode() {
   }
   document.addEventListener('pointerdown', function(e) {
     if (!selectMode || !e.target.closest) return;
+    // PRIMARY BUTTON ONLY. Right-click opens the image context menu, and an unfiltered
+    // pointerdown ALSO toggled that card in the persisted cross-page selection on the way --
+    // the same selection "Delete from PixAI" later acts on, so one stray right-click could
+    // quietly enrol an image in an irreversible cloud delete. Pointer Events report the
+    // button, so this is a read, not a guess: touch and pen contacts are button 0 too and
+    // paint exactly as before.
+    if (e.button !== 0) return;
     var card = e.target.closest('.card');
     if (!card || e.target.closest('.cb-wrap')) return;   // empty space scrolls; checkbox handles itself
     painting = true; lastCard = null;
@@ -7398,11 +7417,15 @@ var Snips = (function(){
 })();
 var Gen = (function(){
   var kind='base', selected=null, costSeq=0, costTimer=null;
-  // The Fix sub-tab's price check gets its OWN debounce timer and stale-response counter
-  // rather than sharing costSeq/costTimer with Generate and Edit. It has to: setEditSource
-  // refreshes the Edit badge AND the Fix badge for the same source, so on one shared timer
-  // each would cancel the other's debounce, and on one shared counter whichever response
-  // landed second would silently invalidate the first badge's own answer.
+  // Every price badge gets its OWN debounce timer and stale-response counter -- Generate,
+  // Edit and Fix never share a pair. They have to: one user action schedules more than one
+  // of them. setEditSource refreshes the Edit badge AND the Fix badge for the same source,
+  // and a ?edit=<id> arrival fires the Edit check while the page's opening Generate check is
+  // still sitting on its debounce -- on a shared timer that second call cancels the first,
+  // which is exactly why the Generate tab used to open with no price at all on an ?edit=
+  // load. On a shared counter, whichever response lands second silently invalidates the
+  // first badge's own answer.
+  var editSeq=0, editTimer=null;
   var fixTag_='face', fixBoxes=[], fixStart=null, fixSeq=0, fixTimer=null, fixCostVal=null;
   function el(id){return document.getElementById(id);}
   function open(){
@@ -8242,7 +8265,7 @@ var Gen = (function(){
     // Bump BEFORE the early return -- see fixCost's note. Same contract, same defect: a
     // response for the previous source stayed valid across a source change and repainted
     // its price over the new one.
-    var mine=++costSeq;
+    var mine=++editSeq;
     if(!editSrc()){ cost.clear(); return; }
     cost.setChecking();
     fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(editPayload())})
@@ -8255,12 +8278,12 @@ var Gen = (function(){
       // soft and returns None on any /v2/task-price error, so a transient PixAI hiccup used to
       // put a neutral, price-looking string on the one line whose job is to say whether this
       // spends money. The badge renders it red instead.
-      .then(function(d){ if(mine===costSeq) cost.setPrice(d); })
+      .then(function(d){ if(mine===editSeq) cost.setPrice(d); })
       // setPrice(null), NOT clear(): a failed fetch is could-not-verify, never "not priced
       // yet". Conflating the two is exactly what the old neutral "cost unavailable" did.
-      .catch(function(){ if(mine===costSeq) cost.setPrice(null); });
+      .catch(function(){ if(mine===editSeq) cost.setPrice(null); });
   }
-  function debEditCost(){ clearTimeout(costTimer); costTimer=setTimeout(editCost,250); }
+  function debEditCost(){ clearTimeout(editTimer); editTimer=setTimeout(editCost,250); }
   function edit(){
     var p=editPayload();
     if(!p.source){ el('edit-src').focus(); return; }
@@ -8330,7 +8353,15 @@ var Gen = (function(){
       // setPrice(null), not clear(): a failed fetch is could-not-verify, never "not priced yet".
       .catch(function(){ if(mine===fixSeq){ cost.setPrice(null); fixCostVal=null; } });
   }
-  function debFixCost(){ clearTimeout(fixTimer); fixTimer=setTimeout(fixCost,250); }
+  function debFixCost(){
+    // The boxes have ALREADY changed by the time this runs, so the quoted price is stale NOW,
+    // not 250ms from now. Drop it here and burn the sequence token on the same line, so a
+    // reply still in flight for the previous box set can't put its number back either.
+    // Without both, drawing a second box and pressing Fix inside the debounce window put the
+    // FIRST box's price in the confirm dialog -- a figure approved for a request it never
+    // described.
+    fixCostVal=null; fixSeq++;
+    clearTimeout(fixTimer); fixTimer=setTimeout(fixCost,250); }
   function fix(){
     var src=editSrc(); if(!src){ el('edit-src').focus(); return; }
     if(!fixBoxes.length){
@@ -8792,22 +8823,41 @@ var Similar = (function(){
   return {open:open, close:close};
 })();
 function bulkSendVideo(){
-  var refs=[];
-  selGet().forEach(function(mid){
+  var ids=[...selGet()];
+  if(!ids.length) return;
+  // The selection is a list of media_ids in localStorage; it is NOT the cards on screen. So
+  // "is this one a video?" cannot be asked of `#card-<mid>` alone -- filter or paginate away
+  // from a selected video and there is no card to read data-video off, the test finds
+  // nothing, and the video rides into an image-reference send. A card that IS rendered still
+  // answers for free; only the ids this page can't see cost a lookup.
+  var vids=new Set(), unseen=[];
+  ids.forEach(function(mid){
     var card=document.getElementById('card-'+mid);
-    if(card && card.getAttribute('data-video')==='1') return;   // videos can't be image refs
-    refs.push({mid:mid, thumb:'/thumbs/'+mid+'.jpg'});
+    if(!card){ unseen.push(mid); return; }
+    if(card.getAttribute('data-video')==='1') vids.add(mid);
   });
-  if(!refs.length) return;
-  // Gen.addVideoRefs() itself caps at 6 (the multi-ref drawer's real limit, see its own
-  // comment) -- this used to slice(0,9), a stale number left over from before that cap
-  // dropped 9->6 in the full-parity split. addVideoRefs's cap was always the authoritative
-  // one, so nothing over-sent either way, but nobody was ever TOLD their extra picks got
-  // dropped -- fixed here, not by raising the cap.
-  if(refs.length>6 && window.Toast) Toast.show({kind:'err', title:'Only 6 images used',
-    msg:'The video drawer takes up to 6 reference images — '+(refs.length-6)+' of your '+refs.length+' were left out.'});
-  Gen.addVideoRefs(refs);
-  clearAll();   // sent to the video drawer -- clear the gallery selection (we stay on the page)
+  Promise.all(unseen.map(function(mid){
+    return fetch('/api/image-meta/'+encodeURIComponent(mid))
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){ if(d && d.is_video) vids.add(mid); })
+      .catch(function(){});   // unanswerable id: send it as this always has, decide nothing new
+  })).then(function(){
+    var refs=[];
+    ids.forEach(function(mid){
+      if(vids.has(mid)) return;   // videos can't be image refs
+      refs.push({mid:mid, thumb:'/thumbs/'+mid+'.jpg'});
+    });
+    if(!refs.length) return;
+    // Gen.addVideoRefs() itself caps at 6 (the multi-ref drawer's real limit, see its own
+    // comment) -- this used to slice(0,9), a stale number left over from before that cap
+    // dropped 9->6 in the full-parity split. addVideoRefs's cap was always the authoritative
+    // one, so nothing over-sent either way, but nobody was ever TOLD their extra picks got
+    // dropped -- fixed here, not by raising the cap.
+    if(refs.length>6 && window.Toast) Toast.show({kind:'err', title:'Only 6 images used',
+      msg:'The video drawer takes up to 6 reference images — '+(refs.length-6)+' of your '+refs.length+' were left out.'});
+    Gen.addVideoRefs(refs);
+    clearAll();   // sent to the video drawer -- clear the gallery selection (we stay on the page)
+  });
 }
 document.addEventListener('DOMContentLoaded', function(){
   // O12: the flyout's search input lives inside <mg-model-picker> now (its own .mg-q),
@@ -13348,6 +13398,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             except OSError as e:
                 return jsonify({"error": "Key verified, but couldn't write config.json: {}".format(
                     _redact_host_paths(str(e)))}), 200
+            # Writing the file is only half of "saved": load_token() prefers core's
+            # import-time _cfg snapshot over a fresh disk read, so a server that already
+            # had a key kept authenticating every generation/account call with the OLD
+            # one -- rotating a revoked key or switching accounts changed nothing until a
+            # restart, while this route reported success. Refreshed ONLY for the field
+            # just persisted, and only after the write actually landed; the rest of the
+            # snapshot keeps the caching behaviour the rest of the app relies on.
+            core._cfg["PIXAI_API_KEY"] = key
         try:
             credits = int(me.get("quotaAmount") or 0)
         except (TypeError, ValueError):
