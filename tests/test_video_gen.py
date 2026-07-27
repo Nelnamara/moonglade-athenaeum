@@ -662,3 +662,123 @@ def test_local_audio_reference_is_refused_not_mislabelled():
     # an existing media_id is untouched -- only the local-file case is refused
     assert core._resolve_refs(object(), ["746928310596368107"], None) == \
         ["746928310596368107"]
+
+
+# ---------------------------------------------------------------------------
+# 15 seconds is v4.0-only -- a rule that used to live only in a comment
+# ---------------------------------------------------------------------------
+
+def test_15s_snaps_down_for_models_that_cannot_render_it():
+    """VIDEO_DURATIONS has said "15 is v4.0-only" since it was banked, and nothing enforced it.
+
+    A 15s request on V3.0 Lite therefore went straight to PixAI, which refuses the mutation --
+    and because no task is created, nothing shows on the account and the client reports an
+    instant decline with no explanation. Found while diagnosing a V3.0 Lite failure on
+    2026-07-26 (which turned out to be a different cause; this one was sitting right beside it)."""
+    for model in ("v3.0.2", "v3.0", "v3.2", "v3.0.1", "v2.7"):
+        assert core._snap_video_duration(15, model) == 10, model
+        assert core._snap_video_duration(14, model) == 10, model     # snaps to 15, then capped
+
+
+def test_15s_is_allowed_for_the_v4_family():
+    for model in core.VIDEO_15S_MODELS:
+        assert core._snap_video_duration(15, model) == 15, model
+    assert set(core.VIDEO_15S_MODELS) == {"v4.0", "v4.0.1"}
+
+
+def test_snap_without_a_model_keeps_the_original_behaviour():
+    """The CLI preview path and the pre-existing tests call this model-blind. Adding the gate
+    must not change what they get -- the restriction only applies when a model is named."""
+    assert core._snap_video_duration(15) == 15
+    assert core._snap_video_duration(15, "") == 15
+
+
+def test_the_shot_builder_applies_the_gate():
+    """End to end through the builder the Loom and the gallery drawer both use, since that is
+    where a real 15s request arrives."""
+    p3 = core.build_shot_video_params("I2V", "x", image_ids=["1"], duration=15, model="v3.0.2")
+    assert p3["i2vPro"]["duration"] == "10"
+
+    p4 = core.build_shot_video_params("I2V", "x", image_ids=["1"], duration=15, model="v4.0.1")
+    assert p4["i2vPro"]["duration"] == "15"
+
+
+# ---------------------------------------------------------------------------
+# Spend failures are logged server-side
+# ---------------------------------------------------------------------------
+
+def test_a_failed_generation_is_logged_with_its_params(tmp_path, monkeypatch, caplog):
+    """A failed spend attempt must leave a trail on the server.
+
+    It did not, and that is the whole reason a 2026-07-26 video decline was undiagnosable: the
+    route handed the raw error to the browser, the browser replaced it with a guess ("PixAI's
+    content filter blocked this"), and the real text was recorded nowhere. A content block and a
+    rejected parameter want OPPOSITE fixes, so the guess actively misdirected.
+
+    Asserts the params are logged too, not just the message -- the shape (model, quality mode,
+    duration) is the diagnosis for this class of failure."""
+    import logging
+    from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from tests.conftest import login_test_client
+
+    (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
+    img = tmp_path / "2025-01" / "a_555.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
+        "media_id": "555", "filename": "2025-01/a_555.png", "created_at": "2026-06-18T05:24:56Z"}])
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "upload_media", lambda session, path, **k: "777")
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+
+    def boom(session, params):
+        raise core.PixAIError('unknown mode "professional" for i2vPro')
+    monkeypatch.setattr(core, "submit_generation", boom)
+
+    cli = login_test_client(create_app(tmp_path))
+    with caplog.at_level(logging.ERROR):
+        r = cli.post("/api/loom/generate", json={
+            "mode": "I2V", "prompt": "a test", "images": ["555"],
+            "duration": 10, "video_model": "v3.0.2"})
+
+    # The client still gets the error, unchanged in contract (200 + {"error": ...}).
+    assert r.status_code == 200
+    assert "unknown mode" in r.get_json()["error"]
+
+    logged = "\n".join(rec.getMessage() for rec in caplog.records)
+    assert "/api/loom/generate" in logged
+    assert "unknown mode" in logged, "the raw PixAI error was not recorded"
+    assert "v3.0.2" in logged, "the param shape was not recorded -- it IS the diagnosis"
+    assert "i2vPro" in logged
+
+
+def test_the_failure_log_never_breaks_the_error_path(tmp_path, monkeypatch):
+    """A diagnostic that can break the error path it reports on is worse than none. Params that
+    refuse to serialise must not turn a clean error response into a 500."""
+    from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from tests.conftest import login_test_client
+
+    (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "2025-01" / "a_555.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
+        "media_id": "555", "filename": "2025-01/a_555.png", "created_at": "2026-06-18T05:24:56Z"}])
+
+    class Unserialisable:
+        def __repr__(self):
+            raise RuntimeError("even repr fails")
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "upload_media", lambda session, path, **k: "777")
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+
+    def boom(session, params):
+        params["poison"] = Unserialisable()
+        raise core.PixAIError("the real failure")
+    monkeypatch.setattr(core, "submit_generation", boom)
+
+    cli = login_test_client(create_app(tmp_path))
+    r = cli.post("/api/loom/generate", json={
+        "mode": "I2V", "prompt": "x", "images": ["555"], "duration": 5})
+
+    assert r.status_code == 200
+    assert "the real failure" in r.get_json()["error"]

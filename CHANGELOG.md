@@ -30,6 +30,28 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **A failed generation told you the wrong thing, and left no trace to check it against.** A
+  video submit that PixAI declined reported *"PixAI's content filter blocked this generation"* —
+  in the gallery, worded as though you were in the Loom, and for a submit that never created a
+  task on PixAI at all. Three separate faults stacked up. The message-mapper's moderation test
+  matched bare words like `not allowed`, `violates` and `sensitive`, which are ordinary in
+  *parameter* rejections — so a validation error was relabelled as moderation, pointing you at a
+  prompt that was never the problem. It then **replaced** the raw error with that guess rather
+  than adding to it. And no route logged the failure, so the true text existed nowhere
+  afterwards. Now: the raw wording is always appended (*"… (PixAI said: …)"*), the moderation
+  test needs a content-ish word beside those loose ones before it will claim moderation,
+  unclassified errors come through verbatim, no message names an internal surface, and every
+  spend path records the failure **with its parameter shape** — model, quality mode, duration —
+  because for this class of bug the shape is the diagnosis.
+- **The quality-setting explanation could never appear for video.** Video's quality field is
+  `i2vPro.mode`; images use `inferenceProfile`. The message written to explain an unsupported
+  quality setting only matched the image field, so video quality rejections fell through into the
+  moderation test instead — the exact misdiagnosis path above.
+- **15-second clips were offered on models that cannot render them.** `VIDEO_DURATIONS` has
+  carried the note *"15 is v4.0-only"* since it was banked, but nothing enforced it, so a 15s
+  request on (say) V3.0 Lite went to PixAI, which refuses the mutation — no task created, nothing
+  on the account, an instant decline with no explanation. Non-v4.0 models now snap to 10.
+
 - **A maintenance job left "running" was never resolved after a restart.** Panel, import and
   bulk-delete jobs are spawned by the server, and the Job Tracker's reaper only ever asked PixAI
   about *generation* jobs — reasonably, since local jobs "self-report" when they finish. But a

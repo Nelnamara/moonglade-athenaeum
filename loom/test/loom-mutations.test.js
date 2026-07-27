@@ -389,6 +389,55 @@ describe("friendlyGenErr", () => {
     assert.equal(friendlyGenErr(""), "generation failed");
     assert.equal(friendlyGenErr(null), "generation failed");
   });
+
+  // --- 2026-07-26: the label used to REPLACE the raw error, and it mislabelled -----------
+
+  test("always appends PixAI's raw words, so a wrong label cannot hide the real cause", () => {
+    // The whole reason a video decline cost an evening: the UI said "content filter", PixAI had
+    // created no task, and the actual error text existed nowhere -- this function had discarded
+    // it and no route logged it. A friendly label is a HINT layered over the truth now.
+    const out = friendlyGenErr("content policy violation: prompt rejected");
+    assert.match(out, /content filter/);
+    assert.match(out, /PixAI said: content policy violation: prompt rejected/);
+  });
+
+  test("a bare parameter rejection is NOT relabelled as a content-filter block", () => {
+    // These are ordinary PARAMETER-rejection words. Calling them moderation sends someone off to
+    // rewrite a prompt that was never the problem, which is exactly what happened.
+    for (const raw of ["duration 15 is not allowed for this model",
+                       "value violates the accepted range",
+                       "field is sensitive to model type"]) {
+      const out = friendlyGenErr(raw);
+      assert.doesNotMatch(out, /content filter/, `mislabelled: ${raw}`);
+      assert.equal(out, raw, "an unclassified error must come through verbatim");
+    }
+  });
+
+  test("still recognizes genuine moderation wording", () => {
+    // The loose words DO mean moderation when a content noun sits beside them -- tightening the
+    // regex must not go so far that real blocks stop being explained.
+    for (const raw of ["prohibited content detected", "flagged as sensitive content",
+                       "violates our content policy", "NSFW blocked"]) {
+      assert.match(friendlyGenErr(raw), /content filter/, `missed real moderation: ${raw}`);
+    }
+  });
+
+  test("a VIDEO quality rejection reaches the quality branch, not the moderation one", () => {
+    // Video's quality field is i2vPro.mode; images use inferenceProfile. Before this, the
+    // quality message could never fire for video at all and those errors fell into the
+    // moderation test instead -- the exact misdiagnosis path found on 2026-07-26.
+    assert.match(friendlyGenErr('unknown mode "ultra" for i2vPro'), /quality setting/);
+  });
+
+  test("no message names an internal surface", () => {
+    // "not in the Loom" showed up in the gallery's video generator, which is a different screen
+    // as far as the person reading it is concerned. Shared copy must not name where the code
+    // happens to live.
+    for (const raw of ["content policy violation", "INSUFFICIENT_BALANCE",
+                       'unknown inferenceProfile "ultra"']) {
+      assert.doesNotMatch(friendlyGenErr(raw), /\bLoom\b/i, `names the Loom: ${raw}`);
+    }
+  });
 });
 
 describe("classifyTaskStatus", () => {
