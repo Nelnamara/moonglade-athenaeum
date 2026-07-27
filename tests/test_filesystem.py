@@ -180,7 +180,10 @@ def test_import_local_external_copies_in(tmp_path):
     out = tmp_path / "backup"
     res = core.run_import_local(SimpleNamespace(out=str(out), import_local=str(ext)))
     assert res["imported"] == 1
-    assert (out / "imported" / "outside.png").exists()   # copied into the backup
+    # Stored under the content-addressed name, not the source basename: two different
+    # files called outside.png out of two folders both have to survive the import.
+    copied = list((out / "imported").glob("outside_local_*.png"))
+    assert len(copied) == 1, [p.name for p in (out / "imported").glob("*")]
 
 
 def test_video_poster_thumb_noop_without_ffmpeg(tmp_path, monkeypatch):
