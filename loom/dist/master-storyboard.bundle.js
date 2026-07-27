@@ -1879,7 +1879,11 @@ ${"=".repeat(48)}
               type: "button",
               className: "lv-lrm",
               title: "Remove",
-              onClick: () => setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id))
+              onClick: () => {
+                const p = loraPickerElRef.current;
+                if (p && p.deselect) p.deselect(l.model_id);
+                setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id));
+              }
             },
             "\xD7"
           ), l.versions && l.versions.length > 1 && /* @__PURE__ */ React.createElement(
@@ -2625,15 +2629,21 @@ ${"=".repeat(48)}
       const tgt = list.find((x) => x.id === id);
       if (!window.confirm(`Delete "${tgt && tgt.name || "this storyboard"}"? This can't be undone.`)) return;
       if (id === activeId) {
-        const next = list.find((x) => x.id !== id);
-        let p = null;
-        try {
-          const raw = await sGet(PPRE + next.id);
-          if (raw) p = JSON.parse(raw);
-        } catch {
+        let next = null, p = null;
+        for (const cand of list) {
+          if (cand.id === id) continue;
+          try {
+            const raw = await sGet(PPRE + cand.id);
+            if (raw) {
+              p = JSON.parse(raw);
+              next = cand;
+              break;
+            }
+          } catch {
+          }
         }
         if (!p) {
-          window.alert("Couldn't read the next storyboard, so nothing was deleted. Try again.");
+          window.alert("Couldn't open another storyboard, so nothing was deleted. Try again.");
           return;
         }
         clearTimeout(saveTimer.current);

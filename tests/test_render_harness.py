@@ -205,10 +205,15 @@ def render_server(tmp_path_factory):
             "created_at": "2025-01-%02dT00:00:00" % (i + 1)}
         # Row 0 alone carries what a swept catalog holds: the REAL size of the bitmap written
         # below, plus a model. The upscale panel derives its ratio cap from those dimensions,
-        # so a fake size would make every assertion about the cap meaningless, and without a
-        # model the panel correctly refuses to submit and there would be nothing to measure.
+        # so a fake size would make every assertion about the cap meaningless.
         | ({"width": "900", "height": "600", "model_id": "4242",
             "model_name": "Harness Model", "prompt_full": "harness prompt"} if i == 0 else {})
+        # Row 1 is the half-swept state: the size is known but the model never was. That is
+        # what a locally imported file looks like once it has a thumbnail, and what any row
+        # predating a full meta sweep looks like. It exists so the "no model" case can be
+        # tested on its OWN -- the other bare rows also have no size, which disables the
+        # ratio slider for an unrelated reason and would mask what is being measured.
+        | ({"width": "900", "height": "600"} if i == 1 else {})
         for i in range(6)
     ])
     # A REAL bitmap on disk for the first row, so /full/100 serves a decodable image through
@@ -769,10 +774,16 @@ def test_the_upscale_panel_offers_a_picker_when_the_model_is_unknown(logged_in_p
     the state a catalog that has never been swept is in, and the permanent state of anything
     imported from this computer, which has no PixAI task behind it at all.
 
-    The panel must not guess one (guessing a model on an upscale silently restyles the
-    picture) and must not simply refuse either (the upscale needs *a* model, not necessarily
-    the original). So: submit stays disabled, the reason is named along with the command that
-    fixes it, and the SAME picker the Generate drawer uses is offered.
+    It must still be upscalable. PixAI's own upscale dialog has NO model control at all --
+    their submit sets a fixed model version and takes the prompt off the source's original
+    task -- so requiring one here was this app's own invention, and it left every locally
+    imported file with a dead Go button behind "pick a model first" (and no way out at all
+    on a page where the picker failed to render).
+
+    So: submit is ENABLED against core's UPSCALE_FALLBACK_VERSION_ID, the reason is still
+    named along with the command that fixes it, and the SAME picker the Generate drawer uses
+    is still offered -- as an override now, because naming the original model IS better when
+    it is known (Hires re-diffuses, so the original keeps the style).
     """
     page = logged_in_page(**DESKTOP)
     _visit(page, "/image/101")
@@ -780,9 +791,11 @@ def test_the_upscale_panel_offers_a_picker_when_the_model_is_unknown(logged_in_p
     page.wait_for_selector("mg-upscale-panel[open]", state="attached")
     _settle(page)
     m = page.evaluate(_UPSCALE_JS)
-    assert m["goDisabled"], "no model, but the panel would still submit"
+    assert not m["goDisabled"], (
+        "an image with no recorded model must still be upscalable -- PixAI does not ask "
+        "for one either")
     assert "backfill-full-meta" in m["text"], (
-        "the panel must name the command that fixes it, not just refuse")
+        "the panel must still name the command that fills the catalog in")
     assert m["pickerOffered"], "the owner must be able to pick a model rather than be blocked"
     # It is the shared component, not a bespoke model list built for this panel.
     assert page.evaluate("() => !!window.customElements.get('mg-model-picker')"), (

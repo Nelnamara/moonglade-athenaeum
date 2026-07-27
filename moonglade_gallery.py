@@ -3239,6 +3239,11 @@ def _upscale_const_js():
             "enlargeModels": list(core.ENLARGE_MODELS),
             "defaultEnlargeModel": core.DEFAULT_ENLARGE_MODEL,
             "ceiling": core.UPSCALE_PIXEL_CEILING,
+            # So the panel can upscale an image whose model the catalog never recorded,
+            # instead of refusing until one is picked -- PixAI's own dialog has no model
+            # control at all. Served rather than retyped, like everything else here. It is
+            # a VERSION id, so the panel sends it as version_id; see core for why.
+            "fallbackVersionId": core.UPSCALE_FALLBACK_VERSION_ID,
             "denoise": {"strength": core.DEFAULT_UPSCALE_DENOISING_STRENGTH,
                         "steps": core.DEFAULT_UPSCALE_DENOISING_STEPS},
         }, separators=(",", ":")),
@@ -6694,7 +6699,7 @@ document.addEventListener('DOMContentLoaded', function(){
                  onchange="Gen.refreshCost()" style="width:100%;">
         </div>
       </div>
-      <label class="gen-check" title="This IS the site's Turbo tier (priority=1000): a faster runner. Costs more credits when paid, but a matching free card covers it (paidCredit 0) — verified against a real Turbo gen."><input type="checkbox" id="gen-hp"> High priority &middot; Turbo (faster)</label>
+      <label class="gen-check" title="PixAI's High Priority channel (priority=1000): ~10x faster and it COSTS EXTRA credits. It is not Turbo — Turbo is a separate, members-only channel that is free, and it is what an unticked box already asks for (falling back to standard speed on its own if this account isn't a member)."><input type="checkbox" id="gen-hp"> High priority (faster &middot; costs extra)</label>
       <label class="gen-check"><input type="checkbox" id="gen-ph" checked> Prompt helper</label>
       <mg-cost-badge id="gen-cost" hint="Pick a model to see the cost." card-label="a card"></mg-cost-badge>
       <button id="gen-go" class="gen-go" onclick="Gen.generate()" disabled>Generate</button>
@@ -7711,7 +7716,16 @@ var Gen = (function(){
   // therefore payload()) is always correct immediately, regardless of the grid's own
   // highlight state. Flagged as a precise, known, low-severity remainder rather than
   // silently left unexplained.
-  function loraRemove(i){ loras.splice(i,1); renderLoras(); refreshLoraNotes(); debouncedCost(); }
+  function loraRemove(i){
+    var gone=loras[i];
+    loras.splice(i,1);
+    // Tell the picker too. It keeps its OWN copy of what's picked, and removing a chip
+    // here never touched it: the card stayed lit, clicking it again read as a remove
+    // rather than a re-add, and a version resolve still in flight for that LoRA saw it
+    // as live and re-dispatched it straight back into this list.
+    if(gone && loraPickerEl && loraPickerEl.deselect) loraPickerEl.deselect(gone.model_id);
+    renderLoras(); refreshLoraNotes(); updateGoState(); debouncedCost();
+  }
   // Switch an already-added LoRA to a different published release -- mirrors pickVersion()
   // (the base model's own version switcher) exactly, just applied to loras[i] instead of the
   // single `selected` object. No extra network call: l.versions was already resolved in full
@@ -13812,6 +13826,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         feeds to core._gen_parameters -- so web + CLI build identical params (one source
         of truth). Clamped to safe ranges."""
         from types import SimpleNamespace
+        import moonglade_backup as core          # module-local, like every other use here
         p = p or {}
         def num(k, d, cast=int):
             try:
@@ -13832,7 +13847,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             width=num("width", 512), height=num("height", 512),
             steps=num("steps", 25), cfg=num("cfg", 7, float),
             count=max(1, min(num("count", 1), 4)),
-            priority=(1000 if hp else 500), mode=(p.get("mode") or "auto"),
+            # Ticked = High (1000, costs extra). Unticked = Turbo (500, free but
+            # members-only); core's submit downgrades that to Low on its own if PixAI
+            # says this account isn't entitled, so an expired membership no longer
+            # breaks every generate/edit/upscale at once.
+            priority=(core.PRIORITY_HIGH if hp else core.PRIORITY_TURBO),
+            mode=(p.get("mode") or "auto"),
             seed=(int(seed_raw) if seed_raw.lstrip("-").isdigit() else None),
             lora=loras,
             prompt_helper=(str(p.get("prompt_helper", "1")) not in ("0", "false", "off")),
@@ -14391,6 +14411,24 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         from urllib.parse import quote
         return _loom_kv_dir(user) / (quote(str(key), safe="") + ".json")
 
+    def _loom_tomb_path(user, key):
+        """Marks a legacy key this account has DELETED.
+
+        Deleting only ever unlinked the account's own copy, and a board it had merely
+        inherited from the legacy shared layer had no own copy to unlink -- so the delete
+        reported success, the read fell straight back through to the legacy file, and the
+        board came back. Every board predating the per-account split behaved that way:
+        undeletable, with a fresh one deleting perfectly, which is what made it look like
+        the list was showing the same board twice.
+
+        A tombstone rather than deleting the legacy file itself, because that layer is
+        shared and read-only to every account by design -- one account tidying its own
+        board list must not remove a board out from under another. `.deleted` cannot
+        collide with a real key: `quote(safe="")` percent-encodes any dot in a key name.
+        """
+        from urllib.parse import quote
+        return _loom_kv_dir(user) / (quote(str(key), safe="") + ".deleted")
+
     def _loom_kv_write(user, key, value):
         """Atomically persist one key's value into the ACCOUNT'S OWN dir (tmp +
         os.replace). Never writes the legacy shared dir -- that stays exactly as
@@ -14399,6 +14437,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
         tmp.write_text(json.dumps(value), encoding="utf-8")
         os.replace(tmp, p)
+        # Writing a key un-buries it: an own copy now exists, so the tombstone has nothing
+        # left to suppress, and leaving one behind would hide a board that was deliberately
+        # re-created under the same key.
+        try:
+            _loom_tomb_path(user, key).unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
 
     def _loom_kv_read(user, key):
         """This account's value for `key`, falling back read-only to the legacy shared
@@ -14411,6 +14458,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 return json.loads(own.read_text(encoding="utf-8"))
             except (ValueError, OSError):
                 return None
+        if _loom_tomb_path(user, key).exists():
+            return None      # this account deleted it; don't resurrect it from the legacy layer
         try:
             return json.loads(_legacy_loom_kv_path(key).read_text(encoding="utf-8"))
         except (ValueError, OSError):
@@ -14584,7 +14633,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # never omits a board a bare "get" on the same key would still return.
             own_keys = {unquote(f.stem) for f in _loom_kv_dir(user).glob("*.json")}
             legacy_keys = {unquote(f.stem) for f in _legacy_loom_kv_dir().glob("*.json")}
-            keys = own_keys | legacy_keys
+            # Minus anything this account has deleted. Without it a legacy board the
+            # account never saved its own copy of stayed in the list forever: the delete
+            # had nothing of its own to unlink, so it reported success and changed nothing.
+            buried = {unquote(f.stem) for f in _loom_kv_dir(user).glob("*.deleted")}
+            keys = (own_keys | legacy_keys) - buried
         return jsonify({"keys": sorted(k for k in keys if k.startswith(pre))})
 
     @app.route("/api/loom/delete", methods=["POST"])
@@ -14597,14 +14650,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             _loom_migrate()
             if k:
                 # Unlinks only the account's OWN copy, never the legacy shared file --
-                # matches _view_presets: the legacy layer is never written back to.
-                # An account that never saved its own copy of an inherited/shared key
-                # can't make a delete "stick" this way (a later GET still falls through
-                # to the legacy value) -- accepted gap, not a bug: this only bites a
-                # second account deleting a board it never touched itself, which doesn't
-                # happen in the single-owner-plus-occasional-LAN-device use case this
-                # feature was built for. Revisit with a per-key tombstone file if that
-                # ever changes.
+                # matches _view_presets: the legacy layer is never written back to, so one
+                # account tidying its board list cannot remove a board out from under
+                # another.
+                # That alone was not enough. A board the account had merely INHERITED from
+                # the legacy layer has no own copy to unlink, so this reported success and
+                # changed nothing: the next read fell straight back through to the legacy
+                # file and the board returned. Every board predating the per-account split
+                # was undeletable that way, while a freshly created one deleted perfectly
+                # -- which reads as the list showing the same board twice. The gap was
+                # known and judged not to bite a single owner; it does. Hence the tombstone
+                # this comment used to propose.
                 try:
                     _loom_kv_path(user, k).unlink()
                 except FileNotFoundError:
@@ -14615,6 +14671,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     # {"ok": true} came back even though the file is still sitting there --
                     # matches loom_set's own OSError handling just above in this file.
                     return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:120]}), 500
+                # Bury it only when the legacy layer would otherwise hand it straight back.
+                # Fails soft: an unwritable tombstone leaves the old behaviour (the board
+                # reappears), which is exactly what happened before and is not worth
+                # turning a working delete into an error.
+                if _legacy_loom_kv_path(k).exists():
+                    try:
+                        _loom_tomb_path(user, k).write_text("", encoding="utf-8")
+                    except OSError:
+                        pass
         return jsonify({"ok": True})
 
     def _find_local_video_file(mid):
