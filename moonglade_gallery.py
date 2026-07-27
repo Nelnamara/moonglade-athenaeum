@@ -7274,28 +7274,47 @@ var Setup = (function(){
       setTimeout(function(){ location.reload(); },900);
     }).catch(function(){ msg('setup-key-msg','Network error \\u2014 try again.','err'); });
   }
-  var poll=null;
+  var poll=null, syncBtn=null, pollMisses=0;
+  // "Sync now" is the ONLY control on the first-run screen, so every failure path has to hand
+  // it back -- tick() polls long after firstSync()'s stack is gone, so the button lives here
+  // instead of in a closure the poller can't reach. It used to be disabled on click and
+  // re-enabled only when the POST itself was rejected: a brand-new user whose first sync
+  // failed mid-job (or whose status polling died) was stranded on the setup screen forever.
+  function syncFailed(text){
+    if(poll){ clearInterval(poll); poll=null; }
+    pollMisses=0;
+    msg('setup-sync-msg', text, 'err');
+    if(syncBtn) syncBtn.disabled=false;
+  }
   function firstSync(){
-    var btn=event&&event.target; if(btn) btn.disabled=true;
+    var btn=event&&event.target; if(btn) syncBtn=btn;
+    if(syncBtn) syncBtn.disabled=true;
+    pollMisses=0;
     msg('setup-sync-msg','Starting\\u2026','');
     fetch('/api/panel/run',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({action:'sync'})}).then(function(r){return r.json();}).then(function(d){
-      if(d.error){ msg('setup-sync-msg',d.error,'err'); if(btn) btn.disabled=false; return; }
+      if(d.error){ syncFailed(d.error); return; }
       poll=setInterval(tick, 1500); tick();
-    }).catch(function(){ msg('setup-sync-msg','Network error \\u2014 try again.','err'); if(btn) btn.disabled=false; });
+    }).catch(function(){ syncFailed('Network error \\u2014 try again.'); });
   }
   function tick(){
     fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
+      pollMisses=0;
       if(d.status==='running'){
         var p=d.progress;
         msg('setup-sync-msg', p ? ('Syncing\\u2026 '+p.done+' / '+p.total+(p.new?(' ('+p.new+' new)'):'')) : 'Syncing\\u2026', '');
         return;
       }
       clearInterval(poll); poll=null;
-      if(d.status==='failed'){ msg('setup-sync-msg','Sync failed \\u2014 see the Panel for details.','err'); return; }
+      if(d.status==='failed'){ syncFailed('Sync failed \\u2014 see the Panel for details.'); return; }
       msg('setup-sync-msg','Done! Reloading\\u2026','ok');
       setTimeout(function(){ location.reload(); },900);
-    }).catch(function(){});
+    }).catch(function(){
+      // A status read can blip while the job is genuinely running, so give up only after
+      // several consecutive misses -- but DO give up, rather than polling a dead endpoint
+      // forever behind a disabled button.
+      if(++pollMisses>=5) syncFailed('Lost contact with the sync job \\u2014 check the Panel, then try again.');
+    });
   }
   return {saveKey:saveKey, firstSync:firstSync};
 })();
@@ -7717,7 +7736,17 @@ var Gen = (function(){
         refreshLoraNotes();   // re-check any attached LoRAs against the new base + set go-state
         applyModelDefaults();
         refreshCost(); })
-      .catch(function(){ if(mySeq===selSeq) el('gen-selname').textContent=m.title; });
+      .catch(function(){ if(mySeq!==selSeq) return;   // a newer pick already owns the UI
+        // `selected` was swapped to the new base at the top of this function, so a failed
+        // resolve leaves it with NO version_id -- only the success path ever re-ran the gate,
+        // so Go stayed enabled from the previously-resolved model and would submit a base
+        // that never resolved. Re-run the same gate here, and say so instead of silently
+        // dropping the " ..." and looking like a normal pick.
+        el('gen-selname').textContent=m.title+' (version lookup failed)';
+        updateGoState();
+        if(window.Toast) Toast.show({kind:'err', title:'Model not loaded',
+          msg:'Could not look up versions for '+m.title+' \\u2014 pick it again.'});
+      });
   }
   // Copy one resolved version's meta (list_model_versions row shape) onto `selected` --
   // shared by onBasePick's initial (latest) resolve and pickVersion's switch, so the two
