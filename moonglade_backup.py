@@ -2277,11 +2277,17 @@ def video_outputs(task):
     if not task:
         return [], {}
     params = task.get("parameters") or {}
-    rv = params.get("referenceVideo") or {}
+    # A video task carries ONE of two blocks: `referenceVideo` for a multi-reference
+    # generation, `i2vPro` for an ordinary image-to-video. Reading only the first meant every
+    # plain i2v -- the common Video-tab case, and everything --sync-videos backfills -- was
+    # cataloged with a blank prompt and duration, with nothing to show it had been dropped.
+    # The two blocks do NOT agree on the key: referenceVideo carries `prompt`, i2vPro carries
+    # `prompts` (see build_video_parameters), so both spellings are read.
+    src = params.get("referenceVideo") or params.get("i2vPro") or {}
     shared = {
-        "prompt": rv.get("prompt", ""),
-        "duration": rv.get("duration", ""),
-        "i2v_model": rv.get("model", ""),
+        "prompt": src.get("prompt") or src.get("prompts") or "",
+        "duration": src.get("duration", ""),
+        "i2v_model": src.get("model", ""),
     }
     outs = []
     for v in ((task.get("outputs") or {}).get("videos") or []):

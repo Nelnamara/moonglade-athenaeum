@@ -853,3 +853,35 @@ def test_video_prompt_over_the_limit_is_caught_before_submitting():
 
     ok = core.build_shot_video_params("I2V", "x" * 2000, image_ids=["1"], model="v4.0.1")
     assert ok["i2vPro"]["prompts"] == "x" * 2000     # exactly at the limit is fine
+
+
+def test_video_outputs_reads_a_plain_i2v_not_just_reference_video():
+    """A video task carries EITHER referenceVideo (multi-reference) or i2vPro (ordinary
+    image-to-video). Reading only the first left every plain i2v cataloged with a blank
+    prompt and duration -- the common Video-tab case, and everything --sync-videos
+    backfills. The two blocks disagree on the key: `prompt` vs `prompts`.
+    """
+    i2v_task = {
+        "parameters": {"i2vPro": {"model": "v4.0", "prompts": "a cat on a wall",
+                                  "duration": "10", "mediaId": "src1"}},
+        "outputs": {"videos": [{"mediaId": "vid1", "thumbnailMediaId": "th1", "seed": "7"}]},
+    }
+    outs, shared = core.video_outputs(i2v_task)
+    assert [o["video_media_id"] for o in outs] == ["vid1"]
+    assert shared["prompt"] == "a cat on a wall", "an i2v prompt must not be dropped"
+    assert shared["duration"] == "10"
+    assert shared["i2v_model"] == "v4.0"
+
+    # The reference-video shape still wins where both could apply, and still uses `prompt`.
+    rv_task = {
+        "parameters": {"referenceVideo": {"model": "v4.0.1", "prompt": "@image1 walks",
+                                          "duration": "5"}},
+        "outputs": {"videos": [{"mediaId": "vid2"}]},
+    }
+    _outs2, shared2 = core.video_outputs(rv_task)
+    assert shared2["prompt"] == "@image1 walks"
+    assert shared2["duration"] == "5"
+
+    # A task with neither block still returns the empty shape rather than raising.
+    assert core.video_outputs({"parameters": {}, "outputs": {}}) == ([], {
+        "prompt": "", "duration": "", "i2v_model": ""})

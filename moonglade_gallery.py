@@ -5682,16 +5682,36 @@ function bulkContactSheet() {
   if (!ids.length) return;
   window.open('/contact-sheet?ids=' + encodeURIComponent(ids.join(',')), '_blank');
 }
-function bulkSendCast() {
-  var ids = [];
-  selGet().forEach(function(mid){
+// Which of these selected ids are videos? The selection is a list of media_ids in
+// localStorage; it is NOT the cards on screen. So `#card-<mid>` can only answer for what
+// this page happens to be rendering -- filter or paginate away from a selected video and the
+// test finds nothing, and the video rides on into an images-only destination. A card that IS
+// rendered answers for free; only the ids this page cannot see cost a lookup.
+// One helper, not one per caller: both image-only bulk actions had this same hole, and a
+// second copy is just the next place for the two to drift apart.
+function selectedVideoIds(ids){
+  var vids = new Set(), unseen = [];
+  ids.forEach(function(mid){
     var card = document.getElementById('card-'+mid);
-    if (card && card.getAttribute('data-video') === '1') return;   // cast is images
-    ids.push(mid);
+    if (!card) { unseen.push(mid); return; }
+    if (card.getAttribute('data-video') === '1') vids.add(mid);
   });
+  return Promise.all(unseen.map(function(mid){
+    return fetch('/api/image-meta/'+encodeURIComponent(mid))
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){ if (d && d.is_video) vids.add(mid); })
+      .catch(function(){});   // unanswerable id: send it as this always has, decide nothing new
+  })).then(function(){ return vids; });
+}
+function bulkSendCast() {
+  var ids = [...selGet()];
   if (!ids.length) return;
-  localStorage.removeItem('gallery_sel');   // selection is consumed into the Loom cast
-  window.location.href = '/loom?cast=' + encodeURIComponent(ids.join(','));
+  selectedVideoIds(ids).then(function(vids){
+    var keep = ids.filter(function(mid){ return !vids.has(mid); });   // cast is images
+    if (!keep.length) return;
+    localStorage.removeItem('gallery_sel');   // selection is consumed into the Loom cast
+    window.location.href = '/loom?cast=' + encodeURIComponent(keep.join(','));
+  });
 }
 function onCheck() {
   var sel = selGet();
@@ -8830,18 +8850,7 @@ function bulkSendVideo(){
   // from a selected video and there is no card to read data-video off, the test finds
   // nothing, and the video rides into an image-reference send. A card that IS rendered still
   // answers for free; only the ids this page can't see cost a lookup.
-  var vids=new Set(), unseen=[];
-  ids.forEach(function(mid){
-    var card=document.getElementById('card-'+mid);
-    if(!card){ unseen.push(mid); return; }
-    if(card.getAttribute('data-video')==='1') vids.add(mid);
-  });
-  Promise.all(unseen.map(function(mid){
-    return fetch('/api/image-meta/'+encodeURIComponent(mid))
-      .then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(d){ if(d && d.is_video) vids.add(mid); })
-      .catch(function(){});   // unanswerable id: send it as this always has, decide nothing new
-  })).then(function(){
+  selectedVideoIds(ids).then(function(vids){
     var refs=[];
     ids.forEach(function(mid){
       if(vids.has(mid)) return;   // videos can't be image refs
