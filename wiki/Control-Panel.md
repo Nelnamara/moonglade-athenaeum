@@ -45,9 +45,15 @@ The buttons are grouped exactly as the risk splits.
   different ids.
 - **Verify `_duplicates/` is safe to delete** — confirms every quarantined file is
   byte-identical to a surviving copy, and flags orphans, before you empty the folder.
-- **Rebuild the Similar index (slow, needs pixeltable)** — re-embeds the visual-similarity
-  index used by **✧ Similar** in the gallery. No network; needs the optional
-  `pixeltable` install.
+- **Top up the Similar index (adds only what's missing)** — embeds any images the
+  visual-similarity index doesn't have yet and leaves everything already in it alone.
+  **This is the one you normally want.** It can't lose existing work, and if a previous
+  build was interrupted it carries on from where that stopped instead of starting over.
+  No network; needs the optional `pixeltable` install.
+- **Rebuild the Similar index (slow, needs pixeltable)** — drops the index and re-embeds
+  **every** image from scratch. Reach for this only when the index is actually *broken*
+  (wrong or duplicated results), not merely incomplete — on a large library it takes
+  roughly three times as long as a top-up and discards whatever was already there.
 - **Organize — preview (dry run)** and **Dedup — preview (dry run)** — show the plan
   without moving anything.
 - **Sync published-artwork metadata (full re-walk)** — merges titles, tags, likes and
@@ -160,11 +166,31 @@ The **Users** tab lists your gallery login accounts.
 - **Remove** — takes effect immediately: that account is signed out on every device at once.
 - The **last remaining account can't be removed** from here — that would lock every remote
   device out until someone signed in on the server machine to bootstrap a new one.
+- **Your password** — change your own from anywhere, including a tablet on the LAN. You have
+  to enter your current password to prove it's you.
+- **Reset password** — appears next to each *other* account, and only when you're using the
+  browser **on the server machine itself**. It sets a new password without needing the old
+  one, which is what makes it a recovery path rather than a convenience.
 
-Every account has equal access (browse, generate, maintenance); there's no separate admin
-tier. Locked out, or need a password reset? That's the CLI's job — see [Setup](Setup).
+Every account has equal access (browse, generate, maintenance); there's no separate admin tier.
+
+**Why the reset button is local-only.** Being at the server machine is the proof of identity
+here — it's doing the job an emailed reset link does for a hosted app. That's also why there's
+no *"forgot password?"* link on the login page and no email anywhere in Moonglade: without an
+out-of-band channel, a logged-out reset would let anything on your network reset your account.
+So recovery is three cases:
+
+- **You know your password** → change it from anywhere, here in **Users → Your password**.
+- **You forgot it** → someone at the server machine resets it, **Users → Reset password**.
+- **It's the only account and you forgot it** → `--add-web-user` on the server machine, whose
+  add-or-update behaviour still doubles as a reset. See [Setup](Setup).
 
 ## Where jobs are recorded
+
+If the app is closed or the machine restarts while a job is running, that job is marked
+**Interrupted** the next time the server starts, rather than sitting at "running" forever.
+Nothing is corrupted when that happens — just start it again. (A top-up will pick up where the
+interrupted one left off.)
 
 Every panel job also writes to the shared activity log, so the paper trail survives a page
 reload: open the **Activity** button in the gallery (bottom-left, also in The Loom) to see
