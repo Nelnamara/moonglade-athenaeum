@@ -4170,6 +4170,69 @@ def create_app(out_dir: Path):
         except Exception:                          # noqa: BLE001
             pass
 
+    # How many recent tasks a catch-up examines. One page, deliberately: this runs unattended on
+    # every reconnect, and a history walk on a flapping connection would hammer PixAI for no
+    # benefit. Anything older than this page is what --sync / --update are for.
+    WATCH_CATCHUP_TASKS = 30
+    # Floor between catch-ups. A reconnect storm (flapping wifi, PixAI restarting) must not
+    # become a request storm, so extra reconnects inside this window skip the sweep entirely.
+    WATCH_CATCHUP_MIN_GAP = 300
+    _catchup_lock = threading.Lock()
+    _catchup_at = {"t": 0.0}
+
+    def _watch_catchup(reason):
+        """Collect finished tasks the mirror never saw. Safe to call on every reconnect.
+
+        A push mirror is blind while disconnected, and reconnecting does not replay what it
+        missed -- so without this, anything that completed during a drop is stranded until
+        someone runs a manual sync. That is the gap; this closes it.
+
+        Bounded, rate-limited and idempotent by construction: one page of recent tasks, at most
+        one sweep per WATCH_CATCHUP_MIN_GAP, and a task is skipped unless the catalog is actually
+        missing its media. Collection goes through the SAME _watch_mirror the event path uses, so
+        its single-flight guard prevents a task being collected twice.
+
+        Never raises -- a failed catch-up must not kill the watcher thread that called it."""
+        import logging as _logging
+        import time as _time
+        import moonglade_backup as core
+        _log = _logging.getLogger(__name__)
+        with _catchup_lock:
+            if _time.time() - _catchup_at["t"] < WATCH_CATCHUP_MIN_GAP:
+                return
+            _catchup_at["t"] = _time.time()
+        try:
+            session = core._make_session(None)
+            conn = core.find_connection(
+                core.gql(session, core.page_variables(WATCH_CATCHUP_TASKS)))
+            edges = (conn or {}).get("edges") or []
+            missed = []
+            for edge in edges:
+                node = edge.get("node", edge)
+                tid = str(node.get("id") or "")
+                if not tid or str(node.get("status") or "") not in core._GEN_DONE:
+                    continue
+                mids = [str(m) for m in (core.media_ids_for(node) or [])]
+                if not mids:
+                    continue
+                # Absent from the catalog is the ONLY trigger. A task whose media is already
+                # here needs nothing, and re-collecting it would be pure waste.
+                if all(get_row(db_path, m) for m in mids):
+                    continue
+                missed.append(tid)
+            if not missed:
+                _log.info("live mirror: catch-up after %s -- nothing missed", reason)
+                return
+            _log.warning(
+                "live mirror: catch-up after %s -- %d finished task(s) were never mirrored, "
+                "collecting now: %s", reason, len(missed), ", ".join(missed[:10]))
+            for tid in missed:
+                _watch_mirror(tid)
+                _time.sleep(1.0)          # paced -- be polite to their servers
+        except Exception as e:
+            _log.warning("live mirror: catch-up after %s failed: %s: %s",
+                         reason, type(e).__name__, _redact_host_paths(str(e))[:200])
+
     def _watch_loop():
         import asyncio
         import logging as _logging
@@ -4188,6 +4251,9 @@ def create_app(out_dir: Path):
             _watch_status["started_at"] = _time.time()
         _log.info("live mirror: starting")
         _reconcile_orphan_jobs()   # clear any job left hanging at 'running' from a prior session
+        # The app was closed until now, so by definition the mirror saw nothing in that window.
+        # Off-thread: this does network I/O and must not delay the first subscribe.
+        threading.Thread(target=_watch_catchup, args=("startup",), daemon=True).start()
         backoff = 5
         while True:
             try:
@@ -4203,6 +4269,12 @@ def create_app(out_dir: Path):
                             _watch_status["connected"] = True
                             _watch_status["last_error"] = None
                         _log.info("live mirror: connected and subscribed")
+                        # Every connect covers a window we were blind for -- the gap since the
+                        # last one. Rate-limited inside, so a flapping socket cannot turn this
+                        # into a request storm, and threaded so it never blocks this callback
+                        # (which is running on the WebSocket's own event loop).
+                        threading.Thread(target=_watch_catchup, args=("reconnect",),
+                                         daemon=True).start()
                         return
                     tu = ev.get("taskUpdated")
                     if not tu:
