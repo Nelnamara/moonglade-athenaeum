@@ -1821,8 +1821,13 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             <input type="checkbox" checked={imgAdv.promptHelper}
               onChange={(ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))} /> Prompt helper</label>
           <mg-cost-badge ref={imgCostRef} hint="Pick a model and write a prompt to see the cost." card-label="a card"></mg-cost-badge>
+          {/* Gate on what genImage() itself refuses without -- a model and a prompt. It rejects
+              both outright ("pick a model first" / "enter an image prompt"), so a live button
+              made the tab's very FIRST click, before any model is picked, a dead end that only
+              printed an error line. Same shape as the Edit/Reference Go buttons below, which
+              already gate on their own required input (!src / !refs.length). */}
           <button className="lv-go"
-            disabled={busyI || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) || overLoraCap(imgLoras, acct && acct.lora_cap)}
+            disabled={busyI || !imgModel || !(active.c.imgPrompt || "").trim() || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) || overLoraCap(imgLoras, acct && acct.lora_cap)}
             onClick={() => genImage(active)}>
             {busyI ? (gi.msg || "generating…")
               : anyLoraUnresolved(imgLoras) ? "waiting on LoRA…"

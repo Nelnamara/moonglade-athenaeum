@@ -304,6 +304,7 @@
         this._dims.textContent = w && hh
           ? 'This page did not receive the upscale limits, so the ratio cannot be checked here.'
           : 'This image has no recorded size, so the ratio cannot be checked.';
+        this._syncGo();
         return;
       }
       this._ratio.max = String(mx);
@@ -316,11 +317,25 @@
         ? ('This picture is already at PixAI’s ceiling for ' +
            (this.mode === 'enlarge' ? 'Upscale' : 'Hires') + '.')
         : (w + '×' + hh + ' → ' + o[0] + '×' + o[1]);
+      this._syncGo();
     }
 
     _setMsg(t, bad) {
       this._msg.textContent = t || '';
       this._msg.classList.toggle('bad', !!bad);
+    }
+
+    // Go and the cost badge must refuse on exactly the same conditions, and they did not:
+    // _price() also bails on a DISABLED ratio (a picture already at PixAI's ceiling, or a page
+    // that never received the limits), so the badge stayed silent while Go still fired a real,
+    // PAID /api/generate that upscaled nothing. One predicate now answers for both.
+    _canSubmit() {
+      var s = this.src || {};
+      return !!(s.model_id && !s.is_video && !this._ratio.disabled);
+    }
+
+    _syncGo() {
+      this._go.disabled = !this._canSubmit();
     }
 
     // The model row. Prefilled when the catalog knows it; otherwise this says which case it
@@ -334,7 +349,7 @@
         this._model.classList.remove('bad');
         this._model.textContent = (s.model_name || s.model_id) +
           (s.model_picked ? ' · chosen' : ' · from this image');
-        this._go.disabled = false;
+        this._syncGo();
         return;
       }
       // Two different reasons, two different answers, so they are not collapsed into one
@@ -503,7 +518,7 @@
 
     _submit() {
       var self = this;
-      if (!this.src || !this.src.model_id) return;
+      if (!this._canSubmit()) return;
       var idle = this._go.textContent;
       this._go.disabled = true;
       this._go.textContent = 'Submitting…';
