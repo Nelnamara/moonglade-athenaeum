@@ -4893,6 +4893,64 @@ def _upscale_ratio(raw):
     return r if r > 1.0 else None
 
 
+# PixAI's generation priority channels, read off their own bundle:
+#   {default: 1000, turboMode: 500, low: 0}   (an XHigh 1500 exists; not exposed here)
+#
+# The names matter and are NOT in speed order. 500 is **TurboMode -- members only, no
+# extra cost**, not the cheap standard tier it was taken for; 1000 is High Priority,
+# which anyone may use and which costs EXTRA. This app defaulted every submit to 500,
+# so every generation asked for a members-only channel. That is invisible while the
+# membership is live -- it just runs fast and free -- and the day it lapses PixAI starts
+# refusing with "Only member can use turbo mode" (REQUIRE_MEMBERSHIP, 403), on paths
+# that had worked for months.
+#
+# PixAI's own client never hits that, because it normalises before submitting: a member
+# asking for Low is upgraded to Turbo, and a NON-member asking for Turbo is downgraded to
+# Low. Nothing here can read entitlement without an extra round trip per submit, so
+# submit_generation does the same correction from the other end -- see it for why acting
+# on the rejection is safe.
+PRIORITY_LOW = 0          # standard speed, no extra cost, anyone
+PRIORITY_TURBO = 500      # ~7.6x faster, no extra cost -- MEMBERS ONLY
+PRIORITY_HIGH = 1000      # ~10x faster, costs extra credits, anyone
+PRIORITY_XHIGH = 1500     # in their enum; this app never sends it
+PRIORITY_CHOICES = (PRIORITY_LOW, PRIORITY_TURBO, PRIORITY_HIGH, PRIORITY_XHIGH)
+
+# Flipped the first time PixAI refuses Turbo for want of a membership. Process-scoped on
+# purpose: it stops the SECOND and every later submit paying a wasted round trip, without
+# caching an entitlement across runs that the owner may renew at any moment.
+_turbo_refused = {"seen": False}
+
+
+def _coerce_priority(value):
+    """A submitted priority, defaulting to Turbo. Accepts 0 (Low) properly, which a
+    truthiness fallback cannot."""
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return PRIORITY_TURBO
+    return v if v in PRIORITY_CHOICES else PRIORITY_TURBO
+
+
+def priority_for_submit(params):
+    """Downgrade a Turbo request to Low once PixAI has told us this account can't use it.
+
+    Mirrors the downgrade half of PixAI's own normaliser. Returns the params unchanged
+    when there is nothing to correct."""
+    if _turbo_refused["seen"] and params.get("priority") == PRIORITY_TURBO:
+        params = dict(params)
+        params["priority"] = PRIORITY_LOW
+    return params
+
+
+def _is_turbo_refusal(err):
+    """True for PixAI's members-only refusal of the Turbo channel -- matched on the
+    stable parts (its REQUIRE_MEMBERSHIP code, its numeric code, or the message) rather
+    than on one exact string."""
+    s = str(err)
+    return ("REQUIRE_MEMBERSHIP" in s or "40300047" in s
+            or ("turbo" in s.lower() and "member" in s.lower()))
+
+
 def _gen_parameters(args):
     if getattr(args, "params_json", ""):
         return json.loads(args.params_json)
@@ -4911,9 +4969,10 @@ def _gen_parameters(args):
         # batchSize must be >= 1. `--batch-size` shares dest="count" with the top-level
         # `--count` (store_true) flag, so its default can arrive as False -> coerce.
         "batchSize": max(1, int(getattr(args, "count", 1) or 1)),
-        # 1000 = high priority (faster, more credits); 500 = standard (cheaper).
-        # We default to standard so a run costs less unless high is requested.
-        "priority": getattr(args, "priority", 500) or 500,
+        # See PRIORITY_* -- 500 is TURBO (members only), not "standard". `or` is wrong
+        # here: PRIORITY_LOW is 0, and `0 or X` is X, which would quietly re-upgrade a
+        # deliberate Low back to Turbo.
+        "priority": _coerce_priority(getattr(args, "priority", None)),
     }
     # Quality mode (inferenceProfile) is MODEL-TYPE-SPECIFIC: SD_V1_MODEL accepts
     # lite/standard but rejects pro/ultra (those are for newer model types). So we
@@ -6141,6 +6200,7 @@ def submit_generation(session, params):
     only fires on a PixAIError, which means PixAI answered with a GraphQL error and
     REJECTED the task, so there is nothing created and nothing charged to duplicate."""
     _check_read_only("submit a generation (spends credits)")
+    params = priority_for_submit(params)   # already known to be turbo-refused? use Low
     try:
         created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
     except PixAIError as e:
@@ -6148,6 +6208,18 @@ def submit_generation(session, params):
             dropped = params.pop("inferenceProfile")
             print("  mode '{}' not supported by this model; retrying on the "
                   "model's default...".format(dropped))
+            created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
+        elif _is_turbo_refusal(e) and params.get("priority") == PRIORITY_TURBO:
+            # Turbo (500) is members-only and this app asked for it on EVERY submit, so
+            # the day a membership lapses every generate/edit/video/fix/upscale starts
+            # failing at once. Safe to re-submit for the same reason the inferenceProfile
+            # case above is: PixAI returned a GraphQL error, so the task was rejected --
+            # nothing exists and nothing was charged. Falls back to the tier their own
+            # client would have picked for a non-member.
+            params = dict(params, priority=PRIORITY_LOW)
+            _turbo_refused["seen"] = True
+            print("  turbo is members-only on this account; resubmitting at standard "
+                  "speed (no extra cost).")
             created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
         else:
             raise
@@ -8823,11 +8895,18 @@ def main():
     gen.add_argument("--batch-size", dest="count", type=int, default=1,
                      help="number of images per --generate run (batch size)")
     gen.add_argument("--seed", type=int, default=None)
-    gen.add_argument("--priority", type=int, default=500,
-                     help="generation priority: 500 = standard (default, cheaper), "
-                          "1000 = high (faster, costs more credits)")
-    gen.add_argument("--high-priority", dest="priority", action="store_const", const=1000,
-                     help="shortcut for --priority 1000 (faster, more credits)")
+    gen.add_argument("--priority", type=int, default=PRIORITY_TURBO,
+                     choices=list(PRIORITY_CHOICES),
+                     help="speed channel: 0 = standard, no extra cost; 500 = turbo, "
+                          "~7.6x faster and free but MEMBERS ONLY (default -- falls back "
+                          "to 0 on its own if the account isn't a member); 1000 = high, "
+                          "~10x faster and costs EXTRA credits; 1500 = extra high")
+    gen.add_argument("--high-priority", dest="priority", action="store_const",
+                     const=PRIORITY_HIGH,
+                     help="shortcut for --priority 1000 (faster, costs extra credits)")
+    gen.add_argument("--low-priority", dest="priority", action="store_const",
+                     const=PRIORITY_LOW,
+                     help="shortcut for --priority 0 (standard speed, never members-only)")
     gen.add_argument("--mode", default="auto",
                      choices=["auto", "lite", "standard", "pro", "ultra"],
                      help="quality mode (inferenceProfile). auto (default) lets PixAI pick the "
