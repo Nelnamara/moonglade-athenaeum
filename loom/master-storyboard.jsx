@@ -1673,8 +1673,16 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                         setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x)); }} />
                     <b>{(+l.weight).toFixed(1)}</b>
                   </span>
+                  {/* deselect() as well as dropping it here: the picker keeps its own copy
+                      of what's picked and never saw this removal, so the card stayed lit,
+                      clicking it again read as a remove rather than a re-add, and a version
+                      resolve still in flight re-dispatched the LoRA straight back in. */}
                   <button type="button" className="lv-lrm" title="Remove"
-                    onClick={() => setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id))}>×</button>
+                    onClick={() => {
+                      const p = loraPickerElRef.current;
+                      if (p && p.deselect) p.deselect(l.model_id);
+                      setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id));
+                    }}>×</button>
                   {/* Per-LoRA version selection: only when this LoRA actually has more than one
                       published release (l.versions, resolved alongside version_id itself by
                       mg-model-picker.js's ?all=1 fetch -- see bindLoraPicker above). Mirrors
@@ -2467,15 +2475,25 @@ function useProjectStore(setSelShot) {
     if (id === activeId) {
       // Switch to a survivor WITHOUT flushing the doomed project first — openProject()'s
       // flushSave(activeId) would re-create the very project we're deleting.
-      const next = list.find((x) => x.id !== id);
-      let p = null; try { const raw = await sGet(PPRE + next.id); if (raw) p = JSON.parse(raw); } catch {}
-      // A survivor that won't read is a hiccup, never an empty board: readProjList()
-      // above only lists keys it just parsed successfully. Opening it as a fresh
-      // seedProject() would hand the 600ms autosave a blank board to write over that
-      // survivor's own key — one dropped read costing TWO storyboards, the second of
-      // which nobody asked to delete. Stop instead: nothing removed, nothing
-      // overwritten, and the delete can simply be retried.
-      if (!p) { window.alert("Couldn't read the next storyboard, so nothing was deleted. Try again."); return; }
+      // Walk the survivors rather than trusting the first one. readProjList() parsed every
+      // entry on this list moments ago, so a null here is a transient read and the next
+      // candidate is almost certainly fine — refusing the whole delete because ONE key
+      // blipped would be its own bug.
+      // Giving up only when none of them read, and giving up WITHOUT deleting, is the
+      // point: sGet() swallows its own errors and returns null, so a failed read and an
+      // empty one look identical from here. Opening a seedProject() on that null (what
+      // this did before) hands the 600ms autosave a blank board to write over a survivor's
+      // own key — one dropped read costing TWO storyboards, the second of which nobody
+      // asked to delete.
+      let next = null, p = null;
+      for (const cand of list) {
+        if (cand.id === id) continue;
+        try {
+          const raw = await sGet(PPRE + cand.id);
+          if (raw) { p = JSON.parse(raw); next = cand; break; }
+        } catch { /* try the next survivor */ }
+      }
+      if (!p) { window.alert("Couldn't open another storyboard, so nothing was deleted. Try again."); return; }
       // A pending 600ms autosave timer for THIS project can otherwise fire during the
       // awaits below (sDel/sSet both hit the network) and re-create the very key
       // sDel just removed, silently resurrecting a "permanently deleted" board. The

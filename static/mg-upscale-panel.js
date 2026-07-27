@@ -41,8 +41,14 @@
    The model is the one field that can be absent. It comes only from a per-task detail fetch,
    so a catalog that has never been swept may not have it, and a LOCALLY IMPORTED file can
    never have it -- there is no PixAI task behind it. The panel prefills from the image when
-   the catalog knows it and asks otherwise; it does not guess, because guessing a model on an
-   upscale silently restyles the picture.
+   the catalog knows it, because Hires re-diffuses and the original model keeps the style.
+   When it does NOT know, it falls back to the version PixAI's own upscale submits (core's
+   UPSCALE_FALLBACK_VERSION_ID, served in window.MG_UPSCALE) rather than refusing. That is
+   not a guess: their dialog has no model control at all and always submits that value.
+   Demanding one here was this app's own invention, and it made every locally imported file
+   impossible to upscale -- Go dead behind "pick a model first", with the picker the only
+   way out and no way at all if the picker failed to render. The picker is still offered as
+   an override.
 
    Public API:
      .open(mediaIdOrRow)  -- open for a media_id (fetches its row) or a row already in hand.
@@ -104,6 +110,14 @@
   // cap", which disables the ratio control and says why -- never as a guessed default, which
   // would offer ratios the server then clamps with nothing on screen to explain the change.
   function consts() { return window.MG_UPSCALE || null; }
+
+  // What to upscale WITH when the catalog cannot name the model that made the picture.
+  // A model VERSION id (PixAI's own upscale submits one directly), so it goes out as
+  // `version_id` -- sent as `model_id` it would enter the model->versions lookup, find
+  // nothing, and come back "pick a model first". Served from core rather than retyped;
+  // '' when this page never received the constants, which _canSubmit treats as "cannot
+  // upscale", the same way a missing ceiling already disables the ratio.
+  function fallbackVersion() { var c = consts(); return (c && c.fallbackVersionId) || ''; }
 
   var MODES = [
     { key: 'enlarge', label: 'Upscale',
@@ -331,7 +345,9 @@
     // PAID /api/generate that upscaled nothing. One predicate now answers for both.
     _canSubmit() {
       var s = this.src || {};
-      return !!(s.model_id && !s.is_video && !this._ratio.disabled);
+      // A model the catalog never recorded is fine -- fallbackModel() covers it. Only a
+      // page that never received the constants leaves nothing to submit with.
+      return !!((s.model_id || fallbackVersion()) && !s.is_video && !this._ratio.disabled);
     }
 
     _syncGo() {
@@ -352,20 +368,28 @@
         this._syncGo();
         return;
       }
-      // Two different reasons, two different answers, so they are not collapsed into one
-      // message. A never-swept catalog is fixable with one command; a locally imported file
-      // has no PixAI task behind it and never will have a model, so there is nothing to go
-      // and fill. Either way the picker is offered -- the upscale itself only needs *a*
-      // model, and refusing to proceed because we cannot name the original would block a
-      // perfectly reasonable action.
+      // No recorded model is NOT a blocker. PixAI's own upscale dialog has no model control
+      // at all -- their submit sets a fixed modelId and takes the prompt off the source's
+      // original task -- so demanding one here was this app's own invention, and it made
+      // every locally imported file (and anything predating a full meta sweep) impossible
+      // to upscale: Go stayed dead with "pick a model first" and, if the picker failed to
+      // render, no way at all to satisfy it.
+      // The picker is still offered, because naming the original model IS the better answer
+      // when it is known -- Hires re-diffuses, so the original keeps the style -- but it is
+      // now an override, not a toll gate.
       this._pickBtn.style.display = '';
-      this._go.disabled = true;
-      this._model.classList.add('bad');
+      this._model.classList.remove('bad');
+      // Both cases upscale anyway, but they are not the same situation and are not collapsed
+      // into one line: a never-swept catalog is fixable with one command and worth naming,
+      // while a locally imported file has no PixAI task behind it and never will have a
+      // model, so there is nothing to go and fill.
       this._model.textContent = s.local_import
-        ? 'You imported this file, so PixAI has no record of which model made it. Pick one ' +
-          'to upscale with.'
-        : 'Your catalog does not know which model made this image. Pick one to upscale ' +
-          'with, or fill the catalog in with:  --backfill-full-meta';
+        ? 'You imported this file, so PixAI has no record of which model made it. Upscaling ' +
+          'with PixAI’s own upscale model — pick a different one if you’d rather.'
+        : 'Your catalog does not know which model made this image, so it will upscale with ' +
+          'PixAI’s own upscale model. Pick a different one, or fill the catalog in with:  ' +
+          '--backfill-full-meta';
+      this._syncGo();
     }
 
     _openPicker() {
@@ -471,7 +495,17 @@
       var s = this.src || {};
       var r = this._ratio.disabled ? null : +this._ratio.value;
       var body = {
-        model_id: s.model_id || '',
+        // The two sources of a model here are NOT the same kind of id, and sending them
+        // in the same field is what produced "pick a model first" on a picture that
+        // plainly had a model:
+        //   * from the image -- the catalog's model_id is the task's submitted `modelId`,
+        //     which is a model VERSION id. As `model_id` it entered the server's
+        //     model->versions lookup, matched nothing, and the submit was refused.
+        //   * from the picker -- a real MODEL id, which the server resolves to that
+        //     model's current version, exactly as the Generate drawer does.
+        // Nothing at all -> the version PixAI's own upscale submits.
+        model_id: s.model_picked ? (s.model_id || '') : '',
+        version_id: s.model_picked ? '' : (s.model_id || fallbackVersion()),
         prompt: s.prompt || '',
         negative: s.negative || '',
         width: parseInt(s.width, 10) || 0,

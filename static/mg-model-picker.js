@@ -622,6 +622,7 @@
       rows.forEach(function (m) {
         var c = document.createElement('div');
         c.className = 'mg-card' + (self._isSelected(m) ? ' sel' : '');
+        c.dataset.mid = m.model_id;      // lets deselect() find this card again
         var cov = m.preview_url
           ? '<img class="mg-cov' + (m.should_blur ? ' blur' : '') + '" loading="lazy" src="' + esc(m.preview_url) + '" alt="">'
           : '<div class="mg-cov"></div>';
@@ -763,6 +764,29 @@
     get value() { return this._value || null; }
     set value(v) { this._value = v || null; }
     get selected() { return this._selected.slice(); }
+
+    // Drop a selection the HOST removed on its own. The host keeps its own copy of the
+    // picked list and can drop an entry without a card ever being clicked -- the chip's
+    // own remove button is the ordinary way a LoRA goes away. With no way to say so,
+    // this component still believed the entry was picked, and three things went wrong
+    // at once: the card stayed lit, the next click on it read as a REMOVE instead of a
+    // re-add, and an in-flight /api/model-version resolve still considered the entry
+    // live and re-dispatched `selected: true` -- putting back the LoRA just removed.
+    // Deliberately does NOT fire mg-pick: the host asked for this, telling it what it
+    // just did would only risk a loop.
+    deselect(modelId) {
+      var id = String(modelId == null ? '' : modelId), i = -1;
+      this._selected.forEach(function (e, j) { if (String(e.model_id) === id) i = j; });
+      if (i < 0) return false;
+      this._selected.splice(i, 1);
+      // Walked rather than queried: a model_id is not guaranteed to be a safe CSS
+      // selector, and an id with a quote or a colon in it would throw.
+      var cards = this._grid ? this._grid.querySelectorAll('.mg-card') : [];
+      for (var k = 0; k < cards.length; k++) {
+        if (cards[k].dataset.mid === id) { cards[k].classList.remove('sel'); break; }
+      }
+      return true;
+    }
   }
 
   window.customElements.define('mg-model-picker', MgModelPickerEl);

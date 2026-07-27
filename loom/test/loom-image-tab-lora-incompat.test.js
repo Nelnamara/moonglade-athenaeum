@@ -55,10 +55,25 @@ describe("Image tab LoRA↔base compatibility warning (L536 closes the D-11 defe
   });
 
   test("the Generate button is disabled while any attached LoRA is incompatible with the selected base", () => {
-    assert.match(src,
-      /disabled=\{busyI \|\| anyLoraUnresolved\(imgLoras\) \|\| imgLoras\.some\(\(l\) => loraIncompat\(imgModel && imgModel\.model_type, l\.lora_base_type\)\) \|\| overLoraCap\(imgLoras, acct && acct\.lora_cap\)\}/,
+    // Asserted clause by clause rather than as one exact string. The guarantee is that
+    // each of these gates is PRESENT on the Image tab's Go button; pinning the whole
+    // expression verbatim also failed whenever a NEW gate was added beside them, which
+    // is the opposite of what this test is for.
+    const go = src.match(/disabled=\{busyI[^}]*\}/);
+    assert.ok(go, "the Image tab's Go button must still carry a disabled={busyI ...} gate");
+    const d = go[0];
+    assert.match(d, /anyLoraUnresolved\(imgLoras\)/,
+      "an unresolved LoRA must still gate Go");
+    assert.match(d, /imgLoras\.some\(\(l\) => loraIncompat\(imgModel && imgModel\.model_type, l\.lora_base_type\)\)/,
       "Go must stay gated on incompatibility, not just unresolved -- an incompatible-but-" +
-      "RESOLVED LoRA is still not safe to submit -- and now also on the account's real LoRA cap");
+      "RESOLVED LoRA is still not safe to submit");
+    assert.match(d, /overLoraCap\(imgLoras, acct && acct\.lora_cap\)/,
+      "and on the account's real LoRA cap");
+    assert.match(d, /!imgModel/,
+      "and on a model being picked at all -- genImage() rejects without one, so offering " +
+      "an enabled button is a dead-end click the sibling tabs never had");
+    assert.match(d, /imgPrompt/,
+      "and on a non-empty prompt, for the same reason");
   });
 });
 
