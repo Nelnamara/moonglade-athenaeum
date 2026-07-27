@@ -6694,7 +6694,7 @@ document.addEventListener('DOMContentLoaded', function(){
                  onchange="Gen.refreshCost()" style="width:100%;">
         </div>
       </div>
-      <label class="gen-check" title="This IS the site's Turbo tier (priority=1000): a faster runner. Costs more credits when paid, but a matching free card covers it (paidCredit 0) — verified against a real Turbo gen."><input type="checkbox" id="gen-hp"> High priority &middot; Turbo (faster)</label>
+      <label class="gen-check" title="PixAI's High Priority channel (priority=1000): ~10x faster and it COSTS EXTRA credits. It is not Turbo — Turbo is a separate, members-only channel that is free, and it is what an unticked box already asks for (falling back to standard speed on its own if this account isn't a member)."><input type="checkbox" id="gen-hp"> High priority (faster &middot; costs extra)</label>
       <label class="gen-check"><input type="checkbox" id="gen-ph" checked> Prompt helper</label>
       <mg-cost-badge id="gen-cost" hint="Pick a model to see the cost." card-label="a card"></mg-cost-badge>
       <button id="gen-go" class="gen-go" onclick="Gen.generate()" disabled>Generate</button>
@@ -13812,6 +13812,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         feeds to core._gen_parameters -- so web + CLI build identical params (one source
         of truth). Clamped to safe ranges."""
         from types import SimpleNamespace
+        import moonglade_backup as core          # module-local, like every other use here
         p = p or {}
         def num(k, d, cast=int):
             try:
@@ -13832,7 +13833,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             width=num("width", 512), height=num("height", 512),
             steps=num("steps", 25), cfg=num("cfg", 7, float),
             count=max(1, min(num("count", 1), 4)),
-            priority=(1000 if hp else 500), mode=(p.get("mode") or "auto"),
+            # Ticked = High (1000, costs extra). Unticked = Turbo (500, free but
+            # members-only); core's submit downgrades that to Low on its own if PixAI
+            # says this account isn't entitled, so an expired membership no longer
+            # breaks every generate/edit/upscale at once.
+            priority=(core.PRIORITY_HIGH if hp else core.PRIORITY_TURBO),
+            mode=(p.get("mode") or "auto"),
             seed=(int(seed_raw) if seed_raw.lstrip("-").isdigit() else None),
             lora=loras,
             prompt_helper=(str(p.get("prompt_helper", "1")) not in ("0", "false", "off")),
