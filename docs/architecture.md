@@ -287,7 +287,7 @@ asserts it against a live request, so it is the authority when prose and code di
   `jobs.jsonl` (only its `done`/`failed` branches do), so a job's log entry can be
   orphaned — stuck at `status:"running"` forever — if nothing ever calls that route's
   done/failed branch for it (the polling tab closed, or a transient exception hit the
-  route's fail-soft `except`). Two things close that gap: (1) `/api/import-task`'s task-id
+  route's fail-soft `except`). Three things close that gap: (1) `/api/import-task`'s task-id
   recovery, on either of its success paths (fresh collect or "already cataloged"), also
   closes that task id's OWN pre-existing non-terminal job entry (same `status="done"`
   event shape `/api/task-status` itself writes) — not just the new `import-<suffix>` job
@@ -298,7 +298,21 @@ asserts it against a live request, so it is the authority when prose and code di
   possible, or marking it a distinct non-terminal `status="stale"` (visible + dismissable
   in the Activity card, never silently dropped) when PixAI itself can't be reached. The
   live-mirror watcher separately runs the same reconciliation once, unconditionally
-  (`min_age=0`), at startup, to catch anything orphaned by a prior server session.
+  (`min_age=0`), at startup, to catch anything orphaned by a prior server session. (3) Neither
+  of those can touch a **local** job — `resolve_orphan_jobs` works by asking PixAI about a
+  numeric task id, and a `panel-`/`import-`/`bulkdel-` job has none; the docstring's note that
+  such jobs "self-report" holds right up until the process is killed, after which the terminal
+  event is simply never written. So `create_app()` additionally runs
+  `resolve_interrupted_local_jobs(out_dir)` **once at startup**, marking those `status="failed"`
+  with an `error` explaining the interruption. The rule needs no age heuristic, which is what
+  makes it reliable: at boot the server has not yet created any job of its own, so a
+  server-owned job still sitting non-terminal must belong to a process that is gone. `cli-` jobs
+  are deliberately EXCLUDED — they belong to a separate process with its own lifetime that the
+  server knows nothing about, and sweeping one would brand a genuinely-running command dead
+  while it is still writing its own events. A panel job is a subprocess, so restarting the
+  server while one truly runs marks it failed early; that self-corrects, because
+  `_reconstruct_jobs` blocks only a NON-terminal record from overwriting a terminal one and
+  permits terminal → terminal.
 - **Live events** (`--watch`): a graphql-transport-ws subscription to
   `wss://gw.pixai.art/graphql` (root field `personalEvents`) drives `--watch-backup` and
   the gallery server's always-on **live-mirror** watcher, so gens land the instant they

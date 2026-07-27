@@ -62,6 +62,9 @@ yours it goes back to sign-in only and no one on your network can register thems
 by design — it's your library and your PixAI account behind it, not a public signup.
 
 Locked out with an account already there? On the server machine,
+The Control Panel's **Users** tab handles this in the browser — change your own password from
+anywhere, or reset another account's when you're on the server machine. The CLI is the
+fallback for being locked out of the only account:
 `python moonglade_backup.py --add-web-user` prompts (hidden) for a username and password and
 writes it to `config.json`. It *adds or updates*, so it also resets a forgotten password;
 `--list-web-users` and `--remove-web-user <name>` are the companions. Full flow in
