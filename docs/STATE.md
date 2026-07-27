@@ -1142,6 +1142,32 @@ verified 2026-07-26:
 | the slot list | only `branding/marks` and `branding/favicon` appear in code. The panel needs the full set. |
 | the achievement + roast | **the roast already exists** (`:1353`). The metric and trigger do not. |
 
+### ✅ SHIPPED 2026-07-26: the live mirror is self-healing and observable
+
+**The hole.** A push mirror only sees what completes while its socket is up, and reconnecting did
+not replay the gap — so a drop, a stale socket or a restart stranded those generations until
+someone ran a manual Panel job. Owner's objection is the standard to hold: *"I know theres a
+fuckin button to do it but the point is... im not suppposed to have to."*
+
+**Shipped.** `_watch_catchup(reason)` runs at startup and on every reconnect: one page of recent
+tasks (`WATCH_CATCHUP_TASKS = 30`), rate-limited to one sweep per `WATCH_CATCHUP_MIN_GAP` (300s)
+so a flapping socket cannot become a request storm, off-thread so it never blocks the WS event
+loop, paced 1s between collects, and it only collects tasks whose media is genuinely absent from
+the catalog. Reuses `_watch_mirror`, so its single-flight guard prevents double collection.
+Spends nothing.
+
+**Plus two defects found alongside.** The watcher's state existed ONLY in `_watch_status` in
+memory — nothing logged — which is why "was it even connected?" was unanswerable after a missed
+video; every transition is now in `moonglade.log`, with the silent-socket case at WARNING saying
+explicitly that anything completing during the silence was NOT mirrored. And the collect branch
+matched ONE done-status string while the reconcile branch beside it accepted five off the same
+event; both now share `_GEN_DONE`, pinned by a test.
+
+**Tested at source level, deliberately.** `_watch_catchup` is a closure inside `create_app` called
+only from a thread the suite disables, so there is no seam to drive it without refactoring the
+watcher. The tests pin the guardrails (bounded / rate-limited / absent-only / paced / off-thread /
+cannot raise) plus that the sweep can never fire during tests.
+
 ### ✅ SOLVED 2026-07-26: the video decline was OUR re-upload tripping PixAI's content scanner
 
 **Root cause.** `_input_media_id()` re-uploaded every gallery i2v frame, and a fresh upload gets

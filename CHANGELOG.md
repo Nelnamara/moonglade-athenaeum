@@ -30,6 +30,25 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The live mirror now catches up on anything it missed instead of losing it.** It watches a
+  live push feed, which means it only ever sees what finishes *while it is connected* — and
+  reconnecting never went back for the gap. So a dropped socket, a stale connection or an app
+  restart permanently stranded whatever completed in the meantime, and the only recovery was
+  running a maintenance job by hand. It now sweeps for finished work that never arrived, both at
+  startup and on every reconnect, and collects it automatically. Bounded to one page of recent
+  work, rate-limited so a flapping connection can't turn into a flood of requests, paced to stay
+  polite to PixAI, and it only fetches things genuinely missing from your library.
+- **The live mirror was invisible in the log.** Its entire state lived in memory, readable only
+  through the Panel while the app was running — so after a generation failed to appear there was
+  no way to tell whether the mirror had even been connected. It now records starting, connecting,
+  each item it collects, disconnects, errors, and — as a warning — the case where its connection
+  went silent while still looking healthy, which says outright that anything finishing during the
+  silence was missed.
+- **A finished item could be skipped by the mirror while still showing as done in Activity.** The
+  two branches read the same event but disagreed on which statuses count as finished — one
+  accepted a single spelling, the other five. Now they share one definition, with a test that
+  keeps them in step.
+
 - **Animating your own images could be refused as NSFW when the same job worked on PixAI's site.**
   The gallery's video path re-uploaded every source frame before submitting, and a fresh upload gets
   content-scanned — an image PixAI already hosts does not. So a frame you could animate fine on
