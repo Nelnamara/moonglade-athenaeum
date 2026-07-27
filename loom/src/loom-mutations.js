@@ -232,6 +232,8 @@ export function friendlyGenErr(raw) {
     let hint = '';
     if (/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s))
       hint = 'Out of balance for this model — no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.';
+    else if (/image contains (sensitive|nsfw|prohibited)|NSFW_DETECTED|40300032/i.test(s))
+      hint = 'PixAI refused the SOURCE IMAGE on content grounds, not the prompt — rewriting the text will not help. Try a different frame.';
     else if (/moderat|content.?polic|flagged|nsfw/i.test(s)
       || (/prohibit|sensitive|not.?allowed|violat/i.test(s)
           && /content|prompt|polic|guideline|term|image/i.test(s)))

@@ -429,6 +429,27 @@ describe("friendlyGenErr", () => {
     assert.match(friendlyGenErr('unknown mode "ultra" for i2vPro'), /quality setting/);
   });
 
+  test("an input-image rejection says IMAGE, not prompt (real captured 403)", () => {
+    // Verbatim from the owner's server log, 2026-07-26 18:15:37 -- a V3.0 Lite i2v submit.
+    // PixAI refused the SOURCE FRAME, but the generic wording ("blocked this generation") reads
+    // as being about the prompt, which is exactly the wrong place to go looking.
+    const real = 'GraphQL error: [{"message": "This image contains sensitive or NSFW content.",'
+      + ' "path": ["createGenerationTask"], "extensions": {"code": "Forbidden", "status": 403,'
+      + ' "exception": {"code": 40300032, "name": "NSFW_DETECTED", "expose": true}}}]';
+    const out = friendlyGenErr(real);
+    assert.match(out, /SOURCE IMAGE/);
+    assert.match(out, /not the prompt/);
+    assert.match(out, /PixAI said/, "the raw 403 must still be carried through");
+  });
+
+  test("a prompt-side moderation block does NOT claim the image was at fault", () => {
+    // The generic branch must still own the case where the PROMPT is what was refused, or the
+    // new message just moves the misdirection somewhere else.
+    const out = friendlyGenErr("content policy violation: prompt rejected");
+    assert.match(out, /content filter/);
+    assert.doesNotMatch(out, /SOURCE IMAGE/);
+  });
+
   test("no message names an internal surface", () => {
     // "not in the Loom" showed up in the gallery's video generator, which is a different screen
     // as far as the person reading it is concerned. Shared copy must not name where the code
