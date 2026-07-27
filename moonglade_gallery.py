@@ -384,6 +384,17 @@ def _like_pattern(term):
     return re.sub(r"(?<!\\)%{2,}", "%", "%" + t + "%")
 
 
+def _like_escape(s):
+    r"""Escape LIKE's own metacharacters in a value that must match LITERALLY --
+    a collection name, an art tag, a LoRA name. Unlike _like_pattern above there
+    are no wildcards to honor here: these filters promise an exact token / plain
+    substring, and without this a collection named "100%" or "a_b" compiled into
+    a wildcard that matched half the catalog instead of its own two images. Pair
+    it with ESCAPE '\' on the clause or the backslashes stay literal.
+    """
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 # ---------------------------------------------------------------------------
 # Search field operators: key:value tokens inside the search box
 # ---------------------------------------------------------------------------
@@ -520,8 +531,8 @@ def _operator_clause(key, value):
         return ("SUBSTR(created_at,1,?) {} ?".format(op), [len(prefix), prefix])
     if kind == "collection":
         # exact-token in the comma-joined list, mirroring the Collection dropdown
-        return ("(',' || COALESCE(collections,'') || ',') LIKE ?",
-                ["%," + value + ",%"])
+        return ("(',' || COALESCE(collections,'') || ',') LIKE ? ESCAPE '\\'",
+                ["%," + _like_escape(value) + ",%"])
     if kind == "source":
         v = value.lower()
         if v == "online":
@@ -543,8 +554,8 @@ def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
     params  = []
     if collection:
         # exact-token match within the comma-joined list (no partial-name bleed)
-        clauses.append("(',' || COALESCE(collections,'') || ',') LIKE ?")
-        params.append("%," + collection + ",%")
+        clauses.append("(',' || COALESCE(collections,'') || ',') LIKE ? ESCAPE '\\'")
+        params.append("%," + _like_escape(collection) + ",%")
     if media_type == "video":
         clauses.append("is_video = '1'")
     elif media_type == "image":
@@ -562,11 +573,11 @@ def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
     if published_only:
         clauses.append("is_published = '1'")
     if art_tag:
-        clauses.append("LOWER(COALESCE(art_tags,'')) LIKE ?")
-        params.append("%" + art_tag.strip().lower() + "%")
+        clauses.append("LOWER(COALESCE(art_tags,'')) LIKE ? ESCAPE '\\'")
+        params.append("%" + _like_escape(art_tag.strip().lower()) + "%")
     if lora:
-        clauses.append("LOWER(COALESCE(loras,'')) LIKE ?")
-        params.append("%" + lora.strip().lower() + "%")
+        clauses.append("LOWER(COALESCE(loras,'')) LIKE ? ESCAPE '\\'")
+        params.append("%" + _like_escape(lora.strip().lower()) + "%")
     if q:
         # Whitespace-separated tokens are ANDed. A token can be a FIELD OPERATOR
         # (key:value -- see _SEARCH_OPS/_operator_clause above; quoted values group,
@@ -5853,7 +5864,11 @@ function bulkReplacePrompt() {
   var f = document.createElement('form');
   f.method = 'post'; f.action = '/bulk-replace-prompt';
   function add(n, v){ var i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; f.appendChild(i); }
-  add('back', location.href); add('find', find); add('replace', repl);
+  // Drop the one-shot banner param before it becomes `back` -- replacing twice in a
+  // row would otherwise stack ?replaced=8&replaced=2 and the banner (which reads the
+  // FIRST value) would keep reporting the stale count.
+  var back = new URL(location.href); back.searchParams.delete('replaced');
+  add('back', back.pathname + back.search); add('find', find); add('replace', repl);
   sel.forEach(function(mid){ add('media_ids', mid); });
   localStorage.removeItem('gallery_sel');   // consume the selection after the edit commits
   document.body.appendChild(f); f.submit();
@@ -5866,7 +5881,10 @@ function bulkAddCollection() {
   var f = document.createElement('form');
   f.method = 'post'; f.action = '/collection-add';
   function add(n, v){ var i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; f.appendChild(i); }
-  add('back', location.href); add('name', name.trim());
+  // Same one-shot strip bulkRemoveCollection does: without it a second Add stacks
+  // ?collected=5&collected=1 and the banner (first value wins) shows the stale count.
+  var back = new URL(location.href); back.searchParams.delete('collected');
+  add('back', back.pathname + back.search); add('name', name.trim());
   sel.forEach(function(mid){ add('media_ids', mid); });
   localStorage.removeItem('gallery_sel');   // consume the selection so the NEXT collection starts fresh
   document.body.appendChild(f); f.submit();
@@ -10443,6 +10461,25 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return url
         return None
 
+    def _safe_back(url):
+        """The same same-site guarantee as _safe_next, for the gallery's `back`
+        parameter -- which the pages produce as request.url, i.e. an ABSOLUTE
+        same-origin URL, so it is reduced to path+query first and then vetted by
+        _safe_next itself (one validator, not two).
+
+        `back` is not just a redirect target: the detail page renders it into an
+        href= AND assigns it to location.href after a delete. Neither Jinja
+        autoescaping nor |tojson stops a `javascript:` URI -- they only stop
+        quote-breakout -- so /image/<id>?back=javascript:... ran in the logged-in
+        session until this. Reducing to path+query kills that (a scheme-only URL
+        has no leading-slash path left) and closes the open redirect on
+        /delete, /delete-bulk, /delete-tasks-bulk and the collection routes at
+        the same time."""
+        from urllib.parse import urlsplit
+        parts = urlsplit(url or "")
+        rel = parts.path + (("?" + parts.query) if parts.query else "")
+        return _safe_next(rel)
+
     def _establish_session(username):
         """Populate a freshly-authenticated session for `username` -- the ONE place
         that decides what "you are now logged in" means, shared by BOTH a normal
@@ -11589,7 +11626,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if img_path:
             img_url = url_for("serve_image", rel=str(img_path.relative_to(out_dir)).replace("\\", "/"))
 
-        back = request.args.get("back", url_for("index"))
+        back = _safe_back(request.args.get("back", "")) or url_for("index")
 
         # Parse filter/sort state from back URL to compute prev/next
         from urllib.parse import urlparse, parse_qs
@@ -11703,7 +11740,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/delete/<media_id>", methods=["POST"])
     def delete_one(media_id):
-        back = request.args.get("back") or url_for("index")
+        back = _safe_back(request.args.get("back")) or url_for("index")
         row = get_row(db_path, media_id)
         if row:
             purge_media_local(out_dir, thumb_dir, db_path, media_id, row.get("filename"))
@@ -11711,7 +11748,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/delete-bulk", methods=["POST"])
     def delete_bulk():
-        back = request.form.get("back") or url_for("index")
+        back = _safe_back(request.form.get("back")) or url_for("index")
         media_ids = set(request.form.getlist("media_ids"))
         if not media_ids:
             return redirect(back)
@@ -11883,7 +11920,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         import urllib.parse
         import uuid
         import moonglade_backup as core   # lazy: avoid import cycle
-        back = request.form.get("back") or url_for("index")
+        back = _safe_back(request.form.get("back")) or url_for("index")
 
         def _back(**params):
             sep = "&" if "?" in back else "?"
@@ -12077,7 +12114,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/collection-add", methods=["POST"])
     def collection_add():
-        back = request.form.get("back") or url_for("index")
+        back = _safe_back(request.form.get("back")) or url_for("index")
         ids = request.form.getlist("media_ids")
         name = request.form.get("name", "")
         n = add_to_collection(db_path, ids, name)
@@ -12091,7 +12128,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # under, so the reloaded grid is missing those rows and the banner is the only
         # thing that says how many left. `uncollected` (not `removed`, which the
         # cloud-delete banner already owns) keeps the two banners independent.
-        back = request.form.get("back") or url_for("index")
+        back = _safe_back(request.form.get("back")) or url_for("index")
         ids = request.form.getlist("media_ids")
         name = request.form.get("name", "")
         n = remove_from_collection(db_path, ids, name)
@@ -12100,7 +12137,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/bulk-replace-prompt", methods=["POST"])
     def bulk_replace():
-        back = request.form.get("back") or url_for("index")
+        back = _safe_back(request.form.get("back")) or url_for("index")
         ids = request.form.getlist("media_ids")
         find = request.form.get("find", "")
         replace = request.form.get("replace", "")
@@ -12884,6 +12921,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         photo (single 4x6) | strip (photo-booth: 2x2in strips on a 4x6, for the
         Sinfonia). Sources: ?ids=a,b,c or ?collection=<name>. ?cols / ?captions for
         the grid. Opens the print dialog on load."""
+        # This page is assembled with str.format(), NOT render_template_string, so it
+        # gets NONE of Jinja's autoescaping -- every catalog/query value interpolated
+        # below has to be escaped by hand or ?collection=<script>... is reflected XSS
+        # straight into the logged-in session (markupsafe escapes ' and " too, which
+        # the single-quoted src=' ' attributes here depend on).
+        from markupsafe import escape
         ids_arg = (request.args.get("ids") or "").strip()
         collection = (request.args.get("collection") or "").strip()
         fmt = (request.args.get("format") or "letter").lower()
@@ -12901,7 +12944,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         elif collection:
             rows, _ = query_catalog(db_path, collection=collection, sort="newest",
                                     page=1, page_size=400)
-            title = "Collection: {}".format(collection)
+            title = "Collection: {}".format(escape(collection))
         else:
             rows, _ = query_catalog(db_path, sort="newest", page=1, page_size=60)
             title = "Recent"
@@ -12924,13 +12967,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     ".photo img{max-width:100%;max-height:100%;object-fit:contain}"
                     "@media print{.bar{display:none}}</style></head><body>"
                     + _bar.format(t="4&times;6 photo")
-                    + "<div class='photo'><img src='/full/{}'></div>".format(mids[0])
+                    + "<div class='photo'><img src='/full/{}'></div>".format(escape(mids[0]))
                     + _autoprint + "</body></html>")
 
         if fmt == "strip" and mids:
             frames = [mids[i % len(mids)] for i in range(4)]
             frame_html = "".join(
-                "<div class='frame'><img src='/full/{}'></div>".format(m) for m in frames)
+                "<div class='frame'><img src='/full/{}'></div>".format(escape(m)) for m in frames)
             one = "<div class='strip'>" + frame_html + "</div>"
             return ("<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Photo strip</title>"
                     "<style>@page{size:4in 6in;margin:0}html,body{margin:0;height:100%;"
@@ -12961,9 +13004,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 except (TypeError, ValueError):
                     stars = ""
                 cap = "<div class='cap'>{}{}</div>".format(
-                    date, (" " + stars) if stars else "")
+                    escape(date), (" " + stars) if stars else "")
             cells.append(
-                "<figure><img src='/thumbs/{}.jpg' alt=''>{}</figure>".format(mid, cap))
+                "<figure><img src='/thumbs/{}.jpg' alt=''>{}</figure>".format(
+                    escape(mid), cap))
         html = """<!DOCTYPE html><html><head><meta charset="UTF-8">
 <title>Contact sheet &middot; {title}</title>
 <style>
