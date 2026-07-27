@@ -1555,14 +1555,41 @@ MARK_ANIMS = ["classic", "glow", "shine", "aurora", "twinkle", "shoot", "halo",
 _BRAND_DEFAULTS = {"mark": "mark_4", "anim": "classic"}
 
 
+def branding_root():
+    """Where branding lives: the APP folder, beside the launcher -- NOT inside the library.
+
+    Moved 2026-07-26 (owner decision) for two reasons, the first of which was a live bug.
+
+    It used to be `Path(out_dir) / "branding"`, and out_dir comes from resolve_library_dir(), so
+    the library-folder setting shipped the day before silently relocated it. Point the app at a
+    different library and every mark, mascot and banner disappeared from its view -- the files
+    still on disk in the old folder, the app just no longer looking there. Nobody hit it because
+    only one library has ever existed.
+
+    And the "Under the Hood" easter egg depends on a curious user FINDING the empty slot folders.
+    They scan the top level of the app directory; they do not go rummaging inside a picture
+    library full of month folders and thumbnail caches. Discovery through the filesystem is the
+    mechanic, so the folders have to be where a tinkerer's eye lands. Deliberately NOT inside the
+    /moonglade package that the naming pass will create either -- that is for code, and user art
+    in a package boundary gets treated as code by something eventually.
+
+    Every caller goes through here. Nine sites used to derive this path independently, which is
+    exactly how the out_dir coupling above went unnoticed."""
+    return Path(__file__).resolve().parent / "branding"
+
+
 def _branding_path(out_dir):
-    return Path(out_dir) / "branding.json"
+    # Sibling of the art directory, which preserves EXACTLY the arrangement this had inside
+    # the library (branding.json next to branding/). Anyone moving an existing setup keeps
+    # the same two entries in the same relationship, so the move is a drag of both rather
+    # than a reshuffle -- and .gitignore covers the pair with two lines.
+    return branding_root().parent / "branding.json"
 
 
 def list_marks(out_dir):
     """Marks available on THIS machine: branding/marks/marks.json entries whose
     .png actually exists. Empty on a fresh install (assets are machine-local)."""
-    mdir = Path(out_dir) / "branding" / "marks"
+    mdir = branding_root() / "marks"
     try:
         data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -1611,7 +1638,7 @@ def brand_context(out_dir):
     processor, so old installs with only logo.png render exactly as before)."""
     cfg = load_branding(out_dir)
     marks = {m["id"]: m for m in list_marks(out_dir)}
-    has_banner = (Path(out_dir) / "branding" / "banner.png").exists()
+    has_banner = (branding_root() / "banner.png").exists()
     if cfg["mark"] in marks:
         m = marks[cfg["mark"]]
         return {"mark_url": m["png"], "mark_anim": cfg["anim"], "mark_kind": m["kind"],
@@ -1630,7 +1657,7 @@ def make_launcher_shortcut(out_dir, mark_id):
     chosen mark's .ico, targeting Serve Gallery.pyw via pythonw. Returns the
     .lnk path. Machine-local action -- caller must gate to localhost."""
     import subprocess
-    ico = Path(out_dir) / "branding" / "marks" / (str(mark_id) + ".ico")
+    ico = branding_root() / "marks" / (str(mark_id) + ".ico")
     if not ico.exists():
         raise RuntimeError("no .ico cut for %s yet (branding/marks/)" % mark_id)
     repo = Path(__file__).resolve().parent
@@ -1855,10 +1882,10 @@ def _badge_thumb(out_dir, aid, size=256):
     a full open doesn't pull the masters. Masters stay the source of truth; the cache
     self-heals when a master is re-cut (mtime check). Falls back to the master on any
     trouble, so a tile always resolves to *something*."""
-    src = Path(out_dir) / "branding" / "badges" / (aid + ".png")
+    src = branding_root() / "badges" / (aid + ".png")
     if not src.is_file():
         return None
-    dst = Path(out_dir) / "branding" / "_thumbs" / (aid + ".png")
+    dst = branding_root() / "_thumbs" / (aid + ".png")
     try:
         if dst.is_file() and dst.stat().st_mtime >= src.stat().st_mtime:
             return dst
@@ -2255,6 +2282,9 @@ def collection_health(out_dir, db_path):
     gallery_dir = out_dir / "gallery"
     quarantine_dir = out_dir / "_duplicates"
     deleted_dir = out_dir / DELETED_DIRNAME
+    # Kept as an exclusion even though branding no longer lives under out_dir: an old
+    # install still has files there, and excluding a path that is now absent is a harmless
+    # no-op, whereas dropping the exclusion would sweep a legacy folder into a scan.
     branding_dir = out_dir / "branding"
 
     def _under(p, parent):
@@ -3488,6 +3518,28 @@ def _account_key(username):
 def create_app(out_dir: Path):
     app = Flask(__name__)
 
+    # A job the SERVER owns cannot outlive the server, so anything still marked running when we
+    # boot is from a process that is gone -- nothing will ever report it finished. Sweep those to
+    # a terminal state now, or the Job Tracker shows a phantom "running" row forever (owner hit
+    # exactly this after a 2026-07-26 machine reset: panel-3d49d9bffea2, a Similar rebuild killed
+    # mid-flight, still displaying as running after the reboot). resolve_orphan_jobs() cannot
+    # cover these -- it works by asking PixAI about a task id that local jobs do not have.
+    # Fails soft: a startup nicety must never be able to stop the server from starting. But it
+    # REPORTS the failure rather than swallowing it -- a silent `except: pass` here is how a sweep
+    # that never actually ran would look identical to one with nothing to do. `core` is imported
+    # locally because this module has no module-level alias for it, and there is no module-level
+    # logger either; moonglade_logging.setup_logging() configures the root logger.
+    import logging as _logging
+    try:
+        import moonglade_backup as _core
+        _swept = _core.resolve_interrupted_local_jobs(out_dir)
+        if _swept:
+            _logging.getLogger(__name__).info(
+                "Marked %d interrupted job(s) from a previous session as failed.", _swept)
+    except Exception:
+        _logging.getLogger(__name__).warning(
+            "interrupted-job sweep skipped", exc_info=True)
+
     # ---- Session-based auth: secret key + cookie hardening ------------------
     # AUTH_SECRET_KEY is generated once (secrets.token_hex(32)) and persisted to
     # config.json by get_or_create_secret_key() -- reused on every subsequent start
@@ -3646,6 +3698,13 @@ def create_app(out_dir: Path):
         "audit-full":    {"args": ["--audit"], "label": "Duplicate audit (full — byte-compare, slower)", "destructive": False},
         "verify-dupes":  {"args": ["--verify-dupes"],
                           "label": "Verify _duplicates/ is safe to delete", "destructive": False},
+        # Listed BEFORE rebuild so the non-destructive, usually-correct action reads first.
+        # "Rebuild" drops the table and re-embeds everything; this adds only what is missing and
+        # cannot lose existing rows. After an interrupted build the top-up resumes -- reaching for
+        # rebuild there costs ~3x the time AND discards every row that survived.
+        "sync-similar":  {"args": ["--sync-similar"],
+                          "label": "Top up the Similar index (adds only what's missing)",
+                          "destructive": False},
         "rebuild-similar": {"args": ["--rebuild-similar"],
                             "label": "Rebuild the Similar index (slow, needs pixeltable)",
                             "destructive": False},
@@ -8454,7 +8513,11 @@ var Similar = (function(){
     fetch('/api/similar/'+encodeURIComponent(mid)+'?k=48').then(function(r){return r.json();}).then(function(d){
       g.innerHTML='';
       var imgs=(d&&d.images)||[];
-      if(!imgs.length){ em.textContent=(d&&d.error)?d.error:'No similar images yet \\u2014 the index may still be building.'; em.style.display='block'; return; }
+      // Was an unconditional 'the index may still be building', which reads as a transient
+      // state and is what hid a permanently orphaned index for three days. The route now
+      // distinguishes an EMPTY index -- with instructions -- from a genuine no-matches
+      // result, so trust its error text and only guess when it stays silent.
+      if(!imgs.length){ em.textContent=(d&&d.error)?d.error:'No similar images found for this one.'; em.style.display='block'; return; }
       imgs.forEach(function(it){
         var c=document.createElement('div');
         c.className='card'; c.setAttribute('data-mid', it.media_id);
@@ -9469,6 +9532,13 @@ function savePrompt() {
       {% for u in web_users %}
       <div class="u-row" data-username="{{ u.username }}">
         <span class="u-name">{{ u.username }}{% if u.username == current_username %}<span class="u-you">you</span>{% endif %}</span>
+        {# Resetting SOMEONE ELSE'S password is owner-machine only, and the control is
+           HIDDEN rather than shown-disabled on the LAN (owner's choice 2026-07-26). Your own
+           password is changed through the form below instead, which requires the current one --
+           so there is deliberately no Reset button on your own row. #}
+        {% if panel_is_local and u.username != current_username %}
+        <button type="button" class="btn" onclick="resetUserPassword(this)">Reset password</button>
+        {% endif %}
         {% if panel_is_local or u.username == current_username %}
         <button type="button" class="btn btn-danger" onclick="removeUser(this)">Remove</button>
         {% endif %}
@@ -9477,6 +9547,27 @@ function savePrompt() {
       <div class="p-note" id="users-empty">No accounts.</div>
       {% endfor %}
     </div>
+  </div>
+  <div class="p-sec">
+    <h2>Your password</h2>
+    <form id="own-pw-form" onsubmit="return changeOwnPassword(event)">
+      <div class="setup-row login-fields" style="max-width:380px;">
+        <input type="password" id="pw-current" placeholder="Current password"
+               autocomplete="current-password" required>
+        <input type="password" id="pw-new" placeholder="New password"
+               autocomplete="new-password" required>
+        <input type="password" id="pw-confirm" placeholder="Confirm new password"
+               autocomplete="new-password" required>
+        <button type="submit" class="btn btn-primary">Change password</button>
+      </div>
+    </form>
+    <div id="own-pw-status" style="margin-top:8px;"></div>
+    <div class="p-note">Changing your password signs you out on every OTHER device
+      immediately &mdash; this one stays signed in. Your current password is required even here,
+      so an unlocked browser left open somewhere can't be used to lock you out of your own
+      account.{% if not panel_is_local %} Forgotten it entirely? It can only be reset from the
+      machine running the gallery &mdash; being at that machine is the proof of who you are, which
+      is the job an emailed reset link does elsewhere.{% endif %}</div>
   </div>
   <div class="p-sec">
     <h2>Add user</h2>
@@ -9753,6 +9844,40 @@ function addUser(evt){
       st.innerHTML='<span class="st-done">✓ Account "'+escH2(d.username)+'" created.</span>';
     }).catch(function(){ st.innerHTML='<span class="st-failed">⚠ network error</span>'; });
   return false;
+}
+function changeOwnPassword(evt){
+  evt.preventDefault();
+  var cur=el('pw-current').value, nw=el('pw-new').value, cf=el('pw-confirm').value;
+  var st=el('own-pw-status');
+  // Confirm-match is checked HERE and not server-side on purpose: the route takes one new
+  // password, and a typo in a field the user cannot read back is a client concern.
+  if(nw!==cf){ st.innerHTML='<span class="st-failed">&#9888; The two new passwords do not match.</span>'; return false; }
+  fetch('/api/users/password',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({current_password:cur, new_password:nw, csrf:CSRF})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d.error){ st.innerHTML='<span class="st-failed">&#9888; '+escH2(d.error)+'</span>'; return; }
+      el('pw-current').value=''; el('pw-new').value=''; el('pw-confirm').value='';
+      st.innerHTML='<span class="st-done">&#10003; Password changed. Other devices have been signed out.</span>';
+    }).catch(function(){ st.innerHTML='<span class="st-failed">&#9888; network error</span>'; });
+  return false;
+}
+function resetUserPassword(btn){
+  // Username off the row's data attribute, never a templated JS argument -- see addUser().
+  // Reusing the row also means the name is never re-typed, so the wrong account cannot be
+  // reset by a typo.
+  var row=btn.closest('.u-row');
+  var username=row.getAttribute('data-username');
+  var nw=prompt('Set a new password for "'+username+'".\\n\\nThey will be signed out on every device immediately.');
+  if(nw===null) return;                       // cancelled
+  nw=String(nw);
+  if(!nw.trim()){ return; }
+  var st=el('add-user-status');
+  fetch('/api/users/password',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:username, new_password:nw, csrf:CSRF})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d.error){ st.innerHTML='<span class="st-failed">&#9888; '+escH2(d.error)+'</span>'; return; }
+      st.innerHTML='<span class="st-done">&#10003; Password reset for "'+escH2(username)+'". They have been signed out.</span>';
+    }).catch(function(){ st.innerHTML='<span class="st-failed">&#9888; network error</span>'; });
 }
 function removeUser(btn){
   // Read the username back off the row's data attribute rather than a
@@ -10729,6 +10854,77 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                                      "that would lock every remote device out until "
                                      "someone signs in locally to bootstrap a new one."}), 400
         return jsonify({"ok": True, "username": username})
+
+    @app.route("/api/users/password", methods=["POST"])
+    def api_users_password():
+        """Change an account's password from the Panel's Users tab.
+
+        Closes the last CLI-only account operation: until now a forgotten gallery password could
+        only be reset with `--add-web-user` on the server machine (its add-or-update semantics
+        doubling as a reset). Owner decision 2026-07-26: a user may change THEIR OWN password from
+        anywhere, and changing anyone else's is an owner-machine action.
+
+        Reading the code turned that into a single rule rather than two code paths, because the
+        cases differ in exactly one respect -- whether the CURRENT password must be proved:
+
+            LOCALHOST     may set ANY account's password without the current one.
+            non-local     may set only its OWN, and must prove the current one.
+
+        Both halves are load-bearing. Without the first, the forgotten-password case is not fixed
+        at all, which is the entire point of the item -- and requiring the old password at the
+        machine protects nothing, since anyone sitting there can edit config.json directly. Without
+        the second, an already-authenticated LAN session -- a tablet left unlocked on the
+        network -- could silently change the owner's password and lock him out of his own account,
+        needing nothing but an open browser tab.
+
+        The username check mirrors `api_users_remove` deliberately rather than inventing a stricter
+        shape: an omitted username means "me", and a supplied one that is not yours demands
+        LOCALHOST. That route's trust model has already survived an adversarial review, and
+        consistency with it is worth more here than a second convention.
+
+        The write bumps `sess_epoch`, so every session cookie issued under the old password stops
+        working immediately -- which is the point on other devices and merely rude on this one. So
+        when the caller changed their OWN password, this re-issues the current session's epoch: the
+        browser you are standing in front of stays signed in, every other device drops. A local
+        reset of SOMEONE ELSE's password deliberately does not do that, because the whole intent
+        there is to evict whoever was using it.
+        """
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        import moonglade_backup as core
+        me = session.get("user")
+        local = _is_local_request()
+        target = str(body.get("username") or "").strip() or me
+        new_pw = str(body.get("new_password") or "")
+
+        if target != me and not local:
+            return jsonify({"error": "localhost-only to change another account's password"}), 403
+        # Same policy the Users tab already enforces when ADDING an account -- one rule, one
+        # place, so a password that could not be registered cannot be set here either.
+        problem = core.password_problem(new_pw)
+        if problem:
+            return jsonify({"error": problem}), 400
+
+        # None means "do not check" and is reserved for a caller already proven local.
+        current = None if local else str(body.get("current_password") or "")
+        if current is not None and not current:
+            return jsonify({"error": "Enter your current password."}), 400
+
+        result = core.set_web_user_password_guarded(target, new_pw, current_password=current)
+        if result == "not_found":
+            return jsonify({"error": "No such account."}), 404
+        if result == "bad_current":
+            # Deliberately the same wording whether the account exists or not by this point --
+            # the caller has already been established as the owner of `target` or as local, so
+            # there is nothing left to leak, but keeping it vague costs nothing.
+            return jsonify({"error": "That current password isn't right."}), 403
+
+        if target == me:
+            session["sess_epoch"] = core.get_web_user_session_epoch(me)
+        return jsonify({"ok": True, "username": target,
+                        "signed_out_elsewhere": True,
+                        "still_signed_in_here": target == me})
 
     @app.route("/api/ping")
     def api_ping():
@@ -12489,6 +12685,22 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         except Exception as e:
             return jsonify({"images": [], "total": 0,
                             "error": "similarity index unavailable: " + _redact_host_paths(str(e))[:180]}), 200
+        # An EMPTY index is not the same as "no matches", and conflating the two hid a real
+        # regression for three days. The 2026-07-25 module rename orphaned the stored index;
+        # moonglade_similar._get_table() then CREATED a fresh empty one instead of raising, so this
+        # route returned zero hits with no error at all and the client fell back to "the index may
+        # still be building" -- a benign transient message covering a permanent broken state.
+        # Reporting the size lets the client tell the truth and say what to do about it.
+        if not hits:
+            try:
+                indexed = int(moonglade_similar.count())
+            except Exception:
+                indexed = None
+            if indexed == 0:
+                return jsonify({"images": [], "total": 0, "indexed": 0,
+                                "error": "The similarity index is empty, so there is nothing to "
+                                         "compare against. Rebuild it from the Control Panel "
+                                         "(Rebuild similar index)."}), 200
         telem_bump("similar_uses", out_dir=out_dir)       # Kindred Spirits
         out = []
         for mid, score in hits:
@@ -12519,7 +12731,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Serve drop-in branding art from out_dir/branding/ (banner.png, logo, icons).
         Absent files 404 so the header's onerror simply removes the <img>. Path-safe."""
         from flask import send_from_directory, abort
-        bdir = (out_dir / "branding").resolve()
+        bdir = branding_root().resolve()
         try:
             target = (bdir / fname).resolve()
             target.relative_to(bdir)          # reject path traversal

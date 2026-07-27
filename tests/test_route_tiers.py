@@ -242,6 +242,16 @@ ROUTE_TIERS = {
     # for this one argument value" -- see tests/test_panel_users.py for the
     # LAN-self-succeeds / LAN-other-refused pair that actually covers it.
     ("api_users_remove", "POST"): LOGIN,
+    # api_users_password is LOGIN for the same reason as api_users_remove: a LAN
+    # session can genuinely reach it, but ONLY for its OWN account and ONLY by
+    # proving the current password. Changing SOMEONE ELSE'''S is refused with the
+    # same 403 a LOCALHOST route would give, enforced in the handler on the
+    # submitted username vs session["user"] rather than by tier -- and a LOCALHOST
+    # caller additionally skips the current-password proof, which is what finally
+    # makes a forgotten password recoverable without the CLI. Neither of those is
+    # expressible as a tier, so see tests/test_panel_users.py for the pairs that
+    # actually cover them.
+    ("api_users_password", "POST"): LOGIN,
 
     # RESOLVED (owner decision 2026-07-19, see CHANGELOG): api_server_stop /
     # api_server_restart stay in the broader "any logged-in LAN session" tier

@@ -476,6 +476,59 @@ def add_or_update_web_user(username, password):
         return replaced
 
 
+def set_web_user_password_guarded(username, new_password, current_password=None):
+    """Change an existing account's password. Returns "ok", "not_found" or "bad_current".
+
+    ONE `_accounts_lock` acquisition covers the existence check, the current-password
+    verification and the write. That is not stylistic: `remove_web_user_guarded`'s docstring
+    records a TOCTOU race reproduced live against a real route when a read and a write were
+    split across two acquisitions, and "verify the old password, then write the new one" is
+    the same shape. Between a separate verify and write, a concurrent change could land and
+    this call would happily overwrite it having validated against a password that no longer
+    existed.
+
+    `current_password=None` means DO NOT CHECK -- reserved for the caller that has already
+    established the request came from the server machine. Passing a string means the check is
+    mandatory and a mismatch returns "bad_current" without writing. There is deliberately no
+    third mode: a caller either proves the old password or proves it is local, and the route
+    (`/api/users/password`) is the only place that distinction is made.
+
+    Unlike `add_or_update_web_user`, this REFUSES an unknown username instead of creating the
+    account. A password reset for someone who does not exist is a mistake to report, not an
+    invitation to mint them -- that update-or-add behaviour stays reserved for the CLI's
+    deliberate recovery path.
+
+    Bumps `sess_epoch` through the same install-wide counter every other writer uses, so a
+    changed password invalidates session cookies issued under the old one immediately. Callers
+    that want the CURRENT session to survive must re-issue its cookie afterwards; see
+    /api/users/password, which does exactly that so a user changing their own password is not
+    logged out of the browser they are standing in front of."""
+    from werkzeug.security import generate_password_hash, check_password_hash
+    username = (username or "").strip()
+    if not username:
+        raise ValueError("username must not be empty")
+    if not new_password:
+        raise ValueError("new password must not be empty")
+    with _accounts_lock:
+        cfg = _load_config()
+        existing = _find_web_user(cfg, username)
+        if existing is None:
+            return "not_found"
+        if current_password is not None:
+            if not check_password_hash(existing.get("password_hash", ""), current_password or ""):
+                return "bad_current"
+        users = cfg.get("AUTH_USERS") or []
+        next_epoch = _next_sess_epoch(cfg)
+        new_users = [u for u in users
+                     if not (isinstance(u, dict) and u.get("username") == username)]
+        new_users.append({"username": username,
+                          "password_hash": generate_password_hash(new_password),
+                          "sess_epoch": next_epoch})
+        cfg["AUTH_USERS"] = new_users
+        _save_config(cfg)
+        return "ok"
+
+
 def add_web_user_if_new(username, password):
     """Atomic check-and-add: like add_or_update_web_user(), but refuses outright
     (returns False, writes nothing) if `username` already exists, instead of
@@ -1150,6 +1203,58 @@ def resolve_orphan_jobs(out_dir, status_fn, min_age=0, now=None):
         elif min_age:
             append_job_event(out_dir, jid, status="running")   # refresh ts; see docstring
     return resolved
+
+
+# Job-id prefixes for work the SERVER PROCESS itself owns -- it spawns these and nothing else
+# will ever report them finished. Deliberately EXCLUDES "cli-": a CLI job belongs to a separate
+# process with its own lifetime that the server knows nothing about, so sweeping one would mark a
+# genuinely-running terminal command as dead. Numeric ids are PixAI generate tasks and belong to
+# resolve_orphan_jobs() instead.
+_JOBS_SERVER_OWNED_PREFIXES = ("panel-", "import-", "bulkdel-")
+
+
+def resolve_interrupted_local_jobs(out_dir, now=None):
+    """Mark server-owned jobs left non-terminal by a previous process as failed. Returns the count.
+
+    Call this ONCE at server startup. The rule needs no age heuristic and no clock comparison,
+    which is what makes it reliable: at the moment the server boots it has not yet created any
+    job of its own, so every server-owned job still sitting at a non-terminal status necessarily
+    belongs to a process that is gone. There is nothing left to ask, and nothing will ever arrive.
+
+    This closes a real gap. resolve_orphan_jobs() reaps only PixAI-task-keyed generate jobs -- its
+    docstring notes that panel/delete jobs "are local and self-report", which is true right up
+    until the process is killed. Then the terminal event is simply never written, and the Job
+    Tracker shows "running" forever. Owner's production case (2026-07-26): `panel-3d49d9bffea2`,
+    a Similar-index rebuild killed by a machine-wide memory exhaustion, still displaying as
+    running after the reboot. The silent-death detection shipped 2026-07-25 does not cover this
+    class at all, because it is built around asking PixAI about a task id that these jobs do not
+    have.
+
+    Uses the existing "failed" status and an `error` message rather than inventing an
+    "interrupted" state: failed is already terminal, already rendered by the tracker, and already
+    carries a message -- and the job did, in fact, fail. A new status would need matching UI in
+    mg-notify.js and a new entry in _JOBS_TERMINAL for no gain.
+
+    ONE known imprecision, stated rather than hidden: a panel job runs as a SUBPROCESS, so if the
+    server is restarted while one is genuinely still running, this marks it failed early. That
+    self-corrects -- _reconstruct_jobs() only blocks a NON-terminal record from overwriting a
+    terminal one, so the subprocess's own later "done" still lands (verified at the
+    `cur.get("status") in _JOBS_TERMINAL` branch). Recording the owning pid on each event would
+    remove the imprecision entirely; it is not worth the extra surface for a case that resolves
+    itself."""
+    n = 0
+    for j in read_jobs(out_dir, now=now):
+        if j.get("status") in _JOBS_TERMINAL:
+            continue
+        jid = str(j.get("job_id") or "")
+        if not jid.startswith(_JOBS_SERVER_OWNED_PREFIXES):
+            continue
+        append_job_event(
+            out_dir, jid, status="failed",
+            error="Interrupted -- the app stopped before this finished. Nothing was corrupted; "
+                  "run it again when you're ready.")
+        n += 1
+    return n
 
 
 def maybe_compact_jobs(out_dir, keep=JOBS_KEEP, max_age=JOBS_MAX_AGE):
@@ -4350,6 +4455,11 @@ def run_import_local(args):
     existing_mids = {r.get("media_id") for r in catalog_rows if r.get("media_id")}
     gallery_dir = out / "gallery"
     quarantine = out / "_duplicates"
+    # Branding moved to the APP root on 2026-07-26, so this no longer names a live
+    # directory -- kept because an install that predates the move still has files here,
+    # and --import-local would otherwise catalogue someone's banner and mascots as
+    # gallery images. Excluding an absent path costs nothing; dropping the exclusion
+    # would silently sweep a legacy folder into the library.
     branding_dir = out / "branding"   # app chrome (banner/logo/marks) -- never gallery content
     # B11 (audit 2026-07-21): purge_media_local() clears a purged image's catalog
     # row when it moves the file to _deleted/, so without this exclusion the scan
@@ -7322,6 +7432,45 @@ def run_rebuild_similar(args):
         n, ps.count(), ps.sync.last_errors))
 
 
+def run_sync_similar(args):
+    """--sync-similar: TOP UP the visual-similarity index -- embed only images it doesn't
+    already have. The incremental counterpart to --rebuild-similar.
+
+    This exists because sync() was always incremental (it skips media_ids already in the index)
+    while the only way to reach it was rebuild(), which DROPS the table first. So the sole
+    available action was also the most destructive one, and after an interrupted build the
+    obvious move threw away every row that had survived.
+
+    Measured on the owner's library, 2026-07-26, after a machine-wide memory exhaustion killed a
+    rebuild at 75%: topping up the missing 8,706 images took 11.7 min, against ~38 min to
+    re-embed all 35,106 from scratch -- and it could not lose the 26,400 rows already there,
+    whereas a fresh rebuild dying again would have left strictly less than it started with.
+
+    Prefer this. Reach for --rebuild-similar only to cure an index that is actually broken
+    (duplicate/corrupt), not merely incomplete. No network; needs torch/pixeltable. Run it while
+    the gallery is NOT serving Similar queries -- both use the same embedded Postgres."""
+    try:
+        import moonglade_similar as ps
+    except Exception as e:
+        sys.exit("Similar index unavailable (pixeltable/torch not installed): {}".format(e))
+    if not ps.is_available():
+        sys.exit("Similar index needs torch -- install the ML deps (torch/transformers/pixeltable).")
+    out = Path(args.out)
+    if not out.exists():
+        sys.exit("No backup dir at {}.".format(out))
+    before = ps.count()
+    print("Topping up the Similar index from {} -- {:,} already indexed, embedding only what's "
+          "missing.".format(out, before))
+    n = ps.sync(ps.scan_dir(out), progress=getattr(args, "progress", None))
+    print()  # finish the \r progress line
+    after = ps.count()
+    if not n:
+        print("Similar index already complete: {:,} images, nothing to add.".format(after))
+    else:
+        print("Similar index topped up: embedded {:,} new images ({:,} -> {:,} in index, "
+              "{} skipped).".format(n, before, after, ps.sync.last_errors))
+
+
 def run_catalog_stats(args):
     """Summarize the existing catalog (no network needed)."""
     out = Path(args.out)
@@ -8585,6 +8734,11 @@ def main():
                     help="drop + re-embed the visual-similarity ('Similar') index from scratch off "
                          "the on-disk backup. Cures a corrupted/duplicate index; builds ONE clean "
                          "named index. ~decode-bound, no network. Needs torch/pixeltable.")
+    ap.add_argument("--sync-similar", action="store_true",
+                    help="TOP UP the 'Similar' index: embed only images it doesn't already have. "
+                         "The incremental counterpart to --rebuild-similar and the one you "
+                         "normally want -- it cannot lose existing rows, and after an interrupted "
+                         "build it resumes instead of starting over. Needs torch/pixeltable.")
     webauth = ap.add_argument_group("web gallery login accounts (session-based auth)")
     webauth.add_argument("--add-web-user", action="store_true",
                     help="add or update a gallery web-login account: interactively prompts "
@@ -8641,6 +8795,9 @@ def main():
             return
         if getattr(args, "rebuild_similar", False):
             run_rebuild_similar(args)
+            return
+        if getattr(args, "sync_similar", False):
+            run_sync_similar(args)
             return
         if args.export_csv:
             if not db_path.exists():
