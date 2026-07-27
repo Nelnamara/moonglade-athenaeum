@@ -137,3 +137,61 @@ def test_account_without_its_own_dir_still_sees_legacy_shared_boards(tmp_path):
     assert not (_kv_dir(tmp_path, "alice") / "storyboard%3Av2%3Aproj%3Aold.json").exists(), (
         "alice's own dir must not gain a copy of a key she never wrote herself")
     assert (_kv_dir(tmp_path, "alice") / "storyboard%3Av2%3Aproj%3Anew.json").exists()
+
+
+def _legacy_write(tmp_path, key, value):
+    """Plant a board in the pre-per-account shared layer -- what every storyboard that
+    predates the D-7 split still lives in until its account saves its own copy."""
+    from urllib.parse import quote
+    d = tmp_path / "loom" / "kv"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / (quote(key, safe="") + ".json")).write_text(json.dumps(value), encoding="utf-8")
+
+
+def test_a_legacy_board_can_actually_be_deleted(tmp_path):
+    """A board inherited from the legacy shared layer must delete and STAY deleted.
+
+    Delete only ever unlinked the account's OWN copy, and an inherited board has none --
+    so it reported success, the read fell back through to the legacy file, and the board
+    returned. Every board predating the per-account split was undeletable that way, while
+    a freshly created one deleted perfectly, which reads as the list showing one board
+    twice rather than as a delete that silently did nothing.
+    """
+    key = "storyboard:v2:proj:LEGACY"
+    _legacy_write(tmp_path, key, {"name": "Old board"})
+    cli = _client(tmp_path)
+    assert cli.get("/api/loom/get?key=" + key).get_json()["value"] == {"name": "Old board"}
+    assert key in cli.get("/api/loom/list?prefix=storyboard:v2:proj:").get_json()["keys"]
+
+    r = cli.post("/api/loom/delete", json={"key": key})
+    assert r.get_json().get("ok") is True
+
+    assert cli.get("/api/loom/get?key=" + key).get_json()["value"] is None, \
+        "the legacy layer handed the deleted board straight back"
+    assert key not in cli.get("/api/loom/list?prefix=storyboard:v2:proj:").get_json()["keys"], \
+        "a deleted board must not stay in the list"
+
+
+def test_the_legacy_file_itself_is_never_removed(tmp_path):
+    """The shared layer is read-only to every account: one account tidying its own list
+    must not delete a board out from under another. The tombstone is per-account."""
+    from urllib.parse import quote
+    key = "storyboard:v2:proj:SHARED"
+    _legacy_write(tmp_path, key, {"name": "Shared board"})
+    cli = _client(tmp_path)
+    cli.post("/api/loom/delete", json={"key": key})
+    legacy = tmp_path / "loom" / "kv" / (quote(key, safe="") + ".json")
+    assert legacy.exists(), "the shared legacy file must survive one account's delete"
+
+
+def test_recreating_a_deleted_key_unburies_it(tmp_path):
+    """Saving a key again must bring it back -- a stale tombstone would hide a board the
+    owner deliberately re-created under the same key."""
+    key = "storyboard:v2:proj:REBORN"
+    _legacy_write(tmp_path, key, {"name": "Old"})
+    cli = _client(tmp_path)
+    cli.post("/api/loom/delete", json={"key": key})
+    assert cli.get("/api/loom/get?key=" + key).get_json()["value"] is None
+    cli.post("/api/loom/set", json={"key": key, "value": {"name": "New"}})
+    assert cli.get("/api/loom/get?key=" + key).get_json()["value"] == {"name": "New"}
+    assert key in cli.get("/api/loom/list?prefix=storyboard:v2:proj:").get_json()["keys"]
