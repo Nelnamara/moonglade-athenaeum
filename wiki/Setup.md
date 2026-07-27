@@ -69,6 +69,13 @@ behind it. To add a person or a second device after that, open **Panel → Users
 there. Any signed-in session can: every account carries equal trust, there's no separate admin
 role.
 
+**Resetting a password.** Usually you don't need the command line for this: the Control
+Panel's **Users** tab can change your own password from anywhere, and can reset any other
+account when you're browsing from the server machine itself — see
+[Control Panel](Control-Panel). The CLI below is the fallback for the one case the browser
+can't cover: you're locked out of the *only* account, so you can't sign in to reach the
+Panel at all.
+
 **Locked out, or resetting a forgotten password.** On the server machine,
 `python moonglade_backup.py --add-web-user` prompts for a username (typed normally) and a
 password (hidden — never echoed) and writes the hash straight to `config.json`. It *adds or updates*, so it doubles
