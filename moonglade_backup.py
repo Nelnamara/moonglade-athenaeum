@@ -1962,6 +1962,19 @@ def download(session, url, stem, retries=3, convert=None,
                 print("    FAILED {} ({})".format(url, e))
                 return ("fail", None)
             time.sleep(delay); delay *= 2
+        except OSError as e:
+            # A DISK failure -- a full volume, a read-only path, or the PermissionError
+            # _atomic_replace re-raises once its retries are exhausted -- is not a network
+            # problem, so there is nothing to back off from; it just has to be REPORTED.
+            # Uncaught it escapes the whole function, and callers that hand this to
+            # _parallel_map without an `on_error` drop the failed worker silently: the
+            # image is simply absent from a backup that still finishes and reports success.
+            # Reporting it through the same ("fail", None) channel as a network failure
+            # means every existing caller counts it the way it already counts those.
+            # (requests.RequestException subclasses OSError, so this clause must stay BELOW
+            # it or it would swallow every network error before that one is reached.)
+            print("    FAILED {} ({})".format(url, e))
+            return ("fail", None)
 
 
 def page_variables(page_size, before=None):
@@ -1990,8 +2003,22 @@ def _paid_credit_str(task):
     return "" if v is None else str(v)
 
 
-def task_detail_gql(session, task_id):
-    """GET getTaskById for one task. Returns the task dict or None on failure."""
+def task_detail_gql(session, task_id, retries=3):
+    """GET getTaskById for one task. Returns the task dict or None on failure.
+
+    RETRIED with backoff -- the same 3-retry shape `gql_adhoc` gives any query -- because a
+    single blip here is read downstream as a LOST GENERATION. The moment that matters is the
+    tail of a create path: the task has already completed and already been CHARGED, and a
+    `None` here reaches `_outputs_or_raise` as "task completed but no media ids found",
+    which says "your images are gone" when the task, its images and the credits are all
+    exactly where PixAI left them. One timeout should not produce that sentence.
+
+    Retrying is safe HERE specifically because this is a read-only QUERY. The rule that
+    forbids a silent retry (see `gql_mutate`) is about a re-POST paying for a second
+    generation; a repeated getTaskById cannot spend, delete or change anything.
+
+    A genuine failure now says so, instead of leaving the caller to describe an outage as
+    an empty result."""
     if not TASK_DETAIL_HASH:
         # Defensive only: TASK_DETAIL_HASH ships with a working built-in default (see
         # its module-level assignment above), so this fires only if that default is
@@ -2011,14 +2038,28 @@ def task_detail_gql(session, task_id):
              "persistedQuery": {"version": 1, "sha256Hash": TASK_DETAIL_HASH}},
             separators=(",", ":")),
     }
-    try:
-        r = session.get(API_URL, params=params, timeout=60)
-        if r.status_code != 200:
-            return None
-        data = r.json()
-        return (data.get("data") or {}).get("task")
-    except (requests.RequestException, ValueError):
-        return None
+    delay = 2.0
+    why = ""
+    for attempt in range(retries + 1):
+        try:
+            r = session.get(API_URL, params=params, timeout=60)
+            if r.status_code == 200:
+                data = r.json()
+                return (data.get("data") or {}).get("task")
+            why = "HTTP {}".format(r.status_code)
+            # Only 429/5xx are worth a second look; a 401/404 answers the same way forever.
+            if not (r.status_code == 429 or r.status_code >= 500):
+                break
+        except (requests.RequestException, ValueError) as e:
+            why = str(e) or e.__class__.__name__
+        if attempt == retries:
+            break
+        vlog("getTaskById {} failed ({}); retrying in {:.0f}s".format(task_id, why, delay))
+        time.sleep(delay); delay *= 2
+    print("  could not read task {} back from PixAI ({}). Nothing was spent and nothing is "
+          "lost -- this call only READS a task, so the generation and its credits are "
+          "exactly as PixAI left them. Try again in a moment.".format(task_id, why))
+    return None
 
 
 _DELETE_BATCH_MEDIA_MUT = """
@@ -5203,13 +5244,18 @@ def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_
         "model": model,
         "prompt": prompt or "",
         "duration": int(duration),
-        "audioLanguage": audio_language,
-        "generateAudio": bool(generate_audio),
         "inputVideoDurations": [],
         "referenceAudioMediaIds": [str(m) for m in (audio_media_ids or [])],
         "referenceImageMediaIds": [str(m) for m in (image_media_ids or [])],
         "referenceVideoMediaIds": [str(m) for m in (video_media_ids or [])],
     }
+    # Audio only for models that take it -- the SAME table the i2v builder gates on, see
+    # VIDEO_AUDIO_MODELS. Sending these to a model without audio support comes back as
+    # "This image contains sensitive or NSFW content": a CONTENT complaint for an
+    # unsupported flag, which points the investigation at moderation instead of the shape.
+    if str(model).strip() in VIDEO_AUDIO_MODELS:
+        rv["generateAudio"] = bool(generate_audio)
+        rv["audioLanguage"] = audio_language
     params = {
         "priority": int(priority),
         "referenceVideo": rv,
@@ -5648,11 +5694,18 @@ def _poll_task_status(session, task_id, timeout, *, interval=3, label="task",
             paid_credit = task.get("paidCredit")     # server-authoritative actual cost
         vlog("{} poll: {}{}".format(label, status or "(unknown)",
                                     "" if started_at else " (not started yet)"))
-        if status in ("completed", "succeeded", "success", "done"):
+        # _GEN_DONE / _GEN_FAIL are this module's single source of truth for a terminal
+        # status -- generation_status() and _outputs_or_raise() already read them. This loop
+        # used to carry its own hand-copied tuples, and they had drifted out of step: they
+        # were missing 'finished' (a real success) and 'rejected' (a real failure, and named
+        # as terminal in EmptyOutputsError's own docstring). A rejected generation is
+        # already refunded, but the poller went on waiting for it until the timeout expired
+        # and then reported it as still running on PixAI.
+        if status in _GEN_DONE:
             if paid_credit is not None:
                 print("  actual cost: {:,} credits".format(int(paid_credit)))
             return paid_credit
-        if status in ("failed", "error", "cancelled", "canceled"):
+        if status in _GEN_FAIL:
             raise PixAIError("{} ended with status: {}{}".format(
                 fail_noun, status, _pixai_reason_suffix(task)))
         time.sleep(interval)
@@ -6384,7 +6437,13 @@ def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_
     a = SimpleNamespace(name_length=name_length, name_sep=name_sep)
     vouts, _shared = video_outputs(result)
     if vouts:
-        saved = _download_video_task(session, result, task_id, out, a, {})
+        # Hand the downloader the task's OWN submitted parameters, the way the submit paths
+        # hand it theirs. video_outputs reads only the referenceVideo block, so with an empty
+        # dict here a plain image-to-video (i2vPro) had nothing to read: every clip collected
+        # through this path -- the ordinary Video tab case -- was cataloged with a blank
+        # prompt, negative prompt, duration and model.
+        saved = _download_video_task(session, result, task_id, out, a,
+                                     result.get("parameters") or {})
         mids = [str(o["video_media_id"]) for o in vouts if o.get("video_media_id")]
         dur = probe_video_duration(saved[0]) if saved else None   # real clip length for the reel
         return {"media_ids": mids, "saved": len(saved), "is_video": True, "duration": dur}
@@ -7243,7 +7302,17 @@ def list_kaisuukens(session):
     model it's locked to, and soonest expiry."""
     try:
         data = _rest_get(session, "/kaisuuken/summary") or {}
-    except PixAIError:
+    except (PixAIError, requests.RequestException, ValueError):
+        # "Fails soft" has to mean every way this call can fail, not just the tidy one.
+        # _rest_get only converts a non-2xx into a PixAIError -- a ConnectionError or a
+        # read timeout comes straight out of the raw session.get, and a malformed 200 body
+        # out of r.json() as a ValueError. Both used to escape, and the caller that felt it
+        # is match_kaisuuken(enrich=True): its own try/except covers the /kaisuuken/check
+        # POST but not this cross-reference, so an escape there broke the fail-soft /
+        # raise_on_error contract every enrich caller relies on -- including the one inside
+        # _apply_kaisuuken, mid --confirm, whose except only catches (PixAIError, ValueError).
+        # An unreadable summary costs the card's model preference and its display name,
+        # exactly as it already did when the failure happened to be a PixAIError.
         return []
     rows = data.get("kaisuukens")
     if rows is None:
@@ -8585,9 +8654,11 @@ def run_download(args, progress=None):
             if page_rows:
                 save_catalog(db_path, [carry_local_fields(r, known) for r in page_rows])
 
-                seen += 1
-                if args.max and seen >= args.max:
-                    break
+            # Count TASKS, not pages -- exactly as the parallel branch above does. Counting
+            # one per page made every single-worker run (which is what --collect-only always
+            # is) overshoot --max by a whole page size and print a "Tasks seen" total that
+            # was really a page count.
+            seen += len(edges)
 
             raw_f.flush()
             if args.max and seen >= args.max:
