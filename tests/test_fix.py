@@ -380,7 +380,7 @@ def test_cost_helpers_invalidate_in_flight_requests_before_bailing_out(tmp_path)
 
     Bite: move either `++seq` back below its early return and this fails by name."""
     html, _ = _fix_fn(tmp_path)
-    for name, seq in (("fixCost", "fixSeq"), ("editCost", "costSeq")):
+    for name, seq in (("fixCost", "fixSeq"), ("editCost", "editSeq")):
         body = _fn_body(html, name)
         bump = body.index("++" + seq)
         # The BAIL-OUT return specifically -- the one that clears the badge because there is
@@ -397,11 +397,14 @@ def test_cost_helpers_still_drop_a_superseded_response(tmp_path):
     """The other half of the contract, so the fix above can't be 'achieved' by deleting the
     guard: a response whose sequence no longer matches must still be discarded."""
     html, _ = _fix_fn(tmp_path)
-    for name, seq in (("fixCost", "fixSeq"), ("editCost", "costSeq")):
+    for name, seq in (("fixCost", "fixSeq"), ("editCost", "editSeq")):
         body = _fn_body(html, name)
         # Two equivalent phrasings are in use and both are correct -- fixCost writes
-        # `if(mine!==fixSeq) return;` and editCost writes `if(mine===costSeq) act();`. Accept
+        # `if(mine!==fixSeq) return;` and editCost writes `if(mine===editSeq) act();`. Accept
         # either; what matters is that the settled sequence is consulted before painting.
+        # Each helper owns its OWN sequence: editCost used to share `costSeq` with the
+        # Generate tab's debouncedCost(), so an '?edit=' deep link cancelled the Generate
+        # tab's first price check before it ever fired.
         flat = body.replace(" ", "")
         assert ("mine!==" + seq) in flat or ("mine===" + seq) in flat, (
             "{}() no longer consults {} before painting, so a superseded response would "
