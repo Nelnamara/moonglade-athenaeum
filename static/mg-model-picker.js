@@ -688,6 +688,13 @@
       fetch('/api/model-version?model_id=' + encodeURIComponent(m.model_id) + '&all=1')
         .then(function (r) { return r.json(); })
         .then(function (d) {
+          // Un-picking a LoRA while its resolve is still in flight used to RESURRECT it:
+          // this landed afterwards and re-dispatched `selected: true`, putting a chip the
+          // user had just removed back in the host's list. Same superseded-response guard
+          // as <mg-upscale-panel>'s _price() seq token -- the entry's own identity is the
+          // token here, since a different LoRA picked meanwhile is still legitimately ours
+          // (and a re-pick pushes a NEW entry with its own resolve).
+          if (self._selected.indexOf(entry) === -1) return;
           var versions = (d && d.versions) || [], v = versions[0] || {};
           entry.version_id = v.version_id || '';
           entry.lora_base_type = v.lora_base_model_type || '';
@@ -699,6 +706,7 @@
           }));
         })
         .catch(function () {
+          if (self._selected.indexOf(entry) === -1) return;
           entry.failed = true;
           self.dispatchEvent(new CustomEvent('mg-pick', {
             bubbles: true, composed: true, detail: { model: entry, selected: true }

@@ -34,6 +34,7 @@
     }, opts.defaultFilters || {});
 
     var page = 1, loading = false, hasMore = false, debounceTimer = null, destroyed = false;
+    var loadSeq = 0;
 
     function qs(p) {
       var enc = encodeURIComponent;
@@ -53,16 +54,25 @@
     }
 
     function load(append) {
-      if (loading) return;
+      // Only APPENDS are deduped by the in-flight guard. A filter/query change (append
+      // false) must always win: the old `if (loading) return` dropped it outright, and
+      // the scroll-triggered page-2 fetch it lost to then appended the OLD filter's
+      // results into the grid anyway. `loadSeq` is the same superseded-response token
+      // <mg-upscale-panel>'s _price() uses -- a fetch that a newer load has replaced
+      // resolves into a no-op instead of clobbering the grid (and leaves `loading`
+      // alone, because the load that replaced it owns that flag now).
+      if (loading && append) return;
       loading = true;
       var atPage = page;
+      var mine = ++loadSeq;
       fetch(qs(atPage)).then(function (r) { return r.json(); }).then(function (d) {
+        if (mine !== loadSeq) return;
         loading = false;
         if (destroyed) return;
         var imgs = d.images || [];
         hasMore = ((d.page || atPage) * (d.limit || pageSize)) < (d.total || 0);
         onResults(imgs, { total: d.total || 0, append: !!append, hasMore: hasMore, page: atPage });
-      }).catch(function (e) { loading = false; onError(e); });
+      }).catch(function (e) { if (mine !== loadSeq) return; loading = false; onError(e); });
     }
 
     function reload() { page = 1; load(false); }

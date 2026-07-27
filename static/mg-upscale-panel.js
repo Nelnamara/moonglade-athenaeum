@@ -414,7 +414,12 @@
       this.connectedCallback();
       this.setAttribute('open', '');
       this._setMsg('');
+      // The same sequence token _price() carries, for a costlier reason: open on A, then
+      // quickly on B, and a slow first response landing last would leave the panel -- and the
+      // PAID submit it is one click from making -- bound to a picture no longer on screen.
+      var mine = (this._openSeq = (this._openSeq || 0) + 1);
       var done = function (row) {
+        if (mine !== self._openSeq) return;        // a later open already superseded this one
         self.src = row || null;
         if (!row) { self._setMsg('Could not load this image.', true); return; }
         if (row.is_video) {
