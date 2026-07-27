@@ -2775,6 +2775,14 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       const d = await r.json();
       if (d.error || !d.task_id) {
         setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } }));
+        // Roll the optimistic status:"wip" written above back to a real terminal "error" --
+        // the same write pollShot makes when the SERVER reports a failed render, so a
+        // rejection at SUBMIT time (content policy, no credits) lands in the same visible
+        // state as one that fails mid-render. Without it the card kept status:"wip" forever:
+        // indistinguishable from a live generation, and permanently skipped by
+        // batchGenerate's own todo filter (which excludes "wip" as well as "done"), so every
+        // later "Generate all" silently passed over the shot and the failure never surfaced.
+        setCardStatus(c.id, { status: "error", pendingTaskId: null, genStartedAt: null });
         return { ok: false, reason: "submit-failed" };
       }
       // Persist the task id on the card so a mid-render tab close is recoverable: the
@@ -2798,6 +2806,10 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       return { ok: true, taskId: d.task_id };
     } catch {
       setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } }));
+      // Same rollback as the submit-error branch above, for the same reason: a throw here
+      // (dropped connection, unparseable body) otherwise leaves the optimistic "wip" on the
+      // card forever, where it reads as a live render and is skipped by every later batch.
+      setCardStatus(c.id, { status: "error", pendingTaskId: null, genStartedAt: null });
       return { ok: false, reason: "network" };
     }
   };

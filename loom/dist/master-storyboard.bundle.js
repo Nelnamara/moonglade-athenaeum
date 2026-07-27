@@ -2929,6 +2929,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         const d = await r.json();
         if (d.error || !d.task_id) {
           setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.error ? friendlyGenErr(d.error) : "submit failed" } }));
+          setCardStatus(c.id, { status: "error", pendingTaskId: null, genStartedAt: null });
           return { ok: false, reason: "submit-failed" };
         }
         const startedAt = Date.now();
@@ -2938,6 +2939,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         return { ok: true, taskId: d.task_id };
       } catch {
         setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } }));
+        setCardStatus(c.id, { status: "error", pendingTaskId: null, genStartedAt: null });
         return { ok: false, reason: "network" };
       }
     };
