@@ -919,6 +919,14 @@ _JOBS_COMPACT_AT = 2000        # rewrite the raw log once it passes this many li
 # genuine orphan same-day, far short of JOBS_MAX_AGE's 24h silent drop-from-view.
 JOBS_ORPHAN_SWEEP_AGE = 30 * 60
 
+# Serializes the ONE non-append writer of jobs.jsonl (maybe_compact_jobs' whole-file
+# rewrite) against every other thread in this process, exactly like _accounts_lock does
+# for AUTH_USERS and for the same reproduced reason: moonglade_gallery.py runs
+# threaded=True, so two /api/jobs polls (two tabs, or the gallery plus the Loom) can both
+# see the log cross _JOBS_COMPACT_AT and start rewriting it at the same moment. Appends
+# don't need this -- they're one "a"-mode line and safe across processes by design.
+_jobs_compact_lock = threading.Lock()
+
 
 def _jobs_path(out_dir):
     return Path(out_dir) / JOBS_LOG_NAME
@@ -1264,24 +1272,30 @@ def maybe_compact_jobs(out_dir, keep=JOBS_KEEP, max_age=JOBS_MAX_AGE):
     delete a job the card is currently showing, nor drop an in-flight running job. A
     concurrent append from another process during the rewrite could be lost -- acceptable
     for a display/paper-trail log, and rare (compaction only). Called by the web reader."""
-    jobs, order, n = _reconstruct_jobs(out_dir)
-    if n <= _JOBS_COMPACT_AT:
-        return
-    kept = _select_jobs(jobs, order, time.time(), keep, max_age)
-    kept.reverse()                          # write oldest-first so append order stays chronological
-    path = _jobs_path(out_dir)
-    tmp = path.with_name(path.name + ".tmp")
-    try:
-        with tmp.open("w", encoding="utf-8") as fh:
-            for j in kept:
-                fh.write(json.dumps(j, separators=(",", ":")) + "\n")
-        tmp.replace(path)
-    except OSError:
+    # Whole thing under _jobs_compact_lock: the count check and the rewrite have to be one
+    # step, or two concurrent pollers both pass the threshold test and rewrite together. The
+    # scratch file is pid-stamped like _save_config's for the cross-PROCESS half of the same
+    # race -- a panel subprocess compacting at the same instant would otherwise be writing
+    # into the very file this one is about to rename, truncating the log to a hybrid.
+    with _jobs_compact_lock:
+        jobs, order, n = _reconstruct_jobs(out_dir)
+        if n <= _JOBS_COMPACT_AT:
+            return
+        kept = _select_jobs(jobs, order, time.time(), keep, max_age)
+        kept.reverse()                      # write oldest-first so append order stays chronological
+        path = _jobs_path(out_dir)
+        tmp = path.with_name(path.name + ".tmp-{}".format(os.getpid()))
         try:
-            if tmp.exists():
-                tmp.unlink()
+            with tmp.open("w", encoding="utf-8") as fh:
+                for j in kept:
+                    fh.write(json.dumps(j, separators=(",", ":")) + "\n")
+            _atomic_replace(tmp, path)      # transient Windows sharing violation != lost compaction
         except OSError:
-            pass
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
 
 
 def _quick_count(session, page_size=500):

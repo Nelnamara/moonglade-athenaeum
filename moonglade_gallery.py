@@ -651,6 +651,16 @@ def unique_collections(db_path):
         con.close()
 
 
+# Both collection edits below are a read-modify-write of ONE comma-joined column, so
+# two requests landing on the same media_id (the app is used from several devices at
+# once -- a bulk add overlapping a single-image toggle is enough) each read the old
+# list and write back only their own label, and one edit vanishes with no error. The
+# lock spans the loop rather than each row because the batch already commits as a
+# single transaction; a per-row lock would just hand the other thread a mid-transaction
+# view of the same rows.
+_COLLECTIONS_LOCK = threading.Lock()
+
+
 def add_to_collection(db_path, media_ids, name):
     """Add a collection label to each media_id (no-op if already in it). Names may
     contain spaces but not commas. Returns the number of rows changed."""
@@ -660,17 +670,18 @@ def add_to_collection(db_path, media_ids, name):
     con = _connect(db_path)
     changed = 0
     try:
-        for mid in media_ids:
-            row = con.execute("SELECT collections FROM catalog WHERE media_id=?", (mid,)).fetchone()
-            if not row:
-                continue
-            cols = _split_collections(row[0])
-            if name not in cols:
-                cols.append(name)
-                con.execute("UPDATE catalog SET collections=? WHERE media_id=?",
-                            (",".join(cols), mid))
-                changed += 1
-        con.commit()
+        with _COLLECTIONS_LOCK:
+            for mid in media_ids:
+                row = con.execute("SELECT collections FROM catalog WHERE media_id=?", (mid,)).fetchone()
+                if not row:
+                    continue
+                cols = _split_collections(row[0])
+                if name not in cols:
+                    cols.append(name)
+                    con.execute("UPDATE catalog SET collections=? WHERE media_id=?",
+                                (",".join(cols), mid))
+                    changed += 1
+            con.commit()
     finally:
         con.close()
     return changed
@@ -684,16 +695,17 @@ def remove_from_collection(db_path, media_ids, name):
     con = _connect(db_path)
     changed = 0
     try:
-        for mid in media_ids:
-            row = con.execute("SELECT collections FROM catalog WHERE media_id=?", (mid,)).fetchone()
-            if not row:
-                continue
-            cols = _split_collections(row[0])
-            if name in cols:
-                con.execute("UPDATE catalog SET collections=? WHERE media_id=?",
-                            (",".join(c for c in cols if c != name), mid))
-                changed += 1
-        con.commit()
+        with _COLLECTIONS_LOCK:
+            for mid in media_ids:
+                row = con.execute("SELECT collections FROM catalog WHERE media_id=?", (mid,)).fetchone()
+                if not row:
+                    continue
+                cols = _split_collections(row[0])
+                if name in cols:
+                    con.execute("UPDATE catalog SET collections=? WHERE media_id=?",
+                                (",".join(c for c in cols if c != name), mid))
+                    changed += 1
+            con.commit()
     finally:
         con.close()
     return changed
@@ -3872,19 +3884,39 @@ def create_app(out_dir: Path):
                 "--workers", str(workers)] + action_args
         # MOONGLADE_PROGRESS makes the CLI emit machine progress markers we parse above.
         env = dict(os.environ, MOONGLADE_PROGRESS="1")
-        proc = subprocess.Popen(argv, cwd=_cli_dir, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, bufsize=1,
-                                encoding="utf-8", errors="replace", env=env,
-                                creationflags=_NO_WINDOW)
         import uuid
         job_id = "panel-" + uuid.uuid4().hex[:12]
+        # CLAIM the single job slot -- check and mark in ONE lock acquisition, BEFORE any
+        # subprocess exists; returns False (having spawned nothing) when it's already
+        # taken. The check used to live at the caller and the mark down here after Popen,
+        # so two near-simultaneous starts (a double-click, two tabs, the scheduler firing
+        # as the owner clicks) both passed the check, both spawned, and the second's
+        # update() overwrote the first's proc handle: one subprocess orphaned, invisible
+        # to /api/panel/cancel, and for a destructive action walking the same files as
+        # its twin -- exactly what "one job runs at a time" exists to prevent.
         with _panel_lock:
+            if _panel_job["status"] == "running":
+                return False
             _panel_job.update(status="running", action=action, label=spec["label"],
                               lines=["$ " + " ".join(action_args)], rc=None,
-                              started_at=None, progress=None, proc=proc, cancelled=False,
+                              started_at=None, progress=None, proc=None, cancelled=False,
                               job_id=job_id, warn_count=0)
+        try:
+            proc = subprocess.Popen(argv, cwd=_cli_dir, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True, bufsize=1,
+                                    encoding="utf-8", errors="replace", env=env,
+                                    creationflags=_NO_WINDOW)
+        except Exception:
+            # Release the slot on a failed spawn, or one bad launch wedges the Panel for
+            # the life of the process (nothing would ever clear a "running" with no proc).
+            with _panel_lock:
+                _panel_job.update(status="failed", proc=None)
+            raise
+        with _panel_lock:
+            _panel_job["proc"] = proc
         _log_job(job_id, status="running", type="panel", label=spec["label"])
         threading.Thread(target=_panel_reader, args=(proc,), daemon=True).start()
+        return True
 
     # ---- Automated tasks: run a SAFE job on an interval while the app is open ----
     # Persisted to out_dir/schedule.json. Only non-destructive actions are schedulable.
@@ -3926,7 +3958,10 @@ def create_app(out_dir: Path):
         while True:
             _time.sleep(60)
             try:
-                s = _load_sched()
+                # Same lock /api/panel/schedule writes under -- reading the file while a
+                # save is mid-write otherwise hands this loop a truncated (or stale) copy.
+                with _sched_lock:
+                    s = _load_sched()
                 action = s.get("action")
                 if not s.get("enabled") or action not in PANEL_ACTIONS \
                         or PANEL_ACTIONS[action]["destructive"] \
@@ -3938,12 +3973,16 @@ def create_app(out_dir: Path):
                 interval = max(1, int(s.get("interval_hours") or 6)) * 3600
                 if _time.time() - (s.get("last_run") or 0) < interval:
                     continue
-                with _panel_lock:
-                    if _panel_job["status"] == "running":
-                        continue
-                _panel_run(action)
-                s["last_run"] = _time.time()
-                _save_sched(s)
+                if not _panel_run(action):
+                    continue                   # panel busy -- retry on the next tick
+                # Re-read under the lock before stamping: `s` was loaded up to a minute
+                # ago, so writing that whole copy back would silently revert any setting
+                # the owner saved through /api/panel/schedule in the meantime. The lock
+                # can't span _panel_run -- it calls _load_sched() itself for `workers`.
+                with _sched_lock:
+                    s = _load_sched()
+                    s["last_run"] = _time.time()
+                    _save_sched(s)
             except Exception:              # noqa: BLE001 -- a bad schedule must not kill the loop
                 pass
 
@@ -11241,13 +11280,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"error": "this action changes files; localhost-only"}), 403
         if spec["destructive"] and not body.get("confirm"):
             return jsonify({"error": "this action changes files; confirm required"}), 400
-        with _panel_lock:
-            if _panel_job["status"] == "running":
-                return jsonify({"error": "a job is already running"}), 409
         try:
             # `n` is only consumed by an int_param action (test-pull); _panel_run
             # clamps it into range and ignores it otherwise, so passing it always is safe.
-            _panel_run(action, int_arg=body.get("n"))
+            # The busy check lives INSIDE _panel_run, under the same lock that claims the
+            # slot -- checking it here first would just be the race again.
+            if not _panel_run(action, int_arg=body.get("n")):
+                return jsonify({"error": "a job is already running"}), 409
             return jsonify({"ok": True, "action": action, "label": spec["label"]})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
