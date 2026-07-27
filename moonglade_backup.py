@@ -4951,13 +4951,29 @@ def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_
     return params
 
 
-def _snap_video_duration(d):
-    """Snap a requested duration (seconds) to the nearest allowed PixAI video length."""
+# Only the v4.0 family renders a 15-second clip. VIDEO_DURATIONS has carried the note
+# "15 is v4.0-only" since it was banked, but nothing enforced it, so a 15s request on any
+# other model went straight to PixAI, which refuses the mutation -- no task is created, so
+# nothing appears on the account and the client shows an instant unexplained decline. A rule
+# that lives only in a comment is not a rule.
+VIDEO_15S_MODELS = ("v4.0", "v4.0.1")
+
+
+def _snap_video_duration(d, model=""):
+    """Snap a requested duration (seconds) to the nearest allowed PixAI video length.
+
+    `model` (optional) additionally enforces the 15s restriction: 15 is v4.0-only, so any other
+    model snaps down to 10 rather than being sent a length PixAI will reject. Omitting `model`
+    keeps the original model-blind behavior exactly, which is what the CLI's own preview path
+    and the pre-existing tests pin."""
     try:
         d = float(d)
     except (TypeError, ValueError):
         return 5
-    return min(VIDEO_DURATIONS, key=lambda v: abs(v - d))
+    snapped = min(VIDEO_DURATIONS, key=lambda v: abs(v - d))
+    if snapped == 15 and model and str(model).strip() not in VIDEO_15S_MODELS:
+        return 10
+    return snapped
 
 
 def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=(),
@@ -4977,8 +4993,8 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
     imgs = [str(i) for i in (image_ids or []) if str(i).strip()]
     vids = [str(v) for v in (video_ids or []) if str(v).strip()]
     auds = [str(a) for a in (audio_ids or []) if str(a).strip()]
-    dur = _snap_video_duration(duration)
     mdl = (model or "").strip() or DEFAULT_VIDEO_MODEL
+    dur = _snap_video_duration(duration, mdl)
     qual = (quality or "professional").strip() or "professional"
     mid_num = video_model_id(mdl)                  # the REQUIRED numeric modelId for this model
     if m == "I2V" and imgs:
@@ -5101,7 +5117,10 @@ def _gen_video_parameters(args):
         model=(getattr(args, "video_model", "") or getattr(args, "model", "")
                or DEFAULT_VIDEO_MODEL),
         tail_media_id=getattr(args, "tail", "") or "",
-        duration=_snap_video_duration(getattr(args, "duration", 5) or 5),
+        duration=_snap_video_duration(
+            getattr(args, "duration", 5) or 5,
+            (getattr(args, "video_model", "") or getattr(args, "model", "")
+             or DEFAULT_VIDEO_MODEL)),
         mode=getattr(args, "vmode", None) or "professional",
         generate_audio=bool(getattr(args, "audio", False)),
         audio_language=getattr(args, "audio_language", None) or "english",
@@ -6179,7 +6198,8 @@ def run_reference_video(args):
         return build_reference_video_parameters(
             prompt, image_media_ids=img_ids, video_media_ids=vid_ids, audio_media_ids=aud_ids,
             model=(getattr(args, "video_model", "") or "v4.0.1"),
-            duration=_snap_video_duration(getattr(args, "duration", 5) or 5),
+            duration=_snap_video_duration(getattr(args, "duration", 5) or 5,
+                                          (getattr(args, "video_model", "") or "v4.0.1")),
             mode=getattr(args, "vmode", None) or "professional",
             generate_audio=bool(getattr(args, "audio", False)),
             audio_language=getattr(args, "audio_language", None) or "english",

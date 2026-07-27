@@ -7818,14 +7818,32 @@ var Gen = (function(){
   // one via <mg-generate-drawer>). A code-search for "friendlyGenErr" is the only guard
   // against drift beyond the parity test covering this copy (loom/test/mg-generate-drawer-parity.test.js).
   function friendlyGenErr(raw){
-    var s=String(raw||'');
-    if(/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s))
-      return 'Out of balance for this model \\u2014 no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.';
-    if(/moderat|content.?policy|flagged|prohibit|sensitive|not.?allowed|violat/i.test(s))
-      return "PixAI's content filter blocked this generation \\u2014 that's decided on PixAI's side, not in the Loom.";
-    if(/inferenceProfile/i.test(s))
-      return "That quality setting isn't available for this model \\u2014 try Auto instead.";
-    return s||'generation failed';
+  // A friendly label NEVER replaces the raw text -- it is APPENDED. 2026-07-26: a video
+  // decline read "PixAI's content filter blocked this generation" while PixAI had created no
+  // task at all, and the real cause was unrecoverable because this function discarded the raw
+  // string (and no route logged it either). Guidance AND ground truth, always.
+  //
+  // The moderation test deliberately does NOT fire on a bare "not allowed" / "violates" /
+  // "sensitive" / "prohibited": those are ordinary words in PARAMETER rejections, and matching
+  // them relabelled a validation error as a content-filter block -- which sends someone off to
+  // rewrite a prompt that was never the problem. They now need a content-ish noun beside them.
+  // Falling through to the raw text is safe; mislabelling is not.
+  //
+  // i2vPro is in the quality branch because VIDEO's quality field is `i2vPro.mode`, not
+  // `inferenceProfile` -- so before this, the one message written to explain a quality mismatch
+  // could never fire for a video error, and it fell into the moderation test instead.
+    var s = String(raw || '');
+    if (!s) return 'generation failed';
+    var hint = '';
+    if (/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s))
+      hint = 'Out of balance for this model \\u2014 no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.';
+    else if (/moderat|content.?polic|flagged|nsfw/i.test(s)
+      || (/prohibit|sensitive|not.?allowed|violat/i.test(s)
+          && /content|prompt|polic|guideline|term|image/i.test(s)))
+      hint = "PixAI's content filter blocked this generation \\u2014 that's decided on PixAI's side, not here.";
+    else if (/inferenceProfile|i2vPro|unknown mode/i.test(s))
+      hint = "That quality setting isn't available for this model \\u2014 try a different Mode.";
+    return hint ? hint + ' (PixAI said: ' + s.slice(0, 160) + ')' : s;
   }
   function renderResultInto(target, d, past){
     if(d.error){ target.innerHTML='<span style="color:var(--red);font-size:12px;">'+esc(friendlyGenErr(d.error))+'</span>'; return; }
@@ -13838,6 +13856,38 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # upscale methods at once) becomes the badge's own note, not a 500.
             return None, args.no_card, _redact_host_paths(str(e))[:140]
 
+    def _log_gen_failure(where, exc, params=None):
+        """Record a failed spend attempt in the server log. Returns the redacted message so a
+        caller can both log and return it in one line.
+
+        This did not exist, and its absence is what made a 2026-07-26 video decline
+        undiagnosable: the route handed the raw error to the browser, the browser's
+        friendlyGenErr() replaced it with a guess ("PixAI's content filter blocked this"), and
+        the actual text was written down nowhere. There was no way to tell a content block from
+        a rejected parameter after the fact -- and those want opposite fixes, so the guess sent
+        the owner off to rewrite a prompt that was fine.
+
+        Logs the PARAMS too, because the shape is the diagnosis for this class of failure -- which
+        model, which quality mode, what duration. No credential is involved: the API key travels
+        in the session headers, never in `parameters`. Prompts do appear, which is correct -- a
+        moderation decline is unreadable without the prompt -- and this log is local to the
+        owner's own machine, the same file that already records every request.
+
+        Never raises: a diagnostic that can break the error path it reports on is worse than
+        no diagnostic."""
+        msg = _redact_host_paths(str(exc))
+        try:
+            import json as _json
+            import logging as _logging
+            shape = ""
+            if params:
+                shape = " params=" + _json.dumps(params, ensure_ascii=False, default=str)[:700]
+            _logging.getLogger(__name__).error(
+                "%s failed: %s: %s%s", where, type(exc).__name__, msg[:400], shape)
+        except Exception:
+            pass
+        return msg
+
     @app.route("/api/price", methods=["POST"])
     def api_price():
         """Live cost + free-card check for the drawer's current settings (generate OR
@@ -13926,7 +13976,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 pass
             return jsonify({"task_id": task_id})
         except Exception as e:
-            return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
+            return jsonify({"error": _log_gen_failure(
+                "/api/generate", e, locals().get("params"))[:300]}), 200
 
     @app.route("/api/edit", methods=["POST"])
     def api_edit():
@@ -13954,7 +14005,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             telem_set_add("tools", "edit", out_dir=out_dir)
             return jsonify({"task_id": task_id})
         except Exception as e:
-            return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
+            return jsonify({"error": _log_gen_failure(
+                "/api/edit", e, locals().get("params"))[:300]}), 200
 
     # /api/enhance is gone. It submitted a panelplugin task, which PixAI accepts, queues,
     # charges for and then cancels unstarted at roughly 60 minutes ("waiting timeout") whenever
@@ -14390,7 +14442,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 pass
             return jsonify({"task_id": task_id, "uploaded": len(image_ids)})
         except Exception as e:
-            return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
+            return jsonify({"error": _log_gen_failure(
+                "/api/loom/generate", e, locals().get("params"))[:300]}), 200
 
     def _run_export(cmd, out_path, total_sec):
         """Run the ffmpeg concat in a thread, parsing time= for progress. The output
