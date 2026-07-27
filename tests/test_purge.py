@@ -2,6 +2,8 @@
 the app (it deletes files). Covers purge_media_local (quarantine vs hard-delete) and
 the gallery /delete-tasks-bulk route (cloud delete is mocked; we assert local side
 effects + that the cloud call fires task-level)."""
+import pytest
+
 import moonglade_gallery as g
 from moonglade_gallery import (CATALOG_FIELDS, save_catalog, load_catalog,
                            purge_media_local, create_app)
@@ -53,6 +55,50 @@ def test_purge_missing_file_is_safe(tmp_path):
     assert load_catalog(db) == []                              # row still cleared, no crash
 
 
+def test_purge_keeps_the_row_when_the_quarantine_move_fails(tmp_path, monkeypatch):
+    """The data-loss case. The move can genuinely fail -- an antivirus or sync client
+    holding the file open for a moment, or a library on a different volume from
+    out_dir, which makes img.replace(dest) a cross-device rename (OSError on Windows).
+    The file then stays exactly where it was, so dropping its catalog row anyway
+    strands it: invisible in the gallery AND absent from _deleted/, which is the only
+    place the trash panel looks. wiki/Deleting.md promises local deletes are
+    recoverable; an orphan is the one shape that cannot be recovered."""
+    db = _seed(tmp_path, [_row(media_id="66", filename="66.png")], {"66.png": b"KEEP"})
+    thumb = tmp_path / "gallery" / "thumbs"
+    thumb.mkdir(parents=True)
+    (thumb / "66.jpg").write_bytes(b"t")
+
+    def _cross_device(self, target):
+        raise OSError(18, "Invalid cross-device link")
+
+    monkeypatch.setattr(g.Path, "replace", _cross_device)
+
+    with pytest.raises(OSError):
+        purge_media_local(tmp_path, thumb, db, "66", "66.png")
+
+    assert (tmp_path / "images" / "66.png").read_bytes() == b"KEEP", "the file moved anyway"
+    assert [r["media_id"] for r in load_catalog(db)] == ["66"], (
+        "the catalog row was destroyed for a file that never left its original path -- "
+        "it is now an orphan no restore path can find")
+
+
+def test_purge_keeps_the_row_when_the_hard_delete_fails(tmp_path, monkeypatch):
+    """Same contract on the hard-delete branch: a file the OS refused to unlink is
+    still there, so the row that points at it has to stay too."""
+    db = _seed(tmp_path, [_row(media_id="67", filename="67.png")], {"67.png": b"KEEP"})
+
+    def _denied(self, **kw):
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr(g.Path, "unlink", _denied)
+
+    with pytest.raises(OSError):
+        purge_media_local(tmp_path, tmp_path / "t", db, "67", "67.png", quarantine=False)
+
+    assert (tmp_path / "images" / "67.png").exists()
+    assert [r["media_id"] for r in load_catalog(db)] == ["67"]
+
+
 def test_quarantined_file_is_invisible_to_resolution(tmp_path):
     # A file already sitting in _deleted/ must not be found as a live media file.
     db = _seed(tmp_path, [], {})
@@ -91,6 +137,51 @@ def test_delete_tasks_bulk_route_quarantines_and_calls_cloud(tmp_path, monkeypat
     for name in ("100.png", "101.png", "200.png"):
         assert (deleted / name).exists()
     assert {r["media_id"] for r in load_catalog(db)} == set()    # all three rows cleared
+
+
+def test_bulk_delete_keeps_going_when_one_local_purge_fails(tmp_path, monkeypatch):
+    """One unmovable file must not abandon every task queued behind it. The cloud
+    deletes have already fired and cannot be taken back by the time the local purge
+    runs, so a loop that dies on the first OSError leaves the remaining tasks gone
+    from PixAI but still in the local catalog -- the exact cloud/catalog drift this
+    route exists to prevent, and silent, because the job card is the only place it
+    would ever show."""
+    import time
+    import moonglade_backup as core
+    db = _seed(tmp_path, [
+        _row(media_id="300", task_id="TA", filename="300.png"),
+        _row(media_id="400", task_id="TB", filename="400.png"),
+    ], {"300.png": b"a", "400.png": b"b"})
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: None)
+
+    real_replace = g.Path.replace
+
+    def _one_bad_file(self, target):
+        if self.name == "300.png":                 # TA is processed first (task ids sort)
+            raise OSError(18, "Invalid cross-device link")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(g.Path, "replace", _one_bad_file)
+
+    client = login_client(tmp_path)
+    client.post("/delete-tasks-bulk", data={"media_ids": ["300", "400"], "back": "/"})
+
+    job = None
+    for _ in range(200):
+        jobs = client.get("/api/jobs").get_json()["jobs"]
+        job = next((j for j in jobs if j.get("type") == "delete"), None)
+        if job and job["status"] in ("done", "failed"):
+            break
+        time.sleep(0.02)
+
+    assert job is not None and job["status"] == "failed", (
+        "a purge that failed was reported as a clean run")
+    assert (tmp_path / g.DELETED_DIRNAME / "400.png").exists(), (
+        "the second task was abandoned after the first one's file would not move")
+    assert {r["media_id"] for r in load_catalog(db)} == {"300"}, (
+        "the row for the file still on disk should survive, and only that one")
 
 
 def test_bulk_delete_async_logs_a_job_that_completes(tmp_path, monkeypatch):

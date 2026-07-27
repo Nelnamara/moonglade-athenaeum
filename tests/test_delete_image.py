@@ -97,6 +97,35 @@ def test_a_failed_cloud_delete_leaves_the_local_copy_alone(tmp_path, monkeypatch
         assert con.execute("SELECT COUNT(*) FROM catalog WHERE media_id='b'").fetchone()[0] == 1
 
 
+def test_a_failed_local_purge_comes_back_as_an_error_body(tmp_path, monkeypatch):
+    """The mirror of the test above, on the other side of the cloud call. By the time the
+    local purge runs the delete on PixAI is already done and irreversible, so a purge that
+    fails (the file locked, or _deleted/ on a different volume than the library) has to be
+    reported through this route's own JSON contract -- the client reads `error` and says so.
+    An unhandled 500 tells the user nothing while a row for an image PixAI no longer has
+    quietly stays in the catalog."""
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    monkeypatch.setattr(core, "delete_batch_media_gql", lambda s, tid, mid: None)
+    (tmp_path / "b.png").write_bytes(b"x")
+    cli = _cli(tmp_path, _batch(tmp_path))
+
+    def _cross_device(self, target):
+        raise OSError(18, "Invalid cross-device link")
+
+    monkeypatch.setattr(pathlib.Path, "replace", _cross_device)
+
+    r = cli.post("/api/delete-image", json={"media_id": "b", "confirm": True})
+    assert r.status_code == 200, "a local-purge failure escaped as a raw server error"
+    d = r.get_json()
+    assert d.get("ok") is not True and d.get("error"), (
+        "the route claimed success for a purge that never happened")
+    assert (tmp_path / "b.png").exists()
+    with sqlite3.connect(str(tmp_path / "catalog.db")) as con:
+        assert con.execute(
+            "SELECT COUNT(*) FROM catalog WHERE media_id='b'").fetchone()[0] == 1, (
+            "the row was cleared for a file still sitting in the library")
+
+
 def test_it_refuses_without_the_confirm_flag(tmp_path, monkeypatch):
     """The typed-DELETE prompt is the client's half of the gate. A route that acted without
     the flag would make that prompt decorative -- anything that could reach the endpoint
