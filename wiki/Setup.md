@@ -2,7 +2,7 @@
 
 ## 1. Install
 
-Python 3.8+ (`python --version`), then:
+Python 3.9+ (`python --version`), then:
 
 ```bash
 pip install -r requirements.txt

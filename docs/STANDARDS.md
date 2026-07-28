@@ -108,7 +108,7 @@ Dark, single-theme — the Athenaeum's violet world, deliberately.
 6. **Watch the weight** — inline images add up; past ~6–8 MB, drop embed resolution or give
    reference-only items smaller thumbs.
 7. **Publish & log** — redeploy to the same URL on updates; add the artifact to the ledger in
-   `docs/STATE.md` (§ Locked design → Artifact ledger).
+   `docs/DECISIONS.md` (§ Design sources).
 
 *Drafted from the selection-artifact work of 2026-07-12; approved by the owner with no changes.
 Related: `feedback_artifact_sandbox`, `feedback_cohesion`, `feedback_design_intent`.*
@@ -145,7 +145,7 @@ occasions and was dismissed — that dismissal is a banked never-repeat. Full in
 
 | Tool | What it does | Status |
 |---|---|---|
-| **Figma plugin** (`figma@claude-plugins-official`) | **Bidirectional**: paste a frame URL → Claude implements from the real frame data; Claude can also write UI back to the Figma canvas as editable layers. Ships MCP server + agent skills (figma-design-to-code, figma-use, …). | Skills installed; **MCP is live and authenticated** (per `docs/STATE.md`) — no auth step needed. |
+| **Figma plugin** (`figma@claude-plugins-official`) | **Bidirectional**: paste a frame URL → Claude implements from the real frame data; Claude can also write UI back to the Figma canvas as editable layers. Ships MCP server + agent skills (figma-design-to-code, figma-use, …). | Skills installed; MCP auth status is a live fact — check the current session rather than a doc. |
 | **Claude Design** (claude.ai/design, Anthropic Labs) | Design-system projects that **round-trip with Claude Code** — import a design system, design with those exact components, hand off a bundle Claude Code implements from. Research preview, Pro/Max. | Harness has native support via the `DesignSync` tool (no dedicated skill by that name is present — drive the tool directly). Candidate: push `DESIGN_TOKENS_CSS` + the `mg-*` web components + the toast as the Moonglade design system. |
 | **Auth-free, installed now** | `web-artifacts-builder`, `canvas-design`, `theme-factory`, the `design:*` suite (design-critique / design-system / design-handoff), `dataviz` | Usable immediately, no connector auth. |
 | Canva plugin | Import/generate/export designs | Present; needs connector auth. |
@@ -165,7 +165,7 @@ confirmed byte-for-byte identical tier-triad colors to what the toast already sh
 signal it carried real values through rather than approximating. Ported to this app's actual
 vanilla JS/CSS (not adopted as React — the app has no other React surface besides the Loom) and
 verified against live data in-browser before shipping. Also renamed Trophy Hall → **The Folio of
-Honors** in the same pass, the owner's pick off `docs/STATE.md`'s shortlist.
+Honors** in the same pass, the owner's pick off the (now-retired) `STATE.md` rename shortlist.
 
 Backend infra from the original arc — earn-date persistence, the badge thumb-cache — lived in
 earlier commits and survived both the revert and the redesign: `43014ef`'s mystery-tile wiring
