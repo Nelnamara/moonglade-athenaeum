@@ -849,6 +849,101 @@ The Descent achievement is deliberately shelved.
 
 ---
 
+## The design pass — the owner's answers, 2026-07-27
+
+*A five-way sweep of the docs produced ten candidate open design items; the owner answered all of
+them in one pass. Five CLOSE here. Recorded so the next survey does not re-open them — an
+unanswered item gets re-derived, and re-derivation of settled state is the specific failure this
+tracker exists to stop.*
+
+### Deep Focus — CLOSED as a design question, with one real gap underneath it
+
+Owner: *"Deep focus looks AMAZING since the update... I am very happy with the look and size."*
+The 2026-07-26 wrapping change (frames wrap at a larger size instead of being divided into the old
+width) settled it. **Do not restyle Deep Focus.** There is no open width question.
+
+Two follow-ups survive, and neither is a restyle:
+
+1. **Imported shots land with no first or last frame — the real gap.** A shot card built from an
+   already-produced, imported video renders correctly (thumbnail, `I2V 15s`, `IMPORTED`, `DONE`)
+   but its endpoint frames are empty, because nothing ever produced them: the video arrived
+   finished rather than being generated from a start frame. Owner: *"Can this be added somehow?"*
+   **Yes, and it is wiring rather than new capability** — the data model already has both slots
+   (`media_id` = source/first frame, `tail_media_id` = last frame) and `extract_last_frame()`
+   already exists in `moonglade_backup.py`, alongside the first-frame ffmpeg path used for
+   poster-less videos. The import path simply never calls them. This is a generation-hub function
+   gap, so it outranks every cosmetic item in this section.
+2. **Small shot cards could be taller**, to show more of the first/last frame. Cosmetic, and it
+   only becomes visible once (1) fills those frames in — so it is downstream of it, not parallel.
+
+### Publish — the capture may already exist; read before capturing again
+
+Owner: the publish screen and the train-LoRA pages were likely grabbed in a Chrome dive over the
+2026-07-25 weekend. `createArtworkFromTaskV2` (`taskId`, `input: CreateArtworkFromTaskInput!`) is
+already recorded in `private/API_OPERATIONS.md`. **So the next step is reading what we hold, not
+another capture run.** Only if the input type's fields turn out not to be enumerated does a fresh
+capture become necessary. Where Publish lives and how it is gated were already decided; the open
+part is only the screen behind the (already present, already disabled) button.
+
+### The Loom's video button is renamed "Render" — DECIDED
+
+Two buttons in the Loom's top bar both read "Export". The one that renders and stitches finished
+shots into a single video becomes **Render**; the one that saves project files keeps **Export**.
+Owner's call, owner's voice. Small enough to ride any Loom commit.
+
+### Rewards do not map across all 57 achievements
+
+Owner: *"Not all 57 get a reward — only a select few, most of which are active, banked, and 1
+broken."* **There is therefore no ladder-wide reward rule to invent**, which is what the survey
+assumed when it called this an open brainstorm. The work is finding the one broken reward, not
+designing a scheme for 57.
+
+### The Loom gets Moonglade branding and a Mark — on a much thinner banner
+
+Owner wants the branding system and a Mark on the Loom, using a **deliberately much thinner banner
+image so it does not hog space** — the Loom's header is a working surface, not a lobby. This is
+the second of the two art gaps named on 2026-07-06 (the badge half is finished).
+
+**Decide the ratio before any art is generated.** The banked banner rule (1920×480, 4:1, composed
+subject-left) does not cover a slim variant, and generating against an unstated ratio is how art
+gets made twice.
+
+### "Under the Hood" — gated on bundling, and the gate is also the hazard
+
+Owner: it *"still needs flushing out and is gated on bundling the assets and clearing the branding
+folder."*
+
+**These two must land in the same pass, because bundling is the exact act that arms the bug.** The
+achievement's trigger is `if list_marks(out_dir)` inside `sweep_telemetry()` — it fires when ANY
+mark is present, not when the user added one, and the code comments that once set the flag stays
+set. No marks are committed today, so a fresh clone is clean. The moment default marks ship in
+`branding/`, every user earns the rarest hidden feat on first load. Replacing the trigger is not a
+separate tidy-up; it is a precondition of shipping bundled assets.
+
+### Community — enumerate PixAI's news and notices first, then scope
+
+Owner: *"We need to enumerate their news and notices if possible and scope this for the community
+items already placeheld."* So the next step is a **read-only enumeration** of PixAI's news/notices
+surface, and only then a scope against the placeholders already in the app. This also answers the
+survey's objection that PixAI's events carry no "who": if a notices surface exists, it may carry
+the identity the raw event stream lacks. Nothing gets designed before that probe runs.
+
+### Two items are CLOSED outright
+
+- **The lost unlock-toast animation is live again.** It was found and restored from a long-lost
+  artifact. The survey listed it as needing the owner to describe the motion; that is stale.
+- **The Loom's visual pass is done.** V2 received a full visual mock when the Edit Bay and Loom V1
+  were retired. Owner: *"Its honestly pretty solid overall... I like it, especially on iPad."*
+  Possible follow-up beyond branding only — not a pass, not a restyle.
+
+### Known defect surfaced by the same sweep: Completionist cannot be earned
+
+`Completionist` requires every non-feat, non-banner achievement. Two achievements hang off the
+**deleted Enhance surface** — `enhances` (common) and `enhance_workflows_distinct` (epic). Both
+are non-feat, so both sit in the required pool, and neither metric can ever increment, because
+Enhance never dispatches for an API-key client. **The top of the ladder is therefore unreachable
+by anyone.** Recorded here as a defect, not a design item.
+
 ## The gallery top — LOCKED 2026-07-27
 
 *The owner did the placement himself in a component editor. This is the source of truth for that
