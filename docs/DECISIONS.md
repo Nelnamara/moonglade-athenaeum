@@ -908,17 +908,21 @@ the second of the two art gaps named on 2026-07-06 (the badge half is finished).
 subject-left) does not cover a slim variant, and generating against an unstated ratio is how art
 gets made twice.
 
-### "Under the Hood" — gated on bundling, and the gate is also the hazard
+### "Under the Hood" — gated on bundling the assets and clearing the branding folder
 
 Owner: it *"still needs flushing out and is gated on bundling the assets and clearing the branding
 folder."*
 
-**These two must land in the same pass, because bundling is the exact act that arms the bug.** The
-achievement's trigger is `if list_marks(out_dir)` inside `sweep_telemetry()` — it fires when ANY
-mark is present, not when the user added one, and the code comments that once set the flag stays
-set. No marks are committed today, so a fresh clone is clean. The moment default marks ship in
-`branding/`, every user earns the rarest hidden feat on first load. Replacing the trigger is not a
-separate tidy-up; it is a precondition of shipping bundled assets.
+**The trigger itself is correct and does not need replacing.** `branding/` is gitignored and
+`list_marks()` documents itself as *"Empty on a fresh install (assets are machine-local)"* — so
+the folder holds only what a user put there, and the achievement fires on exactly that. Bundling
+the default assets somewhere other than `branding/`, and clearing that folder, is what preserves
+this property; it is the fix, not a hazard.
+
+*(A 2026-07-27 survey pass claimed the opposite — that shipping defaults would arm the
+achievement for every user. It was wrong: it missed that the folder is gitignored and cannot carry
+shipped defaults. Deleted rather than annotated; noted only because the wrong version briefly
+reached a commit message.)*
 
 ### Community — enumerate PixAI's news and notices first, then scope
 
