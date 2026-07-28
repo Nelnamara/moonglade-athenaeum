@@ -6,7 +6,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 // (which closes over `thumbs` state) under the ORIGINAL single-arg call shape.
 import {
   CONNECT, CONTINUITY_PHRASE, actLetter,
-  maxTagNum, nextTag, frameLinked, connectMeta, continuityLinked,
+  maxTagNum, nextTag, isCatalogMediaId, frameLinked, connectMeta, continuityLinked,
   flat, shotText, castMissingImages, castPastBudget, refBudget, resolvedImage,
   usesCloseFrame,
   pickTarget, pickVideoTarget, positionTag, durOf,
@@ -1150,7 +1150,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             const a = activeRef.current; if (!a) return;
             const proj = projectRef.current;
             const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId]
-              : (source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null);
+              : (source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null);
             const plan = pickTarget(a, proj, resolve, slot);
             if (plan.type === "replace" && plan.kind === "cast") {
               // Cast assets are project-GLOBAL (shared identity across every shot that uses
@@ -1256,7 +1256,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         // thumbsRef, not the `thumbs` prop: this listener registers once and its closure
         // goes stale -- the exact idiom the mg-pick-request resolve above already uses.
         const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId]
-          : (source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null);
+          : (source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null);
         const composed = already ? null : shotText(a, projectRef.current, resolve);
         if (!already && text === composed) return;
         const apply = (c) => setPromptOverride(c, text);
@@ -1347,8 +1347,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // imgSrc mirrors useGenerationPipeline's own private helper exactly (thumbs is a prop
   // here too) -- needed to call buildShotPayload directly from this scope.
   const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId]
-    : (source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null);
-  const asRef = (d) => ({ media_id: d, thumb: /^\d+$/.test(d) ? ("/thumbs/" + d + ".jpg") : d });
+    : (source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null);
+  
+  // An imported file's `local_<hex>` id has a thumbnail at the SAME /thumbs/<id>.jpg
+  // route a PixAI id does -- the numeric test used to send the raw id as the <img src>.
+  const asRef = (d) => ({ media_id: d, thumb: isCatalogMediaId(d) ? ("/thumbs/" + d + ".jpg") : d });
   // ---- mode families for the Cast & assets panel and Deep Focus live tags (2026-07-27,
   // round 3). Which modes actually SEND the cast/ref image bank with a generation:
   // R2V/V2V take the full reference bank (the server resolves both through the same
@@ -2831,7 +2834,12 @@ function useProjectStore(setSelShot) {
   useEffect(() => {
     if (!project || castImported.current) return;
     castImported.current = true;
-    const ids = parseCastIdsFromSearch(location.search);
+    // Two filters, deliberately: parseCastIdsFromSearch is the URL *sanitiser* (safe
+    // characters only, so nothing can escape a path or a query), and isCatalogMediaId is
+    // the *grammar* -- applied here, at the one call site that has both modules in scope,
+    // so neither file has to carry a second copy of the other's rule. Junk in the URL is
+    // dropped rather than becoming a cast member with no picture.
+    const ids = parseCastIdsFromSearch(location.search).filter(isCatalogMediaId);
     if (!ids.length) return;
     setProject((p) => {
       const existing = p.assets || [];
@@ -3013,7 +3021,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     (prev && prev.ids.has(cardId)) ? { ...prev, outcomes: { ...prev.outcomes, [cardId]: outcome } } : prev);
 
   const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId]
-    : (source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null);
+    : (source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null);
   /* Build the /api/loom/generate + /api/price payload for a shot (single source).
      Wraps the pure, imported buildShotPayload with this hook's own `project` state
      + `imgSrc` (closes over `thumbs`), preserving the original single-argument

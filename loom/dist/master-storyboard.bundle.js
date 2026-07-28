@@ -44,6 +44,7 @@ var LoomBundle = (() => {
     const m = /^@image(\d+)$/.exec(tag || "");
     return m ? +m[1] : 0;
   };
+  var isCatalogMediaId = (s) => /^(?:\d+|local_[0-9a-f]{12})$/.test(String(s == null ? "" : s));
   var frameLinked = (a, b) => !!a && !!b && (!!a.mediaId && !!b.mediaId && a.mediaId === b.mediaId || !!a.thumbId && !!b.thumbId && a.thumbId === b.thumbId);
   var continuityLinked = (entries, entryId) => {
     const idx = (entries || []).findIndex((x) => x.c.id === entryId);
@@ -98,7 +99,7 @@ var LoomBundle = (() => {
     while (claims.has(n)) n++;
     return { type: "append", tag: "@image" + n };
   };
-  var shotVideoRefs = (entry) => (entry.c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || ""));
+  var shotVideoRefs = (entry) => (entry.c.refs || []).filter((r) => r.kind === "video" && isCatalogMediaId(r.source));
   var pickVideoTarget = (entry, slot) => {
     const items = shotVideoRefs(entry);
     const existing = items[slot];
@@ -162,7 +163,7 @@ var LoomBundle = (() => {
   var shotPayload = (entry, project, imgSrc) => {
     const c = entry.c;
     const imgs = shotImageRefs(entry, project, imgSrc);
-    const vids = (c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || "")).map((r) => r.source).slice(0, 3);
+    const vids = (c.refs || []).filter((r) => r.kind === "video" && isCatalogMediaId(r.source)).map((r) => r.source).slice(0, 3);
     return {
       mode: c.mode,
       prompt: shotText(entry, project, imgSrc),
@@ -363,7 +364,7 @@ var LoomBundle = (() => {
   var patchRef = (project, actId, cardId, refId, patch) => patchCard(project, actId, cardId, (c) => ({ ...c, refs: c.refs.map((r) => r.id !== refId ? r : { ...r, ...patch }) }));
   var removeRef = (project, actId, cardId, refId) => patchCard(project, actId, cardId, (c) => ({ ...c, refs: c.refs.filter((r) => r.id !== refId) }));
   var countShots = (project) => (project.acts || []).reduce((n, a) => n + (a.cards || []).length, 0);
-  var parseCastIdsFromSearch = (search) => (search || "").replace(/^\?/, "").split("&").map((kv) => kv.split("=")).filter(([k]) => k === "cast").flatMap(([, v]) => (v || "").split(",")).map((s) => decodeURIComponent(s).trim()).filter((s) => /^\d+$/.test(s));
+  var parseCastIdsFromSearch = (search) => (search || "").replace(/^\?/, "").split("&").map((kv) => kv.split("=")).filter(([k]) => k === "cast").flatMap(([, v]) => (v || "").split(",")).map((s) => decodeURIComponent(s).trim()).filter((s) => /^[A-Za-z0-9_-]{1,64}$/.test(s));
   function friendlyGenErr(raw) {
     const s = String(raw || "");
     if (!s) return "generation failed";
@@ -1581,7 +1582,7 @@ ${"=".repeat(48)}
               const a = activeRef.current;
               if (!a) return;
               const proj = projectRef.current;
-              const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null;
+              const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
               const plan = pickTarget(a, proj, resolve, slot);
               if (plan.type === "replace" && plan.kind === "cast") {
                 setAssets((arr) => arr.map((x) => x.id !== plan.id ? x : { ...x, mediaId: String(mid), thumbId: "", source: "" }));
@@ -1644,7 +1645,7 @@ ${"=".repeat(48)}
           if (!a) return;
           const text = e.detail.text;
           const already = !!a.c.promptOverride;
-          const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null;
+          const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
           const composed = already ? null : shotText(a, projectRef.current, resolve);
           if (!already && text === composed) return;
           const apply = (c) => setPromptOverride(c, text);
@@ -1729,8 +1730,8 @@ ${"=".repeat(48)}
     const cardModeForVmode = (v) => v === "flf" ? "FLF" : v === "i2v" ? "I2V" : "R2V";
     const weaveSelIdx = sel ? entries.findIndex((e) => e.c.id === sel.c.id) : -1;
     const weavePrevEntry = weaveSelIdx > 0 ? entries[weaveSelIdx - 1] : null;
-    const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null;
-    const asRef = (d) => ({ media_id: d, thumb: /^\d+$/.test(d) ? "/thumbs/" + d + ".jpg" : d });
+    const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
+    const asRef = (d) => ({ media_id: d, thumb: isCatalogMediaId(d) ? "/thumbs/" + d + ".jpg" : d });
     const modeSendsRefs = (m) => usesCloseFrame(m) && m !== "FLF";
     const modeSendsLine = (m) => m === "FLF" ? "First & Last sends the start & end frames only \u2014 cast & refs here are for continuity/notes, not references" : "I2V sends the opening frame only \u2014 cast here is for continuity/notes, not references";
     const liveTagText = (liveTag, pastBudget, mode) => liveTag || (pastBudget ? modeSendsRefs(mode) ? "not sent" : "not cited" : "\u2014");
@@ -2902,7 +2903,7 @@ ${"=".repeat(48)}
     useEffect(() => {
       if (!project || castImported.current) return;
       castImported.current = true;
-      const ids = parseCastIdsFromSearch(location.search);
+      const ids = parseCastIdsFromSearch(location.search).filter(isCatalogMediaId);
       if (!ids.length) return;
       setProject((p) => {
         const existing = p.assets || [];
@@ -3100,7 +3101,7 @@ Your currently-open board is left untouched.`)) return;
     const [batching, setBatching] = useState(false);
     const [batchTally, setBatchTally] = useState(null);
     const setBatchOutcome = (cardId, outcome) => setBatchTally((prev) => prev && prev.ids.has(cardId) ? { ...prev, outcomes: { ...prev.outcomes, [cardId]: outcome } } : prev);
-    const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null;
+    const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
     const shotPayload2 = (entry) => shotPayload(entry, project, imgSrc);
     const priceShot = async (entry) => {
       try {

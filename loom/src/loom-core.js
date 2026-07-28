@@ -60,6 +60,24 @@ export const nextTag = (items, prefix) => prefix + (maxTagNum(items, prefix) + 1
 // positions are 1-based, so it can never be mistaken for one.
 const imageClaim = (tag) => { const m = /^@image(\d+)$/.exec(tag || ""); return m ? +m[1] : 0; };
 
+// Is `s` a catalog media_id -- i.e. something /thumbs/<id>.jpg will actually serve?
+//
+// TWO id families, and the Loom knew only one. A PixAI generation's media_id is all digits;
+// an imported local file's is `local_<12 hex>` (moonglade_backup.local_media_id, content-
+// addressed since the path-hash collision fix). Both get a thumbnail written to the same
+// place and both are served by the same /thumbs/<media_id>.jpg route -- but eight separate
+// `/^\d+$/` tests across this file, loom-mutations.js, master-storyboard.jsx and
+// mg-generate-drawer.js each independently decided a media_id was digits, so every imported
+// picture was invisible to the Loom: dropped by the gallery's "Send to cast" import, then
+// unresolvable as a cast picture, then unthumbnailable in the drawer's preview. The owner
+// found it the honest way -- selected two imported images plus a video, sent them to the
+// cast, and the Loom opened empty (2026-07-28).
+//
+// Deliberately NOT the same question as parseCastIdsFromSearch()'s filter, which is a URL
+// *sanitiser* and stays a character allowlist: a sanitiser that also encodes the id grammar
+// has to be edited every time a third id family appears, which is how this one rotted.
+export const isCatalogMediaId = (s) => /^(?:\d+|local_[0-9a-f]{12})$/.test(String(s == null ? "" : s));
+
 // Two frames are "linked" (continuous) if they share EITHER identity field —
 // mediaId (gallery-picked / generated-in-Loom frames) or thumbId (locally
 // uploaded ones). The old check only looked at thumbId, so it was blind to
@@ -320,7 +338,7 @@ export const pickTarget = (entry, project, imgSrc, slot) => {
 // .mediaId the way cast/frames/image-refs do, and there's no cast/frame equivalent to fold
 // in -- a video ref only ever comes from c.refs itself. Small enough to stay its own pair of
 // functions rather than bending shotImageRefs()'s shape to fit.
-export const shotVideoRefs = (entry) => (entry.c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || ""));
+export const shotVideoRefs = (entry) => (entry.c.refs || []).filter((r) => r.kind === "video" && isCatalogMediaId(r.source));
 
 export const pickVideoTarget = (entry, slot) => {
   const items = shotVideoRefs(entry);
@@ -496,7 +514,7 @@ export const shotPayload = (entry, project, imgSrc) => {
   // c.refs entries over its editing history; capping here, at the one place that builds the
   // actual /api/loom/generate body, guarantees the real submit never exceeds it regardless of
   // which surface (batchGenerate's direct call or the drawer's own prefill) triggered it.
-  const vids = (c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || "")).map((r) => r.source).slice(0, 3);
+  const vids = (c.refs || []).filter((r) => r.kind === "video" && isCatalogMediaId(r.source)).map((r) => r.source).slice(0, 3);
   // Draft mode renders every shot at the cheaper "basic" quality for blocking out an
   // animatic; approve the cut, turn Draft off, and re-generate the keepers at pro. Carried
   // on the payload so BOTH the price preview and the actual submit see the same quality.
