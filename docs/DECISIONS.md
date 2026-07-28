@@ -2086,4 +2086,10 @@ Owner, immediately after the roster scrub: make a note that the docs will need a
 
 **Why.** Recorded so the roster scrub is not mistaken for the end of the job — the data dump was the worst leak, not the only one. It also lands in the window the tracker already opened: [[Documentation debt deliberately deferred until after the naming pass]] — the naming pass has shipped, so doc work is unblocked.
 
+### Marks come in three layers, and the selector moves on unlock  ·  *2026-07-27*
+
+The included mark/icon set is the DEFAULT set — the launcher-icon picker keeps working out of the box, nothing users have today is taken away. Some included marks are gated by their own achievements (a mark can be an achievement's reward). The "Under the Hood" branding unlock adds ONE user-custom mark/icon on top of the included set, selectable in the Control Panel. And once full branding unlocks, the skin and mark selector MOVE into the unlocked branding panel — the branding tab becomes the customization hub. See [[The bundle's unlock split: branding opens, achievement assets stay sealed]].
+
+**Why.** Owner's design, answering the "are the tab/launcher icons gated?" question with something better than a yes/no: the default experience stays whole, achievements keep gating their own marks, and the unlock's reward is additive — your own mark, plus the hub to manage all of it.
+
 ---
