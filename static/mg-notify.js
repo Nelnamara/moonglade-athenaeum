@@ -514,7 +514,7 @@
     // ---- The Folio of Honors card (tier / milestone / mastery / feat). Legendary and feat
     // cards get the 9-slice frame overlay -- extended from the unlock toast to grid tiles
     // here, a deliberate change from the prior "toast only" behavior (2026-07-22 redesign,
-    // per docs/STATE.md's Per-tile ornate frames open question). Masked hidden feats arrive
+    // per the old state doc's Per-tile ornate frames open question). Masked hidden feats arrive
     // from the server ALREADY sanitized (id/name/desc replaced server-side in api_achievements
     // -- see that route) so this function never has to know a real hidden feat's identity.
     function card(d,a){

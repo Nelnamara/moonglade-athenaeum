@@ -892,7 +892,7 @@ ${"=".repeat(48)}
   var V2_STYLES = `
 .lv-overlay{position:fixed;inset:0;z-index:400;background:var(--base);display:flex;flex-direction:column;}
 /* While Deep Focus is open, lift the WHOLE overlay's root-context z-index to .lv-df-veil's
-   own intended 450 (see the "AUDIT_2026-07-21.md" comment above the .lv-overlay mount) so
+   own intended 450 (see the 2026-07-21 audit comment above the .lv-overlay mount) so
    the body-level corner FABs -- #jobs-fab/#jobs-tray at 401/402 -- stop painting over Deep
    Focus and its nested flyouts, which are otherwise contained inside .lv-overlay's own
    stacking context and can never out-rank a root-level sibling on their own. */

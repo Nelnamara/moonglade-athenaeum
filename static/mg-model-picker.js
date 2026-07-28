@@ -397,7 +397,7 @@
       // hidden, and let the host call ensureSearched() (below) the moment it actually
       // reveals this instance -- see setKind()/the pickerKind effect on each host.
       //
-      // _stale (AUDIT_2026-07-21 follow-up) is the same idea one step further: this
+      // _stale (the 2026-07-21 audit follow-up) is the same idea one step further: this
       // instance HAS searched, but a filter changed while it was hidden, so its grid no
       // longer matches its own filters. Only base-type can do that today (see
       // attributeChangedCallback) -- every other filter lives on a control inside this
@@ -499,7 +499,7 @@
       // keystroke/category click. '' is a legitimate value (base cleared), so this fires
       // even when val is falsy -- unlike 'kind' above, which never goes empty in practice.
       //
-      // AUDIT_2026-07-21 follow-up: "already on screen" is the whole point, and this used
+      // the 2026-07-21 audit follow-up: "already on screen" is the whole point, and this used
       // to search unconditionally. Picking a base model sets base-type on a LoRA picker
       // that is normally still HIDDEN (both hosts mount base+LoRA together and reveal one),
       // so the common flow fired a full request and built ~24 cards into a display:none

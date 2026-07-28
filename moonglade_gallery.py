@@ -2676,7 +2676,7 @@ def _read_trash_meta(out_dir, media_id):
 def _snapshot_before_purge(db_path, out_dir, media_id):
     """Write out_dir/_deleted/<media_id>.json with the row's own fields (rating,
     collections, prompt, task_id, ...) BEFORE delete_from_catalog() removes it for
-    good. docs/AUDIT_2026-07-21.md's scoping note on the restore-panel row: "ratings/
+    good. the 2026-07-21 audit's scoping note on the restore-panel row: "ratings/
     collections on old purges are gone (no manifest existed -- a purge-time snapshot
     for future deletes is part of the build)" -- this is that snapshot. The trash
     panel's restore path reads it back to reinsert a FULL row instead of a bare
@@ -2796,7 +2796,7 @@ def make_video_thumbnail(video_path, thumb_path):
 # ---------------------------------------------------------------------------
 # Trash / quarantine panel -- list, restore, permanently delete
 # ---------------------------------------------------------------------------
-# docs/AUDIT_2026-07-21.md's restore-panel row, scoped 2026-07-23: _deleted/ has ~12k
+# the 2026-07-21 audit's restore-panel row, scoped 2026-07-23: _deleted/ has ~12k
 # files with no restore UI even though the delete confirm promises "recoverable".
 # These are directory-scan helpers, deliberately NOT catalog queries -- the whole
 # point of purge_media_local is that the catalog row is already gone by the time a
@@ -2961,7 +2961,7 @@ def restore_quarantined_media(out_dir, thumb_dir, db_path, media_id):
     is_video read off the file's own extension, so the file is visible in the gallery
     again -- and a video comes back as a video -- even though its history is genuinely
     gone (there was never a manifest before this feature -- see
-    docs/AUDIT_2026-07-21.md's scoping note on this row). A live re-fetch of the
+    the 2026-07-21 audit's scoping note on this row). A live re-fetch of the
     task via getTaskById (mentioned as possible in that same note) is deliberately
     NOT attempted here: it would turn a local file-move into a network call with its
     own failure modes, for metadata that's "nice to have" on a handful of pre-feature
@@ -3639,7 +3639,7 @@ def create_app(out_dir: Path):
     # routinely embeds an absolute path, which routinely embeds the OS username.
     #
     # Literal-PREFIX replacement, NOT a regex. An earlier attempt (2026-07-21, docs/
-    # AUDIT_2026-07-21.md's S3) used a regex (`[^\s'"<>\|]*`) that stopped matching at
+    # the 2026-07-21 audit's S3) used a regex (`[^\s'"<>\|]*`) that stopped matching at
     # the first whitespace, so a spaced Windows username (`C:\Users\John Smith\...`)
     # still leaked in full -- exactly the harm this exists to close -- and its own
     # tests used space-free paths, so they'd have shipped green. This re-spin is
@@ -5230,7 +5230,7 @@ document.addEventListener('DOMContentLoaded', function() {
        _is_local_request() result computed in index() below, the same value
        `can_delete_cloud` already uses for "Delete from PixAI" -- instead of the
        blanket `is_local` flag every other button in this block uses. FIXED
-       2026-07-24 (docs/AUDIT_2026-07-21.md P3/S5-3, previously a documented but
+       2026-07-24 (the 2026-07-21 audit P3/S5-3, previously a documented but
        un-fixed gap): a signed-in, non-local LAN session no longer sees a
        working-looking Import button that always 403'd on click. #}
     {% if is_local %}
@@ -6699,7 +6699,7 @@ document.addEventListener('DOMContentLoaded', function(){
      rather than a specificity trick: the override can no longer be separated from its
      base by an edit elsewhere in the file, and IF this CSS is ever moved as a unit the
      base rules and their responsive overrides travel together. (Extraction to a real
-     .css file was tried and DISCARDED -- docs/AUDIT_2026-07-21.md T5-CSS -- so that is
+     .css file was tried and DISCARDED -- the 2026-07-21 audit T5-CSS -- so that is
      a property worth having, not a plan.) Do not move these back up into the shared
      mobile block. */
   @media (max-width: 480px) {
@@ -11053,7 +11053,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         session for this identity, by bumping its sess_epoch.
 
         The split exists because the global revoke used to hang off a bare GET with
-        no token (docs/STATE.md's "/logout is a CSRF-able GET that revokes
+        no token (the old state doc's "/logout is a CSRF-able GET that revokes
         globally"). SESSION_COOKIE_SAMESITE="Lax" already killed the
         <img src=".../logout"> version of that -- a cross-site SUBRESOURCE carries
         no cookie, so the handler saw an anonymous request and skipped the bump --
@@ -11221,7 +11221,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # not just the Users tab it started as (2026-07-22): which PANEL_ACTIONS become
         # Maintenance buttons at all, whether "Set launcher icon" renders in the
         # Branding section, panel_out_dir's redaction, and the Users tab's Add/Remove UI.
-        # FIXED 2026-07-24 (docs/AUDIT_2026-07-21.md P3/S5-3): a LAN session used to see
+        # FIXED 2026-07-24 (the 2026-07-21 audit P3/S5-3): a LAN session used to see
         # every destructive Maintenance button (Organize, Dedup, Rebuild thumbnails, ...)
         # and "Set launcher icon" render normally, then hit a confirm-dialog-then-403
         # dead end on click -- api_panel_run/api_branding_shortcut were always correctly
@@ -11302,7 +11302,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         itself a brand-new, persistent account. Closed alongside the matching
         fix to /api/users/remove: a LAN session used to be able to evict the
         owner's own account and then register a fresh one for itself, one
-        finding with two halves (see docs/STATE.md's Access & accounts section).
+        finding with two halves (see the old state doc's Access & accounts section).
         Account creation now sits in the same trust class as
         api_setup_save_key/api_branding_shortcut/destructive Panel jobs -- a
         logged-in LAN account can use the gallery, not decide who else gets to.
@@ -11357,7 +11357,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         be able to remove ANY account by name, including the owner's, with no
         guard beyond "not the last account left." A guest handed a tablet could
         boot the owner and (before the matching api_users_add fix) mint itself
-        a durable login in the same motion. See docs/STATE.md's Access &
+        a durable login in the same motion. See the old state doc's Access &
         accounts section for the full reasoning; api_users_add closes the
         other half (a LAN session can no longer register a new account either).
 
@@ -11971,7 +11971,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # differs about it off `is_true_local` (see the #lan-chip comment there).
         # `is_true_local` is the REAL, un-hardcoded _is_local_request() result. It
         # gates the Import button's own visibility (see the head-nav comment above it),
-        # FIXED 2026-07-24 (docs/AUDIT_2026-07-21.md P3/S5-3): a signed-in, non-local
+        # FIXED 2026-07-24 (the 2026-07-21 audit P3/S5-3): a signed-in, non-local
         # LAN session used to see a working-looking Import button that always 403'd,
         # because /api/import-local re-checks the stricter _is_local_request() itself
         # while the button's old visibility only checked the blanket is_local flag.
@@ -12466,7 +12466,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     # -------------------------------------------------------------------
     # Trash / quarantine panel -- the floating panel opened from the Control
-    # Panel (NOT a routed page of its own). See docs/AUDIT_2026-07-21.md's
+    # Panel (NOT a routed page of its own). See the 2026-07-21 audit's
     # restore-panel row for the decided design (floating overlay, directory
     # scan, restore=LOGIN, delete-forever/empty=LOCALHOST+typed confirm).
     # -------------------------------------------------------------------
@@ -12500,7 +12500,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Restore one or more quarantined files back into the library. LOGIN tier --
         recovering something you (or anyone signed in) deleted is not the same trust
         question as permanently destroying it. Matches the decided design in
-        docs/AUDIT_2026-07-21.md: restore=LOGIN, delete-forever/empty=LOCALHOST."""
+        the 2026-07-21 audit: restore=LOGIN, delete-forever/empty=LOCALHOST."""
         body = request.get_json(silent=True) or {}
         media_ids = [str(m) for m in (body.get("media_ids") or []) if str(m).strip()]
         if not media_ids:
@@ -13086,7 +13086,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         (base_type=) needs that per-row data on every LoRA search, not just the
         category/Newest subset, and REST's oRPC endpoint has no equivalent field to request
         it from (confirmed by inspecting its full response shape -- see
-        docs/AUDIT_2026-07-21.md). Base-model search is UNCHANGED (REST by default, GraphQL
+        the 2026-07-21 audit). Base-model search is UNCHANGED (REST by default, GraphQL
         only for category/Newest) -- architecture filtering is a LoRA-picker concept only,
         base models don't get compat-sorted against anything.
 
@@ -16124,7 +16124,7 @@ def port_owner(host, port, timeout=0.4):
     reclaiming one stuck in TIME_WAIT. Both processes then hold :PORT and requests
     land on whichever the OS feels like -- so you edit a file, reload, and get the
     OLD server's response with no error anywhere. That is not hypothetical; it has
-    burned this project twice (docs/STATE.md's verification notes), each time
+    burned this project twice (the old state doc's verification notes), each time
     costing a debugging session chasing a "fix that didn't work" which had in fact
     worked perfectly in a process nobody was talking to.
 

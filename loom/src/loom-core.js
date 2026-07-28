@@ -126,7 +126,7 @@ export const effectivePrompt = (c) => (c.promptOverride ? (c.promptOverrideText 
 // ---------- shot-level "what image is this" list (single source of truth for BOTH the
 // composed prompt's @imageN citations AND the Multi-Reference drawer's own image bank) ----
 //
-// AUDIT_2026-07-21.md's owner-filed "Loom shot-card reference sending bugs out past 2
+// the 2026-07-21 audit's owner-filed "Loom shot-card reference sending bugs out past 2
 // images" row traced the corruption to two DIFFERENT, un-synced numbering systems that both
 // happen to use the same "@imageN" syntax:
 //   1. A project-GLOBAL tag on each cast asset (assigned once, in cast-add order -- see
@@ -275,7 +275,7 @@ export const positionTag = (entry, project, imgSrc, id) => {
   return idx < 0 ? null : "@image" + (idx + 1);
 };
 
-// Multi-Reference drawer pick-persistence plan (AUDIT_2026-07-21.md "reference picker
+// Multi-Reference drawer pick-persistence plan (the 2026-07-21 audit "reference picker
 // corruption" row, requirement 2: adding a 3rd/4th reference via the picker must actually
 // work). A pick used to ONLY ever update the drawer's own private, in-memory bank -- nothing
 // host-side ever recorded it, so it was silently discarded the next time ANY host-tracked

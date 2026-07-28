@@ -341,7 +341,7 @@ function seedProject() {
 const V2_STYLES = `
 .lv-overlay{position:fixed;inset:0;z-index:400;background:var(--base);display:flex;flex-direction:column;}
 /* While Deep Focus is open, lift the WHOLE overlay's root-context z-index to .lv-df-veil's
-   own intended 450 (see the "AUDIT_2026-07-21.md" comment above the .lv-overlay mount) so
+   own intended 450 (see the 2026-07-21 audit comment above the .lv-overlay mount) so
    the body-level corner FABs -- #jobs-fab/#jobs-tray at 401/402 -- stop painting over Deep
    Focus and its nested flyouts, which are otherwise contained inside .lv-overlay's own
    stacking context and can never out-rank a root-level sibling on their own. */
@@ -1124,7 +1124,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         const apply = (c) => ({ ...c, audioGen, audioLanguage });
         a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
       });
-      // AUDIT_2026-07-21.md's pinned "reference picker corruption" row, requirement 2: a
+      // the 2026-07-21 audit's pinned "reference picker corruption" row, requirement 2: a
       // successful pick used to ONLY ever call e.detail.respond(), which writes into the
       // drawer's own PRIVATE _slots/_imgSlots/_vidSlots array and nothing else -- invisible
       // to the rest of the app, and silently discarded the next time ANY host-tracked field
@@ -2428,7 +2428,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     </>
   );
 
-  // AUDIT_2026-07-21.md `state-owner-defects`: .lv-df-veil (z-index 450) renders as a
+  // the 2026-07-21 audit `state-owner-defects`: .lv-df-veil (z-index 450) renders as a
   // DESCENDANT of .lv-overlay (z-index 400), so from the root stacking context it's part
   // of the SAME 400 atom, not a real 450 -- the body-level corner FABs (#jobs-fab/#jobs-
   // tray, z-index 401/402; see moonglade_gallery.py's "Lift the Activity chip" comment) then
