@@ -9,7 +9,7 @@ import {
   maxTagNum, nextTag, frameLinked, connectMeta, continuityLinked,
   flat, shotText, castMissingImages, pickTarget, pickVideoTarget, positionTag, durOf,
   reelStats, effectivePrompt,
-  priceFingerprint, tallyPrices, formatCostEstimate, costTooltip,
+  priceFingerprint, tallyPrices, formatCostEstimate, costTooltip, bundleMissingReport,
   shotPayload as buildShotPayload,
 } from "./src/loom-core.js";
 // Pure project-tree mutators + response-shape classifiers (Phase 2, composed-
@@ -134,6 +134,10 @@ const STYLES = `
 .sb-exp-bar{height:9px;background:var(--panel2);border:1px solid var(--line);border-radius:999px;overflow:hidden}
 .sb-exp-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--amber),var(--gold));transition:width .3s}
 .sb-exp-txt{font-size:13px;color:var(--ink);text-align:center;font-family:ui-monospace,monospace}
+.sb-miss-list{max-height:44vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--panel2)}
+.sb-miss-row{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--ink)}
+.sb-miss-row i{color:var(--ink2);font-style:normal}
+.sb-miss-id{font-family:ui-monospace,monospace;font-size:11px;color:var(--ink2);word-break:break-all}
 /* 500, not 400: ImportCollection opens ON TOP of the V2 shell, and .lv-overlay is also 400 --
    at a tie it only stayed above because it happens to render later in App's child order.
    500 clears both that and Deep Focus's .lv-df-veil (450) outright. */
@@ -3288,6 +3292,7 @@ function useExportPipeline(project, thumbs) {
     `${project.name.replace(/\s+/g, "_")}_shotlist.txt`, "text/plain");
   const exportJSON = () => download(JSON.stringify({ project, thumbs }, null, 2), `${project.name.replace(/\s+/g, "_")}_backup.json`, "application/json");
   const [bundling, setBundling] = useState(false);
+  const [bundleMissing, setBundleMissing] = useState(null);   // M24 report: {total, rows, hidden} or null
   // Tier 2: same {project, thumbs} as the lightweight backup, but the server zips in
   // every media file the project actually references (resultMid, both frame slots, every
   // cast/asset) -- for sharing with someone who doesn't share your catalog. media_ids ride
@@ -3300,13 +3305,22 @@ function useExportPipeline(project, thumbs) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project, thumbs }) });
       if (!r.ok) { const d = await r.json().catch(() => ({})); alert("Bundle export failed: " + (d.error || r.status)); return; }
-      const missing = parseInt(r.headers.get("X-Bundle-Missing-Count") || "0", 10);
+      // A partial bundle is still a successful export, so the report about it has to reach the
+      // owner some other way. Both headers, not just the count: "2 referenced file(s) couldn't
+      // be found" told them a number and left them hand-diffing every reference in the project
+      // against the zip's media/ folder to find out WHICH shot lost a file (M24). The act/shot
+      // labels come from bundleMissingReport() walking the project we just posted -- see its
+      // comment in loom-core.js for why they are not in the (length-capped) header.
+      const report = bundleMissingReport(project, r.headers.get("X-Bundle-Missing-Count"), r.headers.get("X-Bundle-Missing"));
       const blob = await r.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url;
       a.download = `${project.name.replace(/\s+/g, "_")}_bundle.zip`; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      if (missing) alert(`Bundle exported, but ${missing} referenced file(s) couldn't be found on disk and were left out.`);
+      // A dialog, not an alert(): this is a LIST the owner reads while looking at the board,
+      // and alert() is modal to the whole tab, unreadable past a couple of lines, and gone the
+      // moment it is dismissed. Same overlay the cut export already uses (setExp/.sb-export-box).
+      if (report.total) setBundleMissing(report);
     } catch { alert("Bundle export failed -- network error."); }
     finally { setBundling(false); }
   };
@@ -3342,7 +3356,8 @@ function useExportPipeline(project, thumbs) {
   const closeSequence = () => setSeq(null);
 
   return { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
-    exportAll, exportJSON, exportBundle, bundling };
+    exportAll, exportJSON, exportBundle, bundling,
+    bundleMissing, closeBundleMissing: () => setBundleMissing(null) };
 }
 
 export default function App() {
@@ -3452,7 +3467,8 @@ export default function App() {
   }, [activeId]);
 
   const { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
-    exportAll, exportJSON, exportBundle, bundling } = useExportPipeline(project, thumbs);
+    exportAll, exportJSON, exportBundle, bundling,
+    bundleMissing, closeBundleMissing } = useExportPipeline(project, thumbs);
 
   // Import a whole gallery collection as reusable @image references (media_id kept
   // -> free reference at generate time). Tags continue from the current max @imageN.
@@ -3515,6 +3531,11 @@ export default function App() {
             </>}
             {exp.status === "done" && <>
               <div className="sb-exp-txt" style={{ color: "var(--green)" }}>&#10003; Cut rendered.</div>
+              {/* A render that SUCCEEDED but came out different from what was asked for -- today
+                  that means no audio track, because a missing ffprobe made every clip's length
+                  unreadable. Shown next to the download button rather than logged, since the
+                  owner is the one who can install the missing piece. */}
+              {exp.warning && <div className="sb-exp-txt" style={{ color: "var(--amber)" }}>&#9888; {exp.warning}</div>}
               <a className="sb-btn amber" href="/api/loom/export-file" style={{ alignSelf: "center", textDecoration: "none" }}>&#8681; Download mp4</a>
               <button className="sb-btn ghost sm" style={{ alignSelf: "center" }} onClick={closeExport}>Close</button>
             </>}
@@ -3523,6 +3544,38 @@ export default function App() {
                 {exp.status === "failed" ? ("⚠ " + (exp.error || "export failed")) : "■ Export stopped."}</div>
               <button className="sb-btn ghost sm" style={{ alignSelf: "center" }} onClick={closeExport}>Close</button>
             </>}
+          </div>
+        </div>)}
+      {/* Full-bundle export, partial result (M24). The zip is already downloaded and still
+          useful -- this names the references whose file wasn't on disk, by the same A·01 shot
+          codes the board shows, so the owner knows where to look instead of being handed a
+          count. Dismiss-only: there is nothing to retry here, the fix is off-screen (re-sync
+          or re-generate the shot), and the durable copy travels in the zip's project.json. */}
+      {bundleMissing && (
+        <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget) closeBundleMissing(); }}>
+          <div className="sb-export-box">
+            <div className="sb-pick-head"><span className="sb-pick-t">Bundle exported, {bundleMissing.total} file(s) left out</span>
+              <button className="sb-pick-x" style={{ marginLeft: "auto" }} onClick={closeBundleMissing}>&#215;</button></div>
+            <div className="sb-exp-txt" style={{ color: "var(--coral)" }}>
+              &#9888; No file on disk for these references &mdash; everything else exported normally.</div>
+            {bundleMissing.rows.length > 0 && (
+              <div className="sb-miss-list">
+                {bundleMissing.rows.map((row) => (
+                  <div className="sb-miss-row" key={row.mid}>
+                    {row.where.length
+                      ? row.where.map((w, i) => <b key={i}>{w}</b>)
+                      : <i>not referenced by any shot or cast entry in this project</i>}
+                    <span className="sb-miss-id">{row.mid}</span>
+                  </div>))}
+              </div>)}
+            {bundleMissing.hidden > 0 && (
+              <div className="sb-exp-txt" style={{ color: "var(--ink2)", fontSize: "12px" }}>
+                {bundleMissing.rows.length
+                  ? `+${bundleMissing.hidden} more, not listed here.`
+                  : `The server sent no id list.`}
+                The complete list, with the shot each id came from, is inside the zip:
+                <b>project.json</b> &rarr; <b>missing_media</b>.</div>)}
+            <button className="sb-btn ghost sm" style={{ alignSelf: "center" }} onClick={closeBundleMissing}>Close</button>
           </div>
         </div>)}
       {pickCb && (pickAllowType

@@ -1323,6 +1323,7 @@
     function renderDetail(j){
       var d=detailEl();
       d.innerHTML=detailHtml(j);
+      syncTick(j);   // every repaint re-decides whether the live clock should still be running
     }
     // Anchors the popover beside the row that opened it -- same "prefer the side with room,
     // clamp to the viewport" technique as mg-model-picker.js's own floating preview card
@@ -1335,24 +1336,51 @@
       d.style.left=x+'px'; d.style.top=y+'px';
     }
     function stopTick(){ if(detailTick){ clearInterval(detailTick); detailTick=null; } }
+    // Whether the live "Time Spent" clock should be ticking is a fact about the JOB, not
+    // about the popover being open -- so it is decided here, from the job's status as of
+    // right now, and re-decided by every renderDetail() (i.e. on every poll). It used to be
+    // decided once, at open time, and unwound only by closeDetail(), which render() calls
+    // only when the job VANISHES from jobsById -- never when it merely finishes. A job that
+    // completed while its popover stayed open therefore kept its interval: one second after
+    // the correct final duration rendered, the tick overwrote it with `Date.now()/1000 -
+    // started_at` and went on climbing forever for a job that was already done. The popover
+    // exists so an owner can diagnose a slow generation without server access (field report
+    // 2026-07-23) -- an elapsed time that keeps growing past completion is worse than none.
+    //
+    // "Still running" is tested directly rather than against a set of finished statuses, on
+    // purpose. `stale` (the server's orphan sweep, resolve_orphan_jobs) is a real status
+    // this file already gives its own glyph and warning styling, and any hardcoded terminal
+    // list that forgets it would keep counting for exactly the job most likely to have a
+    // popover open on it -- toastTransitions()' own TERMINAL map has that gap today (H18),
+    // which is why this deliberately does not copy its shape. Deriving it this way is also
+    // right in the other direction: `stale` is NOT terminal server-side (_JOBS_TERMINAL), a
+    // later sweep can heartbeat the same job back to 'running', and because this is
+    // re-evaluated on every repaint the clock simply starts again when that happens.
+    function syncTick(j){
+      if(!j || (j.status||'running')!=='running'){ stopTick(); return; }
+      if(detailTick) return;                  // already ticking for this popover -- don't reset its phase
+      // Ticks the popover only, not a full card refresh (JobsCard's own poll already
+      // handles catching a state change).
+      detailTick=setInterval(function(){
+        var cur=jobsById[detailJobId];
+        if(!cur){ closeDetail(); return; }
+        // Belt to renderDetail's braces: the poll above normally stops this the moment the
+        // job leaves 'running', but the tick must never be the thing that writes a "so far"
+        // onto a job that isn't running -- repaint the true final figure and let that
+        // repaint's own syncTick clear the interval.
+        if((cur.status||'running')!=='running'){ renderDetail(cur); return; }
+        var v=detailEl().querySelector('[data-spent]');
+        if(v) v.textContent=fmtDuration(Date.now()/1000-(cur.started_at||cur.ts||0))+' so far';
+      }, 1000);
+    }
     function openDetail(jid, anchorEl){
       var j=jobsById[jid]; if(!j) return;
       detailJobId=jid; detailAnchor=anchorEl;
       var d=detailEl();
-      renderDetail(j);
+      stopTick();          // a clock still running for the PREVIOUS row's job must not be inherited
+      renderDetail(j);     // paints, and (via syncTick) starts the clock iff this job is still running
       placeDetail(anchorEl);
       d.classList.add('open'); d.setAttribute('aria-hidden','false');
-      stopTick();
-      // Live "time spent" while the job is still running -- ticks the popover only, not a
-      // full card refresh (JobsCard's own poll already handles catching a state change).
-      if((j.status||'running')==='running'){
-        detailTick=setInterval(function(){
-          var cur=jobsById[detailJobId];
-          if(!cur){ closeDetail(); return; }
-          var v=d.querySelector('[data-spent]');
-          if(v) v.textContent=fmtDuration(Date.now()/1000-(cur.started_at||cur.ts||0))+' so far';
-        }, 1000);
-      }
     }
     function closeDetail(){
       stopTick();

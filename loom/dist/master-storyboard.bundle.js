@@ -40,6 +40,10 @@ var LoomBundle = (() => {
     }, 0);
   };
   var nextTag = (items, prefix) => prefix + (maxTagNum(items, prefix) + 1);
+  var imageClaim = (tag) => {
+    const m = /^@image(\d+)$/.exec(tag || "");
+    return m ? +m[1] : 0;
+  };
   var frameLinked = (a, b) => !!a && !!b && (!!a.mediaId && !!b.mediaId && a.mediaId === b.mediaId || !!a.thumbId && !!b.thumbId && a.thumbId === b.thumbId);
   var continuityLinked = (entries, entryId) => {
     const idx = (entries || []).findIndex((x) => x.c.id === entryId);
@@ -51,10 +55,6 @@ var LoomBundle = (() => {
   var effectivePrompt = (c) => c.promptOverride ? c.promptOverrideText || "" : c.prompt || "";
   var shotImageRefs = (entry, project, imgSrc) => {
     const c = entry.c;
-    const tagNum = (t) => {
-      const m = /(\d+)/.exec(t || "");
-      return m ? +m[1] : 99;
-    };
     const items = [];
     (project.assets || []).filter((as) => as.kind === "image" && c.cast.includes(as.id)).forEach((as) => {
       const d = as.mediaId || imgSrc(as.thumbId, as.source);
@@ -69,8 +69,8 @@ var LoomBundle = (() => {
       const d = r.mediaId || imgSrc(r.thumbId, r.source);
       if (d) items.push({ tag: r.tag, d, kind: "ref", id: r.id });
     });
-    const kindRank = (it) => it.kind === "frame" ? 0 : 1;
-    const sortNum = (it) => it.kind === "frame" ? 0 : tagNum(it.tag);
+    const kindRank = (it) => it.kind === "frame" ? 0 : it.kind === "cast" ? 1 : 2;
+    const sortNum = (it) => it.kind === "cast" ? imageClaim(it.tag) || Number.MAX_SAFE_INTEGER : 0;
     items.sort((a, b) => kindRank(a) - kindRank(b) || sortNum(a) - sortNum(b));
     return items.slice(0, 6);
   };
@@ -84,7 +84,16 @@ var LoomBundle = (() => {
     const items = shotImageRefs(entry, project, imgSrc);
     const existing = items[slot];
     if (existing) return { type: "replace", kind: existing.kind, id: existing.id };
-    return { type: "append", tag: nextTag(items, "@image") };
+    const c = entry.c;
+    const claims = new Set([
+      ...(project.assets || []).filter((as) => (c.cast || []).includes(as.id)).map((as) => as.tag),
+      (c.openFrame || {}).tag,
+      (c.closeFrame || {}).tag,
+      ...(c.refs || []).filter((r) => r.kind === "image").map((r) => r.tag)
+    ].map(imageClaim).filter(Boolean));
+    let n = items.length + 1;
+    while (claims.has(n)) n++;
+    return { type: "append", tag: "@image" + n };
   };
   var shotVideoRefs = (entry) => (entry.c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || ""));
   var pickVideoTarget = (entry, slot) => {
@@ -122,7 +131,7 @@ var LoomBundle = (() => {
         L.push(`  ${as.name} \u2014 ${as.lock ? "maintain exact appearance from " : "reference "}${tag}`);
       });
     }
-    const usedRefs = (c.refs || []).map((r) => ({ r, tag: positionTag(entry, p, resolve, r.id) })).filter((x) => x.tag);
+    const usedRefs = (c.refs || []).map((r) => ({ r, tag: positionTag(entry, p, resolve, r.id) || (r.kind === "image" ? null : r.tag) })).filter((x) => x.tag);
     if (usedRefs.length) {
       L.push("", "Other references:");
       usedRefs.forEach(({ r, tag }) => {
@@ -182,6 +191,34 @@ var LoomBundle = (() => {
     const scale = Math.max(total, target) || 1;
     const over = total - target;
     return { total, scale, over };
+  };
+  var mediaRefIndex = (project) => {
+    const ids = {};
+    const note = (mid, where) => {
+      const k = String(mid);
+      (ids[k] = ids[k] || []).push(where);
+    };
+    ((project || {}).acts || []).forEach((act, ai) => {
+      (act.cards || []).forEach((c, ci) => {
+        const title = (c.title || "").trim();
+        const code = `${actLetter(ai)}\xB7${String(ci + 1).padStart(2, "0")}${title ? ` ${title}` : ""}`;
+        if (c.resultMid) note(c.resultMid, `${code} (shot result)`);
+        ["openFrame", "closeFrame"].forEach((slot) => {
+          const f = c[slot] || {};
+          if (f.mediaId) note(f.mediaId, `${code} (${slot})`);
+        });
+      });
+    });
+    ((project || {}).assets || []).forEach((a) => {
+      if (a.mediaId) note(a.mediaId, `cast/asset ${a.name || a.tag || a.id || "?"}`);
+    });
+    return ids;
+  };
+  var bundleMissingReport = (project, countHeader, listHeader) => {
+    const total = Math.max(0, parseInt(countHeader || "0", 10) || 0);
+    const index = mediaRefIndex(project);
+    const rows = String(listHeader || "").split(",").map((s) => s.trim()).filter((s) => s && !/^\+\d+ more$/.test(s)).map((mid) => ({ mid, where: index[mid] || [] }));
+    return { total, rows, hidden: Math.max(0, total - rows.length) };
   };
 
   // src/loom-mutations.js
@@ -534,6 +571,10 @@ ${"=".repeat(48)}
 .sb-exp-bar{height:9px;background:var(--panel2);border:1px solid var(--line);border-radius:999px;overflow:hidden}
 .sb-exp-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--amber),var(--gold));transition:width .3s}
 .sb-exp-txt{font-size:13px;color:var(--ink);text-align:center;font-family:ui-monospace,monospace}
+.sb-miss-list{max-height:44vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--panel2)}
+.sb-miss-row{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--ink)}
+.sb-miss-row i{color:var(--ink2);font-style:normal}
+.sb-miss-id{font-family:ui-monospace,monospace;font-size:11px;color:var(--ink2);word-break:break-all}
 /* 500, not 400: ImportCollection opens ON TOP of the V2 shell, and .lv-overlay is also 400 --
    at a tie it only stayed above because it happens to render later in App's child order.
    500 clears both that and Deep Focus's .lv-df-veil (450) outright. */
@@ -3372,6 +3413,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     );
     const exportJSON = () => download(JSON.stringify({ project, thumbs }, null, 2), `${project.name.replace(/\s+/g, "_")}_backup.json`, "application/json");
     const [bundling, setBundling] = useState(false);
+    const [bundleMissing, setBundleMissing] = useState(null);
     const exportBundle = async () => {
       setBundling(true);
       try {
@@ -3385,7 +3427,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           alert("Bundle export failed: " + (d.error || r.status));
           return;
         }
-        const missing = parseInt(r.headers.get("X-Bundle-Missing-Count") || "0", 10);
+        const report = bundleMissingReport(project, r.headers.get("X-Bundle-Missing-Count"), r.headers.get("X-Bundle-Missing"));
         const blob = await r.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -3393,7 +3435,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         a.download = `${project.name.replace(/\s+/g, "_")}_bundle.zip`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 1e3);
-        if (missing) alert(`Bundle exported, but ${missing} referenced file(s) couldn't be found on disk and were left out.`);
+        if (report.total) setBundleMissing(report);
       } catch {
         alert("Bundle export failed -- network error.");
       } finally {
@@ -3450,7 +3492,9 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       exportAll,
       exportJSON,
       exportBundle,
-      bundling
+      bundling,
+      bundleMissing,
+      closeBundleMissing: () => setBundleMissing(null)
     };
   }
   function App() {
@@ -3605,7 +3649,9 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       exportAll,
       exportJSON,
       exportBundle,
-      bundling
+      bundling,
+      bundleMissing,
+      closeBundleMissing
     } = useExportPipeline(project, thumbs);
     const importCollection = (items, cname) => {
       setImportOpen(false);
@@ -3707,7 +3753,9 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       }
     )), seq && /* @__PURE__ */ React.createElement(SequencePlayer, { clips: seq, onClose: closeSequence }), exp && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
       if (e.target === e.currentTarget && exp.status !== "running") closeExport();
-    } }, /* @__PURE__ */ React.createElement("div", { className: "sb-export-box" }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "sb-pick-t" }, "Export the cut"), exp.status !== "running" && /* @__PURE__ */ React.createElement("button", { className: "sb-pick-x", onClick: closeExport }, "\xD7")), exp.status === "running" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-bar" }, /* @__PURE__ */ React.createElement("i", { style: { width: (exp.progress || 0) + "%" } })), /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt" }, "Rendering\u2026 ", exp.progress || 0, "% \xB7 ", Math.round(exp.elapsed || 0), "s of cut"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: cancelExport }, "\u25A0 Stop")), exp.status === "done" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--green)" } }, "\u2713 Cut rendered."), /* @__PURE__ */ React.createElement("a", { className: "sb-btn amber", href: "/api/loom/export-file", style: { alignSelf: "center", textDecoration: "none" } }, "\u21E9 Download mp4"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")), (exp.status === "failed" || exp.status === "cancelled") && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: exp.status === "failed" ? "var(--coral)" : "var(--ink2)" } }, exp.status === "failed" ? "\u26A0 " + (exp.error || "export failed") : "\u25A0 Export stopped."), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")))), pickCb && (pickAllowType ? /* @__PURE__ */ React.createElement("mg-gallery-picker", { ref: bindGalleryPicker, "default-type": pickKind, "show-type": true }) : /* @__PURE__ */ React.createElement("mg-gallery-picker", { ref: bindGalleryPicker, "default-type": pickKind })), importOpen && /* @__PURE__ */ React.createElement(ImportCollection, { onClose: () => setImportOpen(false), onImport: importCollection }));
+    } }, /* @__PURE__ */ React.createElement("div", { className: "sb-export-box" }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "sb-pick-t" }, "Export the cut"), exp.status !== "running" && /* @__PURE__ */ React.createElement("button", { className: "sb-pick-x", onClick: closeExport }, "\xD7")), exp.status === "running" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-bar" }, /* @__PURE__ */ React.createElement("i", { style: { width: (exp.progress || 0) + "%" } })), /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt" }, "Rendering\u2026 ", exp.progress || 0, "% \xB7 ", Math.round(exp.elapsed || 0), "s of cut"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: cancelExport }, "\u25A0 Stop")), exp.status === "done" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--green)" } }, "\u2713 Cut rendered."), exp.warning && /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--amber)" } }, "\u26A0 ", exp.warning), /* @__PURE__ */ React.createElement("a", { className: "sb-btn amber", href: "/api/loom/export-file", style: { alignSelf: "center", textDecoration: "none" } }, "\u21E9 Download mp4"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")), (exp.status === "failed" || exp.status === "cancelled") && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: exp.status === "failed" ? "var(--coral)" : "var(--ink2)" } }, exp.status === "failed" ? "\u26A0 " + (exp.error || "export failed") : "\u25A0 Export stopped."), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")))), bundleMissing && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
+      if (e.target === e.currentTarget) closeBundleMissing();
+    } }, /* @__PURE__ */ React.createElement("div", { className: "sb-export-box" }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "sb-pick-t" }, "Bundle exported, ", bundleMissing.total, " file(s) left out"), /* @__PURE__ */ React.createElement("button", { className: "sb-pick-x", style: { marginLeft: "auto" }, onClick: closeBundleMissing }, "\xD7")), /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--coral)" } }, "\u26A0 No file on disk for these references \u2014 everything else exported normally."), bundleMissing.rows.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "sb-miss-list" }, bundleMissing.rows.map((row) => /* @__PURE__ */ React.createElement("div", { className: "sb-miss-row", key: row.mid }, row.where.length ? row.where.map((w, i) => /* @__PURE__ */ React.createElement("b", { key: i }, w)) : /* @__PURE__ */ React.createElement("i", null, "not referenced by any shot or cast entry in this project"), /* @__PURE__ */ React.createElement("span", { className: "sb-miss-id" }, row.mid)))), bundleMissing.hidden > 0 && /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--ink2)", fontSize: "12px" } }, bundleMissing.rows.length ? `+${bundleMissing.hidden} more, not listed here.` : `The server sent no id list.`, "The complete list, with the shot each id came from, is inside the zip:", /* @__PURE__ */ React.createElement("b", null, "project.json"), " \u2192 ", /* @__PURE__ */ React.createElement("b", null, "missing_media"), "."), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeBundleMissing }, "Close"))), pickCb && (pickAllowType ? /* @__PURE__ */ React.createElement("mg-gallery-picker", { ref: bindGalleryPicker, "default-type": pickKind, "show-type": true }) : /* @__PURE__ */ React.createElement("mg-gallery-picker", { ref: bindGalleryPicker, "default-type": pickKind })), importOpen && /* @__PURE__ */ React.createElement(ImportCollection, { onClose: () => setImportOpen(false), onImport: importCollection }));
   }
   function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
     const vidRef = useRef(null), trackRef = useRef(null);
