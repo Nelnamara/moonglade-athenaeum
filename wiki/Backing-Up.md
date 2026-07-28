@@ -61,7 +61,7 @@ python moonglade_backup.py --workers 8 --page-size 500 # fast full backfill
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--delay` | `0.4` | seconds between API requests (politeness throttle; applies to most commands, not just downloads) |
+| `--delay` | `0.4` | seconds between API requests (politeness throttle). Always paces the page listing, the per-task metadata fetch, and single-worker downloads. The **multi-worker** download stage is paced only when you type `--delay` yourself — left alone, it downloads as fast as your connection, which is what the `--workers` guidance above assumes. Typing `--delay` throttles the whole pool to one image per that interval, so it slows a big backfill down a lot; that is the point of it. |
 | `--count-page-size` | `5000` | page size `--count` uses to tally — bigger = fewer requests, but the server errors above ~10,000 |
 | `--collect-only` | off | scan and catalog without downloading any files (also forces single-worker mode) |
 | `--name-length` | `60` | max characters of the prompt used in filenames |
@@ -183,9 +183,19 @@ Each runs its pass and exits; all are idempotent and safe to re-run.
 | Command | What it fixes |
 |---|---|
 | `--fix-model-names` | re-resolves catalog rows whose model name is blank or a raw numeric id (one API call per distinct model). Also runs inside `--sync`. |
-| `--fix-model-names --relabel-removed` | additionally labels ids that no longer resolve (deleted models) as "Unknown or removed model" instead of leaving the raw number |
+| `--fix-model-names --relabel-removed` | additionally labels ids that **PixAI answered about and had no name for** (deleted models) as "Unknown or removed model" instead of leaving the raw number. An id whose lookup simply *failed* — timeout, 5xx, a dropped connection — is a different thing, and is now left exactly as it was and reported as `not checked`, so the next run picks it up. It used to get the "Unknown or removed model" label too, which is a permanent-looking answer to a temporary problem: a re-run then read the row as already resolved and never came back for it. |
 | `--backfill-meta` | fills missing url/width/height only (see [Full metadata](#full-metadata) for the full-meta variant) |
 | `--faststart-videos` | losslessly rewrites every video so iOS/Safari can stream it over HTTP (`ffmpeg -c copy +faststart`; needs ffmpeg on PATH; skips already-fixed files; safe to run while the gallery or a live watch is collecting — each remux uses its own unique temp file) |
+
+**Every clip the faststart sweep walks lands in exactly one of *rewritten*, *already OK*
+or *failed*** — the closing `Done: … rewritten, … already OK, … failed (… total)` line
+adds up. That's worth stating because you only ever run this command *because* a video
+wouldn't play on your phone, and a clip ffmpeg refused to remux used to land in none of
+the three: the totals quietly came out short and nothing named the file still broken. Now
+a refusal is called out as it happens and listed again at the end as
+`still not faststart:` with its full path, so you can go and look at it. Add `-v` and each
+failure carries ffmpeg's own reason for refusing, which is the only thing that tells you
+whether the file is salvageable.
 
 ## Reclaiming disk space
 
@@ -254,6 +264,20 @@ rounding error by comparison:
 ```bash
 python moonglade_backup.py --catalog-stats
 ```
+
+**Images you've already deleted are counted separately, not as part of the library.** A
+gallery delete moves the file into `pixai_backup/_deleted/` rather than destroying it (see
+[Deleting & Sync](Deleting)), so it is still real bytes on your disk — but it is not part
+of your collection any more, and folding it into "Image files on disk" inflated the exact
+number you are reading this screen to decide about. It now gets its own line with its own
+size and where to go and reclaim it:
+
+```
+  + 412 soft-deleted in _deleted/ (1.9 GB) -- purge in the gallery's Trash to reclaim
+```
+
+The line only appears when there is something in there. `--count` reports the same split
+under its **On disk** heading.
 
 > **A note on where your library lives.** By default `pixai_backup/` sits *inside* the
 > install folder, which is why the app directory looks enormous. Nothing requires that —

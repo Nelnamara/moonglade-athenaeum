@@ -914,8 +914,12 @@ def _make_progress(out_dir=None, job_id=None):
         return _cb
 
     def _cb(done, total, new=0):
-        sys.stdout.write(_progress_line(done, total, new))
-        sys.stdout.flush()
+        # Under _CONSOLE_LOCK so a bar frame cannot be drawn INSIDE a multi-line message a
+        # worker thread is emitting (see _console_block). Uncontended in the normal case --
+        # the bar is drawn from the main thread and the blocks are rare.
+        with _CONSOLE_LOCK:
+            sys.stdout.write(_progress_line(done, total, new))
+            sys.stdout.flush()
         _log_tick(done, total)
     return _cb
 
@@ -1713,18 +1717,102 @@ def extract_meta(node):
 # Preference order of variant labels inside the media object's "urls" list.
 URL_VARIANT_PREFERENCE = ["PUBLIC", "ORIGINAL", "ORIG", "FULL", "THUMBNAIL", "STILL_THUMBNAIL"]
 
+# Said-it-once latch for the media-CDN TLS message below. resolve_media runs inside worker
+# pools (_parallel_map, the download workers), so the latch is taken under a lock -- two
+# threads failing at the same instant must not both print the paragraph.
+_MEDIA_TLS_LOCK = threading.Lock()
+_media_tls_warned = False
+
+# Serialises MULTI-LINE console output against the \r-overwriting progress bar.
+#
+# run_download draws that bar from the MAIN thread while resolve_media runs on pool threads,
+# so a worker printing a paragraph mid-run could interleave with a redraw and leave the
+# terminal reading "  [====>    ] 12/17000 checked  MEDIA CDN TLS verification failed:" with
+# the rest of the guidance smeared across the next few bar frames -- the one message the user
+# most needs to read whole, shredded by the one thing guaranteed to be printing at the time
+# (M01, 2026-07-27). Held only around the write itself, never across network or file I/O, so
+# it can never become a throughput gate; an RLock so a future nested writer cannot deadlock.
+_CONSOLE_LOCK = threading.RLock()
+
+
+def _console_block(text):
+    """Write a multi-line message as ONE locked, flushed unit, clear of the progress bar.
+
+    The leading newline breaks off whatever partial `\\r` bar frame is on the current line;
+    without it the message starts halfway along the bar. Everything the message has to say
+    goes in a single write under _CONSOLE_LOCK so no redraw can land inside it."""
+    with _CONSOLE_LOCK:
+        sys.stdout.write("\n" + text.rstrip("\n") + "\n")
+        sys.stdout.flush()
+
+
+def _warn_media_tls_once(exc):
+    """Print `_ssl_help()`'s actionable guidance for a MEDIA-CDN TLS failure -- once a process.
+
+    gql() and download() answer requests.exceptions.SSLError with
+    `raise PixAIError(_ssl_help())`, because one such failure there ends the operation and
+    the user needs to be told it is a fixable LOCAL trust problem (the corporate
+    proxy/antivirus interception that `truststore.inject_into_ssl()` exists for), not a
+    PixAI outage. resolve_media could not do the same: it is called once per image inside
+    loops that must keep walking past a genuinely-missing media object, and its soft
+    `(None, {})` return is the contract those callers are written against -- so it printed
+    nothing, the caller printed "no url for media <id>", and a TLS problem that would fail
+    EVERY image in the library was indistinguishable from PixAI simply not having that one
+    (M01, 2026-07-27). Hence: same message, printed rather than raised.
+
+    Once, not per image: MEDIA_BASE is a single host, so if its TLS handshake fails it fails
+    for all of them -- a 17,000-image backup would otherwise repeat this paragraph 17,000
+    times and bury the very thing it is trying to say. The per-image `vlog` line still
+    records each failure individually, and vlog reaches the rotating file log whether or not
+    -v is on, so nothing is lost by saying the paragraph once.
+
+    The latch is per PROCESS, and for the CLI that is the same thing as per run. It is NOT
+    the same thing inside the long-lived gallery server, which resolves media for months on
+    one process: there the paragraph appears on the server console the first time and never
+    again, even if the trust problem is fixed and returns. Named rather than fixed because
+    the honest fix is not a timer -- every failure is already in moonglade.log, which is the
+    surface a server operator reads, and a re-arming console paragraph would print on a
+    console nobody is watching. The message below says "process" for that reason; do not
+    reword it to "run".
+
+    Printed as one locked block, not three `print`s: see _console_block."""
+    global _media_tls_warned
+    with _MEDIA_TLS_LOCK:
+        if _media_tls_warned:
+            return
+        _media_tls_warned = True
+    _console_block(
+        "  MEDIA CDN TLS verification failed: {}\n".format(str(exc)[:200])
+        + _ssl_help() + "\n"
+        + "  Every image resolve will fail the same way until this is fixed -- this is a "
+          "local trust problem, NOT PixAI missing your images. (Said once per process; "
+          "every individual failure is in the log.)\n")
+
 
 def resolve_media(session, mid):
     """Fetch the media object and return (best_full_res_url, info_dict).
 
     Reads the object's `urls` list and picks the highest-quality variant
     (PUBLIC = full-resolution original on PixAI). Returns (None, {}) on failure.
+
+    Fails SOFT on purpose -- callers page through whole libraries and a media object that
+    genuinely no longer exists must not end the run. The one failure that is not really
+    "this image is missing" is a TLS handshake failure against the media CDN, which is a
+    fixable local problem affecting every image at once; that one gets `_ssl_help()`
+    printed (once) before the same soft return, see `_warn_media_tls_once`.
     """
     _t = time.monotonic()
     try:
         r = session.get(MEDIA_BASE.format(id=mid), timeout=30)
         r.raise_for_status()
         obj = r.json()
+    except requests.exceptions.SSLError as e:
+        # Must precede the RequestException clause -- SSLError is a subclass of it, so the
+        # broader handler below would otherwise swallow this case exactly as before.
+        _warn_media_tls_once(e)
+        vlog("resolve_media {} FAILED (TLS) in {:.2f}s ({})".format(
+            mid, time.monotonic() - _t, e))
+        return None, {}
     except (requests.RequestException, ValueError) as e:
         vlog("resolve_media {} FAILED in {:.2f}s ({})".format(
             mid, time.monotonic() - _t, e))
@@ -2345,6 +2433,51 @@ def _model_preview_url(media):
     return next((u for u in urls if "/thumb/" in u), urls[0] if urls else "")
 
 
+def _row_should_blur(node):
+    """Whether the picker must blur this model's cover -- ONE rule for BOTH row sources.
+
+    model_search_rest (REST /generation-model/search) and _market_row (the GraphQL
+    `generationModels` node, serving Market + Bookmarks) are documented as producing the
+    SAME interchangeable row shape, and the picker renders them in one grid -- but they
+    disagreed on this field: REST read the API's own `flag.shouldBlur`, GraphQL read the raw
+    `isNsfw` content flag. So the same model blurred on one tab and not the other, and a
+    keyword search and a Market browse of one grid gave different answers about identical
+    content (M02, 2026-07-27).
+
+    The rule, in order:
+
+    1. The API's own `shouldBlur`, wherever the payload carries it (`flag.shouldBlur` on a
+       REST row, a node-level `shouldBlur` on a GraphQL one). It is the authoritative answer
+       because it is the only one computed against the VIEWER's content settings -- an
+       account that has opted into seeing this content gets False here for a model whose
+       `isNsfw` is perfectly true.
+    2. Failing that, `isNsfw` -- the raw content flag, which knows nothing about the viewer.
+
+    PREFERRING a field is worthless unless a query SELECTS it: the first pass at this bug
+    added the preference while both GraphQL documents still asked only for `isNsfw`, so every
+    real Market/Bookmarks row took branch 2 and the behaviour was byte-for-byte what the
+    finding described (M02 round 2, 2026-07-27). `_model_conn_query` now asks for the field;
+    branch 2 is the honest fallback for the row shapes that genuinely cannot carry it -- the
+    persisted bookmark document (PixAI's own fragment, ours to send, not to edit) and, if
+    their schema turns out not to expose the field at all, the degraded Market/Bookmarks
+    projection that helper falls back to.
+
+    Ambiguity resolves toward blurring, never away from it: a row that carries neither key
+    reads False, but a row flagged NSFW with no viewer-scoped answer blurs -- including on
+    the REST path, where `flag.shouldBlur` used to be read with a bare `.get()` so a row that
+    simply omitted it showed an NSFW cover unblurred. That direction has a cost and it is
+    chosen, not overlooked: if PixAI ever stops sending the flag on a row, an opted-in viewer
+    gets blur they did not ask for and can clear with one click, where the other direction
+    puts an NSFW cover on the screen of someone who never opted in at all."""
+    node = node or {}
+    flag = node.get("flag") if isinstance(node.get("flag"), dict) else {}
+    for src in (flag, node):
+        v = src.get("shouldBlur")
+        if v is not None:
+            return bool(v)
+    return bool(node.get("isNsfw") or flag.get("isNsfw"))
+
+
 def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
     """Search models/LoRAs via the oRPC GET /v2/generation-model/search endpoint. Unlike
     the GraphQL `generationModels` connection (which conflates base models + LoRAs), this
@@ -2361,7 +2494,6 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
     out = []
     for m in data.get("data") or []:
         med = m.get("media") or {}
-        flag = m.get("flag") or {}
         # Real field names (probed 2026-07-04): the rich description lives under
         # `modelDescription`, base-model family under `category`, and an official
         # badge under `curations` (e.g. ["inhouse"]). See private/GENERATOR_SURFACE.md.
@@ -2371,7 +2503,10 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
             "type": m.get("type") or "",
             "model_id": str(m.get("id") or ""),
             "liked_count": int(m.get("likedCount") or 0),
-            "should_blur": bool(flag.get("shouldBlur")),
+            # Shared with _market_row so both paths blur the same model the same way --
+            # this row keeps its authoritative flag.shouldBlur, and a row that somehow
+            # arrives without one now falls back to isNsfw instead of silently not blurring.
+            "should_blur": _row_should_blur(m),
             # publicUrl preferred (matches cover_url below): PixAI's own thumbnailUrl is a
             # small, often blurry auto-thumb -- fine as a last-resort fallback, poor as the
             # grid card's main image. loading="lazy" on the <img> bounds the cost to what's
@@ -2569,7 +2704,11 @@ def _market_row(n):
         "type": n.get("type") or "",
         "model_id": str(n.get("id") or ""),
         "liked_count": int(n.get("likedCount") or 0),
-        "should_blur": bool(n.get("isNsfw")),
+        # Was `bool(n.get("isNsfw"))` -- the REST sibling read the API's own shouldBlur, so
+        # one model blurred on Search and not on Market/Bookmarks. Both documents that feed
+        # this function now SELECT the viewer-scoped flag (see _MODEL_BLUR_FIELD), and both
+        # rows go through the one rule.
+        "should_blur": _row_should_blur(n),
         "preview_url": _model_preview_url(n.get("media")),
         "has_version": bool(lv.get("id")),
         # REST-only rich fields absent here -> empty so the card hides them.
@@ -2590,6 +2729,76 @@ def _market_row(n):
         "bookmarked": bool(n.get("bookmarked")),
         "liked": bool(n.get("liked")),
     }
+
+
+# The viewer-scoped blur flag, as a GraphQL leaf on a generationModels node. Requested by
+# both model-connection documents through _model_conn_query below.
+#
+# UNPROBED, and treated as such. `flag.shouldBlur` is confirmed on the REST search row
+# (2026-07-04); the same name on the GraphQL node is an inference from PixAI's own REST/GQL
+# naming, not something read off a live reply. A field the schema does not have is a REJECTED
+# QUERY -- the whole page, not just that leaf -- and this file's standing rule (see the
+# un-guessed DateRange shape above) is that the picker must never break on a field we guessed.
+# Hence: ask once per process, and if the enriched document is refused, re-run the SAME search
+# without the field and remember the answer. Cost if the guess is wrong is one extra request
+# per process and the pre-existing isNsfw behaviour; cost of not asking at all is that
+# _row_should_blur's preference can never fire on a live row, which is the bug itself.
+_MODEL_BLUR_FIELD = "shouldBlur"
+# None = not asked yet this process, True = PixAI answered it, False = refused, stop asking.
+_model_blur_supported = None
+# A refusal has to REPEAT before it is believed. `gql_adhoc` raises PixAIError for a 200
+# carrying an `errors` array -- which is the shape of PixAI's transient "Internal server
+# error" as well as of a rejected field -- so a single refusal is not evidence about the
+# schema at all. Latching on one blip permanently demoted Market/Bookmarks back to `isNsfw`
+# for the life of a long-running gallery process, silently reopening the very disagreement
+# this field was added to close. A genuinely absent field is refused EVERY time; a blip is
+# not, so two consecutive refusals separate them without matching on error wording.
+_model_blur_refusals = 0
+_MODEL_BLUR_REFUSALS_BEFORE_GIVING_UP = 2
+
+
+def _model_conn_query(session, build, variables):
+    """Run a model-connection document that ASKS for `_MODEL_BLUR_FIELD`, degrading once.
+
+    `build(leaf)` returns the query text with `leaf` spliced into the node projection ("" for
+    the original, field-less document).
+
+    The degrade is deliberately NOT keyed on the wording of PixAI's error -- an error string
+    match is a guess about a guess, and the failure it would miss is a dead Market tab. It is
+    keyed on evidence instead: if the enriched document is refused and the identical document
+    WITHOUT the field then succeeds, the field is the LIKELY culprit -- but only likely, since
+    a transient 200-with-errors looks identical and would pass on the retry by then having
+    cleared. So one such observation is not acted on; the latch goes off (and every later call
+    in this process skips the field) only once refusals repeat CONSECUTIVELY, which a missing
+    field does every time and a blip does not. If the plain document fails
+    too, this was a real outage/auth failure -- that exception propagates untouched (one extra
+    request on that path, deliberately) and the latch is left alone, so the next process asks
+    again.
+
+    No lock, unlike `_warn_media_tls_once`'s latch next door: two gallery threads racing here
+    cost one duplicate probe and then agree, whereas two threads racing that one would print
+    the same twenty-line TLS paragraph twice."""
+    global _model_blur_supported, _model_blur_refusals
+    if _model_blur_supported is False:
+        return gql_adhoc(session, build(""), variables)
+    try:
+        data = gql_adhoc(session, build(_MODEL_BLUR_FIELD + " "), variables)
+    except PixAIError as e:
+        plain = gql_adhoc(session, build(""), variables)
+        _model_blur_refusals += 1
+        if _model_blur_refusals >= _MODEL_BLUR_REFUSALS_BEFORE_GIVING_UP:
+            _model_blur_supported = False
+            vlog("model connection refused `{}` {} times ({}); retried without it -- blur "
+                 "falls back to isNsfw for the rest of this run".format(
+                     _MODEL_BLUR_FIELD, _model_blur_refusals, str(e)[:160]))
+        else:
+            vlog("model connection refused `{}` ({}); retried without it and will ask again "
+                 "-- one refusal is as likely to be a transient error as a missing field"
+                 .format(_MODEL_BLUR_FIELD, str(e)[:160]))
+        return plain
+    _model_blur_supported = True
+    _model_blur_refusals = 0        # a success clears the tally: only CONSECUTIVE refusals count
+    return data
 
 
 def model_search_market_gql(session, keyword="", category="", sort="", usage="MODEL", limit=24,
@@ -2742,12 +2951,15 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
         args.append("timeRange:$tr")
         var_decl += ",$tr:DateRange"
         variables["tr"] = time_range
-    q = ("query(" + var_decl + "){ generationModels(" + ", ".join(args) + "){ "
-         "pageInfo{ hasNextPage endCursor } edges { node { id title type isNsfw "
-         "likedCount bookmarked liked "
-         "latestVersion { id modelType loraBaseModelType } media { id urls { url } } "
-         "tags { name } author { displayName } createdAt } } } }")
-    data = (gql_adhoc(session, q, variables) or {}).get("generationModels") or {}
+    # `blur` is the viewer-scoped flag, spliced in by _model_conn_query so a schema that does
+    # not carry it degrades to this same document without it rather than to a broken tab.
+    def _q(blur):
+        return ("query(" + var_decl + "){ generationModels(" + ", ".join(args) + "){ "
+                "pageInfo{ hasNextPage endCursor } edges { node { id title type isNsfw "
+                + blur + "likedCount bookmarked liked "
+                "latestVersion { id modelType loraBaseModelType } media { id urls { url } } "
+                "tags { name } author { displayName } createdAt } } } }")
+    data = (_model_conn_query(session, _q, variables) or {}).get("generationModels") or {}
     out = []
     for e in data.get("edges") or []:
         n = e.get("node") or {}
@@ -2770,10 +2982,13 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
 BOOKMARKED_MODELS_OP = "listMyBookmarkedGenerationModels"
 BOOKMARKED_MODELS_HASH = "2281653492ff54ef17707104736fd74e7a8d70dc314e024e595f0e71ff2945b9"
 
-_BOOKMARK_NODE_FIELDS = (
-    "id title type isNsfw likedCount bookmarked liked "
-    "latestVersion { id modelType loraBaseModelType } media { id urls { url } } "
-    "tags { name } author { displayName } createdAt")
+def _bookmark_node_fields(blur=""):
+    """The bookmark node projection -- the same leaves the Market document asks for, so both
+    tabs produce identical rows. `blur` is the viewer-scoped flag, spliced in (or not) by
+    _model_conn_query; see _MODEL_BLUR_FIELD for why it is asked for conditionally."""
+    return ("id title type isNsfw " + blur + "likedCount bookmarked liked "
+            "latestVersion { id modelType loraBaseModelType } media { id urls { url } } "
+            "tags { name } author { displayName } createdAt")
 
 
 def model_bookmarks_gql(session, keyword="", usage="MODEL", limit=24, after=None,
@@ -2824,13 +3039,18 @@ def model_bookmarks_gql(session, keyword="", usage="MODEL", limit=24, after=None
         var_decl += ",$lb:[GenerationModelType!]"
         variables["lb"] = [lbt]
 
-    q = ("query(" + var_decl + "){ me { id bookmarkedGenerationModels(" + ", ".join(args)
-         + "){ totalCount pageInfo{ hasNextPage endCursor } edges { node { "
-         + _BOOKMARK_NODE_FIELDS + " } } } } }")
+    def _q(blur):
+        return ("query(" + var_decl + "){ me { id bookmarkedGenerationModels(" + ", ".join(args)
+                + "){ totalCount pageInfo{ hasNextPage endCursor } edges { node { "
+                + _bookmark_node_fields(blur) + " } } } } }")
 
     conn, path = None, ""
     try:
-        data = gql_adhoc(session, q, variables) or {}
+        # Through _model_conn_query, not gql_adhoc directly: a refusal of the blur leaf must
+        # be answered by re-asking ad-hoc without it, NOT by silently demoting the whole tab
+        # to the persisted hash -- that route sends PixAI's own fragment, which cannot be
+        # narrowed to the fields a row needs and rots when they redeploy.
+        data = _model_conn_query(session, _q, variables) or {}
         conn = ((data.get("me") or {}).get("bookmarkedGenerationModels")) or {}
         path = "adhoc"
     except PixAIError as e:
@@ -2885,11 +3105,16 @@ def _bookmarks_persisted(session, variables, want_lora, lbt, kw, after, limit):
             separators=(",", ":")),
     }
     r = session.get(API_URL, params=params, timeout=60)
+    if r.status_code in (401, 403):
+        raise PixAIError(
+            "bookmarks: HTTP {} on the persisted path -- the request was refused, not "
+            "answered with an empty bookmark list. A stale/absent U3T or an expired key is "
+            "the usual cause; refresh the credential and retry.".format(r.status_code))
     try:
         body = r.json()
     except ValueError:
         raise PixAIError("bookmarks: HTTP {} non-JSON response".format(r.status_code))
-    if body.get("errors"):
+    if isinstance(body, dict) and body.get("errors"):
         blob = json.dumps(body["errors"])[:400]
         if "PersistedQueryNotFound" in blob:
             raise PixAIError(
@@ -2897,6 +3122,21 @@ def _bookmarks_persisted(session, variables, want_lora, lbt, kw, after, limit):
                 "`python tools/harvest_api_surface.py fetch` then `extract` to re-derive it "
                 "-- the hashes are computed from PixAI's own bundle, so this is self-healing.")
         raise PixAIError("bookmarks: " + blob)
+    # Everything below trusted the body's SHAPE alone: no status check, and only a top-level
+    # "errors" key counted as failure. An auth/gateway refusal that answers with perfectly
+    # valid but non-GraphQL JSON -- a plain {"statusCode":401,"message":"Unauthorized"} from
+    # the edge, say -- has neither, so it fell straight through the `or {}` tail and
+    # model_bookmarks_gql reported {"results": [], "has_more": False}: the user saw an EMPTY
+    # Bookmarks tab, which reads as "you have no bookmarks", for a request that never ran
+    # (M03, 2026-07-27). A real GraphQL reply always carries a "data" key (null or not), so
+    # its absence is the tell, and it catches the 200-with-an-error-body variant that a
+    # status check alone would miss.
+    if not isinstance(body, dict) or "data" not in body:
+        raise PixAIError(
+            "bookmarks: HTTP {} returned a non-GraphQL body -- the request failed rather "
+            "than returning an empty list:\n{}".format(r.status_code, r.text[:300]))
+    if not r.ok:
+        raise PixAIError("bookmarks: HTTP {}:\n{}".format(r.status_code, r.text[:300]))
     return ((body.get("data") or {}).get("me") or {}).get("bookmarkedGenerationModels") or {}
 
 
@@ -3092,13 +3332,61 @@ def run_list_models(args):
             _safe(m["title"][:40]), m["type"][:14], m["version_id"], tag))
 
 
-def model_name_gql(session, model_version_id, _cache={}):
-    """GET getGenerationModelByVersionId; result cached by ID (few unique models)."""
+# Sentinel parked in model_name_gql's memo cache when the LOOKUP ITSELF failed -- a network
+# error, a timeout, a 5xx, an unparseable body, OR a perfectly-well-formed HTTP 200 whose
+# payload is a GraphQL `errors` array rather than an answer. It is not a name and must never
+# be written to a catalog row -- see model_name_gql's docstring.
+_MODEL_LOOKUP_FAILED = object()
+
+
+def model_name_gql(session, model_version_id, _cache={}, strict=False):
+    """GET getGenerationModelByVersionId; result cached by ID (few unique models).
+
+    Returns the id itself when the name cannot be resolved, which the callers that just want
+    a label are written against. That conflated two facts with very different consequences:
+    "PixAI answered, and this version has no name / no longer exists" and "the request never
+    got an answer". `--fix-models --relabel-removed` acts on the first by permanently writing
+    "Unknown or removed model" over the row, and `_needs_model_fix` then considers the row
+    resolved -- so a single timeout mid-run mislabelled every row of a still-perfectly-valid
+    model, forever, with no re-run able to repair it (M18, 2026-07-27).
+
+    `strict=True` therefore raises PixAIError instead of returning the id when the LOOKUP
+    failed. What counts as a failure is decided the way `gql()` decides it, and for the same
+    reason: **PixAI answers a refused GraphQL request with HTTP 200 and an `errors` array**.
+    `raise_for_status()` is blind to that shape, so an exception-only guard closed the
+    network half of this bug and left the half that hurts more -- a rotated persisted hash or
+    an auth failure surfaced as a resolver error refuses EVERY id in the run, so one
+    `--fix-models --relabel-removed` would stamp "Unknown or removed model" over the model
+    provenance of the whole catalog at once (M18 round 2, 2026-07-27). So this mirrors the one
+    ordering decision that matters in `gql()` -- the `errors` array is read BEFORE the status
+    is trusted at all -- and then rejects, in turn, a bad status, a body that is not a GraphQL
+    reply, and a reply that simply never carried the `generationModelVersion` field we asked
+    for. None of those is an answer about the model. (It does not copy `gql()`'s 401/429/5xx
+    pre-checks: those exist there to drive a backoff-and-retry loop this lookup does not have,
+    and every one of them ends up a failure here anyway.)
+
+    Two things it deliberately does NOT treat as a failure, because both are real "PixAI has
+    no name for this" answers: an absent MODEL_DETAIL_HASH (nothing was asked, and the
+    id-as-name fallback is the documented behaviour of an unconfigured install), and a
+    response that carries `generationModelVersion` explicitly NULL or title-less -- that is
+    the genuinely-removed model `--relabel-removed` exists for.
+
+    A failure is memoised as `_MODEL_LOOKUP_FAILED`, never as a name. Caching the id would
+    make the failure indistinguishable from an answer for the rest of the process -- which
+    matters most in `--sync`, where the full-meta pass and `--fix-models` share this cache in
+    one run, so a blip during the former would otherwise be laundered into a "resolved to its
+    own id" verdict for the latter. Caching the *verdict* still spares the repeat calls."""
     if not model_version_id:
         return ""
     mid = str(model_version_id)
     if mid in _cache:
-        return _cache[mid]
+        hit = _cache[mid]
+        if hit is _MODEL_LOOKUP_FAILED:
+            if strict:
+                raise PixAIError(
+                    "model {} lookup failed earlier this run; not retried".format(mid))
+            return mid
+        return hit
     if not MODEL_DETAIL_HASH:
         _cache[mid] = mid
         return mid
@@ -3114,13 +3402,42 @@ def model_name_gql(session, model_version_id, _cache={}):
     }
     try:
         r = session.get(API_URL, params=params, timeout=60)
+        try:
+            body = r.json()
+        except ValueError:
+            raise PixAIError("HTTP {} non-JSON body: {}".format(
+                r.status_code, (r.text or "")[:200]))
+        # Errors BEFORE status, exactly as gql() reads it: a refused PixAI query is an
+        # ordinary 200 carrying an `errors` array, so checking the status first sees a
+        # perfectly healthy response and reads the empty payload as "this model has no name".
+        if isinstance(body, dict) and body.get("errors"):
+            raise PixAIError("GraphQL error: " + json.dumps(body["errors"])[:300])
         r.raise_for_status()
-        mv = (r.json().get("data") or {}).get("generationModelVersion") or {}
+        # The presence of `data` is what tells a GraphQL reply from an edge answering a refusal
+        # in perfectly valid non-GraphQL JSON ({"statusCode":401,...}) -- the same tell
+        # _bookmarks_persisted uses. A `data` that is null rather than an object is caught by
+        # the same check on purpose: the spec pairs a null data with an `errors` array (handled
+        # above), so a bare null answers nothing and must not read as "this model is gone".
+        if not isinstance(body, dict) or not isinstance(body.get("data"), dict):
+            raise PixAIError("no GraphQL data in the reply: {}".format(str(body)[:200]))
+        # `"generationModelVersion": null` IS an answer -- the model is gone, which is what
+        # --relabel-removed is for. The field being ABSENT is not: nothing answered the
+        # question we asked, and treating that silence as "removed" is the whole bug.
+        if "generationModelVersion" not in body["data"]:
+            raise PixAIError("reply carried no generationModelVersion field: {}".format(
+                str(body["data"])[:200]))
+        mv = body["data"]["generationModelVersion"] or {}
         title = (mv.get("model") or {}).get("title", "")
         version = mv.get("name", "")
         name = "{} {}".format(title, version).strip() if title else mid
-    except Exception:
-        name = mid
+    except Exception as e:                  # noqa: BLE001 -- a name lookup must not end a run
+        # The lookup never landed. Record THAT, not the id: the id is what a successful
+        # "no such model" answer also looks like, and --relabel-removed acts irreversibly
+        # on the difference.
+        _cache[mid] = _MODEL_LOOKUP_FAILED
+        if strict:
+            raise PixAIError("model {} lookup failed: {}".format(mid, str(e)[:200]))
+        return mid
     _cache[mid] = name
     return name
 
@@ -4127,11 +4444,15 @@ def run_count(args):
     print("Tasks that are batches    : {}  (>1 image each)".format(batched_tasks))
     print("Fetched in {} request(s).".format(page))
     out = Path(args.out)
-    disk_count, disk_bytes, thumb_count = _count_backup_images(out) if out.exists() else (0, 0, 0)
+    counts = _count_backup_images(out) if out.exists() else DiskCounts(0, 0, 0)
+    disk_count, disk_bytes, thumb_count = counts
     print("\n--- On disk ({}) ---".format(args.out))
     print("Image files on disk       : {}".format(disk_count))
     if thumb_count:
         print("  + preview thumbnails    : {}".format(thumb_count))
+    if counts.trashed:
+        print("  + soft-deleted (trash)  : {}  ({}, in {}/)".format(
+            counts.trashed, _format_size(counts.trashed_bytes), DELETED_DIRNAME))
     print("Total collection size     : {}".format(
         _format_size(disk_bytes) if disk_bytes else "0 B (folder empty or not found)"))
     if images > tasks:
@@ -4554,12 +4875,93 @@ def _mp4_is_faststart(path):
     return order.index("moov") < di
 
 
+# What a faststart attempt actually DID. Three outcomes, because two are not enough: a bool
+# collapses "I tried and ffmpeg refused" into the same False as "there was nothing to do",
+# and a sweep that treats that union as failure reports a healthy file as broken. The
+# concurrency that makes them collide is BLESSED by the docs -- wiki/Backing-Up.md says
+# --faststart-videos is safe to run while the gallery or a live watch is collecting, and the
+# live mirror remuxes the same clips -- so between one caller's "not faststart" check and the
+# next line of code the file can legitimately already be fixed, or gone from Trash entirely
+# (M04 round 2, 2026-07-27).
+FASTSTART_REWROTE = "rewrote"        # the file was not faststart and now is
+FASTSTART_NOT_NEEDED = "not-needed"  # nothing to do: already faststart, vanished, not a video
+FASTSTART_REFUSED = "refused"        # ffmpeg (or the swap) tried and failed -- a REAL failure
+
+
+def _video_faststart_attempt(path):
+    """The remux, reporting WHICH of the three FASTSTART_* outcomes happened.
+
+    `video_faststart` below is the bool face of this, kept because almost every caller only
+    wants "did the file change" -- see its docstring for the mechanism and the unique-temp
+    rationale. Only run_faststart_videos, which has to account for every clip it walked and
+    name the ones still broken, needs the third answer."""
+    p = Path(path)
+    if p.suffix.lower() not in (".mp4", ".mov", ".m4v"):
+        return FASTSTART_NOT_NEEDED
+    ff = _ffmpeg_path()
+    if not ff or not p.exists() or _mp4_is_faststart(p):
+        # Deliberately NOT a refusal. This is the branch a concurrent collector's remux (or a
+        # Trash purge) lands in when it wins the race with a sweep that had already decided
+        # this file needed work; calling it a failure prints "still not iOS-playable" about a
+        # file that is now perfectly playable.
+        return FASTSTART_NOT_NEEDED
+    import subprocess
+    from uuid import uuid4
+    # unique per call; the real ext stays LAST so ffmpeg still picks the muxer by extension
+    tmp = p.with_name(p.stem + ".__fstmp__" + uuid4().hex[:8] + p.suffix)
+    try:
+        # stderr is CAPTURED, not discarded. ffmpeg reports why it refused a remux there and
+        # nowhere else, and with -v error it prints nothing at all on success, so piping it
+        # costs nothing on the happy path and is the entire diagnostic on the unhappy one.
+        r = subprocess.run([ff, "-y", "-v", "error", "-i", str(p),
+                            "-c", "copy", "-movflags", "+faststart", str(tmp)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=300,
+                           creationflags=_NO_WINDOW)
+        if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
+            os.replace(str(tmp), str(p))            # atomic swap
+            return FASTSTART_REWROTE
+        # A non-zero returncode raises NOTHING -- it is ffmpeg's ordinary way of refusing a
+        # file (a stream anomaly `-c copy` won't carry, say). This branch used to fall
+        # straight through to the cleanup below, so the one genuinely COMMON failure mode was
+        # the one that produced no message even under -v -- flatly contradicting the comment
+        # in the except clause below (M04, 2026-07-27). Report the code and ffmpeg's own
+        # reason, since "it didn't work" without either is not something a user can act on.
+        err = r.stderr or b""
+        if isinstance(err, bytes):
+            err = err.decode("utf-8", "replace")
+        why = " ".join(err.split())[:400] or (
+            "no stderr; wrote no usable temp file" if r.returncode == 0 else "no stderr")
+        vlog("faststart remux failed for {}: ffmpeg exit {} -- {}".format(
+            p.name, r.returncode, why))
+    except Exception as e:                          # noqa: BLE001 -- remux must never crash a collect
+        # swallowed by design (a failed remux leaves the original playable), but never
+        # silently: a lost race or an odd ffmpeg failure must at least show under -v.
+        vlog("faststart remux failed for {}: {}".format(p.name, e))
+    try:
+        if tmp.exists():
+            tmp.unlink()   # the temp is unique to THIS call, so this only ever cleans our own leftover
+    except OSError:
+        pass
+    if not p.exists():
+        # The SOURCE went away while ffmpeg was reading it -- a Trash purge from the gallery,
+        # or an --organize move, both of which the docs say may run alongside this. ffmpeg
+        # failing to open a file that no longer exists is not a refusal, and reporting it as
+        # one names a file the user cannot go and look at. Checked here rather than up front
+        # because this is the only window the earlier `p.exists()` cannot cover.
+        return FASTSTART_NOT_NEEDED
+    return FASTSTART_REFUSED
+
+
 def video_faststart(path):
     """Losslessly move an mp4's `moov` atom to the front (ffmpeg -c copy -movflags
     +faststart) so iOS/Safari will play it over HTTP -- PixAI serves videos with moov at
     the END, which desktop tolerates but iOS refuses (MediaError 4). No re-encode, no
     quality loss. Returns True only when it rewrote the file; no-op (False) if ffmpeg is
     absent, the file is already faststart, or the remux fails (original left untouched).
+
+    A caller that has to tell a refusal apart from a no-op wants `_video_faststart_attempt`,
+    which this wraps -- False here is deliberately the union of both, and the collect-time
+    callers (which just want the file made streamable if it can be) do not care which.
 
     The temp name is UNIQUE per invocation (uuid suffix), never derived from the
     filename alone. Two collectors can legitimately remux the same clip seconds apart
@@ -4571,57 +4973,58 @@ def video_faststart(path):
     and then stopped mid-way. With unique temps any overlap is safe: each remux is
     complete and self-contained, and whichever os.replace lands last wins with a
     COMPLETE file either way."""
-    p = Path(path)
-    if p.suffix.lower() not in (".mp4", ".mov", ".m4v"):
-        return False
-    ff = _ffmpeg_path()
-    if not ff or not p.exists() or _mp4_is_faststart(p):
-        return False
-    import subprocess
-    from uuid import uuid4
-    # unique per call; the real ext stays LAST so ffmpeg still picks the muxer by extension
-    tmp = p.with_name(p.stem + ".__fstmp__" + uuid4().hex[:8] + p.suffix)
-    try:
-        r = subprocess.run([ff, "-y", "-v", "error", "-i", str(p),
-                            "-c", "copy", "-movflags", "+faststart", str(tmp)],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300,
-                           creationflags=_NO_WINDOW)
-        if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
-            os.replace(str(tmp), str(p))            # atomic swap
-            return True
-    except Exception as e:                          # noqa: BLE001 -- remux must never crash a collect
-        # swallowed by design (a failed remux leaves the original playable), but never
-        # silently: a lost race or an odd ffmpeg failure must at least show under -v.
-        vlog("faststart remux failed for {}: {}".format(p.name, e))
-    try:
-        if tmp.exists():
-            tmp.unlink()   # the temp is unique to THIS call, so this only ever cleans our own leftover
-    except OSError:
-        pass
-    return False
+    return _video_faststart_attempt(path) == FASTSTART_REWROTE
 
 
 def run_faststart_videos(args):
     """Rewrite every non-faststart mp4 under videos/ so iOS can stream them (lossless
     -c copy +faststart). Idempotent -- skips files already faststart. Touches only the
     video files, never the catalog. Fixes the 'plays on desktop, error 4 on iPhone' bug
-    for the existing library; new videos are faststarted at collect time automatically."""
+    for the existing library; new videos are faststarted at collect time automatically.
+
+    Every video lands in exactly ONE of fixed / skipped / failed, and each failure is named.
+    A clip video_faststart refused used to land in NONE of them, so the summary quietly read
+    fixed+skipped < total -- and the user, who ran this command precisely because a video
+    would not play on their phone, had no way to tell which file was still broken, or even
+    that any still was (M04, 2026-07-27).
+
+    'failed' means ffmpeg was asked and could not: nothing else. The first version of this
+    accounting asked `_mp4_is_faststart` itself and then treated a False from video_faststart
+    as a refusal -- but video_faststart re-asks the same question, and wiki/Backing-Up.md
+    blesses running this sweep while the gallery or a live watch is collecting, so the live
+    mirror remuxing that clip (or a Trash purge removing it) in between the two checks made
+    the sweep print 'FAILED <name> -- still not iOS-playable' about a file that had just been
+    FIXED. One question, asked once, by `_video_faststart_attempt`: whatever it says the
+    outcome is, is the outcome. A clip someone else repaired BEFORE this sweep reached it
+    counts as already-OK; one repaired AFTER we looked gets a harmless second remux and
+    counts as rewritten. Neither is a failure, and that is the whole point."""
     out = Path(args.out)
     vdir = out / "videos"
     vids = sorted(p for p in vdir.rglob("*")
                   if p.is_file() and p.suffix.lower() in (".mp4", ".mov", ".m4v")) if vdir.exists() else []
     if not _ffmpeg_path():
-        print("ffmpeg not found on PATH; cannot faststart."); return {"fixed": 0, "total": len(vids)}
+        print("ffmpeg not found on PATH; cannot faststart.")
+        return {"fixed": 0, "skipped": 0, "failed": 0, "total": len(vids)}
     print("Faststart pass over {} video(s) in {}...".format(len(vids), vdir), flush=True)
     fixed = skipped = 0
+    failures = []
     for i, p in enumerate(vids, 1):
-        if _mp4_is_faststart(p):
-            skipped += 1
-        elif video_faststart(p):
+        outcome = _video_faststart_attempt(p)
+        if outcome == FASTSTART_REWROTE:
             fixed += 1
             print("  [{}/{}] faststart -> {}".format(i, len(vids), p.name), flush=True)
-    print("Done: {} rewritten, {} already OK ({} total).".format(fixed, skipped, len(vids)))
-    return {"fixed": fixed, "skipped": skipped, "total": len(vids)}
+        elif outcome == FASTSTART_REFUSED:
+            failures.append(p)
+            print("  [{}/{}] FAILED {} -- still not iOS-playable (re-run with -v for "
+                  "ffmpeg's own reason)".format(i, len(vids), p.name), flush=True)
+        else:
+            skipped += 1
+    print("Done: {} rewritten, {} already OK, {} failed ({} total).".format(
+        fixed, skipped, len(failures), len(vids)))
+    for p in failures:
+        print("  still not faststart: {}".format(p))
+    return {"fixed": fixed, "skipped": skipped, "failed": len(failures),
+            "total": len(vids)}
 
 
 def run_import_local(args):
@@ -5875,7 +6278,11 @@ def run_generate(args):
     the results into the backup, and catalog them as source='api'. GUARDED: without
     --confirm it only prints a preview (spends no credits). Submits through
     submit_generation() (and so through gql_mutate) + the shared session/download/
-    catalog plumbing."""
+    catalog plumbing.
+
+    A task recovered by --task-id that turns out to have VIDEO outputs is collected as
+    video, through the same _download_video_task the video commands use -- never dragged
+    through the image path. See the comment at the outputs split below for why."""
     out = Path(args.out)
     params = _gen_parameters(args)
     existing_task = (getattr(args, "task_id", "") or "").strip()
@@ -5933,12 +6340,32 @@ def run_generate(args):
     # fail-open/unfiled-workflow-findings, 2026-07-21).
     media = _task_image_media(outputs)
     seeds = dict(media)
-    mids = [mid for mid, _ in media]
-    for v in outputs.get("videos") or []:
-        if v.get("mediaId"):
-            mids.append(str(v["mediaId"]))
-    mids = list(dict.fromkeys(mids))
-    _outputs_or_raise(result, mids, "task completed but no media ids found")
+    mids = list(dict.fromkeys(mid for mid, _ in media))
+    # outputs.videos USED TO BE APPENDED TO `mids` and walked by the image loop below, which
+    # downloaded the mp4 into images/ and wrote it a catalog row off `{f: "" for f in
+    # CATALOG_FIELDS}` -- so is_video stayed blank. The gallery lists images with
+    # `COALESCE(is_video,'') != '1'`, so the clip was served as an image: an <img> pointed at
+    # an mp4 (broken tile), no poster thumbnail, and no faststart remux, none of which the
+    # image path knows how to do (M16, 2026-07-27). Reachable simply by handing
+    # `--generate --task-id` an i2v or reference-video id -- a mispaste, or a script looping
+    # over a mixed list of ids.
+    #
+    # So videos go to the code that actually handles videos. Collecting rather than refusing
+    # is what collect_generation (the /watch and web routes) already does off the same
+    # outputs.videos tell, and refusing would strand the outputs of a task the user has
+    # ALREADY paid for behind a second command.
+    #
+    # What is recovered, honestly: the FILE, its is_video flag, its poster and its faststart
+    # remux -- always. The prompt/duration/model on the row are best-effort. `params` here is
+    # the image-gen submit block, so _download_video_task's `sent` lookup finds neither
+    # i2vPro nor referenceVideo in it and falls back to `video_outputs`' shared block -- and
+    # that reads `parameters.referenceVideo` ONLY. A reference-video task therefore recovers
+    # its prompt and duration; a pure i2v (i2vPro) task lands with those three columns blank
+    # and needs a --backfill-full-meta pass to fill them. Blank-but-filed beats an mp4 served
+    # through an <img> tag, which is what this branch replaced, but do not read the comment
+    # above as a promise that the metadata always survives -- it does not.
+    vouts, _vshared = video_outputs(result)
+    _outputs_or_raise(result, mids or vouts, "task completed but no media ids found")
 
     # Prefer the task's actual metadata (authoritative, and the only source when
     # recovering by --task-id); fall back to the params we submitted.
@@ -6006,16 +6433,57 @@ def run_generate(args):
 
     if rows:
         save_catalog(db_path, rows)
-        if existing_task:
-            try:      # Against the Void: a stranded task pulled back by id
-                from moonglade_gallery import telem_bump
-                telem_bump("recover_events", out_dir=out)
-            except Exception:
-                pass
+
+    videos = []
+    if vouts:
+        print("This task has {} VIDEO output(s) -- collecting them as video (videos/, "
+              "is_video=1, poster thumbnail, faststart), not as images.".format(len(vouts)))
+        if not mids:
+            print("  (a video task: `--generate-video --task-id {}` is the direct route)"
+                  .format(task_id))
+        try:
+            videos = _download_video_task(session, result, task_id, out, args, params)
+        except Exception as e:                # noqa: BLE001 -- see below; images are already safe
+            # FAIL SOFT, like the image loop above. That loop walks past an image it cannot
+            # resolve or download with a `continue`; this block had no equivalent, so one
+            # media-CDN TLS failure or a dropped connection inside download() -- which
+            # answers an SSLError with `raise PixAIError(_ssl_help())` -- escaped through
+            # main's handler. The images were already downloaded AND already in the catalog
+            # two lines up, but the user got a traceback-shaped exit instead of the summary
+            # listing them, and run_generate's return dict never happened (M16, 2026-07-27).
+            #
+            # Broad on purpose, and safe to be: everything the image half of this command
+            # promised is durable before we get here, the clip is still on PixAI (already
+            # paid for, recoverable for free), and the message below names the command that
+            # fetches it. KeyboardInterrupt is not an Exception, so Ctrl-C still stops the run.
+            print("  video collection FAILED ({}) -- {}".format(
+                str(e)[:200],
+                "the {} image(s) below are saved and cataloged.".format(len(saved))
+                if saved else "this task had no image outputs, so nothing was collected."))
+            print("  The clip is still on PixAI and costs nothing to re-fetch: "
+                  "`--generate-video --task-id {}`".format(task_id))
+
+    # Against the Void: a stranded task pulled back by id. Counted once per RECOVERY, whatever
+    # kind of output it turned out to hold -- this used to live inside `if rows:`, so a
+    # video-only task (rows is empty by construction for one) recovered nothing as far as the
+    # ledger was concerned, and the achievement that exists to reward exactly that rescue
+    # never moved (M16, 2026-07-27).
+    if existing_task and (rows or videos):
+        try:
+            from moonglade_gallery import telem_bump
+            telem_bump("recover_events", out_dir=out)
+        except Exception:
+            pass
+
     print("Generated + cataloged {} image(s):".format(len(saved)))
     for s in saved:
         print("  " + s)
-    return {"submitted": True, "task_id": task_id, "images": len(saved)}
+    if videos:
+        print("Generated + cataloged {} video(s):".format(len(videos)))
+        for s in videos:
+            print("  " + s)
+    return {"submitted": True, "task_id": task_id, "images": len(saved),
+            "videos": len(videos)}
 
 
 def _download_video_task(session, result, task_id, out, args, params):
@@ -6431,6 +6899,34 @@ def _resolved_model_name(session, fm, model_id):
         return ""
 
 
+def _edit_model_label(session, fm, model_id):
+    """The model name to store on an EDIT (chat-task) row -- resolvable, never a dead end.
+
+    This used to be `fm.get("model_name", "") or "Edit"`. extract_full_meta fills model_name
+    for a chat task only from the local EDIT_MODELS table, so an edit made with any model NOT
+    in those two hardcoded entries -- `--edit-image --params-json` with a newer modelId, or
+    `--task-id` recovering a chat task made on PixAI's web UI after this table was last
+    updated -- landed the literal string "Edit" in the catalog. That string is worse than
+    blank: `_needs_model_fix` sees a non-empty, non-digit name that differs from the model_id,
+    calls the row resolved, and --fix-models never queues it. The row showed the generic
+    "Edit" forever, having also lost WHICH edit model made it, and no re-run could repair it
+    (M17, 2026-07-27).
+
+    So an unknown edit model goes through the same _resolved_model_name every ordinary
+    generation uses. Whatever that returns is recoverable: a real name is the answer; the id
+    (its soft-failure return) and "" both make `_needs_model_fix` hand the row to
+    --fix-models on the next run.
+
+    "Edit" survives for the one case it was ever right about -- a chat task carrying NO model
+    id at all, where there is nothing to resolve and nothing for --fix-models to queue
+    regardless (it returns '' for an id-less row), so a generic label costs nothing and beats
+    an empty Model field."""
+    mid = str(model_id or "").strip()
+    if not mid:
+        return str((fm or {}).get("model_name") or "").strip() or "Edit"
+    return _resolved_model_name(session, fm, mid)
+
+
 def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_"):
     """Download + catalog a COMPLETED task's output(s) into out_dir -> {media_ids, saved,
     is_video}. Auto-detects video (outputs.videos) vs image and uses the matching shared
@@ -6747,6 +7243,11 @@ def run_edit_image(args):
     fm = extract_full_meta(result)
     chat = (params.get("chat") or {}) if isinstance(params, dict) else {}
     prompt_used = fm.get("prompt_full") or prompt or chat.get("prompts", "")
+    # Resolved ONCE for the task, not per output image: the model is a property of the task,
+    # and _resolved_model_name can reach the network for an edit model this app doesn't know
+    # locally (model_name_gql is process-cached, so this is at most one call either way).
+    edit_model_id_used = str(chat.get("modelId") or fm.get("model_id") or "")
+    edit_model_name = _edit_model_label(session, fm, edit_model_id_used)
     img_dir = out / "images"
     rows, saved = [], []
     for mid in mids:
@@ -6767,8 +7268,8 @@ def run_edit_image(args):
             "url": url, "source": "api", "status": "completed",
             "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
             "prompt_full": prompt_used, "prompt_preview": (prompt_used or "")[:100],
-            "model_id": str(chat.get("modelId") or fm.get("model_id") or ""),
-            "model_name": fm.get("model_name", "") or "Edit",
+            "model_id": edit_model_id_used,
+            "model_name": edit_model_name,
             "paid_credit": _paid_credit_str(result),   # actual cost, task-level
             "width": str((info or {}).get("width") or ""),
             "height": str((info or {}).get("height") or ""),
@@ -6827,13 +7328,32 @@ def run_fix_models(args):
         " ({} workers)".format(workers) if workers > 1 else ""))
     _prog = getattr(args, "progress", None)
     fixed = relabeled = unresolved = 0
+    # Ids whose lookup FAILED (network/timeout/5xx), as opposed to answering "no such model".
+    # --relabel-removed writes a permanent label that _needs_model_fix then reads as
+    # "resolved", so a run must never act on a failure it could simply leave for the next one
+    # (M18, 2026-07-27). _parallel_map calls on_error before yielding that item, so the set
+    # is always populated by the time the loop body below tests it.
+    lookup_failed = set()
+
+    def _note_lookup_failure(vid, exc):
+        lookup_failed.add(vid)
+        print("  model {} could not be checked ({}) -- left untouched for the next run".format(
+            vid, str(exc)[:160]))
+
     for vid, name in _parallel_map(sorted(to_resolve),
-                                   lambda v: model_name_gql(session, v),
-                                   workers, _prog, delay=getattr(args, "delay", 0.4)):
+                                   lambda v: model_name_gql(session, v, strict=True),
+                                   workers, _prog, delay=getattr(args, "delay", 0.4),
+                                   on_error=_note_lookup_failure):
         if name and name != vid and not str(name).isdigit():
             for r in to_resolve[vid]:
                 r["model_name"] = name
                 fixed += 1
+        elif vid in lookup_failed:
+            # Not counted as unresolved either: "unresolved" means PixAI answered and had no
+            # name, and the summary's model tally is derived from it. This id simply was not
+            # examined, and re-running --fix-models will pick the same rows up again because
+            # nothing was written over them.
+            continue
         else:
             unresolved += 1
             if relabel:
@@ -6846,11 +7366,14 @@ def run_fix_models(args):
 
     if fixed or relabeled:
         save_catalog(db_path, rows)
-    print("\nFixed {} row(s) across {} model(s); {} id(s) unresolved{}.".format(
-        fixed, len(to_resolve) - unresolved, unresolved,
-        " (relabeled {} rows to '{}')".format(relabeled, removed_label) if relabeled else ""))
-    return {"fixed": fixed, "relabeled": relabeled, "models": len(to_resolve) - unresolved,
-            "unresolved": unresolved}
+    print("\nFixed {} row(s) across {} model(s); {} id(s) unresolved{}{}.".format(
+        fixed, len(to_resolve) - unresolved - len(lookup_failed), unresolved,
+        " (relabeled {} rows to '{}')".format(relabeled, removed_label) if relabeled else "",
+        "; {} id(s) not checked -- lookup failed, re-run to finish them".format(
+            len(lookup_failed)) if lookup_failed else ""))
+    return {"fixed": fixed, "relabeled": relabeled,
+            "models": len(to_resolve) - unresolved - len(lookup_failed),
+            "unresolved": unresolved, "lookup_failed": len(lookup_failed)}
 
 
 # Read-only account dashboard. Ad-hoc query (no persisted hash) -- the selection
@@ -7551,15 +8074,39 @@ def run_suggest_prompt(args):
 
 
 # --- Claimable rewards (daily credits, agent stamina) -- oRPC /v2/claim ----------
+class ClaimsResult(list):
+    """A claim list that also carries WHY it is empty, when it is empty for a bad reason.
+
+    `list_claims` fails soft to an empty list on purpose and must keep doing so: the
+    gallery's account panels call it on every render and must not 500 because PixAI
+    hiccuped. But "the fetch failed" and "you have nothing to claim" are different facts,
+    and `run_claims` printed "No claimable rewards found" for both -- so a transient 5xx
+    left a REAL, ready daily-credit reward unclaimed while telling the user, in so many
+    words, that there was nothing there (M05, 2026-07-27).
+
+    A list subclass rather than a (rows, error) tuple because every existing call site --
+    `for c in core.list_claims(session)` in two gallery routes, `if not rewards`, and
+    `list_claims(...) == []` in the tests -- keeps working byte-for-byte unchanged, and a
+    caller that substitutes a plain list (as the run_claims tests do) simply reports no
+    error. Read `.error` via getattr with a default for exactly that reason."""
+
+    def __init__(self, rows=(), error=""):
+        super().__init__(rows)
+        self.error = error
+
+
 def list_claims(session):
     """Read the account's claimable rewards via GET /v2/claim (daily credits, agent
-    stamina). Read-only; fails soft (returns []). Each row: {id, amount, canClaim,
-    claimedAt, nextClaimableTime}."""
+    stamina). Read-only; fails soft (returns an empty ClaimsResult). Each row: {id, amount,
+    canClaim, claimedAt, nextClaimableTime}.
+
+    The empty-on-failure return carries `.error` so a caller reporting to a human can say
+    "the fetch failed" instead of "you have nothing to claim" -- see ClaimsResult."""
     try:
         data = _rest_get(session, "/claim")
-    except PixAIError:
-        return []
-    return data if isinstance(data, list) else []
+    except PixAIError as e:
+        return ClaimsResult((), str(e))
+    return ClaimsResult(data if isinstance(data, list) else ())
 
 
 def claim_reward(session, claim_id):
@@ -7586,6 +8133,17 @@ def run_claims(args):
     session = _make_session(getattr(args, "token", None))
     claim_id = (getattr(args, "claim", "") or "").strip()
     rewards = list_claims(session)
+    # An empty list from a FAILED fetch is not the same fact as an empty list from an
+    # account with nothing to claim, and this is the one place a human reads the answer.
+    # Reporting both as "No claimable rewards found" is how a ready reward went unclaimed
+    # after a transient 5xx, with nothing on screen to suggest retrying (M05, 2026-07-27).
+    # getattr with a default: a caller/test may hand back a plain list, which carries none.
+    err = getattr(rewards, "error", "") or ""
+    if err:
+        print("Could NOT read your claimable rewards: {}".format(err[:200]))
+        print("This is a failed request, not an empty account -- a ready reward may still "
+              "be waiting. Nothing was claimed; re-run --claims in a minute.")
+        return {"rewards": 0, "error": err[:200]}
     if not rewards:
         print("No claimable rewards found (read-only; nothing changed).")
         return {"rewards": 0}
@@ -7805,27 +8363,67 @@ def run_reconcile_deleted(args):
     return {"live": len(live), "flagged": flagged, "cleared": cleared}
 
 
+class DiskCounts(tuple):
+    """(originals_count, originals_bytes, thumbnail_count), with the TRASH carried alongside.
+
+    A real 3-tuple, so every `n, b, thumbs = _count_backup_images(out)` call site keeps
+    unpacking exactly as it always did; the `_deleted/` totals ride as attributes because a
+    fourth slot would have broken that contract. Same trick, and the same reason, as
+    ClaimsResult above: the caller that wants the extra fact can ask for it, and the ones
+    that don't are untouched.
+
+    Why the extra fact exists at all: quarantined files were simply DROPPED from the scan
+    (M06's fix), and dropping them silently would trade one wrong number for another --
+    'Image files on disk' would stop matching what `du` says about the folder, with nothing
+    on screen explaining the gap. --catalog-stats is the command the wiki points at for
+    deciding what to clean up, and 'N files are already in the trash, purge to reclaim X' is
+    the single most actionable line that scan can produce."""
+
+    def __new__(cls, originals, originals_bytes, thumbs, trashed=0, trashed_bytes=0):
+        self = super().__new__(cls, (originals, originals_bytes, thumbs))
+        self.trashed = trashed
+        self.trashed_bytes = trashed_bytes
+        return self
+
+
 def _count_backup_images(out):
     """Count the ORIGINAL image files on disk, split from preview thumbnails. The naive
     rglob-for-_IMAGE_EXTS double-counts because gallery/thumbs/<id>.jpg is one .jpg per image --
-    which made 'files on disk' look ~2x the catalog. Excludes gallery/ (thumbs) and _duplicates/
-    (quarantined). Returns (originals_count, originals_bytes, thumbnail_count)."""
+    which made 'files on disk' look ~2x the catalog. Excludes gallery/ (thumbs), _duplicates/
+    (quarantined) and _deleted/ (the soft-delete quarantine). Returns a DiskCounts:
+    (originals_count, originals_bytes, thumbnail_count) plus .trashed / .trashed_bytes.
+
+    `_deleted/` was NOT excluded until M06 (2026-07-27), while run_download's own disk
+    scanner in this file has excluded all three for longer (B11, audit 2026-07-21). Soft-
+    deleted images are still real files pending a purge, so counting them as part of the
+    active library inflated exactly the number a user reads before deciding what to delete --
+    on the screen the wiki's 'Reclaiming disk space' section sends them to. They are now
+    reported SEPARATELY rather than dropped, so the total still accounts for the whole
+    folder."""
     out = Path(out)
-    skip = (out / "gallery", out / "_duplicates")
-    n = b = thumbs = 0
+    gallery_dir = out / "gallery"
+    deleted_dir = out / DELETED_DIRNAME
+    skip = (gallery_dir, out / "_duplicates", deleted_dir)
+    n = b = thumbs = trashed = trashed_bytes = 0
     for p in out.rglob("*"):
         if not p.is_file() or p.suffix.lower() not in _IMAGE_EXTS or p.name.endswith(".part"):
             continue
         if any(s in p.parents for s in skip):
-            if (out / "gallery") in p.parents:
+            if gallery_dir in p.parents:
                 thumbs += 1
+            elif deleted_dir in p.parents:
+                trashed += 1
+                try:
+                    trashed_bytes += p.stat().st_size
+                except OSError:
+                    pass
             continue
         n += 1
         try:
             b += p.stat().st_size
         except OSError:
             pass
-    return n, b, thumbs
+    return DiskCounts(n, b, thumbs, trashed, trashed_bytes)
 
 
 def run_rebuild_similar(args):
@@ -7929,11 +8527,18 @@ def run_catalog_stats(args):
             sum(task_cost.values()), len(task_cost),
             sum(1 for v in task_cost.values() if v == 0)))
     _print_meta_coverage(rows, total)
-    disk_count, disk_bytes, thumb_count = _count_backup_images(out)
+    counts = _count_backup_images(out)
+    disk_count, disk_bytes, thumb_count = counts
     if disk_count:
         print("Image files on disk : {}  ({})".format(disk_count, _format_size(disk_bytes)))
     if thumb_count:
         print("  + {} preview thumbnails (gallery/thumbs, not originals)".format(thumb_count))
+    # The trash is real disk space that is NOT part of the library, and this screen is where
+    # a user decides what to reclaim -- so it is named and costed rather than folded into the
+    # library total (which is what it used to be) or dropped without a word (M06).
+    if counts.trashed:
+        print("  + {} soft-deleted in {}/ ({}) -- purge in the gallery's Trash to reclaim"
+              .format(counts.trashed, DELETED_DIRNAME, _format_size(counts.trashed_bytes)))
 
 
 # Columns whose EMPTINESS unambiguously means "never fetched". Deliberately NOT `loras`
@@ -7987,6 +8592,82 @@ def _print_meta_coverage(rows, total):
         print("  Cost history      : add --with-credit to recover spend on older tasks")
 
 
+class _DefaultDelay(float):
+    """The argparse DEFAULT for `--delay`, tagged so "nobody said anything" can be told from
+    "the user asked for this".
+
+    A plain float cannot answer that question. `args.delay == 0.4` is true both when the flag
+    was never typed and when it was typed as `--delay 0.4`, and `parser.get_default("delay")`
+    only re-derives the same 0.4 -- so any comparison-based test silently overrides a
+    deliberate choice that happens to match the shipped default. argparse runs `type=float`
+    over a value it took from the COMMAND LINE and leaves the `default=` object untouched
+    otherwise, so the tag survives exactly when the user was silent, which is the fact we
+    need. A float subclass rather than a None-and-fill-in-later default because `args.delay`
+    is read as a number in a dozen places (`time.sleep(args.delay)`, the `{:g}` banner, every
+    `_parallel_map(delay=...)` call); every one of them keeps working unchanged.
+
+    Only the parallel download stage asks -- see run_download. Everything else honours
+    --delay's default exactly as it always has."""
+    __slots__ = ()
+
+
+DEFAULT_DELAY = _DefaultDelay(0.4)
+
+
+def _delay_was_chosen(args):
+    """True when `--delay` was actually typed (or a caller deliberately set one).
+
+    A synthesized args namespace -- the tests, and any in-process caller that builds one --
+    carries a plain float, which reads as a deliberate choice. That is the right default for
+    a caller that went to the trouble of naming a delay; the one caller that must NOT be
+    re-paced, the Control Panel's Sync job, reaches run_download by spawning the CLI with
+    `--workers N` and no `--delay` at all, so it comes through argparse and lands on the
+    sentinel. A namespace with no `delay` at all named nothing either, so it reads as not
+    chosen -- answering True there would send the caller straight into an AttributeError
+    reaching for the value it just claimed existed."""
+    d = getattr(args, "delay", None)
+    return d is not None and not isinstance(d, _DefaultDelay)
+
+
+def _pace_gate(delay):
+    """Return a zero-arg callable that blocks until the caller owns the next request slot.
+
+    One global slot at a time: each caller reads the next free slot, waits for it, and books
+    the one after it, so a WHOLE thread pool starts at most one request per `delay` seconds
+    no matter how many threads are in it. The obvious alternative -- sleeping `delay` inside
+    each worker -- is not the same thing and is not enough: it still bursts at
+    workers x rate, which is exactly the impoliteness the flag was passed to prevent.
+
+    A falsy `delay` returns a no-op, so a caller can install the gate unconditionally and pay
+    nothing (not even a lock acquisition) when the user asked for no pacing.
+
+    Lifted out of _parallel_map's inner closure on 2026-07-27, when run_download's own inline
+    pool -- the DEFAULT `--workers 4` path, and the highest-traffic code in the whole tool --
+    turned out to apply no pacing at all to its per-image resolve/download calls. The fix for
+    that must not be a second, subtly different copy of this clock: two pacing
+    implementations drift, and the one that drifts is the one nobody is looking at.
+
+    NOTE that run_download installs this gate only when the user EXPLICITLY passed --delay;
+    a defaulted --delay gets `_pace_gate(0)`, i.e. the no-op. _parallel_map's own callers are
+    unaffected and pace as they always did. Read run_download's comment before assuming a
+    default backup is throttled by this -- it is not.
+    """
+    if not delay:
+        return lambda: None
+    gate = threading.Lock()
+    next_start = [0.0]
+
+    def _wait():
+        with gate:
+            now = time.monotonic()
+            wait = max(0.0, next_start[0] - now)
+            next_start[0] = max(now, next_start[0]) + delay
+        if wait:
+            time.sleep(wait)
+
+    return _wait
+
+
 def _parallel_map(items, work_fn, workers=1, progress=None, delay=0.0, on_error=None):
     """Run work_fn(item) over items, yielding (item, result) as each finishes.
 
@@ -8026,20 +8707,10 @@ def _parallel_map(items, work_fn, workers=1, progress=None, delay=0.0, on_error=
         return
     from concurrent.futures import ThreadPoolExecutor, as_completed
     done = 0
-    gate = threading.Lock()
-    next_start = [0.0]
+    pace = _pace_gate(delay)   # one global slot per item -- see _pace_gate
 
     def _paced(it):
-        if delay:
-            # One global slot at a time: each worker waits for the next free slot and books
-            # the one after it, so the whole pool starts at most one request per `delay`
-            # seconds no matter how many threads are in it.
-            with gate:
-                now = time.monotonic()
-                wait = max(0.0, next_start[0] - now)
-                next_start[0] = max(now, next_start[0]) + delay
-            if wait:
-                time.sleep(wait)
+        pace()
         return work_fn(it)
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -8399,8 +9070,12 @@ def run_download(args, progress=None):
         if progress:
             progress(processed, total_images, dl["ok"])
         elif sys.stdout.isatty():
-            sys.stdout.write(_progress_line(processed, total_images, dl["ok"]))
-            sys.stdout.flush()
+            # _CONSOLE_LOCK: this is THE writer a pool thread's TLS paragraph races with --
+            # _tick runs on the main thread as futures complete, resolve_media runs on the
+            # workers. See _console_block.
+            with _CONSOLE_LOCK:
+                sys.stdout.write(_progress_line(processed, total_images, dl["ok"]))
+                sys.stdout.flush()
 
     if progress:
         progress(processed, total_images, 0)
@@ -8424,9 +9099,37 @@ def run_download(args, progress=None):
     workers = max(1, getattr(args, "workers", 1) or 1)
     parallel = (workers > 1
                 and not getattr(args, "collect_only", False))
+    # --delay is documented as a politeness throttle that applies to most commands, not just
+    # to the serial download loop -- but the parallel branch below paced only the page listing
+    # and the per-task full-meta fetch, and fired every resolve_media + download back-to-back
+    # with nothing in between, so a user who asked for pacing did not get it on the one stage
+    # that makes the most requests (M07, 2026-07-27).
+    #
+    # It is honoured here only when the user actually TYPED --delay. The first repair paced
+    # the pool off the argparse default and so re-paced every existing install that had never
+    # asked for anything: at the shipped 0.4s that is a hard global ceiling of 2.5 images/sec
+    # regardless of --workers, which turns this file's own documented `--workers 8
+    # --page-size 500  # fast full backfill` into a ~2-hour download stage for a 17k library
+    # where it used to be ~35 minutes, and quietly makes the Control Panel's Download-workers
+    # selector decorative (the panel spawns the CLI with --workers N and no --delay). A
+    # throttle nobody asked for is not politeness, it is a silent 3-6x regression -- so the
+    # DEFAULT keeps today's full-speed behaviour and `--delay <n>` (including `--delay 0.4`,
+    # typed) buys the documented contract. See _DefaultDelay for how the two are told apart.
+    #
+    # When it IS on: same global-slot semantics as _parallel_map -- one request start per
+    # delay across the whole pool, NOT per thread -- so --workers still buys latency hiding
+    # rather than a bigger burst, and the gate is built ONCE for the run so the pace survives
+    # page boundaries. Each image books ONE slot, covering its resolve_media and its download
+    # together; that is a deliberate choice and it is NOT the same rate as the serial branch,
+    # which sleeps once per SUCCESSFULLY downloaded image and not at all for a missing one.
+    _paced_downloads = _delay_was_chosen(args)
+    _pace_image = _pace_gate(args.delay if _paced_downloads else 0)
     if parallel:
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        print("Parallel downloads: {} workers.\n".format(workers))
+        print("Parallel downloads: {} workers{}.\n".format(
+            workers,
+            (", paced to one image per {:g}s across the pool (--delay)".format(args.delay)
+             if _paced_downloads and args.delay else "")))
 
     def _row_for(meta, mid, full_meta, filename="", url="", w="", h=""):
         return {
@@ -8501,6 +9204,11 @@ def run_download(args, progress=None):
                 # and file write run in threads; all shared state is mutated here
                 # in the main thread as futures complete.
                 def _work(item):
+                    # Blocks on a pool thread until this image's slot comes up -- but only
+                    # when the user typed --delay. Left at its default (and with --delay 0)
+                    # this is a no-op call on a `lambda: None`, so the pool runs exactly as
+                    # fast as it did before the gate existed.
+                    _pace_image()
                     url, info = resolve_media(session, item["mid"])
                     if not url:
                         return item, "missing", "", info, None
@@ -8850,8 +9558,13 @@ def main():
     ap.add_argument("--accurate-count", action="store_true",
                     help="walk the whole API to count library size for the progress bar "
                          "(slow). Default uses the catalog size as a fast estimate.")
-    ap.add_argument("--delay", type=float, default=0.4,
-                    help="seconds to wait between API requests (default: 0.4)")
+    # default is the _DefaultDelay sentinel, not a bare 0.4, so run_download can tell a typed
+    # `--delay 0.4` from an untouched default. See _DefaultDelay for why a comparison cannot.
+    ap.add_argument("--delay", type=float, default=DEFAULT_DELAY,
+                    help="seconds to wait between API requests (default: 0.4). Passing it "
+                         "EXPLICITLY also paces the parallel download stage, at one image "
+                         "per --delay across the whole pool; left at its default, downloads "
+                         "run at full --workers speed as they always have")
     ap.add_argument("--probe", action="store_true",
                     help="show first page + auto-detect the full-res variant, then exit")
     ap.add_argument("--count", action="store_true",

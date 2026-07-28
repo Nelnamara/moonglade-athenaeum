@@ -17,18 +17,49 @@ This file is git-ignored working material for triage. Delete it once the items a
 
 ## Repair status — 2026-07-27
 
-**52 of 81 fixed, 2 closed by the owner.** Suite: **1313 python + 448 node, 0 failed**
+**All 81 are accounted for: 79 fixed, 2 closed by the owner.** Both suites green.
 Eight were additionally verified by the owner against the running app: sync curation,
 import naming, the picker filter race, the collection filter, priority/turbo, upscale,
 LoRA removal and storyboard deletion.
 
 Fixed: `C01`, `C02`, `C03`, `C04`, `C05`, `C06`, `C07`, `C08`, `C09`, `C10`, `C11`, `C12`, `C13`, `C14`, `H01`, `H02`, `H03`, `H04`, `H05`, `H06`, `H07`, `H08`, `H09`, `H10`, `H11`, `H12`, `H13`, `H14`, `H15`, `H16`, `H17`, `H18`, `H19`, `H20`, `H21`, `H22`, `H23`, `H24`, `H25`, `H26`, `H27`, `H28`, `L01`, `L02`, `M08`, `M09`, `M15`, `M22`, `M28`, `M29`, `M33`, `M34`
 
-**27 still open, all medium.** No criticals, highs or lows remain: `L02` is by design, `L03` is superseded by the planned asset bundling, `L04` is fixed.
+No criticals, highs or lows remain: `L02` is closed by design, `L03` is superseded by the
+planned asset bundling, `L04` is fixed. Everything above is on `master`.
 
-Everything through `M34` is on `master` and CI is green. The five highs above them
-(`H17` `H24` `H25` `H27` `H28`) needed an owner decision first; those decisions were
-made and the fixes are on `session-work`, not yet merged.
+The remaining 27 -- all medium -- are on `med-review`, rebased onto that master and
+described in the next section.
+
+## Medium round — 2026-07-27, branch `med-review` (NOT merged)
+
+**The remaining 27 Mediums are fixed on `med-review`,** awaiting the owner's review:
+`M01` `M02` `M03` `M04` `M05` `M06` `M07` `M10` `M11` `M12` `M13` `M14` `M16` `M17` `M18`
+`M19` `M20` `M21` `M23` `M24` `M25` `M26` `M27` `M30` `M31` `M32` `M35`.
+Python and node suites green; the committed Loom bundle matches a fresh build.
+
+**Read this before trusting the entries below.** Every one of these was written by a fixing
+agent, then attacked by a reviewer told to REFUTE it. **Five did not survive the first pass**
+and were repaired: `M18` (the first repair was WORSE than the bug -- PixAI returns real
+failures at HTTP 200 with an `errors` array, so the new guard never fired and one
+`--fix-model-names --relabel-removed` after a hash rotation would have destroyed the model
+provenance of the whole catalog), `M27` (the first repair leaked another shot's image into a
+priced payload), `M02` (a no-op -- neither document actually selected the field), `M24`
+(server half only), `M30` (the existence check and the serving route asked different
+questions). `M07` and `M23` additionally introduced regressions -- a 3-6x slowdown of the
+default backup, and a hard block on Loom export -- and were resolved deliberately rather than
+by taking the agents' first answer. **A green suite was not sufficient evidence for any of
+these; the adversarial pass was.**
+
+Two owner decisions are baked into the entries and are easy to reverse:
+- `M07` -- the default download speed is deliberately UNCHANGED. `--delay` throttles the
+  parallel stage only when you type it. Always-on pacing was rejected as a silent 3-6x
+  regression on the tool's most common command.
+- `M23` -- a missing ffprobe DEGRADES (no audio track) and says so on screen, rather than
+  refusing the export outright.
+
+One thing was deliberately NOT shipped: a `prune()` counterpart for the similarity index. It
+was written, had no caller anywhere, and instructed the owner to run it from a Python prompt.
+Removed. Wiring a reachable version is a genuine follow-up -- see `M12`.
 
 ### Known related groups (same defect, more than one review angle)
 
@@ -566,9 +597,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 ## MEDIUM
 
-### `M01` moonglade_backup.py:1583
+### ~~`M01` moonglade_backup.py:1583~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** `resolve_media()` routes an SSLError through the same `_ssl_help()` guidance `gql()`/`download()` already give, said once per run rather than once per image.
 - **Area:** Backup & Import
 - **Category:** error-handling
 - **Batch:** -
@@ -577,9 +609,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** The media CDN host (MEDIA_BASE) hits a TLS trust/interception issue distinct from the GraphQL API host (the exact corporate-proxy scenario this codebase's truststore.inject_into_ssl() exists to handle). Every call prints only "no url for media <id>" (visible identically to a genuinely missing image) instead of the actionable _ssl_help() message gql()/download() give for the identical exception, so the user never learns it's a fixable local TLS problem rather than PixAI not having the image.
 
-### `M02` moonglade_backup.py:2366
+### ~~`M02` moonglade_backup.py:2366~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** Both the Market and Bookmarks documents now ASK for `shouldBlur`; the fallback to `isNsfw` latches only after TWO consecutive refusals, since one refusal is as likely to be a transient 200-with-errors as a missing field.
 - **Area:** Backup & Import
 - **Category:** correctness
 - **Batch:** -
@@ -588,9 +621,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** The same NSFW-flagged model is searched by keyword (REST path, line 2168: should_blur = flag['shouldBlur'], respects the viewer's actual content settings) and then browsed via the Market or Bookmarks tab (GraphQL path, line 2366: should_blur = bool(isNsfw), ignores viewer settings entirely). A user whose account/preferences would normally show it unblurred sees it forced-blurred on Market/Bookmarks but not on Search, or vice versa for a model where isNsfw and shouldBlur disagree -- inconsistent blur behavior for identical content depending on which tab served the row.
 
-### `M03` moonglade_backup.py:2694
+### ~~`M03` moonglade_backup.py:2694~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** `_bookmarks_persisted()` checks the status and the reply shape before trusting the body, so a refusal raises instead of becoming an empty Bookmarks tab.
 - **Area:** Backup & Import
 - **Category:** error-handling
 - **Batch:** -
@@ -599,9 +633,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** The ad-hoc bookmarks query is refused (PixAIError) and falls back to _bookmarks_persisted; the persisted GET hits an auth/gateway failure (e.g. stale U3T) that returns valid JSON without an 'errors' array (e.g. a plain REST-style {"statusCode":401,...} body). The function falls through to `return ... or {}`, and model_bookmarks_gql reports {"results": [], "has_more": False} -- the user sees an empty Bookmarks tab instead of any indication the request actually failed.
 
-### `M04` moonglade_backup.py:4377
+### ~~`M04` moonglade_backup.py:4377~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** A non-zero ffmpeg exit is vlogged with ffmpeg's own stderr (previously sent to DEVNULL), and `run_faststart_videos` accounts for every video as fixed/skipped/failed and names each failure. A concurrent remux is a no-op, not a failure.
 - **Area:** Backup & Import
 - **Category:** error-handling
 - **Batch:** -
@@ -610,9 +645,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** A captured i2v mp4 with a stream anomaly that ffmpeg's `-c copy -movflags +faststart` refuses to remux causes subprocess.run's returncode to be non-zero without raising; video_faststart returns False silently (no vlog call, contradicting its own comment that 'an odd ffmpeg failure must at least show under -v'). run_faststart_videos then increments neither fixed nor skipped for that file, so fixed+skipped < total with no way to tell which video is still not iOS-playable after the user ran the exact tool meant to fix that.
 
-### `M05` moonglade_backup.py:7202
+### ~~`M05` moonglade_backup.py:7202~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** `list_claims()` carries the failure reason; `run_claims()` distinguishes 'could not read your rewards' from 'nothing to claim' and says to retry.
 - **Area:** Backup & Import
 - **Category:** error-handling
 - **Batch:** -
@@ -621,9 +657,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** User has a ready daily-credit or stamina claim, but GET /v2/claim returns a transient 5xx or times out; list_claims (lines 7201-7205) catches PixAIError and returns [], and run_claims (lines 7232-7234) prints 'No claimable rewards found (read-only; nothing changed).' -- indistinguishable from genuinely having nothing to claim. The user has no signal to retry and may believe (incorrectly) that no reward is currently available, leaving a real claimable reward unclaimed.
 
-### `M06` moonglade_backup.py:7457
+### ~~`M06` moonglade_backup.py:7457~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** `_count_backup_images()` excludes `_deleted/` from the library totals and reports the quarantine on its own line with its size.
 - **Area:** Backup & Import
 - **Category:** correctness
 - **Batch:** -
@@ -632,9 +669,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** A user soft-deletes a batch of images via the gallery's trash feature (moved into pixai_backup/_deleted/, still real files on disk pending a permanent purge), then runs `python moonglade_backup.py --catalog-stats` -- which the Wiki's 'Reclaiming disk space' section recommends as the way to see 'where the space actually goes' before deciding what to clean up. The reported 'Image files on disk' count and byte total silently include the trashed/quarantined images as if they were still part of the active library, overstating true library size and undermining the exact disk-usage decision the command is meant to inform.
 
-### `M07` moonglade_backup.py:8146
+### ~~`M07` moonglade_backup.py:8146~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** `--delay` paces the multi-worker download stage when EXPLICITLY passed; left at its default the download stage is unchanged and still runs at full speed. `wiki/Backing-Up.md`'s `--delay` row corrected to match.
 - **Area:** Backup & Import
 - **Category:** resource-abuse
 - **Batch:** -
@@ -667,9 +705,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** The app explicitly supports concurrent multi-device access (Gallery.md: 'sign in from a tablet... Everything here needs a login as of v2.0.0... available from any device'). If the same image is curated from two sessions at nearly the same time -- e.g. desktop adds image X to collection "Vacation" while a tablet session simultaneously adds the same image X to collection "Favorites" -- both requests read collections='' before either commits, then each writes back only its own single name. Whichever UPDATE lands second overwrites the first, so the DB ends up with only one of the two collection tags even though both HTTP requests returned success (changed=1) to their respective clients. Same race applies to remove_from_collection (line 676) racing against a concurrent add. No locking or transaction guards this read-modify-write cycle, unlike the telemetry counters in this same file which do have an explicit cross-process file lock (_telem_file_lock) for exactly this class of concurrent-write hazard.
 
-### `M10` moonglade_gallery.py:4838
+### ~~`M10` moonglade_gallery.py:4838~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** The star widget advances only to the value the server confirms, repaints what it still holds on failure, and says the write failed.
 - **Area:** Catalog & Misc
 - **Category:** correctness
 - **Batch:** -
@@ -678,9 +717,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** On any gallery/detail page, click star 4 on an unrated image. buildStars() (line 4829-4844) immediately sets its closure variable `rating = 4` (line 4838) and fires setRating() (line 4813-4821), which POSTs to /rate/<id> and only calls updateStars() to redraw the stars `if (data.ok)` (line 4819) — there is no .catch() and no else/rollback branch. If that request fails outright (dropped connection, a transient 5xx from the server, or r.json() throwing on a non-JSON error body), the promise chain never reaches updateStars(): the UI keeps showing 0 filled stars, but the widget's internal `rating` var is already 4. The user, seeing nothing happened, clicks the same 4th star again to retry — but the click handler now computes `newVal = (rating === star) ? 0 : star` = `(4===4)?0:4` = 0 (line 4837), so the 'retry' actually submits rating:0 (clear) instead of the intended 4. The user never sees an error and ends up with the opposite of what they clicked.
 
-### `M11` moonglade_logging.py:92
+### ~~`M11` moonglade_logging.py:92~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** `threading.excepthook` is installed alongside `sys.excepthook`, chaining to whatever was already there, so a background-thread crash reaches the log file.
 - **Area:** Catalog & Misc
 - **Category:** error-handling
 - **Batch:** -
@@ -689,9 +729,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** A background worker thread (e.g. a job the web app spins up outside Flask's own request-handling, such as a long-running sync/build job) raises an uncaught exception. Python routes it through the default `threading.excepthook`, which prints a traceback to stderr and returns -- `_hook` in this file is never invoked because that hook only fires for the main thread. If that thread's stderr isn't being watched (the exact 'terminal window is already gone' scenario this module's own docstring says it exists to cover), the crash leaves zero trace in out_dir/logs/moonglade.log, and the job simply appears to have died with no record of why.
 
-### `M12` moonglade_mcp.py:112
+### ~~`M12` moonglade_mcp.py:112~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** The `similar` MCP tool reports `stale_index_entries` / `stale_media_ids` and names index drift as the cause of a short count; the cure it points at is `--rebuild-similar`. NOTE: a `prune()` counterpart WAS written and then deliberately removed before commit -- it had no caller anywhere and told the owner to invoke it from a Python prompt. Wiring a reachable prune (CLI flag + Panel job) is a real follow-up, not part of this finding.
 - **Area:** Catalog & Misc
 - **Category:** data-consistency
 - **Batch:** -
@@ -700,9 +741,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** An image gets deleted/purged from the catalog (its catalog.db row removed) after it was already embedded into moonglade.images. Weeks later the owner calls `similar(media_id=X, limit=24)` on an unrelated, visually-similar image; several of the top-25 nearest-neighbor hits from the CLIP index are that now-deleted media_id (still present in the sidecar table, embedding never pruned). Each such hit fails `g.get_row(DB, mid)` and is silently skipped, so the tool returns e.g. `count: 15` for a `limit: 24` request with no error or explanation, and the caller has no way to know results were truncated by stale index entries rather than there simply being fewer similar images.
 
-### `M13` moonglade_mcp.py:123
+### ~~`M13` moonglade_mcp.py:123~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** `set_rating` checks the row exists and returns `ok:false` when the UPDATE would match nothing.
 - **Area:** Catalog & Misc
 - **Category:** correctness
 - **Batch:** -
@@ -711,9 +753,11 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** An agent (or the owner) calls `set_rating(media_id="abc123", rating=5)` with a mistyped or stale media_id (e.g. copied from an older search_catalog result for an image that was since re-imported under a different id, or a typo). The tool returns `{"ok": true, "media_id": "abc123", "rating": 5}` even though the UPDATE matched zero rows and catalog.db is unchanged -- the caller believes the rating was set and moves on, and the image is silently left unrated.
 
-### `M14` moonglade_gallery.py:5607
+### ~~`M14` moonglade_gallery.py:5607~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** `bulkSendCast()` no longer asks the DOM whether a selected id is a video -- it goes through `selectedVideoIds()`, which answers from the rendered card where there is one and asks `/api/image-meta` for the ids this page cannot see, so a video selected on another page can no longer enter the Loom cast.
+  **Resolved against `H16` during the rebase.** The two are the same defect in sibling functions, and both branches fixed it independently: `med-review` with a persisted id-to-kind map, `master` with `selectedVideoIds()`. Master's is the better instrument -- it is correct for a selection persisted before any map existed -- so the map was dropped rather than kept alongside it. Nothing in the suite covered `selectedVideoIds()`, so `M14`'s tests were re-pointed at it instead of deleted; without that, closing this finding would have removed the only coverage either fix had.
 - **Area:** Deleting & Trash
 - **Category:** correctness
 - **Batch:** -
@@ -734,9 +778,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** An attacker sends a signed-in user a link to the app's own real, trusted domain: /image/<id>?back=https://evil.example/fake-login. The detail page (same-origin GET, so SameSite=Lax doesn't block it) echoes that back value into its Delete/rate/collection forms' hidden 'back' field or action query string. When the user performs their own legitimate action (e.g. clicks Delete, which is exactly what they intended to do), delete_one() at line 11704-11710 does `return redirect(back)` with no validation that back is a local path, bouncing the user's browser from the real app straight to evil.example immediately after a genuine action -- a classic setup for a credential-phishing page that the user has no reason to distrust because the preceding action just worked on the real site. The same unguarded pattern repeats at delete_bulk (line 11727), the delete_tasks_bulk _back() helper (lines 11888-11890), collection_add/collection_remove, and bulk_replace.
 
-### `M16` moonglade_backup.py:5611
+### ~~`M16` moonglade_backup.py:5611~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** Video outputs in `run_generate` go through the real video collection path instead of being downloaded into `images/` with `is_video` blank; the video block fails soft the way the image loop does.
 - **Area:** Generating & Cost
 - **Category:** misclassification
 - **Batch:** -
@@ -745,9 +790,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** A user runs `python moonglade_backup.py --generate --task-id <id>` where <id> is actually an i2v or reference-video task (e.g. the wrong id pasted, or a script looping over a mixed list of task ids without checking type). _task_image_media(outputs) returns [] since a video-only task has no batch/mediaId, but the loop at lines 5609-5611 still appends the video's own mediaId into `mids`. The per-mid loop (5629-5677) then resolve_media/downloads that mp4 into out/images/ and writes a catalog row via `full = {f: "" for f in CATALOG_FIELDS}` (line 5641) that never sets is_video, leaving it at CATALOG_FIELDS' blank default. The gallery's image listing filters on `COALESCE(is_video,'') != '1'` (moonglade_gallery.py), so this row is served as an image; the browser tries to render the mp4 in an <img> tag (broken tile), and none of the video-specific handling (poster thumbnail, faststart remux) that _download_video_task normally runs ever touches this file.
 
-### `M17` moonglade_backup.py:6424
+### ~~`M17` moonglade_backup.py:6424~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** An edit model outside `EDIT_MODELS` goes through the same name lookup as any other generation, leaving the row repairable by `--fix-model-names` instead of permanently reading 'Edit'.
 - **Area:** Generating & Cost
 - **Category:** correctness
 - **Batch:** -
@@ -756,20 +802,22 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** Submit or recover an edit task whose chat.modelId isn't 'edit-pro' or 'reference-pro' (EDIT_MODELS, moonglade_backup.py:5193) — reachable via `--edit-image --params-json <override with a custom/newer modelId>` or `--edit-image --task-id <id>` recovering a chat task originally created outside this app (e.g. PixAI's web UI with a model added after this table was last updated). extract_full_meta's chat_label (line 2946) resolves to "" since edit_model_by_id finds no match, so run_edit_image line 6424 (`fm.get("model_name", "") or "Edit"`) writes the literal string "Edit" into the catalog row. Later, `_needs_model_fix` (line 6451-6452) sees name="Edit" — non-empty, non-digit, != model_id — and returns "", so `run_fix_models` never queues the row for resolution. The row is stuck forever showing the generic "Edit" instead of the real model name, and even loses the distinction between which of PixAI's edit models actually produced it.
 
-### `M18` moonglade_backup.py:6494
+### ~~`M18` moonglade_backup.py:6494~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** `model_name_gql()` treats a GraphQL `errors` array (PixAI's real failure shape, returned at HTTP 200), a bad status, a non-GraphQL body and a missing field as LOOKUP FAILURES -- never memoised as a name -- and `--relabel-removed` skips them so a later run picks the same rows up again.
 - **Area:** Generating & Cost
 - **Category:** silent-exception-swallowing
 - **Batch:** -
 
-**What it is.** `--fix-models --relabel-removed` cannot tell a transient network/API failure apart from a genuinely-removed model, so a mere hiccup permanently mislabels a still-valid model as "Unknown or removed model" with no way to self-heal on a retry.
+**What it is.** `--fix-model-names --relabel-removed` cannot tell a transient network/API failure apart from a genuinely-removed model, so a mere hiccup permanently mislabels a still-valid model as "Unknown or removed model" with no way to self-heal on a retry.
 
 **How it fails.** Run `python moonglade_backup.py --fix-models --relabel-removed` while one of the distinct model ids being resolved hits a transient network error, timeout, or PixAI 5xx/429. `model_name_gql` (line 2916-2917) catches ALL exceptions broadly and returns `name = mid` (the id unchanged) rather than raising or signaling failure. Back in run_fix_models, the check `if name and name != vid and not str(name).isdigit()` is False (name==vid), so every row using that still-perfectly-valid model falls into the unresolved branch and, because --relabel-removed is set, line 6494 overwrites `r["model_name"] = "Unknown or removed model"` for all of them; `save_catalog` persists this incorrect label immediately after. Re-running --fix-models does not repair it: `_needs_model_fix` (line 6451-6452) now sees a non-empty, non-digit name that isn't the id, so it reports the row as already resolved and never re-queues it — the mislabel is permanent without manual DB editing.
 
-### `M19` moonglade_gallery.py:8052
+### ~~`M19` moonglade_gallery.py:8052~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** `setEditModel()` toasts what it dropped, matching `bulkSendVideo`'s register for the same class of cap truncation.
 - **Area:** Generating & Cost
 - **Category:** silent-data-loss
 - **Batch:** -
@@ -778,9 +826,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** User selects Reference Pro (max_refs:10), adds 6 reference images via the '+ ref' picker. User then clicks the Edit Pro toggle (max_refs:4) -- setEditModel('edit-pro') computes maxAdd=4-1=3 and executes 'editRefs=editRefs.slice(0,3)' at line 8052, dropping 3 of the 6 chosen references with no message of any kind (contrast bulkSendVideo's explicit Toast for the same class of cap-truncation). The user submits an edit believing all 6 references are in play; only 3 actually are.
 
-### `M20` moonglade_gallery.py:13629
+### ~~`M20` moonglade_gallery.py:13629~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** width/height/steps/cfg are clamped, and a clamp that actually fires is reported in the response rather than silently substituted on a paid submit.
 - **Area:** Generating & Cost
 - **Category:** input-validation
 - **Batch:** -
@@ -789,9 +838,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** A malformed or malicious signed-in client (the drawer is explicitly login-tier, any LAN device) POSTs {width: 999999999, height: 999999999, steps: 999999} directly to /api/generate (bypassing the UI's own dropdowns/sliders). num() casts these straight through with no ceiling, core._gen_parameters rounds them to a multiple of 8 with only a 64px floor, and the unbounded values are submitted to PixAI as-is -- exactly the 'safe ranges' clamp the function's docstring promises never happens, so nothing here stops an oversized/absurd request from reaching PixAI and being priced/charged at whatever that produces.
 
-### `M21` moonglade_gallery.py:14153
+### ~~`M21` moonglade_gallery.py:14153~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** `/api/fix` logs through `_log_gen_failure` like `/api/generate` and `/api/edit` -- the one drawer action guaranteed to have spent credits is no longer the only one with no record.
 - **Area:** Generating & Cost
 - **Category:** error-handling
 - **Batch:** -
@@ -812,9 +862,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** Schedule is Enabled with a 1-hour interval. At the moment _scheduler_loop loads schedule.json (`s = _load_sched()`, inside the try starting at line 3911) and fires the due action via _panel_run(action) (line 3927), the owner opens the Panel and unticks 'Enabled' (or changes action/workers); that POST correctly wraps its read-modify-write in `with _sched_lock:` and saves `enabled: False`. _scheduler_loop never acquired that lock, so it proceeds to set `s['last_run'] = _time.time()` (line 3928) on its already-stale copy (still `enabled: True`) and calls `_save_sched(s)` (line 3929), overwriting schedule.json and silently re-enabling the toggle the owner just turned off -- the background full-history scan the owner tried to stop keeps firing every interval with no UI indication it's still on.
 
-### `M23` moonglade_gallery.py:14741
+### ~~`M23` moonglade_gallery.py:14741~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** When no clip length can be measured the export drops the audio track (rather than collapsing every silent span to 0.1s) and shows an amber warning in the export dialog naming ffprobe and where to get it. One refusal remains, for the definitively-corrupt case: a shot with real audio alongside a shot whose length cannot be read.
 - **Area:** Job Tracker & Watcher
 - **Category:** correctness
 - **Batch:** -
@@ -823,9 +874,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** A shot rendered without the "Generate audio" toggle (no audio stream) is exported with its trim-out left unset (co is None, the default/common case), and probe_duration(path) returns None (e.g. ffprobe isn't on PATH even though the earlier shutil.which("ffmpeg") check passed, or ffprobe errors on that file). span becomes max(0.1, (ci+0.1)-ci) == 0.1 regardless of the clip's actual multi-second length, so that segment's video plays its full duration while only 0.1s of matching silence is generated -- every subsequent segment's audio in loom_cut.mp4 shifts out of sync with its video.
 
-### `M24` moonglade_gallery.py:14864
+### ~~`M24` moonglade_gallery.py:14864~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** The bundle zip carries a `missing_media` manifest naming the act/shot each missing id came from, the header carries the ids, and the Loom's export dialog names them instead of only counting them.
 - **Area:** Job Tracker & Watcher
 - **Category:** correctness
 - **Batch:** -
@@ -834,9 +886,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** A project references a shot whose rendered clip was moved/deleted from the backup folder, or was generated on a different machine and never synced. Exporting the Full Bundle zip succeeds and the response carries X-Bundle-Missing-Count: 2, but the two actual media_ids in `missing` (computed at line 14852-14859) are discarded after `len(missing)` is taken -- never written into the header, the zip, or anywhere else the client can read. The owner learns "2 files are missing" with no way to identify which act/shot they belong to short of manually diffing every project reference against the zip's media/ folder.
 
-### `M25` static/mg-notify.js:1343
+### ~~`M25` static/mg-notify.js:1343~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** The job-detail ticker stops when the job reaches a terminal status, not only when the job leaves the list. Terminal-ness is derived rather than hardcoded, so it is correct for `stale` too (see `H18`).
 - **Area:** Job Tracker & Watcher
 - **Category:** notification-state-stuck
 - **Batch:** -
@@ -845,9 +898,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** User clicks a running job's row to open the detail popover (built specifically per the 2026-07-23 field report so owners can get a task ID for a slow/stuck generation without server access). openDetail() at line 1332 starts a 1s setInterval (line 1343) because status was 'running' at open time, and that interval recomputes 'Time Spent' as `Date.now()/1000 - started_at` unconditionally. The job then finishes. render() (line 1361), called every poll, does call renderDetail() to refresh the popover's numbers (line 1365) — but only stops the ticking interval via closeDetail()/stopTick() when the job is absent from jobsById (line 1366), never when it merely changed status. So one second after the correct final duration briefly renders, the still-running interval overwrites it with a live, ever-growing 'X so far' figure computed against the current wall-clock time, not the job's actual end time. A user who leaves the popover open while a generation finishes sees a fictitious, continuously incrementing elapsed time for a job that is already done.
 
-### `M26` moonglade_gallery.py:7272
+### ~~`M26` moonglade_gallery.py:7272~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** Snippet delete fires on release rather than press, and leaves an Undo at the top of the menu.
 - **Area:** Pickers & Drawer
 - **Category:** data-loss
 - **Batch:** -
@@ -856,9 +910,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** In the compact #snip-menu popover (min-width 220px, max-width 340px), the delete '×' button sits directly beside the 'insert' button in the same .snip-row, wired to `onmousedown="event.preventDefault();Snips.del(i)"` at line 7272 -- not onclick, not gated by confirm(). A single stray press near the insert button (easy to fat-finger in that narrow row, and mousedown fires before the user could release/drag away to cancel) calls Snips.del(i) at line 7280, which does `list.splice(i,1); persist();` -- immediately POSTing the truncated list to /api/snippets and permanently deleting the saved prompt, with no undo and no 'are you sure'.
 
-### `M27` static/mg-generate-drawer.js:533
+### ~~`M27` static/mg-generate-drawer.js:533~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** A model-forced mode switch no longer discards the user's picks, and the host-driven `prefill()` path no longer carries another shot's media into a priced payload. `_setMode` still dispatches nothing.
 - **Area:** Pickers & Drawer
 - **Category:** correctness
 - **Batch:** -
@@ -891,9 +946,11 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** jobs.jsonl has just crossed _JOBS_COMPACT_AT (2000) lines. Two concurrent /api/jobs polls (e.g. two browser tabs/devices, or the gallery page plus The Loom, both legitimately signed in per Setup.md's 'sign in with it from any device', served by Flask's threaded=True per this file's own _accounts_lock docstring) both call maybe_compact_jobs() and both pass the `n <= _JOBS_COMPACT_AT` gate. Both open the SAME hardcoded tmp path in truncating 'w' mode, write their own independently-computed `kept` lists, and both call `tmp.replace(path)`. The interleaving can truncate/corrupt the shared tmp file (later silently dropped line-by-line via `_reconstruct_jobs`'s bare `except ValueError: continue`) or let one thread's replace clobber the other's, losing job-history events that landed between the two reads/writes -- and any resulting OSError is swallowed by the bare `except OSError: ... pass` with no logging, so the Job Tracker log can silently stop compacting (grow unbounded) or lose entries with zero operator-visible signal.
 
-### `M30` moonglade_gallery.py:8761
+### ~~`M30` moonglade_gallery.py:8761~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** `detail()` and `/video-file` resolve through the same `_find_local_video_file()`, so a video row whose file is gone says 'Video file not found on disk.' instead of rendering a dead player. Covers the reviewer's three reproductions: a stale filename whose real file moved, a blank filename, and an imported `.m4v` (the hand-written extension tuple was missing it).
+  The resolver's catalog-filename branch also now checks that `out_dir / filename` actually lands inside the library, reusing this file's own `_is_under()`. Without it a traversing `filename` was the one case left where the two still disagreed -- the page drew a player and `/video-file`, which has always added `relative_to()` on top of `send_from_directory`'s `safe_join`, refused the URL behind it. Not a hostile-input concern (`filename` is written by this app), but "the existence check and the serving route ask the same question" is the whole content of this finding, so an exception to it is the bug.
 - **Area:** Security & Access
 - **Category:** functional-bug
 - **Batch:** -
@@ -902,9 +959,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** For an image row, img_url is only set if find_image_file() locates the file, and the template falls back to a friendly 'Image file not found on disk.' message (lines 8772-8774) when it doesn't. For a video row (row.is_video == '1'), the template unconditionally emits `<video><source src="{{ url_for('video_file', media_id=row.media_id) }}">...</video>` (lines 8761-8767) with no existence check. If the catalog has a video row whose file is missing on disk (a state the app's own Health dashboard tracks and expects — 'Missing files'), the user sees a broken/blank video player with no explanation instead of the clear message images get in the same situation.
 
-### `M31` moonglade_gallery.py:10906
+### ~~`M31` moonglade_gallery.py:10906~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** DOCUMENTATION FIX -- no code changed, the code was right. `wiki/Setup.md`, `Control-Panel.md`, `FAQ.md` and `Trust-and-Safety.md` corrected: adding an account is localhost-only, while generating, editing, curating and delete-to-Trash all work from any signed-in device. `tests/test_route_tiers.py` is the inventory these pages are written against.
 - **Area:** Security & Access
 - **Category:** doc-code-mismatch
 - **Batch:** -
@@ -913,9 +971,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** wiki/Setup.md ("Adding more accounts" section) tells the owner: "To add a person or a second device after that, open Panel -> Users and add them there. Any signed-in session can: every account carries equal trust, there's no separate admin role." Following that instruction, the owner gives a guest a LAN login and has them add their own account from a tablet's browser via Panel -> Users -> Add user. The POST reaches api_users_add with a valid session and valid CSRF, but `if not _is_local_request(): return jsonify({"error": "localhost-only"}), 403` at moonglade_gallery.py:10906-10907 rejects it unconditionally for any non-127.0.0.1/::1 remote_addr -- the documented workflow cannot be completed from any device except the one physically running the server, with no indication in Setup.md that this restriction exists.
 
-### `M32` moonglade_gallery.py:11167
+### ~~`M32` moonglade_gallery.py:11167~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** The filtered CSV export is taken consistently, so a concurrent sync can no longer make it silently short.
 - **Area:** Security & Access
 - **Category:** race-condition
 - **Batch:** -
@@ -948,9 +1007,12 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** User is mid-edit on the currently open project (e.g. typing a shot's prompt), which schedules a 600ms debounced autosave via the single shared `saveTimer` ref (the autosave effect only ever tracks the ACTIVE project — there is no per-project timer). Within that 600ms window they open the Project Switcher and delete a different, unrelated old storyboard. `deleteProject` runs `clearTimeout(saveTimer.current)` (line 2465) unconditionally, before checking `id === activeId`. For the non-active-delete branch (`else { await sDel(PPRE + id); }`, line 2474-2475) neither `project` nor `activeId` state changes, so the autosave effect never reruns to reschedule the cancelled write. If the user makes no further edit to the active project afterward, that last change is silently never persisted to storage and is lost on reload — with no error or indication anything was dropped.
 
-### `M35` loom/src/loom-core.js:214
+### ~~`M35` loom/src/loom-core.js:214~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
+- **Repair:** `pickTarget()` numbers an appended reference by its real position among the shot's images instead of counting the structural `@image8`/`@image9` frame fallbacks, bumped up only past a number another entity on the card is actually displaying.
+  The leak half was resolved in `master`'s favour during the rebase: an image ref with no live slot is now left OUT of the composed prompt entirely, rather than cited with a label. That is the better answer — the prompt is sent to PixAI, so "this reference isn't attached" is noise in a generation request, and the board card is where an unattached reference belongs.
+  **One defect found in that master-side change while merging it, and fixed here:** the new filter kept only refs `positionTag()` could number, but `positionTag()` resolves against `shotImageRefs()`, which is images by definition — so it returned null for *every* video ref and silently dropped `@video1` out of every composed prompt that had one. `@videoN` is a separate namespace assigned by `pickVideoTarget()` and never renumbered by position, so a video ref's stored tag is not a fallback: it is the only name it has. Video refs are now exempt from the filter, with a test.
 - **Area:** The Loom
 - **Category:** correctness
 - **Batch:** -

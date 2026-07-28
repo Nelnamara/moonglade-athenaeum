@@ -161,18 +161,45 @@ come back after a restart.
 
 The **Users** tab lists your gallery login accounts.
 
-- **Add user** — username, password, confirm. Duplicate usernames are refused outright
-  rather than quietly resetting an existing account's password.
+- **Add user** — username, password, confirm. Appears **only when you're using the browser on
+  the server machine itself**; a LAN session gets a short note where the form would be, and a
+  request made by hand comes back `localhost-only` (403). A new account is a permanent key to
+  the whole library and can spend your PixAI credits, so creating one is an
+  owner-at-the-keyboard action rather than something any open tab can do. Duplicate usernames
+  are refused outright rather than quietly resetting an existing account's password.
 - **Remove** — takes effect immediately: that account is signed out on every device at once.
-- The **last remaining account can't be removed** from here — that would lock every remote
-  device out until someone signed in on the server machine to bootstrap a new one.
+  Removing **your own** account works from anywhere *unless it's the only account left* (see the
+  next bullet — the button is still drawn on your own row, so on a single-account install this is
+  the refusal you'll actually meet); removing **someone else's** is restricted to the server
+  machine, for the same reason **Add user** is. (Signing yourself out of your own account can
+  only cost you; evicting another account is the other half of the same mint-yourself-a-login
+  problem.)
+- The **last remaining account can't be removed** from here — from *any* address, loopback
+  included, because that would leave the gallery with nobody able to sign in. To deliberately
+  take the count to zero and re-open the first-run bootstrap, use `--remove-web-user` on the
+  server machine; that's the escape hatch, and it's CLI-only on purpose.
 - **Your password** — change your own from anywhere, including a tablet on the LAN. You have
   to enter your current password to prove it's you.
 - **Reset password** — appears next to each *other* account, and only when you're using the
   browser **on the server machine itself**. It sets a new password without needing the old
   one, which is what makes it a recovery path rather than a convenience.
 
-Every account has equal access (browse, generate, maintenance); there's no separate admin tier.
+Reading the roster is not restricted — every signed-in session sees who exists. It's changing
+the roster that needs the server machine.
+
+There's no separate admin tier: every account has equal access to the gallery itself (browse,
+generate, edit, Fix, curate, The Loom, the safe maintenance jobs), and no account holds a power
+another one lacks. The line that actually exists is *where you're sitting*, not who you are —
+adding an account, removing someone else's, resetting their password, the destructive jobs above,
+emptying the Trash, deleting from your PixAI account, and writing the API key or library folder
+all need the machine hosting the gallery, and they refuse the owner's own account just as firmly
+when it's signed in from a tablet.
+
+The two operations that *do* turn on a username — changing your own password, removing your own
+account — aren't a privilege either: what varies is whose account is being changed, not what your
+login is allowed to do. `tests/test_route_tiers.py` is what keeps this page honest; it enumerates
+every route the app actually registers and fails the build if one doesn't declare and enforce its
+tier against a live LAN request.
 
 **Why the reset button is local-only.** Being at the server machine is the proof of identity
 here — it's doing the job an emailed reset link does for a hosted app. That's also why there's
@@ -209,6 +236,15 @@ the job went into the queue — it is not a countdown, and there is no percentag
 bar, because PixAI does not report progress on a running task at all. A job that stays
 unstarted long enough is marked **stale** with an explanation; PixAI cancels and refunds
 tasks it never starts at about 60 minutes.
+
+**That live Time Spent stops when the job does.** It only ever ticks while the job is
+actually running, and it's re-checked on every poll rather than decided once when you opened
+the popover — so leaving the popover open across a finish now leaves the real final duration
+on screen. It used to keep counting: a second after the true figure rendered, the clock
+overwrote it with an ever-growing "X so far" for a job that was already done. On a panel
+whose whole purpose is telling a slow generation from a stuck one, an elapsed time that
+never stops is worse than no elapsed time. (If a **stale** job is later heartbeated back to
+running, the clock simply starts again — that status isn't final server-side.)
 
 ## This build
 

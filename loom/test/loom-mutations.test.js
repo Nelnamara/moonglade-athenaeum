@@ -356,8 +356,19 @@ describe("parseCastIdsFromSearch", () => {
   test("extracts comma-separated numeric ids from ?cast=", () => {
     assert.deepEqual(parseCastIdsFromSearch("?cast=123,456,789"), ["123", "456", "789"]);
   });
-  test("drops non-numeric junk and ignores other query params", () => {
-    assert.deepEqual(parseCastIdsFromSearch("?foo=bar&cast=1,abc,2"), ["1", "2"]);
+  test("passes safe tokens through and ignores other query params", () => {
+    // Was "drops non-numeric junk": this filter is a SANITISER, not an id-grammar check.
+    // Encoding "a media_id is digits" here silently dropped every imported file's
+    // `local_<hex>` id, which is why sending imported pictures to the cast opened the Loom
+    // empty (2026-07-28). The grammar now lives in loom-core's isCatalogMediaId(), applied
+    // at the one call site that imports both -- see the cast-import effect. "abc" survives
+    // this function and is rejected there.
+    assert.deepEqual(parseCastIdsFromSearch("?foo=bar&cast=1,abc,2"), ["1", "abc", "2"]);
+    assert.deepEqual(parseCastIdsFromSearch("?cast=1,local_a1b2c3d4e5f6"),
+      ["1", "local_a1b2c3d4e5f6"]);
+  });
+  test("still drops anything that could escape a URL or a path", () => {
+    assert.deepEqual(parseCastIdsFromSearch("?cast=" + encodeURIComponent("../x") + ",a%2Fb"), []);
   });
   test("empty/missing search yields no ids", () => {
     assert.deepEqual(parseCastIdsFromSearch(""), []);

@@ -226,7 +226,13 @@ export const parseCastIdsFromSearch = (search) =>
     .split("&").map((kv) => kv.split("=")).filter(([k]) => k === "cast")
     .flatMap(([, v]) => (v || "").split(","))
     .map((s) => decodeURIComponent(s).trim())
-    .filter((s) => /^\d+$/.test(s));
+    // A SANITISER, not an id-grammar check: reject anything that could escape a URL or a
+    // path (slashes, quotes, angle brackets, spaces), and leave "is this a real media_id"
+    // to the catalog. The old /^\d+$/ encoded "media_ids are digits", which silently
+    // dropped every `local_<hex>` id an imported file carries -- so sending imported
+    // pictures to the cast opened the Loom with nothing in it. See isCatalogMediaId() in
+    // loom-core.js for the grammar question this deliberately is not.
+    .filter((s) => /^[A-Za-z0-9_-]{1,64}$/.test(s));
 
 // ---------- generation error / poll-response classification ----------
 

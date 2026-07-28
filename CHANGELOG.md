@@ -57,6 +57,24 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **A Multi-Reference shot's Closing Frame was invisible to everything downstream.** The
+  card showed its tag as "—", the cast numbered themselves one slot early, and the frame
+  never reached the generator at all — the numbering only admitted a closing frame on
+  First & Last, though Multi-Reference (and V2V, which the server treats identically) uses
+  one too. Toggling the drawer's mode tabs *appeared* to fix it because the drawer only
+  re-read the shot on unrelated changes — attaching a frame wasn't one of them, which was
+  its own bug and is also fixed. Now: Opening Frame is `@image1`, a Closing Frame that has
+  a picture is `@image2`, cast and references number from `@image3`, and the card, the
+  panel, the composed prompt, the drawer's bank and the actual submit all say the same
+  thing. The Cast & assets panel shows each member's live `→ @imageN` beside their
+  project-wide `@tag`, with a visible reference budget (six images, frames claim theirs
+  first) instead of silent trimming. Two traps found by review and closed on the way: an
+  End Frame picked before the Start Frame used to land in the *Start* box — a paid render
+  from the wrong frame — and now lands in End, with Go refusing (and the badge not
+  pricing) an End-only First & Last, since the server would reinterpret that as a
+  reference video; and the drawer's prompt and its image bank used to number through two
+  different resolvers, so a locally-uploaded frame shifted every citation off by one.
+
 - **A shot's prompt no longer names pictures that aren't attached to it.** A cast member added
   to a shot but not yet given an image was still cited by their project-wide tag — "Greg —
   reference @image4" when no @image4 is on that shot, and the reference drawer numbers purely
@@ -244,6 +262,363 @@ git tags. Full prose notes for tagged versions live on
   Queries are untouched: a flaky network still must not fail a read on the first blip. The
   two REST spend paths (hand/face Fix, reward claims) were already single-attempt and are
   now pinned as such rather than left to assumption.
+
+- **A request that failed could read as an empty answer, in three different places.** The
+  shape is identical each time: something asks PixAI a question, never gets one back, and the
+  code that reports it says *there is nothing here* rather than *I could not find out*. They
+  are listed apart because you meet them on three different screens.
+  - **A whole backup could report your images as missing when the problem was your own
+    machine.** Antivirus or a corporate proxy intercepting HTTPS breaks the handshake against
+    PixAI's media host, and resolving an image is deliberately allowed to fail softly so a
+    library walk doesn't stop dead at one deleted picture. The result was `no url for media
+    <id>` printed for image after image — indistinguishable from PixAI having lost your entire
+    history, for a fixable *local* trust problem. It now prints the same guidance the other
+    network paths already do (`pip install truststore`, and whether truststore is active this
+    run), says outright that every remaining image will fail the same way until it's fixed, and
+    says it **once**: the media host is a single host, so it either works for all of them or
+    none, and repeating the paragraph seventeen thousand times would bury the very thing it is
+    trying to say. Every individual failure still goes to the log. It is written as one locked
+    block, too, because the thing racing it for your terminal is the progress bar redrawing over
+    itself, which would otherwise smear the one message you most need to read whole across
+    several frames. (Once per *process* — on the long-running gallery server that means the
+    first time and not again; the log has them all regardless.)
+  - **The model picker's Bookmarks tab read as empty when the request had been refused.** The
+    bookmarks fetch judged success by the shape of the reply alone: no status check, and only a
+    GraphQL-style `errors` array counted as a failure. An auth or gateway refusal that answers
+    with perfectly valid *non*-GraphQL JSON — a bare `{"statusCode":401,…}` from the edge — has
+    neither, so it fell straight through to "no rows" and the picker drew **No results — try
+    another search** over a request that never ran. A 401/403, a bad status, and a body carrying
+    no `data` key are all failures now, and the tab shows the reason instead of a shrug.
+  - **`--claims` said "No claimable rewards found" when it had failed to look.** The claims read
+    fails soft on purpose — the gallery's account panels call it on every render and must not
+    break over a hiccup — but the command printed one sentence for both an empty account and a
+    request that never landed, so a transient server error left a ready daily-credit reward
+    sitting unclaimed while telling you, in so many words, that there was nothing there. The
+    empty result now carries *why* it is empty; `--claims` reports the failure, says plainly
+    that this is a failed request and not an empty account, and tells you to re-run. Nothing
+    about the soft-failing panels changes.
+
+- **`--faststart-videos` could report a clean sweep while leaving videos broken.** A clip ffmpeg
+  refused to remux was counted in neither of the two numbers the summary printed, so *fixed +
+  already-OK* quietly came to less than the total — and the person who ran the command precisely
+  because a video wouldn't play on their phone had no way to learn which file was still bad, or
+  that any still was. Every video now lands in exactly one of **rewritten / already OK /
+  failed**, each failure is named as it happens and listed again at the end, and ffmpeg's own
+  reason for refusing — which it writes to a stream that used to be thrown away — goes to the
+  log. "Failed" means ffmpeg was asked and could not, and nothing else: the wiki blesses running
+  this sweep while the gallery or a live watch is collecting, so a clip the live mirror repaired
+  (or a Trash purge removed) between the check and the remux counts as done. The first attempt at
+  this accounting could print *FAILED … still not iOS-playable* about a file that had just been
+  fixed.
+
+- **The same model could be blurred in Search and unblurred in Market or Bookmarks.** The picker
+  draws all three tabs into one grid from two different sources, and they disagreed about what
+  NSFW means: the keyword search read PixAI's own `shouldBlur` — the only answer computed against
+  *your* content settings — while Market and Bookmarks read the raw content flag, which knows
+  nothing about the viewer. So a keyword search and a Market browse of one grid gave different
+  answers about identical content. One rule answers for both now: the viewer-scoped flag wherever
+  the reply carries it, the raw flag otherwise, and ambiguity resolves *toward* blurring rather
+  than away from it. That direction is chosen, not overlooked — unwanted blur clears with one
+  click, an NSFW cover on the screen of someone who never opted in does not. Market and Bookmarks
+  now actually **ask** for the viewer-scoped field, which is the half that makes preferring it
+  mean anything; if PixAI's schema turns out not to carry it, the same search is re-run without
+  it — but only after **two consecutive** refusals, because PixAI answers a transient server
+  error in exactly the shape of a rejected field, and giving up on one blip would silently
+  reopen the disagreement for the life of a long-running gallery process.
+
+- **A picture's model name could get stuck wrong forever, with no re-run able to repair it.**
+  Two ways in, both ending at the same place: a permanent-looking label that `--fix-model-names` then
+  reads as *already resolved* and never queues again.
+  - **An edit made with a model this app doesn't know locally was filed as "Edit".** The label
+    came from a small built-in table of edit models, so an edit made with anything outside it —
+    a newer model id passed through by hand, or a chat task recovered by `--task-id` that was
+    made on PixAI's own site — landed the literal word "Edit" in the catalog. That is worse than
+    blank, because blank gets picked up again and "Edit" doesn't: the row showed the generic
+    label forever, having also lost *which* edit model made it. An unknown edit model now goes
+    through the same name lookup every ordinary generation uses, and whatever comes back is
+    recoverable. "Edit" survives only for a task carrying no model id at all, where there is
+    nothing to resolve and nothing to queue.
+  - **One network blip could brand a perfectly good model as removed.** The name lookup returned
+    the model's own id when it couldn't resolve a name, which conflated *PixAI answered, and this
+    model is gone* with *the request never got an answer* — and `--fix-model-names --relabel-removed`
+    acts on the first by permanently writing "Unknown or removed model" over the row. So a single
+    timeout mid-run mislabelled every row of a still-perfectly-valid model. Worse, PixAI answers
+    a refused query with a healthy-looking HTTP 200 carrying an errors array, so a rotated hash
+    or an auth failure refuses *every* id in the run — one `--relabel-removed` could have stamped
+    that label over the model provenance of your whole catalog at once. A lookup that failed is
+    now told apart from one that answered "no such model": failures are left untouched, named on
+    screen as they happen, counted separately in the summary (*N id(s) not checked — lookup
+    failed, re-run to finish them*), and picked up again next run, because nothing was written
+    over them.
+
+- **Recovering a video task with `--generate --task-id` filed the clip as an image.** Hand an
+  image-to-video or reference-video id to the image command — a mispaste, or a script looping
+  over a mixed list of ids — and the mp4 was downloaded into `images/` and catalogued with its
+  video flag blank, so the gallery served it as a picture: an `<img>` pointed at an mp4, which
+  is a broken tile, with no poster thumbnail and no faststart remux. Video outputs now go to the
+  code that handles video, whichever command recovered them, so the file, its video flag, its
+  poster and its remux all land properly, and the run says what it is doing. Honest about what
+  it can't fully recover: the image command submits an image-shaped parameter block, so a pure
+  image-to-video task comes back with its prompt, duration and model blank until a
+  `--backfill-full-meta` pass fills them in (a reference-video task keeps its prompt and
+  duration). Two smaller repairs ride along: a video collection that fails now leaves the images
+  already downloaded and catalogued alone, prints what happened and names the free command that
+  fetches the clip, instead of exiting through the top-level error handler with the summary
+  never printed; and recovering a *video-only* task finally counts as a recovery, so the
+  achievement that exists to reward exactly that rescue moves.
+
+- **The trash was being counted as part of your library.** An image you delete in the gallery
+  moves to a quarantine folder and waits there for a purge, but the disk scan behind
+  `--catalog-stats` and `--count` walked straight into it — so the number you read *before
+  deciding what to clean up* already included what you'd deleted. Soft-deleted files are out of
+  the library totals now, and reported on their own line with their size and where to reclaim
+  them, rather than dropped without a word: dropping them would have traded one wrong number for
+  another, with "files on disk" no longer matching the folder and nothing on screen explaining
+  the gap.
+
+- **`--delay` now paces the parallel download stage too — when you actually type it.** The flag
+  is documented as a politeness throttle across the tool, but the multi-worker download branch
+  paced only the page listing and the per-task metadata fetch, firing every image resolve and
+  download back to back — so asking for pacing got you none on the one stage that makes the most
+  requests. **The default is unchanged and still runs at full speed:** leave `--delay` alone and
+  a `--workers 8` backup downloads exactly as fast as it always has, as do the Control Panel's
+  jobs, which spawn the command with a worker count and no delay. Type it and the whole pool is
+  throttled to one image per interval *across every worker*, not per worker — so `--workers`
+  still buys latency hiding rather than a bigger burst, and the pace holds across page
+  boundaries. That will slow a big backfill down a lot, which is the point of typing it: at the
+  shipped 0.4s it is a hard ceiling of two and a half images a second no matter how many workers
+  you give it. The first repair of this paced the pool off the flag's *default* and so would
+  have re-throttled every install that had never asked for anything; a throttle nobody requested
+  isn't politeness, so a typed `--delay` (including a typed `--delay 0.4`) and an untouched one
+  are now told apart.
+
+- **A rating that failed to save could set the picture to unrated.** The star widget advanced
+  its own idea of the current rating the moment you clicked and never put it back, and the chain
+  that saved it had no error handler at all — so a write that never came back (a dropped
+  connection, or a server error whose HTML body can't be read as a result) simply fell off the
+  end: the stars stayed unfilled while the widget had already recorded 4. Your obvious next
+  move, clicking the same star again to retry, then read as *it's already 4, so this means clear
+  it* and submitted a zero. **Clicking the fourth star twice through one failed write unrated
+  the image.** The widget now keeps the gesture optimistic — so click-again-to-unrate keeps
+  working while a write is in the air — and the paint confirmed, so only what the server actually
+  stored is ever drawn; a failure rolls the gesture back to the stored value and repaints from
+  it, and a slow response that a newer click has already superseded is ignored instead of
+  overwriting it. And it tells you, which it never did: on the gallery through the usual notice
+  toast, and on a picture's own page — which carries the largest star widget on the site and
+  doesn't load the toast script — by flashing the stars red with the reason in their tooltip.
+
+- **The Generate drawer's numbers were only bounded in the browser.** Width, height, steps and
+  CFG went from the drawer into a real, paid submit with no ceiling on the server at all — and
+  generating is deliberately open to any signed-in device, so the drawer's own min/max
+  attributes were the only bound a well-behaved client honours and a hand-rolled request honours
+  none: `{"width": 999999999, "steps": 999999}` reached PixAI and was priced at whatever that
+  produces. They are bounded server-side now, at the same limits the drawer's own controls carry
+  (64–4096 px, 1–150 steps, CFG 1–30, 1–4 images). And because clamping on a paid path is a
+  **substitution** — you are charged for a generation other than the one you configured — a
+  clamp that fires is reported rather than applied in silence: the response carries what was
+  changed, and the drawer raises it as a receipt naming the field, what you asked for and what
+  was used. That is not only a defence against a rogue client: the drawer adopts a model's
+  published restrictions verbatim, so it can legitimately offer a number this clamp then
+  rewrites. The price badge quotes the clamped request either way, since it builds its
+  parameters through the same code.
+
+- **A failed hand/face Fix left no record anywhere.** Every other spend path in the web app has
+  recorded its failures — with the shape of the request, because for this class of bug the shape
+  is the diagnosis — since the undiagnosable video decline of 2026-07-26. Fix was the last
+  holdout: it handed the raw error to the browser, the browser replaced it with a friendlier
+  guess, and the true text existed nowhere afterwards. That is money gone with nothing written
+  down, on the one drawer action that always spends (no free card is ever applied to a fixer
+  task). It now writes the failure to the log along with exactly what it asked for, boxes
+  included.
+
+- **A video missing from disk showed a dead black player and said nothing.** The image half of a
+  picture's detail page has always asked whether the file is really there and degraded to a
+  readable line; the video half drew a player unconditionally — so a clip that had gone missing,
+  a state the Health dashboard explicitly counts, rendered as a black box with no explanation. It
+  now says the file isn't on disk. The route that serves the bytes was also answering a narrower
+  question than the page asked: it served the filename stored in the catalog and gave up when
+  that was blank or stale — after `--organize` moved the clip, say, or a re-download landed it
+  under a different name — while the page had a media-id fallback it didn't. When the two
+  disagreed you got the dead player again, sitting on top of its own fix. One resolver answers
+  for both now, so a clip whose stored filename has drifted plays instead of 404ing, and `.m4v`
+  — which importing local files copies in and catalogues as video — is no longer reported missing
+  on sight.
+
+- **A filtered CSV export could silently ship fewer rows than matched.** It counted the matching
+  rows and then asked a second, later query for exactly that many, with nothing holding the two
+  together — so a write landing in the gap left the second query sized to the *old* count. Not
+  an exotic race: **Sync now** inserts rows for minutes at a time while you keep browsing, and
+  an export taken during one came out short with nothing in the downloaded file admitting it. It
+  is a single query now, which has nothing to disagree with.
+
+- **A video ticked on another page could ride into the Loom's cast.** The selection deliberately
+  survives paging — that is the whole reason it lives in browser storage — but the filter that
+  keeps videos out of the cast asked the *page* what kind each id was, and a video ticked on page
+  2 has no card on page 1. The lookup came back empty, the guard was skipped, and the video
+  sailed straight through a filter whose own comment said it couldn't. Which of your selected ids
+  are videos is now recorded at the moment they're ticked — the one moment the page can answer
+  the question at all — so **Send to The Loom (cast)** is correct off-page. The record is kept in
+  step with the selection and cleared with it, and a fresh browser session still starts clean.
+
+- **References could vanish from the drawer with nothing said — in two places, for opposite
+  reasons.** It feels the same both times: you pick references, change one setting, and the strip
+  empties.
+  - **In the Edit tab they really were being left out of a paid submit.** Each edit model accepts
+    a different number of images, and switching to a smaller one trimmed the extras off the strip
+    in silence: pick six under a model that takes ten, tap one that takes four, and three
+    disappear with no message anywhere — after which the edit is submitted, and paid for, in the
+    belief all six were attached. It now says what happened: how many were kept, the model's real
+    limit, that the picture being edited counts against that limit, and how many of yours were
+    left out. (The bulk Send-to-Video path has announced its identical truncation since the day
+    it was written; this is the same class of loss, treated the same way.)
+  - **In the video drawer nothing was lost at all — the drawer just stopped showing it.**
+    Multi-Reference keeps its images, video reference and audio reference in banks of their own,
+    so leaving that mode repaints the Start Frame from an array nothing wrote to while you were
+    in there, and four picked image references plus a video and an audio ref blink out at once.
+    Worst on the path that switches *without being asked*: changing the Model dropdown to one
+    that doesn't offer Multi-Reference forces the mode over, so merely changing model emptied the
+    slots with no confirmation and no message. Every pick was still in its bank the whole time —
+    what you lost was knowing that. The drawer now names what is still held, says nothing was
+    deleted, and says that going back to Multi-Reference (on a model that offers it) brings it
+    all back. Deliberately a notice and not a copy: promoting one of those references into the
+    Start Frame would re-price the drawer and arm Go, one click from spending, off a switch you
+    never asked for — and there is no honest way to guess which of six references you meant as
+    the first frame. An empty slot you fill in one click is the right amount of opinion for this
+    drawer to have. The notice is raised only for a switch a human caused, so the host re-syncing
+    the drawer onto a different shot never narrates it as a choice you made.
+
+- **Moving the Loom to another shot could leave the previous shot's End Frame in the drawer.**
+  The drawer is re-filled from scratch when you switch shots, but the End Frame slot was exempt —
+  deliberately, because the gallery's partial **Send to Video** writes only the start frame, and
+  wiping a hand-picked End Frame *there* would be its own data loss. On the full re-sync path
+  that left the last shot's closing frame sitting in place: prefill a First-and-Last shot, then
+  move to one whose closing frame you haven't picked yet, and the drawer held one frame from each
+  shot — priced by the cost badge, and one click from being generated that way. An explicit image
+  list now clears the slot it doesn't fill.
+
+- **Deleting a saved prompt snippet was instant, unconfirmed and unrecoverable.** The ✕ sits four
+  pixels from the insert button in a popover a few hundred pixels wide, and it fired on
+  mouse-*down* — committing before the button was even released, so there was no
+  press-then-slide-away-to-cancel, and by the time you noticed, the shortened list had already
+  been saved. One fat finger and a saved prompt was gone for good. Two cheap changes instead of a
+  confirmation box: it fires on click, which restores the cancel gesture every destructive
+  control in every app has, and the removed text is kept so the menu can hand it straight back —
+  an **Undo** strip pinned at the top of the popover, nowhere near the ✕ that produced it, with a
+  toast saying where it is. Deliberately not a confirm dialog: this menu exists to be used
+  quickly, and a modal on every delete is friction paid by the deletes you meant, to protect the
+  rare one you didn't. An undo taxes only the mistake.
+
+- **A job's "Time Spent" kept climbing after the job had finished.** Whether that live clock
+  should be running is a fact about the *job*, but it was decided once, when you opened the
+  popover, and unwound only when the job disappeared from the list entirely — never when it
+  merely completed. So a job that finished with its popover open rendered the correct final
+  duration and then, one second later, had it overwritten by a clock that went on counting
+  forever. The popover exists so you can diagnose a slow generation without server access; an
+  elapsed time that grows past completion is worse than none. It is re-decided on every repaint
+  now, from the job's status right then — which also means a job the orphan sweep marks stale,
+  and which a later sweep can bring back to life, simply starts counting again when it does.
+
+- **The Loom's cut export could come out permanently out of sync — and on a machine without
+  ffprobe it now comes out silent, and says so.** Shots with no audio of their own get matching
+  silence synthesised so the sound can't drift across a shot boundary, and the length of that
+  silence has to be *right*: the audio is laid end to end, so silence shorter than its own shot
+  doesn't merely mute that shot's tail, it starts every later shot's audio early and keeps it
+  early for the rest of the file. When a shot's length couldn't be measured, that length quietly
+  became a tenth of a second — manufacturing the exact desync the mechanism exists to prevent, in
+  an export that reports *done* and looks finished until you watch past the first shot. Lengths
+  are now resolved before a single frame is assembled, and a guess is never one of the answers.
+  What happens instead depends on what is at stake:
+  - **If no shot has real audio, the cut is exported with no audio track at all**, and an amber
+    warning in the export dialog says so. Every segment's audio was going to be synthesised
+    silence anyway, so the file sounds exactly the same and nothing can drift. This is the normal
+    path on a machine that has ffmpeg but not **ffprobe**, where nothing is measurable and every
+    clip reads as silent — so the warning names ffprobe, says it ships with the full ffmpeg
+    build, and says that installing it restores measured lengths and audio. The export is
+    deliberately *not* refused over a missing ffprobe: that machine used to get a file, and the
+    wiki never asked for that dependency, so taking the deliverable away is the wrong trade.
+  - **One case is still refused**: some shot has real audio *and* another shot's length can't be
+    measured. A guessed length there would push your actual recorded audio permanently out of
+    sync, and dropping the track would throw it away — both worse than not producing a file. The
+    message names the shot and gives the two ways out: set that shot's out point, or fix the
+    file. (Real audio being detected at all proves ffprobe is working, which makes that one file
+    the suspect.)
+
+- **The full-bundle export said "2 referenced file(s) couldn't be found" and left you to work out
+  which.** A bundle whose media is partly missing is still a successful export, so that report is
+  all you get — and it was a bare count, with no way to close the gap short of unzipping the
+  bundle and hand-diffing its contents against every reference in the project. Two things name
+  them now. The response carries the ids, so the Loom opens a proper dialog listing each one
+  against the **shot code you see on the board** (A·01, plus the shot's title if it has one) or
+  the cast entry it belongs to — a dialog rather than a browser alert, because this is a list you
+  read while looking at the board, and dismiss-only, because the fix is off-screen. And the zip's
+  own `project.json` now carries the same list with the same labels, permanently: it survives the
+  download and travels to whoever you hand the bundle to. The count stays the authoritative
+  number — the id list in the response is length-capped on purpose, since a header that grows
+  with your project is how a bundle downloads fine on the machine that built it and is rejected
+  by a proxy on the next one — so when the list overflows, the dialog says how many more there
+  are and where to read the whole thing.
+
+- **A shot's prompt could point the model at the wrong picture.** The Loom numbers the images it
+  attaches to a shot — `@image1`, `@image2` — and the prompt cites those numbers, which only
+  works if the numbers describe the pictures actually being sent. Three things could put them out
+  of step:
+  - A newly picked reference was stored with a number one past the highest anything in the shot
+    happened to hold — a number that existed only to win a sort. A First-and-Last shot with two
+    untagged frames and one cast member (three images) stamped its next reference **@image10**,
+    on a bank PixAI caps at six. A picked reference now takes the number of the slot it really
+    lands in, bumped up only far enough that two things on one card can never display the same
+    number.
+  - Shot references sorted ahead of cast members whenever their own tag held a lower number,
+    while every screen that shows the two lists shows cast first. They rank behind cast now and
+    keep their own order — which is the order the prompt prints them in, so the citations read 1,
+    2, 3 down the page instead of jumping.
+  - A reference with no live position fell back to whatever number was stored on it, and that
+    number lives in the *same* namespace as every other citation in the same prompt — so it named
+    a real picture in that shot, just not the one it meant. An out-of-range number is noise a
+    model drops; an in-range one is an instruction it follows. Those now say what they actually
+    are: past the six-image limit, or attached but not numbered in this shot. (That second case
+    briefly read "not attached", which was simply false — a picture you uploaded yourself is
+    uploaded again by the server before submitting, so it does travel.)
+
+- **A crash in a background thread left no trace at all.** The app has recorded uncaught crashes
+  to `moonglade.log` since the log existed, but Python has *two* hooks for that and only one was
+  installed — the one that fires for the main thread. Anything raised in a background thread, the
+  live-mirror watcher included, went to the other one, which prints a traceback to a terminal
+  that in this app is usually closed or was never there, and returns. Nothing reached the log, so
+  a background job that died looked exactly like one that quietly stopped. Both hooks are
+  installed now and the thread is named in the entry, while an orderly exit inside a worker is
+  still not filed as a crash. One gap is named rather than papered over: work handed to a worker
+  pool parks its exception on the task instead of raising, so neither hook ever sees it — that
+  one has to be logged where the results are collected, and no hook can do it.
+
+- **Two of the assistant-facing tools could report something that wasn't true.**
+  - **Rating an id that isn't in the catalog reported success.** The write is a plain update
+    matching zero rows, and the tool answered `ok` regardless — so an assistant working through a
+    review queue marked the picture done off a mistyped or stale id, and it stayed unrated
+    forever. An unknown id is refused now, with nothing written.
+  - **The similarity lookup could make your library look smaller than it is.** It answers from an
+    index built ahead of time, and an image deleted or purged afterwards stays in that index
+    until it's rebuilt. Those stale neighbours were dropped from the answer without a word, so
+    asking for 24 similar images and getting 15 read as *there are only 15 similar images* —
+    which is a bad conclusion to hand anything curating a library. The answer now carries how
+    many were asked for, how many of the neighbours were stale entries whose catalog row is gone,
+    which ids those were, and a note saying plainly that this is index drift rather than a
+    shortage, and that rebuilding the index clears it (`--rebuild-similar`, or the Control
+    Panel's Rebuild job). The lookup deliberately doesn't clear them itself: it's interactive and
+    expected to answer fast, a rebuild is minutes of GPU time, and that is your call to make
+    rather than a side effect of a search.
+
+- **Documentation correction: the wiki said any signed-in device could add an account. Only the
+  machine running the gallery can.** No code changed here — creating an account has been
+  restricted to the server's own machine since 2026-07-22, and is enforced twice over: the **Add
+  user** form isn't drawn at all for a browser that reached the Panel across the network, and a
+  request made by hand is refused. The wiki simply never caught up and told you the opposite,
+  which is the worst kind of documentation error — it describes a permission you don't have and
+  sends you looking for a bug when it doesn't work. Setup and Trust & Safety now describe the
+  real boundary, and it's worth stating precisely because it looks like an admin tier and isn't
+  one: **no account holds a power another one lacks.** The gate asks where you are sitting, not
+  who you are — your own account is refused from the LAN exactly as a guest's would be, and any
+  account can do all of it sitting at the server machine.
 
 ## [2.5.0] - 2026-07-25 — Upscale where PixAI puts it, five filters of our own, metadata that captures itself, and a settable library folder
 

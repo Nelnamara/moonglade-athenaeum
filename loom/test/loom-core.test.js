@@ -473,7 +473,11 @@ describe("shotPayload", () => {
     assert.equal(payload.images[1], "close-data");
   });
 
-  test("non-FLF mode ignores the close frame entirely (no phantom second image)", () => {
+  test("I2V ignores the close frame entirely (no phantom second image)", () => {
+    // Was titled "non-FLF mode ignores the close frame" -- no longer true as a class:
+    // CLOSE_FRAME_MODES (loom-core.js) now includes R2V and V2V, whose generations really
+    // do consume an end frame (med3-close-frame-joins-numbering.test.js). I2V is the one
+    // mode that still ignores it, and must keep doing so.
     const card = makeCard({
       mode: "I2V",
       openFrame: { thumbId: "open-data", source: "", desc: "", tag: "" },

@@ -6,10 +6,12 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 // (which closes over `thumbs` state) under the ORIGINAL single-arg call shape.
 import {
   CONNECT, CONTINUITY_PHRASE, actLetter,
-  maxTagNum, nextTag, frameLinked, connectMeta, continuityLinked,
-  flat, shotText, castMissingImages, pickTarget, pickVideoTarget, positionTag, durOf,
+  maxTagNum, nextTag, isCatalogMediaId, frameLinked, connectMeta, continuityLinked,
+  flat, shotText, castMissingImages, castPastBudget, refBudget, resolvedImage,
+  usesCloseFrame,
+  pickTarget, pickVideoTarget, positionTag, durOf,
   reelStats, effectivePrompt,
-  priceFingerprint, tallyPrices, formatCostEstimate, costTooltip,
+  priceFingerprint, tallyPrices, formatCostEstimate, costTooltip, bundleMissingReport,
   shotPayload as buildShotPayload,
 } from "./src/loom-core.js";
 // Pure project-tree mutators + response-shape classifiers (Phase 2, composed-
@@ -134,6 +136,10 @@ const STYLES = `
 .sb-exp-bar{height:9px;background:var(--panel2);border:1px solid var(--line);border-radius:999px;overflow:hidden}
 .sb-exp-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--amber),var(--gold));transition:width .3s}
 .sb-exp-txt{font-size:13px;color:var(--ink);text-align:center;font-family:ui-monospace,monospace}
+.sb-miss-list{max-height:44vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--panel2)}
+.sb-miss-row{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--ink)}
+.sb-miss-row i{color:var(--ink2);font-style:normal}
+.sb-miss-id{font-family:ui-monospace,monospace;font-size:11px;color:var(--ink2);word-break:break-all}
 /* 500, not 400: ImportCollection opens ON TOP of the V2 shell, and .lv-overlay is also 400 --
    at a tie it only stayed above because it happens to render later in App's child order.
    500 clears both that and Deep Focus's .lv-df-veil (450) outright. */
@@ -438,6 +444,11 @@ const V2_STYLES = `
 /* A shot cast someone it has no picture for: they are left out of the prompt (citing an
    @imageN with nothing behind it is worse than saying nothing), so the card has to say so. */
 .lv-st.warn{margin-left:0;color:var(--peach);background:color-mix(in srgb,var(--peach) 16%,transparent);}
+/* A cast member whose picture is fine but lost PixAI's 6-slot contest (frames first) --
+   castPastBudget in loom-core.js. Quieter than .warn on purpose: nothing is broken, the
+   shot is simply over budget, so this reads informational (dashed outline, subtext) rather
+   than fix-me peach. */
+.lv-st.oob{margin-left:0;color:var(--subtext);background:var(--base);border:1px dashed var(--overlay0);}
 /* Imported-footage provenance badge -- coexists with the real status pill the same way
    .linked does (margin-left:0, not competing for the row's one auto-margined slot).
    Neutral/informational, not a warning -- reuses .todo's own subtext-on-base treatment
@@ -507,6 +518,22 @@ const V2_STYLES = `
 .lv-tagin{width:76px;flex:none;background:var(--base);border:1px solid var(--surface1);border-radius:6px;
   color:var(--accent);font:11px/1.3 ui-monospace,monospace;padding:6px 7px;}
 .lv-tagin:focus{outline:0;border-color:var(--accent);}
+/* The bound shot's LIVE positional @imageN beside the stored-tag input -- read-only and
+   visually distinct from it (dashed border + cyan, matching FrameSlot's own derived
+   .sb-tagin display) so the panel never implies the editable stored tag is what gets sent.
+   .oob = has a picture but lost the 6-slot contest ("not sent" on R2V/V2V; "not cited" on
+   FLF/I2V, where nothing cast-shaped is sent either way -- see modeSendsRefs/liveTagText).
+   Worn by the Cast & assets rows (both densities) AND Deep Focus's Other-references image
+   rows (round 3) -- one class, one wording source, so the surfaces cannot drift. */
+.lv-livetag{flex:none;font:11px/1.3 ui-monospace,monospace;color:var(--cyan);background:var(--base);
+  border:1px dashed var(--overlay0);border-radius:6px;padding:6px 7px;}
+.lv-livetag.oob{color:var(--peach);border-color:var(--peach);font-size:9.5px;}
+.lv-assetrow.oob,.lv-simplecard.oob{opacity:.6;}
+/* Live reference-slot budget under the Cast & assets header (6 minus attached frames --
+   see refBudget in loom-core.js). .lv-refbudget-over = more resolvable cast/refs than
+   slots, i.e. the rows marked .oob below exist. */
+.lv-refbudget{font-size:10px;color:var(--subtext);margin:-4px 0 8px;}
+.lv-refbudget-over{color:var(--peach);font-weight:700;}
 .lv-sel{flex:none;background:var(--base);border:1px solid var(--surface1);border-radius:6px;color:var(--text);
   font:10.5px/1.3 system-ui;padding:6px 3px;}
 .lv-locklab,.lv-inshot{display:flex;align-items:center;gap:4px;font-size:9.5px;color:var(--subtext);
@@ -1123,7 +1150,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             const a = activeRef.current; if (!a) return;
             const proj = projectRef.current;
             const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId]
-              : (source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null);
+              : (source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null);
             const plan = pickTarget(a, proj, resolve, slot);
             if (plan.type === "replace" && plan.kind === "cast") {
               // Cast assets are project-GLOBAL (shared identity across every shot that uses
@@ -1215,7 +1242,22 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         const a = activeRef.current; if (!a) return;
         const text = e.detail.text;
         const already = !!a.c.promptOverride;
-        const composed = already ? null : shotText(a, projectRef.current);
+        // SAME RESOLVER AS THE PREFILL (2026-07-27, round 3 -- the drawer-COUPLED
+        // shotText family). The drawer's prompt box is prefilled from
+        // shotText(active, project, imgSrc) -- the live, thumbs-aware resolver -- and
+        // this comparator decides "did the owner actually change anything" by
+        // recomposing. Round 2 composed here with NO resolver (mediaId-only), so on any
+        // shot carrying a thumb-only picture the two texts differed by construction
+        // (the thumb entity is numbered in one and invisible to the other) and every
+        // purely-prefilled prompt froze as a hand-edit override -- silent, sticky
+        // corruption. All sites that feed the drawer's prompt or compare against it now
+        // compose with the same thumbs-aware resolver; copyShot/exportAll are the
+        // deliberate standalone exceptions (see their comments).
+        // thumbsRef, not the `thumbs` prop: this listener registers once and its closure
+        // goes stale -- the exact idiom the mg-pick-request resolve above already uses.
+        const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId]
+          : (source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null);
+        const composed = already ? null : shotText(a, projectRef.current, resolve);
         if (!already && text === composed) return;
         const apply = (c) => setPromptOverride(c, text);
         a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
@@ -1305,8 +1347,54 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // imgSrc mirrors useGenerationPipeline's own private helper exactly (thumbs is a prop
   // here too) -- needed to call buildShotPayload directly from this scope.
   const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId]
-    : (source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null);
-  const asRef = (d) => ({ media_id: d, thumb: /^\d+$/.test(d) ? ("/thumbs/" + d + ".jpg") : d });
+    : (source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null);
+  
+  // An imported file's `local_<hex>` id has a thumbnail at the SAME /thumbs/<id>.jpg
+  // route a PixAI id does -- the numeric test used to send the raw id as the <img src>.
+  const asRef = (d) => ({ media_id: d, thumb: isCatalogMediaId(d) ? ("/thumbs/" + d + ".jpg") : d });
+  // ---- mode families for the Cast & assets panel and Deep Focus live tags (2026-07-27,
+  // round 3). Which modes actually SEND the cast/ref image bank with a generation:
+  // R2V/V2V take the full reference bank (the server resolves both through the same
+  // build_shot_video_params path); an FLF generation consumes ONLY the two frames and an
+  // I2V generation ONLY the opening frame -- cast/refs are never attached there. Derived
+  // from usesCloseFrame/CLOSE_FRAME_MODES plus the mode itself, NEVER a second mode
+  // table (the two-numbering-systems corruption loom-core.js catalogs began as exactly
+  // that kind of independent second table). Round 2 shipped the budget line and live-tag
+  // tooltips mode-BLIND: an I2V shot's panel asserted two cast members were "sent" while
+  // its generation sends the opening frame alone -- refuted in adversarial review.
+  //
+  // The live @imageN itself stays visible in EVERY mode on purpose: shotText() cites
+  // cast/refs by position regardless of mode (its "Keep consistent:"/"Other references:"
+  // blocks are mode-independent), so the number is real -- it is the composed prompt's
+  // citation. What is mode-dependent is the CLAIM around it: in R2V/V2V it is also what
+  // the generator attaches; in FLF/I2V it is citation numbering only, so the
+  // label/tooltip below say "not cited" rather than "not sent" for a past-budget row
+  // there (nothing cast-shaped is sent in those modes either way) and never claim
+  // send-ness for a numbered one.
+  const modeSendsRefs = (m) => usesCloseFrame(m) && m !== "FLF";
+  // One wording source shared by the budget-line replacement, the detailed cast rows,
+  // the Simple grid AND Deep Focus's ref rows -- shared precisely so the surfaces cannot
+  // drift apart again (round 2 gave cast rows the live tag and left Deep Focus's ref
+  // rows showing only the stale stored tag).
+  const modeSendsLine = (m) => (m === "FLF"
+    ? "First & Last sends the start & end frames only — cast & refs here are for continuity/notes, not references"
+    : "I2V sends the opening frame only — cast here is for continuity/notes, not references");
+  const liveTagText = (liveTag, pastBudget, mode) =>
+    liveTag || (pastBudget ? (modeSendsRefs(mode) ? "not sent" : "not cited") : "—");
+  const liveTagTitle = (liveTag, pastBudget, mode, code) => {
+    const framesOnly = mode === "FLF" ? "First & Last sends only the start/end frames" : "I2V sends only the opening frame";
+    if (liveTag) {
+      return modeSendsRefs(mode)
+        ? `Live slot in ${code} — numbered by position; this is what the composed prompt and the generator actually send, not the stored tag on the left`
+        : `${code}'s composed-prompt citation — numbered by position. ${framesOnly}, so this picture is NOT attached to the generation; the number is only what the prompt text cites`;
+    }
+    if (pastBudget) {
+      return modeSendsRefs(mode)
+        ? `Past the reference limit for ${code} (6 images minus attached frames) — not sent`
+        : `Past the citation limit for ${code} (6 images minus attached frames) — left out of the composed prompt. ${framesOnly}; cast/ref pictures are not attached either way`;
+    }
+    return `No picture resolved on ${code} — nothing to number`;
+  };
   // Feed the shot's structured fields into the mounted <mg-generate-drawer> whenever they
   // change -- mode/duration/audio/quality sync unconditionally (structural, not a "hand-edit"
   // concern); the composed PROMPT only re-syncs while the owner hasn't typed in the drawer's
@@ -1337,7 +1425,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           const outEntry = isDraft ? { a: { id: "__draft__" }, c: draftCard, code: "Draft" } : entries.find((e) => e.c.id === outId);
           if (outEntry) {
             const already = !!outEntry.c.promptOverride;
-            const composed = already ? null : shotText(outEntry, project);
+            // imgSrc: drawer-COUPLED comparator -- the pending text being flushed was
+            // seeded from an imgSrc composition (payload.prompt below), so comparing it
+            // against a noImgSrc recompose froze every thumb-carrying prefilled prompt
+            // as an override. See the mg-prompt-commit handler's comment for the family.
+            const composed = already ? null : shotText(outEntry, project, imgSrc);
             if (already || pending !== composed) {
               const apply = (c) => setPromptOverride(c, pending);
               isDraft ? setDraftCard(apply) : setCard(outEntry.a.id, outId, apply);
@@ -1365,8 +1457,29 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     if (nextMode === "i2v" && active.c.openFrame && active.c.openFrame.mediaId) {
       payload.images = [{ media_id: active.c.openFrame.mediaId, thumb: frameSrc(active.c.openFrame) }];
     } else if (nextMode === "flf") {
-      payload.images = [active.c.openFrame, active.c.closeFrame].filter((f) => f && f.mediaId)
-        .map((f) => ({ media_id: f.mediaId, thumb: frameSrc(f) }));
+      // POSITIONAL, NULLS PRESERVED -- always [Start-or-null, End-or-null], never a
+      // filtered list (2026-07-27, round 3). Round 2 built this with
+      // `.filter((f) => f && f.mediaId)`, and the drawer's flf branch maps its list
+      // positionally (images[0] -> Start box, images[1] -> End box) -- so an flf shot
+      // whose END frame was picked first (start still empty) shipped images=[close] and
+      // the drawer put the intended END frame in the START box. Generate then spent real
+      // credits rendering FROM the end frame; both round-2 reviewers reproduced it. An
+      // empty frame now travels as an explicit null (the drawer clears that slot), so the
+      // list's SHAPE can never encode less than its POSITIONS again. Contained: this is
+      // the only producer that puts nulls in `images`, it always states mode:'flf' in the
+      // same payload, and the drawer's flf branch is the only consumer that sees it
+      // (prefill() routes a mode:'flf' list of <=2 there unconditionally).
+      //
+      // resolvedImage(), not the round-2 `f.mediaId` test: a locally-uploaded frame
+      // (thumbId only, no gallery mediaId yet) resolves to its data-URL through imgSrc,
+      // the exact shape the r2v branch below already ships for cast thumbs via
+      // buildShotPayload()/asRef() -- and the server's resolve_img()
+      // (moonglade_gallery.py, /api/loom/generate) base64-uploads a `data:` URL for
+      // EVERY mode, flf included (verified against that route before wiring this). So a
+      // thumb-only frame the card numbers @image1/@image2 is genuinely sendable
+      // end-to-end here, instead of silently never reaching the drawer at all.
+      payload.images = [active.c.openFrame, active.c.closeFrame]
+        .map((f) => { const d = resolvedImage(f, imgSrc); return d ? asRef(d) : null; });
     } else if (nextMode === "r2v") {
       const sp = buildShotPayload(active, project, imgSrc);
       payload.images = sp.images.map(asRef);
@@ -1376,12 +1489,40 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       }
       payload.video_refs = vids;
     }
-    if (!promptDirtyRef.current) payload.prompt = shotText(active, project);
+    // imgSrc (2026-07-27, round 3): the prompt must cite the SAME numbering as the bank
+    // this effect just built -- buildShotPayload above composes the bank thumbs-aware,
+    // while round 2 composed this prompt with NO resolver (mediaId-only). A thumb-only
+    // frame or cast picture was therefore IN the bank but INVISIBLE to the prompt's
+    // numbering, and every citation after it was off by one (reproduced in review: bank
+    // held frame=@image1, Nelnamara=@image2; the prompt cited "Nelnamara — reference
+    // @image1"). Drawer-COUPLED shotText family -- every site that feeds this drawer's
+    // prompt or compares against it composes with imgSrc; the comparators are at
+    // mg-prompt-commit, the outgoing-shot flush above, the re-sync button and the
+    // Generate-all flush. copyShot/exportAll are the deliberate standalone exceptions.
+    if (!promptDirtyRef.current) payload.prompt = shotText(active, project, imgSrc);
     el.prefill(payload);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active.c.id, active.c.mode, active.c.connect, active.c.duration, active.c.audioGen, active.c.audioLanguage,
       active.c.prompt, active.c.camera, active.c.lighting, active.c.transIn, active.c.transOut,
       active.c.cast, active.c.refs, project.assets,
+      // The FRAMES' IDENTITY fields (2026-07-27, closing-frame pass). Every branch above
+      // reads c.openFrame/c.closeFrame -- i2v/flf feed them to the drawer directly, r2v
+      // through buildShotPayload() -- yet no frame field was a dependency, so attaching or
+      // replacing a frame never re-ran this effect: the drawer kept showing (and PRICING,
+      // and submitting) the bank from before the change, until some unrelated dep -- `tab`,
+      // usually -- happened to fire it. That is the owner's "toggling a tab fixes the
+      // missing frame" symptom, and the worse, quieter one behind it: mg-pick-request
+      // resolves a picked slot INDEX against the fresh list (pickTarget) while the drawer
+      // reported the pick against its stale bank, so a pick could replace a different
+      // entity than the one the owner clicked (the reference-picker corruption class).
+      // Identity fields, not the frame OBJECTS, on purpose: FrameSlot's desc/tag inputs
+      // patch a fresh frame object per keystroke, and a re-prefill per keystroke of text
+      // that cannot change which image is attached is churn this carefully-scoped effect
+      // exists to avoid. mediaId/thumbId/source are exactly the fields shotImageRefs()
+      // resolves an image from (resolvedImage in loom-core.js), so these six scalars fire
+      // precisely when a frame's PICTURE changes and never otherwise.
+      (active.c.openFrame || {}).mediaId, (active.c.openFrame || {}).thumbId, (active.c.openFrame || {}).source,
+      (active.c.closeFrame || {}).mediaId, (active.c.closeFrame || {}).thumbId, (active.c.closeFrame || {}).source,
       active.c.title, project.look, project.draft, tab,
       active.c.promptOverride, active.c.promptOverrideText]);
   // Isolated, narrow busy-guard effect -- deliberately NOT folded into the big prefill
@@ -1444,15 +1585,41 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                     <div className="lv-cmeta"><span className="lv-mode">{e.c.mode}</span><span className="lv-dur">{durOf(e.c)}s</span>
                       {/* A cast member on this shot with no picture for it. shotText() leaves
                           them out of the prompt rather than citing an @imageN with nothing
-                          behind it, so this is what keeps that from being silent. */}
+                          behind it, so this is what keeps that from being silent. Two chips
+                          because they are two different repairs (2026-07-27): "no image"
+                          means attach a picture; "past the reference limit" means the
+                          picture is fine but PixAI's 6-image cap (frames first) trimmed it
+                          -- drop a reference or a frame to fit. Calling the second "no
+                          image" was the lie castMissingImages()'s own comment documents;
+                          castPastBudget() is its honest counterpart. */}
                       {(() => {
                         const miss = castMissingImages(e, project, imgSrc);
-                        return miss.length ? (
-                          <span className="lv-st warn"
-                            title={`No picture on this shot for ${miss.join(", ")} — they are cast here but cannot be referenced, so they are left out of the prompt. Add an image to use them.`}>
-                            {miss.length === 1 ? `${miss[0]}: no image` : `${miss.length} cast: no image`}
-                          </span>
-                        ) : null;
+                        const over = castPastBudget(e, project, imgSrc);
+                        return <>
+                          {miss.length ? (
+                            <span className="lv-st warn"
+                              title={`No picture on this shot for ${miss.join(", ")} — they are cast here but cannot be referenced, so they are left out of the prompt. Add an image to use them.`}>
+                              {miss.length === 1 ? `${miss[0]}: no image` : `${miss.length} cast: no image`}
+                            </span>
+                          ) : null}
+                          {over.length ? (
+                            /* Same mode split as liveTagText/liveTagTitle (round 3): "not
+                               sent" is a reference-slot claim and only R2V/V2V send
+                               reference slots. On FLF/I2V the trim is real but it trims the
+                               prompt's CITATION list, not a payload -- nothing cast-shaped
+                               was going to be sent either way, and a chip asserting
+                               send-ness there is the round-2 mode-blindness bug wearing a
+                               different hat. */
+                            <span className="lv-st oob"
+                              title={modeSendsRefs(e.c.mode)
+                                ? `Past the reference limit — not sent. PixAI takes 6 reference images and attached frames claim theirs first, so ${over.join(", ")} ${over.length === 1 ? "does" : "do"} not fit this shot. Remove a frame or another reference to include ${over.length === 1 ? "them" : "them all"}.`
+                                : `Past the citation limit — not cited. The composed prompt numbers at most 6 pictures (frames first), so ${over.join(", ")} ${over.length === 1 ? "gets" : "get"} no @imageN here. In ${e.c.mode} only the frame${e.c.mode === "FLF" ? "s are" : " is"} sent either way.`}>
+                              {over.length === 1
+                                ? `${over[0]}: past ref limit — ${modeSendsRefs(e.c.mode) ? "not sent" : "not cited"}`
+                                : `${over.length} cast past ref limit — ${modeSendsRefs(e.c.mode) ? "not sent" : "not cited"}`}
+                            </span>
+                          ) : null}
+                        </>;
                       })()}
                       {linked && <span className="lv-st linked" title="Opening frame matches the previous shot's closing frame — continuous across the cut">linked</span>}
                       {e.c.imported && <span className="lv-st imported" title="Imported from your gallery -- no PixAI task backs this clip, so re-roll has nothing to redo">imported</span>}
@@ -1630,7 +1797,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             // straight after queuing that update would still see the old promptOverride:true
             // and return stale (override) text, since the queued state write hasn't
             // committed yet at this point in the same synchronous handler.
-            const composed = shotText({ ...active, c: { ...active.c, promptOverride: false } }, project);
+            // imgSrc: this text goes straight INTO the drawer (prefill below), so it is
+            // drawer-COUPLED and must carry the same thumbs-aware numbering the prefill
+            // effect composes with -- see that effect's payload.prompt comment.
+            const composed = shotText({ ...active, c: { ...active.c, promptOverride: false } }, project, imgSrc);
             active.c.id === "__draft__" ? setDraftCard(clearPromptOverride) : setCard(active.a.id, active.c.id, clearPromptOverride);
             if (genDrawerRef.current) genDrawerRef.current.prefill({ prompt: composed });
           }}>&#8634; re-sync from shot</button>
@@ -2053,6 +2223,40 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const castList = (
     <>
       <div className="lv-castrow-h">Cast &amp; assets{sel ? <span className="lv-dim"> — bound to {sel.code}</span> : null}</div>
+      {/* Live reference-slot budget for the bound shot (owner decision, 2026-07-27): PixAI
+          takes 6 images, attached frames claim theirs only when attached, so cast/refs get
+          6 minus attached frames -- refBudget() in loom-core.js, derived off the same
+          item list shotImageRefs builds and actually ships, never a second count. `used` is
+          deliberately uncapped: used > budget is the "some of these are not being sent"
+          state the rows below mark, and hiding it here would put the panel back to
+          silently trimming. No `sel` means no shot to budget against -- say nothing rather
+          than invent a project-global number no generation ever uses. */}
+      {sel && (() => {
+        // MODE-AWARE (2026-07-27, round 3): the slot arithmetic below is only true of
+        // modes whose generation takes the reference bank (R2V/V2V -- modeSendsRefs,
+        // derived from usesCloseFrame + the mode, see its comment). Round 2 rendered it
+        // unconditionally, so an I2V shot's panel claimed cast members were consuming
+        // "reference slots" of a generation that sends the opening frame alone. For
+        // FLF/I2V: no budget arithmetic at all, just the honest one-liner.
+        if (!modeSendsRefs(sel.c.mode)) {
+          return (
+            <div className="lv-refbudget"
+              title={`${sel.c.mode === "FLF" ? "A First & Last generation attaches only the Start and End frames" : "An I2V generation attaches only the opening frame"}. The @imageN numbers below are the composed prompt's citation numbering, not attachments.`}>
+              {modeSendsLine(sel.c.mode)}
+            </div>
+          );
+        }
+        const b = refBudget(sel, project, imgSrc);
+        return (
+          <div className="lv-refbudget"
+            title={`PixAI accepts 6 reference images per generation. ${b.frames
+              ? `${b.frames === 1 ? "1 slot is" : `${b.frames} slots are`} held by ${sel.code}'s attached frame${b.frames === 1 ? "" : "s"}, leaving ${b.budget} for cast & image refs.`
+              : "No frames attached, so all 6 are free for cast & image refs."} Anything past that is not sent.`}>
+            <span className={b.used > b.budget ? "lv-refbudget-over" : undefined}>{b.used} of {b.budget} reference slot{b.budget === 1 ? "" : "s"} used</span>
+            {b.frames ? <span className="lv-dim"> &middot; {b.frames} of 6 held by attached frame{b.frames === 1 ? "" : "s"}</span> : null}
+          </div>
+        );
+      })()}
       <details className="lv-look" open={!!(project.look || "").trim()}>
         <summary>🎨 Project look{(project.look || "").trim() ? "" : <span className="lv-dim"> — a style line added to every shot</span>}</summary>
         <textarea className="lv-lookin" value={project.look || ""} rows={2}
@@ -2067,8 +2271,22 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         const inShot = sel && (sel.c.cast || []).includes(as.id);
         const toggleInShot = () => sel && setCard(sel.a.id, sel.c.id, (c) => ({ ...c, cast: (c.cast || []).includes(as.id) ? c.cast.filter((x) => x !== as.id) : [...(c.cast || []), as.id] }));
         const src = frameSrc(as);
+        // This panel is shot-bound ("bound to A-02") yet used to show ONLY as.tag -- the
+        // project-global, cast-add-order tag -- as if that were what gets sent. It is not:
+        // the generator numbers by POSITION in the bound shot (shotImageRefs/positionTag,
+        // loom-core.js), which is how the owner watched this panel say @image1/@image2
+        // while the drawer and the composed prompt said @image2/@image3 for the same two
+        // pictures. `liveTag` is that real, live number, shown READ-ONLY beside the stored-
+        // tag input (which keeps editing as.tag exactly as before -- it still drives cast
+        // ordering). null liveTag splits two honest ways: `pastBudget` (has a picture, lost
+        // the 6-slot contest -- positionTag's null IS the cap's signal, same ordering that
+        // trims, never re-derived) gets the row dimmed and marked "not sent"; no picture at
+        // all gets a plain dash -- NOT a warning state, which round 1 invented here and
+        // watched misfire on cap-trimmed members.
+        const liveTag = sel && inShot && as.kind === "image" ? positionTag(sel, project, imgSrc, as.id) : null;
+        const pastBudget = sel && inShot && as.kind === "image" && !liveTag && !!resolvedImage(as, imgSrc);
         return (
-          <div key={as.id} className="lv-assetrow">
+          <div key={as.id} className={"lv-assetrow" + (pastBudget ? " oob" : "")}>
             {as.kind !== "audio" && <button className="lv-pickico" title="Pick from your gallery"
               onClick={() => openPick((mid) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: "", source: "", mediaId: mid })), as.kind === "video" ? "video" : "image")}>🖼</button>}
             {as.kind === "image" ? (
@@ -2089,6 +2307,16 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               onChange={(e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, name: e.target.value }))} />
             <input className="lv-tagin" value={as.tag}
               onChange={(e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, tag: e.target.value }))} />
+            {/* liveTagTitle/liveTagText, not inline strings (round 3): round 2 hard-coded
+                "what the composed prompt and the generator actually send" here for every
+                mode -- false on FLF/I2V, whose generations never attach cast pictures.
+                The shared helpers word the claim per mode family (see their comment). */}
+            {sel && inShot && as.kind === "image" && (
+              <span className={"lv-livetag" + (pastBudget ? " oob" : "")}
+                title={liveTagTitle(liveTag, pastBudget, sel.c.mode, sel.code)}>
+                {liveTagText(liveTag, pastBudget, sel.c.mode)}
+              </span>
+            )}
             <select className="lv-sel" value={as.kind}
               onChange={(e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, kind: e.target.value }))}>
               <option value="image">image</option><option value="video">video</option><option value="audio">audio</option>
@@ -2104,12 +2332,24 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         <div className="lv-simplegrid">{(project.assets || []).map((as) => {
           const inShot = sel && (sel.c.cast || []).includes(as.id);
           const src = frameSrc(as);
+          // Same live-number rule as the detailed rows above (see that comment): the shot's
+          // real positional @imageN when this member is in the bound shot's cast, "not sent"
+          // when a good picture lost the 6-slot contest, nothing at all when there is no
+          // picture to number.
+          const liveTag = inShot && as.kind === "image" ? positionTag(sel, project, imgSrc, as.id) : null;
+          const pastBudget = inShot && as.kind === "image" && !liveTag && !!resolvedImage(as, imgSrc);
           return (
-            <div key={as.id} className={"lv-simplecard " + (inShot ? "on " : "") + (!sel ? "nosel" : "")}
+            <div key={as.id} className={"lv-simplecard " + (inShot ? "on " : "") + (pastBudget ? "oob " : "") + (!sel ? "nosel" : "")}
               title={sel ? `Toggle into ${sel.code}` : "Select a shot on the board to toggle its cast"}
               onClick={() => sel && setCard(sel.a.id, sel.c.id, (c) => ({ ...c, cast: (c.cast || []).includes(as.id) ? c.cast.filter((x) => x !== as.id) : [...(c.cast || []), as.id] }))}>
               {src ? <img src={src} alt="" /> : <span className="lv-castph" />}
               <b>{as.name || as.kind}</b><span className="lv-dim">{as.tag}</span>
+              {/* Shared liveTagTitle/liveTagText wording, same round-3 mode-awareness as
+                  the detailed rows above -- a Simple card must never claim "sent" on a
+                  mode that doesn't attach cast pictures. Structure unchanged from round 2:
+                  no-picture still renders nothing here (the compact card has no dash). */}
+              {liveTag ? <span className="lv-livetag" title={liveTagTitle(liveTag, pastBudget, sel.c.mode, sel.code)}>{liveTag}</span>
+                : pastBudget ? <span className="lv-livetag oob" title={liveTagTitle(liveTag, pastBudget, sel.c.mode, sel.code)}>{liveTagText(liveTag, pastBudget, sel.c.mode)}</span> : null}
             </div>
           );
         })}</div>
@@ -2221,7 +2461,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           if (pending != null && activeRef.current) {
             const a = activeRef.current;
             const already = !!a.c.promptOverride;
-            const composed = already ? null : shotText(a, project);
+            // imgSrc: drawer-COUPLED comparator (the flushed text was seeded thumbs-aware
+            // by the prefill effect) -- composing without it here would freeze every
+            // thumb-carrying prefilled prompt as an override the moment Generate-all is
+            // clicked. See the prefill effect's payload.prompt comment for the family.
+            const composed = already ? null : shotText(a, project, imgSrc);
             if (already || pending !== composed) {
               const patchedCard = setPromptOverride(a.c, pending);
               liveEntries = entries.map((e) => (e.c.id === a.c.id ? { ...e, c: patchedCard } : e));
@@ -2387,6 +2631,17 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                 <label className="sb-lab">Other references &amp; @tags</label>
                 {c.refs.map((r) => {
                   const preview = r.thumbId ? thumbs[r.thumbId] : (r.kind === "image" && r.source.startsWith("http") ? r.source : null);
+                  // Same live-number treatment the Cast & assets rows got in round 2 (see
+                  // castList's liveTag comment) -- round 2 left THESE rows showing only
+                  // the stale stored r.tag, so a ref whose real position had shifted kept
+                  // asserting a number the composed prompt and the drawer no longer use.
+                  // Image refs only: @videoN/@audioN are their own namespaces, never
+                  // renumbered by position -- there the stored tag IS the live name
+                  // (shotText() prints it verbatim; see its video-ref comment), so a
+                  // second "live" copy of it would be noise. Shares liveTagText/
+                  // liveTagTitle with the cast rows so the two row types cannot drift.
+                  const refLiveTag = r.kind === "image" ? positionTag(live, project, imgSrc, r.id) : null;
+                  const refPastBudget = r.kind === "image" && !refLiveTag && !!resolvedImage(r, imgSrc);
                   return (
                     <div className="sb-ref" key={r.id}>
                       {r.kind === "image" ? (
@@ -2398,6 +2653,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                       <div className="sb-refbody">
                         <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
                           <input className="sb-tagin sb-mono" value={r.tag} onChange={(e) => setRef(live.a.id, c.id, r.id, { tag: e.target.value })} />
+                          {r.kind === "image" && (
+                            <span className={"lv-livetag" + (refPastBudget ? " oob" : "")}
+                              title={liveTagTitle(refLiveTag, refPastBudget, c.mode, live.code)}>
+                              {liveTagText(refLiveTag, refPastBudget, c.mode)}
+                            </span>
+                          )}
                           <span className="sb-hint">{r.kind}</span>
                           <button className="sb-ico" style={{ marginLeft: "auto" }} onClick={() => delRef(live.a.id, c.id, r)}>✕</button>
                         </div>
@@ -2573,7 +2834,12 @@ function useProjectStore(setSelShot) {
   useEffect(() => {
     if (!project || castImported.current) return;
     castImported.current = true;
-    const ids = parseCastIdsFromSearch(location.search);
+    // Two filters, deliberately: parseCastIdsFromSearch is the URL *sanitiser* (safe
+    // characters only, so nothing can escape a path or a query), and isCatalogMediaId is
+    // the *grammar* -- applied here, at the one call site that has both modules in scope,
+    // so neither file has to carry a second copy of the other's rule. Junk in the URL is
+    // dropped rather than becoming a cast member with no picture.
+    const ids = parseCastIdsFromSearch(location.search).filter(isCatalogMediaId);
     if (!ids.length) return;
     setProject((p) => {
       const existing = p.assets || [];
@@ -2755,7 +3021,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     (prev && prev.ids.has(cardId)) ? { ...prev, outcomes: { ...prev.outcomes, [cardId]: outcome } } : prev);
 
   const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId]
-    : (source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null);
+    : (source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null);
   /* Build the /api/loom/generate + /api/price payload for a shot (single source).
      Wraps the pure, imported buildShotPayload with this hook's own `project` state
      + `imgSrc` (closes over `thumbs`), preserving the original single-argument
@@ -3284,10 +3550,17 @@ function useExportPipeline(project, thumbs) {
 
   const download = (text, name, type) => { const url = URL.createObjectURL(new Blob([text], { type }));
     const a = document.createElement("a"); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
+  // shotText is handed over UNBOUND, so buildShotListText composes noImgSrc -- the
+  // drawer-DECOUPLED family (2026-07-27, round 3 resolver-split audit; same reasoning as
+  // copyShot in App below): the exported shot list is a standalone .txt rendering that
+  // never feeds or gets compared against the drawer's prompt box, and session-local thumb
+  // data-URL numbering would be meaningless in a file on disk. The drawer-coupled family
+  // (prefill/comparators in LoomV2) must all compose WITH imgSrc.
   const exportAll = () => download(buildShotListText(project, fmt, actLetter, shotText),
     `${project.name.replace(/\s+/g, "_")}_shotlist.txt`, "text/plain");
   const exportJSON = () => download(JSON.stringify({ project, thumbs }, null, 2), `${project.name.replace(/\s+/g, "_")}_backup.json`, "application/json");
   const [bundling, setBundling] = useState(false);
+  const [bundleMissing, setBundleMissing] = useState(null);   // M24 report: {total, rows, hidden} or null
   // Tier 2: same {project, thumbs} as the lightweight backup, but the server zips in
   // every media file the project actually references (resultMid, both frame slots, every
   // cast/asset) -- for sharing with someone who doesn't share your catalog. media_ids ride
@@ -3300,13 +3573,22 @@ function useExportPipeline(project, thumbs) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project, thumbs }) });
       if (!r.ok) { const d = await r.json().catch(() => ({})); alert("Bundle export failed: " + (d.error || r.status)); return; }
-      const missing = parseInt(r.headers.get("X-Bundle-Missing-Count") || "0", 10);
+      // A partial bundle is still a successful export, so the report about it has to reach the
+      // owner some other way. Both headers, not just the count: "2 referenced file(s) couldn't
+      // be found" told them a number and left them hand-diffing every reference in the project
+      // against the zip's media/ folder to find out WHICH shot lost a file (M24). The act/shot
+      // labels come from bundleMissingReport() walking the project we just posted -- see its
+      // comment in loom-core.js for why they are not in the (length-capped) header.
+      const report = bundleMissingReport(project, r.headers.get("X-Bundle-Missing-Count"), r.headers.get("X-Bundle-Missing"));
       const blob = await r.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url;
       a.download = `${project.name.replace(/\s+/g, "_")}_bundle.zip`; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      if (missing) alert(`Bundle exported, but ${missing} referenced file(s) couldn't be found on disk and were left out.`);
+      // A dialog, not an alert(): this is a LIST the owner reads while looking at the board,
+      // and alert() is modal to the whole tab, unreadable past a couple of lines, and gone the
+      // moment it is dismissed. Same overlay the cut export already uses (setExp/.sb-export-box).
+      if (report.total) setBundleMissing(report);
     } catch { alert("Bundle export failed -- network error."); }
     finally { setBundling(false); }
   };
@@ -3342,7 +3624,8 @@ function useExportPipeline(project, thumbs) {
   const closeSequence = () => setSeq(null);
 
   return { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
-    exportAll, exportJSON, exportBundle, bundling };
+    exportAll, exportJSON, exportBundle, bundling,
+    bundleMissing, closeBundleMissing: () => setBundleMissing(null) };
 }
 
 export default function App() {
@@ -3452,7 +3735,8 @@ export default function App() {
   }, [activeId]);
 
   const { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
-    exportAll, exportJSON, exportBundle, bundling } = useExportPipeline(project, thumbs);
+    exportAll, exportJSON, exportBundle, bundling,
+    bundleMissing, closeBundleMissing } = useExportPipeline(project, thumbs);
 
   // Import a whole gallery collection as reusable @image references (media_id kept
   // -> free reference at generate time). Tags continue from the current max @imageN.
@@ -3467,6 +3751,14 @@ export default function App() {
     });
   };
 
+  // Deliberately noImgSrc -- the drawer-DECOUPLED shotText family (2026-07-27, round 3
+  // resolver-split audit). A copied shot is a standalone rendering for pasting OUTSIDE
+  // this app; it never feeds the drawer's prompt box and is never compared against it, so
+  // the "same resolver everywhere the drawer is involved" rule (see the prefill effect's
+  // payload.prompt comment in LoomV2) does not bind it. It cites durable mediaId-backed
+  // images only, by design -- a citation numbered off a session-local thumb data-URL
+  // means nothing on a clipboard. The drawer-coupled family (prefill, mg-prompt-commit,
+  // outgoing-shot flush, re-sync, Generate-all flush) must all pass imgSrc.
   const copyShot = (entry) => navigator.clipboard?.writeText(shotText(entry, project));
   const setLook = (v) => setProject((p) => ({ ...p, look: v }));
   const setDraft = (v) => setProject((p) => ({ ...p, draft: v }));
@@ -3515,6 +3807,11 @@ export default function App() {
             </>}
             {exp.status === "done" && <>
               <div className="sb-exp-txt" style={{ color: "var(--green)" }}>&#10003; Cut rendered.</div>
+              {/* A render that SUCCEEDED but came out different from what was asked for -- today
+                  that means no audio track, because a missing ffprobe made every clip's length
+                  unreadable. Shown next to the download button rather than logged, since the
+                  owner is the one who can install the missing piece. */}
+              {exp.warning && <div className="sb-exp-txt" style={{ color: "var(--amber)" }}>&#9888; {exp.warning}</div>}
               <a className="sb-btn amber" href="/api/loom/export-file" style={{ alignSelf: "center", textDecoration: "none" }}>&#8681; Download mp4</a>
               <button className="sb-btn ghost sm" style={{ alignSelf: "center" }} onClick={closeExport}>Close</button>
             </>}
@@ -3523,6 +3820,38 @@ export default function App() {
                 {exp.status === "failed" ? ("⚠ " + (exp.error || "export failed")) : "■ Export stopped."}</div>
               <button className="sb-btn ghost sm" style={{ alignSelf: "center" }} onClick={closeExport}>Close</button>
             </>}
+          </div>
+        </div>)}
+      {/* Full-bundle export, partial result (M24). The zip is already downloaded and still
+          useful -- this names the references whose file wasn't on disk, by the same A·01 shot
+          codes the board shows, so the owner knows where to look instead of being handed a
+          count. Dismiss-only: there is nothing to retry here, the fix is off-screen (re-sync
+          or re-generate the shot), and the durable copy travels in the zip's project.json. */}
+      {bundleMissing && (
+        <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget) closeBundleMissing(); }}>
+          <div className="sb-export-box">
+            <div className="sb-pick-head"><span className="sb-pick-t">Bundle exported, {bundleMissing.total} file(s) left out</span>
+              <button className="sb-pick-x" style={{ marginLeft: "auto" }} onClick={closeBundleMissing}>&#215;</button></div>
+            <div className="sb-exp-txt" style={{ color: "var(--coral)" }}>
+              &#9888; No file on disk for these references &mdash; everything else exported normally.</div>
+            {bundleMissing.rows.length > 0 && (
+              <div className="sb-miss-list">
+                {bundleMissing.rows.map((row) => (
+                  <div className="sb-miss-row" key={row.mid}>
+                    {row.where.length
+                      ? row.where.map((w, i) => <b key={i}>{w}</b>)
+                      : <i>not referenced by any shot or cast entry in this project</i>}
+                    <span className="sb-miss-id">{row.mid}</span>
+                  </div>))}
+              </div>)}
+            {bundleMissing.hidden > 0 && (
+              <div className="sb-exp-txt" style={{ color: "var(--ink2)", fontSize: "12px" }}>
+                {bundleMissing.rows.length
+                  ? `+${bundleMissing.hidden} more, not listed here.`
+                  : `The server sent no id list.`}
+                The complete list, with the shot each id came from, is inside the zip:
+                <b>project.json</b> &rarr; <b>missing_media</b>.</div>)}
+            <button className="sb-btn ghost sm" style={{ alignSelf: "center" }} onClick={closeBundleMissing}>Close</button>
           </div>
         </div>)}
       {pickCb && (pickAllowType
