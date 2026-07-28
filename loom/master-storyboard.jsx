@@ -7,7 +7,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import {
   CONNECT, CONTINUITY_PHRASE, actLetter,
   maxTagNum, nextTag, frameLinked, connectMeta, continuityLinked,
-  flat, shotText, pickTarget, pickVideoTarget, positionTag, durOf, reelStats, effectivePrompt,
+  flat, shotText, castMissingImages, pickTarget, pickVideoTarget, positionTag, durOf,
+  reelStats, effectivePrompt,
   priceFingerprint, tallyPrices, formatCostEstimate, costTooltip,
   shotPayload as buildShotPayload,
 } from "./src/loom-core.js";
@@ -233,10 +234,34 @@ const PKEY = "storyboard:v2:project";        // legacy single-project key — mi
 const PPRE = "storyboard:v2:proj:";          // one KV key per saved storyboard: PPRE + id
 const ACTIVE_KEY = "storyboard:v2:active";   // id of the storyboard currently open
 const TPRE = "storyboard:v2:thumb:";
-async function sGet(k) { try { const r = await window.storage.get(k); return r ? r.value : null; } catch { return null; } }
-async function sSet(k, v) { try { await window.storage.set(k, v, false); } catch (e) { console.error(e); } }
-async function sList(p) { try { const r = await window.storage.list(p, false); if (!r) return []; return (r.keys || []).map((k) => (typeof k === "string" ? k : k.key)); } catch { return []; } }
-async function sDel(k) { try { await window.storage.delete(k); } catch (e) { console.error(e); } }
+// Every one of these used to swallow its error and answer as though nothing had gone wrong:
+// sGet returned null for BOTH "no such key" and "the read failed", sList returned [] for
+// both "nothing stored" and "the listing failed", and sSet/sDel reported success after a
+// failed write. That is not a small thing here -- storyboards ARE this storage. A delete
+// guarded on `if (!p)` could not tell a hiccup from an empty board, and a save that never
+// landed looked identical to one that did.
+// They still never THROW -- every caller is written around a soft answer, and turning that
+// into an exception mid-autosave would be its own bug -- but a real failure is now recorded
+// and surfaced once, so it stops being invisible. sGet additionally reports whether the read
+// itself failed, which is the distinction the delete path actually needs.
+let _storeWarned = false;
+function storeFailed(op, k, e) {
+  console.error("storage " + op + " failed for " + k, e);
+  // One banner per session: a flapping backend would otherwise stack a toast per autosave.
+  if (!_storeWarned && typeof window !== "undefined" && window.Toast) {
+    _storeWarned = true;
+    window.Toast.show({ kind: "err", sticky: true, title: "Storyboard storage is failing",
+      msg: "Your recent changes may not be saved. Check the server, then reload before editing further." });
+  }
+}
+async function sGetX(k) {
+  try { const r = await window.storage.get(k); return { value: r ? r.value : null, failed: false }; }
+  catch (e) { storeFailed("read", k, e); return { value: null, failed: true }; }
+}
+async function sGet(k) { return (await sGetX(k)).value; }
+async function sSet(k, v) { try { await window.storage.set(k, v, false); return true; } catch (e) { storeFailed("write", k, e); return false; } }
+async function sList(p) { try { const r = await window.storage.list(p, false); if (!r) return []; return (r.keys || []).map((k) => (typeof k === "string" ? k : k.key)); } catch (e) { storeFailed("list", p, e); return []; } }
+async function sDel(k) { try { await window.storage.delete(k); return true; } catch (e) { storeFailed("delete", k, e); return false; } }
 
 function fileToThumb(file, maxDim = 480, q = 0.72) {
   return new Promise((res, rej) => {
@@ -410,6 +435,9 @@ const V2_STYLES = `
    as "shot generation status" and margin-left:0 so it sits with mode/duration on the left
    instead of racing .lv-st's own margin-left:auto for the row's one right-aligned slot. */
 .lv-st.linked{margin-left:0;color:var(--cyan);background:color-mix(in srgb,var(--cyan) 16%,transparent);}
+/* A shot cast someone it has no picture for: they are left out of the prompt (citing an
+   @imageN with nothing behind it is worse than saying nothing), so the card has to say so. */
+.lv-st.warn{margin-left:0;color:var(--peach);background:color-mix(in srgb,var(--peach) 16%,transparent);}
 /* Imported-footage provenance badge -- coexists with the real status pill the same way
    .linked does (margin-left:0, not competing for the row's one auto-margined slot).
    Neutral/informational, not a warning -- reuses .todo's own subtext-on-base treatment
@@ -1408,6 +1436,18 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                     <div className="lv-code">{e.code}</div>
                     <div className="lv-ctitle">{e.c.title || "untitled"}</div>
                     <div className="lv-cmeta"><span className="lv-mode">{e.c.mode}</span><span className="lv-dur">{durOf(e.c)}s</span>
+                      {/* A cast member on this shot with no picture for it. shotText() leaves
+                          them out of the prompt rather than citing an @imageN with nothing
+                          behind it, so this is what keeps that from being silent. */}
+                      {(() => {
+                        const miss = castMissingImages(e, project, imgSrc);
+                        return miss.length ? (
+                          <span className="lv-st warn"
+                            title={`No picture on this shot for ${miss.join(", ")} — they are cast here but cannot be referenced, so they are left out of the prompt. Add an image to use them.`}>
+                            {miss.length === 1 ? `${miss[0]}: no image` : `${miss.length} cast: no image`}
+                          </span>
+                        ) : null;
+                      })()}
                       {linked && <span className="lv-st linked" title="Opening frame matches the previous shot's closing frame — continuous across the cut">linked</span>}
                       {e.c.imported && <span className="lv-st imported" title="Imported from your gallery -- no PixAI task backs this clip, so re-roll has nothing to redo">imported</span>}
                       <span className={"lv-st " + st}
@@ -1419,7 +1459,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                       <button className="lv-ico xs" onClick={() => moveCard(act.id, e.ci, -1)} title="Move up">&#8593;</button>
                       <button className="lv-ico xs" onClick={() => moveCard(act.id, e.ci, 1)} title="Move down">&#8595;</button>
                       <button className="lv-ico xs" onClick={() => dupCard(act.id, e.c)} title="Duplicate">&#10697;</button>
-                      <button className="lv-ico xs danger" onClick={() => delCard(act.id, e.c)} title="Delete">&#10005;</button>
+                      {/* Confirmed, like every other destructive action here. A shot card holds
+                          a prompt, its cast, its frames and any generated result, and the ✕ sits
+                          between Duplicate and a dropdown -- there was no dialog and no undo. */}
+                      <button className="lv-ico xs danger" title="Delete"
+                        onClick={() => { if (window.confirm(`Delete shot ${e.code}${e.c.title ? ` — "${e.c.title}"` : ""}? This can't be undone.`)) delCard(act.id, e.c); }}>&#10005;</button>
                       {project.acts.length > 1 && (
                         <select className="lv-actsel" value="" title="Move to another act"
                           onChange={(ev) => ev.target.value && moveCardToAct(act.id, e.c, ev.target.value)}>
@@ -2485,15 +2529,21 @@ function useProjectStore(setSelShot) {
       // this did before) hands the 600ms autosave a blank board to write over a survivor's
       // own key — one dropped read costing TWO storyboards, the second of which nobody
       // asked to delete.
-      let next = null, p = null;
+      let next = null, p = null, anyReadFailed = false;
       for (const cand of list) {
         if (cand.id === id) continue;
         try {
-          const raw = await sGet(PPRE + cand.id);
-          if (raw) { p = JSON.parse(raw); next = cand; break; }
-        } catch { /* try the next survivor */ }
+          const got = await sGetX(PPRE + cand.id);      // .failed distinguishes a broken read
+          if (got.failed) { anyReadFailed = true; continue; }
+          if (got.value) { p = JSON.parse(got.value); next = cand; break; }
+        } catch { anyReadFailed = true; }               // stored, but not parseable
       }
-      if (!p) { window.alert("Couldn't open another storyboard, so nothing was deleted. Try again."); return; }
+      if (!p) {
+        window.alert(anyReadFailed
+          ? "Couldn't read your other storyboards, so nothing was deleted. Check the server and try again."
+          : "Couldn't open another storyboard, so nothing was deleted. Try again.");
+        return;
+      }
       // A pending 600ms autosave timer for THIS project can otherwise fire during the
       // awaits below (sDel/sSet both hit the network) and re-create the very key
       // sDel just removed, silently resurrecting a "permanently deleted" board. The

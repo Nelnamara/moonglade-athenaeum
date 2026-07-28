@@ -94,6 +94,10 @@ var LoomBundle = (() => {
     const allVideoRefs = (entry.c.refs || []).filter((r) => r.kind === "video");
     return { type: "append", tag: nextTag(allVideoRefs, "@video") };
   };
+  var castMissingImages = (entry, p, imgSrc) => {
+    const resolve = imgSrc || noImgSrc;
+    return (p.assets || []).filter((as) => (entry.c.cast || []).includes(as.id)).filter((as) => !positionTag(entry, p, resolve, as.id)).map((as) => as.name || "(unnamed)");
+  };
   var shotText = (entry, p, imgSrc) => {
     const { c, code, ai } = entry;
     if (c.promptOverride) return effectivePrompt(c);
@@ -102,7 +106,7 @@ var LoomBundle = (() => {
     const prev = idx > 0 ? flat(p)[idx - 1] : null;
     const L = [`[${code} \u2014 "${c.title || "untitled"}"]  (${c.mode}, ~${c.duration}s, ${connectMeta(c.connect).label})`, ""];
     if (c.connect === "extend" && prev) L.push(`Continue seamlessly from the previous clip ${prev.code} (upload it as @video1).`);
-    if (c.connect === "flf") {
+    if (c.mode === "FLF") {
       const openTag = positionTag(entry, p, resolve, "openFrame") || c.openFrame.tag;
       const closeTag = positionTag(entry, p, resolve, "closeFrame") || c.closeFrame.tag;
       if (c.openFrame.desc || openTag) L.push(`Opening frame ${openTag || "(first image)"}: ${c.openFrame.desc || "\u2014"}`);
@@ -111,18 +115,17 @@ var LoomBundle = (() => {
     L.push("", c.prompt || "(prompt tbd)");
     if (c.connect === "extend" || c.connect === "flf") L.push(CONTINUITY_PHRASE);
     if (p.look) L.push("", `Look (consistent across the film): ${p.look}`);
-    const usedCast = (p.assets || []).filter((as) => c.cast.includes(as.id));
+    const usedCast = (p.assets || []).filter((as) => c.cast.includes(as.id)).map((as) => ({ as, tag: positionTag(entry, p, resolve, as.id) })).filter((x) => x.tag);
     if (usedCast.length) {
       L.push("", "Keep consistent:");
-      usedCast.forEach((as) => {
-        const tag = positionTag(entry, p, resolve, as.id) || as.tag;
+      usedCast.forEach(({ as, tag }) => {
         L.push(`  ${as.name} \u2014 ${as.lock ? "maintain exact appearance from " : "reference "}${tag}`);
       });
     }
-    if (c.refs.length) {
+    const usedRefs = (c.refs || []).map((r) => ({ r, tag: positionTag(entry, p, resolve, r.id) })).filter((x) => x.tag);
+    if (usedRefs.length) {
       L.push("", "Other references:");
-      c.refs.forEach((r) => {
-        const tag = positionTag(entry, p, resolve, r.id) || r.tag;
+      usedRefs.forEach(({ r, tag }) => {
         L.push(`  ${tag} \u2014 ${r.role || "(role tbd)"}${r.source ? `  [${r.source}]` : ""}`);
       });
     }
@@ -669,19 +672,38 @@ ${"=".repeat(48)}
   var PPRE = "storyboard:v2:proj:";
   var ACTIVE_KEY = "storyboard:v2:active";
   var TPRE = "storyboard:v2:thumb:";
-  async function sGet(k) {
+  var _storeWarned = false;
+  function storeFailed(op, k, e) {
+    console.error("storage " + op + " failed for " + k, e);
+    if (!_storeWarned && typeof window !== "undefined" && window.Toast) {
+      _storeWarned = true;
+      window.Toast.show({
+        kind: "err",
+        sticky: true,
+        title: "Storyboard storage is failing",
+        msg: "Your recent changes may not be saved. Check the server, then reload before editing further."
+      });
+    }
+  }
+  async function sGetX(k) {
     try {
       const r = await window.storage.get(k);
-      return r ? r.value : null;
-    } catch {
-      return null;
+      return { value: r ? r.value : null, failed: false };
+    } catch (e) {
+      storeFailed("read", k, e);
+      return { value: null, failed: true };
     }
+  }
+  async function sGet(k) {
+    return (await sGetX(k)).value;
   }
   async function sSet(k, v) {
     try {
       await window.storage.set(k, v, false);
+      return true;
     } catch (e) {
-      console.error(e);
+      storeFailed("write", k, e);
+      return false;
     }
   }
   async function sList(p) {
@@ -689,15 +711,18 @@ ${"=".repeat(48)}
       const r = await window.storage.list(p, false);
       if (!r) return [];
       return (r.keys || []).map((k) => typeof k === "string" ? k : k.key);
-    } catch {
+    } catch (e) {
+      storeFailed("list", p, e);
       return [];
     }
   }
   async function sDel(k) {
     try {
       await window.storage.delete(k);
+      return true;
     } catch (e) {
-      console.error(e);
+      storeFailed("delete", k, e);
+      return false;
     }
   }
   function fileToThumb(file, maxDim = 480, q = 0.72) {
@@ -904,6 +929,9 @@ ${"=".repeat(48)}
    as "shot generation status" and margin-left:0 so it sits with mode/duration on the left
    instead of racing .lv-st's own margin-left:auto for the row's one right-aligned slot. */
 .lv-st.linked{margin-left:0;color:var(--cyan);background:color-mix(in srgb,var(--cyan) 16%,transparent);}
+/* A shot cast someone it has no picture for: they are left out of the prompt (citing an
+   @imageN with nothing behind it is worse than saying nothing), so the card has to say so. */
+.lv-st.warn{margin-left:0;color:var(--peach);background:color-mix(in srgb,var(--peach) 16%,transparent);}
 /* Imported-footage provenance badge -- coexists with the real status pill the same way
    .linked does (margin-left:0, not competing for the row's one auto-margined slot).
    Neutral/informational, not a warning -- reuses .todo's own subtext-on-base treatment
@@ -1711,7 +1739,17 @@ ${"=".repeat(48)}
           })()),
           /* @__PURE__ */ React.createElement("div", { className: "lv-code" }, e.code),
           /* @__PURE__ */ React.createElement("div", { className: "lv-ctitle" }, e.c.title || "untitled"),
-          /* @__PURE__ */ React.createElement("div", { className: "lv-cmeta" }, /* @__PURE__ */ React.createElement("span", { className: "lv-mode" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lv-dur" }, durOf2(e.c), "s"), linked && /* @__PURE__ */ React.createElement("span", { className: "lv-st linked", title: "Opening frame matches the previous shot's closing frame \u2014 continuous across the cut" }, "linked"), e.c.imported && /* @__PURE__ */ React.createElement("span", { className: "lv-st imported", title: "Imported from your gallery -- no PixAI task backs this clip, so re-roll has nothing to redo" }, "imported"), /* @__PURE__ */ React.createElement(
+          /* @__PURE__ */ React.createElement("div", { className: "lv-cmeta" }, /* @__PURE__ */ React.createElement("span", { className: "lv-mode" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lv-dur" }, durOf2(e.c), "s"), (() => {
+            const miss = castMissingImages(e, project, imgSrc);
+            return miss.length ? /* @__PURE__ */ React.createElement(
+              "span",
+              {
+                className: "lv-st warn",
+                title: `No picture on this shot for ${miss.join(", ")} \u2014 they are cast here but cannot be referenced, so they are left out of the prompt. Add an image to use them.`
+              },
+              miss.length === 1 ? `${miss[0]}: no image` : `${miss.length} cast: no image`
+            ) : null;
+          })(), linked && /* @__PURE__ */ React.createElement("span", { className: "lv-st linked", title: "Opening frame matches the previous shot's closing frame \u2014 continuous across the cut" }, "linked"), e.c.imported && /* @__PURE__ */ React.createElement("span", { className: "lv-st imported", title: "Imported from your gallery -- no PixAI task backs this clip, so re-roll has nothing to redo" }, "imported"), /* @__PURE__ */ React.createElement(
             "span",
             {
               className: "lv-st " + st,
@@ -1724,7 +1762,17 @@ ${"=".repeat(48)}
             },
             gs && gs.msg ? gs.msg : st
           )),
-          /* @__PURE__ */ React.createElement("div", { className: "lv-crow", onClick: (ev) => ev.stopPropagation(), onDoubleClick: (ev) => ev.stopPropagation() }, /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => moveCard(act.id, e.ci, -1), title: "Move up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => moveCard(act.id, e.ci, 1), title: "Move down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => dupCard(act.id, e.c), title: "Duplicate" }, "\u29C9"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs danger", onClick: () => delCard(act.id, e.c), title: "Delete" }, "\u2715"), project.acts.length > 1 && /* @__PURE__ */ React.createElement(
+          /* @__PURE__ */ React.createElement("div", { className: "lv-crow", onClick: (ev) => ev.stopPropagation(), onDoubleClick: (ev) => ev.stopPropagation() }, /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => moveCard(act.id, e.ci, -1), title: "Move up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => moveCard(act.id, e.ci, 1), title: "Move down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => dupCard(act.id, e.c), title: "Duplicate" }, "\u29C9"), /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              className: "lv-ico xs danger",
+              title: "Delete",
+              onClick: () => {
+                if (window.confirm(`Delete shot ${e.code}${e.c.title ? ` \u2014 "${e.c.title}"` : ""}? This can't be undone.`)) delCard(act.id, e.c);
+              }
+            },
+            "\u2715"
+          ), project.acts.length > 1 && /* @__PURE__ */ React.createElement(
             "select",
             {
               className: "lv-actsel",
@@ -2629,21 +2677,26 @@ ${"=".repeat(48)}
       const tgt = list.find((x) => x.id === id);
       if (!window.confirm(`Delete "${tgt && tgt.name || "this storyboard"}"? This can't be undone.`)) return;
       if (id === activeId) {
-        let next = null, p = null;
+        let next = null, p = null, anyReadFailed = false;
         for (const cand of list) {
           if (cand.id === id) continue;
           try {
-            const raw = await sGet(PPRE + cand.id);
-            if (raw) {
-              p = JSON.parse(raw);
+            const got = await sGetX(PPRE + cand.id);
+            if (got.failed) {
+              anyReadFailed = true;
+              continue;
+            }
+            if (got.value) {
+              p = JSON.parse(got.value);
               next = cand;
               break;
             }
           } catch {
+            anyReadFailed = true;
           }
         }
         if (!p) {
-          window.alert("Couldn't open another storyboard, so nothing was deleted. Try again.");
+          window.alert(anyReadFailed ? "Couldn't read your other storyboards, so nothing was deleted. Check the server and try again." : "Couldn't open another storyboard, so nothing was deleted. Try again.");
           return;
         }
         clearTimeout(saveTimer.current);
