@@ -2066,4 +2066,16 @@ Loom V2 is a fixed four-region shell (top strip, left card, center board, right 
 
 **Why.** Stated as a deliberate property of the shell; no further rationale recorded in the doc.
 
+### The bundle's unlock split: branding opens, achievement assets stay sealed  ·  *2026-07-27*
+
+Contents and unlock model, decided in chat: ALL of the owner's branding goes into the container (a small owner audit of the base items is still owed before the list is final). Earning "Under the Hood" unlocks the full branding folder — the user-facing customization slots are **Icons/marks · Banners (main + login screen) · Mascots · Rewards** — but NOT badges, the Mystery Konami-code assets, or the tier frames: those stay sealed to the achievements that earn them. Likewise sealed: ANY file carrying achievement data or descriptions. This needs recoding — badges, Konami assets and frames are currently counted as part of "Branding" and must be split out so the branding unlock cannot reach them.
+
+**Why.** The branding unlock is the "make it yours" surface; the sealed set is earned surprises, and one achievement must not open another's reward. Two boundaries to pin during the owner's audit: the mascot bucket spans both sides (the general pack — loader, sad-on-fail, offline — reads as branding; the per-achievement animations under `mascots/ach/` read as achievement content), and the bundle cannot seal what GitHub already publishes — the roster JSON remains its own open call, see [[The 57-roster JSON spoiler question is an open owner call, separate from the naming pass]].
+
+### BANKED: a Starfall-class fanfare for the branding unlock  ·  *2026-07-27*
+
+Earning "Under the Hood" gets a large fanfare in the same class as the Konami code's Starfall. Banked as a want; owner explicitly marked it unscoped.
+
+**Why.** The bar is named now ("similar to konami code's starfall") so the moment doesn't get shipped small later — and marking it banked keeps it from being built before it is designed.
+
 ---
