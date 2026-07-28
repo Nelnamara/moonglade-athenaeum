@@ -42,6 +42,13 @@ git tags. Full prose notes for tagged versions live on
 
 ### Changed
 
+- **A board shot card actually shows its opening frame.** The frame box was 48px tall against a
+  144px-wide card (`.lv-cards` minmax(158px) minus the card's padding), and `object-fit: cover`
+  meant that discarded ~40% of the height and showed a middle band. A 16:9 frame wants ~81px at
+  that width and a 2048x1072 clip wants ~75px, so the box is now 80px. Landed right after
+  imported clips started carrying real first/last frames, which is what made the crop obvious:
+  the frame had been there, just not visible.
+
 - **The Loom is reachable from a phone.** Its nav button was hidden below 480px, on the theory
   that a dense multi-panel tool could not work on a phone screen. V2 made that stale — it is
   usable out of the box in landscape — so the gate is gone and the button is in the nav at every
