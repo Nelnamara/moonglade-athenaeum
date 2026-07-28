@@ -27,15 +27,21 @@ Fixed: `C01`, `C02`, `C03`, `C04`, `C05`, `C06`, `C07`, `C08`, `C09`, `C10`, `C1
 No criticals, highs or lows remain: `L02` is closed by design, `L03` is superseded by the
 planned asset bundling, `L04` is fixed. Everything above is on `master`.
 
-The remaining 27 -- all medium -- are on `med-review`, rebased onto that master and
-described in the next section.
+The remaining 27 -- all medium -- were merged to `master` on 2026-07-28 (from `med-review`,
+now deleted) and are described in the next section.
 
-## Medium round — 2026-07-27, branch `med-review` (NOT merged)
+## Medium round — 2026-07-27, merged to master 2026-07-28
 
-**The remaining 27 Mediums are fixed on `med-review`,** awaiting the owner's review:
+**The remaining 27 Mediums are fixed and confirmed on `master`:**
 `M01` `M02` `M03` `M04` `M05` `M06` `M07` `M10` `M11` `M12` `M13` `M14` `M16` `M17` `M18`
 `M19` `M20` `M21` `M23` `M24` `M25` `M26` `M27` `M30` `M31` `M32` `M35`.
 Python and node suites green; the committed Loom bundle matches a fresh build.
+
+**Not yet logged to `CHANGELOG.md`.** Every Critical and High below has a matching
+`[Unreleased]` entry there; these 27 Mediums don't yet -- only the two that needed an owner
+decision (`M07`, `M23`) made it into `docs/DECISIONS.md`. This file stays undeleted until
+that write-up happens, per the "delete once logged" rule above -- it's currently the only
+place the medium fixes are documented in prose.
 
 **Read this before trusting the entries below.** Every one of these was written by a fixing
 agent, then attacked by a reviewer told to REFUTE it. **Five did not survive the first pass**
