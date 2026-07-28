@@ -193,6 +193,14 @@ Setting the library folder only repoints configuration. It validates before writ
 
 **Why.** Re-pointing a library must never be able to relocate or destroy the owner's archive as a side effect; the grep-test exists so a future convenience feature can't quietly add data movement to this path.
 
+### The achievement ladder is Design Pass scope — its gaps are NOT bugs  ·  *2026-07-28*
+
+The whole achievement/reward system — the ladder, which achievements carry rewards, the mark/skin/banner pairings, unreachable or unearnable entries, missing reward values — is **owner design work reserved for the Design Pass.** It has been scoped and re-explained by the owner many times. Individual gaps in it are **not defects and must not be filed, surfaced, or prioritised as bugs.**
+
+Concretely: "Completionist cannot be earned because two of its required metrics hang off the deleted Enhance surface" is a true observation and a **Design Pass item**, not a bug report. The same goes for blank reward fields, tier mappings that do not cover every track, and any "achievement X is unreachable" finding.
+
+**Why.** A 2026-07-28 automated sweep of this file read those gaps as live defects and put an unearnable achievement at the TOP of a bugs list handed to the owner — who had already deferred it repeatedly. That is the failure this entry exists to stop: the deferral was recorded for *specific* items ([[Toast tier colors — owner called it resolved, but the direction wasn't restated]], [[9-slice tier frames wrap legendary/feat grid tiles too — the answer to "frame or defer"]]) but never for the ladder as a whole, so every fresh reader re-derived it as broken. **The Design Pass keeps receding because each pass widens the frontier instead of clearing the path to it — treat anything achievement-shaped as already-scoped and already-deferred unless the owner says otherwise.**
+
 ### 57-vs-60 achievement gap stays open  ·  *2026-07-26*
 
 The gap is still open and that is fine. Owner, verbatim: *"Don't rush me LOL. We are thinking."* Do not re-ask.

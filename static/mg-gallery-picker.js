@@ -27,7 +27,7 @@
    same night, once the gallery's own #pick-modal migration (O13) became their first real
    caller -- all three exist because the gallery's own picker had them and losing them on
    migration would have been a regression, not a consolidation. Lesson: "zero callers
-   right now" is not the same claim as "will never have one" -- see docs/AUDIT_2026-07-21.md.
+   right now" is not the same claim as "will never have one" -- see the 2026-07-21 audit.
    Events (both bubble + compose, so a React host's DOM listener sees them):
      mg-pick  -- detail: {media_id, thumb, prompt, is_video}
      mg-close -- fired on Escape / backdrop click / the X button; the host is expected to
