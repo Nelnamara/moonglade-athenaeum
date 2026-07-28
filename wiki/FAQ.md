@@ -10,7 +10,12 @@ It's built to do the opposite of abuse: it only reads/manages *your own* account
 defaults to the **cheaper** generation priority, has no purchase automation, and is
 rate-paced to be polite. It does claim PixAI's own free rewards (`--claims`/`--claim`,
 daily credits + agent stamina) and auto-apply your free cards — self-service on your
-own account, not farming. Generation spends your own credits: the CLI always asks
+own account, not farming. `--claims` now separates "you have nothing to claim" from "I
+couldn't read your rewards": a request that failed says so plainly and tells you to re-run
+in a minute, instead of reporting the same cheerful *No claimable rewards found* it reports
+for a genuinely empty account. They look identical and mean opposite things, and the one
+that matters is the one where a ready reward is sitting there waiting. Nothing is claimed
+either way. Generation spends your own credits: the CLI always asks
 (`--confirm` is required to submit), while the web Generate drawer submits on click and
 shows a live price estimate up front instead. For the full, precise list of what this
 tool can and can't do to your account — plus a `READ_ONLY` config flag that refuses
@@ -44,22 +49,39 @@ requires an account on every path — including on the machine running it. Sign 
 phone and you can browse *and* generate, which is the point: the login exists so tablet
 generation is possible, not to keep you out.
 
-A few things stay stricter than "signed in", because they act on the server machine itself
-or delete irreversibly from your PixAI account: the destructive Control Panel jobs
-(organize, dedup-apply, rebuild-thumbnails), cloud bulk-delete, setting the API key or
-launcher icon, and importing local files into your library (**↑ Import** / `--import-local`).
-Those require a request from the machine running the server, no matter who is signed in.
+The rule is drawn around what you cannot take back: **permanent deletion, writes to
+`config.json`, the destructive maintenance jobs, and creating a login are localhost-only;
+everything else — including spending your credits — works from any signed-in device.**
+
+So generating, editing and Fix all work over the LAN, as do rating, collections, The Loom, CSV
+export, claiming rewards, the maintenance jobs that aren't marked destructive, and ordinary
+delete-to-Trash and restore-from-Trash (your file moves, but you can move it back — which is why
+moving files is not itself the thing that gets gated). What needs the machine running the server,
+no matter who is signed in: the
+destructive Control Panel jobs (organize, undo-organize, dedup-apply, dedup-delete,
+restore-orphans, rebuild-thumbnails) plus cancelling a job or editing the schedule; emptying the
+Trash or deleting from it forever; deleting from your PixAI account, per-image or in bulk;
+setting the API key, the library folder, or the launcher icon; importing local files (**↑ Import**
+/ `--import-local`); and changing the account roster — adding an account, removing someone
+*else's*, or resetting someone else's password.
 
 Still use a trusted network: the app is served over plain HTTP unless you pass `--https`,
 and a signed-in session on a shared network can spend your credits.
 
 **How do I add another person, or get back in if I'm locked out?**
 
-Add accounts from **Panel → Users** once you're signed in — any account can, since they're all
-equal-trust (there's no separate admin role). The login page *creates* an account only during
+Add accounts from **Panel → Users**, signed in **on the machine running the gallery** — the
+**Add user** form only appears there, and the route refuses a LAN request outright. Any account
+may do it; none may do it from across the network. There's no admin role — all accounts are
+equal-trust, and the gate asks *where you're sitting*, never *who you are*, so this stops your own
+tablet too. (The two account operations you can do to *yourself* from anywhere — change your own
+password, remove your own account — aren't an exception to that: they turn on whose account is
+being changed, not on any power your login holds. And removing your own account is still refused
+when it's the last one left, from every address.) The login page *creates* an account only during
 first-run setup (on the server's own machine, before any account exists), so once you've made
-yours it goes back to sign-in only and no one on your network can register themselves. That's
-by design — it's your library and your PixAI account behind it, not a public signup.
+yours it goes back to sign-in only and no one on your network can register themselves. That's by
+design — it's your library and your PixAI account behind it, not a public signup, and every
+extra account is another key to both.
 
 Locked out with an account already there? On the server machine,
 The Control Panel's **Users** tab handles this in the browser — change your own password from

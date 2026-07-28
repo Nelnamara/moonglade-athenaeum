@@ -67,7 +67,11 @@ The filter bar:
   choice, being purely cosmetic, is still install-wide.)
 - When any filter is active, the active-filter bar shows an **⬇ Export this view (CSV)**
   link that downloads exactly the rows you're looking at. (The Control Panel's **Download
-  catalog (CSV)** is the whole-library dump.)
+  catalog (CSV)** is the whole-library dump.) **It's a complete answer even mid-sync.** It
+  used to count the matching rows and then, a moment later, ask for that many — so a
+  "Sync now" job inserting rows in between meant the file shipped the old count out of the
+  new, larger set, with nothing in the CSV admitting it was short. It's now one query, which
+  has nothing to disagree with.
 
 ### Search operators
 
@@ -124,8 +128,33 @@ back (even via the browser Back button).
 
 ## Editing & curating
 
-- **Star ratings** (0–5) per image, inline, stored in `catalog.db`.
+- **Star ratings** (0–5) per image, inline, stored in `catalog.db`. **A rating that doesn't
+  reach the server now says so** rather than rolling back without a word: in the grid you get
+  a "Rating not saved" notice with the reason; on the detail page, which carries no notices,
+  the stars themselves turn red for a few seconds and the reason hangs off their tooltip.
+  Either way the stars go back to what the catalog really holds. That mattered — a silent
+  failure left the widget privately believing you'd set 4 stars while the display still read
+  0, so clicking the same star again to retry was read as "you already rated it 4, clear
+  it" and submitted a 0. Two clicks through one dropped connection unrated the image.
 - **Edit Prompt** — fix/annotate a single image's prompt on its detail page.
 - **Find/Replace** — bulk substring replace across selected prompts.
 - **Download ZIP** — bundle the selected full-res images (selection persists across pages).
 - **[Collections](Collections)** and **Select mode** — see that page.
+
+### Saved prompt snippets
+
+The **★ Snippets** button beside a prompt box stores fragments you reuse. Deleting one used
+to fire the moment you *pressed* the × — which sits a few pixels from Insert, in a popover
+only 220–340px wide — with nothing to catch a slip and nothing to undo it. Now it fires on
+**release**, so sliding off the button cancels the way it does everywhere else, and the
+deletion leaves an **Undo** strip pinned to the top of the menu that puts the snippet
+straight back. No confirmation dialog, deliberately: this menu exists to be used quickly, and
+an undo taxes only the mistake, where a prompt would tax every delete you meant.
+
+### Sending a selection onward
+
+Selections persist across pages, which is the point of them — and it's also what made
+**Actions → ▰ Send to The Loom (cast)** miss a video. The cast is images only, but the check
+asked the *page you were looking at*, so a video ticked on page 2 and sent from page 1 was
+invisible to it and went through. The kinds are now remembered alongside the selection
+itself, so the exclusion holds wherever a video was picked.

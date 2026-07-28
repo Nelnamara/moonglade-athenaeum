@@ -65,9 +65,25 @@ any device.
 **Adding more accounts.** The login page offers to *create* an account only during that
 first-run bootstrap; once one account exists it goes back to sign-in only, so nobody on your
 network can register themselves — deliberate, since it's your library and your PixAI account
-behind it. To add a person or a second device after that, open **Panel → Users** and add them
-there. Any signed-in session can: every account carries equal trust, there's no separate admin
-role.
+behind it. To add a person or a second device after that, open **Panel → Users** *on the
+machine running the gallery* and add them there. **Adding an account is localhost-only.** The
+**Add user** form isn't even drawn for a browser that reached the Panel across the network,
+and a request made by hand comes back `localhost-only` (403). The reason is real rather than
+bureaucratic: a new account is a permanent key to your whole library and can spend your PixAI
+credits, so minting one sits in the same tier as removing somebody else's account or resetting
+their password — an owner-at-the-keyboard action.
+
+That's not an admin role; there isn't one. Every account carries equal trust: once signed in, any
+of them can browse, **generate, edit and run Fix**, curate, use The Loom, move things to the
+Trash and pull them back out again, and run the safe maintenance jobs — and none of them can do
+anything the others can't. What differs is *where you're sitting*, not who you are — sign
+in as yourself from a tablet and minting an account is refused exactly as it would be for a
+guest. Sit down at the server machine and the restriction lifts, whichever account you used.
+
+The only account operations that turn on a username at all are the two you aim at *yourself*:
+you may change your own password from anywhere (typing the current one), and remove your own
+account from anywhere — unless it's the last one, which is refused everywhere. That isn't a
+privilege tier either; it's the difference between acting on yourself and acting on someone else.
 
 **Resetting a password.** Usually you don't need the command line for this: the Control
 Panel's **Users** tab can change your own password from anywhere, and can reset any other
@@ -80,8 +96,10 @@ Panel at all.
 `python moonglade_backup.py --add-web-user` prompts for a username (typed normally) and a
 password (hidden — never echoed) and writes the hash straight to `config.json`. It *adds or updates*, so it doubles
 as a password reset for an existing name. Companions: `--list-web-users` shows who exists,
-`--remove-web-user <name>` deletes one. (Remove the last account and the first-run bootstrap
-re-opens on the server machine — a deliberate escape hatch, not a bug.)
+`--remove-web-user <name>` deletes one — including the *last* one, which is the point: the count
+drops to zero and the first-run bootstrap re-opens on the server machine, a deliberate escape
+hatch rather than a bug. The Panel's **Remove** button deliberately won't do that from any
+address, loopback included, so emptying the roster on purpose stays a CLI act you have to mean.
 
 Prefer a double-click, no-console launcher? Use **`Serve Gallery.pyw`** — it starts the web
 gallery (and supervises it) without a terminal window.
