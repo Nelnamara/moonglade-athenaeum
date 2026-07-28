@@ -57,6 +57,24 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **A Multi-Reference shot's Closing Frame was invisible to everything downstream.** The
+  card showed its tag as "—", the cast numbered themselves one slot early, and the frame
+  never reached the generator at all — the numbering only admitted a closing frame on
+  First & Last, though Multi-Reference (and V2V, which the server treats identically) uses
+  one too. Toggling the drawer's mode tabs *appeared* to fix it because the drawer only
+  re-read the shot on unrelated changes — attaching a frame wasn't one of them, which was
+  its own bug and is also fixed. Now: Opening Frame is `@image1`, a Closing Frame that has
+  a picture is `@image2`, cast and references number from `@image3`, and the card, the
+  panel, the composed prompt, the drawer's bank and the actual submit all say the same
+  thing. The Cast & assets panel shows each member's live `→ @imageN` beside their
+  project-wide `@tag`, with a visible reference budget (six images, frames claim theirs
+  first) instead of silent trimming. Two traps found by review and closed on the way: an
+  End Frame picked before the Start Frame used to land in the *Start* box — a paid render
+  from the wrong frame — and now lands in End, with Go refusing (and the badge not
+  pricing) an End-only First & Last, since the server would reinterpret that as a
+  reference video; and the drawer's prompt and its image bank used to number through two
+  different resolvers, so a locally-uploaded frame shifted every citation off by one.
+
 - **A shot's prompt no longer names pictures that aren't attached to it.** A cast member added
   to a shot but not yet given an image was still cited by their project-wide tag — "Greg —
   reference @image4" when no @image4 is on that shot, and the reference drawer numbers purely
