@@ -117,6 +117,18 @@ python moonglade_backup.py --generate --task-id <id>
 Generated images are tagged `source='api'` — filter to them in the gallery via
 **Source → Generated**.
 
+**`--generate --task-id` pointed at a *video* task now files it as a video.** It's an easy
+id to mispaste, and a script looping over a mixed list will do it eventually. That used to
+drop the mp4 into `images/` with the video flag left blank, so the gallery served it as a
+picture: a broken tile with an mp4 behind it, no poster frame, and none of the faststart
+remux videos need. The clip is now handed to the video path instead — `videos/`,
+`is_video=1`, poster thumbnail, faststart — and the run says so. When the task turned out to
+hold *only* video, it also names the direct route (`--generate-video --task-id <id>`); a task
+carrying both images and video just collects both. One honest caveat: on that detour the *file*
+always arrives, but the metadata is best-effort. A multi-reference task recovers its prompt
+and duration; a plain image-to-video one lands with prompt, duration and model blank and
+wants a `--backfill-full-meta` pass afterwards.
+
 > **The two upscale methods, and why the flag names look backwards.** PixAI's own dialog
 > labels them *Upscale* and *Hires*, but the parameters those two buttons actually send are
 > named `enlarge` and `upscale` — so the flags are named after the parameters (what
@@ -222,6 +234,16 @@ python moonglade_backup.py --edit-image --edit-src "C:\pics\her.png" --prompt ".
 The four are clamped to what the chosen model really supports before submit — e.g.
 Reference Pro only offers 2K/4K and has no quality knob, so out-of-range values are
 corrected (and shown in the preview) rather than rejected.
+
+**Edits made with a model Moonglade doesn't know locally still get a real name.** It
+recognizes PixAI's two edit models by name without asking anyone; anything else — a newer
+`modelId` pushed through `--params-json`, or `--task-id` recovering a chat task you made on
+PixAI's own site — used to land in the catalog as the literal word "Edit". That was worse
+than leaving it blank, because "Edit" *looks* like a resolved name: `--fix-model-names`
+counted the row as finished and never came back for it, so it stayed generic forever and
+lost which edit model actually made it. Such a row now goes through the same name lookup an
+ordinary generation does, and if that lookup can't answer, the row is left blank or holding
+the raw id — the two states `--fix-model-names` is built to pick up on a later run.
 
 ## Upscale — on the picture, not in the drawer
 
@@ -436,16 +458,43 @@ what *is* restricted to the server's own machine.
   it submits: unlike everything else in the drawer, a fix can't be covered by a free card, so
   it always spends. Fixed images are filed under the name of the image they repaired plus a
   `fix-face` / `fix-hand` marker, so a repair sits next to its original in the folder.
+  The two edit models take different numbers of reference images (Edit Pro up to 4,
+  Reference Pro up to 10, and the picture being edited counts as one of them), so switching
+  from the roomier one to the tighter one can't keep everything you picked. **It now tells
+  you what it dropped** — "Only 3 reference images kept … 3 of your 6 references were left
+  out" — instead of thinning the strip in silence and letting you submit a paid edit
+  believing all six were still attached.
 - **Video** — first-frame / first+last / multi-reference shots; pick reference images straight
   from your own gallery (badged `@image1…`, removable, hover to preview); typing `@image1` in
   the prompt turns into a chip; model + duration + audio; live cost shows **FREE + how many
   video cards you have left** when a card covers it.
+  Multi-Reference keeps its picks in their own bank, and First Frame / First & Last have
+  nowhere to display them — so leaving Multi-Reference empties those slots on screen. It used
+  to happen wordlessly, and worst of all when you hadn't asked for it: Multi-Reference only
+  runs on the V4.0 pair, so picking any other model switches the mode for you, taking every
+  image, video and audio reference out of view with it. **Now it says what carried over** —
+  "Still held for Multi-Reference: 4 image refs, 1 video ref and the audio ref. Nothing was
+  deleted…" — because nothing *is* deleted: come back to Multi-Reference, on a model that
+  offers it, and every pick is still there.
 - **Tag Suggestions** — Danbooru-style autocomplete in the **Generate** prompt, the **Generate**
   negative, and the **Edit** instruction (not the Video tab's prompt); **TAB** accepts.
 - **Bridges from the gallery**: right-click any thumbnail (Edit / Send to Video / Copy media id),
   the same buttons in the lightbox, and multi-select → **Send to Video** in the bulk bar.
 - Results are downloaded and cataloged automatically (`source='api'`; videos into `videos/`),
   so everything you make lands in your own library the moment it finishes.
+
+**The numbers are bounded on the server, and you're told when one moved.** Because the
+drawer is login-tier, the sliders and number boxes in your browser are the only limit a
+well-behaved client honours — and anything POSTing to `/api/generate` by hand honours none,
+so a width of 999,999,999 or 999,999 steps used to go straight through to PixAI and be
+priced at whatever that produced. Width and height are now held to 64–4096, steps to 1–150,
+CFG to 1–30 and count to 1–4, the same bounds the drawer's own controls carry. When a clamp
+actually fires the response says so and the drawer raises it — "Settings were adjusted
+before submitting … steps 200 → 150 — this generation used the adjusted values." — because
+that submit is already made and already charged, and quietly billing you for a different
+generation than the one you configured is worse than the absurd number being refused. You
+can meet this from the drawer itself, not only from a hand-rolled request: a model that
+publishes wider limits of its own widens the browser field to match.
 
 **The Loom** (`/loom`) is the storyboard for multi-clip video — acts, shots, cast,
 frame handoff, and per-shot **Generate** on the same engine. It's a fixed 4-region shell

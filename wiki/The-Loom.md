@@ -224,10 +224,44 @@ Restoring either file **always creates a new storyboard** — your open board is
 overwritten. Importing a bundle also catalogs any media this machine doesn't already have,
 so a board moved between machines arrives with its images and clips intact.
 
+**When the bundle can't find a file, it names it.** A shot can reference a clip that was
+moved, deleted, or rendered on another machine and never synced. The zip still exports —
+a partial bundle is still worth having — and a dialog then lists what didn't travel, by the
+same `A·01` shot codes the board shows, rather than handing you a count and leaving you to
+diff every reference against the zip's `media/` folder by hand. If a great many are missing
+the dialog lists what it can and ends with "+N more, not listed here" — but the **complete**
+list always rides inside the zip, as a `missing_media` entry in `project.json` — each id
+alongside every place it
+was referenced from, whether that's a shot's result, one of its frame slots, or a cast entry
+— so it survives the download and reaches whoever you hand the bundle to.
+
 Don't confuse that menu with the top bar's **↓ Export**, which is the actual render: it
 trims and stitches every finished shot into one 720p mp4 via ffmpeg (with progress, and a
-Stop button). That one needs **ffmpeg on your PATH** — without it the export refuses and
-tells you so.
+Stop button).
+
+### What the render needs
+
+- **ffmpeg on your PATH** — required. Without it the export refuses and tells you so.
+- **ffprobe — strongly recommended, and it ships with the full ffmpeg build.** It's what
+  reads a clip's real length and whether it has any sound. Without it (some minimal ffmpeg
+  builds omit it) the export still runs, but every clip reads as silent and no length is
+  measurable, so as soon as one shot has no out point of its own the cut is muxed with **no
+  audio track at all**. The dialog says so in amber, right above the Download button, and
+  names ffprobe — rather than handing you a quietly silent file and filing the reason in a
+  log you have no reason to open. Dropping the track isn't a compromise: the whole track was
+  going to be synthesized silence anyway, so a file with no track sounds identical — and
+  can't drift.
+
+Setting aside the obvious refusals — no ffmpeg, no finished shots to export, or an export
+already running — there is exactly one case where the audio handling refuses instead of
+degrading: **some shot has real audio, and another shot's length can't be measured.**
+Silence has no natural end, so
+each silent segment needs a number — either its own out point or a real measurement. Guess
+one and the concatenated audio doesn't merely mute that shot's tail; every later shot's
+sound starts early and stays early for the rest of the cut. Rather than hand you a file that
+looks finished and desyncs after the first shot, it names the shot and asks you to set its
+out point (which supplies the length exactly) or fix the file. Since real audio was detected
+somewhere, ffprobe is demonstrably working, so that one file is the suspect.
 
 ## Where to go next
 

@@ -295,6 +295,12 @@ Undispatched-job detection tests `started is False`, never `not started`. Absent
 
 **Why.** "a status source that omits the field means *unknown*, and unknown must not brand every in-flight job stale." Passing the bare phase string instead of the dict makes the detection dead code in production.
 
+### A missing ffprobe degrades the Loom export — it never blocks it
+
+The render export needs each silent, untrimmed shot's real length to build a matching span of silence. Where no length is readable and nothing in the cut carries real audio, the file is muxed with no audio track at all and the export dialog says so in amber, naming ffprobe and the full ffmpeg build it ships with. One refusal remains, for the definitively-corrupt case: a shot carrying real audio alongside a shot whose length cannot be read, where a guessed span would push that real audio permanently out of sync.
+
+**Why.** An earlier repair refused the whole export whenever a length could not be measured. On a machine with ffmpeg but no ffprobe that is *every* untrimmed shot, so the owner got no file at all where they previously got a usable one. Owner's call, 2026-07-27: a missing prerequisite is something to TELL the user about — not to hand them a bare failure over, and not to silently degrade around either.
+
 ### A pasted API key must be validated with a hand-built session, never the normal client path
 
 The setup wizard's save-key route validates a submitted key by hand-building a session with that key as the sole credential, deliberately NOT through the normal session/token helpers.
@@ -378,6 +384,12 @@ Read the CLI-only list before filing a "no Panel button" item. The board has twi
 The state doc describes only what is true right now. When something stops being true, DELETE the line — "never strike it through, never mark it SUPERSEDED, never write 'was X, now Y', never append a correction beside the thing it corrects." There is no "shipped recently" or "landed on <date>" section. Never write a number a command can answer (test counts, commits-ahead, version strings) — name the command instead. Absolute dates only (2026-07-17), never "today"/"last week". A commit SHA is allowed as an *identifier* riding a present-tense fact, never as the subject of a change-story; prefer symbol names over line numbers. What shipped → CHANGELOG. How a decision was reached → git history + frozen copies in docs/archive/. How it works → architecture doc. Rules → CLAUDE.md.
 
 **Why.** "a list of recent changes only ever grows, and that append-only growth is the exact failure this file exists to avoid." Its predecessor (docs/ROADMAP_LOOM_ACHIEVEMENTS.md, now frozen in docs/archive/) died holding 40 stale claims precisely because it was an append-only journal.
+
+### The default download speed is unpaced — `--delay` reaches the parallel stage only when typed
+
+`--delay` always paces the page listing, the per-task metadata fetch, and single-worker downloads. The multi-worker download stage — the default `--workers 4` path — is paced only when the flag is passed explicitly. Left alone it runs at full connection speed, exactly as it always has.
+
+**Why.** The finding (`M07`) was that the wiki documented `--delay` as applying to downloads and on the default path it did not. Making it always-on at the shipped `0.4` capped the whole pool at one image per 0.4s regardless of worker count — it made `--workers` decorative, made the Panel's own workers selector decorative, and turned a 17,000-image first backup from roughly 35 minutes into nearly two hours. That is a silent 3–6x regression on the tool's single most common command, traded for a throttling problem that has never once been reported. The mismatch was mostly a documentation defect, so the wiki was corrected and the flag made to work when it is actually asked for.
 
 ### The live audit backlog must NOT be archived until it is empty
 
