@@ -864,15 +864,28 @@ width) settled it. **Do not restyle Deep Focus.** There is no open width questio
 
 Two follow-ups survive, and neither is a restyle:
 
-1. **Imported shots land with no first or last frame — the real gap.** A shot card built from an
-   already-produced, imported video renders correctly (thumbnail, `I2V 15s`, `IMPORTED`, `DONE`)
-   but its endpoint frames are empty, because nothing ever produced them: the video arrived
-   finished rather than being generated from a start frame. Owner: *"Can this be added somehow?"*
-   **Yes, and it is wiring rather than new capability** — the data model already has both slots
-   (`media_id` = source/first frame, `tail_media_id` = last frame) and `extract_last_frame()`
-   already exists in `moonglade_backup.py`, alongside the first-frame ffmpeg path used for
-   poster-less videos. The import path simply never calls them. This is a generation-hub function
-   gap, so it outranks every cosmetic item in this section.
+1. **Imported shots land with no first or last frame — SHIPPED 2026-07-27.** A shot card built
+   from an already-produced, imported video rendered correctly (thumbnail, `I2V 15s`, `IMPORTED`,
+   `DONE`) but its endpoint frames were empty, because nothing ever produced them: the video
+   arrived finished rather than being generated from a start frame.
+
+   Fixed by `/api/loom/import-frames` + `importedFramesPatch`. Three facts found while scoping it,
+   worth keeping because they are not obvious from the names:
+
+   - **`extract_last_frame()` is a general frame primitive.** `at_seconds=0.0` takes its
+     explicit-seek branch and yields the FIRST frame; `None` keeps the EOF-relative path. No new
+     extraction code was needed, and nothing should be written that duplicates it.
+   - **A thumbnail is mandatory, not decoration.** `/thumbs/<id>.jpg` serves straight from disk
+     with no fetch-on-miss, so an uploaded frame without a thumb renders as a blank box with a
+     perfectly good media id behind it.
+   - **Both frames are UPLOADED, not just saved locally.** Free, and it makes them real media
+     ids, so an imported clip's closing frame is a valid continuity hand-off into the next shot.
+     A display-only still would have looked identical and failed the first time anyone chained
+     off it.
+
+   The card lands instantly and the frames fill in asynchronously — landing the footage is the
+   Footage tab's whole action and ffmpeg plus two uploads take a second or two. Partial success is
+   a real outcome and is returned as one.
 2. **Small shot cards could be taller**, to show more of the first/last frame. Cosmetic, and it
    only becomes visible once (1) fills those frames in — so it is downstream of it, not parallel.
 

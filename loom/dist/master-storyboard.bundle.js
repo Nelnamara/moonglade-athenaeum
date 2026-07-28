@@ -212,6 +212,13 @@ var LoomBundle = (() => {
       ...dur > 0 ? { actualDur: dur } : {}
     };
   };
+  var importedFramesPatch = (firstMid, lastMid) => {
+    const frame = (mid, desc) => ({ thumbId: "", source: "", tag: "", desc, mediaId: String(mid) });
+    const p = {};
+    if (firstMid) p.openFrame = frame(firstMid, "first frame of the imported clip");
+    if (lastMid) p.closeFrame = frame(lastMid, "last frame of the imported clip");
+    return p;
+  };
   var patchAct = (project, actId, patch) => ({
     ...project,
     acts: project.acts.map((a) => a.id !== actId ? a : { ...a, ...patch })
@@ -2830,6 +2837,16 @@ Your currently-open board is left untouched.`)) return;
     const importFootage = (mediaId, duration) => {
       const c = newCard(importedFootagePatch(mediaId, duration));
       setProject((p) => landInFirstAct(p, c, uid()));
+      fetch("/api/loom/import-frames", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ video_media_id: mediaId })
+      }).then((r) => r.json()).then((d) => {
+        if (!d || d.error) return;
+        const patch = importedFramesPatch(d.first_media_id, d.last_media_id);
+        if (Object.keys(patch).length) setCardStatus(c.id, patch);
+      }).catch(() => {
+      });
       return c.id;
     };
     const dupCard = (aId, card) => {

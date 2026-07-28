@@ -125,8 +125,17 @@ there is appended to *every* shot's assembled prompt as `Look (consistent across
 …` — a style or grade you want held across the whole piece, written once.
 
 The second tab, **Footage**, is different: it's a grid of *this project's own* rendered
-shots. Its **⤓ Browse library** button and the drag-and-drop zone below it both add media in
-as a **cast** reference (a picked video becomes `@video`, a dropped image becomes `@image`).
+shots. Its **⤓ Browse library** button imports an already-rendered video from your gallery
+**straight onto the board as a real, placeable shot** — not as a reference. That's the
+Footage tab's whole purpose: "bring this video in", not "cite it in a prompt". Cast & Assets
+keeps its own separate **+ add from gallery** button for the reference use case. The
+drag-and-drop zone below takes local *image* files, which land as `@image` references.
+
+When you import a finished video this way, the Loom pulls its **first and last frame out of
+the clip itself** and fills the shot's opening and closing frames with them — so an imported
+shot looks like any other in Deep Focus, and its closing frame can hand off to the next shot's
+opening frame just like a shot you rendered here. The card appears straight away; the two
+frames catch up a second or two later.
 
 ## Generating a shot
 

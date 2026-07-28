@@ -74,6 +74,25 @@ export const importedFootagePatch = (mediaId, duration) => {
   };
 };
 
+// The frames an imported clip gets from ITSELF -- its own first and last frame -- so Deep
+// Focus shows the shot's endpoints instead of two empty slots. Built fresh rather than
+// merged because this is only ever applied to a just-imported card, whose frames are
+// emptyFrame() by construction (importedFootagePatch does not touch them).
+//
+// `mediaId`, not `thumbId`: frameSrc() resolves a mediaId through /thumbs/<id>.jpg, while
+// thumbId indexes the client-side blob map that only holds things picked in this session.
+// The same three companion fields are cleared that the continuity hand-off clears, so a
+// frame filled this way is indistinguishable in shape from one handed off by the previous
+// shot. Either id may be absent -- partial extraction is a real outcome -- and an absent
+// one simply leaves that slot empty rather than writing a blank frame over it.
+export const importedFramesPatch = (firstMid, lastMid) => {
+  const frame = (mid, desc) => ({ thumbId: "", source: "", tag: "", desc, mediaId: String(mid) });
+  const p = {};
+  if (firstMid) p.openFrame = frame(firstMid, "first frame of the imported clip");
+  if (lastMid) p.closeFrame = frame(lastMid, "last frame of the imported clip");
+  return p;
+};
+
 export const patchAct = (project, actId, patch) => ({
   ...project,
   acts: project.acts.map((a) => a.id !== actId ? a : { ...a, ...patch }),
