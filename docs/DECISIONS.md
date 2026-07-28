@@ -2080,4 +2080,10 @@ Earning "Under the Hood" gets a large fanfare in the same class as the Konami co
 
 **Why.** The bar is named now ("similar to konami code's starfall") so the moment doesn't get shipped small later — and marking it banked keeps it from being built before it is designed.
 
+### BANKED: the public docs need a spoiler-hygiene pass  ·  *2026-07-27*
+
+Owner, immediately after the roster scrub: make a note that the docs will need a hygiene pass. The raw roster file is gone from the repo and its history, but public docs still describe achievement internals — `docs/ART.md` carries the full badge list (ids, tiers, trigger conditions, art prompts), and `docs/ROADMAP_LOOM_ACHIEVEMENTS.md` and this tracker discuss designs like the Under-the-Hood breadcrumb and the Konami surprises. Unscoped: the pass's first question is what moves to git-ignored `private/`, what gets trimmed, and what stays as acceptable design notes. See [[The 57-roster JSON is gone: removed from the repo and scrubbed from history]] and [[The bundle's unlock split: branding opens, achievement assets stay sealed]].
+
+**Why.** Recorded so the roster scrub is not mistaken for the end of the job — the data dump was the worst leak, not the only one. It also lands in the window the tracker already opened: [[Documentation debt deliberately deferred until after the naming pass]] — the naming pass has shipped, so doc work is unblocked.
+
 ---
