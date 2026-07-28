@@ -949,7 +949,8 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 ### ~~`M30` moonglade_gallery.py:8761~~ &nbsp; FIXED
 
 - **Triage:** `[x]` fixed 2026-07-27 (branch `med-review`, not yet merged)
-- **Repair:** `detail()` and `/video-file` resolve through the same `_find_local_video_file()`, so a video row whose file is gone says 'Video file not found on disk.' instead of rendering a dead player.
+- **Repair:** `detail()` and `/video-file` resolve through the same `_find_local_video_file()`, so a video row whose file is gone says 'Video file not found on disk.' instead of rendering a dead player. Covers the reviewer's three reproductions: a stale filename whose real file moved, a blank filename, and an imported `.m4v` (the hand-written extension tuple was missing it).
+  The resolver's catalog-filename branch also now checks that `out_dir / filename` actually lands inside the library, reusing this file's own `_is_under()`. Without it a traversing `filename` was the one case left where the two still disagreed -- the page drew a player and `/video-file`, which has always added `relative_to()` on top of `send_from_directory`'s `safe_join`, refused the URL behind it. Not a hostile-input concern (`filename` is written by this app), but "the existence check and the serving route ask the same question" is the whole content of this finding, so an exception to it is the bug.
 - **Area:** Security & Access
 - **Category:** functional-bug
 - **Batch:** -

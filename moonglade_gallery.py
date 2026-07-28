@@ -15089,7 +15089,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         fn = row.get("filename") or ""
         if fn:
             cand = out_dir / fn
-            if cand.is_file() and cand.suffix.lower() in vid_exts:
+            # The catalog's `filename` is joined onto out_dir, so a row carrying a traversing
+            # path resolves outside the library. /video-file already refuses that (relative_to
+            # + send_from_directory's own safe_join), which is exactly why this branch has to
+            # agree: without the check THIS resolver says "present" for a file the serving
+            # route will 404, and the detail page draws a player over it and says nothing --
+            # M30's own symptom, reached by a different road. `.resolve()` is the load-bearing
+            # part: relative_to alone does not normalise, so `..` walks straight through it.
+            if (_is_under(cand.resolve(), Path(out_dir).resolve())
+                    and cand.is_file() and cand.suffix.lower() in vid_exts):
                 return cand
         fallback = find_files_for_media_id(out_dir, mid, exts=vid_exts)
         return fallback[0] if fallback else None
