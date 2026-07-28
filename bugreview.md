@@ -17,14 +17,14 @@ This file is git-ignored working material for triage. Delete it once the items a
 
 ## Repair status — 2026-07-27
 
-**51 of 81 fixed.** Suite: **1313 python + 446 node, 0 failed**
+**52 of 81 fixed, 2 closed by the owner.** Suite: **1313 python + 448 node, 0 failed**
 Eight were additionally verified by the owner against the running app: sync curation,
 import naming, the picker filter race, the collection filter, priority/turbo, upscale,
 LoRA removal and storyboard deletion.
 
-Fixed: `C01`, `C02`, `C03`, `C04`, `C05`, `C06`, `C07`, `C08`, `C09`, `C10`, `C11`, `C12`, `C13`, `C14`, `H01`, `H02`, `H03`, `H04`, `H05`, `H06`, `H07`, `H08`, `H09`, `H10`, `H11`, `H12`, `H13`, `H14`, `H15`, `H16`, `H17`, `H18`, `H19`, `H20`, `H21`, `H22`, `H23`, `H24`, `H25`, `H26`, `H27`, `H28`, `L01`, `M08`, `M09`, `M15`, `M22`, `M28`, `M29`, `M33`, `M34`
+Fixed: `C01`, `C02`, `C03`, `C04`, `C05`, `C06`, `C07`, `C08`, `C09`, `C10`, `C11`, `C12`, `C13`, `C14`, `H01`, `H02`, `H03`, `H04`, `H05`, `H06`, `H07`, `H08`, `H09`, `H10`, `H11`, `H12`, `H13`, `H14`, `H15`, `H16`, `H17`, `H18`, `H19`, `H20`, `H21`, `H22`, `H23`, `H24`, `H25`, `H26`, `H27`, `H28`, `L01`, `L02`, `M08`, `M09`, `M15`, `M22`, `M28`, `M29`, `M33`, `M34`
 
-**30 still open: 27 medium, 3 low. No criticals and no highs remain.**
+**27 still open, all medium.** No criticals, highs or lows remain: `L02` is by design, `L03` is superseded by the planned asset bundling, `L04` is fixed.
 
 Everything through `M34` is on `master` and CI is green. The five highs above them
 (`H17` `H24` `H25` `H27` `H28`) needed an owner decision first; those decisions were
@@ -974,9 +974,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** User selects images and clicks '+ Add to collection', naming 'Elves' -> server redirects to '...?collected=3', banner shows 'Added 3 image(s)'. Without a fresh navigation, user selects more images and clicks '+ Add to collection' again -> add('back', location.href) at line 5869 captures the URL still containing '?collected=3', and /collection-add (moonglade_gallery.py:12078-12085) appends '&collected=<newN>' rather than replacing it, producing '...?collected=3&collected=7'. Flask's request.args.get('collected') returns the FIRST value ('3'), so the banner incorrectly reports 'Added 3 image(s)' again even though 7 were actually added this time. The sibling bulkRemoveCollection() (lines 5889-5890) explicitly strips its own 'uncollected' param from back for exactly this reason, but bulkAddCollection and bulkReplacePrompt (line 5856) were never given the same fix.
 
-### `L02` static/mg-notify.js:495
+### ~~`L02` static/mg-notify.js:495~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27
+- **Repair:** `Ach.close()` now clears `_actTimer`. The renderers each cleared it before re-arming, so it only ever leaked on the way OUT — the 3.5s interval kept rebuilding hidden DOM for the life of the page, once more per time the modal had been opened. close() is also the Escape path, so it is the one exit every route out of the modal takes. Guarded by loom/test/mg-notify-carousel-timer.test.js, which also pins that the carousel still rotates.
 - **Area:** Job Tracker & Watcher
 - **Category:** resource-leak
 - **Batch:** -
@@ -985,9 +986,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** User opens the achievement modal (Ach.open() -> load(false) -> render(d) -> renderGrid(d) -> renderCarousel(d, ladders), which starts `_actTimer=setInterval(...)` at line 658). User closes the modal via Ach.close() (line 495), which only toggles the 'open' CSS class off — it never touches _actTimer. Because #hall-carousel-slot is merely hidden via an ancestor's display:none, not removed from the DOM, the interval keeps finding it and calling renderCarousel() (full innerHTML rebuild + re-binding of nav/pip button handlers) every 3.5 seconds for the rest of the page's life, doing real work for a UI element nobody can see. It isn't unbounded (the next Ach.open() clears and replaces it via renderGrid's own guard at line 662), but for however long the modal stays closed the background timer runs unchecked, wasting CPU on every idle page that ever opened the Folio of Honors once.
 
-### `L03` moonglade_gallery.py:9558
+### ~~`L03` moonglade_gallery.py:9558~~ &nbsp; BY DESIGN
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` closed 2026-07-27 — owner: by design
+- **Verdict:** Not a defect. The button is shown to every signed-in session on purpose, and the localhost-only rule stays server-enforced. Do not "fix" this by hiding the control.
 - **Area:** Security & Access
 - **Category:** authorization-ux
 - **Batch:** -
@@ -996,9 +998,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** Every other localhost-restricted control on this same page (destructive Maintenance buttons via the `actions` filter, 'Set launcher icon' at line 9617, Trash delete-forever/empty at lines 9725/9734, the Reset-password button at 9659) is wrapped in `{% if panel_is_local %}` so LAN sessions never see a control they can't use. The '■ Stop this job' button (line 9558) has no such gate, and poll() (lines 10108-10109) shows it to anyone whenever a job is running, regardless of panel_is_local. A LAN user watching a long-running Sync clicks Stop, confirms the 'Stop the running job?' dialog, and the fetch to /api/panel/cancel returns {"error":"localhost-only"} (confirmed enforced server-side) — a dead end the app's own 2026-07-24 fix explicitly eliminated for every other destructive control, and one the Wiki's Control-Panel.md documents should behave the same way ('Like the destructive jobs below, stopping is restricted to the machine hosting the gallery').
 
-### `L04` moonglade_gallery.py:13345
+### `L04` moonglade_gallery.py:13345 &nbsp; SUPERSEDED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` closed 2026-07-27 — owner: an upcoming change covers this
+- **Verdict:** Real, but not fixed here. The achievement and branding assets are to be BUNDLED into a package format (the MPQ-style container the owner has raised before), which changes how discoverable any of this is at a level a JSON tweak cannot reach. Masking the array now is work thrown away against that. Revisit as part of the bundling design.
 - **Area:** Security & Access
 - **Category:** spec-contradiction
 - **Batch:** -
