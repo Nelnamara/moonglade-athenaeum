@@ -50,6 +50,16 @@ export const maxTagNum = (items, prefix) => {
 // maxTagNum once and increment locally instead (see importCollection/cast-import).
 export const nextTag = (items, prefix) => prefix + (maxTagNum(items, prefix) + 1);
 
+// The number a tag CLAIMS in the "@imageN" namespace, or 0 for "claims nothing at all"
+// (empty, "hero", "ref3", "@video2"). Anchored on purpose, and deliberately the SAME reading
+// maxTagNum uses above: for a while shotImageRefs()'s slot ordering and pickTarget()'s tag
+// arithmetic ran two different parsers over one namespace -- an anchored `^@image(\d+)$` for
+// the max, an unanchored `(\d+)` for the sort -- so an owner-typed "ref3" was worth nothing to
+// one and slot 3 to the other, and a freshly picked reference landed in a different slot than
+// the drawer had just reported picking. Zero is safe as the "no claim" answer because live
+// positions are 1-based, so it can never be mistaken for one.
+const imageClaim = (tag) => { const m = /^@image(\d+)$/.exec(tag || ""); return m ? +m[1] : 0; };
+
 // Two frames are "linked" (continuous) if they share EITHER identity field —
 // mediaId (gallery-picked / generated-in-Loom frames) or thumbId (locally
 // uploaded ones). The old check only looked at thumbId, so it was blind to
@@ -128,13 +138,17 @@ export const effectivePrompt = (c) => (c.promptOverride ? (c.promptOverrideText 
 // tests) callers pass whatever lookup they like.
 export const shotImageRefs = (entry, project, imgSrc) => {
   const c = entry.c;
-  const tagNum = (t) => { const m = /(\d+)/.exec(t || ""); return m ? +m[1] : 99; };
   const items = [];
   (project.assets || []).filter((as) => as.kind === "image" && c.cast.includes(as.id))
     .forEach((as) => { const d = as.mediaId || imgSrc(as.thumbId, as.source); if (d) items.push({ tag: as.tag, d, kind: "cast", id: as.id }); });
   // Untagged open/close frames need DISTINCT fallback tags -- both defaulting to the
   // same literal meant an FLF shot with two untagged frames silently sent duplicate
-  // @image9 tags, and the model only ever saw one of the two images.
+  // @image9 tags, and the model only ever saw one of the two images. No code READS those two
+  // literals: they are invented for one render pass, never written back to the frame (whose
+  // own .tag stays empty), the ordering below ignores them (frames rank by KIND), and every
+  // citation the composed prompt emits comes from positionTag()'s live position. pickTarget()
+  // counting them as numbers the shot had claimed is what stamped "@image10" on a 3-image
+  // shot -- see its own comment.
   [["@image8", "openFrame", c.openFrame], ["@image9", "closeFrame", c.mode === "FLF" ? c.closeFrame : null]].forEach(([fallbackTag, key, f]) => {
     if (!f) return; const d = f.mediaId || imgSrc(f.thumbId, f.source); if (d) items.push({ tag: f.tag || fallbackTag, d, kind: "frame", id: key }); });
   (c.refs || []).filter((r) => r.kind === "image").forEach((r) => {
@@ -159,8 +173,24 @@ export const shotImageRefs = (entry, project, imgSrc) => {
   // whatever stale text either one's .tag holds. See positionTag()'s callers (shotText's
   // frame-description lines, FrameSlot's own live-tag display) -- none of them may trust a
   // frame's raw .tag as anything but a fallback for when it has no resolvable image at all.
-  const kindRank = (it) => (it.kind === "frame" ? 0 : 1);
-  const sortNum = (it) => (it.kind === "frame" ? 0 : tagNum(it.tag));
+  // REF ORDER (2026-07-27, M35 -- the FOURTH manifestation, and the reason the third's
+  // "rank by KIND, never by raw tag text" rule now extends one tier down). A shot-level ref's
+  // .tag is free text too (Deep Focus's per-ref tag input), and addRef() numbers a new one
+  // only against the CARD's own refs -- so a shot holding cast "@image3" and a first ref
+  // "@image1" sorted the ref ahead of the cast member, while every surface that shows the two
+  // lists shows cast first ("Keep consistent:" above "Other references:" in shotText(), Cast
+  // & assets above Other references in Deep Focus). Refs now take their own rank behind cast
+  // and keep c.refs array order among themselves -- the same order shotText() prints them in,
+  // so that block's citations read 1, 2, 3 down the page instead of jumping.
+  // The load-bearing consequence is pickTarget(): once slot order no longer depends on the
+  // appended ref's own tag, that tag is free to BE the ref's real position -- which is what
+  // the drawer, the prompt and the owner all read it as -- instead of a number inflated past
+  // everything else in the shot purely to win a sort. Cast keeps sorting by its own claim
+  // (a project-global number, assigned in cast-add order); a cast tag that claims nothing in
+  // the @imageN namespace sorts to the back of the cast tier rather than silently borrowing
+  // whatever digits happen to be in it.
+  const kindRank = (it) => (it.kind === "frame" ? 0 : it.kind === "cast" ? 1 : 2);
+  const sortNum = (it) => (it.kind === "cast" ? (imageClaim(it.tag) || Number.MAX_SAFE_INTEGER) : 0);
   items.sort((a, b) => kindRank(a) - kindRank(b) || sortNum(a) - sortNum(b));
   // PixAI's real cap: a generation takes at most 6 image refs. Reserving frames first means
   // a shot that has to drop something under this cap always drops a lower-priority cast/ref,
@@ -211,7 +241,40 @@ export const pickTarget = (entry, project, imgSrc, slot) => {
   const items = shotImageRefs(entry, project, imgSrc);
   const existing = items[slot];
   if (existing) return { type: "replace", kind: existing.kind, id: existing.id };
-  return { type: "append", tag: nextTag(items, "@image") };
+  const c = entry.c;
+  // The appended ref is stored with the "@imageN" of the slot it actually LANDS IN. N starts
+  // at items.length + 1 because REF ORDER (see shotImageRefs) puts a newly appended c.refs
+  // entry last by construction, so that is the position positionTag() and the drawer's own
+  // bank will both report for it the instant the pick is written -- stored tag and live
+  // citation agree by arithmetic, not by luck.
+  //
+  // This used to be nextTag(items, "@image"): one past the highest number anything in the
+  // shot happened to hold, which existed only to win the old tag-text sort and produced
+  // numbers with no relation to the shot at all. An FLF shot with two untagged frames (whose
+  // "@image8"/"@image9" are shotImageRefs()'s own invention for one render pass, stored
+  // nowhere) plus one "@image1" cast member -- 3 real images -- stamped its 4th picked
+  // reference "@image10", on a bank PixAI caps at 6. Filtering the invented 8/9 back out was
+  // not enough and made it worse: the max then landed on "@image2", a number this shot really
+  // does use (the Closing Frame), so the moment that ref dropped out of the live numbering
+  // shotText() cited a picture that IS in the prompt but is not the one the ref means -- the
+  // exact misdirection this file's header says positionTag() exists to prevent.
+  //
+  // The bump loop is the one thing raw position cannot give up: two entities on one card must
+  // never DISPLAY the same @imageN. `claims` is every tag this shot's own entities hold,
+  // including the ones shotImageRefs() cannot see -- a ref added with "+ reference" that has
+  // no picture yet is absent from `items` and still shows its tag in Deep Focus, and a cast
+  // member's tag is project-global. (pickVideoTarget() below has guarded exactly this for the
+  // video bank since it was written; the image side never did.) The loop only ever moves N UP,
+  // so the stored tag is never below the ref's real position and can never steal a slot number
+  // something else is already showing.
+  const claims = new Set([
+    ...(project.assets || []).filter((as) => (c.cast || []).includes(as.id)).map((as) => as.tag),
+    (c.openFrame || {}).tag, (c.closeFrame || {}).tag,
+    ...(c.refs || []).filter((r) => r.kind === "image").map((r) => r.tag),
+  ].map(imageClaim).filter(Boolean));
+  let n = items.length + 1;
+  while (claims.has(n)) n++;
+  return { type: "append", tag: "@image" + n };
 };
 
 // ---------- r2v video-reference bank pick persistence (parallel to pickTarget() above) ---
@@ -304,8 +367,19 @@ export const shotText = (entry, p, imgSrc) => {
   if (usedCast.length) { L.push("", "Keep consistent:"); usedCast.forEach(({ as, tag }) => {
     L.push(`  ${as.name} — ${as.lock ? "maintain exact appearance from " : "reference "}${tag}`);
   }); }
+  // An IMAGE ref with no live position is left out entirely -- citing an "@imageN" this shot
+  // does not number is either noise the model drops or, worse, an instruction pointing at a
+  // different picture (see castMissingImages above for the same rule applied to cast, and
+  // shotImageRefs()'s header for why a raw .tag cannot be trusted as a fallback).
+  //
+  // A VIDEO ref is not the same case and must not be filtered with it. positionTag() only ever
+  // numbers shotImageRefs(), which is images by definition, so it returns null for EVERY video
+  // ref -- filtering on it alone silently dropped "@video1" out of every composed prompt that
+  // had one. "@videoN" is its own namespace, assigned by pickVideoTarget() over the card's own
+  // video refs and never renumbered by position, so the stored tag is not a fallback there: it
+  // is the only name that ref has, and it is always correct.
   const usedRefs = (c.refs || [])
-    .map((r) => ({ r, tag: positionTag(entry, p, resolve, r.id) }))
+    .map((r) => ({ r, tag: positionTag(entry, p, resolve, r.id) || (r.kind === "image" ? null : r.tag) }))
     .filter((x) => x.tag);
   if (usedRefs.length) { L.push("", "Other references:"); usedRefs.forEach(({ r, tag }) => {
     L.push(`  ${tag} — ${r.role || "(role tbd)"}${r.source ? `  [${r.source}]` : ""}`);
@@ -393,4 +467,61 @@ export const reelStats = (entries, target) => {
   const scale = Math.max(total, target) || 1;
   const over = total - target;
   return { total, scale, over };
+};
+
+// ---------- full-bundle export: naming what did NOT travel (M24) ----------
+//
+// /api/loom/export-bundle zips the project plus every media file it references and answers
+// with two headers: X-Bundle-Missing-Count (the true total, authoritative) and
+// X-Bundle-Missing (the ids themselves, comma-separated and deliberately LENGTH-CAPPED -- a
+// header that grows with the project is how a bundle downloads fine on the machine that built
+// it and is rejected by a proxy on the next one, so the server truncates with a trailing
+// "+N more" and keeps the complete, labelled list inside the zip's project.json). The client
+// used to read the count alone and say "2 referenced file(s) couldn't be found on disk", which
+// is the whole of M24: a number, and no way to tell WHICH shot lost a file short of unzipping
+// the bundle and reading project.json by hand.
+//
+// The header carries ids, not places, and it has to stay small for the reason above. So the
+// act/shot labels are re-derived HERE, from the project the client just posted -- it holds the
+// whole thing in memory, so nothing needs to ride in the header to name a shot. That makes
+// this walk a second implementation of the server's `_loom_collect_media_ids`, and it must
+// stay faithful to it (same four sources, same "A·01 Title (openFrame)" shape): the same file
+// gets named in two places the owner will compare -- this report and the zip's own
+// missing_media manifest -- and one file with two different names is its own bug report.
+
+export const mediaRefIndex = (project) => {
+  const ids = {};
+  const note = (mid, where) => { const k = String(mid); (ids[k] = ids[k] || []).push(where); };
+  ((project || {}).acts || []).forEach((act, ai) => {
+    (act.cards || []).forEach((c, ci) => {
+      const title = (c.title || "").trim();
+      const code = `${actLetter(ai)}·${String(ci + 1).padStart(2, "0")}${title ? ` ${title}` : ""}`;
+      if (c.resultMid) note(c.resultMid, `${code} (shot result)`);
+      ["openFrame", "closeFrame"].forEach((slot) => {
+        const f = c[slot] || {};
+        if (f.mediaId) note(f.mediaId, `${code} (${slot})`);
+      });
+    });
+  });
+  ((project || {}).assets || []).forEach((a) => {
+    if (a.mediaId) note(a.mediaId, `cast/asset ${a.name || a.tag || a.id || "?"}`);
+  });
+  return ids;
+};
+
+// {total, rows:[{mid, where:[label,...]}], hidden} for the export-bundle response headers.
+// `hidden` is derived from the COUNT header rather than from the "+N more" marker, because the
+// count is the one value the server calls authoritative and the list is best-effort. That is
+// also what covers the list header being absent altogether -- an older gallery, or a project
+// whose every missing id was dropped by the server's ASCII sanitiser -- where rows comes back
+// empty, hidden equals total, and the dialog degrades to the count-plus-a-pointer-to-the-zip
+// rather than to a wrong or empty claim. A row whose id the walk above cannot place keeps an
+// empty `where`; it is shown as a bare id, never guessed at.
+export const bundleMissingReport = (project, countHeader, listHeader) => {
+  const total = Math.max(0, parseInt(countHeader || "0", 10) || 0);
+  const index = mediaRefIndex(project);
+  const rows = String(listHeader || "").split(",").map((s) => s.trim())
+    .filter((s) => s && !/^\+\d+ more$/.test(s))
+    .map((mid) => ({ mid, where: index[mid] || [] }));
+  return { total, rows, hidden: Math.max(0, total - rows.length) };
 };
