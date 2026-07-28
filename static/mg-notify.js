@@ -492,7 +492,13 @@
     // exists on the current page.
     function open(){ var m=el('ach-modal'); if(!m) return; m.classList.add('open'); m.setAttribute('aria-hidden','false');
       load(false); }
-    function close(){ var m=el('ach-modal'); if(!m) return; m.classList.remove('open'); m.setAttribute('aria-hidden','true'); }
+    function close(){ var m=el('ach-modal'); if(!m) return; m.classList.remove('open'); m.setAttribute('aria-hidden','true');
+      // Stop the Hall carousel with the modal. renderCarousel/renderGrid each clear this
+      // before re-arming it, so it was only ever left running on the way OUT -- the interval
+      // kept firing every 3.5s and rebuilding hidden DOM for the life of the page, once per
+      // time the modal had been opened. close() is also the Escape-key path, so it is the one
+      // exit every route out of the modal goes through.
+      if(_actTimer){ clearInterval(_actTimer); _actTimer=null; } }
     function load(mark){
       fetch('/api/achievements'+(mark?'?mark=1':''))
         .then(function(r){return r.json();})

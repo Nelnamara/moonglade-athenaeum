@@ -238,6 +238,19 @@ export const pickVideoTarget = (entry, slot) => {
   return { type: "append", tag: nextTag(allVideoRefs, "@video") };
 };
 
+// Names of cast members this shot lists but has no picture for. shotText() leaves them OUT
+// of the prompt (citing an @imageN with nothing behind it is worse than saying nothing), so
+// this is what stops that being silent: the board card shows it, where it can be fixed.
+// Deliberately NOT put in the prompt itself -- that text is sent to PixAI, and "no reference
+// image attached" is noise in a generation request.
+export const castMissingImages = (entry, p, imgSrc) => {
+  const resolve = imgSrc || noImgSrc;
+  return (p.assets || [])
+    .filter((as) => (entry.c.cast || []).includes(as.id))
+    .filter((as) => !positionTag(entry, p, resolve, as.id))
+    .map((as) => as.name || "(unnamed)");
+};
+
 export const shotText = (entry, p, imgSrc) => {
   const { c, code, ai } = entry;
   // Hard early-return, never merged with the composition below -- a promptOverride is the
@@ -251,7 +264,13 @@ export const shotText = (entry, p, imgSrc) => {
   const prev = idx > 0 ? flat(p)[idx - 1] : null;
   const L = [`[${code} — "${c.title || "untitled"}"]  (${c.mode}, ~${c.duration}s, ${connectMeta(c.connect).label})`, ""];
   if (c.connect === "extend" && prev) L.push(`Continue seamlessly from the previous clip ${prev.code} (upload it as @video1).`);
-  if (c.connect === "flf") {
+  // Gated on MODE, not connect. shotImageRefs() -- the function that actually reserves the
+  // frame slots -- decides by `c.mode === "FLF"`, so gating the DESCRIPTIONS on `c.connect`
+  // meant the two disagreed: a shot set to FLF mode had both frames attached and sent, with
+  // nothing in the prompt saying what they were, and the reverse case described frames that
+  // no slot had been reserved for. The descriptions earn their place -- telling the model
+  // what the opening and closing images are is what makes the motion between them land.
+  if (c.mode === "FLF") {
     // positionTag(), not the frame's own raw .tag -- see shotImageRefs()'s frame-reservation
     // comment. A frame's raw .tag is free text the owner can edit in FrameSlot's UI and can
     // drift from its actual, guaranteed slot (e.g. it still reads "@image2" from before the
@@ -270,16 +289,25 @@ export const shotText = (entry, p, imgSrc) => {
   // one visual world. Appended to each shot's own prompt (and its shot-list text, which
   // is the same string) -- the project-level analogue of the per-shot cast block.
   if (p.look) L.push("", `Look (consistent across the film): ${p.look}`);
-  const usedCast = (p.assets || []).filter((as) => c.cast.includes(as.id));
-  if (usedCast.length) { L.push("", "Keep consistent:"); usedCast.forEach((as) => {
-    // positionTag(), not as.tag -- see shotImageRefs()'s comment. Falls back to the asset's
-    // own global tag only when it has no resolvable image in THIS shot (matches prior
-    // behavior: nothing for the drawer to number, so there's no live reference to protect).
-    const tag = positionTag(entry, p, resolve, as.id) || as.tag;
+  // Only cast/refs this shot actually HAS a picture for. positionTag() returns the live,
+  // structurally-guaranteed @imageN a picture occupies in THIS shot; nothing means the shot
+  // carries no image for them, and the old `|| as.tag` fallback then cited their project-
+  // GLOBAL tag instead -- "Greg — reference @image4" when no @image4 is attached and the
+  // drawer, which numbers purely by position, calls something else that. That is exactly the
+  // two-numbering-systems corruption the long comment above shotImageRefs() describes, and
+  // the fallback quietly re-opened it. A miscast shot is not silently swallowed: the board
+  // card flags a cast member with no picture (see castMissingImages), which is where it can
+  // be seen and fixed, rather than in text that gets sent to PixAI.
+  const usedCast = (p.assets || []).filter((as) => c.cast.includes(as.id))
+    .map((as) => ({ as, tag: positionTag(entry, p, resolve, as.id) }))
+    .filter((x) => x.tag);
+  if (usedCast.length) { L.push("", "Keep consistent:"); usedCast.forEach(({ as, tag }) => {
     L.push(`  ${as.name} — ${as.lock ? "maintain exact appearance from " : "reference "}${tag}`);
   }); }
-  if (c.refs.length) { L.push("", "Other references:"); c.refs.forEach((r) => {
-    const tag = positionTag(entry, p, resolve, r.id) || r.tag;
+  const usedRefs = (c.refs || [])
+    .map((r) => ({ r, tag: positionTag(entry, p, resolve, r.id) }))
+    .filter((x) => x.tag);
+  if (usedRefs.length) { L.push("", "Other references:"); usedRefs.forEach(({ r, tag }) => {
     L.push(`  ${tag} — ${r.role || "(role tbd)"}${r.source ? `  [${r.source}]` : ""}`);
   }); }
   if (c.camera) L.push("", `Camera: ${c.camera}`);

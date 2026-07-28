@@ -1310,3 +1310,36 @@ def test_a_surviving_subprocess_can_still_correct_a_premature_failure(tmp_path):
 
     core.append_job_event(tmp_path, "panel-live", status="done")   # the subprocess survived
     assert core.read_jobs(tmp_path)[0]["status"] == "done"
+
+
+def _status_client(tmp_path):
+    save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1"}])
+    return login_test_client(create_app(tmp_path))
+
+
+def test_task_status_reports_our_OWN_defect_as_failed(tmp_path, monkeypatch):
+    """A bug in this poll cannot come good on a retry, so it must not be reported as a job
+    that is merely still running.
+
+    The broad handler beneath is deliberate and stays: a PixAI 5xx/429/timeout answers
+    'running' precisely so mg-notify's poller keeps trying instead of bricking the card with
+    a false failure. But it caught programming errors too, so a genuinely broken poll looked
+    identical to a slow one -- for the full 6h polling ceiling, with nothing saying otherwise.
+    """
+    def boom(*_a, **_k):
+        raise TypeError("unsupported operand type(s)")
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status", boom)
+    d = _status_client(tmp_path).get("/api/task-status?task_id=T1").get_json()
+    assert d["phase"] == "failed", d
+    assert "internal error" in (d.get("error") or "").lower()
+
+
+def test_task_status_still_treats_a_pixai_blip_as_non_terminal(tmp_path, monkeypatch):
+    """The other half, so the above can't be 'achieved' by making everything terminal."""
+    def blip(*_a, **_k):
+        raise core.PixAIError("502 Bad Gateway")
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status", blip)
+    d = _status_client(tmp_path).get("/api/task-status?task_id=T2").get_json()
+    assert d["phase"] == "running", "a transient blip must stay non-terminal: %s" % d

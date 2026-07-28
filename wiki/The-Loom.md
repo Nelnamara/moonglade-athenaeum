@@ -50,7 +50,8 @@ Both side rails collapse to an icon strip; clicking an icon re-opens the rail on
 
 **+ New act** adds a chapter; **+ Add shot to \<act\>** adds a card to it. Each card carries
 its code, title, mode, duration and a status badge, plus small controls to move it up/down,
-duplicate it, delete it, or move it to another act. **Double-click a card** to open
+duplicate it, delete it (it asks first — a card carries its prompt, cast, frames and any
+rendered result, and there is no undo), or move it to another act. **Double-click a card** to open
 [Deep Focus](#deep-focus).
 
 The **reel bar** in the Timeline drawer draws one colored segment per shot, sized by
@@ -111,6 +112,12 @@ marks a member as the consistency anchor ("maintain exact appearance") instead o
 reference.
 
 With a shot selected, clicking a cast card toggles that member into or out of that shot.
+
+A cast member can only be *cited* in a shot that actually has a picture for them, so one you
+have added to a shot but not yet given an image is left out of that shot's assembled prompt
+rather than referenced by a tag with nothing behind it. The shot card says so — a small
+**"…: no image"** badge naming who — so it is visible while you build rather than discovered
+in the output.
 
 **🎨 Project look** is a collapsible textarea at the top of the panel. Whatever you write
 there is appended to *every* shot's assembled prompt as `Look (consistent across the film):

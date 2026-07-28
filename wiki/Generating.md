@@ -23,7 +23,7 @@ generations cost 0). Its controls map onto the same PixAI parameters:
 | Steps / CFG / Count / Seed | the obvious params | blank seed = random; dims rounded to /8 |
 | **Mode** | `inferenceProfile` | Auto (default) · Lite · Standard · Pro · Ultra |
 | **Prompt helper** | `promptHelper` | on by default; uncheck to use your prompt literally |
-| **High priority** | `priority` | off (500, cheaper) by default; on = 1000 (faster, more credits) |
+| **High priority** | `priority` | off = Turbo (500) if your membership covers it, otherwise standard (0) — both free; on = High (1000), faster and **costs extra credits** |
 
 Submit and the result drops straight into your catalog, tagged `source='api'`, and
 appears in the gallery. Submitting doesn't lock the button — PixAI itself runs
@@ -100,7 +100,7 @@ python moonglade_backup.py --generate --task-id <id>
 | `--model` | Tsubaki.2 | model **version** id |
 | `--lora VERSIONID:WEIGHT` | — | repeatable |
 | `--mode` | `auto` | `auto`/`lite`/`standard`/`pro`/`ultra` — an unsupported mode auto-falls-back to the model's default and retries once instead of erroring (a rejected submit costs no credits either way); the web Generate tab does the same since 2026-07-24 |
-| `--priority` / `--high-priority` | `500` | 500 = standard (cheaper), 1000 = high |
+| `--priority` / `--high-priority` / `--low-priority` | `500` | PixAI's speed channels: `0` standard (free) · `500` Turbo, ~7.6× faster and free but **members only** · `1000` High, ~10× faster and **costs extra** · `1500` extra high. Turbo is the default and falls back to `0` on its own if the account is not a member |
 | `--no-prompt-helper` | off | use the prompt literally |
 | `--width`/`--height`/`--steps`/`--cfg`/`--batch-size`/`--seed` | 512/512/25/7/1/random | |
 | `--enlarge RATIO` | off | upscale the finished image with an upscaler network (PixAI's **Upscale** method). 0.1 steps, clamped to the biggest ratio your `--width`/`--height` allows |
@@ -243,12 +243,14 @@ Two methods, and they are genuinely different jobs:
 and height against a pixel ceiling, so the panel tells you the real answer for the image in
 front of you — "max 2.7× for this picture" — and shows the exact output size as you drag.
 
-**Upscaling needs a model.** Normally the panel fills it in from the image itself. Two cases
-where it cannot: your catalog has not captured it yet (run `--backfill-full-meta`, and see
-[Backing up](Backing-Up)), or you imported the file from your own computer, in which case
-PixAI has no record of it and never will. Either way you can pick a model yourself — it is
-the same picker the Generate drawer uses. The panel never picks one for you, because
-upscaling under a different model changes how the picture looks.
+**You do not have to pick a model.** Normally the panel fills it in from the image itself,
+which is the better answer when it is known — Hires re-renders the picture, so the model that
+made it keeps the style. Two cases where it cannot: your catalog has not captured it yet (run
+`--backfill-full-meta`, and see [Backing up](Backing-Up)), or you imported the file from your
+own computer, in which case PixAI has no record of it and never will. Those upscale anyway,
+on the same model PixAI's own upscale uses — their dialog has no model control either. You
+can still pick one yourself if you want a different look; it is the same picker the Generate
+drawer uses.
 
 The cost is shown before you commit, and a matching free card is applied automatically, the
 same as any other generation.

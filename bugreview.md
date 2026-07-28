@@ -17,14 +17,18 @@ This file is git-ignored working material for triage. Delete it once the items a
 
 ## Repair status — 2026-07-27
 
-**29 of 81 fixed, merged to master.** Suite: **1310 python + 445 node, 0 failed**
+**52 of 81 fixed, 2 closed by the owner.** Suite: **1313 python + 448 node, 0 failed**
 Eight were additionally verified by the owner against the running app: sync curation,
 import naming, the picker filter race, the collection filter, priority/turbo, upscale,
 LoRA removal and storyboard deletion.
 
-Fixed: `C01`, `C02`, `C03`, `C04`, `C05`, `C06`, `C07`, `C08`, `C09`, `C10`, `C11`, `C12`, `C13`, `C14`, `H09`, `H13`, `H19`, `H20`, `H21`, `H22`, `L01`, `M08`, `M09`, `M15`, `M22`, `M28`, `M29`, `M33`, `M34`
+Fixed: `C01`, `C02`, `C03`, `C04`, `C05`, `C06`, `C07`, `C08`, `C09`, `C10`, `C11`, `C12`, `C13`, `C14`, `H01`, `H02`, `H03`, `H04`, `H05`, `H06`, `H07`, `H08`, `H09`, `H10`, `H11`, `H12`, `H13`, `H14`, `H15`, `H16`, `H17`, `H18`, `H19`, `H20`, `H21`, `H22`, `H23`, `H24`, `H25`, `H26`, `H27`, `H28`, `L01`, `L02`, `M08`, `M09`, `M15`, `M22`, `M28`, `M29`, `M33`, `M34`
 
-All merged to `master`. CI green.
+**27 still open, all medium.** No criticals, highs or lows remain: `L02` is by design, `L03` is superseded by the planned asset bundling, `L04` is fixed.
+
+Everything through `M34` is on `master` and CI is green. The five highs above them
+(`H17` `H24` `H25` `H27` `H28`) needed an owner decision first; those decisions were
+made and the fixes are on `session-work`, not yet merged.
 
 ### Known related groups (same defect, more than one review angle)
 
@@ -223,9 +227,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 ## HIGH
 
-### `H01` moonglade_backup.py:1799
+### ~~`H01` moonglade_backup.py:1799~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** download() reports a disk error instead of letting a bare OSError escape -- callers without an on_error were dropping the file silently and reporting success.
 - **Area:** Backup & Import
 - **Category:** error-handling
 - **Batch:** -
@@ -234,9 +239,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** Disk fills up mid-run: `fh.write(chunk)` at line 1760 raises `OSError: [Errno 28] No space left on device`, which is not a requests.RequestException so it isn't caught here. It propagates out of download(); at a call site like the video-fetch loop (~line 4107) that passes no `on_error` to `_parallel_map`, the exception becomes a bare `None` result that matches none of the caller's `ok/skip/missing/fail` branches — the file silently disappears from every success/fail count with no printed error at all.
 
-### `H02` moonglade_backup.py:1861
+### ~~`H02` moonglade_backup.py:1861~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** task_detail_gql retries like every other query, so a blip after a CHARGED generation stops reporting 'no media ids found'. Safe because it is a read-only query; the no-retry rule protects mutations from paying twice.
 - **Area:** Backup & Import
 - **Category:** correctness
 - **Batch:** -
@@ -245,9 +251,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** User runs `--generate --confirm` (or `--generate-video --confirm`); the task completes and is charged, but the immediately-following task_detail_gql() GET (used to fetch outputs) hits a transient timeout/5xx from PixAI's own busy servers right after task completion. task_detail_gql returns None silently (not even under -v), the caller computes zero media ids, and raises "task completed but no media ids found" — indistinguishable from a real failure, with no hint that `--task-id <id>` would recover it for free.
 
-### `H03` moonglade_backup.py:7011
+### ~~`H03` moonglade_backup.py:7011~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** match_kaisuuken's enrich path keeps its fail-soft contract -- a ConnectionError or malformed body used to escape mid --confirm.
 - **Area:** Backup & Import
 - **Category:** error-handling
 - **Batch:** -
@@ -256,9 +263,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** During a --confirm spend, _apply_kaisuuken (line 7285) calls match_kaisuuken(session, params, enrich=True, raise_on_error=True) in a loop (lines 7308-7316) whose except clause only catches `(PixAIError, ValueError)` -- specifically built so a transient glitch aborts cleanly with 'Lost to the Void -- nothing was spent, try again' instead of silently spending credits. If the /kaisuuken/summary call inside list_kaisuukens hits a plain network hiccup (ConnectionError/Timeout, not wrapped as PixAIError), that exception is not caught by list_kaisuukens (which only catches PixAIError), not caught by match_kaisuuken (whose only try/except at lines 7001-7007 wraps just the earlier /kaisuuken/check POST), and not caught by _apply_kaisuuken's retry loop -- so instead of the deliberately engineered safe-abort message, the CLI crashes with a raw unhandled exception mid-spend-flow. The same gap fires on the read-only price-preview route in moonglade_gallery.py line 14040 (`core.match_kaisuuken(gsession, params, enrich=True)`, called with the default raise_on_error=False): a network blip there is caught only by the route's outer try/except (line 14045), discarding the already-computed `cost` from line 14039 and returning a bare error to the Generate/Loom drawer's cost badge -- exactly the 'glitched check should not block the UI' failure the docstring says can't happen. The test suite's `_no_live_card_network` fixture (tests/conftest.py lines 85-98) only ever injects `PixAIError` for `_rest_get`/`_rest_post`, so this gap is untested and would not be caught by CI.
 
-### `H04` moonglade_backup.py:8306
+### ~~`H04` moonglade_backup.py:8306~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** run_download's single-worker loop counts tasks, not pages, so --collect-only stops overshooting --max and prints a true total.
 - **Area:** Backup & Import
 - **Category:** correctness
 - **Batch:** -
@@ -267,9 +275,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** Run `python moonglade_backup.py --collect-only --max 40` (the Wiki's Download-tuning table states `--collect-only` 'also forces single-worker mode', which routes into this exact code path; the same bug is also hit with an explicit `--workers 1 --max 40`, and `--workers 1` is documented in --help as '1 = serial/polite'). With the default `--page-size 250`, the loop only increments `seen` once per full page of up to 250 tasks, so `if args.max and seen >= args.max: break` doesn't fire until ~40 pages have been processed -- i.e. up to ~10,000 tasks instead of the 40 the user asked for via the documented 'small test download' flag. The final 'Done. Tasks seen: N' summary is also wrong (reports page count, not task count) for any serial run.
 
-### `H05` moonglade_similar.py:263
+### ~~`H05` moonglade_similar.py:263~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** scan_dir matches its exclusions against the path UNDER root. A library beneath any folder named gallery/_duplicates/_deleted was silently indexing NOTHING.
 - **Area:** Catalog & Misc
 - **Category:** correctness
 - **Batch:** -
@@ -278,9 +287,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** Backup lives at e.g. D:\Photos\Gallery\pixai_backup and the owner runs a fresh similarity build via `sync(scan_dir(root))` with root="D:\Photos\Gallery\pixai_backup". Every yielded path's `p.parts` includes "Gallery" as a component, so `excluded_dirs & {q.lower() for q in p.parts}` is non-empty for literally every file, `scan_dir` yields zero (media_id, path) pairs, `sync()` inserts 0 rows, and count()/similar() report an empty or perpetually-empty index with no exception raised anywhere -- the whole 'more like this' feature goes silently dark for that install and there's no error to point at the cause.
 
-### `H06` moonglade_gallery.py:2937
+### ~~`H06` moonglade_gallery.py:2937~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** Restoring a legacy quarantined VIDEO now derives is_video from the file when the purge-time sidecar cannot (there are ~12k pre-sidecar files in _deleted/), so it no longer returns as a broken image.
 - **Area:** Deleting & Trash
 - **Category:** correctness
 - **Batch:** -
@@ -289,9 +299,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** The module's own docstring (lines 2750-2751, 2795-2797) states `_deleted/` holds ~12k legacy files from before the 2026-07-24 sidecar feature, with no sidecar JSON. Restoring one of those pre-existing quarantined VIDEOS from the Trash panel: `_read_trash_meta` returns None -> `meta = None` -> line 2937 builds `row = {f: '' for f in CATALOG_FIELDS}`, so `row['is_video']` is '' rather than '1' (unlike list_quarantined at line 2843, which independently derives is_video from the file suffix -- restore_quarantined_media does not do the same derivation). Every is_video-gated code path elsewhere in this module (templates checking `row.is_video == '1'`, video-serving routes gated on `row.get('is_video') == '1'`) will now treat the restored .mp4/.webm as a plain still image: no play badge, no video route, and the detail page attempting to open it as an image. The user restores a video expecting it back and gets a silently misclassified, effectively broken item with no error shown.
 
-### `H07` moonglade_gallery.py:3086
+### ~~`H07` moonglade_gallery.py:3086~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** build_thumbnails()'s video fallback now passes the video extensions -- it was searching image extensions, so it could never find the video it existed to thumbnail.
 - **Area:** Deleting & Trash
 - **Category:** silent-failure
 - **Batch:** -
@@ -300,9 +311,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** For a video row whose primary path `Path(out_dir)/filename` doesn't exist (stale filename after a reorg, or an empty filename), line 3085's `if not vp.exists()` triggers the fallback at line 3086: `find_files_for_media_id(Path(out_dir), mid)` with no `exts` argument. Per that function's own docstring in this same file (lines 2543-2548), the default is `_IMAGE_EXTS`, and callers must explicitly pass `exts=_VIDEO_EXTS` (as moonglade_backup.py's already_downloaded_video does) to match video files. Since .mp4/.webm/.mov/.mkv/.m4v are never in `_IMAGE_EXTS`, the search always returns `[]`, `vp` becomes None, and `make_video_thumbnail` is never invoked -- even though the video file may exist elsewhere under out_dir and would have been found with the right extension set. The video silently gets no poster thumbnail, and every subsequent `--sync` / 'Rebuild thumbnails' pass repeats the same no-op lookup and never fixes it.
 
-### `H08` moonglade_gallery.py:5652
+### ~~`H08` moonglade_gallery.py:5652~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** Drag-paint only paints for the primary button. A right-click (a documented feature) was silently toggling the card into the selection that 'Delete from PixAI' acts on.
 - **Area:** Deleting & Trash
 - **Category:** selection-integrity
 - **Batch:** -
@@ -323,9 +335,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** A logged-in-at-the-console user deletes a single image via the detail page. core.delete_batch_media_gql(...) succeeds at line 11697 (image is now gone from PixAI, irreversible), but purge_media_local(out_dir, thumb_dir, db_path, mid, row.get('filename')) at line 11700 throws (e.g. catalog.db momentarily locked by a concurrent request) before delete_from_catalog() runs. The exception is not caught anywhere in this view function, so Flask returns an unhandled 500 instead of the route's normal jsonify({'error': ...}) shape, and the catalog row + thumbnail for that image are never removed -- the gallery keeps showing an image that no longer exists on the user's PixAI account, exactly the cloud/catalog drift this route's own docstring says the ordering is designed to prevent.
 
-### `H10` moonglade_backup.py:4937
+### ~~`H10` moonglade_backup.py:4937~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** Reference-video gates audio flags on VIDEO_AUDIO_MODELS, the same table the i2v builder uses -- it was re-introducing the false-NSFW refusal that table exists to prevent.
 - **Area:** Generating & Cost
 - **Category:** wrong-params
 - **Batch:** -
@@ -334,9 +347,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** Run `--reference-video --video-model v3.0.1 --ref-image <id1> --ref-image <id2> --prompt "@image1 ... @image2 ..." --confirm` (or any model outside VIDEO_AUDIO_MODELS, e.g. v3.0, v3.0.2, v2.7). The `rv` dict at lines 4932-4943 unconditionally sets `audioLanguage` and `generateAudio`, with no equivalent to the `if str(model).strip() in VIDEO_AUDIO_MODELS:` gate that build_video_parameters applies at line 4891-4893 for the exact same fields. The file's own survey comment at lines 4973-4992 documents that v3.0.1/v3.0.2/v2.7 must OMIT both fields, and that sending them on an unsupported model previously caused a real, otherwise-accepted submit to be refused with 'This image contains sensitive or NSFW content' on an image PixAI's own site accepted -- the same failure mode is reachable here through the unfixed sibling builder, silently blocking a legitimate reference-video generation with a misleading moderation error instead of the actual cause.
 
-### `H11` moonglade_backup.py:5386
+### ~~`H11` moonglade_backup.py:5386~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** The poller reads _GEN_DONE/_GEN_FAIL instead of its own drifted copy, so 'finished' and 'rejected' are recognised as terminal.
 - **Area:** Generating & Cost
 - **Category:** state-drift
 - **Batch:** -
@@ -345,9 +359,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** A submitted generation ends up with PixAI status 'rejected' (already-terminal, already refunded per the file's own EmptyOutputsError/_GEN_FAIL handling elsewhere). run_generate / run_generate_video / run_reference_video / web_generate all poll it via _poll_task_status (lines 5591, 6176, 6292, 6121), whose success check (line 5382: completed/succeeded/success/done) and fail check (line 5386: failed/error/cancelled/canceled) neither matches 'rejected', so the loop just sleeps for the full poll_timeout (300s images, 600s video/reference-video) and then, since 'rejected' isn't in _never_dispatched's waiting/pending/queued set either, prints the false message 'the task is STILL RUNNING on PixAI ... recover it free once it finishes with --task-id' for a task that is already dead. A user who believes the CLI is just slow and re-runs --generate --confirm instead of recovering by id can be charged for a second generation.
 
-### `H12` moonglade_backup.py:6105
+### ~~`H12` moonglade_backup.py:6105~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** video_outputs reads the i2vPro block as well as referenceVideo (the two disagree on the key -- `prompts` vs `prompt`), so a plain image-to-video is no longer catalogued blank. Fixes --sync-videos' backfill too.
 - **Area:** Generating & Cost
 - **Category:** metadata-loss
 - **Batch:** -
@@ -368,9 +383,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** User has Model A selected with a resolved version_id and compatible LoRAs (Go button enabled). User clicks Model B in the picker; selected is immediately reassigned to Model B's raw object (no version_id yet), and the /api/model-version fetch for B fails (timeout/dropped connection). Only the success .then() branch calls refreshLoraNotes()->updateGoState(); the .catch() at line 7657 only resets the label text (`el('gen-selname').textContent=m.title`). The Go button keeps whatever enabled/disabled state Model A left it in -- typically still enabled. Clicking Generate then silently does nothing (payload().version_id is '' so generate()'s `if(!p.version_id) return;` guard at line 7993 no-ops), with no error message and no indication the pick failed, unlike the sibling 'no version!' label used when the fetch succeeds but returns zero versions. The only recovery is guessing to re-pick a model to retry the fetch.
 
-### `H14` moonglade_gallery.py:8130
+### ~~`H14` moonglade_gallery.py:8130~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** The Edit and Generate tabs own separate debounce sequences, so an '?edit=' link no longer cancels the Generate tab's first price check. tests/test_fix.py updated: it pinned the shared `costSeq` by name, and the sharing WAS the defect.
 - **Area:** Generating & Cost
 - **Category:** race-condition
 - **Batch:** -
@@ -379,9 +395,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** On page load (DOMContentLoaded, line ~8701) 'if(document.getElementById("gen-dim-note") ...) Gen.refreshCost();' schedules a 250ms debounced price check via the shared costTimer. Immediately after, at lines 8707-8708, 'var em=...get("edit"); if(em) Gen.openEdit(em);' runs synchronously (this fires whenever the gallery is opened via an 'Edit this image' deep link, e.g. from an image detail page). Gen.openEdit -> setEditSource() calls debEditCost() (line 8130), which does clearTimeout(costTimer) and reschedules the SAME shared timer for editCost -- silently cancelling the Generate tab's pending refreshCost before it runs. If the user then switches back to the Generate tab and submits without touching any of the fields that re-trigger refreshCost (aspect/mode/count/size/width/height), the Generate cost badge never gets an actual price and the user hits Generate with no real cost check having ever completed for that tab.
 
-### `H15` moonglade_gallery.py:8196
+### ~~`H15` moonglade_gallery.py:8196~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** The Fix dialog's quoted price is invalidated the moment the marked boxes change, not only when a price fetch completes.
 - **Area:** Generating & Cost
 - **Category:** stale-price-confirm
 - **Batch:** -
@@ -390,9 +407,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** User draws one hand-fix box; fixCost() settles and fixCostVal=~300. User then draws a second box (debFixCost() schedules a new /api/price call 250ms out) and immediately clicks 'Fix marked regions' before that call resolves. fix() (line 8201) reads the still-stale fixCostVal=300 and shows 'Fix 2 marked regions? This spends about 300 PixAI credits' -- then runTask() submits fixBoxesScaled() for BOTH boxes (line 8220), which actually prices/charges for 2 regions. The user confirmed a real, unavoidable credit spend (Fix can never be covered by a free card, per this file's own comment at line 8213) based on a number that didn't match what was submitted.
 
-### `H16` moonglade_gallery.py:8665
+### ~~`H16` moonglade_gallery.py:8665~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** bulkSendVideo decides from the selection's own data, not the cards on screen -- a video scrolled or filtered out of view slipped into an image-reference send. bulkSendCast had the identical hole; both now share ONE helper.
 - **Area:** Generating & Cost
 - **Category:** input-validation
 - **Batch:** -
@@ -401,9 +419,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** selGet() (used at line 8663) reads selections from localStorage('gallery_sel'), independent of what's rendered. User selects a mix of images and one video on an unfiltered gallery view, then changes the search/filter or paginates (replacing the rendered card grid) before clicking the bulk bar's 'Send to Video'. For the selected video, document.getElementById('card-'+mid) at line 8664 now returns null (its card no longer exists in the DOM), so the 'if(card && card.getAttribute("data-video")==="1") return;' guard at line 8665 is skipped, and the video's media_id is pushed into refs and handed to Gen.addVideoRefs() as an image reference for the (expensive) video drawer -- exactly the case the inline comment says can't happen.
 
-### `H17` moonglade_gallery.py:15060
+### ~~`H17` moonglade_gallery.py:15060~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** A defect in our OWN poll code now reports failed. The broad handler stays -- a PixAI 5xx/429/timeout must answer 'running' so the poller keeps trying instead of bricking the card with a false failure -- but it caught programming errors too, so a genuinely broken poll looked exactly like a slow one for the full 6h ceiling.
 - **Area:** Job Tracker & Watcher
 - **Category:** error-handling
 - **Batch:** -
@@ -412,9 +431,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** config.json's PIXAI_API_KEY becomes invalid/expired while a Loom shot or gallery generation is mid-poll. Every /api/task-status?task_id=<tid> call now raises inside _gen_session() (line 15009) or core.generation_status(), which is caught by the bare `except Exception` at line 15060 and returned as {"phase":"running","status":"checking… (...)"} (line 15075-15076). The Job Tracker card spins indefinitely showing the job as still in progress -- never a clear failure -- for a condition that will never resolve itself, until (if ever) the much-slower orphan-reconciliation sweep in /api/jobs ages it out.
 
-### `H18` static/mg-notify.js:1390
+### ~~`H18` static/mg-notify.js:1390~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** 'stale' is in the Job Tracker's terminal set with its own toast, so a job PixAI never started is announced instead of vanishing quietly.
 - **Area:** Job Tracker & Watcher
 - **Category:** notification-state-stuck
 - **Batch:** -
@@ -471,9 +491,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** User scrolls the gallery picker near the bottom, triggering `loadMore()` -> `load(true)` for page 2 of the current filter (loading=true). Before that request returns, the user changes the rating/collection/type filter dropdown, triggering `setFilters()` (line 72), which updates the `filters` object and resets page=1 but then calls `load(false)` — which no-ops immediately because `loading` is still true (line 56). No fetch is ever issued for the new filter. When the stale page-2 response for the OLD filter arrives, `onResults(..., {append:true})` fires and mg-gallery-picker.js appends those old-filter images to the still-visible grid (append=true never clears it) alongside the previously-shown results, while the count display shows the old filter's total. The grid now permanently shows a mix of images from two different filter states — e.g. images below the user's chosen rating_min threshold remain pickable — until an unrelated later action happens to trigger a fresh non-append load.
 
-### `H23` moonglade_gallery.py:13128
+### ~~`H23` moonglade_gallery.py:13128~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** Saving a new API key refreshes the in-memory copy, so rotating a revoked key takes effect without a restart.
 - **Area:** Security & Access
 - **Category:** state-caching
 - **Batch:** -
@@ -482,9 +503,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** Server is already running with core._cfg['PIXAI_API_KEY'] = keyA cached at import (moonglade_backup.py line 695). PixAI revokes keyA, or the owner wants to switch accounts; needs_key flips true again (gallery.py ~line 11549) and the wizard reappears, or the endpoint is called directly. The handler validates the new keyB with a hand-built session (lines 13089-13105, deliberately bypassing the cache) and reports 'Connected -- N credits', then writes keyB to config.json (line 13128). But every subsequent call in the same process -- /api/account, /api/generate, any _gen_session() -> core._make_session(None) -> load_token(None) -- checks core._cfg.get('PIXAI_API_KEY') first (moonglade_backup.py lines 788-793); since it is still non-empty (keyA), it never re-reads disk, so every real generation/account call keeps silently using the dead/wrong keyA until a manual restart, directly contradicting the success message the wizard just showed.
 
-### `H24` loom/master-storyboard.jsx:237
+### ~~`H24` loom/master-storyboard.jsx:237~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** sGet/sSet/sList/sDel no longer answer as if nothing went wrong. They still never throw (every caller is built around a soft answer), but a failure is logged and surfaced once per session, and sGetX reports whether the READ failed -- the distinction the storyboard delete path needed.
 - **Area:** The Loom
 - **Category:** data-loss
 - **Batch:** -
@@ -493,9 +515,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** window.storage.set() fails (quota exceeded from accumulated local thumbnail data at TPRE keys, or the storage backend errors) during the debounced project autosave; sSet's catch only does console.error(e) with no return signal, so the caller proceeds as if the save succeeded and the UI's saving/busy indicator clears normally. The user keeps editing, closes the tab, and discovers the storyboard was never actually persisted only on next load.
 
-### `H25` loom/master-storyboard.jsx:1422
+### ~~`H25` loom/master-storyboard.jsx:1422~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** Deleting a shot card asks first, like every other destructive action in the Loom. It holds a prompt, cast, frames and any result, and the x sits between Duplicate and a dropdown with no undo.
 - **Area:** The Loom
 - **Category:** data-loss
 - **Batch:** -
@@ -504,9 +527,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** User misclicks the '×' delete icon in the card's tightly-packed move-up/move-down/duplicate/delete button row (lines 1419-1422) — delCard(act.id, e.c) runs instantly (confirmed via its definition: `(aId, card) => setProject((p) => removeCard(p, aId, card.id))`, no confirm inside). The shot's prompt, frames, refs, notes, and attached generated-video result are gone permanently; a whole-file search found no undo mechanism anywhere, in contrast to deleteProject and delAct-with-cards which both gate on window.confirm.
 
-### `H26` loom/master-storyboard.jsx:2736
+### ~~`H26` loom/master-storyboard.jsx:2736~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** A failed shot is put back to a state later batches pick up, instead of sitting at 'wip' forever and being silently skipped.
 - **Area:** The Loom
 - **Category:** correctness
 - **Batch:** -
@@ -515,9 +539,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** generateShot writes `setCardStatus(c.id, { status: "wip" })` optimistically (line 2736) before the `/api/loom/generate` fetch. If PixAI returns a normal JSON error (content-policy rejection, insufficient credits, etc. — handled at lines 2743-2746) or the fetch itself throws (lines 2766-2769), only the ephemeral, in-memory `genState` is set to phase 'error' — `setCardStatus` is never called again to revert status or attach a `pendingTaskId`. On reload, `genState` is wiped and the resume-on-load effect (lines 2873-2881) only re-attaches a poll for cards that have BOTH `status==="wip"` AND a `pendingTaskId` (this shot has neither the latter), so the card shows indefinitely 'wip' with zero error indication, and `batchGenerate`'s own `todo` filter (`status !== "done" && status !== "wip"`, line 3062) permanently excludes it from every subsequent 'Generate all' click — a single ordinary submit rejection quietly and irreversibly removes a shot from the batch pipeline.
 
-### `H27` loom/src/loom-core.js:254
+### ~~`H27` loom/src/loom-core.js:254~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** Frame descriptions gate on MODE, matching shotImageRefs() which reserves the slots by mode. An FLF-mode shot had both frames attached and SENT with nothing in the prompt saying what they were.
 - **Area:** The Loom
 - **Category:** correctness
 - **Batch:** -
@@ -526,9 +551,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** Select a shot and set Mode to FLF via the Video tab's mode picker (Mode and Continuity are documented/coded as independent controls — see setShotMode/setShotConnect in loom-mutations.js, which only forces mode when connect is set TO "flf", never the reverse). Leave Continuity at its default "New scene" (or pick "Cut"/"Extend prev"). Fill in Opening and Closing frame images with descriptions and Generate. shotImageRefs()/shotPayload() (correctly gated on c.mode==="FLF", matching the loom-mutations.js comment that mode alone controls what reaches generation) still uploads both frame images as @image1/@image2, but shotText()'s `if (c.connect === "flf")` block never fires, so the actual prompt text sent to PixAI never says what either image is ("Opening frame @imageN: ..."/"Closing frame @imageN: ..." both missing). The model gets two structurally load-bearing reference images with zero textual explanation — for the routine, everyday case of choosing FLF mode without also toggling the First→Last continuity chip. (The one existing test for this text, loom/test/loom-core.test.js:250-260, only exercises connect:"flf" with mode left at makeCard()'s default "R2V" — a combination that's actually unreachable through the real UI's coupling logic — so the reachable broken case, mode:"FLF" with connect anything else, has zero test coverage.)
 
-### `H28` loom/src/loom-core.js:278
+### ~~`H28` loom/src/loom-core.js:278~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** A cast member the shot has no picture for is left OUT of the prompt instead of being cited by their project-global tag ("Greg -- reference @image4" with no @image4 attached). castMissingImages() feeds a badge on the board card so the omission is visible where it can be fixed.
 - **Area:** The Loom
 - **Category:** correctness
 - **Batch:** -
@@ -948,9 +974,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** User selects images and clicks '+ Add to collection', naming 'Elves' -> server redirects to '...?collected=3', banner shows 'Added 3 image(s)'. Without a fresh navigation, user selects more images and clicks '+ Add to collection' again -> add('back', location.href) at line 5869 captures the URL still containing '?collected=3', and /collection-add (moonglade_gallery.py:12078-12085) appends '&collected=<newN>' rather than replacing it, producing '...?collected=3&collected=7'. Flask's request.args.get('collected') returns the FIRST value ('3'), so the banner incorrectly reports 'Added 3 image(s)' again even though 7 were actually added this time. The sibling bulkRemoveCollection() (lines 5889-5890) explicitly strips its own 'uncollected' param from back for exactly this reason, but bulkAddCollection and bulkReplacePrompt (line 5856) were never given the same fix.
 
-### `L02` static/mg-notify.js:495
+### ~~`L02` static/mg-notify.js:495~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27
+- **Repair:** `Ach.close()` now clears `_actTimer`. The renderers each cleared it before re-arming, so it only ever leaked on the way OUT — the 3.5s interval kept rebuilding hidden DOM for the life of the page, once more per time the modal had been opened. close() is also the Escape path, so it is the one exit every route out of the modal takes. Guarded by loom/test/mg-notify-carousel-timer.test.js, which also pins that the carousel still rotates.
 - **Area:** Job Tracker & Watcher
 - **Category:** resource-leak
 - **Batch:** -
@@ -959,9 +986,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** User opens the achievement modal (Ach.open() -> load(false) -> render(d) -> renderGrid(d) -> renderCarousel(d, ladders), which starts `_actTimer=setInterval(...)` at line 658). User closes the modal via Ach.close() (line 495), which only toggles the 'open' CSS class off — it never touches _actTimer. Because #hall-carousel-slot is merely hidden via an ancestor's display:none, not removed from the DOM, the interval keeps finding it and calling renderCarousel() (full innerHTML rebuild + re-binding of nav/pip button handlers) every 3.5 seconds for the rest of the page's life, doing real work for a UI element nobody can see. It isn't unbounded (the next Ach.open() clears and replaces it via renderGrid's own guard at line 662), but for however long the modal stays closed the background timer runs unchecked, wasting CPU on every idle page that ever opened the Folio of Honors once.
 
-### `L03` moonglade_gallery.py:9558
+### ~~`L03` moonglade_gallery.py:9558~~ &nbsp; BY DESIGN
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` closed 2026-07-27 — owner: by design
+- **Verdict:** Not a defect. The button is shown to every signed-in session on purpose, and the localhost-only rule stays server-enforced. Do not "fix" this by hiding the control.
 - **Area:** Security & Access
 - **Category:** authorization-ux
 - **Batch:** -
@@ -970,9 +998,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** Every other localhost-restricted control on this same page (destructive Maintenance buttons via the `actions` filter, 'Set launcher icon' at line 9617, Trash delete-forever/empty at lines 9725/9734, the Reset-password button at 9659) is wrapped in `{% if panel_is_local %}` so LAN sessions never see a control they can't use. The '■ Stop this job' button (line 9558) has no such gate, and poll() (lines 10108-10109) shows it to anyone whenever a job is running, regardless of panel_is_local. A LAN user watching a long-running Sync clicks Stop, confirms the 'Stop the running job?' dialog, and the fetch to /api/panel/cancel returns {"error":"localhost-only"} (confirmed enforced server-side) — a dead end the app's own 2026-07-24 fix explicitly eliminated for every other destructive control, and one the Wiki's Control-Panel.md documents should behave the same way ('Like the destructive jobs below, stopping is restricted to the machine hosting the gallery').
 
-### `L04` moonglade_gallery.py:13345
+### `L04` moonglade_gallery.py:13345 &nbsp; SUPERSEDED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` closed 2026-07-27 — owner: an upcoming change covers this
+- **Verdict:** Real, but not fixed here. The achievement and branding assets are to be BUNDLED into a package format (the MPQ-style container the owner has raised before), which changes how discoverable any of this is at a level a JSON tweak cannot reach. Masking the array now is work thrown away against that. Revisit as part of the bundling design.
 - **Area:** Security & Access
 - **Category:** spec-contradiction
 - **Batch:** -

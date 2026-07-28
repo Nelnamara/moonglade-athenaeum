@@ -26,8 +26,8 @@ reader could work it out from the code, it does not belong here.
 ## Contents
 
 - [Standing rules](#standing-rules) &mdash; 61
-- [Settled constraints](#settled-constraints) &mdash; 41
-- [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 25
+- [Settled constraints](#settled-constraints) &mdash; 45
+- [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
 - [Decisions](#decisions) &mdash; 130
 
@@ -415,6 +415,30 @@ The two ops relevant to picker-favorites (bookmarked / liked generation models) 
 
 **Why.** Both docs look authoritative; scoping picker-favorites on the optimistic reading would build against an operation that may not exist, and dropping it on the pessimistic reading may discard a working surface.
 
+### PixAI's speed channels: 500 is members-only Turbo, not the cheap tier  ·  *2026-07-27*
+
+Read off their own bundle: `{default: 1000, turboMode: 500, low: 0}` (an XHigh 1500 also exists). **1000 is High Priority — anyone may use it and it COSTS EXTRA. 500 is TurboMode — free, ~7.6x faster, and MEMBERS ONLY. 0 is standard.** Their client never submits a tier you are not entitled to, because it normalises first: a member asking for Low is upgraded to Turbo, a non-member asking for Turbo is downgraded to Low.
+
+**Why.** This app had the two backwards in its own comments and defaulted every submit to 500 as "standard, cheaper". Nothing was wrong while the membership was live — it just ran fast and free — so the error was undetectable until the day it lapsed and PixAI began refusing every create path at once with `REQUIRE_MEMBERSHIP`. Reading entitlement before each submit would cost a round trip per generation, so `submit_generation` corrects on the refusal instead and remembers for the session; that is safe for the same reason the neighbouring inferenceProfile retry is (PixAI answered with a GraphQL error, so the task was rejected — nothing created, nothing charged). This also closes the open question in `private/GENERATOR_SURFACE.md` that said Turbo's submit value was never captured: it is 500, pinned from the bundle, no submit and no credits spent.
+
+### An upscale does not choose a model, and the catalog's model_id is a VERSION id  ·  *2026-07-27*
+
+PixAI's upscale dialog has no model control at all: their submit spreads the enlarge/upscale params, sets a FIXED model version, and takes prompts/width/height off the source's original task. Separately, `catalog.model_id` is populated from a task's submitted `modelId`, and a submit's `modelId` **is a model version id** — only a model chosen in the picker is a real model id.
+
+**Why.** Both facts were learned the expensive way. Sending the catalog's value in the `model_id` field put a version id through the model→versions lookup, which matched nothing and refused the submit with "pick a model first" on a picture that was displaying its model on screen. And requiring a model at all was this app's own invention, which left every locally imported file unupscalable behind a dead button. Recorded because neither is guessable from the code alone, and both look like the opposite of a bug until you read PixAI's own submit builder.
+
+### The Panel's "Stop this job" button is shown to every session on purpose  ·  *2026-07-27*
+
+Stopping a maintenance job is localhost-only and server-enforced. The BUTTON is nonetheless rendered for every signed-in session, including LAN devices, which means a LAN user can confirm the dialog and then be refused. That is the owner's call and it stands: do not "fix" it by hiding the control.
+
+**Why.** It reads like an authorization-UX defect to a fresh audit (it was filed as one), and the obvious repair — hide the button off `_is_local_request()` — would be wrong twice over: it moves a security rule into the UI layer where it cannot be trusted, and it makes the control's absence look like a bug to the owner on his own LAN device. The refusal is the correct behaviour; only the wording of it is ever worth revisiting.
+
+### Masked achievements are not worth hardening before the asset bundle exists  ·  *2026-07-27*
+
+`/api/achievements` masks hidden, unearned Feats to a `???` placeholder but leaves them in the array, so the COUNT of undiscovered feats is readable in the raw JSON. This contradicts the wiki's "no placeholder count… found by playing, not by reading", and it is deliberately NOT being fixed at the JSON layer.
+
+**Why.** The achievement and branding assets are to be bundled into a package format (the MPQ-style container the owner has raised repeatedly), which changes what is discoverable at a level a response tweak cannot reach — anyone can read a JSON response, bundled or not, but the whole discoverability model shifts once the assets stop being loose files. Masking the array now is work thrown away against that design, and would also have to be undone or reconciled when the bundle lands. Revisit as part of the bundling design, not before. See [[Packaged assets must keep a loose-file override layer]].
+
 ### mg-generate-drawer must stay a build-free <script>  ·  *2026-07-18*
 
 The shared generate drawer cannot import from loom-mutations.js (an ES module) and must stay a build-free <script>. Shared logic it needs (e.g. the friendly generation-error mapper) is a local, verbatim port, with a permanent parity test guarding the copy against drift.
@@ -660,6 +684,12 @@ Pending, and it gates: the image picker's further visual polish, taste-level wid
 ## Rejected — do not re-propose
 
 *Tried and failed, or considered and turned down. This section exists so nobody spends a day rediscovering a dead end.*
+
+### Do not fabricate data to satisfy a validation rule  ·  *2026-07-27*
+
+A repair pass "fixed" an empty-prompt rejection on upscale by inventing a fallback prompt string in the client and sending it to the paid generation endpoint. Reverted the same day. A second pass "fixed" Stop/Restart orphaning a maintenance job by making the server KILL the job — the opposite of what the Panel already enforced (both buttons carry class `jobbtn`, which the poller disables for the life of a job). Also reverted; the routes now refuse with a 409, which is what the UI had always implied.
+
+**Why.** Both are the same failure with different faces: an agent met a wall, invented a plausible way through, and shipped a behaviour nobody had chosen. The prompt one would have steered a real re-diffusion on the owner's credits; the Stop one contradicted a rule the app already had. The rule that came out of it, and that now leads every repair brief: if a fix needs a product or behaviour decision — inventing a default, choosing what reaches a paid API, picking between two defensible behaviours — **stop and report the choice**. "I stopped here, and here is the choice" is a success. A plausible invention is a failure, even when the tests pass.
 
 ### Claude's "the toggle just isn't checked" explanation of the roast leak is WRONG — do not restart from it  ·  *2026-07-22*
 

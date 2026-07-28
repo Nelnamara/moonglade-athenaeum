@@ -15392,6 +15392,23 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # sat at 'running' indefinitely while PixAI considered it long finished.)
             _log_job(tid, status="failed", error=_redact_host_paths(str(e))[:200])
             return jsonify({"phase": "failed", "error": _redact_host_paths(str(e))[:200]}), 200
+        except (TypeError, AttributeError, NameError, KeyError, IndexError) as e:
+            # A defect in THIS code, not a PixAI blip. The broad handler below deliberately
+            # answers 'running' so a flaky network keeps getting retried -- but retrying a
+            # TypeError just repeats it, so a genuinely broken poll used to present as a job
+            # that was merely slow, for the full 6h polling ceiling, with nothing anywhere
+            # saying otherwise. These are the errors that cannot come good on a retry, so
+            # they get the authoritative 'failed' the paragraph below is right to withhold
+            # from everything else.
+            import logging as _logging          # module-local, as everywhere else in this file
+            _log_job(tid, status="failed", error=_redact_host_paths(str(e))[:200])
+            # The traceback is the whole point for this class: it names the line to fix, and
+            # moonglade_logging keeps a rotating file log regardless of -v.
+            _logging.getLogger(__name__).exception("task-status poll failed for %s", tid)
+            return jsonify({"phase": "failed",
+                            "error": "Moonglade hit an internal error checking this job "
+                                     "({}). The generation itself may be fine -- check the "
+                                     "Activity card.".format(_redact_host_paths(str(e))[:120])}), 200
         except Exception as e:
             # A transient PixAI blip (5xx/429/timeout) raises here even though the task may
             # still be running -- or already finished. Do NOT write an authoritative 'failed'
