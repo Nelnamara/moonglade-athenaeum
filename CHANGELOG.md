@@ -28,6 +28,14 @@ git tags. Full prose notes for tagged versions live on
   there — whereas a fresh rebuild dying again leaves strictly less than it started with. Reach
   for `--rebuild-similar` only to cure an index that is genuinely broken, not merely incomplete.
 
+### Changed
+
+- **The Loom is reachable from a phone.** Its nav button was hidden below 480px, on the theory
+  that a dense multi-panel tool could not work on a phone screen. V2 made that stale — it is
+  usable out of the box in landscape — so the gate is gone and the button is in the nav at every
+  width. Hiding the only entry point did not protect anyone; it made a shipped feature look
+  absent. Portrait is still cramped, which is a polish gap, not a reason to hide the door.
+
 ### Fixed
 
 - **A shot's prompt no longer names pictures that aren't attached to it.** A cast member added

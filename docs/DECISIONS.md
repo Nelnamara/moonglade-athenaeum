@@ -615,9 +615,15 @@ The generation ETA presented in the tracker is an estimated wait.
 
 ### 320px is the support floor for web surfaces
 
-The Job Tracker/Activity tray and the snippet/tag popups clamp max-width to calc(100vw - Npx) so none of them run off a 320px-wide screen (replacing flat max-widths). The Loom nav button is hidden below 480px and visible from tablet up; the gallery's filters become a bottom sheet at the same breakpoint.
+The Job Tracker/Activity tray and the snippet/tag popups clamp max-width to calc(100vw - Npx) so none of them run off a 320px-wide screen (replacing flat max-widths). The gallery's filters become a bottom sheet below 480px.
 
-**Why.** 320px is treated as the narrowest screen that must work; 480px is the line below which the Loom isn't offered at all rather than being offered broken.
+**Why.** 320px is treated as the narrowest screen that must work.
+
+### The Loom is reachable at every width — REVERSED 2026-07-27
+
+The Loom nav button was hidden below 480px. **That gate is deleted** (owner, 2026-07-27): V2 is the live surface and is usable out of the box in landscape, so hiding its only entry point did not protect anyone — it made a shipped feature unreachable from a phone entirely, with no hint it existed.
+
+**Why the original call was wrong, so it isn't re-made.** "Don't offer it broken" is sound when the surface *is* broken; it became stale the moment V2 landed and nobody revisited the CSS. A capability gate that outlives the limitation it was written for reads to the user as a missing feature. Portrait on a phone is still cramped — that is a **known, deferred polish gap, not a reason to hide the door**; rotating the phone is a thing the user can do and discover, hunting for an invisible button is not.
 
 ### Config writes must be atomic
 

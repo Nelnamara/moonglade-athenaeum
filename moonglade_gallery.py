@@ -4615,9 +4615,10 @@ __DESIGN_TOKENS__
     .head-nav::-webkit-scrollbar { display: none; }
     .head-nav > * { flex: 0 0 auto; }
     .head-nav .btn, .acct-chip, .acct-claim { min-height: 40px; display: inline-flex; align-items: center; }
-    /* The Loom is a dense multi-panel desktop/tablet tool -- not viable on a phone screen.
-       Hidden here (phone-only breakpoint), stays visible at 481px+ incl. the tablet range. */
-    .head-nav .b-loom { display: none; }
+    /* The Loom used to be hidden here on the theory that a dense multi-panel tool was not
+       viable on a phone. REVERSED 2026-07-27 (owner): V2 is the live surface and is usable
+       out of the box in landscape, so hiding its only entry point just made the feature
+       unreachable from a phone. It stays in the nav at every width. */
 
     /* GRID: force a comfortable 2-up; ignore a too-large saved --thumb (else 1 giant column / overflow). */
     .grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px; padding: 10px 10px; }

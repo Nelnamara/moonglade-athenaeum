@@ -11,8 +11,9 @@ python moonglade_gallery.py --out pixai_backup      # then http://127.0.0.1:5000
 ```
 
 You need to be signed in, exactly like the rest of the gallery — so the Loom works from a
-tablet on your LAN too. It's a dense four-panel tool, so the header button is hidden at
-phone widths.
+tablet on your LAN too. The header button is there at every screen width, phones included.
+It's a dense four-panel tool, so **turn a phone to landscape** — portrait works but is
+cramped.
 
 It is also deliberately **engine-agnostic**: every shot can hand you its assembled prompt
 via **Copy shot**, so you can plan here and render somewhere else.
