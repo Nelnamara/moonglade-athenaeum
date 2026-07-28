@@ -26,7 +26,7 @@ import {
   buildShotListText, buildPlaySequence, buildExportClips,
   setPromptOverride, clearPromptOverride,
   loraIncompat, resolveLoraPayload, anyLoraUnresolved, overLoraCap,
-  landInFirstAct, importedFootagePatch,
+  landInFirstAct, importedFootagePatch, importedFramesPatch,
   // resolveGenDims was USED below (the Advanced panel's "→ W × H" readout) without ever
   // being imported. The in-browser Babel path inlines every module into one global scope,
   // so it happened to resolve there and the omission was invisible; esbuild builds a real
@@ -2654,6 +2654,18 @@ function useShotMutations(project, setProject) {
   const importFootage = (mediaId, duration) => {
     const c = newCard(importedFootagePatch(mediaId, duration));
     setProject((p) => landInFirstAct(p, c, uid()));
+    // The card lands FIRST and the two stills fill in a beat later, on purpose. Landing the
+    // footage is the Footage tab's whole action and has to stay instant; ffmpeg plus two
+    // uploads take a second or two. The card is complete and placeable throughout -- the
+    // frames are the only thing outstanding -- so nothing waits on this and a failure just
+    // leaves the slots as they already were.
+    fetch("/api/loom/import-frames", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ video_media_id: mediaId }) })
+      .then((r) => r.json()).then((d) => {
+        if (!d || d.error) return;
+        const patch = importedFramesPatch(d.first_media_id, d.last_media_id);
+        if (Object.keys(patch).length) setCardStatus(c.id, patch);
+      }).catch(() => {});
     return c.id;
   };
   const dupCard = (aId, card) => {

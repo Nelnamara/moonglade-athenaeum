@@ -10,7 +10,7 @@ import {
   buildShotListText, buildPlaySequence, buildExportClips,
   setPromptOverride, clearPromptOverride,
   loraIncompat, resolveLoraPayload, anyLoraUnresolved, overLoraCap,
-  landInFirstAct, importedFootagePatch,
+  landInFirstAct, importedFootagePatch, importedFramesPatch,
   snap8, resolveGenDims, buildImgGenBody,
 } from "../src/loom-mutations.js";
 import { flat, shotText, actLetter } from "../src/loom-core.js";
@@ -696,4 +696,44 @@ describe("buildImgGenBody (L536)", () => {
     assert.equal(body.high_priority, false);
     assert.equal(body.prompt_helper, false);
   });
+});
+
+/* importedFramesPatch -- the two stills an imported clip gets from itself.
+   The partial cases matter as much as the happy one: the server returns whichever end
+   survived extraction and upload, so an absent id must leave that slot ALONE rather than
+   writing an empty frame over it. */
+test("importedFramesPatch fills both frames with resolvable media ids", () => {
+  const p = importedFramesPatch("111", "222");
+  assert.equal(p.openFrame.mediaId, "111");
+  assert.equal(p.closeFrame.mediaId, "222");
+  // mediaId is what frameSrc() resolves through /thumbs/<id>.jpg; thumbId indexes the
+  // client-side blob map, which holds nothing for a frame made on the server.
+  assert.equal(p.openFrame.thumbId, "");
+  assert.equal(p.closeFrame.source, "");
+  assert.match(p.openFrame.desc, /first frame/);
+  assert.match(p.closeFrame.desc, /last frame/);
+});
+
+test("importedFramesPatch omits the end that did not come back", () => {
+  const onlyFirst = importedFramesPatch("111", null);
+  assert.ok(onlyFirst.openFrame);
+  assert.equal("closeFrame" in onlyFirst, false);
+  const onlyLast = importedFramesPatch(undefined, "222");
+  assert.ok(onlyLast.closeFrame);
+  assert.equal("openFrame" in onlyLast, false);
+});
+
+test("importedFramesPatch returns an EMPTY patch when neither end came back", () => {
+  // the board checks Object.keys(patch).length before patching, so an empty object is the
+  // signal to leave the card untouched -- returning frames full of "" would blank the slots
+  assert.deepEqual(importedFramesPatch(null, undefined), {});
+  assert.equal(Object.keys(importedFramesPatch("", "")).length, 0);
+});
+
+test("importedFramesPatch coerces a numeric media id to a string", () => {
+  // the server hands back JSON; a numeric id would break the "/thumbs/" + id concat only
+  // subtly (it works) but compares unequal against every string id elsewhere on the board
+  const p = importedFramesPatch(111, 222);
+  assert.strictEqual(p.openFrame.mediaId, "111");
+  assert.strictEqual(p.closeFrame.mediaId, "222");
 });

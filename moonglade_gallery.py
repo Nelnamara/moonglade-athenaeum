@@ -14807,6 +14807,53 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
+    @app.route("/api/loom/import-frames", methods=["POST"])
+    def loom_import_frames():
+        """Give an IMPORTED clip the two stills it never had.
+
+        A shot generated on the board gets its opening frame from whatever was fed in.
+        An imported clip arrives already rendered, so nothing ever produced those stills
+        and Deep Focus shows two empty slots -- even though the frames are sitting in the
+        very file we already hold. ffmpeg has them: frame 0, and the last frame.
+
+        Both are UPLOADED as well as thumbnailed, so they are real media ids rather than
+        decoration: the close frame is then a valid continuity hand-off into the next shot,
+        exactly like a generated shot's. Thumbnails are written because /thumbs/<id>.jpg
+        serves from disk with no fetch-on-miss fallback, so an un-thumbnailed frame would
+        render as a blank box. Login required; the upload is free.
+
+        Partial success is a real outcome and is returned as one: if only one end extracts
+        or uploads, that end still lands. The board fills whichever frames come back."""
+        body = request.get_json(silent=True) or {}
+        mid = str(body.get("video_media_id") or "").strip()
+        if not mid:
+            return jsonify({"error": "video_media_id required"}), 400
+        try:
+            core, session = _gen_session()
+            vid = _find_local_video_file(mid)
+            if vid is None:
+                return jsonify({"error": "clip not downloaded yet -- collect it first"}), 200
+            fdir = out_dir / "loom" / "_frames"
+            fdir.mkdir(parents=True, exist_ok=True)
+            out = {}
+            # at_seconds=0.0 is the FIRST frame through the same primitive (it takes the
+            # explicit-seek branch); None keeps the EOF-relative path for the last frame.
+            for key, at in (("first", 0.0), ("last", None)):
+                png = fdir / ("{}_{}.png".format(mid, key))
+                if not core.extract_last_frame(str(vid), str(png), at_seconds=at):
+                    continue
+                try:
+                    fmid = str(core.upload_media(session, str(png)))
+                except Exception:                              # noqa: BLE001
+                    continue                                   # one end failing is not fatal
+                make_thumbnail(png, thumb_dir / (fmid + ".jpg"))
+                out[key + "_media_id"] = fmid
+            if not out:
+                return jsonify({"error": "could not extract frames (ffmpeg)"}), 200
+            return jsonify(out)
+        except Exception as e:                                 # noqa: BLE001
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
+
     @app.route("/api/loom/video-duration")
     def loom_video_duration():
         """Real duration (seconds) of an already-catalogued video, via ffprobe on the local

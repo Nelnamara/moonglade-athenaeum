@@ -28,6 +28,18 @@ git tags. Full prose notes for tagged versions live on
   there — whereas a fresh rebuild dying again leaves strictly less than it started with. Reach
   for `--rebuild-similar` only to cure an index that is genuinely broken, not merely incomplete.
 
+### Added
+
+- **An imported clip now gets its opening and closing frames from itself.** A shot generated on
+  the board takes its opening frame from whatever was fed in, but an imported, already-rendered
+  video had nothing to take one from — so Deep Focus showed two empty frame slots for a shot
+  whose frames were sitting in the very file already on disk. Both ends are now extracted with
+  ffmpeg on import, uploaded, and thumbnailed. Uploading (free) rather than only writing a local
+  still is deliberate: it makes them real media ids, so an imported clip's closing frame is a
+  valid continuity hand-off into the next shot, exactly like a generated shot's. The card lands
+  instantly and the frames fill in a beat later, so nothing waits on ffmpeg; if only one end
+  survives extraction or upload, that end still lands.
+
 ### Changed
 
 - **The Loom is reachable from a phone.** Its nav button was hidden below 480px, on the theory
