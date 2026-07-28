@@ -429,3 +429,30 @@ def test_a_filtered_export_ships_every_matching_row(tmp_path):
     cli = login_test_client(create_app(tmp_path))
     got = _csv_media_ids(cli.get("/export-csv?q=druid"))
     assert sorted(got) == ["0", "1", "2", "3"]
+
+
+def test_a_traversing_catalog_filename_does_not_leave_a_player_over_a_404(tmp_path):
+    """The last one-sided divergence, found by the reviewer after the M30 repair landed.
+
+    `filename` is joined onto out_dir, and the resolver's catalog-filename branch trusted the
+    join. /video-file never did -- it adds relative_to(out_dir) on top of send_from_directory's
+    own safe_join -- so a row whose filename walks out of the library made the two disagree in
+    the one direction the repair was supposed to eliminate: the page decided the clip was
+    present and drew a player, the route refused the URL behind it, and nothing said anything.
+    The same dead black player, reached by a different road.
+
+    Not a hostile-input scenario -- `filename` is written by this app, not by a visitor -- which
+    is why it is a one-liner and not a security fix. It is here because "the existence check and
+    the serving route ask the same question" is the entire content of M30, and an exception to
+    that is the bug, whoever produced the row.
+    """
+    outside = tmp_path.parent / "outside_the_library.mp4"
+    outside.write_bytes(b"\x00\x00\x00\x18ftypmp42OUTSIDE")
+    cli = _video_app(tmp_path, [_row(media_id="TRAV", filename="../outside_the_library.mp4",
+                                     is_video="1", prompt_preview="a clip outside the library")])
+    html, served = _detail_and_video(cli, "TRAV")
+    assert served.status_code != 200, "the serving route handed back a file outside the library"
+    assert "<video" not in html, (
+        "the page drew a player for a file /video-file refuses -- the existence check and the "
+        "serving route are asking different questions again")
+    assert "Video file not found on disk." in html
