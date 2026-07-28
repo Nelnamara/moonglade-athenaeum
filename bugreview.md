@@ -17,15 +17,18 @@ This file is git-ignored working material for triage. Delete it once the items a
 
 ## Repair status — 2026-07-27
 
-**46 of 81 fixed.** Suite: **1311 python + 445 node, 0 failed**
+**51 of 81 fixed.** Suite: **1313 python + 446 node, 0 failed**
 Eight were additionally verified by the owner against the running app: sync curation,
 import naming, the picker filter race, the collection filter, priority/turbo, upscale,
 LoRA removal and storyboard deletion.
 
-Fixed: `C01`, `C02`, `C03`, `C04`, `C05`, `C06`, `C07`, `C08`, `C09`, `C10`, `C11`, `C12`, `C13`, `C14`, `H01`, `H02`, `H03`, `H04`, `H05`, `H06`, `H07`, `H08`, `H09`, `H10`, `H11`, `H12`, `H13`, `H14`, `H15`, `H16`, `H18`, `H19`, `H20`, `H21`, `H22`, `H23`, `H26`, `L01`, `M08`, `M09`, `M15`, `M22`, `M28`, `M29`, `M33`, `M34`
+Fixed: `C01`, `C02`, `C03`, `C04`, `C05`, `C06`, `C07`, `C08`, `C09`, `C10`, `C11`, `C12`, `C13`, `C14`, `H01`, `H02`, `H03`, `H04`, `H05`, `H06`, `H07`, `H08`, `H09`, `H10`, `H11`, `H12`, `H13`, `H14`, `H15`, `H16`, `H17`, `H18`, `H19`, `H20`, `H21`, `H22`, `H23`, `H24`, `H25`, `H26`, `H27`, `H28`, `L01`, `M08`, `M09`, `M15`, `M22`, `M28`, `M29`, `M33`, `M34`
 
-Every fix above is on `master` and CI is green. The 5 high findings still open
-are the ones that need an owner decision, not an implementation -- see their entries.
+**30 still open: 27 medium, 3 low. No criticals and no highs remain.**
+
+Everything through `M34` is on `master` and CI is green. The five highs above them
+(`H17` `H24` `H25` `H27` `H28`) needed an owner decision first; those decisions were
+made and the fixes are on `session-work`, not yet merged.
 
 ### Known related groups (same defect, more than one review angle)
 
@@ -416,9 +419,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** selGet() (used at line 8663) reads selections from localStorage('gallery_sel'), independent of what's rendered. User selects a mix of images and one video on an unfiltered gallery view, then changes the search/filter or paginates (replacing the rendered card grid) before clicking the bulk bar's 'Send to Video'. For the selected video, document.getElementById('card-'+mid) at line 8664 now returns null (its card no longer exists in the DOM), so the 'if(card && card.getAttribute("data-video")==="1") return;' guard at line 8665 is skipped, and the video's media_id is pushed into refs and handed to Gen.addVideoRefs() as an image reference for the (expensive) video drawer -- exactly the case the inline comment says can't happen.
 
-### `H17` moonglade_gallery.py:15060
+### ~~`H17` moonglade_gallery.py:15060~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** A defect in our OWN poll code now reports failed. The broad handler stays -- a PixAI 5xx/429/timeout must answer 'running' so the poller keeps trying instead of bricking the card with a false failure -- but it caught programming errors too, so a genuinely broken poll looked exactly like a slow one for the full 6h ceiling.
 - **Area:** Job Tracker & Watcher
 - **Category:** error-handling
 - **Batch:** -
@@ -499,9 +503,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** Server is already running with core._cfg['PIXAI_API_KEY'] = keyA cached at import (moonglade_backup.py line 695). PixAI revokes keyA, or the owner wants to switch accounts; needs_key flips true again (gallery.py ~line 11549) and the wizard reappears, or the endpoint is called directly. The handler validates the new keyB with a hand-built session (lines 13089-13105, deliberately bypassing the cache) and reports 'Connected -- N credits', then writes keyB to config.json (line 13128). But every subsequent call in the same process -- /api/account, /api/generate, any _gen_session() -> core._make_session(None) -> load_token(None) -- checks core._cfg.get('PIXAI_API_KEY') first (moonglade_backup.py lines 788-793); since it is still non-empty (keyA), it never re-reads disk, so every real generation/account call keeps silently using the dead/wrong keyA until a manual restart, directly contradicting the success message the wizard just showed.
 
-### `H24` loom/master-storyboard.jsx:237
+### ~~`H24` loom/master-storyboard.jsx:237~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** sGet/sSet/sList/sDel no longer answer as if nothing went wrong. They still never throw (every caller is built around a soft answer), but a failure is logged and surfaced once per session, and sGetX reports whether the READ failed -- the distinction the storyboard delete path needed.
 - **Area:** The Loom
 - **Category:** data-loss
 - **Batch:** -
@@ -510,9 +515,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** window.storage.set() fails (quota exceeded from accumulated local thumbnail data at TPRE keys, or the storage backend errors) during the debounced project autosave; sSet's catch only does console.error(e) with no return signal, so the caller proceeds as if the save succeeded and the UI's saving/busy indicator clears normally. The user keeps editing, closes the tab, and discovers the storyboard was never actually persisted only on next load.
 
-### `H25` loom/master-storyboard.jsx:1422
+### ~~`H25` loom/master-storyboard.jsx:1422~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** Deleting a shot card asks first, like every other destructive action in the Loom. It holds a prompt, cast, frames and any result, and the x sits between Duplicate and a dropdown with no undo.
 - **Area:** The Loom
 - **Category:** data-loss
 - **Batch:** -
@@ -533,9 +539,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** generateShot writes `setCardStatus(c.id, { status: "wip" })` optimistically (line 2736) before the `/api/loom/generate` fetch. If PixAI returns a normal JSON error (content-policy rejection, insufficient credits, etc. — handled at lines 2743-2746) or the fetch itself throws (lines 2766-2769), only the ephemeral, in-memory `genState` is set to phase 'error' — `setCardStatus` is never called again to revert status or attach a `pendingTaskId`. On reload, `genState` is wiped and the resume-on-load effect (lines 2873-2881) only re-attaches a poll for cards that have BOTH `status==="wip"` AND a `pendingTaskId` (this shot has neither the latter), so the card shows indefinitely 'wip' with zero error indication, and `batchGenerate`'s own `todo` filter (`status !== "done" && status !== "wip"`, line 3062) permanently excludes it from every subsequent 'Generate all' click — a single ordinary submit rejection quietly and irreversibly removes a shot from the batch pipeline.
 
-### `H27` loom/src/loom-core.js:254
+### ~~`H27` loom/src/loom-core.js:254~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** Frame descriptions gate on MODE, matching shotImageRefs() which reserves the slots by mode. An FLF-mode shot had both frames attached and SENT with nothing in the prompt saying what they were.
 - **Area:** The Loom
 - **Category:** correctness
 - **Batch:** -
@@ -544,9 +551,10 @@ Findings tagged with a batch letter are mechanically similar and can be fixed to
 
 **How it fails.** Select a shot and set Mode to FLF via the Video tab's mode picker (Mode and Continuity are documented/coded as independent controls — see setShotMode/setShotConnect in loom-mutations.js, which only forces mode when connect is set TO "flf", never the reverse). Leave Continuity at its default "New scene" (or pick "Cut"/"Extend prev"). Fill in Opening and Closing frame images with descriptions and Generate. shotImageRefs()/shotPayload() (correctly gated on c.mode==="FLF", matching the loom-mutations.js comment that mode alone controls what reaches generation) still uploads both frame images as @image1/@image2, but shotText()'s `if (c.connect === "flf")` block never fires, so the actual prompt text sent to PixAI never says what either image is ("Opening frame @imageN: ..."/"Closing frame @imageN: ..." both missing). The model gets two structurally load-bearing reference images with zero textual explanation — for the routine, everyday case of choosing FLF mode without also toggling the First→Last continuity chip. (The one existing test for this text, loom/test/loom-core.test.js:250-260, only exercises connect:"flf" with mode left at makeCard()'s default "R2V" — a combination that's actually unreachable through the real UI's coupling logic — so the reachable broken case, mode:"FLF" with connect anything else, has zero test coverage.)
 
-### `H28` loom/src/loom-core.js:278
+### ~~`H28` loom/src/loom-core.js:278~~ &nbsp; FIXED
 
-- **Triage:** `[ ]` log  `[ ]` fix  `[ ]` wontfix
+- **Triage:** `[x]` fixed 2026-07-27 — nothing to log unless you want it recorded
+- **Repair:** A cast member the shot has no picture for is left OUT of the prompt instead of being cited by their project-global tag ("Greg -- reference @image4" with no @image4 attached). castMissingImages() feeds a badge on the board card so the omission is visible where it can be fixed.
 - **Area:** The Loom
 - **Category:** correctness
 - **Batch:** -
