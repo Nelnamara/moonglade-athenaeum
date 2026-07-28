@@ -108,9 +108,17 @@ instead of a button.
 References live once and get cited everywhere. Add them with **+ add from gallery** (one
 image or video from your catalog) or **↖ Import collection** (a whole
 [collection](Collections) at once), and they're tagged **`@image1`, `@video1`, `@audio1`**
-in tag order. Write those tags into a shot's prompt to cite them; the **lock** checkbox
-marks a member as the consistency anchor ("maintain exact appearance") instead of a loose
-reference.
+in tag order. That stored tag is the member's *project-wide name*; what a given **shot**
+actually cites them as is positional, and the two have no reason to match — a shot's
+Opening Frame is always `@image1` and its Closing Frame `@image2` (in the modes that use
+one: First & Last and Multi-Reference), so cast and extra references number from `@image3`.
+The panel shows both when a shot is bound: the editable `@tag` you named them with, and a
+read-only `→ @imageN` beside it — the number that shot's prompt and generator really use.
+A **reference budget** line above the rows keeps the arithmetic honest: PixAI takes six
+images, attached frames claim theirs first, and anything past the remainder is marked
+rather than silently trimmed. Write tags into a shot's prompt to cite members; the **lock**
+checkbox marks a member as the consistency anchor ("maintain exact appearance") instead of
+a loose reference.
 
 With a shot selected, clicking a cast card toggles that member into or out of that shot.
 
