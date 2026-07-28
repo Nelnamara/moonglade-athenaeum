@@ -457,6 +457,10 @@ var window = {}, _persisted = [], pendingUndo = null;
 var list = ['alpha', 'beta', 'gamma'];
 function persist(){ _persisted.push(list.slice()); }
 function render(){}
+// reflow() re-measures the popover's on-screen position after a re-render changes its
+// height (the undo strip appearing/disappearing). Pure DOM geometry, no bearing on the
+// list arithmetic this test pins -- stubbed so the lifted del()/undo() can run headless.
+function reflow(){}
 __CODE__
 del(1);
 var afterDel = list.slice();
@@ -537,3 +541,31 @@ selectedVideoIds(ids).then(function(vids){
     assert got["asked"] == 2, (
         "both ids were unseen, so both had to be resolved server-side -- a DOM-only "
         "answer is exactly the bug")
+
+
+def test_the_snippet_popover_is_re_measured_whenever_its_size_changes(client):
+    """Owner-reported 2026-07-28, with a screenshot: after deleting a snippet the popover's
+    header and Undo button were clipped at the right edge.
+
+    Not a styling bug. `place()` ran exactly once, at open, and clamped `left` against the
+    width the popover had THEN -- its 220px minimum, because the list was empty. Deleting
+    adds the undo strip, whose quoted snippet text pushes the box out to its 340px maximum,
+    and nothing re-clamped: the box grew rightward past the viewport edge it had already been
+    positioned against. Every re-render that can change the popover's size has to re-measure,
+    which is what reflow() is for.
+    """
+    html = client.get("/").get_data(as_text=True)
+    assert "function reflow()" in html, "the re-measure helper is gone"
+    reflow = _js_function(html, "reflow")
+    assert "place(" in reflow, "reflow() must re-run the placement, not just redraw"
+
+    for name in ("del", "undo", "saveCurrent"):
+        fn = _uncommented(_js_function(html, name))
+        assert fn, name + "() not found in the rendered page"
+        assert "render()" in fn, name + "() no longer re-renders -- re-point this test"
+        assert "reflow()" in fn, (
+            name + "() re-renders the popover without re-measuring it; a size change that "
+            "moves an edge past the viewport is exactly the clipping this closed")
+
+    assert "max-height:min(300px, calc(100vh - 16px))" in html, (
+        "the popover's height ceiling must also respect a short viewport")

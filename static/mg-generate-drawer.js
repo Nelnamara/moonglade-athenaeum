@@ -1185,7 +1185,11 @@
       // A prefilled slot can carry a local data-URL (a cast asset never uploaded to PixAI
       // yet) instead of a real media_id -- /thumbs/<id>.jpg would 404 for that, so skip
       // rather than show a broken image.
-      if (!p || !mid || !/^\d+$/.test(mid)) return;
+      // Both catalog id families have a thumbnail at this route: a PixAI id (digits) and
+      // an imported file's `local_<12 hex>`. Kept as a local literal because this file is
+      // a deliberately build-free <script> and cannot import -- loom-core.js's
+      // isCatalogMediaId() is the canonical definition; widen both together.
+      if (!p || !mid || !/^(?:\d+|local_[0-9a-f]{12})$/.test(mid)) return;
       p.innerHTML = '<img src="/thumbs/' + esc(mid) + '.jpg" alt="">';
       p.classList.add('open'); p.setAttribute('aria-hidden', 'false');
       var r = anchor.getBoundingClientRect(), w = 300, gap = 12, x;

@@ -7136,7 +7136,7 @@ document.addEventListener('DOMContentLoaded', function(){
   .ct-foot a{color:var(--lavender);font-style:normal;}
 </style>
 <style>
-  #snip-menu{position:fixed;z-index:236;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:220px;max-width:min(340px, calc(100vw - 16px));max-height:300px;overflow-y:auto;padding:5px;}
+  #snip-menu{position:fixed;z-index:236;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:220px;max-width:min(340px, calc(100vw - 16px));max-height:min(300px, calc(100vh - 16px));overflow-y:auto;padding:5px;}
   #snip-menu .snip-head{display:flex;justify-content:space-between;align-items:center;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--overlay0);padding:3px 6px 5px;}
   #snip-menu .snip-empty{color:var(--subtext);font-size:11.5px;padding:6px;}
   /* The undo strip Snips.del() leaves behind. Pinned at the top of the popover, above the
@@ -7212,6 +7212,7 @@ document.addEventListener('DOMContentLoaded', function(){
 <script>
 var Contests = (function(){
   function el(id){return document.getElementById(id);}
+  var lastAnchor=null;
   function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
   function fmt(n){ return (Number(n)||0).toLocaleString(); }
   var showAll=false, loaded=false;
@@ -7517,7 +7518,15 @@ var Snips = (function(){
       .then(function(d){ if(!d || d.error){ if(window.Toast) Toast.show({kind:'err', title:'Snippet not saved', msg:(d&&d.error)||'The server rejected the save.'}); } })
       .catch(function(){ if(window.Toast) Toast.show({kind:'err', title:'Snippet not saved', msg:'Network error.'}); });
   }
-  function open(anchor, tgt){ target=tgt; load().then(function(){ render(); place(anchor); }); }
+  function open(anchor, tgt){ target=tgt; lastAnchor=anchor;
+    load().then(function(){ render(); place(anchor); }); }
+  // render() can change the popover's HEIGHT while it is open -- the undo strip adds a row,
+  // undoing removes it -- and place() only ever ran once, at open. A popover that had been
+  // flipped ABOVE its button (the common case: the snippet button sits low in the drawer)
+  // grows upward off the top of the screen, so the strip it just grew to show is the exact
+  // part that gets clipped. Re-measure after any re-render that happens while it is open.
+  function reflow(){ var m=menu();
+    if(m && m.style.display==='block' && lastAnchor && lastAnchor.isConnected) place(lastAnchor); }
   function hide(){ var m=menu(); if(m) m.style.display='none'; }
   function place(a){ var m=menu(), r=a.getBoundingClientRect();
     m.style.display='block';
@@ -7540,7 +7549,7 @@ var Snips = (function(){
   }
   function trunc(s){ s=String(s||''); return s.length>44 ? s.slice(0,44)+'\\u2026' : s; }
   function saveCurrent(){ if(!target) return; var v=(target.get()||'').trim(); if(!v) return;
-    if(list.indexOf(v)<0){ list.unshift(v); list=list.slice(0,200); persist(); render(); } }
+    if(list.indexOf(v)<0){ list.unshift(v); list=list.slice(0,200); persist(); render(); reflow(); } }
   function insert(i){ if(!target||!list[i]) return; var cur=(target.get()||'').trim();
     target.set(cur ? (cur.replace(/,\\s*$/,'')+', '+list[i]) : list[i]); hide(); }
   var pendingUndo=null;   /* one level: the last snippet del() removed, offered back in render() */
@@ -7563,7 +7572,7 @@ var Snips = (function(){
     // its e.target has been detached and m.contains(e.target) is false. The popover would
     // shut itself -- taking the undo affordance with it -- on every delete.
     pendingUndo={text:list[i], index:i};
-    list.splice(i,1); persist(); render();
+    list.splice(i,1); persist(); render(); reflow();
     // Neutral kind, not 'ok': a green tick on a deletion reads as "saved successfully",
     // which is the opposite of the thing being reported. The toast's whole job is to say
     // it happened and where the way back is.
@@ -7577,7 +7586,7 @@ var Snips = (function(){
     // current" between the delete and the undo shifts every index by one, and re-adding
     // a duplicate would be a second bug wearing the first one's clothes.
     if(list.indexOf(p.text)<0) list.splice(Math.min(p.index, list.length), 0, p.text);
-    persist(); render();
+    persist(); render(); reflow();   // the strip just went away -- re-measure, same as del()
   }
   document.addEventListener('click', function(e){ var m=menu();
     if(m && m.style.display==='block' && !m.contains(e.target) && !(e.target.classList&&e.target.classList.contains('snip-btn'))) hide(); });
