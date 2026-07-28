@@ -7530,8 +7530,14 @@ var Snips = (function(){
   function hide(){ var m=menu(); if(m) m.style.display='none'; }
   function place(a){ var m=menu(), r=a.getBoundingClientRect();
     m.style.display='block';
-    m.style.left=Math.min(r.left, window.innerWidth-m.offsetWidth-8)+'px';
-    var top=r.bottom+4; if(top+m.offsetHeight>window.innerHeight-8) top=r.top-m.offsetHeight-4;
+    // clientWidth/clientHeight, NOT window.innerWidth/innerHeight: innerWidth counts the
+    // vertical scrollbar as usable space, so clamping against it parked the popover's right
+    // edge under the scrollbar gutter -- readable, but sitting on top of a control. The
+    // documentElement's client box is the same viewport minus the scrollbars, which is what
+    // "keep 8px clear of the edge" actually means here.
+    var vw=document.documentElement.clientWidth, vh=document.documentElement.clientHeight;
+    m.style.left=Math.max(8, Math.min(r.left, vw-m.offsetWidth-8))+'px';
+    var top=r.bottom+4; if(top+m.offsetHeight>vh-8) top=r.top-m.offsetHeight-4;
     m.style.top=Math.max(8,top)+'px';
   }
   function render(){
