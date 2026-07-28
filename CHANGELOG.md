@@ -30,6 +30,31 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **A shot's prompt no longer names pictures that aren't attached to it.** A cast member added
+  to a shot but not yet given an image was still cited by their project-wide tag — "Greg —
+  reference @image4" when no @image4 is on that shot, and the reference drawer numbers purely
+  by position, so it meant a different picture or none. They are now left out of the prompt,
+  and the shot card carries a small badge naming who has no image, so the omission is visible
+  while you build instead of discovered in the output.
+- **Shots set to FLF mode now describe their opening and closing frames.** The frames were
+  always attached and sent; the description lines were gated on a different field than the one
+  that reserves the frame slots, so an FLF-mode shot handed PixAI both pictures with nothing
+  saying what they were for.
+- **Deleting a shot card asks first,** like every other destructive action in the Loom. It
+  holds a prompt, its cast, its frames and any rendered result, and there is no undo.
+- **The Loom stops pretending a failed save worked.** Its storage helpers each swallowed their
+  own error and answered as though nothing had happened — a read that failed looked exactly
+  like an empty one, which is what made storyboard deletion misbehave. They still never throw,
+  but a real failure is now logged and surfaced once, and the delete path can tell the two
+  apart.
+- **A broken job-status check reports itself instead of looking slow.** The poller answers
+  "still running" on any error so a PixAI blip keeps retrying rather than bricking the card
+  with a false failure — but that also swallowed defects in our own code, which no retry can
+  cure, for the full six-hour polling ceiling.
+- **The Folio carousel stops when you close it.** Its 3.5-second auto-rotate kept running after
+  the achievements modal was dismissed, rebuilding hidden DOM for the life of the page — and
+  once more per time the modal had been opened.
+
 - **Generations stopped working the day a membership lapsed.** Every submit carried
   `priority: 500`, described in the code as the cheap standard tier. It is not: 500 is PixAI's
   **Turbo** channel, which is members-only. That is invisible while a membership is live — it

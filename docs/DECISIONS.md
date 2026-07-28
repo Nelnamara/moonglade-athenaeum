@@ -26,7 +26,7 @@ reader could work it out from the code, it does not belong here.
 ## Contents
 
 - [Standing rules](#standing-rules) &mdash; 61
-- [Settled constraints](#settled-constraints) &mdash; 43
+- [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
 - [Decisions](#decisions) &mdash; 130
@@ -426,6 +426,18 @@ Read off their own bundle: `{default: 1000, turboMode: 500, low: 0}` (an XHigh 1
 PixAI's upscale dialog has no model control at all: their submit spreads the enlarge/upscale params, sets a FIXED model version, and takes prompts/width/height off the source's original task. Separately, `catalog.model_id` is populated from a task's submitted `modelId`, and a submit's `modelId` **is a model version id** — only a model chosen in the picker is a real model id.
 
 **Why.** Both facts were learned the expensive way. Sending the catalog's value in the `model_id` field put a version id through the model→versions lookup, which matched nothing and refused the submit with "pick a model first" on a picture that was displaying its model on screen. And requiring a model at all was this app's own invention, which left every locally imported file unupscalable behind a dead button. Recorded because neither is guessable from the code alone, and both look like the opposite of a bug until you read PixAI's own submit builder.
+
+### The Panel's "Stop this job" button is shown to every session on purpose  ·  *2026-07-27*
+
+Stopping a maintenance job is localhost-only and server-enforced. The BUTTON is nonetheless rendered for every signed-in session, including LAN devices, which means a LAN user can confirm the dialog and then be refused. That is the owner's call and it stands: do not "fix" it by hiding the control.
+
+**Why.** It reads like an authorization-UX defect to a fresh audit (it was filed as one), and the obvious repair — hide the button off `_is_local_request()` — would be wrong twice over: it moves a security rule into the UI layer where it cannot be trusted, and it makes the control's absence look like a bug to the owner on his own LAN device. The refusal is the correct behaviour; only the wording of it is ever worth revisiting.
+
+### Masked achievements are not worth hardening before the asset bundle exists  ·  *2026-07-27*
+
+`/api/achievements` masks hidden, unearned Feats to a `???` placeholder but leaves them in the array, so the COUNT of undiscovered feats is readable in the raw JSON. This contradicts the wiki's "no placeholder count… found by playing, not by reading", and it is deliberately NOT being fixed at the JSON layer.
+
+**Why.** The achievement and branding assets are to be bundled into a package format (the MPQ-style container the owner has raised repeatedly), which changes what is discoverable at a level a response tweak cannot reach — anyone can read a JSON response, bundled or not, but the whole discoverability model shifts once the assets stop being loose files. Masking the array now is work thrown away against that design, and would also have to be undone or reconciled when the bundle lands. Revisit as part of the bundling design, not before. See [[Packaged assets must keep a loose-file override layer]].
 
 ### mg-generate-drawer must stay a build-free <script>  ·  *2026-07-18*
 
