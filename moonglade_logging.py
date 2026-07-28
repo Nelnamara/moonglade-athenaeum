@@ -21,6 +21,7 @@ when imported) without this module needing to know or care which.
 import logging
 import logging.handlers
 import sys
+import threading
 from pathlib import Path
 
 LOGGER_NAME = "moonglade"
@@ -28,6 +29,8 @@ LOGGER_NAME = "moonglade"
 _configured = False
 _file_handler = None
 _console_handler = None
+_prev_excepthook = None
+_prev_threading_excepthook = None
 
 
 def setup_logging(out_dir, verbose=False):
@@ -88,15 +91,52 @@ def _install_crash_hook(logger):
     excepthook was already installed (Python's default, printing the
     traceback to stderr) so the user-visible behavior is unchanged -- this
     only ADDS a permanent record of the crash, it doesn't alter how it's
-    reported to the terminal."""
+    reported to the terminal.
+
+    BOTH of Python's hooks are installed, because there are two and they do not
+    overlap. `sys.excepthook` fires ONLY for the main thread. An uncaught exception
+    in any background worker -- the web app's sync/build/thumbnail jobs, the
+    live-mirror watcher thread -- goes to `threading.excepthook` instead, which was
+    left at its default until 2026-07-27: it printed a traceback to a stderr nobody
+    was watching and returned, leaving zero trace in out_dir/logs/moonglade.log. That
+    is exactly the "terminal window that would have shown it is already gone" case in
+    this module's own docstring, and it meant a background job that died looked
+    identical to a background job that quietly stopped.
+
+    The threading hook takes ONE args object (exc_type/exc_value/exc_traceback/thread),
+    not sys.excepthook's three positionals, so it cannot simply reuse _hook.
+
+    NOT covered, deliberately: a function raising inside a
+    concurrent.futures.ThreadPoolExecutor worker (run_download's parallel branch, the
+    gallery's job runners). The executor catches BaseException itself and parks it on
+    the Future, so NEITHER hook ever fires -- the traceback exists only if somebody
+    calls future.result(). There is no hook to install for that; making those visible
+    means logging where the futures are collected, at the call sites."""
+    global _prev_excepthook, _prev_threading_excepthook
     previous_hook = sys.excepthook
+    previous_thread_hook = threading.excepthook
 
     def _hook(exc_type, exc_value, exc_tb):
         if exc_type is not KeyboardInterrupt:      # Ctrl+C is not a crash
             logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_tb))
         previous_hook(exc_type, exc_value, exc_tb)
 
+    def _thread_hook(args):
+        # Same Ctrl+C exclusion as the main hook, plus SystemExit -- CPython's own
+        # default threading hook silently ignores SystemExit, because sys.exit() inside
+        # a worker is an ordinary way to end that thread; filing it at CRITICAL would
+        # record an orderly shutdown as a crash.
+        if args.exc_type not in (KeyboardInterrupt, SystemExit):
+            logger.critical(
+                "Uncaught exception in thread %s",
+                getattr(args.thread, "name", None) or "<unknown>",
+                exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+        previous_thread_hook(args)
+
+    _prev_excepthook = previous_hook
+    _prev_threading_excepthook = previous_thread_hook
     sys.excepthook = _hook
+    threading.excepthook = _thread_hook
 
 
 def log_path(out_dir):
@@ -110,8 +150,22 @@ def get_logger():
 
 def _reset_for_tests():
     """Test-only: undo setup_logging() so each test starts clean. Not called
-    by any production code path."""
+    by any production code path.
+
+    The crash hooks are restored too, not just the handlers: each _install_crash_hook()
+    call closes over whatever hook it found and chains to it, so a reset that left them
+    installed would have the NEXT setup_logging() chain onto the old pair, and one crash
+    would be written to the log once per surviving link. Harmless in production (the hook
+    is installed once per process) but it compounds across a test session -- and there
+    are two hooks to leak now, not one."""
     global _configured, _file_handler, _console_handler
+    global _prev_excepthook, _prev_threading_excepthook
+    if _prev_excepthook is not None:
+        sys.excepthook = _prev_excepthook
+    if _prev_threading_excepthook is not None:
+        threading.excepthook = _prev_threading_excepthook
+    _prev_excepthook = None
+    _prev_threading_excepthook = None
     root = logging.getLogger()
     for h in list(root.handlers):
         root.removeHandler(h)

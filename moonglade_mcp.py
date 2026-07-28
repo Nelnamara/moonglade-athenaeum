@@ -96,30 +96,66 @@ def get_image(media_id: str, include_image: bool = True):
 @mcp.tool
 def similar(media_id: str, limit: int = 24) -> dict:
     """Visually-similar images (CLIP) to `media_id`, via the local Similar index.
-    Returns neighbors with similarity scores + metadata (self-match excluded)."""
+    Returns neighbors with similarity scores + metadata (self-match excluded).
+    `stale_index_entries` counts neighbours the index still holds but the catalog no
+    longer does -- when it is non-zero, `count` is short of `requested` for that
+    reason and not because the library ran out of similar images."""
     row = g.get_row(DB, media_id)
     if not row:
         return {"error": "no such media_id", "neighbors": []}
     path = g.find_image_file(OUT, media_id, row.get("filename") or "")
     if not path:
         return {"error": "image file not on disk", "neighbors": []}
+    k = max(1, min(limit, 96))
     try:
         import moonglade_similar as ps
-        hits = ps.similar(str(path), k=max(1, min(limit, 96)), exclude_media_id=media_id)
+        hits = ps.similar(str(path), k=k, exclude_media_id=media_id)
     except Exception as e:
         return {"error": "similar index unavailable: {}".format(e), "neighbors": []}
     neighbors = []
+    stale = []
     for mid, score in hits:
         r = g.get_row(DB, mid)
         if r:
             neighbors.append({**_slim(r), "score": round(float(score), 4)})
-    return {"query": media_id, "count": len(neighbors), "neighbors": neighbors}
+        else:
+            # In the index, absent from the catalog: the image was deleted/purged after it
+            # was embedded and nothing pruned the sidecar. Dropping these silently is what
+            # made `count: 15` on a `limit: 24` request read as "there are only 15 similar
+            # images" -- an agent curating off that number draws the wrong conclusion about
+            # the library. Report the shortfall and name its cause instead.
+            #
+            # This tool does NOT clear them itself: it is interactive and expected to answer
+            # fast, and the index has no per-id removal path -- `sync()` only ever adds. The
+            # cure is --rebuild-similar, which drops and re-embeds; that is minutes of GPU
+            # time, so it is the owner's call to make, not a side effect of a lookup.
+            stale.append(mid)
+    out = {"query": media_id, "requested": k, "count": len(neighbors),
+           "stale_index_entries": len(stale), "neighbors": neighbors}
+    if stale:
+        out["stale_media_ids"] = stale
+        out["note"] = (
+            "{} of the {} nearest neighbours are stale similarity-index entries whose "
+            "catalog row is gone (deleted or purged), so fewer than the requested {} came "
+            "back -- this is index drift, not a shortage of similar images. Rebuilding the "
+            "index (--rebuild-similar, or the Control Panel's Rebuild job) clears it."
+            .format(len(stale), len(hits), k))
+    return out
 
 
 @mcp.tool
 def set_rating(media_id: str, rating: int) -> dict:
-    """WRITE: set an image's star rating, 0-5 (0 = unrated). Persists to catalog.db."""
+    """WRITE: set an image's star rating, 0-5 (0 = unrated). Persists to catalog.db.
+    Returns ok:False for a media_id that isn't in the catalog -- nothing was written."""
     value = max(0, min(5, int(rating)))
+    # g.update_rating is a bare `UPDATE ... WHERE media_id=?` and returns nothing, so a
+    # mistyped or stale id matches zero rows and the write vanishes without a whisper.
+    # Reporting ok:True for that told the caller the rating had been set: an agent working
+    # through a review queue marks the image done, and it stays unrated forever. The check
+    # lives here rather than in update_rating because the gallery helper has other callers
+    # whose contract (silent no-op on a missing row) this tool has no business changing.
+    if not g.get_row(DB, media_id):
+        return {"ok": False, "error": "no such media_id", "media_id": media_id}
     g.update_rating(DB, media_id, value)
     return {"ok": True, "media_id": media_id, "rating": value}
 
