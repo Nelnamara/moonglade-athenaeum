@@ -763,7 +763,7 @@ def _check_read_only(action):
     upload_media() is deliberately NOT gated here -- it costs no credits and is not one
     of the four actions CLAUDE.md's contract lists (submit a generation, submit a fix,
     delete a task, claim a reward). Whether READ_ONLY should also block a free upload
-    is an open question, tracked in docs/AUDIT_2026-07-21.md, not resolved by this
+    is an open question, tracked in the 2026-07-21 audit, not resolved by this
     docstring.
 
     Both the import-time snapshot AND the live file are consulted, and EITHER one
@@ -990,7 +990,7 @@ def append_job_event(out_dir, job_id, status=None, **fields):
     This bounds SIZE, not CONTENT -- a short message can still contain a host path
     (`C:\\Users\\...` easily fits in 200 chars). Redacting host detail out of error
     text generally is a separate, larger, deliberately deferred piece of work (see
-    docs/AUDIT_2026-07-21.md, S3) -- a first attempt at that used a regex that
+    the 2026-07-21 audit, S3) -- a first attempt at that used a regex that
     stopped redacting at the first space, silently leaving a spaced username
     exposed, which is exactly the kind of narrow-looking fix that is easy to get
     subtly wrong. This closes the "totally unbounded" half safely tonight without
@@ -3219,7 +3219,7 @@ def list_model_versions(session, model_id):
     """Every published version/release row for a model/LoRA -- not just resolve_version_meta's
     rows[0]. PixAI's own site offers a version selector on model/LoRA cards; this is what
     lets our picker do the same instead of always silently resolving the latest
-    (docs/AUDIT_2026-07-21.md's tracked O12/O13 remainder, closed picker-parity-round2,
+    (the 2026-07-21 audit's tracked O12/O13 remainder, closed picker-parity-round2,
     2026-07-24). Same ONE GET as resolve_version_meta (no new network surface, no N+1) --
     each row mapped through the identical _version_row_to_meta shape, so a chosen
     version_id carries real model_type/lora_base_model_type/tuned-preset data, not a
@@ -3276,7 +3276,7 @@ def is_lora_compatible(base_model_type, lora_base_model_type):
 
 def annotate_lora_compat(results, base_model_type):
     """Soft-sort + tag a LoRA search-results list by architecture compatibility with a
-    selected base model (docs/AUDIT_2026-07-21.md's LoRA-arch-filter item; the root-caused
+    selected base model (the 2026-07-21 audit's LoRA-arch-filter item; the root-caused
     mechanism confirmed live: a row's real architecture is `lora_base_model_type`, sourced
     from GraphQL's `latestVersion.loraBaseModelType` via model_search_market_gql -- NEVER
     the `base_model` field, which is PixAI's content CATEGORY, not architecture).
