@@ -2,8 +2,8 @@
 
 Every image the app consumes, the palette it must match, the picks that landed, and the prompt
 bank that feeds new art. One file. It replaces `ART_PROMPTS.md` + `ART_SPECS.md` + `ART_PICKS.md`
-+ `badge_generation_prompts.md`, which are frozen under `docs/archive/` in the same commit that
-added this file — preserved, not deleted (§6).
++ `badge_generation_prompts.md`, which were frozen under `docs/archive/` in the same commit that
+added this file, then deleted outright on 2026-07-27 along with the rest of `docs/archive/` (§6).
 
 **The three rules that keep this file from rotting.** It replaced four docs that had spent a month
 arguing with each other — and with themselves — about a banner size, a generation size, and a hex.
@@ -78,13 +78,17 @@ Code-only literals — no source doc carried these. Tiles: `.ach-card.t-*` (`:47
 The toast ramp is deliberately its own thing — a lighter set tuned for the glow, with no token
 equivalent. It is not a palette drift and there is nothing to reconcile.
 
-**The frame gate is literal** (`:5303`) — legendary and feat only, and never on a summary toast:
+**The frame gate is literal** (`:5303`) — currently legendary and feat, and never on a summary toast:
 
 ```js
 var framed=(!!({legendary:1,feat:1}[tier]))&&opts.badge!==false;
 ```
 
-Adding `epic:1` to that object is the whole change if epic ever joins the framed tiers.
+> ⚠️ **Superseded by owner decision, 2026-07-26** (`docs/DECISIONS.md`, "Only Feats keep ornate
+> per-tile frames"): Legendary is being dropped from this set — frames become **Feats only**, and
+> there will be no Epic frame either. The literal above reflects the code as last measured here; if
+> you're reading this after that change ships, drop `legendary:1` from the object and update the
+> rest of this section (§2 row 7, §3, and the point below) to match.
 
 ### 1.3 Unreconciled literals — hexes the tokens do not cover
 
@@ -117,7 +121,7 @@ not specced.
 | 4 | **Marks system** | `marks/marks.json` + `marks/<id>.png` (+ optional `<id>.ico`) (`:1279`) | PNG **512×512** RGBA; ICO carries **7 frames** (16·24·32·48·64·128·256). 5 marks live: `mark_4` + `mark_12` (`kind:"tile"`), `mark_62` / `mark_63` / `mark_74` (`kind:"alpha"`) | 42px. `"tile"` → `.mk-tile` rounded tile, `"alpha"` → floater. 16 `MARK_ANIMS` (15 + `none`, `:1268`). The `.ico` feeds the Desktop `.lnk` via `/api/branding/shortcut` (`:1349`) | ✅ |
 | 5 | **Badge masters** | `badges/<achievement-id>.png` | **2000×2000** RGBA — 53 of 57 (4 exceptions below). 57 files; ids match `docs/achievements_roster_57.json` exactly, 0 missing / 0 extra | Tiles **46px** (`.ach-card .ico`) + Recent rail **38px**, both via `/badge-thumb/<id>.png` (`_badge_thumb(…, size=256)`, lazy into `_thumbs/`, mtime self-heal, master fallback). **The toast pulls the MASTER at 100px** (`.ach-m2 .badge`, `:4928`) — not the thumb | ✅ |
 | 6 | **Mystery tile** | `mystery/secret_feat.png` (`:5107`) | **512×512** RGBA | Fills the 46px `.ico` well for masked feats | ✅ MYS8 |
-| 7 | **Legendary frame** | `frames/legendary.png` (`:4980`) | **1100×829** RGBA | 9-slice `border-image`; `border-width:46px 44px`; `slice:16.8% 13.3% 16.8% 13%`; `outset:6px` | ✅ LEG6 |
+| 7 | **Legendary frame** | `frames/legendary.png` (`:4980`) | **1100×829** RGBA | 9-slice `border-image`; `border-width:46px 44px`; `slice:16.8% 13.3% 16.8% 13%`; `outset:6px` | ✅ LEG6 ⚠️ scheduled for removal — `DECISIONS.md`, 2026-07-26 |
 | 8 | **Feat frame** | `frames/feat.png` (`:4981`) | **1100×719** RGBA | 9-slice; `border-width:46px 38px`; `slice:15.8% 10.3% 16.8% 10%`; `outset:6px` | ✅ FEAT13 |
 | 9 | **Reward · gift** | `rewards/gift.png` (`:5310`) | **128×119** RGBA | **15×15** in the toast reward ribbon `.rwd .giftbox` | ✅ CLAIM7 |
 | 10 | **Reward · claim** | `rewards/claim.png` (`:5620`) | **128×128** RGBA | **15×15** in the header credit chip `.claim-ico` | ✅ CLAIM3 |
@@ -186,7 +190,7 @@ and the 2026-07-13 "alpha gaps" are both **closed**: every winner is keyed, on d
 
 | Slot | Winner | Why it won | Landed at | Verified |
 |---|---|---|---|---|
-| Legendary frame | **LEG6** | gold + emerald = the house palette | `frames/legendary.png` | ✅ 1100×829 |
+| Legendary frame | **LEG6** | gold + emerald = the house palette | `frames/legendary.png` | ✅ 1100×829 ⚠️ scheduled for removal, see §1.2 |
 | Feat frame | **FEAT13** | ruby thorns — the showstopper; feats are 0-point pure bragging rights, so the most dramatic frame fits | `frames/feat.png` | ✅ 1100×719 |
 | Claim icon (daily) | **CLAIM3** | the re-keyed gallery gem — "a BETTER GEM" | `rewards/claim.png` | ✅ 128×128 |
 | Reward ribbon (redeem) | **CLAIM7** | gift box | `rewards/gift.png` | ✅ 128×119 |
@@ -207,8 +211,10 @@ Locked 2026-07-13 out of the "in action" review, all three now verifiable in cod
 
 1. **Frames wrap the TOAST, 9-sliced** — corners fixed, edges stretch, so the frame grows with the
    content and the roast never overflows. Not the Hall's tiles; that was a wrong turn.
-2. **Tier-gated: legendary + feat only** (§1.2, the `framed` literal). Tiles get a tier band +
-   earned glow instead. Common / rare / epic stay clean chrome. *"WoW-like, our own flavor."*
+2. **Tier-gated: legendary + feat only, as coded today** (§1.2, the `framed` literal) — **but
+   Legendary is being dropped per the 2026-07-26 decision; frames become Feat-only.** Tiles get a
+   tier band + earned glow instead. Common / rare / epic stay clean chrome. *"WoW-like, our own
+   flavor."*
 3. **CLAIM7 → the toast reward ribbon; CLAIM3 → the header credit chip.** Two different surfaces —
    daily credit claim vs earned goodies / card redemption. Do not conflate them again.
 
@@ -882,23 +888,27 @@ A sweeping view straight UP the inside of an endless moonlit spiral TOWER-stairc
 
 ---
 
-## 6. Archive — frozen, not deleted
+## 6. Archive — gone as of 2026-07-27
 
-Freeze-not-delete was the owner's call: these are gold-standard prompt-craft reference. The reason
-they are out of the live doc is that reading them beside the current text produces exactly the
-conflicting-data-points problem this file exists to end — `ART_SPECS` alone still specs a favicon
-master (512×512, transparent) that is not the file on disk (§2 row 2), a banner size the banner has
-never been (§2), and a badge generation size the prompt doc contradicts (§4).
+Freeze-not-delete was the owner's original call: these were kept as gold-standard prompt-craft
+reference. The reason they were out of the live doc is that reading them beside the current text
+reproduces exactly the conflicting-data-points problem this file exists to end — `ART_SPECS` alone
+still specced a favicon master (512×512, transparent) that was never the file on disk (§2 row 2), a
+banner size the banner had never been (§2), and a badge generation size the prompt doc contradicted
+(§4).
 
-They are frozen verbatim under `docs/archive/`, each keeping its name plus the date suffix this
-repo's archive convention uses — `ls docs/archive/` for the exact filenames.
+**They were deleted outright on 2026-07-27**, together with the rest of `docs/archive/` and
+`docs/STATE.md` (see `CLAUDE.md`'s Current state section) — `ls docs/archive/` now returns nothing,
+and the table below is kept only as a historical record of what they held and why each was
+superseded. If the actual prompt/spec text is wanted back, it is not recoverable from this repo's
+working tree.
 
-| Frozen | What it holds | Why it is not live |
+| Frozen (now deleted) | What it held | Why it was not live |
 |---|---|---|
 | `ART_PROMPTS` | Banner v1 / v2 / v3 · emblem A–C · launch-icon A–C · the badge template v1 · the 3 skin-banner sketches · **Loom mark A/B/C** · the 2026-07-06 worklist-11 table | The rounds **contradict each other by design** — v3 explicitly reverses v2's gold filigree ("a WARD, not a jewel") and reasserts a left-third composition rule v2 had correctly retired (§2). The worklist-11 ICONs are carried live in §5.5–5.7; the Loom mark prompts wait on a slot (§2 row 17); the skin-banner sketches describe a model that was never built (§2 row 18) and name no shipped skin |
 | `ART_SPECS` | Slot dimensions, the transparency gotcha, the 2026-07-05 build order | Superseded by §2, which measures instead of speccing. Its priority list is fully discharged — every hook on it shipped. Its favicon, banner and ICO figures are all wrong against the disk |
 | `ART_PICKS` | The full pick export: ranked lists, shortlists, the alpha-tag pass, the "in action" showcase findings | Superseded by §3, which carries the winners and the reasoning. The runners-up and the scoring history are the part that belongs frozen |
 | `badge_generation_prompts` | The v2 set + the **obsidian-and-gold PRESTIGE feat set (10)** | §5 carries the v2 set and the gunmetal-ruby feats. The obsidian feat set is **not a subset** of its replacement — the 10 subjects were fully rewritten (Night Owl went from an owl-and-candle to sleeping on a cloud) and `against-the-void` was added — so it is preserved whole. No `obsidian` or `crimson` token exists in the code (§1). Per §5.4 it is also the closest thing we have to an authorship record: 4 of the 11 shipped feat masters carry its ring, and 2 carry its subjects |
 
-**Do not resurrect a frozen prompt into this file.** If a frozen idea is wanted, build the slot first
-(§2), then write the prompt against §5.1 and §1.
+**Do not resurrect a frozen prompt into this file from memory of what it said.** If an old idea is
+wanted, build the slot first (§2), then write the prompt fresh against §5.1 and §1.

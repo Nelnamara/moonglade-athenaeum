@@ -279,8 +279,8 @@ asserts it against a live request, so it is the authority when prose and code di
   autocomplete in prompt boxes.
 - **Gallery bridges**: lightbox Edit/To-Video buttons, right-click context menu, bulk-bar
   Send-to-Video.
-- **The Loom** (`/loom`): the storyboard surface — current shape lives in `docs/STATE.md`;
-  usage manual is `docs/LOOM.md`.
+- **The Loom** (`/loom`): the storyboard surface — current shape is described above; decisions
+  behind it live in `docs/DECISIONS.md`; usage manual is `docs/LOOM.md`.
 - **Async engine**: submit (`/api/generate|edit|fix|loom/generate`) → poll
   (`/api/task-status`) → auto-download + catalog (`source='api'`). Free cards auto-apply
   on every create path. `/api/task-status`'s 'running' branch deliberately never writes to

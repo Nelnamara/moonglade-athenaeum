@@ -80,7 +80,7 @@ Everything deep lives in the **[Wiki](../../wiki)**:
 
 [Setup & Configuration](../../wiki/Setup) · [Backing Up](../../wiki/Backing-Up) · [The Gallery](../../wiki/Gallery) · [Generating Images](../../wiki/Generating) · [The Loom](../../wiki/The-Loom) · [Collections & Curation](../../wiki/Collections) · [Deleting & Cloud Sync](../../wiki/Deleting) · [Collection Health](../../wiki/Health) · [Control Panel](../../wiki/Control-Panel) · [Folio of Honors](../../wiki/Folio-of-Honors) · [Troubleshooting](../../wiki/Troubleshooting) · [Trust & Safety](../../wiki/Trust-and-Safety) · [FAQ](../../wiki/FAQ) · [How It Works](../../wiki/How-It-Works)
 
-In-repo: [`docs/architecture.md`](docs/architecture.md) (how it's built), [`docs/LOOM.md`](docs/LOOM.md) (the Loom's manual), [`docs/STATE.md`](docs/STATE.md) (current project state), [`docs/STANDARDS.md`](docs/STANDARDS.md) (house standards), [`docs/ART.md`](docs/ART.md) (art direction), and [`CONTRIBUTING.md`](CONTRIBUTING.md).
+In-repo: [`docs/architecture.md`](docs/architecture.md) (how it's built), [`docs/LOOM.md`](docs/LOOM.md) (the Loom's manual), [`docs/DECISIONS.md`](docs/DECISIONS.md) (decisions & standing rules), [`docs/STANDARDS.md`](docs/STANDARDS.md) (house standards), [`docs/ART.md`](docs/ART.md) (art direction), and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ---
 
