@@ -886,8 +886,16 @@ Two follow-ups survive, and neither is a restyle:
    The card lands instantly and the frames fill in asynchronously — landing the footage is the
    Footage tab's whole action and ffmpeg plus two uploads take a second or two. Partial success is
    a real outcome and is returned as one.
-2. **Small shot cards could be taller**, to show more of the first/last frame. Cosmetic, and it
-   only becomes visible once (1) fills those frames in — so it is downstream of it, not parallel.
+2. **Small shot cards could be taller — SHIPPED 2026-07-27, and it was not cosmetic.** Filed as
+   a nicety, but measuring it showed a real crop: `.lv-cframe` was 48px tall inside a card whose
+   content width is 144px at the narrowest column, and `object-fit: cover` therefore threw away
+   ~40% of the frame's height. A 16:9 frame needs ~81px at that width; the owner's own 2048x1072
+   clips need ~75px. Now 80px, guarded by `loom/test/loom-board-card-frame-height.test.js`, which
+   asserts the height against the column geometry rather than freezing a magic number — 48px
+   looked perfectly deliberate until it was measured against the card.
+
+   Sequencing note worth keeping: this was only visible AFTER (1) shipped. An empty frame slot
+   and a frame cropped to a middle band look the same when there is no frame to crop.
 
 ### Publish — the capture may already exist; read before capturing again
 

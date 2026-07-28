@@ -975,7 +975,13 @@ ${"=".repeat(48)}
 .lv-usevid{width:100%;margin-top:7px;background:transparent;color:var(--subtext);border:1px solid var(--surface1);border-radius:8px;padding:7px;font:600 11px/1 system-ui;cursor:pointer;}
 .lv-usevid:hover{border-color:var(--accent);color:var(--accent);}
 .lv-usevid:disabled{opacity:.5;cursor:default;}
-.lv-cframe{height:48px;border-radius:5px;overflow:hidden;background:var(--base);border:1px solid var(--surface1);display:flex;align-items:center;justify-content:center;margin-bottom:5px;}
+/* 80px, not 48px: the frame is object-fit:cover inside a card whose content width is 144px at
+   the narrowest column (.lv-cards minmax(158px) minus .lv-card's 7px padding either side). A
+   16:9 frame wants 81px at that width and a 2048x1072 clip wants 75px, so a 48px box was
+   cropping ~40% of the height away and showing a middle band -- the frame was there, you just
+   could not see it. 80px covers both without letterboxing. Portrait frames still crop (cover
+   is deliberate; contain would leave wide empty bars on the common case). */
+.lv-cframe{height:80px;border-radius:5px;overflow:hidden;background:var(--base);border:1px solid var(--surface1);display:flex;align-items:center;justify-content:center;margin-bottom:5px;}
 .lv-cframe img{width:100%;height:100%;object-fit:cover;}
 .lv-cframeph{font:700 9px/1 system-ui;color:var(--subtext);}
 .lv-cast{flex:1;min-height:0;overflow-y:auto;padding:8px;}
