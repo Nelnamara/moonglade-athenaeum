@@ -953,6 +953,26 @@ surface, and only then a scope against the placeholders already in the app. This
 survey's objection that PixAI's events carry no "who": if a notices surface exists, it may carry
 the identity the raw event stream lacks. Nothing gets designed before that probe runs.
 
+### Open, LOW PRIORITY: more Loom previews and placement, owner to walk it
+
+Owner, 2026-07-27, right after the board-card frame height landed: there are *"some other
+previews and misc placement items to discuss in the loom"*, explicitly **lower priority**.
+
+**Nothing is scoped yet, and nothing should be guessed.** No list of likely candidates belongs
+here — inventing one is the manufactured-need failure mode, and it would also pre-empt the
+walkthrough that is the actual next step. The note exists so this is not forgotten, not so it can
+be worked on.
+
+Two pieces of context that make it easier to pick up cold:
+
+- This is **not** the Loom visual pass, which is closed — V2 got a full mock when the Edit Bay
+  and Loom V1 were retired, and the owner is happy with it, iPad included. This is a narrower
+  set of follow-ups on top of a surface he likes.
+- The two frame items settled the same day are a useful precedent for how these tend to go: both
+  were filed as cosmetic niceties and one turned out to be a real 40%-of-the-frame crop that only
+  measurement exposed. So when this conversation happens, **measure the thing against its
+  container before agreeing it is cosmetic** — and equally, before agreeing it is a bug.
+
 ### Two items are CLOSED outright
 
 - **The lost unlock-toast animation is live again.** It was found and restored from a long-lost
