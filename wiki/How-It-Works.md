@@ -17,6 +17,24 @@ the Loom, Control Panel, achievements, collections, and contact sheet are browse
 its own always-on live-mirror watcher (Control Panel → **Live Mirror** status dot, backed by
 `/api/watch/status`) and a header **claim** button (`/api/claim`) for daily rewards.
 
+Two of the MCP tools report their own limits rather than papering over them, because an
+agent can't see the gallery and has only the answer to go on:
+
+- **`similar`** can return fewer neighbours than you asked for. The CLIP index and the
+  catalog are separate stores, and deleting an image doesn't reach into the index — so a
+  nearest-neighbour hit can point at a row that no longer exists. Those used to be dropped in
+  silence, which made `count: 15` on a request for 24 read as *your library only has 15
+  similar images*. The reply now carries `stale_index_entries` (and the ids in
+  `stale_media_ids`) plus a note saying the shortfall is index drift, not a shortage — and
+  that rebuilding clears it: `--rebuild-similar`, or the Control Panel's
+  **Rebuild the Similar index** job. The tool doesn't clear them itself; a rebuild re-embeds
+  the whole library and can take a long while, so it stays your call rather than a side
+  effect of a lookup.
+- **`set_rating`** returns `ok: false` for a `media_id` that isn't in the catalog. The write
+  is a plain update, so a mistyped or stale id matched nothing and reported success anyway —
+  which is how an agent working a review queue marks an image done and leaves it unrated
+  forever.
+
 ## How it talks to PixAI — and why setup is just one key
 
 PixAI has no official public API for managing your own work, so some operations

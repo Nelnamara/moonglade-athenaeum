@@ -40,6 +40,11 @@ var LoomBundle = (() => {
     }, 0);
   };
   var nextTag = (items, prefix) => prefix + (maxTagNum(items, prefix) + 1);
+  var imageClaim = (tag) => {
+    const m = /^@image(\d+)$/.exec(tag || "");
+    return m ? +m[1] : 0;
+  };
+  var isCatalogMediaId = (s) => /^(?:\d+|local_[0-9a-f]{12})$/.test(String(s == null ? "" : s));
   var frameLinked = (a, b) => !!a && !!b && (!!a.mediaId && !!b.mediaId && a.mediaId === b.mediaId || !!a.thumbId && !!b.thumbId && a.thumbId === b.thumbId);
   var continuityLinked = (entries, entryId) => {
     const idx = (entries || []).findIndex((x) => x.c.id === entryId);
@@ -49,28 +54,27 @@ var LoomBundle = (() => {
   var connectMeta = (connect) => CONNECT[connect] || CONNECT.new;
   var flat = (p) => p.acts.flatMap((a, ai) => a.cards.map((c, ci) => ({ c, a, ai, ci, code: `${actLetter(ai)}\xB7${String(ci + 1).padStart(2, "0")}` })));
   var effectivePrompt = (c) => c.promptOverride ? c.promptOverrideText || "" : c.prompt || "";
+  var resolvedImage = (x, resolve) => x && (x.mediaId || resolve(x.thumbId, x.source)) || null;
+  var CLOSE_FRAME_MODES = ["FLF", "R2V", "V2V"];
+  var usesCloseFrame = (mode) => CLOSE_FRAME_MODES.includes(mode);
   var shotImageRefs = (entry, project, imgSrc) => {
     const c = entry.c;
-    const tagNum = (t) => {
-      const m = /(\d+)/.exec(t || "");
-      return m ? +m[1] : 99;
-    };
     const items = [];
     (project.assets || []).filter((as) => as.kind === "image" && c.cast.includes(as.id)).forEach((as) => {
-      const d = as.mediaId || imgSrc(as.thumbId, as.source);
+      const d = resolvedImage(as, imgSrc);
       if (d) items.push({ tag: as.tag, d, kind: "cast", id: as.id });
     });
-    [["@image8", "openFrame", c.openFrame], ["@image9", "closeFrame", c.mode === "FLF" ? c.closeFrame : null]].forEach(([fallbackTag, key, f]) => {
+    [["@image8", "openFrame", c.openFrame], ["@image9", "closeFrame", usesCloseFrame(c.mode) ? c.closeFrame : null]].forEach(([fallbackTag, key, f]) => {
       if (!f) return;
-      const d = f.mediaId || imgSrc(f.thumbId, f.source);
+      const d = resolvedImage(f, imgSrc);
       if (d) items.push({ tag: f.tag || fallbackTag, d, kind: "frame", id: key });
     });
     (c.refs || []).filter((r) => r.kind === "image").forEach((r) => {
-      const d = r.mediaId || imgSrc(r.thumbId, r.source);
+      const d = resolvedImage(r, imgSrc);
       if (d) items.push({ tag: r.tag, d, kind: "ref", id: r.id });
     });
-    const kindRank = (it) => it.kind === "frame" ? 0 : 1;
-    const sortNum = (it) => it.kind === "frame" ? 0 : tagNum(it.tag);
+    const kindRank = (it) => it.kind === "frame" ? 0 : it.kind === "cast" ? 1 : 2;
+    const sortNum = (it) => it.kind === "cast" ? imageClaim(it.tag) || Number.MAX_SAFE_INTEGER : 0;
     items.sort((a, b) => kindRank(a) - kindRank(b) || sortNum(a) - sortNum(b));
     return items.slice(0, 6);
   };
@@ -84,9 +88,18 @@ var LoomBundle = (() => {
     const items = shotImageRefs(entry, project, imgSrc);
     const existing = items[slot];
     if (existing) return { type: "replace", kind: existing.kind, id: existing.id };
-    return { type: "append", tag: nextTag(items, "@image") };
+    const c = entry.c;
+    const claims = new Set([
+      ...(project.assets || []).filter((as) => (c.cast || []).includes(as.id)).map((as) => as.tag),
+      (c.openFrame || {}).tag,
+      (c.closeFrame || {}).tag,
+      ...(c.refs || []).filter((r) => r.kind === "image").map((r) => r.tag)
+    ].map(imageClaim).filter(Boolean));
+    let n = items.length + 1;
+    while (claims.has(n)) n++;
+    return { type: "append", tag: "@image" + n };
   };
-  var shotVideoRefs = (entry) => (entry.c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || ""));
+  var shotVideoRefs = (entry) => (entry.c.refs || []).filter((r) => r.kind === "video" && isCatalogMediaId(r.source));
   var pickVideoTarget = (entry, slot) => {
     const items = shotVideoRefs(entry);
     const existing = items[slot];
@@ -96,7 +109,18 @@ var LoomBundle = (() => {
   };
   var castMissingImages = (entry, p, imgSrc) => {
     const resolve = imgSrc || noImgSrc;
-    return (p.assets || []).filter((as) => (entry.c.cast || []).includes(as.id)).filter((as) => !positionTag(entry, p, resolve, as.id)).map((as) => as.name || "(unnamed)");
+    return (p.assets || []).filter((as) => (entry.c.cast || []).includes(as.id)).filter((as) => !(as.kind === "image" && resolvedImage(as, resolve))).map((as) => as.name || "(unnamed)");
+  };
+  var castPastBudget = (entry, p, imgSrc) => {
+    const resolve = imgSrc || noImgSrc;
+    return (p.assets || []).filter((as) => (entry.c.cast || []).includes(as.id)).filter((as) => as.kind === "image" && resolvedImage(as, resolve) && !positionTag(entry, p, resolve, as.id)).map((as) => as.name || "(unnamed)");
+  };
+  var refBudget = (entry, p, imgSrc) => {
+    const resolve = imgSrc || noImgSrc;
+    const c = entry.c;
+    const frames = shotImageRefs(entry, p, resolve).filter((it) => it.kind === "frame").length;
+    const used = (p.assets || []).filter((as) => as.kind === "image" && (c.cast || []).includes(as.id) && resolvedImage(as, resolve)).length + (c.refs || []).filter((r) => r.kind === "image" && resolvedImage(r, resolve)).length;
+    return { used, budget: 6 - frames, frames };
   };
   var shotText = (entry, p, imgSrc) => {
     const { c, code, ai } = entry;
@@ -122,7 +146,7 @@ var LoomBundle = (() => {
         L.push(`  ${as.name} \u2014 ${as.lock ? "maintain exact appearance from " : "reference "}${tag}`);
       });
     }
-    const usedRefs = (c.refs || []).map((r) => ({ r, tag: positionTag(entry, p, resolve, r.id) })).filter((x) => x.tag);
+    const usedRefs = (c.refs || []).map((r) => ({ r, tag: positionTag(entry, p, resolve, r.id) || (r.kind === "image" ? null : r.tag) })).filter((x) => x.tag);
     if (usedRefs.length) {
       L.push("", "Other references:");
       usedRefs.forEach(({ r, tag }) => {
@@ -139,7 +163,7 @@ var LoomBundle = (() => {
   var shotPayload = (entry, project, imgSrc) => {
     const c = entry.c;
     const imgs = shotImageRefs(entry, project, imgSrc);
-    const vids = (c.refs || []).filter((r) => r.kind === "video" && /^\d+$/.test(r.source || "")).map((r) => r.source).slice(0, 3);
+    const vids = (c.refs || []).filter((r) => r.kind === "video" && isCatalogMediaId(r.source)).map((r) => r.source).slice(0, 3);
     return {
       mode: c.mode,
       prompt: shotText(entry, project, imgSrc),
@@ -182,6 +206,34 @@ var LoomBundle = (() => {
     const scale = Math.max(total, target) || 1;
     const over = total - target;
     return { total, scale, over };
+  };
+  var mediaRefIndex = (project) => {
+    const ids = {};
+    const note = (mid, where) => {
+      const k = String(mid);
+      (ids[k] = ids[k] || []).push(where);
+    };
+    ((project || {}).acts || []).forEach((act, ai) => {
+      (act.cards || []).forEach((c, ci) => {
+        const title = (c.title || "").trim();
+        const code = `${actLetter(ai)}\xB7${String(ci + 1).padStart(2, "0")}${title ? ` ${title}` : ""}`;
+        if (c.resultMid) note(c.resultMid, `${code} (shot result)`);
+        ["openFrame", "closeFrame"].forEach((slot) => {
+          const f = c[slot] || {};
+          if (f.mediaId) note(f.mediaId, `${code} (${slot})`);
+        });
+      });
+    });
+    ((project || {}).assets || []).forEach((a) => {
+      if (a.mediaId) note(a.mediaId, `cast/asset ${a.name || a.tag || a.id || "?"}`);
+    });
+    return ids;
+  };
+  var bundleMissingReport = (project, countHeader, listHeader) => {
+    const total = Math.max(0, parseInt(countHeader || "0", 10) || 0);
+    const index = mediaRefIndex(project);
+    const rows = String(listHeader || "").split(",").map((s) => s.trim()).filter((s) => s && !/^\+\d+ more$/.test(s)).map((mid) => ({ mid, where: index[mid] || [] }));
+    return { total, rows, hidden: Math.max(0, total - rows.length) };
   };
 
   // src/loom-mutations.js
@@ -312,7 +364,7 @@ var LoomBundle = (() => {
   var patchRef = (project, actId, cardId, refId, patch) => patchCard(project, actId, cardId, (c) => ({ ...c, refs: c.refs.map((r) => r.id !== refId ? r : { ...r, ...patch }) }));
   var removeRef = (project, actId, cardId, refId) => patchCard(project, actId, cardId, (c) => ({ ...c, refs: c.refs.filter((r) => r.id !== refId) }));
   var countShots = (project) => (project.acts || []).reduce((n, a) => n + (a.cards || []).length, 0);
-  var parseCastIdsFromSearch = (search) => (search || "").replace(/^\?/, "").split("&").map((kv) => kv.split("=")).filter(([k]) => k === "cast").flatMap(([, v]) => (v || "").split(",")).map((s) => decodeURIComponent(s).trim()).filter((s) => /^\d+$/.test(s));
+  var parseCastIdsFromSearch = (search) => (search || "").replace(/^\?/, "").split("&").map((kv) => kv.split("=")).filter(([k]) => k === "cast").flatMap(([, v]) => (v || "").split(",")).map((s) => decodeURIComponent(s).trim()).filter((s) => /^[A-Za-z0-9_-]{1,64}$/.test(s));
   function friendlyGenErr(raw) {
     const s = String(raw || "");
     if (!s) return "generation failed";
@@ -534,6 +586,10 @@ ${"=".repeat(48)}
 .sb-exp-bar{height:9px;background:var(--panel2);border:1px solid var(--line);border-radius:999px;overflow:hidden}
 .sb-exp-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--amber),var(--gold));transition:width .3s}
 .sb-exp-txt{font-size:13px;color:var(--ink);text-align:center;font-family:ui-monospace,monospace}
+.sb-miss-list{max-height:44vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--panel2)}
+.sb-miss-row{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--ink)}
+.sb-miss-row i{color:var(--ink2);font-style:normal}
+.sb-miss-id{font-family:ui-monospace,monospace;font-size:11px;color:var(--ink2);word-break:break-all}
 /* 500, not 400: ImportCollection opens ON TOP of the V2 shell, and .lv-overlay is also 400 --
    at a tie it only stayed above because it happens to render later in App's child order.
    500 clears both that and Deep Focus's .lv-df-veil (450) outright. */
@@ -939,6 +995,11 @@ ${"=".repeat(48)}
 /* A shot cast someone it has no picture for: they are left out of the prompt (citing an
    @imageN with nothing behind it is worse than saying nothing), so the card has to say so. */
 .lv-st.warn{margin-left:0;color:var(--peach);background:color-mix(in srgb,var(--peach) 16%,transparent);}
+/* A cast member whose picture is fine but lost PixAI's 6-slot contest (frames first) --
+   castPastBudget in loom-core.js. Quieter than .warn on purpose: nothing is broken, the
+   shot is simply over budget, so this reads informational (dashed outline, subtext) rather
+   than fix-me peach. */
+.lv-st.oob{margin-left:0;color:var(--subtext);background:var(--base);border:1px dashed var(--overlay0);}
 /* Imported-footage provenance badge -- coexists with the real status pill the same way
    .linked does (margin-left:0, not competing for the row's one auto-margined slot).
    Neutral/informational, not a warning -- reuses .todo's own subtext-on-base treatment
@@ -1008,6 +1069,22 @@ ${"=".repeat(48)}
 .lv-tagin{width:76px;flex:none;background:var(--base);border:1px solid var(--surface1);border-radius:6px;
   color:var(--accent);font:11px/1.3 ui-monospace,monospace;padding:6px 7px;}
 .lv-tagin:focus{outline:0;border-color:var(--accent);}
+/* The bound shot's LIVE positional @imageN beside the stored-tag input -- read-only and
+   visually distinct from it (dashed border + cyan, matching FrameSlot's own derived
+   .sb-tagin display) so the panel never implies the editable stored tag is what gets sent.
+   .oob = has a picture but lost the 6-slot contest ("not sent" on R2V/V2V; "not cited" on
+   FLF/I2V, where nothing cast-shaped is sent either way -- see modeSendsRefs/liveTagText).
+   Worn by the Cast & assets rows (both densities) AND Deep Focus's Other-references image
+   rows (round 3) -- one class, one wording source, so the surfaces cannot drift. */
+.lv-livetag{flex:none;font:11px/1.3 ui-monospace,monospace;color:var(--cyan);background:var(--base);
+  border:1px dashed var(--overlay0);border-radius:6px;padding:6px 7px;}
+.lv-livetag.oob{color:var(--peach);border-color:var(--peach);font-size:9.5px;}
+.lv-assetrow.oob,.lv-simplecard.oob{opacity:.6;}
+/* Live reference-slot budget under the Cast & assets header (6 minus attached frames --
+   see refBudget in loom-core.js). .lv-refbudget-over = more resolvable cast/refs than
+   slots, i.e. the rows marked .oob below exist. */
+.lv-refbudget{font-size:10px;color:var(--subtext);margin:-4px 0 8px;}
+.lv-refbudget-over{color:var(--peach);font-weight:700;}
 .lv-sel{flex:none;background:var(--base);border:1px solid var(--surface1);border-radius:6px;color:var(--text);
   font:10.5px/1.3 system-ui;padding:6px 3px;}
 .lv-locklab,.lv-inshot{display:flex;align-items:center;gap:4px;font-size:9.5px;color:var(--subtext);
@@ -1505,7 +1582,7 @@ ${"=".repeat(48)}
               const a = activeRef.current;
               if (!a) return;
               const proj = projectRef.current;
-              const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null;
+              const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
               const plan = pickTarget(a, proj, resolve, slot);
               if (plan.type === "replace" && plan.kind === "cast") {
                 setAssets((arr) => arr.map((x) => x.id !== plan.id ? x : { ...x, mediaId: String(mid), thumbId: "", source: "" }));
@@ -1568,7 +1645,8 @@ ${"=".repeat(48)}
           if (!a) return;
           const text = e.detail.text;
           const already = !!a.c.promptOverride;
-          const composed = already ? null : shotText(a, projectRef.current);
+          const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
+          const composed = already ? null : shotText(a, projectRef.current, resolve);
           if (!already && text === composed) return;
           const apply = (c) => setPromptOverride(c, text);
           a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
@@ -1652,8 +1730,21 @@ ${"=".repeat(48)}
     const cardModeForVmode = (v) => v === "flf" ? "FLF" : v === "i2v" ? "I2V" : "R2V";
     const weaveSelIdx = sel ? entries.findIndex((e) => e.c.id === sel.c.id) : -1;
     const weavePrevEntry = weaveSelIdx > 0 ? entries[weaveSelIdx - 1] : null;
-    const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null;
-    const asRef = (d) => ({ media_id: d, thumb: /^\d+$/.test(d) ? "/thumbs/" + d + ".jpg" : d });
+    const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
+    const asRef = (d) => ({ media_id: d, thumb: isCatalogMediaId(d) ? "/thumbs/" + d + ".jpg" : d });
+    const modeSendsRefs = (m) => usesCloseFrame(m) && m !== "FLF";
+    const modeSendsLine = (m) => m === "FLF" ? "First & Last sends the start & end frames only \u2014 cast & refs here are for continuity/notes, not references" : "I2V sends the opening frame only \u2014 cast here is for continuity/notes, not references";
+    const liveTagText = (liveTag, pastBudget, mode) => liveTag || (pastBudget ? modeSendsRefs(mode) ? "not sent" : "not cited" : "\u2014");
+    const liveTagTitle = (liveTag, pastBudget, mode, code) => {
+      const framesOnly = mode === "FLF" ? "First & Last sends only the start/end frames" : "I2V sends only the opening frame";
+      if (liveTag) {
+        return modeSendsRefs(mode) ? `Live slot in ${code} \u2014 numbered by position; this is what the composed prompt and the generator actually send, not the stored tag on the left` : `${code}'s composed-prompt citation \u2014 numbered by position. ${framesOnly}, so this picture is NOT attached to the generation; the number is only what the prompt text cites`;
+      }
+      if (pastBudget) {
+        return modeSendsRefs(mode) ? `Past the reference limit for ${code} (6 images minus attached frames) \u2014 not sent` : `Past the citation limit for ${code} (6 images minus attached frames) \u2014 left out of the composed prompt. ${framesOnly}; cast/ref pictures are not attached either way`;
+      }
+      return `No picture resolved on ${code} \u2014 nothing to number`;
+    };
     useEffect(() => {
       const el = genDrawerRef.current;
       if (!el || tab !== "Video") return;
@@ -1665,7 +1756,7 @@ ${"=".repeat(48)}
             const outEntry = isDraft ? { a: { id: "__draft__" }, c: draftCard, code: "Draft" } : entries.find((e) => e.c.id === outId);
             if (outEntry) {
               const already = !!outEntry.c.promptOverride;
-              const composed = already ? null : shotText(outEntry, project);
+              const composed = already ? null : shotText(outEntry, project, imgSrc);
               if (already || pending !== composed) {
                 const apply = (c) => setPromptOverride(c, pending);
                 isDraft ? setDraftCard(apply) : setCard(outEntry.a.id, outId, apply);
@@ -1690,7 +1781,10 @@ ${"=".repeat(48)}
       if (nextMode === "i2v" && active.c.openFrame && active.c.openFrame.mediaId) {
         payload.images = [{ media_id: active.c.openFrame.mediaId, thumb: frameSrc(active.c.openFrame) }];
       } else if (nextMode === "flf") {
-        payload.images = [active.c.openFrame, active.c.closeFrame].filter((f) => f && f.mediaId).map((f) => ({ media_id: f.mediaId, thumb: frameSrc(f) }));
+        payload.images = [active.c.openFrame, active.c.closeFrame].map((f) => {
+          const d = resolvedImage(f, imgSrc);
+          return d ? asRef(d) : null;
+        });
       } else if (nextMode === "r2v") {
         const sp = shotPayload(active, project, imgSrc);
         payload.images = sp.images.map(asRef);
@@ -1700,7 +1794,7 @@ ${"=".repeat(48)}
         }
         payload.video_refs = vids;
       }
-      if (!promptDirtyRef.current) payload.prompt = shotText(active, project);
+      if (!promptDirtyRef.current) payload.prompt = shotText(active, project, imgSrc);
       el.prefill(payload);
     }, [
       active.c.id,
@@ -1717,6 +1811,28 @@ ${"=".repeat(48)}
       active.c.cast,
       active.c.refs,
       project.assets,
+      // The FRAMES' IDENTITY fields (2026-07-27, closing-frame pass). Every branch above
+      // reads c.openFrame/c.closeFrame -- i2v/flf feed them to the drawer directly, r2v
+      // through buildShotPayload() -- yet no frame field was a dependency, so attaching or
+      // replacing a frame never re-ran this effect: the drawer kept showing (and PRICING,
+      // and submitting) the bank from before the change, until some unrelated dep -- `tab`,
+      // usually -- happened to fire it. That is the owner's "toggling a tab fixes the
+      // missing frame" symptom, and the worse, quieter one behind it: mg-pick-request
+      // resolves a picked slot INDEX against the fresh list (pickTarget) while the drawer
+      // reported the pick against its stale bank, so a pick could replace a different
+      // entity than the one the owner clicked (the reference-picker corruption class).
+      // Identity fields, not the frame OBJECTS, on purpose: FrameSlot's desc/tag inputs
+      // patch a fresh frame object per keystroke, and a re-prefill per keystroke of text
+      // that cannot change which image is attached is churn this carefully-scoped effect
+      // exists to avoid. mediaId/thumbId/source are exactly the fields shotImageRefs()
+      // resolves an image from (resolvedImage in loom-core.js), so these six scalars fire
+      // precisely when a frame's PICTURE changes and never otherwise.
+      (active.c.openFrame || {}).mediaId,
+      (active.c.openFrame || {}).thumbId,
+      (active.c.openFrame || {}).source,
+      (active.c.closeFrame || {}).mediaId,
+      (active.c.closeFrame || {}).thumbId,
+      (active.c.closeFrame || {}).source,
       active.c.title,
       project.look,
       project.draft,
@@ -1754,14 +1870,31 @@ ${"=".repeat(48)}
           /* @__PURE__ */ React.createElement("div", { className: "lv-ctitle" }, e.c.title || "untitled"),
           /* @__PURE__ */ React.createElement("div", { className: "lv-cmeta" }, /* @__PURE__ */ React.createElement("span", { className: "lv-mode" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lv-dur" }, durOf2(e.c), "s"), (() => {
             const miss = castMissingImages(e, project, imgSrc);
-            return miss.length ? /* @__PURE__ */ React.createElement(
+            const over = castPastBudget(e, project, imgSrc);
+            return /* @__PURE__ */ React.createElement(React.Fragment, null, miss.length ? /* @__PURE__ */ React.createElement(
               "span",
               {
                 className: "lv-st warn",
                 title: `No picture on this shot for ${miss.join(", ")} \u2014 they are cast here but cannot be referenced, so they are left out of the prompt. Add an image to use them.`
               },
               miss.length === 1 ? `${miss[0]}: no image` : `${miss.length} cast: no image`
-            ) : null;
+            ) : null, over.length ? (
+              /* Same mode split as liveTagText/liveTagTitle (round 3): "not
+                 sent" is a reference-slot claim and only R2V/V2V send
+                 reference slots. On FLF/I2V the trim is real but it trims the
+                 prompt's CITATION list, not a payload -- nothing cast-shaped
+                 was going to be sent either way, and a chip asserting
+                 send-ness there is the round-2 mode-blindness bug wearing a
+                 different hat. */
+              /* @__PURE__ */ React.createElement(
+                "span",
+                {
+                  className: "lv-st oob",
+                  title: modeSendsRefs(e.c.mode) ? `Past the reference limit \u2014 not sent. PixAI takes 6 reference images and attached frames claim theirs first, so ${over.join(", ")} ${over.length === 1 ? "does" : "do"} not fit this shot. Remove a frame or another reference to include ${over.length === 1 ? "them" : "them all"}.` : `Past the citation limit \u2014 not cited. The composed prompt numbers at most 6 pictures (frames first), so ${over.join(", ")} ${over.length === 1 ? "gets" : "get"} no @imageN here. In ${e.c.mode} only the frame${e.c.mode === "FLF" ? "s are" : " is"} sent either way.`
+                },
+                over.length === 1 ? `${over[0]}: past ref limit \u2014 ${modeSendsRefs(e.c.mode) ? "not sent" : "not cited"}` : `${over.length} cast past ref limit \u2014 ${modeSendsRefs(e.c.mode) ? "not sent" : "not cited"}`
+              )
+            ) : null);
           })(), linked && /* @__PURE__ */ React.createElement("span", { className: "lv-st linked", title: "Opening frame matches the previous shot's closing frame \u2014 continuous across the cut" }, "linked"), e.c.imported && /* @__PURE__ */ React.createElement("span", { className: "lv-st imported", title: "Imported from your gallery -- no PixAI task backs this clip, so re-roll has nothing to redo" }, "imported"), /* @__PURE__ */ React.createElement(
             "span",
             {
@@ -1882,7 +2015,7 @@ ${"=".repeat(48)}
           patch((c) => ({ ...clearPromptOverride(c), prompt: ev.target.value }));
         } }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Camera ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("camera") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.camera || "", placeholder: "e.g. slow push in, shallow DoF", onChange: (ev) => patch((c) => ({ ...c, camera: ev.target.value })) }), palFor === "camera" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, Object.entries(CAM_PALETTE).map(([grp, items]) => /* @__PURE__ */ React.createElement("div", { key: grp, className: "lv-termsgrp" }, /* @__PURE__ */ React.createElement("div", { className: "lv-termsgrpt" }, grp), items.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("camera", t) }, t))))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Lighting ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("lighting") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.lighting || "", placeholder: "e.g. moonlit, soft haze", onChange: (ev) => patch((c) => ({ ...c, lighting: ev.target.value })) }), palFor === "lighting" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, LIGHTING_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("lighting", t) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition in ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transIn") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transIn || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transIn: ev.target.value })) }), palFor === "transIn" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transIn: t })) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition out ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transOut") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transOut || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transOut: ev.target.value })) }), palFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transOut: t })) }, t))), /* @__PURE__ */ React.createElement("div", { className: "lv-refline" }, (active.c.cast || []).length, " cast \xB7 ", (active.c.refs || []).length, " refs ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(toggle cast in the Cast & assets tab; add extra image/video/audio refs directly below)")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", margin: "10px 0 2px" } }, active.c.promptOverride ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim lv-override-badge", title: "Hand-edited override -- Camera/Lighting/cast/notes above are NOT composed into it. Re-sync to go back to auto-compose." }, "\u270E override active \u2014 fields above not woven in") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\u2193 woven into the form below"), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => {
           promptDirtyRef.current = false;
-          const composed = shotText({ ...active, c: { ...active.c, promptOverride: false } }, project);
+          const composed = shotText({ ...active, c: { ...active.c, promptOverride: false } }, project, imgSrc);
           active.c.id === "__draft__" ? setDraftCard(clearPromptOverride) : setCard(active.a.id, active.c.id, clearPromptOverride);
           if (genDrawerRef.current) genDrawerRef.current.prefill({ prompt: composed });
         } }, "\u21BA re-sync from shot")), overrideClearedFlash && /* @__PURE__ */ React.createElement("div", { className: "lv-overrideflash" }, "override cleared \u2014 back to auto-compose"));
@@ -2243,7 +2376,28 @@ ${"=".repeat(48)}
         ))))
       ));
     }
-    const castList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-castrow-h" }, "Cast & assets", sel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 bound to ", sel.code) : null), /* @__PURE__ */ React.createElement("details", { className: "lv-look", open: !!(project.look || "").trim() }, /* @__PURE__ */ React.createElement("summary", null, "\u{1F3A8} Project look", (project.look || "").trim() ? "" : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 a style line added to every shot")), /* @__PURE__ */ React.createElement(
+    const castList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-castrow-h" }, "Cast & assets", sel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 bound to ", sel.code) : null), sel && (() => {
+      if (!modeSendsRefs(sel.c.mode)) {
+        return /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            className: "lv-refbudget",
+            title: `${sel.c.mode === "FLF" ? "A First & Last generation attaches only the Start and End frames" : "An I2V generation attaches only the opening frame"}. The @imageN numbers below are the composed prompt's citation numbering, not attachments.`
+          },
+          modeSendsLine(sel.c.mode)
+        );
+      }
+      const b = refBudget(sel, project, imgSrc);
+      return /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          className: "lv-refbudget",
+          title: `PixAI accepts 6 reference images per generation. ${b.frames ? `${b.frames === 1 ? "1 slot is" : `${b.frames} slots are`} held by ${sel.code}'s attached frame${b.frames === 1 ? "" : "s"}, leaving ${b.budget} for cast & image refs.` : "No frames attached, so all 6 are free for cast & image refs."} Anything past that is not sent.`
+        },
+        /* @__PURE__ */ React.createElement("span", { className: b.used > b.budget ? "lv-refbudget-over" : void 0 }, b.used, " of ", b.budget, " reference slot", b.budget === 1 ? "" : "s", " used"),
+        b.frames ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \xB7 ", b.frames, " of 6 held by attached frame", b.frames === 1 ? "" : "s") : null
+      );
+    })(), /* @__PURE__ */ React.createElement("details", { className: "lv-look", open: !!(project.look || "").trim() }, /* @__PURE__ */ React.createElement("summary", null, "\u{1F3A8} Project look", (project.look || "").trim() ? "" : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 a style line added to every shot")), /* @__PURE__ */ React.createElement(
       "textarea",
       {
         className: "lv-lookin",
@@ -2256,7 +2410,9 @@ ${"=".repeat(48)}
       const inShot = sel && (sel.c.cast || []).includes(as.id);
       const toggleInShot = () => sel && setCard(sel.a.id, sel.c.id, (c) => ({ ...c, cast: (c.cast || []).includes(as.id) ? c.cast.filter((x) => x !== as.id) : [...c.cast || [], as.id] }));
       const src = frameSrc(as);
-      return /* @__PURE__ */ React.createElement("div", { key: as.id, className: "lv-assetrow" }, as.kind !== "audio" && /* @__PURE__ */ React.createElement(
+      const liveTag = sel && inShot && as.kind === "image" ? positionTag(sel, project, imgSrc, as.id) : null;
+      const pastBudget = sel && inShot && as.kind === "image" && !liveTag && !!resolvedImage(as, imgSrc);
+      return /* @__PURE__ */ React.createElement("div", { key: as.id, className: "lv-assetrow" + (pastBudget ? " oob" : "") }, as.kind !== "audio" && /* @__PURE__ */ React.createElement(
         "button",
         {
           className: "lv-pickico",
@@ -2293,6 +2449,13 @@ ${"=".repeat(48)}
           value: as.tag,
           onChange: (e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, tag: e.target.value }))
         }
+      ), sel && inShot && as.kind === "image" && /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          className: "lv-livetag" + (pastBudget ? " oob" : ""),
+          title: liveTagTitle(liveTag, pastBudget, sel.c.mode, sel.code)
+        },
+        liveTagText(liveTag, pastBudget, sel.c.mode)
       ), /* @__PURE__ */ React.createElement(
         "select",
         {
@@ -2307,17 +2470,20 @@ ${"=".repeat(48)}
     }) : /* @__PURE__ */ React.createElement("div", { className: "lv-simplegrid" }, (project.assets || []).map((as) => {
       const inShot = sel && (sel.c.cast || []).includes(as.id);
       const src = frameSrc(as);
+      const liveTag = inShot && as.kind === "image" ? positionTag(sel, project, imgSrc, as.id) : null;
+      const pastBudget = inShot && as.kind === "image" && !liveTag && !!resolvedImage(as, imgSrc);
       return /* @__PURE__ */ React.createElement(
         "div",
         {
           key: as.id,
-          className: "lv-simplecard " + (inShot ? "on " : "") + (!sel ? "nosel" : ""),
+          className: "lv-simplecard " + (inShot ? "on " : "") + (pastBudget ? "oob " : "") + (!sel ? "nosel" : ""),
           title: sel ? `Toggle into ${sel.code}` : "Select a shot on the board to toggle its cast",
           onClick: () => sel && setCard(sel.a.id, sel.c.id, (c) => ({ ...c, cast: (c.cast || []).includes(as.id) ? c.cast.filter((x) => x !== as.id) : [...c.cast || [], as.id] }))
         },
         src ? /* @__PURE__ */ React.createElement("img", { src, alt: "" }) : /* @__PURE__ */ React.createElement("span", { className: "lv-castph" }),
         /* @__PURE__ */ React.createElement("b", null, as.name || as.kind),
-        /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, as.tag)
+        /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, as.tag),
+        liveTag ? /* @__PURE__ */ React.createElement("span", { className: "lv-livetag", title: liveTagTitle(liveTag, pastBudget, sel.c.mode, sel.code) }, liveTag) : pastBudget ? /* @__PURE__ */ React.createElement("span", { className: "lv-livetag oob", title: liveTagTitle(liveTag, pastBudget, sel.c.mode, sel.code) }, liveTagText(liveTag, pastBudget, sel.c.mode)) : null
       );
     })), !(project.assets || []).length && /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No cast yet \u2014 add one below."), /* @__PURE__ */ React.createElement("button", { className: "lv-addcast", onClick: () => openPick((mid, thumb, isVideo) => setAssets((a) => {
       const k = isVideo ? "video" : "image", pre = isVideo ? "@video" : "@image";
@@ -2395,7 +2561,7 @@ ${"=".repeat(48)}
           if (pending != null && activeRef.current) {
             const a = activeRef.current;
             const already = !!a.c.promptOverride;
-            const composed = already ? null : shotText(a, project);
+            const composed = already ? null : shotText(a, project, imgSrc);
             if (already || pending !== composed) {
               const patchedCard = setPromptOverride(a.c, pending);
               liveEntries = entries.map((e) => e.c.id === a.c.id ? { ...e, c: patchedCard } : e);
@@ -2551,6 +2717,8 @@ ${"=".repeat(48)}
         }
       )), /* @__PURE__ */ React.createElement("div", { className: "sb-field" }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Other references & @tags"), c.refs.map((r) => {
         const preview = r.thumbId ? thumbs[r.thumbId] : r.kind === "image" && r.source.startsWith("http") ? r.source : null;
+        const refLiveTag = r.kind === "image" ? positionTag(live, project, imgSrc, r.id) : null;
+        const refPastBudget = r.kind === "image" && !refLiveTag && !!resolvedImage(r, imgSrc);
         return /* @__PURE__ */ React.createElement("div", { className: "sb-ref", key: r.id }, r.kind === "image" ? /* @__PURE__ */ React.createElement("label", { className: "sb-refprev" + (c.discreet ? " discreet" : ""), title: "Attach image" }, preview ? /* @__PURE__ */ React.createElement("img", { src: preview, alt: r.tag }) : "\uFF0B", /* @__PURE__ */ React.createElement(
           "input",
           {
@@ -2564,7 +2732,14 @@ ${"=".repeat(48)}
               setRef(live.a.id, c.id, r.id, { thumbId: id, source: r.source || f.name });
             }
           }
-        )) : /* @__PURE__ */ React.createElement("div", { className: "sb-refprev" }, r.kind === "video" ? "\u{1F39E}" : "\u266A"), /* @__PURE__ */ React.createElement("div", { className: "sb-refbody" }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("input", { className: "sb-tagin sb-mono", value: r.tag, onChange: (e) => setRef(live.a.id, c.id, r.id, { tag: e.target.value }) }), /* @__PURE__ */ React.createElement("span", { className: "sb-hint" }, r.kind), /* @__PURE__ */ React.createElement("button", { className: "sb-ico", style: { marginLeft: "auto" }, onClick: () => delRef(live.a.id, c.id, r) }, "\u2715")), /* @__PURE__ */ React.createElement("input", { className: "sb-in", placeholder: "what to use it for (motion / camera / mood\u2026)", value: r.role, onChange: (e) => setRef(live.a.id, c.id, r.id, { role: e.target.value }) }), /* @__PURE__ */ React.createElement("input", { className: "sb-in", placeholder: "file name or URL", value: r.source, onChange: (e) => setRef(live.a.id, c.id, r.id, { source: e.target.value }) })));
+        )) : /* @__PURE__ */ React.createElement("div", { className: "sb-refprev" }, r.kind === "video" ? "\u{1F39E}" : "\u266A"), /* @__PURE__ */ React.createElement("div", { className: "sb-refbody" }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("input", { className: "sb-tagin sb-mono", value: r.tag, onChange: (e) => setRef(live.a.id, c.id, r.id, { tag: e.target.value }) }), r.kind === "image" && /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            className: "lv-livetag" + (refPastBudget ? " oob" : ""),
+            title: liveTagTitle(refLiveTag, refPastBudget, c.mode, live.code)
+          },
+          liveTagText(refLiveTag, refPastBudget, c.mode)
+        ), /* @__PURE__ */ React.createElement("span", { className: "sb-hint" }, r.kind), /* @__PURE__ */ React.createElement("button", { className: "sb-ico", style: { marginLeft: "auto" }, onClick: () => delRef(live.a.id, c.id, r) }, "\u2715")), /* @__PURE__ */ React.createElement("input", { className: "sb-in", placeholder: "what to use it for (motion / camera / mood\u2026)", value: r.role, onChange: (e) => setRef(live.a.id, c.id, r.id, { role: e.target.value }) }), /* @__PURE__ */ React.createElement("input", { className: "sb-in", placeholder: "file name or URL", value: r.source, onChange: (e) => setRef(live.a.id, c.id, r.id, { source: e.target.value }) })));
       }), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 7, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: () => addRef(live.a.id, c, "image") }, "+ Image"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: () => addRef(live.a.id, c, "video") }, "+ Video"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: () => addRef(live.a.id, c, "audio") }, "+ Audio"))), /* @__PURE__ */ React.createElement("div", { className: "sb-field" }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Music / audio cue ", /* @__PURE__ */ React.createElement("button", { className: "sb-ico", style: { fontSize: 11 }, onClick: () => setDfPalFor(dfPalFor === "audio" ? null : "audio") }, "\uFF0Bterms")), /* @__PURE__ */ React.createElement("input", { className: "sb-in", value: c.audioCue, onChange: (ev) => dfPatch((cc) => ({ ...cc, audioCue: ev.target.value })), placeholder: "track, beat sync, room tone\u2026" }), dfPalFor === "audio" && /* @__PURE__ */ React.createElement("div", { className: "sb-pal" }, AUDIO_PALETTE.map((t) => /* @__PURE__ */ React.createElement("button", { key: t, className: "sb-pchip sb-mono", onClick: () => dfAppend("audioCue", t) }, t)))), /* @__PURE__ */ React.createElement("div", { className: "sb-field" }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Notes"), /* @__PURE__ */ React.createElement("textarea", { className: "sb-ta", value: c.notes, onChange: (ev) => dfPatch((cc) => ({ ...cc, notes: ev.target.value })), placeholder: "blocking, continuity reminders\u2026" })), /* @__PURE__ */ React.createElement("div", { className: "sb-toolbar" }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn amber sm", onClick: () => copyShot(live) }, "Copy shot")), /* @__PURE__ */ React.createElement("button", { className: "lv-go", onClick: () => {
         setSelShot(c.id);
         setDeepFocus(null);
@@ -2728,7 +2903,7 @@ ${"=".repeat(48)}
     useEffect(() => {
       if (!project || castImported.current) return;
       castImported.current = true;
-      const ids = parseCastIdsFromSearch(location.search);
+      const ids = parseCastIdsFromSearch(location.search).filter(isCatalogMediaId);
       if (!ids.length) return;
       setProject((p) => {
         const existing = p.assets || [];
@@ -2926,7 +3101,7 @@ Your currently-open board is left untouched.`)) return;
     const [batching, setBatching] = useState(false);
     const [batchTally, setBatchTally] = useState(null);
     const setBatchOutcome = (cardId, outcome) => setBatchTally((prev) => prev && prev.ids.has(cardId) ? { ...prev, outcomes: { ...prev.outcomes, [cardId]: outcome } } : prev);
-    const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || /^\d+$/.test(source)) ? source : null;
+    const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
     const shotPayload2 = (entry) => shotPayload(entry, project, imgSrc);
     const priceShot = async (entry) => {
       try {
@@ -3372,6 +3547,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     );
     const exportJSON = () => download(JSON.stringify({ project, thumbs }, null, 2), `${project.name.replace(/\s+/g, "_")}_backup.json`, "application/json");
     const [bundling, setBundling] = useState(false);
+    const [bundleMissing, setBundleMissing] = useState(null);
     const exportBundle = async () => {
       setBundling(true);
       try {
@@ -3385,7 +3561,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           alert("Bundle export failed: " + (d.error || r.status));
           return;
         }
-        const missing = parseInt(r.headers.get("X-Bundle-Missing-Count") || "0", 10);
+        const report = bundleMissingReport(project, r.headers.get("X-Bundle-Missing-Count"), r.headers.get("X-Bundle-Missing"));
         const blob = await r.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -3393,7 +3569,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         a.download = `${project.name.replace(/\s+/g, "_")}_bundle.zip`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 1e3);
-        if (missing) alert(`Bundle exported, but ${missing} referenced file(s) couldn't be found on disk and were left out.`);
+        if (report.total) setBundleMissing(report);
       } catch {
         alert("Bundle export failed -- network error.");
       } finally {
@@ -3450,7 +3626,9 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       exportAll,
       exportJSON,
       exportBundle,
-      bundling
+      bundling,
+      bundleMissing,
+      closeBundleMissing: () => setBundleMissing(null)
     };
   }
   function App() {
@@ -3605,7 +3783,9 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       exportAll,
       exportJSON,
       exportBundle,
-      bundling
+      bundling,
+      bundleMissing,
+      closeBundleMissing
     } = useExportPipeline(project, thumbs);
     const importCollection = (items, cname) => {
       setImportOpen(false);
@@ -3707,7 +3887,9 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       }
     )), seq && /* @__PURE__ */ React.createElement(SequencePlayer, { clips: seq, onClose: closeSequence }), exp && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
       if (e.target === e.currentTarget && exp.status !== "running") closeExport();
-    } }, /* @__PURE__ */ React.createElement("div", { className: "sb-export-box" }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "sb-pick-t" }, "Export the cut"), exp.status !== "running" && /* @__PURE__ */ React.createElement("button", { className: "sb-pick-x", onClick: closeExport }, "\xD7")), exp.status === "running" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-bar" }, /* @__PURE__ */ React.createElement("i", { style: { width: (exp.progress || 0) + "%" } })), /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt" }, "Rendering\u2026 ", exp.progress || 0, "% \xB7 ", Math.round(exp.elapsed || 0), "s of cut"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: cancelExport }, "\u25A0 Stop")), exp.status === "done" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--green)" } }, "\u2713 Cut rendered."), /* @__PURE__ */ React.createElement("a", { className: "sb-btn amber", href: "/api/loom/export-file", style: { alignSelf: "center", textDecoration: "none" } }, "\u21E9 Download mp4"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")), (exp.status === "failed" || exp.status === "cancelled") && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: exp.status === "failed" ? "var(--coral)" : "var(--ink2)" } }, exp.status === "failed" ? "\u26A0 " + (exp.error || "export failed") : "\u25A0 Export stopped."), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")))), pickCb && (pickAllowType ? /* @__PURE__ */ React.createElement("mg-gallery-picker", { ref: bindGalleryPicker, "default-type": pickKind, "show-type": true }) : /* @__PURE__ */ React.createElement("mg-gallery-picker", { ref: bindGalleryPicker, "default-type": pickKind })), importOpen && /* @__PURE__ */ React.createElement(ImportCollection, { onClose: () => setImportOpen(false), onImport: importCollection }));
+    } }, /* @__PURE__ */ React.createElement("div", { className: "sb-export-box" }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "sb-pick-t" }, "Export the cut"), exp.status !== "running" && /* @__PURE__ */ React.createElement("button", { className: "sb-pick-x", onClick: closeExport }, "\xD7")), exp.status === "running" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-bar" }, /* @__PURE__ */ React.createElement("i", { style: { width: (exp.progress || 0) + "%" } })), /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt" }, "Rendering\u2026 ", exp.progress || 0, "% \xB7 ", Math.round(exp.elapsed || 0), "s of cut"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: cancelExport }, "\u25A0 Stop")), exp.status === "done" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--green)" } }, "\u2713 Cut rendered."), exp.warning && /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--amber)" } }, "\u26A0 ", exp.warning), /* @__PURE__ */ React.createElement("a", { className: "sb-btn amber", href: "/api/loom/export-file", style: { alignSelf: "center", textDecoration: "none" } }, "\u21E9 Download mp4"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")), (exp.status === "failed" || exp.status === "cancelled") && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: exp.status === "failed" ? "var(--coral)" : "var(--ink2)" } }, exp.status === "failed" ? "\u26A0 " + (exp.error || "export failed") : "\u25A0 Export stopped."), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")))), bundleMissing && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
+      if (e.target === e.currentTarget) closeBundleMissing();
+    } }, /* @__PURE__ */ React.createElement("div", { className: "sb-export-box" }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "sb-pick-t" }, "Bundle exported, ", bundleMissing.total, " file(s) left out"), /* @__PURE__ */ React.createElement("button", { className: "sb-pick-x", style: { marginLeft: "auto" }, onClick: closeBundleMissing }, "\xD7")), /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--coral)" } }, "\u26A0 No file on disk for these references \u2014 everything else exported normally."), bundleMissing.rows.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "sb-miss-list" }, bundleMissing.rows.map((row) => /* @__PURE__ */ React.createElement("div", { className: "sb-miss-row", key: row.mid }, row.where.length ? row.where.map((w, i) => /* @__PURE__ */ React.createElement("b", { key: i }, w)) : /* @__PURE__ */ React.createElement("i", null, "not referenced by any shot or cast entry in this project"), /* @__PURE__ */ React.createElement("span", { className: "sb-miss-id" }, row.mid)))), bundleMissing.hidden > 0 && /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--ink2)", fontSize: "12px" } }, bundleMissing.rows.length ? `+${bundleMissing.hidden} more, not listed here.` : `The server sent no id list.`, "The complete list, with the shot each id came from, is inside the zip:", /* @__PURE__ */ React.createElement("b", null, "project.json"), " \u2192 ", /* @__PURE__ */ React.createElement("b", null, "missing_media"), "."), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeBundleMissing }, "Close"))), pickCb && (pickAllowType ? /* @__PURE__ */ React.createElement("mg-gallery-picker", { ref: bindGalleryPicker, "default-type": pickKind, "show-type": true }) : /* @__PURE__ */ React.createElement("mg-gallery-picker", { ref: bindGalleryPicker, "default-type": pickKind })), importOpen && /* @__PURE__ */ React.createElement(ImportCollection, { onClose: () => setImportOpen(false), onImport: importCollection }));
   }
   function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
     const vidRef = useRef(null), trackRef = useRef(null);

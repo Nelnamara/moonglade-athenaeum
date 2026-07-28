@@ -28,6 +28,13 @@ count is nonzero, `/health` shows a note pointing at the fix: the gallery's **�
 button, or `python moonglade_backup.py --import-local` from the CLI — both catalog
 any not-yet-known file it finds (see [Backing Up → Importing your own media](Backing-Up)).
 
+**Opening a row whose file is gone tells you that.** A catalog row can outlive its file —
+that's exactly what **Missing files** counts — and clicking through to one now says
+"Video file not found on disk." in place of the player. Images have always degraded to
+that line; videos used to draw a player over a 404 instead, which reads as a broken app
+rather than a missing file, on the one screen you reached *because* Health told you
+something was missing.
+
 ## Duplicates review
 
 **`/duplicates`** shows cross-folder duplicate copies side-by-side before you dedup

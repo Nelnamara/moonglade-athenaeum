@@ -715,20 +715,40 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
                   sort="newest", page=1, page_size=100, batch="", rating_min=0,
                   published_only=False, art_tag="", lora="", media_type="", source="",
                   collection=""):
-    """Return (rows, total) with filtering, sorting and pagination done in SQL."""
+    """Return (rows, total) with filtering, sorting and pagination done in SQL.
+
+    `page_size=None` means UNPAGINATED: one statement returns every matching row and
+    `total` is simply how many came back. That is not a convenience shorthand for "a very
+    large page" -- it closes a real hole. The paginated path answers COUNT(*) and the page
+    itself in two SEPARATE statements, i.e. two separate SQLite read snapshots with no
+    transaction across them, so a write landing between the two makes them disagree. A grid
+    page can absorb that (worst case a paginator is off by one for one refresh), but a
+    caller that sizes its LIMIT off the count cannot: /export-csv did exactly that, and a
+    "Sync now" Panel job inserting rows for minutes while the owner browsed meant the CSV
+    silently shipped the OLD match count out of the new, larger match set, with nothing in
+    the downloaded file admitting it was short. One statement has nothing to disagree with.
+    """
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
                                  published_only, art_tag, lora, media_type, source,
                                  collection)
     order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
-    offset = (max(1, page) - 1) * page_size
     con = _connect(db_path)
     try:
+        if page_size is None:
+            rows = con.execute(
+                "SELECT * FROM catalog WHERE {} ORDER BY {}".format(where, order),
+                params,
+            ).fetchall()
+            # No second COUNT on purpose -- taking one here would reintroduce exactly the
+            # two-snapshot disagreement this branch exists to avoid, and a total that can
+            # differ from len(rows) is precisely what misled the export.
+            return [dict(r) for r in rows], len(rows)
         total = con.execute(
             "SELECT COUNT(*) FROM catalog WHERE {}".format(where), params
         ).fetchone()[0]
         rows = con.execute(
             "SELECT * FROM catalog WHERE {} ORDER BY {} LIMIT ? OFFSET ?".format(where, order),
-            params + [page_size, offset],
+            params + [page_size, (max(1, page) - 1) * page_size],
         ).fetchall()
         return [dict(r) for r in rows], total
     finally:
@@ -3716,8 +3736,12 @@ def create_app(out_dir: Path):
     _WARN_PREFIX = "~=MGWARN=~"        # matches PANEL_WARN_PREFIX in moonglade_backup.py (D-4)
     # The Loom's ffmpeg export job (trim + concat finished shots -> one mp4).
     _export_lock = threading.Lock()
+    # `warning` is distinct from `error`: the export SUCCEEDS but came out different from what
+    # was asked for (today: no audio track, because a missing ffprobe made every clip's length
+    # unreadable). That has to reach the owner's screen, not just the log -- a silent downgrade
+    # on a missing dependency is how someone ships a silent cut without ever learning why.
     _export_job = {"status": "idle", "progress": 0, "elapsed": 0.0,
-                   "out": "", "error": "", "proc": None, "cancelled": False}
+                   "out": "", "error": "", "warning": "", "proc": None, "cancelled": False}
     _export_dir = out_dir / "loom" / "exports"
     # Bulk cloud-delete runs OFF-THREAD (it's irreversible and can be many network calls)
     # and reports to the Activity card via the job log. Single-flight so two runs can never
@@ -4880,6 +4904,10 @@ __DESIGN_TOKENS__
   .stars button { background: none; border: none; cursor: pointer; font-size: 14px; padding: 0; line-height: 1; color: var(--overlay0); }
   .stars button.on { color: #f9e2af; }
   .stars button:hover { color: #f9e2af; opacity: 0.7; }
+  /* The no-Toast half of ratingFailed() -- see it for why the detail page needs one.
+     Same specificity as `.stars button.on` and declared after it on purpose, so a
+     failed write repaints red over a previously-filled star instead of losing the tie. */
+  .stars.rate-fail button { color: var(--red); }
   .card .stars { padding: 3px 6px 5px; }
   .detail-stars { margin-top: 12px; display: flex; align-items: center; gap: 8px; }
   .detail-stars .stars button { font-size: 22px; }
@@ -4892,13 +4920,28 @@ function confirmDelete(url, msg) {
   document.getElementById('del-modal-form').action = url;
   document.getElementById('del-modal').classList.add('open');
 }
-function setRating(mediaId, value, starsEl) {
-  fetch('/rate/' + mediaId, {
+function setRating(mediaId, value) {
+  // RESOLVES to the rating the server actually stored, REJECTS on anything else. That
+  // contract is the whole point: buildStars keeps its own copy of "the current rating"
+  // and the two silently disagreeing is not cosmetic. This chain used to end at
+  // `if (data.ok) updateStars(...)` with no else and no .catch, so a POST that never
+  // came back -- dropped connection, a 5xx whose HTML body makes r.json() throw --
+  // simply fell off the end: the stars stayed unfilled while the closure had already
+  // advanced to 4. The user's obvious move, clicking the same star again to retry, then
+  // read (rating === star) as "already 4, so this means clear" and submitted a 0.
+  // Clicking the 4th star twice through one failed write set the image to unrated.
+  //
+  // It reports and does not paint -- which is why it no longer takes the stars element.
+  // The repaint lives in buildStars because only the closure there knows whether THIS
+  // response is still the newest one; painting from in here meant a slow first response
+  // could repaint over a fast second one's result with no way for the caller to stop it.
+  return fetch('/rate/' + mediaId, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({rating: value})
-  }).then(r => r.json()).then(data => {
-    if (data.ok) updateStars(starsEl, data.rating);
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    if (!data || !data.ok) throw new Error((data && data.error) || 'The server rejected it.');
+    return data.rating;
   });
 }
 function updateStars(el, rating) {
@@ -4908,7 +4951,54 @@ function updateStars(el, rating) {
   var lbl = el.parentElement.querySelector('.rating-label');
   if (lbl) lbl.textContent = rating > 0 ? rating + ' / 5' : 'unrated';
 }
+function ratingFailed(el, msg) {
+  // Toast (static/mg-notify.js) is this app's notice channel and is used wherever it is
+  // loaded -- but the gallery loads that script and the DETAIL page does not, and the
+  // detail page carries the largest star widget on the site. A Toast-only report would
+  // therefore stay silent on precisely the surface where one click is the entire
+  // interaction, which is the failure this whole fix is about. So fall back to the widget
+  // itself: flash it red and hang the reason off its tooltip. Not alert() -- a modal that
+  // steals focus mid-browse for a rating write is worse than the bug.
+  if (window.Toast) { Toast.show({kind: 'err', title: 'Rating not saved', msg: msg}); return; }
+  // Borrowed, then given back. The .stars container carries no title today, so clearing it
+  // outright looked free -- but it is a shared attribute on an element this function does
+  // not own, and the first tooltip anyone hangs there would be silently eaten four seconds
+  // after an unrelated failed write. Saved only on the way IN (not on a repeat while the
+  // flash is still up, which would save this function's own message) and restored by a
+  // single restarted timer, so two failures four seconds apart can't leave one stuck.
+  if (!el.classList.contains('rate-fail')) el._ratePriorTitle = el.title;
+  el.classList.add('rate-fail');
+  el.title = 'Rating not saved — ' + msg;
+  clearTimeout(el._rateTimer);
+  el._rateTimer = setTimeout(function() {
+    el.classList.remove('rate-fail');
+    el.title = el._ratePriorTitle || '';
+  }, 4000);
+}
 function buildStars(mediaId, rating, containerEl) {
+  // TWO values, deliberately, because one cannot answer both questions this widget asks.
+  //
+  //   confirmed -- the last rating the SERVER said it stored. It is what a failure rolls
+  //                back to, and the only thing safe to repaint from.
+  //   asked     -- what the user's clicks have asked for, including writes still in the
+  //                air. It is what "is this star already lit?" must be answered from, or
+  //                the click-again-to-unrate gesture stops working mid-flight.
+  //
+  // Collapsing them is what produced the finding and then its own regression, in turn.
+  // The original code advanced ONE variable optimistically and never rolled it back, so a
+  // failed write left the closure at 4 while the stars showed 0 and the retry click read
+  // (rating === star) as "clear it" -- clicking star 4 twice through one failure set the
+  // image to unrated. The first repair stopped advancing anything until the server
+  // answered, which fixed that and broke the opposite case: two fast clicks on star 4 both
+  // computed from the same un-advanced 0 and both POSTed 4, so a deliberate double-click
+  // to unrate did nothing until the round trip landed. Optimistic for the gesture,
+  // confirmed for the paint, and a rollback joining them, is the shape that serves both.
+  //
+  // `seq` exists because responses can land out of order: only the newest click may move
+  // `confirmed` or repaint, so a slow first response can no longer overwrite a fast
+  // second one's result. (The stale one's own updateStars inside setRating is why that
+  // repaint moved out to here.)
+  var confirmed = rating, asked = rating, seq = 0;
   for (var i = 1; i <= 5; i++) {
     (function(star) {
       var btn = document.createElement('button');
@@ -4916,9 +5006,23 @@ function buildStars(mediaId, rating, containerEl) {
       if (star <= rating) btn.classList.add('on');
       btn.addEventListener('click', function(e) {
         e.preventDefault(); e.stopPropagation();
-        var newVal = (rating === star) ? 0 : star;
-        rating = newVal;
-        setRating(mediaId, newVal, containerEl);
+        var newVal = (asked === star) ? 0 : star;
+        asked = newVal;
+        var mine = ++seq;
+        setRating(mediaId, newVal).then(function(stored) {
+          if (mine !== seq) return;          // a newer click already owns this widget
+          confirmed = asked = stored;
+          updateStars(containerEl, stored);
+        }).catch(function(err) {
+          if (mine !== seq) return;
+          // The rollback that makes the optimistic `asked` safe: the write did not land,
+          // so the gesture goes back to what the database actually holds and the stars are
+          // repainted from it. Without this, `asked` would stay advanced past a failure --
+          // which IS the original finding, one variable over.
+          asked = confirmed;
+          updateStars(containerEl, confirmed);
+          ratingFailed(containerEl, (err && err.message) || 'Network error.');
+        });
       });
       containerEl.appendChild(btn);
     })(i);
@@ -7032,9 +7136,13 @@ document.addEventListener('DOMContentLoaded', function(){
   .ct-foot a{color:var(--lavender);font-style:normal;}
 </style>
 <style>
-  #snip-menu{position:fixed;z-index:236;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:220px;max-width:min(340px, calc(100vw - 16px));max-height:300px;overflow-y:auto;padding:5px;}
+  #snip-menu{position:fixed;z-index:236;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:220px;max-width:min(340px, calc(100vw - 16px));max-height:min(300px, calc(100vh - 16px));overflow-y:auto;padding:5px;}
   #snip-menu .snip-head{display:flex;justify-content:space-between;align-items:center;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--overlay0);padding:3px 6px 5px;}
   #snip-menu .snip-empty{color:var(--subtext);font-size:11.5px;padding:6px;}
+  /* The undo strip Snips.del() leaves behind. Pinned at the top of the popover, above the
+     rows, so the affordance is nowhere near the x that produced it. */
+  #snip-menu .snip-undo{display:flex;justify-content:space-between;align-items:center;gap:6px;background:var(--surface0);border-radius:5px;padding:3px 4px 3px 7px;margin-bottom:3px;font-size:11px;color:var(--subtext);}
+  #snip-menu .snip-undo span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .snip-row{display:flex;gap:4px;align-items:center;}
   .snip-ins{flex:1;text-align:left;background:none;border:none;color:var(--text);font-size:12px;padding:6px 8px;border-radius:5px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .snip-ins:hover{background:var(--surface0);color:var(--lavender);}
@@ -7104,6 +7212,7 @@ document.addEventListener('DOMContentLoaded', function(){
 <script>
 var Contests = (function(){
   function el(id){return document.getElementById(id);}
+  var lastAnchor=null;
   function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
   function fmt(n){ return (Number(n)||0).toLocaleString(); }
   var showAll=false, loaded=false;
@@ -7409,32 +7518,85 @@ var Snips = (function(){
       .then(function(d){ if(!d || d.error){ if(window.Toast) Toast.show({kind:'err', title:'Snippet not saved', msg:(d&&d.error)||'The server rejected the save.'}); } })
       .catch(function(){ if(window.Toast) Toast.show({kind:'err', title:'Snippet not saved', msg:'Network error.'}); });
   }
-  function open(anchor, tgt){ target=tgt; load().then(function(){ render(); place(anchor); }); }
+  function open(anchor, tgt){ target=tgt; lastAnchor=anchor;
+    load().then(function(){ render(); place(anchor); }); }
+  // render() can change the popover's HEIGHT while it is open -- the undo strip adds a row,
+  // undoing removes it -- and place() only ever ran once, at open. A popover that had been
+  // flipped ABOVE its button (the common case: the snippet button sits low in the drawer)
+  // grows upward off the top of the screen, so the strip it just grew to show is the exact
+  // part that gets clipped. Re-measure after any re-render that happens while it is open.
+  function reflow(){ var m=menu();
+    if(m && m.style.display==='block' && lastAnchor && lastAnchor.isConnected) place(lastAnchor); }
   function hide(){ var m=menu(); if(m) m.style.display='none'; }
   function place(a){ var m=menu(), r=a.getBoundingClientRect();
     m.style.display='block';
-    m.style.left=Math.min(r.left, window.innerWidth-m.offsetWidth-8)+'px';
-    var top=r.bottom+4; if(top+m.offsetHeight>window.innerHeight-8) top=r.top-m.offsetHeight-4;
+    // clientWidth/clientHeight, NOT window.innerWidth/innerHeight: innerWidth counts the
+    // vertical scrollbar as usable space, so clamping against it parked the popover's right
+    // edge under the scrollbar gutter -- readable, but sitting on top of a control. The
+    // documentElement's client box is the same viewport minus the scrollbars, which is what
+    // "keep 8px clear of the edge" actually means here.
+    var vw=document.documentElement.clientWidth, vh=document.documentElement.clientHeight;
+    m.style.left=Math.max(8, Math.min(r.left, vw-m.offsetWidth-8))+'px';
+    var top=r.bottom+4; if(top+m.offsetHeight>vh-8) top=r.top-m.offsetHeight-4;
     m.style.top=Math.max(8,top)+'px';
   }
   function render(){
     var m=menu(); var html='<div class="snip-head"><span>Snippets</span>'
       +'<button class="jt-x" onmousedown="event.preventDefault();Snips.saveCurrent()">+ save current</button></div>';
+    if(pendingUndo) html+='<div class="snip-undo"><span>Deleted \\u201c'+esc(trunc(pendingUndo.text))+'\\u201d</span>'
+      +'<button class="jt-x" onmousedown="event.preventDefault()" onclick="event.stopPropagation();Snips.undo()">Undo</button></div>';
     if(!list.length) html+='<div class="snip-empty">No saved snippets yet.</div>';
     (list||[]).forEach(function(s,i){
+      // The x fires on CLICK, not mousedown -- see del() for why that one word matters.
       html+='<div class="snip-row"><button class="snip-ins" onmousedown="event.preventDefault();Snips.insert('+i+')" title="Insert">'+esc(s)+'</button>'
-        +'<button class="jt-x" onmousedown="event.preventDefault();Snips.del('+i+')">\\u00d7</button></div>';
+        +'<button class="jt-x" onmousedown="event.preventDefault()" onclick="event.stopPropagation();Snips.del('+i+')" title="Delete (Undo appears at the top)">\\u00d7</button></div>';
     });
     m.innerHTML=html;
   }
+  function trunc(s){ s=String(s||''); return s.length>44 ? s.slice(0,44)+'\\u2026' : s; }
   function saveCurrent(){ if(!target) return; var v=(target.get()||'').trim(); if(!v) return;
-    if(list.indexOf(v)<0){ list.unshift(v); list=list.slice(0,200); persist(); render(); } }
+    if(list.indexOf(v)<0){ list.unshift(v); list=list.slice(0,200); persist(); render(); reflow(); } }
   function insert(i){ if(!target||!list[i]) return; var cur=(target.get()||'').trim();
     target.set(cur ? (cur.replace(/,\\s*$/,'')+', '+list[i]) : list[i]); hide(); }
-  function del(i){ list.splice(i,1); persist(); render(); }
+  var pendingUndo=null;   /* one level: the last snippet del() removed, offered back in render() */
+  function del(i){
+    if(!list[i]) return;
+    // This used to run on MOUSEDOWN, unconfirmed and unrecoverable. The x sits 4px from
+    // the insert button in a popover 220-340px wide, and mousedown commits before the
+    // button is even released -- there is no press-then-slide-away-to-cancel, and by the
+    // time you notice, persist() has already POSTed the truncated list to /api/snippets.
+    // One fat-finger and a saved prompt is gone for good. Two cheap changes instead of a
+    // confirm(): fire on CLICK, which restores the cancel gesture every destructive
+    // control in every app has; and keep the removed text so the popover can hand it
+    // straight back. Deliberately NOT confirm() -- this menu exists to be used quickly,
+    // and a modal on every delete is friction paid by the deletes that were meant, to
+    // protect the rare one that wasn't. An undo taxes only the mistake.
+    //
+    // The event.stopPropagation() on that button is load-bearing, not decoration:
+    // render() below replaces the popover's innerHTML while the click is still bubbling,
+    // so by the time the document-level "click outside closes the menu" listener runs,
+    // its e.target has been detached and m.contains(e.target) is false. The popover would
+    // shut itself -- taking the undo affordance with it -- on every delete.
+    pendingUndo={text:list[i], index:i};
+    list.splice(i,1); persist(); render(); reflow();
+    // Neutral kind, not 'ok': a green tick on a deletion reads as "saved successfully",
+    // which is the opposite of the thing being reported. The toast's whole job is to say
+    // it happened and where the way back is.
+    if(window.Toast) Toast.show({kind:'', icon:'\\u21ba', title:'Snippet deleted',
+      msg:'Undo sits at the top of the Snippets menu.'});
+  }
+  function undo(){
+    if(!pendingUndo) return;
+    var p=pendingUndo; pendingUndo=null;
+    // Clamped, and skipped entirely if the text is somehow back already: a "+ save
+    // current" between the delete and the undo shifts every index by one, and re-adding
+    // a duplicate would be a second bug wearing the first one's clothes.
+    if(list.indexOf(p.text)<0) list.splice(Math.min(p.index, list.length), 0, p.text);
+    persist(); render(); reflow();   // the strip just went away -- re-measure, same as del()
+  }
   document.addEventListener('click', function(e){ var m=menu();
     if(m && m.style.display==='block' && !m.contains(e.target) && !(e.target.classList&&e.target.classList.contains('snip-btn'))) hide(); });
-  return {open:open, saveCurrent:saveCurrent, insert:insert, del:del};
+  return {open:open, saveCurrent:saveCurrent, insert:insert, del:del, undo:undo};
 })();
 var Gen = (function(){
   var kind='base', selected=null, costSeq=0, costTimer=null;
@@ -7863,6 +8025,18 @@ var Gen = (function(){
   // model's numbers (imperative DOM attributes persist across calls unless explicitly
   // touched -- unlike React's declarative re-render, which recomputes from scratch every
   // time and never had this bug on the Loom's own copy of this same gate).
+  // NOTE, because "clamp ... when the model publishes tighter ones" above describes the
+  // INTENT and not a guarantee: `bounds` REPLACES defMin/defMax, it does not clip them.
+  // Every restriction PixAI has been observed to publish is narrower (samplingSteps
+  // {min:16,max:50}, Tsubaki.2's fixed 16), but nothing here enforces it -- and
+  // `restrictions` is live remote data, so a published
+  // samplingSteps.max of 200 would widen this control past what the server accepts, the
+  // POST would carry 200, and _gen_args_from_payload would clamp it to 150 on the way to a
+  // PAID submit. That is why the server side REPORTS a clamp that fires (see `adjusted`)
+  // instead of applying it in silence: the owner finds out they paid for 150 steps rather
+  // than being charged for a substitution nobody mentioned. Clipping here as well would be
+  // the belt to that braces -- deliberately not done in this pass, because it changes three
+  // lines tests/test_web_pick.py pins verbatim and that file is outside this repair.
   function gateField(id, honored, bounds, defMin, defMax){
     var f=el(id); if(!f) return;
     var off = honored===false;
@@ -8155,6 +8329,17 @@ var Gen = (function(){
       .then(function(d){
         unlock();   // the server answered -- free the button for the NEXT submission
         if(d.error || !d.task_id){ renderResultInto(line, {error:d.error||'submit failed'}); return; }
+        // The server clamped something. It is already submitted and already charged, so
+        // this is a receipt, not a warning -- but it has to be SAID: paying for a 150-step
+        // render after asking for 200 is the substitution M20's clamp would otherwise make
+        // in silence. The key is absent unless a clamp really fired, so an ordinary submit
+        // costs nothing here -- and the drawer itself CAN produce one, because gateField()
+        // takes a model's published `restrictions` verbatim (see its note).
+        if(d.adjusted && d.adjusted.length && window.Toast){
+          Toast.show({kind:'err', title:'Settings were adjusted before submitting',
+            msg:d.adjusted.map(function(a){ return a.field+' '+a.asked+' \\u2192 '+a.used; }).join(', ')
+              +' \\u2014 this generation used the adjusted values.'});
+        }
         line.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Queued \\u2014 running\\u2026</span>';
         // Jobs owns the polling, so the task (and its result) survive closing the drawer.
         // The callback below only ever touches THIS submission's own `line`.
@@ -8226,7 +8411,23 @@ var Gen = (function(){
     if(c.qualities.length){ if(qw)qw.style.display=''; _fillEditSel('edit-qual',c.qualities,c.def.quality); }
     else { if(qw)qw.style.display='none'; if(el('edit-qual'))el('edit-qual').innerHTML=''; }
     var maxAdd=Math.max(0, editRefCap()-(editSrc()?1:0));   // trim refs that no longer fit the model cap
-    if(editRefs.length>maxAdd) editRefs=editRefs.slice(0,maxAdd);
+    if(editRefs.length>maxAdd){
+      // ...and SAY SO. This slice was silent: pick six references under Reference Pro
+      // (cap 10), tap the Edit Pro toggle (cap 4), and three of them vanished from the
+      // strip with no message anywhere -- the user then submitted a paid edit believing
+      // all six were still attached. bulkSendVideo has toasted its identical cap
+      // truncation since the day it was written; this is the same class of loss and
+      // deserves the same treatment and the same voice. Nothing toasts on the initial
+      // setEditModel('edit-pro') at page load: editRefs is empty, so this branch is
+      // simply not entered.
+      var had=editRefs.length, dropped=had-maxAdd, nm=el('em-'+k);
+      nm=nm?nm.textContent.trim():k;
+      editRefs=editRefs.slice(0,maxAdd);
+      if(window.Toast) Toast.show({kind:'err',
+        title:'Only '+maxAdd+' reference image'+(maxAdd===1?'':'s')+' kept',
+        msg:nm+' takes up to '+editRefCap()+' images in total (the one being edited counts as one) — '
+          +dropped+' of your '+had+' references were left out.'});
+    }
     renderEditRefs();
     editCost();
   }
@@ -8951,13 +9152,18 @@ document.addEventListener('DOMContentLoaded', function() {
   </div>
 
   <div class="detail-img">
-    {% if row.is_video == '1' %}
+    {# video_url is None when the clip is missing from disk -- see detail(). Without that
+       test this branch rendered a player over a 404 and said nothing, while the image
+       branch beside it has always degraded to a readable line. #}
+    {% if row.is_video == '1' and video_url %}
     <video controls autoplay loop playsinline preload="metadata"
            style="max-width:100%;border-radius:8px;background:#000"
            {% if poster_url %}poster="{{ poster_url }}"{% endif %}>
-      <source src="{{ url_for('video_file', media_id=row.media_id) }}" type="video/mp4">
-      Your browser can't play this video. <a href="{{ url_for('video_file', media_id=row.media_id) }}">Download it</a>.
+      <source src="{{ video_url }}" type="video/mp4">
+      Your browser can't play this video. <a href="{{ video_url }}">Download it</a>.
     </video>
+    {% elif row.is_video == '1' %}
+    <div style="color:var(--overlay0);padding:40px">Video file not found on disk.</div>
     {% elif img_url %}
     <a href="{{ img_url }}" target="_blank" title="Click to open full resolution">
       <img src="{{ img_url }}" alt="{{ row.prompt_preview }}">
@@ -11388,12 +11594,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         import datetime
         filters = _filters_from_args(request.args)
         if filters:
-            # query_catalog paginates: count the matches first, then take that many in a
-            # single page, so a filtered export is never silently truncated. `sort` isn't a
-            # filter (it never changes WHICH rows match) so it's passed separately -- and
-            # an unknown value falls back to the default order inside query_catalog.
-            _, total = query_catalog(db_path, page=1, page_size=1, **filters)
-            rows, _ = query_catalog(db_path, page=1, page_size=max(total, 1),
+            # ONE unpaginated query (page_size=None), deliberately. This used to COUNT the
+            # matches and then ask a SECOND, later query for exactly that many rows, with no
+            # lock or transaction across the pair -- so a catalog write landing in the gap
+            # left the second query's LIMIT sized to the OLD count. The everyday case is not
+            # exotic: "Sync now" is a Panel job that inserts rows for minutes at a time while
+            # the owner keeps browsing, and the export it produced mid-sync shipped fewer
+            # rows than matched with nothing in the file saying so. A single SELECT reads one
+            # snapshot and cannot disagree with itself. `sort` isn't a filter (it never
+            # changes WHICH rows match) so it stays a separate argument -- and an unknown
+            # value falls back to the default order inside query_catalog.
+            rows, _ = query_catalog(db_path, page=1, page_size=None,
                                     sort=request.args.get("sort", "newest"), **filters)
         else:
             rows = load_catalog(db_path)
@@ -11852,15 +12063,31 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         next_id = nav_ids[idx + 1] if 0 <= idx < len(nav_ids) - 1 else None
 
         poster_url = None
+        video_url = None
         if row.get("is_video") == "1":
             for pmid in (media_id, row.get("poster_media_id")):
                 if pmid and (thumb_dir / "{}.jpg".format(pmid)).exists():
                     poster_url = url_for("thumb", media_id=pmid)
                     break
+            # The image branch has always asked find_image_file() whether the file is
+            # really there and fallen back to a plain "not found on disk" line; the video
+            # branch emitted <video><source> unconditionally, so a row whose clip is gone
+            # -- a state the Health dashboard explicitly counts under "Missing files" --
+            # showed a dead black player and no explanation at all. _find_local_video_file
+            # is the video half of that same question (catalog filename first, then the
+            # shared media-id matcher with its quarantine exclusions), so this is the
+            # existing resolver, not a third one -- and, since 2026-07-27, it is also the
+            # resolver /video-file serves from, which is what makes the answer here
+            # binding. A check that asks a different question from the route it gates is
+            # not a check: it just moves the dead player behind a `video_url` that 404s.
+            # `row` is handed over so the resolver doesn't re-SELECT the row loaded above.
+            if _find_local_video_file(media_id, row=row):
+                video_url = url_for("video_file", media_id=media_id)
 
         return render_template_string(
             DETAIL_HTML, row=row, img_url=img_url, back=back,
             prev_id=prev_id, next_id=next_id, poster_url=poster_url,
+            video_url=video_url,
             # Same value the gallery's own "Delete from PixAI" is gated on. A LAN session
             # can browse and spend, but not destroy on the owner's real cloud account.
             can_delete_cloud=_is_local_request(),
@@ -12408,10 +12635,30 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/video-file/<media_id>")
     def video_file(media_id):
         row = get_row(db_path, media_id)
-        if not row or row.get("is_video") != "1" or not row.get("filename"):
+        if not row or row.get("is_video") != "1":
+            return "Video not found.", 404
+        # Resolved through _find_local_video_file -- the SAME question the detail page asks
+        # before it decides to draw a player at all. This route used to answer a narrower
+        # one: it served `row["filename"]` and 404'd if that column was blank (an older row,
+        # or one written before the download settled on a name) or stale (`--organize` moved
+        # the clip, a re-download landed it under a different name). detail() has the
+        # media-id fallback and this did not, so the two could disagree -- and when they
+        # disagree the page renders <video><source> over a 404, which is a dead black box
+        # with no message: M30's exact symptom, surviving on top of M30's own fix. An
+        # existence check is only worth having if it is answered by whatever will serve the
+        # bytes, so there is one resolver and both callers ask it.
+        p = _find_local_video_file(media_id, row=row)
+        if p is None:
+            return "Video not found.", 404
+        try:
+            rel = str(p.relative_to(out_dir)).replace("\\", "/")
+        except ValueError:
+            # Only reachable if a catalog `filename` escaped the backup folder (an absolute
+            # path, or one with ..). send_from_directory would refuse it below anyway; doing
+            # it here keeps "found" meaning the same thing to the resolver and to the serve.
             return "Video not found.", 404
         # send_from_directory supports HTTP Range, so the <video> can seek
-        resp = send_from_directory(str(out_dir), row["filename"], max_age=31536000)
+        resp = send_from_directory(str(out_dir), rel, max_age=31536000)
         resp.headers["Cache-Control"] = _IMMUTABLE
         return resp
 
@@ -13892,7 +14139,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def _gen_args_from_payload(p):
         """Turn the Generate drawer's JSON into the SAME argparse-like namespace the CLI
         feeds to core._gen_parameters -- so web + CLI build identical params (one source
-        of truth). Clamped to safe ranges."""
+        of truth). Clamped to safe ranges, and every clamp that actually fired is listed on
+        the returned namespace as `.clamped` = [{field, asked, used}] so the route can tell
+        the caller its request was rewritten instead of charging for the difference."""
         from types import SimpleNamespace
         import moonglade_backup as core          # module-local, like every other use here
         p = p or {}
@@ -13901,6 +14150,46 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 return cast(p.get(k, d))
             except (TypeError, ValueError):
                 return d
+        # "Clamped to safe ranges" was, until this existed, true of `count` alone: width,
+        # height, steps and cfg went through num() with no ceiling and straight into a real
+        # paid submit, because core._gen_parameters only FLOORS width/height to 64 (via
+        # _dim) and caps nothing at all. /api/generate is LOGIN-tier on purpose -- any
+        # signed-in LAN device may spend -- so the drawer's own HTML min/max attributes are
+        # the only bound a well-behaved client honours and a hand-rolled POST honours none:
+        # {"width": 999999999, "steps": 999999} reached PixAI, priced at whatever that
+        # produces. Clamp here, where the docstring promises it.
+        #
+        # The ceilings are read off the drawer's OWN controls, not invented:
+        #   width/height  64..4096  -- #gen-cw / #gen-ch (min=64 max=4096 step=8), and the
+        #                              drawer's d8() already clamps to exactly that before
+        #                              it POSTs, so this is the same number twice
+        #   steps         1..150    -- #gen-steps, and gateField()'s defMin/defMax
+        #   cfg           1..30     -- #gen-cfg, and gateField()'s defMin/defMax
+        # Same idiom core._gen_parameters uses for the Hires knobs ("bounds read off the
+        # live dialog's own controls: strength 0.01-0.99, steps 1-50").
+        #
+        # These are NOT provably the widest the UI can emit, and an earlier draft of this
+        # comment claimed they were ("a model publishing tighter `restrictions` narrows the
+        # browser field further"). gateField() REPLACES the field's min/max with whatever
+        # `restrictions` carries rather than clipping them, and `restrictions` is live PixAI
+        # data -- so a model publishing samplingSteps.max = 200 would widen the drawer's own
+        # control and the drawer would legitimately POST 200.
+        #
+        # Which is exactly why a clamp that FIRES is recorded instead of applied in silence.
+        # Clamping is substitution on a paid path: the caller asked for one generation and
+        # is charged for a different one, and doing that without a word is a worse failure
+        # than the absurd value the clamp exists to refuse -- the money is gone either way,
+        # and only the version that says so tells you what it bought. `adjusted` is that
+        # receipt; /api/generate hands it back in the response (see api_generate). No
+        # price/charge split comes of it either way: /api/price builds its params through
+        # this same function, so the badge already quotes the clamped request.
+        adjusted = []
+
+        def clamp(field, v, lo, hi):
+            c = max(lo, min(hi, v))
+            if c != v:
+                adjusted.append({"field": field, "asked": v, "used": c})
+            return c
         loras = []
         for lo in (p.get("loras") or []):
             vid = str((lo or {}).get("version_id") or "").strip()
@@ -13912,9 +14201,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             params_json="", prompt=(p.get("prompt") or "").strip(),
             negative=(p.get("negative") or "").strip(),
             model=(p.get("version_id") or "").strip(),
-            width=num("width", 512), height=num("height", 512),
-            steps=num("steps", 25), cfg=num("cfg", 7, float),
-            count=max(1, min(num("count", 1), 4)),
+            width=clamp("width", num("width", 512), 64, 4096),
+            height=clamp("height", num("height", 512), 64, 4096),
+            steps=clamp("steps", num("steps", 25), 1, 150),
+            cfg=clamp("cfg", num("cfg", 7, float), 1.0, 30.0),
+            count=clamp("count", num("count", 1), 1, 4),
             # Ticked = High (1000, costs extra). Unticked = Turbo (500, free but
             # members-only); core's submit downgrades that to Low on its own if PixAI
             # says this account isn't entitled, so an expired membership no longer
@@ -13936,7 +14227,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             upscale_denoising_steps=num("upscale_denoise_steps", None, int),
             face_fix=(p.get("face_fix") in (True, "1", "true", "on")),
             quality_tag=str(p.get("quality_tag") or "").strip(),
-            kaisuuken_id="", no_card=bool(p.get("no_card")))
+            kaisuuken_id="", no_card=bool(p.get("no_card")),
+            # core._gen_parameters reads named attributes only, so carrying the receipt on
+            # the namespace costs the submit shape nothing and keeps it beside the values it
+            # describes -- a caller cannot pick up the args and lose the record of what was
+            # changed to make them.
+            clamped=adjusted)
 
     _presets_lock = threading.Lock()
 
@@ -14384,7 +14680,18 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                         telem_set_add("loras", v, out_dir=out_dir)
             except Exception:
                 pass
-            return jsonify({"task_id": task_id})
+            out = {"task_id": task_id}
+            if getattr(args, "clamped", None):
+                # A clamp fired: this submit is NOT the one that was asked for, and the
+                # caller has just been charged for it. Say so in the response rather than
+                # letting the substitution pass unremarked -- the whole hazard M20's clamp
+                # introduced is that it can quietly bill a different generation than the
+                # one configured. Both kinds of caller can land here: a hand-rolled POST
+                # (the finding's own threat model) and the drawer itself, whose steps/cfg
+                # controls adopt a model's published `restrictions` verbatim and so can
+                # legitimately offer a number this clamp then rewrites.
+                out["adjusted"] = args.clamped
+            return jsonify(out)
         except Exception as e:
             return jsonify({"error": _log_gen_failure(
                 "/api/generate", e, locals().get("params"))[:300]}), 200
@@ -14438,11 +14745,25 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 return jsonify({"error": "pick an image first"}), 400
             if not boxes:
                 return jsonify({"error": "draw a box over a hand or face"}), 400
+            # The exact body submit_fixer POSTs to /v2/task/fixer, named here so the failure
+            # log below has the REQUEST SHAPE to report, the same way /api/generate and
+            # /api/edit hand it their `params`. Built from the route's own inputs rather
+            # than re-running clean_fix_boxes(), so nothing on the error path can itself
+            # raise; a box the cleaner would have dropped is still worth seeing, because
+            # "which boxes did we actually ask about" is half the diagnosis.
+            fix_params = {"mediaId": src, "boxes": boxes}
             task_id = core.submit_fixer(session, src, boxes)
             telem_set_add("tools", "fix", out_dir=out_dir)   # Full Toolbox
             return jsonify({"task_id": task_id})
         except Exception as e:
-            return jsonify({"error": _redact_host_paths(str(e))[:300]}), 200
+            # Fix is the ONE drawer action that always spends -- no free card ever covers a
+            # fixer task -- so an unlogged failure here is money gone with nothing written
+            # down. This route was the last holdout after _log_gen_failure was added for the
+            # 2026-07-26 undiagnosable decline: it returned the redacted text to the browser,
+            # friendlyGenErr() replaced it with a guess, and the real error was recorded
+            # nowhere at all.
+            return jsonify({"error": _log_gen_failure(
+                "/api/fix", e, locals().get("fix_params"))[:300]}), 200
 
     # --- The Loom (Seedance storyboard) -------------------------------------
     # Storage is a small key->value store the Loom's window.storage shim reads via
@@ -14750,7 +15071,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                         pass
         return jsonify({"ok": True})
 
-    def _find_local_video_file(mid):
+    def _find_local_video_file(mid, row=None):
         """Resolve a catalog media_id to its local video file on disk: try the catalog's
         stored filename first, then fall back to the shared media-id matcher (SAME exact
         media_id_of(p) == mid check and _duplicates/_deleted quarantine exclusion as every
@@ -14759,15 +15080,39 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         match as a substring of a longer, unrelated one's filename). find_files_for_media_id
         defaults to images, hence the explicit exts=vid_exts. Returns a Path or None.
 
-        Shared by /api/loom/handoff (frame extraction) and /api/loom/video-duration
-        (footage-import fallback probe) -- both need the exact same file before they can
-        hand it to ffmpeg/ffprobe; one resolver, not two independently-drifting copies."""
-        vid_exts = (".mp4", ".webm", ".mov", ".mkv")
-        row = get_row(db_path, mid) or {}
+        Shared by /api/loom/handoff (frame extraction), /api/loom/video-duration
+        (footage-import fallback probe), the detail page's does-this-clip-exist check, and
+        /video-file itself. That last one is the point rather than a nicety: while
+        /video-file resolved `row["filename"]` on its own, the page could decide a clip was
+        present (via the fallback here) and then link to a URL that 404s, which draws a dead
+        player and says nothing -- the very failure the detail-page check was added to stop.
+        One resolver, four callers, one answer.
+
+        `row` is an already-loaded catalog row, passed by callers that just fetched it so
+        this doesn't repeat a primary-key SELECT they already paid for. It is a cache, not
+        an override: pass a DIFFERENT row and you get a different file, which is why only
+        the two callers holding this exact mid's row use it."""
+        import moonglade_backup as core
+        # core._VIDEO_EXTS, not a hand-written tuple: the local copy was missing .m4v, which
+        # core.run_import_local DOES copy in and catalog as is_video='1' (its media_exts is
+        # _IMAGE_EXTS | _VIDEO_EXTS). Harmless while the only callers were Loom handoff/
+        # duration -- a .m4v is never a generated shot -- but the detail page's existence
+        # check below runs over a whole catalog, so the short list would have reported a
+        # perfectly present imported clip as missing from disk.
+        vid_exts = core._VIDEO_EXTS
+        row = (row if row is not None else get_row(db_path, mid)) or {}
         fn = row.get("filename") or ""
         if fn:
             cand = out_dir / fn
-            if cand.is_file() and cand.suffix.lower() in vid_exts:
+            # The catalog's `filename` is joined onto out_dir, so a row carrying a traversing
+            # path resolves outside the library. /video-file already refuses that (relative_to
+            # + send_from_directory's own safe_join), which is exactly why this branch has to
+            # agree: without the check THIS resolver says "present" for a file the serving
+            # route will 404, and the detail page draws a player over it and says nothing --
+            # M30's own symptom, reached by a different road. `.resolve()` is the load-bearing
+            # part: relative_to alone does not normalise, so `..` walks straight through it.
+            if (_is_under(cand.resolve(), Path(out_dir).resolve())
+                    and cand.is_file() and cand.suffix.lower() in vid_exts):
                 return cand
         fallback = find_files_for_media_id(out_dir, mid, exts=vid_exts)
         return fallback[0] if fallback else None
@@ -15051,10 +15396,28 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         Each segment's real audio rides along when the clip has one (ffprobe-detected);
         segments with no audio stream (e.g. rendered without the "Generate audio" toggle)
         get matching-duration silence synthesized (anullsrc) so the concatenated audio
-        track never desyncs across a segment boundary. body: {clips:[{mid,in,out}], total_seconds}"""
+        track never desyncs across a segment boundary. "Matching" is load-bearing, not
+        best-effort: a span is only ever a trim's own out point or a real ffprobe
+        measurement, never a guess. When neither exists the export does NOT quietly pad --
+        it either drops the audio track entirely (when there was no real audio anywhere, so
+        nothing is lost) or refuses and names the shot (when real audio would be thrown out
+        of sync by it). See the span pre-pass below. body: {clips:[{mid,in,out}], total_seconds}"""
         import shutil
         if not shutil.which("ffmpeg"):
             return jsonify({"error": "ffmpeg is not on PATH -- install it to export."}), 400
+        # ffprobe deliberately is NOT gated here alongside ffmpeg. It usually ships in the
+        # same package, and probe_has_audio()/probe_duration() both fail soft when it is
+        # absent -- which means on a machine with ffmpeg but no ffprobe EVERY clip reads as
+        # silent and no duration is readable, i.e. the common untrimmed shot would trip an
+        # up-front gate and the owner would get no export at all. That machine used to get a
+        # file (badly desynced, but a file), and taking the file away is a hard change to a
+        # documented feature over a dependency the wiki does not ask for. So a missing
+        # ffprobe DEGRADES here (see the span pre-pass: no measurable spans and no real
+        # audio anywhere -> the cut is muxed without an audio track, which is the same thing
+        # you would have heard, since every segment's audio was going to be synthesized
+        # silence). A refusal is kept for the one case where continuing is definitively
+        # corrupt: some shot HAS real audio and another cannot be measured, where a guessed
+        # span shifts that real audio permanently out of sync.
         with _export_lock:
             if _export_job["status"] == "running":
                 return jsonify({"error": "an export is already running"}), 409
@@ -15099,57 +15462,147 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                         crop = (cx, cy, cw, ch)
                 except (TypeError, ValueError):
                     crop = None
-            segs.append((path, ci, co, probe_has_audio(path), crop))
+            # mid rides along purely so a per-segment failure below can name the shot the
+            # owner has to go fix -- the on-disk path is a host path we don't hand back.
+            segs.append((path, ci, co, probe_has_audio(path), crop, mid))
         if not segs:
             return jsonify({"error": "no finished shot videos found on disk to export"}), 400
         _export_dir.mkdir(parents=True, exist_ok=True)
         out_path = _export_dir / "loom_cut.mp4"
         W, H = 1280, 720
         parts, labels = [], ""
+        # --- silence spans, resolved BEFORE a single filter string is built ----------
         # A silent segment needs an explicit numeric span to synthesize (anullsrc has no
-        # natural end); reuse the trim's own end if given, else probe the real file once.
-        need_silence = any(not ha for (_p, _ci, _co, ha, _cr) in segs)
+        # natural end), and the number has to be RIGHT: concat lays each segment's audio
+        # end-to-end, so silence shorter than its own video does not merely mute that shot's
+        # tail -- every LATER segment's audio starts early and stays early for the rest of
+        # loom_cut.mp4. Until 2026-07-27 an unreadable duration silently became
+        # `max(0.1, (ci + 0.1) - ci)` == 0.1s, which manufactured exactly the desync this
+        # whole path exists to prevent, in an export that reports "done" and looks finished
+        # until you watch past the first shot.
+        #
+        # Doing the whole pass up front, instead of deciding shot-by-shot mid-assembly, is
+        # what makes the fallback answerable: "can this export have a correct audio track at
+        # all" is a question about the WHOLE clip list, and it has two very different
+        # answers depending on whether any real audio is in play.
+        spans = {}           # segment index -> silence span (silent segments only)
+        unmeasurable = []    # media_ids of silent, untrimmed shots with no readable length
+        for i, (path, ci, co, has_audio, crop, mid) in enumerate(segs):
+            if has_audio:
+                continue
+            if co is not None:
+                spans[i] = co - ci          # the trim's own end: exact, no probe needed
+                continue
+            dur = probe_duration(path)
+            if dur is None:
+                unmeasurable.append(mid)
+                continue
+            # Floor kept for the degenerate case a real measurement can still produce: a
+            # trim-in at or past the clip's end leaves nothing, and atrim=duration=0 is not
+            # a valid filter argument. This one IS a fudge, and a knowingly small one -- the
+            # video side of such a segment is empty too, so the mismatch it can introduce is
+            # bounded by 0.1s on a shot the owner has already trimmed into oblivion.
+            spans[i] = max(0.1, dur - ci)
+        have_real_audio = any(ha for (_p, _ci, _co, ha, _cr, _m) in segs)
+        audio_track = True
+        export_warning = ""      # set only when the cut comes out different from what was asked
+        if unmeasurable and have_real_audio:
+            # Some shot carries real recorded audio and another cannot be measured. Padding
+            # the unmeasurable one with a guess would push that real audio permanently out
+            # of sync, and dropping the track would throw the owner's actual audio away.
+            # Both outcomes are worse than not producing a file, so this is the one refusal
+            # left -- and since real audio was detected, ffprobe is demonstrably working,
+            # which makes the named file itself the suspect.
+            return jsonify({"error":
+                "Shot %s has no audio track and no out point, so the export needs its real "
+                "length to keep the shots that DO have audio in sync -- but ffprobe could "
+                "not read its duration (the file may be truncated or still downloading). "
+                "Set that shot's out point, or fix the file, then export again."
+                % unmeasurable[0]}), 400
+        if unmeasurable:
+            # No real audio anywhere, so the entire audio track was going to be synthesized
+            # silence. Mux without one instead of inventing lengths: the cut sounds exactly
+            # the same, nothing can drift, and the owner gets the deliverable. This is the
+            # ffmpeg-without-ffprobe machine's normal path -- probe_has_audio() answers
+            # False for every clip there, so `have_real_audio` cannot be true.
+            audio_track = False
+            # Say it on the OWNER'S screen, not only in the log. A missing ffprobe is a
+            # prerequisite problem with a one-line cure, and the person who can fix it is the
+            # one staring at the export dialog -- handing them a quietly silent cut and filing
+            # the reason in a log file they have no reason to open is how this stays a mystery.
+            export_warning = (
+                "Exported with no audio track. %d shot(s) (%s) have no audio, no out point, "
+                "and their real length could not be measured, so there was nothing to keep in "
+                "sync against.%s"
+                % (len(unmeasurable), ", ".join(unmeasurable[:5]),
+                   " ffprobe is not installed -- it ships with the full ffmpeg build, and "
+                   "installing it restores measured lengths and audio."
+                   if not shutil.which("ffprobe") else ""))
+            try:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "loom export: %d shot(s) (%s) have no audio stream, no out point and no "
+                    "readable duration%s -- exporting with no audio track rather than "
+                    "padding with a guessed length.",
+                    len(unmeasurable), ", ".join(unmeasurable[:5]),
+                    " (ffprobe is not on PATH; it ships with the full ffmpeg build)"
+                    if not shutil.which("ffprobe") else "")
+            except Exception:
+                pass
+        need_silence = audio_track and any(not ha for (_p, _ci, _co, ha, _cr, _m) in segs)
         silence_idx = len(segs)   # the synthetic-silence input, appended after all real -i's
-        for i, (path, ci, co, has_audio, crop) in enumerate(segs):
+        for i, (path, ci, co, has_audio, crop, _mid) in enumerate(segs):
             tr = "trim=start=%.3f" % ci + ((":end=%.3f" % co) if co is not None else "")
             # A per-shot crop happens in SOURCE pixels (iw/ih), before the scale-to-canvas, so
             # the kept region fills the 1280x720 frame. No crop -> the chain is unchanged.
             crop_f = ("crop=iw*%.4f:ih*%.4f:iw*%.4f:ih*%.4f," % (crop[2], crop[3], crop[0], crop[1])) if crop else ""
             parts.append("[%d:v]%s,setpts=PTS-STARTPTS,%sscale=%d:%d:force_original_aspect_ratio=decrease,"
                          "pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24[v%d]" % (i, tr, crop_f, W, H, W, H, i))
-            if has_audio:
+            if audio_track and has_audio:
                 atr = "atrim=start=%.3f" % ci + ((":end=%.3f" % co) if co is not None else "")
                 parts.append("[%d:a]%s,asetpts=PTS-STARTPTS[a%d]" % (i, atr, i))
-            else:
-                span = (co - ci) if co is not None else max(0.1, (probe_duration(path) or ci + 0.1) - ci)
+            elif audio_track:
                 # [silence_idx:a] is a raw decoder-input reference (the lavfi anullsrc), not a
                 # named filter output -- ffmpeg allows referencing it multiple times (once per
                 # silent segment) without an explicit asplit.
-                parts.append("[%d:a]atrim=duration=%.3f,asetpts=PTS-STARTPTS[a%d]" % (silence_idx, span, i))
+                parts.append("[%d:a]atrim=duration=%.3f,asetpts=PTS-STARTPTS[a%d]"
+                             % (silence_idx, spans[i], i))
             # concat's input pads are PER-SEGMENT interleaved (v0,a0,v1,a1,...), never grouped
             # by stream type (v0,v1,...,a0,a1,...) -- ffmpeg errors "media type mismatch" if
             # the pad order doesn't match n*(v+a) in that exact per-segment sequence.
-            labels += "[v%d][a%d]" % (i, i)
-        fc = ";".join(parts) + ";" + labels + "concat=n=%d:v=1:a=1[vout][aout]" % len(segs)
+            labels += ("[v%d][a%d]" % (i, i)) if audio_track else ("[v%d]" % i)
+        fc = ";".join(parts) + ";" + labels + (
+            "concat=n=%d:v=1:a=1[vout][aout]" if audio_track else "concat=n=%d:v=1:a=0[vout]"
+        ) % len(segs)
         cmd = ["ffmpeg", "-y"]
-        for (path, _ci, _co, _ha, _cr) in segs:
+        for (path, _ci, _co, _ha, _cr, _m) in segs:
             cmd += ["-i", path]
         if need_silence:
             cmd += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
-        cmd += ["-filter_complex", fc, "-map", "[vout]", "-map", "[aout]", "-c:v", "libx264",
-                "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", "192k", str(out_path)]
+        cmd += ["-filter_complex", fc, "-map", "[vout]"]
+        if audio_track:
+            cmd += ["-map", "[aout]"]
+        cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"]
+        if audio_track:
+            cmd += ["-c:a", "aac", "-b:a", "192k"]
+        cmd += [str(out_path)]
         with _export_lock:
             _export_job.update(status="running", progress=0, elapsed=0.0, out="",
-                               error="", proc=None, cancelled=False)
+                               error="", warning=export_warning, proc=None, cancelled=False)
         threading.Thread(target=_run_export, args=(cmd, out_path, total_sec), daemon=True).start()
-        return jsonify({"ok": True, "shots": len(segs)})
+        # `audio` is a fact about the file that is about to be written, returned so a caller
+        # can tell the owner the cut came out silent-by-necessity. NOT a claim that anything
+        # renders it today: the Loom's export dialog reads `error` on the POST and then polls
+        # export-status, so as of this change the durable record of a dropped track is the
+        # server log warning above. Stated plainly rather than dressed up, because a comment
+        # promising a notice that no client draws is how this file rots.
+        return jsonify({"ok": True, "shots": len(segs), "audio": audio_track})
 
     @app.route("/api/loom/export-status")
     def api_loom_export_status():
         with _export_lock:
             return jsonify({k: _export_job[k] for k in
-                            ("status", "progress", "elapsed", "out", "error")})
+                            ("status", "progress", "elapsed", "out", "error", "warning")})
 
     @app.route("/api/loom/export-file")
     def api_loom_export_file():
@@ -15181,25 +15634,54 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     # have it); one that isn't gets copied into imported/ and cataloged fresh. That also
     # makes re-importing the same bundle twice a no-op the second time.
     _BUNDLE_VIDEO_EXTS = {".mp4", ".webm", ".mov", ".mkv", ".m4v"}  # mirrors backup.py's
-    # _VIDEO_EXTS; not imported directly -- moonglade_gallery.py is the lower module in the
-    # three-file layering (backup.py imports this file, never the reverse).
+    # _VIDEO_EXTS. It cannot be a MODULE-LEVEL import -- backup.py imports this file, so the
+    # reverse at import time is a cycle -- but a function-body `import moonglade_backup as
+    # core` inside create_app is fine and is what the rest of this file does (the delete
+    # paths, _find_local_video_file). An earlier version of this comment said the constant
+    # was "not imported directly" as if the layering forbade it outright; it doesn't, and
+    # _find_local_video_file now reads core._VIDEO_EXTS exactly that way. This one stays a
+    # literal only because it is bound while create_app is still building its namespace;
+    # if the two lists ever drift, do the lazy import here too rather than re-typing them.
 
     def _loom_collect_media_ids(project):
         """Every real (catalog) media_id a project references -- resultMid, both frame
-        slots, and every cast/asset entry. thumbId references are NOT collected: they're
-        client-only (base64 in `thumbs`) and already travel inside project.json as-is."""
-        ids = set()
-        for act in (project.get("acts") or []):
-            for c in (act.get("cards") or []):
+        slots, and every cast/asset entry -- mapped to WHERE each one was referenced from.
+        thumbId references are NOT collected: they're client-only (base64 in `thumbs`) and
+        already travel inside project.json as-is.
+
+        Returns an insertion-ordered {media_id: [label, ...]} dict rather than the bare set
+        this used to return, for two reasons. The labels are the whole difference between a
+        useful missing-media report and the one export-bundle used to produce: "2 files are
+        missing" with no way to tell which shot they belonged to left the owner hand-diffing
+        every reference in the project against the zip's media/ folder. And insertion order
+        makes the zip's media/ entries -- and the missing list -- come out identical twice
+        for the same project, instead of following whatever order set hashing happened to
+        pick that run. Callers that only want the ids still just iterate the dict.
+
+        The labels mirror the Loom's own `A·01` shot codes (loom-core.js's actLetter +
+        1-based card number) on purpose: a code in this report has to be one the owner can
+        find on screen without translating it."""
+        ids = {}
+
+        def _note(mid, where):
+            ids.setdefault(str(mid), []).append(where)
+
+        for ai, act in enumerate(project.get("acts") or []):
+            letter = chr(65 + ai) if ai < 26 else "A%d" % ai   # matches actLetter()'s wrap
+            for ci, c in enumerate(act.get("cards") or []):
+                code = "%s·%02d" % (letter, ci + 1)
+                title = (c.get("title") or "").strip()
+                code = "%s %s" % (code, title) if title else code
                 if c.get("resultMid"):
-                    ids.add(str(c["resultMid"]))
+                    _note(c["resultMid"], "%s (shot result)" % code)
                 for slot in ("openFrame", "closeFrame"):
                     f = c.get(slot) or {}
                     if f.get("mediaId"):
-                        ids.add(str(f["mediaId"]))
+                        _note(f["mediaId"], "%s (%s)" % (code, slot))
         for a in (project.get("assets") or []):
             if a.get("mediaId"):
-                ids.add(str(a["mediaId"]))
+                who = (a.get("name") or a.get("tag") or a.get("id") or "?")
+                _note(a["mediaId"], "cast/asset %s" % who)
         return ids
 
     def _loom_resolve_media(mid):
@@ -15218,11 +15700,41 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 return p
         return None
 
+    # Cap on the X-Bundle-Missing value. Nothing in HTTP bounds a header value, but every
+    # mainstream server and proxy caps the header BLOCK (nginx/Apache land around 8 KB, and
+    # the limit is on the whole block, not this one line), so a header that grows with the
+    # project is how you get a bundle that downloads fine on the machine that built it and
+    # is rejected by a proxy on the next one. ~900 bytes fits a few dozen ids with the rest
+    # of the response's headers left comfortable.
+    _BUNDLE_MISSING_HEADER_MAX = 900
+
+    def _bundle_missing_header(missing):
+        """The X-Bundle-Missing value: comma-separated, ASCII-only, length-capped media_ids.
+
+        Filtered rather than trusted, because every id here came out of client-supplied
+        project JSON: a value carrying CR/LF is header injection, and a non-latin-1 one makes
+        Werkzeug raise while serialising the response -- turning a successful export into a
+        500 for the owner. Ids that survive the filter but overflow the cap collapse into a
+        trailing "+N more"; the complete list, with the act/shot each id came from, is in the
+        zip's project.json regardless, which is why truncating here costs nothing."""
+        safe = [s for s in (re.sub(r"[^A-Za-z0-9._-]", "", str(m["media_id"]))[:64]
+                            for m in missing) if s]
+        out, used = [], 0
+        for i, mid in enumerate(safe):
+            if used + len(mid) + 1 > _BUNDLE_MISSING_HEADER_MAX:
+                out.append("+%d more" % (len(safe) - i))
+                break
+            out.append(mid)
+            used += len(mid) + 1
+        return ",".join(out)
+
     @app.route("/api/loom/export-bundle", methods=["POST"])
     def api_loom_export_bundle():
-        """Full-bundle export: a zip of project.json (identical shape to the lightweight
-        Backup .json) plus every referenced media file under media/<id><ext>. Login required
-        -- reads real files off disk, same trust level as /export-zip."""
+        """Full-bundle export: a zip of project.json (the lightweight Backup .json's
+        {project, thumbs}, plus a `missing_media` manifest this tier alone can produce
+        because only the server knows what's on disk) and every referenced media file under
+        media/<id><ext>. Login required -- reads real files off disk, same trust level as
+        /export-zip."""
         import io
         import zipfile
         body = request.get_json(silent=True) or {}
@@ -15231,22 +15743,45 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if not project:
             return jsonify({"error": "no project given"}), 400
         mids = _loom_collect_media_ids(project)
+        # Resolve everything BEFORE opening the archive so project.json can carry the missing
+        # manifest and still be written first (a reader streaming the zip gets the project,
+        # and the report about it, before megabytes of media).
+        resolved, missing = [], []
+        for mid in mids:
+            p = _loom_resolve_media(mid)
+            if p:
+                resolved.append((mid, p))
+            else:
+                missing.append({"media_id": mid, "referenced_by": mids[mid]})
         mem = io.BytesIO()
-        missing = []
         with zipfile.ZipFile(mem, "w", zipfile.ZIP_STORED) as z:
-            z.writestr("project.json", json.dumps({"project": project, "thumbs": thumbs}))
-            for mid in mids:
-                p = _loom_resolve_media(mid)
-                if not p:
-                    missing.append(mid)
-                    continue
+            z.writestr("project.json", json.dumps({"project": project, "thumbs": thumbs,
+                                                   "missing_media": missing}))
+            for mid, p in resolved:
                 z.write(p, arcname="media/{}{}".format(mid, p.suffix.lower()))
         mem.seek(0)
         name = "{}_bundle.zip".format((project.get("name") or "loom_project").replace(" ", "_"))
         resp = send_file(mem, mimetype="application/zip", as_attachment=True, download_name=name)
-        # Missing media doesn't fail the export (a partial bundle is still useful) -- the
-        # client surfaces this list so the owner knows what didn't travel.
+        # Missing media doesn't fail the export (a partial bundle is still useful), so the
+        # report has to reach the owner some other way. It goes to two places on purpose:
+        #
+        #   project.json's `missing_media` is the durable copy -- id plus the act/shot code
+        #   each id was referenced from. It is IN the zip, so it survives the download, it
+        #   travels to whoever the bundle is handed to, and it does not depend on a client
+        #   noticing a response header at the moment of export. import-bundle ignores the key
+        #   (it reads `project`/`thumbs`), so adding it costs the round trip nothing.
+        #
+        #   X-Bundle-Missing is the live copy, so the client can NAME what didn't travel
+        #   instead of only counting it. This route shipped with the count alone under a
+        #   comment claiming "the client surfaces this list" -- it could not; `missing` was
+        #   discarded the moment len() was taken, and the owner was told "2 files are missing"
+        #   with nowhere to look them up. X-Bundle-Missing-Count stays for the client that
+        #   already reads it, and stays authoritative: it is the true total, while the header
+        #   list may be truncated (see _bundle_missing_header).
         resp.headers["X-Bundle-Missing-Count"] = str(len(missing))
+        hdr = _bundle_missing_header(missing)
+        if hdr:
+            resp.headers["X-Bundle-Missing"] = hdr
         return resp
 
     @app.route("/api/loom/import-bundle", methods=["POST"])

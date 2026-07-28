@@ -44,6 +44,27 @@ it for free with `--task-id <id>` instead of paying again.
 Behind antivirus or a corporate proxy: `pip install truststore` (Python 3.10+). The
 tool uses it automatically when present.
 
+## Every image says "no url for media …"
+
+If that line appears once, PixAI genuinely doesn't have that image any more. If it appears
+for *everything*, it's almost certainly not PixAI — it's the same HTTPS interception above,
+hitting the media CDN rather than the API. That case now prints the truststore guidance
+once per run, above the flood of per-image lines, ending with:
+
+> Every image resolve will fail the same way until this is fixed — this is a local trust
+> problem, NOT PixAI missing your images. (Said once per process; every individual failure
+> is in the log.)
+
+It's said once rather than 17,000 times for the obvious reason; each individual failure is
+still recorded in the rotating log at `pixai_backup/logs/moonglade.log`, whether or not you
+ran with `-v`. The cure is the one above: `pip install truststore`, then re-run.
+
+Two details worth knowing. The API host and the media CDN are different hosts, so one can be
+trusted while the other isn't — which is why this used to look like a PixAI problem instead
+of a local one. And "once per run" is literally once per *process*: on the long-lived gallery
+server the paragraph appears on the console the first time and not again, so read the log
+there rather than waiting for it to repeat.
+
 ## The gallery shows old behavior after I updated
 After `git pull`, **restart the gallery server** so it loads the new code — Stop/Restart
 from the browser, or relaunch **`Serve Gallery.pyw`**. Then **hard-refresh the browser

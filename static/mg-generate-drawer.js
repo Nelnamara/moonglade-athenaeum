@@ -104,6 +104,9 @@
     'mg-generate-drawer .mgd-seg{display:flex;gap:6px;margin-bottom:10px;}',
     'mg-generate-drawer .mgd-seg button{flex:1;padding:6px 0;font-size:12px;border-radius:6px;background:var(--surface0,#211f3a);color:var(--subtext,#9a93ab);border:1px solid var(--surface1,#3a3460);cursor:pointer;}',
     'mg-generate-drawer .mgd-seg button.on{background:var(--lavender,#b692e6);color:var(--base,#0c0a1c);border-color:var(--lavender,#b692e6);font-weight:600;}',
+    // The mode-switch hold notice (see _noteR2vHeld). Amber, not red: nothing has failed
+    // and nothing is lost -- it is telling the user where their Multi-Reference picks went.
+    'mg-generate-drawer .mgd-modenote{margin:-4px 0 10px;font-size:11.5px;line-height:1.4;color:var(--amber,#f9d38c);}',
     'mg-generate-drawer .mgd-lbl{color:var(--overlay0,#6a6088);font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px;}',
     'mg-generate-drawer .mgd-lbl:first-child{margin-top:0;}',
     'mg-generate-drawer .mgd-note{text-transform:none;letter-spacing:0;color:var(--overlay0,#6a6088);}',
@@ -268,6 +271,13 @@
     return DURATIONS.reduce(function (best, v) { return Math.abs(v - d) < Math.abs(best - d) ? v : best; });
   }
 
+  // "a" / "a and b" / "a, b and c" -- the mode-switch notice (_noteR2vHeld) lists up to
+  // three kinds of reference and has to read like a sentence, not like a debug dump.
+  function joinAnd(parts) {
+    if (parts.length < 2) return parts[0] || '';
+    return parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1];
+  }
+
   var CHANNEL_CAP = {
     normal: 'Please keep creations SFW',
     enhanced: '👑 Enhanced — for professional creators'
@@ -285,6 +295,7 @@
       '<button type="button" data-vmode="flf">First &amp; Last Frames</button>' +
       '<button type="button" data-vmode="r2v">Multi-Reference</button>' +
     '</div>' +
+    '<div class="mgd-modenote" style="display:none;"></div>' +
     '<div class="mgd-lbl mgd-slots-lbl">Start Frame</div>' +
     '<div class="mgd-slots mgd-imgslots"></div>' +
     '<div class="mgd-lbl mgd-endlbl" style="display:none;">End Frame <span class="mgd-note">(Optional)</span></div>' +
@@ -413,6 +424,7 @@
         console.error('<mg-generate-drawer>: /static/mg-cost-badge.js is not loaded — the cost line will not render. Load it before this file.');
       }
       this.innerHTML = MARKUP;
+      this._modeNote = this.querySelector('.mgd-modenote');
       this._slotsLbl = this.querySelector('.mgd-slots-lbl');
       this._slotsWrap = this.querySelector('.mgd-imgslots');
       this._endLbl = this.querySelector('.mgd-endlbl');
@@ -451,7 +463,9 @@
       });
       this._ce.addEventListener('blur', function () { self._chipify(true); self._emitCommitIfDirty(); });
       this._neg.addEventListener('input', function () { self._debCost(); });
-      this._model.addEventListener('change', function () { self._renderModelCaps(); self._applyModelGating(); self._debCost(); });
+      // `true` = a real user gesture, the one thing that entitles a forced mode switch to
+      // raise the "still held for Multi-Reference" notice (see _setMode/_noteR2vHeld).
+      this._model.addEventListener('change', function () { self._renderModelCaps(); self._applyModelGating(true); self._debCost(); });
       this._dur.addEventListener('change', function () {
         self._debCost();
         // Fired only from a real user change on this <select> -- prefill() sets
@@ -489,7 +503,15 @@
     _primary() { return this._mode === 'r2v' ? this._imgSlots : this._slots; }
     _setPrimary(arr) { if (this._mode === 'r2v') this._imgSlots = arr; else this._slots = arr; }
 
-    _setMode(m) {
+    // `userDriven` is true ONLY when a human gesture caused this switch: a click on a
+    // mode-segment button (_userSetMode) or a Model-dropdown change that forced the mode off
+    // an unsupported one (_applyModelGating(true)). prefill(), setRefs() and connectedCallback
+    // pass nothing, and that is load-bearing rather than cosmetic -- see _noteR2vHeld for the
+    // paid-payload bug that appears the moment this path stops being able to tell "the user
+    // changed their mind" from "the host is re-syncing this drawer onto a DIFFERENT shot".
+    // Same split, same reason, as _setMode vs _userSetMode's dispatch rule below.
+    _setMode(m, userDriven) {
+      var from = this._mode;
       this._mode = m;
       var self = this;
       this.querySelectorAll('.mgd-seg button').forEach(function (b) {
@@ -498,6 +520,10 @@
       if (m === 'i2v') this._slots = [this._slots[0] || null];
       else if (m === 'flf') this._slots = [this._slots[0] || null, this._slots[1] || null];
       else if (!this._imgSlots.length) this._imgSlots = [null];
+      // Any notice left over from an earlier switch describes a bank layout that is no
+      // longer on screen -- clear it first, then let this switch speak for itself.
+      this._noteMode('');
+      if (userDriven && from === 'r2v' && m !== 'r2v') this._noteR2vHeld(m);
       this._slotsLbl.textContent = MODE_LBL[m];
       this._ce.setAttribute('data-placeholder', MODE_PH[m]);
       this._camWrap.style.visibility = (m === 'r2v') ? 'hidden' : 'visible';
@@ -510,6 +536,60 @@
       if (showR2v) { this._renderVidSlots(); this._renderAudioRow(); }
     }
 
+    // The user has just walked out of Multi-Reference. NAME what the incoming mode cannot
+    // use, so the picks don't merely blink out of the drawer -- and write nothing.
+    //
+    // The bug this closes (M27): r2v holds its picks in the separate _imgSlots/_vidSlots/
+    // _audSlot banks while i2v/flf use _slots, so _setMode's `this._slots = [this._slots[0]
+    // || null]` above repaints the Start Frame off an array nothing wrote to for the whole
+    // time the user was in r2v. Four picked image refs, a video ref and an audio ref
+    // disappear from the drawer at once -- worst on the path that switches WITHOUT being
+    // asked, since _applyModelGating() forces the mode off r2v for any model whose
+    // MODEL_VMODES lacks it (V3.0 Flash, V2.7, ...), so merely changing the Model dropdown
+    // emptied the slots with no confirmation, no message and no mg-error.
+    //
+    // NOTHING IS ACTUALLY DESTROYED, and that is why the answer is a notice and not a
+    // copy. _setMode never touches _imgSlots/_vidSlots/_audSlot on the way out, so every
+    // pick is still in its bank and returning to Multi-Reference renders all of them again;
+    // what the user lost was the KNOWLEDGE of that, not the data. The first attempt at this
+    // (2026-07-27, reverted the same day) auto-promoted _imgSlots[0] into the Start Frame,
+    // which is a materially worse trade on this surface:
+    //   * the Start Frame is the PRIMARY input of an expensive paid video render. Filling it
+    //     from a bank the user picked for a different purpose (style/subject influence)
+    //     re-prices the drawer and arms Go, one click from spending, off a switch the user
+    //     never asked for -- announced only in an 11.5px note.
+    //   * only EMPTY target slots were filled, and the copy aliased the same object into two
+    //     banks, so r2v -> i2v -> r2v -> delete @image1 -> i2v left the deleted image still
+    //     sitting in _slots[0], still priced, still submitted.
+    //   * and there is no honest way to guess WHICH of up to six references the user meant
+    //     as the first frame. An empty slot the user fills in one click is the correct
+    //     amount of opinion for this drawer to have.
+    // Two wording constraints, both from claims the first attempt got wrong. It must not
+    // promise a return trip the drawer cannot always offer -- gating hides the Multi-Reference
+    // button outright on an i2v-only model, so getting back means picking a model that offers
+    // it first. And it must describe STATE ("nowhere to show that"), never capability: with an
+    // empty Start Frame an image ref could perfectly well have gone there, so "only applies in
+    // Multi-Reference" was simply false, and the user is the one who decides.
+    _noteR2vHeld(m) {
+      var imgs = this._imgSlots.filter(function (s) { return s && s.media_id; }).length;
+      var vids = this._vidSlots.filter(function (s) { return s && s.media_id; }).length;
+      var held = [];
+      if (imgs) held.push(imgs + (imgs === 1 ? ' image ref' : ' image refs'));
+      if (vids) held.push(vids + (vids === 1 ? ' video ref' : ' video refs'));
+      if (this._audSlot && this._audSlot.media_id) held.push('the audio ref');
+      if (!held.length) return;      // Multi-Reference was empty -- nothing happened, say nothing
+      this._noteMode('Still held for Multi-Reference: ' + joinAnd(held) + '. Nothing was deleted — '
+        + (m === 'flf' ? 'First & Last Frames' : 'First Frame') + ' has nowhere to show that. Switch '
+        + 'back to Multi-Reference, on a model that offers it, and it is all still there.');
+    }
+
+    // One place sets and clears the mode-switch notice, so it can never be left on screen
+    // describing a bank layout from two switches ago.
+    _noteMode(msg) {
+      this._modeNote.textContent = msg || '';
+      this._modeNote.style.display = msg ? '' : 'none';
+    }
+
     // Called ONLY from a direct user click on a mode-segment button (First Frame/First &
     // Last Frames/Multi-Reference). Applies the mode locally via _setMode AND tells the host
     // a real, user-initiated mode choice happened -- distinct from _setMode() itself, which
@@ -518,19 +598,28 @@
     // bulk "Send to Video" load) -- none of those represent the user asking for a mode, and
     // none of them may dispatch, or a click -> event -> host update -> prefill() -> _setMode()
     // -> re-dispatch loop results. Mirrors the mg-prompt-commit / _emitCommitIfDirty split.
+    // Not to be confused with _setMode's separate `userDriven` argument: that one asks the
+    // narrower question "was a human at the keyboard for this switch" (true for a model change
+    // too, which _applyModelGating turns into a forced mode switch) and gates only the
+    // _noteR2vHeld message. This one asks "did the user CHOOSE this mode", which a model
+    // change did not, and gates the event. A dispatch here would still be a sync loop.
     _userSetMode(m) {
-      this._setMode(m);
+      this._setMode(m, true);
       this.dispatchEvent(new CustomEvent('mg-mode-commit', { bubbles: true, composed: true, detail: { vmode: m } }));
     }
 
     // Shows/hides the mode buttons a selected model doesn't actually support (MODEL_VMODES)
     // and switches off an now-invalid current mode. Called on model change and prefill.
-    _applyModelGating() {
+    // `userDriven` is passed straight through to _setMode and is TRUE only for the Model
+    // <select>'s own change listener: prefill()'s closing call and connectedCallback's mount
+    // call re-assert gating for content the drawer was HANDED, and must not narrate it as a
+    // choice the user made about the previous shot's references.
+    _applyModelGating(userDriven) {
       var allowed = MODEL_VMODES[this._model.value] || ['i2v', 'flf', 'r2v'];
       this.querySelectorAll('.mgd-seg button').forEach(function (b) {
         b.style.display = allowed.indexOf(b.getAttribute('data-vmode')) === -1 ? 'none' : '';
       });
-      if (allowed.indexOf(this._mode) === -1) this._setMode(allowed[0]);
+      if (allowed.indexOf(this._mode) === -1) this._setMode(allowed[0], userDriven);
 
       // Duration options past this model's cap are disabled AND hidden -- hiding alone is
       // not enough, a hidden <option> stays keyboard-selectable and still submits. Setting
@@ -850,6 +939,23 @@
 
     _hasAnyRef(p) { return !!(p.images.length || p.video_refs.length || p.audio_refs.length); }
 
+    // First & Last with an End Frame but NO Start Frame is not a smaller FLF -- it is a
+    // DIFFERENT generation. payload() filters empty slots, so this state ships
+    // mode:FLF images:[end]; the server's shot builder needs two images for the
+    // start+tailMediaId shape and a one-image list falls through to the reference-video
+    // build, where the picture the owner placed in the "End Frame" box becomes a plain
+    // style/subject reference and nothing ends on it. The state became REACHABLE when the
+    // host's flf prefill went positional (round 3 of the closing-frame fix: an end frame
+    // picked first now lands in the End slot instead of being mis-mapped into Start), so
+    // the submit needs the guard the mis-map used to make unnecessary. One predicate for
+    // Go AND the cost badge -- pricing what Go would refuse (or vice versa) is exactly the
+    // split that let C09 charge for a disabled upscale.
+    _flfMissingStart() {
+      return this._mode === 'flf'
+        && !(this._slots[0] && this._slots[0].media_id)
+        && !!(this._slots[1] && this._slots[1].media_id);
+    }
+
     _audioToggle() {
       this._langWrap.style.display = this._audio.checked ? '' : 'none';
       this._debCost();
@@ -892,6 +998,11 @@
       // `hint` attribute instead of written straight into textContent.
       cost.setAttribute('hint', (this._mode === 'r2v') ? 'Pick at least one reference to see the cost.' : 'Pick a source image to see the cost.');
       if (!this._hasAnyRef(p)) { cost.removeAttribute('warn'); cost.clear(); return; }
+      // Same predicate as _generate()'s refusal: never price a submit Go would block.
+      if (this._flfMissingStart()) {
+        cost.setAttribute('hint', 'Pick a Start Frame — the End Frame alone can’t drive First & Last.');
+        cost.removeAttribute('warn'); cost.clear(); return;
+      }
       // v4.0 full is ~2.5x Lite (14k/s -> 210k for a 15s clip). Set BEFORE the response lands
       // so the badge's `paid` branch renders the caution inline; the badge deliberately ignores
       // `warn` in every other state, so a free/idle/error render is unaffected by it. The red
@@ -938,6 +1049,12 @@
         var warn = this._newResultLine();
         warn.innerHTML = '<span style="color:var(--red,#f38ba8);font-size:12px;">' +
           (this._mode === 'r2v' ? 'Pick at least one reference first.' : 'Pick a source image first.') + '</span>';
+        return;
+      }
+      if (this._flfMissingStart()) {
+        var warn2 = this._newResultLine();
+        warn2.innerHTML = '<span style="color:var(--red,#f38ba8);font-size:12px;">' +
+          'Pick a Start Frame first — the End Frame alone can’t drive First &amp; Last.</span>';
         return;
       }
       var line = this._newResultLine();
@@ -1068,7 +1185,11 @@
       // A prefilled slot can carry a local data-URL (a cast asset never uploaded to PixAI
       // yet) instead of a real media_id -- /thumbs/<id>.jpg would 404 for that, so skip
       // rather than show a broken image.
-      if (!p || !mid || !/^\d+$/.test(mid)) return;
+      // Both catalog id families have a thumbnail at this route: a PixAI id (digits) and
+      // an imported file's `local_<12 hex>`. Kept as a local literal because this file is
+      // a deliberately build-free <script> and cannot import -- loom-core.js's
+      // isCatalogMediaId() is the canonical definition; widen both together.
+      if (!p || !mid || !/^(?:\d+|local_[0-9a-f]{12})$/.test(mid)) return;
       p.innerHTML = '<img src="/thumbs/' + esc(mid) + '.jpg" alt="">';
       p.classList.add('open'); p.setAttribute('aria-hidden', 'false');
       var r = anchor.getBoundingClientRect(), w = 300, gap = 12, x;
@@ -1118,6 +1239,10 @@
     // load-bearing for prefill() below: switching the Loom to a shot/draft with zero refs
     // used to leave the PREVIOUS shot's images sitting in the drawer, unnoticed, ready to
     // submit against the wrong shot's generation. Found 2026-07-18 live-testing.
+    // The last branch below writes _slots[0] and DELIBERATELY leaves flf's End Frame alone:
+    // a bulk-send of one image must not silently destroy an End Frame the user picked by
+    // hand. That makes the whole-bank clear prefill()'s business, not this method's -- see
+    // the imgList block there before "fixing" it here.
     setRefs(refs) {
       if (!Array.isArray(refs)) return;
       refs = refs.slice(0, 6);
@@ -1136,6 +1261,11 @@
     // images/video_refs: [{media_id,thumb}]. audio_ref: {media_id,filename}|null.
     prefill(o) {
       o = o || {};
+      // A notice on screen was raised by a mode switch the user made against the PREVIOUS
+      // shot; this call replaces the shot. _setMode clears it too, but only when o.mode is
+      // present -- a host that re-syncs refs without restating the mode would otherwise leave
+      // a sentence about another shot's references sitting above the new one's slots.
+      this._noteMode('');
       if (o.mode && MODE_LBL[String(o.mode).toLowerCase()]) this._setMode(String(o.mode).toLowerCase());
       if (o.video_model != null) { this._model.value = o.video_model; this._renderModelCaps(); }
       if (o.duration != null) this._dur.value = String(snapDuration(o.duration));
@@ -1144,8 +1274,61 @@
       if (o.audio != null) { this._audio.checked = !!o.audio; this._audioToggle(); }
       if (o.audio_language != null) this._lang.value = o.audio_language;
       if (o.negative != null) this._neg.value = o.negative;
-      if (o.refs) this.setRefs(o.refs);                    // back-compat alias for images
-      if (o.images) this.setRefs(o.images);
+      // An explicit images array is the COMPLETE image list for this shot, so a slot it does
+      // not fill has to be emptied -- and setRefs() alone will not do it. setRefs writes
+      // _slots[0] and nothing else, deliberately: it is also the gallery's partial "Send to
+      // Video" entry, where wiping a hand-picked End Frame would be its own data loss. On the
+      // full-re-sync path that leaves the PREVIOUS flf shot's End Frame in place. Reproduced
+      // 2026-07-27: shot C prefilled [C1,C2], then shot B prefilled with images:[B_open]
+      // (its close frame not picked yet -- a normal intermediate state) gave payload().images
+      // ["B_open","C2"], so the cost badge priced and Generate would have spent credits on a
+      // frame belonging to a different shot. The flf branch below owns that guarantee now:
+      // it writes BOTH _slots positionally from the complete list, so an unfilled End Frame
+      // is nulled and _renderSlots() repaints the emptied box the same as the standalone
+      // `_slots[1] = null` line it replaced.
+      var imgList = Array.isArray(o.images) ? o.images : (Array.isArray(o.refs) ? o.refs : null);
+      if (imgList && this._mode === 'flf' && imgList.length <= 2) {
+        // FLF END-FRAME DELIVERY (2026-07-27). setRefs() is deliberately incapable of
+        // writing _slots[1] -- it is also the gallery's partial "Send to Video" entry,
+        // where wiping a hand-picked End Frame is data loss (its own comment above) -- and
+        // its multi-image branch force-switches to r2v (`refs.length > 1 -> _setMode('r2v')`),
+        // which is right for a gallery bulk-send but WRONG for a host prefill that stated
+        // mode:'flf' two lines up in this very call: a First & Last shot with both frames
+        // attached arrived as images:[open, close], got silently bounced into
+        // Multi-Reference, and the End Frame never landed in the End Frame box at all --
+        // not on first prefill, not on any re-prefill, since every re-sync repeated the
+        // same wrong route. The host cannot fix this on its side: prefill()/setRefs() are
+        // this drawer's whole public surface and NEITHER can place an image into _slots[1],
+        // so this branch is the one place a host-stated flf image list maps onto the two
+        // frame slots POSITIONALLY (images[0] -> Start, images[1] -> End). No _setMode
+        // call, no event: the host said flf, the drawer stays flf -- same no-dispatch
+        // discipline as the _setMode/_userSetMode split. An explicit images array is the
+        // COMPLETE list for its shot (see the comment above), so a slot it does not fill
+        // is emptied -- this subsumes the old `length < 2 -> _slots[1] = null` line, and
+        // med2-mg-generate-drawer-prefill-leak.test.js pins the leak that line closed.
+        // 3+ images while sitting in flf still falls through to setRefs' legacy r2v
+        // routing below: no known host builds that payload (master-storyboard's flf branch
+        // caps at [open, close]), and second-guessing an unknown caller's intent is the
+        // overreach that killed round 1 of this fix.
+        //
+        // NULL ENTRIES ARE POSITIONAL HOLES (2026-07-27, round 3): the host's flf list is
+        // [Start-or-null, End-or-null] -- round 2 had the host FILTER empty frames out
+        // instead, which destroyed position: a shot with only an END frame arrived as a
+        // one-item list and this branch put the intended End Frame in the START box, and
+        // Generate spent real credits rendering FROM it (the money bug of the round-2
+        // review). A null here means "the host says this frame slot is EMPTY" and clears
+        // the slot, exactly like the too-short-list case below it always did.
+        var flfSlots = imgList.map(function (r) {
+          if (!r) return null;
+          var mid = String(r.media_id || r.mid);
+          return { media_id: mid, thumb: r.thumb || ('/thumbs/' + mid + '.jpg') };
+        });
+        this._slots = [flfSlots[0] || null, flfSlots[1] || null];
+        this._renderSlots();
+      } else {
+        if (o.refs) this.setRefs(o.refs);                  // back-compat alias for images
+        if (o.images) this.setRefs(o.images);
+      }
       // Array.isArray (not truthy-length) so an EXPLICIT empty array clears stale video
       // refs from a previous shot, same reasoning as setRefs() above -- a shot with no
       // video refs used to leave the last shot's video slots sitting there unnoticed.
