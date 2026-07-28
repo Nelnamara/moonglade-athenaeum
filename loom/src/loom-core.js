@@ -133,6 +133,40 @@ export const effectivePrompt = (c) => (c.promptOverride ? (c.promptOverrideText 
 // whatever @imageN the composed prompt names for a picture is, by construction, the exact same
 // @imageN the drawer's own Image References panel shows for that same picture.
 //
+// The ONE image-resolution rule every consumer shares: a durable gallery mediaId wins, else
+// whatever the injected imgSrc lookup can make of a local thumbId/source pair. Extracted
+// (2026-07-27, closing-frame pass) because castMissingImages()/castPastBudget() below need
+// to ask "does this entity HAVE a picture" separately from "did it WIN a slot" -- two
+// questions PixAI's 6-slot cap makes genuinely different -- and a second hand-rolled copy
+// of this expression is exactly the silent-drift failure this file's header catalogs.
+export const resolvedImage = (x, resolve) => (x && (x.mediaId || resolve(x.thumbId, x.source))) || null;
+
+// CLOSING-FRAME PARTICIPATION (2026-07-27 -- the FIFTH manifestation of this file's
+// un-synced-@imageN-numbering bug class; the FRAME RESERVATION and REF ORDER comments below
+// are the third and fourth). The closing frame used to join the numbering only for
+// `c.mode === "FLF"`, a leftover from when FLF was the only mode whose generation was
+// thought to consume an end frame. But the server treats R2V and V2V identically at submit
+// (both resolve to the same build_shot_video_params path -- see CHANGELOG; the owner
+// confirms end-frame reference works on V4.0), and R2V's payload is built from
+// buildShotPayload() -> shotImageRefs(), so an R2V shot with both frames attached produced
+// every symptom in the owner's filing at once: the card's Closing Frame read "--"
+// (positionTag() had no item to number), cast counted from @image2 instead of @image3, and
+// the closing frame never reached the generator at all -- silently absent from
+// payload.images on a paid render. The mode list is a named, exported predicate so no other
+// surface ever re-derives it ad hoc and drifts (the two-numbering-systems corruption above
+// started exactly that way). I2V stays out: its generation consumes only the opening frame,
+// and closeFrame's mode-INDEPENDENT roles (continuityLinked(), the "inherit close" handoff)
+// read c.closeFrame directly, never this list.
+//
+// A frame still only enters `items` when it RESOLVES to an image -- no placeholders. Round 1
+// of this fix was refuted in adversarial review for "reserving" @image2 while the closing
+// slot was still EMPTY: that put two entities on screen claiming one @imageN (the empty
+// slot's hold-tag vs a live cast member's tag), this bug class's founding sin re-introduced
+// on purpose. An empty frame claims NOTHING; cast numbers shift up the moment a frame is
+// attached, and that is correct -- do not reintroduce reserved-empty entries here.
+export const CLOSE_FRAME_MODES = ["FLF", "R2V", "V2V"];
+export const usesCloseFrame = (mode) => CLOSE_FRAME_MODES.includes(mode);
+
 // `imgSrc(thumbId, source)` is injected rather than closed-over so this stays pure: in
 // master-storyboard.jsx it resolves against the component's `thumbs` state; here (and in
 // tests) callers pass whatever lookup they like.
@@ -140,7 +174,7 @@ export const shotImageRefs = (entry, project, imgSrc) => {
   const c = entry.c;
   const items = [];
   (project.assets || []).filter((as) => as.kind === "image" && c.cast.includes(as.id))
-    .forEach((as) => { const d = as.mediaId || imgSrc(as.thumbId, as.source); if (d) items.push({ tag: as.tag, d, kind: "cast", id: as.id }); });
+    .forEach((as) => { const d = resolvedImage(as, imgSrc); if (d) items.push({ tag: as.tag, d, kind: "cast", id: as.id }); });
   // Untagged open/close frames need DISTINCT fallback tags -- both defaulting to the
   // same literal meant an FLF shot with two untagged frames silently sent duplicate
   // @image9 tags, and the model only ever saw one of the two images. No code READS those two
@@ -149,10 +183,10 @@ export const shotImageRefs = (entry, project, imgSrc) => {
   // citation the composed prompt emits comes from positionTag()'s live position. pickTarget()
   // counting them as numbers the shot had claimed is what stamped "@image10" on a 3-image
   // shot -- see its own comment.
-  [["@image8", "openFrame", c.openFrame], ["@image9", "closeFrame", c.mode === "FLF" ? c.closeFrame : null]].forEach(([fallbackTag, key, f]) => {
-    if (!f) return; const d = f.mediaId || imgSrc(f.thumbId, f.source); if (d) items.push({ tag: f.tag || fallbackTag, d, kind: "frame", id: key }); });
+  [["@image8", "openFrame", c.openFrame], ["@image9", "closeFrame", usesCloseFrame(c.mode) ? c.closeFrame : null]].forEach(([fallbackTag, key, f]) => {
+    if (!f) return; const d = resolvedImage(f, imgSrc); if (d) items.push({ tag: f.tag || fallbackTag, d, kind: "frame", id: key }); });
   (c.refs || []).filter((r) => r.kind === "image").forEach((r) => {
-    const d = r.mediaId || imgSrc(r.thumbId, r.source); if (d) items.push({ tag: r.tag, d, kind: "ref", id: r.id }); });
+    const d = resolvedImage(r, imgSrc); if (d) items.push({ tag: r.tag, d, kind: "ref", id: r.id }); });
   // FRAME RESERVATION (2026-07-23, "frame/cast @imageN slot collision" -- the THIRD
   // manifestation of this file's un-synced-numbering bug class; follow-up to commit 2e714fd
   // and commit c7aaff2). Opening/Closing Frame now ALWAYS sort ahead of cast/refs, by KIND,
@@ -301,17 +335,64 @@ export const pickVideoTarget = (entry, slot) => {
   return { type: "append", tag: nextTag(allVideoRefs, "@video") };
 };
 
-// Names of cast members this shot lists but has no picture for. shotText() leaves them OUT
-// of the prompt (citing an @imageN with nothing behind it is worse than saying nothing), so
-// this is what stops that being silent: the board card shows it, where it can be fixed.
-// Deliberately NOT put in the prompt itself -- that text is sent to PixAI, and "no reference
-// image attached" is noise in a generation request.
+// Names of cast members this shot lists but has no picture for AT ALL. shotText() leaves
+// them OUT of the prompt (citing an @imageN with nothing behind it is worse than saying
+// nothing), so this is what stops that being silent: the board card shows it, where it can
+// be fixed. Deliberately NOT put in the prompt itself -- that text is sent to PixAI, and "no
+// reference image attached" is noise in a generation request.
+//
+// "Has no picture" is asked with resolvedImage(), NOT positionTag() (which this used to
+// trust): once the closing frame joined the numbering for R2V/V2V (usesCloseFrame above), a
+// 6th cast member on a two-frame shot loses its slot to PixAI's 6-image cap while holding a
+// perfectly good picture. positionTag() returns null for BOTH "no picture" and "capped", so
+// reading it here reported the capped case as "no image" -- telling the owner to fix a
+// picture that was never broken (this exact misfire is one of the findings that refuted
+// round 1 of the closing-frame fix). castPastBudget() below is the capped half's honest
+// report. The `kind === "image"` test keeps the old answer for a video/audio cast member --
+// never image-referenceable, still reported here, exactly as before.
 export const castMissingImages = (entry, p, imgSrc) => {
   const resolve = imgSrc || noImgSrc;
   return (p.assets || [])
     .filter((as) => (entry.c.cast || []).includes(as.id))
-    .filter((as) => !positionTag(entry, p, resolve, as.id))
+    .filter((as) => !(as.kind === "image" && resolvedImage(as, resolve)))
     .map((as) => as.name || "(unnamed)");
+};
+
+// Names of cast members that HAVE a picture and are still not sent: they lost the 6-slot
+// contest (frames first, then cast, then refs -- shotImageRefs()'s own ordering). Asked via
+// positionTag() ON PURPOSE: a resolvable entity positionTag() cannot number is, by
+// construction, one the slice(0, 6) trimmed -- the cap's own signal, from the SAME ordering
+// that actually trims. Do not re-derive the ordering a second way here; two implementations
+// of one ordering is the two-numbering-systems corruption this whole file exists to end.
+// The board card renders this as "past the reference limit -- not sent" (drop a reference
+// or a frame to fit), a different repair from castMissingImages' "attach a picture".
+export const castPastBudget = (entry, p, imgSrc) => {
+  const resolve = imgSrc || noImgSrc;
+  return (p.assets || [])
+    .filter((as) => (entry.c.cast || []).includes(as.id))
+    .filter((as) => as.kind === "image" && resolvedImage(as, resolve) && !positionTag(entry, p, resolve, as.id))
+    .map((as) => as.name || "(unnamed)");
+};
+
+// The Cast & assets panel's live reference-slot arithmetic (owner decision, 2026-07-27):
+// PixAI takes 6 reference images per generation, and an attached frame claims its slot only
+// when it actually RESOLVES to an image (no reserved-empty entries -- see usesCloseFrame's
+// comment for the refuted round-1 alternative), so the cast/ref budget is 6 minus attached
+// frames: 4 with both frames, 5 with one, 6 with none. `frames` is counted off
+// shotImageRefs()'s own items rather than by re-testing the frame fields, so this can never
+// disagree with the list that actually ships; frames can never themselves be trimmed (they
+// sort first and there are at most two). `used` counts every in-cast image asset and image
+// ref that resolves to a picture, deliberately UNCAPPED -- used > budget is exactly the
+// "something below is not being sent" state the panel must not hide (shotImageRefs slices
+// to 6, so the overflow would otherwise vanish without a trace).
+export const refBudget = (entry, p, imgSrc) => {
+  const resolve = imgSrc || noImgSrc;
+  const c = entry.c;
+  const frames = shotImageRefs(entry, p, resolve).filter((it) => it.kind === "frame").length;
+  const used =
+    (p.assets || []).filter((as) => as.kind === "image" && (c.cast || []).includes(as.id) && resolvedImage(as, resolve)).length +
+    (c.refs || []).filter((r) => r.kind === "image" && resolvedImage(r, resolve)).length;
+  return { used, budget: 6 - frames, frames };
 };
 
 export const shotText = (entry, p, imgSrc) => {
@@ -328,11 +409,21 @@ export const shotText = (entry, p, imgSrc) => {
   const L = [`[${code} — "${c.title || "untitled"}"]  (${c.mode}, ~${c.duration}s, ${connectMeta(c.connect).label})`, ""];
   if (c.connect === "extend" && prev) L.push(`Continue seamlessly from the previous clip ${prev.code} (upload it as @video1).`);
   // Gated on MODE, not connect. shotImageRefs() -- the function that actually reserves the
-  // frame slots -- decides by `c.mode === "FLF"`, so gating the DESCRIPTIONS on `c.connect`
-  // meant the two disagreed: a shot set to FLF mode had both frames attached and sent, with
-  // nothing in the prompt saying what they were, and the reverse case described frames that
-  // no slot had been reserved for. The descriptions earn their place -- telling the model
-  // what the opening and closing images are is what makes the motion between them land.
+  // frame slots -- used to decide by `c.mode === "FLF"` too, so gating the DESCRIPTIONS on
+  // `c.connect` meant the two disagreed: a shot set to FLF mode had both frames attached and
+  // sent, with nothing in the prompt saying what they were, and the reverse case described
+  // frames that no slot had been reserved for. The descriptions earn their place -- telling
+  // the model what the opening and closing images are is what makes the motion between them
+  // land.
+  //
+  // DELIBERATELY NARROWER than usesCloseFrame() (2026-07-27): the closing frame now joins
+  // the NUMBERING for R2V/V2V as well, but these description lines stay FLF-only. Round 1
+  // of that fix widened this gate to match and was refuted for it: with frames routinely
+  // undescribed on R2V shots it emitted "Opening frame @image1: —" noise on every one, and
+  // the `|| c.openFrame.tag` fallbacks below re-opened the raw-.tag wrong-picture citations
+  // M35 deleted. How a composed R2V prompt should talk about its frames is a real question
+  // deliberately left unanswered for now -- widen this only with an actual answer, not to
+  // make the two gates look symmetrical.
   if (c.mode === "FLF") {
     // positionTag(), not the frame's own raw .tag -- see shotImageRefs()'s frame-reservation
     // comment. A frame's raw .tag is free text the owner can edit in FrameSlot's UI and can

@@ -939,6 +939,23 @@
 
     _hasAnyRef(p) { return !!(p.images.length || p.video_refs.length || p.audio_refs.length); }
 
+    // First & Last with an End Frame but NO Start Frame is not a smaller FLF -- it is a
+    // DIFFERENT generation. payload() filters empty slots, so this state ships
+    // mode:FLF images:[end]; the server's shot builder needs two images for the
+    // start+tailMediaId shape and a one-image list falls through to the reference-video
+    // build, where the picture the owner placed in the "End Frame" box becomes a plain
+    // style/subject reference and nothing ends on it. The state became REACHABLE when the
+    // host's flf prefill went positional (round 3 of the closing-frame fix: an end frame
+    // picked first now lands in the End slot instead of being mis-mapped into Start), so
+    // the submit needs the guard the mis-map used to make unnecessary. One predicate for
+    // Go AND the cost badge -- pricing what Go would refuse (or vice versa) is exactly the
+    // split that let C09 charge for a disabled upscale.
+    _flfMissingStart() {
+      return this._mode === 'flf'
+        && !(this._slots[0] && this._slots[0].media_id)
+        && !!(this._slots[1] && this._slots[1].media_id);
+    }
+
     _audioToggle() {
       this._langWrap.style.display = this._audio.checked ? '' : 'none';
       this._debCost();
@@ -981,6 +998,11 @@
       // `hint` attribute instead of written straight into textContent.
       cost.setAttribute('hint', (this._mode === 'r2v') ? 'Pick at least one reference to see the cost.' : 'Pick a source image to see the cost.');
       if (!this._hasAnyRef(p)) { cost.removeAttribute('warn'); cost.clear(); return; }
+      // Same predicate as _generate()'s refusal: never price a submit Go would block.
+      if (this._flfMissingStart()) {
+        cost.setAttribute('hint', 'Pick a Start Frame — the End Frame alone can’t drive First & Last.');
+        cost.removeAttribute('warn'); cost.clear(); return;
+      }
       // v4.0 full is ~2.5x Lite (14k/s -> 210k for a 15s clip). Set BEFORE the response lands
       // so the badge's `paid` branch renders the caution inline; the badge deliberately ignores
       // `warn` in every other state, so a free/idle/error render is unaffected by it. The red
@@ -1027,6 +1049,12 @@
         var warn = this._newResultLine();
         warn.innerHTML = '<span style="color:var(--red,#f38ba8);font-size:12px;">' +
           (this._mode === 'r2v' ? 'Pick at least one reference first.' : 'Pick a source image first.') + '</span>';
+        return;
+      }
+      if (this._flfMissingStart()) {
+        var warn2 = this._newResultLine();
+        warn2.innerHTML = '<span style="color:var(--red,#f38ba8);font-size:12px;">' +
+          'Pick a Start Frame first — the End Frame alone can’t drive First &amp; Last.</span>';
         return;
       }
       var line = this._newResultLine();
@@ -1250,13 +1278,53 @@
       // 2026-07-27: shot C prefilled [C1,C2], then shot B prefilled with images:[B_open]
       // (its close frame not picked yet -- a normal intermediate state) gave payload().images
       // ["B_open","C2"], so the cost badge priced and Generate would have spent credits on a
-      // frame belonging to a different shot. Cleared BEFORE setRefs so its _renderSlots()
-      // repaints the emptied box. Two-plus images never reach here (setRefs routes those to
-      // the r2v bank), hence the length test rather than an unconditional wipe.
+      // frame belonging to a different shot. The flf branch below owns that guarantee now:
+      // it writes BOTH _slots positionally from the complete list, so an unfilled End Frame
+      // is nulled and _renderSlots() repaints the emptied box the same as the standalone
+      // `_slots[1] = null` line it replaced.
       var imgList = Array.isArray(o.images) ? o.images : (Array.isArray(o.refs) ? o.refs : null);
-      if (imgList && this._mode === 'flf' && imgList.length < 2) this._slots[1] = null;
-      if (o.refs) this.setRefs(o.refs);                    // back-compat alias for images
-      if (o.images) this.setRefs(o.images);
+      if (imgList && this._mode === 'flf' && imgList.length <= 2) {
+        // FLF END-FRAME DELIVERY (2026-07-27). setRefs() is deliberately incapable of
+        // writing _slots[1] -- it is also the gallery's partial "Send to Video" entry,
+        // where wiping a hand-picked End Frame is data loss (its own comment above) -- and
+        // its multi-image branch force-switches to r2v (`refs.length > 1 -> _setMode('r2v')`),
+        // which is right for a gallery bulk-send but WRONG for a host prefill that stated
+        // mode:'flf' two lines up in this very call: a First & Last shot with both frames
+        // attached arrived as images:[open, close], got silently bounced into
+        // Multi-Reference, and the End Frame never landed in the End Frame box at all --
+        // not on first prefill, not on any re-prefill, since every re-sync repeated the
+        // same wrong route. The host cannot fix this on its side: prefill()/setRefs() are
+        // this drawer's whole public surface and NEITHER can place an image into _slots[1],
+        // so this branch is the one place a host-stated flf image list maps onto the two
+        // frame slots POSITIONALLY (images[0] -> Start, images[1] -> End). No _setMode
+        // call, no event: the host said flf, the drawer stays flf -- same no-dispatch
+        // discipline as the _setMode/_userSetMode split. An explicit images array is the
+        // COMPLETE list for its shot (see the comment above), so a slot it does not fill
+        // is emptied -- this subsumes the old `length < 2 -> _slots[1] = null` line, and
+        // med2-mg-generate-drawer-prefill-leak.test.js pins the leak that line closed.
+        // 3+ images while sitting in flf still falls through to setRefs' legacy r2v
+        // routing below: no known host builds that payload (master-storyboard's flf branch
+        // caps at [open, close]), and second-guessing an unknown caller's intent is the
+        // overreach that killed round 1 of this fix.
+        //
+        // NULL ENTRIES ARE POSITIONAL HOLES (2026-07-27, round 3): the host's flf list is
+        // [Start-or-null, End-or-null] -- round 2 had the host FILTER empty frames out
+        // instead, which destroyed position: a shot with only an END frame arrived as a
+        // one-item list and this branch put the intended End Frame in the START box, and
+        // Generate spent real credits rendering FROM it (the money bug of the round-2
+        // review). A null here means "the host says this frame slot is EMPTY" and clears
+        // the slot, exactly like the too-short-list case below it always did.
+        var flfSlots = imgList.map(function (r) {
+          if (!r) return null;
+          var mid = String(r.media_id || r.mid);
+          return { media_id: mid, thumb: r.thumb || ('/thumbs/' + mid + '.jpg') };
+        });
+        this._slots = [flfSlots[0] || null, flfSlots[1] || null];
+        this._renderSlots();
+      } else {
+        if (o.refs) this.setRefs(o.refs);                  // back-compat alias for images
+        if (o.images) this.setRefs(o.images);
+      }
       // Array.isArray (not truthy-length) so an EXPLICIT empty array clears stale video
       // refs from a previous shot, same reasoning as setRefs() above -- a shot with no
       // video refs used to leave the last shot's video slots sitting there unnoticed.
