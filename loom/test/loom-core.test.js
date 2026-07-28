@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   CONNECT, CONTINUITY_PHRASE, actLetter,
   maxTagNum, nextTag, frameLinked, connectMeta, continuityLinked,
-  flat, shotText, shotPayload, durOf, reelStats, effectivePrompt,
+  flat, shotText, castMissingImages, shotPayload, durOf, reelStats, effectivePrompt,
   priceFingerprint, tallyPrices, formatCostEstimate, costTooltip,
 } from "../src/loom-core.js";
 
@@ -247,8 +247,12 @@ describe("shotText", () => {
     assert.ok(text.includes(CONTINUITY_PHRASE));
   });
 
-  test("'flf' connect includes open/close frame descriptions", () => {
+  test("FLF MODE includes open/close frame descriptions", () => {
+    // Gated on mode, not connect: shotImageRefs() reserves the frame slots by
+    // `c.mode === "FLF"`, so describing them by `c.connect` let the two disagree -- an
+    // FLF-mode shot had both frames attached and sent with nothing saying what they were.
     const card = makeCard({
+      mode: "FLF",
       connect: "flf",
       openFrame: { thumbId: "", source: "", desc: "sunrise over the ridge", tag: "@image8" },
       closeFrame: { thumbId: "", source: "", desc: "sun fully up", tag: "@image9" },
@@ -260,11 +264,31 @@ describe("shotText", () => {
   });
 
   test("cast references list with lock-appearance phrasing", () => {
-    const asset = { id: "as1", name: "Nel", tag: "@image1", lock: true };
+    // kind+mediaId so the shot actually HAS a picture for Nel -- a cast member with no image
+    // is deliberately left out of the prompt now (see the test below).
+    const asset = { id: "as1", name: "Nel", tag: "@image1", lock: true, kind: "image", mediaId: "m1" };
     const card = makeCard({ cast: ["as1"] });
     const project = makeProject([{ id: "a1", name: "Act", cards: [card] }], [asset]);
     const text = shotText(flat(project)[0], project);
     assert.match(text, /Nel — maintain exact appearance from @image1/);
+  });
+
+  test("a cast member with no picture on this shot is left OUT of the prompt", () => {
+    // Citing them fell back to their project-GLOBAL tag -- "Greg — reference @image4" when no
+    // @image4 is attached, and the drawer numbers purely by position so it calls something
+    // else that. Exactly the two-numbering-systems corruption positionTag() exists to stop.
+    // The board card surfaces it instead (castMissingImages), where it can be fixed.
+    const withPic = { id: "as1", name: "Nel", tag: "@image1", kind: "image", mediaId: "m1" };
+    const noPic = { id: "as4", name: "Greg", tag: "@image4", kind: "image" };
+    const card = makeCard({ cast: ["as1", "as4"] });
+    const project = makeProject([{ id: "a1", name: "Act", cards: [card] }], [withPic, noPic]);
+    const entry = flat(project)[0];
+    const text = shotText(entry, project);
+    assert.match(text, /Nel — reference @image1/, "a cast member WITH a picture is still cited");
+    assert.doesNotMatch(text, /Greg/, "a cast member with no picture must not be cited");
+    assert.doesNotMatch(text, /@image4/, "and its global tag must not reach the prompt");
+    assert.deepStrictEqual(castMissingImages(entry, project), ["Greg"],
+      "but the board card must be able to say so");
   });
 
   test("project 'look' appends a film-wide style line to every shot", () => {
