@@ -95,8 +95,10 @@ not part of an `out_dir` backup; a fresh machine rebuilds it rather than restori
 2. **Resume is keyed on media id, checked before any network call.**
 3. **Incomplete/zero-byte files don't count as done**; downloads are atomic (`*.part` → replace).
 4. **`catalog.db` is the source of truth.**
-5. **One shared media-id → file matcher** (`find_files_for_media_id`) recognizes both
-   naming layouts, so resume / gallery / audit never drift.
+5. **`find_files_for_media_id` recognizes both naming layouts** — but it isn't one shared
+   matcher yet. Only the gallery calls it today; resume, the audit, and `--organize` each still
+   walk the tree independently with their own exclusion set. Consolidating onto a single matcher
+   is open work, not yet done (see `docs/architecture.md`'s Invariants section for specifics).
 
 ## Testing
 Run `python -m pytest -q` from the repo root — pure functions, filesystem, catalog,
