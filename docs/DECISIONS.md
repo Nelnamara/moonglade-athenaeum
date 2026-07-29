@@ -2153,3 +2153,21 @@ The Refiner's Touch / Full Toolbox / Enhance Adept retool (five refinement tasks
 **Why.** The dependency is real, not caution: the achievement's detection hook reads the `upscale`/`enlarge` params, and those params are what the gating fix changes the conditions for. Also banked in the same breath: the shared model picker means a capability gate implemented once reaches the gallery and the Loom together — owner: *"fill two stones with one bird."*
 
 ---
+
+### What Moonglade actually is: official key, INTERNAL endpoints  ·  *2026-07-28*
+
+**Moonglade authenticates with an official long-lived PixAI API key and drives PixAI's own GraphQL API.** Official credential, internal endpoints, same host. One `Authorization: Bearer <PIXAI_API_KEY>` on every request (`load_token`/`_make_session`); no JWT in the live path. Generation, edit, video, listing and deletion all go to `api.pixai.art/graphql` via `createGenerationTask` — the `apollo-require-preflight` + `x-apollo-operation-name` headers we always send are Apollo CSRF headers and are the proof. Exactly FOUR official `/v2` REST endpoints are used: `/task/fixer`, `/kaisuuken/check`, `/task-price`, `/task/{id}`. **`/v2/image/create` is never called.**
+
+**The 2026-06-22 switch was AUTH-ONLY.** Commits "Support official API key as preferred auth" → "Auth: API key is the only required credential" swapped the expiring browser JWT for the long-lived key and moved no endpoint. It was never framed as partial, so the owner reasonably believed the whole stack had migrated to an official API. It had not.
+
+**Why.** Recorded because the owner discovered the gap on 2026-07-28 and it cost real trust. It also REFRAMES a board item: F13 ("a browser JWT files a generation into the pixai.art account, a bare API key does not") is **the bill for the June 22 switch**, not a missing feature — "Mirror to PixAI" is a restoration of what that migration cost. See [[PixAI's official API v2 exists, is enrollment-gated, and cannot build this app]].
+
+### PixAI's official API v2 exists, is enrollment-gated, and cannot build this app  ·  *2026-07-28*
+
+Docs live at **`https://platform.pixai.art/en/docs`** — quick-start (enroll-in-api · first-api-call · limits), faq, `api-v2/image/createImage`, `api/task/getTask`, references/models, references/supported-resolutions, and a **webhook for async notification** (a supported alternative to our poll loop). `POST /v2/image/create` takes `modelVersionId, prompt, aspectRatio, mode, batchSize, seed` plus named `style` presets, and describes itself as "replacing the raw pixel dimensions and internal parameter names of v1" — which is precisely what our submit sends.
+
+**Access is a separate product from an account API key**: enrollment is a business application to `api@withpixai.art` or a beta form. **Documented limits: 10 concurrent pending/running tasks; no enforced rate limit but do not poll faster than every 1.5s, with exponential backoff. NOT SUPPORTED: video generation, PixAI Reference Pro, PixAI Edit, PixAI Edit Lite.** Only three models are documented (Tsubaki.2, Haruka v2, Hoshino v2), by VERSION id, with per-model allowed samplingMethods.
+
+**Why.** This is the documented reason the internal surface is not a shortcut but a necessity: the official API cannot do video, Edit Pro or Reference Pro, and its simplified parameters cannot express steps/CFG/sampler/LoRA weights/upscale/boosters. It also retires guesswork elsewhere — it is very likely the answer to F18 (whether an API key may submit a LoRA training) without burning one of the eight free trainings, and it corroborates the proven "Enhance never dispatches for an API-key client" finding. **Nothing auto-syncs** (no schema feed, GraphQL introspection off), so this docs site is the only authoritative changelog and must be re-read periodically rather than rediscovered by breakage. Owner's read: his key is the OLD standard and v2 is new, part of the generation engine rolling out with **Tsubaki.3** (announced in the generator's in-app news; `MMDIT26B_MODEL` = DiT.3 is already in their live filter enum, no Tsubaki.3 model published yet).
+
+---
