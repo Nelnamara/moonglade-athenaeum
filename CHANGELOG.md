@@ -2598,13 +2598,14 @@ path, not just the `esbuild` bundle, which was also rebuilt and confirmed to com
   reachable the normal way, through the same `workflow_id` path every other Enhance
   workflow uses.
 
-### Known issue (not fixed — deliberately left for the design pass)
+### Resolved (2026-07-28 reconciliation — originally filed as a known issue)
 
-- **Roast/flavor text may be showing the uncensored "spicy" variant when it shouldn't.**
-  Reported right after the layout fix above; not yet confirmed whether this is a real gating
-  bug or a visual artifact of the (now-fixed) overlap bug making two different cards' text
-  read as one. Owner wants to look at it himself before any further changes — see
-  `docs/STATE.md`'s Folio of Honors section for what's on record.
+- **Roast/flavor text "spicy leak" — the gate was never absent.** Both gate lines shipped
+  2026-07-12 in one commit and were untouched since; the report matched the (now-fixed)
+  overlap bug making two different cards' text read as one. The one real roast defect ran
+  the opposite direction — the carousel never printed a roast at all — fixed 2026-07-26
+  (`f5cc94b`) with a pinned test. The owner's own roast-field diff remains his step before
+  final closure.
 
 ### Fixed (continued)
 

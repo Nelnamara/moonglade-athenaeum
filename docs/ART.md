@@ -119,7 +119,7 @@ not specced.
 | 2 | **Favicon** | `favicon.png` (`:2900`) | **128×128** RGB — **no alpha** | `<link rel="icon">`. Fallback = the inline SVG data-URI at `:2902` (§1.3). Only in `BASE_HTML` — **`/loom` ships no favicon link at all** | ✅ |
 | 3 | **Logo mark** (legacy fallback) | `logo.png` | **512×512** RGBA | 42px `.brand .mark`. Used **only** when `marks/` is empty (`:1335`) | ✅ |
 | 4 | **Marks system** | `marks/marks.json` + `marks/<id>.png` (+ optional `<id>.ico`) (`:1279`) | PNG **512×512** RGBA; ICO carries **7 frames** (16·24·32·48·64·128·256). 5 marks live: `mark_4` + `mark_12` (`kind:"tile"`), `mark_62` / `mark_63` / `mark_74` (`kind:"alpha"`) | 42px. `"tile"` → `.mk-tile` rounded tile, `"alpha"` → floater. 16 `MARK_ANIMS` (15 + `none`, `:1268`). The `.ico` feeds the Desktop `.lnk` via `/api/branding/shortcut` (`:1349`) | ✅ |
-| 5 | **Badge masters** | `badges/<achievement-id>.png` | **2000×2000** RGBA — 53 of 57 (4 exceptions below). 57 files; ids match `docs/achievements_roster_57.json` exactly, 0 missing / 0 extra | Tiles **46px** (`.ach-card .ico`) + Recent rail **38px**, both via `/badge-thumb/<id>.png` (`_badge_thumb(…, size=256)`, lazy into `_thumbs/`, mtime self-heal, master fallback). **The toast pulls the MASTER at 100px** (`.ach-m2 .badge`, `:4928`) — not the thumb | ✅ |
+| 5 | **Badge masters** | `badges/<achievement-id>.png` | **2000×2000** RGBA — 53 of 57 (4 exceptions below). 57 files; ids match the roster exactly (owner's off-repo backup of `achievements_roster_57.json`; committed copy scrubbed 2026-07-27), 0 missing / 0 extra | Tiles **46px** (`.ach-card .ico`) + Recent rail **38px**, both via `/badge-thumb/<id>.png` (`_badge_thumb(…, size=256)`, lazy into `_thumbs/`, mtime self-heal, master fallback). **The toast pulls the MASTER at 100px** (`.ach-m2 .badge`, `:4928`) — not the thumb | ✅ |
 | 6 | **Mystery tile** | `mystery/secret_feat.png` (`:5107`) | **512×512** RGBA | Fills the 46px `.ico` well for masked feats | ✅ MYS8 |
 | 7 | **Legendary frame** | `frames/legendary.png` (`:4980`) | **1100×829** RGBA | 9-slice `border-image`; `border-width:46px 44px`; `slice:16.8% 13.3% 16.8% 13%`; `outset:6px` | ✅ LEG6 ⚠️ scheduled for removal — `DECISIONS.md`, 2026-07-26 |
 | 8 | **Feat frame** | `frames/feat.png` (`:4981`) | **1100×719** RGBA | 9-slice; `border-width:46px 38px`; `slice:15.8% 10.3% 16.8% 10%`; `outset:6px` | ✅ FEAT13 |
@@ -273,7 +273,7 @@ assume one exists. **Pick one before the next badge run** and write it into §5.
 ## 5. Prompt bank
 
 All 57 achievements, in roster order, one entry each — so a coverage gap is visible rather than
-buried in whichever doc didn't have it. `docs/achievements_roster_57.json` is the roster's source of
+buried in whichever doc didn't have it. the owner's off-repo backup of `achievements_roster_57.json` (committed copy scrubbed 2026-07-27) is the roster's source of
 truth; ids, tiers and triggers below are transcribed from it (57 achievements: 14 common · 15 rare ·
 11 epic · 6 legendary · 11 feat).
 
