@@ -1009,10 +1009,13 @@ are non-feat, so both sit in the required pool, and neither metric can ever incr
 Enhance never dispatches for an API-key client. **The top of the ladder is therefore unreachable
 by anyone.** Recorded here as a defect, not a design item.
 
-## The gallery top — LOCKED 2026-07-27
+## The gallery top — the owner's own placement, 2026-07-27 · NOT locked
 
-*The owner did the placement himself in a component editor. This is the source of truth for that
-surface; a build verifies against it, not against prose.*
+*The owner did the placement himself in a component editor, and it is the best current reference
+for this surface — but he never locked it. The LOCKED status this section carried until 2026-07-28
+was stamped during the parsing of his design-pass answers, not by him ("No where did I lock this —
+that was unilaterally decided for me"). Locking is his explicit call; until he makes it, this is
+direction to review with him, not a pixel source of truth a build verifies against.*
 
 ### The principle: sort by persistence, not by available space
 
@@ -2119,5 +2122,11 @@ Owner, immediately after the roster scrub: make a note that the docs will need a
 The included mark/icon set is the DEFAULT set — the launcher-icon picker keeps working out of the box, nothing users have today is taken away. Some included marks are gated by their own achievements (a mark can be an achievement's reward). The "Under the Hood" branding unlock adds ONE user-custom mark/icon on top of the included set, selectable in the Control Panel. And once full branding unlocks, the skin and mark selector MOVE into the unlocked branding panel — the branding tab becomes the customization hub. See [[The bundle's unlock split: branding opens, achievement assets stay sealed]].
 
 **Why.** Owner's design, answering the "are the tab/launcher icons gated?" question with something better than a yes/no: the default experience stays whole, achievements keep gating their own marks, and the unlock's reward is additive — your own mark, plus the hub to manage all of it.
+
+### Two manufactured statuses corrected: subject-left was never retired, and the gallery top was never locked  ·  *2026-07-28*
+
+Owner, on reviewing the doc-action sweep: two of his design-pass answers were parsed into decisions he never made. (1) **Subject-left stands.** The banner composition rule — focal content in the left third, because the right side carries UI — was never retired by him. A doc pass declared it "retired by the code" off the no-banner mask, missing that every header control renders ON TOP of the art (`header > * { z-index: 1 }`). The rule covers the gallery banner AND the Loom slim banner — which is the surface his answer was actually about. ART.md's passage siding with the "retirement" against his 2026-07-04 reassertion is corrected as of today. Any O5 slim-banner composition advice that carried "subject-left should not be carried over" is void. (2) **The gallery top is NOT locked.** He did the placement himself in the component editor, but the LOCKED stamp was applied in parsing — owner verbatim: *"No where did I lock this — that was unilaterally decided for me."* The section heading above is corrected; a build starts only after he explicitly locks the design, consistent with his own D1 note ("want a review pass first").
+
+**Why.** Standing rule going forward: **no session stamps LOCKED, settled, retired, or source-of-truth on the owner's behalf** — those statuses exist only when he says the words, and a quoted verbatim beats every paraphrase. And an owner design rule is never falsified by reading CSS — code shows mechanics, not intent.
 
 ---
