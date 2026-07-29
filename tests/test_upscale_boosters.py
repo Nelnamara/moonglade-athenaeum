@@ -679,3 +679,46 @@ def test_generate_rejects_a_version_id_sent_as_a_model_id(monkeypatch, tmp_path)
         "width": 900, "height": 600, "count": 1, "ref_media_id": "u2",
     })
     assert r.status_code == 400 and "pick a model first" in (r.get_json() or {}).get("error", "")
+
+
+# --- per-model booster gating ------------------------------------------------
+
+def test_enhance_details_is_gated_on_the_model_declaring_upscale_support(tmp_path):
+    """PixAI's own Add Booster menu omits Enhance Details on a DiT model (measured
+    2026-07-28 on Tsubaki.2, whose extra.compatibility carries `upscale:false`), and offers
+    it on SDXL. Our drawer used to show all three boosters on every model, so it would send
+    the `upscale` family to a model that rejects it -- the image-side twin of the V3.0 Lite
+    video bug, where an unsupported flag came back as a bogus NSFW refusal.
+
+    The gate reads the same field PixAI does, through the existing capability path, and
+    fails OPEN: only an explicit false disables anything, so a never-probed model is
+    unchanged.
+    """
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = login_client(tmp_path).get("/").get_data(as_text=True)
+
+    assert "function gateBooster(" in html, "the booster gate is gone"
+    # Wired into the one place capability data is applied, off PixAI's own field.
+    assert "gateBooster('hires', compat.upscale," in html, \
+        "Enhance Details must gate on compatibility.upscale, not on an architecture guess"
+    # Fails open exactly like gateField: an explicit false and nothing else.
+    gate = html.split("function gateBooster(")[1].split("function applyCapabilityGating(")[0]
+    assert "honored===false" in gate, "the booster gate must fail OPEN on unknown data"
+    # A booster armed before the model changed underneath it must be disarmed, or the
+    # payload would still carry a ratio the new model cannot use.
+    assert "boosters[k]=false" in gate, "switching to an incompatible model must disarm it"
+
+
+def test_booster_gate_does_not_touch_quality_tag_or_face_fix(tmp_path):
+    """Quality Tag is a MEMBERSHIP question (PixAI crowns it) and Face Fix has no
+    compatibility key at all -- neither is decided by extra.compatibility, so neither is
+    gated here. Pinned so a later pass doesn't quietly extend the capability gate over a
+    product decision the owner has not made.
+    """
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = login_client(tmp_path).get("/").get_data(as_text=True)
+    body = html.split("function applyCapabilityGating(")[1].split("function ")[0]
+    assert "gateBooster('qtag'" not in body, "Quality Tag gating is an owner decision"
+    assert "gateBooster('facefix'" not in body, "Face Fix has no compatibility flag to gate on"
