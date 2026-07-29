@@ -2179,3 +2179,46 @@ Measured by the owner across his own lapse and renewal. While the membership was
 **Why.** This is a different shape from what a whole session assumed, and it corrects two things at once. First, a lapsed member does not lose API access, so nothing in Moonglade breaks on a lapse for that reason — the failures seen on 2026-07-28 were per-feature entitlement checks (Quality Tag, Edit Pro, Reference Pro, the LoRA cap), never the credential. Second, it explains how the owner holds long-lived keys at all: they were issued while a member, and their two-year lifetime outlives the membership that produced them. Practical consequence worth remembering: **do not let a key expire while lapsed** — the key would keep working to its expiry, but there would be no interface to issue a replacement without renewing first. Related: [[PixAI's official API v2 exists, is enrollment-gated, and cannot build this app]] — the enrollment programme is a separate product on top of this, and this finding does not change that.
 
 ---
+
+### Gallery-top: what is built, what is not, and the measurements that matter  ·  *2026-07-29*
+
+`gallery-top` is GREEN at `574b3bb` and contains: the Loom Render rename, the booster
+capability gate, the booster rebuilt as a plain chip with PixAI's captured values, the
+membership check and the LoRA-cap fix, the login-mascot ladder, the header restructure
+(vertical destination rail, top-right cluster, two zones), the filter-bar deletion with its
+three-way redistribution, and the bulk-bar deletion. The owner tested and confirmed the
+first four.
+
+**The strip layout is NOT finished, and here is the measured reason.** Read on the running
+page rather than inferred:
+
+* The two `.gt-row`s were **nested**, not siblings — row 1 at x=20, row 2 at x=666, when
+  `flex-direction:column` would put both at x=20. That is why everything crammed onto one
+  line.
+* The search field was **flex-shrunk from 376px to 126px**. Flex items shrink by default;
+  `width:376px` never held. `flex:0 0 376px` fixes it.
+* At a 1244px window the rows need **827px and 943px** against **819px available**. The
+  owner's stage is 1534px, which leaves ~1150px once the brand takes its ~370px. So the
+  layout is right and simply does not fit a narrow window.
+* **Un-nesting the rows breaks five Playwright render tests**, and this is the trap: two
+  un-nested rows need ~79px inside a 72px strip, the header grows, and every flyout below it
+  shifts — the model-picker and art-filter viewport assertions then fail. Clipping the strip
+  and neutralising its pointer-events was not sufficient. The strip almost certainly needs to
+  be a GRID with the brand spanning both rows (his export has the brand at x8 spanning
+  y320-362 while row 1 starts at x386 — flex rows cannot express that), plus a real
+  responsive rule for windows under ~1320px.
+* Separately real: an absolutely-positioned full-width strip **swallows clicks** over its
+  empty regions. Playwright's message is literal — `<div class="gt-strip"> intercepts pointer
+  events`. Any positioned band needs `pointer-events:none` with `auto` on its children.
+
+**Why.** Three hours went into this surface with no way to see it, and the entire failure was
+that. **Get a sandbox login BEFORE writing any CSS**: `python moonglade_backup.py
+--add-web-user`, then serve the dev checkout against a throwaway `--out` directory on a spare
+port, sign in once in the browser, and measure with `getBoundingClientRect` instead of
+guessing. Ten minutes of that found all three bugs above with exact numbers after hours of
+theorising. Also: the template lives in a Python string, so **the server must be restarted for
+any change** — and a killed server can still serve a cached page, which produced identical
+"nothing changed" measurements twice. Kill by command line and prove it responds before
+trusting a screenshot.
+
+---
