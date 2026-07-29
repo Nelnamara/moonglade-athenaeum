@@ -13365,7 +13365,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/branding/<path:fname>")
     def branding(fname):
-        """Serve drop-in branding art from out_dir/branding/ (banner.png, logo, icons).
+        """Serve drop-in branding art from the app-root branding/ folder — branding_root() — (banner.png, logo, icons).
         Absent files 404 so the header's onerror simply removes the <img>. Path-safe."""
         from flask import send_from_directory, abort
         bdir = branding_root().resolve()

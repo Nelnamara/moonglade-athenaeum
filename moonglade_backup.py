@@ -5579,9 +5579,12 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
     """Build createGenerationTask's `parameters` for an image-to-video (i2vPro) job.
 
     VERIFIED against a real card-covered submit (2026-07-06 via --dump-params): the shape
-    is a top-level `modelId` + the `i2vPro` block + privacy/preview flags. There is NO
-    `channel` field. `media_id` = source/first frame; `tail_media_id` (optional) = last
-    frame for FLF interpolation.
+    is a top-level `modelId` + the `i2vPro` block + privacy/preview flags. Their site
+    sends a top-level `channel` (observed value "private", task dump 2026-07-26); we send
+    the equivalent as `isPrivate`. Also unsent by us: width/height and a lora object,
+    both present in their submit. No evidence any of the three matters — every real task
+    renders without them. `media_id` = source/first frame; `tail_media_id` (optional) =
+    last frame for FLF interpolation.
 
     `modelId` is NOT what selects the engine -- `i2vPro.model` is. Corrected 2026-07-21
     after two free --dump-params captures + three read-only price probes: two real tasks

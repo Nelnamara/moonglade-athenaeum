@@ -73,11 +73,11 @@ Verification of a layout change must include sibling bounding-box comparisons or
 
 **Why.** A stale grid class survived the redesign and auto-placed full-width sections into narrow tiled columns; the owner caught it on the live install as a scrambled, overlapping render. Every per-element check had passed. The dead rules were removed, not annotated, because they encoded the exact wrong mental model that caused the bug. Screenshot capture was unavailable that whole session, which is why nothing caught it.
 
-### Roast/flavor text: do not resume work without the owner's explicit go  ·  *2026-07-22*
+### Roast/flavor text: the gate was verified present; the owner still owns the last step  ·  *2026-07-22 · updated 2026-07-28*
 
-The reported leak of uncensored/"spicy" roast lines was deliberately NOT investigated further or fixed. The owner wants to look himself first and has flagged it for the actual design pass, not a quick patch. Only a read-only code check was made; no changes.
+The reported leak of uncensored/"spicy" roast lines was deliberately not patched blind. The verification has since been done, read-only: both gates (server blanks `roast_nsfw` unless Triggered is earned; the toggle renders only when the server says so) shipped 2026-07-12 in a single commit and were never absent — the surviving explanation for what was seen is the same-day Folio grid-overlap bug (two renderings stacked, fixed f09cd3b). The one real roast defect ran the opposite direction: the carousel never printed a roast at all, fixed 2026-07-26 (f5cc94b) with a pinned test. The owner still wants to diff the two roast fields himself before final closure.
 
-**Why.** His explicit scope boundary. Related standing rule: never audit or sanitize the owner's own product-copy language — the roasts and swearing are deliberate voice.
+**Why.** His explicit scope boundary stands. Related standing rule: never audit or sanitize the owner's own product-copy language — the roasts and swearing are deliberate voice.
 
 ### Two persona buckets of the archived 2026-07-16 sweep have never been reconciled  ·  *2026-07-22*
 
@@ -291,11 +291,11 @@ With no feat earned yet, the whole Feats section correctly does not exist at all
 
 **Why.** Recorded rather than left to a code comment because the failure mode here is a HELPFUL fix: a sweep reads "section disappears", finds the mystery-tile art and style sitting right there apparently unused, concludes someone forgot to wire it up, and wires it up — destroying the reveal in the name of consistency. The mystery tile is not unused; it is waiting for the second state.
 
-### V3.0 Lite instant video decline: do not close as fixed  ·  *2026-07-26*
+### V3.0 Lite instant video decline: CLOSED — cause found the same day this warning was written  ·  *2026-07-26 · reconciled 2026-07-28*
 
-Do not mark the V3.0 Lite instant-decline as solved. It was made diagnosable, not solved.
+The cause was found by following this entry's own instruction (read the raw error and param shape from the log): we sent `generateAudio`/`audioLanguage` to v3.0.2 (V3.0 Lite), which does not take them, and PixAI surfaced that as "This image contains sensitive or NSFW content." Proven by a controlled pair on media id 747704233721405654 — their site submitted the same image WITHOUT the audio fields and it rendered; this app submitted WITH them and was refused. Fixed by `VIDEO_AUDIO_MODELS` (commit c8724b5), gated on both video builders. Two same-day contributors closed alongside: our own re-upload manufacturing content-filter refusals, and 15s offered on non-v4.0 models (now snapped to 10). Owner's test case: V3.0 Lite at 15s should submit at 10s, not decline.
 
-**Why.** Owner reported that submitting a video on V3.0 Lite from the gallery generator declines instantly with nothing appearing on PixAI's side, showing "PixAI's content filter blocked this generation — that's decided on PixAI's side, not in the Loom." His diagnostic instinct was the useful part: a real denial normally stays visible on their account for a while even for API generations, so nothing appearing there means no task was ever created. The doc's instruction is explicit — read the raw error and param shape from the log before theorising further. (Recorded beside a same-day entry that identified our own re-upload as the root cause of content-filter refusals; the warning still stands as written — verify from the log before declaring it closed.)
+**Why.** The owner's diagnostic instinct (nothing on the account = no task was ever created) was right and drove the fix. Reconciled so the do-not-close warning doesn't outlive the fix it asked for — the fix landed hours before the warning was carried into this file.
 
 ### `started is False`, never `not started` — unknown must stay unknown
 
@@ -719,9 +719,9 @@ A repair pass "fixed" an empty-prompt rejection on upscale by inventing a fallba
 
 ### Claude's "the toggle just isn't checked" explanation of the roast leak is WRONG — do not restart from it  ·  *2026-07-22*
 
-After the owner earned the Triggered feat live (real play, screenshot in hand), the unleash flag genuinely flipped true, the toggle appeared, and the toast text matched the achievement's normal roast field word-for-word. Claude reported this as "expected — the toggle just hasn't been checked yet." The owner said that explanation is incorrect. What is specifically wrong about it was never established.
+After the owner earned the Triggered feat live (real play, screenshot in hand), the unleash flag genuinely flipped true, the toggle appeared, and the toast text matched the achievement's normal roast field word-for-word. Claude reported this as "expected — the toggle just hasn't been checked yet." The owner said that explanation is incorrect. Resolved 2026-07-28: of the two possibilities recorded below, (b) is the survivor — the gate was never absent (both gate lines shipped 2026-07-12, one commit, untouched since), so the report described the screen while the grid-overlap bug was live.
 
-**Why.** Recorded so the next session does not adopt the toggle theory as a starting point without re-deriving it. Two live possibilities were never distinguished: (a) a genuine gating bug somewhere in the chain, or (b) the report describing what was on screen while the grid layout bug was still live — ladder tiers render twice (active-ladder grid and All Ladder Tiers), and two overlapping renderings could read as "two flavors shown for one achievement" with no roast-logic bug at all. The owner wants to diff the two roast fields himself on his work machine before anything is decided.
+**Why.** Recorded so the next session does not adopt the toggle theory as a starting point without re-deriving it. The two possibilities were: (a) a genuine gating bug somewhere in the chain, or (b) the report describing what was on screen while the grid layout bug was still live — ladder tiers render twice, and two overlapping renderings read as "two flavors shown for one achievement" with no roast-logic bug at all. The owner's own roast-field diff remains his step before anything further is decided.
 
 ### The easter egg IS `under-the-hood`, and its current trigger premise is rejected  ·  *2026-07-23*
 
@@ -1217,7 +1217,7 @@ Model Theme offers Illustrious-v1.0, NoobAI XL, Hinata v2, Illustrious-v0.1 and 
 
 ### Their site sends video fields we do not (unprobed)  ·  *2026-07-26*
 
-From the same task dump: their website sends width/height (1536x864), a channel value of "private", and an empty lora object, and it OMITS the audio-generation fields we always send. Our own video-parameter builder's comment asserting there is no channel field is demonstrably false. Unknown whether any of it matters — probe before assuming.
+From the same task dump: their website sends width/height (1536x864), a channel value of "private", and an empty lora object. (A clause here previously read "it OMITS the audio-generation fields we always send" — stale: we stopped always sending them the same day, `VIDEO_AUDIO_MODELS`, commit c8724b5.) CLOSED 2026-07-28: all three unsent fields are captured, every real task renders without them, and the builder's false "there is NO channel field" docstring is corrected — the only further test would be a paid submit A/B nothing is asking for. A spend, not a probe.
 
 **Why.** Measured evidence off a real task, not inference. Kept so the false in-code assertion isn't trusted again and so the discrepancy isn't re-discovered from scratch.
 
@@ -1277,7 +1277,7 @@ https://claude.ai/code/artifact/7919cec3-aec7-41d0-8efc-8fb2d0f4cdb5 — the 194
 
 ### Moonglade Roster Board
 
-https://claude.ai/code/artifact/31d6c68a-bd54-4824-886f-9017c6012912 — the 57-achievement three-lane voting board. Votes are complete; it is the MODEL for any new board, which should be built from docs/achievements_roster_57.json.
+https://claude.ai/code/artifact/31d6c68a-bd54-4824-886f-9017c6012912 — the 57-achievement three-lane voting board. Votes are complete; it is the MODEL for any new board, which should be built from the owner's off-repo backup of the roster JSON (the committed copy was scrubbed 2026-07-27 — point `tools/build_roster_board.py --roster` at the backup).
 
 **Why.** Records that its votes are done (not re-runnable) while keeping it as the template, and that a new board reads the roster JSON rather than hardcoding entries.
 
@@ -1559,7 +1559,7 @@ Scoped shape only (not built, not populated): add **`reward_kind`** (`none`/`ico
 
 ### Reward-bundle ledger — every mark/skin/banner pairing decided so far  ·  *2026-07-24*
 
-Bundle themes as decided: **(default)** Void Sentinel mark, ships free/ungated. **(removed)** Gem Tome — delete from the mark roster. **Nightfallen** — Moonwell Eclipse mark + Nightfallen skin (currently free) + banner #100. **Verdant Grove** — Vine Crescent mark + Verdant Grove skin, no banner picked yet. **Ember Court** — Winged Crescent mark (art not remade yet) + Embercourt skin, no banner picked yet, blocked on art. **Moonlit Silver** — skin picked plus a banner generation task, no mark picked yet. Standalone: **banner #62 is the current live default**, already shipped and not tied to any achievement.
+Bundle themes as decided: **(default)** Void Sentinel mark, ships free/ungated. **(removed)** Gem Tome — delete from the mark roster. **Nightfallen** — Moonwell Eclipse mark + Nightfallen skin (currently free) + banner #100. **Verdant Grove** — Vine Crescent mark + Verdant Grove skin, no banner picked yet. **Ember Court** — Winged Crescent mark (art not remade yet) + Embercourt skin, no banner picked yet, blocked on art. **Moonlit Silver** — skin picked plus banner generation task `2030243024291694139`, no mark picked yet. Standalone: **banner #62 is the current live default**, already shipped and not tied to any achievement.
 
 **Why.** This is the compiled, cross-checked record of pairing decisions that previously existed only scattered across an audit doc and prose; it is the thing that stops the pairings being re-picked from scratch.
 
@@ -1949,7 +1949,7 @@ BlurHash grid placeholders are deferred at low ROI — a small banked item, not 
 
 ### Canonical achievement roster (57, with a 60 ceiling)
 
-The canonical roster is docs/achievements_roster_57.json — 57 achievements, each carrying roast (default/spicy), roast_nsfw and a rung, in buckets of 29 ladder / 9 milestone / 8 mastery / 11 feat. The Great Library is a BANNER reward, not a badge. There is room for ~3 more against a 60 ceiling.
+The canonical roster is the owner's off-repo backup copy of `achievements_roster_57.json` (the committed copy was removed and scrubbed from history 2026-07-27) — 57 achievements, each carrying roast (default/spicy), roast_nsfw and a rung, in buckets of 29 ladder / 9 milestone / 8 mastery / 11 feat. The Great Library is a BANNER reward, not a badge. There is room for ~3 more against a 60 ceiling.
 
 **Why.** Fixes the roster as data (one JSON file) rather than prose, and pre-answers "can we add more?" — yes, about three, then stop at 60. The Great Library being a banner keeps it out of badge-art scope.
 
