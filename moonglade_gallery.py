@@ -13056,6 +13056,38 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         import moonglade_backup as core
         return core, core._make_session(None)
 
+    # Membership is not stored anywhere -- it is a live GraphQL read per call -- and
+    # /api/price fires on every keystroke in the drawer, so an uncached check would tax the
+    # cost badge with a round trip per character. Five minutes is long enough to cost
+    # nothing and short enough that a membership bought (or lapsed) mid-session is picked up
+    # without a restart. An UNKNOWN result is deliberately not cached: it means the read
+    # failed, and a transient failure must not pin a paying member to non-member behaviour.
+    _entitle_cache = {"value": None, "at": 0.0}
+    _ENTITLE_TTL = 300.0
+
+    def _entitlements(core, session):
+        """{"is_member": True/False/None, "lora_cap": int|None} -- what PixAI says this
+        account may ask for. None anywhere means UNKNOWN and every caller fails open."""
+        import time as _t
+        now = _t.time()
+        cached = _entitle_cache["value"]
+        if cached is not None and (now - _entitle_cache["at"]) < _ENTITLE_TTL:
+            return cached
+        try:
+            me = core.account_info(session)
+            val = {"is_member": core.account_is_member(me),
+                   "lora_cap": core.account_lora_cap(me)}
+        except Exception:                                    # noqa: BLE001
+            return {"is_member": None, "lora_cap": None}
+        if val["is_member"] is not None:
+            _entitle_cache["value"] = val
+            _entitle_cache["at"] = now
+        return val
+
+    def _account_is_member(core, session):
+        """True / False / None(unknown) -- entitlement for PixAI's members-only options."""
+        return _entitlements(core, session)["is_member"]
+
     def _input_media_id(core, session, val):
         """Turn whatever the client sent into a media_id PixAI will accept as an INPUT.
 
@@ -13581,10 +13613,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # to probe against from this checkout) -- treated as a soft pre-submit guard the
             # client can warn from, not a hard block, since PixAI's own server is the real
             # authority on any submit that slips past it.
-            priv = ((me.get("membership") or {}).get("privilege")) or {}
-            lora_cap = priv.get("lora")
-            if lora_cap is None:
-                lora_cap = priv.get("freeUserLora")
+            # Shared with the submit-side guard so the number the drawer PAINTS and the
+            # number the server ENFORCES can never disagree. Crucially this now returns the
+            # free-tier cap for a non-member instead of null: null hid the counter and
+            # switched the client guard off entirely the moment a membership lapsed.
+            lora_cap = core.account_lora_cap(me)
             # Backup coverage: server's lifetime TASK count vs distinct tasks we hold locally.
             # Both are task counts (not images), so the ratio is honest.
             try:
@@ -13603,7 +13636,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                             "coverage_pct": coverage,
                             "followers": me.get("followerCount"),
                             "following": me.get("followingCount"),
-                            "lora_cap": lora_cap})
+                            "lora_cap": lora_cap,
+                            # True / False / null=unknown. The drawer gates members-only
+                            # controls on an explicit False only, so an unreadable account
+                            # never strips a paying member's options.
+                            "is_member": core.account_is_member(me)})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
@@ -14507,7 +14544,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 os.replace(tmp, dest)   # atomic: a torn write can't eat the set
             return jsonify({"presets": presets})
 
-    def _params_and_nocard(core, p, user):
+    def _params_and_nocard(core, p, user, is_member=None):
         """Route a drawer payload to generate, edit, fix, or video params. Returns (params,
         no_card, note). note is set (params None) when something's missing. `user` is
         only consulted on the edit path (a preset lookup is per-account)."""
@@ -14563,6 +14600,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         args = _gen_args_from_payload(p)
         if not args.model:
             return None, args.no_card, "pick a model"
+        # Same entitlement the submit applies, so the badge cannot quote a price for a
+        # members-only option that will be stripped before it is sent.
+        args.is_member = is_member
         try:
             return core._gen_parameters(args), args.no_card, None
         except core.PixAIError as e:
@@ -14645,7 +14685,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 _vid = (core.resolve_version_meta(gsession, str(body["model_id"]).strip()) or {}).get("version_id") or ""
                 if _vid:
                     body = {**body, "version_id": _vid}
-            params, no_card, note = _params_and_nocard(core, body, user)
+            params, no_card, note = _params_and_nocard(
+                core, body, user, _account_is_member(core, gsession))
             if params is None:
                 return jsonify({"cost": None, "free": False, "note": note})
             cost = core.price_task(gsession, params)
@@ -14691,6 +14732,26 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 return jsonify({"error": "pick a model first"}), 400
             if not args.prompt:
                 return jsonify({"error": "enter a prompt"}), 400
+            # Members-only options are dropped for an account PixAI reports as non-member.
+            # Set on the args (not inside the builder) so the CLI keeps its own path and the
+            # price call below can set the identical flag -- the badge must quote the shape
+            # that will actually submit.
+            _ent = _entitlements(core, session)
+            args.is_member = _ent["is_member"]
+            # The per-generation LoRA cap was CLIENT-ONLY until 2026-07-28: both the gallery
+            # drawer and the Loom disable their own submit button over the cap, and nothing
+            # checked it here -- so any path that is not one of those two buttons (a stale
+            # page, the Loom before /api/account resolves, a hand-rolled POST) reached PixAI
+            # and came back LORA_NUM_EXCEEDED / 40300027. Reproduced by the owner with six
+            # LoRAs against a cap of three. Refuse rather than silently trim: dropping a LoRA
+            # changes the picture he asked for, and a refusal costs nothing because no task
+            # is created either way. Fails OPEN on an unknown cap.
+            _cap = _ent["lora_cap"]
+            if _cap is not None and len(getattr(args, "lora", None) or []) > _cap:
+                return jsonify({"error": "Your account allows {} LoRA{} per generation — "
+                                         "remove {} to continue.".format(
+                                             _cap, "" if _cap == 1 else "s",
+                                             len(args.lora) - _cap)}), 400
             params = core._gen_parameters(args)
             core._apply_kaisuuken(session, params, args)   # attach free card unless no_card
             task_id = core.submit_generation(session, params)

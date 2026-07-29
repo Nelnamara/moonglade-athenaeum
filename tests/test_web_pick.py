@@ -2330,12 +2330,34 @@ def test_account_lora_cap_falls_back_to_free_user_lora(tmp_path, monkeypatch):
     assert d["lora_cap"] == 2
 
 
-def test_account_lora_cap_null_when_membership_absent(tmp_path, monkeypatch):
+def test_account_lora_cap_is_the_free_tier_when_membership_absent(tmp_path, monkeypatch):
+    """A NON-MEMBER is not "unknown" -- they are the free tier, and the cap is 3.
+
+    This test used to assert None, which is exactly the bug it now guards against: when the
+    owner's membership lapsed on 2026-07-27, `membership` came back null, lora_cap went
+    null, the drawer's "n / cap" counter hid itself, and overLoraCap() started returning
+    false -- so the client guard switched OFF at the precise moment it was needed. Six LoRAs
+    reached PixAI against a cap of three and came back LORA_NUM_EXCEEDED (reproduced by the
+    owner, 2026-07-28). PixAI's own panel prints "Free: 0/3   Max: 15" beside the LoRA
+    section, so 3 is measured, not assumed.
+    """
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 140})
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     d = cli.get("/api/account").get_json()
+    assert d["lora_cap"] == core.FREE_LORA_CAP == 3
+    assert d["is_member"] is False
+
+
+def test_account_entitlements_unknown_when_account_unreadable(tmp_path, monkeypatch):
+    """An account we could not READ is the only real unknown, and it must fail OPEN --
+    a transient GraphQL blip must never strip a paying member's entitlements."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "account_info", lambda s: {})
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    d = cli.get("/api/account").get_json()
     assert d["lora_cap"] is None
+    assert d["is_member"] is None
 
 
 def test_claim_endpoint_gated_and_claims_ready(tmp_path, monkeypatch):
