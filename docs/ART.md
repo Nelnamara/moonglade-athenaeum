@@ -148,15 +148,19 @@ The archived specs never agreed (ART_SPECS said 2048×512+, ART_PROMPTS said no-
 16:9 in different passes) — that disagreement is settled by the owner's call above; the archive
 copies stay as history.
 
-The *composition* rule, unlike the size, is settled — by the code, against the docs. With a real
-banner present the whole frame shows at full opacity with the mask off, cropped `center 32%`. So:
-
-- **True:** keep the hero element in the **upper-middle** band; the bottom is scrimmed and the top
-  crops away first as the header collapses. Full opacity means fine detail survives, but the art
-  sits **behind** the wordmark and nav — favour atmosphere over busy subject detail.
-- **False:** "all art in the LEFT third, the header masks the right ~62%." That is the v1/v3 rule,
-  and v3 (2026-07-04) reasserted it *after* v2 had already correctly retired it. It describes the
-  no-banner base state (`:2912`) only. Ignore it.
+The *composition* rule is the OWNER'S, reasserted 2026-07-28 after a doc pass wrongly retired it —
+**do not relitigate it from a CSS reading again**. The rule: **subject-left** — the focal content
+lives in the left third, because the right side carries UI. It covers the gallery banner AND the
+Loom slim banner (the surface the owner's design-pass answer was actually about). The code
+supports it, read fully: every header child renders ON TOP of the banner (`header > * {
+z-index: 1 }`, the art at z-index 0), brand on the left, controls massing rightward; the Loom's
+top bar runs controls across the whole band with `← Gallery` pinned right. The 62%-right fade
+mask belongs to the no-banner ghost state only; with a real banner the frame shows at full
+opacity, which changes the *mechanism* (UI overlay, not masking) and not the *rule*. The v2
+"retirement" read the mask and missed the overlay; v3 (2026-07-04) reasserting subject-left was
+the owner being right, not the docs drifting. Also true and compatible: the bottom band is
+scrimmed and pinned (`--bnr-slim: 62px` shows the bottom slice when collapsed), so busy detail
+stays out of the extreme bottom; atmosphere over clutter where UI sits.
 
 ### The four off-spec badge masters
 
