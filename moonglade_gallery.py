@@ -6827,22 +6827,6 @@ document.addEventListener('DOMContentLoaded', function(){
         <button type="button" id="gen-hires" onclick="Gen.toggleBooster('hires')"
                 title="PixAI's Enhance Details: re-renders the finished image at a larger size (hi-res fix), so it adds detail rather than just resolution. To upscale a picture you already have, open it and use Upscale there.">Enhance Details</button>
       </div>
-      <div id="gen-up-ctl" style="display:none;">
-        <div class="gen-lbl">Ratio <span id="gen-up-rval" style="color:var(--lavender);">1.2&times;</span>
-          <span id="gen-up-max" style="text-transform:none;color:var(--overlay0);"></span></div>
-        <input type="range" id="gen-up-ratio" min="1.1" max="1.9" step="0.1" value="1.2" style="width:100%;"
-               oninput="Gen.upRatio()">
-        <div id="gen-up-dims" style="font-size:11px;color:var(--subtext);margin-top:3px;"></div>
-        <div id="gen-up-denoise">
-          <div class="gen-lbl">Denoising strength <span id="gen-up-dval" style="color:var(--lavender);">0.60</span>
-            <span style="text-transform:none;color:var(--overlay0);">&middot; PixAI: works better 0.4&ndash;0.6</span></div>
-          <input type="range" id="gen-up-denoise-str" min="0.01" max="0.99" step="0.01" value="0.6" style="width:100%;"
-                 oninput="Gen.upDenoise(this.value)">
-          <div class="gen-lbl">Denoising steps</div>
-          <input id="gen-up-denoise-steps" class="gen-sel" type="number" min="1" max="50" step="1" value="26"
-                 onchange="Gen.refreshCost()" style="width:100%;">
-        </div>
-      </div>
       <label class="gen-check" title="PixAI's High Priority channel (priority=1000): ~10x faster and it COSTS EXTRA credits. It is not Turbo — Turbo is a separate, members-only channel that is free, and it is what an unticked box already asks for (falling back to standard speed on its own if this account isn't a member)."><input type="checkbox" id="gen-hp"> High priority (faster &middot; costs extra)</label>
       <label class="gen-check"><input type="checkbox" id="gen-ph" checked> Prompt helper</label>
       <mg-cost-badge id="gen-cost" hint="Pick a model to see the cost." card-label="a card"></mg-cost-badge>
@@ -8063,7 +8047,6 @@ var Gen = (function(){
     if(off && boosters[k]){
       boosters[k]=false;
       b.classList.remove('on');
-      if(k==='hires'){ var c=el('gen-up-ctl'); if(c) c.style.display='none'; }
       return true;                    // caller re-costs: the submit shape just changed
     }
     return false;
@@ -8179,8 +8162,7 @@ var Gen = (function(){
     return {w:d8(w), h:d8(h), custom:false};
   }
   function updateDimNote(){ var n=el('gen-dim-note'); if(!n) return; var d=dims();
-    n.textContent='\\u2192 '+d.w+' \\u00d7 '+d.h+(d.custom?' \\u00b7 custom':' px');
-    syncUpscale(); }
+    n.textContent='\\u2192 '+d.w+' \\u00d7 '+d.h+(d.custom?' \\u00b7 custom':' px'); }
   // --- Boosters (Face Fix / Quality Tag / Enhance Details) --------------------
   // PixAI has TWO upscale methods and they live in different places. `enlarge` (their
   // ESRGAN "Upscale") and `upscale` (their "Hires") are both offered from the IMAGE VIEW,
@@ -8193,42 +8175,18 @@ var Gen = (function(){
   // image, so the ratio cap and the "-> 1952x1096" output line were derived from the size
   // the generation is ABOUT to be rather than from a real picture.
   //
-  // upCeil/upDims/upMax are a HAND PORT of core.UPSCALE_PIXEL_CEILING /
-  // upscale_output_dims / max_upscale_ratio (moonglade_backup.py) -- the server
-  // re-derives and clamps the ratio on every price check AND submit, so this copy exists
-  // only so the slider can't offer a ratio the server would silently pull back, and so
-  // the output size can be shown while dragging with no round-trip. Same hand-maintained
-  // duplication risk as friendlyGenErr below: if those ceilings change, change these too.
-  // (static/mg-upscale-panel.js carries the same port for the same reason, and
-  // tests/test_upscale_boosters.py runs BOTH against the Python.) Both languages use
-  // IEEE-754 doubles, so the floor-to-multiple-of-8 below reproduces the Python side (and
-  // PixAI's own dialog) exactly, 1952 and not 1960 at 1400x1.4.
-  var upCeil={enlarge:2048*2048, upscale:2048*1152};
+  // The drawer's chip carries NO settings, matching PixAI: their Add Booster menu offers
+  // add-or-remove and nothing else. The ratio/denoise sliders that used to live here were
+  // the image-view tool's controls on a booster that has none, and the pixel-ceiling cap
+  // that drove them does not apply: it was inferred from their image-view DIALOG's slider
+  // maxima, and a real booster task submitted 1.5 on a 1400x784 source (2100x1176) --
+  // over that inferred ceiling -- and completed. The ceiling still governs
+  // <mg-upscale-panel>, which is where a slider actually exists.
+  // PixAI's own values for the Enhance Details chip, captured from a real task rather than
+  // guessed. Their booster exposes no controls, so these are not defaults the user can move.
+  var MG_HIRES={ratio:1.5, denoise:0.6};
   var boosters={facefix:false, qtag:false, hires:false};
   var BOOSTER_BTN={facefix:'gen-facefix', qtag:'gen-qtag', hires:'gen-hires'};
-  function upDims(w,h,r){ return [Math.max(64,Math.floor(w*r/8)*8), Math.max(64,Math.floor(h*r/8)*8)]; }
-  function upMax(w,h,mode){
-    for(var i=30;i>0;i--){ var r=Math.round((1+i*0.1)*10)/10, o=upDims(w,h,r);
-      if(o[0]*o[1]<=upCeil[mode]) return r; }
-    return 1;
-  }
-  function syncUpscale(){
-    if(!boosters.hires) return;
-    var d=dims(), s=el('gen-up-ratio'); if(!s) return;
-    // Re-derived from the CURRENT output size every time, so it moves with Aspect / Size /
-    // custom W&H. Always the 'upscale' ceiling: the drawer only does Hires now.
-    var mx=upMax(d.w,d.h,'upscale');
-    s.max=mx; s.disabled=(mx<=1);
-    if(+s.value>mx) s.value=mx;
-    var r=+s.value, o=upDims(d.w,d.h,r);
-    el('gen-up-rval').textContent=r.toFixed(1)+'\\u00d7';
-    el('gen-up-max').textContent = (mx<=1) ? '' : ('\\u00b7 max '+mx.toFixed(1)+'\\u00d7 at this size');
-    el('gen-up-dims').textContent = (mx<=1)
-      ? 'This size is already at PixAI\\'s ceiling for Hires \\u2014 generate smaller to enhance details.'
-      : (d.w+'\\u00d7'+d.h+' \\u2192 '+o[0]+'\\u00d7'+o[1]);
-  }
-  function upRatio(){ syncUpscale(); debouncedCost(); }
-  function upDenoise(v){ el('gen-up-dval').textContent=(+v).toFixed(2); debouncedCost(); }
   function toggleBooster(k){
     boosters[k]=!boosters[k];
     var b=el(BOOSTER_BTN[k]);
@@ -8236,14 +8194,17 @@ var Gen = (function(){
     // Enhance Details is the one booster with settings of its own; the ratio panel is its
     // disclosure, so it opens and closes with the chip rather than living on screen at all
     // times the way the old segment's controls did.
-    if(k==='hires'){
-      el('gen-up-ctl').style.display = boosters.hires ? '' : 'none';
-      syncUpscale();
-    }
     debouncedCost();
   }
   function payload(){ var a=dims();
-    var upR=(!boosters.hires||el('gen-up-ratio').disabled)?null:+el('gen-up-ratio').value;
+    // Enhance Details is a plain on/off chip, exactly like PixAI's: their Add Booster menu
+    // offers add-or-remove and NO settings at all. The values below are theirs, captured
+    // from a real task (2026-07-28, task 2039053268124647852): upscale 1.5, denoising
+    // strength 0.6, and denoising steps that MIRROR the generation's own sampling steps
+    // rather than a constant -- their task carried samplingSteps 32 and
+    // upscaleDenoisingSteps 32. The drawer used to expose a ratio/denoise panel, which was
+    // the IMAGE-VIEW upscale tool's control surface bolted onto a booster that has none.
+    var upR = boosters.hires ? MG_HIRES.ratio : null;
     var qt=el('gen-qtag');
     return { version_id:(selected&&selected.version_id)||'', model_id:(selected&&selected.model_id)||'', prompt:el('gen-prompt').value.trim(),
       negative:el('gen-neg').value.trim(), width:a.w, height:a.h, mode:el('gen-mode').value,
@@ -8257,8 +8218,8 @@ var Gen = (function(){
       // the drawer offers Hires only, and a stray enlarge alongside it is the one
       // combination the builder refuses outright.
       upscale:upR,
-      upscale_denoise:+el('gen-up-denoise-str').value,
-      upscale_denoise_steps:+el('gen-up-denoise-steps').value,
+      upscale_denoise: boosters.hires ? MG_HIRES.denoise : null,
+      upscale_denoise_steps: boosters.hires ? (+el('gen-steps').value||25) : null,
       face_fix:boosters.facefix,
       quality_tag:(boosters.qtag?(qt&&qt.getAttribute('data-prefix')||''):''),
       loras:loras.filter(function(l){return l.version_id;}).map(function(l){return {version_id:l.version_id, weight:l.weight};}) }; }
@@ -8892,7 +8853,6 @@ var Gen = (function(){
           setDock:setDock, toggleFlyout:toggleFlyout,
           previewSelected:previewSelected, hidePreview:hidePreview,
           refPick:refPick, refStrength:refStrength, presetImport:presetImport,
-          upRatio:upRatio, upDenoise:upDenoise,
           toggleBooster:toggleBooster,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
           reclampLoras:reclampLoras,
