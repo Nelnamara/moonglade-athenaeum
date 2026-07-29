@@ -8046,11 +8046,36 @@ var Gen = (function(){
     if(defMin!=null) f.min = (bounds&&bounds.min!=null) ? bounds.min : defMin;
     if(defMax!=null) f.max = (bounds&&bounds.max!=null) ? bounds.max : defMax;
   }
+  // A booster the model does not honor must not be offerable. PixAI's own Add Booster menu
+  // omits Enhance Details entirely on a DiT model (measured 2026-07-28 on Tsubaki.2), and
+  // compatibility.upscale:false is the same fact in their metadata. Sending it anyway is the
+  // image-side twin of the V3.0 Lite video bug, where an unsupported flag came back as a
+  // bogus "sensitive or NSFW content" refusal -- so the cost of not gating is a misleading
+  // error, not a no-op. Disables rather than hides, same reasoning as gateField, and turns
+  // the booster OFF if the model changed underneath it while it was armed.
+  function gateBooster(k, honored, why){
+    var b=el(BOOSTER_BTN[k]); if(!b) return;
+    if(b.getAttribute('data-title')===null) b.setAttribute('data-title', b.title||'');
+    var off = honored===false;
+    b.disabled = off;
+    b.classList.toggle('cap-off', off);
+    b.title = off ? why : (b.getAttribute('data-title')||'');
+    if(off && boosters[k]){
+      boosters[k]=false;
+      b.classList.remove('on');
+      if(k==='hires'){ var c=el('gen-up-ctl'); if(c) c.style.display='none'; }
+      return true;                    // caller re-costs: the submit shape just changed
+    }
+    return false;
+  }
   function applyCapabilityGating(){
     var s=selected||{}, compat=s.compatibility||{}, restr=s.restrictions||{};
     gateField('gen-neg', compat.negativePrompt, null);
     gateField('gen-steps', compat.samplingSteps, restr.samplingSteps, 1, 150);
     gateField('gen-cfg', compat.cfgScale, restr.cfgScale, 1, 30);
+    var disarmed = gateBooster('hires', compat.upscale,
+      'This model doesn\\u2019t support Enhance Details \\u2014 PixAI doesn\\u2019t offer it on this model either.');
+    if(disarmed) debouncedCost();
   }
   // problem 4: PixAI's own model/LoRA cards offer a version selector; resolve_version_meta
   // always silently took the newest release and discarded the rest. #gen-version lists every
