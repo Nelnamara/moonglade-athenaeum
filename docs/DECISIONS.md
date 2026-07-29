@@ -2129,4 +2129,27 @@ Owner, on reviewing the doc-action sweep: two of his design-pass answers were pa
 
 **Why.** Standing rule going forward: **no session stamps LOCKED, settled, retired, or source-of-truth on the owner's behalf** — those statuses exist only when he says the words, and a quoted verbatim beats every paraphrase. And an owner design rule is never falsified by reading CSS — code shows mechanics, not intent.
 
+### Boosters are PER-MODEL on PixAI, and our drawer offers all three on everything  ·  *measured live 2026-07-28*
+
+Measured in PixAI's own generate panel, driving the owner's account: on **Tsubaki.2 (DiT.2)** the Add Booster menu offers ONLY **Quality Tag** and **To Video**, both crowned (members-only). **Face Fix and Enhance Details (HiRes) are not offered at all** on that model. On an **SDXL** model (owner's capture) Face Fix and Enhance Details ARE offered and un-crowned, with the same two crowned extras beneath. So booster availability is a per-model property, and the crowned pair is a membership gate on top of it.
+
+Our Generate drawer renders Face Fix · Quality Tag · Enhance Details **unconditionally on every model** — there is no per-model gating anywhere. Two consequences, both real:
+
+1. **We send booster params to models that do not take them.** On a DiT model our drawer will send `enableADetailer` (Face Fix) or the `upscale` family (Enhance Details). This is the SAME failure class as the closed V3.0 Lite video bug — `generateAudio` sent to a model that does not accept it came back as a bogus *"This image contains sensitive or NSFW content"*. Image side, still live. Suspect it behind any unexplained image refusals on DiT models.
+2. **We invoke a members-only booster with no membership check.** Quality Tag sends PixAI's real gated parameter (`params["qualityTag"] = {"prefix": ...}`, moonglade_backup.py:5527-5529). Our own **Snippets** feature is NOT implicated — banked prompt text is just typing, and nobody gates a user writing `((masterpiece))` into their own prompt. The booster button is the one handing out a crowned feature.
+
+**Why.** Owner spotted it from the screenshots ("something we added on our own replaces one of these functions and basically gives one of their members only options for free") and it verified live. Recorded before any fix so the two defects stay distinguishable: #1 is a correctness bug that can manufacture a fake content refusal, #2 is a product/ethics call that is the owner's alone.
+
+### The owner's PixAI membership is LAPSED, deliberately, as a test bed  ·  *2026-07-28*
+
+Owner: *"I let my membership lapse on purpose to test some of this."* PixAI reports the membership expired 2026-07-27. This makes the account the first non-privileged test bed in the project's history — every prior test ran from a paid tier, which is exactly why ungated members-only calls could never have been noticed. **`private/VIDEO_MODELS.md`'s "owner is tier-3 premium" is stale as of 2026-07-27.**
+
+**Why.** Load-bearing for interpreting any refusal seen from here on: a call that used to succeed may now fail on membership rather than on shape. It also means the Quality Tag question is answerable by one real generation whenever the owner chooses to spend it.
+
+### Achievements banked behind the booster fix  ·  *2026-07-28*
+
+The Refiner's Touch / Full Toolbox / Enhance Adept retool (five refinement tasks at 1/3/5) is designed and banked, deliberately NOT built yet. Owner: *"Bank the achievements for the moment and lets fix this otherwise the achievement will still be a bit broken."* The chain's first task is Upscale/Hi-res, which is exactly the booster under repair — instrumenting it before the fix would count a broken control.
+
+**Why.** The dependency is real, not caution: the achievement's detection hook reads the `upscale`/`enlarge` params, and those params are what the gating fix changes the conditions for. Also banked in the same breath: the shared model picker means a capability gate implemented once reaches the gallery and the Loom together — owner: *"fill two stones with one bird."*
+
 ---
