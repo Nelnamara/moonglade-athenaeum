@@ -17,6 +17,17 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **The design kit: generated token pages + the "Moonglade Athenaeum" Claude Design project.**
+  Every standalone harness page in `static/` now carries the app's full design tokens between
+  generated `mg-tokens` markers — `tools/export_design_kit.py` regenerates them (plus
+  `static/design-tokens.css`) from `DESIGN_TOKENS_CSS`, and `tests/test_design_kit_sync.py`
+  fails the suite on drift; the old hand-typed slices had in fact drifted. New pages:
+  `design-tokens.html` (palette + type, self-deriving), `design-skins.html` (all five skins
+  at once), `mg-upscale-panel.html` (the dynamic ratio cap is the demo), `mg-notify.html`
+  (Toast kinds + the Activity shell). The whole kit is mirrored to a claude.ai/design
+  design-system project via DesignSync, where each page is a card — see docs/DECISIONS.md
+  (2026-07-29) for the project id and the `gallery-top` merge note.
+
 - **`--sync-similar` — top up the visual-similarity index instead of rebuilding it.** Also a
   Control Panel job, *Top up the Similar index (adds only what's missing)*, listed above Rebuild
   so the non-destructive action reads first. `sync()` was always incremental — it skips
