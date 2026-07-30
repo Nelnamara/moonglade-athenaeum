@@ -2221,4 +2221,38 @@ any change** — and a killed server can still serve a cached page, which produc
 "nothing changed" measurements twice. Kill by command line and prove it responds before
 trusting a screenshot.
 
+### A locally-imported file could save and never appear on page 1 — created_at's timezone, not a duplicate or a sandbox artifact  ·  *2026-07-29*
+
+Owner, after Save to library started reporting success: **"It says saved but does not appear in
+the gallery."** First explanation offered was wrong and worth recording as a lesson: reading the
+default "All, newest first" view, two thumbnails looked blank at a glance and were assumed to be
+the new saves; zooming in showed they were unrelated real images — a second misread in the same
+investigation (the first was mistaking a JPEG-compression artifact for a broken tile). The
+owner pushed back correctly: **"I would think they would be in line with the timestamp and
+appear at the top."** That instinct was right. Checked the actual `catalog.db` rather than
+trust a screenshot a third time.
+
+**Root cause:** `_SORT_SQL`/`_DEFAULT_SORT_SQL` (`moonglade_gallery.py`) sort `created_at` as a
+**plain SQL string**, no `datetime()` wrapping. `run_import_local()` (`moonglade_backup.py`)
+stamped it via `time.strftime(..., time.localtime(stored.stat().st_mtime))` — **naive local
+time, no timezone marker** — while every PixAI-collected row's `createdAt` arrives (and is
+stored) as **UTC with a trailing `Z`**. A file saved at 23:0X PDT reads as the string
+`"2026-07-29T23:0X:XX"`; a PixAI row collected minutes earlier reads as
+`"2026-07-30T06:0X:XX.XXXZ"` — and `"2026-07-30…" > "2026-07-29…"` lexicographically, regardless
+of the fact that 06:0X UTC on the 30th *is* 23:0X PDT on the 29th, the same evening. The row was
+never missing: correctly written, correctly thumbnailed, correctly counted (`source=local`
+filter surfaced all 6 test saves immediately, and `total` had incremented on every one) — it
+simply never sorted near the top of a plain-string "newest first" comparison against
+UTC-stamped rows.
+
+**Fix:** stamp UTC + `Z` instead of naive local time, in `run_import_local()` and in the four
+`result.get("createdAt") or time.strftime(...)` fallbacks on the generate/edit/video/
+reference-video collect paths (`moonglade_backup.py`) — same latent inconsistency, same shape,
+fixed everywhere it appears rather than only where it was reported. Required a full server
+restart to take effect: `import moonglade_backup as core` runs inside each request handler, but
+Python caches the module in `sys.modules` on first import, so an edited `.py` file is invisible
+to an already-running process until it restarts (this server runs with `debug=False`, no
+auto-reloader). Verified live post-restart: a fresh save's `created_at` lands as `…Z` UTC and is
+genuinely the first tile in the default view, ahead of every previously-collected row.
+
 ---

@@ -5138,8 +5138,14 @@ def run_import_local(args):
             continue
         existing_mids.add(mid)            # two sources, one content: catalog it once
         try:
-            created = time.strftime("%Y-%m-%dT%H:%M:%S",
-                                    time.localtime(stored.stat().st_mtime))
+            # UTC + Z, matching the PixAI-sourced rows' `createdAt` format below --
+            # `created_at` is sorted as a plain string (_SORT_SQL has no datetime()
+            # wrapping), so a naive LOCAL-time stamp here reads as hours "older" than
+            # a same-moment UTC one west of Greenwich, silently outranked by anything
+            # PixAI collected since (a local save at 23:0X PDT sorted behind rows
+            # timestamped 06:05 UTC the "next" day, an hour earlier in real time).
+            created = time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                    time.gmtime(stored.stat().st_mtime))
         except OSError:
             created = ""
         full = {f: "" for f in CATALOG_FIELDS}
@@ -6409,7 +6415,11 @@ def run_generate(args):
             "task_id": str(task_id), "media_id": mid,
             "filename": str(path.relative_to(out)).replace("\\", "/"),
             "url": url, "source": "api", "status": "completed",
-            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
+            # UTC + Z fallback, matching PixAI's own createdAt format -- created_at is
+            # sorted as a plain string with no datetime() wrapping, so a naive local-time
+            # stamp here would read hours "older" than a same-moment UTC one west of
+            # Greenwich (see run_import_local's matching fix for how this was found).
+            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "prompt_full": prompt,
             "prompt_preview": (prompt or "")[:100],
             "negative_prompt": _pick("negative_prompt", "negativePrompts"),
@@ -6529,7 +6539,11 @@ def _download_video_task(session, result, task_id, out, args, params):
             "task_id": str(task_id), "media_id": vmid,
             "filename": str(path.relative_to(out)).replace("\\", "/"),
             "url": url, "source": "api", "status": "completed", "is_video": "1",
-            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
+            # UTC + Z fallback, matching PixAI's own createdAt format -- created_at is
+            # sorted as a plain string with no datetime() wrapping, so a naive local-time
+            # stamp here would read hours "older" than a same-moment UTC one west of
+            # Greenwich (see run_import_local's matching fix for how this was found).
+            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "prompt_full": prompt, "prompt_preview": (prompt or "")[:100],
             "negative_prompt": sent.get("negativePrompts", ""),
             "seed": str(o.get("seed") or ""),
@@ -6687,7 +6701,11 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
             "task_id": str(task_id), "media_id": mid, "seed": seed,
             "filename": str(path.relative_to(out)).replace("\\", "/"),
             "url": url, "source": "api", "status": "completed",
-            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
+            # UTC + Z fallback, matching PixAI's own createdAt format -- created_at is
+            # sorted as a plain string with no datetime() wrapping, so a naive local-time
+            # stamp here would read hours "older" than a same-moment UTC one west of
+            # Greenwich (see run_import_local's matching fix for how this was found).
+            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "prompt_full": prompt, "prompt_preview": (prompt or "")[:100],
             # Everything extract_full_meta resolved from the task. This row used to write
             # only the model id, so a generation captured as it happened landed with an
@@ -7277,7 +7295,11 @@ def run_edit_image(args):
             "task_id": str(task_id), "media_id": mid, "seed": seeds.get(mid, ""),
             "filename": str(path.relative_to(out)).replace("\\", "/"),
             "url": url, "source": "api", "status": "completed",
-            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
+            # UTC + Z fallback, matching PixAI's own createdAt format -- created_at is
+            # sorted as a plain string with no datetime() wrapping, so a naive local-time
+            # stamp here would read hours "older" than a same-moment UTC one west of
+            # Greenwich (see run_import_local's matching fix for how this was found).
+            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "prompt_full": prompt_used, "prompt_preview": (prompt_used or "")[:100],
             "model_id": edit_model_id_used,
             "model_name": edit_model_name,
