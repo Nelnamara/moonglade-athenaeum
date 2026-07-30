@@ -1,0 +1,189 @@
+<!-- @dsCard group="Foundation" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moonglade tokens — palette &amp; type</title>
+<style>
+  /* mg-tokens:begin -- generated from moonglade_gallery.DESIGN_TOKENS_CSS by tools/export_design_kit.py; hand-edits between these markers are overwritten */
+  :root {
+    /* Palette sampled from two reference images:
+       731004762264180451.webp — teal "magic glow", green gems, rare gold trim.
+       s1_06.png              — the deep violet armor (#33236d/#241f5b/#36345a/#643aac)
+                                that tints the ground and surfaces below. */
+    --base:    #0c0a1c; --mantle:  #0a0818; --surface0:#211f3a;
+    --surface1:#3a3460; --overlay0:#6a6088; --text:    #d6d2e2;
+    --subtext: #9a93ab; --lavender:#b692e6; --mauve:   #c4a6f0;
+    --red:     #f38ba8; --peach:   #fab387; --green:   #46d488;
+    --blue:    #47cbc3; --sapphire:#3a8a93;
+    /* Moonglade Athenaeum palette: lavender leads, emerald is the "magic"
+       highlight (Nelnamara's gems), gold filigree is rare. */
+    --accent:  #b692e6; --accent-soft:#4fc99a; --gold: #d4af37; --emerald:#4fc99a;
+    --purple-deep: #33236d; --purple-bright: #643aac;
+    /* Feat tier: gunmetal band + ruby glow (the agreed 5th tier -- NOT pink). */
+    --gunmetal: #8a93a2; --gunmetal-deep: #4a515c;
+    --ruby: #e0355e; --ruby-deep: #a11238;
+    /* Native controls (checkbox/radio/range/progress) default to the BROWSER's
+       accent -- Windows Chrome's is a bright blue that belongs to no skin here.
+       Three places had already set this one control at a time; declaring it on
+       :root covers every control app-wide, and because it is an inherited
+       property a skin that redefines --accent retints them for free. Per-control
+       overrides (e.g. the ruby unleash toggle) still win on specificity. */
+    accent-color: var(--accent);
+    /* accent-color only tints the CHECKED fill; an unchecked box, a native select
+       arrow and the scrollbars all keep light OS chrome without this. Every
+       surface in this app is dark, so declaring it once here is what actually
+       stops white checkboxes sitting on top of artwork. */
+    color-scheme: dark;
+  }
+  /* ---- Skins: cosmetic palette swaps unlocked by achievements. A skin overrides
+     the meaningful subset of the palette; everything else inherits :root. Applied
+     via <html data-skin="..."> (set pre-paint from localStorage in <head>). ---- */
+  html[data-skin="nightfallen"] {
+    --base:#0a0713; --mantle:#080610; --surface0:#241a3f; --surface1:#3c2b63;
+    --text:#e7ddff; --subtext:#a493c9; --overlay0:#7a6aa6;
+    --accent:#a678f0; --lavender:#c9a6ff; --mauve:#d3b6ff;
+    --emerald:#7f6fe0; --accent-soft:#8b7ae6; --gold:#d9b3ff;
+  }
+  html[data-skin="moonlit"] {
+    --base:#0b1018; --mantle:#080d15; --surface0:#1c2735; --surface1:#334358;
+    --text:#e6eefb; --subtext:#93a6bd; --overlay0:#6f8298;
+    --accent:#8fb8e8; --lavender:#bcd6f5; --mauve:#c6dbf7;
+    --emerald:#68d5e0; --accent-soft:#6fc9d6; --gold:#cfe1f5;
+  }
+  html[data-skin="ember"] {
+    --base:#160c0c; --mantle:#120909; --surface0:#33201c; --surface1:#5a352c;
+    --text:#fbe6df; --subtext:#c79b8d; --overlay0:#a5786a;
+    --accent:#e8935f; --lavender:#f0b48f; --mauve:#f3c3a5;
+    --emerald:#e0a94b; --accent-soft:#d67f4b; --gold:#ffcf7a;
+  }
+  html[data-skin="verdant"] {
+    --base:#0a1410; --mantle:#08110d; --surface0:#173026; --surface1:#2a5140;
+    --text:#e2f5ea; --subtext:#93bda6; --overlay0:#6f9d84;
+    --accent:#5fd39a; --lavender:#8fe8bf; --mauve:#a5f3cf;
+    --emerald:#4fc99a; --accent-soft:#4bd68f; --gold:#c8e6a8;
+  }
+/* mg-tokens:end */
+  body{background:var(--base);color:var(--text);font:14px/1.5 system-ui,sans-serif;
+    margin:0;padding:26px;max-width:860px;}
+  h1{font-size:18px;margin:0 0 4px;}
+  p{color:var(--subtext);font-size:13px;}
+  code{background:var(--surface0);border:1px solid var(--surface1);border-radius:5px;padding:1px 6px;}
+  .card{background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;padding:18px;margin-top:16px;}
+  .card h2{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);margin:0 0 12px;font-weight:700;}
+  .bar{display:flex;align-items:center;gap:10px;margin-top:14px;}
+  .bar label{font-size:12px;color:var(--subtext);}
+  select{background:var(--surface0);border:1px solid var(--surface1);color:var(--text);
+    border-radius:6px;padding:5px 9px;font:12px system-ui;}
+  #chips{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;}
+  .chip{background:var(--surface0);border:1px solid var(--surface1);border-radius:9px;padding:8px;}
+  .chip .sw{height:34px;border-radius:6px;border:1px solid var(--surface1);}
+  .chip .nm{font:600 11px ui-monospace,monospace;color:var(--text);margin-top:7px;word-break:break-all;}
+  .chip .vl{font:11px ui-monospace,monospace;color:var(--subtext);margin-top:1px;}
+  .type-row{border-top:1px solid var(--surface1);padding:12px 2px;}
+  .type-row:first-of-type{border-top:none;padding-top:2px;}
+  .type-meta{font:11px ui-monospace,monospace;color:var(--overlay0);margin-top:3px;}
+</style>
+</head>
+<body>
+  <h1>Moonglade tokens — palette &amp; type</h1>
+  <p>Every custom property in the app's <code>DESIGN_TOKENS_CSS</code>, read live from the
+  generated block in this page's own <code>&lt;style&gt;</code> — nothing below is a retyped
+  list, so a token added to the Python constant appears here after one
+  <code>python tools/export_design_kit.py</code>. Pick a skin to watch every swatch re-resolve;
+  a chip whose value doesn't change under a skin is inherited from the base palette.</p>
+
+  <div class="bar">
+    <label for="skin">Skin</label>
+    <select id="skin"></select>
+    <span style="font-size:12px;color:var(--overlay0);">applies <code>&lt;html data-skin&gt;</code>, exactly like the gallery header's switcher</span>
+  </div>
+
+  <div class="card">
+    <h2>Palette — declaration order, straight from the stylesheet</h2>
+    <div id="chips"></div>
+  </div>
+
+  <div class="card">
+    <h2>Type in practice</h2>
+    <div class="type-row">
+      <div style="font:700 21px system-ui,sans-serif;letter-spacing:.01em;">Moonglade Athenaeum</div>
+      <div class="type-meta">headings — system-ui 700, the .ach-htitle scale</div>
+    </div>
+    <div class="type-row">
+      <div style="font:14px/1.5 system-ui,sans-serif;">A library against the Void: back up, browse, generate, curate.</div>
+      <div class="type-meta">body — system-ui 14/1.5</div>
+    </div>
+    <div class="type-row">
+      <div style="font:600 11px system-ui,sans-serif;text-transform:uppercase;letter-spacing:.09em;color:var(--overlay0);">Section label</div>
+      <div class="type-meta">section headers — 11px 600–700 uppercase, spaced (.hall-sec-h scale)</div>
+    </div>
+    <div class="type-row">
+      <div style="font:12px/1.4 ui-monospace,monospace;color:var(--accent);">task_id 7741…88221 · 84,000 credits · FREE</div>
+      <div class="type-meta">data readouts — ui-monospace, tabular where numeric</div>
+    </div>
+    <p style="margin:12px 0 0;">The tokens define no font-family today: the app states
+    <code>system-ui</code> / <code>ui-monospace</code> stacks per surface. If a family ever
+    becomes a token it will land in the palette grid above automatically.</p>
+  </div>
+
+  <script>
+    // Self-deriving: the palette grid and the skin list are READ out of the stamped
+    // stylesheet, so this page has no second copy of either to drift.
+    var rootStyle = getComputedStyle(document.documentElement);
+
+    function rootRule() {
+      var sheet = document.styleSheets[0], rules = sheet.cssRules;
+      for (var i = 0; i < rules.length; i++)
+        if (rules[i].selectorText === ':root') return rules[i];
+      return null;
+    }
+
+    function tokenNames() {
+      var r = rootRule(), names = [];
+      if (!r) return names;
+      for (var i = 0; i < r.style.length; i++)
+        if (r.style[i].indexOf('--') === 0) names.push(r.style[i]);
+      return names;
+    }
+
+    function skinNames() {
+      var names = [], rules = document.styleSheets[0].cssRules;
+      for (var i = 0; i < rules.length; i++) {
+        var sel = rules[i].selectorText || '';
+        var m = sel.match(/^html\[data-skin="([^"]+)"\]$/);
+        if (m) names.push(m[1]);
+      }
+      return names;
+    }
+
+    function renderChips() {
+      var box = document.getElementById('chips');
+      box.innerHTML = '';
+      tokenNames().forEach(function (n) {
+        var v = rootStyle.getPropertyValue(n).trim();
+        var chip = document.createElement('div');
+        chip.className = 'chip';
+        chip.innerHTML = '<div class="sw" style="background:var(' + n + ')"></div>' +
+          '<div class="nm">' + n + '</div><div class="vl">' + v + '</div>';
+        box.appendChild(chip);
+      });
+    }
+
+    var sel = document.getElementById('skin');
+    ['moonglade (default)'].concat(skinNames()).forEach(function (n, i) {
+      var o = document.createElement('option');
+      o.value = i === 0 ? '' : n; o.textContent = n;
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', function () {
+      if (sel.value) document.documentElement.setAttribute('data-skin', sel.value);
+      else document.documentElement.removeAttribute('data-skin');
+      renderChips();   // swatches track var() live; the printed values need a re-read
+    });
+
+    renderChips();
+  </script>
+</body>
+</html>
