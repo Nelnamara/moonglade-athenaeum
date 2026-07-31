@@ -6827,22 +6827,6 @@ document.addEventListener('DOMContentLoaded', function(){
         <button type="button" id="gen-hires" onclick="Gen.toggleBooster('hires')"
                 title="PixAI's Enhance Details: re-renders the finished image at a larger size (hi-res fix), so it adds detail rather than just resolution. To upscale a picture you already have, open it and use Upscale there.">Enhance Details</button>
       </div>
-      <div id="gen-up-ctl" style="display:none;">
-        <div class="gen-lbl">Ratio <span id="gen-up-rval" style="color:var(--lavender);">1.2&times;</span>
-          <span id="gen-up-max" style="text-transform:none;color:var(--overlay0);"></span></div>
-        <input type="range" id="gen-up-ratio" min="1.1" max="1.9" step="0.1" value="1.2" style="width:100%;"
-               oninput="Gen.upRatio()">
-        <div id="gen-up-dims" style="font-size:11px;color:var(--subtext);margin-top:3px;"></div>
-        <div id="gen-up-denoise">
-          <div class="gen-lbl">Denoising strength <span id="gen-up-dval" style="color:var(--lavender);">0.60</span>
-            <span style="text-transform:none;color:var(--overlay0);">&middot; PixAI: works better 0.4&ndash;0.6</span></div>
-          <input type="range" id="gen-up-denoise-str" min="0.01" max="0.99" step="0.01" value="0.6" style="width:100%;"
-                 oninput="Gen.upDenoise(this.value)">
-          <div class="gen-lbl">Denoising steps</div>
-          <input id="gen-up-denoise-steps" class="gen-sel" type="number" min="1" max="50" step="1" value="26"
-                 onchange="Gen.refreshCost()" style="width:100%;">
-        </div>
-      </div>
       <label class="gen-check" title="PixAI's High Priority channel (priority=1000): ~10x faster and it COSTS EXTRA credits. It is not Turbo — Turbo is a separate, members-only channel that is free, and it is what an unticked box already asks for (falling back to standard speed on its own if this account isn't a member)."><input type="checkbox" id="gen-hp"> High priority (faster &middot; costs extra)</label>
       <label class="gen-check"><input type="checkbox" id="gen-ph" checked> Prompt helper</label>
       <mg-cost-badge id="gen-cost" hint="Pick a model to see the cost." card-label="a card"></mg-cost-badge>
@@ -8046,11 +8030,35 @@ var Gen = (function(){
     if(defMin!=null) f.min = (bounds&&bounds.min!=null) ? bounds.min : defMin;
     if(defMax!=null) f.max = (bounds&&bounds.max!=null) ? bounds.max : defMax;
   }
+  // A booster the model does not honor must not be offerable. PixAI's own Add Booster menu
+  // omits Enhance Details entirely on a DiT model (measured 2026-07-28 on Tsubaki.2), and
+  // compatibility.upscale:false is the same fact in their metadata. Sending it anyway is the
+  // image-side twin of the V3.0 Lite video bug, where an unsupported flag came back as a
+  // bogus "sensitive or NSFW content" refusal -- so the cost of not gating is a misleading
+  // error, not a no-op. Disables rather than hides, same reasoning as gateField, and turns
+  // the booster OFF if the model changed underneath it while it was armed.
+  function gateBooster(k, honored, why){
+    var b=el(BOOSTER_BTN[k]); if(!b) return;
+    if(b.getAttribute('data-title')===null) b.setAttribute('data-title', b.title||'');
+    var off = honored===false;
+    b.disabled = off;
+    b.classList.toggle('cap-off', off);
+    b.title = off ? why : (b.getAttribute('data-title')||'');
+    if(off && boosters[k]){
+      boosters[k]=false;
+      b.classList.remove('on');
+      return true;                    // caller re-costs: the submit shape just changed
+    }
+    return false;
+  }
   function applyCapabilityGating(){
     var s=selected||{}, compat=s.compatibility||{}, restr=s.restrictions||{};
     gateField('gen-neg', compat.negativePrompt, null);
     gateField('gen-steps', compat.samplingSteps, restr.samplingSteps, 1, 150);
     gateField('gen-cfg', compat.cfgScale, restr.cfgScale, 1, 30);
+    var disarmed = gateBooster('hires', compat.upscale,
+      'This model doesn\\u2019t support Enhance Details \\u2014 PixAI doesn\\u2019t offer it on this model either.');
+    if(disarmed) debouncedCost();
   }
   // problem 4: PixAI's own model/LoRA cards offer a version selector; resolve_version_meta
   // always silently took the newest release and discarded the rest. #gen-version lists every
@@ -8154,8 +8162,7 @@ var Gen = (function(){
     return {w:d8(w), h:d8(h), custom:false};
   }
   function updateDimNote(){ var n=el('gen-dim-note'); if(!n) return; var d=dims();
-    n.textContent='\\u2192 '+d.w+' \\u00d7 '+d.h+(d.custom?' \\u00b7 custom':' px');
-    syncUpscale(); }
+    n.textContent='\\u2192 '+d.w+' \\u00d7 '+d.h+(d.custom?' \\u00b7 custom':' px'); }
   // --- Boosters (Face Fix / Quality Tag / Enhance Details) --------------------
   // PixAI has TWO upscale methods and they live in different places. `enlarge` (their
   // ESRGAN "Upscale") and `upscale` (their "Hires") are both offered from the IMAGE VIEW,
@@ -8168,42 +8175,18 @@ var Gen = (function(){
   // image, so the ratio cap and the "-> 1952x1096" output line were derived from the size
   // the generation is ABOUT to be rather than from a real picture.
   //
-  // upCeil/upDims/upMax are a HAND PORT of core.UPSCALE_PIXEL_CEILING /
-  // upscale_output_dims / max_upscale_ratio (moonglade_backup.py) -- the server
-  // re-derives and clamps the ratio on every price check AND submit, so this copy exists
-  // only so the slider can't offer a ratio the server would silently pull back, and so
-  // the output size can be shown while dragging with no round-trip. Same hand-maintained
-  // duplication risk as friendlyGenErr below: if those ceilings change, change these too.
-  // (static/mg-upscale-panel.js carries the same port for the same reason, and
-  // tests/test_upscale_boosters.py runs BOTH against the Python.) Both languages use
-  // IEEE-754 doubles, so the floor-to-multiple-of-8 below reproduces the Python side (and
-  // PixAI's own dialog) exactly, 1952 and not 1960 at 1400x1.4.
-  var upCeil={enlarge:2048*2048, upscale:2048*1152};
+  // The drawer's chip carries NO settings, matching PixAI: their Add Booster menu offers
+  // add-or-remove and nothing else. The ratio/denoise sliders that used to live here were
+  // the image-view tool's controls on a booster that has none, and the pixel-ceiling cap
+  // that drove them does not apply: it was inferred from their image-view DIALOG's slider
+  // maxima, and a real booster task submitted 1.5 on a 1400x784 source (2100x1176) --
+  // over that inferred ceiling -- and completed. The ceiling still governs
+  // <mg-upscale-panel>, which is where a slider actually exists.
+  // PixAI's own values for the Enhance Details chip, captured from a real task rather than
+  // guessed. Their booster exposes no controls, so these are not defaults the user can move.
+  var MG_HIRES={ratio:1.5, denoise:0.6};
   var boosters={facefix:false, qtag:false, hires:false};
   var BOOSTER_BTN={facefix:'gen-facefix', qtag:'gen-qtag', hires:'gen-hires'};
-  function upDims(w,h,r){ return [Math.max(64,Math.floor(w*r/8)*8), Math.max(64,Math.floor(h*r/8)*8)]; }
-  function upMax(w,h,mode){
-    for(var i=30;i>0;i--){ var r=Math.round((1+i*0.1)*10)/10, o=upDims(w,h,r);
-      if(o[0]*o[1]<=upCeil[mode]) return r; }
-    return 1;
-  }
-  function syncUpscale(){
-    if(!boosters.hires) return;
-    var d=dims(), s=el('gen-up-ratio'); if(!s) return;
-    // Re-derived from the CURRENT output size every time, so it moves with Aspect / Size /
-    // custom W&H. Always the 'upscale' ceiling: the drawer only does Hires now.
-    var mx=upMax(d.w,d.h,'upscale');
-    s.max=mx; s.disabled=(mx<=1);
-    if(+s.value>mx) s.value=mx;
-    var r=+s.value, o=upDims(d.w,d.h,r);
-    el('gen-up-rval').textContent=r.toFixed(1)+'\\u00d7';
-    el('gen-up-max').textContent = (mx<=1) ? '' : ('\\u00b7 max '+mx.toFixed(1)+'\\u00d7 at this size');
-    el('gen-up-dims').textContent = (mx<=1)
-      ? 'This size is already at PixAI\\'s ceiling for Hires \\u2014 generate smaller to enhance details.'
-      : (d.w+'\\u00d7'+d.h+' \\u2192 '+o[0]+'\\u00d7'+o[1]);
-  }
-  function upRatio(){ syncUpscale(); debouncedCost(); }
-  function upDenoise(v){ el('gen-up-dval').textContent=(+v).toFixed(2); debouncedCost(); }
   function toggleBooster(k){
     boosters[k]=!boosters[k];
     var b=el(BOOSTER_BTN[k]);
@@ -8211,14 +8194,17 @@ var Gen = (function(){
     // Enhance Details is the one booster with settings of its own; the ratio panel is its
     // disclosure, so it opens and closes with the chip rather than living on screen at all
     // times the way the old segment's controls did.
-    if(k==='hires'){
-      el('gen-up-ctl').style.display = boosters.hires ? '' : 'none';
-      syncUpscale();
-    }
     debouncedCost();
   }
   function payload(){ var a=dims();
-    var upR=(!boosters.hires||el('gen-up-ratio').disabled)?null:+el('gen-up-ratio').value;
+    // Enhance Details is a plain on/off chip, exactly like PixAI's: their Add Booster menu
+    // offers add-or-remove and NO settings at all. The values below are theirs, captured
+    // from a real task (2026-07-28, task 2039053268124647852): upscale 1.5, denoising
+    // strength 0.6, and denoising steps that MIRROR the generation's own sampling steps
+    // rather than a constant -- their task carried samplingSteps 32 and
+    // upscaleDenoisingSteps 32. The drawer used to expose a ratio/denoise panel, which was
+    // the IMAGE-VIEW upscale tool's control surface bolted onto a booster that has none.
+    var upR = boosters.hires ? MG_HIRES.ratio : null;
     var qt=el('gen-qtag');
     return { version_id:(selected&&selected.version_id)||'', model_id:(selected&&selected.model_id)||'', prompt:el('gen-prompt').value.trim(),
       negative:el('gen-neg').value.trim(), width:a.w, height:a.h, mode:el('gen-mode').value,
@@ -8232,8 +8218,8 @@ var Gen = (function(){
       // the drawer offers Hires only, and a stray enlarge alongside it is the one
       // combination the builder refuses outright.
       upscale:upR,
-      upscale_denoise:+el('gen-up-denoise-str').value,
-      upscale_denoise_steps:+el('gen-up-denoise-steps').value,
+      upscale_denoise: boosters.hires ? MG_HIRES.denoise : null,
+      upscale_denoise_steps: boosters.hires ? (+el('gen-steps').value||25) : null,
       face_fix:boosters.facefix,
       quality_tag:(boosters.qtag?(qt&&qt.getAttribute('data-prefix')||''):''),
       loras:loras.filter(function(l){return l.version_id;}).map(function(l){return {version_id:l.version_id, weight:l.weight};}) }; }
@@ -8795,8 +8781,14 @@ var Gen = (function(){
       // Saved through /api/import-local -- the SAME route the Picker's file import uses -- so
       // the composite lands in imported/ with a thumbnail and a source='local' catalog row like
       // any other local file. Nothing is uploaded to PixAI; no generation is created.
-      var fd=new FormData();
-      fd.append('files', b, mid+'_'+acting.id+'.png');
+      //
+      // Strength/angle are part of the OUTPUT, not just the filter id -- without them in the
+      // name, re-saving the same filter at a different slider position collides with the
+      // first file's name, and run_import_local's dedup keys purely on filename (not content),
+      // so it silently treats a genuinely different image as "already in your library."
+      var o=afOpts(), fd=new FormData();
+      var tag=acting.id+'_s'+o.strength.toFixed(2).replace('.','')+'_a'+o.angle;
+      fd.append('files', b, mid+'_'+tag+'.png');
       return fetch('/api/import-local', {method:'POST', body:fd}).then(function(r){ return r.json(); });
     }).then(function(d){
       if(d && d.error){ done(d.error, true); return; }
@@ -8867,7 +8859,6 @@ var Gen = (function(){
           setDock:setDock, toggleFlyout:toggleFlyout,
           previewSelected:previewSelected, hidePreview:hidePreview,
           refPick:refPick, refStrength:refStrength, presetImport:presetImport,
-          upRatio:upRatio, upDenoise:upDenoise,
           toggleBooster:toggleBooster,
           loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
           reclampLoras:reclampLoras,
@@ -9486,13 +9477,19 @@ function savePrompt() {
        the glow + sparkle behind it is exactly the mock's own placeholder, so a
        fresh install still gets the moment rather than a broken image. #}
     <div class="login-char" id="login-char" aria-hidden="true">
-      {# Each rung must hand off to the NEXT rung, and the last must REMOVE the
-         element -- an <img> left in the DOM after its final 404 paints a broken-image
-         icon, and the `:has(img)` rule below would go on suppressing the sparkle
-         placeholder because a (broken) img still matches. Removing it restores the
-         mock's own glow-and-sparkle treatment on an install with no mascot art. #}
-      <img src="/branding/mascots/login_nel.png" alt=""
-           onerror="this.onerror=function(){this.remove();};this.src='/branding/mascots/gen_nel.png';">
+      {# ANIMATED-OR-STILL, the same contract the per-achievement mascots already have:
+         `ach/<id>.webp` -> `ach/<id>.png` -> `present_<tier>.png`, which is why dropping
+         first-light.webp beside the stills just animated it. The login screen was built
+         later and never carried that context -- it hardcoded ONE path with ONE fallback,
+         so it silently rendered nothing whichever format or folder the art landed in.
+         This walks the same ladder: webp before png, root before mascots/ (root is the
+         precedent the job-tracker spinner sets -- branding/gen_nel.png is a different file
+         from mascots/gen_nel.png), then the narrator still, then removes the element
+         entirely rather than leaving a broken-image icon that would keep the `:has(img)`
+         rule below from restoring the mock's own sparkle placeholder. #}
+      <img src="/branding/login_nel.webp" alt=""
+           data-fb="/branding/login_nel.png|/branding/mascots/login_nel.webp|/branding/mascots/login_nel.png|/branding/mascots/gen_nel.png"
+           onerror="var f=(this.dataset.fb||'').split('|').filter(Boolean);var n=f.shift();this.dataset.fb=f.join('|');if(n){this.src=n;}else{this.remove();}">
     </div>
   <div class="login-card">
     <div class="login-brand">
@@ -12852,7 +12849,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 return "No matching images found.", 404
             mem.seek(0)
             resp = send_file(mem, mimetype="application/zip", as_attachment=True,
-                             download_name="pixai_selection_{}.zip".format(n))
+                             download_name="moonglade_selection_{}.zip".format(n))
             if warnings:
                 resp.headers["X-Export-Warnings"] = str(len(warnings))
             return resp
@@ -13030,6 +13027,38 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def _gen_session():
         import moonglade_backup as core
         return core, core._make_session(None)
+
+    # Membership is not stored anywhere -- it is a live GraphQL read per call -- and
+    # /api/price fires on every keystroke in the drawer, so an uncached check would tax the
+    # cost badge with a round trip per character. Five minutes is long enough to cost
+    # nothing and short enough that a membership bought (or lapsed) mid-session is picked up
+    # without a restart. An UNKNOWN result is deliberately not cached: it means the read
+    # failed, and a transient failure must not pin a paying member to non-member behaviour.
+    _entitle_cache = {"value": None, "at": 0.0}
+    _ENTITLE_TTL = 300.0
+
+    def _entitlements(core, session):
+        """{"is_member": True/False/None, "lora_cap": int|None} -- what PixAI says this
+        account may ask for. None anywhere means UNKNOWN and every caller fails open."""
+        import time as _t
+        now = _t.time()
+        cached = _entitle_cache["value"]
+        if cached is not None and (now - _entitle_cache["at"]) < _ENTITLE_TTL:
+            return cached
+        try:
+            me = core.account_info(session)
+            val = {"is_member": core.account_is_member(me),
+                   "lora_cap": core.account_lora_cap(me)}
+        except Exception:                                    # noqa: BLE001
+            return {"is_member": None, "lora_cap": None}
+        if val["is_member"] is not None:
+            _entitle_cache["value"] = val
+            _entitle_cache["at"] = now
+        return val
+
+    def _account_is_member(core, session):
+        """True / False / None(unknown) -- entitlement for PixAI's members-only options."""
+        return _entitlements(core, session)["is_member"]
 
     def _input_media_id(core, session, val):
         """Turn whatever the client sent into a media_id PixAI will accept as an INPUT.
@@ -13556,10 +13585,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # to probe against from this checkout) -- treated as a soft pre-submit guard the
             # client can warn from, not a hard block, since PixAI's own server is the real
             # authority on any submit that slips past it.
-            priv = ((me.get("membership") or {}).get("privilege")) or {}
-            lora_cap = priv.get("lora")
-            if lora_cap is None:
-                lora_cap = priv.get("freeUserLora")
+            # Shared with the submit-side guard so the number the drawer PAINTS and the
+            # number the server ENFORCES can never disagree. Crucially this now returns the
+            # free-tier cap for a non-member instead of null: null hid the counter and
+            # switched the client guard off entirely the moment a membership lapsed.
+            lora_cap = core.account_lora_cap(me)
             # Backup coverage: server's lifetime TASK count vs distinct tasks we hold locally.
             # Both are task counts (not images), so the ratio is honest.
             try:
@@ -13578,7 +13608,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                             "coverage_pct": coverage,
                             "followers": me.get("followerCount"),
                             "following": me.get("followingCount"),
-                            "lora_cap": lora_cap})
+                            "lora_cap": lora_cap,
+                            # True / False / null=unknown. The drawer gates members-only
+                            # controls on an explicit False only, so an unreadable account
+                            # never strips a paying member's options.
+                            "is_member": core.account_is_member(me)})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
@@ -14214,7 +14248,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             mode=(p.get("mode") or "auto"),
             seed=(int(seed_raw) if seed_raw.lstrip("-").isdigit() else None),
             lora=loras,
-            prompt_helper=(str(p.get("prompt_helper", "1")) not in ("0", "false", "off")),
+            # .lower() matters: a JSON `false` arrives as Python False, and
+            # str(False) is "False" -- which did NOT match the lowercase tuple, so
+            # every explicitly-disabled prompt helper was submitted as ENABLED.
+            # Found 2026-07-29 reviewing the pilot's port; it bit the classic
+            # drawer's unchecked box identically.
+            prompt_helper=(str(p.get("prompt_helper", "1")).lower()
+                           not in ("0", "false", "off", "none")),
             ref_media_id=str(p.get("ref_media_id") or "").strip(),
             ref_strength=num("ref_strength", 0.55, float),
             # Upscale + boosters. num() returns its default for a missing/blank value, so
@@ -14482,7 +14522,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 os.replace(tmp, dest)   # atomic: a torn write can't eat the set
             return jsonify({"presets": presets})
 
-    def _params_and_nocard(core, p, user):
+    def _params_and_nocard(core, p, user, is_member=None):
         """Route a drawer payload to generate, edit, fix, or video params. Returns (params,
         no_card, note). note is set (params None) when something's missing. `user` is
         only consulted on the edit path (a preset lookup is per-account)."""
@@ -14538,6 +14578,9 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         args = _gen_args_from_payload(p)
         if not args.model:
             return None, args.no_card, "pick a model"
+        # Same entitlement the submit applies, so the badge cannot quote a price for a
+        # members-only option that will be stripped before it is sent.
+        args.is_member = is_member
         try:
             return core._gen_parameters(args), args.no_card, None
         except core.PixAIError as e:
@@ -14620,7 +14663,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 _vid = (core.resolve_version_meta(gsession, str(body["model_id"]).strip()) or {}).get("version_id") or ""
                 if _vid:
                     body = {**body, "version_id": _vid}
-            params, no_card, note = _params_and_nocard(core, body, user)
+            params, no_card, note = _params_and_nocard(
+                core, body, user, _account_is_member(core, gsession))
             if params is None:
                 return jsonify({"cost": None, "free": False, "note": note})
             cost = core.price_task(gsession, params)
@@ -14666,6 +14710,26 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 return jsonify({"error": "pick a model first"}), 400
             if not args.prompt:
                 return jsonify({"error": "enter a prompt"}), 400
+            # Members-only options are dropped for an account PixAI reports as non-member.
+            # Set on the args (not inside the builder) so the CLI keeps its own path and the
+            # price call below can set the identical flag -- the badge must quote the shape
+            # that will actually submit.
+            _ent = _entitlements(core, session)
+            args.is_member = _ent["is_member"]
+            # The per-generation LoRA cap was CLIENT-ONLY until 2026-07-28: both the gallery
+            # drawer and the Loom disable their own submit button over the cap, and nothing
+            # checked it here -- so any path that is not one of those two buttons (a stale
+            # page, the Loom before /api/account resolves, a hand-rolled POST) reached PixAI
+            # and came back LORA_NUM_EXCEEDED / 40300027. Reproduced by the owner with six
+            # LoRAs against a cap of three. Refuse rather than silently trim: dropping a LoRA
+            # changes the picture he asked for, and a refusal costs nothing because no task
+            # is created either way. Fails OPEN on an unknown cap.
+            _cap = _ent["lora_cap"]
+            if _cap is not None and len(getattr(args, "lora", None) or []) > _cap:
+                return jsonify({"error": "Your account allows {} LoRA{} per generation — "
+                                         "remove {} to continue.".format(
+                                             _cap, "" if _cap == 1 else "s",
+                                             len(args.lora) - _cap)}), 400
             params = core._gen_parameters(args)
             core._apply_kaisuuken(session, params, args)   # attach free card unless no_card
             task_id = core.submit_generation(session, params)
@@ -16272,6 +16336,13 @@ def main():
         # run code after a blocking call starts)
         import threading, webbrowser
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+    # Per-port session cookie. Browsers scope cookies by HOST ONLY -- localhost:5757 and
+    # localhost:5057 share one cookie jar entry -- so two Moonglade instances with the
+    # default "session" name and different secrets evict each other's login on every
+    # sign-in (discovered 2026-07-29: a sandbox and the run-copy silently logged each
+    # other out all evening). Naming the cookie by port lets instances coexist. Costs one
+    # re-login per instance when this ships, then never again.
+    app.config["SESSION_COOKIE_NAME"] = "moonglade_session_{}".format(args.port)
     app.run(host=args.host, port=args.port, debug=False, threaded=True, ssl_context=ssl_context)
 
 

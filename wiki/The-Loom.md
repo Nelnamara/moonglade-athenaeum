@@ -183,7 +183,7 @@ Select a shot that has rendered and pull the Timeline drawer to **full** — tha
 clip actually plays:
 
 - Hover the preview to scrub; **⏸/▶** toggles playback, **⏪ / ⏩** nudge by 0.25s.
-- Drag the in/out handles to **trim** non-destructively — both Play and Export honor it.
+- Drag the in/out handles to **trim** non-destructively — both Play and Render honor it.
 - **✂ Split** cuts the shot in two at the playhead.
 - **⛶ Crop** — drag a rectangle over the preview; it's applied on export.
 
@@ -243,9 +243,9 @@ alongside every place it
 was referenced from, whether that's a shot's result, one of its frame slots, or a cast entry
 — so it survives the download and reaches whoever you hand the bundle to.
 
-Don't confuse that menu with the top bar's **↓ Export**, which is the actual render: it
-trims and stitches every finished shot into one 720p mp4 via ffmpeg (with progress, and a
-Stop button).
+That menu is for project *files*. The top bar's **⇩ Render** is the video: it trims and
+stitches every finished shot into one 720p mp4 via ffmpeg (with progress, and a Stop
+button).
 
 ### What the render needs
 

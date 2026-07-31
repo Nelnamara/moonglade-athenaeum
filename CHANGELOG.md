@@ -17,6 +17,26 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Fixed: a locally-imported image (Art filters' Save to library, or anything else through
+  `/api/import-local`) could save successfully and still never appear on the gallery's first
+  page.** Owner: *"It says saved but does not appear in the gallery."* Not a sandbox artifact
+  and not a duplicate — confirmed directly against `catalog.db` rather than trusting a
+  screenshot. The real cause:
+  `created_at` is sorted as a **plain string** (`_SORT_SQL`/`_DEFAULT_SORT_SQL` have no
+  `datetime()` wrapping), and `run_import_local()` stamped it in **naive local time** with no
+  timezone marker (`time.strftime(..., time.localtime(mtime))`), while every PixAI-collected
+  row stores `createdAt` in **UTC with a trailing `Z`**. A file saved at 23:0X PDT on the 29th
+  reads as `"2026-07-29T23:0X:XX"` — a plain string that sorts *behind* `"2026-07-30T06:0X:XX.XXXZ"`,
+  even though 06:0X UTC on the 30th is 23:0X PDT on the *same* evening the file was actually
+  saved. The row was real, correctly thumbnailed, and correctly counted in the total the whole
+  time (confirmed: filtering Source → Imported showed it immediately) — it just never sorted
+  near page 1 of "newest first." Fixed by stamping UTC + `Z` instead, matching the PixAI
+  convention exactly, in `run_import_local()` and in the four `createdAt`-missing fallbacks on
+  the generate/edit/video/reference-video collect paths (same latent inconsistency, same fix).
+  Required a server restart to take effect (the module was already imported in the running
+  process) — verified live afterward: a fresh save's `created_at` lands as `…Z` UTC and the
+  item is genuinely the first tile in the default view.
+
 - **`--sync-similar` — top up the visual-similarity index instead of rebuilding it.** Also a
   Control Panel job, *Top up the Similar index (adds only what's missing)*, listed above Rebuild
   so the non-destructive action reads first. `sync()` was always incremental — it skips

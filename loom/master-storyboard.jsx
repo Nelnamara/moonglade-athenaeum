@@ -2485,7 +2485,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => playSequence(entries)}
           title="Play every finished shot back-to-back, honoring trims — a rough cut, no rendering">&#9654;&#9654; Play</button>
         <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => exportCut(entries)}
-          title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8681; Export</button>
+          title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8681; Render</button>
         <ExportMenu exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle}
           bundling={bundling} importBackup={importBackup} />
         <a className="lv-close" href="/" style={{ textDecoration: "none" }}>← Gallery</a>
