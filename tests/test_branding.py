@@ -244,3 +244,29 @@ def test_branding_json_sits_beside_the_art_directory():
     assert cfg == g.branding_root().parent / "branding.json"
     assert cfg.parent == g.branding_root().parent      # siblings, not nested
     assert "library" not in str(cfg)                   # the argument is genuinely ignored
+
+
+def test_login_mascot_takes_webp_or_png_like_the_achievement_mascots(tmp_path):
+    """The per-achievement mascots have had an animated-or-still contract since 2026-07-12:
+    `ach/<id>.webp` -> `ach/<id>.png` -> `present_<tier>.png`. That is why dropping
+    `first-light.webp` in beside the stills simply animated that one achievement.
+
+    The login screen was built later and never carried that context: it hardcoded ONE path
+    with ONE fallback (`mascots/login_nel.png`), so the owner's real art -- `login_nel.webp`
+    at the branding ROOT -- rendered nothing at all, being in the wrong folder AND the wrong
+    format. Owner: "It was my understanding we wired things so I could use webp animated and
+    png for the mascots... but the login screen was made later and likely did not carry that
+    context."
+
+    Pins the whole ladder so a later edit cannot quietly collapse it back to one path.
+    """
+    html = _app(tmp_path).test_client().get("/login").get_data(as_text=True)
+    assert "/branding/login_nel.webp" in html, "webp must be tried FIRST -- animated wins"
+    for later in ("/branding/login_nel.png",
+                  "/branding/mascots/login_nel.webp",
+                  "/branding/mascots/login_nel.png",
+                  "/branding/mascots/gen_nel.png"):
+        assert later in html, later + " is missing from the fallback ladder"
+    # It must still END by removing the element: a broken-image icon would keep the
+    # :has(img) rule from restoring the mock's sparkle placeholder on a bare install.
+    assert "this.remove()" in html

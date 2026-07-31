@@ -8781,8 +8781,14 @@ var Gen = (function(){
       // Saved through /api/import-local -- the SAME route the Picker's file import uses -- so
       // the composite lands in imported/ with a thumbnail and a source='local' catalog row like
       // any other local file. Nothing is uploaded to PixAI; no generation is created.
-      var fd=new FormData();
-      fd.append('files', b, mid+'_'+acting.id+'.png');
+      //
+      // Strength/angle are part of the OUTPUT, not just the filter id -- without them in the
+      // name, re-saving the same filter at a different slider position collides with the
+      // first file's name, and run_import_local's dedup keys purely on filename (not content),
+      // so it silently treats a genuinely different image as "already in your library."
+      var o=afOpts(), fd=new FormData();
+      var tag=acting.id+'_s'+o.strength.toFixed(2).replace('.','')+'_a'+o.angle;
+      fd.append('files', b, mid+'_'+tag+'.png');
       return fetch('/api/import-local', {method:'POST', body:fd}).then(function(r){ return r.json(); });
     }).then(function(d){
       if(d && d.error){ done(d.error, true); return; }
@@ -9471,13 +9477,19 @@ function savePrompt() {
        the glow + sparkle behind it is exactly the mock's own placeholder, so a
        fresh install still gets the moment rather than a broken image. #}
     <div class="login-char" id="login-char" aria-hidden="true">
-      {# Each rung must hand off to the NEXT rung, and the last must REMOVE the
-         element -- an <img> left in the DOM after its final 404 paints a broken-image
-         icon, and the `:has(img)` rule below would go on suppressing the sparkle
-         placeholder because a (broken) img still matches. Removing it restores the
-         mock's own glow-and-sparkle treatment on an install with no mascot art. #}
-      <img src="/branding/mascots/login_nel.png" alt=""
-           onerror="this.onerror=function(){this.remove();};this.src='/branding/mascots/gen_nel.png';">
+      {# ANIMATED-OR-STILL, the same contract the per-achievement mascots already have:
+         `ach/<id>.webp` -> `ach/<id>.png` -> `present_<tier>.png`, which is why dropping
+         first-light.webp beside the stills just animated it. The login screen was built
+         later and never carried that context -- it hardcoded ONE path with ONE fallback,
+         so it silently rendered nothing whichever format or folder the art landed in.
+         This walks the same ladder: webp before png, root before mascots/ (root is the
+         precedent the job-tracker spinner sets -- branding/gen_nel.png is a different file
+         from mascots/gen_nel.png), then the narrator still, then removes the element
+         entirely rather than leaving a broken-image icon that would keep the `:has(img)`
+         rule below from restoring the mock's own sparkle placeholder. #}
+      <img src="/branding/login_nel.webp" alt=""
+           data-fb="/branding/login_nel.png|/branding/mascots/login_nel.webp|/branding/mascots/login_nel.png|/branding/mascots/gen_nel.png"
+           onerror="var f=(this.dataset.fb||'').split('|').filter(Boolean);var n=f.shift();this.dataset.fb=f.join('|');if(n){this.src=n;}else{this.remove();}">
     </div>
   <div class="login-card">
     <div class="login-brand">
@@ -12837,7 +12849,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 return "No matching images found.", 404
             mem.seek(0)
             resp = send_file(mem, mimetype="application/zip", as_attachment=True,
-                             download_name="pixai_selection_{}.zip".format(n))
+                             download_name="moonglade_selection_{}.zip".format(n))
             if warnings:
                 resp.headers["X-Export-Warnings"] = str(len(warnings))
             return resp
@@ -14236,7 +14248,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             mode=(p.get("mode") or "auto"),
             seed=(int(seed_raw) if seed_raw.lstrip("-").isdigit() else None),
             lora=loras,
-            prompt_helper=(str(p.get("prompt_helper", "1")) not in ("0", "false", "off")),
+            # .lower() matters: a JSON `false` arrives as Python False, and
+            # str(False) is "False" -- which did NOT match the lowercase tuple, so
+            # every explicitly-disabled prompt helper was submitted as ENABLED.
+            # Found 2026-07-29 reviewing the pilot's port; it bit the classic
+            # drawer's unchecked box identically.
+            prompt_helper=(str(p.get("prompt_helper", "1")).lower()
+                           not in ("0", "false", "off", "none")),
             ref_media_id=str(p.get("ref_media_id") or "").strip(),
             ref_strength=num("ref_strength", 0.55, float),
             # Upscale + boosters. num() returns its default for a missing/blank value, so
@@ -16318,6 +16336,13 @@ def main():
         # run code after a blocking call starts)
         import threading, webbrowser
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+    # Per-port session cookie. Browsers scope cookies by HOST ONLY -- localhost:5757 and
+    # localhost:5057 share one cookie jar entry -- so two Moonglade instances with the
+    # default "session" name and different secrets evict each other's login on every
+    # sign-in (discovered 2026-07-29: a sandbox and the run-copy silently logged each
+    # other out all evening). Naming the cookie by port lets instances coexist. Costs one
+    # re-login per instance when this ships, then never again.
+    app.config["SESSION_COOKIE_NAME"] = "moonglade_session_{}".format(args.port)
     app.run(host=args.host, port=args.port, debug=False, threaded=True, ssl_context=ssl_context)
 
 
