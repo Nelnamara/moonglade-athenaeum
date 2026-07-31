@@ -25,7 +25,7 @@ reader could work it out from the code, it does not belong here.
 
 ## Contents
 
-- [Standing rules](#standing-rules) &mdash; 61
+- [Standing rules](#standing-rules) &mdash; 62
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
@@ -422,6 +422,12 @@ The route-tier test enumerates the URL map, fails any route declaring no tier, a
 The Activity tray renders from /api/jobs, never from a poll response. /api/task-status writes `started` into jobs.jsonl, and the tray draws a distinct QUEUED row (mascot with both animations stopped plus an uppercase `queued` pill) that flips to the ordinary spinner when a worker takes the job. The phase is written once per phase change, not once per poll, and the in-process de-dupe entry is dropped at a terminal phase so it stays bounded by in-flight tasks.
 
 **Why.** Four pollers ask every 3s; a per-poll write would bloat the log and keep refreshing the `ts` that the orphan sweep's age check reads. Rendering from the log means the signal reaches both trays with no per-host wiring, since every submit surface's poller calls that one route.
+
+### Start the dev server through the launcher, never `python moonglade_gallery.py` bare
+
+A dev/sandbox server is started by running **`Serve Gallery.pyw`** (under `pythonw`), never by invoking `moonglade_gallery.py` directly. Machine-local flags go in the git-ignored `serve.txt` beside it — on the sandbox checkout that is `--out pixai_backup --port 5057`. The `--out` pin is **not optional here**: the launcher deliberately passes no `--out` so the server can resolve `config.json`'s `LIBRARY_DIR`, and on this machine that value points at the **D: install's library** — an unpinned launch from the C: checkout serves D:.
+
+**Why.** Only the launcher sets `MOONGLADE_SUPERVISED=1` and runs the exit-code-42 relaunch loop, and `/api/server/restart` refuses with a 409 without it. A bare launch therefore silently removes the owner's Restart button from the Control Panel, which is not a cosmetic loss — his stated reason for killing a bare-started server was that he could not restart it. Nothing in the running process advertises that it is unsupervised, so the next session cannot tell by looking; the rule has to be written down.
 
 ---
 
@@ -2220,5 +2226,39 @@ theorising. Also: the template lives in a Python string, so **the server must be
 any change** — and a killed server can still serve a cached page, which produced identical
 "nothing changed" measurements twice. Kill by command line and prove it responds before
 trusting a screenshot.
+
+### A locally-imported file could save and never appear on page 1 — created_at's timezone, not a duplicate or a sandbox artifact  ·  *2026-07-29*
+
+Owner, after Save to library started reporting success: **"It says saved but does not appear in
+the gallery."** First explanation offered was wrong and worth recording as a lesson: reading the
+default "All, newest first" view, two thumbnails looked blank at a glance and were assumed to be
+the new saves; zooming in showed they were unrelated real images — a second misread in the same
+investigation (the first was mistaking a JPEG-compression artifact for a broken tile). The
+owner pushed back correctly: **"I would think they would be in line with the timestamp and
+appear at the top."** That instinct was right. Checked the actual `catalog.db` rather than
+trust a screenshot a third time.
+
+**Root cause:** `_SORT_SQL`/`_DEFAULT_SORT_SQL` (`moonglade_gallery.py`) sort `created_at` as a
+**plain SQL string**, no `datetime()` wrapping. `run_import_local()` (`moonglade_backup.py`)
+stamped it via `time.strftime(..., time.localtime(stored.stat().st_mtime))` — **naive local
+time, no timezone marker** — while every PixAI-collected row's `createdAt` arrives (and is
+stored) as **UTC with a trailing `Z`**. A file saved at 23:0X PDT reads as the string
+`"2026-07-29T23:0X:XX"`; a PixAI row collected minutes earlier reads as
+`"2026-07-30T06:0X:XX.XXXZ"` — and `"2026-07-30…" > "2026-07-29…"` lexicographically, regardless
+of the fact that 06:0X UTC on the 30th *is* 23:0X PDT on the 29th, the same evening. The row was
+never missing: correctly written, correctly thumbnailed, correctly counted (`source=local`
+filter surfaced all 6 test saves immediately, and `total` had incremented on every one) — it
+simply never sorted near the top of a plain-string "newest first" comparison against
+UTC-stamped rows.
+
+**Fix:** stamp UTC + `Z` instead of naive local time, in `run_import_local()` and in the four
+`result.get("createdAt") or time.strftime(...)` fallbacks on the generate/edit/video/
+reference-video collect paths (`moonglade_backup.py`) — same latent inconsistency, same shape,
+fixed everywhere it appears rather than only where it was reported. Required a full server
+restart to take effect: `import moonglade_backup as core` runs inside each request handler, but
+Python caches the module in `sys.modules` on first import, so an edited `.py` file is invisible
+to an already-running process until it restarts (this server runs with `debug=False`, no
+auto-reloader). Verified live post-restart: a fresh save's `created_at` lands as `…Z` UTC and is
+genuinely the first tile in the default view, ahead of every previously-collected row.
 
 ---

@@ -2598,7 +2598,7 @@ ${"=".repeat(48)}
         onClick: () => exportCut(entries),
         title: "Trim + stitch every finished shot into one mp4 (ffmpeg)"
       },
-      "\u21E9 Export"
+      "\u21E9 Render"
     ), /* @__PURE__ */ React.createElement(
       ExportMenu,
       {

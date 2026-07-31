@@ -5138,8 +5138,14 @@ def run_import_local(args):
             continue
         existing_mids.add(mid)            # two sources, one content: catalog it once
         try:
-            created = time.strftime("%Y-%m-%dT%H:%M:%S",
-                                    time.localtime(stored.stat().st_mtime))
+            # UTC + Z, matching the PixAI-sourced rows' `createdAt` format below --
+            # `created_at` is sorted as a plain string (_SORT_SQL has no datetime()
+            # wrapping), so a naive LOCAL-time stamp here reads as hours "older" than
+            # a same-moment UTC one west of Greenwich, silently outranked by anything
+            # PixAI collected since (a local save at 23:0X PDT sorted behind rows
+            # timestamped 06:05 UTC the "next" day, an hour earlier in real time).
+            created = time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                    time.gmtime(stored.stat().st_mtime))
         except OSError:
             created = ""
         full = {f: "" for f in CATALOG_FIELDS}
@@ -5525,6 +5531,14 @@ def _gen_parameters(args):
     if getattr(args, "face_fix", False):
         params["enableADetailer"] = True             # their "Face Fix" booster
     qtag = str(getattr(args, "quality_tag", "") or "").strip()
+    # Quality Tag is MEMBERS-ONLY on PixAI -- crowned in their Add Booster menu on every
+    # model, and their own guide says "member-only" in writing. This app was never built to
+    # get around their systems (owner, 2026-07-28), so an account PixAI reports as
+    # non-member does not send the gated parameter. `is_member` is True/False/None from
+    # core.account_is_member(); only an explicit False gates, so an unreadable account still
+    # submits exactly as before.
+    if qtag and getattr(args, "is_member", None) is False:
+        qtag = ""
     if qtag:
         params["qualityTag"] = {"prefix": qtag}      # their "Quality Tag" booster
     if getattr(args, "kaisuuken_id", ""):
@@ -6401,7 +6415,11 @@ def run_generate(args):
             "task_id": str(task_id), "media_id": mid,
             "filename": str(path.relative_to(out)).replace("\\", "/"),
             "url": url, "source": "api", "status": "completed",
-            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
+            # UTC + Z fallback, matching PixAI's own createdAt format -- created_at is
+            # sorted as a plain string with no datetime() wrapping, so a naive local-time
+            # stamp here would read hours "older" than a same-moment UTC one west of
+            # Greenwich (see run_import_local's matching fix for how this was found).
+            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "prompt_full": prompt,
             "prompt_preview": (prompt or "")[:100],
             "negative_prompt": _pick("negative_prompt", "negativePrompts"),
@@ -6521,7 +6539,11 @@ def _download_video_task(session, result, task_id, out, args, params):
             "task_id": str(task_id), "media_id": vmid,
             "filename": str(path.relative_to(out)).replace("\\", "/"),
             "url": url, "source": "api", "status": "completed", "is_video": "1",
-            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
+            # UTC + Z fallback, matching PixAI's own createdAt format -- created_at is
+            # sorted as a plain string with no datetime() wrapping, so a naive local-time
+            # stamp here would read hours "older" than a same-moment UTC one west of
+            # Greenwich (see run_import_local's matching fix for how this was found).
+            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "prompt_full": prompt, "prompt_preview": (prompt or "")[:100],
             "negative_prompt": sent.get("negativePrompts", ""),
             "seed": str(o.get("seed") or ""),
@@ -6679,7 +6701,11 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
             "task_id": str(task_id), "media_id": mid, "seed": seed,
             "filename": str(path.relative_to(out)).replace("\\", "/"),
             "url": url, "source": "api", "status": "completed",
-            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
+            # UTC + Z fallback, matching PixAI's own createdAt format -- created_at is
+            # sorted as a plain string with no datetime() wrapping, so a naive local-time
+            # stamp here would read hours "older" than a same-moment UTC one west of
+            # Greenwich (see run_import_local's matching fix for how this was found).
+            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "prompt_full": prompt, "prompt_preview": (prompt or "")[:100],
             # Everything extract_full_meta resolved from the task. This row used to write
             # only the model id, so a generation captured as it happened landed with an
@@ -7269,7 +7295,11 @@ def run_edit_image(args):
             "task_id": str(task_id), "media_id": mid, "seed": seeds.get(mid, ""),
             "filename": str(path.relative_to(out)).replace("\\", "/"),
             "url": url, "source": "api", "status": "completed",
-            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%S"),
+            # UTC + Z fallback, matching PixAI's own createdAt format -- created_at is
+            # sorted as a plain string with no datetime() wrapping, so a naive local-time
+            # stamp here would read hours "older" than a same-moment UTC one west of
+            # Greenwich (see run_import_local's matching fix for how this was found).
+            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "prompt_full": prompt_used, "prompt_preview": (prompt_used or "")[:100],
             "model_id": edit_model_id_used,
             "model_name": edit_model_name,
@@ -7431,6 +7461,59 @@ def account_info(session, raise_on_error=False):
         if raise_on_error:
             raise
         return {}
+
+
+def account_is_member(me):
+    """Is there an ACTIVE PixAI membership on this account? True / False / None=unknown.
+
+    MEASURED 2026-07-28 against the owner's deliberately-lapsed account: `membership` comes
+    back as **null** the moment it expires, while `subscription` lingers as a historical
+    record -- status "inactive", a past endAt, cancelAtPeriodEnd true. So membership's
+    PRESENCE is the signal and subscription is not: reading `subscription.planId` would call
+    a lapsed account premium forever. An active account carries membership{membershipId,
+    tier, privilege} (tier 3 on the 2026-07-06 probe).
+
+    Returns None when `me` is empty -- i.e. the account could not be read at all. Callers
+    MUST fail OPEN on None: a network blip or a transient GraphQL error must never silently
+    strip a paying member's entitlements mid-session. Only an explicit False gates anything,
+    the same convention as the model-capability gate."""
+    if not me:
+        return None
+    return bool(me.get("membership"))
+
+
+# PixAI's free-tier LoRAs-per-generation allowance. Their own generate panel prints it
+# verbatim beside the LoRA section as "Free: 0/3   Max: 15 (crowned)", measured 2026-07-28
+# on a lapsed account, and the owner independently confirmed 3 is his live cap. It is a
+# CONSTANT here because `membership.privilege` -- where the paid cap lives -- is null for a
+# non-member, so there is no field to read it from. If PixAI ever moves it, the symptom is a
+# refused submit (LORA_NUM_EXCEEDED), not a silent overspend.
+FREE_LORA_CAP = 3
+
+
+def account_lora_cap(me):
+    """LoRAs-per-generation this account may use. int, or None when genuinely unknown.
+
+    Three cases, and the middle one is the bug this exists to fix:
+      * `me` empty            -> None. The account could not be read; callers fail OPEN.
+      * membership present    -> privilege.lora, else privilege.freeUserLora.
+      * membership NULL       -> FREE_LORA_CAP. A non-member is not "unknown", it is the
+                                 free tier -- and returning None here is what silently
+                                 disabled the cap guard the moment the owner's membership
+                                 lapsed, letting six LoRAs reach PixAI against a cap of
+                                 three (LORA_NUM_EXCEEDED, reproduced 2026-07-28)."""
+    if not me:
+        return None
+    priv = ((me.get("membership") or {}).get("privilege")) or {}
+    cap = priv.get("lora")
+    if cap is None:
+        cap = priv.get("freeUserLora")
+    if cap is None:
+        return FREE_LORA_CAP if not me.get("membership") else None
+    try:
+        return int(cap)
+    except (TypeError, ValueError):
+        return None
 
 
 def run_account_info(args):

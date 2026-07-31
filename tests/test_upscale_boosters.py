@@ -281,13 +281,21 @@ def test_drawer_offers_hires_as_a_booster_and_not_the_enlarge_method(tmp_path):
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = login_client(tmp_path).get("/").get_data(as_text=True)
-    for probe in ('id="gen-hires"', 'id="gen-up-ratio"', 'id="gen-up-dims"',
-                  'id="gen-up-denoise"', 'id="gen-facefix"', 'id="gen-qtag"'):
+    for probe in ('id="gen-hires"', 'id="gen-facefix"', 'id="gen-qtag"'):
         assert probe in html, probe
     # The enlarge method and its dropdown left the drawer with the segment.
     for gone in ('id="gen-up-seg"', 'id="gen-up-model"', 'id="gu-enlarge"', 'id="gu-off"',
                  "Gen.setUpscale("):
         assert gone not in html, gone + " is still in the generation panel"
+    # REBUILT 2026-07-28: the chip carries NO settings, matching PixAI, whose Add Booster
+    # menu offers add-or-remove and nothing else (owner, verifying live: "It just adds a
+    # chip. you can only remove it."). The ratio/denoise controls that used to hang off
+    # this chip were the IMAGE-VIEW tool's surface bolted onto a booster that has none;
+    # they still live on <mg-upscale-panel>, where a real source picture exists.
+    for gone in ('id="gen-up-ctl"', 'id="gen-up-ratio"', 'id="gen-up-dims"',
+                 'id="gen-up-denoise"', 'id="gen-up-denoise-str"', 'id="gen-up-denoise-steps"',
+                 "Gen.upRatio(", "Gen.upDenoise("):
+        assert gone not in html, gone + " survived the booster rebuild"
 
 
 def test_upscale_constants_reach_the_client_from_core(tmp_path):
@@ -545,39 +553,35 @@ def test_core_clamps_the_lora_weight_to_pixais_bounds():
     assert {e["versionId"]: e["weight"] for e in lst} == m, "the two shapes disagree"
 
 
-def test_drawer_ratio_cap_agrees_with_the_python_one(tmp_path):
-    """The drawer carries a HAND PORT of max_upscale_ratio/upscale_output_dims so the
-    slider can show a live max and output size without a round-trip. Run the real ported
-    JS in Node and compare it to the Python it was copied from -- a drifted ceiling would
-    offer a ratio the server then silently clamps, with no visible sign in the UI."""
-    node = shutil.which("node")
-    if node is None:
-        pytest.skip("node not installed")
+def test_drawer_no_longer_carries_the_ratio_cap_port(tmp_path):
+    """The drawer's hand port of max_upscale_ratio existed ONLY to drive its ratio slider,
+    and the slider is gone. It was also the wrong rule for this surface: the ceiling was
+    inferred from PixAI's image-view DIALOG maxima, and a real booster task submitted
+    upscale 1.5 on a 1400x784 source (2100x1176 -- over that inferred ceiling) and
+    completed (task 2039053268124647852, 2026-07-28). The port still belongs to
+    <mg-upscale-panel>, which has a real slider and a real source picture; that copy is
+    covered by test_upscale_panel_ratio_cap_agrees_with_python.
+    """
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = login_client(tmp_path).get("/").get_data(as_text=True)
-    block = "var upCeil=" + html.split("var upCeil=", 1)[1].split("function syncUpscale", 1)[0]
-    sizes = [(768, 1280), (1400, 784), (512, 512), (1024, 1024), (2048, 2048), (1536, 640)]
-    harness = "console.log(JSON.stringify([{}].map(function(d){{ return [upMax(d[0],d[1],'enlarge'), upMax(d[0],d[1],'upscale'), upDims(d[0],d[1],1.4)]; }})));".format(
-        ",".join("[{},{}]".format(w, h) for w, h in sizes))
-    js = tmp_path / "cap.js"
-    js.write_text(block + "\n" + harness, encoding="utf-8")
-    out = tmp_path / "cap.out"
-    # Real files + DEVNULL stdin, same reason as tests/test_js_syntax.py: some sandboxes
-    # cannot duplicate pytest's captured std handles.
-    try:
-        with open(out, "w", encoding="utf-8") as fh, open(os.devnull) as nul:
-            rc = subprocess.call([node, str(js)], stdin=nul, stdout=fh,
-                                 stderr=subprocess.STDOUT)
-    except OSError as e:                              # noqa: BLE001
-        pytest.skip("cannot spawn node in this environment: {}".format(e))
-    text = out.read_text(encoding="utf-8")
-    assert rc == 0, text
-    got = json.loads(text)
-    want = [[core.max_upscale_ratio(w, h, "enlarge"), core.max_upscale_ratio(w, h, "upscale"),
-             list(core.upscale_output_dims(w, h, 1.4))] for w, h in sizes]
-    assert got == want
+    for gone in ("var upCeil=", "function upMax(", "function syncUpscale("):
+        assert gone not in html, gone + " is still in the generation panel"
 
+
+def test_drawer_sends_pixais_own_booster_values(tmp_path):
+    """Captured, not chosen. PixAI's Enhance Details booster exposes no controls, so their
+    SERVER picks the values -- read off a real task (2039053268124647852, 2026-07-28):
+    upscale 1.5, upscaleDenoisingStrength 0.6, and upscaleDenoisingSteps 32 alongside
+    samplingSteps 32, i.e. the denoise steps MIRROR the generation's own steps rather than
+    being a constant. Our old hardcoded 26 was a number nobody chose.
+    """
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = login_client(tmp_path).get("/").get_data(as_text=True)
+    assert "var MG_HIRES={ratio:1.5, denoise:0.6}" in html, "PixAI's captured values are gone"
+    assert "upscale_denoise_steps: boosters.hires ? (+el('gen-steps').value||25) : null" in html,         "denoise steps must mirror the generation's sampling steps, not a constant"
+    assert "upscale:upR" in html
 
 def test_model_type_filter_mapping_is_measured_not_guessed():
     """Their Model Type filter maps a label to a GenerationModelType, and the ones that matter
@@ -679,3 +683,46 @@ def test_generate_rejects_a_version_id_sent_as_a_model_id(monkeypatch, tmp_path)
         "width": 900, "height": 600, "count": 1, "ref_media_id": "u2",
     })
     assert r.status_code == 400 and "pick a model first" in (r.get_json() or {}).get("error", "")
+
+
+# --- per-model booster gating ------------------------------------------------
+
+def test_enhance_details_is_gated_on_the_model_declaring_upscale_support(tmp_path):
+    """PixAI's own Add Booster menu omits Enhance Details on a DiT model (measured
+    2026-07-28 on Tsubaki.2, whose extra.compatibility carries `upscale:false`), and offers
+    it on SDXL. Our drawer used to show all three boosters on every model, so it would send
+    the `upscale` family to a model that rejects it -- the image-side twin of the V3.0 Lite
+    video bug, where an unsupported flag came back as a bogus NSFW refusal.
+
+    The gate reads the same field PixAI does, through the existing capability path, and
+    fails OPEN: only an explicit false disables anything, so a never-probed model is
+    unchanged.
+    """
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = login_client(tmp_path).get("/").get_data(as_text=True)
+
+    assert "function gateBooster(" in html, "the booster gate is gone"
+    # Wired into the one place capability data is applied, off PixAI's own field.
+    assert "gateBooster('hires', compat.upscale," in html, \
+        "Enhance Details must gate on compatibility.upscale, not on an architecture guess"
+    # Fails open exactly like gateField: an explicit false and nothing else.
+    gate = html.split("function gateBooster(")[1].split("function applyCapabilityGating(")[0]
+    assert "honored===false" in gate, "the booster gate must fail OPEN on unknown data"
+    # A booster armed before the model changed underneath it must be disarmed, or the
+    # payload would still carry a ratio the new model cannot use.
+    assert "boosters[k]=false" in gate, "switching to an incompatible model must disarm it"
+
+
+def test_booster_gate_does_not_touch_quality_tag_or_face_fix(tmp_path):
+    """Quality Tag is a MEMBERSHIP question (PixAI crowns it) and Face Fix has no
+    compatibility key at all -- neither is decided by extra.compatibility, so neither is
+    gated here. Pinned so a later pass doesn't quietly extend the capability gate over a
+    product decision the owner has not made.
+    """
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    html = login_client(tmp_path).get("/").get_data(as_text=True)
+    body = html.split("function applyCapabilityGating(")[1].split("function ")[0]
+    assert "gateBooster('qtag'" not in body, "Quality Tag gating is an owner decision"
+    assert "gateBooster('facefix'" not in body, "Face Fix has no compatibility flag to gate on"
