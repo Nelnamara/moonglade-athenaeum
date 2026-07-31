@@ -25,11 +25,11 @@ reader could work it out from the code, it does not belong here.
 
 ## Contents
 
-- [Standing rules](#standing-rules) &mdash; 62
+- [Standing rules](#standing-rules) &mdash; 63
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 130
+- [Decisions](#decisions) &mdash; 131
 
 ---
 
@@ -428,6 +428,19 @@ The Activity tray renders from /api/jobs, never from a poll response. /api/task-
 A dev/sandbox server is started by running **`Serve Gallery.pyw`** (under `pythonw`), never by invoking `moonglade_gallery.py` directly. Machine-local flags go in the git-ignored `serve.txt` beside it — on the sandbox checkout that is `--out pixai_backup --port 5057`. The `--out` pin is **not optional here**: the launcher deliberately passes no `--out` so the server can resolve `config.json`'s `LIBRARY_DIR`, and on this machine that value points at the **D: install's library** — an unpinned launch from the C: checkout serves D:.
 
 **Why.** Only the launcher sets `MOONGLADE_SUPERVISED=1` and runs the exit-code-42 relaunch loop, and `/api/server/restart` refuses with a 409 without it. A bare launch therefore silently removes the owner's Restart button from the Control Panel, which is not a cosmetic loss — his stated reason for killing a bare-started server was that he could not restart it. Nothing in the running process advertises that it is unsupervised, so the next session cannot tell by looking; the rule has to be written down.
+
+### Moonglade converts COMPLETELY to React. Not a surface option, not a hybrid, not up for technical debate.  ·  *2026-07-31*
+
+The owner asked about moving the app to React back when the Loom was first built. A session pushed back hard against it — wrongly. He raised it again 2026-07-31, still visibly frustrated, mid-way through the actual conversion effort: **"This is My app."** His own diagnosis of every failure so far: **"Porting a design back and forth is where this went totally to shit."**
+
+The direction: vanilla JS and the `moonglade_gallery.py` Jinja-template monolith (~16.3k lines) are being retired **in full**. Flask becomes a JSON API backend, not a page renderer. Claude Design has been building the complete app UI in React (2026-07-29 → ongoing), working from the real `mg-*` component code + real `DESIGN_TOKENS_CSS` (pushed via the `design-kit` branch + DesignSync), the owner's own Figma work on the Folio, and direct access to this repo — not guessed, not screenshotted-and-approximated. The `gallery-top` branch is kept specifically because the conversion continues there, not as an archive.
+
+**Do not:**
+- Offer "port the design back to vanilla JS," "keep a scoped hybrid for now," or any variant that quietly reopens this — even when it sounds like the lower-risk engineering call. That exact back-and-forth is the named failure mode.
+- Treat this as one option among several because a doc phrased it softly once. If a stack/architecture decision this owner has stated seems hedged or half-implemented in the code, that is something to flag and fix, not evidence it was ever negotiable.
+- Assume "design happens in Claude Design" means no React/UI work happens in this repo. It's the opposite: Claude Design produces the UI, this repo is where it gets implemented, wired to real data, and shipped.
+
+**Why.** Full memory record: [[owner-architecture-calls-are-final]] (Claude Code's own persistent memory, work machine). Real evidence on what "easy" actually means for this conversion — what's already solved vs. genuine remaining work — is banked in the Decisions entry below, *"React conversion: the feasibility map (2026-07-31)."*
 
 ---
 
@@ -2260,5 +2273,137 @@ Python caches the module in `sys.modules` on first import, so an edited `.py` fi
 to an already-running process until it restarts (this server runs with `debug=False`, no
 auto-reloader). Verified live post-restart: a fresh save's `created_at` lands as `…Z` UTC and is
 genuinely the first tile in the default view, ahead of every previously-collected row.
+
+---
+
+## 2026-07-31 — React conversion: the feasibility map
+
+Banked before the owner leaves the work machine, so the home-machine session can start straight
+into implementation instead of re-deriving this. Gathered by a 5-way parallel audit of the real
+codebase (route-by-route, component-by-component) — not inferred from doc prose. Every claim
+below was independently verified against `master` and, where noted, the still-live `gallery-top`
+branch (kept specifically because the conversion continues there — see the Standing Rule above).
+
+**Where this stands overall: a meaningful fraction of the backend is already done or proven; the
+real remaining work is concentrated in a few identifiable places, not spread evenly.** This is a
+map for planning against, not a verdict that the conversion is trivial or that it's a slog —
+neither framing survived contact with the actual code.
+
+### Already a clean JSON API on `master` today — a React front end can drive these with zero backend work
+
+Generate/Edit/Fix/Enhance (`/api/generate`, `/api/edit`, `/api/fix`, `/api/price`,
+`/api/task-status`, `/api/presets`, `/api/suggest-prompt`, `/api/tag-suggest`); the Picker
+(`/api/model-search`, `/api/model-version`, `/api/gallery-images`, `/api/upload`,
+`/api/import-local`); Panel + maintenance jobs + scheduler (`/api/panel/*`, `/api/watch/status`,
+`/api/jobs*`, `/api/server/*`); Achievements/Folio (`/api/achievements`, `/api/skin`,
+`/api/ach-event`); Contests (`/api/contests`); My Art (`/api/your-art`, `/api/artwork-views`);
+Branding/skins (`/api/branding*`, `/api/skin`); Trash (`/api/trash/*`); and the Loom's ENTIRE
+data layer (`/api/loom/*` — get/set/list/delete/handoff/generate/export/import-bundle). 65 of 94
+routes on `master` fall into this bucket. Users/admin mutation is also ready
+(`/api/users/*`, `/api/setup/save-key`, `/api/account`) — only `/login`/`/logout` themselves are
+HTML-only (see below).
+
+### Genuinely NOT there yet on `master` — real work, not wiring
+
+- **The single most load-bearing endpoint — a filtered/paginated/sorted page of the gallery
+  grid — has no JSON equivalent on `master`.** `index()` (`/`) bakes it entirely into a Jinja
+  render: facets (`unique_models`/`unique_batches`/`catalog_years`/`unique_collections`), stats,
+  setup-wizard flags, CSRF token, active-filter chips, the works. The abandoned `gallery-top`
+  branch's `/api/next/library` + `/api/next/detail/<id>` are a strong, mostly-complete
+  **reference** for the shape (same filter surface as `query_catalog`, real prev/next nav) but
+  are thin on chrome — facets/stats/session/CSRF currently only reach that pilot via an HTML-shell
+  boot script (`window.MG_BOOT`), not real JSON endpoints. That boot-payload promotion
+  (e.g. real `/api/facets`, `/api/session`, `/api/stats`) is itself real, unfinished work.
+- **`/login` and `/logout` are HTML-only**, with first-run/bootstrap-account and lockout logic
+  embedded in the render. A SPA needs real `POST /api/login` → JSON and a JSON logout before auth
+  can be driven from React at all.
+- **Several grid mutations are still redirect-based, not JSON**: delete, bulk delete, bulk
+  prompt-replace, collection add/remove.
+- **The classic gallery's own Image/Edit/Fix generation controller has no componentized
+  equivalent anywhere** — one 1,289-line vanilla-JS IIFE (`Gen` in `moonglade_gallery.py`), the
+  single largest un-ported block in the app. `<mg-generate-drawer>` only ever replaced its
+  **Video** tab; Image/Edit/Fix would need a real from-scratch React build.
+- **A dozen real surfaces got literal zero coverage from the last attempt**: Trash's own
+  review UI, Users/admin, real branding/skin *editing* (the last attempt only ever consumed
+  tokens/skins, never let you set a banner/mark/skin), plus ~700 more lines across smaller
+  utility IIFEs (`ImportUI`, `CloudDel`, `Snips`, `Setup`, `Acct`, `Tags`, `YourArt`, `Similar`,
+  `Ctx`) and ~1,500 lines of un-namespaced glue code (lightbox keyboard nav, the print page,
+  service-worker registration) tied to specific DOM ids baked into the Python template — none of
+  it lifts out mechanically.
+
+### The shared component layer — proven, not hypothetical
+
+`static/mg-*.js` are real custom elements (light DOM, no shadow root). Four of five have **cited,
+working `ref={...}` mounts in the Loom's own shipped React source
+(`loom/master-storyboard.jsx`)** today: `mg-model-picker`, `mg-gallery-picker`,
+`mg-generate-drawer` (video only), `mg-cost-badge`. `mg-upscale-panel` is architecturally
+identical (same conventions) but has zero React-mount evidence yet — treat as "should work,
+confirm before relying on it." `mg-notify.js` and `picker-core.js` aren't elements at all — they
+port for free as imperative globals/pure logic, no JSX involvement needed.
+`DESIGN_TOKENS_CSS` (`moonglade_gallery.py:3188-3246`) is plain CSS custom properties, zero
+framework coupling, trivial to import into any React app; skin switching is one
+`setAttribute('data-skin', …)` call.
+
+### Auth/CSRF — the hard questions were already asked and answered once; the code just isn't on `master`
+
+Session-cookie auth needs nothing special from React (`fetch()` rides it same-origin). The
+`_enforce_front_door()` / `ROUTE_TIERS` contract is self-enforcing
+(`tests/test_route_tiers.py`) and a new route just needs declaring into it. **Most spend/mutate
+JSON routes (`/api/generate`, `/api/edit`, `/api/fix`, `/api/loom/generate`, `/api/import-local`,
+`/api/delete`) are deliberately CSRF-token-exempt**, protected by `SameSite=Lax` + the session
+gate instead — a React caller needs no CSRF token for these, only for the small explicit-token
+class (login, logout-revoke, password change, add/remove user, DELETE-forever). Any boot-data
+injected into an SPA shell MUST use Jinja's `|tojson`, never `json.dumps(...)|safe` — the latter
+doesn't escape `</script>` and is a real, previously-shipped XSS hole into the CSRF-exempt
+`/api/generate`. **None of this is theoretical** — `gallery-top`'s Mix pilot proved the whole
+pattern end to end with real `fetch()` calls against real auth, including finding and fixing the
+XSS hole above and a per-port `SESSION_COOKIE_NAME` collision bug (two Moonglade instances on
+different ports silently logged each other out). That specific code died with the branch, but
+the design questions it answered did not need to be re-asked.
+
+### Calibration: the real bugs the last attempt actually hit (read before assuming "just wiring" is quick)
+
+Not a reason for doom, but real evidence of where friction shows up even when the direction and
+plan are exactly right: an XSS hole (above); a boolean-coercion bug on `/api/generate`'s
+`prompt_helper` flag (`str(False) == "False"` never matched the lowercase falsy tuple — every
+explicitly-disabled prompt helper submitted as enabled, on the classic drawer too); a real race
+in the Fix tab (clicking the instant a quote was still in flight); a stale-rating bug (Details
+view read its own fetched copy instead of the shared rate() update); several z-index/paint bugs,
+including one where `getComputedStyle` reported a demonstrably-painted button as
+`visibility:hidden` — only an actual screenshot caught the real bug; the `created_at` timezone
+data-correctness bug (banked as its own entry above); and **seven distinct defects in the
+Generate-drawer port caught only by a dedicated adversarial review pass before shipping** —
+`<mg-model-picker>`'s multi-select emitting `{model, selected}` not a raw row (the whole LoRA
+path silently read `undefined`), `Jobs.track`'s callback shape being `cb(phase, data)` not an
+object (completions would have hung on "Queued" forever), `trigger_words` being a
+comma-separated string not an array (`.join()` would have crashed on the first hit), LoRA weight
+bounds keying off the LoRA's own architecture instead of the base model's (a −0.8 SDXL weight
+could ride a DiT submit that only accepts 0–1.2), and three more in the same vein. **Budget a
+real adversarial-review pass before calling any ported surface done — this class of bug is not
+hypothetical, it is what actually happened.**
+
+### Open, unscoped, and not yet asked of the owner: does the Loom become part of the same app?
+
+Neither `master`'s nor `gallery-top`'s `DECISIONS.md` states whether the Loom and the new React
+gallery become one unified application. The only relevant entry (`gallery-top`, "gallery UI
+moves to React, the Loom's way") describes them being *built the same way*, phased, with Flask
+staying one shared backend — not merging into one bundle. The code as shipped already diverged
+from even that: the Loom loads React via vendored UMD globals + Babel-standalone (or a stripped
+esbuild bundle that deliberately does NOT bundle React), while the Mix pilot used real npm
+`react`/`react-dom` through Vite's ESM graph — two incompatible React-loading strategies that
+have never coexisted in one bundle. The pilot only ever linked to `/loom` as a full-page
+navigation, never embedded it. Merging them would mean rewriting the Loom's delivery mechanism
+(dropping vendor-globals/Babel-standalone for real npm React, decomposing its single 4,178-line
+root component into something embeddable) — genuinely large, not a wiring task. **Ask the owner
+directly whether this is in scope before assuming either answer.**
+
+### Next step, concretely
+
+The map above is the terrain, built from what already exists in this repo. It is not a
+substitute for looking at Claude Design's actual output. The next concrete action for whoever
+picks this up: get the real handoff (export, or a DesignSync pull into the repo) and read it
+against this map — which surfaces it covers, whether it's wired to real data or sample data, and
+whether it already assumes the `mg-*` component contracts above — before writing implementation
+code.
 
 ---
