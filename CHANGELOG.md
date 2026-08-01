@@ -36,6 +36,24 @@ git tags. Full prose notes for tagged versions live on
   Required a server restart to take effect (the module was already imported in the running
   process) — verified live afterward: a fresh save's `created_at` lands as `…Z` UTC and the
   item is genuinely the first tile in the default view.
+- **The handoff map: `static/design-handoff.html`, a new kit Reference card.** Component
+  linkage measured against the live app (which of the three surfaces mounts each `mg-*`
+  component, with real grep counts), each component's in/out interface (attributes and
+  `mg-*` events), the live design decisions that touch them, and a measured tally of the
+  hardcoded font-size/radius/gap/breakpoint/z-index values across all three surfaces —
+  explicitly labeled as recurrence, not named tokens. Pushed to the Claude Design project
+  along with `mg-art-filters.js` (the one component that had never been uploaded) and a
+  refreshed `kit/design-tokens.css` carrying the app's since-added `--loomc`.
+- **The design kit: generated token pages + the "Moonglade Athenaeum" Claude Design project.**
+  Every standalone harness page in `static/` now carries the app's full design tokens between
+  generated `mg-tokens` markers — `tools/export_design_kit.py` regenerates them (plus
+  `static/design-tokens.css`) from `DESIGN_TOKENS_CSS`, and `tests/test_design_kit_sync.py`
+  fails the suite on drift; the old hand-typed slices had in fact drifted. New pages:
+  `design-tokens.html` (palette + type, self-deriving), `design-skins.html` (all five skins
+  at once), `mg-upscale-panel.html` (the dynamic ratio cap is the demo), `mg-notify.html`
+  (Toast kinds + the Activity shell). The whole kit is mirrored to a claude.ai/design
+  design-system project via DesignSync, where each page is a card — see docs/DECISIONS.md
+  (2026-07-29) for the project id and the `gallery-top` merge note.
 
 - **`--sync-similar` — top up the visual-similarity index instead of rebuilding it.** Also a
   Control Panel job, *Top up the Similar index (adds only what's missing)*, listed above Rebuild

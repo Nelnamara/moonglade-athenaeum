@@ -2407,3 +2407,42 @@ whether it already assumes the `mg-*` component contracts above — before writi
 code.
 
 ---
+
+## 2026-07-29 — The design kit exists: generated token pages + a Claude Design project (`design-kit` branch)
+
+**Shipped on `design-kit`** (owner tests before any merge). The STANDARDS.md Claude Design
+row's candidate ("push `DESIGN_TOKENS_CSS` + the `mg-*` web components + the toast") is no
+longer a candidate:
+
+* **Every kit page's inline token copy is now GENERATED.** `tools/export_design_kit.py`
+  rewrites `static/design-tokens.css` and the `mg-tokens:begin/end` block in every kit page
+  from `moonglade_gallery.DESIGN_TOKENS_CSS`; `tests/test_design_kit_sync.py` fails the suite
+  when any copy is stale, naming the repair command. The old hand-typed slices had already
+  drifted (`--mantle #131024` vs the real `#0a0818`) — that drift is the whole justification.
+* **Two foundation pages** — `static/design-tokens.html` (palette + type) and
+  `static/design-skins.html` (all five skins side-by-side) — both self-derive from the
+  stamped stylesheet, so neither holds a second list of anything.
+* **The two missing harnesses exist** (`mg-upscale-panel.html`, `mg-notify.html`); the four
+  existing harness pages gained a first-line `@dsCard` marker and `./` relative script srcs
+  (identical when served from `/static/`; now they also work file-opened and bundled).
+* **claude.ai/design project "Moonglade Athenaeum"** (id
+  `b43ffcd7-3a93-428f-afe8-3e20ca29e8e8`) carries the whole kit under `kit/` — 8 card pages,
+  7 component JS files, `design-tokens.css` — pushed via DesignSync from this branch's
+  `static/`. That project is a legitimate PIXEL source of truth for visual builds per the
+  checkpoint protocol, and future syncs go through the same finalize_plan → write_files flow,
+  incrementally, never as a wholesale replace.
+* **Merge note for `gallery-top`:** it adds `--loomc` (and banner tokens) to
+  `DESIGN_TOKENS_CSS`. After any merge that touches the constant, run
+  `python tools/export_design_kit.py` and commit what it refreshes — the drift test holds the
+  suite red until that happens, on purpose. Re-push the refreshed kit to the Claude Design
+  project in the same pass so the two stay one thing.
+
+**Why.** One constant was already the app's single source of tokens; the kit extends that
+discipline to every standalone surface that had quietly stopped inheriting it, and the Claude
+Design project turns the same files into a design surface for composing new screens with the
+REAL components, not lookalikes. Verified before push against a fresh static server on a
+fresh port: 24 token chips match the constant, skin swaps repaint live, the upscale demo's
+ratio cap moves 1.9 → 2.0 between its two demo rows, zero uncaught console errors, full
+suite green (1436 passed; render tests deselected as designed).
+
+---
