@@ -83,10 +83,10 @@ code{font-family:ui-monospace,monospace;font-size:11px;color:var(--lavender)}
 </style>
 
 <h1>Handoff Map</h1>
-<p class="sub">Component linkage, interfaces, adoption state, and the measured (un-named) visual scale.
-Measured at app commit <code>8560b8c</code>, 2026-07-31. The three surfaces: <b>classic gallery</b>
-(moonglade_gallery.py, Flask/vanilla), <b>the Loom</b> (loom/master-storyboard.jsx, React), <b>/next
-pilot</b> (gallery/src, React/esbuild).</p>
+<p class="sub">The complete surface inventory, component linkage, interfaces, adoption state, and the
+measured (un-named) visual scale. Measured at app commit <code>8560b8c</code>, 2026-07-31. The three
+host stacks: <b>classic gallery</b> (moonglade_gallery.py, Flask/vanilla), <b>the Loom</b>
+(loom/master-storyboard.jsx, React), <b>/next pilot</b> (gallery/src, React/esbuild).</p>
 
 <h2>1 · The token pipeline (what is already a system)</h2>
 <p class="sub"><code>DESIGN_TOKENS_CSS</code> in <code>moonglade_gallery.py</code> is the single source —
@@ -99,7 +99,37 @@ color + the five skins only. <code>tools/export_design_kit.py</code> regenerates
 restamp automatically when the branches merge and the export script reruns. Everything else is
 identical — all 7 component <code>.js</code> files in this project are byte-identical to the live app.</div>
 
-<h2>2 · Component linkage + interfaces</h2>
+<h2>2 · The surfaces — what "entire UI" means</h2>
+<p class="sub">Every HTML-serving route in the app plus the full-screen/in-page surfaces that aren't
+routes. Component loads verified from each template's actual <code>&lt;script&gt;</code> block.</p>
+<table>
+<tr><th>Surface</th><th>Route</th><th>Kit components loaded</th><th>Notes</th></tr>
+<tr><td><b>Gallery</b> (flagship)</td><td><code>/</code></td><td class="ok">all 8</td>
+  <td>Hosts the in-page surfaces below.</td></tr>
+<tr><td>Detail page</td><td><code>/image/&lt;id&gt;</code></td><td>picker-core · model-picker · cost-badge · upscale-panel</td>
+  <td>Full metadata, edit-prompt, upscale inline.</td></tr>
+<tr><td><b>The Loom</b></td><td><code>/loom</code></td><td>picker-core · model-picker · gallery-picker · cost-badge · generate-drawer · notify</td>
+  <td>Fixed 4-region shell; full manual in <code>docs/LOOM.md</code>.</td></tr>
+<tr><td>React pilot</td><td><code>/next</code></td><td class="ok">all 8</td>
+  <td class="part">Its Lightbox/Details is owner-ruled NOT done — don't reference that build.</td></tr>
+<tr><td>Login</td><td><code>/login</code></td><td class="dim">none — self-contained</td>
+  <td>Has a <b>second face</b>: one-time first-run bootstrap (account creation) that renders once per install. Serif identity + mascot ladder live here.</td></tr>
+<tr><td>Collection Health</td><td><code>/health</code></td><td class="dim">none — self-contained</td><td></td></tr>
+<tr><td>Control Panel</td><td><code>/panel</code></td><td class="dim">none — job UI is inline</td>
+  <td>Redesign already designed: <code>panel/board.html</code> in this project — "The Deck, Mixed", awaiting the owner's yes.</td></tr>
+<tr><td>Duplicate Review</td><td><code>/duplicates</code></td><td class="dim">none — self-contained</td><td></td></tr>
+<tr><td>Contact sheet</td><td><code>/contact-sheet</code></td><td class="dim">none</td><td>Print surface.</td></tr>
+<tr><td>Logout</td><td><code>/logout</code></td><td class="dim">none</td><td>Trivial.</td></tr>
+</table>
+<p class="sub" style="margin-top:8px"><b>In-page surfaces on <code>/</code></b> (not routes — easy to
+miss as "screens"): the lightbox · the <b>Folio of Honors</b> overlay (<code>#ach-modal</code> — an
+overlay <i>by design</i>, never a route) · <b>Contests</b> overlay · <b>My Art</b> overlay · the Trash
+view · the Generate drawer's docked states · the model/gallery picker modals.</p>
+<p class="sub"><b>Also part of "entire UI":</b> <code>manifest.webmanifest</code> + <code>sw.js</code>
+exist — the app installs as a PWA, so install icon, splash, and window chrome are design surfaces too.
+Asset routes (<code>/thumbs /img /full /video-file /branding /badge-thumb</code>) are not.</p>
+
+<h2>3 · Component linkage + interfaces</h2>
 <p class="sub">All are plain-global web components / IIFEs — no build step, light DOM, every one reads
 the shared tokens so it re-skins with the app. Mount counts are real grep counts at 8560b8c.</p>
 <table>
@@ -130,7 +160,7 @@ the shared tokens so it re-skins with the app. Mount counts are real grep counts
   <td>PixAI's 7 art filters as local gradient recipes — free, offline, no network ever. <b>New in this push</b> — was never uploaded to this project; no harness card yet.</td></tr>
 </table>
 
-<h2>3 · Live design decisions that touch these components</h2>
+<h2>4 · Live design decisions that touch these components</h2>
 <table>
 <tr><th>Decision (owner, dated)</th><th>Affects</th></tr>
 <tr><td><b>Folio grid cards lose their ornate frames — every tier</b> (2026-07-31). The <code>.hall-card/.hall-frame</code> framing in mg-notify goes; tier reads from band + glow. <b>The achievement toast's <code>.tframe</code> keeps its legendary + feat frames — confirmed correct as-is.</b></td><td>mg-notify</td></tr>
@@ -139,7 +169,7 @@ the shared tokens so it re-skins with the app. Mount counts are real grep counts
 <tr><td><b>One meaning per hue:</b> lavender = primary action · <code>--loomc</code> cyan = the Loom · gold = credits · ruby/red = destructive · emerald = success/"magic".</td><td>everything</td></tr>
 </table>
 
-<h2>4 · The measured scale (NOT yet tokens — naming them is a handoff decision)</h2>
+<h2>5 · The measured scale (NOT yet tokens — naming them is a handoff decision)</h2>
 <p class="sub">The app defines <b>no</b> spacing/type/radius/breakpoint variables — these are tallies of
 the hardcoded values actually in use across all three surfaces (occurrences in parentheses).
 Recurrence = de-facto convention, nothing more.</p>
@@ -152,7 +182,7 @@ Recurrence = de-facto convention, nothing more.</p>
 <p class="tally"><b>z-index</b> · two bands: components use 0–7; overlays/modals use 300–500. Nothing between.</p>
 <p class="tally"><b>type faces</b> · body/UI: system-ui sans · data/ids/counts: ui-monospace · display serif (Georgia) appears exactly <b>once</b> in the classic app (login h1) — the serif-heading identity lives in this project's <code>styles.css</code> (<code>--serif</code>) and the mockups, not yet in the app's own tokens.</p>
 
-<h2>5 · What is deliberately NOT here</h2>
+<h2>6 · What is deliberately NOT here</h2>
 <p class="sub">Colors + skins are already the real, pinned system (section 1) — not restated. The Loom's
 docs live in <code>docs/LOOM.md</code>; per-component behavioral detail lives in each file's own header
 comment, which is authoritative over this summary.</p>
