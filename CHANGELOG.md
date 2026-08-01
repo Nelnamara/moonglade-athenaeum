@@ -17,6 +17,10 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **`--loomc` token added to `DESIGN_TOKENS_CSS`** — the Loom's fixed-meaning cyan
+  (`#47cbc3`), same value as `--blue`, added under its semantic name because the UI Kit v2
+  designs (Claude Design, new-frontend era) reference the hue as `var(--loomc)` and it
+  would fall back silently at handoff otherwise. Kit pages re-stamped by the exporter.
 - **Fixed: a locally-imported image (Art filters' Save to library, or anything else through
   `/api/import-local`) could save successfully and still never appear on the gallery's first
   page.** Owner: *"It says saved but does not appear in the gallery."* Not a sandbox artifact
