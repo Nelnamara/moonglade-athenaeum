@@ -14950,6 +14950,211 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         except OSError:
             pass
 
+    # ==== THE NEW GALLERY -- React pilot ====================================
+    # /next serves gallery/dist (Vite build: `npm run build` inside gallery/).
+    # This is the FIRST-CLASS frontend the gallery UI is migrating to -- real
+    # component files, its own purpose-built API below, NOT the Loom's delivery
+    # and NOT the picker routes. The classic gallery at / is untouched; pieces
+    # flip only on the owner's sign-off. Design lock + suite-shell rationale:
+    # docs/DECISIONS.md "THE MIX is the pilot's locked direction" (2026-07-29).
+    # Auth: covered by the global _enforce_front_door() hook like every route.
+    _NEXT_DIST = Path(__file__).resolve().parent / "gallery" / "dist"
+
+    # The shared web components + the job tracker ride along as plain scripts in
+    # the CLASSIC include order (picker-core before the pickers, cost-badge
+    # before the drawer -- the drawer's cost line IS <mg-cost-badge>). mg-notify
+    # needs only its two DOM anchors; its CSS reads the app tokens, which the
+    # bundle's stylesheet defines on :root. __UPSCALE_CONST__ serves MG_LORA /
+    # MG_UPSCALE from their one Python source, same idiom as the classic pages.
+    NEXT_PAGE = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moonglade Athenaeum</title>
+<link rel="icon" href="/branding/favicon.ico">
+<script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>
+<link rel="stylesheet" href="/next/assets/app.css">
+{# The app's ONE palette + every skin override, AFTER the bundle's stylesheet so
+   the tokens win any same-specificity :root collision. Same idiom BASE_HTML and
+   the Loom shell use -- deliberately not a /next/assets/tokens.css route, which
+   would split the single source of truth. mg-notify (already loaded below) does
+   the rest: it reconciles data-skin against /api/achievements on load. #}
+<style>
+__DESIGN_TOKENS__
+/* The Job Tracker's two anchors are plain divs in the body, and EVERY rule that
+   styles them lives in the stylesheet mg-notify.js injects at runtime -- from the
+   last <script> on the page. Between first paint and that script running they are
+   unstyled block elements, so the fab's "Activity" label painted as raw text at the
+   top of the document on every single load. mg-notify's own default is display:none
+   (it reveals with .show/.open), so stating that default early is the same end state,
+   just before the flash instead of after it. Classic never showed this because its
+   fab sits inside a page whose inline <style> is already parsed; the pilot's CSS is
+   the React bundle, which knows nothing about these ids. */
+#jobs-fab, #jobs-tray { display: none; }
+</style>
+</head><body>
+<div id="root"></div>
+<div id="jobs-fab" onclick="JobsCard.open()"><span class="jf-dot"></span><span class="jf-badge" id="jobs-fab-badge"></span><span>Activity</span></div>
+<div id="jobs-tray" aria-label="Job activity"></div>
+{# |tojson, NOT json.dumps|safe: json.dumps does not escape "</script>", and boot
+   carries third-party text (PixAI model titles via unique_models, collection
+   names from any account). One "</script>" in a model title would break out of
+   this inline script and run in a session that can POST the CSRF-exempt
+   /api/generate -- i.e. spend without consent. Jinja's tojson escapes < > &. #}
+<script>window.MG_BOOT = {{ boot|tojson }};</script>
+__UPSCALE_CONST__
+<script src="/static/picker-core.js"></script>
+<script src="/static/mg-model-picker.js"></script>
+<script src="/static/mg-gallery-picker.js"></script>
+<script src="/static/mg-cost-badge.js"></script>
+<script src="/static/mg-generate-drawer.js"></script>
+<script src="/static/mg-art-filters.js"></script>
+<script src="/static/mg-upscale-panel.js"></script>
+<script src="/static/mg-notify.js"></script>
+<script type="module" src="/next/assets/app.js"></script>
+</body></html>"""
+
+    @app.route("/next")
+    def next_gallery():
+        session.setdefault("csrf", secrets.token_hex(16))
+        brand = brand_context(out_dir)
+        boot = {
+            "stats": catalog_counts(db_path),
+            "collections": unique_collections(db_path),
+            "user": session.get("user") or "",
+            "is_local": True,
+            "is_true_local": _is_local_request(),
+            "csrf": session["csrf"],
+            "build_stamp": build_stamp,
+            # The locked default; becomes a Branding-panel setting later
+            # (docs/DECISIONS.md "Banner controls join the Branding panel").
+            "band": {"height": 340, "crop": 30},
+            # For the Advanced flyout: the model datalist + the From/To year range.
+            "models": unique_models(db_path),
+            "years": catalog_years(db_path),
+            # The chosen branding: which mark, its animation, and whether it is a
+            # rounded tile or a transparent floater. _inject_branding() already
+            # puts these in every template's Jinja context; the pilot needs them
+            # in JS because its mark is a React component, and the glint mask
+            # needs the URL as a CSS variable (a built stylesheet cannot
+            # Jinja-interpolate one). Without this the mark rendered dead.
+            "mark_url": brand.get("mark_url") or "/branding/logo.png",
+            "mark_anim": brand.get("mark_anim") or "classic",
+            "mark_kind": brand.get("mark_kind") or "",
+        }
+        return render_template_string(
+            NEXT_PAGE.replace("__UPSCALE_CONST__", _upscale_const_js())
+                     .replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS),
+            boot=boot)
+
+    @app.route("/next/assets/<path:fname>")
+    def next_assets(fname):
+        return send_from_directory(str(_NEXT_DIST), fname)
+
+    @app.route("/api/next/library")
+    def api_next_library():
+        """The new gallery's own listing surface -- full filter set, clean field
+        names, one purpose. Reads the same catalog engine (query_catalog) as
+        everything else; nothing here is borrowed from the picker routes."""
+        q = (request.args.get("q") or "").strip()
+        try:
+            page = max(1, int(request.args.get("page") or 1))
+            page_size = max(1, min(int(request.args.get("page_size") or 100), 200))
+            rating_min = max(0, min(int(request.args.get("rating_min") or 0), 5))
+        except ValueError:
+            page, page_size, rating_min = 1, 100, 0
+        media = (request.args.get("media") or "").strip().lower()
+        media = media if media in ("image", "video") else ""
+        sort = (request.args.get("sort") or "newest").strip()
+        rows, total = query_catalog(
+            db_path, q=q, sort=sort, page=page, page_size=page_size,
+            rating_min=rating_min, media_type=media,
+            collection=(request.args.get("collection") or "").strip(),
+            source=(request.args.get("source") or "").strip(),
+            # The Advanced flyout's fields -- same engine params the classic
+            # gallery's form submits, same names where the URL is user-visible.
+            model=(request.args.get("model") or "").strip(),
+            lora=(request.args.get("lora") or "").strip(),
+            date_from=(request.args.get("from") or "").strip(),
+            date_to=(request.args.get("to") or "").strip(),
+            art_tag=(request.args.get("tag") or "").strip(),
+            # Not a flyout field -- reached only from the Details view's "View batch"
+            # link (same engine param the classic gallery's own link sets).
+            batch=(request.args.get("batch") or "").strip(),
+            published_only=(request.args.get("published") or "") == "1")
+        items = []
+        for r in rows:
+            mid = r.get("media_id")
+            if not mid:
+                continue
+            items.append({
+                "media_id": str(mid),
+                "thumb": "/thumbs/{}.jpg".format(mid),
+                "is_video": str(r.get("is_video") or "") == "1",
+                "is_nsfw": str(r.get("is_nsfw") or "") == "1",
+                "model": str(r.get("model_name") or ""),
+                "date": str(r.get("created_at") or "")[:10],
+                "rating": int(str(r.get("rating") or "0") or 0)
+                          if str(r.get("rating") or "").isdigit() else 0,
+                "w": str(r.get("width") or ""),
+                "h": str(r.get("height") or ""),
+                "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:1200],
+                # The pilot's captions were missing metrics the classic card shows
+                # (owner QA, 2026-07-30): where it came from, and the actual file.
+                "source": str(r.get("source") or ""),
+                "filename": str(r.get("filename") or ""),
+            })
+        pages = max(1, (total + page_size - 1) // page_size)
+        return jsonify({"items": items, "total": total, "page": page, "pages": pages})
+
+    @app.route("/api/next/detail/<media_id>")
+    def api_next_detail(media_id):
+        """The pilot's Details view backing data -- classic's detail() route (~12254),
+        JSON instead of a server-rendered page. Full row, plus prev_id/next_id computed
+        the SAME way: list_media_ids() under the CURRENT filter/sort (the same param
+        names /api/next/library accepts), index looked up in that ordered id list.
+
+        Deliberately does NOT precompute img_url/video_url/an existence check the way
+        classic's route does -- classic needed that because a dead <img src> shows a
+        broken-image icon with no explanation. The client already gets that signal for
+        free (an <img>/<video> onError), so there is nothing here worth a filesystem
+        stat the caller didn't ask for."""
+        row = get_row(db_path, media_id)
+        if not row:
+            return jsonify({"error": "not found"}), 404
+        q = (request.args.get("q") or "").strip()
+        media = (request.args.get("media") or "").strip().lower()
+        media = media if media in ("image", "video") else ""
+        sort = (request.args.get("sort") or "newest").strip()
+        try:
+            rating_min = max(0, min(int(request.args.get("rating_min") or 0), 5))
+        except ValueError:
+            rating_min = 0
+        nav_ids = list_media_ids(
+            db_path, q=q, sort=sort, rating_min=rating_min, media_type=media,
+            collection=(request.args.get("collection") or "").strip(),
+            source=(request.args.get("source") or "").strip(),
+            model=(request.args.get("model") or "").strip(),
+            lora=(request.args.get("lora") or "").strip(),
+            date_from=(request.args.get("from") or "").strip(),
+            date_to=(request.args.get("to") or "").strip(),
+            art_tag=(request.args.get("tag") or "").strip(),
+            published_only=(request.args.get("published") or "") == "1")
+        try:
+            idx = nav_ids.index(media_id)
+        except ValueError:
+            idx = -1
+        prev_id = nav_ids[idx - 1] if idx > 0 else None
+        next_id = nav_ids[idx + 1] if 0 <= idx < len(nav_ids) - 1 else None
+        return jsonify({
+            "row": row,
+            "prev_id": prev_id, "next_id": next_id,
+            # Same value the gallery's own "Delete from PixAI" is gated on. A LAN
+            # session can browse and spend, but not destroy on the owner's real
+            # cloud account.
+            "can_delete_cloud": _is_local_request(),
+            "siblings": _batch_sibling_count(row.get("task_id")),
+        })
+
     @app.route("/loom/vendor/<path:fname>")
     def loom_vendor(fname):
         """Serve the Loom's vendored JS (React/ReactDOM/Babel UMD builds) from
@@ -16341,6 +16546,13 @@ def main():
         # run code after a blocking call starts)
         import threading, webbrowser
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+    # Per-port session cookie. Browsers scope cookies by HOST ONLY -- localhost:5757 and
+    # localhost:5057 share one cookie jar entry -- so two Moonglade instances with the
+    # default "session" name and different secrets evict each other's login on every
+    # sign-in (discovered 2026-07-29: a sandbox and the run-copy silently logged each
+    # other out all evening). Naming the cookie by port lets instances coexist. Costs one
+    # re-login per instance when this ships, then never again.
+    app.config["SESSION_COOKIE_NAME"] = "moonglade_session_{}".format(args.port)
     # Per-port session cookie. Browsers scope cookies by HOST ONLY -- localhost:5757 and
     # localhost:5057 share one cookie jar entry -- so two Moonglade instances with the
     # default "session" name and different secrets evict each other's login on every

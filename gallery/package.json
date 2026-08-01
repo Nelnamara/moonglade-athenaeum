@@ -1,0 +1,22 @@
+{
+  "name": "athenaeum-gallery",
+  "private": true,
+  "version": "0.1.0",
+  "description": "The NEW gallery frontend -- React + Vite, first-class. Not the Loom's delivery (no vendor globals, no Babel fallback, no single-file JSX): real component files, real modules, hot reload in dev (`npm run dev` proxies /api to the running Flask server), and a fixed-name production bundle in gallery/dist served by moonglade_gallery.py at /next.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true
+  }
+}
