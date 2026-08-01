@@ -69,12 +69,32 @@
     // placement it cannot be computed against a stale or slid-away rect. z-index must clear
     // the lightbox's own 300, or the panel opens BEHIND the picture it is about to upscale.
     'mg-upscale-panel:not([inline]){position:fixed;z-index:320;top:56px;right:12px;',
-    ' width:min(420px,calc(100vw - 24px));max-height:calc(100vh - 72px);overflow:auto;',
-    ' background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;',
-    ' box-shadow:0 22px 60px rgba(0,0,0,.6);}',
+    ' width:min(420px,calc(100vw - 24px));max-height:calc(100vh - 72px);overflow:auto;}',
     '@media (max-width:520px){mg-upscale-panel:not([inline]){left:12px;right:12px;width:auto;}}',
-    'mg-upscale-panel[inline]{margin-top:14px;background:var(--mantle);border:1px solid var(--surface1);',
-    ' border-radius:12px;}',
+    'mg-upscale-panel[inline]{margin-top:14px;}',
+    // The glass face (design spec). ONE surface for both mounts -- only the anchoring
+    // above differs. The rgba numbers are the spec's literal glass values, not palette.
+    'mg-upscale-panel{border-radius:16px;border:1px solid rgba(182,146,230,.32);',
+    ' background:linear-gradient(120deg,rgba(24,18,54,.92),rgba(14,11,32,.95));',
+    ' -webkit-backdrop-filter:blur(18px) saturate(1.12);backdrop-filter:blur(18px) saturate(1.12);',
+    ' box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px rgba(182,146,230,.14);}',
+    // Overlay law: both directions animate. Close is a [closing] attribute plus a 340ms
+    // deferred drop of [open] in close() -- without the deferral the display:none flip
+    // lands first and the exit keyframes are never seen. The flyout slides for the edge
+    // it lives on; the inline mount is part of the page, so it fade-rises like one.
+    '@keyframes mguIn{from{opacity:0;transform:translateX(34px) scale(.985);}to{opacity:1;transform:none;}}',
+    '@keyframes mguOut{from{opacity:1;transform:none;}to{opacity:0;transform:translateX(34px) scale(.985);}}',
+    'mg-upscale-panel:not([inline])[open]{animation:mguIn .4s cubic-bezier(.18,1.02,.26,1);}',
+    // pointer-events:none while closing: the fade window is 340ms of a still-mounted,
+    // still-[open] panel, and .mgu-go re-enables before close() on the submit path --
+    // without this, a second click during the exit fade lands on a live Go and pays for
+    // a SECOND generation. The instant close used to be this guard; the animation isn't
+    // allowed to un-guard a spend path.
+    'mg-upscale-panel:not([inline])[closing]{animation:mguOut .34s cubic-bezier(.4,0,.2,1) forwards;pointer-events:none;}',
+    '@keyframes mguRise{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}',
+    '@keyframes mguSink{from{opacity:1;transform:none;}to{opacity:0;transform:translateY(6px);}}',
+    'mg-upscale-panel[inline][open]{animation:mguRise .22s cubic-bezier(.2,.9,.24,1);}',
+    'mg-upscale-panel[inline][closing]{animation:mguSink .34s cubic-bezier(.4,0,.2,1) forwards;pointer-events:none;}',
     '.mgu-body{padding:12px 14px 14px;}',
     '.mgu-head{display:flex;align-items:center;gap:8px;padding:11px 14px 0;font-weight:600;}',
     '.mgu-head .x{margin-left:auto;background:none;border:none;color:var(--subtext);',
@@ -83,17 +103,49 @@
     ' margin:11px 0 4px;}',
     '.mgu-seg{display:flex;gap:6px;}',
     '.mgu-seg button{flex:1;padding:6px 8px;font-size:12px;border-radius:7px;cursor:pointer;',
-    ' background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);}',
+    ' background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);',
+    ' position:relative;z-index:1;transition:background .18s,border-color .18s,color .18s;}',
     '.mgu-seg button.on{background:var(--surface1);color:var(--text);border-color:var(--overlay0);}',
+    // Tooltip law on the method hints. The segment sits at the top of the panel with the
+    // whole body below it, so the tip pops DOWN into that open space, centered on its
+    // button. These hints are sentences, so they take the spec's multi-line face (212px,
+    // wrapping) rather than the one-line nowrap face. While a tip shows, its trigger
+    // rises to the top of the component band (z 7) and the tip rides at z 5 as its
+    // child -- no new band between components and overlays. No native `title`: on
+    // touch, tapping a method already prints the same hint into the line below.
+    '.mgu-seg button:hover,.mgu-seg button:focus-visible{z-index:7;}',
+    '.mgu-tip{position:absolute;z-index:5;top:calc(100% + 8px);left:50%;width:212px;',
+    ' transform:translate(-50%,-4px);opacity:0;pointer-events:none;text-align:left;',
+    ' background:rgba(9,7,22,.96);border:1px solid rgba(182,146,230,.4);border-radius:8px;',
+    ' padding:8px 11px;font-size:10.5px;font-weight:500;line-height:1.5;color:var(--text);',
+    ' white-space:normal;box-shadow:0 10px 26px rgba(0,0,0,.6);',
+    ' transition:opacity .18s cubic-bezier(.2,.9,.24,1),transform .18s cubic-bezier(.2,.9,.24,1);}',
+    '.mgu-seg button:hover .mgu-tip,.mgu-seg button:focus-visible .mgu-tip{opacity:1;transform:translate(-50%,0);}',
     '.mgu-sel{width:100%;padding:6px 8px;border-radius:7px;background:var(--surface0);',
     ' color:var(--text);border:1px solid var(--surface1);font-size:12px;}',
     '.mgu-note{font-size:11px;color:var(--subtext);margin-top:4px;}',
     '.mgu-note.bad{color:var(--red);}',
     '.mgu-val{color:var(--lavender);}',
     '.mgu-dim{color:var(--overlay0);text-transform:none;}',
-    '.mgu-go{width:100%;margin-top:11px;padding:9px;border-radius:8px;border:none;cursor:pointer;',
-    ' background:var(--lavender);color:#1a1430;font-weight:650;font-size:13px;}',
-    '.mgu-go[disabled]{opacity:.45;cursor:not-allowed;}',
+    // The primary action wears the skin-aware metallic accent (spec accentMetal), at the
+    // spec's full-width in-panel geometry. Disabled/submitting is the spec's muted state:
+    // the sheen keeps drifting, just desaturated, so "waiting" reads differently from a
+    // flat dead control. mgMetal is the shared 7s drift; redefining it here is harmless
+    // if another component's injected style already carries the identical keyframes.
+    '@keyframes mgMetal{0%{background-position:0% 50%;}50%{background-position:100% 50%;}',
+    ' 100%{background-position:0% 50%;}}',
+    '.mgu-go{width:100%;margin-top:11px;padding:12px;border-radius:10px;cursor:pointer;',
+    ' font-weight:800;font-size:14px;letter-spacing:.03em;white-space:nowrap;',
+    ' color:color-mix(in oklab,var(--accent) 26%,#08040f);text-shadow:0 1px 0 rgba(255,255,255,.45);',
+    ' border:1px solid rgba(255,255,255,.34);',
+    ' background:linear-gradient(100deg,color-mix(in oklab,var(--accent) 50%,#06030d) 0%,',
+    '  var(--accent) 18%,color-mix(in oklab,var(--accent) 22%,#ffffff) 34%,var(--accent) 50%,',
+    '  color-mix(in oklab,var(--accent) 74%,#06030d) 68%,var(--mauve) 84%,',
+    '  color-mix(in oklab,var(--accent) 50%,#06030d) 100%);',
+    ' background-size:220% 100%;animation:mgMetal 7s ease-in-out infinite;',
+    ' box-shadow:inset 0 1px 0 rgba(255,255,255,.72),inset 0 -3px 5px rgba(40,20,70,.5),',
+    '  0 10px 26px rgba(0,0,0,.5);}',
+    '.mgu-go[disabled]{filter:saturate(.6) brightness(.82);cursor:not-allowed;}',
     'mg-upscale-panel input[type=range]{width:100%;}'
   ].join('');
 
@@ -187,7 +239,10 @@
       MODES.forEach(function (m) {
         var b = h('button', null, m.label);
         b.type = 'button';
-        b.title = m.hint;
+        // The hint rides as a styled tooltip child (tooltip law), not a native title.
+        // The same text still lands in _modeHint for the selected mode -- which is
+        // also what a touch user gets, since tapping IS selecting.
+        b.appendChild(h('span', 'mgu-tip', m.hint));
         b.onclick = function () { self.setMode(m.key); };
         seg.appendChild(b);
         self._segBtns[m.key] = b;
@@ -451,6 +506,10 @@
     open(what) {
       var self = this;
       this.connectedCallback();
+      // Re-opening mid-close must win over close()'s deferred unmount below, or the
+      // panel blinks out 340ms into its own open.
+      clearTimeout(this._closeT);
+      this.removeAttribute('closing');
       this.setAttribute('open', '');
       this._setMsg('');
       // The same sequence token _price() carries, for a costlier reason: open on A, then
@@ -482,7 +541,18 @@
     }
 
     close() {
-      this.removeAttribute('open');
+      var self = this;
+      // The exit plays before the display:none flip: [closing] runs the reverse
+      // slide+fade and the [open] drop is deferred 340ms -- the animation's own
+      // length -- so the exit is ever seen at all (overlay law). Closing an already
+      // closed panel stays a no-op.
+      if (!this.hasAttribute('open')) return this;
+      this.setAttribute('closing', '');
+      clearTimeout(this._closeT);
+      this._closeT = setTimeout(function () {
+        self.removeAttribute('closing');
+        self.removeAttribute('open');
+      }, 340);
       return this;
     }
 

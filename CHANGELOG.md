@@ -17,7 +17,20 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
-- **The React conversion, Phase 0 (Foundation) — complete.** The React pilot (`gallery/`
+- **The React conversion, Phase 1 — the `mg-*` components respecced to UI Kit v2.** Visual
+  only, public APIs frozen (classic pages still mount everything unchanged). Generate
+  drawer: metallic skin-aware submit + glass chrome + both-ways dock motion. Cost badge:
+  metallic credits chip, gold membership-warning dot + gold-bordered billing tooltip
+  (visual states now; expiry data arrives with the `/api/account` extension). Notify:
+  toast kind hues + motion vocab, the toast's legendary/feat frames kept, and **the Folio
+  grid-card ornate frames dropped** (owner call 2026-07-31 — tier now reads from band +
+  glow). Pickers: glass surfaces, tooltip law, both-ways motion; picker-core untouched,
+  zero new fetches (the one-fetch speed benchmark holds). Upscale panel: glass + metallic
+  respec. Each component adversarially verified value-by-value against the kit card; the
+  verify pass caught and we fixed a real spend-path defect the respec would have shipped
+  (the upscale panel's new 340ms closing fade left a re-enabled Go clickable — a double
+  click could have paid for a second generation; `pointer-events:none` on `[closing]`
+  restores the guard the old instant-close provided). The React pilot (`gallery/`
   Vite app, the `/next` page + its purpose-built API, route tiers pinned at LOGIN) salvaged
   verbatim off `gallery-top`, which has now yielded everything it was kept for. Rode along:
   the per-port `SESSION_COOKIE_NAME` fix, so two Moonglade instances on different localhost

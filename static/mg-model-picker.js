@@ -178,6 +178,11 @@
     ' border:1px solid var(--surface1,#3a3460);border-radius:6px;color:var(--subtext,#9a93ab);',
     ' font:10.5px/1.3 system-ui;padding:4px 6px;cursor:pointer;}',
     'mg-model-picker .mg-mktsel select.on{color:var(--text,#d6d2e2);border-color:var(--accent,#b692e6);}',
+    /* design-final-pass motion vocab: every chip/button/select state change (on/off,
+       hover) settles over .18s on the shared micro curve instead of snapping. One rule,
+       all four control rows -- no per-row drift. */
+    'mg-model-picker .mg-mktsort button,mg-model-picker .mg-mktcats button,mg-model-picker .mg-mktsrc button,',
+    'mg-model-picker .mg-mktsel select{transition:background .18s cubic-bezier(.2,.9,.24,1),color .18s cubic-bezier(.2,.9,.24,1),border-color .18s cubic-bezier(.2,.9,.24,1);}',
     /* picker-parity-round2: was a fixed max-height:320px (the O12/O13-round bug -- a tall
        host left dead space below this fixed cap instead of the grid using it). Now a flex
        item that fills whatever room the (flex-column) host element above has, with its own
@@ -201,10 +206,14 @@
        height and real overflow. Verified live: rows back to ~200px, images a real 1:1
        square, scrollHeight now correctly exceeds clientHeight with 24+ cards. */
     'mg-model-picker .mg-grid{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:min-content;gap:7px;margin-top:8px;',
-    ' flex:1 1 auto;min-height:140px;overflow:auto;transition:opacity .12s;}',
-    'mg-model-picker .mg-card{position:relative;background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);',
-    ' border-radius:8px;overflow:hidden;cursor:pointer;}',
-    'mg-model-picker .mg-card:hover{border-color:var(--accent,#b692e6);}',
+    ' flex:1 1 auto;min-height:140px;overflow:auto;transition:opacity .18s cubic-bezier(.2,.9,.24,1);}',
+    /* design-final-pass: cards live in the component band (0-7). z-index 1 at rest, 7 on
+       hover -- the hovered card is the TRIGGER of the floating preview tip, and the
+       tooltip law elevates a showing trigger to the top of its band. Border settles on
+       the .18s micro curve rather than snapping. */
+    'mg-model-picker .mg-card{position:relative;z-index:1;background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);',
+    ' border-radius:8px;overflow:hidden;cursor:pointer;transition:border-color .18s cubic-bezier(.2,.9,.24,1);}',
+    'mg-model-picker .mg-card:hover{border-color:var(--accent,#b692e6);z-index:7;}',
     'mg-model-picker .mg-card.sel{border-color:var(--accent,#b692e6);box-shadow:0 0 0 1px var(--accent,#b692e6) inset;}',
     'mg-model-picker .mg-cov{width:100%;aspect-ratio:1/1;object-fit:cover;display:block;background:var(--base,#0c0a1c);}',
     'mg-model-picker .mg-cov.blur{filter:blur(14px);}',
@@ -220,11 +229,23 @@
     'mg-model-picker .mg-cbadge.yes{background:rgba(148,226,178,.16);color:var(--green,#94e2b2);}',
     'mg-model-picker .mg-cbadge.no{background:rgba(243,139,168,.16);color:var(--red,#f38ba8);}',
     'mg-model-picker .mg-empty{color:var(--subtext,#9a93ab);font-size:12px;padding:12px 4px;display:none;font-style:italic;flex:none;}',
-    /* the floating preview -- fixed so the Loom canvas transform:scale() can't distort it */
-    'mg-model-picker .mg-preview{position:fixed;z-index:600;width:300px;background:var(--mantle,#131024);',
-    ' border:1px solid var(--surface1,#3a3460);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.6);',
-    ' overflow:hidden;display:none;pointer-events:none;}',
-    'mg-model-picker .mg-preview.open{display:block;}',
+    /* the floating preview -- fixed so the Loom canvas transform:scale() can't distort it.
+       design-final-pass: respecced to the GLASS surface (gradient pane + blur, 16px
+       radius, violet edge -- spec-literal rgba values) and to the tooltip MOTION law:
+       instead of the old display:none snap it now fades + drifts 4px into place, both
+       directions, .18s on the micro curve. Placement already obeys the tight-grid law
+       (sideways into open canvas, see _place()); the elevated trigger is the hovered
+       .mg-card above. z-index/positioning untouched -- restructuring the fixed element
+       into a child-of-trigger tip would re-open the Loom transform distortion this
+       comment exists to prevent. */
+    'mg-model-picker .mg-preview{position:fixed;z-index:600;width:300px;',
+    ' background:linear-gradient(120deg,rgba(24,18,54,.92),rgba(14,11,32,.95));',
+    ' backdrop-filter:blur(18px) saturate(1.12);',
+    ' border:1px solid rgba(182,146,230,.32);border-radius:16px;',
+    ' box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px rgba(182,146,230,.14);',
+    ' overflow:hidden;opacity:0;transform:translateY(4px);pointer-events:none;',
+    ' transition:opacity .18s cubic-bezier(.2,.9,.24,1),transform .18s cubic-bezier(.2,.9,.24,1);}',
+    'mg-model-picker .mg-preview.open{opacity:1;transform:none;}',
     'mg-model-picker .mg-preview img{width:100%;max-height:300px;object-fit:cover;display:block;}',
     'mg-model-picker .mg-preview img.blur{filter:blur(20px);}',
     'mg-model-picker .mp-meta{padding:10px 12px;}',

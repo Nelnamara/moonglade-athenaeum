@@ -50,33 +50,69 @@
        order, which is luck, not layering (same fix as the Loom's own .sb-pick-ov). 500 is
        the shell's established full-screen-modal tier: above the overlay and Deep Focus's
        veil, below mg-notify's toasts (510) and the unlock moment (520). */
+    /* design-final-pass: the element IS the scrim -- spec face (rgba(5,4,13,.62) +
+       blur(7px)) and it fades .32s in. Close is the same story reversed (glass law:
+       every conditional overlay animates BOTH ways): _close() flips on .mg-closing,
+       scrim fades .34s out on the exit curve while the box slides away below, and the
+       mg-close dispatch is deferred 340ms so the host's unmount lands after the exit
+       finishes instead of snapping it mid-frame. pointer-events:none while closing --
+       a dying modal must not eat clicks. */
     'mg-gallery-picker{position:fixed;inset:0;z-index:500;display:flex;align-items:center;',
-    ' justify-content:center;padding:20px;background:rgba(6,4,16,.76);font:13px/1.4 system-ui,sans-serif;}',
-    'mg-gallery-picker .mg-pk-box{width:920px;max-width:94vw;height:82vh;background:var(--mantle,#131024);',
-    ' border:1px solid var(--surface1,#3a3460);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:9px;}',
+    ' justify-content:center;padding:20px;background:rgba(5,4,13,.62);backdrop-filter:blur(7px);',
+    ' font:13px/1.4 system-ui,sans-serif;animation:mgPkScrimIn .32s cubic-bezier(.2,.9,.24,1) both;}',
+    'mg-gallery-picker.mg-closing{animation:mgPkScrimOut .34s cubic-bezier(.4,0,.2,1) both;pointer-events:none;}',
+    '@keyframes mgPkScrimIn{from{opacity:0;}to{opacity:1;}}',
+    '@keyframes mgPkScrimOut{from{opacity:1;}to{opacity:0;}}',
+    /* Glass surface respec: gradient pane + blur(18px), 16px radius, violet edge + bloom
+       (spec-literal rgba values). Opens as slide+fade from +34px with the .985->1 settle
+       on the enter curve; reversed on close via .mg-closing above. */
+    'mg-gallery-picker .mg-pk-box{width:920px;max-width:94vw;height:82vh;',
+    ' background:linear-gradient(120deg,rgba(24,18,54,.92),rgba(14,11,32,.95));',
+    ' backdrop-filter:blur(18px) saturate(1.12);border:1px solid rgba(182,146,230,.32);',
+    ' border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px rgba(182,146,230,.14);',
+    ' padding:14px;display:flex;flex-direction:column;gap:9px;',
+    ' animation:mgPkBoxIn .4s cubic-bezier(.18,1.02,.26,1) both;}',
+    'mg-gallery-picker.mg-closing .mg-pk-box{animation:mgPkBoxOut .34s cubic-bezier(.4,0,.2,1) both;}',
+    '@keyframes mgPkBoxIn{from{opacity:0;transform:translateY(34px) scale(.985);}to{opacity:1;transform:none;}}',
+    '@keyframes mgPkBoxOut{from{opacity:1;transform:none;}to{opacity:0;transform:translateY(34px) scale(.985);}}',
     'mg-gallery-picker .mg-pk-head{display:flex;align-items:center;gap:9px;}',
     'mg-gallery-picker .mg-pk-t{font-size:15px;font-weight:700;white-space:nowrap;color:var(--text,#d6d2e2);}',
     'mg-gallery-picker .mg-pk-q{flex:1;min-width:140px;background:var(--base,#0c0a1c);border:1px solid var(--surface1,#3a3460);',
     ' border-radius:8px;padding:7px 9px;color:var(--text,#d6d2e2);font:13px/1.2 system-ui;}',
     'mg-gallery-picker .mg-pk-q:focus{outline:0;border-color:var(--accent,#b692e6);}',
-    'mg-gallery-picker .mg-pk-x{background:none;border:none;color:var(--subtext,#9a93ab);font-size:24px;',
-    ' line-height:1;cursor:pointer;padding:0 4px;}',
+    'mg-gallery-picker .mg-pk-x{position:relative;z-index:1;background:none;border:none;color:var(--subtext,#9a93ab);font-size:24px;',
+    ' line-height:1;cursor:pointer;padding:0 4px;transition:color .18s cubic-bezier(.2,.9,.24,1);}',
     'mg-gallery-picker .mg-pk-x:hover{color:var(--text,#d6d2e2);}',
+    /* Tooltip law: the X sits on the panel's crowded top-RIGHT edge, so its tip pops
+       BELOW, right-anchored, toward the open grid -- never up off the panel. The tip is
+       a child of its trigger at z 5; the trigger elevates to z 7 (top of the component
+       band) while showing and drops back to z 1 -- no new band invented. Face + the
+       opacity/4px-drift .18s motion are the spec's, both directions. data-tip replaced
+       the native title so the browser tip can't double up over this one. */
+    'mg-gallery-picker .mg-pk-x:hover,mg-gallery-picker .mg-pk-x:focus-visible{z-index:7;}',
+    'mg-gallery-picker .mg-pk-x::after{content:attr(data-tip);position:absolute;top:calc(100% + 6px);right:0;z-index:5;',
+    ' background:rgba(9,7,22,.96);border:1px solid rgba(182,146,230,.4);border-radius:8px;',
+    ' padding:6px 10px;font:600 10.5px/1.2 system-ui;color:var(--text,#d6d2e2);white-space:nowrap;',
+    ' box-shadow:0 10px 26px rgba(0,0,0,.6);pointer-events:none;opacity:0;transform:translateY(-4px);',
+    ' transition:opacity .18s cubic-bezier(.2,.9,.24,1),transform .18s cubic-bezier(.2,.9,.24,1);}',
+    'mg-gallery-picker .mg-pk-x:hover::after,mg-gallery-picker .mg-pk-x:focus-visible::after{opacity:1;transform:none;}',
     'mg-gallery-picker .mg-pk-filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}',
     'mg-gallery-picker .mg-pk-filters select{background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);',
     ' border-radius:6px;color:var(--text,#d6d2e2);padding:5px 9px;font-size:12px;cursor:pointer;max-width:210px;}',
     'mg-gallery-picker .mg-pk-copy{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--subtext,#9a93ab);}',
     'mg-gallery-picker .mg-pk-upload{background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);',
-    ' color:var(--text,#d6d2e2);border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;}',
+    ' color:var(--text,#d6d2e2);border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;',
+    ' transition:border-color .18s cubic-bezier(.2,.9,.24,1);}',
     'mg-gallery-picker .mg-pk-upload:hover{border-color:var(--accent,#b692e6);}',
     'mg-gallery-picker .mg-pk-count{margin-left:auto;font-size:11px;color:var(--subtext,#9a93ab);font-family:ui-monospace,monospace;}',
     'mg-gallery-picker .mg-pk-sizer{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--subtext,#9a93ab);}',
     'mg-gallery-picker .mg-pk-sizer input{width:70px;}',
     'mg-gallery-picker .mg-pk-grid{flex:1;overflow-y:auto;display:grid;',
     ' grid-template-columns:repeat(auto-fill,minmax(var(--mg-pk-tile,122px),1fr));',
-    ' grid-auto-rows:var(--mg-pk-tile,122px);gap:8px;align-content:start;transition:opacity .12s;}',
+    ' grid-auto-rows:var(--mg-pk-tile,122px);gap:8px;align-content:start;transition:opacity .18s cubic-bezier(.2,.9,.24,1);}',
+    /* design-final-pass motion vocab: hover border settles over .18s on the micro curve. */
     'mg-gallery-picker .mg-pk-cell{position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--surface1,#3a3460);',
-    ' cursor:pointer;background:var(--surface0,#211f3a);}',
+    ' cursor:pointer;background:var(--surface0,#211f3a);transition:border-color .18s cubic-bezier(.2,.9,.24,1);}',
     'mg-gallery-picker .mg-pk-cell:hover{border-color:var(--accent,#b692e6);}',
     'mg-gallery-picker .mg-pk-cell img{width:100%;height:100%;object-fit:cover;display:block;}',
     'mg-gallery-picker .mg-pk-vid{position:absolute;top:5px;right:5px;background:rgba(6,4,16,.72);color:var(--text,#d6d2e2);',
@@ -87,7 +123,7 @@
        gallery picker) painted the whole catalog unblurred regardless of the toggle. body is
        real light DOM (no shadow root here), so the host page's class reaches straight in,
        same shape as .card/.pick-cell in moonglade_gallery.py. */
-    'body.privacy-blur mg-gallery-picker .mg-pk-cell img{filter:blur(16px);transition:filter .12s;}',
+    'body.privacy-blur mg-gallery-picker .mg-pk-cell img{filter:blur(16px);transition:filter .18s cubic-bezier(.2,.9,.24,1);}',
     'body.privacy-blur mg-gallery-picker .mg-pk-cell[data-nsfw="1"] img{filter:blur(28px);}',
     'body.privacy-blur mg-gallery-picker .mg-pk-cell:hover img{filter:none;}'
   ].join('');
@@ -214,7 +250,7 @@
         '<div class="mg-pk-box" role="dialog" aria-label="Pick from your gallery">' +
         '<div class="mg-pk-head"><span class="mg-pk-t">Pick from your gallery</span>' +
         '<input class="mg-pk-q" type="text" placeholder="Search your images…">' +
-        '<button type="button" class="mg-pk-x" title="Close (Esc)">&#215;</button></div>' +
+        '<button type="button" class="mg-pk-x" data-tip="Close (Esc)" aria-label="Close (Esc)">&#215;</button></div>' +
         '<div class="mg-pk-filters">' +
         '<select data-f="collection"><option value="">All collections</option></select>' +
         typeSel + sourceSel +
@@ -308,7 +344,20 @@
     }
 
     _close() {
-      this.dispatchEvent(new CustomEvent('mg-close', { bubbles: true, composed: true }));
+      // design-final-pass: the modal animates BOTH ways. The host unmounts on mg-close
+      // (the contract at the top of this file), so the exit can only ever be seen if the
+      // dispatch itself waits for it -- .mg-closing plays scrim + box out (see the CSS),
+      // and mg-close fires after the spec's 340ms deferred-unmount window. Re-entry (Esc
+      // mashed, backdrop re-clicked mid-exit) is a no-op, not a second timer. mg-pick is
+      // deliberately NOT deferred: picking is the fast path and fires instantly -- the
+      // host tears the element down itself there, same as it always has.
+      if (this._closing) return;
+      this._closing = true;
+      this.classList.add('mg-closing');
+      var self = this;
+      setTimeout(function () {
+        self.dispatchEvent(new CustomEvent('mg-close', { bubbles: true, composed: true }));
+      }, 340);
     }
   }
 

@@ -3393,7 +3393,8 @@ body { background: var(--base); margin: 0; font-family: system-ui, sans-serif; }
    context, so that 400 competes in the ROOT context directly against these body-level FABs
    (mg-notify.js gives them 234/235) and wins. 401/402 floats them over the board while staying
    UNDER the modal/celebration tier that must keep covering them -- .sb-seq / .sb-pick-ov and the
-   frame picker <mg-gallery-picker> (all 500), #mg-toasts (510), .ach-m2 / .m2-conf (520/521).
+   frame picker <mg-gallery-picker> (all 500), #mg-toasts (510), .ach-m2 (520; its confetti
+   sheet sits INSIDE at local z 1, behind the card -- the old 521-in-front was a bug).
    Loom-only: this block ships only in _LOOM_SHELL, so the gallery's own #jobs-fab keeps 234.
    !important for the same mg-notify.js cascade-timing reason as the bottom rule above.
    FIXED 2026-07-24 (was a known residual): Deep Focus's .lv-df-veil (450) and its nested

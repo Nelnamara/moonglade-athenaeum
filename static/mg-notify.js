@@ -43,7 +43,14 @@
     // #contest-modal (Contests), and #art-modal (YourArt), NOT achievement-exclusive. Never
     // scope or drop this independently of those other two features.
     '.ach-modal{position:fixed;inset:0;z-index:300;background:rgba(6,4,14,.72);backdrop-filter:blur(4px);display:none;align-items:flex-start;justify-content:center;padding:5vh 16px;overflow-y:auto;}',
-    '.ach-modal.open{display:flex;}',
+    '.ach-modal.open{display:flex;animation:ach-scrim-in .32s ease;}',
+    // Closing state (design-spec motion law: overlays animate BOTH directions, unmount
+    // deferred 340ms). Only Ach.close() ever adds .closing, so #contest-modal/#art-modal --
+    // which share the base .ach-modal chrome but close from their own page JS -- are
+    // untouched by it.
+    '.ach-modal.closing{display:flex;pointer-events:none;animation:ach-scrim-out .34s cubic-bezier(.4,0,.2,1) forwards;}',
+    '@keyframes ach-scrim-in{from{opacity:0;}}',
+    '@keyframes ach-scrim-out{to{opacity:0;}}',
     // The 2026-07-21 host-neutral font fix (see the #jobs-fab/#jobs-tray/#mg-toasts comment
     // below) only covered those three roots -- it missed the achievement celebration (.ach-m2,
     // below) and this Folio of Honors subtree (#ach-modal, the achievement-specific id, NOT
@@ -69,7 +76,7 @@
     // which auto-placed every new full-width section into narrow tiled columns instead of
     // stacking them -- the actual cause of the overlapping/scrambled render this fixes.)
     '.ach-grid{display:flex;flex-direction:column;margin-top:18px;}',
-    '.ach-nar{width:34px;height:34px;border-radius:50%;object-fit:cover;object-position:60% 30%;cursor:pointer;border:1px solid var(--surface1);vertical-align:middle;margin-left:9px;transition:transform .12s,border-color .12s;}',
+    '.ach-nar{width:34px;height:34px;border-radius:50%;object-fit:cover;object-position:60% 30%;cursor:pointer;border:1px solid var(--surface1);vertical-align:middle;margin-left:9px;transition:transform .18s,border-color .18s;}',
     '.ach-nar:hover{transform:scale(1.12);border-color:var(--lavender);}',
     '.ach-unleash{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--ruby);margin-left:12px;cursor:pointer;user-select:none;border:1px solid var(--ruby-deep);border-radius:999px;padding:3px 10px;background:rgba(224,53,94,.08);}',
     '.ach-unleash input{accent-color:var(--ruby);}',
@@ -81,9 +88,11 @@
     // etc.), never fixed hex, so the Hall keeps retinting per active skin like the rest
     // of the app.
     '.ach-hall.open{align-items:center;padding:3vh 3vw;}',
-    '.ach-hall .ach-panel{width:96vw;max-width:1320px;height:94vh;max-height:860px;padding:0;display:flex;flex-direction:column;overflow:hidden;background:linear-gradient(160deg,var(--mantle) 0%,var(--base) 100%);transform-origin:top right;animation:hall-in .28s cubic-bezier(.16,.84,.34,1.06);}',
+    '.ach-hall .ach-panel{width:96vw;max-width:1320px;height:94vh;max-height:860px;padding:0;display:flex;flex-direction:column;overflow:hidden;background:linear-gradient(160deg,var(--mantle) 0%,var(--base) 100%);transform-origin:top right;animation:hall-in .4s cubic-bezier(.2,.9,.24,1);}',
     '@keyframes hall-in{from{opacity:0;transform:scale(.93) translateY(-12px);}to{opacity:1;transform:none;}}',
-    '@media (prefers-reduced-motion: reduce){ .ach-hall .ach-panel{animation:none;} }',
+    '.ach-hall.closing .ach-panel{animation:hall-out .34s cubic-bezier(.4,0,.2,1) forwards;}',
+    '@keyframes hall-out{to{opacity:0;transform:scale(.93) translateY(-12px);}}',
+    '@media (prefers-reduced-motion: reduce){ .ach-hall .ach-panel,.ach-hall.closing .ach-panel,.ach-modal.open,.ach-modal.closing{animation:none;} }',
     '.ach-hall .ach-x{position:static;font-size:24px;flex:none;}',
     '.hall-head{display:flex;align-items:center;gap:13px;padding:12px 20px;flex:none;border-bottom:1px solid var(--surface1);background:linear-gradient(180deg,var(--surface0),transparent);}',
     '.hall-title{font-size:19px;font-weight:700;color:var(--text);display:flex;align-items:center;white-space:nowrap;}',
@@ -184,7 +193,7 @@
     // ---- Ladder badges (the selector row above the tier grid) ----
     '.hall-ladders{display:grid;grid-template-columns:repeat(5,1fr);gap:11px;}',
     '.ladder-badge{cursor:pointer;user-select:none;display:flex;flex-direction:column;align-items:center;gap:5px;}',
-    '.ladder-badge .lb-img{position:relative;width:100%;aspect-ratio:1/1;border-radius:13px;overflow:hidden;transition:outline-color .15s,box-shadow .15s;outline:2px solid transparent;outline-offset:2px;}',
+    '.ladder-badge .lb-img{position:relative;width:100%;aspect-ratio:1/1;border-radius:13px;overflow:hidden;transition:outline-color .18s,box-shadow .18s;outline:2px solid transparent;outline-offset:2px;}',
     '.ladder-badge .lb-img img{width:100%;height:100%;object-fit:cover;transition:transform .18s;}',
     '.ladder-badge:hover .lb-img img{transform:scale(1.08);}',
     '.ladder-badge.zero .lb-img{filter:grayscale(.75) brightness(.45);}',
@@ -234,11 +243,18 @@
     '.hall-pilldiv.feats .pd-pill .pd-nm{color:var(--ruby);}',
     // ---- Tier / milestone / mastery / feat cards ----
     '.hall-cardgrid{display:grid;grid-template-columns:1fr 1fr;gap:11px;}',
-    '.hall-card{position:relative;display:flex;align-items:center;gap:11px;padding:12px;border-radius:11px;background:rgba(28,18,50,.5);border:1px solid var(--surface1);min-height:70px;transition:background .12s,box-shadow .12s;}',
+    '.hall-card{position:relative;display:flex;align-items:center;gap:11px;padding:12px;border-radius:11px;background:rgba(28,18,50,.5);border:1px solid var(--surface1);min-height:70px;transition:background .18s,box-shadow .18s;}',
     '.hall-card:hover{background:rgba(44,30,72,.5);}',
     '.hall-card.locked{opacity:.7;}',
     '.hall-card.earned{box-shadow:0 0 14px -4px var(--tc);}',
-    '.hall-card.framed{border:none;}',
+    // Tier band: the top-edge tier gradient every card carries (dim when locked, lit when
+    // earned) -- with the earned glow above, this is HOW a grid card reads its tier now that
+    // the ornate frames are toast-only again (owner call 2026-07-31). Same band gradient
+    // vocabulary as .toast::before / .hall-carousel::before. Hidden feats stay bandless so
+    // the band can't leak the tier of a masked card.
+    '.hall-card::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;border-radius:11px 11px 0 0;background:linear-gradient(90deg,transparent,var(--tc) 22%,var(--tcl) 50%,var(--tc) 78%,transparent);opacity:.35;transition:opacity .18s;}',
+    '.hall-card.earned::before{opacity:.9;box-shadow:0 0 8px var(--tc);}',
+    '.hall-card.hidden-feat::before{display:none;}',
     '.hall-card .hcd-ico{position:relative;flex:none;width:42px;height:42px;border-radius:10px;overflow:hidden;filter:grayscale(1) brightness(.75);display:flex;align-items:center;justify-content:center;font-size:22px;background:color-mix(in srgb, var(--tc) 12%, transparent);border:1px solid color-mix(in srgb, var(--tc) 25%, transparent);}',
     '.hall-card.earned .hcd-ico{filter:none;}',
     // .hcd-badge OVERLAYS the emoji text above (position:absolute) rather than sitting next
@@ -268,17 +284,14 @@
     // carrying a second copy of the style, so the selector has to admit both.
     '.hall-card .hcd-roast,.hall-carousel .hcd-roast{grid-column:1/-1;font-size:10.5px;color:#c9b8e6;line-height:1.4;margin-top:6px;padding:5px 8px;background:rgba(182,146,230,.07);border-left:2px solid var(--lavender);border-radius:0 7px 7px 0;font-style:italic;}',
     '.hall-card .hcd-bannerflag{font-size:10px;color:var(--gold);margin-top:4px;}',
-    // 9-slice frame overlay for legendary/feat CARDS (same technique + real served frame
-    // assets the unlock toast already uses -- see .ach-m2 .t-legendary .tframe below --
-    // extending it to grid tiles was an explicit, decided change from the prior "toast only"
-    // behavior, per the 2026-07-22 redesign).
-    '.hall-frame{position:absolute;inset:-5px;pointer-events:none;z-index:2;border-style:solid;border-color:transparent;}',
-    '.hall-frame.legendary{border-width:16px 14px;border-image-source:url(/branding/frames/legendary.png);border-image-slice:16.8% 13.3% 16.8% 13%;border-image-outset:0;}',
-    '.hall-frame.feat{border-width:16px 13px;border-image-source:url(/branding/frames/feat.png);border-image-slice:15.8% 10.3% 16.8% 10%;border-image-outset:0;}',
+    // The 9-slice frame overlay for legendary/feat CARDS (the 2026-07-22 extension of the
+    // unlock toast's frames to grid tiles) was REMOVED per owner call 2026-07-31: frames are
+    // toast-only again (.ach-m2 .tframe below keeps them); a grid card's tier reads from the
+    // ::before band + earned glow above.
     // ---- Section collapse chevron (reused on the ladder-groups + milestone/mastery/feat
     // pill dividers, and the classic Evolution Ladders flat section for the "All" view) ----
     '.ach-hall .ach-sect{cursor:pointer;user-select:none;}',
-    '.ach-hall .ach-sect .chev{margin-left:auto;color:var(--overlay0);font-size:11px;transition:transform .15s;}',
+    '.ach-hall .ach-sect .chev{margin-left:auto;color:var(--overlay0);font-size:11px;transition:transform .18s;}',
     '.ach-hall .ach-sect.collapsed .chev{transform:rotate(-90deg);}',
     '.hall-empty{color:var(--overlay0);font-size:12px;font-style:italic;padding:8px 0;}',
     '@media(max-width:860px){ .ach-hall.open{padding:0;} .ach-hall .ach-panel{width:100vw;height:100vh;max-height:none;border-radius:0;} .hall-body{grid-template-columns:1fr;} .hall-rail{border-left:none;border-top:1px solid var(--surface1);} .hall-search{width:120px;} .hall-cardgrid,.hall-ladders{grid-template-columns:repeat(2,1fr);} .hall-statcards{grid-template-columns:1fr;} .hc-row{flex-direction:column;} .hc-cap{width:100%;border-right:none;border-bottom:1px solid var(--surface1);padding:14px 0;} .hc-nav{display:none;} }',
@@ -301,6 +314,10 @@
     '.ach-m2 .mglow{position:absolute;top:6px;right:0;width:250px;height:190px;z-index:1;pointer-events:none;background:radial-gradient(ellipse at 60% 55%,var(--tc),transparent 66%);filter:blur(22px);opacity:0;}',
     '.ach-m2 .tw.go .mglow{animation:m2gfade .7s ease 1.3s forwards;}',
     '@keyframes m2gfade{to{opacity:.55;}}',
+    // Feat flair (design spec): the crimson glow doesn't just fade in, it FLICKERS like
+    // embers once lit. The existing .ring pulse (ruby for t-feat) is the crimson circle.
+    '.ach-m2 .tw.go.t-feat .mglow{animation:m2gfade .7s ease 1.3s forwards, m2ember 2.2s ease-in-out 2.1s infinite;}',
+    '@keyframes m2ember{0%,100%{opacity:.55;}18%{opacity:.38;}34%{opacity:.6;}52%{opacity:.42;}71%{opacity:.62;}86%{opacity:.47;}}',
     '.ach-m2 .mascot{position:absolute;top:0;right:26px;height:206px;z-index:2;transform-origin:bottom center;filter:drop-shadow(0 12px 16px rgba(0,0,0,.55));opacity:0;transform:translateY(96px) scale(.9);}',
     '.ach-m2 .tw.go .mascot{animation:m2pop .66s cubic-bezier(.16,.86,.28,1.32) 1.32s forwards;}',
     '@keyframes m2pop{0%{opacity:0;transform:translateY(96px) scale(.9);}62%{opacity:1;transform:translateY(-10px) scale(1.03);}100%{opacity:1;transform:translateY(0) scale(1);}}',
@@ -336,7 +353,11 @@
     '@keyframes m2sheen{0%{left:-60%;}30%{left:130%;}100%{left:130%;}}',
     '.ach-m2 .rwd{display:inline-block;margin:8px 0 0 8px;font-size:11px;color:var(--gold);border:1px solid #6b5330;background:rgba(230,200,120,.1);border-radius:7px;padding:3px 9px;opacity:0;}',
     '.ach-m2 .tw.go .rwd{animation:m2fade .4s ease 1.34s forwards;}',
-    '.m2-conf{position:fixed;top:-3vh;width:7px;height:14px;border-radius:2px;z-index:521;pointer-events:none;animation:m2conffall linear forwards;}',
+    // Confetti sheet sits BEHIND the card (design spec): .ach-m2 is its own stacking
+    // context, so "behind" is local z 1 -- under the toast (z 3) and mascot (z 2), above
+    // the veil. The spec's global band number (517, vs the moment's 520) can't be used
+    // literally in here: 517 beats the toast's local 3 and would land the sheet in FRONT.
+    '.m2-conf{position:fixed;top:-3vh;width:7px;height:14px;border-radius:2px;z-index:1;pointer-events:none;animation:m2conffall linear forwards;}',
     '@keyframes m2conffall{to{transform:translateY(112vh) rotate(720deg);opacity:.5;}}',
     '.ach-m2 .flash{position:absolute;inset:0;border-radius:16px;pointer-events:none;opacity:0;background:radial-gradient(circle at 74% -4%,rgba(255,242,206,.9),transparent 58%);}',
     '.ach-m2 .t-feat .flash{background:radial-gradient(circle at 74% -4%,rgba(255,214,226,.9),transparent 58%);}',
@@ -349,7 +370,9 @@
     '.ach-m2 .t-legendary .tframe{border-width:46px 44px;border-image-source:url(/branding/frames/legendary.png);border-image-slice:16.8% 13.3% 16.8% 13%;border-image-outset:6px;}',
     '.ach-m2 .t-feat .tframe{border-width:46px 38px;border-image-source:url(/branding/frames/feat.png);border-image-slice:15.8% 10.3% 16.8% 10%;border-image-outset:6px;}',
     '.ach-m2 .t-legendary .tframe .toast,.ach-m2 .t-feat .tframe .toast{border-color:transparent;box-shadow:none;opacity:1;transform:none;animation:none;}',
-    '.ach-m2 .rwd .giftbox{height:15px;width:15px;object-fit:contain;vertical-align:-3px;margin-right:5px;}',
+    // Icon-as-background-image (design-spec toast rule: toast icons are never raw <img src>,
+    // so the preload scanner can't fetch them and computed background styles stay inspectable).
+    '.ach-m2 .rwd .giftbox{display:inline-block;height:15px;width:15px;background:url(/branding/rewards/gift.png) center/contain no-repeat;vertical-align:-3px;margin-right:5px;}',
     '.ach-m2 .pts-pill{display:inline-block;margin:8px 0 0 8px;font:800 9px/1 sans-serif;letter-spacing:.06em;color:var(--gold,#e0c268);border:1px solid #6b5330;background:rgba(230,200,120,.12);border-radius:999px;padding:3px 9px;vertical-align:middle;opacity:0;}',
     '.ach-m2 .tw.go .pts-pill{animation:m2fade .4s ease 1.26s forwards;}',
     '@media (prefers-reduced-motion: reduce){ .ach-m2 .pts-pill{opacity:1!important;} }',
@@ -365,7 +388,7 @@
     // card, visibly different type on the two pages (owner spotted it comparing screenshots,
     // 2026-07-21). A shared component that changes appearance depending on who mounts it is
     // the bug; mg-notify is host-neutral by design, like its mg-* siblings, so it owns this.
-    '#jobs-fab{position:fixed;left:14px;bottom:14px;z-index:234;display:none;align-items:center;gap:7px;background:var(--mantle);border:1px solid var(--surface1);border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.45);color:var(--subtext);cursor:pointer;padding:7px 13px 7px 10px;font-family:system-ui,sans-serif;font-size:11.5px;letter-spacing:.02em;transition:border-color .15s,color .15s;}',
+    '#jobs-fab{position:fixed;left:14px;bottom:14px;z-index:234;display:none;align-items:center;gap:7px;background:var(--mantle);border:1px solid var(--surface1);border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.45);color:var(--subtext);cursor:pointer;padding:7px 13px 7px 10px;font-family:system-ui,sans-serif;font-size:11.5px;letter-spacing:.02em;transition:border-color .18s,color .18s;}',
     '#jobs-fab.show{display:inline-flex;}',
     '#jobs-fab:hover{border-color:var(--lavender);color:var(--text);}',
     '#jobs-fab .jf-dot{width:8px;height:8px;border-radius:50%;background:var(--overlay0);flex:none;}',
@@ -447,15 +470,19 @@
     // ---- Toasts: small, corner-stacked, reusable (job notices; achievements adopt the same
     // frame for the >3-unlock summary case). z-index raised 420->510 (see top-of-file comment).
     '#mg-toasts{position:fixed;right:16px;top:64px;z-index:510;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;font-family:system-ui,sans-serif;}',
-    '.mg-toast{pointer-events:auto;min-width:214px;max-width:340px;display:flex;align-items:flex-start;gap:10px;background:var(--mantle);border:1px solid var(--surface1);border-left:3px solid var(--lavender);border-radius:10px;padding:11px 13px;box-shadow:0 10px 30px rgba(0,0,0,.5);animation:mg-toast-in .28s cubic-bezier(.2,.9,.3,1.2);}',
-    '.mg-toast.out{animation:mg-toast-out .3s ease forwards;}',
-    '.mg-toast.ok{border-left-color:var(--emerald);} .mg-toast.err{border-left-color:var(--red);}',
+    // Enter/exit per the design-spec motion vocab (.4s enter / .34s exit curves; JS remove()
+    // defers the unmount 340ms to match). Kind hues: '' info=lavender, ok=emerald, err=red,
+    // unlock=gold -- tokens, one hue per kind.
+    '.mg-toast{pointer-events:auto;min-width:214px;max-width:340px;display:flex;align-items:flex-start;gap:10px;background:var(--mantle);border:1px solid var(--surface1);border-left:3px solid var(--lavender);border-radius:10px;padding:11px 13px;box-shadow:0 10px 30px rgba(0,0,0,.5);animation:mg-toast-in .4s cubic-bezier(.2,.9,.24,1);}',
+    '.mg-toast.out{animation:mg-toast-out .34s cubic-bezier(.4,0,.2,1) forwards;}',
+    '.mg-toast.ok{border-left-color:var(--emerald);} .mg-toast.err{border-left-color:var(--red);} .mg-toast.unlock{border-left-color:var(--gold);}',
     '.mg-toast .mt-ic{flex:none;font-size:15px;margin-top:1px;color:var(--lavender);}',
-    '.mg-toast.ok .mt-ic{color:var(--emerald);} .mg-toast.err .mt-ic{color:var(--red);}',
+    '.mg-toast.ok .mt-ic{color:var(--emerald);} .mg-toast.err .mt-ic{color:var(--red);} .mg-toast.unlock .mt-ic{color:var(--gold);}',
     '.mg-toast .mt-main{flex:1;min-width:0;}',
     '.mg-toast .mt-title{font-size:12.5px;color:var(--text);font-weight:600;}',
     '.mg-toast .mt-msg{font-size:11px;color:var(--subtext);margin-top:2px;white-space:normal;}',
-    '.mg-toast .mt-thumb{width:34px;height:34px;border-radius:6px;object-fit:cover;flex:none;}',
+    // Thumb is a background-image span, not <img src> -- same toast icon rule as .giftbox above.
+    '.mg-toast .mt-thumb{width:34px;height:34px;border-radius:6px;background-position:center;background-size:cover;background-repeat:no-repeat;flex:none;}',
     '.mg-toast .mt-x{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:14px;padding:0 1px;flex:none;line-height:1;}',
     '.mg-toast .mt-x:hover{color:var(--text);}',
     '@keyframes mg-toast-in{from{opacity:0;transform:translateY(-12px);}to{opacity:1;transform:translateY(0);}}',
@@ -490,9 +517,24 @@
     // toasts + the Job tracker) doesn't crash -- close() in particular is reachable from the
     // global Escape-key listener below on every keypress, app-wide, whether or not the modal
     // exists on the current page.
-    function open(){ var m=el('ach-modal'); if(!m) return; m.classList.add('open'); m.setAttribute('aria-hidden','false');
+    // _closeT: the deferred-unmount timer (design-spec motion law -- the modal animates
+    // closed over .34s, then display actually drops at 340ms). open() cancels it so
+    // reopening mid-close can't be yanked away by the earlier close's pending unmount.
+    var _closeT=null;
+    function open(){ var m=el('ach-modal'); if(!m) return;
+      if(_closeT){ clearTimeout(_closeT); _closeT=null; }
+      m.classList.remove('closing');
+      m.classList.add('open'); m.setAttribute('aria-hidden','false');
       load(false); }
-    function close(){ var m=el('ach-modal'); if(!m) return; m.classList.remove('open'); m.setAttribute('aria-hidden','true');
+    function close(){ var m=el('ach-modal'); if(!m) return; m.setAttribute('aria-hidden','true');
+      // Animate out, THEN unmount: .closing keeps display:flex while the exit animation
+      // runs; the timeout drops both classes at 340ms. Guarded so the app-wide Escape
+      // listener (which reaches here on every keypress) is still a no-op when the modal
+      // is closed or already on its way out.
+      if(m.classList.contains('open') && !m.classList.contains('closing')){
+        m.classList.add('closing');
+        _closeT=setTimeout(function(){ m.classList.remove('open'); m.classList.remove('closing'); _closeT=null; }, 340);
+      }
       // Stop the Hall carousel with the modal. renderCarousel/renderGrid each clear this
       // before re-arming it, so it was only ever left running on the way OUT -- the interval
       // kept firing every 3.5s and rebuilding hidden DOM for the life of the page, once per
@@ -511,18 +553,18 @@
     function setUnleash(on){ try{ localStorage.setItem('unleash', on?'1':'0'); }catch(e){}
       if(data) render(data); }
     function tierPill(tier){ return '<span class="hall-tierpill-mini t-'+esc(tier)+'">'+esc(tier)+'</span>'; }
-    // ---- The Folio of Honors card (tier / milestone / mastery / feat). Legendary and feat
-    // cards get the 9-slice frame overlay -- extended from the unlock toast to grid tiles
-    // here, a deliberate change from the prior "toast only" behavior (2026-07-22 redesign,
-    // per the old state doc's Per-tile ornate frames open question). Masked hidden feats arrive
-    // from the server ALREADY sanitized (id/name/desc replaced server-side in api_achievements
-    // -- see that route) so this function never has to know a real hidden feat's identity.
+    // ---- The Folio of Honors card (tier / milestone / mastery / feat). The 9-slice frame
+    // overlay that briefly extended from the unlock toast to these grid tiles (2026-07-22
+    // redesign) was dropped per owner call 2026-07-31 -- frames are toast-only again, and a
+    // card's tier reads from the .hall-card::before band + earned glow. Masked hidden feats
+    // arrive from the server ALREADY sanitized (id/name/desc replaced server-side in
+    // api_achievements -- see that route) so this function never has to know a real hidden
+    // feat's identity.
     function card(d,a){
       var masked=a.hidden&&!a.earned;
       var isFeat=a.tier==='feat';
-      var framed=(a.tier==='legendary'||isFeat)&&!masked;
       var c=document.createElement('div');
-      c.className='hall-card t-'+a.tier+(a.earned?' earned':' locked')+(masked?' hidden-feat':'')+(framed?' framed':'');
+      c.className='hall-card t-'+a.tier+(a.earned?' earned':' locked')+(masked?' hidden-feat':'');
       c.setAttribute('data-q',(a.name+' '+a.desc+' '+a.tier).toLowerCase());
       // The badge <img> OVERLAYS the always-present escaped emoji text (same technique the
       // old .ico/.ico-badge pair used) rather than swapping textContent in from an inline
@@ -539,7 +581,7 @@
         ico='<div class="hcd-ico emoji">'+esc(a.icon)+'</div>';
       }
       var sub=(a.bucket==='ladder'&&a.ladderName)?(esc(a.ladderName)+' &middot; '+esc(fmt(a.threshold))):'';
-      var body=(framed?'<div class="hall-frame '+(isFeat?'feat':'legendary')+'"></div>':'')+ico
+      var body=ico
         +'<div class="hcd-body"><div class="hcd-top"><span class="hcd-nm">'+(masked?'???':esc(a.name))+'</span>'
         +(masked?'':tierPill(isFeat?'feat':a.tier))+'</div>'
         +'<div class="hcd-ds">'+(masked?'Hidden until earned':esc(a.desc))+'</div>'
@@ -914,7 +956,7 @@
         +'<div class="r">'+esc(line)+'</div>'
         +(opts.pill===false?'':'<span class="tier-pill">'+esc(tier)+'</span>')
         +((a.points&&opts.pill!==false)?'<span class="pts-pill">+'+a.points+'</span>':'')
-        +(rwd?'<span class="rwd"><img class="giftbox" src="/branding/rewards/gift.png" onerror="this.remove()">'+esc(rwd)+'</span>':'')
+        +(rwd?'<span class="rwd"><i class="giftbox"></i>'+esc(rwd)+'</span>':'')
         +'</div><div class="flash"></div></div>';
       tw.innerHTML='<div class="mglow"></div>'+(framed?'<div class="tframe">'+toastHTML+'</div>':toastHTML);
       stage.appendChild(tw); m.appendChild(stage);
@@ -975,7 +1017,7 @@
         s.style.animationDelay=(Math.random()*1.4)+'s'; m.appendChild(s); }
       var cols=(tier==='feat')?['#e0355e','#8a93a2','#a11238','#d6d2e2','#4a515c']
                               :['#b692e6','#d4af37','#4fc99a','#c4a6f0','#ffffff'];
-      for(i=0;i<80;i++){ cn=document.createElement('i'); cn.className='m2-conf';
+      for(i=0;i<84;i++){ cn=document.createElement('i'); cn.className='m2-conf';
         cn.style.background=cols[i%cols.length]; cn.style.left=(Math.random()*100)+'vw';
         cn.style.animationDuration=(1.8+Math.random()*1.8)+'s';
         cn.style.animationDelay=(0.2+Math.random()*0.9)+'s'; m.appendChild(cn); }
@@ -1038,15 +1080,17 @@
     function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
     function show(o){
       o=o||{};
-      var kind=o.kind||'';   // '' | 'ok' | 'err'
+      var kind=o.kind||'';   // '' (info) | 'ok' | 'err' | 'unlock'
       var el=document.createElement('div');
       el.className='mg-toast'+(kind?(' '+kind):'');
-      var ic=o.icon||(kind==='ok'?'✓':(kind==='err'?'⚠':'◉'));
-      var thumb=o.thumb?'<img class="mt-thumb" src="'+esc(o.thumb)+'" alt="">':'';
+      var ic=o.icon||(kind==='ok'?'✓':(kind==='err'?'⚠':(kind==='unlock'?'🏆':'◉')));
+      // Thumb rides as a background-image span, never a raw <img src> (design-spec toast
+      // icon rule); the extra %27 hop keeps a stray apostrophe from ending the url() early.
+      var thumb=o.thumb?'<span class="mt-thumb" style="background-image:url(\''+esc(o.thumb).replace(/'/g,'%27')+'\')"></span>':'';
       el.innerHTML='<span class="mt-ic">'+ic+'</span><div class="mt-main"><div class="mt-title">'+esc(o.title||'')+'</div>'
         +(o.msg?'<div class="mt-msg">'+esc(o.msg)+'</div>':'')+'</div>'+thumb
         +'<button class="mt-x" aria-label="Dismiss">×</button>';
-      function remove(){ if(!el.parentNode) return; el.classList.add('out'); setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); }, 320); }
+      function remove(){ if(!el.parentNode) return; el.classList.add('out'); setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); }, 340); }
       el.querySelector('.mt-x').onclick=remove;
       box().appendChild(el);
       if(!o.sticky){ setTimeout(remove, o.ttl||5200); }
