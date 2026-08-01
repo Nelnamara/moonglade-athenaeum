@@ -1,0 +1,197 @@
+<!-- @dsCard group="Reference" -->
+<!-- design-handoff.html -- the linkage + measured-scale map for the full-UI handoff.
+     Everything here was MEASURED against the live app at commit 8560b8c
+     (docs-prune-2026-07-31 branch tip, 2026-07-31) -- grep counts of real mounts,
+     tallies of real CSS values -- not transcribed from docs. Regenerate the numbers
+     the same way before trusting them after big merges. -->
+<!doctype html>
+<meta charset="utf-8">
+<title>Moonglade — Handoff Map (linkage + measured scale)</title>
+<style>
+/* mg-tokens:begin -- generated from moonglade_gallery.DESIGN_TOKENS_CSS by tools/export_design_kit.py; hand-edits between these markers are overwritten */
+  :root {
+    /* Palette sampled from two reference images:
+       731004762264180451.webp — teal "magic glow", green gems, rare gold trim.
+       s1_06.png              — the deep violet armor (#33236d/#241f5b/#36345a/#643aac)
+                                that tints the ground and surfaces below. */
+    --base:    #0c0a1c; --mantle:  #0a0818; --surface0:#211f3a;
+    --surface1:#3a3460; --overlay0:#6a6088; --text:    #d6d2e2;
+    --subtext: #9a93ab; --lavender:#b692e6; --mauve:   #c4a6f0;
+    --red:     #f38ba8; --peach:   #fab387; --green:   #46d488;
+    --blue:    #47cbc3; --sapphire:#3a8a93;
+    /* Moonglade Athenaeum palette: lavender leads, emerald is the "magic"
+       highlight (Nelnamara's gems), gold filigree is rare. */
+    --accent:  #b692e6; --accent-soft:#4fc99a; --gold: #d4af37; --emerald:#4fc99a;
+    --purple-deep: #33236d; --purple-bright: #643aac;
+    /* Feat tier: gunmetal band + ruby glow (the agreed 5th tier -- NOT pink). */
+    --gunmetal: #8a93a2; --gunmetal-deep: #4a515c;
+    --ruby: #e0355e; --ruby-deep: #a11238;
+    /* Native controls (checkbox/radio/range/progress) default to the BROWSER's
+       accent -- Windows Chrome's is a bright blue that belongs to no skin here.
+       Three places had already set this one control at a time; declaring it on
+       :root covers every control app-wide, and because it is an inherited
+       property a skin that redefines --accent retints them for free. Per-control
+       overrides (e.g. the ruby unleash toggle) still win on specificity. */
+    accent-color: var(--accent);
+    /* accent-color only tints the CHECKED fill; an unchecked box, a native select
+       arrow and the scrollbars all keep light OS chrome without this. Every
+       surface in this app is dark, so declaring it once here is what actually
+       stops white checkboxes sitting on top of artwork. */
+    color-scheme: dark;
+  }
+  /* ---- Skins: cosmetic palette swaps unlocked by achievements. A skin overrides
+     the meaningful subset of the palette; everything else inherits :root. Applied
+     via <html data-skin="..."> (set pre-paint from localStorage in <head>). ---- */
+  html[data-skin="nightfallen"] {
+    --base:#0a0713; --mantle:#080610; --surface0:#241a3f; --surface1:#3c2b63;
+    --text:#e7ddff; --subtext:#a493c9; --overlay0:#7a6aa6;
+    --accent:#a678f0; --lavender:#c9a6ff; --mauve:#d3b6ff;
+    --emerald:#7f6fe0; --accent-soft:#8b7ae6; --gold:#d9b3ff;
+  }
+  html[data-skin="moonlit"] {
+    --base:#0b1018; --mantle:#080d15; --surface0:#1c2735; --surface1:#334358;
+    --text:#e6eefb; --subtext:#93a6bd; --overlay0:#6f8298;
+    --accent:#8fb8e8; --lavender:#bcd6f5; --mauve:#c6dbf7;
+    --emerald:#68d5e0; --accent-soft:#6fc9d6; --gold:#cfe1f5;
+  }
+  html[data-skin="ember"] {
+    --base:#160c0c; --mantle:#120909; --surface0:#33201c; --surface1:#5a352c;
+    --text:#fbe6df; --subtext:#c79b8d; --overlay0:#a5786a;
+    --accent:#e8935f; --lavender:#f0b48f; --mauve:#f3c3a5;
+    --emerald:#e0a94b; --accent-soft:#d67f4b; --gold:#ffcf7a;
+  }
+  html[data-skin="verdant"] {
+    --base:#0a1410; --mantle:#08110d; --surface0:#173026; --surface1:#2a5140;
+    --text:#e2f5ea; --subtext:#93bda6; --overlay0:#6f9d84;
+    --accent:#5fd39a; --lavender:#8fe8bf; --mauve:#a5f3cf;
+    --emerald:#4fc99a; --accent-soft:#4bd68f; --gold:#c8e6a8;
+  }
+/* mg-tokens:end */
+body{margin:0;background:var(--mantle);color:var(--text);font:13px/1.55 system-ui,sans-serif;padding:26px 30px 60px;max-width:1080px}
+h1{font-family:Georgia,'Times New Roman',serif;font-weight:400;font-size:24px;margin:0 0 4px}
+h2{font-family:Georgia,'Times New Roman',serif;font-weight:400;font-size:17px;margin:30px 0 8px;color:var(--lavender)}
+.sub{color:var(--subtext);font-size:12px;margin:0 0 8px}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--overlay0);text-align:left;padding:6px 10px 4px;border-bottom:1px solid var(--surface1)}
+td{padding:6px 10px;border-bottom:1px solid color-mix(in srgb,var(--surface1) 50%,transparent);vertical-align:top}
+code{font-family:ui-monospace,monospace;font-size:11px;color:var(--lavender)}
+.ok{color:var(--emerald)}.no{color:var(--red)}.part{color:var(--peach)}
+.note{background:var(--base);border:1px solid var(--surface1);border-left:3px solid var(--gold);border-radius:6px;padding:10px 13px;font-size:12px;margin:10px 0}
+.tally{font-family:ui-monospace,monospace;font-size:11.5px;color:var(--text)}
+.tally b{color:var(--emerald);font-weight:600}
+.dim{color:var(--overlay0)}
+</style>
+
+<h1>Handoff Map — the app AS-BUILT</h1>
+<div class="note" style="border-left-color:var(--ruby)"><b>Authority:</b> this card describes the
+<b>current app as it exists</b> (measured at commit <code>8560b8c</code>, 2026-07-31) — it is
+archaeology, not a spec. <b>Where the new design diverges from anything here, the new design wins.</b>
+Nothing below is a constraint on the redesign; it exists so you know what you're replacing and what
+machinery (section 3) carries over.</div>
+<p class="sub">The three host stacks today: <b>classic gallery</b> (moonglade_gallery.py,
+Flask/vanilla), <b>the Loom</b> (loom/master-storyboard.jsx, React), <b>/next pilot</b>
+(gallery/src, React/esbuild).</p>
+
+<h2>1 · The token pipeline (what is already a system)</h2>
+<p class="sub"><code>DESIGN_TOKENS_CSS</code> in <code>moonglade_gallery.py</code> is the single source —
+color + the five skins only. <code>tools/export_design_kit.py</code> regenerates
+<code>static/design-tokens.css</code> and every kit page's stamped block from it;
+<code>tests/test_design_kit_sync.py</code> fails the suite if any copy drifts.</p>
+<div class="note"><b>Live drift, found by diffing the constants:</b> the app has since added
+<code>--loomc: #47cbc3</code> (the Loom's own hue — cyan means "the Loom" everywhere). This project's
+<code>kit/design-tokens.css</code> is refreshed with it in this push; the kit branch's stamped pages
+restamp automatically when the branches merge and the export script reruns. Everything else is
+identical — all 7 component <code>.js</code> files in this project are byte-identical to the live app.</div>
+
+<h2>2 · The surfaces — what "entire UI" means</h2>
+<p class="sub">Every HTML-serving route in the app plus the full-screen/in-page surfaces that aren't
+routes. Component loads verified from each template's actual <code>&lt;script&gt;</code> block.</p>
+<table>
+<tr><th>Surface</th><th>Route</th><th>Kit components loaded</th><th>Notes</th></tr>
+<tr><td><b>Gallery</b> (flagship)</td><td><code>/</code></td><td class="ok">all 8</td>
+  <td>Hosts the in-page surfaces below.</td></tr>
+<tr><td>Detail page</td><td><code>/image/&lt;id&gt;</code></td><td>picker-core · model-picker · cost-badge · upscale-panel</td>
+  <td>Full metadata, edit-prompt, upscale inline.</td></tr>
+<tr><td><b>The Loom</b></td><td><code>/loom</code></td><td>picker-core · model-picker · gallery-picker · cost-badge · generate-drawer · notify</td>
+  <td>Fixed 4-region shell; full manual in <code>docs/LOOM.md</code>.</td></tr>
+<tr><td>React pilot</td><td><code>/next</code></td><td class="ok">all 8</td>
+  <td class="part">Its Lightbox/Details is owner-ruled NOT done — don't reference that build.</td></tr>
+<tr><td>Login</td><td><code>/login</code></td><td class="dim">none — self-contained</td>
+  <td>Has a <b>second face</b>: one-time first-run bootstrap (account creation) that renders once per install. Serif identity + mascot ladder live here.</td></tr>
+<tr><td>Collection Health</td><td><code>/health</code></td><td class="dim">none — self-contained</td><td></td></tr>
+<tr><td>Control Panel</td><td><code>/panel</code></td><td class="dim">none — job UI is inline</td>
+  <td>Redesign already designed: <code>panel/board.html</code> in this project — "The Deck, Mixed", awaiting the owner's yes.</td></tr>
+<tr><td>Duplicate Review</td><td><code>/duplicates</code></td><td class="dim">none — self-contained</td><td></td></tr>
+<tr><td>Contact sheet</td><td><code>/contact-sheet</code></td><td class="dim">none</td><td>Print surface.</td></tr>
+<tr><td>Logout</td><td><code>/logout</code></td><td class="dim">none</td><td>Trivial.</td></tr>
+</table>
+<p class="sub" style="margin-top:8px"><b>In-page surfaces on <code>/</code></b> (not routes — easy to
+miss as "screens"): the lightbox · the <b>Folio of Honors</b> overlay (<code>#ach-modal</code> —
+currently an overlay, not a route) · <b>Contests</b> overlay · <b>My Art</b> overlay · the Trash
+view · the Generate drawer's docked states · the model/gallery picker modals.</p>
+<p class="sub"><b>Also part of "entire UI":</b> <code>manifest.webmanifest</code> + <code>sw.js</code>
+exist — the app installs as a PWA, so install icon, splash, and window chrome are design surfaces too.
+Asset routes (<code>/thumbs /img /full /video-file /branding /badge-thumb</code>) are not.</p>
+
+<h2>3 · Component linkage + interfaces</h2>
+<p class="sub">All are plain-global web components / IIFEs — no build step, light DOM, every one reads
+the shared tokens so it re-skins with the app. <b>Two measurement bases, kept distinct:</b> the
+surfaces table above counts <i>script-tag loads</i> per template; the ✓ counts below are
+<i>source-level references</i> (grep at 8560b8c). They differ on /next: it loads all 8 as globals,
+but its React source only references some — the split is called out per row.</p>
+<table>
+<tr><th>Component</th><th>Kind</th><th>Classic</th><th>Loom</th><th>/next pilot</th><th>Interface (in → out)</th></tr>
+<tr><td><code>mg-generate-drawer</code></td><td>custom element</td>
+  <td class="ok">✓ 19</td><td class="ok">✓ 15</td><td class="ok">✓</td>
+  <td>in: <code>prefill()</code>, <code>data-loom-ctx</code> (CSS-only) → out: <code>mg-submit · mg-result · mg-error · mg-dirty · mg-pick-request · mg-slow · mg-paused · mg-prompt/mode/duration/audio-commit</code>. Owns /api/price, /api/loom/generate, /api/task-status.</td></tr>
+<tr><td><code>mg-model-picker</code></td><td>custom element</td>
+  <td class="ok">✓ 23</td><td class="ok">✓ 16</td><td class="ok">✓</td>
+  <td>in: <code>kind="base|lora"</code> → out: <code>mg-pick</code> (detail = raw /api/model-search row).</td></tr>
+<tr><td><code>mg-gallery-picker</code></td><td>custom element</td>
+  <td class="ok">✓ 17</td><td class="ok">✓ 4</td><td class="ok">✓</td>
+  <td>in: <code>default-type="image|video|all"</code>; mount-to-open, unmount-to-close → out: <code>mg-pick · mg-close</code>. Wraps PickerCore.</td></tr>
+<tr><td><code>mg-cost-badge</code></td><td>custom element</td>
+  <td class="ok">✓ 15</td><td class="ok">✓ 4</td><td class="ok">✓</td>
+  <td>in: host pushes the price — it <b>never fetches</b>. <code>compact</code> attr + <code>mg-cost</code> event are declared public API with no consumer yet, <b>by design — do not remove</b>.</td></tr>
+<tr><td><code>picker-core</code></td><td>global (<code>PickerCore</code>)</td>
+  <td class="ok">✓ 8</td><td class="ok">✓ 1</td><td class="dim">indirect</td>
+  <td>Logic only — browse/filter/paginate/infinite-scroll; no DOM. The pilot reaches it through mg-gallery-picker.</td></tr>
+<tr><td><code>mg-notify</code></td><td>global IIFEs (<code>Ach/Toast/Jobs/JobsCard</code>)</td>
+  <td class="ok">✓ 23</td><td class="ok">✓ 9</td><td class="part">loaded as a global; zero refs in React src</td>
+  <td>Needs two anchors: <code>#jobs-fab</code>, <code>#jobs-tray</code>. Achievement toasts + corner Toast + Job tracker. On /next the script runs (Ach toasts self-fire, no anchor needed) but the React source never calls it — the Jobs card has no anchors there.</td></tr>
+<tr><td><code>mg-upscale-panel</code></td><td>custom element</td>
+  <td class="ok">✓ 8</td><td class="no">✗</td><td class="ok">✓</td>
+  <td>Upscale/Hires on an <i>existing</i> image (flyout in lightbox, inline on detail) → out: <code>mg-upscale</code>.</td></tr>
+<tr><td><code>mg-art-filters</code></td><td>global (<code>MgArtFilters</code>)</td>
+  <td class="ok">✓ 4</td><td class="no">✗</td><td class="part">loaded as a global; zero refs in React src</td>
+  <td>PixAI's 7 art filters as local gradient recipes — free, offline, no network ever. Uploaded to this project 2026-07-31; no harness card yet.</td></tr>
+</table>
+
+<h2>4 · Live design decisions that touch these components</h2>
+<p class="sub">As recorded in the repo (docs/DECISIONS.md) on 2026-07-31. Anything decided later in
+the design conversation supersedes these.</p>
+<table>
+<tr><th>Decision (owner, dated)</th><th>Affects</th></tr>
+<tr><td><b>Folio grid cards lose their ornate frames — every tier</b> (2026-07-31). The <code>.hall-card/.hall-frame</code> framing in mg-notify goes; tier reads from band + glow. <b>The achievement toast's <code>.tframe</code> keeps its legendary + feat frames — confirmed correct as-is.</b></td><td>mg-notify</td></tr>
+<tr><td><b>Notify surfaces get visually redesigned; the machinery stays</b> (2026-07-30, eb49ba8). Restyle freely; Ach/Toast/Jobs logic is not up for rewrite.</td><td>mg-notify</td></tr>
+<tr><td><b>The pilot's Lightbox/Details is owner-declared "a failure and NOT done"</b> (2026-07-30). Its two locked artifacts remain the design source; the build failed. Don't treat that surface as a reference.</td><td>mg-upscale-panel mounts there</td></tr>
+<tr><td><b>One meaning per hue:</b> lavender = primary action · <code>--loomc</code> cyan = the Loom · gold = credits · ruby/red = destructive · emerald = success/"magic".</td><td>everything</td></tr>
+</table>
+
+<h2>5 · The measured scale (NOT yet tokens — naming them is a handoff decision)</h2>
+<p class="sub">The app defines <b>no</b> spacing/type/radius/breakpoint variables — these are tallies of
+the hardcoded values actually in use across all three surfaces (occurrences in parentheses).
+Recurrence = de-facto convention, nothing more.</p>
+<p class="tally"><b>font-size</b> · 11px(105) · 12px(105) · 13px(62) · 10px(43) · 11.5px(40) · 12.5px(40) · 10.5px(37) · 9px(25) · 15px(15) · 14px(13) · 16px(10)<br>
+<span class="dim">Dense-UI type runs 9–13px; 14–16px is already "large" here. Sub-pixel steps (10.5/11.5/12.5) are common.</span></p>
+<p class="tally"><b>border-radius</b> · 6px(85) · 8px(62) · 4px(36) · 50%(35) · 5px(35) · 7px(33) · 10px(28) · 12px(28) · 999px(17 — pills) · 14px(12)</p>
+<p class="tally"><b>gap</b> · 8px(64) · 6px(59) · 5px(33) · 7px(29) · 10px(27) · 9px(17) · 4px(17) · 11px(14) · 12px(12)</p>
+<p class="tally"><b>@media breakpoints</b> · 480px(4) · 680px(3) · 860px(3) · plus one-offs 520/560/681/900/1023/1260<br>
+<span class="dim">No shared breakpoint system — each surface picked its own. Relevant to the mobile question: there is nothing to "extend"; a breakpoint scale would be new either way.</span></p>
+<p class="tally"><b>z-index</b> · two bands: components use 0–7; overlays/modals use 300–500. Nothing between.</p>
+<p class="tally"><b>type faces</b> · body/UI: system-ui sans · data/ids/counts: ui-monospace · display serif (Georgia) appears exactly <b>once</b> in the classic app (login h1) — the serif-heading identity lives in this project's <code>styles.css</code> (<code>--serif</code>) and the mockups, not yet in the app's own tokens.</p>
+
+<h2>6 · What is deliberately NOT here</h2>
+<p class="sub">Colors + skins are already the real, pinned system (section 1) — not restated. The Loom's
+docs live in <code>docs/LOOM.md</code>; per-component behavioral detail lives in each file's own header
+comment, which is authoritative over this summary.</p>

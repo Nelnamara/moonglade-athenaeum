@@ -4,7 +4,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>&lt;mg-generate-drawer&gt; — standalone verification</title>
+<title>&lt;mg-upscale-panel&gt; — standalone verification</title>
 <style>
   /* mg-tokens:begin -- generated from moonglade_gallery.DESIGN_TOKENS_CSS by tools/export_design_kit.py; hand-edits between these markers are overwritten */
   :root {
@@ -71,81 +71,81 @@
   p{color:var(--subtext);font-size:13px;}
   code{background:var(--surface0);border:1px solid var(--surface1);border-radius:5px;padding:1px 6px;}
   .card{background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;padding:18px;margin-top:16px;}
+  .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px;}
+  .row button{background:var(--surface0);border:1px solid var(--surface1);color:var(--text);
+    border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;}
+  .row button:hover{border-color:var(--accent);}
   #out{margin-top:14px;font-family:ui-monospace,monospace;font-size:12px;color:var(--accent);
     background:var(--surface0);border:1px solid var(--surface1);border-radius:8px;padding:10px 12px;
-    white-space:pre-wrap;max-height:220px;overflow-y:auto;}
+    white-space:pre-wrap;}
   ol{color:var(--subtext);font-size:13px;padding-left:20px;}
   ol code{color:var(--text);}
 </style>
 </head>
 <body>
-  <h1>&lt;mg-generate-drawer&gt; — standalone verification</h1>
-  <p>Isolates the shared Generate form (full-parity build: 6 image + 3 video + 1 audio ref,
-  negative prompt, Channel, full model roster) from both hosts, so a component bug and a
-  mount-bridge bug can't be confused. Serve the gallery, then open this at
-  <code>/static/mg-generate-drawer.html</code> on the same machine (it calls the
-  localhost-gated <code>/api/price</code> / <code>/api/loom/generate</code> / <code>/api/upload</code>).
-  Image and video slot picks are serviced by <code>&lt;mg-gallery-picker&gt;</code> via the
-  <code>mg-pick-request</code> event, filtered by its <code>kind</code> hint — exactly how a
-  real host wires it. Audio refs upload directly (no picker involved, matching how the
-  component itself works).</p>
+  <h1>&lt;mg-upscale-panel&gt; — standalone verification</h1>
+  <p>PixAI's Upscale, where PixAI puts it: on a picture that already exists. Two real methods —
+  <b>Upscale</b> (ESRGAN, adds resolution) and <b>Hires</b> (re-diffuses, adds detail) — and a
+  ratio cap that is <em>derived from the source's dimensions</em> against a per-mode output-pixel
+  ceiling, never a constant. The two demo rows below exist to show that cap moving.</p>
 
-  <div class="card">
-    <mg-generate-drawer></mg-generate-drawer>
+  <div class="row">
+    <button id="open-l">Open — 1400×784 row (landscape)</button>
+    <button id="open-p">Open — 768×1280 row (portrait)</button>
+    <button id="close">close()</button>
   </div>
 
-  <div id="out">events: (none yet)</div>
+  <div class="card">
+    <mg-upscale-panel inline></mg-upscale-panel>
+  </div>
+
+  <div id="out">mg-upscale events: (none yet)</div>
 
   <ol>
-    <li>Mode buttons reshape the banks: <b>First frame</b> = 1 image, <b>First + last</b> = start/end, <b>Multi-ref</b> = up to 6 image + 3 video + 1 audio.</li>
-    <li>Clicking an image or video slot opens the shared gallery picker, filtered to that kind (the <code>mg-pick-request</code> seam); hovering a filled slot shows the floating preview.</li>
-    <li><b>+ Audio</b> opens a file picker and uploads directly to <code>/api/upload</code> — a real media_id, no gallery involved.</li>
-    <li>With any reference filled, the cost line calls the real <code>/api/price</code> — a matching free card shows the green 🎫 line; V4.0 full shows the ⚠ warn.</li>
-    <li>In Multi-ref, typing <code>@image1</code>/<code>@video1</code>/<code>@audio1</code> then a space becomes a thumbnail chip; the payload log shows it serialized back to text.</li>
-    <li>Two models in the roster (V3.0 Flash, V2.7) are disabled with a tooltip — no real modelId captured yet.</li>
-    <li><b>Generate video spends real credits/cards</b> — every submit/result/error lands in the event log below. Don't click it casually.</li>
+    <li>The method radios are PixAI's own two — their <code>value</code>s literally are the
+      parameter families (<code>enlarge</code> vs <code>upscale</code>).</li>
+    <li>Switching between the two demo rows moves the ratio slider's maximum — output-pixel
+      ceiling at work, not a hardcoded max.</li>
+    <li>Neither demo row carries a model: the panel falls back to the version PixAI's own
+      dialog always submits, and says so, instead of refusing (locally imported files
+      depend on this).</li>
+    <li>The cost line is <code>&lt;mg-cost-badge&gt;</code>; with no server behind this page it
+      shows the could-not-verify state — the fail-closed read a spend gate needs.</li>
+    <li>Nothing here can spend: pricing and submit are the served app's localhost-gated
+      <code>/api/price</code> / <code>/api/generate</code>.</li>
   </ol>
 
-  <script src="./picker-core.js"></script>
-  <script src="./mg-gallery-picker.js"></script>
-  <!-- the drawer's cost line is <mg-cost-badge> now; load its definition before the drawer -->
-  <script src="./mg-cost-badge.js"></script>
-  <script src="./mg-generate-drawer.js"></script>
   <script>
-    var drawer = document.querySelector('mg-generate-drawer');
+    // A standalone page has no server to hand these over (the app serves them via
+    // moonglade_gallery._upscale_const_js from core's constants). Mirrored here by hand,
+    // clearly fake-safe: a drifted copy changes a demo slider's cap on THIS page only --
+    // the app itself never reads this block.
+    window.MG_UPSCALE = {
+      enlargeModels: ["ESRGAN_4x", "R-ESRGAN 4x+", "R-ESRGAN 4x+ Anime6B", "SwinIR_4x", "Lollypop"],
+      defaultEnlargeModel: "R-ESRGAN 4x+ Anime6B",
+      ceiling: { enlarge: 2048 * 2048, upscale: 2048 * 1152 },
+      fallbackVersionId: "1861558740588989558"
+    };
+    window.MG_LORA = {};
+  </script>
+  <script src="./mg-cost-badge.js"></script>
+  <script src="./mg-model-picker.js"></script>
+  <script src="./mg-upscale-panel.js"></script>
+  <script>
+    var panel = document.querySelector('mg-upscale-panel');
     var out = document.getElementById('out');
-    var lines = [];
-    function log(s) {
-      lines.unshift(new Date().toTimeString().slice(0, 8) + '  ' + s);
-      out.textContent = lines.slice(0, 30).join('\n');
-    }
-
-    // Service mg-pick-request with the shared gallery picker (mount-to-open idiom),
-    // filtered to the component's kind hint so video slots actually show videos.
-    drawer.addEventListener('mg-pick-request', function (e) {
-      var respond = e.detail.respond;
-      log('mg-pick-request  bank=' + e.detail.bank + ' slot=' + e.detail.slot + ' kind=' + e.detail.kind);
-      var pk = document.createElement('mg-gallery-picker');
-      pk.setAttribute('default-type', e.detail.kind === 'video' ? 'video' : 'image');
-      function closePk() { if (pk.parentNode) pk.parentNode.removeChild(pk); }
-      pk.addEventListener('mg-pick', function (ev) {
-        respond(ev.detail.media_id, ev.detail.thumb);
-        log('picked  ' + ev.detail.media_id);
-        closePk();
-      });
-      pk.addEventListener('mg-close', closePk);
-      document.body.appendChild(pk);
+    panel.addEventListener('mg-upscale', function (e) {
+      out.textContent = 'mg-upscale  ' + JSON.stringify(e.detail);
     });
-
-    drawer.addEventListener('mg-submit', function (e) {
-      log('mg-submit  task_id=' + e.detail.task_id + '\n  payload=' + JSON.stringify(e.detail.payload));
-    });
-    drawer.addEventListener('mg-result', function (e) {
-      log('mg-result  ' + JSON.stringify(e.detail));
-    });
-    drawer.addEventListener('mg-error', function (e) {
-      log('mg-error  ' + e.detail.error);
-    });
+    var ROWS = {
+      l: { media_id: 'kit-demo-a', width: 1400, height: 784, is_video: 0,
+           prompt: 'moonlit athenaeum, violet armor, teal magic glow', model: '' },
+      p: { media_id: 'kit-demo-b', width: 768, height: 1280, is_video: 0,
+           prompt: 'nightfallen archivist among the stacks', model: '' }
+    };
+    document.getElementById('open-l').addEventListener('click', function () { panel.open(ROWS.l); });
+    document.getElementById('open-p').addEventListener('click', function () { panel.open(ROWS.p); });
+    document.getElementById('close').addEventListener('click', function () { panel.close(); });
   </script>
 </body>
 </html>
