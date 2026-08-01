@@ -111,6 +111,13 @@ static/_mockup_*.html
 /branding/
 /branding.json
 
+# The Claude Design handoff package (design_handoff_moonglade_suite): DC prototype
+# surfaces, drift report, and ASSETS INCLUDING THE OWNER'S BRANDING ART -- which is
+# deliberately machine-local (see /branding/ above) and must never reach this public
+# repo. Kept beside the code as the implementation reference for the gallery-era
+# redesign; master copies are the zips the owner downloaded from Claude Design.
+/design_handoff/
+
 # Local triage worksheet from the 2026-07-27 adversarial code review. Working material:
 # findings get parsed out into Decisions.md and the file is deleted. Never committed --
 # it is a snapshot of defects, and a stale copy in the repo would be exactly the kind of
