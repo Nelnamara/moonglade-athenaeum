@@ -17,6 +17,15 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **The React conversion, Phase 0 (Foundation) — complete.** The React pilot (`gallery/`
+  Vite app, the `/next` page + its purpose-built API, route tiers pinned at LOGIN) salvaged
+  verbatim off `gallery-top`, which has now yielded everything it was kept for. Rode along:
+  the per-port `SESSION_COOKIE_NAME` fix, so two Moonglade instances on different localhost
+  ports no longer evict each other's login. The three z bands (components 0–7 ·
+  overlays 300–500 · ambient/celebration 510–520) are documented at the top of
+  `DESIGN_TOKENS_CSS`. The JSON-route gap audit ran over all 19 redesign surfaces:
+  20 routes to build + 11 extensions, matrix in `design_handoff/gap-audit.md` (local
+  working material), summary + owner calls in `docs/ROADMAP.md`.
 - **`--loomc` token added to `DESIGN_TOKENS_CSS`** — the Loom's fixed-meaning cyan
   (`#47cbc3`), same value as `--blue`, added under its semantic name because the UI Kit v2
   designs (Claude Design, new-frontend era) reference the hue as `var(--loomc)` and it
