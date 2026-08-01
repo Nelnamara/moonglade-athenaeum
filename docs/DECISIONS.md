@@ -2446,3 +2446,25 @@ ratio cap moves 1.9 → 2.0 between its two demo rows, zero uncaught console err
 suite green (1436 passed; render tests deselected as designed).
 
 ---
+
+## 2026-08-01 — design-kit merged; the handoff map is NOT trusted until audited after the React conversion
+
+The `design-kit` branch was merged to master on the owner's explicit instruction, with the
+owner's verdict on record: the kit was supposed to be *"the UI kit and linkage, function
+names and what interconnects what — basically the entire click map"*, and what it delivered
+was mostly *"style sheets and formatting constraints"*. Getting even that into Claude Design
+took multiple passes and the linkage info was still incorrect/conflicting. Accordingly:
+
+* **`static/design-handoff.html` (the handoff map / linkage card) is unaudited and not to be
+  treated as a reliable source** for component linkage or interconnection. Do not build from
+  it or cite it as authority.
+* **Standing follow-up: audit the design kit after the React conversion lands** — the
+  conversion will change the real linkage anyway, so auditing before it is wasted work. A
+  trustworthy click map must be rebuilt **bottom-up from the source** (walk every route,
+  button, and function, verify each edge against code), never authored top-down from memory.
+* The token machinery (exporter + drift test + generated token pages) is unaffected by this
+  verdict — it is generated from `DESIGN_TOKENS_CSS` and pinned by the suite.
+
+**Why.** Merging keeps the token discipline and the Claude Design mirror live without
+carrying an unmerged branch, while the verdict on the handoff map is written down so no
+future session mistakes a merged file for a trusted one.
