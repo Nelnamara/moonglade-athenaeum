@@ -3186,6 +3186,11 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
 # __JSX__) by BASE_HTML and LOOM_PAGE so both surfaces re-skin together instead of the
 # Loom carrying its own copy that silently drifts from this one.
 DESIGN_TOKENS_CSS = r"""
+  /* Z BANDS (decided 2026-08-01, gallery-era redesign): exactly three, nothing between --
+     components 0-7 · overlays/modals 300-500 · ambient/celebration 510-520 (the layer that
+     must paint over any modal: achievement moment 520, its confetti sheet 517 behind it).
+     The legacy 200s cluster and the stray 99 live only in classic surfaces, which retire
+     with the React conversion -- do not add new values outside the three bands. */
   :root {
     /* Palette sampled from two reference images:
        731004762264180451.webp — teal "magic glow", green gems, rare gold trim.
