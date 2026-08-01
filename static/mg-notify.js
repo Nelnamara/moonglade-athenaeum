@@ -284,10 +284,9 @@
     // carrying a second copy of the style, so the selector has to admit both.
     '.hall-card .hcd-roast,.hall-carousel .hcd-roast{grid-column:1/-1;font-size:10.5px;color:#c9b8e6;line-height:1.4;margin-top:6px;padding:5px 8px;background:rgba(182,146,230,.07);border-left:2px solid var(--lavender);border-radius:0 7px 7px 0;font-style:italic;}',
     '.hall-card .hcd-bannerflag{font-size:10px;color:var(--gold);margin-top:4px;}',
-    // The 9-slice frame overlay for legendary/feat CARDS (the 2026-07-22 extension of the
-    // unlock toast's frames to grid tiles) was REMOVED per owner call 2026-07-31: frames are
-    // toast-only again (.ach-m2 .tframe below keeps them); a grid card's tier reads from the
-    // ::before band + earned glow above.
+    // The 9-slice ornate frames are gone from EVERY surface -- grid cards on 2026-07-31,
+    // toasts on 2026-08-01 (owner: frames axed "all around"). Tier reads from the ::before
+    // band + earned glow above, plus the tier/points pills.
     // ---- Section collapse chevron (reused on the ladder-groups + milestone/mastery/feat
     // pill dividers, and the classic Evolution Ladders flat section for the "All" view) ----
     '.ach-hall .ach-sect{cursor:pointer;user-select:none;}',
@@ -364,12 +363,8 @@
     '.ach-m2 .tw.go.t-legendary .flash,.ach-m2 .tw.go.t-feat .flash{animation:m2flash .9s ease-out 1.3s;}',
     '@keyframes m2flash{0%{opacity:0;}20%{opacity:.92;}100%{opacity:0;}}',
     '@media (prefers-reduced-motion: reduce){ .ach-m2 *{animation:none!important;} .ach-m2 .toast,.ach-m2 .badge,.ach-m2 .mascot,.ach-m2 .mglow,.ach-m2 .tbody .u,.ach-m2 .tbody .n,.ach-m2 .tbody .r,.ach-m2 .tier-pill{opacity:1!important;transform:none!important;} }',
-    '.ach-m2 .tframe{position:relative;z-index:3;}',
-    '.ach-m2 .t-legendary .tframe,.ach-m2 .t-feat .tframe{border-style:solid;border-image-repeat:stretch;opacity:0;transform:translateY(14px);}',
-    '.ach-m2 .tw.go.t-legendary .tframe,.ach-m2 .tw.go.t-feat .tframe{animation:m2rise .5s ease forwards;}',
-    '.ach-m2 .t-legendary .tframe{border-width:46px 44px;border-image-source:url(/branding/frames/legendary.png);border-image-slice:16.8% 13.3% 16.8% 13%;border-image-outset:6px;}',
-    '.ach-m2 .t-feat .tframe{border-width:46px 38px;border-image-source:url(/branding/frames/feat.png);border-image-slice:15.8% 10.3% 16.8% 10%;border-image-outset:6px;}',
-    '.ach-m2 .t-legendary .tframe .toast,.ach-m2 .t-feat .tframe .toast{border-color:transparent;box-shadow:none;opacity:1;transform:none;animation:none;}',
+    // (The .tframe 9-slice toast frames lived here until 2026-08-01 -- axed with every
+    // other ornate frame; see the render-path comment in card().)
     // Icon-as-background-image (design-spec toast rule: toast icons are never raw <img src>,
     // so the preload scanner can't fetch them and computed background styles stay inspectable).
     '.ach-m2 .rwd .giftbox{display:inline-block;height:15px;width:15px;background:url(/branding/rewards/gift.png) center/contain no-repeat;vertical-align:-3px;margin-right:5px;}',
@@ -377,7 +372,6 @@
     '.ach-m2 .tw.go .pts-pill{animation:m2fade .4s ease 1.26s forwards;}',
     '@media (prefers-reduced-motion: reduce){ .ach-m2 .pts-pill{opacity:1!important;} }',
     '.ach-card .ach-pts{display:inline-block;margin-left:6px;font:700 10px/1 sans-serif;color:var(--gold,#e0c268);border:1px solid #6b5330;background:rgba(230,200,120,.1);border-radius:6px;padding:2px 6px;vertical-align:middle;}',
-    '@media (prefers-reduced-motion: reduce){ .ach-m2 .tframe{opacity:1!important;transform:none!important;} }',
     // ---- Jobs card: the activity tracker (bottom-left, always openable) ----
     // Each of these three roots states its own font-family, and that is load-bearing rather
     // than belt-and-braces. They set font-SIZE but used to inherit font-FAMILY from the host
@@ -947,9 +941,9 @@
       var rwd='';                                  // reward ribbon (gift box + text)
       if(a.skin) rwd='Unlocks skin: '+skinName(data||{skins:[]}, a.skin);
       else if(a.banner_reward) rwd='Unlocks a banner';
-      // tier flair frame (9-slice border-image) wraps the toast for the top tiers only;
-      // add epic:1 to frame epic too. Summary toasts (opts.badge===false) never get a frame.
-      var framed=(!!({legendary:1,feat:1}[tier]))&&opts.badge!==false;
+      // Ornate frames are GONE everywhere (owner call 2026-08-01: "too much of a pain in
+      // the ass all around" -- supersedes the 2026-07-31 toast-only keep). Tier reads from
+      // the band, glow, and pills on every surface, toasts included.
       var toastHTML='<div class="toast"><div class="cap"></div>'
         +'<div class="tbody"><div class="u">'+esc(opts.eyebrow||'New Achievement')+'</div>'
         +'<div class="n">'+esc(a.name)+'</div>'
@@ -958,7 +952,7 @@
         +((a.points&&opts.pill!==false)?'<span class="pts-pill">+'+a.points+'</span>':'')
         +(rwd?'<span class="rwd"><i class="giftbox"></i>'+esc(rwd)+'</span>':'')
         +'</div><div class="flash"></div></div>';
-      tw.innerHTML='<div class="mglow"></div>'+(framed?'<div class="tframe">'+toastHTML+'</div>':toastHTML);
+      tw.innerHTML='<div class="mglow"></div>'+toastHTML;
       stage.appendChild(tw); m.appendChild(stage);
       var cap=tw.querySelector('.cap');
       if(opts.badge===false){                       // summary: trophy in the well
@@ -985,7 +979,7 @@
         nel.onerror=function(){ ci++; if(ci<chain.length){ this.src=chain[ci]; } else { this.remove(); } };
         nel.onload=function(){ try{ _seatMascot(this); }catch(e){} };
         nel.src=chain[0];
-        tw.insertBefore(nel, tw.querySelector('.tframe')||tw.querySelector('.toast'));
+        tw.insertBefore(nel, tw.querySelector('.toast'));
       }
       return {m:m, tw:tw};
     }
