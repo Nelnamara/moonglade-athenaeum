@@ -19,6 +19,11 @@
     --subtext: #9a93ab; --lavender:#b692e6; --mauve:   #c4a6f0;
     --red:     #f38ba8; --peach:   #fab387; --green:   #46d488;
     --blue:    #47cbc3; --sapphire:#3a8a93;
+    /* --loomc is the Loom's fixed-meaning cyan (hue law: cyan means the Loom in every
+       skin). Same value as --blue on purpose: the UI Kit v2 designs reference the hue
+       by this name, and the semantic name must exist in the pipeline or var(--loomc)
+       falls back silently at handoff. --blue stays for existing usages. */
+    --loomc:   #47cbc3;
     /* Moonglade Athenaeum palette: lavender leads, emerald is the "magic"
        highlight (Nelnamara's gems), gold filigree is rare. */
     --accent:  #b692e6; --accent-soft:#4fc99a; --gold: #d4af37; --emerald:#4fc99a;
