@@ -17,6 +17,14 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **The handoff map: `static/design-handoff.html`, a new kit Reference card.** Component
+  linkage measured against the live app (which of the three surfaces mounts each `mg-*`
+  component, with real grep counts), each component's in/out interface (attributes and
+  `mg-*` events), the live design decisions that touch them, and a measured tally of the
+  hardcoded font-size/radius/gap/breakpoint/z-index values across all three surfaces —
+  explicitly labeled as recurrence, not named tokens. Pushed to the Claude Design project
+  along with `mg-art-filters.js` (the one component that had never been uploaded) and a
+  refreshed `kit/design-tokens.css` carrying the app's since-added `--loomc`.
 - **The design kit: generated token pages + the "Moonglade Athenaeum" Claude Design project.**
   Every standalone harness page in `static/` now carries the app's full design tokens between
   generated `mg-tokens` markers — `tools/export_design_kit.py` regenerates them (plus
