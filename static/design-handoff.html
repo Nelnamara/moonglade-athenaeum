@@ -82,11 +82,15 @@ code{font-family:ui-monospace,monospace;font-size:11px;color:var(--lavender)}
 .dim{color:var(--overlay0)}
 </style>
 
-<h1>Handoff Map</h1>
-<p class="sub">The complete surface inventory, component linkage, interfaces, adoption state, and the
-measured (un-named) visual scale. Measured at app commit <code>8560b8c</code>, 2026-07-31. The three
-host stacks: <b>classic gallery</b> (moonglade_gallery.py, Flask/vanilla), <b>the Loom</b>
-(loom/master-storyboard.jsx, React), <b>/next pilot</b> (gallery/src, React/esbuild).</p>
+<h1>Handoff Map — the app AS-BUILT</h1>
+<div class="note" style="border-left-color:var(--ruby)"><b>Authority:</b> this card describes the
+<b>current app as it exists</b> (measured at commit <code>8560b8c</code>, 2026-07-31) — it is
+archaeology, not a spec. <b>Where the new design diverges from anything here, the new design wins.</b>
+Nothing below is a constraint on the redesign; it exists so you know what you're replacing and what
+machinery (section 3) carries over.</div>
+<p class="sub">The three host stacks today: <b>classic gallery</b> (moonglade_gallery.py,
+Flask/vanilla), <b>the Loom</b> (loom/master-storyboard.jsx, React), <b>/next pilot</b>
+(gallery/src, React/esbuild).</p>
 
 <h2>1 · The token pipeline (what is already a system)</h2>
 <p class="sub"><code>DESIGN_TOKENS_CSS</code> in <code>moonglade_gallery.py</code> is the single source —
@@ -122,8 +126,8 @@ routes. Component loads verified from each template's actual <code>&lt;script&gt
 <tr><td>Logout</td><td><code>/logout</code></td><td class="dim">none</td><td>Trivial.</td></tr>
 </table>
 <p class="sub" style="margin-top:8px"><b>In-page surfaces on <code>/</code></b> (not routes — easy to
-miss as "screens"): the lightbox · the <b>Folio of Honors</b> overlay (<code>#ach-modal</code> — an
-overlay <i>by design</i>, never a route) · <b>Contests</b> overlay · <b>My Art</b> overlay · the Trash
+miss as "screens"): the lightbox · the <b>Folio of Honors</b> overlay (<code>#ach-modal</code> —
+currently an overlay, not a route) · <b>Contests</b> overlay · <b>My Art</b> overlay · the Trash
 view · the Generate drawer's docked states · the model/gallery picker modals.</p>
 <p class="sub"><b>Also part of "entire UI":</b> <code>manifest.webmanifest</code> + <code>sw.js</code>
 exist — the app installs as a PWA, so install icon, splash, and window chrome are design surfaces too.
@@ -131,7 +135,10 @@ Asset routes (<code>/thumbs /img /full /video-file /branding /badge-thumb</code>
 
 <h2>3 · Component linkage + interfaces</h2>
 <p class="sub">All are plain-global web components / IIFEs — no build step, light DOM, every one reads
-the shared tokens so it re-skins with the app. Mount counts are real grep counts at 8560b8c.</p>
+the shared tokens so it re-skins with the app. <b>Two measurement bases, kept distinct:</b> the
+surfaces table above counts <i>script-tag loads</i> per template; the ✓ counts below are
+<i>source-level references</i> (grep at 8560b8c). They differ on /next: it loads all 8 as globals,
+but its React source only references some — the split is called out per row.</p>
 <table>
 <tr><th>Component</th><th>Kind</th><th>Classic</th><th>Loom</th><th>/next pilot</th><th>Interface (in → out)</th></tr>
 <tr><td><code>mg-generate-drawer</code></td><td>custom element</td>
@@ -150,17 +157,19 @@ the shared tokens so it re-skins with the app. Mount counts are real grep counts
   <td class="ok">✓ 8</td><td class="ok">✓ 1</td><td class="dim">indirect</td>
   <td>Logic only — browse/filter/paginate/infinite-scroll; no DOM. The pilot reaches it through mg-gallery-picker.</td></tr>
 <tr><td><code>mg-notify</code></td><td>global IIFEs (<code>Ach/Toast/Jobs/JobsCard</code>)</td>
-  <td class="ok">✓ 23</td><td class="ok">✓ 9</td><td class="part">styles only — NOT mounted</td>
-  <td>Needs two anchors: <code>#jobs-fab</code>, <code>#jobs-tray</code>. Achievement toasts + corner Toast + Job tracker.</td></tr>
+  <td class="ok">✓ 23</td><td class="ok">✓ 9</td><td class="part">loaded as a global; zero refs in React src</td>
+  <td>Needs two anchors: <code>#jobs-fab</code>, <code>#jobs-tray</code>. Achievement toasts + corner Toast + Job tracker. On /next the script runs (Ach toasts self-fire, no anchor needed) but the React source never calls it — the Jobs card has no anchors there.</td></tr>
 <tr><td><code>mg-upscale-panel</code></td><td>custom element</td>
   <td class="ok">✓ 8</td><td class="no">✗</td><td class="ok">✓</td>
   <td>Upscale/Hires on an <i>existing</i> image (flyout in lightbox, inline on detail) → out: <code>mg-upscale</code>.</td></tr>
 <tr><td><code>mg-art-filters</code></td><td>global (<code>MgArtFilters</code>)</td>
-  <td class="ok">✓ 4</td><td class="no">✗</td><td class="no">✗</td>
-  <td>PixAI's 7 art filters as local gradient recipes — free, offline, no network ever. <b>New in this push</b> — was never uploaded to this project; no harness card yet.</td></tr>
+  <td class="ok">✓ 4</td><td class="no">✗</td><td class="part">loaded as a global; zero refs in React src</td>
+  <td>PixAI's 7 art filters as local gradient recipes — free, offline, no network ever. Uploaded to this project 2026-07-31; no harness card yet.</td></tr>
 </table>
 
 <h2>4 · Live design decisions that touch these components</h2>
+<p class="sub">As recorded in the repo (docs/DECISIONS.md) on 2026-07-31. Anything decided later in
+the design conversation supersedes these.</p>
 <table>
 <tr><th>Decision (owner, dated)</th><th>Affects</th></tr>
 <tr><td><b>Folio grid cards lose their ornate frames — every tier</b> (2026-07-31). The <code>.hall-card/.hall-frame</code> framing in mg-notify goes; tier reads from band + glow. <b>The achievement toast's <code>.tframe</code> keeps its legendary + feat frames — confirmed correct as-is.</b></td><td>mg-notify</td></tr>
