@@ -100,7 +100,24 @@
   // mgd-* names so mounting inside the gallery later can't collide with its live rules ----
   var STYLE_ID = 'mg-generate-drawer-style';
   var CSS = [
-    'mg-generate-drawer{display:block;font:13px/1.4 system-ui,sans-serif;color:var(--text,#d6d2e2);}',
+    /* Glass spec: this element IS the Generate-dock surface, so the glass chrome lives on
+       it directly. The backdrop-filter sits on a ::before layer, NOT on the element: a
+       backdrop-filter (like filter/transform) turns its element into the containing block
+       for position:fixed descendants, which would silently re-anchor .mgd-preview's
+       viewport coordinates to this box -- the exact distortion its own "fixed so a host
+       transform can't distort it" comment exists to prevent. isolation:isolate keeps the
+       z-index:-1 pseudo behind the content but never behind a host card's background. */
+    'mg-generate-drawer{display:block;position:relative;isolation:isolate;box-sizing:border-box;padding:16px;border-radius:16px;border:1px solid rgba(182,146,230,.32);box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px rgba(182,146,230,.14);animation:mgdDockIn .44s cubic-bezier(.2,.9,.24,1);font:13px/1.4 system-ui,sans-serif;color:var(--text,#d6d2e2);}',
+    'mg-generate-drawer::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:inherit;background:linear-gradient(120deg,rgba(24,18,54,.92),rgba(14,11,32,.95));-webkit-backdrop-filter:blur(18px) saturate(1.12);backdrop-filter:blur(18px) saturate(1.12);}',
+    /* Open/close both ways (glass law). The dock-in keyframes replay on every mount AND
+       every display:none->visible re-show (CSS animations restart then), so a host opening
+       its Generate surface gets the enter motion for free. The exit is the .mgd-closing
+       hook: a host hiding/unmounting this drawer adds the class first and defers the real
+       removal 360ms -- the deferral itself MUST live in the host, because an element
+       cannot postpone its own removal from inside disconnectedCallback. */
+    'mg-generate-drawer.mgd-closing{animation:mgdDockOut .36s cubic-bezier(.4,0,.2,1) forwards;pointer-events:none;}',
+    '@keyframes mgdDockIn{from{opacity:0;transform:translateY(22px) scale(.97);}to{opacity:1;transform:none;}}',
+    '@keyframes mgdDockOut{from{opacity:1;transform:none;}to{opacity:0;transform:translateY(22px) scale(.97);}}',
     'mg-generate-drawer .mgd-seg{display:flex;gap:6px;margin-bottom:10px;}',
     'mg-generate-drawer .mgd-seg button{flex:1;padding:6px 0;font-size:12px;border-radius:6px;background:var(--surface0,#211f3a);color:var(--subtext,#9a93ab);border:1px solid var(--surface1,#3a3460);cursor:pointer;}',
     'mg-generate-drawer .mgd-seg button.on{background:var(--lavender,#b692e6);color:var(--base,#0c0a1c);border-color:var(--lavender,#b692e6);font-weight:600;}',
@@ -148,9 +165,18 @@
        <style> injection order. If red-vs-amber is ever settled the other way, DELETE this
        rule -- do not re-fork the badge. */
     'mg-generate-drawer mg-cost-badge[data-state="paid"][data-warn]{border-color:var(--red,#f38ba8);color:var(--red,#f38ba8);}',
-    'mg-generate-drawer .mgd-go{width:100%;padding:9px 0;border:none;border-radius:6px;background:var(--lavender,#b692e6);color:var(--base,#0c0a1c);font-size:13.5px;font-weight:600;cursor:pointer;}',
-    'mg-generate-drawer .mgd-go:hover{opacity:.9;}',
-    'mg-generate-drawer .mgd-go:disabled{opacity:.4;cursor:not-allowed;}',
+    /* Metallic spec: skin-aware accentMetal on the primary Generate action, hero geometry
+       (radius 12 / 11px 26px pad / 14px 800). Every stop keys off var(--accent) so the
+       skins recolor the metal for free; --mauve is the one companion token the spec bakes
+       into the sweep. Disabled (busy, or a host setBusy) is the MUTED state -- the metal
+       stays and just desaturates/darkens, never the old flat opacity fade. */
+    'mg-generate-drawer .mgd-go{width:100%;padding:11px 26px;border:1px solid rgba(255,255,255,.34);border-radius:12px;background:linear-gradient(100deg,color-mix(in oklab,var(--accent,#b692e6) 50%,#06030d) 0%,var(--accent,#b692e6) 18%,color-mix(in oklab,var(--accent,#b692e6) 22%,#ffffff) 34%,var(--accent,#b692e6) 50%,color-mix(in oklab,var(--accent,#b692e6) 74%,#06030d) 68%,var(--mauve,#c4a6f0) 84%,color-mix(in oklab,var(--accent,#b692e6) 50%,#06030d) 100%);background-size:220% 100%;animation:mgMetal 7s ease-in-out infinite;color:color-mix(in oklab,var(--accent,#b692e6) 26%,#08040f);text-shadow:0 1px 0 rgba(255,255,255,.45);box-shadow:inset 0 1px 0 rgba(255,255,255,.72),inset 0 -3px 5px rgba(40,20,70,.5),0 10px 26px rgba(0,0,0,.5);font-size:14px;font-weight:800;letter-spacing:.03em;white-space:nowrap;cursor:pointer;}',
+    // No hover fade on the metal: the old flat-lavender button dimmed on hover, but an
+    // opacity fade over the banded gradient + bevel stack reads as a rendering glitch,
+    // and the kit's only dimmed state is the muted filter while the target is open.
+    'mg-generate-drawer .mgd-go:disabled{filter:saturate(.6) brightness(.82);cursor:not-allowed;}',
+    '@keyframes mgMetal{0%{background-position:0% 50%;}50%{background-position:100% 50%;}100%{background-position:0% 50%;}}',
+    '@media (max-width:640px){mg-generate-drawer .mgd-go{border-radius:10px;padding:12px;}}',
     'mg-generate-drawer .mgd-result{margin-top:12px;display:none;}',
     'mg-generate-drawer .mgd-result img{width:100%;border-radius:10px;display:block;margin-bottom:6px;}',
     'mg-generate-drawer .mgd-result a{color:var(--accent-soft,#4fc99a);font-size:12px;text-decoration:none;}',
@@ -168,9 +194,13 @@
     'mg-generate-drawer .mgd-audiochip{display:inline-flex;align-items:center;gap:7px;background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);border-radius:6px;padding:5px 10px;font-size:11.5px;color:var(--text,#d6d2e2);}',
     'mg-generate-drawer .mgd-audiochip button{background:none;border:none;color:var(--subtext,#9a93ab);cursor:pointer;font-size:13px;padding:0;line-height:1;}',
     'mg-generate-drawer .mgd-audioadd{background:var(--surface0,#211f3a);border:1px dashed var(--surface1,#3a3460);color:var(--subtext,#9a93ab);border-radius:6px;padding:6px 14px;font-size:11.5px;cursor:pointer;}',
-    /* the floating ref preview -- fixed so a host transform:scale() can't distort it */
-    'mg-generate-drawer .mgd-preview{position:fixed;z-index:600;width:300px;background:var(--mantle,#131024);border:1px solid var(--surface1,#3a3460);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.6);overflow:hidden;display:none;pointer-events:none;}',
+    /* the floating ref preview -- fixed so a host transform:scale() can't distort it.
+       Both-ways motion (glass law, micro tier since it's hover chrome): .open restores
+       display, .in one frame later drives the .18s opacity + 4px drift; the exit reverses
+       it and _hidePreview defers the display:none drop 180ms so the fade actually plays. */
+    'mg-generate-drawer .mgd-preview{position:fixed;z-index:600;width:300px;background:var(--mantle,#131024);border:1px solid var(--surface1,#3a3460);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.6);overflow:hidden;display:none;pointer-events:none;opacity:0;transform:translateY(4px);transition:opacity .18s cubic-bezier(.2,.9,.24,1),transform .18s cubic-bezier(.2,.9,.24,1);}',
     'mg-generate-drawer .mgd-preview.open{display:block;}',
+    'mg-generate-drawer .mgd-preview.open.in{opacity:1;transform:none;}',
     'mg-generate-drawer .mgd-preview img{width:100%;max-height:300px;object-fit:cover;display:block;}',
     /* Privacy blur (audit 2026-07-21 S5): the reference-slot thumbnails (mgd-slot, set via
        slotBox()) never carried the host page's body.privacy-blur rule -- once picked, an
@@ -410,6 +440,7 @@
       this._costTimer = null;
       this._chipTimer = null;
       this._pollTimer = null;
+      this._previewTimer = null;   // deferred-hide timer for the floating ref preview
       this._dirty = false;       // true from the first keystroke since the last commit/sync
       this._rendering = false;   // true while THIS drawer's own submit/poll is in flight
       // HARD DEPENDENCY, new as of the cost-badge consolidation: MARKUP contains a
@@ -492,6 +523,7 @@
     disconnectedCallback() {
       clearTimeout(this._costTimer);
       clearTimeout(this._chipTimer);
+      clearTimeout(this._previewTimer);
       // Concurrent generations: each in-flight submission owns its own poll timeout (see
       // _poll below), tracked in this Set instead of the old single this._pollTimer --
       // sweep every one of them, not just the most recent submission's.
@@ -1182,6 +1214,21 @@
     // ---- floating ref preview (own element; no host singleton coupling) ----
     _showPreview(mid, anchor) {
       var p = this._preview;
+      // While the dock's entry animation runs, its transform makes this element the
+      // containing block for the fixed-position preview -- viewport-computed coords land
+      // relative to the drawer's own box, the exact mis-anchor the ::before split exists
+      // to prevent. Defer the show to the animation's end; only re-fire if the pointer is
+      // still on the anchor.
+      var self = this;
+      var entry = (this.getAnimations ? this.getAnimations() : []).filter(function (a) {
+        return a.animationName === 'mgdDockIn' && a.playState === 'running';
+      })[0];
+      if (entry) {
+        entry.finished.then(function () {
+          if (anchor.isConnected && anchor.matches(':hover')) self._showPreview(mid, anchor);
+        }).catch(function () {});   // cancelled animation = drawer went away; nothing to show
+        return;
+      }
       // A prefilled slot can carry a local data-URL (a cast asset never uploaded to PixAI
       // yet) instead of a real media_id -- /thumbs/<id>.jpg would 404 for that, so skip
       // rather than show a broken image.
@@ -1190,6 +1237,7 @@
       // a deliberately build-free <script> and cannot import -- loom-core.js's
       // isCatalogMediaId() is the canonical definition; widen both together.
       if (!p || !mid || !/^(?:\d+|local_[0-9a-f]{12})$/.test(mid)) return;
+      clearTimeout(this._previewTimer);   // cancel a pending fade-out from the last slot
       p.innerHTML = '<img src="/thumbs/' + esc(mid) + '.jpg" alt="">';
       p.classList.add('open'); p.setAttribute('aria-hidden', 'false');
       var r = anchor.getBoundingClientRect(), w = 300, gap = 12, x;
@@ -1198,11 +1246,17 @@
       var y = Math.max(8, Math.min(r.top - 10, window.innerHeight - 380));
       p.style.left = x + 'px';
       p.style.top = y + 'px';
+      // 'in' one frame after 'open' restores display, so the .18s drift plays, not snaps.
+      requestAnimationFrame(function () { p.classList.add('in'); });
     }
 
     _hidePreview() {
       var p = this._preview;
-      if (p) { p.classList.remove('open'); p.setAttribute('aria-hidden', 'true'); }
+      if (!p) return;
+      p.classList.remove('in'); p.setAttribute('aria-hidden', 'true');
+      // Deferred hide (glass law, micro tier): drop display only AFTER the fade played.
+      clearTimeout(this._previewTimer);
+      this._previewTimer = setTimeout(function () { p.classList.remove('open'); }, 180);
     }
 
     // ---- public host API ----

@@ -39,8 +39,11 @@
      warn      -- a caution clause shown ONLY on the `paid` state, which also turns the
                   badge amber: warn="V4.0 full — ~2.5× Lite" renders
                   "⚠ V4.0 full — ~2.5× Lite · ≈ 210,000 credits". Empty/absent = no warning.
-     compact   -- boolean; render as an inline pill (toolbar/near-a-button) instead of the
-                  full-width bar (a drawer's cost line). Purely presentational.
+     compact   -- boolean; render as the credits chip (toolbar/near-a-button) instead of the
+                  full-width bar (a drawer's cost line). Purely presentational: the chip
+                  form shows value · divider · label, a gold "!" dot when the covering
+                  card is near expiry, and a gold-bordered billing tooltip on hover in
+                  place of the native title. Same data, same events, same .text.
      card-label-- fallback name for the covering card when the server didn't send one
                   ("a video card" / "an Edit card"); defaults to "a free card".
    Public API (a host sets data; the element never goes and gets it):
@@ -90,15 +93,52 @@
     'mg-cost-badge[data-state="free"]{border-color:var(--emerald,#4fc99a);color:var(--emerald,#4fc99a);}',
     'mg-cost-badge[data-state="paid"][data-warn]{border-color:var(--peach,#fab387);color:var(--peach,#fab387);}',
     'mg-cost-badge[data-state="error"]{border-color:var(--red,#f38ba8);color:var(--red,#f38ba8);}',
-    /* compact: an inline pill for a toolbar or a spot next to a Go button */
-    'mg-cost-badge[compact]{display:inline-flex;align-items:center;gap:6px;margin:0;',
-    ' padding:3px 9px;border-radius:999px;font-size:11.5px;white-space:nowrap;}',
+    /* compact: the credits chip (gallery-era spec) -- metallic violet pill face. z 1 at
+       rest, z 7 while its billing tip shows (top of the 0-7 component band; the tip
+       itself is z 5 as a child, never a new band). */
+    'mg-cost-badge[compact]{display:inline-flex;align-items:center;gap:9px;margin:0;',
+    ' padding:6px 15px;border-radius:999px;font-size:11.5px;white-space:nowrap;',
+    ' border:1px solid rgba(255,255,255,.22);position:relative;z-index:1;',
+    ' background:linear-gradient(150deg,rgba(222,214,246,.32) 0%,rgba(122,96,178,.34) 46%,rgba(24,18,44,.66) 100%);',
+    ' box-shadow:inset 0 1px 0 rgba(255,255,255,.42),inset 0 -2px 4px rgba(20,12,40,.45),0 5px 14px rgba(0,0,0,.4);}',
+    'mg-cost-badge[compact]:hover{z-index:7;}',
+    /* chip keeps the spec's white border/neutral ink in the settled states; the honesty
+       grammar survives in the value (emerald FREE) and the red/amber cases below */
+    'mg-cost-badge[compact][data-state="free"]{color:var(--text,#d6d2e2);}',
+    'mg-cost-badge[compact][data-state="error"]{border-color:var(--red,#f38ba8);}',
+    'mg-cost-badge[compact][data-warn]{border-color:var(--peach,#fab387);}',
+    'mg-cost-badge[compact][data-warn] .mgc-lab{color:var(--peach,#fab387);}',
+    /* muted treatment while there is nothing settled to read */
+    'mg-cost-badge[compact][data-state="idle"],mg-cost-badge[compact][data-state="checking"]{filter:saturate(.6) brightness(.82);}',
+    /* value · divider · label -- the chip's internal anatomy */
+    'mg-cost-badge .mgc-val{font-size:15.5px;font-weight:800;letter-spacing:-.01em;',
+    ' font-variant-numeric:tabular-nums;color:#f2ecff;text-shadow:0 1px 1px rgba(0,0,0,.45);}',
+    'mg-cost-badge[data-state="free"] .mgc-val{color:#dcffee;}',
+    'mg-cost-badge .mgc-div{width:1px;height:12px;background:rgba(255,255,255,.2);flex:none;}',
+    'mg-cost-badge .mgc-lab{font-size:8.5px;font-weight:700;letter-spacing:.16em;',
+    ' text-transform:uppercase;color:rgba(255,255,255,.62);}',
+    /* gold "!" membership/expiry-warning dot */
+    'mg-cost-badge .mgc-dot{box-sizing:border-box;width:15px;height:15px;border-radius:50%;',
+    ' display:grid;place-items:center;font-size:10px;font-weight:800;line-height:1;color:#2a1f06;',
+    ' border:1px solid rgba(255,255,255,.4);flex:none;text-shadow:none;',
+    ' background:linear-gradient(150deg,#ffe9a8 0%,#d4af37 52%,#8a6c18 100%);',
+    ' box-shadow:inset 0 1px 0 rgba(255,255,255,.6);}',
+    /* gold-bordered billing tooltip: right-anchored child of the chip, drops below with a
+       4px drift. pointer-events none so it never traps the cursor. */
+    'mg-cost-badge .mgc-tip{box-sizing:border-box;position:absolute;top:calc(100% + 6px);right:0;z-index:5;',
+    ' width:212px;background:rgba(9,7,22,.96);border:1px solid rgba(212,175,55,.45);border-radius:9px;',
+    ' padding:8px 11px;font-size:10.5px;font-weight:500;line-height:1.5;letter-spacing:normal;',
+    ' text-transform:none;color:var(--text,#d6d2e2);text-shadow:none;text-align:left;white-space:normal;',
+    ' pointer-events:none;box-shadow:0 12px 30px rgba(0,0,0,.62);opacity:0;transform:translateY(-4px);',
+    ' transition:opacity .18s cubic-bezier(.2,.9,.24,1),transform .18s cubic-bezier(.2,.9,.24,1);}',
+    'mg-cost-badge[compact]:hover .mgc-tip{opacity:1;transform:translateY(0);}',
     'mg-cost-badge .mgc-sub{display:block;margin-top:2px;font-size:11px;color:var(--overlay0,#6a6088);}',
     /* On one line in compact, so it needs its own separator -- without the ::before the
-       expiry butts straight against "…saves ~84,000 credits" with no space at all (caught
-       in the harness 2026-07-21). The block form gets its gap from the line break instead.
-       No margin: the host's own flex `gap` already spaces the two items apart. */
-    'mg-cost-badge[compact] .mgc-sub{display:inline;margin:0;}',
+       expiry butts straight against the label with no space at all (caught in the harness
+       2026-07-21). The block form gets its gap from the line break instead. No margin: the
+       chip's own flex `gap` already spaces the segments apart. */
+    'mg-cost-badge[compact] .mgc-sub{display:inline;margin:0;font-size:8.5px;font-weight:700;',
+    ' letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.62);}',
     'mg-cost-badge[compact] .mgc-sub::before{content:"· ";}',
     /* the eclipse pip, matching the drawer's own in-flight moon at badge scale */
     'mg-cost-badge .mgc-pip{display:inline-block;width:9px;height:9px;border-radius:50%;',
@@ -138,7 +178,9 @@
                days === 0 ? 'expires today' :
                days === 1 ? 'expires tomorrow' :
                'expires in ' + days + ' days';
-    return { text: when, title: new Date(t).toLocaleString() };
+    // `days` rides along so the chip can decide when the gold "!" warning dot earns its
+    // spot (membership expiry via /api/account lands on the same shape later).
+    return { text: when, title: new Date(t).toLocaleString(), days: days };
   }
 
   class MgCostBadgeEl extends HTMLElement {
@@ -157,7 +199,7 @@
       this._render();
     }
 
-    static get observedAttributes() { return ['hint', 'warn', 'card-label']; }
+    static get observedAttributes() { return ['hint', 'warn', 'card-label', 'compact']; }
     attributeChangedCallback() { if (this._built) this._render(); }
 
     // ---- public API: the host pushes, this element renders ------------------------
@@ -213,14 +255,27 @@
     _render() {
       var d = this._raw || {}, st = this._state;
       var warn = (this.getAttribute('warn') || '').trim();
+      var compact = this.hasAttribute('compact');
       var main = '', sub = null, title = '';
+      // Chip-only pieces: value/label anatomy, billing-tooltip body, gold "!" dot. The
+      // classification, `_text` and the mg-cost event never depend on them -- the chip is
+      // the same data wearing the credits-chip face.
+      var val = '', lab = '', tip = '', dot = false;
       if (st === 'free') {
         var card = d.card_name || (this.getAttribute('card-label') || '').trim() || 'a free card';
-        var left = (d.cards != null && isFinite(Number(d.cards))) ? ' (' + fmt(d.cards) + ' left)' : '';
-        var saves = (d.cost != null && isFinite(Number(d.cost))) ? ' · saves ~' + fmt(d.cost) + ' credits' : '';
-        main = '🎫 FREE — ' + card + ' covers this' + left + saves;
+        var leftN = (d.cards != null && isFinite(Number(d.cards))) ? fmt(d.cards) + ' left' : '';
+        var savesN = (d.cost != null && isFinite(Number(d.cost))) ? fmt(d.cost) : '';
+        main = '🎫 FREE — ' + card + ' covers this' + (leftN ? ' (' + leftN + ')' : '') +
+               (savesN ? ' · saves ~' + savesN + ' credits' : '');
         sub = expiryNote(d.card_expires);
         title = 'A free card is applied automatically at submit — this generation spends 0 credits.';
+        val = 'FREE';
+        lab = card + (leftN ? ' · ' + leftN : '');
+        tip = title + (savesN ? ' Saves ~' + savesN + ' credits.' : '');
+        if (sub) {
+          tip += ' Card ' + sub.text + ' — ' + sub.title + '.';
+          dot = sub.days <= 7;   // near-expiry (or expired) earns the gold "!" dot
+        }
       } else if (st === 'paid') {
         var n = Number(d.cost);
         // A settled ZERO is real (nothing to spend) but is NOT the free-card state, and must
@@ -230,25 +285,43 @@
                          : (warn ? '⚠ ' + warn + ' · ' : '') + '≈ ' + fmt(n) + ' credits';
         title = (n === 0) ? 'Priced at zero credits. No free card was involved.'
                           : 'No free card covers this — generating spends credits.';
+        val = (n === 0) ? '0' : (warn ? '⚠ ' : '') + '≈ ' + fmt(n);
+        lab = (n === 0) ? 'credits — spends nothing' : 'credits';
+        tip = (n !== 0 && warn) ? '⚠ ' + warn + '. ' + title : title;
       } else if (st === 'error') {
         main = '⚠ ' + (this._msg || ERR_TEXT);
         title = ERR_TITLE;
+        tip = ERR_TITLE;
       } else if (st === 'checking') {
         main = '<span class="mgc-pip"></span>Checking cost…';
       } else {
         main = this._note || (this.getAttribute('hint') || '').trim() || DEFAULT_HINT;
       }
       // `main` is plain TEXT in every branch except 'checking' (whose only markup is this
-      // file's own literal pip span), so it is escaped wholesale here -- server-supplied
-      // strings (card_name, note, error) can never reach innerHTML unescaped.
-      var html = (st === 'checking') ? main : esc(main);
-      if (sub) html += '<span class="mgc-sub" title="' + esc(sub.title) + '">' + esc(sub.text) + '</span>';
+      // file's own literal pip span), and every chip piece (val/lab/tip/sub) is escaped
+      // individually -- server-supplied strings (card_name, note, error) can never reach
+      // innerHTML unescaped.
+      var html;
+      if (compact && val) {
+        html = '<span class="mgc-val">' + esc(val) + '</span><span class="mgc-div"></span>' +
+               '<span class="mgc-lab">' + esc(lab) + '</span>';
+        if (sub) html += '<span class="mgc-sub">' + esc(sub.text) + '</span>';
+        if (dot) html += '<span class="mgc-dot" aria-hidden="true">!</span>';
+      } else {
+        html = (st === 'checking') ? main : esc(main);
+        if (sub) html += '<span class="mgc-sub" title="' + esc(sub.title) + '">' + esc(sub.text) + '</span>';
+      }
+      // aria-hidden: the tip duplicates info already carried by the chip/`_text`, and this
+      // element is an aria-live region -- the tooltip must not re-announce on every push.
+      if (compact && tip) html += '<span class="mgc-tip" aria-hidden="true">' + esc(tip) + '</span>';
       this.innerHTML = html;
       this._text = (st === 'checking' ? 'Checking cost…' : main) + (sub ? ' · ' + sub.text : '');
       this.setAttribute('data-state', st);
       if (st === 'paid' && warn) this.setAttribute('data-warn', '1');
       else this.removeAttribute('data-warn');
-      if (title) this.setAttribute('title', title); else this.removeAttribute('title');
+      // The chip's billing tooltip REPLACES the native title (two tooltips on one hover
+      // otherwise); the block form keeps the native title exactly as before.
+      if (title && !(compact && tip)) this.setAttribute('title', title); else this.removeAttribute('title');
     }
 
     _emit() {
