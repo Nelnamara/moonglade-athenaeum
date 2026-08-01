@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<!-- DEV entry only (npm run dev). Production is served by moonglade_gallery.py's
+     /next route, which injects window.MG_BOOT server-side. Dev fakes a minimal boot
+     and the Vite proxy supplies real /api data from the running server. -->
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Moonglade Athenaeum — next (dev)</title>
+  <script type="module" crossorigin src="/next/assets/app.js"></script>
+  <link rel="stylesheet" crossorigin href="/next/assets/app.css">
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    window.MG_BOOT = window.MG_BOOT || {
+      dev: true,
+      stats: { images: 0, videos: 0, collections: 0 },
+      collections: [],
+      user: "dev",
+      is_local: true,
+      is_true_local: true,
+      csrf: "",
+      build_stamp: "dev",
+      band: { height: 340, crop: 30 },
+    };
+  </script>
+</body>
+</html>

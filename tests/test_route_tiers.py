@@ -151,6 +151,15 @@ ROUTE_TIERS = {
     ("loom_dist", "GET"): LOGIN,
     ("loom_vendor", "GET"): LOGIN,
 
+    # The React gallery pilot at /next. LOGIN, exactly like the classic gallery
+    # it mirrors: it browses the library and opens the same spend surfaces, so
+    # a signed-in LAN session may use it (spending from a signed-in tablet is
+    # the point) -- nothing here writes config or moves files.
+    ("next_gallery", "GET"): LOGIN,
+    ("next_assets", "GET"): LOGIN,
+    ("api_next_library", "GET"): LOGIN,
+    ("api_next_detail", "GET"): LOGIN,
+
     # library mutation (local only in effect, but LAN-authorized by design)
     ("rate", "POST"): LOGIN,
     ("edit_prompt", "POST"): LOGIN,
