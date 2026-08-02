@@ -1,0 +1,65 @@
+/* My Art + Contests overlays — ported from the Frontend Gallery DC's ovMyArt
+   (lines ~567-599) and ovContests (lines ~601-645) slabs. Shares the generic
+   .mgv-* shell from overlays.css; these are the "different innards" that
+   file's own header comment anticipated. */
+
+.mgma-slab { width: min(860px, calc(100vw - 48px)); }
+
+/* ---- My Art ---- */
+.mgma-stats { display: flex; gap: 26px; flex-wrap: wrap; padding: 14px 0 4px; }
+.mgma-stat { display: flex; flex-direction: column; gap: 4px; }
+.mgma-stat-value { font-size: 21px; font-weight: 800; letter-spacing: -.01em;
+  font-variant-numeric: tabular-nums; color: var(--text); }
+.mgma-stat-label { font-size: 9px; font-weight: 700; letter-spacing: .14em; color: var(--overlay0); }
+
+.mgma-posts { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 9px; }
+.mgma-post { display: flex; gap: 11px; align-items: center; padding: 11px 13px;
+  border-radius: 11px; border: 1px solid var(--surface1); background: rgba(33,31,58,.5);
+  cursor: pointer; transition: border-color .2s; font-family: inherit; text-align: left; }
+.mgma-post:hover { border-color: var(--accent); }
+.mgma-rank { flex: none; width: 20px; text-align: center; font-size: 13px; font-weight: 800;
+  color: var(--overlay0); }
+.mgma-postbody { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.mgma-posttitle { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.mgma-postmeta { font-size: 10.5px; color: var(--subtext); font-variant-numeric: tabular-nums; }
+.mgma-barwrap { height: 4px; border-radius: 2px; background: var(--surface0); overflow: hidden; }
+.mgma-bar { height: 100%; border-radius: 2px; background: var(--accent); }
+.mgma-footnote { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px;
+  font-style: italic; color: var(--overlay0); padding-top: 14px; }
+
+/* ---- Contests ---- */
+.mgct-slab { width: min(820px, calc(100vw - 48px)); }
+.mgct-summary { font-size: 11.5px; color: var(--subtext); padding: 3px 0 14px; }
+.mgct-summary b { color: var(--text); }
+.mgct-h { font-size: 11px; font-weight: 700; padding-bottom: 8px; }
+.mgct-h .n { color: var(--overlay0); font-weight: 600; }
+.mgct-h.official { color: var(--gold); }
+.mgct-h.community { color: var(--mauve); }
+
+.mgct-official { width: min(420px, 100%); border-radius: 12px; overflow: hidden;
+  border: 1px solid rgba(212,175,55,.45); background: rgba(33,31,58,.5); cursor: pointer;
+  display: block; font-family: inherit; text-align: left; padding: 0; }
+.mgct-cover { position: relative; aspect-ratio: 2.4 / 1; background: var(--surface0); }
+.mgct-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.mgct-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 7px; }
+.mgct-title { font-size: 12.5px; font-weight: 700; line-height: 1.4; }
+.mgct-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.mgct-prize { font-family: ui-monospace, Menlo, monospace; font-size: 10px; font-weight: 700;
+  padding: 3px 9px; border-radius: 999px; background: rgba(212,175,55,.16);
+  border: 1px solid rgba(212,175,55,.45); color: var(--gold); }
+.mgct-votepick { font-size: 9.5px; font-weight: 800; letter-spacing: .06em; padding: 3px 9px;
+  border-radius: 999px; background: var(--gold); color: #2a1f06; }
+.mgct-votepick.user { background: transparent; border: 1px solid rgba(182,146,230,.4);
+  background: rgba(182,146,230,.12); color: var(--mauve); }
+.mgct-dates { font-size: 10.5px; color: var(--subtext); font-variant-numeric: tabular-nums; }
+
+.mgct-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.mgct-card { border-radius: 12px; overflow: hidden; border: 1px solid var(--surface1);
+  background: rgba(33,31,58,.5); cursor: pointer; transition: border-color .2s;
+  display: block; font-family: inherit; text-align: left; padding: 0; width: 100%; }
+.mgct-card:hover { border-color: var(--accent); }
+.mgct-card .mgct-title { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgct-card .mgct-body { padding: 9px 12px 11px; gap: 6px; }
+.mgct-empty { font-size: 11.5px; color: var(--subtext); padding: 20px 0; }

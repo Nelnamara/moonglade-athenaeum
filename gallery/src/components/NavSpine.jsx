@@ -10,12 +10,16 @@ import "../styles/shell.css";
    plus mounting the surface at App.jsx's overlay mount point. */
 
 const NAV = [
-  { label: "My Art", tip: "How your published art is doing", overlay: "myart", soon: true },
+  // My Art + Contests (2026-08-02): real overlays now (MyArtOverlay.jsx /
+  // ContestsOverlay.jsx), ported from the same Frontend Gallery DC these
+  // pills always pointed at -- they had real, working backend routes
+  // (/api/your-art, /api/contests) sitting unused the whole time.
+  { label: "My Art", tip: "How your published art is doing", overlay: "myart" },
   { label: "Publish", tip: "Publish to PixAI", overlay: "publish", soon: true },
   { label: "Train", tip: "Train a LoRA on PixAI", overlay: "train", soon: true },
   { label: "Import", tip: "Bring local files into the catalog — nothing goes to PixAI",
     overlay: "import", soon: true, localOnly: true },
-  { label: "Contests", tip: "Live PixAI contests", overlay: "contests", soon: true },
+  { label: "Contests", tip: "Live PixAI contests", overlay: "contests" },
   // The REAL in-app overlay (HealthOverlay.jsx, ported from the Frontend
   // Gallery DC's ovHealth slab) -- the first of the six designed overlays to
   // land. Its two page-bounce stand-ins from earlier today are both dead.

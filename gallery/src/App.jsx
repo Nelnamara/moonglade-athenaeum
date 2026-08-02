@@ -7,6 +7,8 @@ import Grid from "./components/Grid.jsx";
 import Lightbox from "./components/Lightbox.jsx";
 import DetailsView from "./components/DetailsView.jsx";
 import HealthOverlay from "./components/HealthOverlay.jsx";
+import MyArtOverlay from "./components/MyArtOverlay.jsx";
+import ContestsOverlay from "./components/ContestsOverlay.jsx";
 import GenerateDrawer from "./components/GenerateDrawer.jsx";
 import PickerHost, { isPickerOpen } from "./components/PickerHost.jsx";
 import "./styles/shell.css";
@@ -589,9 +591,11 @@ export default function App({ boot }) {
         />
       )}
 
-      {/* OVERLAY MOUNT POINT — the six designed nav overlays land here one by
-          one. Health is live (the first); the other five stay `soon`-dimmed in
-          NavSpine until each ports from its DC. Scrim z 300, slab 301 (band per
+      {/* OVERLAY MOUNT POINT — the six designed nav overlays land here.
+          Health/My Art/Contests are live; Publish/Train/Import are still
+          `soon`-dimmed in NavSpine until their own backend routes exist (My
+          Art and Contests already had real, working routes sitting unused --
+          see docs/DECISIONS.md 2026-08-02). Scrim z 300, slab 301 (band per
           drift §3); Esc-first is handled by the capture listener above. The
           model/tag/LoRA click-throughs close the overlay and apply the filter
           through the same applyAdvanced path every filter control uses. */}
@@ -602,6 +606,15 @@ export default function App({ boot }) {
           onTagFilter={(t) => { setOverlay(null); applyAdvanced({ tag: t }); }}
           onLoraFilter={(l) => { setOverlay(null); applyAdvanced({ lora: l }); }}
         />
+      )}
+      {overlay === "myart" && (
+        <MyArtOverlay
+          onClose={() => setOverlay(null)}
+          onOpenPost={(mid) => { setOverlay(null); openDetails(mid); }}
+        />
+      )}
+      {overlay === "contests" && (
+        <ContestsOverlay onClose={() => setOverlay(null)} />
       )}
 
       {/* the Generate dock host: the wrapper carries the outside-click anchor
