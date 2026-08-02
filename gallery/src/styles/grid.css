@@ -117,7 +117,9 @@
 /* the ▶ corner glyph on videos — always on, not reveal-gated (DC line 178) */
 .mgg-vglyph {
   position: absolute; top: 8px; right: 8px; z-index: 2;
-  font-size: 9px; color: var(--subtext); pointer-events: none;
+  /* DC literal (near-white at .9), restored per owner 2026-08-01 -- the token
+     substitution pass dimmed this without asking. */
+  font-size: 9px; color: rgba(214, 210, 226, .9); pointer-events: none;
 }
 
 /* ---- caption slab: reveals on hover / picked / Select mode ------------------- */
@@ -137,9 +139,11 @@
   font-size: 10.5px; font-weight: 600; color: var(--lavender, var(--accent));
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.mgg-date { font-size: 9.5px; color: var(--overlay0); font-variant-numeric: tabular-nums; }
+/* DC literals restored (owner 2026-08-01): the DC brightens the date over the
+   filename (.5 vs .35 white) -- the single-token version flattened that. */
+.mgg-date { font-size: 9.5px; color: rgba(255, 255, 255, .5); font-variant-numeric: tabular-nums; }
 .mgg-file {
-  font-size: 9.5px; color: var(--overlay0);
+  font-size: 9.5px; color: rgba(255, 255, 255, .35);
   font-family: ui-monospace, Menlo, monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -169,7 +173,8 @@
 .mgg-chip.ghost {
   border: 1px solid rgba(255, 255, 255, .16);
   background: rgba(9, 7, 22, .7);
-  color: var(--subtext);
+  /* DC literal restored (owner 2026-08-01). */
+  color: rgba(226, 222, 238, .82);
 }
 .mgg-chip.ghost:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 

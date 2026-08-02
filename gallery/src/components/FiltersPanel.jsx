@@ -63,13 +63,52 @@ function cycleNext(list, cur) {
    Commits ride applyAdvanced — App.jsx's existing one-patch commit path — so
    every chip reuses the exact mechanism the Advanced flyout already commits
    through (media/shelf/perPage keys included). */
-export function FilterTray({ closing, media, shelf, perPage, adv, collections, commit }) {
+export function FilterTray({ closing, media, shelf, perPage, adv, collections, models, commit }) {
   const srcLabel = (SOURCE_CYCLE.find((s) => s[0] === (adv.source || "")) || SOURCE_CYCLE[0])[1];
   const mediaLabel = (MEDIA_CYCLE.find((m) => m[0] === (media || "")) || MEDIA_CYCLE[0])[1];
   const shelfOpts = [""].concat(collections || []);
   const stars = adv.ratingMin || 0;
+  /* Model chip (DC filterChips lead with it). The DC cycles a 3-entry
+     placeholder list; the real library has dozens of models, so cycling is
+     unusable -- the chip opens an anchored list of the library's real models
+     instead (owner-disclosed adaptation, 2026-08-01). Commits ride the same
+     applyAdvanced path as the Advanced flyout's model field. */
+  const [modelMenu, setModelMenu] = useState(null); // {x, y} anchor or null
+  const modelBtn = useRef(null);
+  useEffect(() => {
+    if (!modelMenu) return;
+    const onDown = (e) => {
+      if (modelBtn.current && modelBtn.current.contains(e.target)) return;
+      if (!e.target.closest || !e.target.closest(".mgl-menu")) setModelMenu(null);
+    };
+    const onKey = (e) => { if (e.key === "Escape") setModelMenu(null); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [modelMenu]);
+  const openModelMenu = () => {
+    const r = modelBtn.current.getBoundingClientRect();
+    setModelMenu({ x: Math.max(10, Math.min(r.left, window.innerWidth - 252)), y: r.bottom + 8 });
+  };
+  const modelLabel = adv.model ? (adv.model.length > 18 ? adv.model.slice(0, 17) + "…" : adv.model) : "any";
   return (
     <div className={"mgl-tray" + (closing ? " closing" : "")}>
+      <span ref={modelBtn}>
+        <Chip label={"Model · " + modelLabel} active={!!adv.model}
+          title="Filter by the model that made it"
+          onClick={() => (modelMenu ? setModelMenu(null) : openModelMenu())} />
+      </span>
+      {modelMenu && (
+        <div className="mgl-menu" style={{ left: modelMenu.x, top: modelMenu.y, maxHeight: "50vh", overflowY: "auto" }}>
+          <div className="mgl-item" onClick={() => { commit({ model: "" }); setModelMenu(null); }}>any</div>
+          {(models || []).map((m) => (
+            <div key={m} className="mgl-item" onClick={() => { commit({ model: m }); setModelMenu(null); }}>{m}</div>
+          ))}
+        </div>
+      )}
       <Chip label={"Media · " + mediaLabel} active={media !== ""}
         title="Cycle: All → Images → Videos"
         onClick={() => commit({ media: cycleNext(MEDIA_CYCLE.map((m) => m[0]), media || "") })} />
@@ -170,6 +209,7 @@ export function LibraryBar({
           closing={trayClosing}
           media={media} shelf={shelf} perPage={perPage} adv={adv}
           collections={collections}
+          models={boot.models || []}
           commit={applyAdvanced}
         />
       )}
