@@ -17,6 +17,24 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **`<mg-model-picker>` conformed to the DC's "Base model" panel** (owner: *"conform or get
+  the fuck out"*) — card anatomy, search field, and grid now match the design's literal
+  values (11px radius, accent-border-only selection, no hover rule, Official pill, the
+  1:1 cover, 9.5px meta typography). The old green "compatible" text badge is gone (the DC
+  has none); a confirmed-incompatible LoRA (`compat:'no'`) gets the DC's warning
+  treatment — dimmed cover, ⚠ badge, blocked from a fresh pick — while `'unknown'`/no-base
+  stays fully live (never overclaiming data the server doesn't have). Real data only: no
+  base-model cost line (the search payload carries no rate), LoRA weight ranges from the
+  live `MG_LORA` table, not the DC's demo numbers. The picker's open-path speed law holds
+  exactly — still one fetch, verified byte-for-byte against HEAD; all four consuming
+  hosts (classic, Loom, /next, the upscale panel) unmodified. Adversarial verify caught
+  and fixed a real edge case first: a LoRA selected before a base-model switch could
+  render both selected AND click-dead in the same grid (no way to remove it from the
+  picker itself) — now matches the DC's own toggle order, where removing an
+  already-picked item is always allowed even after it goes incompatible. The
+  picker-parity-round2 suite (pins the component's source, no browser harness) updated
+  to the new design's real values rather than reverted; full suite green (579 loom +
+  186 Python).
 - **THE FLIP: the redesigned app owns the front door.** `/` now serves the React app;
   the classic gallery moved to `/classic` (every `url_for("index")` in its own templates
   follows automatically) and survives there only until demolition. `/next` stays as an
