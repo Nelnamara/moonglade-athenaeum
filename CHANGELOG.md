@@ -17,6 +17,17 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Fixed: a job stuck 'running' for hours had no way to clear it from the Job Tracker.**
+  The dismiss control only ever rendered for jobs already in a terminal or `stale`
+  status — a job the orphan-reconciliation sweep hadn't (yet, or ever) resolved just sat
+  there forever with no `×`. The backend's dismiss endpoint never actually required a
+  terminal status; the gap was purely in the UI. Added a second, deliberately quieter
+  "Stop tracking" text link for any non-finished job, gated behind a plain-language
+  confirm that's explicit about what it does and doesn't do: it only stops the local
+  tracker from watching the job — it does not cancel anything on PixAI or touch credits,
+  and if the job really was still running, the finished image still lands in the library
+  later. Verified live: registered a fake stuck job, confirmed Cancel leaves it alone and
+  OK removes it from both the API and the tray.
 - **The gallery grid, Loom Masonry v1 — real aspect ratios, no more random cropping.**
   Replaces the decorative "every 6th card spans 2 rows" pattern, which was fine over
   placeholder art and produced arbitrary crops over the real 35k-image library. Now: every
