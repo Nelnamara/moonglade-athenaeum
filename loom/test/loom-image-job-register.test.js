@@ -98,8 +98,10 @@ describe("every Loom image submit path registers its generation in the shared Jo
   test("it REGISTERS rather than TRACKS -- no second poll loop for the same task id", () => {
     // mg-notify.js's register() is the register-ONLY entry point; track() also starts its own
     // poll. These paths already own pollTaskWithCeiling, so track() would poll the same task
-    // twice from one page.
-    assert.match(notify, /function register\(id, label\)\{/,
+    // twice from one page. `count` (2026-08-02, the Runs reel batch-grid feature) is a 3rd,
+    // optional param -- every Loom call site here still passes just (id, label), which is a
+    // no-op-compatible call against the new signature.
+    assert.match(notify, /function register\(id, label, count\)\{/,
       "mg-notify.js must still expose the register-ONLY entry point this fix depends on");
     assert.doesNotMatch(src, /window\.Jobs\.track\(/,
       "master-storyboard.jsx must never call Jobs.track() -- every generation path in this file " +

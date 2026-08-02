@@ -23,6 +23,13 @@
   100% { box-shadow: 0 0 0 16px rgba(182, 146, 230, 0); } }
 @keyframes mgSlab { from { opacity: 0; transform: translate3d(0, 12px, 0); } to { opacity: 1; transform: none; } }
 @keyframes mgFade { from { opacity: 0; } to { opacity: 1; } }
+/* A done reel tile's thumbnail mounts fresh the instant its job flips running
+   -> done (see RunsReel.jsx: a running job is one placeholder cell, a done job
+   is N brand-new result cells keyed by media_id) -- so a plain mount animation
+   IS the running->done transition, with no fake clock or synthetic percentage
+   to interpolate against. */
+@keyframes mgSharpen { from { filter: blur(9px) saturate(.55); opacity: .38; }
+  to { filter: blur(0) saturate(1); opacity: 1; } }
 
 /* ============================= DOCK SHELL =================================== */
 .mgdock {
@@ -117,25 +124,27 @@
 
 .mgdock-run { flex: none; display: flex; flex-direction: column; gap: 6px;
   animation: mgPop .58s cubic-bezier(.2, 1.06, .3, 1) both; }
-.mgdock-tilelink { display: block; line-height: 0; }
 .mgdock-tile { position: relative; border-radius: 13px; overflow: hidden;
   border: 1px solid var(--surface1); background: rgba(12, 10, 28, .9);
   display: grid; place-items: center;
   transition: border-color .3s, transform .25s cubic-bezier(.2, .9, .24, 1); }
-.mgdock-tile.done { border-color: rgba(182, 146, 230, .42); cursor: pointer; }
+.mgdock-tile.done { border-color: rgba(182, 146, 230, .42); }
+.mgdock-tile.done:hover { border-color: rgba(182, 146, 230, .8); }
+.mgdock-tile.running { background: rgba(12, 10, 28, .96); }
 .mgdock-tile.fail { border-color: color-mix(in srgb, var(--red) 45%, transparent); }
 .mgdock-tileimg { position: absolute; inset: 0; width: 100%; height: 100%;
-  object-fit: cover; }
+  object-fit: cover;
+  animation: mgSharpen .42s cubic-bezier(.22, 1, .36, 1) both; }
 .mgdock-tilefail { font-size: 15px; color: var(--red); }
-.mgdock-tilestrip { position: absolute; left: 0; right: 0; bottom: 0;
-  display: flex; align-items: center; gap: 6px; padding: 7px 9px;
-  background: linear-gradient(to top, rgba(5, 4, 13, .82), rgba(5, 4, 13, 0)); }
-.mgdock-tiletrack { flex: 1 1 auto; height: 2px; border-radius: 999px;
-  background: rgba(255, 255, 255, .16); overflow: hidden; }
-.mgdock-tiletrack i { display: block; height: 100%; border-radius: 999px;
-  background: var(--mauve); transition: width .18s linear; }
-.mgdock-tilestrip span { font-size: 9px; color: rgba(214, 210, 226, .85);
-  font-variant-numeric: tabular-nums; }
+/* a running job submitted with count>1 -- one reel slot, an NxN grid of
+   indeterminate placeholders sized by how many images were requested (capped
+   at 4). No per-cell progress: our job model has no partial-batch state (see
+   RunsReel.jsx's BATCH note), so every cell in the grid animates identically
+   until the whole job flips to done and fans out into real result tiles. */
+.mgdock-batchgrid { position: absolute; inset: 3px; display: grid;
+  grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); gap: 3px; }
+.mgdock-batchgrid i { border-radius: 7px; background: rgba(255, 255, 255, .05);
+  display: grid; place-items: center; font-style: normal; }
 .mgdock-tilehint { position: absolute; inset: 0; display: flex; align-items: flex-end;
   padding: 9px; transition: opacity .22s; opacity: 0; pointer-events: none;
   background: linear-gradient(to top, rgba(5, 4, 13, .9) 0%, rgba(5, 4, 13, 0) 62%); }
@@ -156,11 +165,12 @@
 .mgdock-emptycopy { font-size: 11px; line-height: 1.6; color: var(--subtext);
   max-width: 260px; }
 
-/* the eclipse spinner (peek pill 18px, tiles 24px) */
+/* the eclipse spinner (peek pill 18px, tiles 24px, batch-grid sub-cells 12px) */
 .mgdock-eclipse { position: relative; display: block; width: 18px; height: 18px;
   border-radius: 50%; overflow: hidden; background: var(--accent); flex: none; }
 .mgdock-eclipse.lg { width: 24px; height: 24px;
   box-shadow: 0 0 20px rgba(182, 146, 230, .55); }
+.mgdock-eclipse.sm { width: 12px; height: 12px; }
 .mgdock-eclipse > span { position: absolute; inset: 0; border-radius: 50%;
   background: rgba(10, 8, 24, .96); animation: mgEclipse 2.6s ease-in-out infinite; }
 
@@ -363,6 +373,16 @@
 .mgdock-modelchip.empty span { color: var(--mauve); }
 .mgdock-frames { font-size: 10px; color: var(--overlay0);
   font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Lineage chip: "reusing settings from run #N" -- a LOCAL annotation only
+   (GenerateDrawer's reuseFrom state), set when a done reel tile is clicked and
+   cleared the moment a new submission goes out. */
+.mgdock-reusefrom { display: flex; align-items: center; gap: 5px;
+  padding: 3px 8px; border-radius: 999px; cursor: pointer; font-family: inherit;
+  border: 1px solid rgba(182, 146, 230, .45); background: rgba(100, 58, 172, .18);
+  color: var(--mauve); font-size: 10px; font-weight: 600; white-space: nowrap;
+  animation: mgFade .25s ease both; }
+.mgdock-reusefrom span { opacity: .75; }
+.mgdock-reusefrom:hover { border-color: rgba(182, 146, 230, .8); }
 .mgdock-composer-top .sp { flex: 1 1 auto; }
 
 .mgdock-prompt { width: 100%; background: transparent; border: none; outline: none;
@@ -441,7 +461,8 @@
 /* ============================ reduced motion ================================ */
 @media (prefers-reduced-motion: reduce) {
   .mgdock, .mgdock-run, .mgdock-slab, .mgdock-peek, .mgdock-tab.on,
-  .mgdock-expand, .mgdock-gen, .mgdock-eclipse > span { animation: none; }
+  .mgdock-expand, .mgdock-gen, .mgdock-eclipse > span,
+  .mgdock-tileimg, .mgdock-reusefrom { animation: none; }
   .mgx-dock-host.open .mgdock, .mgx-dock-host.closing .mgdock { animation: none; }
 }
 

@@ -62,6 +62,10 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   const [flyOpen, setFlyOpen] = useState(false);
   const [flyKind, setFlyKind] = useState("base");
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // Lineage: "reusing settings from run #N" -- a LOCAL annotation only (no
+  // backend concept exists for it), set at prefill time and cleared the moment
+  // a new submission goes out. See prefillFromRun below + the composer chip.
+  const [reuseFrom, setReuseFrom] = useState(null);   // {jobId, tag}
   const costRef = useRef(null);
   const costHost = useRef(null);
   const deselectRef = useRef(null);
@@ -225,6 +229,82 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
     g.applyModelRow(row);
   }, [g]);
 
+  /* REUSE: a done reel tile's real prefill (owner correction, 2026-08-02) --
+     fetches the SAME /api/next/detail/<media_id> Details/Lightbox already call,
+     and maps its row onto the real composer setters. Prefills only -- never
+     submits; the user reviews/edits, then clicks Generate themselves.
+
+     Fields mapped: model, prompt, negative, frame (customW/customH set directly
+     from the row's real width/height -- an exact reproduction, more faithful
+     than reverse-guessing which aspect/size stop it came from), steps, cfg, seed.
+
+     MODEL is a two-hop resolve (2026-08-02, fixes a verify-flagged bug found
+     live: reuse silently failed to restore the model on every click, old or
+     new gens alike). The catalog's row.model_id is the VERSION PixAI actually
+     rendered with, not the base model id applyModelRow expects (it calls
+     /api/model-version?model_id=X to enumerate a BASE model's versions -- fed
+     a version id, that returns nothing and the reuse silently keeps whatever
+     model was already selected). /api/model-version?version_id=X does the
+     reverse lookup first (core.resolve_model_base_id), THEN applyModelRow
+     resolves that real base id server-side the same way a fresh market pick
+     does -- never trusts a stale id either way. A run whose model can't be
+     resolved (PixAI-side removal, an unconfigured MODEL_DETAIL_HASH) leaves
+     the composer's model untouched rather than showing the old wrong-id
+     failure toast for a case that isn't the user's mistake.
+
+     LoRAs are DELIBERATELY NOT reconstructed: the catalog's `loras` column is a
+     display-only "Name:0.7, Name2:0.5" string (moonglade_backup.resolve_loras)
+     with no model_id/version_id in it -- fuzzy-matching a LoRA back from its
+     name would risk wiring a DIFFERENT LoRA into a paid submission on a name
+     collision, which the spend-safety contract in gen/genCore.js explicitly
+     guards against ("never let a substitution pass unremarked"). Proposed,
+     disclosed deviation from the literal "loras+weights" in the click-wiring
+     spec -- see the report.
+
+     model_id resolution runs FIRST and is awaited: applyModelRow can apply the
+     newly-picked model's own preset (negative/steps/cfg) as a side effect, and
+     the run's own real values must win over that preset, not be clobbered by
+     it. */
+  const prefillFromRun = useCallback(async (jobId, mediaId) => {
+    if (!mediaId) return;
+    let row;
+    try {
+      const r = await fetch("/api/next/detail/" + encodeURIComponent(mediaId));
+      const d = await r.json();
+      if (d.error || !d.row) {
+        if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that run's settings", msg: d.error || "" });
+        return;
+      }
+      row = d.row;
+    } catch {
+      if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that run's settings", msg: "Network error." });
+      return;
+    }
+    if (row.model_id) {
+      let baseId = "";
+      try {
+        const rv = await fetch("/api/model-version?version_id=" + encodeURIComponent(row.model_id));
+        const dv = await rv.json();
+        baseId = (dv && dv.model_id) || "";
+      } catch { /* soft-fail: leave the composer's model untouched below */ }
+      if (baseId) {
+        await g.applyModelRow({ model_id: baseId, title: row.model_name || row.model_id, preview_url: "" });
+      }
+    }
+    g.set({
+      prompt: row.prompt_full || row.prompt_preview || "",
+      negative: row.negative_prompt || "",
+      customW: row.width ? String(row.width) : "",
+      customH: row.height ? String(row.height) : "",
+      steps: row.steps || "",
+      cfg: row.cfg_scale || "",
+      seed: row.seed || "",
+    });
+    setTab("image");
+    setExpanded(true);
+    setReuseFrom({ jobId, tag: "#" + String(jobId || "").slice(-4) });
+  }, [g]);
+
   /* multi picker contract: (model, selected). The picker owns its own highlight
      state, so honor its verdict instead of second-guessing from ours. */
   const onLoraPick = useCallback((model, selected) => {
@@ -268,7 +348,7 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   const reelLabel = runningCount ? "Making" : "Runs";
   const reelNote = runningCount
     ? runningCount + (runningCount === 1 ? " image resolving — it sharpens as it lands" : " images resolving — they sharpen as they land")
-    : (historyOpen ? "grouped by day · click any run to open its image" : "today · click any run to open its image");
+    : (historyOpen ? "grouped by day — click any run to reuse its settings" : "today — click any run to reuse its settings");
 
   const stepsVal = s.steps === "" ? 25 : Number(s.steps);
   const cfgVal = s.cfg === "" ? 7 : Number(s.cfg);
@@ -326,7 +406,7 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
         {/* ---- DOCK BODY: reel · per-tab surface. Safety-valve scroll for
              short windows only — the composer footer never scrolls. ---- */}
         <div className="mgdock-body">
-          {reelVisible && <RunsReel jobs={jobs} historyOpen={historyOpen} reelH={reelH} />}
+          {reelVisible && <RunsReel jobs={jobs} historyOpen={historyOpen} reelH={reelH} onPrefill={prefillFromRun} />}
 
           {tab === "image" && expanded && (
             <div className="mgdock-slabs">
@@ -602,6 +682,13 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
                   <span>{modelShort}</span>
                 </button>
                 <span className="mgdock-frames">{frameSummary}</span>
+                {reuseFrom && (
+                  <button type="button" className="mgdock-reusefrom"
+                    onClick={() => setReuseFrom(null)}
+                    title={"Prompt & core settings prefilled from run " + reuseFrom.tag + " — click to clear"}>
+                    ↺ from {reuseFrom.tag} <span>&times;</span>
+                  </button>
+                )}
                 <span className="sp" />
               </div>
               <textarea className="mgdock-prompt" rows={promptRows} value={s.prompt}
@@ -627,7 +714,7 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
               <button type="button" className={"mgdock-gen" + (gate || g.busy ? " off" : "")}
                 disabled={!!gate || g.busy}
                 title={gate ? "Pick a model and write a prompt first" : "Submit — this spends credits or a card"}
-                onClick={() => g.generate(loraCap)}>
+                onClick={() => { setReuseFrom(null); g.generate(loraCap); }}>
                 <span>&#10022; Generate</span>
               </button>
             </div>

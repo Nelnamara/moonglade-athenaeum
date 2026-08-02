@@ -17,6 +17,61 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **The Runs reel rebuilt against the real click/prefill/batch spec — reuse, not
+  reopen.** Owner correction (2026-08-02): a done reel tile's click was shipped as
+  "open the image," when the design's own intent, present in the DC from the start,
+  was "reuse this run's prompt and settings." Rebuilt: a done tile's click now calls
+  `GenerateDrawer`'s `prefillFromRun`, which fetches the same `/api/next/detail`
+  Details/Lightbox already use and maps the row onto the real composer setters
+  (prompt, negative, frame from the row's true width/height, steps, cfg, seed) —
+  never `g.generate()`, the user reviews and submits themselves. A composer chip
+  ("↺ from #N") shows the lineage. Running tiles have no click. All fake-progress
+  code (`pctOf`, the percent strip) is gone — PixAI reports no per-task render
+  progress, so a running tile is an honest indeterminate placeholder, not a
+  synthetic clock. A real count>1 submission is one atomic PixAI job with N
+  media_ids: while running it now renders as a real NxN grid of placeholders
+  "sized by how many images were requested, capped at 4" (the spec's own words);
+  the instant the job resolves it fans out into N independently-reusable result
+  tiles, one per real media_id — no synthetic per-image batch simulation needed,
+  our data model is simpler than the DC's demo. `count` threads through
+  `submitTask.js` → `Jobs.track`/`Jobs.register` (`static/mg-notify.js`, new
+  optional 3rd param, byte-identical for every caller that doesn't pass it) →
+  the job log, so the reel can render the real number without guessing.
+  Adversarial verify caught a real issue here: the first pass's report justified
+  skipping the batch grid with a spec quotation that did not exist — the
+  technical reasoning (no `task_id` returned from `generate()` to correlate) was
+  accurate, but should have been disclosed as a gap, not dressed up as spec
+  authorization. Built for real instead once the actual blocker (attaching
+  `count` at submit time) turned out to be a small, addressable gap, not a hard
+  wall. Two smaller findings from the same pass also fixed: the reuse tooltip/chip
+  copy ("Use the settings…") implied a full restore when LoRAs, count, mode, and
+  the boosters are deliberately left untouched (data-forced — the catalog's
+  `loras` column has no ids to fuzzy-match safely) — reworded to "prompt & core
+  settings" everywhere it appears; and two CSS classes orphaned by the rewrite
+  (`.mgdock-tilestrip`/`.mgdock-tiletrack`) were removed.
+  **Fixed in the same pass, found live during verification:** reuse-prefill's
+  model restore failed silently on every click, old runs and brand-new ones
+  alike — "Model lookup failed" toast, model left unset. Root cause: the
+  catalog's `model_id` column stores the *version* id a task actually rendered
+  with (what `createGenerationTask` itself takes), not the *base model* id
+  `applyModelRow`'s version-listing flow expects — feeding a version id into
+  "list this model's versions" always returns empty. Fixed with a real reverse
+  lookup: `resolve_model_base_id()` (new, `moonglade_backup.py`) calls the same
+  `getGenerationModelByVersionId` GraphQL op `model_name_gql` already uses (its
+  own request, not a refactor of that function's hardened cache — this is a
+  rare one-off click, not a hot backfill loop) and reads the `model.id` field
+  it already returns but nobody was extracting. Exposed via
+  `/api/model-version?version_id=X`; `prefillFromRun` resolves the base id
+  first, then calls `applyModelRow` exactly as a fresh market pick would —
+  never trusting either id blind. Fails soft: an unresolvable model (removed,
+  no `MODEL_DETAIL_HASH`) leaves the composer's model untouched rather than
+  repeating the wrong-id failure toast for a case that isn't the user's mistake.
+  7 new tests (model-version reverse-resolve + the route). Verified live end to
+  end against the real account: submitted a real 3-image job (Tsubaki.2 +
+  a real LoRA) — the running batch grid rendered correctly, the job resolved to
+  3 independently-tagged tiles at 0 credits (free card), and reuse-clicking one
+  restored prompt/frame/steps/seed *and* the model, clean, no error toast.
+  579 loom + 1480 Python tests green.
 - **The Generate dock — the centerpiece surface, actually installed.** Reshelled from
   the pilot's right-side drawer into the designed bottom-center glass dock: the RUNS reel
   (real jobs from `/api/jobs`, today/yesterday, live thumbnails, free-card/cost tags —
