@@ -70,6 +70,41 @@ def test_panel_page_renders_with_actions(tmp_path):
     assert '"action": "reconcile-deleted"' in dropdown_json
 
 
+def test_panel_summary_matches_the_page_route(tmp_path):
+    """/api/panel/summary (2026-08-02, for the React Control Panel overlay) is a JSON
+    twin of /panel's own aggregation -- same data, same local/destructive visibility
+    rule. Asserted against the SAME two properties test_panel_page_renders_with_actions
+    checks on the HTML route, so a future change to either can't silently diverge."""
+    cli = _authed_client(tmp_path)
+    d = cli.get("/api/panel/summary").get_json()
+    assert d["stats"]["images"] == 1  # the one seeded row
+    by_action = {a["action"]: a for a in d["actions"]}
+    assert "sync" in by_action
+    assert "reconcile-deleted" not in by_action          # panel_visible: False
+    all_by_action = {a["action"]: a for a in d["all_actions"]}
+    assert "reconcile-deleted" in all_by_action            # still in the full list
+    for shown in ("undo-organize", "restore-orphans"):
+        assert by_action[shown]["destructive"] is True
+    assert d["panel_is_local"] is True                     # test client is loopback
+    assert d["out_dir"], "a local session must see the real out_dir"
+    assert "csrf" in d and d["csrf"]
+    assert d["branding"]["mark"] == "logo"                 # load_branding()'s own default
+    assert "anims" in d["branding"] and "classic" in d["branding"]["anims"]
+
+
+def test_panel_summary_withholds_out_dir_from_lan(tmp_path):
+    """The host filesystem path is the same host-detail /panel's own docstring withholds
+    from a LAN caller (S2, 2026-07-21 audit) -- this JSON twin must match, not leak it."""
+    cli = _authed_client(tmp_path)
+    LAN = "203.0.113.5"
+    d = cli.get("/api/panel/summary", environ_overrides={"REMOTE_ADDR": LAN}).get_json()
+    assert d["out_dir"] == ""
+    assert d["panel_is_local"] is False
+    by_action = {a["action"]: a for a in d["actions"]}
+    assert "undo-organize" not in by_action, (
+        "a LAN session must not receive destructive actions in the visible list")
+
+
 def test_run_rejects_unknown_action(tmp_path):
     cli = _authed_client(tmp_path)
     assert cli.post("/api/panel/run", json={"action": "rm -rf"}).status_code == 400

@@ -17,6 +17,78 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Control Panel — ported as a MODAL, not the DC's own designed page, per the owner's live
+  2026-08-02 correction** ("Control panel is now ALSO modal. no separate pages anymore").
+  `ControlPanelOverlay.jsx` carries the DC's real content (Maintenance tab's job console +
+  tile grid, Branding tab, Users and Trash sub-overlays, the server power modal) inside the
+  same `.mgv-scrim`/`.mgv-host` shell every other overlay uses, sized much larger. The
+  Panel nav pill (`NavSpine.jsx`) changed from a full-page `href:"/panel"` to
+  `overlay:"panel"`. Confirmed before writing a line of it: the ENTIRE Maintenance job
+  console (Sync, Organize, the 5-stage Dedup pipeline, Rebuild thumbnails, Similar index,
+  Checks, Test pull) is already real, whitelisted backend via `PANEL_ACTIONS` +
+  `/api/panel/run`/`/api/panel/status` — the same mechanism Setup Wizard's sync phase
+  already uses — so this is a port, not new business logic, for that whole surface. Users
+  (`/api/users/*`), Trash (`/api/trash/*`), Branding (`/api/branding`(`/shortcut`)), Skins
+  (`/api/achievements` + `/api/skin`), and server Stop/Restart (`/api/server/stop|restart`
+  + `/api/ping`) are all equally pre-existing and real. One new backend route:
+  `GET /api/panel/summary`, a thin JSON twin of `/panel`'s own long-standing aggregation
+  (same fields, same local/destructive action-visibility rule) — no new business logic,
+  just a fetch()-shaped view of data `/panel` already computed every request.
+  **Two disclosed departures from the DC:** the job console's "ledger" (run history) and
+  "checks" last-run timestamps are the DC's own in-memory demo state — nothing in this app
+  persists per-action run history, so they're dropped rather than fabricated. The power
+  modal's `RESTART_STAGES` (5 fake timed stages, "Draining running jobs...") are replaced
+  with classic's own real `_watchServer()` mechanism: poll `/api/ping` until the server
+  goes down then comes back (restart) or stops answering (stop), then reload — the actual
+  observable signal, not an invented progress bar. The DC's Branding tab also specifies 5
+  image-upload slots (banners/mascots/rewards with crop + a rotating-source collection);
+  only "Icons & marks" has a real backend (`/api/branding` stores `mark`+`anim` only) — the
+  other four are left out entirely rather than shipping dead UI.
+  **A dedicated adversarial review pass (5 agents, one per sub-feature, each independently
+  verifying its own findings against the real component and route code) caught 13 real,
+  confirmed defects before this ever shipped — all fixed in the same pass:** a finished
+  read-only Check's own output (the entire point of running one) was discarded the instant
+  it completed, with no result ever shown; `done_with_errors`/`warn_count` were folded into
+  an identical-looking "done"; an already-running job (e.g. from the scheduler) went
+  undetected on open, showing the idle grid as if nothing were happening; destructive
+  Maintenance buttons rendered from the unfiltered action list instead of the
+  locality-filtered one, so a LAN session saw live buttons that 403'd on confirm; Stop's
+  and account-removal's real error responses were silently discarded; there was no UI path
+  for a local session to reset another account's forgotten password despite the backend
+  route existing for exactly that; the Trash panel's typed-DELETE confirmation wasn't
+  scoped per action (switching from "delete selected" to "Empty trash" without retyping
+  could empty the whole trash on the leftover word) and didn't snapshot the selection
+  (the grid stayed clickable underneath the confirm dialog); Trash had no pagination past
+  its first 60 items; picking a skin updated only the clicked card's own checkmark and
+  never actually retinted the app (missing the `data-skin`/`localStorage` writes classic's
+  own skin picker and `mg-notify.js` both do) and swallowed a real 403 "skin locked"
+  silently; Restart could be clicked while unsupervised with no feedback until the 409 came
+  back; neither Stop nor Restart had any confirmation step at all (classic gates both
+  behind `window.confirm()`); clicking Cancel during Restart's in-flight POST didn't stop
+  an orphaned ping-poll from later firing an unprompted reload; and a refused restart left
+  the modal visually stuck showing a still-spinning "in progress" state next to its own
+  refusal text. Fixes: capture and show a job's final tail in a dismissible result banner;
+  branch on `done_with_errors` with its own warning treatment; check `/api/panel/status` on
+  mount and resume polling if a job is already running; read actions from
+  `summary.actions` (locality-filtered) instead of `summary.all_actions`; surface every
+  discarded error into visible UI state; add a per-account "reset password…" control for
+  local sessions; scope the Trash confirm word to a snapshot taken when the dialog opens
+  and disable the grid/other trigger while it's open; add Trash pagination; write
+  `data-skin`/`localStorage` and surface skin-pick errors; disable Restart when
+  unsupervised; add a real two-click arm-then-fire confirmation (reusing the same inline
+  pattern `ActionChip` already used for destructive Maintenance actions) for both Stop and
+  Restart; guard the post-Cancel race with a ref; and give a refused restart its own
+  distinct "failed" visual state instead of leaving the busy chrome running next to it.
+  New/updated coverage: `tests/test_panel.py`'s `/api/panel/summary` tests (parity with
+  `/panel`, out_dir/action withholding for a LAN caller) and
+  `tests/test_render_harness.py::test_control_panel_runs_real_jobs_and_manages_a_real_account`
+  — a real safe job run against the harness's own real catalog (with its now-visible
+  result), a real account added and removed, a real Trash/Branding round-trip, and the
+  power modal's real two-click-confirm + ping-poll reconnect sequence (server
+  stop/restart themselves stubbed — running them for real would kill the shared test
+  server every other test in the file still needs).
+  579 loom + 1485 Python tests green.
+
 - **Setup Wizard — the React front door's own first-run onboarding, ported from the DC's
   theatrical 4-phase design (intro carousel → key entry → sync → ready), driven by the
   same real endpoints classic's plainer two-banner version has used for a long time**
@@ -61,7 +133,7 @@ git tags. Full prose notes for tagged versions live on
   live-verification passes this session — not part of this mistake, but found while
   investigating it, and removed at the owner's request. See `docs/DECISIONS.md`'s
   2026-08-02 entry of the same name for the general lesson.
-  580 loom + 1482 Python tests green; visually confirmed against the owner's real server
+  579 loom + 1482 Python tests green; visually confirmed against the owner's real server
   (read-only — the real install's `config.json` was deliberately not touched again for
   this verification, so the check was limited to confirming the account-creation
   bootstrap page renders correctly against the now-empty `AUTH_USERS`, not a full
@@ -100,7 +172,7 @@ git tags. Full prose notes for tagged versions live on
   collection is offered again without a page reload. `tests/test_import_local.py`
   already covers the backend contract itself (naming, zip-slip, localhost-only);
   this proves the new component actually drives it correctly.
-  580 loom + 1481 Python tests green; visually confirmed against the owner's real
+  579 loom + 1481 Python tests green; visually confirmed against the owner's real
   logged-in session on the latest build.
 
 - **My Art + Contests overlays — the other two of the five nav pills that turned

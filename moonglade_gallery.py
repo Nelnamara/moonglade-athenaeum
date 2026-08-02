@@ -11467,6 +11467,38 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             web_users=core.list_web_users(), csrf=session["csrf"],
             current_username=session.get("user"))
 
+    @app.route("/api/panel/summary")
+    def api_panel_summary():
+        """JSON twin of /panel's own aggregation, for the React Control Panel overlay --
+        same data, same local/destructive action-visibility rule (see /panel's own long
+        comment on panel_is_local), just packaged for fetch() instead of Jinja. Nothing
+        computed here is new: every field is a value /panel already builds every request.
+        LOGIN tier, matching /panel itself."""
+        panel_is_local = _is_local_request()
+        all_actions = [{"action": k, "label": v["label"], "destructive": v["destructive"],
+                        "advanced": v.get("advanced", False),
+                        "int_param": v.get("int_param", False),
+                        "int_default": v.get("int_default"),
+                        "int_range": v.get("int_range")}
+                       for k, v in PANEL_ACTIONS.items()]
+        actions = [a for a, (k, v) in zip(all_actions, PANEL_ACTIONS.items())
+                  if v.get("panel_visible", True) and (panel_is_local or not v["destructive"])]
+        import moonglade_backup as core
+        session.setdefault("csrf", secrets.token_hex(16))
+        branding = load_branding(out_dir)
+        return jsonify({
+            "stats": catalog_counts(db_path),
+            "supervised": _supervised(),
+            "panel_is_local": panel_is_local,
+            "actions": actions, "all_actions": all_actions,
+            "out_dir": str(out_dir) if panel_is_local else "",
+            "web_users": core.list_web_users(),
+            "current_username": session.get("user"),
+            "csrf": session["csrf"],
+            "branding": {"mark": branding["mark"], "anim": branding["anim"],
+                        "anims": MARK_ANIMS, "marks": list_marks(out_dir)},
+        })
+
     def _check_csrf(body):
         """Shared CSRF check for this app's state-changing POSTs -- the Panel's
         Users tab (a parsed JSON body) and /logout (request.form) -- using the exact

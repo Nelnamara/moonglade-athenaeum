@@ -144,6 +144,10 @@ ROUTE_TIERS = {
     # for the same reason: collection metrics for any signed-in session.
     ("api_health", "GET"): LOGIN,
     ("panel", "GET"): LOGIN,
+    # JSON twin of /panel's own aggregation, for the React Control Panel overlay --
+    # same tier, same data, out_dir/destructive-action visibility already narrowed
+    # inside the handler itself for a non-local caller (matching /panel's own rule).
+    ("api_panel_summary", "GET"): LOGIN,
     ("duplicates", "GET"): LOGIN,
     ("loom", "GET"): LOGIN,
     ("contact_sheet", "GET"): LOGIN,
