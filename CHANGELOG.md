@@ -17,6 +17,18 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **The gallery grid, Loom Masonry v1 — real aspect ratios, no more random cropping.**
+  Replaces the decorative "every 6th card spans 2 rows" pattern, which was fine over
+  placeholder art and produced arbitrary crops over the real 35k-image library. Now: every
+  card's row span comes from ITS OWN image's true `width`/`height` (clamped .62–1.85), so
+  `object-fit: cover` has nothing left to crop in the common case; only genuinely
+  out-of-range images (panoramas, ultra-talls) crop at all, top-anchored. The mock's
+  double-height rhythm survives as chosen feature slots (1-in-9 cadence, drifting per
+  page) — the squarest of the next 12 images is picked to fill the slot rather than
+  whatever lands there getting cropped into it. Spec: design side's `grid-algorithm-spec.md`
+  (round-2 relay, answering the owner's grid question). Verified live against the real
+  library in Chrome: 11 feature slots landed at the exact predicted positions, zero
+  unexpected crops across 44 sampled cards.
 - **The React conversion, Phase 2 — the redesigned Frontend Gallery + Lightbox live at
   `/next`.** Banner (hero/slim) with the metallic Generate/Loom/Folio trio and live stats
   from the new `GET /api/stats`; glyph-spine nav; separator bar hosting the credits chip;
