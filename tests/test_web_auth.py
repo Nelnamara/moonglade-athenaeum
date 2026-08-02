@@ -196,31 +196,38 @@ def test_cli_list_web_users_flag_runs_without_error(tmp_path, monkeypatch, capsy
 def test_login_page_renders_form_with_csrf(tmp_path):
     cli = _client(tmp_path).test_client()
     html = cli.get("/login").get_data(as_text=True)
-    assert 'name="username"' in html and 'name="password"' in html
+    # A fresh tmp_path (no accounts, local default test-client address) now gets
+    # the React shell too (2026-08-02: LoginPage.jsx's create mode, see login()'s
+    # route) -- the actual <input> only exists in client-rendered DOM.
+    assert _is_react_login_shell(html)
     assert _csrf(html)   # a token is present
 
 
-def test_login_page_shows_bootstrap_form_locally_until_an_account_exists(tmp_path):
+def _boot_field(html, field):
+    """Pull a boolean field out of the React shell's window.MG_BOOT blob."""
+    m = re.search(r'"' + field + r'":\s*(true|false)', html)
+    return m is not None and m.group(1) == "true"
+
+
+def test_login_page_no_accounts_flag_flips_once_a_real_account_exists(tmp_path):
     """With zero AUTH_USERS configured (the fresh-clone default), a LOCAL request to
-    /login gets a real, functional account-creation form -- first-run setup happens
-    in the browser, never the CLI -- so it must never be a
-    banner pointing at --add-web-user. The bootstrap form (with its extra confirm
-    field) disappears -- and the ordinary two-field sign-in form takes its place --
-    the moment a real account exists."""
+    /login gets the React shell with boot.no_accounts:true -- LoginPage.jsx reads
+    that client-side to default into its create-account mode (2026-08-02, design
+    now exists: design_handoff/request-bootstrap-account-creation.md) -- first-run
+    setup happens in the browser, never the CLI, so classic's --add-web-user hint
+    must never leak into the response either way. The flag flips to false -- and
+    LoginPage.jsx switches to its ordinary sign-in mode -- the moment a real
+    account exists."""
     cli = _client(tmp_path).test_client()
     html = cli.get("/login").get_data(as_text=True)
     assert "--add-web-user" not in html
-    assert 'name="username"' in html and 'name="password"' in html
-    assert 'name="confirm"' in html                          # bootstrap-only field
-    assert 'name="mode" value="create"' in html
+    assert _is_react_login_shell(html)
+    assert _boot_field(html, "no_accounts") is True
     core.add_or_update_web_user("alice", "hunter2")
     html2 = cli.get("/login").get_data(as_text=True)
     assert "--add-web-user" not in html2
-    assert 'name="confirm"' not in html2                      # ordinary sign-in form now
-    assert 'name="mode" value="create"' not in html2
-    # The ordinary sign-in surface: LoginPage.jsx's React shell, not the
-    # bootstrap/no-account states (see _is_react_login_shell's docstring).
     assert _is_react_login_shell(html2)
+    assert _boot_field(html2, "no_accounts") is False
 
 
 def test_login_page_shows_safe_message_for_lan_request_when_no_accounts(tmp_path):

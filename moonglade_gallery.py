@@ -11026,29 +11026,30 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # session has none, so the visible form's token stays valid
             # across any number of these background hits.
             session.setdefault("csrf", secrets.token_hex(16))
-        if request.method == "GET" and not no_accounts:
-            # The common case (2026-08-02, the React Login page): a normal
-            # returning-user visit -- a real account already exists -- now
-            # gets the SAME shell/bundle "/" serves (next_gallery()'s
-            # NEXT_PAGE), with a boot payload that says "not authenticated
-            # yet" instead of gallery data -- App.jsx mounts LoginPage.jsx
-            # and nothing else when it sees authenticated:false. The real
-            # submit goes to POST /api/login (below), not this route's own
-            # POST branch above, which stays completely unchanged and
-            # un-reachable through THIS page now -- left in place because
-            # bootstrap_mode POSTs (below) still need it, and a bad-CSRF/
-            # locked-out POST landing here anyway (a stale tab, a replayed
-            # request) must keep failing exactly the same way, not 404.
+        if request.method == "GET" and (not no_accounts or is_local):
+            # The React Login page (2026-08-02) now covers BOTH real states:
+            # a normal returning-user visit (an account already exists), and
+            # -- as of the account-creation design landing -- the local
+            # first-run bootstrap visit too (LoginPage.jsx's create-mode
+            # toggle, built against design_handoff's updated Login.dc.html).
+            # Same shell/bundle "/" serves (next_gallery()'s NEXT_PAGE), with
+            # a boot payload that says "not authenticated yet" instead of
+            # gallery data -- App.jsx mounts LoginPage.jsx and nothing else
+            # when it sees authenticated:false. The real submit goes to
+            # POST /api/login (below, mode=create included), not this
+            # route's own POST branch above, which stays completely
+            # unchanged and un-reachable through THIS page now -- left in
+            # place because a bad-CSRF/locked-out POST landing here anyway
+            # (a stale tab, a replayed request) must keep failing exactly
+            # the same way, not 404.
             #
-            # Deliberately keyed on no_accounts, NOT bootstrap_mode: those
-            # differ for exactly one state -- zero accounts, non-local
-            # request (a LAN device hitting a fresh, not-yet-set-up
-            # install) -- where bootstrap_mode is already false but there is
-            # STILL no account to sign into. A React sign-in form there
-            # would be functional nonsense; that state keeps the classic
-            # "no account has been set up yet" safety message below, same
-            # as bootstrap_mode itself (no design exists for either state
-            # yet -- see design_handoff/request-bootstrap-account-creation.md).
+            # The condition is `not no_accounts or is_local`, i.e. "React
+            # UNLESS (no_accounts AND not is_local)" -- that one remaining
+            # state (a LAN device hitting a fresh, not-yet-set-up install)
+            # still has no design (a sign-in OR create form there would be
+            # functional nonsense: no account exists, and a remote caller
+            # can never bootstrap one) and keeps the classic "no account has
+            # been set up yet" safety message below.
             brand = brand_context(out_dir)
             boot = {
                 "authenticated": False,
@@ -11069,27 +11070,32 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     @app.route("/api/login", methods=["POST"])
     def api_login():
-        """JSON sign-in for the React Login page (2026-08-02) -- docs/DECISIONS.md's
-        2026-07-31 feasibility map called this out explicitly: 'A SPA needs real
-        POST /api/login -> JSON... before auth can be driven from React at all.'
-        Public (see _PUBLIC_PATHS) -- an unauthenticated caller is exactly who
-        needs to reach this.
+        """JSON sign-in AND first-run account creation for the React Login page
+        (2026-08-02) -- docs/DECISIONS.md's 2026-07-31 feasibility map called
+        this out explicitly: 'A SPA needs real POST /api/login -> JSON... before
+        auth can be driven from React at all.' Public (see _PUBLIC_PATHS) -- an
+        unauthenticated caller is exactly who needs to reach this.
 
-        Deliberately NOT the create-account/bootstrap path -- that stays on
-        classic /login's own form+POST (mode=create), untouched, pending a real
-        design (design_handoff/request-bootstrap-account-creation.md). This
-        route only ever verifies an existing account, same as login()'s plain
-        credential branch, whose lockout/CSRF/session machinery it reuses
-        exactly rather than re-implementing: _login_seconds_locked/
-        _login_try_acquire/_login_clear (shared IP-keyed counter -- a bad
-        attempt here counts against the SAME lockout classic /login's create
-        path would trip), _establish_session, _safe_next. Errors are the
-        identical generic strings login() gives, on purpose -- never which
-        field was wrong, and this and the classic form must never be
-        distinguishable to an attacker by their error text."""
+        mode="create" (added once design_handoff/request-bootstrap-account-creation.md
+        came back with a real spec) mirrors classic login()'s own bootstrap POST
+        branch exactly -- same bootstrap_mode gate (no_accounts AND is_local,
+        re-checked here independent of what GET rendered, so a hand-crafted
+        mode=create POST from a non-local address or after the first account
+        already exists is refused server-side regardless of client state), same
+        core.username_problem/password_problem/add_or_update_web_user. Every
+        other branch (lockout, CSRF, plain sign-in, error strings) is identical
+        to before this existed -- shares _login_seconds_locked/_login_try_acquire/
+        _login_clear (one IP-keyed counter for both modes), _establish_session,
+        _safe_next. Errors are the identical generic strings login() gives, on
+        purpose -- never which field was wrong for a sign-in attempt, and this
+        and the classic form must never be distinguishable to an attacker by
+        their error text."""
         body = request.get_json(silent=True) or {}
         import moonglade_backup as core
         next_url = _safe_next(str(body.get("next") or "")) or ""
+        no_accounts = not core.list_web_users()
+        bootstrap_mode = no_accounts and _is_local_request()
+        wants_create = body.get("mode") == "create"
         ip = _client_ip()
         locked_for = _login_seconds_locked(ip)
         if locked_for is not None:
@@ -11099,12 +11105,38 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                                          mins, "" if mins == 1 else "s")})
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."})
+        if wants_create and not bootstrap_mode:
+            # Same defense-in-depth as classic login()'s identical check: a
+            # mode=create POST is only ever honored while bootstrap_mode is
+            # true for THIS request, never inferred from CSRF validity alone.
+            error = ("No account has been set up yet. Ask whoever runs this "
+                    "server to sign in from the machine itself first.") if no_accounts \
+                    else "Invalid username or password."
+            return jsonify({"error": error})
         relocked_for = _login_try_acquire(ip)
         if relocked_for is not None:
             mins = max(1, (relocked_for + 59) // 60)
             return jsonify({"error": "Too many failed attempts from this address. "
                                      "Try again in about {} minute{}.".format(
                                          mins, "" if mins == 1 else "s")})
+        if wants_create:
+            # bootstrap_mode is guaranteed True here -- the guard above already
+            # rejected wants_create whenever it's False.
+            username = str(body.get("username") or "").strip()
+            password = str(body.get("password") or "")
+            confirm = str(body.get("confirm") or "")
+            un_problem = core.username_problem(username)
+            pw_problem = core.password_problem(password)
+            if un_problem:
+                return jsonify({"error": un_problem})
+            if pw_problem:
+                return jsonify({"error": pw_problem})
+            if password != confirm:
+                return jsonify({"error": "Passwords do not match."})
+            core.add_or_update_web_user(username, password)
+            _login_clear(ip)
+            _establish_session(username)
+            return jsonify({"ok": True, "next": next_url or "/"})
         username = str(body.get("username") or "").strip()
         password = str(body.get("password") or "")
         if username and core.verify_web_user(username, password):

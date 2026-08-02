@@ -1,8 +1,9 @@
 /* ============================================================================
-   Login — the React sign-in page (design spec: Login.dc.html / Login
-   Mobile.dc.html). Verbatim values from the DC; the two things it never
-   speaks to (a real error state, real submit timing) are called out inline
-   below, at the one place each applies.
+   Login — the React sign-in + first-run account-creation page (design spec:
+   Login.dc.html / Login Mobile.dc.html, account-creation added 2026-08-02).
+   Verbatim values from the DC; deliberate departures are called out inline
+   below, at the one place each applies (see LoginPage.jsx's header comment
+   for the full list).
    ========================================================================== */
 
 @keyframes lgnRise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
@@ -10,9 +11,14 @@
 @keyframes lgnBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
 @keyframes lgnGlow { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
 @keyframes lgnMetal { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+@keyframes lgnFieldIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
-.lgn-stage { position: relative; height: 100vh; overflow: hidden;
-  display: grid; place-items: center; background: #05040d; }
+/* min-height + scroll, not a fixed 100vh (2026-08-02, account-creation spec):
+   the create form has more fields than sign-in and can exceed a short
+   viewport's height. */
+.lgn-stage { position: relative; min-height: 100vh; overflow-y: auto; overflow-x: hidden;
+  box-sizing: border-box; display: grid; place-items: center; padding: 32px 0;
+  background: #05040d; }
 .lgn-wash { position: absolute; filter: blur(30px); }
 .lgn-wash-a { width: 60vw; height: 60vh; left: -12vw; top: -18vh;
   background: radial-gradient(closest-side, rgba(100, 58, 172, .15), transparent 70%); }
@@ -48,6 +54,10 @@
   text-transform: uppercase; color: rgba(214, 210, 226, .42); padding-top: 7px;
   cursor: pointer; transition: opacity .5s ease; opacity: 1; }
 .lgn-tagline.fading { opacity: 0; }
+/* create-mode framing, in the tagline's spot ("You're setting up this
+   server — this account will own it.") */
+.lgn-framing { font-size: 11.5px; line-height: 1.5; color: var(--subtext);
+  padding-top: 8px; max-width: 260px; margin: 0 auto; }
 
 .lgn-lbl { font-size: 10px; font-weight: 700; letter-spacing: .16em;
   color: var(--overlay0); padding-bottom: 6px; }
@@ -57,7 +67,19 @@
   font-family: inherit; }
 .lgn-input:focus { border-color: rgba(182, 146, 230, .55); }
 .lgn-input:disabled { opacity: .6; }
+.lgn-input.err { border-color: var(--red); }
 .lgn-pass { letter-spacing: .18em; }
+
+/* create-mode field: mounts with a little rise, matching the DC's own
+   lgFieldIn keyframe for the whole create block. */
+.lgn-fieldin { animation: lgnFieldIn .4s cubic-bezier(.2, .9, .24, 1) both; }
+.lgn-fielderr { font-size: 11px; color: var(--red); padding: 5px 1px 0; }
+
+/* proactive password-requirement checklist -- ✓/· marks flip live as you
+   type, matching create/update in real time rather than only on submit. */
+.lgn-hints { display: flex; flex-direction: column; gap: 3px;
+  padding: 7px 1px 0; font-size: 10.5px; line-height: 1.5; color: var(--overlay0); }
+.lgn-hints .ok { color: var(--emerald); }
 
 /* Error state (2026-08-02): the DC has none -- "it always succeeds", per its
    own logic class. Reusing Setup Wizard.dc.html's already-designed inline
@@ -99,7 +121,8 @@
   animation: lgnGlow 2.2s ease-in-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {
-  .lgn-card, .lgn-welcome, .lgn-spin, .lgn-signbtn, .lgn-mascot.peeked .lgn-mascot-bob {
+  .lgn-card, .lgn-welcome, .lgn-spin, .lgn-signbtn, .lgn-mascot.peeked .lgn-mascot-bob,
+  .lgn-fieldin {
     animation: none; }
   .lgn-mascot { transition: none; }
 }
