@@ -1,0 +1,105 @@
+/* ============================================================================
+   Login — the React sign-in page (design spec: Login.dc.html / Login
+   Mobile.dc.html). Verbatim values from the DC; the two things it never
+   speaks to (a real error state, real submit timing) are called out inline
+   below, at the one place each applies.
+   ========================================================================== */
+
+@keyframes lgnRise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes lgnSpin { to { transform: rotate(360deg); } }
+@keyframes lgnBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@keyframes lgnGlow { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+@keyframes lgnMetal { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+
+.lgn-stage { position: relative; height: 100vh; overflow: hidden;
+  display: grid; place-items: center; background: #05040d; }
+.lgn-wash { position: absolute; filter: blur(30px); }
+.lgn-wash-a { width: 60vw; height: 60vh; left: -12vw; top: -18vh;
+  background: radial-gradient(closest-side, rgba(100, 58, 172, .15), transparent 70%); }
+.lgn-wash-b { width: 50vw; height: 50vh; right: -10vw; bottom: -16vh;
+  background: radial-gradient(closest-side, rgba(58, 52, 96, .2), transparent 70%); }
+
+.lgn-frame { position: relative; width: min(380px, calc(100vw - 40px)); }
+
+.lgn-mascot { position: absolute; left: 50%; top: 0; width: 170px; height: 140px;
+  margin-left: -85px; z-index: 0; transform: translateY(14px);
+  transition: transform .6s cubic-bezier(.3, 1.5, .4, 1); pointer-events: none; }
+.lgn-mascot.peeked { transform: translateY(-112px); }
+.lgn-mascot-bob { position: absolute; inset: 0; }
+.lgn-mascot.peeked .lgn-mascot-bob { animation: lgnBob 3s ease-in-out .65s infinite; }
+.lgn-mascot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+
+.lgn-card { position: relative; z-index: 1; border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, .07);
+  background: linear-gradient(180deg, rgba(25, 21, 48, .97) 0%, rgba(13, 10, 28, .99) 100%);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, .65), 0 0 90px rgba(100, 58, 172, .14);
+  padding: 30px 32px 32px; animation: lgnRise .5s cubic-bezier(.2, .9, .24, 1) both; }
+
+.lgn-mark { position: relative; height: 88px; border-radius: 12px; overflow: hidden;
+  box-shadow: 0 0 44px rgba(146, 109, 222, .32);
+  background: radial-gradient(120% 140% at 18% 0%,
+    color-mix(in oklab, var(--accent) 26%, #0b0820) 0%, #0b0820 62%, #070512 100%); }
+.lgn-mark img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+.lgn-titlewrap { text-align: center; padding: 18px 0 22px; }
+.lgn-title { font-family: Georgia, "Times New Roman", serif; font-size: 23px;
+  letter-spacing: .01em; color: #efecf8; }
+.lgn-tagline { font-size: 9.5px; font-weight: 700; letter-spacing: .3em;
+  text-transform: uppercase; color: rgba(214, 210, 226, .42); padding-top: 7px;
+  cursor: pointer; transition: opacity .5s ease; opacity: 1; }
+.lgn-tagline.fading { opacity: 0; }
+
+.lgn-lbl { font-size: 10px; font-weight: 700; letter-spacing: .16em;
+  color: var(--overlay0); padding-bottom: 6px; }
+.lgn-input { width: 100%; box-sizing: border-box; background: rgba(7, 5, 16, .9);
+  color: var(--text); border: 1px solid var(--surface1); border-radius: 9px;
+  padding: 11px 12px; font-size: 13px; outline: none; transition: border-color .2s;
+  font-family: inherit; }
+.lgn-input:focus { border-color: rgba(182, 146, 230, .55); }
+.lgn-input:disabled { opacity: .6; }
+.lgn-pass { letter-spacing: .18em; }
+
+/* Error state (2026-08-02): the DC has none -- "it always succeeds", per its
+   own logic class. Reusing Setup Wizard.dc.html's already-designed inline
+   error-note treatment verbatim (same suite, same ruby/red token) rather than
+   inventing a new one -- a disclosed minimal extrapolation, not a new design. */
+.lgn-error { margin-top: 10px; font-size: 11.5px; line-height: 1.5;
+  color: var(--red); }
+
+.lgn-signbtn { margin-top: 20px; width: 100%; display: flex; align-items: center;
+  justify-content: center; gap: 9px; padding: 12px; border-radius: 10px;
+  font-size: 13.5px; font-weight: 800; font-family: inherit; cursor: pointer;
+  transition: filter .2s; border: 1px solid rgba(255, 255, 255, .34);
+  color: color-mix(in oklab, var(--accent) 26%, #08040f);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .45);
+  background: linear-gradient(100deg,
+    color-mix(in oklab, var(--accent) 50%, #06030d) 0%, var(--accent) 18%,
+    color-mix(in oklab, var(--accent) 22%, #ffffff) 34%, var(--accent) 50%,
+    color-mix(in oklab, var(--accent) 74%, #06030d) 68%, var(--mauve) 84%,
+    color-mix(in oklab, var(--accent) 50%, #06030d) 100%);
+  background-size: 220% 100%; animation: lgnMetal 7s ease-in-out infinite;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .72), inset 0 -3px 5px rgba(40, 20, 70, .5),
+    0 10px 26px rgba(0, 0, 0, .5); }
+.lgn-signbtn.busy { cursor: default; filter: saturate(.6) brightness(.82); }
+.lgn-spin { width: 15px; height: 15px; border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(20, 16, 42, 0), rgba(20, 16, 42, .85));
+  animation: lgnSpin 1.2s linear infinite; flex: none; }
+
+.lgn-foot { text-align: center; font-size: 10px; color: rgba(214, 210, 226, .34);
+  padding-top: 14px; }
+
+.lgn-welcome { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;
+  background: rgba(5, 4, 13, .9); backdrop-filter: blur(10px);
+  animation: lgnRise .4s cubic-bezier(.2, .9, .24, 1) both; }
+.lgn-welcome-inner { text-align: center; }
+.lgn-welcome-title { font-family: Georgia, "Times New Roman", serif; font-size: 30px;
+  color: #efecf8; }
+.lgn-welcome-line { font-size: 10px; font-weight: 700; letter-spacing: .3em;
+  text-transform: uppercase; color: var(--mauve); padding-top: 12px;
+  animation: lgnGlow 2.2s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lgn-card, .lgn-welcome, .lgn-spin, .lgn-signbtn, .lgn-mascot.peeked .lgn-mascot-bob {
+    animation: none; }
+  .lgn-mascot { transition: none; }
+}

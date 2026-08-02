@@ -55,7 +55,11 @@ def test_gallery_images_requires_login_over_lan_but_then_works(tmp_path):
     assert r.status_code == 401                        # no session -> refused
 
     html = cli.get("/login").get_data(as_text=True)
-    csrf = re.search(r'name="csrf" value="([^"]+)"', html).group(1)
+    # Either the classic hidden input (bootstrap_mode) or the React shell's
+    # window.MG_BOOT JSON blob (the common case: a real account already
+    # exists, so GET /login now serves LoginPage.jsx -- 2026-08-02).
+    m = re.search(r'name="csrf" value="([^"]+)"|"csrf":\s*"([^"]+)"', html)
+    csrf = m.group(1) or m.group(2)
     cli.post("/login", data={"username": "alice", "password": "hunter2", "csrf": csrf})
     d = cli.get("/api/gallery-images", environ_overrides={"REMOTE_ADDR": LAN}).get_json()
     assert len(d["images"]) == 1 and d["total"] == 1    # same LAN address, now logged in
@@ -1407,7 +1411,11 @@ def test_logged_in_lan_request_gets_the_same_full_ui_as_local(tmp_path):
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     html = cli.get("/login").get_data(as_text=True)
-    csrf = re.search(r'name="csrf" value="([^"]+)"', html).group(1)
+    # Either the classic hidden input (bootstrap_mode) or the React shell's
+    # window.MG_BOOT JSON blob (the common case: a real account already
+    # exists, so GET /login now serves LoginPage.jsx -- 2026-08-02).
+    m = re.search(r'name="csrf" value="([^"]+)"|"csrf":\s*"([^"]+)"', html)
+    csrf = m.group(1) or m.group(2)
     cli.post("/login", data={"username": "alice", "password": "hunter2", "csrf": csrf})
     localhost = cli.get("/classic").get_data(as_text=True)
     lan = cli.get("/classic", environ_overrides={"REMOTE_ADDR": "192.168.1.50"}).get_data(as_text=True)

@@ -91,6 +91,16 @@ ROUTE_TIERS = {
     ("login", "POST"): PUBLIC,
     ("logout", "GET"): PUBLIC,        # local sign-out only -- writes no server state
     ("logout", "POST"): PUBLIC,       # + the global revoke, gated on the session csrf
+    # JSON siblings (2026-08-02, the React Login page) -- an unauthenticated
+    # caller is exactly who needs to reach api_login; api_logout must stay
+    # reachable by an already-dead cookie for the same reason logout() does.
+    ("api_login", "POST"): PUBLIC,
+    ("api_logout", "POST"): PUBLIC,
+    # The React bundle (2026-08-02) -- LoginPage.jsx's own shell needs its
+    # compiled CSS/JS to render for a visitor who by definition isn't
+    # authenticated yet. Same public tier as branding/manifest: plain
+    # compiled code, no user data, no catalog, no credential.
+    ("next_assets", "GET"): PUBLIC,
     ("branding", "GET"): PUBLIC,
 
     # -- LOCALHOST-ONLY: a logged-in LAN session is NOT enough ---------------
@@ -164,7 +174,6 @@ ROUTE_TIERS = {
     # a signed-in LAN session may use it (spending from a signed-in tablet is
     # the point) -- nothing here writes config or moves files.
     ("next_gallery", "GET"): LOGIN,
-    ("next_assets", "GET"): LOGIN,
     ("api_next_library", "GET"): LOGIN,
     ("api_next_detail", "GET"): LOGIN,
 
@@ -305,6 +314,9 @@ PUBLIC_EXPECTED_STATUS = {
     # test_session_revocation.py's test_logout_purges_cache_storage_client_side)
     ("logout", "GET"): {200},
     ("logout", "POST"): {200},     # anonymous: nothing to revoke, so no csrf is demanded
+    ("api_login", "POST"): {200},   # success {"ok":true} or {"error":...} -- never a redirect
+    ("api_logout", "POST"): {200},  # anonymous: authorized is False, csrf is never checked
+    ("next_assets", "GET"): {404}, # missing bundle file 404s; it must never redirect to /login
     ("branding", "GET"): {404},    # missing art 404s; it must never redirect to /login
     ("manifest", "GET"): {200},    # a constant body -- anonymous callers get the real thing
 }
@@ -452,10 +464,13 @@ def _login(app, username="tier-probe", password="a-real-test-password-1"):
     core.add_or_update_web_user(username, password)
     cli = app.test_client()
     html = cli.get("/login").get_data(as_text=True)
-    m = re.search(r'name="csrf" value="([^"]+)"', html)
-    assert m, "login page did not render a csrf hidden field"
+    # Either the classic hidden input (bootstrap_mode) or the React shell's
+    # window.MG_BOOT JSON blob (the common case: a real account already
+    # exists, so GET /login now serves LoginPage.jsx -- 2026-08-02).
+    m = re.search(r'name="csrf" value="([^"]+)"|"csrf":\s*"([^"]+)"', html)
+    assert m, "login page did not render a csrf token (classic hidden field or MG_BOOT)"
     r = cli.post("/login", data={"username": username, "password": password,
-                                 "csrf": m.group(1)})
+                                 "csrf": m.group(1) or m.group(2)})
     assert r.status_code in _REDIRECT_CODES, "probe login failed to authenticate"
     return cli
 

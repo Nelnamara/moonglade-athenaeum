@@ -11026,9 +11026,102 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # session has none, so the visible form's token stays valid
             # across any number of these background hits.
             session.setdefault("csrf", secrets.token_hex(16))
+        if request.method == "GET" and not no_accounts:
+            # The common case (2026-08-02, the React Login page): a normal
+            # returning-user visit -- a real account already exists -- now
+            # gets the SAME shell/bundle "/" serves (next_gallery()'s
+            # NEXT_PAGE), with a boot payload that says "not authenticated
+            # yet" instead of gallery data -- App.jsx mounts LoginPage.jsx
+            # and nothing else when it sees authenticated:false. The real
+            # submit goes to POST /api/login (below), not this route's own
+            # POST branch above, which stays completely unchanged and
+            # un-reachable through THIS page now -- left in place because
+            # bootstrap_mode POSTs (below) still need it, and a bad-CSRF/
+            # locked-out POST landing here anyway (a stale tab, a replayed
+            # request) must keep failing exactly the same way, not 404.
+            #
+            # Deliberately keyed on no_accounts, NOT bootstrap_mode: those
+            # differ for exactly one state -- zero accounts, non-local
+            # request (a LAN device hitting a fresh, not-yet-set-up
+            # install) -- where bootstrap_mode is already false but there is
+            # STILL no account to sign into. A React sign-in form there
+            # would be functional nonsense; that state keeps the classic
+            # "no account has been set up yet" safety message below, same
+            # as bootstrap_mode itself (no design exists for either state
+            # yet -- see design_handoff/request-bootstrap-account-creation.md).
+            brand = brand_context(out_dir)
+            boot = {
+                "authenticated": False,
+                "csrf": session["csrf"],
+                "no_accounts": no_accounts,
+                "next": next_url,
+                "build_stamp": build_stamp,
+                "mark_url": brand.get("mark_url") or "/branding/logo.png",
+                "mark_anim": brand.get("mark_anim") or "classic",
+                "mark_kind": brand.get("mark_kind") or "",
+            }
+            return render_template_string(
+                LOGIN_PAGE.replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS),
+                boot=boot)
         return render_template_string(LOGIN_HTML, error=error, csrf=session["csrf"],
                                       next_url=next_url, no_accounts=no_accounts,
                                       bootstrap_mode=bootstrap_mode)
+
+    @app.route("/api/login", methods=["POST"])
+    def api_login():
+        """JSON sign-in for the React Login page (2026-08-02) -- docs/DECISIONS.md's
+        2026-07-31 feasibility map called this out explicitly: 'A SPA needs real
+        POST /api/login -> JSON... before auth can be driven from React at all.'
+        Public (see _PUBLIC_PATHS) -- an unauthenticated caller is exactly who
+        needs to reach this.
+
+        Deliberately NOT the create-account/bootstrap path -- that stays on
+        classic /login's own form+POST (mode=create), untouched, pending a real
+        design (design_handoff/request-bootstrap-account-creation.md). This
+        route only ever verifies an existing account, same as login()'s plain
+        credential branch, whose lockout/CSRF/session machinery it reuses
+        exactly rather than re-implementing: _login_seconds_locked/
+        _login_try_acquire/_login_clear (shared IP-keyed counter -- a bad
+        attempt here counts against the SAME lockout classic /login's create
+        path would trip), _establish_session, _safe_next. Errors are the
+        identical generic strings login() gives, on purpose -- never which
+        field was wrong, and this and the classic form must never be
+        distinguishable to an attacker by their error text."""
+        body = request.get_json(silent=True) or {}
+        import moonglade_backup as core
+        next_url = _safe_next(str(body.get("next") or "")) or ""
+        ip = _client_ip()
+        locked_for = _login_seconds_locked(ip)
+        if locked_for is not None:
+            mins = max(1, (locked_for + 59) // 60)
+            return jsonify({"error": "Too many failed attempts from this address. "
+                                     "Try again in about {} minute{}.".format(
+                                         mins, "" if mins == 1 else "s")})
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."})
+        relocked_for = _login_try_acquire(ip)
+        if relocked_for is not None:
+            mins = max(1, (relocked_for + 59) // 60)
+            return jsonify({"error": "Too many failed attempts from this address. "
+                                     "Try again in about {} minute{}.".format(
+                                         mins, "" if mins == 1 else "s")})
+        username = str(body.get("username") or "").strip()
+        password = str(body.get("password") or "")
+        if username and core.verify_web_user(username, password):
+            _login_clear(ip)
+            _establish_session(username)
+            return jsonify({"ok": True, "next": next_url or "/"})
+        error = "Invalid username or password."
+        # Same "just tripped the lockout" report login()'s own POST branch
+        # gives -- see that comment for why this can't just be inferred from
+        # _login_try_acquire's own return value (it deliberately let THIS
+        # attempt through so a correct 5th-try password still works).
+        just_locked = _login_seconds_locked(ip)
+        if just_locked is not None:
+            mins = max(1, (just_locked + 59) // 60)
+            error = ("Too many failed attempts from this address. "
+                     "Try again in about {} minute{}.".format(mins, "" if mins == 1 else "s"))
+        return jsonify({"error": error})
 
     # Served by logout() in place of a redirect -- see its own comment for why a
     # real page (not a 3xx) is required to run the Cache Storage purge. Static, no
@@ -11136,6 +11229,37 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # hit to /login (the flaw that got an earlier draft of this fix rejected).
         return _LOGOUT_HTML
 
+    @app.route("/api/logout", methods=["POST"])
+    def api_logout():
+        """JSON sign-out for the React app (2026-08-02) -- POST-only mirror of
+        logout()'s own POST branch; see that route's docstring for the full
+        CSRF/revoke-scope reasoning, identical here (same shared
+        bump_web_user_session_epoch, same scope="this-device" opt-out of the
+        global revoke). Public (see _PUBLIC_PATHS): an already-dead cookie
+        must still be able to shed itself locally with no valid session to
+        check a CSRF token against -- same "fail toward MORE cleanup, never
+        less" shape as the classic route, so this skips the CSRF check
+        entirely (not just downgrades it) whenever `authorized` is false,
+        exactly like logout() does.
+
+        No HTML page to run the Cache Storage purge from this time -- the
+        caller (React) does that purge itself in JS on a successful response,
+        then navigates to /login. See LoginPage.jsx / App.jsx's logout
+        handler."""
+        import moonglade_backup as core
+        body = request.get_json(silent=True) or {}
+        user = session.get("user")
+        # ORDER MATTERS, same as logout(): read `user` before any call that
+        # might clear the session.
+        authorized = bool(user) and _is_authorized_request()
+        if authorized:
+            if not _check_csrf(body):
+                return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+            if body.get("scope") != "this-device":
+                core.bump_web_user_session_epoch(user)
+        session.clear()
+        return jsonify({"ok": True})
+
     # ------------------------------------------------------------------
     # THE front door: DEFAULT-DENY for every request, enforced in one place.
     # ------------------------------------------------------------------
@@ -11169,8 +11293,27 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     # branch of login() ("Your session expired", unconditionally, on every submit).
     # setdefault fixed the symptom; letting these self-fired static assets through is
     # what removes the category.
-    _PUBLIC_PATHS = frozenset({"/login", "/logout", "/manifest.webmanifest"})
-    _PUBLIC_PREFIXES = ("/branding/",)
+    _PUBLIC_PATHS = frozenset({
+        "/login", "/logout", "/manifest.webmanifest",
+        # The React app's JSON sign-in/sign-out (2026-08-02) -- an
+        # unauthenticated caller is exactly who needs to reach /api/login,
+        # and /api/logout must stay reachable by an already-dead cookie for
+        # the same reason classic /logout does (see that route's docstring).
+        "/api/login", "/api/logout",
+    })
+    _PUBLIC_PREFIXES = (
+        "/branding/",
+        # The React bundle (2026-08-02): LoginPage.jsx's own shell needs its
+        # compiled CSS/JS to render at all, and it renders for a visitor who
+        # by definition is not authenticated yet -- same public tier as
+        # /branding/ and /manifest.webmanifest above (plain compiled code, no
+        # user data, no catalog, no credential). LOGIN_PAGE below deliberately
+        # does NOT reference the 8 /static/mg-*.js custom-element scripts
+        # next_gallery()'s NEXT_PAGE loads -- none of that (pickers, cost
+        # badge, upscale panel) exists on the login page, so those stay
+        # exactly as gated as they always were.
+        "/next/assets/",
+    )
     # Routes whose EXISTING contract (long before this hook existed) was JSON,
     # not an HTML page -- these get a JSON 401 instead of a login redirect, so a
     # fetch(...).then(r => r.json()) caller still gets parseable JSON instead
@@ -15234,6 +15377,44 @@ __UPSCALE_CONST__
 <script src="/static/mg-art-filters.js"></script>
 <script src="/static/mg-upscale-panel.js"></script>
 <script src="/static/mg-notify.js"></script>
+<script type="module" src="/next/assets/app.js"></script>
+</body></html>"""
+
+    # LoginPage.jsx's own shell (2026-08-02) -- deliberately its OWN, smaller
+    # template rather than reusing NEXT_PAGE verbatim. Two real reasons, not
+    # just tidiness:
+    #   1. NEXT_PAGE's 8 <script src="/static/mg-*.js"> custom-element tags
+    #      (pickers, cost badge, generate drawer, upscale panel) are for
+    #      surfaces that don't exist on the login page at all -- dead weight
+    #      to parse before a visitor has even signed in.
+    #   2. Those files (and __UPSCALE_CONST__) are NOT on the public
+    #      allowlist, and never needed to be until now -- only
+    #      /next/assets/ (this page's own bundle/stylesheet) was added to
+    #      _PUBLIC_PREFIXES. Reusing NEXT_PAGE unmodified would have 404/401'd
+    #      an unauthenticated visitor's <script> requests for all 8 -- caught
+    #      live: those requests 302'd back to /login (the front door redoing
+    #      its own job on itself), the module script's own fetch got HTML
+    #      back and threw "Unexpected token '<'", and the bundle never ran at
+    #      all. Same app.js bundle either way (main.jsx statically imports
+    #      both App and LoginPage, so Vite ships one file) -- only the SHELL
+    #      differs, and the shell is what decides which one actually needs to
+    #      reach an unauthenticated browser.
+    LOGIN_PAGE = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moonglade Athenaeum</title>
+<link rel="icon" href="/branding/favicon.ico">
+<script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + """
+<link rel="stylesheet" href="/next/assets/app.css">
+<style>
+__DESIGN_TOKENS__
+</style>
+</head><body>
+<div id="root"></div>
+{# |tojson, NOT json.dumps|safe -- same XSS reasoning as NEXT_PAGE's own boot
+   script: Jinja's tojson escapes < > & so a stray "</script>" in, say, a
+   redirected `next` path can never break out of this inline script. #}
+<script>window.MG_BOOT = {{ boot|tojson }};</script>
 <script type="module" src="/next/assets/app.js"></script>
 </body></html>"""
 

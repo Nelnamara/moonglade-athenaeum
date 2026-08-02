@@ -17,6 +17,56 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **The React Login page — real JSON auth, per the 2026-07-31 feasibility map's
+  own call.** That map named this explicitly as unfinished, real work: "A SPA
+  needs real `POST /api/login` -> JSON and a JSON logout before auth can be
+  driven from React at all." Built against `Login.dc.html`'s real spec verbatim
+  (rotating 8-phrase tagline shared with the gallery banner's own `useFlavour`
+  hook — extracted to `hooks/useFlavour.js` so both use the same one, not two
+  copies; the metallic sign-in button; the mascot pop/bob; the welcome overlay)
+  — with two disclosed departures: the DC's `signIn()` is a demo (2200ms then
+  5600ms of hardcoded timeouts before it "succeeds"); this fetches
+  `POST /api/login` for real and navigates the instant it resolves, no
+  artificial hold. And the DC has no error state at all ("it always
+  succeeds") — reuses Setup Wizard.dc.html's already-designed inline
+  error-note treatment rather than inventing a new one. First-run/bootstrap
+  account creation has no design of its own yet and stays on classic
+  `/login` untouched — see `design_handoff/request-bootstrap-account-creation.md`,
+  handed to design rather than improvised.
+  New backend: `POST /api/login`/`POST /api/logout` reuse the classic route's
+  exact CSRF/lockout/session-establish machinery (`_login_try_acquire`,
+  `_establish_session`, `_safe_next`), JSON in, JSON out, never a redirect.
+  `/login` GET now branches: a real account already existing (the common
+  case) serves a new, deliberately minimal `LOGIN_PAGE` shell instead of
+  reusing the full gallery template — caught live, not guessed: reusing
+  `NEXT_PAGE` verbatim would have shipped 8 `<script src="/static/mg-*.js">`
+  tags for surfaces the login page doesn't use, all newly unreachable by an
+  unauthenticated visitor (302 loops back to `/login`, the module script's
+  own fetch got HTML back and threw "Unexpected token '<'", the bundle never
+  ran). `/next/assets/` joined the public allowlist (plain compiled code, same
+  reasoning as `/branding/`/the manifest); the 8 `/static/mg-*.js` files
+  stayed exactly as gated as always, since `LOGIN_PAGE` never references
+  them. Zero-accounts-and-not-local (a LAN device hitting a fresh,
+  not-yet-bootstrapped install) still gets the classic safety message, not a
+  functionally-pointless sign-in form — keyed on `no_accounts`, not
+  `bootstrap_mode`, which was the wrong condition on a first pass and would
+  have quietly regressed that state.
+  **Caught and fixed in the same pass:** extracting `useFlavour` out of
+  `Banner.jsx` dropped its own unrelated `useState`/`useEffect` import (the
+  live-stats fetch) — a real `ReferenceError: useState is not defined`
+  crashing the MAIN authenticated gallery page for every user, not just the
+  new login page. Restored; verified live afterward with zero console errors
+  on both pages.
+  Verified live end-to-end: the isolated Browser pane's unauthenticated
+  session (never the owner's real logged-in Chrome) — correct sign-in card,
+  a wrong-password attempt showing the real inline error and nothing else,
+  zero console errors — plus the owner's actual authenticated session
+  reloaded clean. Full suite green (579 loom + 1480 Python, including a
+  fixed race in `test_render_harness.py`'s login helper: `page.click()`
+  doesn't wait for an async fetch-then-navigate chain the way it waits for a
+  native form submit — `expect_navigation` now ties the wait to the real
+  navigation instead of the current, already-settled page).
+
 - **The Runs reel rebuilt against the real click/prefill/batch spec — reuse, not
   reopen.** Owner correction (2026-08-02): a done reel tile's click was shipped as
   "open the image," when the design's own intent, present in the DC from the start,

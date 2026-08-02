@@ -20,9 +20,22 @@ def _client(tmp_path):
 
 
 def _csrf(html):
-    m = re.search(r'name="csrf" value="([^"]+)"', html)
-    assert m, "login page did not render a csrf hidden field"
-    return m.group(1)
+    # Either the classic hidden input (bootstrap_mode) or the React shell's
+    # window.MG_BOOT JSON blob (the common case: a real account already
+    # exists, so GET /login now serves LoginPage.jsx -- 2026-08-02).
+    m = re.search(r'name="csrf" value="([^"]+)"|"csrf":\s*"([^"]+)"', html)
+    assert m, "login page did not render a csrf token (classic hidden field or MG_BOOT)"
+    return m.group(1) or m.group(2)
+
+
+def _is_react_login_shell(html):
+    """True once GET /login serves LoginPage.jsx's shell instead of classic LOGIN_HTML
+    (2026-08-02: happens whenever a real account exists -- see login()'s route). The
+    actual <input name="username"> only exists in client-rendered DOM, not this raw
+    server response, so tests that need to tell "the ordinary sign-in surface is
+    showing" apart from the bootstrap/no-account states check the boot payload's own
+    authenticated:false marker instead of form-field text that isn't there server-side."""
+    return re.search(r'"authenticated":\s*false', html) is not None
 
 
 def _logout(cli):
@@ -203,9 +216,11 @@ def test_login_page_shows_bootstrap_form_locally_until_an_account_exists(tmp_pat
     core.add_or_update_web_user("alice", "hunter2")
     html2 = cli.get("/login").get_data(as_text=True)
     assert "--add-web-user" not in html2
-    assert 'name="username"' in html2 and 'name="password"' in html2
     assert 'name="confirm"' not in html2                      # ordinary sign-in form now
     assert 'name="mode" value="create"' not in html2
+    # The ordinary sign-in surface: LoginPage.jsx's React shell, not the
+    # bootstrap/no-account states (see _is_react_login_shell's docstring).
+    assert _is_react_login_shell(html2)
 
 
 def test_login_page_shows_safe_message_for_lan_request_when_no_accounts(tmp_path):
@@ -224,7 +239,7 @@ def test_login_page_shows_safe_message_for_lan_request_when_no_accounts(tmp_path
     # Once an account exists, a LAN request goes right back to the ordinary form.
     core.add_or_update_web_user("alice", "hunter2")
     html2 = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
-    assert 'name="username"' in html2 and 'name="password"' in html2
+    assert _is_react_login_shell(html2)
     assert "No account has been set up yet" not in html2
 
 

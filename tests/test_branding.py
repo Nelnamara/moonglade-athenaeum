@@ -18,9 +18,12 @@ _REAL_BRANDING_ROOT = g.branding_root
 
 
 def _csrf(html):
-    m = re.search(r'name="csrf" value="([^"]+)"', html)
-    assert m, "login page did not render a csrf hidden field"
-    return m.group(1)
+    # Either the classic hidden input (bootstrap_mode) or the React shell's
+    # window.MG_BOOT JSON blob (the common case: a real account already
+    # exists, so GET /login now serves LoginPage.jsx -- 2026-08-02).
+    m = re.search(r'name="csrf" value="([^"]+)"|"csrf":\s*"([^"]+)"', html)
+    assert m, "login page did not render a csrf token (classic hidden field or MG_BOOT)"
+    return m.group(1) or m.group(2)
 
 
 def _row(**kw):

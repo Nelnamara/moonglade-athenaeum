@@ -284,12 +284,23 @@ def logged_in_page(render_server, render_browser, monkeypatch):
 # Helpers
 # ---------------------------------------------------------------------------
 def _login(page):
-    """Post the real /login form. No bypass, no fabricated session cookie."""
+    """Post the real /login form. No bypass, no fabricated session cookie.
+
+    LoginPage.jsx's submit is async (fetch POST /api/login, then a CLIENT-SIDE
+    window.location.href navigation on success) -- unlike a native HTML form
+    submit, page.click() itself only waits for the click event to dispatch, not
+    for that fetch-then-navigate chain. A plain wait_for_load_state right after
+    the click can resolve against the CURRENT, already-settled /login page
+    before the real navigation has even started (2026-08-02, caught live: the
+    POST really did complete, but page.url was still /login afterward).
+    expect_navigation ties the wait to the actual navigation instead, whenever
+    it actually happens -- the same fix works for a synchronous native submit
+    too, so this isn't React-specific plumbing leaking into a shared helper."""
     page.goto("/login", wait_until="domcontentloaded")
     page.fill("input[name=username]", _USERNAME)
     page.fill("input[name=password]", _PASSWORD)
-    page.click("button[type=submit]")
-    page.wait_for_load_state("networkidle")
+    with page.expect_navigation(wait_until="networkidle"):
+        page.click("button[type=submit]")
     assert "/login" not in page.url, (
         "the harness failed to authenticate -- most likely core._config_path() is not "
         "pointing at the harness's own config.json, so AUTH_USERS looked empty")
