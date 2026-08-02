@@ -82,7 +82,7 @@ import threading
 import pytest
 
 import moonglade_backup as core
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade_gallery import CATALOG_FIELDS, create_app, load_catalog, save_catalog
 
 # No playwright (or no browser) => this whole module skips. It is not installed by
 # .github/workflows/tests.yml, so these tests SKIP in CI today and run locally.
@@ -233,7 +233,7 @@ def render_server(tmp_path_factory):
     try:
         yield SimpleNamespace(
             base_url="http://127.0.0.1:%d" % server.server_port,
-            config_path=config_path)
+            config_path=config_path, root=root)
     finally:
         server.shutdown()
         thread.join(timeout=5)
@@ -1146,6 +1146,96 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
     assert seen["gallery"] == seen["loom"], (
         "the shared Activity tray renders the queued state DIFFERENTLY on the two hosts:\n"
         "  gallery: {!r}\n  loom:    {!r}".format(seen["gallery"], seen["loom"]))
+
+
+# ---------------------------------------------------------------------------
+# 7. Import overlay -- real files, through the real control, land in the real catalog
+# ---------------------------------------------------------------------------
+def test_import_overlay_uploads_real_files_and_updates_the_catalog(logged_in_page, render_server):
+    """ImportOverlay.jsx (2026-08-02) is a straight port of classic's real, working
+    ImportUI onto the React front door -- POST /api/import-local never changed; see
+    tests/test_import_local.py for that contract's own thorough coverage (naming,
+    zip-slip, localhost-only). What has NOT been proven anywhere else is that the new
+    component actually drives it: a real <input type=file>, real multipart bytes, and
+    the post-import refresh that is supposed to make a brand-new collection show up in
+    the SAME overlay's own picker without a page reload (afterMutation -> fetchCollections
+    -> setCollections in App.jsx). A component that renders perfectly but posts the wrong
+    field name, or never re-fetches collections, would pass every other test in this
+    repo and still be broken -- which is exactly the class of defect this harness exists
+    to catch (see the module docstring).
+    """
+    from PIL import Image
+
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+
+    # Two real, DIFFERENT-sized PNGs: de-dupe is by (name, size), so same-size fixtures
+    # would not prove the picker keeps both rows independently.
+    f1 = render_server.root / "mgim_upload_a.png"
+    f2 = render_server.root / "mgim_upload_b.png"
+    Image.new("RGB", (40, 40), (10, 200, 10)).save(f1)
+    Image.new("RGB", (80, 80), (200, 10, 10)).save(f2)
+    coll_name = "mgim-harness-import"
+
+    page.click('nav[aria-label="Destinations"] button:has-text("Import")')
+    page.wait_for_selector('[aria-label="Import into your library"]')
+    _settle(page)
+    assert "Drop images" in page.inner_text('[aria-label="Import into your library"]'), (
+        "the empty-state drop zone did not render")
+
+    page.set_input_files("#mgim-file-input", [str(f1), str(f2)])
+    page.wait_for_function("() => document.querySelectorAll('.mgim-row').length === 2")
+    names = page.eval_on_selector_all(".mgim-nm", "els => els.map(e => e.textContent)")
+    assert set(names) == {"mgim_upload_a.png", "mgim_upload_b.png"}, (
+        "the staged rows do not show the two real filenames: {}".format(names))
+
+    # Pick "+ New collection..." and name it -- the inline-entry path, not the plain list.
+    page.click(".mgim-collpick")
+    page.wait_for_selector(".mgim-collmenu")
+    page.click(".mgim-collopt.new")
+    page.fill(".mgim-collinput", coll_name)
+
+    page.click(".mgim-go")
+    page.wait_for_selector(".mgim-result.ok")
+    result_text = page.inner_text(".mgim-result.ok")
+    assert "Imported" in result_text and "2" in result_text, (
+        "the success banner does not report 2 imported files: {!r}".format(result_text))
+    assert coll_name in result_text, (
+        "the success banner does not name the collection: {!r}".format(result_text))
+
+    # --- backend truth: real bytes on disk, real catalog rows, source='local' ---
+    stored = sorted(p.name for p in (render_server.root / "imported").glob("mgim_upload_*"))
+    assert len(stored) == 2, (
+        "expected 2 real files copied into imported/, found {}".format(stored))
+    rows = [r for r in load_catalog(render_server.root / "catalog.db")
+            if r.get("source") == "local" and "mgim_upload" in (r.get("filename") or "")]
+    assert len(rows) == 2, "expected 2 new catalog rows for the uploaded files, found {}".format(
+        len(rows))
+    assert all(coll_name in (r.get("collections") or "") for r in rows), (
+        "the uploaded rows are not tagged with the collection entered in the picker: {}".format(
+            [r.get("collections") for r in rows]))
+
+    # --- the wiring this test exists for: close, reopen, and the NEW collection must
+    # already be offered -- proving afterMutation's fetchCollections() round-trip landed
+    # in React state, not just that the server persisted it. The picker (and its menu) only
+    # exist once a file is staged, so a third file gets the fresh instance to that branch. ---
+    page.click('[aria-label="Import into your library"] button[aria-label="Close"]')
+    page.wait_for_selector('[aria-label="Import into your library"]', state="detached")
+    page.click('nav[aria-label="Destinations"] button:has-text("Import")')
+    page.wait_for_selector('[aria-label="Import into your library"]')
+    _settle(page)
+    f3 = render_server.root / "mgim_upload_c.png"
+    Image.new("RGB", (20, 20), (10, 10, 200)).save(f3)
+    page.set_input_files("#mgim-file-input", [str(f3)])
+    page.wait_for_selector(".mgim-collpick")
+    page.click(".mgim-collpick")
+    page.wait_for_selector(".mgim-collmenu")
+    offered = page.eval_on_selector_all(
+        ".mgim-collopt", "els => els.map(e => e.textContent)")
+    assert coll_name in offered, (
+        "the collection created a moment ago is not offered on reopen ({!r}) -- the "
+        "post-import refresh did not reach the picker without a full page reload".format(
+            offered))
 
 
 

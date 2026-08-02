@@ -17,8 +17,11 @@ const NAV = [
   { label: "My Art", tip: "How your published art is doing", overlay: "myart" },
   { label: "Publish", tip: "Publish to PixAI", overlay: "publish", soon: true },
   { label: "Train", tip: "Train a LoRA on PixAI", overlay: "train", soon: true },
+  // Import (2026-08-02): ported from classic's real, proven ImportUI
+  // (moonglade_gallery.py's Web Import modal) -- same /api/import-local
+  // contract, zero backend changes. See ImportOverlay.jsx's header comment.
   { label: "Import", tip: "Bring local files into the catalog — nothing goes to PixAI",
-    overlay: "import", soon: true, localOnly: true },
+    overlay: "import", localOnly: true },
   { label: "Contests", tip: "Live PixAI contests", overlay: "contests" },
   // The REAL in-app overlay (HealthOverlay.jsx, ported from the Frontend
   // Gallery DC's ovHealth slab) -- the first of the six designed overlays to
