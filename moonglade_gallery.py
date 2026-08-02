@@ -15458,8 +15458,23 @@ __DESIGN_TOKENS__
     def next_gallery():
         session.setdefault("csrf", secrets.token_hex(16))
         brand = brand_context(out_dir)
+        stats = catalog_counts(db_path)
+        # First-run wizard gating -- SAME computation as classic's index() (see its own
+        # long comment on why this is a fresh config.json read, not the module-cached
+        # core._cfg): someone who just pasted a key via the wizard needs this to flip on
+        # the very next load, not after a restart. No is_local/is_true_local conjunct here
+        # either, matching index() exactly -- the front door's own auth gate is what keeps
+        # an anonymous LAN visitor from ever reaching this line at all; a signed-in LAN
+        # session sees the same wizard an owner does, and the real write endpoints
+        # (/api/setup/save-key) enforce their own localhost-only check independently.
+        import moonglade_backup as _core
+        _fresh_cfg = _core._load_config()
+        needs_key = not bool(_fresh_cfg.get("PIXAI_API_KEY") or _fresh_cfg.get("U3T"))
+        catalog_empty = not needs_key and (stats["images"] + stats["videos"]) == 0
         boot = {
-            "stats": catalog_counts(db_path),
+            "stats": stats,
+            "needs_key": needs_key,
+            "catalog_empty": catalog_empty,
             "collections": unique_collections(db_path),
             "user": session.get("user") or "",
             "is_local": True,
