@@ -29,7 +29,7 @@ Two instruments, deliberately
    shape assertions above stand alone when it does.
 
 Nothing here monkeypatches or reaches into the app: every test starts from
-`client.get('/')` or `client.get('/image/1')`.
+`client.get('/classic')` or `client.get('/image/1')`.
 """
 import json
 import re
@@ -175,7 +175,7 @@ def test_star_click_handler_no_longer_commits_before_the_server_answers(client):
     computed against. Collapsing them into one is what produced the original finding, and
     then -- when the single variable stopped advancing instead -- its mirror image.
     """
-    html = client.get("/").get_data(as_text=True)
+    html = client.get("/classic").get_data(as_text=True)
     handler = _js_function(html, "buildStars")
     post = _js_function(html, "setRating")
     assert handler and post, "buildStars()/setRating() not found in the rendered page"
@@ -352,7 +352,7 @@ def test_a_published_restriction_wider_than_the_drawer_really_does_widen_the_fie
     improvement -- delete this test and say so; do not weaken the report that stands in
     for it today.
     """
-    html = client.get("/").get_data(as_text=True)
+    html = client.get("/classic").get_data(as_text=True)
     fn = _js_function(html, "gateField")
     assert fn, "gateField() not found in the rendered page"
     harness = """
@@ -384,7 +384,7 @@ def test_a_clamped_submit_is_reported_where_the_submit_is_reported(client):
     """The server hands back `adjusted` when a clamp fired (see tests/test_med_gallery_routes.py);
     something has to draw it, or the receipt is a key nobody reads. runTask owns every
     submit response in this drawer, so it is where the report belongs."""
-    html = client.get("/").get_data(as_text=True)
+    html = client.get("/classic").get_data(as_text=True)
     fn = _js_function(html, "runTask")
     assert fn, "runTask() not found in the rendered page"
     assert "d.adjusted" in fn, (
@@ -402,7 +402,7 @@ def test_a_clamped_submit_is_reported_where_the_submit_is_reported(client):
 def test_lowering_the_edit_reference_cap_tells_the_user_what_it_dropped(client):
     """setEditModel()'s `editRefs.slice(0, maxAdd)` had no message of any kind, while the
     near-identical truncation in bulkSendVideo has always toasted."""
-    html = client.get("/").get_data(as_text=True)
+    html = client.get("/classic").get_data(as_text=True)
     assert "if(editRefs.length>maxAdd) editRefs=editRefs.slice(0,maxAdd);" not in html, (
         "the silent one-line truncation is back")
     fn = _js_function(html, "setEditModel")
@@ -423,7 +423,7 @@ def test_snippet_delete_fires_on_click_not_mousedown(client):
     """mousedown commits before the button is released, so there is no
     press-then-slide-away-to-cancel -- on a control 4px from 'insert' in a 220-340px
     popover."""
-    html = client.get("/").get_data(as_text=True)
+    html = client.get("/classic").get_data(as_text=True)
     assert 'onmousedown="event.preventDefault();Snips.del(' not in html, (
         "the snippet delete is armed on mousedown again")
     assert 'onclick="event.stopPropagation();Snips.del(' in html
@@ -432,7 +432,7 @@ def test_snippet_delete_fires_on_click_not_mousedown(client):
 
 
 def test_snippet_delete_offers_an_undo_instead_of_a_confirm(client):
-    html = client.get("/").get_data(as_text=True)
+    html = client.get("/classic").get_data(as_text=True)
     assert "Snips.undo()" in html, "a deleted snippet is unrecoverable again"
     assert "snip-undo" in html, "the undo affordance has no row to live in"
     assert "#snip-menu .snip-undo{" in html, "the undo row has no styling"
@@ -448,7 +448,7 @@ def test_snippet_delete_offers_an_undo_instead_of_a_confirm(client):
 def test_deleting_a_snippet_can_be_undone_and_the_undo_is_persisted(client, tmp_path):
     """del() then undo() must restore the snippet AT ITS OLD INDEX and POST the restored
     list, not just repaint the popover -- the delete already reached /api/snippets."""
-    html = client.get("/").get_data(as_text=True)
+    html = client.get("/classic").get_data(as_text=True)
     code = "\n".join(filter(None, (_js_function(html, "del"), _js_function(html, "undo"))))
     assert "function del(" in code and "function undo(" in code
 
@@ -493,7 +493,7 @@ console.log(JSON.stringify({afterDel: afterDel, afterUndo: list.slice(),
 
 def test_bulk_send_cast_does_not_ask_the_dom_directly_whether_a_selection_is_video(client):
     """The shape assertion, naming the OLD line so it fails against the pre-fix template."""
-    html = client.get("/").get_data(as_text=True)
+    html = client.get("/classic").get_data(as_text=True)
     fn = _uncommented(_js_function(html, "bulkSendCast"))
     assert fn, "bulkSendCast() is gone -- if it was renamed, re-point this test"
     assert "selectedVideoIds(" in fn
@@ -511,7 +511,7 @@ def test_a_video_selected_on_a_page_this_one_cannot_render_stays_out_of_the_cast
     back to /api/image-meta -- which is the whole point of master's version over a map. The
     video must not reach the cast URL.
     """
-    html = client.get("/").get_data(as_text=True)
+    html = client.get("/classic").get_data(as_text=True)
     src = _js_function(html, "selectedVideoIds")
     assert src, "selectedVideoIds() is gone -- M14/H16 lost their only coverage"
     harness = """
@@ -554,7 +554,7 @@ def test_the_snippet_popover_is_re_measured_whenever_its_size_changes(client):
     positioned against. Every re-render that can change the popover's size has to re-measure,
     which is what reflow() is for.
     """
-    html = client.get("/").get_data(as_text=True)
+    html = client.get("/classic").get_data(as_text=True)
     assert "function reflow()" in html, "the re-measure helper is gone"
     reflow = _js_function(html, "reflow")
     assert "place(" in reflow, "reflow() must re-run the placement, not just redraw"

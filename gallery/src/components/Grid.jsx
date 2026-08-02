@@ -36,7 +36,12 @@ import "../styles/grid.css";
    high, because faces in this library sit top-of-frame. */
 const GAP = 11;
 const ROW_STEP = 19;          // grid-auto-rows 8px + the 11px gap
-const R_MIN = 0.62, R_MAX = 1.85;
+// R_MIN 0.55, not the spec's 0.62: 16:9 is 0.5625, and the spec's own stated
+// intent is that only GENUINELY very-wide images (panoramas) crop -- a 0.62
+// floor put every widescreen render in the library under the knife, which is
+// exactly the "still cropping" the owner flagged in QA. Disclosed deviation;
+// the number goes back to the design side for the spec to adopt.
+const R_MIN = 0.55, R_MAX = 1.85;
 const FEAT_R_MAX = 1.05;      // a feature slot wants square-ish, not tall
 const FEAT_CADENCE = 9;       // one feature per 9 positions...
 const FEAT_LOOKAHEAD = 12;    // ...chosen from the next 12 images in page order

@@ -28,6 +28,14 @@
   background: radial-gradient(120% 90% at 50% 42%, rgba(5,4,13,.82) 0%, rgba(5,4,13,.95) 58%, #05040d 100%); }
 
 .lbx-shell { position: absolute; inset: 0; display: grid;
+  /* grid-template-columns is NOT optional here, even though there's only one
+     column: an implicit column's automatic minimum is its content's max-content
+     size, not 0, so the full-res hero <img> (unconstrained until CSS loads/
+     applies) blew the single column out to ~9000px and the real image rendered
+     thousands of pixels off-screen -- found live 2026-08-01, owner report "the
+     lightbox opens empty." minmax(0,1fr) is the standard fix: an explicit 0
+     minimum lets the track actually shrink to the viewport. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   animation: lbxIn .38s cubic-bezier(.2,.9,.24,1) both; }
 .lbx.closing .lbx-shell { animation: lbxOut .34s cubic-bezier(.4,0,.2,1) both; }

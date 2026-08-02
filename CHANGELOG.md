@@ -17,6 +17,28 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **THE FLIP: the redesigned app owns the front door.** `/` now serves the React app;
+  the classic gallery moved to `/classic` (every `url_for("index")` in its own templates
+  follows automatically) and survives there only until demolition. `/next` stays as an
+  alias so pilot-era bookmarks and pushState URLs keep working; post-login lands on `/`.
+  The new nav gains a disclosed transitional "Classic" pill — one honest door to every
+  surface that hasn't ported yet, instead of six dead pills or silent bounces. The flip
+  also surfaced a real gap the suite then caught: the React page never carried the global
+  401 session-expiry guard every classic page embeds — it does now.
+- **The Health overlay — the first of the six designed nav overlays, ported for real.**
+  In-app modal from the Frontend Gallery DC's ovHealth slab (980px glass slab, stats
+  grid, months/models bars, tag chips, prompt word cloud, LoRA chips, folder breakdown,
+  uncataloged note), fed by the new `GET /api/health` (gap-audit route #10 — the same
+  `collection_health()` computation the classic page bakes into HTML, as JSON). The DC's
+  live affordances are wired to real filters: clicking a top-model count, a tag, or a
+  LoRA closes the overlay and applies that filter through the same path every filter
+  control uses. The Duplicates/Reclaimable click-through is parked (styled, inert) until
+  Duplicate Review ports. Health's two earlier stand-ins — the classic-page bounce and
+  the dimmed dead pill — are both gone.
+- **Grid crop clamp widened to fit 16:9** (`R_MIN` 0.62 → 0.55, disclosed deviation for
+  the design side to adopt): the spec's floor sat above 16:9's 0.5625, which put every
+  widescreen render "under the knife by design" — the exact residual cropping the owner
+  flagged in QA. Only genuine panoramas and ultra-talls crop now, top-anchored.
 - **Fixed: a job stuck 'running' for hours had no way to clear it from the Job Tracker.**
   The dismiss control only ever rendered for jobs already in a terminal or `stale`
   status — a job the orphan-reconciliation sweep hadn't (yet, or ever) resolved just sat

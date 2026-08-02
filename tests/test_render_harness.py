@@ -372,7 +372,7 @@ def test_model_picker_grid_fills_the_flyout_panel(logged_in_page):
     """
     page = logged_in_page(**DESKTOP)
     _stub_model_search(page)
-    _visit(page, "/")
+    _visit(page, "/classic")
     _open_drawer_and_model_flyout(page)
 
     m = page.evaluate(_PICKER_METRICS_JS)
@@ -430,7 +430,7 @@ def test_model_flyout_is_fully_inside_the_viewport_at_desktop(logged_in_page):
     right 861. Exactly flush at the bottom, which is why `<=` and not `<`."""
     page = logged_in_page(**DESKTOP)
     _stub_model_search(page)
-    _visit(page, "/")
+    _visit(page, "/classic")
     _open_drawer_and_model_flyout(page)
     _assert_within_viewport(page.evaluate(_RECT_JS, "model-flyout"), "#model-flyout")
 
@@ -451,7 +451,7 @@ def test_model_flyout_is_fully_inside_the_viewport_at_mobile_portrait(logged_in_
     """
     page = logged_in_page(**MOBILE_PORTRAIT)
     _stub_model_search(page)
-    _visit(page, "/")
+    _visit(page, "/classic")
     _open_drawer_and_model_flyout(page)
     _assert_within_viewport(page.evaluate(_RECT_JS, "model-flyout"), "#model-flyout")
 
@@ -565,7 +565,7 @@ def test_art_filters_flyout_is_side_by_side_with_the_image_left(logged_in_page):
     filter.
     """
     page = logged_in_page(**DESKTOP)
-    _visit(page, "/")
+    _visit(page, "/classic")
     _open_filters_flyout(page)
 
     m = page.evaluate(_FILTERS_LAYOUT_JS)
@@ -635,7 +635,7 @@ def test_art_filters_flyout_is_fully_inside_the_viewport_at_mobile_portrait(logg
     page itself never gains a horizontal scroll, which is how an unclamped fixed panel shows
     up to a user rather than as an off-screen rect."""
     page = logged_in_page(**MOBILE_PORTRAIT)
-    _visit(page, "/")
+    _visit(page, "/classic")
     _open_filters_flyout(page)
     _assert_within_viewport(page.evaluate(_RECT_JS, "filters-flyout"), "#filters-flyout")
     assert page.evaluate("() => document.documentElement.scrollWidth <= window.innerWidth + 1"), (
@@ -732,7 +732,7 @@ def test_choosing_a_model_scrolls_the_picker_into_view(logged_in_page):
     # At 1280x900 it fits whole and the bug does not reproduce, which is exactly why the
     # first version of this test passed against the broken build.
     page = logged_in_page(width=1280, height=420)
-    _visit(page, "/")
+    _visit(page, "/classic")
     page.evaluate("() => openLightbox(null, 1)")        # media 101: no model -> offers the picker
     page.wait_for_selector("#lightbox.open", state="attached")
     page.click("#lb-upscale")
@@ -911,7 +911,7 @@ def test_skins_retint_real_components(logged_in_page):
     than the brief's "at least two".
     """
     page = logged_in_page(**DESKTOP)
-    _visit(page, "/")
+    _visit(page, "/classic")
     _settle(page)
 
     seen = {s: page.evaluate(_READ_SKIN_JS, s) for s in _SKINS}
@@ -974,7 +974,7 @@ def test_saved_skin_is_applied_before_the_body_exists(logged_in_page):
     before `<body>` is even parsed, therefore before any paint.
     """
     page = logged_in_page(**DESKTOP)
-    _visit(page, "/")
+    _visit(page, "/classic")
     # THE RACE THIS TEST FIRST TRIPPED ON, and a live example of why nothing here sleeps:
     # static/mg-notify.js's syncSkin() reconciles the pre-paint guess against the server
     # ("server is source of truth") after /api/achievements resolves, and writes the result
@@ -1093,7 +1093,7 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
     reads "est. 27s wait".
     """
     seen = {}
-    for host, path in (("gallery", "/"), ("loom", "/loom?bundle=1")):
+    for host, path in (("gallery", "/classic"), ("loom", "/loom?bundle=1")):
         page = logged_in_page(**DESKTOP)
         _open_tray_with_queued_job(page, path)
         m = page.evaluate(_TRAY_QUEUED_JS)

@@ -130,6 +130,9 @@ ROUTE_TIERS = {
     ("index", "GET"): LOGIN,
     ("detail", "GET"): LOGIN,
     ("health", "GET"): LOGIN,
+    # JSON twin of the health page (the React HealthOverlay's data) -- same tier
+    # for the same reason: collection metrics for any signed-in session.
+    ("api_health", "GET"): LOGIN,
     ("panel", "GET"): LOGIN,
     ("duplicates", "GET"): LOGIN,
     ("loom", "GET"): LOGIN,
@@ -784,7 +787,7 @@ def test_index_withholds_the_import_button_from_a_lan_session(app):
     the real _is_local_request() result -- the same value `can_delete_cloud` ("Delete
     from PixAI") already used."""
     cli = _login(app)
-    html = cli.get("/", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
+    html = cli.get("/classic", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
     assert 'onclick="ImportUI.open()"' not in html, (
         "a LAN session's rendered index page still contains the Import button, which "
         "posts to the LOCALHOST-only /api/import-local and would 403 on click")
@@ -799,7 +802,7 @@ def test_index_shows_the_import_button_to_localhost(app):
     would pass the LAN test while quietly breaking the one caller who can actually use
     it."""
     cli = _login(app)
-    html = cli.get("/").get_data(as_text=True)   # loopback REMOTE_ADDR by default
+    html = cli.get("/classic").get_data(as_text=True)   # loopback REMOTE_ADDR by default
     assert 'onclick="ImportUI.open()"' in html, (
         "the owner's own index page no longer shows the Import button")
 
@@ -850,7 +853,7 @@ def test_index_tells_a_lan_session_it_is_being_served_as_one(app):
     notion of trust, and it gates nothing: it is a label for a decision the tier
     helpers have already made."""
     cli = _login(app)
-    html = cli.get("/", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
+    html = cli.get("/classic", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
     assert 'id="lan-chip"' in html, (
         "a LAN session's index page has no indicator that it is being served as a "
         "remote caller -- the LOCALHOST-tier controls just silently vanish")
@@ -868,7 +871,7 @@ def test_index_does_not_flag_the_owners_own_local_session(app):
     test an unconditional chip would pass the LAN test above while nagging the one
     caller it has no news for."""
     cli = _login(app)
-    html = cli.get("/").get_data(as_text=True)   # loopback REMOTE_ADDR by default
+    html = cli.get("/classic").get_data(as_text=True)   # loopback REMOTE_ADDR by default
     assert 'id="lan-chip"' not in html, (
         "the owner's own local index page shows the LAN-session chip, which has "
         "nothing to tell them -- every local-only control is right there")

@@ -148,7 +148,7 @@ def test_the_hall_was_renamed_the_folio_of_honors(tmp_path):
     """2026-07-22 owner decision, off the STATE.md rename shortlist -- guards against a
     straggler reference surviving a future edit to the modal skeleton in moonglade_gallery.py."""
     cli, _ = _client(tmp_path, [])
-    html = cli.get("/").get_data(as_text=True)
+    html = cli.get("/classic").get_data(as_text=True)
     assert "The Folio of Honors" in html
     assert "Trophy Hall" not in html
 

@@ -60,7 +60,7 @@ def test_branding_defaults_when_no_assets(tmp_path):
     assert d["mark"] == "logo"            # legacy drop-in logo.png fallback
     assert "eclipse" in d["anims"] and "classic" in d["anims"]
     # the header renders the legacy logo + classic animation class
-    html = cli.get("/").get_data(as_text=True)
+    html = cli.get("/classic").get_data(as_text=True)
     assert "anim-classic" in html and "/branding/logo.png" in html
 
 
@@ -73,7 +73,7 @@ def test_branding_save_and_render(tmp_path):
     r = cli.post("/api/branding", json={"mark": "mark_12", "anim": "eclipse"})
     assert r.get_json() == {"mark": "mark_12", "anim": "eclipse"}
     assert json.loads((tmp_path / "branding.json").read_text())["anim"] == "eclipse"
-    html = cli.get("/").get_data(as_text=True)
+    html = cli.get("/classic").get_data(as_text=True)
     # The rendered mark span's OWN class attribute, not a bare substring -- BASE_HTML's
     # shared stylesheet permanently contains ".mark:not(.anim-classic)..." and every
     # anim-*/mk-tile class name as CSS selector text on every page, so a bare "anim-eclipse
@@ -167,7 +167,7 @@ def test_branding_survives_corrupt_manifests(tmp_path):
     (mdir / "marks.json").write_text('{"marks": ["not-a-dict", 42]}', encoding="utf-8")
     (tmp_path / "branding.json").write_text('["not", "an", "object"]', encoding="utf-8")
     cli = _client(tmp_path)
-    assert cli.get("/").status_code == 200
+    assert cli.get("/classic").status_code == 200
     d = cli.get("/api/branding").get_json()
     assert d["marks"] == [] and d["mark"] == "logo" and d["anim"] == "classic"
 
@@ -188,11 +188,11 @@ def test_banner_band_class(tmp_path):
     """With no branding/banner.png the header is the classic slim bar; once the
     file exists the header renders class="bannered" (the visible banner band)."""
     cli = _client(tmp_path)
-    assert 'class="bannered"' not in cli.get("/").get_data(as_text=True)
+    assert 'class="bannered"' not in cli.get("/classic").get_data(as_text=True)
     bdir = tmp_path / "branding"
     bdir.mkdir(parents=True, exist_ok=True)
     (bdir / "banner.png").write_bytes(b"\x89PNG fake")
-    assert 'class="bannered"' in cli.get("/").get_data(as_text=True)
+    assert 'class="bannered"' in cli.get("/classic").get_data(as_text=True)
 
 
 def test_shortcut_requires_cut_ico(tmp_path, monkeypatch):

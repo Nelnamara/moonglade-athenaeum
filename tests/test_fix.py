@@ -302,7 +302,7 @@ def _fix_fn(tmp_path):
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="700", filename="a_700.png",
                        created_at="2026-07-25T00:00:00")])
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
+    html = login_client(tmp_path).get("/classic").get_data(as_text=True)
     i = html.index("function fix(){")
     return html, html[i:html.index("function openEdit(", i)]
 

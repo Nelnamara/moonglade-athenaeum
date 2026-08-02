@@ -334,7 +334,7 @@ def test_cloud_delete_confirm_renders_the_preview_and_keeps_the_typed_gate(tmp_p
     the change -- making a consequence visible is not a reason to loosen the guard in
     front of it."""
     _seed(tmp_path, [_row(media_id="1", task_id="T", filename="1.png")], {})
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
+    html = login_client(tmp_path).get("/classic").get_data(as_text=True)
     assert "/api/delete-preview" in html, (
         "the gallery never asks for the blast radius, so the confirm cannot show it")
     assert "cd-modal" in html
