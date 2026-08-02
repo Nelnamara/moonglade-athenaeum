@@ -128,15 +128,27 @@ _TEST_USERNAME = "tester"
 _TEST_PASSWORD = "a-real-test-password-1"
 
 
+def extract_login_csrf(html_or_boot):
+    """CSRF token off GET /login's response -- either the classic hidden input
+    (bootstrap_mode: no accounts yet, on a local request) or the React shell's
+    window.MG_BOOT JSON blob (the common case, 2026-08-02: a real account
+    already exists, so /login now serves LoginPage.jsx instead of the classic
+    form -- see moonglade_gallery.py's login() route). Whichever renders, the
+    token round-trips to the SAME classic POST /login every caller here still
+    uses -- only extraction changed, not the submit target."""
+    m = re.search(r'name="csrf" value="([^"]+)"|"csrf":\s*"([^"]+)"', html_or_boot)
+    return (m.group(1) or m.group(2)) if m else None
+
+
 def _do_login(cli, username, password):
     """Perform the real GET (csrf) + POST /login flow against `cli` and return it,
     now authenticated. Asserts the login actually redirected (succeeded) rather
     than silently leaving callers with a still-anonymous client on a typo/regression."""
     html = cli.get("/login").get_data(as_text=True)
-    m = re.search(r'name="csrf" value="([^"]+)"', html)
-    assert m, "login page did not render a csrf hidden field"
+    csrf = extract_login_csrf(html)
+    assert csrf, "login page did not render a csrf token (classic hidden field or MG_BOOT)"
     r = cli.post("/login", data={"username": username, "password": password,
-                                 "csrf": m.group(1)})
+                                 "csrf": csrf})
     assert r.status_code in (301, 302, 303, 307, 308), (
         "test login helper failed to authenticate: {}".format(
             r.get_data(as_text=True)[:300]))

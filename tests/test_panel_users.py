@@ -129,9 +129,17 @@ def test_username_inputs_carry_a_maxlength(tmp_path):
     cli = login_client(tmp_path)
     panel = cli.get("/panel").get_data(as_text=True)
     assert 'id="new-username"' in panel and 'maxlength="64"' in panel
-    # login page from a FRESH unauthenticated client -- an authed GET /login may redirect
-    login = create_app(tmp_path).test_client().get("/login").get_data(as_text=True)
-    assert 'name="username"' in login and 'maxlength="64"' in login
+    # The React Login page (2026-08-02): GET /login now serves LoginPage.jsx's shell
+    # once a real account exists (see moonglade_gallery.py's login() route) -- the
+    # actual <input> only exists in client-rendered DOM, not the raw server HTML, so
+    # this checks the JSX source directly. Same "source-presence assertion" pattern
+    # loom/test/loom-image-job-register.test.js already established for JSX this
+    # suite has no browser harness to render (there is one, tests/test_render_harness.py,
+    # but it's Playwright-only and skips without a chromium binary -- this check must
+    # not skip).
+    import pathlib
+    src = pathlib.Path("gallery/src/components/LoginPage.jsx").read_text(encoding="utf-8")
+    assert 'name="username"' in src and "maxLength={64}" in src
 
 
 def test_add_user_requires_valid_csrf(tmp_path):

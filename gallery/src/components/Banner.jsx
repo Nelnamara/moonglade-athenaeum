@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import "../styles/shell.css";
+import useFlavour from "../hooks/useFlavour.js";
 
 /* The banner (DC "Frontend Gallery" §1): one region owning hero/slim state.
    Hero: art + right-aligned brand block on top, a bottom band with the library
@@ -17,40 +18,6 @@ import "../styles/shell.css";
                    search available at 62px). Empty today.
    Stats are LIVE: boot.stats paints first, then GET /api/stats (adds
    coverage_pct) refreshes on mount and after every generation lands. */
-
-// The DC's full 8-line flavour set (README "Frontend Gallery"); the pilot's
-// 5-line port is superseded. Pipe-separated so a future Branding setting can
-// feed its own set straight through the prop.
-const FLAVOURS = "a library against the Void|the archive remembers|what the moon keeps|every dream, kept|a light in the Nightmare|every spark, embraced|woven, not lost|the vigil never sleeps";
-
-function useFlavour(flavours, buildStamp) {
-  const lines = String(flavours || FLAVOURS).split("|").map((t) => t.trim()).filter(Boolean);
-  const [i, setI] = useState(0);
-  const [fading, setFading] = useState(false);
-  const [version, setVersion] = useState(false);
-  useEffect(() => {
-    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    let swap;
-    const id = setInterval(() => {
-      setFading(true);
-      swap = setTimeout(() => { setI((n) => n + 1); setFading(false); }, 500);
-    }, 9000);
-    return () => { clearInterval(id); clearTimeout(swap); };
-  }, []);
-  // click reveals the real build for 3s (the DC hardcodes a version; the pilot
-  // has the true stamp in boot)
-  useEffect(() => {
-    if (!version) return;
-    const t = setTimeout(() => setVersion(false), 3000);
-    return () => clearTimeout(t);
-  }, [version]);
-  return {
-    text: version ? "next · build " + (buildStamp || "?") : lines[i % lines.length],
-    fading,
-    alt: i % 2 === 1,
-    reveal: () => setVersion(true),
-  };
-}
 
 function StatPill({ value, label, emerald }) {
   return (

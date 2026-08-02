@@ -42,19 +42,28 @@ function Gear() {
 }
 
 export default function NavSpine({ boot, onOverlay }) {
-  /* Log Out is a POST (session mutation), same as the retired rail's form —
-     built on click so the pill keeps the spine's button styling. */
+  /* Log Out (2026-08-02): the real JSON POST /api/login's sibling, per
+     docs/DECISIONS.md's 2026-07-31 feasibility map ("A SPA needs real
+     POST /api/login -> JSON and a JSON logout"). Mirrors classic /logout's
+     own cache-purge-then-navigate shape (see moonglade_gallery.py's
+     _LOGOUT_HTML) via fetch instead of a full-page form POST -- same end
+     state, no jarring reload for a session that's still valid up to the
+     click. Lands on /login, which now renders LoginPage.jsx for the common
+     (non-bootstrap) case. Fire-and-forget on the network: an already-dead
+     cookie or a dropped request must still clear local state and navigate,
+     never strand the user on a page that thinks it's signed in. */
   const logout = () => {
-    const f = document.createElement("form");
-    f.method = "post";
-    f.action = "/logout";
-    const i = document.createElement("input");
-    i.type = "hidden";
-    i.name = "csrf";
-    i.value = boot.csrf || "";
-    f.appendChild(i);
-    document.body.appendChild(f);
-    f.submit();
+    fetch("/api/logout", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ csrf: boot.csrf || "" }),
+    }).catch(() => {}).then(() => {
+      const go = () => { window.location.href = "/login"; };
+      if ("caches" in window) {
+        caches.keys().then((ks) => Promise.all(ks.map((k) => caches.delete(k)))).catch(() => {}).then(go);
+      } else {
+        go();
+      }
+    });
   };
 
   return (
