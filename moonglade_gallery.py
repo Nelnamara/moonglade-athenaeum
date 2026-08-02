@@ -13415,7 +13415,21 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         just the resolved latest -- {versions:[...]}, same per-row shape plus `label`/
         `is_latest` -- so the picker can offer a real choice (see
         core.list_model_versions). Default (no ?all) is UNCHANGED: the single resolved-latest
-        shape every existing caller already expects."""
+        shape every existing caller already expects.
+
+        ?version_id=X (2026-08-02, the Runs reel's reuse-prefill): the REVERSE lookup --
+        {"model_id": "..."} , "" if unresolvable. The catalog stores a run's model_id as the
+        VERSION PixAI actually rendered with, not the base model id this route's other two
+        modes take -- reuse-prefill needs this to feed applyModelRow the same real, current
+        base id a fresh market pick would use, never the version id verbatim (see
+        core.resolve_model_base_id)."""
+        version_id = (request.args.get("version_id") or "").strip()
+        if version_id:
+            try:
+                core, session = _gen_session()
+                return jsonify({"model_id": core.resolve_model_base_id(session, version_id)})
+            except Exception as e:
+                return jsonify({"error": _redact_host_paths(str(e))[:200], "model_id": ""}), 200
         mid = (request.args.get("model_id") or "").strip()
         if not mid:
             return jsonify({"error": "model_id required", "version_id": ""}), 400
@@ -16529,9 +16543,22 @@ __UPSCALE_CONST__
         jid = str(body.get("job_id") or "").strip()
         if not jid:
             return jsonify({"ok": False, "error": "job_id required"}), 400
+        # count: how many images this task was submitted to render (image-gen only --
+        # absent on edit/fix/video/Loom registrations). Clamped to the same 1-4 range
+        # /api/generate enforces; anything else is a caller bug or a stale client, not
+        # data worth trusting into the log. Lets the React dock's Runs reel render a
+        # real "N requested" placeholder for a running batch instead of one generic
+        # tile (2026-08-02, closes the verify-flagged gap in the reel rebuild).
+        _count = body.get("count")
+        try:
+            _count = int(_count)
+            if not (1 <= _count <= 4):
+                _count = None
+        except (TypeError, ValueError):
+            _count = None
         _log_job(jid, status=(body.get("status") or "running"),
                  type=body.get("type"), label=body.get("label"),
-                 done=body.get("done"), total=body.get("total"),
+                 done=body.get("done"), total=body.get("total"), count=_count,
                  source=body.get("source") or "web")
         return jsonify({"ok": True})
 

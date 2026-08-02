@@ -228,6 +228,76 @@ class TestModelNameGql:
         assert c.model_name_gql(mock_session, None) == ""
 
 
+class TestResolveModelBaseId:
+    """The reuse-prefill's version->base-model reverse lookup (2026-08-02), fixing a real
+    bug found live: the catalog's model_id is a VERSION id, and feeding that straight into
+    applyModelRow's base-model version listing returns nothing every time."""
+
+    def test_returns_the_base_models_own_id(self, mock_session, mocker):
+        import moonglade_backup as c
+        mv = {"name": "v1", "model": {"id": "1982880136609467518", "title": "Tsubaki.2"}}
+        resp = mocker.MagicMock()
+        resp.json.return_value = {"data": {"generationModelVersion": mv}}
+        mock_session.get.return_value = resp
+        orig_hash = c.MODEL_DETAIL_HASH
+        c.MODEL_DETAIL_HASH = "fakehash"
+        try:
+            result = c.resolve_model_base_id(mock_session, "1983308862240288769")
+        finally:
+            c.MODEL_DETAIL_HASH = orig_hash
+        assert result == "1982880136609467518"
+
+    def test_empty_id_short_circuits(self, mock_session):
+        import moonglade_backup as c
+        assert c.resolve_model_base_id(mock_session, "") == ""
+        assert c.resolve_model_base_id(mock_session, None) == ""
+
+    def test_no_hash_configured_fails_soft(self, mock_session):
+        import moonglade_backup as c
+        orig_hash = c.MODEL_DETAIL_HASH
+        c.MODEL_DETAIL_HASH = ""
+        try:
+            assert c.resolve_model_base_id(mock_session, "V1") == ""
+        finally:
+            c.MODEL_DETAIL_HASH = orig_hash
+
+    def test_graphql_error_fails_soft_not_raises(self, mock_session, mocker):
+        import moonglade_backup as c
+        resp = mocker.MagicMock()
+        resp.json.return_value = {"errors": [{"message": "nope"}]}
+        mock_session.get.return_value = resp
+        orig_hash = c.MODEL_DETAIL_HASH
+        c.MODEL_DETAIL_HASH = "fakehash"
+        try:
+            assert c.resolve_model_base_id(mock_session, "V1") == ""
+        finally:
+            c.MODEL_DETAIL_HASH = orig_hash
+
+    def test_removed_model_fails_soft(self, mock_session, mocker):
+        """generationModelVersion: null (the model/version is gone) -- same '' answer as
+        any other unresolvable case, never a crash."""
+        import moonglade_backup as c
+        resp = mocker.MagicMock()
+        resp.json.return_value = {"data": {"generationModelVersion": None}}
+        mock_session.get.return_value = resp
+        orig_hash = c.MODEL_DETAIL_HASH
+        c.MODEL_DETAIL_HASH = "fakehash"
+        try:
+            assert c.resolve_model_base_id(mock_session, "V1") == ""
+        finally:
+            c.MODEL_DETAIL_HASH = orig_hash
+
+    def test_network_exception_fails_soft(self, mock_session, mocker):
+        import moonglade_backup as c
+        mock_session.get.side_effect = RuntimeError("boom")
+        orig_hash = c.MODEL_DETAIL_HASH
+        c.MODEL_DETAIL_HASH = "fakehash"
+        try:
+            assert c.resolve_model_base_id(mock_session, "V1") == ""
+        finally:
+            c.MODEL_DETAIL_HASH = orig_hash
+
+
 class TestQuickCount:
     def test_returns_zero_on_api_error(self, mock_session, mocker):
         payload = {"errors": [{"message": "INTERNAL_SERVER_ERROR"}]}

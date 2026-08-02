@@ -136,3 +136,20 @@ def test_model_version_all_param_lists_every_version(tmp_path, monkeypatch):
     assert r2.status_code == 200, r2.data
     d2 = r2.get_json()
     assert d2["version_id"] == "V2" and "versions" not in d2
+
+
+def test_model_version_version_id_param_reverse_resolves_the_base_model(tmp_path, monkeypatch):
+    """/api/model-version?version_id=X (2026-08-02): the Runs reel's reuse-prefill reverse
+    lookup -- a run's catalog model_id is a VERSION id, and this is how prefillFromRun turns
+    it back into the base model id applyModelRow's own version-listing flow expects."""
+    monkeypatch.setattr(core, "resolve_model_base_id", lambda s, vid: "BASE-M1" if vid == "V1" else "")
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    client = login_client(tmp_path)
+    r = client.get("/api/model-version?version_id=V1")
+    assert r.status_code == 200, r.data
+    assert r.get_json() == {"model_id": "BASE-M1"}
+
+    # unresolvable -- '' comes back clean, not an error the client has to special-case
+    r2 = client.get("/api/model-version?version_id=UNKNOWN")
+    assert r2.status_code == 200, r2.data
+    assert r2.get_json() == {"model_id": ""}

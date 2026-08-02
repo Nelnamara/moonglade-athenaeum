@@ -973,8 +973,9 @@ def _jobs_path(out_dir):
 def append_job_event(out_dir, job_id, status=None, **fields):
     """Append ONE job event to jobs.jsonl (append-only; safe from many processes).
     Each call records a job's CURRENT state; readers collapse by job_id. Known
-    fields: type, label, done, total, media_ids, error, source, dismissed. `ts`
-    is stamped here. Fails soft -- logging a job must never break the job.
+    fields: type, label, done, total, media_ids, error, source, dismissed, count
+    (requested image count, image-gen registrations only). `ts` is stamped here.
+    Fails soft -- logging a job must never break the job.
 
     Every STRING field is capped at 200 chars here, at the one write choke point
     every job event from every source funnels through (web routes' own _log_job
@@ -3440,6 +3441,54 @@ def model_name_gql(session, model_version_id, _cache={}, strict=False):
         return mid
     _cache[mid] = name
     return name
+
+
+def resolve_model_base_id(session, model_version_id):
+    """The base MODEL id a generation VERSION id belongs to -- what
+    `/generation-model/<id>/versions` (list_model_versions, and so the base-model picker's
+    own re-resolve flow) actually wants, distinct from the VERSION id a submitted task uses
+    and so the catalog's `model_id` column stores (api_generate resolves `args.model` to a
+    VERSION id before submit; every catalog write path follows the same convention -- see
+    moonglade_gallery.py's api_generate and this module's own catalog-row builders).
+
+    Needed by the gallery's Runs-reel reuse-prefill (2026-08-02): it only has a run's
+    catalog row, so it must ask PixAI 'what model is this a version of' before it can feed
+    the picker's normal base-model-id flow -- feeding it the version id directly returns an
+    empty version list (a real, verify-flagged bug: 'Model lookup failed' on every reuse
+    click, old or new gens alike, since it's a catalog-wide convention).
+
+    Same GraphQL op as model_name_gql (getGenerationModelByVersionId), deliberately its OWN
+    request rather than a refactor of that function's cache: model_name_gql's failure
+    semantics are hardened against two real production incidents (see its docstring, M18),
+    and this is a rare, one-off, user-triggered lookup (a single reuse click), not a hot
+    backfill loop -- the extra request is cheap and the isolation is worth it.
+
+    Fails soft: '' on anything short of a clean answer (no hash configured, network error,
+    GraphQL error, missing/null model) -- this is a "nice to restore" path, never a reason to
+    block or mislead the caller. The caller leaves the composer's model untouched on ''
+    rather than repeating today's wrong-id failure toast for a case that isn't the user's
+    mistake."""
+    if not model_version_id or not MODEL_DETAIL_HASH:
+        return ""
+    try:
+        params = {
+            "operation": "getGenerationModelByVersionId",
+            "u3t": U3T,
+            "operationName": "getGenerationModelByVersionId",
+            "variables": json.dumps({"id": str(model_version_id)}, separators=(",", ":")),
+            "extensions": json.dumps(
+                {"clientLibrary": CLIENT_LIBRARY,
+                 "persistedQuery": {"version": 1, "sha256Hash": MODEL_DETAIL_HASH}},
+                separators=(",", ":")),
+        }
+        r = session.get(API_URL, params=params, timeout=30)
+        body = r.json()
+        if not isinstance(body, dict) or body.get("errors"):
+            return ""
+        mv = ((body.get("data") or {}).get("generationModelVersion")) or {}
+        return str((mv.get("model") or {}).get("id") or "")
+    except Exception:                        # noqa: BLE001 -- a soft-fail restore, never fatal
+        return ""
 
 
 def extract_full_meta(task):

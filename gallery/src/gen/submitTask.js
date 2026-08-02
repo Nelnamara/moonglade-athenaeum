@@ -14,6 +14,10 @@ import { friendlyGenErr } from "./genCore.js";
    - A transport failure after submit says the task MAY exist -- never invites a
      resubmit.
    - Completion rides Jobs.track, whose callback is cb(phaseString, data).
+   - `payload.count` (image gen only; absent on edit/fix) rides along to Jobs.track
+     so the Runs reel can render a real "N requested" placeholder while a multi-image
+     task is still running instead of one generic tile (2026-08-02, verify-flagged
+     gap in the reel rebuild -- see RunsReel.jsx).
 
    `emit(patch)` is how the caller paints its own result line; it is called with
    {text, kind, media?} patches. Returns the task_id, or null. */
@@ -77,7 +81,7 @@ export async function submitTask(route, payload, { label, emit }) {
         text: "This tab stopped watching after 6h — the task may still finish; check the Activity tray.",
       });
     }
-  });
+  }, payload.count);
   return d.task_id;
 }
 

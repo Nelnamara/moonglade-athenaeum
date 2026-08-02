@@ -1118,15 +1118,20 @@
   // ================================================================================
   var Jobs = (function(){
     var seen={};
-    function register(id, label){
+    function register(id, label, count){
       if(!id || seen[id]) return; seen[id]=true;
+      // count: how many images this ONE task was submitted to render (1-4, image-gen
+      // only). Omitted by every caller that doesn't know it (video/Loom/classic) --
+      // JSON.stringify drops an undefined key, so those registrations are byte-identical
+      // to before this param existed. Lets the React dock's Runs reel show a real
+      // "N requested" placeholder while the task is still running, instead of guessing.
       fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({job_id:id, type:'generate', label:label||'Generation', status:'running'})}).catch(function(){});
+        body:JSON.stringify({job_id:id, type:'generate', label:label||'Generation', status:'running', count:count})}).catch(function(){});
       if(window.JobsCard) JobsCard.refresh();
     }
-    function track(id, label, cb){
+    function track(id, label, cb, count){
       if(!id || seen[id]) return;
-      register(id, label);
+      register(id, label, count);
       poll(id, cb);
     }
     // 6h ceiling, matching the Loom's POLL_CEILING_MS. This loop had NONE: a task
