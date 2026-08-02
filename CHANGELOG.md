@@ -17,6 +17,54 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Import — ported from classic's real, working `ImportUI` onto the React front
+  door.** Confirmed before writing a line of the component: `POST /api/import-local`
+  (multipart `files[]` + optional `collection`, localhost-only, no CSRF) has been
+  live and proven since classic's own Web Import modal — zero backend changes
+  needed. `ImportOverlay.jsx` is a straight behavioral port: drag-and-drop + native
+  browse/browse-folder pickers, media-only filtering, de-dupe by (name, size), a
+  24-item preview cap with an explicit "all N will still import" note (only the
+  *preview* is capped — classic's real users import in the hundreds, unlike the
+  design handoff's own 3-row demo), and the same collection picker with inline
+  "+ New collection…" entry. Wired into `App.jsx`'s existing `collections` state /
+  `fetchCollections()` / `afterMutation()` pattern (the same one My Art and Contests
+  already reuse) so a newly-created collection reaches the picker without a page
+  reload. `soon: true` removed from the Import nav pill.
+  **Found and fixed live, via the new end-to-end test below, before this ever
+  reached a real session:** the success path cleared `files` immediately on a
+  successful import, and the confirmation banner was rendered *inside* the
+  `files.length > 0` branch — so a successful import instantly flipped the view
+  back to the empty drop-zone, swallowing its own "✓ Imported" message. The server
+  logs showed the import genuinely succeeding; the UI never showed it. Restructured
+  into an explicit three-way branch (empty / staged / done) so the confirmation
+  renders regardless of the now-empty file list, with "Import more" / "Done"
+  actions.
+  New coverage: `tests/test_render_harness.py::test_import_overlay_uploads_real_files_and_updates_the_catalog`
+  — a real Playwright test against the real live server (not the Flask test
+  client, not a manual click-through): two real, differently-sized PNGs through
+  the real `#mgim-file-input`, a real multipart POST, real bytes landing under
+  `imported/`, real new `catalog.db` rows tagged to a brand-new collection typed
+  through the real inline picker, and — the specific regression this test exists
+  to catch — closing and reopening the overlay to prove the just-created
+  collection is offered again without a page reload. `tests/test_import_local.py`
+  already covers the backend contract itself (naming, zip-slip, localhost-only);
+  this proves the new component actually drives it correctly.
+  580 loom + 1481 Python tests green; visually confirmed against the owner's real
+  logged-in session on the latest build.
+
+- **My Art + Contests overlays — the other two of the five nav pills that turned
+  out to already have real, complete designs sitting inside `Frontend Gallery.dc.html`
+  (`ovMyArt`/`ovContests`) and real, working backend routes sitting unused
+  (`/api/your-art`, `/api/contests`).** `MyArtOverlay.jsx` renders four real stat
+  tiles (published / total likes / comments / views-of-top-N) and a top-posts-by-views
+  list, row click opens the real post via `App.jsx`'s existing `openDetails`.
+  `ContestsOverlay.jsx` renders one featured official contest plus a community
+  grid with real prize/vote-type/dates/cover art; card click opens the real
+  pixai.art contest page in a new tab. Both share `overlays.css`'s generic
+  `.mgv-*` shell (scrim/host/slab), matching the pattern `HealthOverlay.jsx`
+  established. Zero new backend work — same shape as Import. `soon: true`
+  removed from both nav pills.
+
 - **The React Login page — real JSON auth, per the 2026-07-31 feasibility map's
   own call.** That map named this explicitly as unfinished, real work: "A SPA
   needs real `POST /api/login` -> JSON and a JSON logout before auth can be

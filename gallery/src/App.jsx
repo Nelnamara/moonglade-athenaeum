@@ -9,6 +9,7 @@ import DetailsView from "./components/DetailsView.jsx";
 import HealthOverlay from "./components/HealthOverlay.jsx";
 import MyArtOverlay from "./components/MyArtOverlay.jsx";
 import ContestsOverlay from "./components/ContestsOverlay.jsx";
+import ImportOverlay from "./components/ImportOverlay.jsx";
 import GenerateDrawer from "./components/GenerateDrawer.jsx";
 import PickerHost, { isPickerOpen } from "./components/PickerHost.jsx";
 import "./styles/shell.css";
@@ -615,6 +616,13 @@ export default function App({ boot }) {
       )}
       {overlay === "contests" && (
         <ContestsOverlay onClose={() => setOverlay(null)} />
+      )}
+      {overlay === "import" && (
+        <ImportOverlay
+          onClose={() => setOverlay(null)}
+          collections={collections}
+          onImported={afterMutation}
+        />
       )}
 
       {/* the Generate dock host: the wrapper carries the outside-click anchor
