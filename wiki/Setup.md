@@ -21,14 +21,21 @@ pip install -r requirements.txt
 
 ## 2. Configure — one value
 
-Copy `config.example.json` to `config.json` (git-ignored) and set **one** value:
+**In the browser (recommended):** once you've signed in (below), a fresh install with no
+key yet walks you through pasting one and running the first sync right there — an intro,
+a spot to paste the key (validated for real before it's saved), then a live sync progress
+screen. Nothing to edit by hand. Skip to [3. First run](#3-first-run) if you're doing it
+this way.
+
+**By hand (headless / scripting):** copy `config.example.json` to `config.json`
+(git-ignored) and set **one** value:
 
 ```json
 { "PIXAI_API_KEY": "your-api-key" }
 ```
 
-Generate a key at [platform.pixai.art](https://platform.pixai.art) (lifetime up to
-~2 years). It's the Bearer credential for **every** call, and:
+Generate a key at [pixai.art → Profile → Settings → API](https://pixai.art) (requires
+membership; lifetime up to ~2 years). It's the Bearer credential for **every** call, and:
 
 - **`USER_ID` is auto-resolved** from the key (via the `me` query) — no DevTools.
 - **The persisted-query hashes ship with working defaults** — nothing to capture.
