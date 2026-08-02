@@ -1248,6 +1248,151 @@ def test_import_overlay_uploads_real_files_and_updates_the_catalog(logged_in_pag
 
 
 # ---------------------------------------------------------------------------
+# 9. Control Panel -- a real safe job, a real account added and removed, real
+#    branding writes, and the power modal's real ping-poll reconnect (stubbed only
+#    where running it for real would kill this module's own shared server)
+# ---------------------------------------------------------------------------
+def test_control_panel_runs_real_jobs_and_manages_a_real_account(logged_in_page, monkeypatch):
+    """ControlPanelOverlay.jsx (2026-08-02) ports classic's /panel page as a modal (owner's
+    live correction: "Control panel is now ALSO modal. no separate pages anymore"). Every
+    action it drives is real, pre-existing backend -- this proves the wiring end to end
+    against render_server's real (if throwaway) config and catalog, EXCEPT server
+    stop/restart, which are stubbed: running them for real would kill the module-scoped
+    server every other test in this file still needs.
+
+    subprocess.Popen is mocked for the job-console step, matching EVERY test in
+    tests/test_panel.py (none of them spawn a real subprocess either -- that is the CLI's
+    own test suite's job, not this route's). The real thing this test proves is
+    unique to it: that the REACT COMPONENT drives /api/panel/run + /api/panel/status
+    correctly, not that a maintenance subprocess itself runs -- that part is already
+    covered thoroughly elsewhere.
+    """
+    # Restart is disabled client-side unless the server reports itself supervised
+    # (summary.supervised, from _supervised() -- os.environ["MOONGLADE_SUPERVISED"]).
+    # This harness's server isn't launched via Serve Gallery, so without this the Restart
+    # button would be a disabled no-op and this test could never reach it for real.
+    monkeypatch.setenv("MOONGLADE_SUPERVISED", "1")
+
+    import subprocess as _subprocess
+    import io as _io
+    import time as _time
+
+    class _FakeProc:
+        """A brief, deliberate delay before wait() -- an instant-return fake would let the
+        background reader thread finish before Playwright's own wait_for_selector ever gets
+        a chance to observe the transient 'running' view at all (caught live: the first
+        version of this test timed out waiting on a state that had already come and gone
+        in milliseconds). Still far faster than a real subprocess spin-up, just not
+        literally zero."""
+        def __init__(self):
+            self.stdout = _io.StringIO("scanning catalog...\n✓ 6 rows checked\n")
+        def wait(self):
+            _time.sleep(0.6)
+            return 0
+    monkeypatch.setattr(_subprocess, "Popen", lambda *a, **k: _FakeProc())
+
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+
+    page.click('nav[aria-label="Destinations"] button:has-text("Panel")')
+    page.wait_for_selector('[aria-label="Control Panel"]')
+    _settle(page)
+    # innerText reflects the CSS text-transform:uppercase on .mgcp-sidekick, not the raw
+    # JSX literal ("The library") -- assert what actually renders.
+    assert "THE LIBRARY" in page.inner_text('[aria-label="Control Panel"]')
+
+    # --- a REAL safe job: Catalog stats, via the REAL /api/panel/run + /api/panel/status
+    # this harness's own real (throwaway) catalog answers. The row's own text ("Catalog
+    # stats") and its run button ("run ▸") are siblings, not nested -- select the row
+    # by its text, then the button within it. ---
+    page.click('.mgcp-checkrow:has-text("Catalog stats") button.mgcp-run')
+    page.wait_for_selector(".mgcp-running")
+    page.wait_for_selector(".mgcp-running", state="detached")
+    assert not page.locator(".mgcp-runerr").count(), (
+        "a real, non-destructive job (--catalog-stats) failed against the harness's own "
+        "real catalog: {!r}".format(page.locator(".mgcp-runerr").all_inner_texts()))
+    # Regression guard (2026-08-02 review): the finished job's own output used to be
+    # discarded the instant `running` cleared, so the idle grid never showed a
+    # read-only Check action's actual result -- the entire point of running one.
+    page.wait_for_selector(".mgcp-runresult")
+    assert "6 rows checked" in page.inner_text(".mgcp-runresult")
+
+    # --- Trash sub-overlay: real /api/trash/list against a genuinely empty quarantine. ---
+    page.click('div.mgcp-tile:has-text("Trash")')
+    page.wait_for_selector('[aria-label="Trash"]')
+    assert "Nothing in the trash" in page.inner_text('[aria-label="Trash"]')
+    page.click('[aria-label="Trash"] button[aria-label="Close"]')
+    page.wait_for_selector('[aria-label="Trash"]', state="detached")
+
+    # --- Users sub-overlay: a REAL account added, then REAL-removed via
+    # /api/users/add|remove -- proving CSRF, the real add/remove contract, and that the
+    # Panel's own account list refreshes without a page reload. ---
+    page.click('div.mgcp-tile:has-text("Accounts")')
+    page.wait_for_selector('[aria-label="Accounts"]')
+    page.fill('[aria-label="Accounts"] input[placeholder="username"]', "harness-added-user")
+    page.fill('[aria-label="Accounts"] input[placeholder="password"]', "a-real-test-password-2")
+    page.fill('[aria-label="Accounts"] input[placeholder="confirm"]', "a-real-test-password-2")
+    page.click('[aria-label="Accounts"] button:has-text("+ Add")')
+    page.wait_for_function(
+        "() => document.body.innerText.includes('harness-added-user')")
+    # .mgcp-useraction is shared with the (2026-08-02) "reset password..." control added
+    # to the same row for local sessions -- disambiguate by the real button text.
+    page.click('.mgcp-userrow:has-text("harness-added-user") button:has-text("remove")')
+    page.wait_for_function(
+        "() => !document.body.innerText.includes('harness-added-user')")
+    page.click('[aria-label="Accounts"] button[aria-label="Close"]')
+    page.wait_for_selector('[aria-label="Accounts"]', state="detached")
+
+    # --- Branding tab: a REAL POST /api/branding, picking a real animation from the
+    # real MARK_ANIMS list this harness's own out_dir/branding.json now persists. ---
+    page.click('button:has-text("✦ Branding")')
+    page.wait_for_selector(".mgcp-brandgrid")
+    page.click('.mgcp-animrow:has-text("glow")')
+    page.wait_for_function(
+        "() => { const el = document.querySelector('.mgcp-animrow.on'); "
+        "return el && el.textContent === 'glow'; }")
+
+    # --- Power modal: the client-side ping-poll reconnect logic (ported from classic's
+    # real _watchServer()), proven against STUBBED /api/server/restart + /api/ping --
+    # the real routes would actually kill this module's shared server. The Server section
+    # lives in the sidebar, a sibling of the tab content, so it's visible on either tab. ---
+    page.route("**/api/server/restart", lambda route: route.fulfill(
+        status=200, content_type="application/json", body='{"ok": true, "action": "restart"}'))
+    ping_calls = {"n": 0}
+
+    def _ping(route):
+        ping_calls["n"] += 1
+        # First two calls: still down (the real gap _watchServer() waits to see before it
+        # will ever reload). Third call onward: back up -- sawDown was already true by
+        # then, so THIS is the call that triggers the real reload.
+        if ping_calls["n"] <= 2:
+            route.fulfill(status=503, content_type="application/json", body="{}")
+        else:
+            route.fulfill(status=200, content_type="application/json", body='{"ok": true}')
+    page.route("**/api/ping", _ping)
+
+    # Restart now arms on the first click ("Confirm -- Restart?") and only actually fires
+    # on the second (2026-08-02 fix -- classic gates the same action behind window.confirm,
+    # and the first version of this component fired immediately with zero confirmation).
+    page.click('button:has-text("⟳ Restart")')
+    page.wait_for_selector('button:has-text("Confirm — Restart?")')
+    page.click('button:has-text("Confirm — Restart?")')
+    page.wait_for_selector(".mgcp-pwr-card")
+    assert "Restarting" in page.inner_text(".mgcp-pwr-title")
+    # The stubbed sequence genuinely drives the component to its real
+    # window.location.reload() call, on its own timer. ControlPanelOverlay is a modal
+    # over the still-mounted App/NavSpine (not a page replacement like LoginPage/
+    # SetupWizard), so the nav bar never disappears and is no signal of a reload at all
+    # -- caught live: an earlier version of this assertion waited on the nav and passed
+    # instantly, before the ping interval had even ticked once. The Panel's OWN dialog
+    # detaching is the real signal: only a full reload resets the React tree that owns it.
+    page.wait_for_selector('[aria-label="Control Panel"]', state="detached", timeout=15_000)
+    assert ping_calls["n"] >= 3, "the reload fired before the down-then-up sequence completed"
+
+
+
+# ---------------------------------------------------------------------------
 # 8. Setup Wizard -- a genuinely fresh install, real key save, real needs_key flip,
 #    live sync progress, and the honest failure path
 # ---------------------------------------------------------------------------

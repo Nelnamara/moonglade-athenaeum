@@ -27,8 +27,11 @@ const NAV = [
   // Gallery DC's ovHealth slab) -- the first of the six designed overlays to
   // land. Its two page-bounce stand-ins from earlier today are both dead.
   { label: "Health", tip: "Collection health dashboard", overlay: "health" },
-  { label: "Panel", tip: "Control Panel — maintenance jobs, scheduler, branding",
-    href: "/panel", gear: true },
+  // Panel (2026-08-02): owner's live correction -- "Control panel is now ALSO
+  // modal. no separate pages anymore" -- supersedes the DC's own page-based
+  // design and this pill's former href:"/panel" full-page nav. ControlPanelOverlay.jsx.
+  { label: "Panel", tip: "Control Panel — maintenance jobs, accounts, branding",
+    overlay: "panel", gear: true },
   // Transitional, NOT in the DC: one honest door to every surface that hasn't
   // ported yet (My Art, Publish, Import...), instead of six dead pills or six
   // silent bounces. Dies with /classic at demolition. Owner-disclosed addition.
