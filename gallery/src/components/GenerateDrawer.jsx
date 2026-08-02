@@ -86,7 +86,8 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
       setEditSource(request.mid);
     } else if (request.tab === "video") {
       setTab("video");
-      setVideoPrefill({ mode: "i2v", images: [{ media_id: request.mid, thumb: request.thumb }] });
+      // A midless request is the #video deep link: land on the tab, prefill nothing.
+      if (request.mid) setVideoPrefill({ mode: "i2v", images: [{ media_id: request.mid, thumb: request.thumb }] });
     }
   }, [request]);
 

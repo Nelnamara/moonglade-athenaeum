@@ -108,6 +108,11 @@ ROUTE_TIERS = {
     ("api_library_path", "GET"): LOGIN,
     ("api_library_path", "POST"): LOCALHOST,
     ("delete_tasks_bulk", "POST"): LOCALHOST,       # irreversible cloud deletion
+    # JSON twin of delete_tasks_bulk (the React gallery's fetch() version). SAME
+    # tier for the SAME reason: it destroys on the owner's real cloud account.
+    # Being /api/-prefixed it refuses with the standard 403 JSON, not the form
+    # route's redirect -- so no LOCALHOST_REFUSAL_IS_REDIRECT entry.
+    ("api_delete_tasks", "POST"): LOCALHOST,
     # Per-image cloud delete. Same tier and the same reason as the task-level
     # delete above: it destroys on the owner's real PixAI account, and a logged-in
     # LAN session unlocks browsing and spending, not irreversible deletion.
@@ -168,6 +173,13 @@ ROUTE_TIERS = {
     ("bulk_replace", "POST"): LOGIN,
     ("collection_add", "POST"): LOGIN,
     ("collection_remove", "POST"): LOGIN,
+    # JSON twins of the redirect-page bulk actions above (the React gallery's
+    # fetch() versions). Each takes the SAME tier as the page route it mirrors:
+    # local quarantine, collection labels and prompt find/replace are reversible
+    # library curation, the LOGIN tier's whole definition.
+    ("api_delete_local", "POST"): LOGIN,      # same path/tier as delete_bulk
+    ("api_collection", "POST"): LOGIN,        # same as collection_add/_remove
+    ("api_replace_prompts", "POST"): LOGIN,   # same as bulk_replace
     ("export_zip", "POST"): LOGIN,
     ("export_csv_download", "GET"): LOGIN,
 
@@ -205,6 +217,10 @@ ROUTE_TIERS = {
     ("api_model_version", "GET"): LOGIN,
     ("api_ping", "GET"): LOGIN,
     ("api_similar", "GET"): LOGIN,
+    # Catalog totals + backup coverage for fetch()-driven headers: the same
+    # numbers index() bakes into the classic banner and /api/account already
+    # serves, at the same tier as both.
+    ("api_stats", "GET"): LOGIN,
     ("api_suggest_prompt", "GET"): LOGIN,
     ("api_tag_suggest", "GET"): LOGIN,
     ("api_task_status", "GET"): LOGIN,

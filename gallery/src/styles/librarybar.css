@@ -1,0 +1,124 @@
+/* ============================================================================
+   mgl — Library Bar workstream styles (FiltersPanel.jsx + ActionsMenu.jsx).
+   NEW file per the workstream contract: styles.css and shell.css are untouched;
+   every class here carries the mgl- prefix so nothing collides.
+
+   Source of truth: Frontend Gallery.dc.html (drift §10) — searchFieldStyle,
+   filtersToggleStyle, filtersTrayStyle, filterChips, clearStyle, selectStyle,
+   actionsStyle, actionsMenuStyle lifted with accent-family literals converted
+   to color-mix over var(--accent)/var(--mauve) (same practice as shell.css);
+   dark neutral surfaces stay literal like shell.css's. Ruby = var(--red).
+
+   Motion laws: micro .18–.25s; tray + menu animate BOTH ways with a 200ms
+   deferred unmount (DC: mgTrayIn .24s / mgTrayOut .2s / mgChipsIn .2s; the
+   menu's exit is mglMenuOut, our own name so no other workstream collides).
+   Z bands: the bar itself is component-band (0–7, inherits the header's 7);
+   the PAGE-LEVEL actions menu + its click-catcher scrim ride the overlay band
+   (340/341 — the banner is overflow-clipped, so the menu cannot live inline).
+   ========================================================================== */
+
+/* DC keyframes (Frontend Gallery.dc.html lines 28–31, verbatim — identical
+   re-declarations by other workstreams collide harmlessly) */
+@keyframes mgChipsIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+@keyframes mgTrayIn { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+@keyframes mgTrayOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(7px); } }
+/* our own exit for the actions menu (the DC unmounts it cold; the global law
+   says every menu animates both ways) */
+@keyframes mglMenuOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(-8px); } }
+
+/* ---- column: the filter tray takes its OWN ROW ABOVE the search bar ---- */
+.mgl-wrap { display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-width: 0; }
+
+.mgl-tray { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0;
+  animation: mgTrayIn .24s cubic-bezier(.2, .9, .24, 1) both; }
+.mgl-tray.closing { animation: mgTrayOut .2s ease both; }
+
+/* cycle-chips (DC filterChips styles) */
+.mgl-chip { font-size: 10.5px; padding: 5px 12px; border-radius: 999px; white-space: nowrap;
+  flex: none; cursor: pointer; user-select: none; font-family: inherit; text-align: left;
+  transition: border-color .15s, background .15s, filter .15s;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  background: rgba(12, 10, 28, .62); color: rgba(214, 210, 226, .78); }
+.mgl-chip:hover { filter: brightness(1.25); }
+.mgl-chip.on { border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 30%, rgba(12, 10, 28, .55));
+  color: var(--text); }
+
+/* ---- the bar row: NEVER wraps (drift §10) ---- */
+.mgl-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; }
+
+/* search field (DC searchFieldStyle; a real input where the DC mocks a span).
+   position:relative anchors the existing Advanced flyout (.fly, styles.css). */
+.mgl-search { position: relative; display: flex; align-items: center; gap: 8px;
+  padding: 7px 13px 7px 15px; border-radius: 999px; flex: 0 1 320px; min-width: 170px;
+  backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
+  transition: border-color .2s, box-shadow .2s;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  background: rgba(7, 5, 18, .52);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12),
+    0 0 18px color-mix(in srgb, var(--accent) 14%, transparent); }
+.mgl-search.open { border-color: var(--accent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12),
+    0 0 18px color-mix(in srgb, var(--accent) 28%, transparent); }
+.mgl-sglyph { flex: none; font-size: 10px; font-style: normal;
+  color: rgba(226, 222, 238, .7); cursor: pointer; }
+.mgl-search input { flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--text);
+  background: none; border: 0; outline: none; padding: 0; font-family: inherit; }
+.mgl-search input::placeholder { color: rgba(214, 210, 226, .62); }
+/* the Advanced trigger rides the search field itself; caret flips 180° open */
+.mgl-scaret { flex: none; font-size: 9px; color: rgba(214, 210, 226, .5);
+  background: none; border: 0; padding: 0 1px; cursor: pointer; font-family: inherit;
+  transition: transform .3s cubic-bezier(.2, .9, .24, 1), color .2s; }
+.mgl-scaret.open { transform: rotate(180deg); color: var(--mauve); }
+
+/* pills: ⚲ Filters / Clear / Select (DC filtersToggleStyle/clearStyle/selectStyle) */
+.mgl-pill { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700;
+  white-space: nowrap; flex: none; padding: 6px 14px; border-radius: 999px; cursor: pointer;
+  user-select: none; font-family: inherit;
+  transition: border-color .2s, background .2s, color .2s;
+  border: 1px solid rgba(255, 255, 255, .14); background: rgba(7, 5, 18, .5);
+  color: rgba(226, 222, 238, .75); }
+.mgl-pill.on, .mgl-filters.open { border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 24%, transparent); color: var(--text); }
+/* border lights when any filter is active, even with the tray shut */
+.mgl-filters.lit { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.mgl-clear { font-weight: 600; color: rgba(226, 222, 238, .72); }
+.mgl-caret8 { font-size: 8px; opacity: .7; }
+
+/* Actions trigger (DC actionsStyle): disabled STYLING at zero selection — the
+   element stays focusable so the title still explains itself */
+.mgl-actbtn { display: flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 700;
+  white-space: nowrap; flex: none; padding: 6px 14px; border-radius: 999px;
+  font-family: inherit; user-select: none;
+  transition: border-color .2s, color .2s;
+  border: 1px solid rgba(255, 255, 255, .12); background: rgba(7, 5, 18, .5);
+  color: rgba(226, 222, 238, .45); cursor: not-allowed; }
+.mgl-actbtn.has { border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  color: var(--text); cursor: pointer; }
+
+/* ---- the page-level actions menu (overlay band; DC actionsMenuStyle) ---- */
+.mgl-scrim { position: fixed; inset: 0; z-index: 340; }
+.mgl-menu { position: fixed; z-index: 341; min-width: 232px; padding: 6px; border-radius: 12px;
+  display: flex; flex-direction: column; align-items: stretch;
+  background: rgba(9, 7, 22, .97);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .6);
+  animation: mgChipsIn .2s cubic-bezier(.2, .9, .24, 1) both; }
+.mgl-menu.closing { animation: mglMenuOut .2s cubic-bezier(.4, 0, .2, 1) both; }
+.mgl-item { padding: 9px 11px; border-radius: 8px; font-size: 12px; white-space: nowrap;
+  cursor: pointer; text-align: left; background: none; border: 0; font-family: inherit;
+  color: var(--text); transition: background .15s; }
+.mgl-item:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.mgl-item.danger { color: var(--red); }
+.mgl-item.danger:hover { background: color-mix(in srgb, var(--red) 14%, transparent); }
+/* the ruby destructive pair rides LAST, separated (DC: margin-top + border-top
+   on the first ruby item) */
+.mgl-item.sep { margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, .08);
+  border-top-left-radius: 0; border-top-right-radius: 0; }
+.mgl-item.off { color: rgba(214, 210, 226, .4); cursor: not-allowed; }
+.mgl-item.off:hover { background: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mgl-tray, .mgl-tray.closing, .mgl-menu, .mgl-menu.closing { animation: none; }
+  .mgl-scaret, .mgl-chip, .mgl-pill { transition: none; }
+}

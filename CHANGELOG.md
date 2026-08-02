@@ -17,6 +17,22 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **The React conversion, Phase 2 — the redesigned Frontend Gallery + Lightbox live at
+  `/next`.** Banner (hero/slim) with the metallic Generate/Loom/Folio trio and live stats
+  from the new `GET /api/stats`; glyph-spine nav; separator bar hosting the credits chip;
+  the library bar's ⚲ Filters collapse pill with its own-row tray + the 8-item Actions
+  menu (page-level render, selection-gated, ruby pair last); full select grammar (checkbox
+  single-select, drag-marquee under Select, shift range, ctrl/⌘ toggle, click → Lightbox);
+  the Generate dock as a true toggle with deferred unmount and `#image|#edit|#video` deep
+  links; the new full-bleed Lightbox (stars, action chips, upscale flyout, filmstrip,
+  slideshow, the innermost-first Esc chain). Backend: five JSON routes — `/api/stats`,
+  `/api/delete-local`, `/api/collection`, `/api/replace-prompts`, and `/api/delete-tasks`
+  (localhost tier kept, `_check_read_only` enforced, shares the page route's worker so the
+  two can't drift) — with 19 new tests; the old redirect routes stay until demolition.
+  Every workstream adversarially verified against the DC prototypes; the five confirmed
+  defects (Esc blocked by the upscale panel's own focus, a page-boundary TypeError, a
+  stale shift-range anchor across pages, one easing drift, the midless `#video` deep
+  link) fixed before this commit.
 - **The React conversion, Phase 1 — the `mg-*` components respecced to UI Kit v2.** Visual
   only, public APIs frozen (classic pages still mount everything unchanged). Generate
   drawer: metallic skin-aware submit + glass chrome + both-ways dock motion. Cost badge:

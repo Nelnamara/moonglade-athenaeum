@@ -12221,6 +12221,40 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                                                failed, len(to_delete)))
         return redirect(back)
 
+    @app.route("/api/delete-local", methods=["POST"])
+    def api_delete_local():
+        """JSON twin of /delete-bulk (and /delete/<id>) for fetch()-driven clients:
+        quarantine the selected media to out_dir/_deleted/ through the SAME
+        purge_media_local path the page routes use, so /api/trash/restore undoes it,
+        minus the redirect-with-banner plumbing. LOGIN tier, exactly like the page
+        routes it mirrors: local quarantine is reversible library curation, not
+        cloud destruction (that is /api/delete-tasks, a different tier). The page
+        routes stay -- classic still posts forms at them.
+
+        Deduped via dict.fromkeys for the same reason /api/delete-preview does it:
+        the count describes FILES quarantined, so a repeated id must not inflate it.
+        Per-file OSError keeps the loop going, exactly as /delete-bulk's does -- one
+        file the OS won't release must not strand the rest -- and comes back as a
+        `failed` count with ok=false instead of a delerr banner."""
+        body = request.get_json(silent=True) or {}
+        media_ids = list(dict.fromkeys(
+            str(m) for m in (body.get("media_ids") or []) if str(m).strip()))
+        if not media_ids:
+            return jsonify({"error": "no media_ids given"}), 400
+        purged = failed = 0
+        for mid in media_ids:
+            row = get_row(db_path, mid)
+            if not row:
+                continue
+            try:
+                purge_media_local(out_dir, thumb_dir, db_path, mid, row.get("filename"))
+                purged += 1
+            except OSError:
+                failed += 1
+        if purged:
+            telem_bump("culled", purged, out_dir=out_dir)           # The Great Sweep
+        return jsonify({"ok": failed == 0, "count": purged, "failed": failed})
+
     def _purge_local(media_id, filename):
         """Remove a media's catalog row + thumbnail; quarantine its file to _deleted/
         (recoverable) rather than destroying it."""
@@ -12361,51 +12395,34 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             },
         })
 
-    @app.route("/delete-tasks-bulk", methods=["POST"])
-    def delete_tasks_bulk():
-        """Delete the selected images' TASKS from PixAI (irreversible) AND purge
-        them locally, so cloud and catalog never drift. Task-level: deleting any
-        image deletes its whole task (all batch images), cloud + local. Imports
-        with no task id are purged locally only. Runs OFF-THREAD and reports progress
-        to the Activity card; localhost-only (this destroys on the owner's account) --
-        same trust tier as /api/branding/shortcut and destructive Panel actions, gated
-        to the stricter _is_local_request(), NOT the broader _is_authorized_request()
-        that the front-door hook enforces for everything else. A logged-in LAN session
-        unlocks browsing and spending the owner's credits, not irreversible deletion
-        from the owner's real cloud account. (This check was dropped during the
-        LAN-auth conversion pass and restored 2026-07-19 per adversarial review --
-        see CHANGELOG.md.)"""
-        import urllib.parse
+    def _start_bulk_delete(task_ids, local_only, purge_local=True):
+        """The shared engine behind BOTH /delete-tasks-bulk (form/redirect) and
+        /api/delete-tasks (JSON) -- extracted from the former verbatim so the two
+        routes cannot drift in what they actually DO, only in how they answer.
+        Kicks the delete off-thread, reporting to the Activity card exactly as
+        before.
+
+        Returns (job_id, total, err): started when err is None; otherwise err is
+        "busy" (a bulk delete is already running -- single-flight held) or
+        "thread" (the worker thread could not start; single-flight released and
+        the failure already logged to the job card). Callers check total > 0
+        themselves -- this helper assumes there is work.
+
+        purge_local=False is the JSON route's cloud-only mode (the CLI
+        --delete-task behavior: cloud gone, local files + catalog intact). It
+        drops the local_only imports HERE, not in the caller, because with no
+        cloud side they would otherwise be pure local purges -- exactly what the
+        flag says not to do."""
         import uuid
         import moonglade_backup as core   # lazy: avoid import cycle
-        back = _safe_back(request.form.get("back")) or url_for("index")
-
-        def _back(**params):
-            sep = "&" if "?" in back else "?"
-            return redirect(back + sep + urllib.parse.urlencode(params))
-
-        if not _is_local_request():
-            return _back(delerr="deleting from PixAI is localhost-only")
-
-        sel = request.form.getlist("media_ids")
-        if not sel:
-            return redirect(back)
-
-        con = _connect(db_path)
-        try:
-            # Same helper /api/delete-preview calls, on purpose: whatever the confirm
-            # dialog showed the user has to be what this route then acts on.
-            sel_rows, task_ids, local_only = _resolve_delete_targets(con, sel)
-        finally:
-            con.close()
+        if not purge_local:
+            local_only = []
         total = len(task_ids) + len(local_only)
-        if not total:
-            return redirect(back)
 
         # Single-flight: never let two bulk deletes interleave their cloud calls.
         with _bulkdel_lock:
             if _bulkdel_running["on"]:
-                return _back(delerr="a bulk delete is already running -- see the Activity card")
+                return None, total, "busy"
             _bulkdel_running["on"] = True
 
         job_id = "bulkdel-" + uuid.uuid4().hex[:12]
@@ -12428,22 +12445,23 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     except Exception:                            # noqa: BLE001
                         failed += 1
                         done += 1; _tick(); continue
-                    con2 = _connect(db_path)
-                    try:
-                        media = con2.execute(
-                            "SELECT media_id, filename FROM catalog WHERE task_id=?", (tid,)
-                        ).fetchall()
-                    finally:
-                        con2.close()
-                    for m in media:
+                    if purge_local:
+                        con2 = _connect(db_path)
                         try:
-                            _purge_local(m[0], m[1]); removed += 1
-                        except OSError:
-                            # This task's cloud delete has ALREADY fired, so one file the
-                            # OS won't let go of must not take the whole loop down with it:
-                            # every task still queued would be left deleted on PixAI but
-                            # live in the catalog, and nothing would say so.
-                            failed += 1
+                            media = con2.execute(
+                                "SELECT media_id, filename FROM catalog WHERE task_id=?", (tid,)
+                            ).fetchall()
+                        finally:
+                            con2.close()
+                        for m in media:
+                            try:
+                                _purge_local(m[0], m[1]); removed += 1
+                            except OSError:
+                                # This task's cloud delete has ALREADY fired, so one file the
+                                # OS won't let go of must not take the whole loop down with it:
+                                # every task still queued would be left deleted on PixAI but
+                                # live in the catalog, and nothing would say so.
+                                failed += 1
                     done += 1; _tick()
                 for r in local_only:
                     try:
@@ -12469,8 +12487,111 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             with _bulkdel_lock:                              # never wedge single-flight forever
                 _bulkdel_running["on"] = False
             _log_job(job_id, status="failed", error="could not start delete thread: " + _redact_host_paths(str(e))[:160])
+            return None, total, "thread"
+        return job_id, total, None
+
+    @app.route("/delete-tasks-bulk", methods=["POST"])
+    def delete_tasks_bulk():
+        """Delete the selected images' TASKS from PixAI (irreversible) AND purge
+        them locally, so cloud and catalog never drift. Task-level: deleting any
+        image deletes its whole task (all batch images), cloud + local. Imports
+        with no task id are purged locally only. Runs OFF-THREAD and reports progress
+        to the Activity card (see _start_bulk_delete above, which owns the worker);
+        localhost-only (this destroys on the owner's account) --
+        same trust tier as /api/branding/shortcut and destructive Panel actions, gated
+        to the stricter _is_local_request(), NOT the broader _is_authorized_request()
+        that the front-door hook enforces for everything else. A logged-in LAN session
+        unlocks browsing and spending the owner's credits, not irreversible deletion
+        from the owner's real cloud account. (This check was dropped during the
+        LAN-auth conversion pass and restored 2026-07-19 per adversarial review --
+        see CHANGELOG.md.)"""
+        import urllib.parse
+        back = _safe_back(request.form.get("back")) or url_for("index")
+
+        def _back(**params):
+            sep = "&" if "?" in back else "?"
+            return redirect(back + sep + urllib.parse.urlencode(params))
+
+        if not _is_local_request():
+            return _back(delerr="deleting from PixAI is localhost-only")
+
+        sel = request.form.getlist("media_ids")
+        if not sel:
+            return redirect(back)
+
+        con = _connect(db_path)
+        try:
+            # Same helper /api/delete-preview calls, on purpose: whatever the confirm
+            # dialog showed the user has to be what this route then acts on.
+            sel_rows, task_ids, local_only = _resolve_delete_targets(con, sel)
+        finally:
+            con.close()
+        if not (task_ids or local_only):
+            return redirect(back)
+
+        job_id, total, err = _start_bulk_delete(task_ids, local_only)
+        if err == "busy":
+            return _back(delerr="a bulk delete is already running -- see the Activity card")
+        if err:
             return _back(delerr="could not start bulk delete -- try again")
         return _back(bulkdel="started", n=total)
+
+    @app.route("/api/delete-tasks", methods=["POST"])
+    def api_delete_tasks():
+        """JSON twin of /delete-tasks-bulk: same LOCALHOST tier (and for the same
+        reason -- this MUTATES THE OWNER'S REAL CLOUD ACCOUNT, irreversibly), same
+        _resolve_delete_targets selection so /api/delete-preview keeps describing
+        exactly what this route then does, and the same off-thread worker via
+        _start_bulk_delete -- which routes every cloud delete through
+        core.delete_task_gql, the single-attempt _check_read_only'd choke point the
+        page route uses, never gql_adhoc. The page route stays until classic's
+        demolition.
+
+        Body: {task_ids: [...]} OR {media_ids: [...]} (task_ids win when both are
+        sent -- they are already the unit the delete operates on), plus optional
+        purge_local (default true, the page behavior: purge follows cloud so
+        catalog and account never drift; false = cloud-only, the CLI
+        --delete-task behavior, and imports are then left alone entirely).
+
+        _check_read_only fires HERE, before the job even starts, on top of the one
+        inside delete_task_gql: failing fast with one readable refusal beats
+        spawning a job whose every task then fails red on the Activity card."""
+        import moonglade_backup as core   # lazy: avoid import cycle
+        if not _is_local_request():
+            return jsonify({"error": "deleting from PixAI is localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        purge_local = bool(body.get("purge_local", True))
+        task_ids = sorted({str(t).strip() for t in (body.get("task_ids") or [])
+                           if str(t).strip()})
+        local_only = []
+        if not task_ids:
+            media_ids = [str(m) for m in (body.get("media_ids") or []) if str(m).strip()]
+            if not media_ids:
+                return jsonify({"error": "no task_ids or media_ids given"}), 400
+            con = _connect(db_path)
+            try:
+                _sel_rows, task_ids, local_only = _resolve_delete_targets(con, media_ids)
+            finally:
+                con.close()
+        if not purge_local:
+            local_only = []          # cloud-only mode: imports have no cloud side
+        if not (task_ids or local_only):
+            return jsonify({"ok": True, "count": 0, "job_id": None,
+                            "tasks": 0, "local_only": 0})
+        if task_ids:
+            try:
+                core._check_read_only("delete tasks from your PixAI account")
+            except core.PixAIError as e:
+                return jsonify({"error": _redact_host_paths(str(e))[:240]}), 403
+        job_id, total, err = _start_bulk_delete(task_ids, local_only,
+                                                purge_local=purge_local)
+        if err == "busy":
+            return jsonify({"error": "a bulk delete is already running -- "
+                                     "see the Activity card"}), 409
+        if err:
+            return jsonify({"error": "could not start bulk delete -- try again"}), 500
+        return jsonify({"ok": True, "count": total, "job_id": job_id,
+                        "tasks": len(task_ids), "local_only": len(local_only)})
 
     # -------------------------------------------------------------------
     # Trash / quarantine panel -- the floating panel opened from the Control
@@ -12603,6 +12724,28 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         sep = "&" if "?" in back else "?"
         return redirect("{}{}uncollected={}".format(back, sep, n))
 
+    @app.route("/api/collection", methods=["POST"])
+    def api_collection():
+        """JSON twin of /collection-add + /collection-remove for fetch()-driven
+        clients: one route, `action` picks the direction, same add_to_collection /
+        remove_from_collection helpers underneath (comma-name scrubbing, the
+        read-modify-write lock, no-op-if-already-there counting -- all of it), no
+        redirect banner. LOGIN tier, exactly like both page routes it mirrors.
+        `count` is rows actually CHANGED, the page banner's own number -- adding to
+        a collection an image is already in counts zero, not one."""
+        body = request.get_json(silent=True) or {}
+        action = str(body.get("action") or "").strip()
+        if action not in ("add", "remove"):
+            return jsonify({"error": "action must be 'add' or 'remove'"}), 400
+        name = str(body.get("collection") or "").strip()
+        if not name:
+            return jsonify({"error": "no collection name given"}), 400
+        media_ids = [str(m) for m in (body.get("media_ids") or []) if str(m).strip()]
+        if not media_ids:
+            return jsonify({"error": "no media_ids given"}), 400
+        fn = add_to_collection if action == "add" else remove_from_collection
+        return jsonify({"ok": True, "count": fn(db_path, media_ids, name)})
+
     @app.route("/bulk-replace-prompt", methods=["POST"])
     def bulk_replace():
         back = _safe_back(request.form.get("back")) or url_for("index")
@@ -12613,6 +12756,24 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         # stash a one-shot result in the query string for a small banner
         sep = "&" if "?" in back else "?"
         return redirect("{}{}replaced={}".format(back, sep, n))
+
+    @app.route("/api/replace-prompts", methods=["POST"])
+    def api_replace_prompts():
+        """JSON twin of /bulk-replace-prompt: same bulk_replace_prompt helper (plain
+        substring find/replace over prompt_full, counting only rows that actually
+        changed), no redirect banner. LOGIN tier, like the page route it mirrors.
+        An empty `find` is a 400 here rather than the helper's silent 0: the page
+        form can't submit one, so a JSON caller sending one is a bug worth naming."""
+        body = request.get_json(silent=True) or {}
+        find = str(body.get("find") or "")
+        if not find:
+            return jsonify({"error": "no find text given"}), 400
+        media_ids = [str(m) for m in (body.get("media_ids") or []) if str(m).strip()]
+        if not media_ids:
+            return jsonify({"error": "no media_ids given"}), 400
+        changed = bulk_replace_prompt(db_path, media_ids, find,
+                                      str(body.get("replace") or ""))
+        return jsonify({"ok": True, "changed": changed})
 
     # Full images are write-once: /img/ is keyed by on-disk path and /full/ resolves to
     # the downloaded original, so the bytes behind a given URL never change. Cache those
@@ -13626,6 +13787,35 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                             "is_member": core.account_is_member(me)})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
+
+    @app.route("/api/stats")
+    def api_stats():
+        """Catalog totals for fetch()-driven headers: the SAME numbers the classic
+        template bakes into its banner (catalog_counts -- images, videos, distinct
+        collections) plus the backed-up percent its cover-badge lazily pulls from
+        /api/account, computed the identical way (server lifetime TASK count from
+        account_info vs distinct_task_count locally; both are tasks, not images, so
+        the ratio is honest -- see api_account above). LOGIN tier, matching index()
+        and /api/account.
+
+        The account read fails soft: coverage_pct/server_tasks come back null when
+        PixAI is unreachable, which is exactly the case where the classic banner
+        shows counts but hides its coverage badge. The catalog counts never depend
+        on the network."""
+        counts = catalog_counts(db_path)
+        local_tasks = distinct_task_count(db_path)
+        try:
+            core, gsession = _gen_session()
+            me = core.account_info(gsession)
+            server_tasks = int((me.get("tasks") or {}).get("totalCount"))
+        except Exception:                                    # noqa: BLE001
+            server_tasks = None
+        coverage = (round(min(100.0, local_tasks / server_tasks * 100), 1)
+                    if server_tasks else None)
+        return jsonify({"images": counts["images"], "videos": counts["videos"],
+                        "collections": counts["collections"],
+                        "local_tasks": local_tasks, "server_tasks": server_tasks,
+                        "coverage_pct": coverage})
 
     @app.route("/api/setup/save-key", methods=["POST"])
     def api_setup_save_key():

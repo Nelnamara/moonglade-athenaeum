@@ -1,16 +1,43 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import ArtBand from "./components/ArtBand.jsx";
+import Banner from "./components/Banner.jsx";
+import SeparatorBar from "./components/SeparatorBar.jsx";
 import Strip from "./components/Strip.jsx";
 import Grid from "./components/Grid.jsx";
 import Lightbox from "./components/Lightbox.jsx";
 import DetailsView from "./components/DetailsView.jsx";
 import GenerateDrawer from "./components/GenerateDrawer.jsx";
-import PickerHost from "./components/PickerHost.jsx";
+import PickerHost, { isPickerOpen } from "./components/PickerHost.jsx";
+import "./styles/shell.css";
 import {
   fetchLibrary, fetchAccount, fetchCollections,
   postForm, downloadZipForm, resolveVideoIds,
 } from "./api.js";
+
+/* ============================ THE APP SHELL =================================
+   Redesigned per the Frontend Gallery DC (design_handoff_moonglade_suite):
+
+     sticky header  = Banner (hero/slim) + SeparatorBar (nav spine, toggles,
+                      credits chip) — Banner.jsx / SeparatorBar.jsx / NavSpine.jsx
+     main           = Grid or DetailsView (existing components, new spot)
+     dock host      = GenerateDrawer wrapped in the dock-host contract: starts
+                      CLOSED, Generate buttons are TRUE TOGGLES, outside-click
+                      ignores [data-dock-toggle], deep links #image|#edit|#video
+                      open it on that tab, close is DEFERRED 360ms (mgDockOut
+                      window) — and the drawer itself is NEVER unmounted (the
+                      shared video component owns poll timers for charged tasks).
+
+   MOUNT POINTS left for the parallel workstreams:
+   - LibraryBar refit: renders via Banner's `libraryBar` slot (Strip today) and
+     `slimSlot` (empty today — the slim row's compact search goes there).
+   - Overlays (My Art/Contests/Health/Publish/Train/Import + Folio): `overlay`
+     state + openOverlay() below; render the overlay host where marked. Esc
+     already closes the overlay BEFORE the dock (capture-phase handler).
+   - GenerateDock refit: the .mgx-dock-host wrapper + open/closing classes are
+     the motion hooks; toggleDock/openDock/closeDock are the host verbs; the
+     separator bar's #mg-sep-cost <mg-cost-badge> is its price chip.
+   - Grid refit: receives `thumb` (SIZE slider) — also exposed as --thumb on
+     <main>; shell.css maps it onto the existing .grid columns until then. */
 
 const ADV_DEFAULTS = {
   sort: "newest", ratingMin: 0, model: "", lora: "",
@@ -49,8 +76,136 @@ export default function App({ boot }) {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const [lbIndex, setLbIndex] = useState(null);
-  const [genOpen, setGenOpen] = useState(false);
   const reqSeq = useRef(0);
+
+  /* ---- banner hero/slim (the slim TOGGLE lives in the separator bar; this
+     replaces the old scroll-collapse mechanism). Persisted: a manual state the
+     owner picked should survive a reload. ---- */
+  const [slim, setSlimState] = useState(
+    () => localStorage.getItem("mg_banner_slim") === "1"
+  );
+  const setSlim = (v) => {
+    localStorage.setItem("mg_banner_slim", v ? "1" : "");
+    setSlimState(v);
+  };
+
+  /* ---- SIZE slider: thumb size for the grid; max = 4-across of the grid's
+     real width (DC formula), measured live. ---- */
+  const [thumb, setThumbState] = useState(() => {
+    const v = parseInt(localStorage.getItem("mg_thumb") || "", 10);
+    return isFinite(v) && v >= 152 ? v : 210;
+  });
+  const setThumb = (v) => {
+    localStorage.setItem("mg_thumb", String(v));
+    setThumbState(v);
+  };
+  const [thumbMax, setThumbMax] = useState(320);
+  const mainRef = useRef(null);
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      setThumbMax(Math.max(200, Math.floor((el.clientWidth - 36 - 33) / 4)));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  /* ---- live-run signal for the banner spinner + activity cluster. Counted
+     from the shared drawer's mg-submit/mg-result events (the only begin/end
+     pair any producer emits today). The image path (useGenerate) has no begin
+     event, so its runs don't tick this — the RunsReel workstream owns the
+     richer signal and can replace this counter wholesale. ---- */
+  const [running, setRunning] = useState({ count: 0, pct: null });
+
+  /* ---- overlays (drift §16): six nav destinations open floating overlays.
+     State + verb live here; the surfaces are the overlays workstream's. ---- */
+  const [overlay, setOverlay] = useState(null);
+  const overlayRef = useRef(null);
+  useEffect(() => { overlayRef.current = overlay; });
+  const openOverlay = useCallback((key) => {
+    /* TEMP until HealthOverlay mounts: Health keeps its live destination —
+       a dead click on a working dashboard would be a regression. The overlays
+       workstream deletes this branch when the overlay ships. */
+    if (key === "health") { window.location.href = "/health"; return; }
+    setOverlay(key);
+  }, []);
+  // Esc closes the overlay FIRST (capture beats the drawer's own Esc ladder).
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "Escape" || !overlayRef.current) return;
+      e.stopPropagation();
+      setOverlay(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
+  /* ---- the Generate dock HOST (DC §6 host behavior; the drawer→dock reshell
+     itself is the GenerateDock workstream). Starts CLOSED; open/close are a
+     true toggle; close defers 360ms (the mgDockOut window) so exit motion has
+     a mounted element to run on. The drawer under it hides, never unmounts. */
+  const [dockOpen, setDockOpen] = useState(false);
+  const [dockClosing, setDockClosing] = useState(false);
+  const dockStateRef = useRef({ open: false, closing: false });
+  useEffect(() => { dockStateRef.current = { open: dockOpen, closing: dockClosing }; });
+  const dockTimer = useRef(null);
+  const dockHostRef = useRef(null);
+  const closeDock = useCallback(() => {
+    setDockClosing(true);
+    clearTimeout(dockTimer.current);
+    dockTimer.current = setTimeout(() => {
+      setDockOpen(false);
+      setDockClosing(false);
+    }, 360);
+  }, []);
+  const openDock = useCallback(() => {
+    clearTimeout(dockTimer.current);
+    setDockOpen(true);
+    setDockClosing(false);
+  }, []);
+  const toggleDock = useCallback(() => {
+    const st = dockStateRef.current;
+    if (st.open && !st.closing) closeDock();
+    else openDock();
+  }, [closeDock, openDock]);
+
+  /* Outside-click closes the dock — but never a click on a [data-dock-toggle]
+     (the toggle buttons own their own open/close and must not race it), and
+     never while the shared picker overlay is up (it renders OUTSIDE the dock
+     host). Capture-phase mousedown, matching the DC. Today the drawer's own
+     scrim (inside the host) swallows most page clicks; when the dock refit
+     drops the scrim, this closer is already the contract. */
+  useEffect(() => {
+    const onDown = (ev) => {
+      const st = dockStateRef.current;
+      if (!st.open || st.closing) return;
+      if (ev.target.closest && ev.target.closest("[data-dock-toggle]")) return;
+      if (isPickerOpen()) return;
+      const host = dockHostRef.current;
+      if (host && !host.contains(ev.target)) closeDock();
+    };
+    window.addEventListener("mousedown", onDown, true);
+    return () => window.removeEventListener("mousedown", onDown, true);
+  }, [closeDock]);
+
+  /* Deep links: #image | #edit | #video open the dock on that tab, then the
+     hash is stripped (history.replaceState) so reloads don't re-trigger.
+     #edit rides the drawer's one-shot request contract with an empty source
+     (safe: EditTab ignores a falsy initialSource). #video rides the same
+     contract -- the drawer now skips the i2v prefill for a midless request,
+     so the deep link lands on the Video tab with clean slots
+     in the shared video component — the GenerateDock retab owns fixing that. */
+  useEffect(() => {
+    const hash = (window.location.hash || "").replace("#", "");
+    if (hash !== "image" && hash !== "edit" && hash !== "video") return;
+    openDock();
+    if (hash === "edit") setGenRequest({ tab: "edit", mid: "", nonce: Math.random() });
+    else if (hash === "video") setGenRequest({ tab: "video", mid: "", nonce: Math.random() });
+    try {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    } catch { /* hash simply stays; harmless */ }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* The Details view -- "the layer deeper" (owner, 2026-07-30), a real
      bookmarkable URL via the History API rather than a modal-only state
@@ -103,14 +258,20 @@ export default function App({ boot }) {
      - mg-submit:   the SHARED video drawer accepting a task -- it owns its own
                     poll, so it gets Jobs.register (never Jobs.track, which
                     would double-poll: the Loom's pinned contract);
-     - mg-result:   that drawer finishing, which is when credits actually moved. */
+     - mg-result:   that drawer finishing, which is when credits actually moved.
+     The same submit/result pair also ticks the shell's live-run counter. */
   useEffect(() => {
     const refresh = () => { load(1, true); fetchAccount().then(setAccount); };
     const onSubmit = (e) => {
       const id = e.detail && (e.detail.task_id || e.detail.taskId);
       if (id && window.Jobs) window.Jobs.register(id, "Rendered");
+      setRunning((r) => ({ ...r, count: r.count + 1 }));
     };
-    const onResult = () => { refresh(); if (window.JobsCard) window.JobsCard.refresh(); };
+    const onResult = () => {
+      refresh();
+      if (window.JobsCard) window.JobsCard.refresh();
+      setRunning((r) => ({ ...r, count: Math.max(0, r.count - 1) }));
+    };
     window.addEventListener("mg-gen-done", refresh);
     document.addEventListener("mg-submit", onSubmit);
     document.addEventListener("mg-result", onResult);
@@ -325,72 +486,101 @@ export default function App({ boot }) {
     }
   };
 
-  /* Lightbox "Edit"/"To Video" -> GenerateDrawer, matching classic's
-     lbEdit()/lbVideo() (close the lightbox, then open the drawer already on
+  /* Lightbox "Edit"/"To Video" -> the dock, matching classic's
+     lbEdit()/lbVideo() (close the lightbox, then open the dock already on
      the right tab with the source loaded). genRequest is a one-shot
      instruction: a fresh object (nonce included) every time, so asking for
      the SAME image twice in a row still re-fires the drawer's effect. */
   const [genRequest, setGenRequest] = useState(null);
   const requestEdit = (mid) => {
     setLbIndex(null);
-    setGenOpen(true);
+    openDock();
     setGenRequest({ tab: "edit", mid, nonce: Math.random() });
   };
   const requestVideo = (mid, thumb) => {
     setLbIndex(null);
-    setGenOpen(true);
+    openDock();
     setGenRequest({ tab: "video", mid, thumb, nonce: Math.random() });
   };
 
+  const dockActive = dockOpen && !dockClosing;
+
   return (
     <div className="app">
-      {/* mg-head carries the collapsing-sticky mechanism: tall header, negative
-          sticky top, so the art scrolls away and .strip pins. */}
-      <header className="mg-head">
-        <ArtBand boot={boot} />
-        <Strip
+      {/* Banner + separator ride together in one sticky band. The old
+          collapsing-sticky mg-head is retired: hero/slim is now an explicit
+          state, toggled from the separator bar. */}
+      <header className="mgx-hdr">
+        <Banner
+          boot={boot}
+          slim={slim}
+          running={running}
+          dockOpen={dockActive}
+          onToggleDock={toggleDock}
+          onFolio={() => openOverlay("folio")}
+          libraryBar={
+            <Strip
+              boot={boot} account={account}
+              media={media} setMedia={setMedia}
+              perPage={perPage} setPerPage={setPerPage}
+              shelf={shelf} setShelf={setShelf}
+              query={query} setQuery={setQuery} submitQuery={submitQuery} resetAll={resetAll}
+              blur={blur} setBlur={setBlur}
+              selectMode={selectMode} setSelectMode={setSelectMode}
+              selectedCount={selected.size}
+              selectedIds={selIds}
+              clearSelection={() => setSelected(new Set())}
+              collections={collections}
+              actions={actions}
+              adv={adv} advCount={advCount}
+              flyOpen={flyOpen} setFlyOpen={setFlyOpen}
+              applyAdvanced={applyAdvanced}
+              onGenerate={openDock}
+            />
+          }
+        />
+        <SeparatorBar
           boot={boot} account={account}
-          media={media} setMedia={setMedia}
-          perPage={perPage} setPerPage={setPerPage}
-          shelf={shelf} setShelf={setShelf}
-          query={query} setQuery={setQuery} submitQuery={submitQuery} resetAll={resetAll}
-          blur={blur} setBlur={setBlur}
-          selectMode={selectMode} setSelectMode={setSelectMode}
-          selectedCount={selected.size}
-          selectedIds={selIds}
-          clearSelection={() => setSelected(new Set())}
-          collections={collections}
-          actions={actions}
-          adv={adv} advCount={advCount}
-          flyOpen={flyOpen} setFlyOpen={setFlyOpen}
-          applyAdvanced={applyAdvanced}
-          onGenerate={() => setGenOpen(true)}
+          slim={slim} onToggleSlim={() => setSlim(!slim)}
+          blur={blur} onToggleBlur={() => setBlur(!blur)}
+          thumb={thumb} thumbMax={thumbMax} onThumb={setThumb}
+          running={running}
+          dockOpen={dockActive} onToggleDock={toggleDock}
+          onOverlay={openOverlay}
         />
       </header>
-      {detailsFor ? (
-        <DetailsView
-          mediaId={detailsFor} onClose={closeDetails} onNavigate={openDetails}
-          onRate={rate} onEdit={requestEdit}
-          onDeleted={() => { closeDetails(); load(1, true); }}
-          onFilterByModel={filterByModel} onFilterByBatch={filterByBatch}
-          advParams={{
-            q: applied, media, collection: shelf,
-            sort: adv.sort !== "newest" ? adv.sort : "", rating_min: adv.ratingMin || "",
-            model: adv.model, lora: adv.lora, from: adv.dateFrom, to: adv.dateTo,
-            source: adv.source, tag: adv.tag, published: adv.publishedOnly ? "1" : "",
-          }}
-        />
-      ) : (
-        <Grid
-          items={items} total={total} loading={loading}
-          page={page} pages={pages}
-          goToPage={(p) => load(p, true)}
-          blur={blur}
-          selectMode={selectMode} selected={selected} toggleSelected={toggleSelected}
-          openLightbox={setLbIndex}
-          onRate={rate}
-        />
-      )}
+
+      <main ref={mainRef} className="mgx-main" style={{ "--thumb": thumb + "px" }}>
+        {detailsFor ? (
+          <DetailsView
+            mediaId={detailsFor} onClose={closeDetails} onNavigate={openDetails}
+            onRate={rate} onEdit={requestEdit}
+            onDeleted={() => { closeDetails(); load(1, true); }}
+            onFilterByModel={filterByModel} onFilterByBatch={filterByBatch}
+            advParams={{
+              q: applied, media, collection: shelf,
+              sort: adv.sort !== "newest" ? adv.sort : "", rating_min: adv.ratingMin || "",
+              model: adv.model, lora: adv.lora, from: adv.dateFrom, to: adv.dateTo,
+              source: adv.source, tag: adv.tag, published: adv.publishedOnly ? "1" : "",
+            }}
+          />
+        ) : (
+          <Grid
+            items={items} total={total} loading={loading}
+            page={page} pages={pages}
+            goToPage={(p) => load(p, true)}
+            blur={blur}
+            thumb={thumb}
+            selectMode={selectMode} selected={selected} toggleSelected={toggleSelected}
+            openLightbox={setLbIndex}
+            onRate={rate}
+          />
+        )}
+      </main>
+
+      {/* the DC's veil: keeps the column bottom legible under the (future) dock */}
+      <div className="mgx-veil" aria-hidden="true" />
+
       {lbIndex != null && (
         <Lightbox
           items={items} index={lbIndex} setIndex={setLbIndex}
@@ -401,8 +591,25 @@ export default function App({ boot }) {
           onOpenDetails={openDetails}
         />
       )}
-      <GenerateDrawer open={genOpen} onClose={() => setGenOpen(false)} account={account}
-        request={genRequest} />
+
+      {/* OVERLAY MOUNT POINT (overlays workstream): render the overlay host
+          here, e.g. <OverlaysHost overlay={overlay} onClose={() => setOverlay(null)}
+          boot={boot} />. Scrim z 300, card above it (300–500 band); Esc-first
+          is already handled above. `overlay` today: null | 'myart' | 'publish'
+          | 'train' | 'import' | 'contests' | 'folio' ('health' page-navigates
+          until HealthOverlay lands — see openOverlay). */}
+
+      {/* the Generate dock host: the wrapper carries the outside-click anchor
+          and the open/closing motion classes for the GenerateDock refit; the
+          drawer inside NEVER unmounts (shared video component owns poll
+          timers for charged tasks). */}
+      <div
+        ref={dockHostRef}
+        className={"mgx-dock-host" + (dockOpen ? " open" : "") + (dockClosing ? " closing" : "")}
+      >
+        <GenerateDrawer open={dockActive} onClose={closeDock} account={account}
+          request={genRequest} />
+      </div>
       <PickerHost />
     </div>
   );
