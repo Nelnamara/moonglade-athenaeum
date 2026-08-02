@@ -262,14 +262,21 @@ def test_login_mascot_takes_webp_or_png_like_the_achievement_mascots(tmp_path):
     context."
 
     Pins the whole ladder so a later edit cannot quietly collapse it back to one path.
-    """
-    html = _app(tmp_path).test_client().get("/login").get_data(as_text=True)
-    assert "/branding/login_nel.webp" in html, "webp must be tried FIRST -- animated wins"
+
+    The React Login page (2026-08-02) ported this ladder into LoginPage.jsx's
+    onMascotError -- the <img> only exists in client-rendered DOM, not the raw
+    server HTML GET /login now returns (see moonglade_gallery.py's login()
+    route), so this checks the JSX source directly. Same "source-presence
+    assertion" pattern loom/test/loom-image-job-register.test.js already
+    established for JSX this suite has no browser harness to render."""
+    import pathlib
+    src = pathlib.Path("gallery/src/components/LoginPage.jsx").read_text(encoding="utf-8")
+    assert '"/branding/login_nel.webp"' in src, "webp must be tried FIRST -- animated wins"
     for later in ("/branding/login_nel.png",
                   "/branding/mascots/login_nel.webp",
                   "/branding/mascots/login_nel.png",
                   "/branding/mascots/gen_nel.png"):
-        assert later in html, later + " is missing from the fallback ladder"
-    # It must still END by removing the element: a broken-image icon would keep the
-    # :has(img) rule from restoring the mock's sparkle placeholder on a bare install.
-    assert "this.remove()" in html
+        assert later in src, later + " is missing from the fallback ladder"
+    # It must still END by hiding the element: a broken-image icon is the one
+    # thing worse than no mascot at all.
+    assert 'img.style.display = "none"' in src

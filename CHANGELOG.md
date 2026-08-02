@@ -67,6 +67,50 @@ git tags. Full prose notes for tagged versions live on
   native form submit — `expect_navigation` now ties the wait to the real
   navigation instead of the current, already-settled page).
 
+- **First-run account creation, on the React Login page — the answered design
+  request, built the same night it came back.** `design_handoff/request-bootstrap-account-creation.md`
+  (handed to design rather than improvised, per the owner's explicit "you don't
+  get to design shit") came back with a real, complete spec: a toggle on the
+  sign-in card, direct owner-framing copy ("You're setting up this server —
+  this account will own it"), a proactive password-requirement checklist with
+  live ✓/· marks, per-field errors, and a calmer non-red banner style for the
+  rare remote-device refusal — all previewable via demo-only chips.
+  Built against it, with one disclosed simplification: the sign-in⇄create
+  **toggle links are not shipped**. `boot.no_accounts` already decides
+  server-side which mode could ever succeed for a given visitor (the React
+  page only reaches the zero-accounts state at all when `bootstrap_mode` is
+  genuinely true — local request, no account yet), so there is exactly one
+  meaningful mode per visitor; the DC's own note says the toggle is "gated
+  server-side... shown here for review," not a real interaction to ship. The
+  password-requirement checklist, per-field errors, and framing copy are all
+  built in full for whichever single mode applies. The three demo "preview:"
+  error chips aren't shipped either (explicitly demo tooling); every real
+  error still surfaces through the one `.lgn-error` style already used
+  elsewhere on the page.
+  Backend: `POST /api/login` gained `mode="create"`, mirroring classic
+  `login()`'s own bootstrap POST branch exactly — same `bootstrap_mode` gate
+  re-checked server-side regardless of client state, same
+  `core.username_problem`/`password_problem`/`add_or_update_web_user`. `/login`
+  GET's routing widened from `not no_accounts` to `not no_accounts or is_local`
+  so the bootstrap state reaches React too (previously it only ever got the
+  classic form, before this design existed).
+  **Caught and fixed in the same pass:** the mascot's `<img>` had a real
+  animated-or-still fallback ladder in classic (`login_nel.webp` →
+  `login_nel.png` → `mascots/login_nel.webp` → `mascots/login_nel.png` →
+  `mascots/gen_nel.png`, a real regression fixed once already per
+  `tests/test_branding.py`'s own history) that the first Login-page pass
+  quietly dropped to "hide on first error." Ported in full via `onMascotError`.
+  Also: the DC's `--emerald` hint-list color turned out to be a real,
+  distinct token in this app (not a guess-and-fallback) — corrected from an
+  initial `--green` substitution.
+  Verified live end-to-end against a genuinely fresh (zero-account) install:
+  create-mode renders with the real framing copy and hint list; a weak/
+  mismatched submission is blocked with the right errors and the hints stay
+  unmet; a valid submission creates the real account, establishes a real
+  session, and lands on the live gallery; reloading `/login` now shows
+  ordinary sign-in mode, and the new account signs back in for real. Full
+  suite green (579 loom + 1480 Python).
+
 - **The Runs reel rebuilt against the real click/prefill/batch spec — reuse, not
   reopen.** Owner correction (2026-08-02): a done reel tile's click was shipped as
   "open the image," when the design's own intent, present in the DC from the start,

@@ -2,34 +2,52 @@ import React, { useState } from "react";
 import useFlavour from "../hooks/useFlavour.js";
 import "../styles/login.css";
 
-/* The React sign-in page (design spec: Login.dc.html / Login Mobile.dc.html),
-   wired to the real POST /api/login (2026-08-02) -- docs/DECISIONS.md's
-   2026-07-31 feasibility map called this out by name as real, unfinished work.
-   Rendered by main.jsx in place of <App> whenever boot.authenticated is false;
-   App.jsx itself never mounts, so nothing here can accidentally fire an
-   authenticated-only fetch.
+/* The React sign-in AND first-run account-creation page (design spec:
+   Login.dc.html / Login Mobile.dc.html, account-creation toggle added
+   2026-08-02 per design_handoff/request-bootstrap-account-creation.md's
+   answered brief), wired to the real POST /api/login. Rendered by main.jsx
+   in place of <App> whenever boot.authenticated is false; App.jsx itself
+   never mounts, so nothing here can accidentally fire an authenticated-only
+   fetch.
 
-   TWO deliberate departures from the DC, both disclosed:
-   - Timing: the DC's signIn() is a demo -- 2200ms then 5600ms of hardcoded
-     setTimeouts before it "succeeds" and hard-navigates. The busy phase here
-     lasts exactly as long as the real fetch takes, and the welcome phase
-     navigates the INSTANT it's set -- no artificial hold. An earlier pass
-     added a fixed 900ms "let the welcome line be readable" delay; caught as
-     exactly the fabricated-timing pattern this whole project has fought
-     against (fake progress bars, fake sync stages) once it broke a real
-     login-then-navigate expectation (tests/test_render_harness.py's
-     `_login()` helper, which the render-harness's own `networkidle` wait
-     doesn't and shouldn't account for a decorative client-side pause).
-     Removed rather than accommodated: the welcome overlay still mounts and
-     is visible for whatever the browser's real paint/unload timing is, just
-     never gated behind a number this app made up.
-   - Error state: the DC has none ("it always succeeds", per its own logic
-     class). Reuses Setup Wizard.dc.html's already-designed inline error-note
-     treatment (see login.css's .lgn-error) rather than inventing a new one.
+   MODE is not a toggle here, unlike the DC: `boot.no_accounts` already
+   decides server-side which form could ever succeed (see login()'s route --
+   the React shell only reaches this zero-accounts state at all when
+   bootstrap_mode is genuinely true: local request, no account yet), so
+   there is exactly one meaningful mode per visitor. The DC's own note says
+   as much ("real visibility is gated server-side... the toggle always shows
+   here for review") -- it's demo convenience for reviewing both states in
+   one prototype, not a real interaction to ship. Showing a link to a mode
+   that would always fail for this visitor isn't a real UI, so the
+   "First time? Create an account" / "Back to sign in" toggle links are the
+   one thing NOT ported from this pass -- everything else (copy, fields,
+   validation, hints, errors) for whichever single mode applies is built in
+   full.
 
-   Bootstrap/first-run account creation is NOT here -- no design exists for it
-   yet (see design_handoff/request-bootstrap-account-creation.md); that flow
-   stays on classic /login exactly as before, unreachable from this page. */
+   Client-side username/password checks (usernameProblem/passwordProblem/
+   isRepeatedOrSequential/passwordWeak below) are ported verbatim from the
+   DC's own JS, which itself mirrors the real core.username_problem()/
+   password_problem() -- proactive UX only; the server re-validates
+   everything regardless.
+
+   THREE other deliberate departures from the DC, all disclosed:
+   - Timing: the DC's signIn()/createAccount() are demos -- 2200ms then
+     5600ms of hardcoded setTimeouts before "succeeding" and hard-navigating.
+     The busy phase here lasts exactly as long as the real fetch takes, and
+     the welcome phase navigates the INSTANT it's set -- no artificial hold
+     (an earlier pass added one; removed after it broke a real
+     login-then-navigate test expectation -- see git history).
+   - Sign-in error state: the DC has none for it ("it always succeeds").
+     Reuses Setup Wizard.dc.html's already-designed inline error-note
+     treatment (login.css's .lgn-error) rather than inventing a new one.
+   - The DC distinguishes a calmer, non-red banner style for the rare
+     "remote device" refusal vs. red for expired/locked-out, previewable via
+     three demo-only "preview:" chips. Not shipped: that refusal can only
+     reach a real visitor via an extreme race (is_local flipping between
+     page load and submit), not a state the UI needs to rehearse, and the
+     chips are explicitly demo tooling. Every real error still surfaces,
+     just through the one .lgn-error style already used everywhere else on
+     this page. */
 
 const WELCOMES = [
   "The gallery is waking",
@@ -38,9 +56,69 @@ const WELCOMES = [
   "The lanterns are lit",
 ];
 
+// Mirrors core.username_problem() / password_problem() (moonglade_backup.py) --
+// one shared policy with the Panel's "Add user" flow, restated here for the
+// proactive client-side check. The server is the real authority either way.
+const COMMON_PASSWORDS = new Set([
+  "password", "12345678", "qwertyui", "password1", "iloveyou", "admin1234", "letmein11",
+]);
+function usernameProblem(u) {
+  if (!u.trim()) return "Username is required.";
+  if (u.length > 64) return "Username must be at most 64 characters.";
+  if (/[\x00-\x1f\x7f]/.test(u)) return "Username can't contain control characters.";
+  return "";
+}
+function isRepeatedOrSequential(p) {
+  if (/^(.)\1+$/.test(p)) return true;
+  let asc = true, desc = true;
+  for (let i = 1; i < p.length; i++) {
+    const d = p.charCodeAt(i) - p.charCodeAt(i - 1);
+    if (d !== 1) asc = false;
+    if (d !== -1) desc = false;
+  }
+  return asc || desc;
+}
+function passwordWeak(p) {
+  return p.length >= 8 && (COMMON_PASSWORDS.has(p.toLowerCase()) || isRepeatedOrSequential(p));
+}
+function passwordProblem(p) {
+  if (p.length < 8) return "Password must be at least 8 characters.";
+  if (passwordWeak(p)) return "That password is too common to be safe. Pick something less guessable.";
+  return "";
+}
+
+// Mirrors classic LOGIN_HTML's data-fb ladder exactly (moonglade_gallery.py):
+// webp (animated) -> still png -> the mascots/ copies -> the generic narrator.
+const MASCOT_FALLBACKS = [
+  "/branding/login_nel.png",
+  "/branding/mascots/login_nel.webp",
+  "/branding/mascots/login_nel.png",
+  "/branding/mascots/gen_nel.png",
+];
+function onMascotError(e) {
+  const img = e.currentTarget;
+  const tried = Number(img.dataset.fb || 0);
+  if (tried < MASCOT_FALLBACKS.length) {
+    img.dataset.fb = String(tried + 1);
+    img.src = MASCOT_FALLBACKS[tried];
+  } else {
+    img.style.display = "none";
+  }
+}
+
 export default function LoginPage({ boot }) {
+  const mode = boot.no_accounts ? "create" : "signin";
+  const createMode = mode === "create";
+
   const [user, setUser] = useState("");
   const [pass, setPass] = useState("");
+  const [createUser, setCreateUser] = useState("");
+  const [createPass, setCreatePass] = useState("");
+  const [createConfirm, setCreateConfirm] = useState("");
+  const [createSubmitted, setCreateSubmitted] = useState(false);
+  const [usernameErr, setUsernameErr] = useState("");
+  const [matchErr, setMatchErr] = useState("");
+
   const [phase, setPhase] = useState("idle"); // idle | busy | welcome
   const [error, setError] = useState("");
   const [welcomeLine] = useState(() => WELCOMES[Math.floor(Math.random() * WELCOMES.length)]);
@@ -48,18 +126,12 @@ export default function LoginPage({ boot }) {
 
   const busy = phase === "busy";
 
-  const signIn = async () => {
-    if (phase !== "idle") return;
-    setPhase("busy");
-    setError("");
+  const submitLogin = async (payload) => {
     let d;
     try {
       const r = await fetch("/api/login", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: user, password: pass,
-          csrf: boot.csrf || "", next: boot.next || "",
-        }),
+        body: JSON.stringify({ ...payload, csrf: boot.csrf || "", next: boot.next || "" }),
       });
       d = await r.json();
     } catch {
@@ -76,7 +148,36 @@ export default function LoginPage({ boot }) {
     window.location.href = d.next || "/";
   };
 
-  const onKey = (e) => { if (e.key === "Enter") signIn(); };
+  const signIn = () => {
+    if (phase !== "idle") return;
+    setPhase("busy");
+    setError("");
+    submitLogin({ username: user, password: pass });
+  };
+
+  const createAccount = () => {
+    if (phase !== "idle") return;
+    const uErr = usernameProblem(createUser);
+    const pErr = passwordProblem(createPass);
+    const mErr = createConfirm !== createPass ? "Passwords do not match." : "";
+    setCreateSubmitted(true);
+    setUsernameErr(uErr);
+    setMatchErr(mErr);
+    setError("");
+    // A password problem alone blocks submit with no separate banner --
+    // the hint list right below the field already says why (✓/· marks),
+    // matching the DC's own choice not to duplicate that as red text too.
+    if (uErr || pErr || mErr) return;
+    setPhase("busy");
+    submitLogin({
+      mode: "create", username: createUser, password: createPass, confirm: createConfirm,
+    });
+  };
+
+  const onKey = (e) => { if (e.key === "Enter") (createMode ? createAccount() : signIn()); };
+
+  const lenOk = createPass.length >= 8;
+  const guessOk = lenOk && !passwordWeak(createPass);
 
   return (
     <div className="lgn-stage">
@@ -85,8 +186,15 @@ export default function LoginPage({ boot }) {
       <div className="lgn-frame">
         <div className={"lgn-mascot" + (phase !== "idle" ? " peeked" : "")}>
           <div className="lgn-mascot-bob">
-            <img src="/branding/login_nel.webp" alt=""
-              onError={(e) => { e.currentTarget.style.display = "none"; }} />
+            {/* Same animated-or-still fallback ladder classic /login's inline
+                <img data-fb=...> carries (moonglade_gallery.py, LOGIN_HTML) --
+                webp (animated) wins, then still art, then the mascots/ copies,
+                then the generic gen_nel narrator, before finally giving up.
+                A real regression fixed once already (owner: real login_nel.webp
+                art rendered nothing because the login screen was built later
+                and never carried that context) -- ported here rather than
+                left at "just hide on error". */}
+            <img src="/branding/login_nel.webp" alt="" onError={onMascotError} />
           </div>
         </div>
         <div className="lgn-card">
@@ -95,39 +203,94 @@ export default function LoginPage({ boot }) {
           </div>
           <div className="lgn-titlewrap">
             <div className="lgn-title">Moonglade Athenaeum</div>
-            <div className={"lgn-tagline" + (fl.fading ? " fading" : "")}
-              onClick={fl.reveal} title="Click for version info">
-              {fl.text}
-            </div>
+            {createMode ? (
+              <div className="lgn-framing">You're setting up this server — this account will own it.</div>
+            ) : (
+              <div className={"lgn-tagline" + (fl.fading ? " fading" : "")}
+                onClick={fl.reveal} title="Click for version info">
+                {fl.text}
+              </div>
+            )}
           </div>
-          <div className="lgn-lbl">USERNAME</div>
-          {/* maxLength 64 matches core.MAX_WEB_USERNAME_LEN -- the same client-side
-              belt to the server's braces the Panel's "Add user" field and the
-              classic bootstrap form both already carry. */}
-          <input className="lgn-input" name="username" value={user} autoFocus autoComplete="username"
-            maxLength={64}
-            onChange={(e) => setUser(e.target.value)} onKeyDown={onKey} disabled={busy} />
-          <div className="lgn-lbl" style={{ paddingTop: 14 }}>PASSWORD</div>
-          <input className="lgn-input lgn-pass" name="password" type="password" value={pass}
-            autoComplete="current-password"
-            onChange={(e) => setPass(e.target.value)} onKeyDown={onKey} disabled={busy} />
-          {error ? <div className="lgn-error">{error}</div> : null}
-          {/* type="submit" with no enclosing <form> -- purely a semantic/
-              a11y match for "this is the primary submit control" (and what
-              the render-harness's real-browser login helper looks for); the
-              click still runs signIn() directly, nothing native to trigger. */}
-          <button type="submit" className={"lgn-signbtn" + (busy ? " busy" : "")}
-            onClick={signIn} disabled={busy}>
-            {busy ? <span className="lgn-spin" /> : null}
-            <span>{busy ? "Signing in…" : "Sign in"}</span>
-          </button>
+
+          {!createMode && (
+            <>
+              <div className="lgn-lbl">USERNAME</div>
+              <input className="lgn-input" name="username" value={user} autoFocus autoComplete="username"
+                maxLength={64}
+                onChange={(e) => setUser(e.target.value)} onKeyDown={onKey} disabled={busy} />
+              <div className="lgn-lbl" style={{ paddingTop: 14 }}>PASSWORD</div>
+              <input className="lgn-input lgn-pass" name="password" type="password" value={pass}
+                autoComplete="current-password"
+                onChange={(e) => setPass(e.target.value)} onKeyDown={onKey} disabled={busy} />
+              {error ? <div className="lgn-error">{error}</div> : null}
+              <button type="submit" className={"lgn-signbtn" + (busy ? " busy" : "")}
+                onClick={signIn} disabled={busy}>
+                {busy ? <span className="lgn-spin" /> : null}
+                <span>{busy ? "Signing in…" : "Sign in"}</span>
+              </button>
+            </>
+          )}
+
+          {createMode && (
+            <div className="lgn-fieldin">
+              <div className="lgn-lbl">USERNAME</div>
+              <input className={"lgn-input" + (createSubmitted && usernameErr ? " err" : "")}
+                name="username" value={createUser} autoFocus autoComplete="username" maxLength={64}
+                onChange={(e) => {
+                  setCreateUser(e.target.value);
+                  if (createSubmitted) setUsernameErr(usernameProblem(e.target.value));
+                }}
+                onKeyDown={onKey} disabled={busy} />
+              {createSubmitted && usernameErr ? <div className="lgn-fielderr">{usernameErr}</div> : null}
+
+              <div className="lgn-lbl" style={{ paddingTop: 14 }}>PASSWORD</div>
+              <input className="lgn-input lgn-pass" name="new-password" type="password"
+                value={createPass} autoComplete="new-password"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setCreatePass(v);
+                  if (createSubmitted && createConfirm) {
+                    setMatchErr(createConfirm !== v ? "Passwords do not match." : "");
+                  }
+                }}
+                onKeyDown={onKey} disabled={busy} />
+              <div className="lgn-hints">
+                <div className={lenOk ? "ok" : ""}>{lenOk ? "✓" : "·"} at least 8 characters</div>
+                <div className={guessOk ? "ok" : ""}>{guessOk ? "✓" : "·"} not a common password or a simple pattern (like 12345678)</div>
+              </div>
+
+              <div className="lgn-lbl" style={{ paddingTop: 14 }}>CONFIRM PASSWORD</div>
+              <input className={"lgn-input lgn-pass" + (matchErr ? " err" : "")}
+                name="confirm-password" type="password" value={createConfirm}
+                autoComplete="new-password"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setCreateConfirm(v);
+                  if (createSubmitted) setMatchErr(v !== createPass ? "Passwords do not match." : "");
+                }}
+                onKeyDown={onKey} disabled={busy} />
+              {matchErr ? <div className="lgn-fielderr">{matchErr}</div> : null}
+
+              {error ? <div className="lgn-error">{error}</div> : null}
+
+              <button type="submit" className={"lgn-signbtn" + (busy ? " busy" : "")}
+                onClick={createAccount} disabled={busy} style={{ marginTop: 16 }}>
+                {busy ? <span className="lgn-spin" /> : null}
+                <span>{busy ? "Creating account…" : "Create account"}</span>
+              </button>
+            </div>
+          )}
+
           <div className="lgn-foot">single-user library · nothing leaves this machine</div>
         </div>
       </div>
       {phase === "welcome" ? (
         <div className="lgn-welcome">
           <div className="lgn-welcome-inner">
-            <div className="lgn-welcome-title">Welcome back{user ? ", " + user : ""}</div>
+            <div className="lgn-welcome-title">
+              {createMode ? "Welcome, " + createUser : "Welcome back" + (user ? ", " + user : "")}
+            </div>
             <div className="lgn-welcome-line">{welcomeLine}</div>
           </div>
         </div>
