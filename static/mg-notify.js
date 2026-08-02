@@ -445,6 +445,14 @@
     '.jt-thumb{flex:none;} .jt-thumb img{width:30px;height:30px;border-radius:5px;object-fit:cover;display:block;}',
     '.jt-x{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:14px;padding:0 2px;flex:none;line-height:1;}',
     '.jt-x:hover{color:var(--red);}',
+    // Force-dismiss: a still-running/queued job the owner wants gone from the tracker
+    // regardless of what PixAI reports. Deliberately a quiet TEXT link, not the bold ×
+    // glyph a finished job gets -- this is a heavier, less routine action (a confirm()
+    // gates it), so it should not read as "the normal way to clear a row."
+    '.jt-forcex{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:9.5px;'
+      +'padding:0 2px;flex:none;align-self:flex-start;text-decoration:underline;'
+      +'text-decoration-color:transparent;white-space:nowrap;}',
+    '.jt-forcex:hover{color:var(--red);text-decoration-color:var(--red);}',
     '.jt-item{cursor:pointer;}',
     // ---- job detail popover: a small secondary card, not a modal -- owner field-report
     // 2026-07-23 (two stuck generations, no way to recover their task id without server
@@ -1293,7 +1301,17 @@
              : '';
       var sub='<div class="jt-sub"><span class="jt-kind">'+esc(kindLabel(j.type))+'</span>'
              +phase+eta+'<span class="jt-when">'+ago(j.ts)+'</span></div>';
-      var x=fin?'<button class="jt-x" data-job="'+esc(j.job_id)+'" title="Dismiss">×</button>':'';
+      // Two different dismiss controls, deliberately not one: a finished job gets the
+      // routine × (no confirm -- clearing a done/failed row is normal housekeeping). A
+      // job still reporting running/queued gets a quieter "stop tracking" text link
+      // instead, gated behind a confirm() -- owner field-report 2026-08-01: a job stuck
+      // 'running' for hours had NO way to clear it at all, because the × was rendered
+      // only for `fin` statuses. The wording in the confirm is deliberate: this stops the
+      // LOCAL tracker only -- it does not cancel the task on PixAI or touch credits.
+      var x=fin
+        ? '<button class="jt-x" data-job="'+esc(j.job_id)+'" title="Dismiss">×</button>'
+        : '<button class="jt-x jt-forcex" data-job="'+esc(j.job_id)+'" data-force="1" '
+          +'title="Stop tracking this job -- does not cancel it on PixAI">Stop tracking</button>';
       var cls=st==='failed'?' st-failed':((st==='done_with_errors'||st==='stale')?' st-warn':'');
       // data-job + tabindex/role: the row itself opens the detail popover (task id, time
       // sent, time spent) on click or Enter/Space -- see the tray's click/keydown listeners
@@ -1519,7 +1537,15 @@
       if(t){
         t.addEventListener('click', function(e){
           var x=e.target.closest?e.target.closest('.jt-x[data-job]'):null;
-          if(x){ dismiss(x.getAttribute('data-job')); return; }
+          if(x){
+            if(x.getAttribute('data-force')==='1' && !confirm(
+              'Stop tracking this job?\n\nThis does NOT cancel it on PixAI or touch your '
+              +'credits -- it only stops your local Job Tracker from watching it. If it '
+              +'was actually still generating, the finished image will still land in '
+              +'your library later; it just will not be tracked here anymore.'
+            )) return;
+            dismiss(x.getAttribute('data-job')); return;
+          }
           var h=e.target.closest?e.target.closest('.jt-hbtn[data-act]'):null;
           if(h){ var a=h.getAttribute('data-act'); if(a==='clear') clearFinished(); else if(a==='close') close(); return; }
           if(e.target.closest && e.target.closest('.jt-thumb')) return;   // let the link navigate
