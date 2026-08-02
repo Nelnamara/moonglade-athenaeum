@@ -10,6 +10,38 @@
    properties, so it re-skins with the app, and it owns its OWN floating preview element,
    which dissolves the gallery's singleton-#model-preview coupling.
 
+   DC conformance pass (2026-08-02): the card anatomy, search input, and grid now follow
+   the "Base model" picker panel spec captured from the design-handoff DC
+   (design_handoff_moonglade_suite/Frontend Gallery.dc.html, panel markup 1226-1262 /
+   builders 2014-2050). What the DC calls the panel SHELL -- scrim, floating container,
+   header title/subtitle/close, dock-offset animation, openers -- belongs to the HOSTS
+   (each of the three mounts already renders its own chrome around this element), so only
+   the regions this component owns were rebuilt:
+     - card: 11px radius, selection = accent border ONLY, transition border-color/transform
+       .2s, no hover rule (DC defines none), tooltip = the row's description.
+     - cover: 1:1 wrapper with the real preview art (the DC's TINT gradients are demo
+       stand-ins for exactly this), literal rgba(12,10,28,.9) behind art-less rows, the
+       "Official" pill top-left, and -- LoRA rows the server confirmed incompatible
+       (compat:'no', annotate_lora_compat) -- the DC's dimmed cover (saturate .3 /
+       brightness .6), .55 card opacity, cursor:not-allowed, "⚠ {arch}" badge bottom-left,
+       and a NO-OP click (DC toggleLora: incompatible arch -> no-op). 'unknown' rows stay
+       clickable and unbadged, same overclaim rule as before.
+     - text block: name 11px/600 ellipsis, meta row = {arch} + {likes} at 9.5px subtext
+       (arch from the row's own base_model/lora_base_model_type/model_type -- never
+       invented), cost line 9.5px overlay0 tabular-nums. The cost line binds REAL data
+       only: LoRA rows get the live weight range from window.MG_LORA (per the selected
+       base's architecture; the DC's literal "0.00-1.50" is its demo range), incompatible
+       rows get "needs {arch}". Base-model rows get NO cost line -- the search payload
+       carries no per-generation rate or free-card eligibility (DC §12 says bind the real
+       rate; there is none in these rows, and a number must never be faked).
+   Deliberately KEPT against the DC (each is a live contract or an owner-mandated fix, all
+   reported in the rebuild notes): the hover preview card + its debounce (pinned by
+   tests/test_web_pick.py source assertions), continuous-scroll pagination (owner report
+   2026-07-24 -- the DC's flat list only holds its 6-8 demo rows), the 250ms debounced
+   SERVER search (the DC filters 6 demo rows client-side; real search is a fetch), the
+   error/no-results lines (the DC "deliberately has nothing" but leaves this an
+   implementer decision), and the opt-in market chrome (frozen host attribute).
+
    Usage:
      <mg-model-picker kind="base"></mg-model-picker>     // kind = "base" | "lora"
    On selection it emits a bubbling CustomEvent('mg-pick', { detail: <model row> }); the
@@ -18,68 +50,46 @@
    addEventListener('mg-pick', ...) since React doesn't wire custom events through JSX props.
 
    D-11: opt-in MULTI-SELECT mode (`<mg-model-picker kind="lora" multi>`), added for the
-   Loom's LoRA picker. Single-value mode (the default, `multi` absent) is UNCHANGED --
-   byte-for-byte the same behavior as before, zero regression risk to the Gallery's mount,
-   which doesn't use this component at all yet. In multi mode:
+   Loom's LoRA picker. Single-value mode (the default, `multi` absent) is UNCHANGED. In
+   multi mode:
      - clicking a card TOGGLES membership (add/remove) instead of replacing a single value.
      - each picked LoRA is resolved via /api/model-version?all=1 (same endpoint the Gallery's
        own toggleLora() and the base-model picker's ?all=1 fetch both use) to fill
        version_id/lora_base_type/trigger_words from the first (latest) release, PLUS a full
-       `versions` array on the entry so a host can offer a per-chip version selector (added
-       2026-07-24 -- previously a plain fetch with no `all` param, silently discarding every
-       release but the latest). The failure/pending cases are handled the same way as before
-       (an unresolved LoRA is marked `failed`, never silently dropped -- see the Gallery's
-       fail-open fix, audit 2026-07-21).
+       `versions` array on the entry so a host can offer a per-chip version selector. The
+       failure/pending cases: an unresolved LoRA is marked `failed`, never silently dropped
+       -- see the Gallery's fail-open fix, audit 2026-07-21.
      - mg-pick's detail becomes { model, selected } (selected=true on add/resolve-update,
        false on remove) instead of the raw row -- a deliberate shape difference gated on
-       the new opt-in attribute, not a change to the existing single-value contract.
+       the opt-in attribute, not a change to the existing single-value contract.
      - `.selected` (getter) returns the current multi-select array.
 
    O12/O13 (Phase 2): opt-in `market` boolean attribute (`<mg-model-picker kind="lora" multi
-   market>`), added for the gallery's LoRA browsing parity. OFF by default -- the Loom's
-   existing kind="lora" multi mount does not set it, so it is byte-for-byte unaffected.
-   When present, renders a Popular/Newest sort toggle + the same 6 category chips
-   (character/style/pose/clothing/background/detail) the gallery's own #model-flyout has
-   for LoRAs, and threads sort=/category= into /api/model-search (the server already
-   honors both -- see moonglade_gallery.py's api_model_search -- only the client-side UI was
-   missing). Independent of `kind`: the HOST decides when market makes sense (the gallery
-   only ever sets it on its LoRA mount, matching its own long-standing "sort/category are a
-   LoRA taxonomy, base models don't get them" design), the same way `show-type` on
-   mg-gallery-picker.js is host-gated rather than baked into a mode.
+   market>`). OFF by default -- the Loom's existing kind="lora" multi mount does not set it,
+   so it is byte-for-byte unaffected. When present, renders the source row, sort, category /
+   model-type chips and Posted-at / Source / License dropdowns, threaded into
+   /api/model-search (the server honors all of them -- see moonglade_gallery.py's
+   api_model_search). Independent of `kind`: the HOST decides when market makes sense.
 
-   picker-parity-round2 (2026-07-24): two follow-ups found on the owner's live test of the
-   above.
-
-   1) LAYOUT: .mg-grid used to be a fixed `max-height:320px`, so a host that gives this
-   element real vertical room (the gallery's #model-flyout, sized to fill most of the
-   viewport) left a large dead area below the grid instead of using it. The element's own
-   default is now `display:flex;flex-direction:column` (was `display:block`) with
-   `.mg-grid{flex:1 1 auto}` and no max-height -- inside an UNconstrained parent (the
-   standalone verification page below, or any future plain mount) this behaves EXACTLY like
-   `display:block` did (a flex column with no assigned height sizes to its content, same as
-   a block), so nothing regresses there; a HOST that actually constrains the element's
-   height (via its own CSS -- see moonglade_gallery.py's `#model-flyout mg-model-picker` and the
-   Loom's `.lv-mpick-body mg-model-picker`) now gets a grid that fills exactly that height
-   and scrolls internally, instead of a second independent 320px cap fighting the host's own
-   scroll container.
-
+   picker-parity-round2 (2026-07-24), still in force:
+   1) LAYOUT: the element defaults to `display:flex;flex-direction:column` with
+   `.mg-grid{flex:1 1 auto}` and no max-height -- inside an UNconstrained parent this
+   behaves exactly like `display:block` did, while a HOST that constrains the element's
+   height (moonglade_gallery.py's `#model-flyout mg-model-picker`, the Loom's
+   `.lv-mpick-body mg-model-picker`) gets a grid that fills that height and scrolls
+   internally.
    2) ARCHITECTURE-AWARE LoRA sort/badge: opt-in `base-type` attribute
    (`<mg-model-picker kind="lora" ... base-type="SDXL_MODEL">`), set/updated by the HOST to
-   the currently-selected base model's resolved `model_type` (both hosts already resolve
-   this today for their own post-selection is_lora_compatible() gate -- this just reuses
-   it). Threaded into /api/model-search as `base_type=`, which soft-sorts + tags results
-   server-side (moonglade_backup.py's annotate_lora_compat -- see that function for the
-   full compatible/unknown/incompatible reasoning); this component's only job is to render
-   the `compat` tag it comes back with as a small badge on the card. No `base-type` set (or
-   kind="base") -> byte-for-byte unaffected, same as `market`'s own opt-in contract.
+   the currently-selected base model's resolved `model_type`. Threaded into
+   /api/model-search as `base_type=`, which soft-sorts + tags results server-side
+   (moonglade_backup.py's annotate_lora_compat); this component renders the `compat` tag it
+   comes back with. No `base-type` set (or kind="base") -> byte-for-byte unaffected.
 
    Continuous scroll (2026-07-24): a scroll listener on .mg-grid fires _loadMore() once the
    viewport nears the bottom, which fetches the SAME search (via _searchUrl, shared with
    _search() so a continuation can never silently drift onto different filters) with the
    last response's `cursor` and APPENDS results instead of replacing them. _hasMore/_cursor
-   reset to false/'' on every fresh _search() (a new query is a new list). Server-side detail
-   in moonglade_gallery.py's api_model_search comment -- has_more had been computed correctly
-   the whole time; nothing here had ever read it or asked for a next page. */
+   reset to false/'' on every fresh _search() (a new query is a new list). */
 (function () {
   'use strict';
   if (window.customElements && customElements.get('mg-model-picker')) return;
@@ -110,18 +120,6 @@
     if (t.indexOf('CHAT') >= 0) return 'Chat';
     return (t.split('_')[0] || 'model').toLowerCase();
   }
-  // picker-parity-round2: render the server's `compat` tag (annotate_lora_compat,
-  // moonglade_backup.py) as a small badge. Hardcoded strings per branch, never the raw
-  // tag value as visible text -- there's nothing untrusted in a same-origin JSON enum, but
-  // matching this file's existing esc()-everything-dynamic discipline costs nothing.
-  // 'unknown' (or no tag at all, i.e. no base selected) renders NOTHING -- see
-  // annotate_lora_compat's own docstring: badging an unresolved architecture as compatible
-  // would overclaim data the server doesn't have.
-  function compatBadge(compat) {
-    if (compat === 'yes') return '<span class="mg-cbadge yes">&#10003; compatible</span>';
-    if (compat === 'no') return '<span class="mg-cbadge no" title="Different base architecture than the selected model &mdash; would fail on submit">&#9888; different arch</span>';
-    return '';
-  }
   function baseLabel(cat) {
     cat = (cat || '').replace(/^uploaded-/, '').replace(/[-_]+/g, ' ').trim();
     if (!cat) return '';
@@ -132,6 +130,21 @@
     if (/pony/i.test(cat)) return 'Pony';
     if (/illustrious/i.test(cat)) return 'Illustrious';
     return cat.replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+  }
+  // The DC card's {arch} slot (SDXL / Flux / Illustrious ...), from whichever REAL field
+  // this row actually carries: REST rows have `base_model` (their `category`), GraphQL
+  // rows have `lora_base_model_type` (a LoRA's base family) or `model_type` (a base
+  // model's own architecture). Never guessed: a row with none of the three -- e.g. a
+  // GraphQL LoRA node with no published version -- renders no arch span at all rather
+  // than a fabricated one. tyShort(type) is a base-kind-only last resort because a LoRA
+  // row's own `type` says "LoRA", which is not an architecture.
+  function archLabel(m, kind) {
+    var b = baseLabel(m.base_model);
+    if (b) return b;
+    var t = m.lora_base_model_type || m.model_type || '';
+    if (t) return tyShort(t);
+    if (kind === 'base' && m.type) return tyShort(m.type);
+    return '';
   }
 
   // ---- one injected <style>, scoped to the element, reading the shared app tokens ----
@@ -145,11 +158,19 @@
        plain/standalone mount. min-height:0 lets it actually SHRINK inside a flex
        ancestor instead of the classic flex content-minimum trap. */
     'mg-model-picker{display:flex;flex-direction:column;min-height:0;font:13px/1.4 system-ui,sans-serif;color:var(--text,#d6d2e2);}',
-    'mg-model-picker .mg-q{width:100%;box-sizing:border-box;background:var(--base,#0c0a1c);',
-    ' border:1px solid var(--surface1,#3a3460);border-radius:8px;padding:7px 9px;color:var(--text,#d6d2e2);font:13px/1.2 system-ui;flex:none;}',
-    'mg-model-picker .mg-q:focus{outline:0;border-color:var(--accent,#b692e6);}',
+    /* DC §5 search input, minus the 165px width (that width belongs to the DC header row,
+       where the input shares a line with title/subtitle/close -- host chrome; inside this
+       full-width element a 165px input would just look broken). Literal rgba background
+       per the DC (it is one of the panel's deliberate non-token hues). */
+    'mg-model-picker .mg-q{width:100%;box-sizing:border-box;background:rgba(12,10,28,.85);',
+    ' border:1px solid var(--surface1,#3a3460);border-radius:8px;padding:6px 9px;color:var(--text,#d6d2e2);',
+    ' font-size:11.5px;font-family:inherit;transition:border-color .2s;flex:none;}',
+    'mg-model-picker .mg-q:focus{outline:none;border-color:var(--accent,#b692e6);}',
+    'mg-model-picker .mg-q::placeholder{color:var(--overlay0,#6a6088);}',
     /* O13 market UI (sort + category), opt-in via the `market` attribute -- same shape as
-       the gallery's own #mkt-sort/#mkt-cats. flex:none -- natural size, never stretched. */
+       the gallery's own #mkt-sort/#mkt-cats. flex:none -- natural size, never stretched.
+       Not part of the DC panel (its shell has search only); kept because `market` is a
+       frozen host-facing attribute with a live consumer (the gallery's both mounts). */
     'mg-model-picker .mg-mktsort{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;flex:none;}',
     'mg-model-picker .mg-mktsort button{min-width:72px;}',
     'mg-model-picker .mg-mktsort button{flex:1;padding:5px 0;font-size:11px;border-radius:6px;background:var(--surface0,#211f3a);',
@@ -161,83 +182,71 @@
     ' color:var(--subtext,#9a93ab);border:1px solid var(--surface1,#3a3460);cursor:pointer;}',
     'mg-model-picker .mg-mktcats button.on{background:var(--accent,#b692e6);color:var(--base,#0c0a1c);',
     ' border-color:var(--accent,#b692e6);font-weight:600;}',
-    /* picker-parity round 3: the SOURCE row (Market / Bookmarked / Mine). Same button-row
-       mechanism as .mg-mktsort so no new UI language is introduced, but deliberately louder --
-       taller, heavier, and it takes the ACCENT fill when active where sort settles for the muted
-       surface fill. Owner asked for these to be "more apparent"; that is the whole difference. */
     'mg-model-picker .mg-mktsrc{display:flex;gap:6px;margin-top:8px;flex:none;}',
     'mg-model-picker .mg-mktsrc button{flex:1;padding:7px 0;font-size:12px;font-weight:600;',
     ' letter-spacing:.02em;border-radius:7px;background:var(--surface0,#211f3a);',
     ' color:var(--subtext,#9a93ab);border:1px solid var(--surface1,#3a3460);cursor:pointer;}',
     'mg-model-picker .mg-mktsrc button.on{background:var(--accent,#b692e6);color:var(--base,#0c0a1c);',
     ' border-color:var(--accent,#b692e6);}',
-    /* Posted-at + License. Dropdowns rather than more chips: neither is a browsing mode you
-       flip between constantly, and three more chip rows would bury the grid. */
     'mg-model-picker .mg-mktsel{display:flex;gap:6px;margin-top:6px;flex:none;}',
     'mg-model-picker .mg-mktsel select{flex:1;min-width:0;background:var(--surface0,#211f3a);',
     ' border:1px solid var(--surface1,#3a3460);border-radius:6px;color:var(--subtext,#9a93ab);',
     ' font:10.5px/1.3 system-ui;padding:4px 6px;cursor:pointer;}',
     'mg-model-picker .mg-mktsel select.on{color:var(--text,#d6d2e2);border-color:var(--accent,#b692e6);}',
-    /* design-final-pass motion vocab: every chip/button/select state change (on/off,
-       hover) settles over .18s on the shared micro curve instead of snapping. One rule,
-       all four control rows -- no per-row drift. */
     'mg-model-picker .mg-mktsort button,mg-model-picker .mg-mktcats button,mg-model-picker .mg-mktsrc button,',
     'mg-model-picker .mg-mktsel select{transition:background .18s cubic-bezier(.2,.9,.24,1),color .18s cubic-bezier(.2,.9,.24,1),border-color .18s cubic-bezier(.2,.9,.24,1);}',
-    /* picker-parity-round2: was a fixed max-height:320px (the O12/O13-round bug -- a tall
-       host left dead space below this fixed cap instead of the grid using it). Now a flex
-       item that fills whatever room the (flex-column) host element above has, with its own
-       internal scroll for overflow -- see the file header comment for the unconstrained-
-       parent fallback behavior. min-height keeps it from ever looking collapsed to nothing
-       while a search is in flight in a very short host.
-       grid-auto-rows:min-content -- found live 2026-07-24 (owner report: thumbnails
-       "squished", grid "no longer scrollable"): giving .mg-grid a REAL, definite height
-       (the flex:1 1 auto above) exposed a second bug riding along with the first fix.
-       .mg-card has overflow:hidden, which per spec makes its OWN automatic minimum size
-       (what grid track sizing falls back to) resolve to 0 instead of its content's real
-       min-content height -- so with a definite container height and no card contributing
-       a height floor, every implicit `auto` row track was stretching/compressing to
-       divide the container's fixed height evenly across however many rows existed (empty-
-       looking 320px cap hid this before: fewer visible rows, less pressure). 24 cards
-       measured live: rows collapsed to ~41px each (image forced to a sliver, cropped by
-       the card's own overflow:hidden -- "squished"), and since the compressed rows always
-       exactly filled the container, scrollHeight never exceeded clientHeight either --
-       "no longer scrollable" was the SAME bug, not a second one. min-content forces each
-       auto row to size off its content's own minimum instead, restoring both real card
-       height and real overflow. Verified live: rows back to ~200px, images a real 1:1
-       square, scrollHeight now correctly exceeds clientHeight with 24+ cards. */
-    'mg-model-picker .mg-grid{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:min-content;gap:7px;margin-top:8px;',
+    /* DC §6 grid: auto-fill columns at a 124px minimum, 11px gap, align-content:start.
+       flex:1 1 auto + overflow:auto + grid-auto-rows:min-content stay from
+       picker-parity-round2 -- the fixed-height "squished rows" bug (owner-verified live
+       2026-07-24) comes straight back without min-content row sizing, and the DC's own
+       align-content:start agrees with it. The DC's 13/15px padding is the floating
+       panel's own inset; each host pads its container, so none is added here. */
+    'mg-model-picker .mg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(124px,1fr));grid-auto-rows:min-content;',
+    ' gap:11px;align-content:start;margin-top:8px;',
     ' flex:1 1 auto;min-height:140px;overflow:auto;transition:opacity .18s cubic-bezier(.2,.9,.24,1);}',
-    /* design-final-pass: cards live in the component band (0-7). z-index 1 at rest, 7 on
-       hover -- the hovered card is the TRIGGER of the floating preview tip, and the
-       tooltip law elevates a showing trigger to the top of its band. Border settles on
-       the .18s micro curve rather than snapping. */
-    'mg-model-picker .mg-card{position:relative;z-index:1;background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);',
-    ' border-radius:8px;overflow:hidden;cursor:pointer;transition:border-color .18s cubic-bezier(.2,.9,.24,1);}',
-    'mg-model-picker .mg-card:hover{border-color:var(--accent,#b692e6);z-index:7;}',
-    'mg-model-picker .mg-card.sel{border-color:var(--accent,#b692e6);box-shadow:0 0 0 1px var(--accent,#b692e6) inset;}',
-    'mg-model-picker .mg-cov{width:100%;aspect-ratio:1/1;object-fit:cover;display:block;background:var(--base,#0c0a1c);}',
-    'mg-model-picker .mg-cov.blur{filter:blur(14px);}',
-    'mg-model-picker .mg-meta{padding:5px 6px;}',
+    /* DC §6 scrollbar: 9px, surface1 thumb at 6px radius, transparent track (global in
+       the DC; scoped to the grid here so a host page's own scrollbars are untouched). */
+    'mg-model-picker .mg-grid::-webkit-scrollbar{width:9px;height:9px;}',
+    'mg-model-picker .mg-grid::-webkit-scrollbar-thumb{background:var(--surface1,#3a3460);border-radius:6px;}',
+    'mg-model-picker .mg-grid::-webkit-scrollbar-track{background:transparent;}',
+    /* DC §7 card: surface0 fill, 11px radius, transition border-color/transform .2s
+       (transform is in the DC's transition list even though it defines no rule that uses
+       it -- replicated, not rationalized). Selection is the ACCENT BORDER ONLY -- no
+       inset ring, no fill, no check -- and the DC defines NO hover rule, so neither does
+       this. The old hover z-index bump existed for the floating preview, which is
+       position:fixed at z 600 and never needed it. */
+    'mg-model-picker .mg-card{position:relative;background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);',
+    ' border-radius:11px;overflow:hidden;cursor:pointer;transition:border-color .2s,transform .2s;}',
+    'mg-model-picker .mg-card.sel{border-color:var(--accent,#b692e6);}',
+    /* DC §7 LoRA incompatible variant (server compat:'no' -- confirmed different
+       architecture, would fail on submit). */
+    'mg-model-picker .mg-card.incompat{cursor:not-allowed;opacity:.55;}',
+    /* DC §7 cover: 1:1, position:relative so the pills can anchor to it. The literal
+       rgba(12,10,28,.9) is the DC's own art-less fallback hue (its TINT gradients are
+       demo stand-ins for the real preview_url art bound here). */
+    'mg-model-picker .mg-cov{position:relative;aspect-ratio:1/1;background:rgba(12,10,28,.9);}',
+    'mg-model-picker .mg-cov img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;}',
+    'mg-model-picker .mg-cov img.blur{filter:blur(14px);}',
+    'mg-model-picker .mg-card.incompat .mg-cov{filter:saturate(.3) brightness(.6);}',
+    /* DC "Official" pill -- literal rgba fills per the spec (one of the DC's deliberate
+       non-token hues), mauve text. */
+    'mg-model-picker .mg-pill{position:absolute;top:5px;left:5px;font-size:8.5px;font-weight:600;padding:2px 5px;',
+    ' border-radius:4px;background:rgba(182,146,230,.26);border:1px solid rgba(182,146,230,.5);color:var(--mauve,#c4a6f0);}',
+    /* DC incompatible badge (LoRA picker only): borderless red chip, bottom-left. */
+    'mg-model-picker .mg-ibadge{position:absolute;bottom:5px;left:5px;font-size:8.5px;font-weight:600;padding:2px 5px;',
+    ' border-radius:4px;background:rgba(243,139,168,.22);color:var(--red,#f38ba8);}',
+    /* DC §7 text block: 7/8/8 padding, 3px column gap; name 11/600 ellipsis; meta row =
+       arch + likes at 9.5px subtext; cost line 9.5px overlay0, tabular numerals. */
+    'mg-model-picker .mg-meta{padding:7px 8px 8px;display:flex;flex-direction:column;gap:3px;}',
     'mg-model-picker .mg-nm{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
-    'mg-model-picker .mg-sub{display:flex;gap:7px;margin-top:2px;font-size:9.5px;color:var(--subtext,#9a93ab);flex-wrap:wrap;}',
-    /* picker-parity-round2: architecture-compat badge (base-type attribute -> server
-       `compat` tag, see the file header comment). 'yes' = confirmed same architecture as
-       the selected base, 'no' = confirmed different (would fail on submit) -- 'unknown'
-       rows get no badge at all (see annotate_lora_compat's docstring: badging an unknown
-       as compatible would overclaim data the app doesn't have). */
-    'mg-model-picker .mg-cbadge{display:inline-block;margin-top:3px;font-size:9px;padding:1px 6px;border-radius:5px;font-weight:600;}',
-    'mg-model-picker .mg-cbadge.yes{background:rgba(148,226,178,.16);color:var(--green,#94e2b2);}',
-    'mg-model-picker .mg-cbadge.no{background:rgba(243,139,168,.16);color:var(--red,#f38ba8);}',
+    'mg-model-picker .mg-sub{display:flex;gap:6px;font-size:9.5px;color:var(--subtext,#9a93ab);}',
+    'mg-model-picker .mg-costline{font-size:9.5px;color:var(--overlay0,#6a6088);font-variant-numeric:tabular-nums;}',
     'mg-model-picker .mg-empty{color:var(--subtext,#9a93ab);font-size:12px;padding:12px 4px;display:none;font-style:italic;flex:none;}',
     /* the floating preview -- fixed so the Loom canvas transform:scale() can't distort it.
-       design-final-pass: respecced to the GLASS surface (gradient pane + blur, 16px
-       radius, violet edge -- spec-literal rgba values) and to the tooltip MOTION law:
-       instead of the old display:none snap it now fades + drifts 4px into place, both
-       directions, .18s on the micro curve. Placement already obeys the tight-grid law
-       (sideways into open canvas, see _place()); the elevated trigger is the hovered
-       .mg-card above. z-index/positioning untouched -- restructuring the fixed element
-       into a child-of-trigger tip would re-open the Loom transform distortion this
-       comment exists to prevent. */
+       NOT in the DC (its cards carry only a title-attr tooltip) but pinned by
+       tests/test_web_pick.py's debounce assertions and still the only surface for the
+       payload's rich fields (description / uses / comments) now the card meta row is
+       DC-shaped. Glass surface + tooltip motion from the design-final-pass, unchanged. */
     'mg-model-picker .mg-preview{position:fixed;z-index:600;width:300px;',
     ' background:linear-gradient(120deg,rgba(24,18,54,.92),rgba(14,11,32,.95));',
     ' backdrop-filter:blur(18px) saturate(1.12);',
@@ -256,9 +265,7 @@
     'mg-model-picker .mp-badges .bdg.official{color:var(--accent,#b692e6);}',
     'mg-model-picker .mp-desc{margin-top:7px;font-size:11px;color:var(--subtext,#9a93ab);line-height:1.45;max-height:88px;overflow:hidden;}',
     // Owner report 2026-07-24: the grid "scrolls about 4 extra rows and then stops -- no
-    // continuous scroll". Root cause was server-side (see api_model_search's own comment) --
-    // has_more was already computed correctly the whole time, nothing client-side ever read
-    // it or asked for a next page. flex:none -- a static line below the (already scrolling)
+    // continuous scroll". flex:none -- a static line below the (already scrolling)
     // grid, not part of its own scroll content, so it never needs repositioning as cards append.
     'mg-model-picker .mg-loadmore{display:none;text-align:center;padding:6px 0 2px;font-size:10.5px;color:var(--subtext,#9a93ab);flex:none;}',
     'mg-model-picker .mg-loadmore.on{display:block;}'
@@ -309,8 +316,9 @@
       this._cursor = '';
       this._hasMore = false;
       this._loadingMore = false;
+      // Placeholder is the DC's own copy ("Search"); aria-label keeps the fuller phrase.
       this.innerHTML =
-        '<input class="mg-q" type="text" placeholder="search models…" aria-label="Search models">' +
+        '<input class="mg-q" type="text" placeholder="Search" aria-label="Search models">' +
         (this._market ? this._marketSkeleton() : '') +
         '<div class="mg-empty"></div>' +
         '<div class="mg-grid" role="listbox"></div>' +
@@ -324,17 +332,11 @@
       var self = this;
       this._input.addEventListener('input', function () { self._q = self._input.value; self._debounce(); });
       // Scroll-triggered "load more": _loadMore() is itself idempotent-guarded
-      // (_loadingMore / !_hasMore), so this needs no separate debounce -- a fast scroll
-      // firing the handler many times in a row just re-checks the same cheap arithmetic
-      // until the guard lets exactly one fetch through.
-      // Owner report 2026-07-24: "still slow and a bit choppy". A native scroll event can
-      // fire many times per animation frame (especially with the DOM growing on every
-      // load-more -- more content, more expensive layout). scrollHeight/scrollTop/
-      // clientHeight are all LAYOUT reads -- doing that arithmetic unthrottled, on every
-      // single event, forces a synchronous layout recalculation each time, which is
-      // exactly what scroll jank is made of. requestAnimationFrame collapses any number
-      // of events within one frame down to a single check, right before the browser
-      // paints that frame anyway -- standard scroll-listener discipline, not a guess.
+      // (_loadingMore / !_hasMore), so this needs no separate debounce. rAF collapses any
+      // number of scroll events within one frame down to a single layout-reading check,
+      // right before the browser paints that frame anyway (owner report 2026-07-24:
+      // "still slow and a bit choppy" -- unthrottled scrollHeight/scrollTop reads force a
+      // synchronous layout per event, which is what scroll jank is made of).
       var scrollRaf = null;
       this._grid.addEventListener('scroll', function () {
         if (scrollRaf) return;
@@ -440,8 +442,8 @@
       this._search();
     }
 
-    // O13: Popular/Newest sort + the gallery's 6 LoRA category chips, same list as
-    // moonglade_gallery.py's #mkt-cats (All is the '' category, not a real server value).
+    // O13: source row + PixAI's four market sorts + category/model-type chips + the
+    // Posted-at / Source / License dropdowns. Every enum token measured off live requests.
     _marketSkeleton() {
       // "Mine" is LoRA-only: you author LoRAs, not base models, and PixAI's own base-model
       // picker offers no equivalent tab either.
@@ -520,12 +522,7 @@
       // keystroke/category click. '' is a legitimate value (base cleared), so this fires
       // even when val is falsy -- unlike 'kind' above, which never goes empty in practice.
       //
-      // the 2026-07-21 audit follow-up: "already on screen" is the whole point, and this used
-      // to search unconditionally. Picking a base model sets base-type on a LoRA picker
-      // that is normally still HIDDEN (both hosts mount base+LoRA together and reveal one),
-      // so the common flow fired a full request and built ~24 cards into a display:none
-      // element nobody had asked to see -- and then the reveal fired the IDENTICAL request
-      // a second time. Defer instead, in both hidden cases:
+      // the 2026-07-21 audit follow-up: a hidden instance defers instead of searching --
       //   never searched -> nothing to refresh; the reveal's ensureSearched() will run the
       //                     first search with the new _baseType already in place.
       //   searched but hidden -> mark _stale so the next reveal re-searches once, rather
@@ -579,10 +576,8 @@
       // A search is a search, whoever asked for it -- browse-on-open, a keystroke, a
       // category chip, a base-type change, or ensureSearched(). Marking the flag HERE
       // rather than at each call site is what stops the flag from drifting out of step
-      // with reality: it previously lived only on the two call sites that knew about it,
-      // so a base-type-triggered search left _searched false and the very next
-      // ensureSearched() re-ran the identical request. _stale clears for the same reason
-      // -- whatever filters this search is carrying, the grid now matches them.
+      // with reality; _stale clears for the same reason -- whatever filters this search
+      // is carrying, the grid now matches them.
       this._searched = true;
       this._stale = false;
       var mine = ++this._seq, self = this;
@@ -634,25 +629,79 @@
       });
     }
 
+    // DC §7's cost line -- REAL data only, per line, or no line at all:
+    //   base rows: NOTHING. The DC shows "~1,600 cr · card" but /api/model-search rows
+    //     carry no per-generation rate and no free-card eligibility; a number here would
+    //     be fabricated. (Real pricing lives with <mg-cost-badge> / /api/price, priced
+    //     against a full submit shape -- a model row alone can't answer it.)
+    //   compatible/unknown LoRA rows: the live weight range for the SELECTED base's
+    //     architecture, from window.MG_LORA (served from core -- DiT 0..1.2, SD -2..2;
+    //     the DC's literal "0.00-1.50" is its demo roster's range, not this account's).
+    //     Pages that don't ship MG_LORA render no line rather than a guessed range.
+    //   incompatible LoRA rows: "needs {arch}" -- the DC's own copy, arch from the row.
+    _costLine(m, incompat, arch) {
+      if (this._kind !== 'lora') return '';
+      if (incompat) return arch ? 'needs ' + arch : '';
+      var L = window.MG_LORA;
+      if (!L) return '';
+      var t = (this._baseType || '').toUpperCase();
+      var r = (L.ranges && L.ranges[t]) || L.fallback;
+      if (!r || r.length < 2 || !isFinite(r[0]) || !isFinite(r[1])) return '';
+      return 'weight ' + Number(r[0]).toFixed(2) + '–' + Number(r[1]).toFixed(2);
+    }
+
     _render(rows, err, append) {
       var g = this._grid, e = this._empty, self = this;
       if (!append) g.innerHTML = '';
+      // Not in the DC (its panel "deliberately has nothing" for both, and leaves adding
+      // one an implementer decision) -- kept: a real network error must say so, and a
+      // no-hit server search reads as broken without a line. Removing either is a
+      // regression, not a conformance.
       if (err) { e.textContent = '⚠ ' + err; e.style.display = 'block'; return; }
       if (!append && !rows.length) { e.textContent = 'No results — try another search.'; e.style.display = 'block'; return; }
       e.style.display = 'none';
       rows.forEach(function (m) {
+        // DC LoRA picker: a row the server CONFIRMED incompatible (compat:'no' -- only
+        // ever present when the host set base-type) is dimmed, badged, not-allowed, and
+        // its click is a NO-OP (DC toggleLora). 'unknown'/absent stays fully live --
+        // badging or blocking an unresolved architecture would overclaim data the server
+        // doesn't have (annotate_lora_compat's own rule).
+        var incompat = m.compat === 'no';
+        var arch = archLabel(m, self._kind);
         var c = document.createElement('div');
-        c.className = 'mg-card' + (self._isSelected(m) ? ' sel' : '');
+        c.className = 'mg-card' + (self._isSelected(m) ? ' sel' : '') + (incompat ? ' incompat' : '');
         c.dataset.mid = m.model_id;      // lets deselect() find this card again
-        var cov = m.preview_url
-          ? '<img class="mg-cov' + (m.should_blur ? ' blur' : '') + '" loading="lazy" src="' + esc(m.preview_url) + '" alt="">'
-          : '<div class="mg-cov"></div>';
-        var uses = m.ref_count ? '<span>◈ ' + fmtCompact(m.ref_count) + '</span>' : '';
+        // DC: the card's title attr is the model's description (its demo `desc`), plus
+        // the incompat sentence. Falls back to the full name -- GraphQL rows have no
+        // description, and an ellipsized name with no way to read it helps nobody.
+        var tip = m.description || m.title || '';
+        if (incompat && arch) tip += (tip ? ' ' : '') + 'Needs a ' + arch + ' base.';
+        if (tip) c.title = tip;
+        // DC cover: real art (the TINT gradients are demo stand-ins for preview_url),
+        // Official pill top-left, incompat badge bottom-left. should_blur kept -- a
+        // viewer-scoped server flag, not a styling choice.
+        var cov = '<div class="mg-cov">' +
+          (m.preview_url ? '<img' + (m.should_blur ? ' class="blur"' : '') + ' loading="lazy" src="' + esc(m.preview_url) + '" alt="">' : '') +
+          (m.official ? '<span class="mg-pill">Official</span>' : '') +
+          (incompat && arch ? '<span class="mg-ibadge">&#9888; ' + esc(arch) + '</span>' : '') +
+          '</div>';
+        // DC meta row: {arch} · {likes}. ref_count no longer rides on the card (the DC
+        // meta row has exactly two spans) -- it still shows on the hover preview.
+        var sub = '<div class="mg-sub">' +
+          (arch ? '<span>' + esc(arch) + '</span>' : '') +
+          '<span>' + fmtCompact(m.liked_count) + ' likes</span></div>';
+        var cost = self._costLine(m, incompat, arch);
         c.innerHTML = cov +
-          '<div class="mg-meta"><div class="mg-nm" title="' + esc(m.title) + '">' + esc(m.title) + '</div>' +
-          '<div class="mg-sub"><span>' + tyShort(m.type) + '</span><span>♥ ' + fmt(m.liked_count) + '</span>' + uses + '</div>' +
-          compatBadge(m.compat) + '</div>';
-        c.addEventListener('click', function () { self._pick(m, c); });
+          '<div class="mg-meta"><div class="mg-nm">' + esc(m.title) + '</div>' + sub +
+          (cost ? '<div class="mg-costline">' + esc(cost) + '</div>' : '') + '</div>';
+        // DC toggleLora order (spec §8): removing an ALREADY-selected LoRA is allowed
+        // even if a base-type switch just made it incompatible -- only a fresh pick on
+        // an incompatible row is a no-op. Without the isSelected escape, a LoRA picked
+        // before the base changed rendered both .sel (accent border) AND click-dead in
+        // the SAME grid render, with no way to remove it from the grid itself (found in
+        // adversarial review; every host's own chip-remove button still worked, so this
+        // was a stranding in the picker's OWN UI, not a hard dead end).
+        if (!incompat || self._isSelected(m)) c.addEventListener('click', function () { self._pick(m, c); });
         // Debounced (D-11): a raw mouseenter re-triggered an instant, un-animated,
         // freshly-repositioned popup on every card the mouse passed over while
         // scanning the grid -- what "browsing" actually is. Same fix as the Gallery's

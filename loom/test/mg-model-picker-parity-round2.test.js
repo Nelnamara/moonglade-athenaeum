@@ -16,8 +16,10 @@ import path from "node:path";
 //
 // Problem 3 (LoRA architecture filtering): a `base-type` opt-in attribute threads the
 // selected base model's model_type into /api/model-search as base_type=, and the component
-// renders the server's `compat` tag (moonglade_backup.py's annotate_lora_compat) as a
-// small badge.
+// renders the server's `compat` tag (moonglade_backup.py's annotate_lora_compat) against
+// the row. Badge shape changed 2026-08-02 (DC conformance pass): only a CONFIRMED
+// incompatible row ('no') is flagged now -- warning badge, dimmed cover, blocked new
+// pick -- 'yes' and 'unknown' both render fully live with no badge at all.
 //
 // static/mg-model-picker.js is a plain global script with no jsdom harness in this runner --
 // source-presence assertions are the established pattern here (see
@@ -49,7 +51,12 @@ describe("Problem 1: .mg-grid fills its host's real height instead of a fixed 32
   });
 
   test(".mg-grid is a flex item that grows to fill available space and keeps its own scroll", () => {
-    assert.match(src, /'mg-model-picker \.mg-grid\{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:min-content;gap:7px;margin-top:8px;',\s*\n\s*' flex:1 1 auto;min-height:140px;overflow:auto;transition:opacity \.12s;\}',/,
+    // Column template updated 2026-08-02 (DC conformance: fixed 1fr-1fr -> the DC's own
+    // auto-fill/minmax card grid, drift item 18's same masonry philosophy applied to a
+    // fixed-size card grid); the .12s transition timing was already stale before that,
+    // superseded by the app-wide .18s motion-vocab pass. The FLEX/SCROLL mechanics this
+    // test protects (flex:1 1 auto, min-height, overflow:auto) are unchanged.
+    assert.match(src, /'mg-model-picker \.mg-grid\{display:grid;grid-template-columns:repeat\(auto-fill,minmax\(124px,1fr\)\);grid-auto-rows:min-content;',\s*\n\s*' gap:11px;align-content:start;margin-top:8px;',\s*\n\s*' flex:1 1 auto;min-height:140px;overflow:auto;transition:opacity \.18s cubic-bezier\(\.2,\.9,\.24,1\);\}',/,
       "the grid must flex-grow to fill the host's real height and remain the one scrolling " +
       "region -- not a second independent scroll container fighting the host's own overflow");
   });
@@ -68,7 +75,7 @@ describe("Problem 1: .mg-grid fills its host's real height instead of a fixed 32
     // The declared style is a JS array of string fragments joined at runtime (some rules
     // span two fragments) -- match loosely across that boundary rather than assuming each
     // selector's whole declaration lives in one JS string literal.
-    assert.match(src, /mg-model-picker \.mg-q\{[\s\S]{0,220}?flex:none;\}/);
+    assert.match(src, /mg-model-picker \.mg-q\{[\s\S]{0,320}?flex:none;\}/);
     assert.match(src, /mg-model-picker \.mg-mktsort\{[\s\S]{0,220}?flex:none;\}/);
     assert.match(src, /mg-model-picker \.mg-mktcats\{[\s\S]{0,220}?flex:none;\}/);
     assert.match(src, /mg-model-picker \.mg-empty\{[\s\S]{0,220}?flex:none;\}/);
@@ -99,17 +106,24 @@ describe("Problem 3: base-type attribute drives architecture-aware LoRA sort/bad
       "no base picked yet must never send base_type=");
   });
 
-  test("the server's compat tag renders as a badge -- 'yes'/'no' visible, 'unknown' renders nothing", () => {
-    assert.match(src, /function compatBadge\(compat\) \{/);
-    assert.match(src, /if \(compat === 'yes'\) return '<span class="mg-cbadge yes">/);
-    assert.match(src, /if \(compat === 'no'\) return '<span class="mg-cbadge no"/);
-    assert.match(src, /return '';\s*\n\s*\}\s*\n\s*function baseLabel/,
-      "'unknown' (or no base selected, i.e. no compat key at all) must render NO badge -- " +
-      "badging an unresolved architecture as compatible would overclaim data the server " +
-      "doesn't have (see annotate_lora_compat's own docstring)");
+  // Superseded 2026-08-02 by the DC (UI Kit v2 / Frontend Gallery) conformance pass:
+  // the old compatBadge() function and its green "yes" / red "no" text badges are GONE
+  // by design -- the DC has no "compatible" badge at all, only a warning treatment for
+  // CONFIRMED incompatible rows. The safety invariant these tests protected is
+  // unchanged and re-asserted below in its new shape: only compat==='no' gets flagged;
+  // 'yes' and 'unknown' (or no base selected) both render identically -- NO badge,
+  // fully live -- so an unresolved architecture is never overclaimed as compatible.
+  test("only a CONFIRMED incompatible row (compat==='no') is flagged -- 'yes'/'unknown' render identically, unflagged", () => {
+    assert.match(src, /var incompat = m\.compat === 'no';/,
+      "'yes' and 'unknown' must fall through to the same unflagged path -- badging an " +
+      "unresolved architecture would overclaim data the server doesn't have (see " +
+      "annotate_lora_compat's own docstring)");
   });
 
-  test("the card template actually calls compatBadge with the row's own compat field", () => {
-    assert.match(src, /compatBadge\(m\.compat\)/);
+  test("a confirmed-incompatible row gets the warning badge, dimmed cover, and a blocked NEW pick", () => {
+    assert.match(src, /incompat && arch \? '<span class="mg-ibadge">&#9888; ' \+ esc\(arch\) \+ '<\/span>' : ''/);
+    assert.match(src, /if \(!incompat \|\| self\._isSelected\(m\)\) c\.addEventListener\('click'/,
+      "a fresh pick on an incompatible row must be blocked, but removing one that was " +
+      "ALREADY selected before the base changed must still work (DC toggleLora order)");
   });
 });
