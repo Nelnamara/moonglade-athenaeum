@@ -177,7 +177,7 @@ class TestSaveKeyEndpoint:
 class TestWizardBannerGating:
     def test_needs_key_banner_when_no_key_configured(self, tmp_path):
         cli = _authed_client(tmp_path)
-        html = cli.get("/").get_data(as_text=True)
+        html = cli.get("/classic").get_data(as_text=True)
         assert 'id="setup-wizard"' in html
         assert "Paste your PixAI API key" in html
         assert "Run your first sync" not in html
@@ -188,7 +188,7 @@ class TestWizardBannerGating:
         cfg = json.loads(cfg_path.read_text())
         cfg["PIXAI_API_KEY"] = "sk-x"
         cfg_path.write_text(json.dumps(cfg))
-        html = cli.get("/").get_data(as_text=True)
+        html = cli.get("/classic").get_data(as_text=True)
         assert "Run your first sync" in html
         assert "Paste your PixAI API key" not in html
 
@@ -199,7 +199,7 @@ class TestWizardBannerGating:
         cfg = json.loads(cfg_path.read_text())
         cfg["PIXAI_API_KEY"] = "sk-x"
         cfg_path.write_text(json.dumps(cfg))
-        html = cli.get("/").get_data(as_text=True)
+        html = cli.get("/classic").get_data(as_text=True)
         assert 'id="setup-wizard"' not in html
 
     def test_no_banner_for_lan_requests_even_with_no_key(self, tmp_path, monkeypatch):
@@ -207,5 +207,5 @@ class TestWizardBannerGating:
         a LAN browser must never be invited to paste a key into someone else's machine."""
         monkeypatch.setattr(core, "_load_config", lambda: {})
         cli = _client(tmp_path)
-        html = cli.get("/", environ_overrides={"REMOTE_ADDR": "192.168.1.50"}).get_data(as_text=True)
+        html = cli.get("/classic", environ_overrides={"REMOTE_ADDR": "192.168.1.50"}).get_data(as_text=True)
         assert 'id="setup-wizard"' not in html

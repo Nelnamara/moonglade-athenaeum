@@ -280,7 +280,7 @@ def test_drawer_offers_hires_as_a_booster_and_not_the_enlarge_method(tmp_path):
     """
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
+    html = login_client(tmp_path).get("/classic").get_data(as_text=True)
     for probe in ('id="gen-hires"', 'id="gen-facefix"', 'id="gen-qtag"'):
         assert probe in html, probe
     # The enlarge method and its dropdown left the drawer with the segment.
@@ -383,7 +383,7 @@ def test_upscale_lives_on_the_image_view_on_both_surfaces(tmp_path):
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli = login_client(tmp_path)
 
-    index = cli.get("/").get_data(as_text=True)
+    index = cli.get("/classic").get_data(as_text=True)
     assert 'id="lb-upscale"' in index and "lbUpscale()" in index
     assert '<mg-upscale-panel id="up-flyout">' in index
     assert "/static/mg-upscale-panel.js" in index
@@ -409,7 +409,7 @@ def test_the_upscale_flyout_never_outlives_the_picture_it_was_opened_for(tmp_pat
     the same class of bug as the filters panel's toggle-used-as-close."""
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
+    html = login_client(tmp_path).get("/classic").get_data(as_text=True)
     for fn in ("function closeLightbox()", "function lbStep(d)"):
         body = html[html.index(fn):]
         body = body[:body.index("\nfunction ", 5)]
@@ -460,7 +460,7 @@ def test_lora_weight_spans_pixais_real_range_on_every_surface(tmp_path):
     root = pathlib.Path(__file__).resolve().parent.parent
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
+    html = login_client(tmp_path).get("/classic").get_data(as_text=True)
     assert 'type="range" step="0.1"' in html
     assert 'step="0.05" min="0" max="2"' not in html, "the old 0..2 spinner survives"
     # The bounds are per ARCHITECTURE, not baked into the markup -- see the range test below.
@@ -534,7 +534,7 @@ def test_lora_weight_bounds_follow_the_base_architecture(tmp_path):
 
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
+    html = login_client(tmp_path).get("/classic").get_data(as_text=True)
     served = json.loads(html.split("window.MG_LORA=", 1)[1].split(";</script>", 1)[0])
     assert served["ranges"]["DIT7B_MODEL"] == [0.0, 1.2]
     assert served["ranges"]["SDXL_MODEL"] == [-2.0, 2.0]
@@ -564,7 +564,7 @@ def test_drawer_no_longer_carries_the_ratio_cap_port(tmp_path):
     """
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
+    html = login_client(tmp_path).get("/classic").get_data(as_text=True)
     for gone in ("var upCeil=", "function upMax(", "function syncUpscale("):
         assert gone not in html, gone + " is still in the generation panel"
 
@@ -578,7 +578,7 @@ def test_drawer_sends_pixais_own_booster_values(tmp_path):
     """
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
+    html = login_client(tmp_path).get("/classic").get_data(as_text=True)
     assert "var MG_HIRES={ratio:1.5, denoise:0.6}" in html, "PixAI's captured values are gone"
     assert "upscale_denoise_steps: boosters.hires ? (+el('gen-steps').value||25) : null" in html,         "denoise steps must mirror the generation's sampling steps, not a constant"
     assert "upscale:upR" in html
@@ -700,7 +700,7 @@ def test_enhance_details_is_gated_on_the_model_declaring_upscale_support(tmp_pat
     """
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
+    html = login_client(tmp_path).get("/classic").get_data(as_text=True)
 
     assert "function gateBooster(" in html, "the booster gate is gone"
     # Wired into the one place capability data is applied, off PixAI's own field.
@@ -722,7 +722,7 @@ def test_booster_gate_does_not_touch_quality_tag_or_face_fix(tmp_path):
     """
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
+    html = login_client(tmp_path).get("/classic").get_data(as_text=True)
     body = html.split("function applyCapabilityGating(")[1].split("function ")[0]
     assert "gateBooster('qtag'" not in body, "Quality Tag gating is an owner decision"
     assert "gateBooster('facefix'" not in body, "Face Fix has no compatibility flag to gate on"

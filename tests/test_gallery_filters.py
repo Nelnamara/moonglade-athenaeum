@@ -287,7 +287,7 @@ def test_source_badges_render(tmp_path):
     (tmp_path / "images").mkdir()
     (tmp_path / "images" / "a.png").write_bytes(b"x")
     (tmp_path / "images" / "b.png").write_bytes(b"x")
-    data = login_client(tmp_path).get("/").data
+    data = login_client(tmp_path).get("/classic").data
     assert b"sbadge gen" in data and b"sbadge loc" in data
 
 
@@ -352,14 +352,14 @@ def test_collection_remove_route_and_ui(tmp_path):
     client = login_client(tmp_path)
 
     # No collection filter -> no remove entry (nothing to remove FROM).
-    assert b"bulkRemoveCollection(this.dataset.coll)" not in client.get("/").data
+    assert b"bulkRemoveCollection(this.dataset.coll)" not in client.get("/classic").data
     # Collection filter active -> the entry is rendered, carrying that collection.
-    page = client.get("/?collection=Moonlit").data
+    page = client.get("/classic?collection=Moonlit").data
     assert b"bulkRemoveCollection(this.dataset.coll)" in page
     assert b'data-coll="Moonlit"' in page
 
     r = client.post("/collection-remove",
-                    data={"media_ids": ["m1"], "name": "Moonlit", "back": "/?collection=Moonlit"})
+                    data={"media_ids": ["m1"], "name": "Moonlit", "back": "/classic?collection=Moonlit"})
     assert r.status_code == 302 and "uncollected=1" in r.headers["Location"]
     by = {x["media_id"]: x for x in load_catalog(db)}
     assert by["m1"]["collections"] == ""      # label gone
@@ -526,10 +526,10 @@ def test_contact_sheet_collection_button_appears_with_active_filter(tmp_path):
 
     # No collection filter -> no contact-sheet-for-collection entry (nothing to sheet FROM,
     # same absence-reasoning as downloadCollection's own button just above it).
-    assert b"contactSheetCollection(this.dataset.coll)" not in client.get("/").data
+    assert b"contactSheetCollection(this.dataset.coll)" not in client.get("/classic").data
 
     # Collection filter active -> the entry is rendered, carrying that collection.
-    page = client.get("/?collection=Moonlit").data
+    page = client.get("/classic?collection=Moonlit").data
     assert b"contactSheetCollection(this.dataset.coll)" in page
     assert b'data-coll="Moonlit"' in page
     # sits beside the ZIP twin, not instead of it
@@ -650,7 +650,7 @@ def test_video_row_renders_and_serves(tmp_path):
     client = login_client(tmp_path)
 
     # grid: shows the play badge and points the thumb at the poster media id
-    idx = client.get("/").data
+    idx = client.get("/classic").data
     assert b"vbadge" in idx
     assert b"/thumbs/POSTER.jpg" in idx
 

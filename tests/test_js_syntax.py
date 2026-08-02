@@ -38,7 +38,7 @@ def _scripts(html):
 
 
 @pytest.mark.skipif(NODE is None, reason="node not installed")
-@pytest.mark.parametrize("path", ["/", "/image/1", "/health", "/duplicates", "/panel", "/login"])
+@pytest.mark.parametrize("path", ["/classic", "/image/1", "/health", "/duplicates", "/panel", "/login"])
 def test_embedded_js_is_valid(client, tmp_path, path):
     html = client.get(path).get_data(as_text=True)
     blocks = _scripts(html)
@@ -230,7 +230,7 @@ def test_no_real_newline_inside_confirm_string(client):
     unconditionally, even with the real bug reintroduced (audit: tests-that-dont-bite,
     2026-07-21). Tightened: pull out each quoted literal from the matched span and
     check each ONE for a real newline, not the span they're formatted across."""
-    html = client.get("/").get_data(as_text=True)
+    html = client.get("/classic").get_data(as_text=True)
     m = re.search(r"confirm\('Delete '.*?\)\)", html, flags=re.S)
     assert m, "confirmBulkDeleteCloud string not found"
     literals = re.findall(r"'((?:[^'\\]|\\.)*)'", m.group(0), flags=re.S)

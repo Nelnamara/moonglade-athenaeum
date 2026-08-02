@@ -6,6 +6,7 @@ import { LibraryBar } from "./components/FiltersPanel.jsx";
 import Grid from "./components/Grid.jsx";
 import Lightbox from "./components/Lightbox.jsx";
 import DetailsView from "./components/DetailsView.jsx";
+import HealthOverlay from "./components/HealthOverlay.jsx";
 import GenerateDrawer from "./components/GenerateDrawer.jsx";
 import PickerHost, { isPickerOpen } from "./components/PickerHost.jsx";
 import "./styles/shell.css";
@@ -124,10 +125,6 @@ export default function App({ boot }) {
   const overlayRef = useRef(null);
   useEffect(() => { overlayRef.current = overlay; });
   const openOverlay = useCallback((key) => {
-    /* TEMP until HealthOverlay mounts: Health keeps its live destination —
-       a dead click on a working dashboard would be a regression. The overlays
-       workstream deletes this branch when the overlay ships. */
-    if (key === "health") { window.location.href = "/health"; return; }
     setOverlay(key);
   }, []);
   // Esc closes the overlay FIRST (capture beats the drawer's own Esc ladder).
@@ -592,12 +589,20 @@ export default function App({ boot }) {
         />
       )}
 
-      {/* OVERLAY MOUNT POINT (overlays workstream): render the overlay host
-          here, e.g. <OverlaysHost overlay={overlay} onClose={() => setOverlay(null)}
-          boot={boot} />. Scrim z 300, card above it (300–500 band); Esc-first
-          is already handled above. `overlay` today: null | 'myart' | 'publish'
-          | 'train' | 'import' | 'contests' | 'folio' ('health' page-navigates
-          until HealthOverlay lands — see openOverlay). */}
+      {/* OVERLAY MOUNT POINT — the six designed nav overlays land here one by
+          one. Health is live (the first); the other five stay `soon`-dimmed in
+          NavSpine until each ports from its DC. Scrim z 300, slab 301 (band per
+          drift §3); Esc-first is handled by the capture listener above. The
+          model/tag/LoRA click-throughs close the overlay and apply the filter
+          through the same applyAdvanced path every filter control uses. */}
+      {overlay === "health" && (
+        <HealthOverlay
+          onClose={() => setOverlay(null)}
+          onModelFilter={(m) => { setOverlay(null); applyAdvanced({ model: m }); }}
+          onTagFilter={(t) => { setOverlay(null); applyAdvanced({ tag: t }); }}
+          onLoraFilter={(l) => { setOverlay(null); applyAdvanced({ lora: l }); }}
+        />
+      )}
 
       {/* the Generate dock host: the wrapper carries the outside-click anchor
           and the open/closing motion classes for the GenerateDock refit; the

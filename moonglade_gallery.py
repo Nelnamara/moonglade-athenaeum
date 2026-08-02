@@ -10979,14 +10979,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                         core.add_or_update_web_user(username, password)
                         _login_clear(ip)
                         _establish_session(username)
-                        return redirect(_safe_next(next_url) or url_for("index"))
+                        return redirect(_safe_next(next_url) or "/")
                 else:
                     username = (request.form.get("username") or "").strip()
                     password = request.form.get("password") or ""
                     if username and core.verify_web_user(username, password):
                         _login_clear(ip)
                         _establish_session(username)
-                        return redirect(_safe_next(next_url) or url_for("index"))
+                        return redirect(_safe_next(next_url) or "/")
                     error = "Invalid username or password."
                     # If THIS failure is the one that tripped the lockout, say so now.
                     # _login_try_acquire reserves the attempt up front and returns None
@@ -11222,6 +11222,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     def health():
         return render_template_string(
             HEALTH_HTML, h=collection_health(out_dir, db_path))
+
+    @app.route("/api/health")
+    def api_health():
+        """The health dashboard's data as JSON -- gap-audit route #10, consumed by the
+        React app's HealthOverlay (the in-app modal that replaces bouncing to the
+        /health page). Same computation, same fields, same LOGIN tier as the page it
+        un-bakes; the page route stays until demolition."""
+        return jsonify(collection_health(out_dir, db_path))
 
     @app.route("/panel")
     def panel():
@@ -11853,7 +11861,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         return render_template_string(
             DUPES_HTML, groups=duplicate_groups(out_dir))
 
-    @app.route("/")
+    # THE FLIP (owner call 2026-08-01: "Can we please just install this new UI").
+    # The redesigned React app owns the front door; the classic page moves to
+    # /classic and survives there ONLY until demolition (Phase 8). The endpoint
+    # keeps its name so every url_for("index") in the classic templates -- Clear
+    # all, Back to gallery, the health page's Import hint -- follows it to
+    # /classic automatically. Post-login lands on "/" (the new UI) explicitly.
+    @app.route("/classic")
     def index():
         q            = request.args.get("q", "")
         model_filter = request.args.get("model", "")
@@ -15167,7 +15181,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Moonglade Athenaeum</title>
 <link rel="icon" href="/branding/favicon.ico">
-<script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>
+<script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + """
 <link rel="stylesheet" href="/next/assets/app.css">
 {# The app's ONE palette + every skin override, AFTER the bundle's stylesheet so
    the tokens win any same-specificity :root collision. Same idiom BASE_HTML and
@@ -15209,6 +15223,10 @@ __UPSCALE_CONST__
 <script type="module" src="/next/assets/app.js"></script>
 </body></html>"""
 
+    # "/" is the FRONT DOOR now (the flip, 2026-08-01); /next stays as a second
+    # path to the same page so bookmarks and pushState URLs from the pilot era
+    # keep working. One endpoint, two paths -- no redirect hop, same tier.
+    @app.route("/")
     @app.route("/next")
     def next_gallery():
         session.setdefault("csrf", secrets.token_hex(16))

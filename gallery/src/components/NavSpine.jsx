@@ -16,11 +16,17 @@ const NAV = [
   { label: "Import", tip: "Bring local files into the catalog — nothing goes to PixAI",
     overlay: "import", soon: true, localOnly: true },
   { label: "Contests", tip: "Live PixAI contests", overlay: "contests", soon: true },
-  // Health has a live fallback destination (/health) until HealthOverlay lands,
-  // wired in App.openOverlay — so it is not `soon`.
+  // The REAL in-app overlay (HealthOverlay.jsx, ported from the Frontend
+  // Gallery DC's ovHealth slab) -- the first of the six designed overlays to
+  // land. Its two page-bounce stand-ins from earlier today are both dead.
   { label: "Health", tip: "Collection health dashboard", overlay: "health" },
   { label: "Panel", tip: "Control Panel — maintenance jobs, scheduler, branding",
     href: "/panel", gear: true },
+  // Transitional, NOT in the DC: one honest door to every surface that hasn't
+  // ported yet (My Art, Publish, Import...), instead of six dead pills or six
+  // silent bounces. Dies with /classic at demolition. Owner-disclosed addition.
+  { label: "Classic", tip: "The old interface — retires when the port completes",
+    href: "/classic" },
   { label: "Log Out", tip: "End this session", logout: true },
 ];
 

@@ -38,7 +38,7 @@ def _run_task_fn(html):
 def test_run_task_unlocks_on_submit_answer_not_on_task_completion(tmp_path):
     """The button must free up the moment fetch() resolves (the server answered the
     submit), not inside Jobs.track's callback (which only fires on a later poll tick)."""
-    html = _authed_client(tmp_path).get("/").get_data(as_text=True)
+    html = _authed_client(tmp_path).get("/classic").get_data(as_text=True)
     fn = _run_task_fn(html)
     assert "Jobs.track(" in fn, "runTask no longer hands polling off to Jobs.track"
     before_track = fn[: fn.index("Jobs.track(")]
@@ -64,7 +64,7 @@ def test_run_task_unlocks_on_submit_answer_not_on_task_completion(tmp_path):
 def test_run_task_gives_each_submission_its_own_result_line(tmp_path):
     """Two submissions in flight at once must not fight over one shared result div --
     each gets its own appended line, and nothing in runTask rewrites the whole strip."""
-    html = _authed_client(tmp_path).get("/").get_data(as_text=True)
+    html = _authed_client(tmp_path).get("/classic").get_data(as_text=True)
     fn = _run_task_fn(html)
     assert "res.appendChild(line)" in fn, (
         "runTask no longer appends a per-submission line -- concurrent tasks would "
@@ -81,7 +81,7 @@ def test_fix_tab_no_boxes_warning_appends_instead_of_overwriting(tmp_path):
     """fix()'s own pre-submit validation (no boxes drawn) used to overwrite el('fix-result')
     directly, bypassing runTask's per-line convention -- a Fix task already rendering from a
     PRIOR submission would be wiped by a second click that forgot to draw a box first."""
-    html = _authed_client(tmp_path).get("/").get_data(as_text=True)
+    html = _authed_client(tmp_path).get("/classic").get_data(as_text=True)
     i = html.index("function fix(){")
     j = html.index("function openEdit(", i)
     fix_fn = html[i:j]
@@ -96,7 +96,7 @@ def test_fix_spend_confirm_still_gates_each_submission(tmp_path):
     real spend gate and not a duplicate of the cost badge beside it (see Gen.fix's own
     comment). Concurrency must never bypass a spend gate -- the confirm still runs before
     every runTask('/api/fix') submission."""
-    html = _authed_client(tmp_path).get("/").get_data(as_text=True)
+    html = _authed_client(tmp_path).get("/classic").get_data(as_text=True)
     i = html.index("function fix()")
     fix_fn = html[i: html.index("function openEdit(", i)]
     assert "window.confirm(" in fix_fn, "the Fix spend confirm is gone"
@@ -108,7 +108,7 @@ def test_generate_edit_fix_all_still_route_through_the_shared_runtask(tmp_path):
     """No-regression: every submitting surface in the drawer must still go through the one
     shared runTask() the fixes above cover -- if any of them grew its own bespoke submit
     path, it would silently lose the concurrency fix (and the spend-gate guarantees) above."""
-    html = _authed_client(tmp_path).get("/").get_data(as_text=True)
+    html = _authed_client(tmp_path).get("/classic").get_data(as_text=True)
     assert "runTask('/api/generate'" in html
     assert "runTask('/api/edit'" in html
     assert "runTask('/api/fix'" in html
