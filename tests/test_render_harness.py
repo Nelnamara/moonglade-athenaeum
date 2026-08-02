@@ -225,6 +225,15 @@ def render_server(tmp_path_factory):
     from PIL import Image
     Image.new("RGB", (900, 600), (120, 90, 180)).save(root / "harness_0.png")
     core.add_or_update_web_user(_USERNAME, _PASSWORD)
+    # This module's tests assume an already-onboarded install (the real gallery, not the
+    # first-run Setup Wizard) -- next_gallery()'s boot payload now computes needs_key from
+    # a fresh config.json read, and this fixture's config would otherwise have none.
+    # test_setup_wizard_onboards_a_genuinely_fresh_install below gets its OWN dedicated
+    # server with no key and an empty catalog, precisely so it can exercise the state this
+    # one is deliberately configured out of.
+    cfg = json.loads(config_path.read_text()) if config_path.exists() else {}
+    cfg["PIXAI_API_KEY"] = "sk-render-harness-fake"
+    config_path.write_text(json.dumps(cfg))
 
     server = make_server("127.0.0.1", 0, create_app(root), threaded=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True,
@@ -1238,5 +1247,193 @@ def test_import_overlay_uploads_real_files_and_updates_the_catalog(logged_in_pag
             offered))
 
 
+# ---------------------------------------------------------------------------
+# 8. Setup Wizard -- a genuinely fresh install, real key save, real needs_key flip,
+#    live sync progress, and the honest failure path
+# ---------------------------------------------------------------------------
+@pytest.fixture()
+def fresh_install_server(tmp_path_factory, monkeypatch):
+    """A genuinely fresh install: empty catalog, no PIXAI_API_KEY -- exactly the state
+    SetupWizard exists for. Its OWN server, separate from the module's shared
+    `render_server` -- that fixture is deliberately configured OUT of this state (see its
+    own comment) so the rest of the module can keep assuming an already-onboarded install;
+    this is the one test that needs the state it was configured out of."""
+    import logging
+    from types import SimpleNamespace
 
+    from werkzeug.serving import make_server
+
+    wz_log = logging.getLogger("werkzeug")
+    wz_level = wz_log.level
+    wz_log.setLevel(logging.ERROR)
+
+    root = tmp_path_factory.mktemp("render-harness-fresh")
+    config_path = root / "config.json"
+    monkeypatch.setenv("MOONGLADE_DISABLE_WATCH", "1")
+    monkeypatch.setattr(core, "_config_path", lambda: config_path)
+    monkeypatch.setattr(core, "_cfg", {})
+    # /api/setup/save-key deliberately does NOT go through core._config_path() (see its
+    # own docstring) -- it derives its path from core.__file__'s directory instead, the
+    # exact mechanism tests/test_setup_wizard.py's own _redirect_config_to() patches.
+    # MISSING THIS ONCE caused a real test to overwrite the checkout's actual config.json
+    # with a fake key, live, 2026-08-02 -- caught immediately by checking the file, but
+    # never again: both path mechanisms this route family can use must be redirected.
+    monkeypatch.setattr(core, "__file__", str(root / "moonglade_backup.py"))
+    save_catalog(root / "catalog.db", [])          # genuinely empty -- no rows at all
+    core.add_or_update_web_user(_USERNAME, _PASSWORD)
+
+    server = make_server("127.0.0.1", 0, create_app(root), threaded=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True,
+                              name="render-harness-fresh-server")
+    thread.start()
+    try:
+        yield SimpleNamespace(base_url="http://127.0.0.1:%d" % server.server_port,
+                              config_path=config_path)
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        wz_log.setLevel(wz_level)
+
+
+def test_setup_wizard_onboards_a_genuinely_fresh_install(
+        fresh_install_server, render_browser, monkeypatch):
+    """SetupWizard.jsx (2026-08-02) is a full-fidelity port of the DC's theatrical 4-phase
+    onboarding -- intro carousel, key entry, sync, ready -- driven by the SAME real
+    endpoints classic's own plainer "paste a key / sync now" banner already used
+    (/api/setup/save-key, /api/panel/run, /api/panel/status, /api/stats). This proves the
+    whole chain against a server that starts in the exact state the wizard exists for:
+    no account key, zero catalog rows.
+
+    The key-save step is real end to end (real POST, real config.json write, mocked only
+    `core.account_info` -- the same substitution tests/test_setup_wizard.py already uses,
+    since this harness has no real PixAI credential to validate against). The sync step
+    cannot be: a real `--sync` subprocess needs a real, working PixAI account, which does
+    not exist here either. Its three endpoints are stubbed with REALISTIC shapes instead
+    (a genuine failure with real-looking traceback lines, then a genuine success with live
+    done/total/new progress and real-shaped final counts) -- proving SetupWizard's own
+    polling/error/retry/reveal logic, which is the part that is actually new here; the
+    backend contract itself is already covered by tests/test_setup_wizard.py and classic's
+    own years of use.
+    """
+    ctx = render_browser.new_context(viewport={"width": DESKTOP["width"], "height": DESKTOP["height"]},
+                                     device_scale_factor=1, base_url=fresh_install_server.base_url)
+    ctx.set_default_timeout(10_000)
+    try:
+        page = ctx.new_page()
+        _login(page)
+        _freeze_motion(page)
+        _settle(page)
+
+        # --- stub the sync-phase endpoints FIRST, before any interaction -- SetupWizard's
+        # own useEffect fires startSync() the INSTANT phase becomes 'sync' (no button click
+        # gates it, matching the DC's single continuous phase machine), so registering these
+        # after clicking Authenticate is too late: a real, unstubbed sync subprocess would
+        # already be underway against this harness's fake key before the stub ever attaches
+        # (caught live -- the first version of this test raced exactly that and timed out
+        # waiting on progress numbers a real, doomed subprocess was never going to produce).
+        # A real subprocess sync needs a real, working PixAI account this harness doesn't
+        # have; page.route persists across the reload below, so one registration covers
+        # both times 'sync' is entered. ---
+        run_calls = []
+
+        def _run(route):
+            run_calls.append(route.request.post_data)
+            if len(run_calls) == 1:
+                # This first call is the auto-trigger fired by the natural key-save ->
+                # 'sync' transition, BEFORE the reload below -- not the run this test
+                # actually observes. A harmless one-shot "busy" error keeps it from ever
+                # starting to poll (startSync() returns on d.error before scheduling the
+                # interval), so it cannot interleave with the sequence asserted on below.
+                route.fulfill(status=200, content_type="application/json",
+                              body=json.dumps({"error": "a job is already running"}))
+                return
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps({"ok": True, "action": "sync", "label": "Sync now"}))
+        page.route("**/api/panel/run", _run)
+
+        status_calls = {"n": 0}
+
+        def _status(route):
+            status_calls["n"] += 1
+            n = status_calls["n"]
+            if n == 1:
+                body = {"status": "running", "rc": None, "lines": [],
+                        "progress": {"done": 3, "total": 40, "new": 3, "pct": 7.5}}
+            elif n == 2:
+                body = {"status": "failed", "rc": 1, "progress": None,
+                        "lines": ["Traceback (most recent call last):",
+                                 "requests.exceptions.ConnectionError", "sync aborted"]}
+            elif n == 3:
+                body = {"status": "running", "rc": None, "lines": [],
+                        "progress": {"done": 12, "total": 40, "new": 12, "pct": 30.0}}
+            else:
+                body = {"status": "done", "rc": 0, "progress": None, "lines": []}
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+        page.route("**/api/panel/status", _status)
+
+        page.route("**/api/stats", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body=json.dumps({"images": 5029, "videos": 41, "collections": 6,
+                            "local_tasks": 4100, "server_tasks": 4100, "coverage_pct": 100.0})))
+
+        # --- intro: real clicks through the real 4-slide carousel, Back really goes back ---
+        assert page.inner_text(".wz-slidehead") == "Welcome to the Athenaeum"
+        for _ in range(3):
+            page.click(".wz-next")
+        assert page.inner_text(".wz-slidehead") == "One composer, every craft"
+        assert page.inner_text(".wz-next") == "Let's set up my key →"
+        page.click(".wz-back")
+        assert page.inner_text(".wz-slidehead") == "Weave shots into a story"
+        page.click(".wz-next")
+        page.click(".wz-next")  # -> phase 'key'
+
+        # --- key: a REAL POST /api/setup/save-key; only account_info is mocked (the same
+        # substitution tests/test_setup_wizard.py uses -- this harness has no real key) ---
+        monkeypatch.setattr(core, "account_info",
+                            lambda session, raise_on_error=False: {"quotaAmount": 777})
+        page.fill(".wz-keyinput", "sk-harness-fake-key")
+        page.click(".wz-authbtn")
+        page.wait_for_selector(".wz-synchead")  # phase flipped to 'sync'
+        cfg = json.loads(fresh_install_server.config_path.read_text())
+        assert cfg["PIXAI_API_KEY"] == "sk-harness-fake-key", (
+            "the real key was not written to config.json by the real route")
+
+        # --- reload proves the flip is real SERVER-SIDE state, not just client memory:
+        # needs_key must now be false, landing directly on 'sync' (skipping intro/key). ---
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_selector(".wz-synchead")
+        boot = page.evaluate("() => window.MG_BOOT")
+        assert boot["needs_key"] is False and boot["catalog_empty"] is True, (
+            "boot payload after the real key save: {!r}".format(boot))
+
+        page.wait_for_function(
+            "() => (document.querySelector('.wz-reveal-v') || {}).textContent === '3 / 40'")
+        page.wait_for_selector(".wz-syncerr")
+        assert "ConnectionError" in page.inner_text(".wz-syncerr"), (
+            "the real subprocess's own traceback lines did not reach the error banner")
+        page.click(".wz-retrybtn")
+        # 3, not 2: call 1 was the harmless pre-reload auto-trigger (never observed), call
+        # 2 was the reload's own natural auto-trigger (the one that just failed above),
+        # call 3 is this explicit retry click.
+        assert len(run_calls) == 3, "clicking Try again did not re-POST /api/panel/run"
+
+        page.wait_for_function(
+            "() => (document.querySelector('.wz-reveal-v') || {}).textContent === '12 / 40'")
+        page.wait_for_selector(".wz-readyhead")
+        assert page.inner_text(".wz-readyhead") == "Welcome home."
+        ready_body = page.inner_text(".wz-readybody")
+        assert "5,029 images" in ready_body and "41 videos" in ready_body and "6 collections" in ready_body, (
+            "the ready phase does not show the real /api/stats numbers: {!r}".format(ready_body))
+
+        with page.expect_navigation(wait_until="domcontentloaded"):
+            page.click(".wz-enterbtn")
+        assert page.url == fresh_install_server.base_url + "/"
+        # The stubbed sync never touched the REAL catalog (still genuinely empty), so
+        # landing back on the wizard -- now needs_key: false for real -- is the honest
+        # outcome, not a test bug. This is the property that actually matters: the key
+        # save from earlier survived the navigation as real server state.
+        boot_after = page.evaluate("() => window.MG_BOOT")
+        assert boot_after["needs_key"] is False
+    finally:
+        ctx.close()
 

@@ -17,6 +17,57 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Setup Wizard — the React front door's own first-run onboarding, ported from the DC's
+  theatrical 4-phase design (intro carousel → key entry → sync → ready), driven by the
+  same real endpoints classic's plainer two-banner version has used for a long time**
+  (`/api/setup/save-key`, `POST /api/panel/run{action:'sync'}` + polling
+  `/api/panel/status`, `/api/stats`) — zero new backend routes. `next_gallery()`'s boot
+  payload gained `needs_key`/`catalog_empty` (the identical computation classic's
+  `index()` has always made — a fresh `config.json` read, not the module-cached
+  `core._cfg`, so a key pasted moments ago takes effect on the very next load); `main.jsx`
+  mounts `SetupWizard` instead of `App` whenever either is true, matching `LoginPage`'s
+  own pattern (App never mounts against a keyless/empty session). Owner's call on seeing
+  it live, unprompted: "a bit more theatric now but still gets the job done quickly."
+  **One disclosed departure, forced by what the real backend actually reports:** the DC's
+  sync phase is 5 fake, individually-timed stages (900ms/1100ms/900ms/800ms/700ms
+  hardcoded) revealing 3 made-up per-media-type numbers one at a time. The real `--sync`
+  job reports one combined done/total/new counter, not a per-type breakdown, and finishes
+  whenever it actually finishes. Shipped instead: one real, continuously live-updating
+  progress bar plus two real reveal chips (synced / new), and the DC's real per-type
+  numbers (images/videos/collections) appear for real on the ready phase from `/api/stats`
+  — relocated to where the app actually has that breakdown, not fabricated to fit a timer.
+  The "get your API key" link uses the DC's own `pixai.art/en/profile/edit/api` verbatim
+  (verified live to be the real, correct destination — `platform.pixai.art`, classic's
+  link, is the developer-docs site and says as much itself: "generate an API key from your
+  profile settings" on pixai.art).
+  New coverage: `tests/test_render_harness.py::test_setup_wizard_onboards_a_genuinely_fresh_install`
+  against a dedicated, genuinely fresh install (empty catalog, no key) — real intro
+  carousel navigation, a real `POST /api/setup/save-key` write (only `core.account_info`
+  mocked, this harness has no real PixAI credential), a real reload proving the
+  server-side `needs_key` flip persists, then the sync phase's live progress/error/retry
+  logic proven against realistic stubbed responses (a real subprocess sync needs a real
+  account this harness doesn't have).
+  **A real, serious mistake caught mid-build, not shipped:** the first version of this
+  test's fixture redirected `core._config_path()` (the mechanism most config-touching
+  code uses) but not `core.__file__` — the SEPARATE mechanism `/api/setup/save-key`
+  specifically derives its path from (see its own docstring). The test's fake key landed
+  in the actual checkout's real `config.json` instead of the fixture's throwaway one,
+  overwriting the real `PIXAI_API_KEY`. Caught immediately by checking the file; the real
+  value could not be recovered (never captured by anything), so the owner had to re-paste
+  their real key. Fixed by redirecting both mechanisms in the fixture (matching
+  `tests/test_setup_wizard.py`'s own `_redirect_config_to()` helper, which already existed
+  for exactly this route and should have been the template from the start). The owner also
+  had three leftover accounts in that same real `config.json` (`AUTH_USERS`) from earlier
+  live-verification passes this session — not part of this mistake, but found while
+  investigating it, and removed at the owner's request. See `docs/DECISIONS.md`'s
+  2026-08-02 entry of the same name for the general lesson.
+  580 loom + 1482 Python tests green; visually confirmed against the owner's real server
+  (read-only — the real install's `config.json` was deliberately not touched again for
+  this verification, so the check was limited to confirming the account-creation
+  bootstrap page renders correctly against the now-empty `AUTH_USERS`, not a full
+  logged-in run-through of the wizard itself, which the render-harness test above
+  already covers in full against an isolated server).
+
 - **Import — ported from classic's real, working `ImportUI` onto the React front
   door.** Confirmed before writing a line of the component: `POST /api/import-local`
   (multipart `files[]` + optional `collection`, localhost-only, no CSRF) has been
