@@ -1,11 +1,11 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
 import "../styles/grid.css";
 
-/* The grid, refit to the Frontend Gallery DC (drift §9): masonry rhythm (every
-   6th card spans 2 rows), SIZE-slider cell sizing via --thumb, reveal-on-hover
-   caption slab with Open/Details chips, metallic source pills, and the full
-   select grammar:
+/* The grid, refit to the Frontend Gallery DC (drift §9) and to LOOM MASONRY v1
+   (design-side spec, grid-algorithm-spec.md / drift §18): SIZE-slider cell
+   sizing via --thumb, reveal-on-hover caption slab with Open/Details chips,
+   metallic source pills, and the full select grammar:
 
      · the 15×15 checkbox ALWAYS single-toggles — no mode needed;
      · shift-click = range from the last pick, ctrl/⌘-click = toggle — both
@@ -27,6 +27,27 @@ import "../styles/grid.css";
    index-local to this page, like the DC. The marquee REPLACES the selection
    (DC semantics) — but only across THIS page's cards; picks made on other
    pages are left alone, because off-page cards can't be hit-tested. */
+/* ---- Loom Masonry v1 (grid-algorithm-spec.md) --------------------------------
+   Every constant here is the spec's, not a guess: 11px gap, 8px auto-rows (so a
+   row step is 19px), display ratio clamped to .62–1.85, and a minimum 4-row span.
+   The point of the whole thing: a card's SHAPE comes from its own image, so
+   `cover` has nothing left to crop. Cropping survives in exactly one place --
+   a true ratio outside the clamp (panoramas, ultra-talls) -- and those anchor
+   high, because faces in this library sit top-of-frame. */
+const GAP = 11;
+const ROW_STEP = 19;          // grid-auto-rows 8px + the 11px gap
+const R_MIN = 0.62, R_MAX = 1.85;
+const FEAT_R_MAX = 1.05;      // a feature slot wants square-ish, not tall
+const FEAT_CADENCE = 9;       // one feature per 9 positions...
+const FEAT_LOOKAHEAD = 12;    // ...chosen from the next 12 images in page order
+
+const trueRatio = (it) => {
+  const w = parseFloat(it.w), h = parseFloat(it.h);
+  return w > 0 && h > 0 ? h / w : 1;   // dimensionless rows (old imports): square
+};
+const clampR = (r, hi) => Math.max(R_MIN, Math.min(hi, r));
+const spanFor = (width, r) => Math.max(4, Math.round((width * r + GAP) / ROW_STEP));
+
 export default function Grid({
   items, total, loading, page, pages, goToPage,
   blur, thumb, selectMode, selected, toggleSelected, openLightbox, onRate,
@@ -45,19 +66,82 @@ export default function Grid({
   // diff against the freshest value without waiting a render.
   const selectedRef = useRef(selected);
   useEffect(() => { selectedRef.current = selected; });
-  // The shift-range anchor is an INDEX into the current page's items -- carrying it
-  // across a page flip would range-add against a stale anchor from the old page.
+
+  /* ---- Loom Masonry v1 layout (grid-algorithm-spec.md) ----
+     Measure the grid's real pixel width so cols/colW match what the browser
+     lays out, then produce `laid` -- the VISUAL-ORDER cell list (feature slots
+     already swapped in) that BOTH the render and the marquee hit-test walk.
+     Everything downstream indexes `laid`, never `items`, so DOM order and the
+     select grammar stay consistent after the feature swaps. */
+  const [gridW, setGridW] = useState(0);
+  // useLayoutEffect + a synchronous first measure: a ResizeObserver's initial
+  // callback is async and was landing AFTER the memo committed with width 0
+  // (cols collapsed to 1, so no feature slots ever appeared). Measuring here,
+  // before paint, seeds the real width; the observer then tracks live resizes.
+  useLayoutEffect(() => {
+    const el = gridRef.current;
+    if (!el) return;
+    const measure = () => setGridW(el.clientWidth);
+    measure();
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(measure);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
+  const laid = useMemo(() => {
+    const tw = thumb || 210;
+    const width = gridW || 0;
+    // Padding is 12px each side (grid.css). cols from the spec's own formula.
+    const inner = Math.max(0, width - 24);
+    const cols = width ? Math.max(1, Math.floor((inner + GAP) / (tw + GAP))) : 1;
+    const colW = width ? (inner - (cols - 1) * GAP) / cols : tw;
+
+    const arr = items.slice();                 // shallow: we only REORDER refs
+    const feature = new Array(arr.length).fill(false);
+    if (cols >= 3) {
+      const offset = ((page % 3) + 2) % FEAT_CADENCE;
+      for (let p = 0; p < arr.length; p++) {
+        if (p % FEAT_CADENCE !== offset) continue;
+        // squarest (min |r-1|) non-video image in the next lookahead window
+        let best = -1, bestScore = Infinity;
+        const end = Math.min(p + FEAT_LOOKAHEAD, arr.length);
+        for (let k = p; k < end; k++) {
+          if (arr[k].is_video) continue;
+          const s = Math.abs(trueRatio(arr[k]) - 1);
+          if (s < bestScore) { bestScore = s; best = k; }
+        }
+        if (best >= 0) {
+          if (best !== p) { const t = arr[p]; arr[p] = arr[best]; arr[best] = t; }
+          feature[p] = true;
+        }
+      }
+    }
+    return arr.map((it, i) => {
+      const feat = feature[i];
+      const w = feat ? (2 * colW + GAP) : colW;
+      const tr = trueRatio(it);
+      const span = spanFor(w, clampR(tr, feat ? FEAT_R_MAX : R_MAX));
+      return { it, feat, colspan: feat ? 2 : 1, span, crop: tr > R_MAX || tr < R_MIN };
+    });
+  }, [items, gridW, thumb, page]);
+
+  // The shift-range anchor is an INDEX into the current page's laid cells --
+  // carrying it across a page flip would range-add against a stale anchor.
   useEffect(() => { lastPickRef.current = null; }, [items]);
 
   const togglePick = (i) => {
     lastPickRef.current = i;
-    toggleSelected(items[i].media_id);
+    toggleSelected(laid[i].it.media_id);
   };
   const rangePick = (i) => {
     const from = lastPickRef.current == null ? i : lastPickRef.current;
     const lo = Math.min(from, i), hi = Math.max(from, i);
     for (let k = lo; k <= hi; k++) {
-      const it = items[k];
+      const it = laid[k] && laid[k].it;
       // add-only across the range, like the DC's Set union
       if (it && !selectedRef.current.has(it.media_id)) toggleSelected(it.media_id);
     }
@@ -88,7 +172,7 @@ export default function Grid({
       Array.prototype.forEach.call(grid.children, (el, i) => {
         const b = el.getBoundingClientRect();
         if (b.right > r.x && b.left < r.x + r.w && b.bottom > r.y && b.top < r.y + r.h) {
-          const it = items[i];
+          const it = laid[i] && laid[i].it;   // DOM order === laid order
           if (it) hits.add(it.media_id);
         }
       });
@@ -108,7 +192,7 @@ export default function Grid({
         window.addEventListener("click", eat, true);
         // Commit: the marquee replaces the selection within this page.
         const cur = selectedRef.current;
-        items.forEach((it) => {
+        laid.forEach(({ it }) => {
           if (hits.has(it.media_id) !== cur.has(it.media_id)) toggleSelected(it.media_id);
         });
       }
@@ -161,7 +245,8 @@ export default function Grid({
         onMouseDown={startMarquee}
         style={thumb ? { "--thumb": thumb + "px" } : undefined}
       >
-        {items.map((it, i) => {
+        {laid.map((cell, i) => {
+          const it = cell.it;
           // While a marquee drags, the band IS the selection (live replace);
           // otherwise the App-owned Set paints.
           const isSel = marqueeHits ? marqueeHits.has(it.media_id) : selected.has(it.media_id);
@@ -174,10 +259,16 @@ export default function Grid({
           return (
             <figure
               key={it.media_id}
+              // Loom Masonry v1: aspect-true row span; a feature spans 2 cols.
+              style={{
+                gridRow: "span " + cell.span,
+                gridColumn: cell.colspan > 1 ? "span " + cell.colspan : undefined,
+              }}
               className={
                 "mgg-card" +
                 (it.is_nsfw ? " nsfw" : "") +
-                (isSel ? " sel" : "")
+                (isSel ? " sel" : "") +
+                (cell.feat ? " feat" : "")
               }
               /* shift held at press = range coming: stop the native text
                  selection before it starts */
@@ -191,7 +282,11 @@ export default function Grid({
                 openLightbox(i);
               }}
             >
-              <img className="mgg-art" loading="lazy" draggable={false} src={it.thumb} alt="" />
+              {/* Only out-of-clamp ratios (panoramas, ultra-talls) crop at all;
+                  anchor them high -- faces in this library's portrait art sit
+                  top-of-frame (grid-algorithm-spec §1). */}
+              <img className="mgg-art" loading="lazy" draggable={false} src={it.thumb} alt=""
+                style={cell.crop ? { objectPosition: "50% 12%" } : undefined} />
               <span className="mgg-top">
                 {/* the checkbox always single-toggles — no mode needed */}
                 <button
