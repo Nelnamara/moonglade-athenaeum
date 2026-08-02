@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import Banner from "./components/Banner.jsx";
 import SeparatorBar from "./components/SeparatorBar.jsx";
-import Strip from "./components/Strip.jsx";
+import { LibraryBar } from "./components/FiltersPanel.jsx";
 import Grid from "./components/Grid.jsx";
 import Lightbox from "./components/Lightbox.jsx";
 import DetailsView from "./components/DetailsView.jsx";
@@ -519,7 +519,7 @@ export default function App({ boot }) {
           onToggleDock={toggleDock}
           onFolio={() => openOverlay("folio")}
           libraryBar={
-            <Strip
+            <LibraryBar
               boot={boot} account={account}
               media={media} setMedia={setMedia}
               perPage={perPage} setPerPage={setPerPage}
