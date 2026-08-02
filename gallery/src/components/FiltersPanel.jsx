@@ -285,18 +285,25 @@ export function LibraryBar({
 }
 
 /* ============================ ART FILTERS PANEL =============================
-   Preserved VERBATIM from this file's previous life (see the header comment).
-   The GenerateDock workstream lifts this into FilterCompare.jsx and deletes it
-   here. */
+   Preserved from this file's previous life (see the header comment) except for
+   place()'s geometry, updated below for the GenerateDock reshell (2026-08-02).
+   Lifting this into its own FilterCompare.jsx is still open; not required for
+   the panel to sit correctly relative to the new dock. */
 
-/* Adaptive side-by-side placement, mirroring classic's placeFilters(). The
-   pilot's drawer only ever docks right (no dock-switching here), so there is
-   only ever a LEFT side to try -- below AF_MIN_SIDE there is no honest
-   side-by-side left (the rail alone is 236px), so it centres over the
-   viewport instead, matching #model-flyout's own documented fallback for
-   docks with no room beside them. Two pictures are worth judging from about
-   380px each: 380*2 + 236 (rail) + 28 (gaps) + 26 (padding) = 1050. */
-const AF_W = 1180, AF_MIN_SIDE = 1050;
+/* Placement, adapted for the GenerateDock reshell (found by adversarial
+   review, 2026-08-02): this used to be adaptive side-by-side against a
+   RIGHT-docked side drawer (try left of it; below AF_MIN_SIDE, centre over
+   the viewport). The dock is bottom-center now, capped at min(1180,
+   100vw-32), so there is no "beside" a horizontally-centered panel -- the
+   old left-side branch was dead code (leftRoom could never reach 1050 on any
+   real viewport) and its vertical anchor (`r.top + 8`, meant to hug a tall
+   side panel's own top) instead hugged the BOTTOM of the screen, since a
+   bottom-anchored dock's top edge sits low -- overlapping the dock's own
+   reel/composer. Now: always centred horizontally (matching what already
+   happened in practice), and anchored ABOVE the dock's top edge with `gap`
+   clearance, clamped on-screen. Two pictures are worth judging from about
+   380px each: 380*2 + 28 (gap) + 26 (padding) = 814; AF_W keeps headroom. */
+const AF_W = 1180;
 
 /* Art filters -- what REPLACED the Enhance surface (owner, 2026-07-29: "Art
    filters replaced enhance. no need to rebuild [enhance]").
@@ -417,15 +424,18 @@ export function ArtFiltersPanel({ open, onClose, drawerRef, onSendToEdit }) {
     if (!f || !d) return;
     const r = d.getBoundingClientRect();
     const vw = window.innerWidth, vh = window.innerHeight, pad = 8, gap = 10;
-    const leftRoom = r.left - gap - pad;
-    let w, x;
-    if (leftRoom >= AF_MIN_SIDE) { w = Math.min(AF_W, leftRoom); x = r.left - gap - w; }
-    else { w = Math.min(AF_W, vw - pad * 2); x = (vw - w) / 2; }
+    const w = Math.min(AF_W, vw - pad * 2);
+    const x = (vw - w) / 2;
     f.style.width = Math.round(w) + "px";
-    f.style.maxHeight = (vh - pad * 2) + "px";
+    // Cap available height to the room actually free ABOVE the dock, not the
+    // whole viewport -- the two-pass measure below must never size the panel
+    // taller than what fits without covering the dock either way.
+    f.style.maxHeight = Math.max(120, r.top - gap - pad) + "px";
     const h = f.offsetHeight;
     f.style.left = Math.round(Math.max(pad, x)) + "px";
-    f.style.top = Math.round(Math.max(pad, Math.min(r.top + 8, vh - h - pad))) + "px";
+    // Bottom edge sits `gap` above the dock's top; clamped so it can never
+    // start above the viewport's own top padding.
+    f.style.top = Math.round(Math.max(pad, r.top - gap - h)) + "px";
   }, [drawerRef]);
 
   useLayoutEffect(() => { if (open) place(); }, [open, place]);

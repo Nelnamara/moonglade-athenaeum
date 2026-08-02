@@ -17,6 +17,28 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **The Generate dock — the centerpiece surface, actually installed.** Reshelled from
+  the pilot's right-side drawer into the designed bottom-center glass dock: the RUNS reel
+  (real jobs from `/api/jobs`, today/yesterday, live thumbnails, free-card/cost tags —
+  no seeded data), the Image/Edit/Video tab strip with History, the peek pill when
+  collapsed with runs live, the three staggered settings slabs (Model & LoRAs / Frame /
+  Tuning) on the Image tab, the composer footer with the real `<mg-cost-badge>` and
+  credits line, and the full measure/motion contract (dock-in/out, expand/collapse,
+  reel sizing tiers) verbatim from the DC. Generation machinery is completely
+  unmodified — submit paths, pricing, polling, the video prefill contract, the
+  never-unmount rule — all traced and confirmed by adversarial review. One gap
+  disclosed rather than faked: job records carry no settings snapshot, so a run's
+  click opens its image today, not a settings reload; the header says so honestly.
+  Verified live end-to-end in a real browser: dock open/close, Edit's Enhance→Open
+  Filters flow, and Video's shared drawer machinery all confirmed working.
+- **Fixed: the Art Filters compare panel could overlap the new dock.** Its placement
+  math was inherited from the old side-drawer (try left of it; else centre) and never
+  adapted — against a bottom-anchored dock, "beside" doesn't exist and the leftover
+  vertical anchor hugged the bottom of the screen, overlapping the dock's own reel and
+  composer instead of sitting cleanly above it. Now always centred horizontally with
+  its available height capped and its bottom edge anchored above the dock's top edge.
+  Caught by the same adversarial review, verified fixed live (Enhance → Open Filters
+  now renders cleanly above the dock, zero overlap).
 - **`<mg-model-picker>` conformed to the DC's "Base model" panel** (owner: *"conform or get
   the fuck out"*) — card anatomy, search field, and grid now match the design's literal
   values (11px radius, accent-border-only selection, no hover rule, Official pill, the

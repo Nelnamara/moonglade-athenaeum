@@ -1,0 +1,451 @@
+/* ============================================================================
+   mgdock — the Generate dock (bottom-center glass), per the design spec
+   extracted from design_handoff_moonglade_suite "Frontend Gallery.dc.html"
+   (dock markup 708–1224) + README dock bullets + drift items 8/22.
+
+   Verbatim style values from the spec's section 2 wherever they apply; the
+   DC's literal fixed hues stay literal (rgba(58,52,96,…) glass rims, the
+   amber #f9d38c note family), everything themed rides var(--*) tokens.
+
+   Motion: mgDockIn .44s cubic-bezier(.2,.9,.24,1) / mgDockOut .36s
+   cubic-bezier(.4,0,.2,1) come from shell.css (identical keyframes, shared);
+   the dock-only keyframes (mgEclipse/mgPop/mgSettle/mgSlab/mgFade) live here.
+
+   Z: component band only — dock 7, expanded scrim 6, model flyout / filters
+   panel keep their existing 305/306 (the 300-band the overlays already own).
+   ========================================================================== */
+
+@keyframes mgEclipse { 0% { transform: translateX(-118%); } 50% { transform: translateX(0); } 100% { transform: translateX(118%); } }
+@keyframes mgPop { 0% { opacity: 0; transform: translate3d(0, 16px, 0) scale(.94); }
+  62% { opacity: 1; transform: translate3d(0, -3px, 0) scale(1.012); }
+  100% { opacity: 1; transform: none; } }
+@keyframes mgSettle { 0% { box-shadow: 0 0 0 0 rgba(182, 146, 230, .5); }
+  100% { box-shadow: 0 0 0 16px rgba(182, 146, 230, 0); } }
+@keyframes mgSlab { from { opacity: 0; transform: translate3d(0, 12px, 0); } to { opacity: 1; transform: none; } }
+@keyframes mgFade { from { opacity: 0; } to { opacity: 1; } }
+
+/* ============================= DOCK SHELL =================================== */
+.mgdock {
+  position: fixed; z-index: 7; left: 50%; bottom: 14px;
+  width: min(1180px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  border-radius: 22px; border: 1px solid rgba(58, 52, 96, .9);
+  background: linear-gradient(180deg, rgba(18, 14, 42, .93) 0%, rgba(10, 8, 24, .97) 100%);
+  box-shadow: 0 34px 90px rgba(0, 0, 0, .72), inset 0 1px 0 rgba(255, 255, 255, .05);
+  backdrop-filter: blur(20px) saturate(1.15);
+  -webkit-backdrop-filter: blur(20px) saturate(1.15);
+  transition: box-shadow .4s ease;
+  visibility: hidden; pointer-events: none;
+}
+/* the HOST's motion classes drive both directions + the 360ms deferred hide */
+.mgx-dock-host.open .mgdock { visibility: visible; pointer-events: auto;
+  animation: mgDockIn .44s cubic-bezier(.2, .9, .24, 1) both; }
+.mgx-dock-host.closing .mgdock { visibility: visible; pointer-events: none;
+  animation: mgDockOut .36s cubic-bezier(.4, 0, .2, 1) both; }
+
+.mgdock-glow { position: absolute; inset: 0; border-radius: 22px; pointer-events: none;
+  background: radial-gradient(130% 80% at 50% 0%, rgba(100, 58, 172, .26) 0%, rgba(10, 8, 24, 0) 68%); }
+
+/* expanded scrim (sibling of the dock; click collapses the settings) */
+.mgdock-scrim { position: fixed; inset: 0; z-index: 6;
+  background: rgba(5, 4, 13, .52); backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: mgFade .35s ease both; }
+
+/* ============================== HEADER ====================================== */
+.mgdock-head { position: relative; display: flex; align-items: center; gap: 11px;
+  padding: 12px 18px 0; flex: none; }
+.mgdock-runslabel { font-size: 10px; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--overlay0); }
+.mgdock-runsnote { font-size: 10.5px; color: var(--subtext); }
+.mgdock-head .sp { flex: 1 1 auto; }
+
+.mgdock-tabs { display: flex; gap: 4px; padding: 3px; border-radius: 10px;
+  background: rgba(12, 10, 28, .7); border: 1px solid var(--surface1); }
+.mgdock-tab { padding: 9px 22px; border-radius: 10px; font-size: 13px; font-weight: 800;
+  letter-spacing: .04em; cursor: pointer; border: 1px solid transparent;
+  transition: color .22s, background .22s; background: transparent;
+  color: rgba(214, 210, 226, .6); font-family: inherit; }
+.mgdock-tab.on {
+  border: 1px solid rgba(255, 255, 255, .3);
+  color: color-mix(in oklab, var(--accent) 26%, #08040f);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .4);
+  background: linear-gradient(100deg,
+    color-mix(in oklab, var(--accent) 50%, #06030d) 0%, var(--accent) 18%,
+    color-mix(in oklab, var(--accent) 22%, #ffffff) 34%, var(--accent) 50%,
+    color-mix(in oklab, var(--accent) 74%, #06030d) 68%, var(--mauve) 84%,
+    color-mix(in oklab, var(--accent) 50%, #06030d) 100%);
+  background-size: 220% 100%;
+  animation: mgMetal 7s ease-in-out infinite;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), inset 0 -3px 5px rgba(40, 20, 70, .45),
+    0 7px 18px rgba(0, 0, 0, .45); }
+
+.mgdock-hist { font-size: 10.5px; font-weight: 600; padding: 4px 10px; border-radius: 8px;
+  cursor: pointer; transition: border-color .2s, color .2s, background .2s;
+  border: 1px solid var(--surface1); background: rgba(33, 31, 58, .6);
+  color: var(--subtext); font-family: inherit; }
+.mgdock-hist.on { border-color: var(--accent); background: rgba(182, 146, 230, .16);
+  color: var(--text); }
+
+.mgdock-x { width: 24px; height: 24px; display: grid; place-items: center;
+  border-radius: 8px; border: 1px solid var(--surface1); background: rgba(33, 31, 58, .6);
+  color: var(--subtext); font-size: 13px; cursor: pointer; padding: 0;
+  transition: border-color .2s, color .2s; font-family: inherit; }
+.mgdock-x:hover { border-color: var(--accent); color: var(--text); }
+
+/* =============================== BODY ======================================= */
+/* safety valve for short windows only — slabs may scroll, the composer never */
+.mgdock-body { position: relative; flex: 0 1 auto; min-height: 0;
+  overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
+
+/* ============================== RUNS REEL =================================== */
+.mgdock-reel { position: relative; flex: none; display: flex; gap: 14px;
+  overflow-x: auto; overflow-y: visible; padding: 11px 18px 7px;
+  align-items: flex-start; flex-wrap: nowrap; }
+.mgdock-reel.wrap { flex-wrap: wrap; }
+.mgdock-reelgrp { display: flex; align-items: stretch; gap: 12px; flex: none; }
+.mgdock-reel.wrap .mgdock-reelgrp { flex-wrap: wrap; }
+
+.mgdock-daydiv { display: flex; flex-direction: column; align-items: center;
+  gap: 4px; flex: none; }
+.mgdock-daydiv i { flex: 1 1 auto; width: 1px;
+  background: linear-gradient(to bottom, rgba(58, 52, 96, 0), rgba(58, 52, 96, .9), rgba(58, 52, 96, 0)); }
+.mgdock-daydiv span { font-size: 9px; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--overlay0);
+  writing-mode: vertical-rl; transform: rotate(180deg); }
+
+.mgdock-run { flex: none; display: flex; flex-direction: column; gap: 6px;
+  animation: mgPop .58s cubic-bezier(.2, 1.06, .3, 1) both; }
+.mgdock-tilelink { display: block; line-height: 0; }
+.mgdock-tile { position: relative; border-radius: 13px; overflow: hidden;
+  border: 1px solid var(--surface1); background: rgba(12, 10, 28, .9);
+  display: grid; place-items: center;
+  transition: border-color .3s, transform .25s cubic-bezier(.2, .9, .24, 1); }
+.mgdock-tile.done { border-color: rgba(182, 146, 230, .42); cursor: pointer; }
+.mgdock-tile.fail { border-color: color-mix(in srgb, var(--red) 45%, transparent); }
+.mgdock-tileimg { position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; }
+.mgdock-tilefail { font-size: 15px; color: var(--red); }
+.mgdock-tilestrip { position: absolute; left: 0; right: 0; bottom: 0;
+  display: flex; align-items: center; gap: 6px; padding: 7px 9px;
+  background: linear-gradient(to top, rgba(5, 4, 13, .82), rgba(5, 4, 13, 0)); }
+.mgdock-tiletrack { flex: 1 1 auto; height: 2px; border-radius: 999px;
+  background: rgba(255, 255, 255, .16); overflow: hidden; }
+.mgdock-tiletrack i { display: block; height: 100%; border-radius: 999px;
+  background: var(--mauve); transition: width .18s linear; }
+.mgdock-tilestrip span { font-size: 9px; color: rgba(214, 210, 226, .85);
+  font-variant-numeric: tabular-nums; }
+.mgdock-tilehint { position: absolute; inset: 0; display: flex; align-items: flex-end;
+  padding: 9px; transition: opacity .22s; opacity: 0; pointer-events: none;
+  background: linear-gradient(to top, rgba(5, 4, 13, .9) 0%, rgba(5, 4, 13, 0) 62%); }
+.mgdock-tilehint.show { opacity: 1; }
+.mgdock-tilehint span { font-size: 10px; font-weight: 600; color: var(--text); }
+
+.mgdock-runcap { display: flex; align-items: baseline; gap: 6px; padding: 0 2px; }
+.mgdock-runtag { font-size: 9.5px; font-weight: 700; color: var(--overlay0);
+  font-variant-numeric: tabular-nums; }
+.mgdock-runcost { font-size: 9.5px; color: var(--overlay0);
+  font-variant-numeric: tabular-nums; }
+.mgdock-runcost.free { color: var(--green, var(--emerald)); }
+
+.mgdock-reelempty { display: flex; align-items: center; gap: 14px; }
+.mgdock-firstrun { width: 108px; border-radius: 12px;
+  border: 1px dashed var(--surface1); display: grid; place-items: center;
+  font-size: 10px; color: var(--overlay0); flex: none; }
+.mgdock-emptycopy { font-size: 11px; line-height: 1.6; color: var(--subtext);
+  max-width: 260px; }
+
+/* the eclipse spinner (peek pill 18px, tiles 24px) */
+.mgdock-eclipse { position: relative; display: block; width: 18px; height: 18px;
+  border-radius: 50%; overflow: hidden; background: var(--accent); flex: none; }
+.mgdock-eclipse.lg { width: 24px; height: 24px;
+  box-shadow: 0 0 20px rgba(182, 146, 230, .55); }
+.mgdock-eclipse > span { position: absolute; inset: 0; border-radius: 50%;
+  background: rgba(10, 8, 24, .96); animation: mgEclipse 2.6s ease-in-out infinite; }
+
+/* ============================ SETTINGS SLABS ================================ */
+.mgdock-slabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px; padding: 4px 18px 8px; align-items: start; }
+.mgdock-slab { display: flex; flex-direction: column; gap: 7px; padding: 10px 12px;
+  border-radius: 14px; background: rgba(12, 10, 28, .6);
+  border: 1px solid rgba(58, 52, 96, .75);
+  animation: mgSlab .42s cubic-bezier(.22, 1, .36, 1) both; }
+
+.mgdock-lbl { font-size: 9.5px; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--overlay0); }
+
+/* model browse row */
+.mgdock-modelrow { display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border-radius: 11px; cursor: pointer; text-align: left; font-family: inherit;
+  transition: border-color .22s, background .22s;
+  border: 1px solid var(--surface1); background: rgba(33, 31, 58, .5); }
+.mgdock-modelrow.empty { border-color: rgba(182, 146, 230, .45); }
+.mgdock-modelthumb { width: 54px; height: 54px; border-radius: 11px; object-fit: cover;
+  flex: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .07); }
+.mgdock-modelthumb.ph { display: block; background: rgba(12, 10, 28, .8);
+  border: 1px dashed var(--surface1); }
+.mgdock-modelname { font-size: 11.5px; font-weight: 600; color: var(--text);
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgdock-modelrow.empty .mgdock-modelname { color: var(--mauve); }
+.mgdock-browse { font-size: 9.5px; color: var(--lavender, var(--accent)); flex: none; }
+.mgdock-modelrow .sp { flex: 1 1 auto; }
+
+.mgdock-presetnote { font-size: 10px; line-height: 1.45; color: var(--emerald);
+  background: rgba(79, 201, 154, .08); border: 1px solid rgba(79, 201, 154, .3);
+  border-radius: 8px; padding: 7px 9px; }
+
+.mgdock-addlora { padding: 6px 10px; border-radius: 9px; font-size: 10.5px;
+  font-weight: 600; cursor: pointer; border: 1px dashed var(--surface1);
+  background: transparent; color: var(--subtext); font-family: inherit;
+  transition: border-color .2s, color .2s; }
+.mgdock-addlora:hover { border-color: var(--accent); color: var(--text); }
+
+.mgdock-refrow { display: flex; align-items: center; gap: 8px; }
+.mgdock-refslot { width: 52px; height: 52px; border-radius: 11px; display: grid;
+  place-items: center; overflow: hidden; cursor: pointer; padding: 0;
+  font-size: 9.5px; color: var(--subtext); font-family: inherit;
+  border: 1px dashed var(--surface1); background: rgba(12, 10, 28, .7); }
+.mgdock-refslot.filled { border: 1px solid var(--accent); }
+.mgdock-refslot img { width: 100%; height: 100%; object-fit: cover; }
+.mgdock-refrow input[type=range] { flex: 1 1 40px; min-width: 40px;
+  accent-color: var(--accent); }
+
+/* ratio glyphs */
+.mgdock-ratios { display: flex; gap: 4px; flex-wrap: wrap; }
+.mgdock-ratio { width: 34px; display: flex; flex-direction: column; align-items: center;
+  gap: 3px; padding: 4px 0 3px; background: none; border: 0; cursor: pointer;
+  font-family: inherit; }
+.mgdock-ratio i { display: block; border-radius: 3px;
+  border: 1px solid var(--surface1); background: transparent;
+  transition: border-color .2s, background .2s,
+    width .28s cubic-bezier(.2, .9, .24, 1), height .28s cubic-bezier(.2, .9, .24, 1); }
+.mgdock-ratio.on i { border-color: var(--accent); background: rgba(182, 146, 230, .24); }
+.mgdock-ratio span { font-size: 8.5px; color: var(--subtext); }
+.mgdock-ratio.on span { color: var(--text); }
+
+/* stops (size / count / duration) */
+.mgdock-stops { display: flex; gap: 5px; }
+.mgdock-stop { flex: 1 1 0; padding: 5px 0; text-align: center; border-radius: 8px;
+  font-size: 10.5px; font-weight: 600; cursor: pointer; font-family: inherit;
+  border: 1px solid var(--surface1); background: transparent; color: var(--subtext);
+  transition: border-color .2s, background .2s, color .2s; }
+.mgdock-stop.on { border-color: var(--accent); background: rgba(182, 146, 230, .16);
+  color: var(--text); }
+
+.mgdock-customrow { display: flex; align-items: center; gap: 6px;
+  font-size: 10.5px; color: var(--subtext); }
+.mgdock-custom { width: 48px; background: rgba(12, 10, 28, .8); color: var(--text);
+  border: 1px solid var(--surface1); border-radius: 8px; padding: 5px 7px;
+  font-size: 10.5px; font-variant-numeric: tabular-nums; font-family: inherit; }
+.mgdock-custom.on { border-color: var(--accent); }
+.mgdock-note-sm { font-size: 9px; color: var(--overlay0); }
+.mgdock-dims { font-size: 10px; color: var(--overlay0);
+  font-variant-numeric: tabular-nums; }
+.mgdock-dims .mauve { color: var(--mauve); }
+
+/* mode bars */
+.mgdock-modebars { display: flex; gap: 5px; }
+.mgdock-modebar { flex: 1 1 0; height: 6px; border-radius: 3px; border: 0;
+  cursor: pointer; padding: 0; background: var(--surface1); transition: background .2s; }
+.mgdock-modebar.on { background: var(--accent); }
+
+.mgdock-sliderrow { display: flex; align-items: center; gap: 8px; }
+.mgdock-sliderrow .mgdock-lbl { flex: none; width: 38px; }
+.mgdock-sliderrow input[type=range] { flex: 1 1 40px; min-width: 40px;
+  accent-color: var(--accent); }
+.mgdock-sliderrow input[type=range]:disabled { opacity: .35; }
+.mgdock-seed { flex: 1 1 auto; min-width: 0; background: rgba(12, 10, 28, .8);
+  border: 1px solid var(--surface1); border-radius: 8px; padding: 5px 8px;
+  font-size: 11px; color: var(--text); font-family: inherit; }
+.mgdock-seed:focus { border-color: var(--accent); outline: none; }
+
+/* booster chips */
+.mgdock-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.mgdock-chip { padding: 5px 10px; border-radius: 8px; font-size: 10.5px;
+  font-weight: 600; cursor: pointer; font-family: inherit;
+  border: 1px solid var(--surface1); background: transparent; color: var(--subtext);
+  transition: border-color .2s, background .2s, color .2s; }
+.mgdock-chip.on { border-color: var(--accent); background: rgba(182, 146, 230, .16);
+  color: var(--text); }
+.mgdock-chip:disabled { opacity: .4; cursor: not-allowed; }
+
+/* switches */
+.mgdock-sw { display: flex; align-items: center; gap: 8px; cursor: pointer;
+  user-select: none; }
+.mgdock-sw input { position: absolute; opacity: 0; width: 0; height: 0; }
+.mgdock-swtrack { position: relative; width: 28px; height: 16px; border-radius: 999px;
+  background: var(--surface1); transition: background .25s; flex: none; }
+.mgdock-sw input:checked + .mgdock-swtrack { background: var(--accent); }
+.mgdock-swtrack i { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px;
+  border-radius: 50%; background: var(--overlay0);
+  transition: transform .25s cubic-bezier(.2, .9, .24, 1), background .25s; }
+.mgdock-sw input:checked + .mgdock-swtrack i { transform: translateX(12px);
+  background: #180f2c; }
+.mgdock-swlab { font-size: 10.5px; color: var(--subtext); }
+.mgdock-sw input:checked ~ .mgdock-swlab { color: var(--text); }
+
+/* amber note bar */
+.mgdock-note { margin: 10px 18px 0; font-size: 10.5px; line-height: 1.5;
+  color: #f9d38c; background: rgba(249, 211, 140, .08);
+  border: 1px solid rgba(249, 211, 140, .32); border-radius: 10px;
+  padding: 8px 11px; animation: mgFade .3s ease both; flex: none; }
+
+.mgdock-results { padding: 6px 18px 8px; }
+
+/* ============================ EDIT TAB WRAP ================================= */
+.mgdock-editwrap { display: flex; flex-direction: column; gap: 8px;
+  padding: 6px 18px 10px; min-height: 0; }
+.mgdock-subtabs { display: flex; gap: 3px; padding: 3px; border-radius: 9px;
+  background: rgba(12, 10, 28, .7); border: 1px solid var(--surface1);
+  align-self: flex-start; }
+.mgdock-seg { flex: 1 1 0; padding: 6px 14px; text-align: center; border-radius: 7px;
+  font-size: 10.5px; font-weight: 700; cursor: pointer; border: 0;
+  font-family: inherit; transition: background .2s, color .2s;
+  background: transparent; color: var(--subtext); }
+.mgdock-seg.on { background: rgba(182, 146, 230, .2); color: var(--text); }
+
+/* the nested EditTab/FixTab bodies keep their gd-* skin; just fit the dock */
+.mgdock .gd-body { padding: 0; }
+.mgdock-enhance { max-width: 460px; }
+.mgdock-openfilters { text-align: center; padding: 10px; border-radius: 10px;
+  font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit;
+  border: 1px solid var(--surface1); background: rgba(182, 146, 230, .14);
+  color: var(--accent); }
+.mgdock-enhancecopy { font-size: 10.5px; line-height: 1.55; color: var(--subtext); }
+
+/* the shared video web component's host */
+.mgdock-videohost { padding: 4px 14px 10px; min-height: 0; overflow-y: auto; }
+
+/* ============================ COMPOSER FOOTER =============================== */
+.mgdock-foot { position: relative; flex: none; display: flex; align-items: flex-end;
+  gap: 11px; padding: 7px 18px 9px; }
+
+/* expand button (38×38 metallic) */
+.mgdock-expand { flex: none; width: 38px; height: 38px; display: grid;
+  place-items: center; border-radius: 11px; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, .3); font-family: inherit;
+  background: linear-gradient(100deg,
+    color-mix(in oklab, var(--accent) 50%, #06030d) 0%, var(--accent) 18%,
+    color-mix(in oklab, var(--accent) 22%, #ffffff) 34%, var(--accent) 50%,
+    color-mix(in oklab, var(--accent) 74%, #06030d) 68%, var(--mauve) 84%,
+    color-mix(in oklab, var(--accent) 50%, #06030d) 100%);
+  background-size: 220% 100%;
+  animation: mgMetal 7s ease-in-out infinite;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), inset 0 -3px 5px rgba(40, 20, 70, .45),
+    0 7px 18px rgba(0, 0, 0, .45);
+  transition: filter .2s; }
+.mgdock-expand:hover { filter: brightness(1.06); }
+.mgdock-caret { font-size: 10px; color: #22143c;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .4);
+  transition: transform .3s cubic-bezier(.2, .9, .24, 1), color .22s; }
+.mgdock-caret.flip { transform: rotate(180deg); }
+
+/* composer */
+.mgdock-composer { flex: 1 1 auto; min-width: 0; padding: 12px 14px;
+  border-radius: 16px; background: rgba(12, 10, 28, .72);
+  transition: border-color .25s, box-shadow .25s;
+  border: 1px solid var(--surface1); }
+.mgdock-composer.focus { border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(182, 146, 230, .13), 0 16px 40px rgba(100, 58, 172, .26); }
+.mgdock-composer-top { display: flex; align-items: center; gap: 9px;
+  padding-bottom: 6px; }
+.mgdock-modelchip { display: flex; align-items: center; gap: 7px;
+  padding: 3px 10px 3px 4px; border-radius: 999px; cursor: pointer;
+  font-family: inherit; min-width: 0;
+  border: 1px solid var(--surface1); background: rgba(33, 31, 58, .6); }
+.mgdock-modelchip.empty { border-color: rgba(182, 146, 230, .45); }
+.mgdock-modelchip img, .mgdock-chipph { width: 26px; height: 26px; border-radius: 50%;
+  object-fit: cover; flex: none; display: block; }
+.mgdock-chipph { background: rgba(12, 10, 28, .8); border: 1px dashed var(--surface1); }
+.mgdock-modelchip span { font-size: 10.5px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 22ch; }
+.mgdock-modelchip.empty span { color: var(--mauve); }
+.mgdock-frames { font-size: 10px; color: var(--overlay0);
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mgdock-composer-top .sp { flex: 1 1 auto; }
+
+.mgdock-prompt { width: 100%; background: transparent; border: none; outline: none;
+  resize: none; overflow-y: auto; color: var(--text); font-family: inherit;
+  font-size: 16px; line-height: 1.5; font-weight: 300; padding: 0;
+  transition: height .28s cubic-bezier(.2, .9, .24, 1); }
+.mgdock-prompt::placeholder { color: var(--overlay0); }
+
+.mgdock-negrow { display: flex; align-items: baseline; gap: 9px;
+  border-top: 1px solid rgba(58, 52, 96, .6); margin-top: 9px; padding-top: 8px; }
+.mgdock-negrow .mgdock-lbl { font-size: 9px; flex: none; }
+.mgdock-neg { flex: 1 1 auto; min-width: 0; background: transparent; border: none;
+  outline: none; resize: none; color: var(--subtext); font-family: inherit;
+  font-size: 12.5px; line-height: 1.5; padding: 0; }
+.mgdock-neg::placeholder { color: var(--overlay0); }
+.mgdock-neg:disabled { opacity: .45; }
+
+/* cost + generate column */
+.mgdock-gocol { flex: none; display: flex; flex-direction: column;
+  align-items: flex-end; gap: 8px; padding-bottom: 2px; max-width: 240px; }
+.mgdock-gocol .gd-cost { min-height: 20px; text-align: right; }
+.mgdock-subline { font-size: 9.5px; color: var(--overlay0);
+  font-variant-numeric: tabular-nums; }
+
+.mgdock-gen { position: relative; overflow: hidden; flex: none;
+  padding: 13px 26px; border-radius: 12px; font-size: 13px; font-weight: 800;
+  letter-spacing: .02em; cursor: pointer; font-family: inherit;
+  border: 1px solid rgba(255, 255, 255, .34);
+  color: color-mix(in oklab, var(--accent) 26%, #08040f);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .45);
+  background: linear-gradient(100deg,
+    color-mix(in oklab, var(--accent) 50%, #06030d) 0%, var(--accent) 18%,
+    color-mix(in oklab, var(--accent) 22%, #ffffff) 34%, var(--accent) 50%,
+    color-mix(in oklab, var(--accent) 74%, #06030d) 68%, var(--mauve) 84%,
+    color-mix(in oklab, var(--accent) 50%, #06030d) 100%);
+  background-size: 220% 100%;
+  animation: mgMetal 7s ease-in-out infinite;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), inset 0 -2px 4px rgba(40, 20, 70, .55),
+    0 10px 26px rgba(0, 0, 0, .5);
+  transition: transform .2s cubic-bezier(.2, .9, .24, 1), box-shadow .25s, filter .25s; }
+.mgdock-gen.off, .mgdock-gen:disabled { cursor: not-allowed;
+  border: 1px solid var(--surface1);
+  background: linear-gradient(180deg, rgba(46, 42, 74, .9) 0%, rgba(26, 23, 45, .95) 100%);
+  animation: none; color: var(--overlay0); text-shadow: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06); }
+
+/* ============================== PEEK PILL =================================== */
+.mgdock-peek { position: fixed; z-index: 7; right: 18px; bottom: 18px;
+  display: flex; align-items: center; gap: 9px; padding: 11px 18px;
+  border-radius: 999px; cursor: pointer; border: 1px solid var(--accent);
+  background: linear-gradient(120deg, rgba(24, 18, 54, .96) 0%, rgba(14, 11, 32, .96) 100%);
+  color: var(--text);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, .6), 0 0 26px rgba(182, 146, 230, .26);
+  animation: mgPop .5s cubic-bezier(.2, 1.06, .3, 1) both; }
+.mgdock-peektxt { font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+/* never visible while the dock itself is up (incl. the closing window) */
+.mgx-dock-host.open .mgdock-peek, .mgx-dock-host.closing .mgdock-peek { display: none; }
+
+/* ====================== MODEL/LoRA FLYOUT REPOSITION ========================
+   The existing mg-model-picker mount (ModelFlyout's .mfly, styles.css: fixed,
+   right of the old side drawer) re-anchors as the dock's bottom-center
+   palette (DC paletteStyle). Scoped under the dock host so the rule can't
+   leak; z stays in the 300 band it already owned. */
+.mgx-dock-host .mfly { top: auto; right: auto; left: 50%; bottom: 250px;
+  transform: translateX(-50%);
+  width: min(720px, calc(100vw - 48px)); max-height: 46vh;
+  flex-direction: column; min-height: 0;
+  border-radius: 16px; border: 1px solid var(--surface1);
+  background: linear-gradient(180deg, rgba(18, 14, 42, .97) 0%, rgba(10, 8, 24, .98) 100%);
+  box-shadow: 0 34px 96px rgba(0, 0, 0, .72); overflow: hidden;
+  padding: 10px 12px 12px;
+  animation: mgSlab .42s cubic-bezier(.2, .9, .24, 1) both;
+  transition: bottom .45s cubic-bezier(.2, .9, .24, 1); }
+.mgx-dock-host:has(.mgdock.expanded) .mfly { bottom: 470px; }
+
+/* ============================ reduced motion ================================ */
+@media (prefers-reduced-motion: reduce) {
+  .mgdock, .mgdock-run, .mgdock-slab, .mgdock-peek, .mgdock-tab.on,
+  .mgdock-expand, .mgdock-gen, .mgdock-eclipse > span { animation: none; }
+  .mgx-dock-host.open .mgdock, .mgx-dock-host.closing .mgdock { animation: none; }
+}
+
+/* narrow viewports: the three slabs stack */
+@media (max-width: 860px) {
+  .mgdock-slabs { grid-template-columns: 1fr; }
+}
