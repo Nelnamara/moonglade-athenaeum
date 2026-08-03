@@ -29,7 +29,7 @@ reader could work it out from the code, it does not belong here.
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 144
+- [Decisions](#decisions) &mdash; 145
 
 ---
 
@@ -1337,6 +1337,46 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 ## Decisions
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
+
+### Loom Mobile increment 2 shipped: Shot Detail, Cast sheet, Frame picker — built by reusing the Loom's existing shared components rather than reimplementing them, and a review that tried to skip its own test run got caught and re-run properly  ·  *2026-08-03*
+
+Shot Detail (mobile Deep Focus), the Cast & assets sheet, and the Frame picker, built on
+top of increment 1's toggle/board/reel. The one architectural choice worth naming: rather
+than porting the locked design's own bespoke widgets, the build reused three of the Loom's
+existing real, shared components as-is — `FrameSlot` for the opening/closing frame (gets
+the real `@imageN` tagging, upload, and gallery-pick machinery for free), the one real
+`<mg-gallery-picker>` already mounted in `App()` for the Frame picker (instead of the
+design's fictional `GALLERY_POOL` mock grid), and the literal same `copyShot`/clipboard
+call desktop's own "Copy shot" button uses. `[[feedback-reuse-existing-ui-mechanisms]]`
+applies directly here, and mattered concretely: the design's Frame picker grid was fake
+data with no real backing, so porting it verbatim would have shipped a picker that doesn't
+actually pick from the real library.
+
+Five other deviations from the locked design were disclosed and independently verified
+against the actual `.dc.html` (not just trusted): the design mocks a 4th "paused" persisted
+status the real data model never had (matched `LoomV2`'s real 3-state cycle instead), a
+hardcoded "of 4 slots" budget copy that would show a wrong number on a real FLF shot
+(real `refBudget()`/mode-aware logic used instead), a different mode-chip order, no
+"Select in Generate →" button (Generate doesn't exist on mobile yet), and no per-row cast
+picture affordance — the last one matches the design exactly, so it's not a build gap, but
+worth flagging: a freshly-added blank cast member currently has no mobile path to get a
+picture at all.
+
+**A process failure worth recording plainly.** The first review pass for this increment
+did real work (28 tool calls) but ended by returning "Waiting for the pytest background
+run to complete before finalizing the report" — it had backgrounded the test run and then
+submitted a stub instead of actually waiting for it, meaning nothing was actually verified
+despite the tool-call activity. Caught by reading the raw journal rather than trusting the
+summary text at face value, and re-run with an explicit instruction to run every command in
+the foreground and never submit a status update in place of real findings — the re-run
+came back with genuine, traceable findings (or lack thereof) the first attempt never
+reached.
+
+**Why record the process failure here, not just quietly re-run it.** This project's own
+standing rule is "verify before asserting" — a review agent that submits an in-progress
+status as if it were a finished verification is the exact failure mode that rule exists to
+catch, and it's worth a future session knowing this shape of failure is possible from a
+review step, not just from a build step.
 
 ### Loom Mobile increment 1 shipped: a real toolbar toggle, sharing the Loom's existing live data layer directly — and a standing wrong claim about the Loom needing new backend work is retracted  ·  *2026-08-03*
 
