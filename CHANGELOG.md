@@ -17,6 +17,46 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Mobile pass, first surface: Login Mobile + real PWA installability.** The React app is
+  installable now — a fresh, real `manifest.json` (correct `start_url:"/"`, this app's actual
+  theme color, not copied verbatim from either the classic app's live manifest or the design
+  bundle's demo one) plus the real 180/192/512 icon PNGs, wired identically into both app
+  shells (`NEXT_PAGE` and `LOGIN_PAGE` in `moonglade_gallery.py`, and the Vite dev entry). No
+  service worker, no offline caching — the owner called full offline support "overkill for
+  this app," so this is installability only (Add to Home Screen, standalone look), matching
+  exactly what any of the 7 mobile designs actually show.
+  A new `useIsMobile()` hook (`gallery/src/hooks/useIsMobile.js`, matching the one existing
+  hook's established convention) does a real reactive `matchMedia` check around ~430px — not
+  a one-shot width read — and `main.jsx` now renders a genuinely native `LoginPageMobile.jsx`
+  (built directly against `Login Mobile.dc.html`: mascot peek/bob, blurred "Welcome back"
+  transition, live password-strength checklist) below that breakpoint, `LoginPage.jsx`
+  unchanged above it. All error copy is reused verbatim from the shipped desktop page via a
+  new `useLogin.js` hook — a mechanical, disclosed duplication of `LoginPage.jsx`'s own
+  logic (not shared yet; nothing enforces the two stay in sync if one changes later, a real
+  but deliberate trade-off for this first surface). Three demo-only QA preview chips in the
+  design (expired/locked-out/remote-bootstrap error-state previews, meant for reviewing the
+  mockup, not for shipping) were deliberately excluded, documented inline.
+  Because this is the first mobile surface, it also doubled as the foundation-risk check for
+  everything after it: a dedicated review independently re-read every changed file (not just
+  the build report) specifically hunting for the one failure mode this app has hit for real
+  before — the unauthenticated `LOGIN_PAGE` shell accidentally inheriting something that
+  breaks it (a past incident had it 401/302-loop trying to load authenticated-only scripts).
+  Confirmed clean: the only additions to either shell are six static `<link>`/`<meta>` tags,
+  zero new `<script>` tags, and `/next/assets/` was already public before this change. Full
+  suite green (1539 passed) after a dev-server restart to pick up the template changes;
+  live-verified in a real browser at the design's actual 390×844 breakpoint (confirmed via
+  DOM inspection, not just a screenshot, after the first verification attempt — the real
+  Chrome window's resize tool turned out not to actually shrink the viewport, which would
+  have made a screenshot alone a false negative) — desktop login and the authenticated
+  gallery both confirmed unaffected at their normal width.
+  Two real design questions surfaced during scoping and relayed back for Claude Design to
+  resolve (`design_handoff/request-mobile-corrections.md`, on the owner's Desktop): the mobile
+  PWA manifest's `orientation:"portrait"` lock contradicts the Loom's own in-app "rotate to
+  landscape" instruction, and all 7 mobile designs are tap-only with no swipe gestures
+  anywhere despite several natural spots for them (closing the Lightbox, dismissing a bottom
+  sheet, the Setup Wizard's intro carousel) — worth an explicit confirm rather than an
+  engineering guess either way. Setup Wizard Mobile is next.
+
 - **Folio of Honors ships in the React front door.** Real `/api/achievements` data (57
   achievements, real points/tiers/earn-dates/ladders/skins) renders in a new
   `FolioOverlay.jsx`: Summary/All/Statistics tabs, the 10 Evolution Ladder tracks, Milestones,

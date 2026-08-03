@@ -29,7 +29,7 @@ reader could work it out from the code, it does not belong here.
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 132
+- [Decisions](#decisions) &mdash; 134
 
 ---
 
@@ -1337,6 +1337,75 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 ## Decisions
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
+
+### Mobile pass scope: installability-only PWA, tablet stays on the desktop layout, architecture is a shared hook per surface  ·  *2026-08-02*
+
+Three owner decisions locked in before any mobile surface was built. **PWA scope is
+installability-only** — manifest.json + icons + "Add to Home Screen", no service worker, no
+offline caching. Owner's own words: full offline support is "overkill for this app." This
+matters because none of the 7 mobile designs actually show a service worker or offline
+behavior either — the README calls the suite "PWA-ready" but that claim was already scoped to
+installability metadata only, this decision just makes it explicit and closes the question
+rather than leaving "should we build real offline support" open indefinitely.
+**Tablets/larger screens use the existing desktop layout**, not a scaled-down mobile one — no
+tablet design exists in the handoff (all 7 mobile files prove out exactly one 390×844 fixed
+viewport), so this avoids inventing a tablet layout nobody designed.
+**Architecture: a shared data/logic hook per surface, with separate desktop and mobile
+presentation components reading from it**, chosen over three alternatives (pure responsive
+CSS on the existing desktop components; fully separate mobile-only components/routes
+mirroring the design handoff's one-file-per-page structure; deferring all 7 surfaces and
+shipping installability only). A 9-agent survey reading all 7 mobile designs in full found the
+same pattern in every one: mobile isn't a reflowed desktop layout, it's a different navigation
+idiom (bottom tabs + hamburger bottom-sheet + full-screen push/pop stack vs. desktop's
+floating dock + top nav + in-place overlays) wrapped around mostly the SAME underlying data —
+5 of 7 surfaces confirmed identical field shapes/API needs to their shipped desktop
+counterparts. Pure CSS breakpoints don't cover incompatible nav models; fully separate
+components risk desktop/mobile logic silently drifting apart with no data-flow bug fixed in
+only one place. The shared-hook approach avoids both failure modes at the cost of an upfront
+logic/presentation split per surface — paid once per surface, not accumulated as drift risk
+forever.
+
+**Why.** Recorded so a future session doesn't re-litigate any of these three from scratch —
+the survey's full reasoning (with the other three options' real pros/cons) is preserved in
+this session's transcript and in [[moonglade-handoff-package]] memory, not restated here per
+this file's own no-derivable-detail rule. The concrete first build against this architecture
+(Login Mobile) is the entry immediately below.
+
+### Login Mobile ships as the mobile pass's first surface and foundation-risk check  ·  *2026-08-02*
+
+Built `LoginPageMobile.jsx` + a real `useIsMobile()` matchMedia hook + a mechanically
+extracted `useLogin.js` (desktop `LoginPage.jsx` untouched, byte-for-byte) as the first mobile
+surface, chosen specifically because it has no nav-shell dependency and was the cleanest proof
+of the shared-hook architecture decided above. Real PWA installability (manifest.json + 3
+icon sizes) was wired into the app shell as part of the same pass, since it had to happen
+somewhere and Login is the app's actual entry point. A dedicated review — independently
+re-reading every changed file rather than trusting the build report — specifically hunted for
+the one failure mode this exact pair of files (`NEXT_PAGE`/`LOGIN_PAGE` in
+`moonglade_gallery.py`) has caused for real before (see "An unauthenticated React page needs
+its OWN shell" above): confirmed the only additions to either shell are six static
+`<link>`/`<meta>` tags, zero new `<script>` tags, and `/next/assets/` was already public
+before this change — the failure mode does not reproduce here.
+**A real live-verification false negative, caught before it was trusted:** the first
+mobile-viewport check used the owner's real Chrome (per the established preference for
+Moonglade UI verification) and its resize tool reported success, but the page's actual
+`window.innerWidth` never changed — a screenshot at that "resized" state would have shown
+ordinary desktop rendering and could easily have been misread as "the mobile breakpoint isn't
+working." Caught by cross-checking the reported viewport dimensions against what was actually
+requested before trusting the screenshot, then switching to the sandboxed preview browser
+(safe for this specific check since the pre-auth login page has no real account data to
+diverge on) to get a real 390×844 viewport and confirm via direct DOM inspection
+(`document.querySelector('[class*="lgnm-"]')`) that the mobile component was genuinely
+mounting, not just assumed from a screenshot.
+
+**Why.** The false-negative near-miss is the reusable lesson: **a browser resize tool
+reporting success is not proof the page's viewport actually changed** — check the real
+reported dimensions (or query `window.innerWidth` directly) before trusting any screenshot
+taken after a resize call, especially across different browser-automation surfaces (the real
+Chrome extension and the sandboxed preview browser behaved differently here for reasons that
+were never fully diagnosed). This is the same category of lesson as
+[[feedback-visual-verification]] (getComputedStyle can lie, escalate to a real check) — one
+level earlier in the pipeline: the viewport itself can silently fail to resize before any CSS
+is even evaluated.
 
 ### A build task touching a surface with a real, already-shipped counterpart must name that counterpart, not just hand over the design file  ·  *2026-08-02*
 
