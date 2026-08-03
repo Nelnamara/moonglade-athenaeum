@@ -17,8 +17,27 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
-- **Mobile pass, surface 3 (part 4): Create tab, Edit mode — Fixer stays honest, Enhance
-  stays dead.** Edit's Edit Pro/Reference Pro sub-mode is now real: prompt, model choice,
+- **Mobile pass, surface 3 (part 5): Create tab, Advanced screen — the Create tab is now
+  functionally complete.** A new shared `MobileScreen.jsx` primitive (full-screen push chrome
+  — back chevron, slide-in, scrollable body) is the second reusable mobile overlay pattern
+  alongside `MobileSheet.jsx`'s bottom sheet; no full-screen-push convention existed anywhere
+  in this codebase's mobile surfaces before this. Image's Advanced screen (LoRA weight
+  sliders, size stops + custom W×H, count, generation mode, steps/CFG/seed, the three
+  boosters, negative prompt) and Edit's (resolution/quality/aspect, correctly reshaping
+  between Edit Pro's and Reference Pro's different option sets) both read and write the exact
+  same lifted state the main composer and the real cost quote already use — verified live with
+  a genuine round-trip (changed the frame size inside Advanced, confirmed the change appeared
+  back on the main screen after closing Advanced, not just inside the screen itself).
+  Two small, disclosed corrections to the design's literal copy, not silent departures: Count
+  uses the real `[1,2,3,4]` stops the backend actually clamps to, not the mockup's `1/2/4/6`
+  (which would let you tap "6" and silently get 4 — a worse experience than not showing the
+  option at all); and Edit's "⚙ Advanced" summary row drops the word "negative" from its
+  copy — `editCore.js` genuinely has no negative-prompt field anywhere in Edit's state or
+  wire payload, so that word was leftover phrasing carried over from Image mode's own summary
+  text, not a real deferred field worth promising.
+  Video mode needs no Advanced screen at all — confirmed the shared generate-drawer element
+  builds its own camera/quality/channel controls entirely inside itself, so there was no
+  reachable dead tap to fix. Full suite green. Edit's Edit Pro/Reference Pro sub-mode is now real: prompt, model choice,
   source + multi-reference picker, a real `/api/price` quote, and real submit — all through
   a new `useEditGenerate.js` hook wired to the exact same `editCore.js`
   (`buildEditPayload`/`editGate`/`switchEditModel`) and shared `submitTask.js` desktop's

@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ASPECTS, dims, goGate, loraIncompat } from "../gen/genCore.js";
+import {
+  ASPECTS, SIZES, STEPS_FALLBACK, MODES as GEN_MODES,
+  dims, goGate, loraIncompat, loraRange, loraStep,
+} from "../gen/genCore.js";
 import { EDIT_CAPS, editCaps, refTag } from "../gen/editCore.js";
 import ModelFlyout from "./ModelFlyout.jsx";
+import MobileScreen from "./MobileScreen.jsx";
 import { askPicker } from "./PickerHost.jsx";
 import { ResultLines } from "./EditTab.jsx";
 import "../styles/create-mobile.css";
@@ -52,16 +56,11 @@ import "../styles/create-mobile.css";
    has its own Models/LoRAs toggle (kind), so nothing new was invented, only
    an extra entry point into a mechanism that already exists.
 
-   DEFERRED to the Advanced screen (its own separate increment, not built
-   here, matching the design's own `advSummary` grouping): LoRA weight
-   sliders, the SIZE long-edge stops + custom W/H override, steps/cfg/seed/
-   mode, the three boosters, and the negative prompt. Until that screen
-   ships, every request goes out with GEN_DEFAULTS' real values for those
-   fields (size 1024, mode "auto", steps/cfg auto, boosters off, negative
-   blank) -- honest defaults, not placeholders; nothing sent to /api/price or
-   /api/generate is fake. Tapping "Advanced" surfaces a disclosing toast
-   (the same soonToast convention AppMobile.jsx's own Menu items use) rather
-   than a dead tap or a half-built screen.
+   DEFERRED to the Advanced screen at the time this comment was first written
+   -- LoRA weight sliders, the SIZE long-edge stops + custom W/H override,
+   steps/cfg/seed/mode, the three boosters, and the negative prompt -- is now
+   BUILT (2026-08-03); see the ADVANCED SCREEN paragraph below for what
+   shipped and what stayed a disclosed, deliberate omission.
 
    EDIT MODE, Edit sub-tab (2026-08-03) is now real, following the identical
    contract Image mode set: real logic via a shared hook (useEditGenerate.js,
@@ -94,12 +93,16 @@ import "../styles/create-mobile.css";
    ModelFlyout.jsx's marketplace-browsing picker (built for an open-ended
    model catalog) doesn't fit a closed enum of two, so reusing desktop's own
    simpler control was the better match, not a workaround. Wired to
-   editCore's real switchEditModel(). Resolution/Quality/Aspect stay deferred
+   editCore's real switchEditModel(). Resolution/Quality/Aspect were deferred
    with EDIT_CAPS' own honest per-model defaults, exactly like Image's own
-   Advanced-gated fields -- nothing sent to /api/price or /api/edit is fake,
-   only unreachable-to-CHANGE this increment. The Advanced
-   row's disclosed summary text is adjusted to "resolution, quality, aspect,
-   negative" (dropping "model", which is no longer Advanced-only here).
+   Advanced-gated fields, until the ADVANCED SCREEN paragraph below's build.
+   The Advanced row's disclosed summary text drops "model" (no longer
+   Advanced-only) AND "negative" -- the design mock's own copy for this row
+   read "resolution, quality, aspect, negative", but editCore.js's EDIT_DEFAULTS
+   and buildEditPayload() have no `negative` key anywhere in Edit's state or
+   wire payload (verified against both -- see the ADVANCED SCREEN paragraph);
+   that word was leftover copy carried over from Image mode's own toast, not a
+   real field, so it was dropped rather than shipped as a dead promise.
 
    Not built here, and not modeled in the design's main pane at all (only
    Advanced's subEdit block and desktop's own EditTab.jsx have it): the
@@ -159,7 +162,60 @@ import "../styles/create-mobile.css";
    arrive as props instead of local state, otherwise unchanged) and renders
    NOTHING in place of the old inline VideoMode mount when cmode === "video"
    -- AppMobile.jsx's lifted VideoMode paints there instead, positioned by
-   create-mobile.css's .cm-videowrap to land in the exact same visual spot. */
+   create-mobile.css's .cm-videowrap to land in the exact same visual spot.
+
+   ADVANCED SCREEN (2026-08-03) -- the "⚙ Advanced" row now pushes a real
+   full-screen screen (MobileScreen.jsx, the first full-screen-push chrome
+   this codebase's mobile surfaces have needed -- no existing pattern fit, so
+   it was built as a new shared primitive alongside MobileSheet.jsx rather
+   than baked inline here or copy-pasted from the bottom-sheet chrome, which
+   has different geometry and a different dismissal contract) instead of the
+   soonToast() stub. advOpen/advClosing are local state (nothing here needs
+   to survive a Gallery/Control tab switch -- the screen is only ever open
+   while the user is actively looking at it, unlike the drafts useGenerate()/
+   useEditGenerate() protect). It is wired to the SAME lifted `s`/`set`/
+   `setLora` (Image) and `edit.s`/`edit.set` (Edit) state the composer screens
+   already use -- no parallel state, no new setters.
+
+   Image's ImageAdvanced renders: per-LoRA weight sliders (loraRange()/
+   loraStep() -- the SAME bounds-by-base-model-architecture GenerateDrawer.jsx
+   uses; s.loras being empty renders an honest "use + Add LoRA" hint instead of
+   a blank section); Frame (SIZES stops S/M/L/XL, custom W/H, the resolved
+   dims() hint, and Count); Tuning (mode chips, Steps/CFG range sliders bound
+   to the selected model's own restrictions with the same disabled-when-
+   incompatible logic as desktop, Seed, the three boosters, and Prompt
+   helper/Priority as real toggles reading/writing s.promptHelper/
+   s.highPriority); and Negative prompt. DISCLOSED DEVIATIONS from the design
+   mock's literal numbers, chosen in favor of the real server contract over
+   the mock's copy: Count's chips are [1,2,3,4] (genCore.js's buildPayload
+   hard-clamps count to 1..4, and GenerateDrawer.jsx's own real COUNT stops
+   are the same four -- the design mock's "1/2/4/6" would silently clamp a
+   tapped "6" down to 4 with no indication, so the real desktop reference
+   won on a numbers mismatch); Priority/Helper are boolean toggle chips
+   ("Priority · standard" / "Priority · high", "Prompt helper · on/off"),
+   not the mock's "standard · 500 / high · 1000" -- no such per-priority
+   pricing exists anywhere in genCore.js or account data, so shipping the
+   mock's literal digits would be inventing a number, not disclosing a real
+   one (the research pass flagged this exact row as likely-placeholder copy).
+
+   Edit's EditAdvanced renders Resolution/Quality/Aspect from EDIT_CAPS,
+   keyed off the model already chosen on the main composer (edit.chooseModel):
+   Resolution and Quality as chip rows (Quality's row is replaced by the
+   design's own real hint text -- "{label} has no quality knob — it offers
+   {resolutions} only" -- for Reference Pro, which ships an empty qualities
+   array); Aspect as a <select> (10-11 options -- desktop EditTab.jsx's own
+   real reference control for this exact field, chips would not fit 11 options
+   on a phone width). No Model row and no Negative prompt in Edit's screen --
+   both disclosed above and in the CORRECTED NOTE paragraph.
+
+   Video mode needs no Advanced screen: re-confirmed directly in
+   static/mg-generate-drawer.js (quality/channel/camera controls are built
+   entirely in the component's own innerHTML template and wired via its own
+   internal querySelector refs) that the shared drawer is fully self-contained,
+   and CreateMobile.jsx/VideoMode.jsx render no "Advanced" row at all for
+   cmode === "video" (VideoMode paints in AppMobile.jsx's own .cm-videowrap
+   slot, entirely outside this file's Advanced-row markup) -- so there was
+   never a reachable dead tap to fix; nothing added for Video on purpose. */
 
 export const MODES = [
   ["image", "Image", "Generate images"],
@@ -169,11 +225,17 @@ export const MODES = [
 
 export default function CreateMobile({
   account, costRef, editCostRef, cmode, setCmode, edit,
-  s, set, busy, results, applyModelRow, pickVersion, addLora, removeLora, generate, refreshPrice,
+  s, set, busy, results, applyModelRow, pickVersion, addLora, removeLora, setLora, generate, refreshPrice,
 }) {
   const [flyOpen, setFlyOpen] = useState(false);
   const [flyKind, setFlyKind] = useState("base");
   const [editSub, setEditSub] = useState("edit"); // Edit's own Edit/Fixer sub-tab -- local, no draft to lose
+  // Advanced screen -- local (nothing here needs to survive a Gallery/Control
+  // tab switch the way the composer drafts do; see header comment). Mirrors
+  // AppMobile.jsx's own sheet/closing pair exactly (MobileScreen.jsx's
+  // ownership contract is deliberately identical to MobileSheet.jsx's).
+  const [advOpen, setAdvOpen] = useState(false);
+  const [advClosing, setAdvClosing] = useState(false);
   const costHost = useRef(null);
   const editCostHost = useRef(null);
   const deselectRef = useRef(null);
@@ -263,8 +325,13 @@ export default function CreateMobile({
     if (picked) edit.addRef(picked);
   };
 
-  const soonToast = (label) => {
-    if (window.Toast) window.Toast.show({ title: label, msg: "Its own screen — coming next." });
+  // Advanced screen open/close -- mirrors AppMobile.jsx's own closeSheet()
+  // timing exactly (setTimeout matches the CSS animation's own duration; see
+  // MobileScreen.jsx's header comment for why the contract is identical).
+  const openAdv = () => setAdvOpen(true);
+  const closeAdv = () => {
+    setAdvClosing(true);
+    setTimeout(() => { setAdvOpen(false); setAdvClosing(false); }, 220);
   };
 
   const d = dims(s);
@@ -354,8 +421,8 @@ export default function CreateMobile({
                   </div>
                 )}
 
-                <button type="button" className="cm-advrow" onClick={() => soonToast("Advanced settings")}>
-                  ⚙ Advanced — resolution, quality, aspect, negative
+                <button type="button" className="cm-advrow" onClick={openAdv}>
+                  ⚙ Advanced — resolution, quality, aspect
                 </button>
 
                 <span ref={editCostHost} className="gd-cost cm-cost" />
@@ -478,7 +545,7 @@ export default function CreateMobile({
               )}
             </div>
 
-            <button type="button" className="cm-advrow" onClick={() => soonToast("Advanced settings")}>
+            <button type="button" className="cm-advrow" onClick={openAdv}>
               ⚙ Advanced — LoRA, size, tuning, negative
             </button>
 
@@ -511,6 +578,17 @@ export default function CreateMobile({
         )}
       </div>
 
+      {/* Advanced screen -- a sibling of .cm-pad within this unpositioned
+          .glm-tab, so .glm-screen's position:absolute;inset:0 resolves
+          against .glm-body (position:relative) the same way .cm-videowrap
+          already does -- see gallery-mobile.css's .glm-screen comment. */}
+      <MobileScreen open={advOpen} closing={advClosing} onClose={closeAdv}
+        title={(cmode === "edit" ? "Edit" : "Image") + " — Advanced"}>
+        {cmode === "edit"
+          ? <EditAdvanced edit={edit} />
+          : <ImageAdvanced s={s} set={set} setLora={setLora} m={m} />}
+      </MobileScreen>
+
       {flyOpen && <div className="glm-scrim" onClick={() => setFlyOpen(false)} />}
       <div className="cm-modelwrap">
         <ModelFlyout
@@ -522,5 +600,189 @@ export default function CreateMobile({
         />
       </div>
     </div>
+  );
+}
+
+/* ---- Image mode's Advanced fields -- see this file's header comment
+   (ADVANCED SCREEN paragraph) for the full field list and the disclosed
+   deviations from the design mock's literal Count/Priority numbers. Reads
+   and writes the SAME `s`/`set`/`setLora` the Image composer above uses --
+   no parallel state. ---- */
+function ImageAdvanced({ s, set, setLora, m }) {
+  const d = dims(s);
+  const custom = !!(parseInt(s.customW, 10) > 0 && parseInt(s.customH, 10) > 0);
+  const [loraLo, loraHi] = loraRange(m ? m.model_type : "");
+  const restr = (m && m.restrictions) || {};
+  const stepsR = restr.samplingSteps || {};
+  const cfgR = restr.cfgScale || {};
+  const stepsVal = s.steps === "" ? STEPS_FALLBACK : Number(s.steps);
+  const cfgVal = s.cfg === "" ? 7 : Number(s.cfg);
+
+  return (
+    <>
+      <div className="cm-subhead">LoRAs</div>
+      {s.loras.length === 0 ? (
+        <div className="cm-hint">No LoRAs added yet — use "+ Add LoRA" on the main screen.</div>
+      ) : (
+        s.loras.map((l) => (
+          <div className="cm-adv-lorarow" key={l.model_id}>
+            <div className="cm-adv-lorahead">
+              <span>{l.title}</span>
+              <b>{Number(l.weight).toFixed(2)}</b>
+            </div>
+            <input type="range" className="cm-range" min={loraLo} max={loraHi} step={loraStep()}
+              value={l.weight} disabled={!l.version_id || l.failed}
+              onChange={(e) => setLora(l.model_id, { weight: e.target.value })} />
+          </div>
+        ))
+      )}
+
+      <div className="cm-subhead">Frame</div>
+      <div className="cm-lbl">Size</div>
+      <div className="cm-chiprow">
+        {SIZES.map((n, i) => (
+          <button key={n} type="button"
+            className={"glm-metal cm-chip" + (!custom && s.size === n ? " on" : "")}
+            onClick={() => set({ size: n, customW: "", customH: "" })}
+            title={n + "px"}>
+            {["S", "M", "L", "XL"][i] || n}
+          </button>
+        ))}
+      </div>
+      <div className="cm-customrow">
+        <input className={"cm-custominput" + (custom ? " on" : "")} placeholder="W" value={s.customW}
+          onChange={(e) => set({ customW: e.target.value.replace(/\D/g, "") })} />
+        <span>×</span>
+        <input className={"cm-custominput" + (custom ? " on" : "")} placeholder="H" value={s.customH}
+          onChange={(e) => set({ customH: e.target.value.replace(/\D/g, "") })} />
+      </div>
+      <div className="cm-hint">
+        {d.width} × {d.height} px — custom overrides above{custom ? " (in effect)" : ""}
+      </div>
+
+      <div className="cm-lbl">Count</div>
+      <div className="cm-chiprow">
+        {[1, 2, 3, 4].map((n) => (
+          <button key={n} type="button" className={"glm-metal cm-chip" + (s.count === n ? " on" : "")}
+            onClick={() => set({ count: n })}>{n}</button>
+        ))}
+      </div>
+
+      <div className="cm-subhead">Tuning</div>
+      <div className="cm-lbl">Mode</div>
+      <div className="cm-chiprow">
+        {GEN_MODES.map(([v, l]) => (
+          <button key={v} type="button" title={l}
+            className={"glm-metal cm-chip" + (s.mode === v ? " on" : "")}
+            onClick={() => set({ mode: v })}>{l}</button>
+        ))}
+      </div>
+
+      <div className="cm-adv-sliderrow">
+        <span className="cm-lbl">Steps</span>
+        <input type="range" className="cm-range"
+          min={stepsR.min != null ? stepsR.min : 1} max={stepsR.max != null ? stepsR.max : 150}
+          step="1" value={stepsVal}
+          disabled={m && m.compat_steps === false}
+          title={m && m.compat_steps === false ? (m.title + " doesn't take steps") : "Sampling steps"}
+          onChange={(e) => set({ steps: e.target.value })} />
+        <b className="cm-adv-sliderval">{stepsVal}</b>
+      </div>
+      <div className="cm-adv-sliderrow">
+        <span className="cm-lbl">CFG</span>
+        <input type="range" className="cm-range"
+          min={cfgR.min != null ? cfgR.min : 1} max={cfgR.max != null ? cfgR.max : 30}
+          step="0.5" value={cfgVal}
+          disabled={m && m.compat_cfg === false}
+          title={m && m.compat_cfg === false ? (m.title + " doesn't take CFG") : "CFG scale"}
+          onChange={(e) => set({ cfg: e.target.value })} />
+        <b className="cm-adv-sliderval">{cfgVal}</b>
+      </div>
+
+      <div className="cm-lbl">Seed</div>
+      <input className="cm-input" value={s.seed} placeholder="blank = random"
+        onChange={(e) => set({ seed: e.target.value.replace(/[^\d-]/g, "").replace(/(?!^)-/g, "") })} />
+
+      <div className="cm-lbl">Boosters</div>
+      <div className="cm-chiprow">
+        <button type="button" className={"glm-metal cm-chip" + (s.boosters.face ? " on" : "")}
+          onClick={() => set({ boosters: { ...s.boosters, face: !s.boosters.face } })}>
+          Face Fix
+        </button>
+        <button type="button" className={"glm-metal cm-chip" + (s.boosters.quality ? " on" : "")}
+          title="Prefixes PixAI's Masterpiece quality tag"
+          onClick={() => set({ boosters: { ...s.boosters, quality: !s.boosters.quality } })}>
+          Quality Tag
+        </button>
+        <button type="button" className={"glm-metal cm-chip" + (s.boosters.hires ? " on" : "")}
+          disabled={m && m.compat_upscale === false}
+          title={m && m.compat_upscale === false
+            ? "This model's version does not support upscaling"
+            : "Enhance Details — PixAI's own 1.5× / 0.6 denoise pass"}
+          onClick={() => set({ boosters: { ...s.boosters, hires: !s.boosters.hires } })}>
+          Enhance Details
+        </button>
+      </div>
+
+      <div className="cm-chiprow">
+        <button type="button" className={"glm-metal cm-chip" + (s.promptHelper ? " on" : "")}
+          title="PixAI's prompt helper (on by default, like the classic drawer)"
+          onClick={() => set({ promptHelper: !s.promptHelper })}>
+          Prompt helper · {s.promptHelper ? "on" : "off"}
+        </button>
+        <button type="button" className={"glm-metal cm-chip" + (s.highPriority ? " on" : "")}
+          title="Faster queue · costs extra"
+          onClick={() => set({ highPriority: !s.highPriority })}>
+          Priority · {s.highPriority ? "high" : "standard"}
+        </button>
+      </div>
+
+      <div className="cm-subhead">Negative prompt</div>
+      <textarea className="cm-ta" rows={2} value={s.negative}
+        placeholder="lowres, bad hands, watermark"
+        disabled={m && m.compat_neg === false}
+        onChange={(e) => set({ negative: e.target.value })} />
+    </>
+  );
+}
+
+/* ---- Edit mode's Advanced fields -- resolution/quality/aspect only (no
+   Model row, no Negative prompt; both disclosed in this file's header
+   comment). Reads and writes the SAME `edit.s`/`edit.set` the Edit composer
+   above uses -- no parallel state. ---- */
+function EditAdvanced({ edit }) {
+  const caps = editCaps(edit.s.model);
+  return (
+    <>
+      <div className="cm-subhead">Resolution</div>
+      <div className="cm-chiprow">
+        {caps.resolutions.map((r) => (
+          <button key={r} type="button"
+            className={"glm-metal cm-chip" + (edit.s.resolution === r ? " on" : "")}
+            onClick={() => edit.set({ resolution: r })}>{r}</button>
+        ))}
+      </div>
+
+      <div className="cm-subhead">Quality</div>
+      {caps.qualities.length > 0 ? (
+        <div className="cm-chiprow">
+          {caps.qualities.map((q) => (
+            <button key={q} type="button"
+              className={"glm-metal cm-chip" + (edit.s.quality === q ? " on" : "")}
+              onClick={() => edit.set({ quality: q })}>{q}</button>
+          ))}
+        </div>
+      ) : (
+        <div className="cm-hint">
+          {caps.label} has no quality knob — it offers {caps.resolutions.join("/")} only.
+        </div>
+      )}
+
+      <div className="cm-subhead">Aspect</div>
+      <select className="cm-select" value={edit.s.aspect}
+        onChange={(e) => edit.set({ aspect: e.target.value })}>
+        {caps.aspects.map((a) => <option key={a} value={a}>{a}</option>)}
+      </select>
+    </>
   );
 }
