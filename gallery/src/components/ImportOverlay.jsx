@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useRef } from "react";
+import useImport from "../hooks/useImport.js";
 import "../styles/overlays.css";
 import "../styles/import-overlay.css";
 
@@ -18,106 +19,26 @@ import "../styles/import-overlay.css";
    Drag-and-drop + a native file/folder picker feed the same addFiles() the
    DC's markup implies but never wires (its rows are static, no real file
    input anywhere in the prototype) -- pulled from classic's real dropzone
-   handling instead of invented. */
+   handling instead of invented.
 
-const CAP = 24;
-const IMG = /[.](png|jpe?g|webp|gif|bmp|avif)$/i;
-const VID = /[.](mp4|webm|mov|m4v)$/i;
-const ZIP = /[.]zip$/i;
-const NEW_COLL = "__new__";
-
-function kindOf(f) {
-  const n = f.name || "";
-  return ZIP.test(n) ? "zip" : VID.test(n) ? "video" : IMG.test(n) ? "image" : "other";
-}
-function fmtSize(b) {
-  if (b < 1024) return b + " B";
-  if (b < 1048576) return (b / 1024).toFixed(0) + " KB";
-  if (b < 1073741824) return (b / 1048576).toFixed(1) + " MB";
-  return (b / 1073741824).toFixed(2) + " GB";
-}
+   DATA LAYER (2026-08-03): the file-staging state/handlers that used to live
+   inline here were mechanically lifted into useImport.js so the new mobile
+   Import screen (ImportMobile.jsx) can consume the EXACT same logic -- see
+   that hook's own header comment. This file is refactored to CONSUME it
+   rather than hold a second, drifting copy of the same POST /api/import-local
+   call. fileInputRef/folderInputRef stay local -- they're DOM refs tied to
+   the two `<input>` elements this file renders (see the hook's own note on
+   why those didn't move). */
 
 export default function ImportOverlay({ onClose, collections, onImported }) {
-  const [files, setFiles] = useState([]);
-  const [dragActive, setDragActive] = useState(false);
-  const [collection, setCollection] = useState("");
-  const [collOpen, setCollOpen] = useState(false);
-  const [newCollName, setNewCollName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState(null);
+  const {
+    files, dragActive, setDragActive, collection, setCollection, collOpen, setCollOpen,
+    newCollName, setNewCollName, busy, result, setResult,
+    addFiles, removeFile, counts, summary, thumbUrl, doImport,
+    previewCapped, previewList, CAP, kindOf, fmtSize, NEW_COLL,
+  } = useImport({ onImported });
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
-  const urlsRef = useRef([]);
-
-  useEffect(() => () => { urlsRef.current.forEach((u) => URL.revokeObjectURL(u)); }, []);
-
-  const addFiles = (list) => {
-    const next = files.slice();
-    for (const f of Array.from(list)) {
-      if (kindOf(f) === "other") continue; // media only, matches classic
-      if (next.some((x) => x.name === f.name && x.size === f.size)) continue; // de-dupe
-      next.push(f);
-    }
-    setFiles(next);
-    setResult(null);
-  };
-  const removeFile = (i) => setFiles(files.filter((_, idx) => idx !== i));
-
-  const counts = files.reduce((acc, f) => {
-    const k = kindOf(f);
-    acc[k] = (acc[k] || 0) + 1;
-    acc.bytes += f.size;
-    return acc;
-  }, { bytes: 0 });
-  const summary = [
-    counts.image ? counts.image + " image" + (counts.image !== 1 ? "s" : "") : "",
-    counts.video ? counts.video + " video" + (counts.video !== 1 ? "s" : "") : "",
-    counts.zip ? counts.zip + " zip" + (counts.zip !== 1 ? "s" : "") : "",
-  ].filter(Boolean).join(" · ");
-
-  urlsRef.current.forEach((u) => URL.revokeObjectURL(u));
-  urlsRef.current = [];
-  const thumbUrl = (f) => {
-    if (kindOf(f) !== "image") return null;
-    const u = URL.createObjectURL(f);
-    urlsRef.current.push(u);
-    return u;
-  };
-
-  const chosenCollection = () => {
-    if (collection !== NEW_COLL) return collection;
-    const name = newCollName.trim();
-    return name || null;
-  };
-
-  const doImport = async () => {
-    if (!files.length || busy) return;
-    const coll = chosenCollection();
-    if (coll === null) { setCollOpen(true); return; } // "New collection…" left blank
-    setBusy(true);
-    setResult(null);
-    const fd = new FormData();
-    files.forEach((f) => fd.append("files", f, f.name));
-    if (coll) fd.append("collection", coll);
-    try {
-      const r = await fetch("/api/import-local", { method: "POST", body: fd });
-      const d = await r.json();
-      setBusy(false);
-      if (!r.ok || d.error) {
-        setResult({ ok: false, error: d.error || ("import failed (" + r.status + ")") });
-        return;
-      }
-      setResult({ ok: true, imported: d.imported, skipped: d.skipped, collection: d.collection });
-      setFiles([]);
-      onImported && onImported();
-    } catch {
-      setBusy(false);
-      setResult({ ok: false, error: "network error" });
-    }
-  };
-
-  const previewCapped = files.length > CAP;
-  const previewList = previewCapped ? files.slice(0, CAP - 1) : files;
 
   return (
     <>

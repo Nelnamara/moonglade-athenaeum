@@ -17,6 +17,49 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Mobile pass, surface 3 (part 8): real content for 4 of the hamburger menu's 6
+  destinations — My Art, Collection Health, Import, and Contests.** Part 7 shipped the
+  push-screen mechanism with an honest placeholder per destination; this increment
+  replaces 4 of those 6 placeholders with the real, live-data surface, following the
+  extract-a-shared-hook pattern `useLibrary.js`/`useGenerate.js`/`useEditGenerate.js`/
+  `useControlPanel.js` already set 4 times this session. New hooks
+  (`useMyArt.js`/`useHealth.js`/`useImport.js`/`useContests.js`, `gallery/src/hooks/`)
+  mechanically lift each desktop overlay's fetch/state/derivation logic out —
+  `MyArtOverlay.jsx`/`HealthOverlay.jsx`/`ImportOverlay.jsx`/`ContestsOverlay.jsx` are
+  refactored to CONSUME their own hook rather than hold a second, drifting copy, and 4
+  new mobile components (`MyArtMobile.jsx`/`HealthMobile.jsx`/`ImportMobile.jsx`/
+  `ContestsMobile.jsx`) consume the identical hook instance — same route, same fetch,
+  never re-derived. Publish/Train are unchanged honest placeholders (neither has a
+  backend or a desktop overlay anywhere in this app yet).
+  Design mock vs. real-data deviations, disclosed in full in each component's own
+  header comment (matching every desktop overlay's own precedent for this): My Art
+  keeps the real stat-label set (the route can't back the mock's plain "Views" total)
+  and drops the row click-through (no mobile Lightbox/Details surface exists yet, same
+  disclosed-gap treatment as Health's Duplicate Review link below); Collection Health
+  shows all 12 real stat tiles (not the mock's 8), adds a real "Top models" section the
+  mock omits, wires tag/LoRA chips as LIVE filters through the already-lifted
+  `useLibrary()` instance (switches to Gallery tab + closes the screen so the filtered
+  result is actually visible), renders Duplicates/Reclaimable as plain non-clickable
+  tiles (no mobile Duplicate Review surface exists yet — disclosed, not built this
+  round, per instruction), and scopes out the prompt word-cloud/folder-breakdown as a
+  deliberate trim; Import gets one real native file-picker button (the design specifies
+  no picker at all; desktop's second "Browse a folder…" button is dropped —
+  `webkitdirectory` has no reliable mobile support) plus a real `<select>` collection
+  picker (live `collections` data + new-collection input); Contests ports the
+  official/community split, live vote-type pills, real cover art, and the pixai.art
+  click-through forward, with community cards showing a computed "days left" (the
+  design's own compact shape) instead of desktop's literal date range.
+  Verified: full suite green (1,539 passed), `npm run build` clean (a CSS-comment typo
+  containing a literal `*/` sequence — caught by the build's own minifier warning, not
+  by a human proofread — was fixed before it shipped), and live in the running dev
+  server: all 4 screens push correctly (back chevron + correct title), and — since this
+  dev session isn't authenticated — each one's real fetch genuinely round-trips and
+  correctly renders its own coded error state (`couldn't load — HTTP 401` / `couldn't
+  load health data — HTTP 401`), confirming the wiring end-to-end rather than only the
+  happy-path markup. Import's empty state (no fetch on mount) rendered its real
+  drop-zone/button copy correctly. Publish/Train's placeholder screens were re-checked
+  and are unchanged.
+
 - **Mobile pass, surface 3 (part 7): the hamburger menu's real push-screen navigation.**
   The ☰ Menu sheet's 6 destinations (My Art/Publish/Train a LoRA/Import/Contests/Health) no
   longer just show a disclosure toast — tapping one now genuinely dismisses the sheet and

@@ -12,6 +12,10 @@ import TabBarMobile from "./TabBarMobile.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import PickerHost from "./PickerHost.jsx";
+import MyArtMobile from "./MyArtMobile.jsx";
+import HealthMobile from "./HealthMobile.jsx";
+import ImportMobile from "./ImportMobile.jsx";
+import ContestsMobile from "./ContestsMobile.jsx";
 import "../styles/gallery-mobile.css";
 import "../styles/create-mobile.css";
 
@@ -121,10 +125,41 @@ import "../styles/create-mobile.css";
        ownership contract are ALL MobileScreen.jsx's existing, unmodified
        contract (220ms open/closing pair, same as Advanced/Branding) -- no
        fork, no new push-screen component.
-   What's still a placeholder, honestly, per destination: each pushed screen
-   renders content, not empty space, but the content itself is a labeled
-   stand-in (glm-placeholder, this codebase's own established soon-state
-   look) -- see SCREEN_INFO below for the real state of each ported feature. */
+   REAL CONTENT (2026-08-03) -- four of the six pushed screens now render
+   the real, live-data surface instead of the honest placeholder above: My
+   Art, Collection Health, Import, and Contests. Each ported its desktop
+   overlay's fetch/state logic into a shared hook (useMyArt.js/useHealth.js/
+   useImport.js/useContests.js, gallery/src/hooks/) -- the SAME pattern
+   useLibrary.js/useGenerate.js/useEditGenerate.js/useControlPanel.js already
+   set 4 times this session -- so MyArtOverlay.jsx/HealthOverlay.jsx/
+   ImportOverlay.jsx/ContestsOverlay.jsx (desktop) and MyArtMobile.jsx/
+   HealthMobile.jsx/ImportMobile.jsx/ContestsMobile.jsx (mobile, rendered
+   below) consume the exact same fetch, never a second copy of it. Each
+   mobile component's own header comment discloses its real-data-vs-design-
+   mock deviations in full (matching every desktop overlay's own precedent
+   for the same kind of disclosure) -- summarized:
+     - My Art: real stat labels kept (desktop's route can't back a plain
+       "Views" total); row click-through to Details dropped -- no mobile
+       Lightbox/Details surface exists anywhere yet.
+     - Collection Health: all 12 real stat tiles shown (design mock only
+       drew 8); a "Top models" section added (real, desktop has it, design
+       omits it); tag/LoRA chips wired as LIVE filters through the lifted
+       useLibrary() instance (see filterFromHealth below); Duplicates/
+       Reclaimable render as plain, non-clickable tiles -- no mobile
+       Duplicate Review surface exists yet (disclosed gap, not built this
+       round, per instruction); word-cloud/folder-breakdown scoped out this
+       pass (deliberate trim, not a "skip real data" call).
+     - Import: one real file-picker button (native <input type="file">) --
+       the design specifies no picker at all; "Browse a folder…" dropped
+       (webkitdirectory has no reliable mobile support); collection picker
+       is a real <select> of live `collections` data + new-collection input.
+     - Contests: official/community split, live vote-type pills, real
+       cover_url images, and pixai.art click-through all ported forward;
+       community cards show a computed "days left" (design's own compact
+       shape) instead of desktop's literal date range.
+   Publish and Train stay honest placeholders -- see SOON_INFO below --
+   because neither has ANY backend or desktop overlay anywhere in this app
+   yet (unchanged from before this pass). */
 
 const MENU_ITEMS = [
   { icon: "📈", label: "My Art", screen: "myart" },
@@ -135,59 +170,32 @@ const MENU_ITEMS = [
   { icon: "♡", label: "Health", screen: "health" },
 ];
 
-// Per-screen header title + honest placeholder copy. Title text matches the
-// design spec exactly (Health's screen is titled "Collection Health", not
-// "Health" -- the row label and the pushed screen's title legitimately
-// differ, same as the design mock). The two "real" lines below are not
-// generic filler -- My Art/Import/Contests/Health each already have a real,
-// SHIPPED desktop overlay (MyArtOverlay/ImportOverlay/ContestsOverlay/
-// HealthOverlay.jsx, all wired to real API routes); Publish/Train have no
-// backend or overlay ANYWHERE yet (NavSpine.jsx's own desktop nav still
-// marks both `soon: true`) -- so their copy says that honestly instead of
-// implying a mobile port of something that doesn't exist yet.
-const SCREEN_INFO = {
-  myart: {
-    title: "My Art",
-    lines: [
-      "The real dashboard already exists on desktop — count, likes, comments, and your top-viewed published pieces (MyArtOverlay, live data from /api/your-art).",
-      "Its own mobile pass — coming next.",
-    ],
-  },
-  publish: {
-    title: "Publish",
-    lines: [
-      "Publish isn't built anywhere yet — desktop's own nav still marks it soon too, no backend route exists.",
-      "Parked for a future pass.",
-    ],
-  },
-  train: {
-    title: "Train a LoRA",
-    lines: [
-      "Training isn't built anywhere yet — desktop's own nav still marks it soon too, no backend route exists.",
-      "Parked for a future pass.",
-    ],
-  },
-  import: {
-    title: "Import",
-    lines: [
-      "The real importer already exists on desktop — drag-and-drop or file picker, straight into the catalog, nothing sent to PixAI (ImportOverlay, /api/import-local).",
-      "Its own mobile pass — coming next.",
-    ],
-  },
-  contests: {
-    title: "Contests",
-    lines: [
-      "The real contest list already exists on desktop — official + community entries, real prizes and dates (ContestsOverlay, live data from /api/contests).",
-      "Its own mobile pass — coming next.",
-    ],
-  },
-  health: {
-    title: "Collection Health",
-    lines: [
-      "The real dashboard already exists on desktop — model/tag/LoRA breakdowns and duplicate/reclaimable-space stats (HealthOverlay, live data from /api/health).",
-      "Its own mobile pass — coming next.",
-    ],
-  },
+// Per-screen header title -- text matches the design spec exactly (Health's
+// screen is titled "Collection Health", not "Health" -- the row label and
+// the pushed screen's title legitimately differ, same as the design mock).
+// My Art/Import/Contests/Health render their own real component below
+// (MyArtMobile/ImportMobile/ContestsMobile/HealthMobile.jsx); Publish/Train
+// still render the honest placeholder in SOON_INFO -- neither has a backend
+// or a desktop overlay ANYWHERE in this app yet (NavSpine.jsx's own desktop
+// nav still marks both `soon: true`).
+const SCREEN_TITLES = {
+  myart: "My Art",
+  publish: "Publish",
+  train: "Train a LoRA",
+  import: "Import",
+  contests: "Contests",
+  health: "Collection Health",
+};
+
+const SOON_INFO = {
+  publish: [
+    "Publish isn't built anywhere yet — desktop's own nav still marks it soon too, no backend route exists.",
+    "Parked for a future pass.",
+  ],
+  train: [
+    "Training isn't built anywhere yet — desktop's own nav still marks it soon too, no backend route exists.",
+    "Parked for a future pass.",
+  ],
 };
 
 export default function AppMobile({ boot }) {
@@ -236,6 +244,29 @@ export default function AppMobile({ boot }) {
   const closeScreen = () => {
     setScreenClosing(true);
     setTimeout(() => { setScreen(null); setScreenClosing(false); }, 220);
+  };
+
+  // Health's tag/model/LoRA filter taps -- HealthMobile.jsx's own header
+  // comment, point 3: "reuse existing UI mechanisms over building parallel
+  // UI". Applies through the SAME lifted useLibrary() instance
+  // GalleryMobile.jsx already reads/writes (lib.applyAdvanced, identical
+  // one-patch commit path App.jsx's desktop applyAdvanced uses for
+  // HealthOverlay's own onModelFilter/onTagFilter/onLoraFilter), then
+  // switches to the Gallery tab and closes the pushed screen so the
+  // filtered result is actually visible, not applied invisibly behind
+  // Health's own screen.
+  const filterFromHealth = (patch) => {
+    lib.applyAdvanced(patch);
+    setTab("gallery");
+    closeScreen();
+  };
+
+  // Import's onImported -- App.jsx's own afterMutation(), ported: reload the
+  // library page 1 (new/imported files should show up) and refresh the
+  // collections list (a brand-new collection may have just been created).
+  const afterImported = async () => {
+    lib.load(1, true);
+    await refreshCollections();
   };
 
   const soonToast = (label) => {
@@ -340,14 +371,25 @@ export default function AppMobile({ boot }) {
             switching Gallery/Create/Control while a screen is pushed must
             not unmount it. */}
         <MobileScreen open={!!screen} closing={screenClosing} onClose={closeScreen}
-          title={screen ? SCREEN_INFO[screen].title : ""}>
-          {screen && (
+          title={screen ? SCREEN_TITLES[screen] : ""}>
+          {screen === "myart" && <MyArtMobile />}
+          {screen === "health" && (
+            <HealthMobile
+              onModelFilter={(m) => filterFromHealth({ model: m })}
+              onTagFilter={(t) => filterFromHealth({ tag: t })}
+              onLoraFilter={(l) => filterFromHealth({ lora: l })}
+              onOpenImport={() => setScreen("import")}
+            />
+          )}
+          {screen === "import" && <ImportMobile collections={collections} onImported={afterImported} />}
+          {screen === "contests" && <ContestsMobile />}
+          {(screen === "publish" || screen === "train") && (
             <div className="glm-placeholder cm-soon">
               <div className="glm-placeholder-icon" aria-hidden="true">
                 {MENU_ITEMS.find((mi) => mi.screen === screen).icon}
               </div>
-              <div className="glm-placeholder-title">{SCREEN_INFO[screen].title}</div>
-              {SCREEN_INFO[screen].lines.map((line, i) => (
+              <div className="glm-placeholder-title">{SCREEN_TITLES[screen]}</div>
+              {SOON_INFO[screen].map((line, i) => (
                 <div className="glm-placeholder-note" key={i}>{line}</div>
               ))}
             </div>

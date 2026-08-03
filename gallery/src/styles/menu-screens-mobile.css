@@ -1,0 +1,32 @@
+/* ============================================================================
+   Shared bits across the 4 new mobile menu-destination screens (My Art,
+   Collection Health, Import, Contests -- design spec: Moonglade Mobile.dc.html
+   screenIsMyArt/screenIsHealth/screenIsImport/screenIsContests blocks) that
+   don't already exist as generic mobile classes or desktop-overlay classes
+   worth reusing verbatim. See each Mobile screen's own header comment for
+   exactly which control-mobile/create-mobile/overlays/myart-contests/
+   import-overlay classes get reused as-is instead of duplicated here --
+   this file only adds the couple of things nothing else already covers. */
+
+/* My Art's and Health's stat grids reuse ControlMobile.jsx's OWN
+   .ctm-statgrid/.ctm-statcard/.ctm-statnum/.ctm-statlabel verbatim (see
+   control-mobile.css) rather than inventing a second, slightly-different
+   stat-tile style -- a deliberate cohesion call (one shared stat-tile look
+   across every mobile screen that has one), not an oversight of the design
+   mock's own label-above-value card order. The one thing that shape doesn't
+   already carry: Health's two "celebration" tiles (Published/Total likes),
+   which desktop's .mgh-stat-value.gold accents -- ported here as a small
+   modifier on the shared stat-tile class instead of a second stat-card
+   component. */
+.ctm-statnum.gold { color: var(--gold); }
+
+/* A note/hint block that's also a real button (Health's "N uncataloged"
+   footer, wired to open the Import screen -- see HealthMobile.jsx). Desktop's
+   .mgh-note is a plain <div>; re-declaring its box here as a <button> avoids
+   fighting the browser's default button reset (border/background/font)
+   instead of un-setting each one inline. */
+.mnu-notebtn { display: block; width: 100%; box-sizing: border-box; text-align: left;
+  font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--subtext);
+  background: rgba(12,10,28,.6); border: 1px solid var(--surface1); border-radius: 9px;
+  padding: 9px 13px; margin-top: 14px; cursor: pointer; }
+.mnu-notebtn:hover { border-color: var(--accent); color: var(--text); }
