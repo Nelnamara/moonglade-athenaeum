@@ -134,6 +134,20 @@ export default function Grid({
     });
   }, [items, gridW, thumb, page]);
 
+  // The Lightbox indexes `items` in its own untouched catalog order (its own
+  // filmstrip/prev-next paging depends on that) -- but `laid` reorders a copy
+  // for the feature-slot swap above, so a card's position in `laid` can differ
+  // from its real position in `items`. openLightbox() must always resolve
+  // through this map, never pass the bare `laid` index straight through, or
+  // clicking a swapped-in feature card opens whatever item originally sat at
+  // that slot instead (owner-reported 2026-08-03: wrong image opens, "usually
+  // the large ones" -- the feature slots are exactly where the swap happens).
+  const origIndexByMid = useMemo(() => {
+    const m = new Map();
+    items.forEach((it, idx) => m.set(it.media_id, idx));
+    return m;
+  }, [items]);
+
   // The shift-range anchor is an INDEX into the current page's laid cells --
   // carrying it across a page flip would range-add against a stale anchor.
   useEffect(() => { lastPickRef.current = null; }, [items]);
@@ -284,7 +298,7 @@ export default function Grid({
                 if (ev.shiftKey) { rangePick(i); return; }
                 if (ev.ctrlKey || ev.metaKey) { togglePick(i); return; }
                 if (selectMode) { togglePick(i); return; }
-                openLightbox(i);
+                openLightbox(origIndexByMid.get(it.media_id));
               }}
             >
               {/* Only out-of-clamp ratios (panoramas, ultra-talls) crop at all;
@@ -318,7 +332,7 @@ export default function Grid({
                   <Stars mediaId={it.media_id} rating={it.rating} onRate={onRate} />
                   <button
                     type="button" className="mgg-chip open" title="Open the lightbox"
-                    onClick={(ev) => { ev.stopPropagation(); openLightbox(i); }}
+                    onClick={(ev) => { ev.stopPropagation(); openLightbox(origIndexByMid.get(it.media_id)); }}
                   >
                     Open
                   </button>
