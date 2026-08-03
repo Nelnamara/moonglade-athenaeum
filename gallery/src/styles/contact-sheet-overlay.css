@@ -1,0 +1,80 @@
+/* Contact Sheet overlay — ported from the Frontend Gallery DC's Contact
+   Sheet.dc.html, but built native: this is the on-screen preview AND the
+   actual print source (the @media print rule below hides everything else
+   in the document and shows only .mgcs-print-area — no server round-trip
+   for the print action itself). */
+
+.mgcs-slab { width: min(1180px, calc(100vw - 48px)); }
+
+.mgcs-print { margin-left: auto; font-size: 11.5px; font-weight: 700;
+  padding: 6px 14px; border-radius: 999px; border: 1px solid var(--surface1);
+  background: rgba(33,31,58,.6); color: var(--text); cursor: pointer; }
+.mgcs-print:hover:not(:disabled) { border-color: var(--accent); }
+.mgcs-print:disabled { opacity: .5; cursor: not-allowed; }
+/* .mgv-x already floats right via mgv-titlerow's flex; the print button sits
+   just before it, so mgv-x loses its own margin-left:auto role here. */
+.mgcs-slab .mgv-x { margin-left: 0; }
+
+.mgcs-header { margin-top: 14px; }
+.mgcs-eyebrow { font-family: Georgia, "Times New Roman", serif; font-style: italic;
+  font-size: 13px; color: var(--subtext); }
+.mgcs-headrow { display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-top: 4px; font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; }
+.mgcs-label { color: var(--text); letter-spacing: .02em; }
+.mgcs-meta { color: var(--subtext); white-space: nowrap; }
+.mgcs-rule { height: 1px; margin-top: 10px;
+  background: linear-gradient(90deg, var(--gold) 0%, transparent 70%); opacity: .55; }
+
+.mgcs-h1 { font-family: Georgia, "Times New Roman", serif; font-style: italic;
+  font-size: 26px; margin: 16px 0 4px; letter-spacing: -.01em; }
+.mgcs-sub { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px;
+  color: var(--subtext); margin-bottom: 18px; }
+
+.mgcs-empty { padding: 40px 0 30px; text-align: center; font-size: 12px; color: var(--subtext); }
+
+.mgcs-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px 14px; }
+/* min-width:0 on both the track item and the image itself -- a grid item's
+   default min-width:auto lets a real (large) <img>'s intrinsic size force its
+   column wider than the 1fr track, overflowing the slab. Caught live: real
+   library images are big enough to trip this where the mock's placeholder
+   art never would have. */
+.mgcs-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mgcs-img { aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: var(--surface0);
+  border: 1px solid var(--surface1); min-width: 0; }
+.mgcs-img img { width: 100%; height: 100%; object-fit: cover; display: block; min-width: 0; }
+.mgcs-no { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--blue);
+  margin-top: 4px; }
+.mgcs-cap-title { font-family: Georgia, "Times New Roman", serif; font-size: 12.5px;
+  color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mgcs-cap-sub { font-size: 10px; color: var(--subtext); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+
+@media print {
+  /* The overlay is portaled straight to document.body (see
+     ContactSheetOverlay.jsx), NOT nested inside #root like every other
+     overlay -- specifically so #root (the whole app, including the full
+     multi-thousand-image gallery grid behind this modal) can just be
+     switched off outright. That matters because visibility:hidden hides
+     PAINT but not LAYOUT HEIGHT: an earlier version tried "hide everything,
+     reveal just the print area" via visibility, and print pagination still
+     reflected the full hidden grid's real height -- ~8 solid blank pages,
+     with the actual sheet content buried many pages past whatever page the
+     preview happened to land on. display:none has no such problem (zero
+     height, not just invisible), and a descendant can't need to override it
+     here because nothing worth printing lives inside #root any more. */
+  #root { display: none !important; }
+  .mgcs-slab .mgv-titlerow { display: none !important; }
+  .mgv-scrim { display: none !important; }
+  /* mg-notify.js (static/, plain JS -- not part of the React tree, so #root
+     hiding it doesn't reach these) appends its Activity FAB and toast host
+     straight to document.body. Both are body-level siblings of the portal
+     same as this overlay is; exclude them explicitly. */
+  #jobs-fab, #mg-toasts { display: none !important; }
+  .mgv-host { position: static !important; display: block !important; }
+  .mgv-slab { position: static !important; width: auto !important; max-height: none !important;
+    overflow: visible !important; box-shadow: none !important; border: none !important;
+    background: none !important; padding: 0 !important; }
+  .mgcs-grid { gap: 10px 8px; }
+  .mgcs-img { border-color: #ccc; }
+  @page { margin: 12mm; }
+}

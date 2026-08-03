@@ -11,6 +11,7 @@ import MyArtOverlay from "./components/MyArtOverlay.jsx";
 import ContestsOverlay from "./components/ContestsOverlay.jsx";
 import ImportOverlay from "./components/ImportOverlay.jsx";
 import ControlPanelOverlay from "./components/ControlPanelOverlay.jsx";
+import ContactSheetOverlay from "./components/ContactSheetOverlay.jsx";
 import GenerateDrawer from "./components/GenerateDrawer.jsx";
 import PickerHost, { isPickerOpen } from "./components/PickerHost.jsx";
 import "./styles/shell.css";
@@ -130,6 +131,16 @@ export default function App({ boot }) {
   useEffect(() => { overlayRef.current = overlay; });
   const openOverlay = useCallback((key) => {
     setOverlay(key);
+  }, []);
+  // Contact Sheet's two entry points hand it different targets: the Actions
+  // menu freezes the explicit selection (ids); the Advanced flyout prints the
+  // current collection view (collectionName) -- the same ids-or-collection
+  // contract /api/contact-sheet already takes. Neither reads live state after
+  // opening, so what prints matches what was on screen when it was opened.
+  const [contactSheetTarget, setContactSheetTarget] = useState({ ids: [], collectionName: "" });
+  const openContactSheet = useCallback((ids, collectionName) => {
+    setContactSheetTarget({ ids: ids || [], collectionName: collectionName || "" });
+    setOverlay("contactsheet");
   }, []);
   // Esc closes the overlay FIRST (capture beats the drawer's own Esc ladder).
   useEffect(() => {
@@ -445,8 +456,14 @@ export default function App({ boot }) {
       setSelected(new Set()); // selection is consumed into the Loom cast
       window.location.href = "/loom?cast=" + encodeURIComponent(keep.join(","));
     },
-    printSheet: () =>
-      window.open("/contact-sheet?ids=" + encodeURIComponent(selIds.join(",")), "_blank"),
+    // Native React overlay + native print (window.print(), scoped by @media
+    // print) -- NOT a hand-off to the classic /contact-sheet page. That route
+    // stays for classic's own use only; the new front door never opens it.
+    printSheet: () => openContactSheet(selIds),
+    // Advanced flyout's "🖶 Contact sheet" -- prints the current collection
+    // view rather than an explicit selection; falls back to /api/contact-
+    // sheet's own "Recent" default when not viewing a collection.
+    printCollection: () => openContactSheet(null, shelf),
     downloadZip: () => downloadZipForm(selIds),
     replacePrompt: async () => {
       const find = window.prompt(
@@ -627,6 +644,13 @@ export default function App({ boot }) {
       )}
       {overlay === "panel" && (
         <ControlPanelOverlay onClose={() => setOverlay(null)} boot={boot} />
+      )}
+      {overlay === "contactsheet" && (
+        <ContactSheetOverlay
+          ids={contactSheetTarget.ids}
+          collectionName={contactSheetTarget.collectionName}
+          onClose={() => setOverlay(null)}
+        />
       )}
 
       {/* the Generate dock host: the wrapper carries the outside-click anchor

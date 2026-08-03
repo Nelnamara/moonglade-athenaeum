@@ -237,6 +237,7 @@ export function LibraryBar({
               current={adv}
               onApply={applyAdvanced}
               onClose={() => setFlyOpen(false)}
+              onPrintCollection={actions && actions.printCollection}
             />
           )}
         </div>

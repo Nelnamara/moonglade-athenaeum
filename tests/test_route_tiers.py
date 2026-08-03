@@ -151,6 +151,10 @@ ROUTE_TIERS = {
     ("duplicates", "GET"): LOGIN,
     ("loom", "GET"): LOGIN,
     ("contact_sheet", "GET"): LOGIN,
+    # JSON twin of /contact-sheet (the React ContactSheetOverlay's data) -- same tier,
+    # same data selection, no destructive action. Native React print replaces the page
+    # route's window.print() for the new front door; the page route itself is untouched.
+    ("api_contact_sheet", "GET"): LOGIN,
     # The manifest body is a compile-time constant (no user data, no install paths), and
     # the browser fetches it unprompted from the public login page -- gating it only bought
     # a self-inflicted redirect. /sw.js is the same CLASS of asset but is NOT bundled in

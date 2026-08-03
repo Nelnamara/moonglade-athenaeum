@@ -2518,3 +2518,70 @@ took multiple passes and the linkage info was still incorrect/conflicting. Accor
 **Why.** Merging keeps the token discipline and the Claude Design mirror live without
 carrying an unmerged branch, while the verdict on the handoff map is written down so no
 future session mistakes a merged file for a trusted one.
+
+---
+
+## 2026-08-02 — Contact Sheet + Duplicate Review scoping: neither is a straight port
+
+Full re-verification of the local `design_handoff/` copy against the newest zip on the
+owner's Desktop (`Moonglade_handoff v3 8.2.26 415am.zip`) found the local copy current
+(byte-identical, assets aside) — every relay/correction doc in `uploads/` was already
+answered and folded into `drift-report.md`. One genuine gap: `Glitch Reveal Demo.dc.html`
+(the 3-option Folio "Unleash" reveal demo) sat at the zip root but was never copied into the
+synced `design_handoff_moonglade_suite/` bundle — copied in; its outcome (style A, ruby
+scramble) was already fully captured in `folio-glitch-spec.md`, so nothing was missed
+functionally.
+
+**Contact Sheet and Duplicate Review, scoped for build, are NOT ports like the previous
+five surfaces (Health/My Art/Contests/Import/Panel):**
+
+- **Contact Sheet's DC design is a static print mockup with fabricated data**, while the
+  REAL backend (`/contact-sheet`, `moonglade_gallery.py:13834`) is already more capable —
+  3 print formats, real ratings, real model names. Owner's explicit call, after an initial
+  plan to hand off to the classic route for the actual print action: **"do it correctly, not
+  the short way"** — the classic interface is being fully retired, so nothing in the new
+  front door should redirect to it, even for a working feature. Built natively: a new JSON
+  endpoint (`GET /api/contact-sheet`, same data functions, LOGIN tier) plus a React overlay
+  whose print output is genuinely native (`window.print()` + `@media print`), not a
+  `window.open('/contact-sheet?...')` redirect.
+- **Duplicate Review's DC design assumes fuzzy, percentage-scored, human-reasoned duplicate
+  detection** ("92% similar", "same seed · re-rolled 2×") that does not exist. Real detection
+  is exact-match only: same media_id reused (Class A, `duplicate_groups()`,
+  `moonglade_gallery.py:2509`) or byte-identical files (Class B, `audit_collection()`,
+  `moonglade_backup.py:3704`). Scoped to a **happy medium** with the owner: ship every tier
+  that's honestly real, including two not built yet but cheap/well-scoped to add — same-seed
+  grouping (real column, `seed` is populated in `CATALOG_FIELDS`, just an unwritten SQL
+  query) and a new perceptual-hash ("upscaled/recompressed original") tier. **Explicitly
+  excluded:** the CLIP-embedding "similar composition" tier — real infrastructure
+  (`/api/similar`) exists, but it measures visual resemblance, not duplication; wiring it to
+  a *destructive* action risks quarantining genuinely distinct images on a false positive,
+  and it already serves its actual purpose (browsing "more like this") elsewhere in the app.
+- **Duplicate Review's Resolve action will really quarantine files** — owner's explicit
+  choice, not the read-only/advisory default first proposed. Scoped to **quarantine only,
+  never hard-delete** (moves losers to `_duplicates/`, matching the CLI's own safe default —
+  `--apply` alone quarantines, hard delete needs the separate `--dedup-delete` flag, which
+  the new web route will never expose), gated by `_check_read_only()`, CSRF-protected
+  (explicit-token class, not the exempt spend-path class), with a real Undo (restores both
+  the file and its `catalog.db` row) since the DC design has a real Undo affordance next to
+  every resolved group and shipping Resolve without it would be a broken half-feature.
+  Auto-resolve-all (multi-group in one click) gets its own extra confirm step beyond
+  per-group Resolve, given the larger blast radius.
+
+**Two real bugs caught live during Contact Sheet's browser verification**, both from testing
+against the owner's *real* library rather than a handful of mock images (owner: "I had a
+feeling ;) it's why I asked for some random selections"): a classic CSS grid overflow (a
+grid item's `min-width:auto` default let a real large `<img>` force its column wider than
+its track — the mock's placeholder art was too small to ever trip it), and a much bigger one
+— printing produced ~8 near-solid dark blank pages, because the overlay was nested inline
+deep inside `#root`, *after* the entire multi-thousand-image gallery grid in DOM order, and
+`visibility:hidden` hides paint but not layout height — print pagination reflected the whole
+hidden grid's real height, with the actual content buried many pages down. Fixed by
+portaling the overlay straight to `document.body` (matching `ActionsMenu.jsx`'s own portal
+precedent) so print CSS can hide `#root` outright instead of relying on visibility tricks.
+Full detail in `CHANGELOG.md`'s `[Unreleased]` entry of the same date.
+
+**Why.** Both scoping calls (matching-tier honesty, real-vs-advisory Resolve) were owner
+decisions, not engineering defaults — recorded so a future pass doesn't quietly walk either
+back. The portal fix is recorded because it's a real, non-obvious architectural pattern (the
+only overlay so far that needs to print) that the next "print a modal" feature should reuse
+rather than rediscover.
