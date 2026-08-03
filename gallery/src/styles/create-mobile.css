@@ -21,10 +21,48 @@
   border: none; font-family: inherit; }
 .cm-segbtn.on { background: var(--lavender); color: var(--base); font-weight: 600; }
 
-/* Edit/Video honest sub-placeholder -- reuses .glm-placeholder's own look,
-   just a shorter min-height since it sits below the segmented control rather
-   than filling the whole tab. */
+/* Edit's honest sub-placeholder -- reuses .glm-placeholder's own look, just a
+   shorter min-height since it sits below the segmented control rather than
+   filling the whole tab. */
 .cm-soon { min-height: 220px; padding: 36px 20px; }
+
+/* ---- Video mode: shared <mg-generate-drawer> host (VideoMode.jsx). The
+   element paints its own full glass chrome (border/radius/shadow/padding --
+   static/mg-generate-drawer.js's own CSS), so this host only adds the
+   vertical gap under the segmented control; .cm-pad already supplies the
+   tab's left/right inset, so no side padding here (matching how .cm-soon
+   and every other direct child of .cm-pad sits flush). ---- */
+.cm-videohost { margin: 8px 0 4px; }
+
+/* ---- Video mode overlay (AppMobile.jsx), lifted 2026-08-03 so
+   <mg-generate-drawer> survives an OUTER Gallery/Create/Control tab switch,
+   not just Create's own Image/Edit/Video segmented control -- see
+   AppMobile.jsx's and VideoMode.jsx's header comments for the credit-safety
+   reason this had to move out of CreateMobile.jsx.
+
+   .cm-videowrap is absolutely positioned inset:0 within .glm-body -- already
+   position:relative (gallery-mobile.css) and already sized by the flex
+   layout to exactly the space between the fixed-height hero and the tab bar,
+   so inset:0 here reuses that existing sizing instead of reintroducing new
+   header/tab-bar height constants of its own. overflow-y matches .glm-body's
+   own scroll behavior for the same reason.
+
+   .cm-videospacer is an invisible (visibility:hidden, so it paints nothing
+   and never obscures what's beneath it) copy of .cm-seg3, built from the
+   exact same class as the REAL segmented control CreateMobile.jsx renders
+   underneath -- it reserves the identical vertical gap that real control
+   occupies by construction (same padding/font-size rules), so <mg-generate-
+   drawer> paints directly below it, in the exact slot it used to fill
+   inline, with no measured or guessed pixel offset to keep in sync.
+
+   pointer-events: none on the wrap (so a tap in the reserved gap falls
+   through to the REAL, still-interactive segmented control painted beneath
+   it) with pointer-events: auto restored on the video host itself (so its
+   own form fields and Generate button stay tappable). ---- */
+.cm-videowrap { position: absolute; inset: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  pointer-events: none; }
+.cm-videowrap .cm-videospacer { visibility: hidden; }
+.cm-videowrap .cm-videohost { pointer-events: auto; }
 
 /* ---- field label + prompt textarea (DC fieldLbl / taStyle) ---- */
 .cm-lbl { font-size: 9.5px; color: var(--overlay0); margin: 12px 0 5px; }

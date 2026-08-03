@@ -4,11 +4,13 @@ import useFlavour from "../hooks/useFlavour.js";
 import useGenerate from "../gen/useGenerate.js";
 import { fetchAccount, fetchCollections } from "../api.js";
 import GalleryMobile from "./GalleryMobile.jsx";
-import CreateMobile from "./CreateMobile.jsx";
+import CreateMobile, { MODES } from "./CreateMobile.jsx";
+import VideoMode from "./VideoMode.jsx";
 import TabBarMobile from "./TabBarMobile.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import PickerHost from "./PickerHost.jsx";
 import "../styles/gallery-mobile.css";
+import "../styles/create-mobile.css";
 
 /* The mobile Gallery/Create/Control shell (design spec: Moonglade Mobile.dc.html)
    -- rendered by main.jsx in place of App.jsx whenever useIsMobile() is true,
@@ -34,6 +36,25 @@ import "../styles/gallery-mobile.css";
        Gallery/Control tab switch instead of resetting on remount. costRef is
        created here too (an imperative DOM handle to the real <mg-cost-badge>
        CreateMobile mounts, the same pattern GenerateDrawer.jsx uses);
+     - cmode (Create's own Image/Edit/Video segmented-control state) and
+       VideoMode itself (the shared <mg-generate-drawer> mount) -- lifted HERE
+       2026-08-03 for a credit-safety reason, not just consistency: VideoMode
+       mounts an element whose disconnectedCallback sweeps every outstanding
+       poll timer for an already-charged, in-flight video render (see
+       VideoMode.jsx's header comment). It was previously mounted INSIDE
+       CreateMobile.jsx, which is itself only rendered while tab === "create"
+       ({tab === "create" && <CreateMobile .../>} below) -- so switching the
+       bottom nav to Gallery or Control unmounted it mid-submit and silently
+       stopped tracking a job the server kept billing. Rendering VideoMode
+       here, as a sibling OUTSIDE that conditional, means neither the inner
+       segmented-control switch nor the outer tab switch ever removes it from
+       the DOM -- only `visible` toggles display:none, same as before, one
+       level higher. cmode/setCmode move up alongside it because CreateMobile's
+       segmented control needs to keep selecting the SAME state VideoMode's
+       visibility is computed from; CreateMobile still owns the segmented
+       control's rendering, just reading/writing lifted state now instead of
+       its own local state. See the .cm-videowrap render below for how this
+       stays visually in the exact spot CreateMobile used to render it inline;
      - PickerHost -- mounted here for the first time on mobile (previously
        desktop-only, App.jsx's own mount). CreateMobile's Reference field calls
        the same askPicker() singleton EditTab/FixTab/FiltersPanel/GenerateDrawer
@@ -90,6 +111,7 @@ export default function AppMobile({ boot }) {
   const lib = useLibrary();
   const costRef = useRef(null);
   const gen = useGenerate({ costRef });
+  const [cmode, setCmode] = useState("image"); // Create's Image/Edit/Video mode -- lifted, see header comment
 
   useEffect(() => { fetchAccount().then(setAccount); }, []);
 
@@ -168,12 +190,33 @@ export default function AppMobile({ boot }) {
           <GalleryMobile boot={boot} collections={collections} refreshCollections={refreshCollections} {...lib} />
         )}
         {tab === "create" && (
-          <CreateMobile account={account} costRef={costRef} {...gen} />
+          <CreateMobile account={account} costRef={costRef} cmode={cmode} setCmode={setCmode} {...gen} />
         )}
         {tab === "control" && (
           <Placeholder icon="⚙" title="Control"
             note="Sync, Tend, Skins, and account maintenance — coming in the next mobile pass." />
         )}
+
+        {/* VideoMode, lifted here (see header comment) so it survives a
+            Gallery/Control tab switch, not just Create's own segmented
+            control. Absolutely positioned over .glm-body -- already
+            position:relative and already sized to exactly the hero/tab-bar
+            gap (gallery-mobile.css) -- with an invisible ghost copy of the
+            segmented control reserving the same vertical gap the REAL one
+            (rendered by CreateMobile above, still visible/clickable through
+            this overlay's pointer-events:none) occupies. See create-mobile.css's
+            .cm-videowrap block for the full rationale. */}
+        <div className="cm-videowrap" style={{ display: (tab === "create" && cmode === "video") ? "" : "none" }}>
+          <div className="cm-pad">
+            <div className="cm-seg3 cm-videospacer" aria-hidden="true">
+              {MODES.map(([k, label, title]) => (
+                <button key={k} type="button" tabIndex={-1} title={title}
+                  className={"cm-segbtn" + (k === "video" ? " on" : "")}>{label}</button>
+              ))}
+            </div>
+            <VideoMode visible={tab === "create" && cmode === "video"} />
+          </div>
+        </div>
       </div>
 
       <TabBarMobile tab={tab} setTab={setTab} />
