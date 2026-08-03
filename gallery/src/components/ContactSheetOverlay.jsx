@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { createPortal } from "react-dom";
+import useContactSheet, { pad } from "../hooks/useContactSheet.js";
 import "../styles/overlays.css";
 import "../styles/contact-sheet-overlay.css";
 
@@ -13,6 +14,13 @@ import "../styles/contact-sheet-overlay.css";
    scoped by the @media print rule in contact-sheet-overlay.css, so what
    prints is the live React DOM, not a server-rendered document.
 
+   Fetch/state logic lifted out to useContactSheet.js (2026-08-03), the same
+   precedent useFolio.js/useHealth.js/useImageDetails.js/useControlPanel.js
+   already set this session -- this component (the ONE place the fetch used
+   to live) is refactored to CONSUME the hook rather than hold a second copy,
+   and the new mobile screen (ContactSheetMobile.jsx) consumes the identical
+   hook instance-per-mount. See useContactSheet.js's own header comment.
+
    Portaled straight to document.body (NOT rendered inline in App's tree,
    unlike every other overlay). Caught live: nested inline, this sits deep
    inside #root AFTER the full gallery grid in DOM order. visibility:hidden
@@ -23,25 +31,8 @@ import "../styles/contact-sheet-overlay.css";
    portal lets print CSS just hide #root outright (display:none, zero
    height) and print this sibling's own natural (small) height instead. */
 
-function pad(n, width) { return String(n).padStart(width, "0"); }
-
 export default function ContactSheetOverlay({ ids, collectionName, onClose }) {
-  const [data, setData] = useState(null);
-  const [err, setErr] = useState(null);
-
-  useEffect(() => {
-    let dead = false;
-    const qs = ids && ids.length
-      ? "ids=" + encodeURIComponent(ids.join(","))
-      : collectionName
-        ? "collection=" + encodeURIComponent(collectionName)
-        : "";
-    fetch("/api/contact-sheet" + (qs ? "?" + qs : ""))
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((d) => { if (!dead) setData(d); })
-      .catch((e) => { if (!dead) setErr(String(e.message || e)); });
-    return () => { dead = true; };
-  }, [ids, collectionName]);
+  const { data, err } = useContactSheet({ ids, collectionName });
 
   return createPortal(
     <>

@@ -1,5 +1,7 @@
-import React from "react";
+import React, { useState } from "react";
 import useHealth, { fmt } from "../hooks/useHealth.js";
+import MobileScreen from "./MobileScreen.jsx";
+import DuplicateReviewMobile from "./DuplicateReviewMobile.jsx";
 import "../styles/overlays.css";
 import "../styles/control-mobile.css";
 import "../styles/create-mobile.css";
@@ -43,12 +45,17 @@ import "../styles/menu-screens-mobile.css";
       buttons. Per "reuse existing UI mechanisms over building parallel UI",
       these stay live here too -- tapping one filters the SAME Gallery tab
       the hamburger menu was opened from, not a decorative no-op.
-   4. DUPLICATES/RECLAIMABLE: HealthOverlay.jsx opens DuplicateReviewOverlay.jsx
-      on a tap; no mobile Duplicate Review surface exists ANYWHERE in this
-      app yet. Per this round's explicit scope (disclose the gap, don't
-      build the surface), these two tiles render as PLAIN, non-clickable
-      stat cards here -- same real numbers, no dead tap pretending to lead
-      somewhere.
+   4. DUPLICATES/RECLAIMABLE (2026-08-03, closing the prior gap): these two
+      tiles now open the real Duplicate Review Mobile screen
+      (DuplicateReviewMobile.jsx, design spec "Duplicate Review Mobile.dc.html"),
+      pushed via a SECOND, locally-owned MobileScreen instance nested inside
+      THIS screen -- matching ControlMobile.jsx's own Branding drill-in
+      precedent (push-within-a-push: this file owns dupOpen/dupClosing the
+      same way ControlMobile owns brandOpen/brandClosing, not lifted to
+      AppMobile). Mirrors HealthOverlay.jsx's own desktop click-through
+      exactly (a plain onClick on the tile's value, `st.dup` gates which
+      tiles get it) -- same real GET /api/health numbers, now a real
+      destination instead of a dead tap.
    5. SCOPED OUT, ON PURPOSE: the prompt word-cloud and folder-breakdown
       sections (both real, both on desktop) aren't in the design's mobile
       spec at all, and are lower-signal, more decorative sections on a
@@ -61,9 +68,21 @@ import "../styles/menu-screens-mobile.css";
       Import screen directly, a real destination that didn't exist before
       this batch, instead of the design's plain static note. */
 
-export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter, onOpenImport }) {
+export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter, onOpenImport, boot, onDuplicatesResolved }) {
   const { h, err, stats, monthMax, modelMax, buckets } = useHealth();
   void buckets; // folder breakdown intentionally not shown on mobile this pass -- see header comment, point 5
+
+  // Duplicate Review drill-in -- MobileScreen.jsx's ownership contract,
+  // mirrored exactly from ControlMobile.jsx's own Branding screen (open/
+  // closing pair, 220ms exit timeout matching glmScreenOut's own duration).
+  // See header comment, point 4.
+  const [dupOpen, setDupOpen] = useState(false);
+  const [dupClosing, setDupClosing] = useState(false);
+  const openDup = () => setDupOpen(true);
+  const closeDup = () => {
+    setDupClosing(true);
+    setTimeout(() => { setDupOpen(false); setDupClosing(false); }, 220);
+  };
 
   if (err) return <div className="mgh-loading">couldn't load health data — {err}</div>;
   if (!h) return <div className="mgh-loading">measuring the collection…</div>;
@@ -73,7 +92,14 @@ export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter,
       <div className="ctm-statgrid" style={{ marginBottom: 16 }}>
         {stats.map((st) => (
           <div className="ctm-statcard" key={st.label}>
-            <div className={"ctm-statnum" + (st.gold ? " gold" : "")}>{st.value}</div>
+            {st.dup ? (
+              <button type="button" className={"ctm-statnum ctm-statnum-btn" + (st.gold ? " gold" : "")}
+                title="Open Duplicate Review" onClick={openDup}>
+                {st.value}
+              </button>
+            ) : (
+              <div className={"ctm-statnum" + (st.gold ? " gold" : "")}>{st.value}</div>
+            )}
             <div className="ctm-statlabel">{st.label}</div>
           </div>
         ))}
@@ -143,6 +169,13 @@ export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter,
           </div>
         )
       )}
+
+      {/* Duplicate Review drill-in -- a sibling MobileScreen, matching
+          ControlMobile.jsx's own Branding screen placement exactly (a
+          push-within-a-push; see header comment, point 4). */}
+      <MobileScreen open={dupOpen} closing={dupClosing} onClose={closeDup} title="Duplicates">
+        <DuplicateReviewMobile csrf={(boot && boot.csrf) || ""} onResolved={onDuplicatesResolved} />
+      </MobileScreen>
     </>
   );
 }

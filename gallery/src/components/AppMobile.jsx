@@ -19,6 +19,7 @@ import HealthMobile from "./HealthMobile.jsx";
 import ImportMobile from "./ImportMobile.jsx";
 import ContestsMobile from "./ContestsMobile.jsx";
 import FolioMobile from "./FolioMobile.jsx";
+import ContactSheetMobile from "./ContactSheetMobile.jsx";
 import "../styles/gallery-mobile.css";
 import "../styles/create-mobile.css";
 
@@ -158,11 +159,18 @@ import "../styles/create-mobile.css";
      - Collection Health: all 12 real stat tiles shown (design mock only
        drew 8); a "Top models" section added (real, desktop has it, design
        omits it); tag/LoRA chips wired as LIVE filters through the lifted
-       useLibrary() instance (see filterFromHealth below); Duplicates/
-       Reclaimable render as plain, non-clickable tiles -- no mobile
-       Duplicate Review surface exists yet (disclosed gap, not built this
-       round, per instruction); word-cloud/folder-breakdown scoped out this
-       pass (deliberate trim, not a "skip real data" call).
+       useLibrary() instance (see filterFromHealth below); word-cloud/
+       folder-breakdown scoped out this pass (deliberate trim, not a "skip
+       real data" call). Duplicates/Reclaimable (2026-08-03, closing the
+       prior gap) now open the real Duplicate Review Mobile screen
+       (DuplicateReviewMobile.jsx, nested inside HealthMobile.jsx's own
+       pushed screen -- see that file's own header comment) -- real GET
+       /api/duplicates + real POST /api/duplicates/resolve|undo, the exact
+       same hook (useDuplicateReview.js) and backend routes desktop's
+       DuplicateReviewOverlay.jsx uses, never a second write path.
+       `afterDuplicatesResolved` below is this surface's own afterMutation()
+       equivalent -- reloads the lifted useLibrary() grid once a duplicate
+       copy actually leaves the visible library.
      - Import: one real file-picker button (native <input type="file">) --
        the design specifies no picker at all; "Browse a folder…" dropped
        (webkitdirectory has no reliable mobile support); collection picker
@@ -201,7 +209,24 @@ import "../styles/create-mobile.css";
    openDetailsFromLightbox is the reverse trip, from the Lightbox's own
    "Details ›" pill. Real cross-page stepping reuses the SAME lib.page/
    lib.pages/lib.load this component already threads through for other
-   purposes -- no second pagination copy. */
+   purposes -- no second pagination copy.
+
+   CONTACT SHEET MOBILE (2026-08-03) -- the Gallery tab's Actions sheet
+   (ActionsMenu.jsx, mounted "as-is" inside GalleryMobile.jsx) has a real
+   "▤ Print sheet" item that, on mobile, previously fell through to
+   ActionsMenu's own desktop-shaped fallback (a bare window.open of the
+   classic print page). `contactSheetTarget`/openContactSheet/
+   closeContactSheet are lifted HERE for the identical reason detailsFor/
+   lbIndex/folioOpen are (must survive being opened from the Gallery tab and
+   cover the WHOLE shell), mirroring desktop App.jsx's own contactSheetTarget/
+   openContactSheet pairing exactly (same {ids, collectionName} target shape,
+   same "explicit ids win, collectionName is the fallback" contract). Renders
+   as a fixed, full-viewport overlay sibling of ImageDetailsMobile/
+   LightboxMobile/FolioMobile below. GalleryMobile.jsx's own onPrintSheet prop
+   closes its local Actions sheet and calls openContactSheet(selIds) in the
+   same click -- see that file's own header comment and ContactSheetMobile.jsx's
+   for the full real-data-vs-design-mock disclosure (placeholder thumbnails,
+   Share via the Web Share API instead of window.print()). */
 
 const MENU_ITEMS = [
   { icon: "📈", label: "My Art", screen: "myart" },
@@ -285,6 +310,16 @@ export default function AppMobile({ boot }) {
   const [folioOpen, setFolioOpen] = useState(false);
   const openFolio = () => setFolioOpen(true);
   const closeFolio = () => setFolioOpen(false);
+
+  // Contact Sheet Mobile (2026-08-03) -- lifted HERE for the identical reason
+  // detailsFor/lbIndex/folioOpen are: reachable from the Gallery tab's
+  // Actions sheet, must cover the WHOLE shell. Mirrors desktop App.jsx's own
+  // contactSheetTarget/openContactSheet exactly -- see header comment.
+  const [contactSheetTarget, setContactSheetTarget] = useState(null); // null | {ids, collectionName}
+  const openContactSheet = (ids, collectionName) => {
+    setContactSheetTarget({ ids: ids || [], collectionName: collectionName || "" });
+  };
+  const closeContactSheet = () => setContactSheetTarget(null);
   const openLightbox = (mid) => {
     const idx = lib.items.findIndex((it) => it.media_id === mid);
     if (idx < 0) {
@@ -395,6 +430,17 @@ export default function AppMobile({ boot }) {
     await refreshCollections();
   };
 
+  // Duplicate Review Mobile's onResolved (HealthMobile.jsx -> nested
+  // DuplicateReviewMobile.jsx, see that hook's own header comment) -- the
+  // SAME App.jsx afterMutation() shape DuplicateReviewOverlay.jsx's onResolved
+  // already calls on desktop: reload the grid so a quarantined duplicate
+  // copy actually leaves the visible library, once real, not just locally
+  // marked resolved in the Duplicate Review screen's own session state.
+  const afterDuplicatesResolved = async () => {
+    lib.load(1, true);
+    await refreshCollections();
+  };
+
   // NavSpine.jsx's own logout(), ported verbatim (same /api/logout JSON POST +
   // cache-purge-then-navigate shape -- see that file's header comment for why).
   const logOut = () => {
@@ -454,7 +500,7 @@ export default function AppMobile({ boot }) {
       <div className="glm-body">
         {tab === "gallery" && (
           <GalleryMobile boot={boot} collections={collections} refreshCollections={refreshCollections} {...lib}
-            onOpenDetails={openDetails} />
+            onOpenDetails={openDetails} onOpenContactSheet={openContactSheet} />
         )}
         {tab === "create" && (
           <CreateMobile account={account} costRef={costRef} editCostRef={editCostRef}
@@ -502,6 +548,8 @@ export default function AppMobile({ boot }) {
               onTagFilter={(t) => filterFromHealth({ tag: t })}
               onLoraFilter={(l) => filterFromHealth({ lora: l })}
               onOpenImport={() => setScreen("import")}
+              boot={boot}
+              onDuplicatesResolved={afterDuplicatesResolved}
             />
           )}
           {screen === "import" && <ImportMobile collections={collections} onImported={afterImported} />}
@@ -552,6 +600,18 @@ export default function AppMobile({ boot }) {
           bar, same level as ImageDetailsMobile/LightboxMobile (see header
           comment for why it's not nested in MobileScreen). */}
       {folioOpen && <FolioMobile onClose={closeFolio} />}
+
+      {/* Contact Sheet Mobile -- a fixed, full-viewport overlay above the
+          hero/tab bar, same level as ImageDetailsMobile/LightboxMobile/
+          FolioMobile (see header comment for why it's not nested in
+          MobileScreen or GalleryMobile's own Actions sheet). */}
+      {contactSheetTarget && (
+        <ContactSheetMobile
+          ids={contactSheetTarget.ids}
+          collectionName={contactSheetTarget.collectionName}
+          onClose={closeContactSheet}
+        />
+      )}
 
       <MobileSheet open={sheet === "loom"} closing={closing} onClose={closeSheet} title="THE LOOM">
         <div className="glm-loom-note">

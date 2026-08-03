@@ -24,6 +24,17 @@
 .ctm-statlabel { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9px;
   letter-spacing: .14em; text-transform: uppercase; color: var(--overlay0); margin-top: 3px; }
 
+/* Duplicates/Reclaimable: mirrors desktop's own .mgh-stat-value.dup treatment
+   (HealthOverlay.jsx + overlays.css) -- a real <button> (not a styled div),
+   accent color + underline as the "this one's clickable" affordance, opening
+   HealthMobile.jsx's own nested Duplicate Review Mobile screen. No font
+   shorthand reset needed: author-stylesheet class rules (.ctm-statnum's own
+   Georgia/22px) already win over the UA stylesheet's plain button default. */
+.ctm-statnum-btn { display: block; width: 100%; border: none; background: none; padding: 0;
+  text-align: left; cursor: pointer; color: var(--accent); text-decoration: underline;
+  text-underline-offset: 3px; }
+.ctm-statnum-btn.gold { color: var(--gold); }
+
 /* ---- Live Mirror status row (DC lines ~1011-1020) -- dot + text real fields
    are GET /api/watch/status's own (connected/last_event_at/mirrored/
    stale_reconnects/last_error), the SAME fields classic's own loadWatchStatus()

@@ -1,0 +1,97 @@
+/* Duplicate Review -- mobile screen (design spec: "Duplicate Review Mobile.dc.html",
+   design_handoff/design_handoff_moonglade_suite/). Nested inside HealthMobile.jsx's
+   own pushed Health screen (MobileScreen.jsx push-within-push, matching
+   ControlMobile.jsx's own Branding drill-in precedent) -- opened from Health's
+   Duplicates/Reclaimable stat tiles.
+
+   Most of the visual language is REUSED verbatim from duplicate-review-overlay.css
+   (.mgdr-groups, .mgdr-group, .mgdr-group-head, .mgdr-members, .mgdr-tile, .mgdr-thumb,
+   .mgdr-toggle, .mgdr-keeper, .mgdr-quarantined, .mgdr-restored, .mgdr-tile-meta,
+   .mgdr-stars and friends, .mgdr-groupfoot, .mgdr-grouperr, .mgdr-resolve, .mgdr-undo,
+   .mgdr-summary, .mgdr-autobtn, .mgdr-allresolved, .mgdr-clear and friends,
+   .mgdr-autoconfirm-head/-body/-actions, .mgdr-autocancel, .mgdr-autogo) --
+   DuplicateReviewMobile.jsx imports that stylesheet
+   directly, the SAME "reuse existing UI mechanisms over building parallel UI" call
+   ControlMobile.jsx already made for BrandingTab/ActionChip/SkinsRow. This file adds
+   ONLY what's genuinely mobile-specific: the design's own stronger per-tile
+   marked-for-removal treatment (a full-tile red wash + X, not just the pill),
+   the bottom-sheet resolve-confirm content, and the CENTERED auto-resolve-all
+   modal (a shape that doesn't exist anywhere else in this app's mobile CSS --
+   MobileSheet.jsx is bottom-anchored only). mgdrm- prefix throughout, every
+   color a shared skin token, matching every other mobile screen's own rule. */
+
+@keyframes mgdrmFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes mgdrmPop { from { opacity: 0; transform: scale(.95); } to { opacity: 1; transform: none; } }
+
+/* ---- group card tweaks for a narrow viewport -- .mgdr-groups' own 66vh max-height
+   is a desktop-slab concern; MobileScreen.jsx's .glm-screen-body already scrolls the
+   whole screen, so this just clears that cap for mobile. ---- */
+.mgdrm-groups { max-height: none; padding-top: 4px; }
+
+/* ---- stronger "marked for removal" tile treatment (the design's own full-tile
+   red wash + X, layered ON TOP of .mgdr-tile.remove's existing dim-image rule
+   rather than replacing it) -- tap-to-toggle reuses the exact real keeper-radio
+   model .mgdr-toggle already drives (see DuplicateReviewMobile.jsx's own header
+   comment for why), this is purely the mobile-only visual emphasis the DC mock
+   specifies for a touch surface. ---- */
+.mgdrm-tile { position: relative; }
+.mgdrm-tile.removed .mgdr-thumb { box-shadow: 0 0 0 2px var(--red) inset; border-radius: 8px; }
+.mgdrm-removed-x { position: absolute; inset: 0; display: grid; place-items: center;
+  background: rgba(243,139,168,.22); color: var(--red); font-size: 20px; font-weight: 700;
+  border-radius: 8px; pointer-events: none; }
+.mgdrm-tile.busy .mgdr-thumb { opacity: .55; pointer-events: none; }
+
+/* ---- per-group "Clear" -- resets ONE group's keeper back to the computed
+   default (see DuplicateReviewMobile.jsx's header comment, point 3). Visually
+   a neutral ghost pill, same look as .mgdr-undo but its own class (not that
+   one reused verbatim) so it sits on the LEFT of the footer row without
+   fighting .mgdr-undo's own margin-left:auto (which .mgdr-resolve, on the
+   right of the same row, still needs). ---- */
+.mgdrm-clearbtn { font-size: 11.5px; font-weight: 700; padding: 7px 15px; border-radius: 8px;
+  cursor: pointer; font-family: inherit; border: 1px solid var(--surface1);
+  background: rgba(12,10,28,.6); color: var(--text); }
+.mgdrm-clearbtn:hover:not(:disabled) { border-color: var(--accent); }
+.mgdrm-clearbtn:disabled { opacity: .55; cursor: default; }
+
+/* ---- per-group toolbar (summary + Auto-resolve-all trigger) -- reuses
+   .mgdr-summary/.mgdr-autobtn verbatim, this just stacks them for a narrow column
+   instead of desktop's flex-wrap row. ---- */
+.mgdrm-toolbar { display: flex; flex-direction: column; gap: 8px; padding-bottom: 4px; }
+.mgdrm-toolbar .mgdr-autobtn { align-self: flex-start; }
+
+/* ---- per-group Resolve confirm -- MobileSheet.jsx's bottom-sheet chrome hosts
+   this content (glm-scrim/glm-sheet already handle the slide/scrim/dismiss). A
+   REAL, deliberate mobile-only gate -- desktop's own per-group Resolve has NO
+   extra confirm (see DuplicateReviewOverlay.jsx's header comment for why that's
+   right there); mobile gets this one per the design + this build's own brief. ---- */
+.mgdrm-confirm-title { font-family: Georgia, "Times New Roman", serif; font-size: 15px;
+  color: var(--text); text-align: center; }
+.mgdrm-confirm-body { font-size: 12px; color: var(--subtext); text-align: center;
+  line-height: 1.55; margin-top: 6px; }
+.mgdrm-confirm-actions { display: flex; gap: 10px; margin-top: 14px; }
+
+/* Full-width variant of the shared .mgdr-autocancel/.mgdr-autogo pill buttons --
+   added as a SECOND class (not an edit to the shared rule, which desktop also
+   uses) so the two mobile confirm rows (per-group sheet, auto-resolve modal)
+   get an even Cancel/Proceed split instead of desktop's auto-width pills. */
+.mgdrm-wide { flex: 1; text-align: center; }
+
+/* ---- Auto-resolve-all -- CENTERED modal (design's own shape; the ONE mobile
+   confirm surface here that is NOT a bottom sheet). No prior centered-modal-
+   with-scrim primitive exists generically in this app's mobile CSS to reuse
+   (PowerModal's .mgcp-pwr-* is control-specific, mascot artwork included) --
+   built fresh here, reusing .mgdr-autoconfirm-head/-body/-actions verbatim for
+   the inner copy/actions styling, same as the per-group sheet above. ---- */
+.mgdrm-automodal-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(4,3,10,.66);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  animation: mgdrmFadeIn .2s ease; }
+.mgdrm-automodal-card { width: 100%; max-width: 320px; border-radius: 14px;
+  background: var(--mantle); border: 1px solid var(--surface1); padding: 18px;
+  animation: mgdrmPop .22s cubic-bezier(.4,0,.2,1) both; }
+.mgdrm-automodal-card .mgdr-autoconfirm-head { text-align: center; }
+.mgdrm-automodal-card .mgdr-autoconfirm-body { text-align: center; }
+.mgdrm-automodal-card .mgdr-autoconfirm-actions { justify-content: stretch; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mgdrm-automodal-scrim, .mgdrm-automodal-card { animation: none; }
+}
