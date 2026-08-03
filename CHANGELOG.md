@@ -17,6 +17,35 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Mobile pass, surface 3 (part 3): Create tab, Video mode — plus a credit-safety fix caught
+  before shipping.** The Video-mode placeholder is now the real, shared `<mg-generate-drawer>`
+  web component (`static/mg-generate-drawer.js`) — the exact same element desktop's
+  `GenerateDrawer.jsx` mounts for its own Video tab, no reimplementation of form state, live
+  cost, submit/poll, or the result strip.
+  **First pass shipped a real gap, caught by review before it went out:** mounting the drawer
+  only inside `CreateMobile.jsx` meant switching the *outer* bottom-nav tab away from Create
+  (to Gallery or Control) unmounted it — and the element's `disconnectedCallback` sweeps every
+  outstanding poll timer, so an already-charged, in-flight video render's UI tracking would
+  silently die the moment the user left the Create tab (the job keeps running and billing
+  server-side regardless; only the UI stops watching it). A 15s v4.0 render is roughly 210,000
+  credits — this codebase treats spend paths as sacred everywhere else (no-retry mutations,
+  `READ_ONLY` gating, etc.), so this got fixed in the same pass rather than shipped as a
+  disclosed gap. Fix: the video host (`VideoMode`, now its own file) was lifted out of
+  `CreateMobile.jsx` up to `AppMobile.jsx` itself — mounted once, unconditionally, for the
+  lifetime of the whole mobile app, with only a `display:none` toggle controlling visibility —
+  the same "lift shared state above the tab switch" pattern already used for `useLibrary()` and
+  `useGenerate()`.
+  Verified twice over, independently: an instrumented copy of the real, unmodified
+  `mg-generate-drawer.js` proved the exact bug live (outer tab switch → disconnect → poll state
+  lost) before the fix and proved it gone after (same clicks, same element, zero
+  connect/disconnect churn across a Create → Gallery → Create round trip) — then reconfirmed a
+  third time against the real running app with the real account: switching to Gallery leaves
+  the video wrap genuinely `display:none` while the exact same `<mg-generate-drawer>` DOM node
+  persists underneath, untouched. CSS positioning measured live (not just read): zero overlap
+  with the header or tab bar, exact fill of the content area between them. No overflow at
+  390/430px in any shot mode, including Multi-Reference with all 6 reference slots filled.
+  Full suite green (1539 passed) both before and after the fix.
+
 - **Mobile pass, surface 3 (part 2): Create tab, Image mode.** The Create tab's placeholder
   (shipped alongside the Gallery tab) is now a real, working Image generator — prompt, the
   real model/LoRA picker (`<mg-model-picker>`, the same shared web component the desktop dock

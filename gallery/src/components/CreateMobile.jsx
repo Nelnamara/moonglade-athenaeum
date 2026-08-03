@@ -61,22 +61,42 @@ import "../styles/create-mobile.css";
    (the same soonToast convention AppMobile.jsx's own Menu items use) rather
    than a dead tap or a half-built screen.
 
-   Edit and Video modes render an honest sub-placeholder (reusing
-   gallery-mobile.css's own .glm-placeholder classes) rather than porting
-   partial pixels for either -- see the build report for why the segmented
-   control itself ships now instead of being deferred alongside them. */
+   Edit still renders an honest sub-placeholder (reusing gallery-mobile.css's
+   own .glm-placeholder classes) -- its own mobile pass, not built here.
 
-const MODES = [
+   VIDEO MODE (this increment) is the shared <mg-generate-drawer> web
+   component (static/mg-generate-drawer.js) -- the SAME element desktop's
+   GenerateDrawer.jsx mounts for its own Video tab (see that file's VideoTab).
+   No reimplementation: form state, live cost, submit/poll, and the result
+   strip are all the component's own unchanged machinery.
+
+   VideoMode itself, and the cmode/setCmode state that selects it, were LIFTED
+   OUT of this file to AppMobile.jsx on 2026-08-03 (credit-safety fix) -- see
+   AppMobile.jsx's own header comment and VideoMode.jsx's header comment for
+   the full reasoning. Short version: this file is only rendered while
+   AppMobile's OUTER tab === "create" ({tab === "create" && <CreateMobile
+   .../>}), so a VideoMode instance mounted IN here, however carefully guarded
+   against the Image/Edit/Video segmented-control switch, still got torn down
+   by a Gallery/Control tab switch -- unmounting mid-submit and silently
+   dropping the poll that was tracking an already-charged, in-flight video
+   render. VideoMode now mounts directly in AppMobile.jsx, one level above
+   this file's own conditional render, so neither switch removes it from the
+   DOM. This file still owns the segmented control itself (cmode/setCmode
+   arrive as props instead of local state, otherwise unchanged) and renders
+   NOTHING in place of the old inline VideoMode mount when cmode === "video"
+   -- AppMobile.jsx's lifted VideoMode paints there instead, positioned by
+   create-mobile.css's .cm-videowrap to land in the exact same visual spot. */
+
+export const MODES = [
   ["image", "Image", "Generate images"],
   ["edit", "Edit", "Edit · Fixer · Enhance"],
   ["video", "Video", "Generate video"],
 ];
 
 export default function CreateMobile({
-  account, costRef,
+  account, costRef, cmode, setCmode,
   s, set, busy, results, applyModelRow, pickVersion, addLora, removeLora, generate, refreshPrice,
 }) {
-  const [cmode, setCmode] = useState("image");
   const [flyOpen, setFlyOpen] = useState(false);
   const [flyKind, setFlyKind] = useState("base");
   const costHost = useRef(null);
@@ -152,15 +172,20 @@ export default function CreateMobile({
           ))}
         </div>
 
-        {cmode !== "image" && (
+        {cmode === "edit" && (
           <div className="glm-placeholder cm-soon">
-            <div className="glm-placeholder-icon" aria-hidden="true">{cmode === "edit" ? "⟲" : "▶"}</div>
-            <div className="glm-placeholder-title">{cmode === "edit" ? "Edit" : "Video"}</div>
+            <div className="glm-placeholder-icon" aria-hidden="true">⟲</div>
+            <div className="glm-placeholder-title">Edit</div>
             <div className="glm-placeholder-note">
-              {cmode === "edit" ? "Edit Pro, Fixer, and Enhance" : "Video generation"} — its own mobile pass, coming next.
+              Edit Pro, Fixer, and Enhance — its own mobile pass, coming next.
             </div>
           </div>
         )}
+
+        {/* cmode === "video" renders nothing here on purpose -- the real
+            VideoMode is mounted by AppMobile.jsx (lifted, see this file's
+            header comment) and painted in this exact slot by
+            create-mobile.css's .cm-videowrap overlay. No duplicate mount. */}
 
         {cmode === "image" && (
           <>

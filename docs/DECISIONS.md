@@ -29,7 +29,7 @@ reader could work it out from the code, it does not belong here.
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 138
+- [Decisions](#decisions) &mdash; 139
 
 ---
 
@@ -1337,6 +1337,37 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 ## Decisions
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
+
+### Any mobile surface hosting a paid, poll-tracked task must survive the OUTER tab switch, not just its own internal mode switches  ·  *2026-08-03*
+
+The mobile Create tab's Video mode mounts the shared `<mg-generate-drawer>` element, whose
+`disconnectedCallback` deliberately sweeps every outstanding poll timer on unmount — correct
+and necessary internally, but only safe if the element is truly never unmounted mid-submit.
+The first build got the *inner* half of this right (the drawer survives an Image/Edit/Video
+segmented-control switch, mirroring desktop's own "never conditionally unmount" rule) but
+missed the *outer* half: the whole `CreateMobile.jsx` component — drawer included — was still
+nested inside `AppMobile.jsx`'s `{tab === "create" && ...}` conditional, so switching the
+bottom-nav tab to Gallery or Control unmounted it anyway, silently killing UI-side tracking of
+an already-charged, in-flight video render (~210,000 credits for a 15s v4.0 render) while the
+job kept running and billing server-side regardless. Caught by review before it shipped, not
+after. Fixed by lifting the video host out of `CreateMobile.jsx` entirely, up to
+`AppMobile.jsx` — mounted once for the app's whole lifetime, visibility toggled by CSS only —
+the same "lift state above the switch that would reset it" pattern already used for
+`useLibrary()`/`useGenerate()`, just applied to a mounted DOM element instead of React state.
+
+**Why.** The general rule for every future mobile surface: any component whose unmount has a
+*side effect beyond losing UI state* — stopping a poll loop on a paid task is the sharpest
+example, but a WebSocket, a file upload, or any other real in-flight operation qualifies too —
+must be evaluated against the OUTERMOST switch that could unmount it (the bottom-nav tab bar),
+not just the more obvious inner one (a segmented control within that tab). A component that
+"never conditionally unmounts" one level up can still be unmounted two levels up if nobody
+checks. Verified three ways before trusting it: an instrumented reproduction of the bug itself
+(proving the failure mode was real, not theoretical), an instrumented proof of the fix (same
+harness, same clicks, opposite result), and a live check against the real running app with the
+real account. Recording the pattern, not re-deriving it, for Control/hamburger-destination
+work still ahead — any of those touching a real job-polling surface (Control's own Sync/Tend
+job console, for instance) needs this same "outer switch, not just inner" check applied from
+the start, not discovered by review after the fact a second time.
 
 ### App.jsx's browse/search/filter/sort/paginate logic gets refactored to consume its own extracted hook, not left as a divergent duplicate  ·  *2026-08-03*
 
