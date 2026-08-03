@@ -17,6 +17,52 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Folio of Honors ships in the React front door.** Real `/api/achievements` data (57
+  achievements, real points/tiers/earn-dates/ladders/skins) renders in a new
+  `FolioOverlay.jsx`: Summary/All/Statistics tabs, the 10 Evolution Ladder tracks, Milestones,
+  Masteries, and (once earned) Feats, a category filter, search, and a "Within reach"/"Relics"
+  rail — the client derives the same grouped shape the DC's own unshipped `trophy-data.js`
+  mock implied, straight from the real flat achievements array (no backend change needed for
+  browsing). The gold "🏆 Folio" banner button already fired (`onFolio` → `openOverlay("folio")`)
+  but hit a dead overlay key with nothing mounted; that's now wired.
+  **The narrator-poke-to-unlock-Unleash mechanic is real, not a mock** — poking the header
+  avatar 5 times POSTs to the same `/api/ach-event` endpoint classic's Trophy Hall uses, so it
+  counts toward the identical, persisted "Triggered" feat regardless of which surface you poke
+  from. **The "Unleash" ruby-scramble reveal is new** — a 34ms/26-tick glyph-scramble
+  (`▉▊▋▌░▒▓@#%&$*<>/\|=+×÷¤§øþ`) that turns an earned card's clean roast into its NSFW variant
+  character-by-character, ported verbatim from `folio-glitch-spec.md`'s locked spec. This
+  didn't exist anywhere before (classic's own Unleash toggle just swaps text instantly).
+  **Real, persisted, cross-session achievement progress is a live side effect of using this
+  feature** — poking the Folio's narrator during verification genuinely earned the "Triggered"
+  feat for real (Feats count moved 3→4 live in the header).
+  Live-celebration wiring closes a real, separately-verified gap (not React-specific in
+  origin — it never fired after an action in *either* environment, just less noticeable in
+  classic's more frequent full-page navigations): a new `Ach.check()` export on
+  `static/mg-notify.js` re-runs the achievement-check-and-celebrate pass on demand, called
+  from React's existing `mg-gen-done` event listener (`App.jsx`) and `submitTask.js`'s "done"
+  branch, so an achievement earned mid-session now celebrates immediately instead of waiting
+  for the next hard refresh.
+  **A real correction mid-build, caught by the owner, not by review:** the first version of
+  the click-to-replay interaction built its own small custom toast, closely following the
+  DC prototype's own simplified corner-notification markup — but the DC prototype can't call
+  into a real running app's JS, so its toast was necessarily a standalone mockup, not a
+  pointer to the real thing. The result looked wrong, had no confetti/fanfare, and — worse —
+  never auto-dismissed, sitting open like a warning until manually closed. The REAL, already-
+  shipped celebration a genuine new unlock gets (`_mkMoment()`/`_play()`/`_fanfare()`/`_chime()`
+  in `static/mg-notify.js` — badge medallion sweep, mascot pop, ring pulse, tier-colored glow,
+  and on legendary/feat tiers a full 84-piece confetti + 46-star fanfare across the whole
+  viewport, confirmed byte-for-byte matching `Ambient Layer.dc.html`'s own locked spec) was
+  never touched by that first build — a second, drifting, incomplete copy got built next to it
+  instead of reusing it. Fixed by adding one new export, `Ach.replay(achievement, opts)`, that
+  plays the exact same real celebration on demand for an already-earned achievement (not
+  queued — immediate, since it's a manual click, not a batch of real earn-events) and returns
+  a handle so the ruby-scramble can write its progressive reveal directly into that real DOM.
+  The custom toast component and its CSS were deleted outright, not kept as a fallback.
+  Full suite green (1539 passed) after the fix; live-verified against the owner's real account
+  — a real earned feat's replay shows the actual badge, mascot, and full confetti/star fanfare,
+  auto-dismisses on its own after its rarity-scaled hold, and the ruby-scramble still reveals
+  correctly inside the real moment.
+
 - **Duplicate Review — real matching, real (reversible) deletion, built via a 9-agent
   Workflow + adversarial safety review.** New `GET /api/duplicates` (LOGIN tier) with four
   honest tiers, no fabricated data: **same-media** (Class A, `duplicate_groups()`, same

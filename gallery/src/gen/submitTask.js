@@ -70,6 +70,11 @@ export async function submitTask(route, payload, { label, emit }) {
         media: data.media_ids || [],
       });
       window.dispatchEvent(new CustomEvent("mg-gen-done"));
+      // Nudge the Folio of Honors to check-and-celebrate any newly earned achievement.
+      // Generations complete through this path independent of ActionsMenu's mutations,
+      // so it needs its own call here rather than relying solely on App.jsx's
+      // mg-gen-done listener.
+      if (window.Ach) window.Ach.check();
     } else if (phase === "failed") {
       emit({
         kind: "err",
