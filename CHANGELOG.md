@@ -17,6 +17,36 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Mobile pass, surface 3 (part 4): Create tab, Edit mode — Fixer stays honest, Enhance
+  stays dead.** Edit's Edit Pro/Reference Pro sub-mode is now real: prompt, model choice,
+  source + multi-reference picker, a real `/api/price` quote, and real submit — all through
+  a new `useEditGenerate.js` hook wired to the exact same `editCore.js`
+  (`buildEditPayload`/`editGate`/`switchEditModel`) and shared `submitTask.js` desktop's
+  `EditTab.jsx` uses, confirmed zero-diff. Model choice is a two-chip row rather than the
+  open-ended marketplace picker Image mode uses — a deliberate match to desktop's own simpler
+  card-row control for this exact fixed 2-item field, not a workaround (an earlier code
+  comment claimed this was needed to make Reference Pro reachable at all; review caught that
+  the design's main pane already has its own independent route there, so the comment was
+  corrected to state the real reason: `ModelFlyout.jsx`'s catalog-browsing picker doesn't fit
+  a closed enum of two, desktop's own control is the better match).
+  **Fixer ships as an honest, disclosed placeholder, not a shortcut on anything actually
+  designed** — its touch box-drawing has no reference implementation anywhere, not in
+  desktop's mouse-only version, not in the design mockup itself (its own copy is descriptive
+  text only: "Drag a box over the hand or face..."). Building a novel touch interaction under
+  overnight time pressure risked exactly the kind of new, unreviewed bug this pass has been
+  trying to avoid, so it's deferred with the design's own real copy plus an honest "coming
+  next" note, not a fake interactive canvas.
+  **Enhance is not built anywhere in this mobile surface, confirmed dead-and-staying-dead**
+  before and after: re-ran `tests/test_enhance.py` (6/6) both in research and in review,
+  confirmed no `/api/enhance` route, no workflow/panelplugin surface, exists anywhere in the
+  live server — this app's only two things still named "Enhance" are the free client-side Art
+  Filters panel and the Image-mode hires booster, neither a paid generation dispatch, neither
+  touched here.
+  Verified live against the real account: Edit Pro/Reference Pro both render with the design's
+  exact reference-count copy ("Edit Pro takes up to 4 references." / "...10 references."),
+  cost badge correctly fails closed until a source is picked, Fixer shows the real design copy
+  plus its disclosure, zero "Enhance" text anywhere in Edit mode. Full suite green.
+
 - **Mobile pass, surface 3 (part 3): Create tab, Video mode — plus a credit-safety fix caught
   before shipping.** The Video-mode placeholder is now the real, shared `<mg-generate-drawer>`
   web component (`static/mg-generate-drawer.js`) — the exact same element desktop's

@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ASPECTS, dims, goGate, loraIncompat } from "../gen/genCore.js";
+import { EDIT_CAPS, editCaps, refTag } from "../gen/editCore.js";
 import ModelFlyout from "./ModelFlyout.jsx";
 import { askPicker } from "./PickerHost.jsx";
+import { ResultLines } from "./EditTab.jsx";
 import "../styles/create-mobile.css";
 
 /* The Create tab, Image mode (design spec: Moonglade Mobile.dc.html isCreate
@@ -61,8 +63,80 @@ import "../styles/create-mobile.css";
    (the same soonToast convention AppMobile.jsx's own Menu items use) rather
    than a dead tap or a half-built screen.
 
-   Edit still renders an honest sub-placeholder (reusing gallery-mobile.css's
-   own .glm-placeholder classes) -- its own mobile pass, not built here.
+   EDIT MODE, Edit sub-tab (2026-08-03) is now real, following the identical
+   contract Image mode set: real logic via a shared hook (useEditGenerate.js,
+   instantiated ONCE in AppMobile.jsx as `edit`, spread in here the same
+   reason `gen` is), a mobile presentation on top, editCore.js/submitTask.js
+   riding completely unmodified. What's real:
+     - Prompt (-> s.instruction), Source (@image1, pick/clear via askPicker),
+       and up to caps.max_refs-1 extra references (@image2, @image3... via
+       editCore's own refTag) -- exactly the fields the design's main pane
+       shows for Edit (design_handoff/.../Moonglade Mobile.dc.html lines
+       109-184: Prompt / Model / Source, +the enhance-only filter grid this
+       build never reaches);
+     - the cost quote -- Edit's OWN separate <mg-cost-badge> mount (editCostRef,
+       never shared with Image's costRef -- see useEditGenerate.js's header
+       comment for why sharing them would resurrect the classic's
+       no-price-on-?edit= bug) fed by useEditGenerate's real /api/price
+       debounce;
+     - Generate itself -- the real editGate()/run() pair (editCore.js's own
+       functions, the SAME ones EditTab.jsx calls), real busy state, and a
+       real result feed (reusing EditTab.jsx's own exported <ResultLines>
+       rather than a third hand-rolled copy).
+
+   CORRECTED NOTE on Edit's MODEL field (Edit Pro / Reference Pro): the DC's
+   main pane already has its own Model row (shared across Image/Edit/Video)
+   that opens a palette showing both as pickable tiles, independent of the
+   Advanced screen's redundant Resolution/Quality/Aspect copy of the same
+   choice -- so this was never a reachability problem to solve. The shipped
+   two-chip row instead mirrors desktop EditTab.jsx's own card-row switch,
+   the real reference implementation for this exact fixed 2-item field --
+   ModelFlyout.jsx's marketplace-browsing picker (built for an open-ended
+   model catalog) doesn't fit a closed enum of two, so reusing desktop's own
+   simpler control was the better match, not a workaround. Wired to
+   editCore's real switchEditModel(). Resolution/Quality/Aspect stay deferred
+   with EDIT_CAPS' own honest per-model defaults, exactly like Image's own
+   Advanced-gated fields -- nothing sent to /api/price or /api/edit is fake,
+   only unreachable-to-CHANGE this increment. The Advanced
+   row's disclosed summary text is adjusted to "resolution, quality, aspect,
+   negative" (dropping "model", which is no longer Advanced-only here).
+
+   Not built here, and not modeled in the design's main pane at all (only
+   Advanced's subEdit block and desktop's own EditTab.jsx have it): the
+   toolbox preset dropdown + "bank a preset from a task id" control. Presets
+   stay empty this increment, so editGate() naturally requires a typed
+   Prompt -- honest, matches the simpler mental model the mobile mockup's own
+   Prompt-only field set implies.
+
+   Edit's Fixer sub-tab renders an honest sub-placeholder (reusing
+   gallery-mobile.css's own .glm-placeholder classes) using the design's own
+   real copy for the drag-a-box gesture (design_handoff/.../Moonglade Mobile
+   .dc.html lines 432-436 -- confirmed the ONLY drag/box-related content in
+   that 1327-line file) -- NOT a shortcut on anything actually specified:
+   there is no reference implementation of touch-canvas box drawing anywhere,
+   not in desktop's own mouse-only FixTab.jsx, not in the design mockup
+   itself (which only asserts the words and a Face/Hand mode toggle as a
+   stand-in, per that file's own state shape -- no canvas, no pointer wiring,
+   no box-position fields at all). Edit's sub-tab strip here is a real
+   two-way Edit/Fixer control, not the design's literal three-way
+   Edit/Fixer/Enhance -- see the ENHANCE paragraph directly below for why.
+
+   ENHANCE stays dead. Re-verified 2026-08-03: tests/test_enhance.py is
+   still 6/6 passing; there is still no /api/enhance or /api/workflows route,
+   no ENHANCE_PLUGINS/build_panelplugin_parameters/workflow_catalog anywhere
+   in the server. The two things still named "Enhance" in current code are
+   NOT that dead surface -- desktop's Edit-tab "Enhance" sub-tab
+   (GenerateDrawer.jsx) is the free, client-side Art Filters panel
+   (window.MgArtFilters/static/mg-art-filters.js: nothing generated, nothing
+   spent, works offline), and Image mode's "Enhance Details" booster chip
+   (genCore.js's MG_HIRES) is an ordinary field of the Image payload (PixAI's
+   own hires-fix pass), not a separate dispatch. Neither is built here: this
+   increment's mobile Edit mode ships ONLY the real Edit sub-tab and Fixer's
+   honest placeholder -- no Art Filters mount, no hires booster UI, no
+   "Enhance" label anywhere in this file. If a later increment ever adds a
+   mobile Enhance surface, it must be the free client-side filters panel,
+   never a server dispatch -- the same rule the desktop research already
+   established.
 
    VIDEO MODE (this increment) is the shared <mg-generate-drawer> web
    component (static/mg-generate-drawer.js) -- the SAME element desktop's
@@ -89,17 +163,19 @@ import "../styles/create-mobile.css";
 
 export const MODES = [
   ["image", "Image", "Generate images"],
-  ["edit", "Edit", "Edit · Fixer · Enhance"],
+  ["edit", "Edit", "Edit · Fixer"],
   ["video", "Video", "Generate video"],
 ];
 
 export default function CreateMobile({
-  account, costRef, cmode, setCmode,
+  account, costRef, editCostRef, cmode, setCmode, edit,
   s, set, busy, results, applyModelRow, pickVersion, addLora, removeLora, generate, refreshPrice,
 }) {
   const [flyOpen, setFlyOpen] = useState(false);
   const [flyKind, setFlyKind] = useState("base");
+  const [editSub, setEditSub] = useState("edit"); // Edit's own Edit/Fixer sub-tab -- local, no draft to lose
   const costHost = useRef(null);
+  const editCostHost = useRef(null);
   const deselectRef = useRef(null);
 
   const loraCap = account && account.lora_cap != null ? account.lora_cap : null;
@@ -127,6 +203,34 @@ export default function CreateMobile({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* Edit's OWN <mg-cost-badge> mount -- same contract as Image's above, but
+     it CANNOT rely on an empty-deps one-shot effect the way Image's does:
+     Image's costHost span already exists on CreateMobile's very first render
+     because cmode defaults to "image" in AppMobile.jsx, so that branch is
+     already the one painted. Edit is never the default mode, so its span
+     does not exist yet on that first render, and a one-shot effect would
+     find editCostHost.current still null and never get another chance. This
+     effect re-checks whenever cmode/editSub change and relies on the
+     host.firstChild guard for idempotency, so it still fires exactly once --
+     the moment the user first lands on Edit's Edit sub-tab -- however many
+     renders happen before or after that. */
+  useEffect(() => {
+    if (cmode !== "edit" || editSub !== "edit") return;
+    const host = editCostHost.current;
+    if (!host || host.firstChild) return;
+    if (window.customElements && window.customElements.get("mg-cost-badge")) {
+      const el = document.createElement("mg-cost-badge");
+      el.setAttribute("hint", "Pick an image to edit to see the cost.");
+      host.appendChild(el);
+      editCostRef.current = el;
+      edit.refreshPrice();
+    } else {
+      host.textContent = "⚠ Couldn't verify the cost — editing may spend credits.";
+      host.className = "gd-cost gd-costfail";
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cmode, editSub]);
+
   const onBasePick = useCallback((row) => {
     setFlyOpen(false);
     applyModelRow(row);
@@ -150,11 +254,22 @@ export default function CreateMobile({
     if (picked) set({ ref: { media_id: picked.media_id, thumb: picked.thumb } });
   };
 
+  const pickEditSource = async () => {
+    const picked = await askPicker({ type: "image" });
+    if (picked) edit.set({ source: picked.media_id });
+  };
+  const pickEditRef = async () => {
+    const picked = await askPicker({ type: "image" });
+    if (picked) edit.addRef(picked);
+  };
+
   const soonToast = (label) => {
     if (window.Toast) window.Toast.show({ title: label, msg: "Its own screen — coming next." });
   };
 
   const d = dims(s);
+  const editCapsNow = editCaps(edit.s.model);
+  const editUsed = (edit.s.source ? 1 : 0) + edit.s.refs.length;
   const modelName = m ? (m.resolving ? "Resolving…" : m.failed ? "Lookup failed" : m.title) : "Pick a model";
   const modelMeta = (m && !m.resolving && !m.failed)
     ? [m.model_type, (m.versions && m.versions.length > 1) ? m.versions.length + " versions" : ""]
@@ -173,13 +288,109 @@ export default function CreateMobile({
         </div>
 
         {cmode === "edit" && (
-          <div className="glm-placeholder cm-soon">
-            <div className="glm-placeholder-icon" aria-hidden="true">⟲</div>
-            <div className="glm-placeholder-title">Edit</div>
-            <div className="glm-placeholder-note">
-              Edit Pro, Fixer, and Enhance — its own mobile pass, coming next.
+          <>
+            <div className="cm-seg3">
+              {[
+                ["edit", "Edit", "Edit Pro / Reference Pro — instruction edits"],
+                ["fixer", "Fixer", "Box a hand or face — PixAI repairs it (always spends)"],
+              ].map(([k, label, title]) => (
+                <button key={k} type="button" title={title}
+                  className={"cm-segbtn" + (editSub === k ? " on" : "")}
+                  onClick={() => setEditSub(k)}>{label}</button>
+              ))}
             </div>
-          </div>
+
+            {editSub === "edit" && (
+              <>
+                <div className="cm-lbl">Prompt</div>
+                <textarea className="cm-ta" rows={4} value={edit.s.instruction}
+                  placeholder="Describe the edit…"
+                  onChange={(e) => edit.set({ instruction: e.target.value })} />
+
+                <div className="cm-lbl">Model</div>
+                <div className="cm-chiprow">
+                  {Object.entries(EDIT_CAPS).map(([k, cap]) => (
+                    <button key={k} type="button"
+                      className={"glm-metal cm-chip" + (edit.s.model === k ? " on" : "")}
+                      onClick={() => edit.chooseModel(k)}>{cap.label}</button>
+                  ))}
+                </div>
+                <div className="cm-hint">
+                  {editCapsNow.label} takes up to {editCapsNow.max_refs} reference{editCapsNow.max_refs === 1 ? "" : "s"}.
+                </div>
+
+                <div className="cm-lbl">Source</div>
+                <div className="cm-refrow">
+                  <button type="button" className={"cm-refslot" + (edit.s.source ? " filled" : "")}
+                    onClick={pickEditSource} title="Pick the image to edit">
+                    {edit.s.source
+                      ? <img src={"/thumbs/" + edit.s.source + ".jpg"} alt="" />
+                      : "▨"}
+                  </button>
+                  {edit.s.source && (
+                    <button type="button" className="cm-chipx cm-refx" title="Clear source"
+                      onClick={() => edit.set({ source: "" })}>&times;</button>
+                  )}
+                  <span className="cm-hint">
+                    {editUsed}/{editCapsNow.max_refs} — @image1 is the image being edited
+                  </span>
+                </div>
+
+                {(edit.s.refs.length > 0 || editUsed < editCapsNow.max_refs) && (
+                  <div className="cm-chiprow cm-refgrid">
+                    {edit.s.refs.map((r, i) => (
+                      <span className="cm-refthumbwrap" key={r.media_id + i}>
+                        <img src={r.thumb} alt="" />
+                        <span className="cm-reftag">{refTag(i)}</span>
+                        <button type="button" className="cm-refthumbx" title="Remove this reference"
+                          onClick={() => edit.dropRef(i)}>&times;</button>
+                      </span>
+                    ))}
+                    {editUsed < editCapsNow.max_refs && (
+                      <button type="button" className="cm-refslot" onClick={pickEditRef} title="Add a reference">
+                        + ref
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <button type="button" className="cm-advrow" onClick={() => soonToast("Advanced settings")}>
+                  ⚙ Advanced — resolution, quality, aspect, negative
+                </button>
+
+                <span ref={editCostHost} className="gd-cost cm-cost" />
+
+                {edit.gate && <div className="cm-gatenote">{edit.gate}</div>}
+
+                {edit.results.length > 0 && (
+                  <div className="cm-results">
+                    <ResultLines lines={edit.results} />
+                  </div>
+                )}
+
+                <button type="button" className={"cm-generate" + (edit.gate || edit.busy ? " off" : "")}
+                  disabled={!!edit.gate || edit.busy}
+                  title={edit.gate || "Submit the edit — this spends credits or a card"}
+                  onClick={edit.run}>
+                  {edit.busy ? "◌ Queued…" : "✦ Edit"}
+                </button>
+              </>
+            )}
+
+            {editSub === "fixer" && (
+              <div className="glm-placeholder cm-soon">
+                <div className="glm-placeholder-icon" aria-hidden="true">⛶</div>
+                <div className="glm-placeholder-title">Fixer</div>
+                <div className="glm-placeholder-note">
+                  Drag a box over the hand or face on the source. A fix can't
+                  be card-covered — it always spends, and always asks first.
+                </div>
+                <div className="glm-placeholder-note">
+                  Touch box-drawing is its own mobile pass — coming next.
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {/* cmode === "video" renders nothing here on purpose -- the real

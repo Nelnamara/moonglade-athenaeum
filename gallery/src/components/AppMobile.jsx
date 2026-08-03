@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import useLibrary from "../hooks/useLibrary.js";
 import useFlavour from "../hooks/useFlavour.js";
 import useGenerate from "../gen/useGenerate.js";
+import useEditGenerate from "../gen/useEditGenerate.js";
 import { fetchAccount, fetchCollections } from "../api.js";
 import GalleryMobile from "./GalleryMobile.jsx";
 import CreateMobile, { MODES } from "./CreateMobile.jsx";
@@ -65,13 +66,24 @@ import "../styles/create-mobile.css";
        already works well... only wants a link"), not a rebuild;
      - Log Out (Menu sheet) -- NavSpine.jsx's own POST /api/logout + cache-purge,
        ported verbatim (the one Menu item cheap enough, and important enough for
-       a signed-in mobile session, to make real in this pass).
+       a signed-in mobile session, to make real in this pass);
+     - Create tab, Edit mode's own Edit sub-tab (2026-08-03) -- fully wired to
+       useEditGenerate({ costRef: editCostRef }), lifted HERE for the IDENTICAL
+       reason useGenerate() is: a picked source/refs/instruction/model draft
+       survives a Create <-> Gallery/Control tab switch instead of resetting on
+       CreateMobile's remount. editCostRef is its own separate ref (a second,
+       dedicated <mg-cost-badge> handle) -- never shared with Image mode's
+       costRef, matching editCore's own no-shared-debounce rule (see
+       useEditGenerate.js's header comment). Fixer stays an honest sub-placeholder
+       this increment (no touch-canvas box-drawing reference implementation
+       exists anywhere yet); Enhance is not built at all on mobile (stays dead --
+       see CreateMobile.jsx's header comment).
 
    What's an HONEST placeholder, not a shortcut on anything above:
-     - Create's own Edit/Video modes (its segmented control's other two legs)
-       and its Advanced screen render a soon-state note/toast -- see
-       CreateMobile.jsx's own header comment for the full disclosure of what's
-       deferred there and why.
+     - Create's own Video mode (its segmented control's third leg), Edit's own
+       Fixer sub-tab, and Create's Advanced screen render a soon-state
+       note/toast -- see CreateMobile.jsx's own header comment for the full
+       disclosure of what's deferred there and why.
      - The Control tab renders a soon-state note, matching this app's own
        NavSpine.jsx convention (dimmed, tooltip disclosing why) rather than
        inventing partial pixels for it -- explicitly separate follow-up work.
@@ -111,6 +123,8 @@ export default function AppMobile({ boot }) {
   const lib = useLibrary();
   const costRef = useRef(null);
   const gen = useGenerate({ costRef });
+  const editCostRef = useRef(null); // Edit mode's OWN cost-badge handle -- never shared with Image's costRef
+  const edit = useEditGenerate({ costRef: editCostRef });
   const [cmode, setCmode] = useState("image"); // Create's Image/Edit/Video mode -- lifted, see header comment
 
   useEffect(() => { fetchAccount().then(setAccount); }, []);
@@ -190,7 +204,8 @@ export default function AppMobile({ boot }) {
           <GalleryMobile boot={boot} collections={collections} refreshCollections={refreshCollections} {...lib} />
         )}
         {tab === "create" && (
-          <CreateMobile account={account} costRef={costRef} cmode={cmode} setCmode={setCmode} {...gen} />
+          <CreateMobile account={account} costRef={costRef} editCostRef={editCostRef}
+            cmode={cmode} setCmode={setCmode} edit={edit} {...gen} />
         )}
         {tab === "control" && (
           <Placeholder icon="⚙" title="Control"
