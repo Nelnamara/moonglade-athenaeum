@@ -17,6 +17,65 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Duplicate Review — real matching, real (reversible) deletion, built via a 9-agent
+  Workflow + adversarial safety review.** New `GET /api/duplicates` (LOGIN tier) with four
+  honest tiers, no fabricated data: **same-media** (Class A, `duplicate_groups()`, same
+  PixAI id in >1 location), **identical file** (Class B, `audit_collection(content=True)`,
+  byte-hash match), **same seed** (new — a `GROUP BY (seed, prompt_full)` query; `seed` was
+  already a real, populated catalog column), and **near-duplicate** (new — a hand-rolled
+  dHash perceptual hash, Pillow-only, no new dependency; LSH-banded Hamming-distance
+  clustering with union-find so a visual chain merges into one group; this is the only tier
+  carrying a real percentage, computed from actual bit distance). Deliberately excluded: any
+  CLIP-embedding "similar composition" tier — real infra exists (`/api/similar`) but it
+  measures resemblance, not duplication, and wiring it to a delete action risked
+  quarantining genuinely distinct images on a false positive.
+  Measured against the owner's real ~2,460-file library: all three cheap tiers run in
+  ~2.6s combined (zero same-media/identical-file duplicates found today — a clean library —
+  but 218 real same-seed groups, so the new tier was exercised at real scale, not just
+  synthetic data).
+  **The owner's explicit, deliberate choice: Resolve really quarantines files from the web
+  UI**, not just a link to run the CLI's Dedup job. New `POST /api/duplicates/resolve` /
+  `POST /api/duplicates/undo` (LOGIN tier, matching `api_delete_local`'s reversible-file-move
+  precedent; explicit-CSRF class, the same `_check_csrf()` account-mutation routes use).
+  **Quarantine only, hard-delete is not reachable under any request body** — verified by a
+  dedicated adversarial review pass that actively hunted for a bypass and found none. Every
+  quarantine/restore call is gated by `_check_read_only()` and by a new
+  `_validate_duplicate_pair()` anti-forgery check (every path must resolve inside `out_dir`,
+  its filename's own media_id must match the claim, and the keep/remove pair is re-verified
+  as a real duplicate relationship for that group's matchType *at request time* — closes a
+  gap where a crafted request could pair real duplicate metadata with an unrelated file). A
+  keep-count-0 resolution is refused **server-side**, not just disabled in the UI.
+  New `DuplicateReviewOverlay.jsx`, reached from Health's own Duplicates/Reclaimable stat
+  tiles (real `<button>`s now, previously static placeholders). Per-group Resolve has no
+  extra confirm dialog (the keep/remove choice is already visible and deliberate, Undo sits
+  one click away); **Auto-resolve-all gets its own harder-to-misclick gate** — an inline
+  panel naming the real blast radius ("quarantine N files across M groups"), computed live,
+  not estimated — more friction than per-group Resolve but not a typed-DELETE gate, since
+  this is reversible quarantine, not permanent deletion, and overstating the stakes would
+  misrepresent the real precedent this codebase's own typed-vs-simple confirm split sets.
+  **A dedicated 4-way adversarial review** (one reviewer per angle: the READ_ONLY gate,
+  quarantine-never-delete, CSRF/tier correctness, and the frontend click-guard/undo
+  correctness) found one real bug before ship: a partial Undo failure (some files in a
+  multi-file group restore, others don't) left the card permanently lying about which files
+  were still actually quarantined, made a clean retry impossible, and skipped the grid
+  refresh even for the files that did come back. Fixed: undo now tracks success per file, a
+  tile shows a genuine `RESTORED` state distinct from `KEPT`/`QUARANTINED` when only part of
+  a group comes back, a retry only re-attempts the files that actually still need it, and
+  the grid refreshes on any real restore, not just a fully clean one. (A second, low-severity
+  finding — two concurrent Undo calls for the *same* multi-copy media_id racing on one
+  unlocked catalog-row reconcile step — is real but not data-destroying per the reviewer's
+  own trace; tracked as a known gap rather than fixed in this pass, since it needs a small
+  per-media_id lock and dedicated concurrency test, not a quick patch.)
+  Full suite green: **1539 passed, 0 failed**. Live-verified against the owner's real library
+  in his real running session: opened Duplicate Review off Health's tiles (218 real same-seed
+  groups, 751.7 MB reclaimable, correct default keeper = highest-rated member), Resolved one
+  real group (files genuinely moved, counters updated live), Undo restored it exactly
+  (counters returned to their pre-resolve values, zero files left behind in `_duplicates/` —
+  confirmed on disk, not just in the UI).
+  **Optional `--backfill-phash` CLI flag** (+ a Control Panel job chip, since it turned out
+  small to add) computes the new near-duplicate tier's hashes; skipped entirely, tier absent
+  from results, until a library has run it at least once.
+
 - **Contact Sheet — native React build, not a hand-off to classic.** New
   `GET /api/contact-sheet` (JSON twin of the existing `/contact-sheet` page,
   same `rows_for_media_ids`/`query_catalog`/rating→stars logic, LOGIN tier)

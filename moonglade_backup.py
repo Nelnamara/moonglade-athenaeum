@@ -9068,6 +9068,82 @@ def run_backfill_full_meta(args):
                   "--workers 2 --delay 1")
 
 
+def run_backfill_phash(args):
+    """--backfill-phash: compute a perceptual difference-hash (compute_dhash(), a 64-bit
+    dHash -- see its docstring in moonglade_gallery.py) for every catalog row missing
+    one. IMAGE ROWS ONLY: is_video='1' rows are skipped by design -- the near-duplicate
+    tier this feeds (near_duplicate_groups(), moonglade_gallery.py) is scoped to images,
+    matching the same image-only scope every other duplicate tier already has.
+
+    Purely local, CPU-bound Pillow work -- no network call, so --delay/politeness pacing
+    (that flag exists to be polite to PixAI's servers) does not apply here. --workers
+    still parallelizes it via a thread pool (Pillow releases the GIL during decode, same
+    reasoning build_thumbnails() already uses). --max caps how many rows THIS RUN
+    processes (0 = all) -- useful for scoping a first pass on a large library, or a small
+    disposable verification run, before committing to hashing the whole thing.
+
+    Safe to re-run -- skips rows that already have a phash. A row whose image file can't
+    be found on disk and a row whose file exists but Pillow can't decode are counted
+    SEPARATELY from each other (and from the video rows skipped by design), so the
+    summary can say WHY a row wasn't filled rather than just how many weren't -- the
+    same "don't collapse different failure reasons into one number" lesson
+    run_backfill_full_meta's docstring already explains."""
+    out = Path(args.out)
+    db_path = _ensure_db(out)
+    from moonglade_gallery import load_catalog, save_catalog, compute_dhash, find_image_file
+
+    rows = load_catalog(db_path)
+    videos = [r for r in rows if str(r.get("is_video") or "") == "1"]
+    to_fill = [r for r in rows
+              if not r.get("phash") and str(r.get("is_video") or "") != "1"]
+    found_n = len(to_fill)
+    max_n = int(getattr(args, "max", 0) or 0)
+    capped = bool(max_n and found_n > max_n)
+    if capped:
+        to_fill = to_fill[:max_n]
+    print("Found {:,} image rows missing a perceptual hash (out of {:,} total catalog "
+          "rows, {:,} video rows skipped by design).".format(found_n, len(rows), len(videos)))
+    if capped:
+        print("  Capped to the first {:,} by --max.".format(max_n))
+    if not to_fill:
+        print("Nothing to backfill.")
+        return {"filled": 0, "unresolved": 0, "unreadable": 0, "total": len(rows)}
+
+    workers = max(1, getattr(args, "workers", 1) or 1)
+    if workers > 1:
+        print("Hashing with {} parallel workers.".format(workers))
+
+    def _one(row):
+        path = find_image_file(out, row["media_id"], row.get("filename"))
+        if not path:
+            return None, "unresolved"
+        h = compute_dhash(path)
+        return (h, "ok") if h else (None, "unreadable")
+
+    filled = unresolved = unreadable = 0
+    _prog = getattr(args, "progress", None)
+    for row, res in _parallel_map(to_fill, _one, workers, _prog, delay=0):
+        h, status = res if res else (None, "unreadable")
+        if h:
+            row["phash"] = h
+            filled += 1
+        elif status == "unresolved":
+            unresolved += 1
+        else:
+            unreadable += 1
+        if not _prog and workers <= 1:
+            sys.stdout.write(
+                "\r  {:,}/{:,}  hashed {:,}  unresolved {:,}  unreadable {:,}  ".format(
+                    filled + unresolved + unreadable, len(to_fill), filled, unresolved, unreadable))
+            sys.stdout.flush()
+
+    print("\nWriting catalog...")
+    save_catalog(db_path, to_fill)
+    print("Done. Hashed {:,} rows. {:,} had no resolvable file on disk, {:,} couldn't be "
+          "decoded.".format(filled, unresolved, unreadable))
+    return {"filled": filled, "unresolved": unresolved, "unreadable": unreadable, "total": len(rows)}
+
+
 def _check_time_capsule(created_at, out_dir):
     """Time Capsule feat: a NEWLY-downloaded piece created >2 years ago. Fires
     only on the download event, never on a full-catalog rescan (old rows already
@@ -9682,7 +9758,9 @@ def main():
                     help="parallel download workers (default 4). 1 = serial/polite. "
                          "Higher saturates bandwidth on bulk first-time pulls; ignored for "
                          "--collect-only.")
-    ap.add_argument("--max", type=int, default=0, help="stop after N tasks (0=all)")
+    ap.add_argument("--max", type=int, default=0,
+                    help="stop after N tasks (0=all); with --backfill-phash, caps the number "
+                         "of rows that run processes instead")
     ap.add_argument("--update", action="store_true",
                     help="incremental follow-up run: stop paging once a run of pages is "
                          "already fully on disk (newest-first, so older items are already "
@@ -9773,6 +9851,12 @@ def main():
                     help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
                          "no recorded credit cost yet (recovers the paid_credit column for older "
                          "generations from the task record; long run)")
+    ap.add_argument("--backfill-phash", action="store_true",
+                    help="compute a perceptual difference-hash (dHash) for every image catalog "
+                         "row that lacks one, powering the near-duplicate ('upscaled or "
+                         "recompressed copy') tier of GET /api/duplicates. Local Pillow work, no "
+                         "network call -- --workers parallelizes it, --max caps how many rows "
+                         "this run processes. Videos are skipped. Then exit.")
     ap.add_argument("--export-csv", action="store_true",
                     help="export catalog.db to catalog.csv for interop/backup, then exit")
     ap.add_argument("--sync-artworks", action="store_true",
@@ -10226,6 +10310,9 @@ def main():
             return
         if args.backfill_full_meta:
             run_backfill_full_meta(args)
+            return
+        if getattr(args, "backfill_phash", False):
+            run_backfill_phash(args)
             return
         if args.convert_existing:
             cmd_convert_existing(args, out)

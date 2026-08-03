@@ -84,12 +84,21 @@ CATALOG_FIELDS = [
     # totals must count once per task_id. '0' is a real value (free card / daily-free
     # gen); '' means never captured -- never conflate the two.
     "paid_credit",
+    # Perceptual difference-hash (dHash, compute_dhash()) of the image, IMAGE ROWS ONLY
+    # (blank for videos and for images not yet processed). 16 hex chars = 64 bits.
+    # Populated by `--backfill-phash`, not at pull/collect time -- backfilled on demand
+    # like blurhash/paid_credit above. Powers the near_duplicate tier in
+    # GET /api/duplicates (near_duplicate_groups()): a Hamming-distance comparison finds
+    # "upscaled or recompressed version of the same image" pairs that byte-hashing (Class
+    # B, identical_file) misses because the bytes differ.
+    "phash",
 ]
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
 THUMB_SIZE = (768, 768)
 THUMB_QUALITY = 90
 PAGE_SIZE = 100
+DHASH_SIZE = 8  # compute_dhash()'s hash dimension: 8x8 -> 64-bit hash, 16 hex chars
 
 
 _CREATE_TABLE = """
@@ -132,7 +141,8 @@ CREATE TABLE IF NOT EXISTS catalog (
     collections     TEXT DEFAULT '',
     blurhash        TEXT DEFAULT '',
     nsfw_scores     TEXT DEFAULT '',
-    paid_credit     TEXT DEFAULT ''
+    paid_credit     TEXT DEFAULT '',
+    phash           TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
@@ -192,6 +202,7 @@ _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN blurhash TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN nsfw_scores TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN paid_credit TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN phash TEXT DEFAULT ''",
 ]
 
 def _connect(db_path):
@@ -2552,6 +2563,152 @@ def duplicate_groups(out_dir, limit=300):
     return groups
 
 
+def same_seed_groups(db_path, limit=1000):
+    """Class-C duplicates (2026-08-02, docs/DECISIONS.md): catalog rows sharing the
+    same non-blank (seed, prompt_full) pair -- almost certainly the same generation
+    re-rolled or resubmitted. A cheap SQL GROUP BY, not a new detection algorithm; no
+    filesystem access, no hashing. Returns [{seed, prompt_hash, media_ids:[...]}],
+    most-duplicated first, capped at `limit` groups. `prompt_hash` is a short digest
+    of the grouped prompt_full (NOT the seed's own identity) so callers get a stable,
+    compact per-group key without echoing the full prompt text into an id string."""
+    import hashlib
+    con = _connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT seed, prompt_full, GROUP_CONCAT(media_id) AS ids, COUNT(*) AS n "
+            "FROM catalog "
+            "WHERE COALESCE(seed,'') != '' AND COALESCE(prompt_full,'') != '' "
+            "GROUP BY seed, prompt_full "
+            "HAVING COUNT(*) > 1 "
+            "ORDER BY n DESC "
+            "LIMIT ?",
+            (limit,),
+        ).fetchall()
+        out = []
+        for r in rows:
+            phash = hashlib.sha1((r["prompt_full"] or "").encode("utf-8", "ignore")).hexdigest()[:10]
+            out.append({"seed": r["seed"], "prompt_hash": phash,
+                        "media_ids": [m for m in (r["ids"] or "").split(",") if m]})
+        return out
+    finally:
+        con.close()
+
+
+# Hamming distance threshold (out of 64 bits) below which two dHashes count as a
+# near-duplicate pair. 10/64 (~84% bit agreement) is the commonly-cited rule of thumb
+# for 64-bit perceptual hashes -- comfortably wide enough to catch recompression/
+# upscaling noise (measured well under 10 in practice: see tests/test_phash.py) while
+# staying far from the ~32/64 (50%) two UNRELATED images land near.
+NEAR_DUP_HAMMING_THRESHOLD = 10
+
+
+def near_duplicate_groups(db_path, threshold=NEAR_DUP_HAMMING_THRESHOLD, hash_size=DHASH_SIZE):
+    """Class-D duplicates (the perceptual-hash follow-up named in the original
+    api_duplicates() docstring/DECISIONS.md): catalog rows whose dHash `phash` column
+    (compute_dhash(), populated by `--backfill-phash`) is within `threshold` Hamming-
+    distance bits of another row's -- catches an upscaled or recompressed copy of the
+    same image, which Class B (identical_file, a byte hash) cannot, because the bytes
+    genuinely differ. Image rows only (is_video='1' rows and blank-phash rows are
+    skipped -- a row with no phash yet is "unknown", never treated as "no match").
+
+    NOT a naive O(n^2) pairwise scan across the whole library (mirrors Class B's
+    same-size-bucket trick in audit_collection()): the 64-bit hash is split into 4
+    non-overlapping 16-bit bands, and rows are grouped by (band_index, band_value).
+    Only rows that land in the SAME band bucket are ever Hamming-compared. This is a
+    standard LSH ("banding") trick -- any pair within `threshold` bits of each other is
+    near-certain to still agree exactly on at least one 16-bit band (a handful of
+    scattered bit flips is very unlikely to touch all 4 bands at once), so real near-
+    duplicates are still found; only far-apart pairs that would fail the threshold check
+    anyway are skipped from ever being compared. Comparisons are deduped (a pair sharing
+    2+ bands is only Hamming-checked once).
+
+    Matching pairs are merged with union-find so a visual chain (A near B, B near C)
+    lands in ONE group even if A and C individually exceed `threshold` -- same "keeper
+    emerges from the group" shape the other three tiers already return, not a flat pair
+    list.
+
+    Returns [{media_ids:[...], closeness_pct}], most-similar-group first. closeness_pct
+    is this tier's one deliberate departure from the other three (which carry no
+    percentage/confidence by design, per DECISIONS.md) -- it is not invented: for each
+    final group it takes the WORST (largest) pairwise Hamming distance among that
+    group's own members (recomputed exactly now that the group is small, not estimated
+    from the banding pass) and reports 100 * (1 - worst_distance / total_bits), i.e. "the
+    two least-alike members in this group still agree on at least this share of the
+    hash" -- a conservative, real number derived from the actual bits, never a fabricated
+    confidence score."""
+    from collections import defaultdict
+    con = _connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT media_id, phash FROM catalog "
+            "WHERE COALESCE(phash,'') != '' AND COALESCE(is_video,'') != '1'"
+        ).fetchall()
+    finally:
+        con.close()
+
+    total_bits = hash_size * hash_size
+    n_bands = 4
+    band_bits = total_bits // n_bands
+    band_mask = (1 << band_bits) - 1
+
+    ints = {}
+    for r in rows:
+        try:
+            ints[str(r["media_id"])] = int(r["phash"], 16)
+        except (TypeError, ValueError):
+            continue          # a corrupt/non-hex phash value -- skip rather than crash
+
+    by_band = [defaultdict(list) for _ in range(n_bands)]
+    for mid, v in ints.items():
+        for b in range(n_bands):
+            by_band[b][(v >> (b * band_bits)) & band_mask].append(mid)
+
+    parent = {mid: mid for mid in ints}
+
+    def _find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def _union(a, c):
+        ra, rc = _find(a), _find(c)
+        if ra != rc:
+            parent[ra] = rc
+
+    compared = set()
+    for band in by_band:
+        for mids in band.values():
+            if len(mids) < 2:
+                continue
+            for i in range(len(mids)):
+                for j in range(i + 1, len(mids)):
+                    a, c = mids[i], mids[j]
+                    key = (a, c) if a < c else (c, a)
+                    if key in compared:
+                        continue
+                    compared.add(key)
+                    dist = bin(ints[a] ^ ints[c]).count("1")
+                    if dist <= threshold:
+                        _union(a, c)
+
+    grouped = defaultdict(set)
+    for mid in ints:
+        grouped[_find(mid)].add(mid)
+
+    out = []
+    for mids in grouped.values():
+        if len(mids) < 2:
+            continue
+        mids = sorted(mids)
+        worst = max(bin(ints[mids[i]] ^ ints[mids[j]]).count("1")
+                    for i in range(len(mids)) for j in range(i + 1, len(mids)))
+        out.append({"media_ids": mids,
+                    "closeness_pct": round(100 * (1 - worst / total_bits), 1)})
+    out.sort(key=lambda g: -g["closeness_pct"])
+    return out
+
+
 def media_id_of(path):
     """Canonical media_id extraction (INVARIANT 1): the last underscore-delimited
     chunk of the filename stem. Works for every naming layout the tool produces:
@@ -2740,6 +2897,45 @@ def purge_media_local(out_dir, thumb_dir, db_path, media_id, filename, quarantin
             pass
     delete_from_catalog(db_path, media_id)
     return moved
+
+
+def compute_dhash(img_path, hash_size=DHASH_SIZE):
+    """Perceptual difference-hash (dHash) of an image, Pillow-only (no numpy/scipy
+    dependency -- this codebase already ships Pillow for thumbnails, so no new
+    dependency was added for this).
+
+    Algorithm (well-known, ~15 lines): shrink to (hash_size+1) x hash_size, convert to
+    grayscale, then for each row encode whether pixel[i] is brighter than pixel[i+1] as
+    one bit. That is `hash_size * hash_size` bits total (64 for the default size=8),
+    returned as a lowercase hex string. Unlike a byte/SHA hash (Class B, identical_file),
+    a dHash is ROBUST to recompression and resizing -- the exact "upscaled or
+    recompressed version of the same image" case byte-hashing misses, because shrinking
+    to 8x8 washes out compression artifacts and interpolation noise while preserving the
+    image's coarse gradient structure. Two dHashes of visually similar images differ in
+    only a handful of the 64 bits (measured via Hamming distance -- see
+    near_duplicate_groups() below); two unrelated images typically differ in ~32 (half),
+    since the bits approach random relative to each other.
+
+    Returns a 16-char hex string, or None if the image can't be opened/decoded (Pillow
+    missing, corrupt file, unsupported format) -- callers must treat None as "unknown",
+    never as a hash that happens to be empty."""
+    if Image is None:
+        return None
+    try:
+        with Image.open(img_path) as im:
+            im = im.convert("L").resize((hash_size + 1, hash_size), Image.LANCZOS)
+            pixels = list(im.getdata())
+    except Exception:
+        return None
+    width = hash_size + 1
+    bits = 0
+    for row in range(hash_size):
+        offset = row * width
+        for col in range(hash_size):
+            bits <<= 1
+            if pixels[offset + col] > pixels[offset + col + 1]:
+                bits |= 1
+    return "{:0{width}x}".format(bits, width=hash_size * hash_size // 4)
 
 
 def make_thumbnail(img_path, thumb_path):
@@ -3068,6 +3264,341 @@ def empty_trash(out_dir, thumb_dir):
         except OSError:
             pass
     return removed
+
+
+# ---------------------------------------------------------------------------
+# Duplicate Review -- resolve/undo (the destructive half of GET /api/duplicates
+# above, which stays read-only). Mirrors the trash panel's own shape immediately
+# above -- a moved file plus a JSON sidecar recording enough to undo it -- rather
+# than inventing a new pattern, but keyed by the file's OWN quarantine location,
+# not media_id: a same_media group can quarantine more than one copy of the SAME
+# media_id in a single resolve, so media_id alone is not a unique key here the
+# way it is for trash (purge_media_local never has two files under one media_id
+# to quarantine at once -- the live catalog holds exactly one file per media_id).
+# The original path is recorded EXPLICITLY and undo restores to that EXACT
+# location -- unlike trash's restore, which only ever remembered a bare filename
+# and always restores into a flat images/ folder -- because cmd_dedup's own
+# quarantine (moonglade_backup.py's cmd_dedup, ~3889-3903) preserves the source's
+# real subfolder structure under _duplicates/, and this feature's undo is
+# specified to put a file back exactly where it came from.
+# ---------------------------------------------------------------------------
+DUPLICATES_DIRNAME = "_duplicates"    # matches cmd_dedup()'s own quarantine_root name
+
+
+def _quarantine_meta_path(dest):
+    """Sidecar path for one quarantined duplicate's undo record, living beside
+    the moved file itself (same 'metadata rides next to the file' idea as
+    trash's _trash_meta_path above)."""
+    return dest.with_name(dest.name + ".undo.json")
+
+
+def _resolve_under(out_dir, rel_path):
+    """A client-submitted relative path, turned into a real absolute Path
+    strictly inside out_dir -- or None if it's blank, absolute, or escapes via
+    '..'/a symlink. Every client-supplied path this feature touches goes
+    through this before it is ever stat'd or moved."""
+    rel_path = str(rel_path or "").replace("\\", "/").strip("/")
+    if not rel_path:
+        return None
+    out_dir = Path(out_dir).resolve()
+    candidate = (out_dir / rel_path).resolve()
+    return candidate if _is_under(candidate, out_dir) else None
+
+
+def _reconcile_one_row_after_move(out_dir, db_path, media_id, row):
+    """Targeted, single-row version of moonglade_backup.reconcile_catalog_with_disk
+    -- point media_id's catalog row at whatever copy is still actually on disk,
+    without rescanning/rewriting the whole catalog (that function's own approach,
+    fine for a batch CLI run, is wasteful for a single synchronous HTTP request).
+    Used when a duplicate quarantine or undo changes what's on disk for a
+    media_id whose row is being KEPT (e.g. a same_media loser's row, still
+    pointing at a keeper that survives elsewhere). No-op if nothing changed, and
+    a no-op if the media_id has no surviving file at all (that case is the
+    caller's row-delete branch instead, not this function's job)."""
+    import moonglade_backup as core
+    matches = find_files_for_media_id(out_dir, media_id)
+    if not matches:
+        return
+    survivor = matches[0]
+    rel_surv = survivor.relative_to(out_dir)
+    bucket = core._bucket_of(rel_surv)
+    new_batch = (rel_surv.parts[1] if bucket == "batches" and len(rel_surv.parts) > 2
+                else ("" if bucket != "batches" else row.get("batch", "")))
+    if row.get("filename") != survivor.name or row.get("batch", "") != new_batch:
+        row = dict(row)
+        row["filename"] = survivor.name
+        row["batch"] = new_batch
+        save_catalog(db_path, [row])
+
+
+def quarantine_duplicate_file(out_dir, thumb_dir, db_path, media_id, rel_path, group_id):
+    """Move ONE duplicate loser out of the live tree into out_dir/_duplicates/,
+    mirroring cmd_dedup()'s DEFAULT (--apply without --dedup-delete) behavior at
+    moonglade_backup.py's cmd_dedup (~3889-3903) -- quarantine, never hard-delete,
+    same collision-suffix rule (dest already exists -> "_dup" inserted before the
+    extension). Called once per file by the /api/duplicates/resolve route, which
+    has already re-verified the (group_id, media_id, path) triple names a real
+    duplicate pair (see _validate_duplicate_pair) -- this function trusts that
+    and only handles the mechanics: the move, the catalog reconciliation, and
+    the undo sidecar. --dedup-delete's hard-delete behavior is not reachable
+    through this function under any argument.
+
+    _check_read_only() fires FIRST, before any path is even resolved -- the same
+    position submit_generation/submit_fixer/delete_task_gql/claim_reward give it
+    (moonglade_backup.py's own contract for every account/filesystem mutation
+    this app makes). READ_ONLY in config.json refuses this the same way it
+    refuses those.
+
+    Catalog handling depends on whether media_id has ANY other live copy left
+    after the move (find_files_for_media_id, which already excludes
+    _duplicates/_deleted -- invariant 6):
+      * no survivor  -> same situation as a trash purge: the row is removed
+        (delete_from_catalog) and a FULL snapshot goes into the sidecar so
+        undo can reinsert it, exactly like purge_media_local/
+        restore_quarantined_media above.
+      * a survivor exists (e.g. the keeper of a same_media group, still on disk
+        under the SAME media_id) -> the row must NOT be deleted -- the media_id
+        is still alive. Only a targeted filename/batch reconcile runs
+        (_reconcile_one_row_after_move), the same fix
+        reconcile_catalog_with_disk applies after a CLI --dedup, just scoped to
+        this one row instead of a full rescan.
+
+    Returns {"ok": True, "media_id", "original_path", "quarantine_path", "size",
+    "row_deleted"} or {"ok": False, "error": "..."} -- never raises."""
+    import moonglade_backup as core
+    try:
+        core._check_read_only("quarantine a duplicate file (Duplicate Review resolve)")
+    except core.PixAIError as e:
+        return {"ok": False, "error": str(e)}
+
+    # .resolve() to match exactly what _resolve_under() resolved `src` against below --
+    # otherwise a caller passing an out_dir that differs from its own .resolve() (a
+    # symlink, a trailing slash) makes src.relative_to(out_dir) raise ValueError even
+    # though src is genuinely inside it.
+    out_dir = Path(out_dir).resolve()
+    src = _resolve_under(out_dir, rel_path)
+    if src is None:
+        return {"ok": False, "error": "invalid path"}
+    quarantine_root = out_dir / DUPLICATES_DIRNAME
+    deleted_root = out_dir / DELETED_DIRNAME
+    if _is_under(src, quarantine_root) or _is_under(src, deleted_root):
+        return {"ok": False, "error": "already quarantined"}
+    if not src.is_file():
+        return {"ok": False, "error": "file not found: {}".format(rel_path)}
+
+    rel = src.relative_to(out_dir)
+    try:
+        size = src.stat().st_size
+    except OSError:
+        size = 0
+    row_before = get_row(db_path, media_id) if media_id else None
+
+    dest = quarantine_root / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():                                   # don't clobber an earlier quarantine
+        dest = dest.with_name(dest.stem + "_dup" + dest.suffix)
+    try:
+        src.replace(dest)                                # atomic move, same volume
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+
+    row_deleted = False
+    if row_before:
+        survivors = find_files_for_media_id(out_dir, media_id)
+        if not survivors:
+            delete_from_catalog(db_path, media_id)
+            row_deleted = True
+            tp = Path(thumb_dir) / "{}.jpg".format(media_id)
+            if tp.exists():
+                try:
+                    tp.unlink()
+                except OSError:
+                    pass
+        else:
+            _reconcile_one_row_after_move(out_dir, db_path, media_id, row_before)
+
+    rel_dest = str(dest.relative_to(out_dir)).replace("\\", "/")
+    rel_orig = str(rel).replace("\\", "/")
+    import time
+    sidecar = {
+        "media_id": str(media_id),
+        "original_path": rel_orig,
+        "quarantine_path": rel_dest,
+        "group_id": group_id,
+        "quarantined_at": time.time(),
+        "row_deleted": row_deleted,
+        "catalog_row": row_before if row_deleted else None,
+    }
+    try:
+        _quarantine_meta_path(dest).write_text(json.dumps(sidecar), encoding="utf-8")
+    except OSError:
+        pass    # best-effort, same fail-soft contract as trash's own snapshot write
+
+    return {"ok": True, "media_id": str(media_id), "original_path": rel_orig,
+            "quarantine_path": rel_dest, "size": size, "row_deleted": row_deleted}
+
+
+def restore_quarantined_duplicate(out_dir, thumb_dir, db_path, quarantine_path):
+    """Reverse ONE quarantine_duplicate_file() call: move the file back to its
+    EXACT original recorded location (not a generic default folder -- unlike
+    trash's restore_quarantined_media, this tier's undo is specified to put a
+    file back exactly where it came from) and restore whatever the catalog
+    snapshot says.
+
+    Fails honestly -- never a silent no-op, never a write to some OTHER
+    location -- when:
+      * no sidecar/file exists for quarantine_path (missing/stale record, or it
+        was never a real quarantined duplicate to begin with)
+      * the original location is occupied by a DIFFERENT file that showed up
+        there since (a re-download, a re-organize, a fresh import)
+
+    Same _check_read_only() gate, in the same first-statement position, as
+    quarantine_duplicate_file().
+
+    Returns {"ok": True, "media_id", "restored_path"} or
+    {"ok": False, "error": "..."} -- never raises."""
+    import moonglade_backup as core
+    try:
+        core._check_read_only("undo a duplicate quarantine (Duplicate Review undo)")
+    except core.PixAIError as e:
+        return {"ok": False, "error": str(e)}
+
+    out_dir = Path(out_dir).resolve()   # match _resolve_under()'s own resolution -- see
+                                        # quarantine_duplicate_file()'s identical comment
+    quarantine_root = out_dir / DUPLICATES_DIRNAME
+    src = _resolve_under(out_dir, quarantine_path)
+    if src is None or not _is_under(src, quarantine_root):
+        return {"ok": False, "error": "not a quarantined-duplicate path"}
+    meta_path = _quarantine_meta_path(src)
+    if not src.is_file() or not meta_path.exists():
+        return {"ok": False, "error": "no undo record for this file "
+                                      "(missing, already restored, or stale)"}
+    try:
+        sidecar = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"ok": False, "error": "undo record is unreadable/corrupt"}
+
+    original_path = str(sidecar.get("original_path") or "")
+    dest = _resolve_under(out_dir, original_path)
+    if dest is None:
+        return {"ok": False, "error": "recorded original path is invalid"}
+    if dest.exists():
+        return {"ok": False, "error": "original location is occupied by another "
+                                      "file now -- refusing to overwrite it"}
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        src.replace(dest)
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+
+    media_id = str(sidecar.get("media_id") or "")
+    if sidecar.get("row_deleted") and sidecar.get("catalog_row"):
+        save_catalog(db_path, [sidecar["catalog_row"]])
+    elif media_id:
+        row = get_row(db_path, media_id)
+        if row:
+            _reconcile_one_row_after_move(out_dir, db_path, media_id, row)
+
+    try:
+        meta_path.unlink()
+    except OSError:
+        pass
+
+    return {"ok": True, "media_id": media_id,
+            "restored_path": str(dest.relative_to(out_dir)).replace("\\", "/")}
+
+
+def _validate_duplicate_pair(out_dir, db_path, match_type, keep, remove):
+    """Re-verify, at request time, that `keep` and every item in `remove`
+    genuinely form the duplicate relationship match_type claims -- never trust
+    the client's group_id/keep/remove alone; a client could otherwise pair a
+    real duplicate's catalog metadata with an unrelated file path and use this
+    route to quarantine anything. Cheap and TARGETED (touches only the specific
+    files/rows named, never a full-library rescan) rather than recomputing GET
+    /api/duplicates' whole detection pass. Returns (True, "") or
+    (False, "<reason>") -- the whole group is refused together on failure,
+    since a partially-verified group is not a safe partial resolve.
+
+    near_duplicate is checked as a direct keep<->remove pairwise Hamming
+    distance, not full group membership: near_duplicate_groups() can chain a
+    group together transitively (A near B, B near C, but A and C individually
+    over threshold) via union-find. A remove item that is only transitively
+    linked to the chosen keeper is refused here as a known, documented
+    simplification -- resolving it means picking a keeper it IS directly close
+    to, not a gap in the detection logic."""
+    import moonglade_backup as core
+    out_dir = Path(out_dir)
+
+    def _real(entry):
+        """Resolve+validate one {media_id, path} member: a real file, strictly
+        inside out_dir, whose OWN filename encodes the claimed media_id."""
+        if not isinstance(entry, dict):
+            return None
+        mid = str(entry.get("media_id") or "").strip()
+        path = _resolve_under(out_dir, entry.get("path"))
+        if not mid or path is None or not path.is_file():
+            return None
+        if media_id_of(path) != mid:
+            return None
+        return mid, path
+
+    k = _real(keep)
+    if k is None:
+        return False, "keeper does not resolve to a real file"
+    keep_mid, keep_path = k
+
+    checked = []
+    for item in remove:
+        r = _real(item)
+        if r is None:
+            return False, "a remove item does not resolve to a real file"
+        checked.append(r)
+    if not checked:
+        return False, "nothing to remove"
+
+    if match_type == "same_media":
+        if any(mid != keep_mid for mid, _ in checked):
+            return False, "same_media resolve must keep and remove copies of the SAME media_id"
+        return True, ""
+
+    if match_type == "identical_file":
+        for mid, path in checked:
+            if not core._same_bytes(keep_path, path):
+                return False, "keeper and {} are no longer byte-identical".format(mid)
+        return True, ""
+
+    if match_type == "same_seed":
+        keep_row = get_row(db_path, keep_mid)
+        if not keep_row or not keep_row.get("seed") or not keep_row.get("prompt_full"):
+            return False, "keeper has no seed/prompt to match against"
+        for mid, _ in checked:
+            row = get_row(db_path, mid)
+            if not row or row.get("seed") != keep_row.get("seed") \
+                    or row.get("prompt_full") != keep_row.get("prompt_full"):
+                return False, "{} no longer shares (seed, prompt) with the keeper".format(mid)
+        return True, ""
+
+    if match_type == "near_duplicate":
+        keep_row = get_row(db_path, keep_mid)
+        keep_phash = (keep_row or {}).get("phash") or ""
+        try:
+            keep_bits = int(keep_phash, 16)
+        except ValueError:
+            return False, "keeper has no usable phash"
+        for mid, _ in checked:
+            row = get_row(db_path, mid)
+            phash = (row or {}).get("phash") or ""
+            try:
+                dist = bin(keep_bits ^ int(phash, 16)).count("1")
+            except ValueError:
+                return False, "{} has no usable phash".format(mid)
+            if dist > NEAR_DUP_HAMMING_THRESHOLD:
+                return False, ("{} is no longer within the near-duplicate threshold "
+                              "of the keeper").format(mid)
+        return True, ""
+
+    return False, "unknown group type '{}'".format(match_type)
 
 
 def probe_has_audio(path, timeout=15):
@@ -3789,6 +4320,13 @@ def create_app(out_dir: Path):
         "rebuild-similar": {"args": ["--rebuild-similar"],
                             "label": "Rebuild the Similar index (slow, needs pixeltable)",
                             "destructive": False},
+        # Same trust class as sync-similar/rebuild-similar just above: computes and writes
+        # a catalog column only (phash), no image files touched, so not destructive despite
+        # being a real disk-scanning/CPU pass. Feeds the near_duplicate tier of
+        # GET /api/duplicates (near_duplicate_groups(), this module).
+        "backfill-phash": {"args": ["--backfill-phash"],
+                           "label": "Backfill perceptual hashes (near-duplicate detection)",
+                           "destructive": False},
         # --- Advanced sync (web parity step 2): the sync variants the bare "Sync now"
         # (an INCREMENTAL --sync, i.e. --update --full-meta) can't do. Each is its own
         # whitelisted KEY, exactly like audit-full/dedup-delete -- never argv the client
@@ -13995,6 +14533,313 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             "printedDate": printed_date,
             "frames": frames,
         })
+
+    @app.route("/api/duplicates")
+    def api_duplicates():
+        """Real, working duplicate-groups listing for the React Duplicate Review overlay
+        (the parked affordance in HealthOverlay.jsx's Duplicates/Reclaimable stat tiles).
+        Owner-scoped "happy medium" (2026-08-02, docs/DECISIONS.md), FOUR tiers --
+        3 EXACT-match with no invented data/percentage, plus one perceptual-similarity
+        tier that carries a real, derived closeness score (see near_duplicate below) --
+
+          same_media     Class A: the same PixAI media_id reused across >1 folder bucket.
+                          duplicate_groups() (this module) -- the classic /duplicates
+                          page's own engine, reused as-is (its 300-row cap is lifted here;
+                          see the call below).
+          identical_file Class B: byte-identical files under DIFFERENT media_ids.
+                          moonglade_backup.audit_collection(content=True)'s size-bucketed
+                          SHA pass -- reused as-is; not naive O(n^2).
+          same_seed       Class C: catalog rows sharing (seed, prompt_full) -- a cheap
+                          SQL GROUP BY (same_seed_groups(), this module), not a new
+                          detection algorithm.
+          near_duplicate  Class D (new): images whose dHash `phash` column (populated by
+                          `--backfill-phash`, compute_dhash()) is within a Hamming-
+                          distance threshold of another's -- catches an upscaled or
+                          recompressed copy of the same image, which byte-hashing (Class
+                          B) cannot, because the bytes genuinely differ. The ONE tier
+                          that carries a `closeness_pct` per group (near_duplicate_groups(),
+                          this module) -- real, Hamming-distance-derived, never invented;
+                          the other three tiers stay percentage-free by design. Rows with
+                          no phash yet (backfill not run / not yet reached that row)
+                          simply don't participate -- they are not reported as "no match",
+                          they are just absent from this tier until backfilled.
+
+        Deliberately EXCLUDES the CLIP-embedding "similar composition" tier -- real
+        infrastructure exists at /api/similar, but it measures visual resemblance, not
+        duplication (see DECISIONS.md).
+
+        Read-only, no filesystem mutation -- LOGIN tier, same trust class as the classic
+        /duplicates page and api_health. Members are shaped identically across all four
+        tiers (media_id/thumb/dims/rating/date/path/bucket/size/is_keeper) so the client
+        never has to special-case by matchType."""
+        import moonglade_backup as core
+
+        def _member(mid, row, path, bucket, size, is_keeper):
+            row = row or {}
+            isv = str(row.get("is_video") or "") == "1"
+            return {
+                "media_id": str(mid),
+                "thumb": "/thumbs/{}.jpg".format(mid),
+                "width": row.get("width") or "",
+                "height": row.get("height") or "",
+                "rating": row.get("rating") or "",
+                "created_at": row.get("created_at") or "",
+                "is_video": "1" if isv else "",
+                "path": str(path).replace("\\", "/"),
+                "bucket": bucket,
+                "size": size,
+                "is_keeper": bool(is_keeper),
+            }
+
+        groups = []
+
+        # ---- same_media (Class A) -------------------------------------------
+        # No arbitrary cap here -- the classic page's limit=300 exists to keep an HTML
+        # render short, not because the underlying scan is expensive (one rglob pass,
+        # no hashing); this route reports the real count instead of silently truncating.
+        class_a = duplicate_groups(out_dir, limit=100000)
+        rows_a = {r["media_id"]: r for r in rows_for_media_ids(db_path, [g["media_id"] for g in class_a])}
+        for g in class_a:
+            mid = g["media_id"]
+            row = rows_a.get(str(mid))
+            members = [_member(mid, row, c["rel"], c["bucket"], c["size"], c["rel"] == g["keeper"])
+                       for c in g["copies"]]
+            reclaim = sum(m["size"] for m in members if not m["is_keeper"])
+            groups.append({"id": "same_media:{}".format(mid), "matchType": "same_media",
+                           "reclaimable_bytes": reclaim, "members": members})
+
+        # ---- identical_file (Class B) ----------------------------------------
+        audit = core.audit_collection(out_dir, content=True)
+        class_b = audit["class_b"]
+        mids_b = sorted({str(item[4]) for g in class_b for item in g["files"]})
+        rows_b = {r["media_id"]: r for r in rows_for_media_ids(db_path, mids_b)}
+        for g in class_b:
+            keeper_path = g["keeper"][0]
+            members = [_member(mid, rows_b.get(str(mid)), rel, bucket, size, p == keeper_path)
+                       for (p, rel, bucket, size, mid) in g["files"]]
+            reclaim = sum(m["size"] for m in members if not m["is_keeper"])
+            groups.append({"id": "identical_file:{}".format(g["sha"]), "matchType": "identical_file",
+                           "reclaimable_bytes": reclaim, "members": members})
+
+        # ---- same_seed (Class C) ----------------------------------------------
+        seed_groups = same_seed_groups(db_path)
+        mids_c = sorted({mid for g in seed_groups for mid in g["media_ids"]})
+        rows_c = {r["media_id"]: r for r in rows_for_media_ids(db_path, mids_c)}
+        for g in seed_groups:
+            candidates = []
+            for mid in g["media_ids"]:
+                row = rows_c.get(str(mid))
+                if not row:
+                    continue        # a stale media_id (row deleted since indexed) -- skip, don't fabricate
+                fpath = find_image_file(out_dir, mid, row.get("filename"))
+                try:
+                    size = fpath.stat().st_size if fpath else 0
+                except OSError:
+                    size = 0
+                # Sort key: oldest real created_at first (the original generation is the
+                # keeper); a blank date sorts LAST so an unknown-date row is never
+                # mistaken for the original over a row with a real timestamp.
+                sort_key = row.get("created_at") or "9999-99-99"
+                candidates.append((sort_key, mid, row, fpath, size))
+            if len(candidates) < 2:
+                continue             # every media_id in this seed group turned out stale
+            candidates.sort(key=lambda c: c[0])
+            keeper_mid = candidates[0][1]
+            members = [_member(mid, row, (str(fpath.relative_to(out_dir)) if fpath else ""),
+                               "", size, mid == keeper_mid)
+                       for (_, mid, row, fpath, size) in candidates]
+            reclaim = sum(m["size"] for m in members if not m["is_keeper"])
+            groups.append({"id": "same_seed:{}:{}".format(g["seed"], g["prompt_hash"]),
+                           "matchType": "same_seed", "seed": g["seed"],
+                           "reclaimable_bytes": reclaim, "members": members})
+
+        # ---- near_duplicate (Class D, new) ------------------------------------
+        # Same "resolve real rows/files, oldest created_at is the keeper" shape as
+        # same_seed above -- the only tier-specific addition is closeness_pct, carried
+        # at the group level exactly like same_seed carries `seed`.
+        near_groups = near_duplicate_groups(db_path)
+        mids_d = sorted({mid for g in near_groups for mid in g["media_ids"]})
+        rows_d = {r["media_id"]: r for r in rows_for_media_ids(db_path, mids_d)}
+        for g in near_groups:
+            candidates = []
+            for mid in g["media_ids"]:
+                row = rows_d.get(str(mid))
+                if not row:
+                    continue        # stale media_id (row deleted since phash was computed)
+                fpath = find_image_file(out_dir, mid, row.get("filename"))
+                try:
+                    size = fpath.stat().st_size if fpath else 0
+                except OSError:
+                    size = 0
+                sort_key = row.get("created_at") or "9999-99-99"
+                candidates.append((sort_key, mid, row, fpath, size))
+            if len(candidates) < 2:
+                continue             # every media_id in this group turned out stale
+            candidates.sort(key=lambda c: c[0])
+            keeper_mid = candidates[0][1]
+            members = [_member(mid, row, (str(fpath.relative_to(out_dir)) if fpath else ""),
+                               "", size, mid == keeper_mid)
+                       for (_, mid, row, fpath, size) in candidates]
+            reclaim = sum(m["size"] for m in members if not m["is_keeper"])
+            groups.append({"id": "near_duplicate:{}".format("-".join(g["media_ids"])),
+                           "matchType": "near_duplicate", "closeness_pct": g["closeness_pct"],
+                           "reclaimable_bytes": reclaim, "members": members})
+
+        groups.sort(key=lambda g: -g["reclaimable_bytes"])
+        counts = {"same_media": len(class_a), "identical_file": len(class_b),
+                 "same_seed": len(seed_groups), "near_duplicate": len(near_groups)}
+        return jsonify({
+            "groups": groups,
+            "counts": counts,
+            "total_groups": len(groups),
+            "total_reclaimable_bytes": sum(g["reclaimable_bytes"] for g in groups),
+        })
+
+    @app.route("/api/duplicates/resolve", methods=["POST"])
+    def api_duplicates_resolve():
+        """The destructive half of Duplicate Review: quarantines the LOSING
+        copies of one or more duplicate groups into out_dir/_duplicates/, via
+        quarantine_duplicate_file() above -- QUARANTINE ONLY, mirroring
+        cmd_dedup()'s DEFAULT (--apply without --dedup-delete) behavior.
+        --dedup-delete's hard-delete path is not reachable through this route
+        under any body field.
+
+        Body: {"csrf": "...", "resolutions": [ {group_id, keep, remove}, ... ]}
+        -- OR the single-resolution shortcut, the same three fields at the TOP
+        level (group_id/keep/remove), for the per-group "Resolve" button; the
+        frontend's "Auto-resolve all" sends the batch shape instead of one
+        request per group, so a many-group resolve is one round trip, not N.
+
+        `keep` and each entry of `remove` are {"media_id": "...", "path": "..."}
+        -- the exact (media_id, path) pair GET /api/duplicates already returned
+        for that member. `path`, not media_id, is what actually disambiguates a
+        member: a same_media group's members all share ONE media_id (that
+        tier's whole definition -- the same generation saved in more than one
+        folder), so media_id alone cannot say which COPY to keep vs remove;
+        path can, because GET /api/duplicates already returns a distinct path
+        per member in every tier.
+
+        SAFETY -- enforced here, not just a disabled frontend button:
+          * keep-count 0 (no valid `keep`, or nothing valid in `remove`) -> that
+            resolution is refused with a clear per-group error and nothing is
+            touched for it; "remove everything including the keeper" is not a
+            resolve.
+          * every path is validated to resolve strictly inside out_dir (no ../
+            escape) and its own filename's encoded media_id (media_id_of())
+            must match the media_id claimed for it.
+          * the keep/remove pair is re-verified as a REAL duplicate
+            relationship for the group_id's own matchType, against the actual
+            files/catalog rows right now -- see _validate_duplicate_pair()'s
+            docstring for the exact check run per tier.
+
+        CSRF: explicit-token class (_check_csrf(), the same helper
+        /api/users/add, /api/users/remove and /api/users/password use) -- a
+        real, hard-to-undo-by-accident file mutation triggered by one web
+        click, not the exempt spend-path class /api/generate etc. sit in.
+
+        READ_ONLY in config.json refuses this exactly like submit_generation/
+        submit_fixer/delete_task_gql/claim_reward -- see
+        quarantine_duplicate_file().
+
+        Response: {"quarantined": [...], "errors": [...], "reclaimed_bytes": N}.
+        Per-item, not all-or-nothing -- one bad group in a batch (a stale
+        group_id, a file already gone) does not block the rest, same "one file
+        the OS won't release must not strand the rest" shape as
+        /api/delete-local."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+
+        resolutions = body.get("resolutions")
+        if not isinstance(resolutions, list):
+            single = {k: body.get(k) for k in ("group_id", "keep", "remove")}
+            resolutions = [single] if single.get("group_id") else []
+        if not resolutions:
+            return jsonify({"error": "no resolutions given"}), 400
+
+        quarantined, errors = [], []
+        for res in resolutions:
+            res = res if isinstance(res, dict) else {}
+            group_id = str(res.get("group_id") or "").strip()
+            keep = res.get("keep")
+            remove_raw = res.get("remove")
+            if not group_id:
+                errors.append({"group_id": group_id, "error": "missing group_id"})
+                continue
+            if (not isinstance(keep, dict) or not str(keep.get("media_id") or "").strip()
+                    or not str(keep.get("path") or "").strip()):
+                errors.append({"group_id": group_id,
+                               "error": "no keeper specified -- refusing to resolve "
+                                        "(keep-count is 0)"})
+                continue
+
+            keep_path_str = str(keep.get("path") or "")
+            seen, remove_items = set(), []
+            for item in (remove_raw if isinstance(remove_raw, list) else []):
+                if not isinstance(item, dict):
+                    continue
+                mid = str(item.get("media_id") or "").strip()
+                path = str(item.get("path") or "").strip()
+                if not mid or not path or path == keep_path_str or path in seen:
+                    continue
+                seen.add(path)
+                remove_items.append({"media_id": mid, "path": path})
+            if not remove_items:
+                errors.append({"group_id": group_id, "error": "nothing valid to remove"})
+                continue
+
+            match_type = group_id.split(":", 1)[0]
+            ok, why = _validate_duplicate_pair(out_dir, db_path, match_type, keep, remove_items)
+            if not ok:
+                errors.append({"group_id": group_id, "error": why})
+                continue
+
+            keep_mid = str(keep.get("media_id"))
+            for item in remove_items:
+                result = quarantine_duplicate_file(out_dir, thumb_dir, db_path,
+                                                   item["media_id"], item["path"], group_id)
+                if result.get("ok"):
+                    result["group_id"] = group_id
+                    result["kept_media_id"] = keep_mid
+                    quarantined.append(result)
+                else:
+                    errors.append({"group_id": group_id, "media_id": item["media_id"],
+                                  "error": result.get("error")})
+
+        if quarantined:
+            telem_bump("duplicates_resolved", len(quarantined), out_dir=out_dir)
+        return jsonify({"quarantined": quarantined, "errors": errors,
+                        "reclaimed_bytes": sum(q.get("size", 0) for q in quarantined)})
+
+    @app.route("/api/duplicates/undo", methods=["POST"])
+    def api_duplicates_undo():
+        """Reverses ONE quarantine_duplicate_file() call (see its own docstring
+        and restore_quarantined_duplicate()): moves a single quarantined
+        duplicate back to its exact original recorded location and restores its
+        catalog row. Singular by design -- 'Undo' on one just-resolved item, not
+        a batch undo; an 'Auto-resolve all' that needs undoing calls this once
+        per item, the same acceptable simplification /api/duplicates/resolve's
+        own docstring notes for the read side of this feature.
+
+        Body: {"csrf": "...", "quarantine_path": "_duplicates/images/p_t2_333.webp"}
+        -- the exact `quarantine_path` /api/duplicates/resolve returned for that
+        item.
+
+        Same CSRF class, same tier, same READ_ONLY gate as resolve (see
+        restore_quarantined_duplicate()). Fails with a clear error -- never a
+        silent no-op or a write to some OTHER location -- when the undo record
+        is missing/stale or the original location is now occupied by something
+        else."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        quarantine_path = str(body.get("quarantine_path") or "").strip()
+        if not quarantine_path:
+            return jsonify({"error": "quarantine_path required"}), 400
+        result = restore_quarantined_duplicate(out_dir, thumb_dir, db_path, quarantine_path)
+        if result.get("ok"):
+            telem_bump("duplicates_undone", out_dir=out_dir)
+        return jsonify(result)
 
     @app.route("/api/account")
     def api_account():

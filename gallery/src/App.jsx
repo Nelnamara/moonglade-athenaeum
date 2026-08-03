@@ -7,6 +7,7 @@ import Grid from "./components/Grid.jsx";
 import Lightbox from "./components/Lightbox.jsx";
 import DetailsView from "./components/DetailsView.jsx";
 import HealthOverlay from "./components/HealthOverlay.jsx";
+import DuplicateReviewOverlay from "./components/DuplicateReviewOverlay.jsx";
 import MyArtOverlay from "./components/MyArtOverlay.jsx";
 import ContestsOverlay from "./components/ContestsOverlay.jsx";
 import ImportOverlay from "./components/ImportOverlay.jsx";
@@ -624,6 +625,14 @@ export default function App({ boot }) {
           onModelFilter={(m) => { setOverlay(null); applyAdvanced({ model: m }); }}
           onTagFilter={(t) => { setOverlay(null); applyAdvanced({ tag: t }); }}
           onLoraFilter={(l) => { setOverlay(null); applyAdvanced({ lora: l }); }}
+          onOpenDuplicates={() => setOverlay("duprev")}
+        />
+      )}
+      {overlay === "duprev" && (
+        <DuplicateReviewOverlay
+          onClose={() => setOverlay(null)}
+          onResolved={afterMutation}
+          boot={boot}
         />
       )}
       {overlay === "myart" && (
