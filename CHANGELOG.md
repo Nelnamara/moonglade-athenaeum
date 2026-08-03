@@ -17,6 +17,27 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Folio of Honors Mobile — real data, and the real celebration engine confirmed reused,
+  not duplicated.** This is the exact surface where an earlier build this session made a
+  real, corrected mistake: building a custom achievement-celebration toast instead of the
+  real, shared engine in `static/mg-notify.js`. Before touching anything here, the desktop
+  `FolioOverlay.jsx` and the full `Ach` engine were re-read fresh (not from memory) to
+  confirm the corrected state was still exactly what shipped earlier — it was; nothing had
+  drifted, on either the code or the design side.
+  `FolioMobile.jsx` is a real full-page destination reached from the hero's gold Folio icon
+  (previously a "coming later" toast). A new `useFolio.js` hook is a mechanical, byte-for-byte
+  extraction of `FolioOverlay.jsx`'s entire data/narrator/glitch-reveal/replay engine —
+  desktop's overlay now consumes it too, rather than holding a second copy (verified line-by-
+  line against the pre-extraction version; the one real behavior change, a stale-variable
+  reference caught during extraction, was checked and is provably equivalent, not a
+  regression). Click-to-replay calls the exact same `window.Ach.replay(a, {line})` desktop
+  does — confirmed by grepping every new file for any confetti/toast/celebration/fanfare
+  reference: every hit is a comment pointing at the real engine, never a locally-rendered one.
+  Verified live against the real account (245 pts, 16/57 honors, 4 feats — the real numbers):
+  tapping an earned achievement fires the real `.ach-m2` celebration node with real roast
+  text, not a mock. One hardcoded hex caught by review (a checkmark color that should have
+  tracked the active skin via `var(--base)`) fixed before shipping. Full suite green (1539).
+
 - **Lightbox Mobile — real swipe-navigate, real data, and the mount-race lesson applied
   proactively this time.** `LightboxMobile.jsx` is the real destination for Image Details
   Mobile's "full-screen viewer" button (previously a "coming next" toast). Deliberately
