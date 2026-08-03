@@ -17,6 +17,21 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Contact Sheet Mobile + Duplicate Review Mobile.** Both reuse this session's
+  hook-extraction pattern (`useContactSheet.js`/`useDuplicateReview.js`) against
+  already-real, already-shipped backends — no new endpoints, no forked write paths.
+  Contact Sheet Mobile wires the Gallery Actions sheet's existing "Print sheet" action;
+  placeholder-quality thumbnails and a Share-based (not `window.print()`) export, per the
+  locked design. Duplicate Review Mobile wires Health's previously-non-tappable
+  Duplicates/Reclaimable tiles; per-group Resolve gets its own bottom-sheet confirm (a real,
+  deliberate difference from desktop's no-confirm), Auto-resolve-all shows a live-computed
+  blast-radius count in a centered modal. A real Resolve→Undo round trip was verified against
+  the owner's actual library and left it unchanged; swipe gestures are explicitly deferred,
+  per the design. Both desktop overlays refactored to consume the same new hooks, unchanged
+  behavior. 1539/1539 pytest, clean build (124 modules). Full reasoning — including a
+  parallel-build cross-contamination risk caught by review and independently re-verified
+  clean — in `docs/DECISIONS.md`'s entry of the same date.
+
 - **Loom Mobile increment 5 — Review & trim.** Crop rectangle + trim handles on a finished
   shot, opened from a new ▶ badge on the board. `trimIn`/`trimOut`/`crop` were already real
   fields on the card (used by desktop's `ShotPreview`, export, and split) — no schema

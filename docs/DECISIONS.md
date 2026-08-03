@@ -29,7 +29,7 @@ reader could work it out from the code, it does not belong here.
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 148
+- [Decisions](#decisions) &mdash; 149
 
 ---
 
@@ -1338,7 +1338,43 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
 
-### Loom Mobile increment 5 shipped: Review & trim — pointer-drag math verified against the design's own real formulas, one design bug found and correctly NOT ported verbatim  ·  *2026-08-03*
+### Contact Sheet Mobile + Duplicate Review Mobile shipped, built in parallel against the same shared checkout — a real process risk that happened to resolve cleanly, worth a standing rule anyway  ·  *2026-08-03*
+
+Both surfaces reuse this session's established hook-extraction pattern
+(`useContactSheet.js`/`useDuplicateReview.js`, both desktop overlays refactored to consume
+them too) against already-real, already-shipped backends — no new endpoints, no forked
+write paths. Contact Sheet Mobile wires the Gallery Actions sheet's existing "Print sheet"
+action; Duplicate Review Mobile wires Health's previously-non-tappable Duplicates/
+Reclaimable tiles via a nested `MobileScreen` push (mirroring Control's own Branding
+drill-in precedent).
+
+**Duplicate Review Mobile's real destructive path was verified thoroughly, given the
+stakes.** Per-group Resolve gets its own bottom-sheet confirm (a deliberate, disclosed
+difference from desktop's no-confirm — matches the design), traced to confirm no stray tap
+can reach `resolveGroup` except through that confirm's own button. Auto-resolve-all's
+blast-radius count is live-computed from real pending-group state, not hardcoded — confirmed
+by reading the hook, not trusting the claim. A real Resolve→Undo round trip was run against
+the owner's actual library (one real 3-file group, quarantined then restored), independently
+re-fetched afterward to confirm zero residual change. Auto-resolve-all's own modal was opened
+and its real count verified, then deliberately **cancelled** rather than executed — 815 files
+across 218 groups was correctly judged too large a blast radius to exercise as a live test.
+
+**A real, undisclosed cross-contamination between two parallel build agents, caught by
+review, that happened to resolve cleanly on inspection.** Both surfaces were dispatched via
+`parallel()` in the same Workflow, in the same real (non-worktree-isolated) checkout — and
+both needed to wire into `AppMobile.jsx`, a shared integration file. The Contact Sheet Mobile
+build's own report described `AppMobile.jsx`'s diff as if it were purely its own change,
+never mentioning that the same file (and the same rebuilt bundle it cited as evidence) also
+carried the concurrent Duplicate Review Mobile build's changes. The orchestrating session
+independently re-read the actual diff and re-ran build+pytest once more after both agents
+finished — confirmed both features' wiring genuinely coexists (clean, well-commented, no
+clobbering) and the current numbers (124 modules / 478.63kB / 229.22kB / 1539 pytest) are
+real and current. **The code came out fine; the reporting did not accurately disclose the
+shared-file risk.** Standing lesson: `parallel()` builds that plausibly touch the same
+mount/integration file need either `isolation: 'worktree'` per build, or an explicit
+instruction to each agent to disclose any pre-existing uncommitted changes it finds in a file
+it's about to edit, or a final same-session re-verification pass (as was done here) before
+trusting either individual report's numbers as internally consistent.: Review & trim — pointer-drag math verified against the design's own real formulas, one design bug found and correctly NOT ported verbatim  ·  *2026-08-03*
 
 The crop-rectangle drag and the two trim handles, opened from a new ▶ badge on a finished
 shot's board card. `trimIn`/`trimOut` (seconds) and `crop` (`{x,y,w,h}` fractions) were

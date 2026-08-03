@@ -27,7 +27,16 @@ import "../styles/gallery-mobile.css";
    (LightboxMobile.jsx) -- reached from Details' own "⛶ open lightbox" glyph,
    not from a plain grid tap (that stays real Details, per this file's own
    established gesture layer below). See AppMobile.jsx's own header comment
-   for the lbIndex/detailsFor wiring. */
+   for the lbIndex/detailsFor wiring.
+
+   CONTACT SHEET ENTRY POINT (2026-08-03): ActionsMenu's "▤ Print sheet" item
+   now gets a real `onPrintSheet` prop -- closes this file's own Actions sheet
+   and calls AppMobile.jsx's lifted onOpenContactSheet(selIds) in the same
+   click (mirroring desktop App.jsx's `printSheet: () => openContactSheet
+   (selIds)`), opening the real ContactSheetMobile.jsx full-screen destination
+   instead of ActionsMenu's own desktop-shaped fallback (a bare window.open of
+   the classic print page). See AppMobile.jsx's own header comment for the
+   contactSheetTarget wiring. */
 
 const MEDIA_PILLS = [["", "All"], ["image", "Images"], ["video", "Videos"]];
 const SORT_OPTS = [
@@ -57,7 +66,7 @@ export default function GalleryMobile({
   adv, applyAdvanced,
   items, total, page, pages, loading, load,
   selectMode, setSelectMode, selected, setSelected, toggleSelected,
-  onOpenDetails,
+  onOpenDetails, onOpenContactSheet,
 }) {
   const { sheet, closing, open: openSheet, close: closeSheet } = useSheet();
   const [draft, setDraft] = useState(() => ({ ...adv, shelf, perPage }));
@@ -260,6 +269,7 @@ export default function GalleryMobile({
             isTrueLocal={boot.is_true_local}
             clearSelection={() => { setSelected(new Set()); closeSheet(); }}
             onMutated={refreshCollections}
+            onPrintSheet={() => { closeSheet(); onOpenContactSheet(selIds); }}
           />
         </div>
       </MobileSheet>
