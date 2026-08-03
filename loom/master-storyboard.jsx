@@ -2935,6 +2935,58 @@ const LOOM_MOBILE_STYLES = `
 .lm-sheetclose{margin-top:12px;text-align:center;padding:11px;border-radius:11px;
   border:1px solid var(--surface1);font:700 12.5px/1 system-ui;color:var(--subtext);cursor:pointer;
   background:none;width:100%;}
+
+/* ---- Generate (third increment, 2026-08-03) -- opened from Shot Detail's own
+   "Select in Generate →" button, matching the locked design's genOpen full-screen page. ---- */
+.lm-gen{position:absolute;inset:0;z-index:25;background:var(--mantle);display:flex;flex-direction:column;
+  animation:lmRise .22s ease both;}
+.lm-gen-top{flex:none;display:flex;align-items:center;gap:8px;
+  padding:max(14px,env(safe-area-inset-top)) 16px 10px;}
+.lm-gen-back{flex:none;font:700 11.5px/1 system-ui;letter-spacing:.04em;color:var(--subtext);
+  background:none;border:none;cursor:pointer;padding:0;white-space:nowrap;}
+.lm-gen-back:hover{color:var(--text);}
+.lm-gen-title{flex:1 1 auto;min-width:0;font:600 13px/1.2 system-ui;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-gen-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px 30px;-webkit-overflow-scrolling:touch;}
+.lm-genbtn{display:block;width:100%;box-sizing:border-box;margin-top:12px;background:var(--accent);
+  color:var(--base);border:none;border-radius:9px;padding:11px;font:700 12.5px/1 system-ui;cursor:pointer;
+  text-align:center;}
+.lm-genbtn:hover{filter:brightness(1.08);}
+.lm-genbtn:disabled{opacity:.5;cursor:default;}
+.lm-genexisting{display:block;width:100%;box-sizing:border-box;margin-top:7px;background:transparent;
+  color:var(--subtext);border:1px solid var(--surface1);border-radius:8px;padding:9px;font:600 11px/1 system-ui;
+  cursor:pointer;text-align:center;}
+.lm-genexisting:hover{border-color:var(--accent);color:var(--accent);}
+.lm-genexisting:disabled{opacity:.5;cursor:default;}
+.lm-gentermbtn{font-size:9px;text-transform:none;letter-spacing:0;color:var(--accent);background:none;
+  border:none;cursor:pointer;text-decoration:underline;text-underline-offset:2px;margin-left:6px;}
+.lm-gentermpal{display:flex;flex-wrap:wrap;gap:4px;margin:5px 0 8px;padding:7px;background:var(--surface0);
+  border-radius:7px;}
+.lm-gentermgrp{width:100%;display:flex;flex-wrap:wrap;gap:4px;align-items:center;}
+.lm-gentermgrpt{width:100%;font-size:8px;letter-spacing:.05em;text-transform:uppercase;color:var(--overlay0);
+  margin-top:4px;}
+.lm-genchip{font-family:ui-monospace,monospace;font-size:10px;color:var(--subtext);background:var(--base);
+  border:1px solid var(--surface1);border-radius:5px;padding:3px 7px;cursor:pointer;}
+.lm-genchip:hover{border-color:var(--accent);color:var(--accent);}
+.lm-genrefline{font-size:10.5px;color:var(--subtext);margin:8px 0 2px;line-height:1.5;}
+.lm-genframerow{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;}
+.lm-genframecol{flex:1 1 130px;min-width:130px;}
+.lm-genframe{height:90px;border-radius:8px;border:1px solid var(--surface1);background:var(--base);
+  overflow:hidden;display:flex;align-items:center;justify-content:center;color:var(--overlay0);
+  font-size:10.5px;position:relative;}
+.lm-genframe img{width:100%;height:100%;object-fit:cover;}
+.lm-genframetag{position:absolute;left:5px;bottom:5px;font-family:ui-monospace,monospace;font-size:9px;
+  color:#fff;background:rgba(0,0,0,.55);padding:1px 5px;border-radius:5px;}
+.lm-genpreview{font-size:10.5px;font-style:italic;color:var(--subtext);background:var(--base);
+  border:1px dashed var(--surface1);border-radius:8px;padding:8px 10px;line-height:1.5;margin:6px 0 8px;
+  white-space:pre-wrap;}
+.lm-genoverride{font-size:11px;color:var(--gold);margin-top:4px;}
+.lm-genflash{font-size:10.5px;color:var(--gold);background:rgba(0,0,0,.15);border-radius:5px;padding:4px 7px;
+  margin-top:4px;}
+.lm-gencost{display:flex;flex-direction:column;gap:2px;margin-top:14px;}
+.lm-gencosttext{font-size:12px;font-weight:700;color:var(--emerald);}
+.lm-gensel{width:100%;box-sizing:border-box;background:var(--base);border:1px solid var(--surface1);
+  border-radius:8px;padding:8px 10px;color:var(--text);font:12.5px/1.3 system-ui;margin-top:6px;}
 `;
 
 function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, addCard, addAct, setDraft,
@@ -2946,11 +2998,19 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // functions LoomV2 already uses for its own Deep Focus/Cast&Assets/FrameSlot; threaded
   // straight through, nothing new invented.
   setCard, setAssets, addRef, setRef, delRef, storeThumb, openPick, copyShot,
-  // Not read by this increment's Generate-less screens -- lifted to App() (see LoomV2's own
-  // prop-list comment) and threaded through here so the NEXT increment (Generate) never has
-  // to re-plumb the lift a second time; a still-in-progress draft already survives toggling
-  // between this view and LoomV2 today, before Generate itself exists on mobile.
-  draftCard, setDraftCard, draftTarget, setDraftTarget, draftAttachedInfo, setDraftAttachedInfo }) {
+  // Not read by earlier increments' Generate-less screens -- lifted to App() (see LoomV2's own
+  // prop-list comment) and threaded through here so a still-in-progress draft already
+  // survives toggling between this view and LoomV2.
+  draftCard, setDraftCard, draftTarget, setDraftTarget, draftAttachedInfo, setDraftAttachedInfo,
+  // Third increment (2026-08-03): Generate. Real, unmodified functions from
+  // useGenerationPipeline -- generateShot (real submit: its own price-check + confirm +
+  // /api/loom/generate + pollShot registration, the SAME function batchGenerate's per-card
+  // loop already calls), priceShot (the SAME read-only /api/price check confirmSpend/
+  // batchGenerate already use for a preview), and useExistingVideo (attach an
+  // already-rendered gallery video as the finished clip, no generation, no spend -- already
+  // wired to LoomV2's own board). No new submit call, no new pricing math, no forked spend
+  // path: this screen is a new VIEW onto the exact same pipeline LoomV2 already drives.
+  generateShot, priceShot, useExistingVideo }) {
   // The overlay is position:fixed and covers the whole viewport, but the classic page
   // underneath is a normal tall document -- same reasoning, same fix, as LoomV2's own
   // identical effect (see its comment): without this, a touch/wheel scroll that isn't
@@ -2994,6 +3054,28 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   const [dfHandoff, setDfHandoff] = useState("");
   const [castSheetOpen, setCastSheetOpen] = useState(false);
   const [castSheetTab, setCastSheetTab] = useState("cast");   // 'cast' | 'footage'
+
+  // ---- Generate -- third increment (2026-08-03), per the locked design's own "genOpen"
+  // full-screen page opened from Shot Detail's "Select in Generate →" button. On DESKTOP
+  // this is not a separate screen at all -- LoomV2's right rail (Video tab + the always-
+  // mounted <mg-generate-drawer>) sits beside the board permanently, bound to whichever shot
+  // is selected. Mobile has no persistent rail, so this screen is the honest mobile
+  // equivalent of "go look at Generate for this shot" -- genOpen is purely a LOCAL, ephemeral
+  // "is this screen showing" flag, same category as dfOpen/castSheetOpen above. It carries
+  // NO generation state of its own on purpose (see the credit-safety note on the Generate
+  // block below for exactly why).
+  const [genOpen, setGenOpen] = useState(false);
+  const [genPalFor, setGenPalFor] = useState(null);        // which term palette is open, or null
+  const [genOverrideFlash, setGenOverrideFlash] = useState(false);
+  const [genSubmitting, setGenSubmitting] = useState(false);
+  // Read-only cost PREVIEW cache for whichever shot Generate is currently open on --
+  // { loading, pr, noInput } for entry.c.id, or null before the first check. This is
+  // strictly informational: the real spend gate is generateShot's OWN internal priceShot +
+  // window.confirm (called unmodified below, exactly like every other real submit path in
+  // this file), never re-implemented here. Debounced the same way LoomV2's own imgCostRef/
+  // editCostRef/refCostRef effects are (see LoomV2's priceInto comment) so a fast run of
+  // keystrokes in Camera/Lighting/Prompt doesn't fire a price check per keystroke.
+  const [genPrice, setGenPrice] = useState({});   // cardId -> {loading, pr, noInput}
 
   // ---- mode families for the Cast & assets sheet + ref live-tag badges. Copied verbatim
   // from LoomV2's own local copies -- neither is exported from loom-core.js/loom-mutations.js
@@ -3134,6 +3216,56 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   };
   const castBudget = dfLive ? refBudget(dfLive, project, imgSrc) : null;
   const finishedShots = entries.filter((e) => e.c.resultMid);
+
+  // ---- Generate screen helpers (third increment, 2026-08-03) ----
+  const genTogglePal = (which) => setGenPalFor((p) => (p === which ? null : which));
+  const genAppendTo = (field, term) => dfPatch((cc) => ({ ...cc, [field]: cc[field] ? cc[field] + ", " + term : term }));
+  // Debounced, read-only price PREVIEW for whichever shot Generate is open on -- the exact
+  // real /api/price check (via priceShot) every other cost display in this file already
+  // uses, just kept per-shot here since this component has no priceCache of its own (that
+  // cache is private to useGenerationPipeline, and this screen only ever needs ONE shot's
+  // price at a time, not the whole board's). Skipped entirely for a shot with nothing
+  // attachable yet (payload.hasInput false) -- pricing an unsendable shot is meaningless,
+  // and generateShot's own real submit already refuses it outright regardless of this.
+  //
+  // Purely informational: the real spend gate is generateShot's OWN internal priceShot +
+  // window.confirm, called UNMODIFIED by genSubmit below -- this cache never gates the
+  // Generate button itself, it only decides what the cost LINE displays before that.
+  useEffect(() => {
+    if (!genOpen || !dfLive) return;
+    const id = dfLive.c.id;
+    const payload = buildShotPayload(dfLive, project, imgSrc);
+    if (!payload.hasInput) { setGenPrice((s) => ({ ...s, [id]: { loading: false, pr: null, noInput: true } })); return; }
+    setGenPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true, noInput: false } }));
+    let live = true;
+    const t = setTimeout(() => {
+      priceShot(dfLive).then((pr) => { if (live) setGenPrice((s) => ({ ...s, [id]: { loading: false, pr, noInput: false } })); });
+    }, 300);
+    return () => { live = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [genOpen, dfLive && dfLive.c.id, dfLive && dfLive.c.mode, dfLive && dfLive.c.duration,
+      dfLive && dfLive.c.connect, dfLive && dfLive.c.audioGen, dfLive && dfLive.c.audioLanguage,
+      dfLive && dfLive.c.prompt, dfLive && dfLive.c.promptOverride, dfLive && dfLive.c.promptOverrideText,
+      dfLive && JSON.stringify(dfLive.c.cast), dfLive && JSON.stringify(dfLive.c.refs), project.draft, project.assets,
+      dfLive && (dfLive.c.openFrame || {}).mediaId, dfLive && (dfLive.c.openFrame || {}).thumbId, dfLive && (dfLive.c.openFrame || {}).source,
+      dfLive && (dfLive.c.closeFrame || {}).mediaId, dfLive && (dfLive.c.closeFrame || {}).thumbId, dfLive && (dfLive.c.closeFrame || {}).source]);
+  // The real submit: generateShot is called EXACTLY as batchGenerate's own per-card loop
+  // calls it (minus skipConfirm -- this is a single, deliberate, owner-initiated tap, not a
+  // pre-confirmed batch run, so generateShot's own internal priceShot+window.confirm gate
+  // fires for real here, same as it would for any other single real submit in this file).
+  // No new endpoint, no new price math, no new confirm dialog of this screen's own -- see
+  // the increment's report for the full credit-safety trace.
+  const genSubmit = async () => {
+    if (!dfLive || genSubmitting) return;
+    setGenSubmitting(true);
+    let r;
+    try { r = await generateShot(dfLive); } finally { setGenSubmitting(false); }
+    // Only a CONFIRMED, successful submit returns to the board -- a cancelled confirm or a
+    // submit-time failure leaves this screen open exactly as it was, so the owner can see
+    // why (generateShot's own genState error write) or adjust and retry, instead of being
+    // silently dumped back to Shot Detail with no visible outcome.
+    if (r && r.ok) { setGenOpen(false); setDfOpen(false); }
+  };
 
   return (
     <div className="lm-root">
@@ -3346,6 +3478,7 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                 onChange={(ev) => dfPatch((cc) => ({ ...cc, notes: ev.target.value }))} />
 
               <button type="button" className="lm-copybtn" onClick={() => copyShot(dfLive)}>Copy shot</button>
+              <button type="button" className="lm-genbtn" onClick={() => setGenOpen(true)}>Select in Generate &rarr;</button>
             </div>
 
             {castSheetOpen && (
@@ -3422,6 +3555,189 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                 </div>
               </>
             )}
+          </div>
+        );
+      })()}
+
+      {/* ---- Generate -- third increment (2026-08-03). Real submit, real cost preview, real
+          generation-state tracking; see the increment's own report for the full credit-safety
+          trace (why toggling Mobile view, closing this screen, closing Shot Detail, and
+          navigating the board can never orphan an in-flight generation here). Deliberately a
+          SEPARATE top-level conditional from the dfOpen block above, not nested inside it --
+          genOpen/dfOpen are independent booleans (closing Generate returns to Shot Detail;
+          closing Shot Detail's own ✕ closes both), matching the locked design's own
+          openGenerate/closeGenerate/backToShot split. */}
+      {genOpen && dfLive && (() => {
+        const c = dfLive.c;
+        const gp = genPrice[c.id] || {};
+        // tallyPrices/formatCostEstimate/costTooltip (loom-core.js) reused VERBATIM on a
+        // one-element array -- the exact same aggregate math every other price display in
+        // this file already trusts, not a new formatter invented for this screen.
+        const tally = gp.pr ? tallyPrices([gp.pr]) : null;
+        const costText = gp.noInput ? "attach a frame or cast image first"
+          : gp.loading ? "checking…"
+          : tally ? formatCostEstimate(tally) : "—";
+        const costTitle = tally ? costTooltip(tally) : "";
+        // genBusy mirrors LoomV2's own `busy` guard on its "Use an existing video instead"
+        // button exactly (see LoomV2's gen block) -- "paused" does NOT count as busy (the
+        // auto-poll has genuinely stopped, so a manual attach/re-submit isn't racing a live
+        // network call).
+        const gsSelf = genState[c.id];
+        const genBusy = !!(gsSelf && gsSelf.phase && gsSelf.phase !== "done" && gsSelf.phase !== "error" && gsSelf.phase !== "paused");
+        // usesCloseFrame (loom-core.js): I2V consumes only the opening frame; FLF/R2V/V2V
+        // all reserve a closing-frame slot when one resolves -- the SAME predicate
+        // shotImageRefs()/the Cast sheet's own modeSendsRefs already gate on, not a second,
+        // independently-guessed mode table.
+        const showClose = usesCloseFrame(c.mode);
+        return (
+          <div className="lm-gen">
+            <div className="lm-gen-top">
+              <button type="button" className="lm-gen-back" onClick={() => setGenOpen(false)}>&lsaquo; {dfLive.code}</button>
+              <span className="lm-gen-title">{c.title || "untitled"}</span>
+              <button type="button" className="lm-df-close" title="Close" onClick={() => { setGenOpen(false); setDfOpen(false); }}>&#10005;</button>
+            </div>
+            <div className="lm-gen-body">
+              <span className="lm-microlab">Mode</span>
+              <div className="lm-modechips">
+                {MODES.map((m) => (
+                  <button type="button" key={m} className={"lm-modechip" + (m === c.mode ? " on" : "")}
+                    onClick={() => dfPatch((cc) => setShotMode(cc, m))}>{m}</button>
+                ))}
+              </div>
+
+              <span className="lm-microlab">Continuity</span>
+              <div className="lm-modechips">
+                {Object.keys(CONNECT).map((k) => (
+                  <button type="button" key={k} className={"lm-modechip" + (k === (c.connect || "new") ? " on" : "")}
+                    title={CONNECT[k].hint} onClick={() => dfPatch((cc) => setShotConnect(cc, k))}>{CONNECT[k].label}</button>
+                ))}
+              </div>
+
+              <span className="lm-microlab">Prompt</span>
+              <textarea className="lm-ta" value={c.prompt || ""} placeholder="Describe the motion…"
+                onChange={(ev) => {
+                  // Same rule as LoomV2's own Prompt field / Shot Detail's copy: typing here
+                  // always means "auto-compose, using this text" -- clears an active override
+                  // immediately, flashing a brief, self-clearing notice since that is silent-
+                  // until-you-notice otherwise (see LoomV2's identical overrideClearedFlash).
+                  if (c.promptOverride) { setGenOverrideFlash(true); setTimeout(() => setGenOverrideFlash(false), 1600); }
+                  dfPatch((cc) => ({ ...clearPromptOverride(cc), prompt: ev.target.value }));
+                }} />
+              <div className="lm-hint">motion only — camera, lighting and cast weave in on top</div>
+              {c.promptOverride && <div className="lm-genoverride">&#9998; override active — Camera/Lighting/cast not woven in</div>}
+              {genOverrideFlash && <div className="lm-genflash">override cleared — back to auto-compose</div>}
+
+              <span className="lm-microlab" style={{ marginTop: 12 }}>Camera <button type="button" className="lm-gentermbtn" onClick={() => genTogglePal("camera")}>+ terms</button></span>
+              <input className="lm-in" value={c.camera || ""} placeholder="e.g. slow push in, shallow DoF"
+                onChange={(ev) => dfPatch((cc) => ({ ...cc, camera: ev.target.value }))} />
+              {genPalFor === "camera" && (
+                <div className="lm-gentermpal">{Object.entries(CAM_PALETTE).map(([grp, items]) => (
+                  <div key={grp} className="lm-gentermgrp">
+                    <div className="lm-gentermgrpt">{grp}</div>
+                    {items.map((t) => (<span key={t} className="lm-genchip" onClick={() => genAppendTo("camera", t)}>{t}</span>))}
+                  </div>
+                ))}</div>
+              )}
+
+              <span className="lm-microlab">Lighting <button type="button" className="lm-gentermbtn" onClick={() => genTogglePal("lighting")}>+ terms</button></span>
+              <input className="lm-in" value={c.lighting || ""} placeholder="e.g. moonlit, soft haze"
+                onChange={(ev) => dfPatch((cc) => ({ ...cc, lighting: ev.target.value }))} />
+              {genPalFor === "lighting" && (
+                <div className="lm-gentermpal">{LIGHTING_PALETTE.map((t) => (<span key={t} className="lm-genchip" onClick={() => genAppendTo("lighting", t)}>{t}</span>))}</div>
+              )}
+
+              <div className="lm-row2">
+                <div className="lm-col">
+                  <span className="lm-microlab">Transition in <button type="button" className="lm-gentermbtn" onClick={() => genTogglePal("transIn")}>+ terms</button></span>
+                  <input className="lm-in" value={c.transIn || ""} placeholder="cut, dissolve"
+                    onChange={(ev) => dfPatch((cc) => ({ ...cc, transIn: ev.target.value }))} />
+                  {genPalFor === "transIn" && (
+                    <div className="lm-gentermpal">{TRANS_PALETTE.map((t) => (<span key={t} className="lm-genchip" onClick={() => dfPatch((cc) => ({ ...cc, transIn: t }))}>{t}</span>))}</div>
+                  )}
+                </div>
+                <div className="lm-col">
+                  <span className="lm-microlab">Transition out <button type="button" className="lm-gentermbtn" onClick={() => genTogglePal("transOut")}>+ terms</button></span>
+                  <input className="lm-in" value={c.transOut || ""} placeholder="cut, dissolve"
+                    onChange={(ev) => dfPatch((cc) => ({ ...cc, transOut: ev.target.value }))} />
+                  {genPalFor === "transOut" && (
+                    <div className="lm-gentermpal">{TRANS_PALETTE.map((t) => (<span key={t} className="lm-genchip" onClick={() => dfPatch((cc) => ({ ...cc, transOut: t }))}>{t}</span>))}</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Mode-aware weave summary -- shares modeSendsLine/modeSendsRefs with the Cast
+                  sheet above so the two surfaces cannot silently disagree about which modes
+                  actually send the cast/ref bank vs. cite it in the prompt only. */}
+              <div className="lm-genrefline">
+                {(c.cast || []).length} cast &middot; {(c.refs || []).length} refs
+                {!modeSendsRefs(c.mode) && <><br />{modeSendsLine(c.mode)}</>}
+              </div>
+
+              <span className="lm-microlab" style={{ marginTop: 12 }}>{showClose ? "Start / end frame" : "Start frame"}</span>
+              <div className="lm-genframerow">
+                <div className="lm-genframecol">
+                  <div className="lm-genframe">
+                    {frameSrc(c.openFrame) ? <img src={frameSrc(c.openFrame)} alt="opening frame" /> : "no frame"}
+                    <span className="lm-genframetag">{positionTag(dfLive, project, imgSrc, "openFrame") || "—"}</span>
+                  </div>
+                </div>
+                {showClose && (
+                  <div className="lm-genframecol">
+                    <div className="lm-genframe">
+                      {frameSrc(c.closeFrame) ? <img src={frameSrc(c.closeFrame)} alt="closing frame" /> : "no frame"}
+                      <span className="lm-genframetag">{positionTag(dfLive, project, imgSrc, "closeFrame") || "—"}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="lm-hint">frames are attached on Shot Detail — this is a preview only</div>
+
+              <span className="lm-microlab" style={{ marginTop: 12 }}>What will be sent</span>
+              {/* shotText(), the REAL composed-prompt assembler (loom-core.js) -- not a fake
+                  mockup string. Shows the owner the exact text about to be submitted, honoring
+                  an active promptOverride verbatim, before they ever tap Generate. */}
+              <div className="lm-genpreview">{shotText(dfLive, project, imgSrc)}</div>
+
+              {/* generate_audio / audio_language -- REAL fields the card shape has always
+                  carried (see newCard()'s own audioGen/audioLanguage comment), but with no UI
+                  anywhere on mobile until now. The 5-value enum matches static/mg-generate-
+                  drawer.js's own real <select> exactly (english/japanese/chinese/korean/none),
+                  not an invented list. */}
+              <label className="lm-check" style={{ marginTop: 6 }}>
+                <input type="checkbox" checked={!!c.audioGen}
+                  onChange={(ev) => dfPatch((cc) => ({ ...cc, audioGen: ev.target.checked }))} />
+                Generate audio (spoken lines become voiceover)
+              </label>
+              {c.audioGen && (
+                <select className="lm-gensel" value={c.audioLanguage || "english"}
+                  onChange={(ev) => dfPatch((cc) => ({ ...cc, audioLanguage: ev.target.value }))}>
+                  <option value="english">English</option>
+                  <option value="japanese">Japanese</option>
+                  <option value="chinese">Chinese</option>
+                  <option value="korean">Korean</option>
+                  <option value="none">SE only (no dialogue)</option>
+                </select>
+              )}
+
+              <div className="lm-gencost">
+                <span className="lm-gencosttext" title={costTitle}>{costText}</span>
+                <span className="lm-hint">uploads are free &middot; one job at a time</span>
+              </div>
+
+              {/* generateShot -- the SAME real function batchGenerate's own per-card loop
+                  calls (useGenerationPipeline), called here UNMODIFIED and without
+                  skipConfirm: its own internal priceShot + window.confirm fires for real on
+                  this tap, exactly as it would for any other single, owner-initiated real
+                  submit in this file. No new endpoint, no new price math, no new confirm
+                  dialog belongs to this screen. */}
+              <button type="button" className="lm-genbtn" disabled={genBusy || genSubmitting || gp.noInput} onClick={genSubmit}>
+                {genBusy ? "already rendering…" : genSubmitting ? "submitting…" : "Generate video"}
+              </button>
+              {/* useExistingVideo -- the SAME real, already-shipped attach-without-generating
+                  path LoomV2's own board already offers (no spend, no PixAI task). */}
+              <button type="button" className="lm-genexisting" disabled={genBusy}
+                onClick={() => useExistingVideo(dfLive)}>Use an existing video instead</button>
+            </div>
           </div>
         );
       })()}
@@ -4275,8 +4591,13 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults,
     genEditState, setGenEditState,
     genRefState, setGenRefState, batching, batchTally,
+    // priceShot exposed (mobile-generate-screen pass, 2026-08-03): the SAME read-only
+    // /api/price check generateShot/confirmSpend/batchGenerate already use internally --
+    // Loom Mobile's own Generate screen needs a per-shot cost PREVIEW to show before the
+    // owner ever taps the real submit button, and this is that exact function, not a new
+    // fetch/pricing implementation. It was already defined here; only its exposure is new.
     generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
-    costEstimate, refreshEstimate,
+    costEstimate, refreshEstimate, priceShot,
   };
 }
 
@@ -4424,6 +4745,13 @@ export default function App() {
     imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults,
     genEditState, setGenEditState,
     genRefState, setGenRefState, batching, batchTally,
+    // generateShot/priceShot newly destructured here (mobile-generate-screen pass,
+    // 2026-08-03) -- both already existed on the hook's return value, generateShot simply
+    // had no consumer above batchGenerate's own internal call until Loom Mobile's Generate
+    // screen needed the exact same real per-shot submit + price-preview functions LoomV2's
+    // batch path already uses. Nothing about either function changes; only who else gets a
+    // reference to them.
+    generateShot, priceShot,
     pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
     costEstimate, refreshEstimate }
     = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId });
@@ -4543,7 +4871,8 @@ export default function App() {
           storeThumb={storeThumb} openPick={openPick} copyShot={copyShot}
           mobileUI={mobileUI} setMobileUI={setMobileUI}
           draftCard={draftCard} setDraftCard={setDraftCard} draftTarget={draftTarget} setDraftTarget={setDraftTarget}
-          draftAttachedInfo={draftAttachedInfo} setDraftAttachedInfo={setDraftAttachedInfo} /></V2Boundary>
+          draftAttachedInfo={draftAttachedInfo} setDraftAttachedInfo={setDraftAttachedInfo}
+          generateShot={generateShot} priceShot={priceShot} useExistingVideo={useExistingVideo} /></V2Boundary>
       ) : (
         <V2Boundary><LoomV2
           project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}

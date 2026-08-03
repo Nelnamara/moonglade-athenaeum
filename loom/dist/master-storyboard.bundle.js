@@ -3004,6 +3004,58 @@ ${"=".repeat(48)}
 .lm-sheetclose{margin-top:12px;text-align:center;padding:11px;border-radius:11px;
   border:1px solid var(--surface1);font:700 12.5px/1 system-ui;color:var(--subtext);cursor:pointer;
   background:none;width:100%;}
+
+/* ---- Generate (third increment, 2026-08-03) -- opened from Shot Detail's own
+   "Select in Generate \u2192" button, matching the locked design's genOpen full-screen page. ---- */
+.lm-gen{position:absolute;inset:0;z-index:25;background:var(--mantle);display:flex;flex-direction:column;
+  animation:lmRise .22s ease both;}
+.lm-gen-top{flex:none;display:flex;align-items:center;gap:8px;
+  padding:max(14px,env(safe-area-inset-top)) 16px 10px;}
+.lm-gen-back{flex:none;font:700 11.5px/1 system-ui;letter-spacing:.04em;color:var(--subtext);
+  background:none;border:none;cursor:pointer;padding:0;white-space:nowrap;}
+.lm-gen-back:hover{color:var(--text);}
+.lm-gen-title{flex:1 1 auto;min-width:0;font:600 13px/1.2 system-ui;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-gen-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px 30px;-webkit-overflow-scrolling:touch;}
+.lm-genbtn{display:block;width:100%;box-sizing:border-box;margin-top:12px;background:var(--accent);
+  color:var(--base);border:none;border-radius:9px;padding:11px;font:700 12.5px/1 system-ui;cursor:pointer;
+  text-align:center;}
+.lm-genbtn:hover{filter:brightness(1.08);}
+.lm-genbtn:disabled{opacity:.5;cursor:default;}
+.lm-genexisting{display:block;width:100%;box-sizing:border-box;margin-top:7px;background:transparent;
+  color:var(--subtext);border:1px solid var(--surface1);border-radius:8px;padding:9px;font:600 11px/1 system-ui;
+  cursor:pointer;text-align:center;}
+.lm-genexisting:hover{border-color:var(--accent);color:var(--accent);}
+.lm-genexisting:disabled{opacity:.5;cursor:default;}
+.lm-gentermbtn{font-size:9px;text-transform:none;letter-spacing:0;color:var(--accent);background:none;
+  border:none;cursor:pointer;text-decoration:underline;text-underline-offset:2px;margin-left:6px;}
+.lm-gentermpal{display:flex;flex-wrap:wrap;gap:4px;margin:5px 0 8px;padding:7px;background:var(--surface0);
+  border-radius:7px;}
+.lm-gentermgrp{width:100%;display:flex;flex-wrap:wrap;gap:4px;align-items:center;}
+.lm-gentermgrpt{width:100%;font-size:8px;letter-spacing:.05em;text-transform:uppercase;color:var(--overlay0);
+  margin-top:4px;}
+.lm-genchip{font-family:ui-monospace,monospace;font-size:10px;color:var(--subtext);background:var(--base);
+  border:1px solid var(--surface1);border-radius:5px;padding:3px 7px;cursor:pointer;}
+.lm-genchip:hover{border-color:var(--accent);color:var(--accent);}
+.lm-genrefline{font-size:10.5px;color:var(--subtext);margin:8px 0 2px;line-height:1.5;}
+.lm-genframerow{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;}
+.lm-genframecol{flex:1 1 130px;min-width:130px;}
+.lm-genframe{height:90px;border-radius:8px;border:1px solid var(--surface1);background:var(--base);
+  overflow:hidden;display:flex;align-items:center;justify-content:center;color:var(--overlay0);
+  font-size:10.5px;position:relative;}
+.lm-genframe img{width:100%;height:100%;object-fit:cover;}
+.lm-genframetag{position:absolute;left:5px;bottom:5px;font-family:ui-monospace,monospace;font-size:9px;
+  color:#fff;background:rgba(0,0,0,.55);padding:1px 5px;border-radius:5px;}
+.lm-genpreview{font-size:10.5px;font-style:italic;color:var(--subtext);background:var(--base);
+  border:1px dashed var(--surface1);border-radius:8px;padding:8px 10px;line-height:1.5;margin:6px 0 8px;
+  white-space:pre-wrap;}
+.lm-genoverride{font-size:11px;color:var(--gold);margin-top:4px;}
+.lm-genflash{font-size:10.5px;color:var(--gold);background:rgba(0,0,0,.15);border-radius:5px;padding:4px 7px;
+  margin-top:4px;}
+.lm-gencost{display:flex;flex-direction:column;gap:2px;margin-top:14px;}
+.lm-gencosttext{font-size:12px;font-weight:700;color:var(--emerald);}
+.lm-gensel{width:100%;box-sizing:border-box;background:var(--base);border:1px solid var(--surface1);
+  border-radius:8px;padding:8px 10px;color:var(--text);font:12.5px/1.3 system-ui;margin-top:6px;}
 `;
   function LoomMobile({
     project,
@@ -3031,16 +3083,26 @@ ${"=".repeat(48)}
     storeThumb,
     openPick,
     copyShot,
-    // Not read by this increment's Generate-less screens -- lifted to App() (see LoomV2's own
-    // prop-list comment) and threaded through here so the NEXT increment (Generate) never has
-    // to re-plumb the lift a second time; a still-in-progress draft already survives toggling
-    // between this view and LoomV2 today, before Generate itself exists on mobile.
+    // Not read by earlier increments' Generate-less screens -- lifted to App() (see LoomV2's own
+    // prop-list comment) and threaded through here so a still-in-progress draft already
+    // survives toggling between this view and LoomV2.
     draftCard,
     setDraftCard,
     draftTarget,
     setDraftTarget,
     draftAttachedInfo,
-    setDraftAttachedInfo
+    setDraftAttachedInfo,
+    // Third increment (2026-08-03): Generate. Real, unmodified functions from
+    // useGenerationPipeline -- generateShot (real submit: its own price-check + confirm +
+    // /api/loom/generate + pollShot registration, the SAME function batchGenerate's per-card
+    // loop already calls), priceShot (the SAME read-only /api/price check confirmSpend/
+    // batchGenerate already use for a preview), and useExistingVideo (attach an
+    // already-rendered gallery video as the finished clip, no generation, no spend -- already
+    // wired to LoomV2's own board). No new submit call, no new pricing math, no forked spend
+    // path: this screen is a new VIEW onto the exact same pipeline LoomV2 already drives.
+    generateShot,
+    priceShot,
+    useExistingVideo
   }) {
     useEffect(() => {
       const prevOverflow = document.body.style.overflow;
@@ -3061,6 +3123,11 @@ ${"=".repeat(48)}
     const [dfHandoff, setDfHandoff] = useState("");
     const [castSheetOpen, setCastSheetOpen] = useState(false);
     const [castSheetTab, setCastSheetTab] = useState("cast");
+    const [genOpen, setGenOpen] = useState(false);
+    const [genPalFor, setGenPalFor] = useState(null);
+    const [genOverrideFlash, setGenOverrideFlash] = useState(false);
+    const [genSubmitting, setGenSubmitting] = useState(false);
+    const [genPrice, setGenPrice] = useState({});
     const modeSendsRefs = (m) => usesCloseFrame(m) && m !== "FLF";
     const modeSendsLine = (m) => m === "FLF" ? "First & Last sends the start & end frames only \u2014 cast & refs here are for continuity/notes, not references" : "I2V sends the opening frame only \u2014 cast here is for continuity/notes, not references";
     const liveTagText = (liveTag, pastBudget, mode) => liveTag || (pastBudget ? modeSendsRefs(mode) ? "not sent" : "not cited" : "\u2014");
@@ -3167,6 +3234,63 @@ ${"=".repeat(48)}
     };
     const castBudget = dfLive ? refBudget(dfLive, project, imgSrc) : null;
     const finishedShots = entries.filter((e) => e.c.resultMid);
+    const genTogglePal = (which) => setGenPalFor((p) => p === which ? null : which);
+    const genAppendTo = (field, term) => dfPatch((cc) => ({ ...cc, [field]: cc[field] ? cc[field] + ", " + term : term }));
+    useEffect(() => {
+      if (!genOpen || !dfLive) return;
+      const id = dfLive.c.id;
+      const payload = shotPayload(dfLive, project, imgSrc);
+      if (!payload.hasInput) {
+        setGenPrice((s) => ({ ...s, [id]: { loading: false, pr: null, noInput: true } }));
+        return;
+      }
+      setGenPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true, noInput: false } }));
+      let live = true;
+      const t = setTimeout(() => {
+        priceShot(dfLive).then((pr) => {
+          if (live) setGenPrice((s) => ({ ...s, [id]: { loading: false, pr, noInput: false } }));
+        });
+      }, 300);
+      return () => {
+        live = false;
+        clearTimeout(t);
+      };
+    }, [
+      genOpen,
+      dfLive && dfLive.c.id,
+      dfLive && dfLive.c.mode,
+      dfLive && dfLive.c.duration,
+      dfLive && dfLive.c.connect,
+      dfLive && dfLive.c.audioGen,
+      dfLive && dfLive.c.audioLanguage,
+      dfLive && dfLive.c.prompt,
+      dfLive && dfLive.c.promptOverride,
+      dfLive && dfLive.c.promptOverrideText,
+      dfLive && JSON.stringify(dfLive.c.cast),
+      dfLive && JSON.stringify(dfLive.c.refs),
+      project.draft,
+      project.assets,
+      dfLive && (dfLive.c.openFrame || {}).mediaId,
+      dfLive && (dfLive.c.openFrame || {}).thumbId,
+      dfLive && (dfLive.c.openFrame || {}).source,
+      dfLive && (dfLive.c.closeFrame || {}).mediaId,
+      dfLive && (dfLive.c.closeFrame || {}).thumbId,
+      dfLive && (dfLive.c.closeFrame || {}).source
+    ]);
+    const genSubmit = async () => {
+      if (!dfLive || genSubmitting) return;
+      setGenSubmitting(true);
+      let r;
+      try {
+        r = await generateShot(dfLive);
+      } finally {
+        setGenSubmitting(false);
+      }
+      if (r && r.ok) {
+        setGenOpen(false);
+        setDfOpen(false);
+      }
+    };
     return /* @__PURE__ */ React.createElement("div", { className: "lm-root" }, /* @__PURE__ */ React.createElement("style", null, LOOM_MOBILE_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lm-top" }, /* @__PURE__ */ React.createElement("a", { className: "lm-back", href: "/" }, "\u2190 Gallery"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement("span", { className: "lm-title" }, "\u25AA The Loom"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement(
       "label",
       {
@@ -3367,7 +3491,7 @@ ${"=".repeat(48)}
           placeholder: "blocking, continuity reminders\u2026",
           onChange: (ev) => dfPatch((cc) => ({ ...cc, notes: ev.target.value }))
         }
-      ), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-copybtn", onClick: () => copyShot(dfLive) }, "Copy shot")), castSheetOpen && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lm-scrim", onClick: () => setCastSheetOpen(false) }), /* @__PURE__ */ React.createElement("div", { className: "lm-sheet" }, /* @__PURE__ */ React.createElement("div", { className: "lm-sheethandle" }), /* @__PURE__ */ React.createElement("div", { className: "lm-tabsrow" }, /* @__PURE__ */ React.createElement(
+      ), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-copybtn", onClick: () => copyShot(dfLive) }, "Copy shot"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-genbtn", onClick: () => setGenOpen(true) }, "Select in Generate \u2192")), castSheetOpen && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lm-scrim", onClick: () => setCastSheetOpen(false) }), /* @__PURE__ */ React.createElement("div", { className: "lm-sheet" }, /* @__PURE__ */ React.createElement("div", { className: "lm-sheethandle" }), /* @__PURE__ */ React.createElement("div", { className: "lm-tabsrow" }, /* @__PURE__ */ React.createElement(
         "button",
         {
           type: "button",
@@ -3424,6 +3548,112 @@ ${"=".repeat(48)}
         dfPickFootage(e.c.resultMid, e.code);
         setCastSheetOpen(false);
       } }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + e.c.resultMid + ".jpg", alt: "" }), /* @__PURE__ */ React.createElement("div", { className: "lm-fclipmeta" }, /* @__PURE__ */ React.createElement("b", null, e.code), /* @__PURE__ */ React.createElement("span", null, durOf(e.c), "s"))))) : /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "no rendered shots yet"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-sheetclose", onClick: () => setCastSheetOpen(false) }, "Done"))));
+    })(), genOpen && dfLive && (() => {
+      const c = dfLive.c;
+      const gp = genPrice[c.id] || {};
+      const tally = gp.pr ? tallyPrices([gp.pr]) : null;
+      const costText = gp.noInput ? "attach a frame or cast image first" : gp.loading ? "checking\u2026" : tally ? formatCostEstimate(tally) : "\u2014";
+      const costTitle = tally ? costTooltip(tally) : "";
+      const gsSelf = genState[c.id];
+      const genBusy = !!(gsSelf && gsSelf.phase && gsSelf.phase !== "done" && gsSelf.phase !== "error" && gsSelf.phase !== "paused");
+      const showClose = usesCloseFrame(c.mode);
+      return /* @__PURE__ */ React.createElement("div", { className: "lm-gen" }, /* @__PURE__ */ React.createElement("div", { className: "lm-gen-top" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-gen-back", onClick: () => setGenOpen(false) }, "\u2039 ", dfLive.code), /* @__PURE__ */ React.createElement("span", { className: "lm-gen-title" }, c.title || "untitled"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-df-close", title: "Close", onClick: () => {
+        setGenOpen(false);
+        setDfOpen(false);
+      } }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "lm-gen-body" }, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Mode"), /* @__PURE__ */ React.createElement("div", { className: "lm-modechips" }, MODES.map((m) => /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          key: m,
+          className: "lm-modechip" + (m === c.mode ? " on" : ""),
+          onClick: () => dfPatch((cc) => setShotMode(cc, m))
+        },
+        m
+      ))), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Continuity"), /* @__PURE__ */ React.createElement("div", { className: "lm-modechips" }, Object.keys(CONNECT).map((k) => /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          key: k,
+          className: "lm-modechip" + (k === (c.connect || "new") ? " on" : ""),
+          title: CONNECT[k].hint,
+          onClick: () => dfPatch((cc) => setShotConnect(cc, k))
+        },
+        CONNECT[k].label
+      ))), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Prompt"), /* @__PURE__ */ React.createElement(
+        "textarea",
+        {
+          className: "lm-ta",
+          value: c.prompt || "",
+          placeholder: "Describe the motion\u2026",
+          onChange: (ev) => {
+            if (c.promptOverride) {
+              setGenOverrideFlash(true);
+              setTimeout(() => setGenOverrideFlash(false), 1600);
+            }
+            dfPatch((cc) => ({ ...clearPromptOverride(cc), prompt: ev.target.value }));
+          }
+        }
+      ), /* @__PURE__ */ React.createElement("div", { className: "lm-hint" }, "motion only \u2014 camera, lighting and cast weave in on top"), c.promptOverride && /* @__PURE__ */ React.createElement("div", { className: "lm-genoverride" }, "\u270E override active \u2014 Camera/Lighting/cast not woven in"), genOverrideFlash && /* @__PURE__ */ React.createElement("div", { className: "lm-genflash" }, "override cleared \u2014 back to auto-compose"), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, "Camera ", /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-gentermbtn", onClick: () => genTogglePal("camera") }, "+ terms")), /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          className: "lm-in",
+          value: c.camera || "",
+          placeholder: "e.g. slow push in, shallow DoF",
+          onChange: (ev) => dfPatch((cc) => ({ ...cc, camera: ev.target.value }))
+        }
+      ), genPalFor === "camera" && /* @__PURE__ */ React.createElement("div", { className: "lm-gentermpal" }, Object.entries(CAM_PALETTE).map(([grp, items]) => /* @__PURE__ */ React.createElement("div", { key: grp, className: "lm-gentermgrp" }, /* @__PURE__ */ React.createElement("div", { className: "lm-gentermgrpt" }, grp), items.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lm-genchip", onClick: () => genAppendTo("camera", t) }, t))))), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Lighting ", /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-gentermbtn", onClick: () => genTogglePal("lighting") }, "+ terms")), /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          className: "lm-in",
+          value: c.lighting || "",
+          placeholder: "e.g. moonlit, soft haze",
+          onChange: (ev) => dfPatch((cc) => ({ ...cc, lighting: ev.target.value }))
+        }
+      ), genPalFor === "lighting" && /* @__PURE__ */ React.createElement("div", { className: "lm-gentermpal" }, LIGHTING_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lm-genchip", onClick: () => genAppendTo("lighting", t) }, t))), /* @__PURE__ */ React.createElement("div", { className: "lm-row2" }, /* @__PURE__ */ React.createElement("div", { className: "lm-col" }, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Transition in ", /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-gentermbtn", onClick: () => genTogglePal("transIn") }, "+ terms")), /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          className: "lm-in",
+          value: c.transIn || "",
+          placeholder: "cut, dissolve",
+          onChange: (ev) => dfPatch((cc) => ({ ...cc, transIn: ev.target.value }))
+        }
+      ), genPalFor === "transIn" && /* @__PURE__ */ React.createElement("div", { className: "lm-gentermpal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lm-genchip", onClick: () => dfPatch((cc) => ({ ...cc, transIn: t })) }, t)))), /* @__PURE__ */ React.createElement("div", { className: "lm-col" }, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Transition out ", /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-gentermbtn", onClick: () => genTogglePal("transOut") }, "+ terms")), /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          className: "lm-in",
+          value: c.transOut || "",
+          placeholder: "cut, dissolve",
+          onChange: (ev) => dfPatch((cc) => ({ ...cc, transOut: ev.target.value }))
+        }
+      ), genPalFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lm-gentermpal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lm-genchip", onClick: () => dfPatch((cc) => ({ ...cc, transOut: t })) }, t))))), /* @__PURE__ */ React.createElement("div", { className: "lm-genrefline" }, (c.cast || []).length, " cast \xB7 ", (c.refs || []).length, " refs", !modeSendsRefs(c.mode) && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("br", null), modeSendsLine(c.mode))), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, showClose ? "Start / end frame" : "Start frame"), /* @__PURE__ */ React.createElement("div", { className: "lm-genframerow" }, /* @__PURE__ */ React.createElement("div", { className: "lm-genframecol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-genframe" }, frameSrc(c.openFrame) ? /* @__PURE__ */ React.createElement("img", { src: frameSrc(c.openFrame), alt: "opening frame" }) : "no frame", /* @__PURE__ */ React.createElement("span", { className: "lm-genframetag" }, positionTag(dfLive, project, imgSrc, "openFrame") || "\u2014"))), showClose && /* @__PURE__ */ React.createElement("div", { className: "lm-genframecol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-genframe" }, frameSrc(c.closeFrame) ? /* @__PURE__ */ React.createElement("img", { src: frameSrc(c.closeFrame), alt: "closing frame" }) : "no frame", /* @__PURE__ */ React.createElement("span", { className: "lm-genframetag" }, positionTag(dfLive, project, imgSrc, "closeFrame") || "\u2014")))), /* @__PURE__ */ React.createElement("div", { className: "lm-hint" }, "frames are attached on Shot Detail \u2014 this is a preview only"), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, "What will be sent"), /* @__PURE__ */ React.createElement("div", { className: "lm-genpreview" }, shotText(dfLive, project, imgSrc)), /* @__PURE__ */ React.createElement("label", { className: "lm-check", style: { marginTop: 6 } }, /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          type: "checkbox",
+          checked: !!c.audioGen,
+          onChange: (ev) => dfPatch((cc) => ({ ...cc, audioGen: ev.target.checked }))
+        }
+      ), "Generate audio (spoken lines become voiceover)"), c.audioGen && /* @__PURE__ */ React.createElement(
+        "select",
+        {
+          className: "lm-gensel",
+          value: c.audioLanguage || "english",
+          onChange: (ev) => dfPatch((cc) => ({ ...cc, audioLanguage: ev.target.value }))
+        },
+        /* @__PURE__ */ React.createElement("option", { value: "english" }, "English"),
+        /* @__PURE__ */ React.createElement("option", { value: "japanese" }, "Japanese"),
+        /* @__PURE__ */ React.createElement("option", { value: "chinese" }, "Chinese"),
+        /* @__PURE__ */ React.createElement("option", { value: "korean" }, "Korean"),
+        /* @__PURE__ */ React.createElement("option", { value: "none" }, "SE only (no dialogue)")
+      ), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: costTitle }, costText), /* @__PURE__ */ React.createElement("span", { className: "lm-hint" }, "uploads are free \xB7 one job at a time")), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-genbtn", disabled: genBusy || genSubmitting || gp.noInput, onClick: genSubmit }, genBusy ? "already rendering\u2026" : genSubmitting ? "submitting\u2026" : "Generate video"), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "lm-genexisting",
+          disabled: genBusy,
+          onClick: () => useExistingVideo(dfLive)
+        },
+        "Use an existing video instead"
+      )));
     })());
   }
   function useProjectStore(setSelShot) {
@@ -4195,6 +4425,11 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setGenRefState,
       batching,
       batchTally,
+      // priceShot exposed (mobile-generate-screen pass, 2026-08-03): the SAME read-only
+      // /api/price check generateShot/confirmSpend/batchGenerate already use internally --
+      // Loom Mobile's own Generate screen needs a per-shot cost PREVIEW to show before the
+      // owner ever taps the real submit button, and this is that exact function, not a new
+      // fetch/pricing implementation. It was already defined here; only its exposure is new.
       generateShot,
       pollShot,
       useExistingVideo,
@@ -4205,7 +4440,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       routeGen,
       batchGenerate,
       costEstimate,
-      refreshEstimate
+      refreshEstimate,
+      priceShot
     };
   }
   function useExportPipeline(project, thumbs) {
@@ -4423,6 +4659,14 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setGenRefState,
       batching,
       batchTally,
+      // generateShot/priceShot newly destructured here (mobile-generate-screen pass,
+      // 2026-08-03) -- both already existed on the hook's return value, generateShot simply
+      // had no consumer above batchGenerate's own internal call until Loom Mobile's Generate
+      // screen needed the exact same real per-shot submit + price-preview functions LoomV2's
+      // batch path already uses. Nothing about either function changes; only who else gets a
+      // reference to them.
+      generateShot,
+      priceShot,
       pollShot,
       useExistingVideo,
       genImage,
@@ -4548,7 +4792,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         draftTarget,
         setDraftTarget,
         draftAttachedInfo,
-        setDraftAttachedInfo
+        setDraftAttachedInfo,
+        generateShot,
+        priceShot,
+        useExistingVideo
       }
     )) : /* @__PURE__ */ React.createElement(V2Boundary, null, /* @__PURE__ */ React.createElement(
       LoomV2,

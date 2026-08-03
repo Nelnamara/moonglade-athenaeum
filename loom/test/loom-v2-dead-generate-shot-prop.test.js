@@ -30,8 +30,17 @@ describe("LoomV2 no longer threads the dead generateShot prop", () => {
   });
 
   test("the <LoomV2 .../> call site does not pass a generateShot prop", () => {
+    // Scoped to the LoomV2 call site specifically (mobile-generate-screen pass, 2026-08-03):
+    // a blanket whole-file check stopped being able to tell "LoomV2 still gets it" apart from
+    // "some OTHER real call site now legitimately gets it" the moment Loom Mobile's own
+    // Generate screen started threading generateShot through to <LoomMobile .../> (its own
+    // real, tested consumer -- see loom-mobile-view.test.js). This guard's job was always
+    // "LoomV2 never reads it" (see this describe block's own title and the file header
+    // comment above), never "no other consumer may exist."
+    const loomV2Call = storyboardSrc.match(/<LoomV2\b[\s\S]*?\/>/);
+    assert.ok(loomV2Call, "expected to find the <LoomV2 .../> call site");
     assert.doesNotMatch(
-      storyboardSrc,
+      loomV2Call[0],
       /generateShot=\{generateShot\}/,
       "App() still passes generateShot into <LoomV2>, but LoomV2 never reads it"
     );

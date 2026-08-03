@@ -203,6 +203,14 @@ describe("the act-grouped shot board: add-shot / add-act / tap-to-select", () =>
 // picker are now built; Generate (all 4 modes), Review & trim, and Filter compare are
 // still out of scope for a later increment.
 
+// Third increment (2026-08-03): Generate (the real, billed video-submit screen, across all
+// 4 real modes -- I2V/R2V/V2V/FLF, per loom-core.js's own MODES/mode logic, not the locked
+// design's own separate "Image/Edit/Reference/Video" tab strip) is now built. The locked
+// design's OTHER three Generate tabs (Image/Edit/Reference -- still-image generation, a
+// different feature from "submit this shot's video") are deliberately NOT built this
+// increment, same as Review & trim / Filter compare -- this increment's own scope was
+// framed entirely around "the 4 real modes," which is a Video-submit-only concept.
+
 describe("Shot Detail (mobile Deep Focus): opens from the board, edits the REAL shot", () => {
   test("renders only while dfOpen && dfLive -- never an empty/placeholder screen", () => {
     assert.match(loomMobileSrc, /\{dfOpen && dfLive && \(\(\) => \{/);
@@ -310,17 +318,121 @@ describe("Frame picker: the shared, already-real gallery picker -- not a fabrica
   });
 });
 
-describe("scope discipline: Generate (all 4 modes) / Review & trim / Filter compare are still NOT built", () => {
-  test("no Generate, Review & trim, or Filter-compare UI leaked into LoomMobile yet", () => {
-    for (const phrase of ["Generate reference image", "Review & trim", "Art filters", "Edit instruction", "Generate video"]) {
+describe("scope discipline: Review & trim / Filter compare (and the OTHER 3 Generate tabs) are still NOT built", () => {
+  test("no Review & trim, Filter-compare, or still-image-generation UI leaked into LoomMobile", () => {
+    // "Generate video" is now REAL (this increment's own scope, asserted positively below) --
+    // removed from this negative list on purpose, not an oversight. Everything else here
+    // remains a later increment: Review & trim and Filter compare outright, and the locked
+    // design's Image/Edit/Reference Generate tabs (a different feature -- generating a still,
+    // not submitting this shot's video) which this increment's own "all 4 real MODES" framing
+    // never covered either.
+    for (const phrase of ["Generate reference image", "Review & trim", "Art filters", "Edit instruction"]) {
       assert.ok(!loomMobileSrc.includes(phrase),
         `LoomMobile should not yet contain "${phrase}" -- that belongs to a later increment`);
     }
   });
 
-  test("Shot Detail / Cast & assets / Frame picker copy NOW DOES exist (this increment's own scope)", () => {
+  test("Shot Detail / Cast & assets / Frame picker copy NOW DOES exist (prior increment's scope)", () => {
     assert.ok(loomMobileSrc.includes("Cast &amp; assets"), "expected the Cast & assets sheet's own tab label to exist now");
     assert.ok(loomMobileSrc.includes("Other references &amp; @tags"), "expected Shot Detail's real references section to exist now");
     assert.ok(loomMobileSrc.includes("Music / audio cue"), "expected Shot Detail's audio-cue field to exist now");
+  });
+});
+
+describe("Generate: real submit, real cost preview, real generation-state tracking (third increment)", () => {
+  test("Shot Detail's own 'Select in Generate →' button opens the real genOpen screen (not a stub)", () => {
+    assert.match(loomMobileSrc, /className="lm-genbtn" onClick=\{\(\) => setGenOpen\(true\)\}>Select in Generate/);
+  });
+
+  test("genState/priceShot/generateShot/useExistingVideo are threaded through as real props, not re-invented", () => {
+    const sigMatch = loomMobileSrc.match(/function LoomMobile\(\{([\s\S]*?)\}\)\s*\{/);
+    assert.ok(sigMatch, "expected to find LoomMobile's function signature");
+    for (const name of ["generateShot", "priceShot", "useExistingVideo"]) {
+      assert.match(sigMatch[1], new RegExp(`\\b${name}\\b`), `LoomMobile's signature should destructure ${name}`);
+    }
+  });
+
+  test("the <LoomMobile .../> call site passes generateShot/priceShot/useExistingVideo through", () => {
+    const loomMobileCall = src.match(/<LoomMobile\b[\s\S]*?\/>/);
+    assert.ok(loomMobileCall, "expected to find the <LoomMobile .../> call site");
+    for (const prop of ["generateShot={generateShot}", "priceShot={priceShot}", "useExistingVideo={useExistingVideo}"]) {
+      assert.ok(loomMobileCall[0].includes(prop), `expected "${prop}" at the <LoomMobile .../> call site`);
+    }
+  });
+
+  test("priceShot is exposed by useGenerationPipeline's own return value (not a new fetch/pricing implementation)", () => {
+    assert.match(src, /generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,\s*\n\s*costEstimate, refreshEstimate, priceShot,/);
+  });
+
+  test("Mode chips render the real MODES array (all 4: I2V/R2V/V2V/FLF) inside the Generate screen too, writing through the real setShotMode reducer", () => {
+    const genBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("genOpen && dfLive && (() => {"));
+    assert.match(genBlock, /\{MODES\.map\(\(m\) => \(/);
+    assert.match(genBlock, /onClick=\{\(\) => dfPatch\(\(cc\) => setShotMode\(cc, m\)\)\}/);
+  });
+
+  test("Continuity chips render the real CONNECT map, writing through the real setShotConnect reducer", () => {
+    const genBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("genOpen && dfLive && (() => {"));
+    assert.match(genBlock, /\{Object\.keys\(CONNECT\)\.map\(\(k\) => \(/);
+    assert.match(genBlock, /onClick=\{\(\) => dfPatch\(\(cc\) => setShotConnect\(cc, k\)\)\}/);
+  });
+
+  test("which frame slots render is mode-aware via the REAL usesCloseFrame(), not a hardcoded I2V special case", () => {
+    const genBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("genOpen && dfLive && (() => {"));
+    assert.match(genBlock, /const showClose = usesCloseFrame\(c\.mode\);/);
+  });
+
+  test("the assembled-prompt preview calls the REAL shotText(), not a fabricated preview string", () => {
+    const genBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("genOpen && dfLive && (() => {"));
+    assert.match(genBlock, /<div className="lm-genpreview">\{shotText\(dfLive, project, imgSrc\)\}<\/div>/);
+  });
+
+  test("Generate audio wires the REAL c.audioGen/c.audioLanguage fields (never exposed on mobile before this increment), with the real 5-value language enum mg-generate-drawer.js itself uses", () => {
+    const genBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("genOpen && dfLive && (() => {"));
+    assert.match(genBlock, /checked=\{!!c\.audioGen\}/);
+    assert.match(genBlock, /onChange=\{\(ev\) => dfPatch\(\(cc\) => \(\{ \.\.\.cc, audioGen: ev\.target\.checked \}\)\)\}/);
+    for (const lang of ["english", "japanese", "chinese", "korean", "none"]) {
+      assert.ok(genBlock.includes(`value="${lang}"`), `expected a real "${lang}" audio-language option`);
+    }
+  });
+
+  test("the cost preview reuses tallyPrices/formatCostEstimate/costTooltip VERBATIM -- no new pricing math", () => {
+    const genBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("genOpen && dfLive && (() => {"));
+    assert.match(genBlock, /const tally = gp\.pr \? tallyPrices\(\[gp\.pr\]\) : null;/);
+    assert.match(genBlock, /formatCostEstimate\(tally\)/);
+    assert.match(genBlock, /costTooltip\(tally\)/);
+  });
+
+  test("the price preview is driven by the real priceShot(dfLive), never a hand-rolled fetch('/api/price', ...)", () => {
+    assert.doesNotMatch(loomMobileSrc, /fetch\(["']\/api\/price["']/,
+      "Loom Mobile must reuse priceShot() -- a second, independent /api/price call here would be exactly the forked pricing logic this increment's brief forbids");
+    assert.match(loomMobileSrc, /priceShot\(dfLive\)\.then\(\(pr\) => /);
+  });
+
+  test("the real submit button calls generateShot(dfLive) UNMODIFIED -- no skipConfirm, no new confirm dialog, no new endpoint", () => {
+    const genBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("genOpen && dfLive && (() => {"));
+    assert.match(genBlock, /className="lm-genbtn"[\s\S]*?onClick=\{genSubmit\}/);
+    assert.doesNotMatch(loomMobileSrc, /generateShot\(dfLive, \{\s*skipConfirm/,
+      "a single, owner-initiated tap must still go through generateShot's own real price-check + confirm, same as it would for any other real single submit");
+    assert.match(loomMobileSrc, /r = await generateShot\(dfLive\);/);
+    assert.doesNotMatch(loomMobileSrc, /fetch\(["']\/api\/loom\/generate["']/,
+      "Loom Mobile must not submit through a second, independent /api/loom/generate call -- generateShot is the one real submit path");
+  });
+
+  test("'Use an existing video instead' calls the real, already-shipped useExistingVideo(dfLive) -- no spend, no forked attach path", () => {
+    const genBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("genOpen && dfLive && (() => {"));
+    assert.match(genBlock, /onClick=\{\(\) => useExistingVideo\(dfLive\)\}/);
+  });
+
+  test("closing Generate or Shot Detail never touches genState/pollShot/generateShot -- both are plain local LoomMobile booleans", () => {
+    // The credit-safety contract this increment's own report explains in full: genOpen/dfOpen
+    // gate JSX only. The real generation-tracking state (genState) and its poll loop
+    // (pollShot's recursive setTimeout chain, inside useGenerationPipeline) live in App(),
+    // are passed down as a read-only prop, and are never declared or reset anywhere in
+    // LoomMobile -- so no LoomMobile-local state transition (this screen closing, Shot Detail
+    // closing, or the Mobile-view toggle unmounting LoomMobile entirely) can ever orphan an
+    // in-flight generation.
+    assert.match(loomMobileSrc, /const \[genOpen, setGenOpen\] = useState\(false\);/);
+    assert.doesNotMatch(loomMobileSrc, /const \[genState, setGenState\] = useState/,
+      "genState must remain a prop LoomMobile reads, never a second local copy of its own");
   });
 });
