@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
+import useMyArt, { fmt } from "../hooks/useMyArt.js";
 import "../styles/overlays.css";
 import "../styles/myart-contests.css";
 
@@ -16,33 +17,16 @@ import "../styles/myart-contests.css";
    - Row click opens the real Details view for that image (onOpenPost), the
      same natural target every other "here's one of your images" row in this
      app already uses -- the DC's markup gives the row cursor:pointer but
-     never wires an actual handler to it. */
+     never wires an actual handler to it.
 
-const fmt = (n) => (n == null ? "—" : Number(n).toLocaleString());
+   DATA LAYER (2026-08-03): the fetch + stats/maxViews derivations that used
+   to live inline here were mechanically lifted into useMyArt.js so the new
+   mobile My Art screen (MyArtMobile.jsx) can consume the EXACT same logic --
+   see that hook's own header comment. This file is refactored to CONSUME it
+   rather than hold a second, drifting copy of the same fetch. */
 
 export default function MyArtOverlay({ onClose, onOpenPost }) {
-  const [d, setD] = useState(null);
-  const [err, setErr] = useState(null);
-
-  useEffect(() => {
-    let dead = false;
-    fetch("/api/your-art")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((data) => { if (!dead) setD(data); })
-      .catch((e) => { if (!dead) setErr(String(e.message || e)); });
-    return () => { dead = true; };
-  }, []);
-
-  const totals = d ? d.totals || {} : {};
-  const items = d ? d.items || [] : [];
-  const stats = d ? [
-    { value: fmt(totals.count), label: "PUBLISHED" },
-    { value: fmt(totals.likes), label: "TOTAL LIKES" },
-    { value: fmt(totals.comments), label: "COMMENTS" },
-    { value: d.views_synced ? fmt(totals.views_top) : "—", label: "VIEWS (TOP " + items.length + ")" },
-  ] : [];
-
-  const maxViews = items.length ? Math.max(1, ...items.map((r) => r.views || 0)) : 1;
+  const { d, err, items, stats, maxViews } = useMyArt();
 
   return (
     <>

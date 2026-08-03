@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
+import useContests, { fmt } from "../hooks/useContests.js";
 import "../styles/overlays.css";
 import "../styles/myart-contests.css";
 
@@ -17,36 +18,17 @@ import "../styles/myart-contests.css";
      labels, which only ever showed one of each.
    - Clicking a card opens the real contest on pixai.art (row.url) in a new
      tab -- the DC's cards are cursor:pointer with no wired destination; this
-     is the only real destination that exists for "view this contest". */
+     is the only real destination that exists for "view this contest".
 
-const fmt = (n) => (n == null ? "—" : Number(n).toLocaleString());
+   DATA LAYER (2026-08-03): the fetch + official/community/featured/
+   restOfficial derivations and openContest()/dateRange() that used to live
+   inline here were mechanically lifted into useContests.js so the new
+   mobile Contests screen (ContestsMobile.jsx) can consume the EXACT same
+   logic -- see that hook's own header comment. This file is refactored to
+   CONSUME it rather than hold a second, drifting copy of the same fetch. */
 
 export default function ContestsOverlay({ onClose }) {
-  const [d, setD] = useState(null);
-  const [err, setErr] = useState(null);
-
-  useEffect(() => {
-    let dead = false;
-    fetch("/api/contests")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((data) => { if (!dead) setD(data); })
-      .catch((e) => { if (!dead) setErr(String(e.message || e)); });
-    return () => { dead = true; };
-  }, []);
-
-  const contests = d ? d.contests || [] : [];
-  const official = contests.filter((c) => c.type === "official");
-  const community = contests.filter((c) => c.type !== "official");
-  const featured = official[0];
-  const restOfficial = official.slice(1);
-
-  const openContest = (row) => { if (row.url) window.open(row.url, "_blank", "noopener"); };
-
-  const dateRange = (row) => {
-    const s = (row.start_at || "").slice(0, 10);
-    const e = (row.end_at || "").slice(0, 10);
-    return s && e ? s + " – " + e : s || e || "";
-  };
+  const { d, err, contests, official, community, featured, restOfficial, openContest, dateRange } = useContests();
 
   return (
     <>
