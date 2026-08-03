@@ -29,7 +29,7 @@ reader could work it out from the code, it does not belong here.
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 146
+- [Decisions](#decisions) &mdash; 147
 
 ---
 
@@ -1337,6 +1337,49 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 ## Decisions
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
+
+### Loom Mobile increment 4 shipped: the Image/Edit/Reference/Video standalone-asset generate rail — and a real, previously-shipped credit-safety bug (drawer poll dies silently on the Mobile toggle) found and fixed  ·  *2026-08-03*
+
+Completes "Generate" on mobile, per the owner's direct correction that increment 3 only
+covered half of it ("The loom has the full generate panel not just video"). Adds the
+Image/Edit/Reference tabs (each calling the real `genImage`/`genEdit`/`genRef` — the exact
+functions `useGenerationPipeline` already exposes, no forked submit or pricing logic) next
+to increment 3's existing Video tab.
+
+**A real bug was found and fixed, not just a mobile gap.** Desktop's `<mg-generate-drawer>`
+(the Video tab's real submit UI) has its own internal poll loop that is genuinely
+component-local — its `disconnectedCallback` clears every tracked poll timer and fires no
+recovery event on unmount. Since the Mobile-view toggle unmounts `LoomV2` (and the drawer
+inside it) wholesale, a real, drawer-submitted video render was left silently frozen —
+"Rendering…" forever, recoverable before this fix only by a full page reload. Fixed by
+extending the generation-pipeline's existing "resume any wip+pendingTaskId shot" effect
+(previously keyed only to project load) to also re-run on the Mobile toggle, reusing the
+exact same recovery path a reload already took. This is a real, pre-existing exposure this
+increment happened to surface while tracing credit-safety for a different tab — worth
+noting since it means the same class of gap could plausibly exist anywhere else `[[a
+component-local poll]]` sits behind a mount boundary the Mobile toggle can cross.
+
+**Verification, again without any real spend for the risky part**: the credit-safety fix
+was proven by dispatching a synthetic submit event directly at the real `<mg-generate-drawer>`
+element (exercising its real state-write path without its real network call), then
+confirming the toggle correctly resumed polling — the same injected-state technique
+established in increment 3, reused rather than reinvented.
+
+**The new gated real-image-generation allowance was used once, within its stated scope,
+and confirmed by the reviewer independently — not just by the build's own claim.** One real
+Image-tab generation (model `Tsubaki.2`, a prompt built from the owner's own real, recent
+catalog entries under his Nelnamara/archdruid tags — not a placeholder) succeeded on the
+first attempt, cost `paid_credit: 0` (free-card covered). The reviewer cross-checked this
+directly against `catalog.db` and `jobs.jsonl` rather than trusting the report, confirming
+exactly one real submission occurred, in the right tab, at the right time, with no retry
+needed — and flagged (correctly, as informational, not a violation) an unrelated failed Edit
+job from 16 hours earlier that traces to the main Gallery's own Edit tab, not this increment.
+Edit/Reference/Video were verified by trace and UI interaction only, never submitted, exactly
+matching the allowance's scope.
+
+With this increment, "Generate" as a whole (video-clip render + all 4 standalone-asset
+tabs) is complete on Loom Mobile. Remaining: Review & trim, Filter compare — the two most
+gesture-heavy screens, saved for last per the original sequencing.
 
 ### Loom Mobile increment 3 shipped: real Generate submit for a shot's video clip — verified end to end WITHOUT ever submitting a real generation, by injecting fake in-flight state through the app's own real storage layer  ·  *2026-08-03*
 

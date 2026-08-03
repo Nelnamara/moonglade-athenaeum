@@ -2987,6 +2987,63 @@ const LOOM_MOBILE_STYLES = `
 .lm-gencosttext{font-size:12px;font-weight:700;color:var(--emerald);}
 .lm-gensel{width:100%;box-sizing:border-box;background:var(--base);border:1px solid var(--surface1);
   border-radius:8px;padding:8px 10px;color:var(--text);font:12.5px/1.3 system-ui;margin-top:6px;}
+
+/* ---- Image/Edit/Reference tabs -- fourth increment (2026-08-03), added to the SAME
+   Generate screen the third increment built. Reuses lm-in/lm-ta/lm-check/lm-row2/lm-col/
+   lm-genbtn/lm-microlab/lm-hint/lm-genframe/lm-gencost*/lm-gensel unchanged; the classes
+   below are the ones this increment's new fields genuinely need and nothing existing
+   already covers. ---- */
+.lm-bal{font-size:10.5px;color:var(--text);padding:6px 0;border-top:1px solid var(--surface1);
+  border-bottom:1px solid var(--surface1);opacity:.85;}
+.lm-selrow{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;padding:8px 10px;
+  border-radius:8px;background:var(--base);border:1px solid var(--surface1);color:var(--text);
+  cursor:pointer;font:12.5px/1.3 system-ui;text-align:left;}
+.lm-selthumb{width:26px;height:26px;border-radius:6px;object-fit:cover;flex:none;}
+.lm-selname{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-selhint{flex:none;font-size:10px;color:var(--subtext);}
+.lm-caps{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;}
+.lm-cap{font-size:9.5px;padding:2px 8px;border-radius:10px;background:var(--base);
+  border:1px solid var(--surface1);color:var(--subtext);}
+.lm-cap.method{color:var(--gold);border-color:var(--gold);}
+.lm-loras{display:flex;flex-direction:column;gap:5px;margin:8px 0 4px;}
+.lm-lchip{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:6px 8px;border-radius:7px;
+  background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
+.lm-lchip.failed{border-color:var(--red);}
+.lm-lnm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-lchip.failed .lm-lnm{color:var(--red);}
+.lm-lw{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
+.lm-lw input[type=range]{width:78px;}
+.lm-lw b{min-width:28px;text-align:right;font-size:11px;font-weight:600;color:var(--gold);
+  font-variant-numeric:tabular-nums;}
+.lm-lrm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:14px;padding:0 2px;}
+.lm-lrm:hover{color:var(--red);}
+.lm-lorver{flex:1 1 100%;background:var(--base);border:1px solid var(--surface1);border-radius:5px;
+  color:var(--text);font-size:10px;padding:4px 6px;}
+.lm-mini2-btn{font-size:10px;color:var(--accent);background:none;border:none;cursor:pointer;
+  text-decoration:underline;text-underline-offset:2px;padding:6px 0 0;display:block;}
+.lm-gerr{font-size:10.5px;color:var(--red);margin-top:6px;}
+.lm-imgresult{margin-top:10px;border:1px solid var(--surface1);border-radius:9px;padding:8px;}
+.lm-imgresult>img{width:100%;border-radius:7px;display:block;}
+.lm-route{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+.lm-routebtn{font:600 10px/1 system-ui;padding:6px 9px;border-radius:6px;border:1px solid var(--surface1);
+  background:var(--surface1);color:var(--subtext);cursor:pointer;}
+.lm-routebtn.on{background:color-mix(in srgb,var(--accent) 22%,transparent);border-color:var(--accent);
+  color:var(--accent);}
+.lm-ok2{font-size:10px;color:var(--accent);margin-top:6px;}
+.lm-refstrip{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 2px;}
+.lm-refstrip img{width:44px;height:44px;object-fit:cover;border-radius:7px;border:1px solid var(--surface1);}
+
+/* Model/LoRA picker sheet -- a near-full-screen mobile sheet (unlike the half-height Cast
+   sheet: <mg-model-picker>'s search+grid genuinely needs the room), wrapping the SAME real
+   custom element LoomV2's floating .lv-mpick-veil overlay uses. */
+.lm-pick-sheet{position:absolute;left:0;right:0;bottom:0;top:6%;z-index:32;background:var(--mantle);
+  border-radius:18px 18px 0 0;border:1px solid var(--surface1);border-bottom:none;
+  padding:12px 16px max(14px,env(safe-area-inset-bottom));display:flex;flex-direction:column;min-height:0;
+  animation:lmSheetUp .26s cubic-bezier(.2,.9,.24,1);}
+.lm-pick-head{flex:none;display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.lm-pick-t{flex:1 1 auto;font-size:14px;font-weight:600;color:var(--text);}
+.lm-pick-body{flex:1;min-height:0;display:flex;flex-direction:column;}
+.lm-pick-body mg-model-picker{flex:1;min-height:0;}
 `;
 
 function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, addCard, addAct, setDraft,
@@ -3010,7 +3067,22 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // already-rendered gallery video as the finished clip, no generation, no spend -- already
   // wired to LoomV2's own board). No new submit call, no new pricing math, no forked spend
   // path: this screen is a new VIEW onto the exact same pipeline LoomV2 already drives.
-  generateShot, priceShot, useExistingVideo }) {
+  generateShot, priceShot, useExistingVideo,
+  // Fourth increment (2026-08-03): Image/Edit/Reference/Video, mirroring LoomV2's own
+  // right-rail GEN_ICONS strip (its "Video" tab is what the third increment above already
+  // built, using generateShot/priceShot rather than <mg-generate-drawer> -- see this
+  // increment's report for why that stays the right call here too). Every one of these is
+  // the SAME hook-level state/function LoomV2 already reads/calls for its Image/Edit/
+  // Reference tabs -- genImage/genEdit/genRef (and their genImgState/genEditState/
+  // genRefState) are plain fetch+setTimeout closures living in useGenerationPipeline, not
+  // tied to any DOM element's lifecycle, so (unlike the drawer) they already survive the
+  // Mobile-view toggle with no fix needed -- confirmed by reading pollImg/
+  // pollTaskWithCeiling, not assumed. No forked submit logic, no reinvented pricing, no new
+  // endpoints: this screen calls the exact same functions LoomV2's Image/Edit/Reference
+  // tab bodies call.
+  genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv,
+  modelDefaults, setModelDefaults, genImage, routeImg,
+  genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen }) {
   // The overlay is position:fixed and covers the whole viewport, but the classic page
   // underneath is a normal tall document -- same reasoning, same fix, as LoomV2's own
   // identical effect (see its comment): without this, a touch/wheel scroll that isn't
@@ -3076,6 +3148,139 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // editCostRef/refCostRef effects are (see LoomV2's priceInto comment) so a fast run of
   // keystrokes in Camera/Lighting/Prompt doesn't fire a price check per keystroke.
   const [genPrice, setGenPrice] = useState({});   // cardId -> {loading, pr, noInput}
+
+  // ---- Image / Edit / Reference / Video tab strip -- fourth increment (2026-08-03),
+  // mirroring LoomV2's own GEN_ICONS rail (Image/Edit/Reference/Video) inside this SAME
+  // Generate screen. "Video" is this screen's pre-existing content (third increment,
+  // unchanged below) -- genTab defaults to "Video" to match LoomV2's own default tab.
+  const [genTab, setGenTab] = useState("Video");
+  // Credit balance line -- purely a read-only display (matches LoomV2's identical
+  // component-local `acct` state and its own component-local fetch effect below), never
+  // gates a submit. Duplicating this one fetch per view (rather than lifting it) is the
+  // established pattern in this file for non-spend UI chrome (pickerOpen/pickerMounted are
+  // the same kind of per-view local state) -- losing it on a toggle just means one more
+  // free /api/account read next time this screen opens, not a credit-safety concern.
+  const [acct, setAcct] = useState(null);
+  useEffect(() => { fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {}); }, []);
+
+  // ---- Model/LoRA picker overlay for the Image tab -- a mobile sheet wrapping the SAME
+  // real <mg-model-picker> custom element LoomV2's own floating .lv-mpick-veil uses, bound
+  // the same way (bindPicker/bindLoraPicker below are close-to-verbatim ports of LoomV2's
+  // own, adapted only for this screen's local naming -- imgModel/imgLoras/imgAdv/
+  // modelDefaults themselves are the SAME hook-level state LoomV2 reads/writes, passed down
+  // as props, so picking a model here is visible on LoomV2 immediately and vice versa).
+  // Component-local by design, same reasoning as LoomV2's own identical state: picking a
+  // model/LoRA spends nothing, so losing this overlay's own open/search state on a Mobile
+  // toggle is a cosmetic inconvenience, never a credit-safety concern -- unlike the video
+  // drawer's poll, there is no in-flight spend riding on this element's mount lifetime.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerKind, setPickerKind] = useState("base");
+  const [pickerMounted, setPickerMounted] = useState(false);
+  useEffect(() => { if (pickerOpen) setPickerMounted(true); }, [pickerOpen]);
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onKey = (ev) => { if (ev.key === "Escape") setPickerOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pickerOpen]);
+  const basePickerElRef = useRef(null);
+  const loraPickerElRef = useRef(null);
+  const imgModelSeqRef = useRef(0);
+  // LoRA weight bounds for the current base model's architecture -- verbatim copy of
+  // LoomV2's own loraRange memo (same shared window.MG_LORA table, same fallback).
+  const loraRange = useMemo(() => {
+    const L = window.MG_LORA;
+    const t = String((imgModel && imgModel.model_type) || "").toUpperCase();
+    if (!L) return [-2, 2];
+    return (L.ranges && L.ranges[t]) || L.fallback || [-2, 2];
+  }, [imgModel]);
+  useEffect(() => {
+    setImgLoras((cur) => {
+      let changed = false;
+      const next = cur.map((l) => {
+        const w = Math.max(loraRange[0], Math.min(loraRange[1], +l.weight));
+        if (w !== l.weight) changed = true;
+        return w === l.weight ? l : { ...l, weight: w };
+      });
+      return changed ? next : cur;
+    });
+  }, [loraRange, setImgLoras]);
+  const bindPicker = useCallback((el) => {
+    basePickerElRef.current = el;
+    if (el && !el._mgBound) {
+      el._mgBound = true;
+      el.addEventListener("mg-pick", (e) => {
+        setPickerOpen(false);
+        const m = { model_id: e.detail.model_id, title: e.detail.title, preview_url: e.detail.preview_url || "" };
+        setImgModel(m);
+        setModelDefaults(null);
+        const mySeq = ++imgModelSeqRef.current;
+        fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1")
+          .then((r) => r.json())
+          .then((d) => {
+            if (mySeq !== imgModelSeqRef.current) return;
+            const versions = (d && d.versions) || [], v = versions[0] || {};
+            setImgModel((cur) => cur ? {
+              ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
+              sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
+              compatibility: v.compatibility || {}, restrictions: v.restrictions || {},
+              versions,
+            } : cur);
+            const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+            setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
+            if (has) {
+              setImgAdv((cur) => ({
+                ...cur,
+                negative: v.negative_prompt || cur.negative,
+                steps: v.sampling_steps || cur.steps,
+                cfg: v.cfg_scale || cur.cfg,
+              }));
+            }
+          })
+          .catch(() => {});
+      });
+    }
+  }, [setImgModel, setImgAdv, setModelDefaults]);
+  const pickVersion = useCallback((vid) => {
+    if (!imgModel || !imgModel.versions) return;
+    const v = imgModel.versions.find((x) => x.version_id === vid);
+    if (!v) return;
+    setImgModel((cur) => ({
+      ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
+      sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
+      compatibility: v.compatibility || {}, restrictions: v.restrictions || {},
+    }));
+    const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+    setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
+    if (has) {
+      setImgAdv((a) => ({
+        ...a,
+        negative: v.negative_prompt || a.negative,
+        steps: v.sampling_steps || a.steps,
+        cfg: v.cfg_scale || a.cfg,
+      }));
+    }
+  }, [imgModel, setImgModel, setImgAdv, setModelDefaults]);
+  const bindLoraPicker = useCallback((el) => {
+    loraPickerElRef.current = el;
+    if (el && !el._mgBound) {
+      el._mgBound = true;
+      el.addEventListener("mg-pick", (e) => {
+        const { model, selected } = e.detail;
+        setImgLoras((cur) => {
+          const i = cur.findIndex((l) => l.model_id === model.model_id);
+          if (!selected) return i < 0 ? cur : cur.filter((l) => l.model_id !== model.model_id);
+          if (i < 0) return [...cur, model];
+          const next = cur.slice(); next[i] = model; return next;
+        });
+      });
+    }
+  }, [setImgLoras]);
+  useEffect(() => {
+    if (!pickerMounted) return;
+    const vis = pickerKind === "base" ? basePickerElRef.current : loraPickerElRef.current;
+    if (vis && vis.ensureSearched) vis.ensureSearched();
+  }, [pickerMounted, pickerKind]);
 
   // ---- mode families for the Cast & assets sheet + ref live-tag badges. Copied verbatim
   // from LoomV2's own local copies -- neither is exported from loom-core.js/loom-mutations.js
@@ -3265,6 +3470,89 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
     // why (generateShot's own genState error write) or adjust and retry, instead of being
     // silently dumped back to Shot Detail with no visible outcome.
     if (r && r.ok) { setGenOpen(false); setDfOpen(false); }
+  };
+
+  // ---- Image / Edit / Reference tab bodies -- fourth increment (2026-08-03). genImage/
+  // genEdit/genRef below are called EXACTLY as LoomV2's own Image/Edit/Reference tabs call
+  // them (useGenerationPipeline) -- same confirmSpend fail-closed gate inside each, same
+  // genImgState/genEditState/genRefState, same Job Tracker registration, same
+  // pollTaskWithCeiling poll. No forked submit logic, no reinvented pricing, no new
+  // endpoints. Unlike the Video tab (generateShot/priceShot, third increment), these three
+  // never touch <mg-generate-drawer> at all -- LoomV2's OWN Image/Edit/Reference tabs don't
+  // either, only its Video tab does, so this is genuine parity, not a workaround.
+  const editSrcMid = dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId;
+  const refMids = (project.assets || []).filter((a) => a.kind === "image" && a.mediaId).map((a) => a.mediaId);
+  const refMidsKey = refMids.join(",");
+  // Debounced, read-only /api/price PREVIEWS for the Image/Edit/Reference tabs -- the SAME
+  // endpoint + body shapes LoomV2's own imgCostRef/editCostRef/refCostRef effects price
+  // (buildImgGenBody for Image; the same {mode:"edit", source, instruction, edit_model}/
+  // {..., sources} shapes for Edit/Reference), just rendered as a plain text line via the
+  // same tallyPrices/formatCostEstimate/costTooltip pure helpers the Video tab's own genPrice
+  // already uses above, instead of binding a <mg-cost-badge> custom element -- a
+  // presentational choice (this screen has no other custom-element bindings besides the
+  // model/LoRA pickers), not a pricing fork: the real cost gate is still confirmSpend's own
+  // window.confirm inside genImage/genEdit/genRef, fired UNMODIFIED on submit below.
+  const [imgPrice, setImgPrice] = useState({});
+  const [editPrice, setEditPrice] = useState({});
+  const [refPrice, setRefPrice] = useState({});
+  useEffect(() => {
+    if (!genOpen || genTab !== "Image" || !dfLive) return;
+    const id = dfLive.c.id;
+    const prompt = (dfLive.c.imgPrompt || "").trim();
+    if (!imgModel || !prompt || anyLoraUnresolved(imgLoras)) { setImgPrice((s) => ({ ...s, [id]: null })); return; }
+    setImgPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
+    let live = true;
+    const t = setTimeout(() => {
+      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildImgGenBody(imgModel, imgLoras, imgAdv, prompt)) })
+        .then((r) => r.json()).then((pr) => { if (live) setImgPrice((s) => ({ ...s, [id]: { loading: false, pr } })); })
+        .catch(() => { if (live) setImgPrice((s) => ({ ...s, [id]: { loading: false, pr: null } })); });
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [genOpen, genTab, dfLive && dfLive.c.id, dfLive && dfLive.c.imgPrompt, imgModel, imgLoras, imgAdv]);
+  useEffect(() => {
+    if (!genOpen || genTab !== "Edit" || !dfLive) return;
+    const id = dfLive.c.id;
+    const instruction = (dfLive.c.editPrompt || "").trim();
+    if (!editSrcMid || !instruction) { setEditPrice((s) => ({ ...s, [id]: null })); return; }
+    setEditPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
+    let live = true;
+    const t = setTimeout(() => {
+      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "edit", source: editSrcMid, instruction, edit_model: "edit-pro" }) })
+        .then((r) => r.json()).then((pr) => { if (live) setEditPrice((s) => ({ ...s, [id]: { loading: false, pr } })); })
+        .catch(() => { if (live) setEditPrice((s) => ({ ...s, [id]: { loading: false, pr: null } })); });
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+  }, [genOpen, genTab, dfLive && dfLive.c.id, dfLive && dfLive.c.editPrompt, editSrcMid]);
+  useEffect(() => {
+    if (!genOpen || genTab !== "Reference" || !dfLive) return;
+    const id = dfLive.c.id;
+    const prompt = (dfLive.c.refPrompt || "").trim();
+    if (!refMids.length || !prompt) { setRefPrice((s) => ({ ...s, [id]: null })); return; }
+    setRefPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
+    let live = true;
+    const t = setTimeout(() => {
+      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "edit", source: refMids[0], sources: refMids, instruction: prompt, edit_model: "reference-pro" }) })
+        .then((r) => r.json()).then((pr) => { if (live) setRefPrice((s) => ({ ...s, [id]: { loading: false, pr } })); })
+        .catch(() => { if (live) setRefPrice((s) => ({ ...s, [id]: { loading: false, pr: null } })); });
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [genOpen, genTab, dfLive && dfLive.c.id, dfLive && dfLive.c.refPrompt, refMidsKey]);
+  const priceLine = (priceState, id, noInputMsg) => {
+    const p = priceState[id];
+    if (!p) return noInputMsg;
+    if (p.loading) return "checking…";
+    const tally = p.pr ? tallyPrices([p.pr]) : null;
+    return tally ? formatCostEstimate(tally) : "—";
+  };
+  const priceTitle = (priceState, id) => {
+    const p = priceState[id];
+    const tally = p && p.pr ? tallyPrices([p.pr]) : null;
+    return tally ? costTooltip(tally) : "";
   };
 
   return (
@@ -3596,7 +3884,274 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
               <span className="lm-gen-title">{c.title || "untitled"}</span>
               <button type="button" className="lm-df-close" title="Close" onClick={() => { setGenOpen(false); setDfOpen(false); }}>&#10005;</button>
             </div>
+            {/* Image/Edit/Reference/Video tab strip -- fourth increment. Mirrors LoomV2's own
+                GEN_ICONS rail (same four tabs, same order, same "Video" default); reuses the
+                Cast & assets sheet's own .lm-tabsrow/.lm-tabbtn chrome rather than inventing a
+                new segmented-control style for a second time in this file. */}
+            <div className="lm-tabsrow" style={{ margin: "0 16px 8px" }}>
+              {["Image", "Edit", "Reference", "Video"].map((t) => (
+                <button type="button" key={t} className={"lm-tabbtn" + (genTab === t ? " on" : "")}
+                  onClick={() => setGenTab(t)}>{t}</button>
+              ))}
+            </div>
+            {acct && (
+              <div className="lm-bal" style={{ margin: "0 16px 8px" }}>
+                &#9889; {acct.credits == null ? "—" : acct.credits} credits &middot; {acct.cards || 0} card{acct.cards === 1 ? "" : "s"}
+                {acct.claim_credits ? <span style={{ color: "var(--gold)" }}> &middot; +{acct.claim_credits} claimable</span> : null}
+              </div>
+            )}
             <div className="lm-gen-body">
+            {genTab === "Image" && (() => {
+              const gi = genImgState[c.id] || {};
+              const busyI = gi.phase === "submitting" || gi.phase === "running";
+              const compat = (imgModel && imgModel.compatibility) || {};
+              const restr = (imgModel && imgModel.restrictions) || {};
+              const negOff = compat.negativePrompt === false;
+              const stepsOff = compat.samplingSteps === false;
+              const cfgOff = compat.cfgScale === false;
+              const stepsB = restr.samplingSteps || {};
+              const cfgB = restr.cfgScale || {};
+              const offTitle = "This model doesn’t use this setting";
+              return (
+                <>
+                  <span className="lm-microlab">Model</span>
+                  <button type="button" className="lm-selrow" onClick={() => { setPickerKind("base"); setPickerOpen(true); }}>
+                    {imgModel && imgModel.preview_url ? <img className="lm-selthumb" src={imgModel.preview_url} alt="" /> : null}
+                    <span className="lm-selname">{imgModel ? imgModel.title : "none — browse models"}</span>
+                    <span className="lm-selhint">&#9776; browse</span>
+                  </button>
+                  {imgModel && (imgModel.sampling_method || (imgModel.capabilities || []).length > 0) && (
+                    <div className="lm-caps">
+                      {imgModel.sampling_method ? <span className="lm-cap method">{imgModel.sampling_method}</span> : null}
+                      {(imgModel.capabilities || []).map((cp) => <span key={cp} className="lm-cap">{cp}</span>)}
+                    </div>
+                  )}
+                  {imgModel && imgModel.versions && imgModel.versions.length > 1 && (
+                    <select className="lm-gensel" value={imgModel.version_id || ""} onChange={(ev) => pickVersion(ev.target.value)}
+                      title="This model's published releases -- PixAI defaults to the latest; pick another to generate against it instead" aria-label="Model version">
+                      {imgModel.versions.map((v) => <option key={v.version_id} value={v.version_id}>{v.label || v.version_id}</option>)}
+                    </select>
+                  )}
+                  {imgLoras.length > 0 && (
+                    <div className="lm-loras">
+                      {imgLoras.map((l) => {
+                        const incompat = loraIncompat(imgModel && imgModel.model_type, l.lora_base_type);
+                        return (
+                          <div key={l.model_id} className={"lm-lchip" + ((l.failed || incompat) ? " failed" : "")}>
+                            <span className="lm-lnm" title={incompat ? l.title + " — needs a different base architecture than the one selected; remove it or switch the base" : l.title}>
+                              {l.title}{!l.version_id ? (l.failed ? " ⚠" : " ⏳") : (incompat ? " ⚠" : "")}
+                            </span>
+                            <span className="lm-lw">
+                              <input type="range" step="0.1" min={loraRange[0]} max={loraRange[1]} value={l.weight}
+                                title={"Weight — " + loraRange[0] + " to " + loraRange[1] + " for this base model"}
+                                onChange={(ev) => { const w = Math.max(loraRange[0], Math.min(loraRange[1], +ev.target.value || 0));
+                                  setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x)); }} />
+                              <b>{(+l.weight).toFixed(1)}</b>
+                            </span>
+                            <button type="button" className="lm-lrm" title="Remove"
+                              onClick={() => {
+                                const p = loraPickerElRef.current;
+                                if (p && p.deselect) p.deselect(l.model_id);
+                                setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id));
+                              }}>&times;</button>
+                            {l.versions && l.versions.length > 1 && (
+                              <select className="lm-lorver" value={l.version_id || ""}
+                                onChange={(ev) => {
+                                  const vid = ev.target.value;
+                                  const v = l.versions.find((x) => x.version_id === vid);
+                                  if (!v) return;
+                                  setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id
+                                    ? { ...x, version_id: v.version_id || "", lora_base_type: v.lora_base_model_type || "",
+                                        trigger_words: v.trigger_words || "", failed: !v.version_id }
+                                    : x));
+                                }}>
+                                {l.versions.map((v) => <option key={v.version_id} value={v.version_id}>{v.label || v.version_id}</option>)}
+                              </select>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <button type="button" className="lm-addrefbtn" style={{ marginTop: 6 }}
+                    onClick={() => { setPickerKind("lora"); setPickerOpen(true); }}>+ add LoRA</button>
+                  {acct && acct.lora_cap != null && (
+                    <span className="lm-hint" style={{ marginLeft: 8 }}>{imgLoras.length} / {acct.lora_cap} LoRAs</span>
+                  )}
+                  <span className="lm-microlab" style={{ marginTop: 12 }}>Image prompt</span>
+                  <textarea className="lm-ta" value={c.imgPrompt || ""} placeholder="describe the reference still (subject, pose, composition, light)…"
+                    onChange={(ev) => dfPatch((cc) => ({ ...cc, imgPrompt: ev.target.value }))} />
+                  <button type="button" className="lm-mini2-btn" onClick={() => dfPatch((cc) => ({ ...cc, imgPrompt: [cc.title, cc.prompt, (cc.openFrame && cc.openFrame.desc) || "", cc.lighting || ""].filter(Boolean).join(", ") }))}>
+                    &#8615; seed from shot description</button>
+                  <details style={{ marginTop: 10 }}>
+                    <summary className="lm-hint" style={{ cursor: "pointer" }}>Advanced</summary>
+                    <textarea className="lm-ta" style={{ marginTop: 6 }} value={imgAdv.negative}
+                      placeholder="lowres, text, watermark…" disabled={negOff} title={negOff ? offTitle : ""}
+                      onChange={(ev) => setImgAdv((a) => ({ ...a, negative: ev.target.value }))} />
+                    <div className="lm-row2">
+                      <div className="lm-col"><span className="lm-microlab">Steps</span>
+                        <input className="lm-in" type="number" min={stepsB.min != null ? stepsB.min : 1} max={stepsB.max != null ? stepsB.max : 150} step="1"
+                          value={imgAdv.steps} disabled={stepsOff} title={stepsOff ? offTitle : ""}
+                          onChange={(ev) => setImgAdv((a) => ({ ...a, steps: +ev.target.value || 25 }))} /></div>
+                      <div className="lm-col"><span className="lm-microlab">CFG scale</span>
+                        <input className="lm-in" type="number" min={cfgB.min != null ? cfgB.min : 1} max={cfgB.max != null ? cfgB.max : 30} step="0.5"
+                          value={imgAdv.cfg} disabled={cfgOff} title={cfgOff ? offTitle : ""}
+                          onChange={(ev) => setImgAdv((a) => ({ ...a, cfg: +ev.target.value || 7 }))} /></div>
+                    </div>
+                    {modelDefaults && (
+                      <div className="lm-hint" style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span>&#10003; using this model's tuned preset</span>
+                        <button type="button" className="lm-mini2-btn" onClick={() => setImgAdv((a) => ({ ...a,
+                          negative: modelDefaults.negative_prompt || a.negative,
+                          steps: modelDefaults.sampling_steps || a.steps,
+                          cfg: modelDefaults.cfg_scale || a.cfg }))}>&#8630; reset</button>
+                      </div>
+                    )}
+                  </details>
+                  <span className="lm-microlab" style={{ marginTop: 12 }}>Aspect</span>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                    {[[1, 1, "1:1"], [3, 4, "3:4"], [4, 3, "4:3"], [2, 3, "2:3"], [3, 2, "3:2"],
+                      [9, 16, "9:16"], [16, 9, "16:9"], [3, 1, "3:1"]].map(([rw, rh, label]) => (
+                      <button type="button" key={label}
+                        className={"lm-modechip" + (imgAdv.aspectW === rw && imgAdv.aspectH === rh ? " on" : "")}
+                        style={{ flex: "0 0 auto", padding: "6px 10px" }}
+                        onClick={() => setImgAdv((a) => ({ ...a, aspectW: rw, aspectH: rh }))}>{label}</button>
+                    ))}
+                  </div>
+                  <div className="lm-row2">
+                    <div className="lm-col"><span className="lm-microlab">Size &middot; long edge</span>
+                      <select className="lm-gensel" style={{ marginTop: 0 }} value={imgAdv.size}
+                        onChange={(ev) => setImgAdv((a) => ({ ...a, size: +ev.target.value }))}>
+                        <option value="768">S &middot; 768</option><option value="1024">M &middot; 1024</option>
+                        <option value="1536">L &middot; 1536</option><option value="2048">XL &middot; 2048</option>
+                      </select></div>
+                    <div className="lm-col"><span className="lm-microlab">Custom W&times;H</span>
+                      <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                        <input className="lm-in" type="number" min="64" max="4096" step="8" placeholder="W" value={imgAdv.customW}
+                          onChange={(ev) => setImgAdv((a) => ({ ...a, customW: ev.target.value }))} />
+                        <span className="lm-hint">&times;</span>
+                        <input className="lm-in" type="number" min="64" max="4096" step="8" placeholder="H" value={imgAdv.customH}
+                          onChange={(ev) => setImgAdv((a) => ({ ...a, customH: ev.target.value }))} />
+                      </div></div>
+                  </div>
+                  <div className="lm-hint">{(() => { const d = resolveGenDims(imgAdv); return "→ " + d.w + " × " + d.h + (d.custom ? " · custom" : " px"); })()}</div>
+                  <div className="lm-row2">
+                    <div className="lm-col"><span className="lm-microlab">Mode</span>
+                      <select className="lm-gensel" style={{ marginTop: 0 }} value={imgAdv.mode}
+                        onChange={(ev) => setImgAdv((a) => ({ ...a, mode: ev.target.value }))}>
+                        <option value="auto">Auto</option><option value="lite">Lite</option>
+                        <option value="standard">Standard</option><option value="pro">Pro</option><option value="ultra">Ultra</option>
+                      </select></div>
+                    <div className="lm-col"><span className="lm-microlab">Count</span>
+                      <select className="lm-gensel" style={{ marginTop: 0 }} value={imgAdv.count}
+                        onChange={(ev) => setImgAdv((a) => ({ ...a, count: +ev.target.value }))}>
+                        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+                      </select></div>
+                  </div>
+                  <span className="lm-microlab">Seed &middot; blank = random</span>
+                  <input className="lm-in" type="number" placeholder="random" value={imgAdv.seed}
+                    onChange={(ev) => setImgAdv((a) => ({ ...a, seed: ev.target.value }))} />
+                  <label className="lm-check" title="This IS the site's Turbo tier (priority=1000): a faster runner. Costs more credits when paid, but a matching free card covers it.">
+                    <input type="checkbox" checked={imgAdv.highPriority}
+                      onChange={(ev) => setImgAdv((a) => ({ ...a, highPriority: ev.target.checked }))} /> High priority &middot; Turbo (faster)</label>
+                  <label className="lm-check">
+                    <input type="checkbox" checked={imgAdv.promptHelper}
+                      onChange={(ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))} /> Prompt helper</label>
+                  <div className="lm-gencost">
+                    <span className="lm-gencosttext" title={priceTitle(imgPrice, c.id)}>{priceLine(imgPrice, c.id, "Pick a model and write a prompt to see the cost.")}</span>
+                  </div>
+                  <button type="button" className="lm-genbtn"
+                    disabled={busyI || !imgModel || !(c.imgPrompt || "").trim() || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) || overLoraCap(imgLoras, acct && acct.lora_cap)}
+                    onClick={() => genImage(dfLive)}>
+                    {busyI ? (gi.msg || "generating…")
+                      : anyLoraUnresolved(imgLoras) ? "waiting on LoRA…"
+                      : imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) ? "incompatible LoRA — remove or switch base"
+                      : overLoraCap(imgLoras, acct && acct.lora_cap) ? "remove " + (imgLoras.length - acct.lora_cap) + " LoRA" + ((imgLoras.length - acct.lora_cap) === 1 ? "" : "s") + " to continue"
+                      : "✦ Generate reference image"}
+                  </button>
+                  {gi.phase === "error" && <div className="lm-gerr">{gi.msg}</div>}
+                  {gi.mid && (
+                    <div className="lm-imgresult">
+                      <img src={"/thumbs/" + gi.mid + ".jpg"} alt="result" />
+                      <div className="lm-route">
+                        <button type="button" className={"lm-routebtn" + (gi.routed === "open" ? " on" : "")} onClick={() => routeImg(dfLive, "open", c.id)}>open frame</button>
+                        <button type="button" className={"lm-routebtn" + (gi.routed === "close" ? " on" : "")} onClick={() => routeImg(dfLive, "close", c.id)}>close frame</button>
+                        <button type="button" className={"lm-routebtn" + (gi.routed === "cast" ? " on" : "")} onClick={() => routeImg(dfLive, "cast", c.id)}>cast</button>
+                      </div>
+                      {gi.routed && <div className="lm-ok2">&#10003; sent to {gi.routed} — it now feeds this shot's video gen</div>}
+                    </div>)}
+                </>
+              );
+            })()}
+            {genTab === "Edit" && (() => {
+              const ge = genEditState[c.id] || {};
+              const busyE = ge.phase === "submitting" || ge.phase === "running";
+              const src = c.openFrame && c.openFrame.mediaId;
+              return (
+                <>
+                  <span className="lm-microlab">Source — this shot's open frame</span>
+                  {src ? (
+                    <div className="lm-genframe" style={{ height: 120, maxWidth: 220 }}>
+                      <img src={"/thumbs/" + src + ".jpg"} alt="source" />
+                    </div>
+                  ) : <div className="lm-empty">No open-frame image yet — route one from the <b>Image</b> tab, or pick it into the open frame on Shot Detail.</div>}
+                  <span className="lm-microlab" style={{ marginTop: 12 }}>Edit instruction</span>
+                  <textarea className="lm-ta" value={c.editPrompt || ""} placeholder="e.g. make it night, add rain, warmer key light…"
+                    onChange={(ev) => dfPatch((cc) => ({ ...cc, editPrompt: ev.target.value }))} />
+                  <div className="lm-gencost">
+                    <span className="lm-gencosttext" title={priceTitle(editPrice, c.id)}>{priceLine(editPrice, c.id, "Add a source image and instruction to see the cost.")}</span>
+                  </div>
+                  <button type="button" className="lm-genbtn" disabled={busyE || !src} onClick={() => genEdit(dfLive)}>
+                    {busyE ? (ge.msg || "editing…") : "✦ Edit the open frame"}
+                  </button>
+                  {ge.phase === "error" && <div className="lm-gerr">{ge.msg}</div>}
+                  {ge.mid && (
+                    <div className="lm-imgresult">
+                      <img src={"/thumbs/" + ge.mid + ".jpg"} alt="result" />
+                      <div className="lm-route">
+                        <button type="button" className={"lm-routebtn" + (ge.routed === "open" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, dfLive, "open", c.id)}>open frame</button>
+                        <button type="button" className={"lm-routebtn" + (ge.routed === "close" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, dfLive, "close", c.id)}>close frame</button>
+                        <button type="button" className={"lm-routebtn" + (ge.routed === "cast" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, dfLive, "cast", c.id)}>cast</button>
+                      </div>
+                      {ge.routed && <div className="lm-ok2">&#10003; sent to {ge.routed}</div>}
+                    </div>)}
+                </>
+              );
+            })()}
+            {genTab === "Reference" && (() => {
+              const gr = genRefState[c.id] || {};
+              const busyR = gr.phase === "submitting" || gr.phase === "running";
+              const refs = (project.assets || []).filter((a) => a.kind === "image" && a.mediaId);
+              return (
+                <>
+                  <span className="lm-microlab">References — cast @image members ({refs.length})</span>
+                  {refs.length ? (
+                    <div className="lm-refstrip">{refs.map((a) => (<img key={a.id} src={"/thumbs/" + a.mediaId + ".jpg"} title={a.tag} alt="" />))}</div>
+                  ) : <div className="lm-empty">No cast @image references with a gallery image yet — add some via the Cast &amp; assets sheet.</div>}
+                  <span className="lm-microlab" style={{ marginTop: 12 }}>Prompt</span>
+                  <textarea className="lm-ta" value={c.refPrompt || ""} placeholder="compose a new still from the references…"
+                    onChange={(ev) => dfPatch((cc) => ({ ...cc, refPrompt: ev.target.value }))} />
+                  <div className="lm-gencost">
+                    <span className="lm-gencosttext" title={priceTitle(refPrice, c.id)}>{priceLine(refPrice, c.id, "Add references and a prompt to see the cost.")}</span>
+                  </div>
+                  <button type="button" className="lm-genbtn" disabled={busyR || !refs.length} onClick={() => genRef(dfLive)}>
+                    {busyR ? (gr.msg || "generating…") : "✦ Generate from references"}
+                  </button>
+                  {gr.phase === "error" && <div className="lm-gerr">{gr.msg}</div>}
+                  {gr.mid && (
+                    <div className="lm-imgresult">
+                      <img src={"/thumbs/" + gr.mid + ".jpg"} alt="result" />
+                      <div className="lm-route">
+                        <button type="button" className={"lm-routebtn" + (gr.routed === "open" ? " on" : "")} onClick={() => routeGen(genRefState, setGenRefState, dfLive, "open", c.id)}>open frame</button>
+                        <button type="button" className={"lm-routebtn" + (gr.routed === "close" ? " on" : "")} onClick={() => routeGen(genRefState, setGenRefState, dfLive, "close", c.id)}>close frame</button>
+                        <button type="button" className={"lm-routebtn" + (gr.routed === "cast" ? " on" : "")} onClick={() => routeGen(genRefState, setGenRefState, dfLive, "cast", c.id)}>cast</button>
+                      </div>
+                      {gr.routed && <div className="lm-ok2">&#10003; sent to {gr.routed}</div>}
+                    </div>)}
+                </>
+              );
+            })()}
+            {genTab === "Video" && (<>
               <span className="lm-microlab">Mode</span>
               <div className="lm-modechips">
                 {MODES.map((m) => (
@@ -3737,7 +4292,35 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                   path LoomV2's own board already offers (no spend, no PixAI task). */}
               <button type="button" className="lm-genexisting" disabled={genBusy}
                 onClick={() => useExistingVideo(dfLive)}>Use an existing video instead</button>
+            </>)}
             </div>
+            {/* Model/LoRA picker -- a full-screen mobile sheet wrapping the SAME real
+                <mg-model-picker> element LoomV2's own floating overlay uses. Lazy-mounted on
+                first open (pickerMounted), then left mounted for the rest of the session --
+                same "CSS-hide instead of unmount" contract as LoomV2's .lv-mpick-veil, so a
+                close/reopen never loses either picker's own search/scroll state. */}
+            {pickerMounted && (
+              <>
+                <div className="lm-scrim" style={{ display: pickerOpen ? "block" : "none" }} onClick={() => setPickerOpen(false)} />
+                <div className="lm-pick-sheet" style={{ display: pickerOpen ? "flex" : "none" }}>
+                  <div className="lm-sheethandle" />
+                  <div className="lm-pick-head">
+                    <span className="lm-pick-t">Models &amp; LoRAs</span>
+                    <button type="button" className="lm-df-close" onClick={() => setPickerOpen(false)} aria-label="Close">&#10005;</button>
+                  </div>
+                  <div className="lm-tabsrow">
+                    <button type="button" className={"lm-tabbtn" + (pickerKind === "base" ? " on" : "")} onClick={() => setPickerKind("base")}>Models</button>
+                    <button type="button" className={"lm-tabbtn" + (pickerKind === "lora" ? " on" : "")} onClick={() => setPickerKind("lora")}>LoRAs</button>
+                  </div>
+                  <div className="lm-pick-body">
+                    <mg-model-picker ref={bindPicker} kind="base"
+                      style={{ display: pickerKind === "base" ? "flex" : "none" }}></mg-model-picker>
+                    <mg-model-picker ref={bindLoraPicker} kind="lora" multi base-type={(imgModel && imgModel.model_type) || ""}
+                      style={{ display: pickerKind === "lora" ? "flex" : "none" }}></mg-model-picker>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         );
       })()}
@@ -4021,7 +4604,10 @@ function useShotMutations(project, setProject) {
 }
 
 // ---- 3. useGenerationPipeline: generate/poll/route across all four modes ----
-function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId }) {
+// mobileUI (mobile-generate-rail pass, 2026-08-03): NOT used for its value, only as a second
+// dependency on the resume effect below -- see that effect's own comment for why the
+// Mobile-view toggle needs to trigger the identical resume it already runs on project load.
+function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI }) {
   const [genState, setGenState] = useState({});         // cardId -> {phase, msg, mid} (video)
   const resumedRef = useRef({});    // taskId -> true: shots whose interrupted poll we've re-attached this session
   const [genImgState, setGenImgState] = useState({});   // shotId -> {phase,msg,mid,routed} (in-Loom image ref-gen)
@@ -4303,6 +4889,28 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   // project load (activeId change), re-attach a poll so the finished clip lands on the
   // card. Deduped per task id so flipping projects back and forth mid-render doesn't
   // stack loops; a resumed poll clears pendingTaskId itself on done/fail.
+  //
+  // mobileUI ALSO in the dependency array (mobile-generate-rail pass, 2026-08-03 --
+  // credit-safety finding): the desktop rail's Video tab submits through <mg-generate-
+  // drawer>, whose OWN poll is genuinely component-local (mg-generate-drawer.js's
+  // disconnectedCallback clears every _pollTimers entry -- confirmed by reading that
+  // file). LoomV2 -- and any <mg-generate-drawer> mounted inside it -- unmounts
+  // completely the instant the "📱 Mobile view" toggle flips (the same class of gap
+  // increment 3 built generateShot/pollShot specifically to route around for a shot's
+  // own clip). Unlike the drawer's documented 6h-ceiling pause, an unmount fires NO
+  // 'mg-paused' event -- genState silently freezes on "Rendering…" with nothing left
+  // polling, recoverable today only via a full page reload (which re-fires this same
+  // effect from a fresh activeId). Re-running the identical, already-idempotent scan on
+  // every mobileUI flip closes that gap immediately: any card left "wip"+pendingTaskId
+  // by a just-unmounted drawer gets a fresh, hook-level pollShot() the instant the
+  // toggle fires, regardless of whether LoomV2 or LoomMobile is the one now unmounting.
+  // resumedRef dedupes by taskId (not by trigger reason), so this is a genuine no-op for
+  // every task already resumed or still actively polling -- no double-poll risk, and
+  // none of Image/Edit/Reference's OWN generation needs this at all: genImage/genEdit/
+  // genRef's polls (pollImg/pollTaskWithCeiling, below) are plain setTimeout chains
+  // living in this hook, never a DOM element's lifecycle, so they already survive the
+  // toggle with no fix required -- verified by reading their implementations, not
+  // assumed. See this increment's own report for the injected-state verification.
   useEffect(() => {
     if (!project) return;   // project is null until the store loads the first board
     (project.acts || []).forEach((a) => (a.cards || []).forEach((c) => {
@@ -4311,7 +4919,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
         pollShot(c.id, c.pendingTaskId, c.genStartedAt);
       }
     }));
-  }, [activeId]);   // eslint-disable-line
+  }, [activeId, mobileUI]);   // eslint-disable-line
   // Attach an already-produced video straight onto a shot as its finished clip -- no
   // generation involved. /api/loom/export already treats every resultMid as just "a video
   // file to trim+concat," so this writes the exact same shape pollShot does on completion.
@@ -4754,7 +5362,9 @@ export default function App() {
     generateShot, priceShot,
     pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
     costEstimate, refreshEstimate }
-    = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId });
+    // mobileUI passed in (mobile-generate-rail pass, 2026-08-03) so the resume-on-reload
+    // effect can also fire on the Mobile-view toggle -- see that effect's own comment.
+    = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI });
   // <mg-generate-drawer> owns its own submit/poll now (Loom-mount build, 2026-07-18); these
   // mirror exactly what generateShot/pollShot already write for every OTHER path, so the
   // board card's live status badge, tab-close resume (pendingTaskId), and the finished clip
@@ -4872,7 +5482,12 @@ export default function App() {
           mobileUI={mobileUI} setMobileUI={setMobileUI}
           draftCard={draftCard} setDraftCard={setDraftCard} draftTarget={draftTarget} setDraftTarget={setDraftTarget}
           draftAttachedInfo={draftAttachedInfo} setDraftAttachedInfo={setDraftAttachedInfo}
-          generateShot={generateShot} priceShot={priceShot} useExistingVideo={useExistingVideo} /></V2Boundary>
+          generateShot={generateShot} priceShot={priceShot} useExistingVideo={useExistingVideo}
+          genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel}
+          imgLoras={imgLoras} setImgLoras={setImgLoras} imgAdv={imgAdv} setImgAdv={setImgAdv}
+          modelDefaults={modelDefaults} setModelDefaults={setModelDefaults} genImage={genImage} routeImg={routeImg}
+          genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState}
+          genEdit={genEdit} genRef={genRef} routeGen={routeGen} /></V2Boundary>
       ) : (
         <V2Boundary><LoomV2
           project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}
