@@ -17,6 +17,38 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Contact Sheet — native React build, not a hand-off to classic.** New
+  `GET /api/contact-sheet` (JSON twin of the existing `/contact-sheet` page,
+  same `rows_for_media_ids`/`query_catalog`/rating→stars logic, LOGIN tier)
+  backs a new `ContactSheetOverlay.jsx`: on-screen preview matching the DC's
+  `Contact Sheet.dc.html` layout, plus a genuinely native print — `window.print()`
+  scoped by `@media print`, not a redirect to the classic HTML route. Both
+  real entry points wired: the Actions menu's "Print sheet" (explicit
+  selection) and a new "🖶 Contact sheet" in the Advanced flyout (current
+  collection view, added to `Flyout.jsx`). The classic `/contact-sheet` route
+  is untouched and still serves `/classic`.
+  **Two real bugs caught live, via direct browser verification against the
+  owner's real library, before this shipped:** (1) a classic CSS grid
+  overflow — a grid item's default `min-width:auto` let a real (large) `<img>`
+  force its column wider than its `1fr` track, since the mock's placeholder
+  art was too small to ever trip it; fixed with `min-width:0` down the cell/
+  image chain. (2) A much bigger one: printing rendered as ~8 near-solid dark
+  blank pages. Root cause — the overlay was nested inline in `App.jsx`'s tree
+  like every other overlay, deep inside `#root` *after* the entire multi-
+  thousand-image gallery grid in DOM order; the print CSS's `visibility:hidden`
+  approach hides paint but not layout height, so print pagination reflected
+  the whole hidden grid's real height, with the actual sheet content buried
+  many pages down. Fixed by portaling `ContactSheetOverlay` straight to
+  `document.body` (`createPortal`, matching `ActionsMenu.jsx`'s own portal
+  precedent) so print CSS can just `#root { display: none }` outright instead
+  of relying on visibility tricks. A third small fix in the same pass:
+  `mg-notify.js`'s Activity FAB/toast host (`#jobs-fab`/`#mg-toasts`) also
+  live outside `#root` (plain-JS, appended straight to `document.body`), so
+  they needed explicit exclusion too — otherwise the Activity pill printed
+  in the corner of every page.
+
+### Added
+
 - **Control Panel — ported as a MODAL, not the DC's own designed page, per the owner's live
   2026-08-02 correction** ("Control panel is now ALSO modal. no separate pages anymore").
   `ControlPanelOverlay.jsx` carries the DC's real content (Maintenance tab's job console +

@@ -56,7 +56,7 @@ function MonthPicker({ value, onChange, years, label }) {
   );
 }
 
-export default function Flyout({ boot, current, onApply, onClose }) {
+export default function Flyout({ boot, current, onApply, onClose, onPrintCollection }) {
   const [d, setD] = useState(current);          // draft
   const [presets, setPresets] = useState([]);
   useEffect(() => { setD(current); }, [current]);
@@ -139,6 +139,12 @@ export default function Flyout({ boot, current, onApply, onClose }) {
         >
           Clear
         </button>
+        {onPrintCollection && (
+          <button className="card" onClick={onPrintCollection}
+            title="Print a contact sheet of the current view">
+            🖶 Contact sheet
+          </button>
+        )}
         <span className="sp" />
         <button className="card apply" onClick={() => onApply(d)}>Apply</button>
         <button className="card" onClick={onClose} title="Esc">✕</button>

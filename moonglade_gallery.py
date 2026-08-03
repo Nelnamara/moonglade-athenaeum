@@ -13946,6 +13946,56 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 </body></html>""".format(title=title, cols=cols, n=len(cells), cells="".join(cells))
         return html
 
+    @app.route("/api/contact-sheet")
+    def api_contact_sheet():
+        """JSON twin of /contact-sheet -- feeds the React ContactSheetOverlay's on-screen
+        preview and its own native (window.print()) output. Same source selection as the
+        page route (rows_for_media_ids / query_catalog); the page route stays untouched
+        for classic's own use until demolition -- the new front door never calls it."""
+        import datetime as _dt
+        ids_arg = (request.args.get("ids") or "").strip()
+        collection = (request.args.get("collection") or "").strip()
+        if ids_arg:
+            ids = [x for x in ids_arg.split(",") if x.strip()]
+            rows = rows_for_media_ids(db_path, ids)
+            collection_name = "{} selected".format(len(rows))
+        elif collection:
+            rows, _ = query_catalog(db_path, collection=collection, sort="newest",
+                                    page=1, page_size=400)
+            collection_name = collection
+        else:
+            rows, _ = query_catalog(db_path, sort="newest", page=1, page_size=60)
+            collection_name = "Recent"
+
+        frames = []
+        for r in rows:
+            mid = str(r.get("media_id") or "")
+            if not mid:
+                continue
+            try:
+                stars = "★" * int(r.get("rating") or 0)
+            except (TypeError, ValueError):
+                stars = ""
+            title = ((r.get("title") or "").strip()
+                     or (r.get("prompt_preview") or "").strip()[:60]
+                     or "Untitled")
+            frames.append({
+                "media_id": mid,
+                "title": title,
+                "model": r.get("model_name") or "",
+                "stars": stars,
+                "thumb_url": "/thumbs/{}.jpg".format(mid),
+            })
+
+        d = _dt.datetime.now()
+        printed_date = "{} {}, {}".format(d.strftime("%B"), d.day, d.year)
+        return jsonify({
+            "collectionName": collection_name,
+            "frameCount": len(frames),
+            "printedDate": printed_date,
+            "frames": frames,
+        })
+
     @app.route("/api/account")
     def api_account():
         """Credits + free-card balance for the header chip. Read-only; login required.
