@@ -29,7 +29,7 @@ reader could work it out from the code, it does not belong here.
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 141
+- [Decisions](#decisions) &mdash; 142
 
 ---
 
@@ -1337,6 +1337,43 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 ## Decisions
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
+
+### A custom-element mount-once effect must be keyed to when its host div actually renders, not to when the component mounts — the same bug shipped twice, caught the second time only by testing against a real network fetch  ·  *2026-08-03*
+
+Building Image Details Mobile surfaced (and fixed) two real, pre-existing desktop bugs in
+`DetailsView.jsx`'s Upscale panel: the host div for the shared `<mg-upscale-panel>` custom
+element only rendered once `upscaleOpen` was already true, but the mount effect that creates
+the element runs exactly once, immediately after the *first* commit — while `upscaleOpen` is
+still false — so the button was silently permanently dead. Fixed (and independently reviewed)
+by rendering the host div unconditionally. Both fixes shipped, reviewed, and reported clean.
+
+Live-verifying against the real account afterward (not the build/review's own stubbed-fetch
+check) found a **third occurrence of the identical bug shape**, missed by both prior passes:
+`ImageDetailsMobile.jsx` has an early-return for its loading state before its main JSX (which
+contains the now-unconditional host div) ever renders. On a real network fetch, the mount
+effect's one-shot first run still lands during that loading branch — the div genuinely doesn't
+exist yet, `upHost.current` is null, the effect bails, and an empty dependency array means it
+never gets a second attempt once the loaded content actually paints. Fixed by keying the effect
+to `row` (the fetched data) instead of mount, so it re-fires the moment the real content exists;
+the existing `firstChild` guard keeps every subsequent re-render a no-op.
+
+**Why this survived two independent review passes:** both the build and the review verified
+this exact interaction using a stubbed/mocked `fetch` (unauthenticated dev sessions can't reach
+the real backend), which resolves near-instantly — fast enough that the loading branch may
+never actually paint before the effect's first run, dodging the race entirely. A real network
+round-trip has enough latency to reliably land the effect's first run during the loading state,
+which is exactly why testing against the owner's real, live account — not a mock, not a stub —
+caught it immediately on the very first interaction.
+
+**The general rule, for every future custom-element mount effect in this codebase:** an effect
+with an empty dependency array that reaches for a ref is only ever as reliable as "this ref's
+element is guaranteed to exist by the time this effect's first run happens." Any early return
+(loading, error, auth-gated, whatever) between the component's mount and the JSX containing the
+target div breaks that guarantee — the fix is to key the effect to whatever state transition
+actually makes the div appear (here, `row` becoming non-null), never to leave it on `[]` and
+assume the first render is the only one that matters. And: a stubbed-fetch live check is real
+verification for logic and data shape, but it is not a substitute for at least one pass against
+a genuine, latent network call when the code under test is itself timing-sensitive.
 
 ### A component's own nested Escape-key ladder is dead code if `App.jsx`'s capture-phase handler already owns Escape for that overlay — verified live, corrected a review's claim  ·  *2026-08-03*
 

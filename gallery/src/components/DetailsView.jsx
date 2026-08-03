@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
+import useImageDetails from "../hooks/useImageDetails.js";
 
 /* Motion: the reveal choreography locked 2026-07-30 (docs/DECISIONS.md, artifact
    477b4655 "The Reveal -- Motion Detail"). The headline LEADS on its own, sliding
@@ -116,87 +117,37 @@ export default function DetailsView({
   mediaId, onClose, onNavigate, onRate, onEdit, onDeleted,
   onFilterByModel, onFilterByBatch, advParams,
 }) {
-  const [state, setState] = useState({ loading: true, data: null, error: "" });
   const [focusMode, setFocusMode] = useState(
     () => (typeof localStorage !== "undefined" && localStorage.getItem("gallery_focus") === "1")
   );
   const [mediaOk, setMediaOk] = useState(true);
-  const [editingPrompt, setEditingPrompt] = useState(false);
-  const [promptText, setPromptText] = useState("");
-  const [saveStatus, setSaveStatus] = useState("");
-  const [copied, setCopied] = useState("");
-  const [views, setViews] = useState(null);
-  const [suggestions, setSuggestions] = useState(null); // null=not asked, []=asked, [..]=results
-  const [suggestBusy, setSuggestBusy] = useState(false);
-  const [suggestErr, setSuggestErr] = useState("");
-  const [upscaleOpen, setUpscaleOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [fullRecord, setFullRecord] = useState(false);
-  const upHost = useRef(null);
-  const upEl = useRef(null);
-  const seq = useRef(0);
   const recordRef = useRef(null);
 
+  const {
+    state, row,
+    headline, hasPromptBlock, tagList, collectionList, wide, nsfw,
+    promptText, setPromptText,
+    copied, copy,
+    editingPrompt, setEditingPrompt, saveStatus, savePrompt,
+    suggestions, suggestBusy, suggestErr, runSuggest,
+    views,
+    busy, deleteLocal, deleteCloud,
+    upscaleOpen, upHost, toggleUpscale,
+    handleRate,
+  } = useImageDetails({ mediaId, advParams, onRate, onDeleted });
+
+  // this component's OWN local resets on navigate (mediaOk/fullRecord aren't
+  // shared with the mobile surface -- see useImageDetails.js for what is).
   useEffect(() => {
-    if (!mediaId) return;
-    const mine = ++seq.current;
-    setState({ loading: true, data: null, error: "" });
-    setMediaOk(true); setEditingPrompt(false); setSaveStatus(""); setCopied("");
-    setViews(null); setSuggestions(null); setSuggestErr(""); setUpscaleOpen(false);
+    setMediaOk(true);
     setFullRecord(false);
-    const qs = new URLSearchParams();
-    for (const [k, v] of Object.entries(advParams || {})) if (v) qs.set(k, v);
-    fetch("/api/next/detail/" + encodeURIComponent(mediaId) + "?" + qs.toString())
-      .then((r) => r.json())
-      .then((d) => {
-        if (mine !== seq.current) return;
-        if (d.error) { setState({ loading: false, data: null, error: d.error }); return; }
-        setState({ loading: false, data: d, error: "" });
-        setPromptText(d.row.prompt_full || d.row.prompt_preview || "");
-      })
-      .catch(() => { if (mine === seq.current) setState({ loading: false, data: null, error: "Network error." }); });
-  }, [mediaId, advParams]);
-
-  const row = state.data && state.data.row;
-
-  /* Stars' visual state and the "N / 5" label both read row.rating, which
-     lives in THIS component's own fetched copy -- onRate (App.jsx's rate())
-     only updates the grid's items array, so a click here posted correctly
-     (confirmed live against /api/next/detail/<mid>) but the UI kept showing
-     the stale pre-click value until this optimistic mirror was added. */
-  const handleRate = (mid, value) => {
-    setState((old) => (old.data ? { ...old, data: { ...old.data, row: { ...old.data.row, rating: value } } } : old));
-    onRate(mid, value);
-  };
-
-  // live view count, published rows only -- classic's DOMContentLoaded engagement fetch
-  useEffect(() => {
-    if (!row || row.is_published !== "1" || !row.artwork_id) return;
-    fetch("/api/artwork-views?id=" + encodeURIComponent(row.artwork_id))
-      .then((r) => r.json())
-      .then((d) => setViews(d && d.views != null ? d.views : null))
-      .catch(() => setViews(null));
-  }, [row]);
+  }, [mediaId]);
 
   useEffect(() => {
     if (typeof localStorage === "undefined") return;
     localStorage.setItem("gallery_focus", focusMode ? "1" : "");
   }, [focusMode]);
-
-  useEffect(() => {
-    if (!upHost.current || upHost.current.firstChild) return;
-    if (!window.customElements || !window.customElements.get("mg-upscale-panel")) return;
-    const el = document.createElement("mg-upscale-panel");
-    el.setAttribute("inline", "");
-    upHost.current.appendChild(el);
-    upEl.current = el;
-  }, []);
-  const toggleUpscale = () => {
-    const willOpen = !upscaleOpen;
-    setUpscaleOpen(willOpen);
-    if (!upEl.current) return;
-    if (willOpen) upEl.current.open(mediaId); else upEl.current.close();
-  };
 
   useEffect(() => {
     const onKey = (e) => {
@@ -226,68 +177,6 @@ export default function DetailsView({
     onNavigate(mid);
   };
 
-  const copy = useCallback((text, tag) => {
-    navigator.clipboard.writeText(text || "").then(() => {
-      setCopied(tag);
-      setTimeout(() => setCopied((c) => (c === tag ? "" : c)), 1200);
-    });
-  }, []);
-
-  const runSuggest = async () => {
-    setSuggestBusy(true); setSuggestErr("");
-    try {
-      const d = await fetch("/api/suggest-prompt?media_id=" + encodeURIComponent(mediaId)).then((r) => r.json());
-      const s = d.suggestions || [];
-      if (d.error || !s.length) { setSuggestErr(d.error || "No suggestion returned."); setSuggestions([]); }
-      else setSuggestions(s);
-    } catch {
-      setSuggestErr("Network error.");
-      setSuggestions([]);
-    } finally { setSuggestBusy(false); }
-  };
-
-  const savePrompt = async () => {
-    setSaveStatus("Saving…");
-    try {
-      const d = await fetch("/edit-prompt/" + encodeURIComponent(mediaId), {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: promptText }),
-      }).then((r) => r.json());
-      setSaveStatus(d && d.ok ? "Saved ✓" : "Error");
-    } catch { setSaveStatus("Error"); }
-  };
-
-  const deleteLocal = async () => {
-    if (!window.confirm(
-      "Remove this image from your local library? The file moves to _deleted/ and is " +
-      "recoverable, and PixAI still has it — a later sync brings it back.")) return;
-    setBusy(true);
-    try {
-      await fetch("/delete/" + encodeURIComponent(mediaId), { method: "POST" });
-      onDeleted();
-    } finally { setBusy(false); }
-  };
-
-  const deleteCloud = async () => {
-    const sibs = state.data.siblings || 1;
-    const what = sibs > 1
-      ? "This deletes ONLY this image from PixAI.\n\nThe other " + (sibs - 1) +
-        " image" + (sibs - 1 === 1 ? "" : "s") + " in its batch stay on your account."
-      : "This deletes this image from PixAI. It is the only image its task made.";
-    if (!window.confirm(what + "\n\nIt is also removed from your local library. This cannot be undone.")) return;
-    const typed = window.prompt("This permanently deletes from PixAI. Type DELETE to confirm:");
-    if (typed !== "DELETE") { window.alert("Cancelled."); return; }
-    setBusy(true);
-    try {
-      const d = await fetch("/api/delete-image", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ media_id: mediaId, confirm: true }),
-      }).then((r) => r.json());
-      if (!d || d.error) { window.alert((d && d.error) || "Could not delete it."); return; }
-      onDeleted();
-    } finally { setBusy(false); }
-  };
-
   if (state.loading) return <div className="detail-wrap"><div className="gd-note">Loading…</div></div>;
   if (state.error || !row) {
     return (
@@ -298,30 +187,10 @@ export default function DetailsView({
     );
   }
 
-  const nsfw = (() => {
-    if (!row.nsfw_scores) return null;
-    try {
-      const s = JSON.parse(row.nsfw_scores);
-      const parts = Object.entries(s).filter(([, v]) => v >= 0.05).sort((a, b) => b[1] - a[1]);
-      return parts.length ? parts.map(([k, v]) => k + " " + Math.round(v * 100) + "%").join(", ") : "clean";
-    } catch { return null; }
-  })();
-
-  // The placard's headline is the owner's own title, full stop -- no prompt
-  // text of any kind (full, natural, or preview) stands in for it. A prompt
-  // is what was ASKED FOR, not a name for the result, and truncating it to
-  // fake a headline misrepresents saved data either way. The real, complete,
-  // uncapped prompt has its own place below and is never touched here.
-  const headline = row.title || row.filename || "Untitled";
-  const hasPromptBlock = row.prompt_full || row.natural_prompt || row.negative_prompt;
-  const tagList = row.art_tags ? row.art_tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
-  const collectionList = row.collections ? row.collections.split(",").map((c) => c.trim()).filter(Boolean) : [];
-  // A real generation can be ANY aspect ratio -- a 1920x480 banner is as valid
-  // as an 808x1024 portrait. Forcing every ratio into the same side-by-side
-  // frame either shrank wide/short images to a sliver, or (the min-height fix)
-  // opened a huge dead void around them. Past a real landscape threshold, the
-  // placard stacks instead: the image gets to be its natural size, full width.
-  const wide = row.width && row.height && row.width / row.height > 1.6;
+  // headline/hasPromptBlock/tagList/collectionList/wide/nsfw now come from
+  // useImageDetails() above -- see that hook for the exact same derivation
+  // (byte-for-byte lifted, including the headline-is-never-a-prompt rule and
+  // the wide-aspect-ratio placard-stacks-instead rule).
 
   return (
     <div className={"detail-wrap" + (focusMode ? " focus-mode" : "")}>
@@ -454,7 +323,15 @@ export default function DetailsView({
         )}
       </div>
 
-      {!focusMode && upscaleOpen && <div ref={upHost} />}
+      {/* Unconditional mount -- see useImageDetails.js's header comment
+          (correction 1): the custom element's own [open]/no-attribute CSS is
+          what shows/hides it, not conditional React mounting. Mounting this
+          only when upscaleOpen is true left the mount effect (which runs
+          once, right after the first commit while upscaleOpen was still
+          false) with nothing to attach to, so the panel never actually
+          opened -- fixed here to match Lightbox.jsx's own, already-working
+          unconditional host div. */}
+      <div ref={upHost} />
 
       {!focusMode && suggestions && (
         <div id="suggest-box">

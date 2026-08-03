@@ -1,0 +1,176 @@
+/* ============================================================================
+   Image Details Mobile -- design spec: "Image Details Mobile.dc.html" (design_
+   handoff_moonglade_suite/). Mounted by AppMobile.jsx as a full-viewport
+   overlay (position:fixed, covers hero + tab bar too, NOT just .glm-body) --
+   see ImageDetailsMobile.jsx's own header comment for why this is a dedicated
+   full-screen presentation rather than MobileScreen.jsx's generic
+   back-chevron+title push chrome: the design's own top bar has a back link,
+   an "open lightbox" glyph, an index label AND prev/next arrows -- a shape
+   MobileScreen's fixed two-item header contract doesn't fit, and DetailsView
+   (desktop) is already a real top-level VIEW, not a nav-menu destination.
+
+   idm- prefix throughout (Image Details Mobile), matching every other mobile
+   surface's own prefix convention (glm-/ctm-/cm-). Colors are all
+   DESIGN_TOKENS_CSS var()s -- no literal hex standing in for a token that
+   exists, same rule gallery-mobile.css documents for itself. */
+
+@keyframes idmIn { from { opacity: 0; transform: scale(.98) translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes idmOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(10px); } }
+@keyframes idmFrame { from { opacity: 0; transform: scale(.96) translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes idmInscribe { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes idmRule { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+.idm-root { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
+  background: radial-gradient(120% 70% at 30% -10%, color-mix(in oklab, var(--accent) 20%, #17123a) 0%,
+    var(--base) 46%, #05040d 100%);
+  color: var(--text); animation: idmIn .22s cubic-bezier(.2,.9,.24,1) both; }
+.idm-root.closing { animation: idmOut .18s ease both; }
+
+/* ---- top bar (design's topBarStyle, back/lightbox/index/prev-next) ---- */
+.idm-topbar { flex: none; display: flex; align-items: center; gap: 10px;
+  padding: max(14px, env(safe-area-inset-top)) 12px 10px; border-bottom: 1px solid var(--surface1); }
+.idm-back { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--subtext); cursor: pointer; background: none; border: none; padding: 0; font-family: inherit; }
+.idm-lb { font-size: 14px; color: var(--overlay0); cursor: pointer; background: none; border: none;
+  padding: 4px; font-family: inherit; }
+.idm-fill { flex: 1 1 auto; }
+.idm-index { font-size: 10.5px; color: var(--overlay0); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.idm-navbtn { font-size: 15px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 7px;
+  cursor: pointer; border: 1px solid rgba(255,255,255,.12); background: var(--surface0); color: var(--text);
+  font-family: inherit; flex: none; }
+.idm-navbtn:disabled { opacity: .35; cursor: default; }
+
+/* ---- scrollable body ---- */
+.idm-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 14px 14px max(26px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 14px; }
+
+.idm-frame { position: relative; flex: none; width: 100%; border-radius: 14px; overflow: hidden;
+  border: 1px solid rgba(255,255,255,.12); box-shadow: 0 24px 60px rgba(0,0,0,.5); background: var(--surface0);
+  animation: idmFrame .5s cubic-bezier(.2,.9,.24,1) both; }
+.idm-frame img, .idm-frame video { display: block; width: 100%; height: auto; max-height: 60vh;
+  object-fit: contain; background: var(--surface0); margin: 0 auto; }
+.idm-frame .gd-note { padding: 40px 16px; text-align: center; }
+
+/* ---- file-action chips row ---- */
+.idm-chiprow { display: flex; flex-wrap: wrap; gap: 7px; padding: 2px; }
+.idm-chip { font-size: 10.5px; font-weight: 700; white-space: nowrap; padding: 8px 13px; border-radius: 9px;
+  cursor: pointer; flex: none; text-decoration: none; font-family: inherit;
+  border: 1px solid rgba(255,255,255,.12); background: rgba(12,10,28,.72); color: rgba(226,222,238,.82); }
+.idm-chip:disabled { opacity: .5; cursor: default; }
+.idm-chip.on { border-color: color-mix(in srgb, var(--lavender) 62%, transparent);
+  background: color-mix(in srgb, var(--lavender) 26%, var(--surface0)); color: var(--text); }
+.idm-chip-danger { border: 1px solid rgba(243,139,168,.35); background: rgba(243,139,168,.1); color: var(--red); }
+
+/* ---- stat row (stars / rating label / dims+date) ---- */
+.idm-statrow { display: flex; align-items: center; gap: 9px; }
+.idm-ratelbl { font-size: 10.5px; color: var(--overlay0); }
+.idm-dims { font-size: 10px; color: var(--overlay0); }
+
+/* ---- head block (kicker / headline / rule) ---- */
+.idm-head { display: flex; flex-direction: column; gap: 7px; }
+.idm-kicker { font-size: 9.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--lavender); display: flex; align-items: center; gap: 8px; }
+.idm-title { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 20px; line-height: 1.28;
+  color: var(--text); margin: 0; animation: idmInscribe .5s cubic-bezier(.2,.9,.24,1) .08s both; }
+.idm-rule { height: 2px; overflow: hidden; }
+.idm-rule > span { display: block; height: 100%; transform-origin: left center; border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), rgba(182,146,230,0));
+  animation: idmRule .5s cubic-bezier(.2,.9,.24,1) .18s both; }
+
+/* ---- tags row ---- */
+.idm-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.idm-tag { font-size: 9.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid rgba(182,146,230,.28); background: rgba(182,146,230,.1); color: rgba(226,222,238,.8); }
+.idm-tag-shelf { border-color: color-mix(in srgb, var(--gold) 38%, transparent);
+  background: color-mix(in srgb, var(--gold) 14%, transparent); color: var(--gold); }
+
+/* ---- ledger (stacked label-above-value rows, per the mobile design --
+   NOT desktop's two-column fixed-label-width row) ---- */
+.idm-ledger { display: flex; flex-direction: column; }
+.idm-row { padding: 8px 2px; border-bottom: 1px dashed var(--surface1); transition: background .18s; }
+.idm-row.copied { background: rgba(79,201,154,.1); }
+.idm-row-label { font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--overlay0); margin-bottom: 3px; }
+.idm-row-vwrap { display: flex; align-items: flex-start; gap: 8px; }
+.idm-row-val { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: 11.5px; line-height: 1.55;
+  color: rgba(226,222,238,.88); }
+.idm-row-val.mono { font-family: ui-monospace, Menlo, monospace; }
+.idm-row-val.dim { color: rgba(214,210,226,.5); }
+.idm-row-copy { flex: none; font-size: 11px; cursor: pointer; padding: 2px 5px; border-radius: 6px;
+  color: var(--overlay0); background: none; border: none; font-family: inherit; }
+.idm-row.copied .idm-row-copy { color: var(--emerald); }
+
+/* ---- SIMILAR box (real /api/similar/<mid> data) ---- */
+.idm-similar { display: flex; flex-direction: column; gap: 8px; }
+.idm-similar-head { display: flex; align-items: baseline; gap: 8px; }
+.idm-subhead { font-size: 9.5px; font-weight: 700; letter-spacing: .14em; color: var(--overlay0); }
+.idm-dimtext { font-size: 10px; color: var(--overlay0); }
+.idm-seeall { font-size: 10px; color: var(--lavender); cursor: pointer; background: none; border: none;
+  font-family: inherit; padding: 0; }
+.idm-simstrip { display: flex; flex: none; gap: 7px; overflow-x: auto; padding: 2px; }
+.idm-simtile { flex: none; width: 62px; height: 62px; border-radius: 9px; cursor: pointer; overflow: hidden;
+  position: relative; background: var(--surface0); border: none; padding: 0; }
+.idm-simtile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.idm-simtile .vbadge { position: absolute; right: 3px; top: 3px; font-size: 8px; color: #fff;
+  background: rgba(0,0,0,.55); border-radius: 50%; width: 14px; height: 14px; display: grid; place-items: center; }
+.idm-simnote { font-size: 11px; color: var(--overlay0); padding: 4px 2px; }
+
+/* the "see all" sheet's own compact grid -- deliberately its own (not
+   desktop's .similar-grid/.scard, sized for a wide fixed modal that doesn't
+   fit a 390px sheet) */
+.idm-simgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+.idm-simgrid button.idm-simtile { width: 100%; height: auto; aspect-ratio: 1; }
+
+/* ---- record-action chips row ---- */
+.idm-recrow { display: flex; flex-wrap: wrap; gap: 7px; padding: 2px 2px 4px; }
+
+/* ---- prompt editor + suggestions (reuse desktop's #prompt-editor/#suggest-box
+   shape at mobile widths -- same fields, own compact layout) ---- */
+.idm-editor { display: flex; flex-direction: column; gap: 8px; }
+.idm-editor textarea { width: 100%; box-sizing: border-box; min-height: 110px; border-radius: 9px;
+  padding: 9px 11px; font-size: 12.5px; color: var(--text); background: var(--surface0);
+  border: 1px solid var(--surface1); font-family: inherit; resize: vertical; }
+.idm-editor-row { display: flex; align-items: center; gap: 8px; }
+.idm-savestatus { font-size: 11px; color: var(--overlay0); }
+.idm-suggest-line { padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.5; cursor: pointer;
+  background: rgba(12,10,28,.6); border: 1px solid var(--surface1); margin-bottom: 6px; }
+.idm-suggest-line.done { border-color: var(--emerald); color: var(--emerald); }
+
+/* ---- Upscale bottom sheet -- deliberately NOT MobileSheet.jsx. MobileSheet
+   unmounts its children (`if (!open) return null`) whenever the sheet closes,
+   but <div ref={upHost}/> must stay PERMANENTLY in the DOM for the shared
+   <mg-upscale-panel> custom element to keep existing across opens/closes --
+   see useImageDetails.js's header comment (correction 1) for the exact bug
+   that produces (the desktop Details page's own Upscale button was silently
+   dead until that fix, from this identical "host div gets unmounted"
+   shape). So this sheet's scrim/slab are ALWAYS mounted, one level below
+   .idm-root's own overlay, and only a CSS class toggles them open/closed --
+   the same "never remove from DOM, animate via an attribute/class" law
+   mg-upscale-panel.js's own CSS already follows for itself.
+   The "see all similar" sheet below has no such constraint (plain React
+   content, nothing persistent to protect) and uses the real, shared
+   MobileSheet.jsx component instead -- see ImageDetailsMobile.jsx. */
+.idm-sheet-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(4,3,10,.66);
+  opacity: 0; pointer-events: none; transition: opacity .24s ease; }
+.idm-sheet-scrim.open { opacity: 1; pointer-events: auto; }
+.idm-sheet-slab { position: fixed; left: 0; right: 0; bottom: 0; z-index: 61; max-height: 84vh;
+  overflow-y: auto; -webkit-overflow-scrolling: touch; background: var(--mantle);
+  border-radius: 16px 16px 0 0; border-top: 1px solid var(--lavender);
+  padding: 12px 15px max(22px, env(safe-area-inset-bottom));
+  transform: translateY(100%); pointer-events: none;
+  transition: transform .28s cubic-bezier(.4,0,.2,1); }
+.idm-sheet-slab.open { transform: translateY(0); pointer-events: auto;
+  transition: transform .28s cubic-bezier(.2,.9,.24,1); }
+.idm-sheet-head { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; }
+.idm-sheet-title { font-size: 14px; font-weight: 800; }
+.idm-sheet-x { margin-left: auto; width: 26px; height: 26px; display: grid; place-items: center;
+  border-radius: 7px; border: 1px solid var(--surface1); background: var(--surface0);
+  color: var(--subtext); font-size: 12px; cursor: pointer; font-family: inherit; }
+mg-upscale-panel[inline] { margin-top: 0 !important; }
+@media (prefers-reduced-motion: reduce) {
+  .idm-sheet-scrim, .idm-sheet-slab { transition: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .idm-root, .idm-frame, .idm-title, .idm-rule > span { animation: none; }
+}

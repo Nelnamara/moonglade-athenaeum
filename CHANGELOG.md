@@ -17,6 +17,36 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Image Details Mobile — ships, plus a real Upscale race condition caught on the real
+  account and fixed before shipping.** `ImageDetailsMobile.jsx` reuses the exact same data
+  and Upscale math as the already-shipped desktop `DetailsView.jsx`, via a new shared
+  `useImageDetails.js` hook (same extraction pattern used throughout this pass). Real entry
+  point: tapping a gallery tile outside select-mode now opens this real screen instead of
+  the earlier "coming later" toast.
+  While unifying the shared code, two real desktop bugs surfaced and got fixed as a
+  byproduct: desktop's own Upscale button was silently dead (the host div only rendered
+  once `upscaleOpen` was already true, but the mount effect that creates the panel runs
+  once, right after the *first* commit, while it's still false), and Prev/Next while
+  Upscale was open left the panel visibly open and bound to the old image. Both fixed to
+  match `Lightbox.jsx`'s own already-correct pattern.
+  **A third instance of the identical bug class was caught live against the real account,
+  after the above two were already "fixed" and independently reviewed:** `ImageDetailsMobile.jsx`
+  has an early-return for its loading state before the real JSX (with the Upscale host div)
+  ever paints. On a genuine network fetch, the mount-once effect's first run lands during
+  that loading branch — `upHost.current` is null, the effect bails, and with an empty
+  dependency array it never gets a second try once the real content finally renders. This
+  is exactly why it survived the build and review's own checks: both used a stubbed/instant
+  fetch, which resolved fast enough to dodge the race entirely — a real network round-trip
+  against the real account exposed it immediately. Fixed by keying the mount effect off
+  `row` instead of mounting once, so it re-fires the moment the loaded content actually
+  exists; the existing `firstChild` guard keeps every later re-render a no-op.
+  Verified live against the real account (not a stub): Details opens with real ledger/tags/
+  stars data, the Upscale panel now genuinely opens with real method descriptions and cost
+  math on both mobile and desktop, and Prev/Next correctly closes it rather than leaving it
+  open on stale data. One real, previously-undisclosed gap closed in the same pass: mobile's
+  ledger was missing the conditional **Clip Skip** row desktop shows; added, matching
+  desktop's own conditional-render rule. Full suite green (1539).
+
 - **Mobile pass, surface 3 (part 8): real content for 4 of the hamburger menu's 6
   destinations — My Art, Collection Health, Import, and Contests.** Part 7 shipped the
   push-screen mechanism with an honest placeholder per destination; this increment
