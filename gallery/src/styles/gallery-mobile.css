@@ -28,6 +28,8 @@
 @keyframes glmFadeOut { from { opacity: 1; } to { opacity: 0; } }
 @keyframes glmRise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
 @keyframes glmPress { from { transform: scale(1); } to { transform: scale(.96); } }
+@keyframes glmScreenIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes glmScreenOut { from { transform: translateX(0); } to { transform: translateX(100%); } }
 
 .glm-stage { position: fixed; inset: 0; display: flex; flex-direction: column;
   background: var(--base); color: var(--text); overflow: hidden;
@@ -241,6 +243,32 @@
 .glm-menu-item.soon { color: var(--overlay0); }
 .glm-menu-icon { display: inline-block; width: 22px; flex: none; }
 
+/* ---- full-screen push chrome (MobileScreen.jsx) -- the shared "screen"
+   primitive, alongside .glm-sheet's shared "sheet" primitive above. Absolutely
+   positioned inset:0 within the nearest positioned ancestor -- CreateMobile.jsx
+   mounts it as a sibling of .cm-pad inside .glm-tab (unpositioned), so it
+   resolves against .glm-body (position:relative, already sized to exactly the
+   hero-to-navbar gap) the SAME way .cm-videowrap already does (create-
+   mobile.css) -- covering the Create tab's own content area, not the DC's
+   literal whole-844px-frame assumption (the hero/credits chip and the bottom
+   tab bar stay visible/reachable underneath, matching this file's own "real
+   viewport, not the DC's iOS-frame sim" rule stated up top). z-index 32 sits
+   above .glm-sheet/.glm-scrim (30/31) and below .cm-modelwrap .mfly (331, so
+   the model/LoRA flyout -- reachable from the main composer, not duplicated
+   inside Advanced -- still layers correctly if opened while a screen is up). */
+.glm-screen { position: absolute; inset: 0; z-index: 32; background: var(--base);
+  display: flex; flex-direction: column;
+  animation: glmScreenIn .22s ease both; }
+.glm-screen.closing { animation: glmScreenOut .22s ease both; }
+.glm-screen-head { flex: none; display: flex; align-items: center; gap: 8px;
+  padding: 12px 13px; border-bottom: 1px solid var(--surface1); }
+.glm-screen-back { flex: none; width: 26px; height: 26px; display: grid; place-items: center;
+  font-size: 20px; line-height: 1; color: var(--overlay0); background: none; border: none;
+  cursor: pointer; padding: 0; font-family: inherit; }
+.glm-screen-title { font-family: Georgia, "Times New Roman", serif; font-size: 15px; color: var(--text); }
+.glm-screen-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 13px; }
+
 /* ---- Create/Control placeholders (this increment's honest soon-state, matching
    the app's existing soon conventions rather than inventing a new one) ---- */
 .glm-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -250,5 +278,5 @@
 .glm-placeholder-note { font-size: 12px; line-height: 1.6; color: var(--subtext); max-width: 260px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .glm-iconbtn, .glm-hero-flavour, .glm-scrim, .glm-sheet, .glm-tile.pressing { animation: none; }
+  .glm-iconbtn, .glm-hero-flavour, .glm-scrim, .glm-sheet, .glm-tile.pressing, .glm-screen { animation: none; }
 }

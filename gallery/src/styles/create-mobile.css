@@ -139,15 +139,47 @@
   color: #fff; text-shadow: 0 0 3px rgba(0, 0, 0, .85); background: none; border: none;
   padding: 2px; cursor: pointer; font-family: inherit; }
 
-/* ---- Advanced row -- its own screen, deferred to a later increment. An
-   honest tap-to-disclose row (same soonToast convention AppMobile.jsx's Menu
-   items already use), not a dead tap or a half-built screen. ---- */
+/* ---- Advanced row -- opens the real Advanced screen (MobileScreen.jsx +
+   ImageAdvanced/EditAdvanced below), not a soonToast() stub anymore. ---- */
 .cm-advrow { display: block; width: 100%; box-sizing: border-box; text-align: center;
   font-size: 11px; padding: 6px 8px; border-radius: 10px; cursor: pointer; font-family: inherit;
   color: var(--text);
   background: linear-gradient(180deg, rgba(255,255,255,.11), rgba(0,0,0,.16)),
     color-mix(in srgb, var(--surface0) 88%, #000);
   border: 1px solid rgba(255,255,255,.14); margin: 10px 0 11px; }
+
+/* ---- Advanced screen (MobileScreen.jsx host, CreateMobile.jsx's
+   ImageAdvanced/EditAdvanced) -- reuses .cm-lbl/.cm-chiprow/.cm-chip/.cm-hint/
+   .cm-ta/.cm-select/.cm-range wherever the main composer already established
+   the look (size chips mirror the aspect chips, resolution/quality chips
+   mirror the boosters row, seed reuses the same box .cm-select already
+   defines); this block only adds what's genuinely NEW to Advanced: section
+   subheads, the per-LoRA weight row, custom W/H side-by-side inputs, and the
+   slider+value row shape steps/CFG share. ---- */
+.cm-subhead { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--lavender); margin: 16px 0 8px; }
+.cm-subhead:first-child { margin-top: 2px; }
+
+.cm-adv-lorarow { margin-bottom: 10px; }
+.cm-adv-lorahead { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 11.5px; color: var(--text); margin-bottom: 3px; }
+.cm-adv-lorahead b { font-variant-numeric: tabular-nums; color: var(--mauve); }
+
+.cm-customrow { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+.cm-customrow span { font-size: 11px; color: var(--overlay0); }
+.cm-custominput { width: 68px; box-sizing: border-box; border-radius: 9px; padding: 6px 8px;
+  font-size: 11.5px; color: var(--text); background: var(--base); border: 1px solid var(--surface1);
+  font-family: inherit; text-align: center; }
+.cm-custominput.on { border-color: var(--lavender); }
+
+.cm-input { width: 100%; box-sizing: border-box; border-radius: 9px; padding: 7px 9px;
+  font-size: 11.5px; color: var(--text); background: var(--base); border: 1px solid var(--surface1);
+  font-family: inherit; margin-bottom: 8px; }
+
+.cm-adv-sliderrow { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+.cm-adv-sliderrow .cm-lbl { margin: 0; flex: none; width: 34px; }
+.cm-adv-sliderval { flex: none; font-size: 11px; color: var(--mauve); font-variant-numeric: tabular-nums;
+  width: 30px; text-align: right; }
 
 .cm-cost { display: block; margin: 0 0 4px; }
 .cm-gatenote { font-size: 11px; color: var(--overlay0); margin: 0 0 8px; text-align: center; }
