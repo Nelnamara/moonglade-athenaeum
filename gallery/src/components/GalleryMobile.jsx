@@ -22,14 +22,12 @@ import "../styles/gallery-mobile.css";
    ENTRY POINT (2026-08-03): a plain tap on a tile OUTSIDE select mode now
    opens the real Image Details Mobile screen (ImageDetailsMobile.jsx, wired
    by AppMobile.jsx via the onOpenDetails prop) instead of the disclosed
-   "coming next" toast this used to show. Lightbox Mobile.dc.html is still its
-   OWN separate, not-yet-built mobile design file (one of the 7 the mobile
-   pass's own scope decision named, docs/DECISIONS.md 2026-08-02) -- reusing
-   desktop Lightbox.jsx unadapted would cram a 7-button toolbar + filmstrip
-   built for a wide viewport into 390px, which is exactly the "close enough"
-   shortcut this increment's brief forbids -- so the "⛶ open lightbox" glyph
-   on Details' own top bar still surfaces that same honest toast; only the
-   PLAIN TAP's destination changed, from a toast to a real screen. */
+   "coming next" toast this used to show. Lightbox Mobile.dc.html (a separate
+   mobile design file) is now ALSO real, as its own dedicated build
+   (LightboxMobile.jsx) -- reached from Details' own "⛶ open lightbox" glyph,
+   not from a plain grid tap (that stays real Details, per this file's own
+   established gesture layer below). See AppMobile.jsx's own header comment
+   for the lbIndex/detailsFor wiring. */
 
 const MEDIA_PILLS = [["", "All"], ["image", "Images"], ["video", "Videos"]];
 const SORT_OPTS = [

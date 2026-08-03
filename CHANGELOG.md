@@ -17,6 +17,33 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Lightbox Mobile — real swipe-navigate, real data, and the mount-race lesson applied
+  proactively this time.** `LightboxMobile.jsx` is the real destination for Image Details
+  Mobile's "full-screen viewer" button (previously a "coming next" toast). Deliberately
+  does **not** reuse `useImageDetails.js` — that hook's eager full-row fetch and eager
+  Upscale mount would be a real regression on a fast swipe/filmstrip surface. Instead it
+  mirrors desktop `Lightbox.jsx`'s own already-correct pattern exactly: chrome fields read
+  straight off the same `items` array the Gallery tab already has loaded, and only the
+  prompt slab's negative/LoRA fields are lazily fetched (and cached) on demand, matching
+  desktop's identical mechanism field-for-field.
+  Real swipe gesture (Pointer Events, drag-follow at 0.4× damping, strict >60px commit
+  threshold, matching the design's own values exactly — distinct from desktop's own
+  0.35×/70px) — verified live against the real account: a real drag genuinely advanced the
+  index from "1 OF 100" to "2 OF 100," not just in an isolated harness.
+  **A real mount-race risk — same family as Image Details' Upscale bug — was found and
+  fixed proactively this time, during the build, not discovered afterward:** stepping across
+  a page boundary can leave a transient render where the loaded page has already changed but
+  the index hasn't caught up yet, so the component's `if (!it) return null` guard fires and
+  tears down the Upscale host div. Desktop's own `Lightbox.jsx` mounts that panel with a
+  one-shot `[]`-keyed effect — safe only because desktop's own step-across-a-boundary path
+  doesn't hit the same transient window in practice, but genuinely fragile if it ever does.
+  This build keys the mobile effect on `[mid]` instead, so any real navigation reliably
+  re-creates the panel on the very next valid render. Desktop's own latent version of this
+  risk was deliberately **not** patched (out of scope for this surface) — flagged separately
+  for its own look rather than silently changed.
+  Full suite green (1539); real Upscale panel confirmed opening correctly on the real
+  account too, same as Image Details Mobile.
+
 - **Image Details Mobile — ships, plus a real Upscale race condition caught on the real
   account and fixed before shipping.** `ImageDetailsMobile.jsx` reuses the exact same data
   and Upscale math as the already-shipped desktop `DetailsView.jsx`, via a new shared

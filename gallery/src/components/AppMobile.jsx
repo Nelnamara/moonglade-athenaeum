@@ -6,6 +6,7 @@ import useEditGenerate from "../gen/useEditGenerate.js";
 import { fetchAccount, fetchCollections, rateImage } from "../api.js";
 import GalleryMobile from "./GalleryMobile.jsx";
 import ImageDetailsMobile from "./ImageDetailsMobile.jsx";
+import LightboxMobile from "./LightboxMobile.jsx";
 import CreateMobile, { MODES } from "./CreateMobile.jsx";
 import VideoMode from "./VideoMode.jsx";
 import ControlMobile from "./ControlMobile.jsx";
@@ -174,7 +175,21 @@ import "../styles/create-mobile.css";
    not nested inside any one tab's own content. See ImageDetailsMobile.jsx's
    own header comment for the full scope disclosure (what's real vs. a
    disclosed placeholder) and useImageDetails.js for the shared data/action
-   hook it and desktop's DetailsView.jsx both now consume. */
+   hook it and desktop's DetailsView.jsx both now consume.
+
+   LIGHTBOX MOBILE (2026-08-03) -- Details' own "⛶ full-screen viewer" topbar
+   button now opens the real LightboxMobile.jsx instead of its own "coming
+   next" toast. `lbIndex` is lifted HERE for the identical reason `detailsFor`
+   is (must survive/cover the whole shell), and is kept MUTUALLY EXCLUSIVE
+   with `detailsFor` -- exactly mirroring desktop App.jsx's own lbIndex/
+   detailsFor pairing (opening either one nulls the other). openLightbox
+   resolves a media_id to its index in the SAME lib.items array Details/
+   Gallery already share (Lightbox itself, like desktop's, reads chrome
+   straight off that array -- see LightboxMobile.jsx's own header comment);
+   openDetailsFromLightbox is the reverse trip, from the Lightbox's own
+   "Details ›" pill. Real cross-page stepping reuses the SAME lib.page/
+   lib.pages/lib.load this component already threads through for other
+   purposes -- no second pagination copy. */
 
 const MENU_ITEMS = [
   { icon: "📈", label: "My Art", screen: "myart" },
@@ -244,6 +259,32 @@ export default function AppMobile({ boot }) {
   const [detailsFor, setDetailsFor] = useState(null);
   const openDetails = (mid) => setDetailsFor(mid);
   const closeDetails = () => setDetailsFor(null);
+
+  // Lightbox Mobile (2026-08-03) -- mutually exclusive with detailsFor, see
+  // header comment. openLightbox is only ever called from Details (its own
+  // ⛶ button), so `mid` is always present in the currently-loaded lib.items;
+  // if it somehow isn't (a filter reloaded out from under an open Details
+  // screen), this stays an honest toast rather than opening on a wrong index.
+  const [lbIndex, setLbIndex] = useState(null);
+  const openLightbox = (mid) => {
+    const idx = lib.items.findIndex((it) => it.media_id === mid);
+    if (idx < 0) {
+      if (window.Toast) {
+        window.Toast.show({
+          title: "Full-screen viewer",
+          msg: "This image isn't in the currently loaded page anymore, so it can't open full-screen.",
+        });
+      }
+      return;
+    }
+    setDetailsFor(null);
+    setLbIndex(idx);
+  };
+  const closeLightbox = () => setLbIndex(null);
+  const openDetailsFromLightbox = (mid) => {
+    setLbIndex(null);
+    openDetails(mid);
+  };
 
   // Same advParams shape App.jsx's own DetailsView mount builds (mirrors
   // /api/next/library's own filter params) -- so Prev/Next and "Find similar
@@ -477,6 +518,18 @@ export default function AppMobile({ boot }) {
           onDeleted={() => { closeDetails(); lib.load(1, true); }}
           onFilterByModel={filterByModelFromDetails} onFilterByBatch={filterByBatchFromDetails}
           advParams={detailsAdvParams} items={lib.items}
+          onOpenLightbox={openLightbox}
+        />
+      )}
+
+      {/* Lightbox Mobile -- a fixed, full-viewport overlay above the hero/tab
+          bar, mutually exclusive with ImageDetailsMobile (see header comment). */}
+      {lbIndex != null && (
+        <LightboxMobile
+          items={lib.items} index={lbIndex} setIndex={setLbIndex}
+          onClose={closeLightbox} onRate={rate}
+          page={lib.page} pages={lib.pages} loadPage={lib.load}
+          onOpenDetails={openDetailsFromLightbox}
         />
       )}
 

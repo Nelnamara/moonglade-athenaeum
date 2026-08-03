@@ -39,13 +39,15 @@ import "../styles/overlays.css";
       data already computes -- real, already-fetched numbers the design's
       static mock never had to address, not invented.
    5. ROW CLICK-THROUGH (the one gap): MyArtOverlay.jsx wires a row tap to
-      open that post's real Details view (onOpenPost). No mobile Details/
-      Lightbox surface exists ANYWHERE in this app yet -- GalleryMobile.jsx's
-      own tap handler still shows a "Lightbox Mobile — coming next" toast.
-      Matching that same disclosed-gap treatment (see Health's Duplicate
-      Review link), rows here are NOT clickable this pass -- wiring a tap to
-      a destination that doesn't exist would be worse than the design's own
-      static row, not better. */
+      open that post's real Details view (onOpenPost). Mobile Details/
+      Lightbox surfaces exist now (ImageDetailsMobile.jsx/LightboxMobile.jsx),
+      but this screen has no route to either from here (it isn't handed an
+      onOpenDetails prop, and its own media_id shape isn't confirmed against
+      the Gallery tab's loaded items array). Matching the same disclosed-gap
+      treatment (see Health's Duplicate Review link), rows here are NOT
+      clickable this pass -- wiring a tap to a destination this screen can't
+      actually reach yet would be worse than the design's own static row, not
+      better. */
 
 export default function MyArtMobile() {
   const { d, err, items, stats, maxViews } = useMyArt();
