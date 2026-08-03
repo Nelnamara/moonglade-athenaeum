@@ -18,6 +18,7 @@ import MyArtMobile from "./MyArtMobile.jsx";
 import HealthMobile from "./HealthMobile.jsx";
 import ImportMobile from "./ImportMobile.jsx";
 import ContestsMobile from "./ContestsMobile.jsx";
+import FolioMobile from "./FolioMobile.jsx";
 import "../styles/gallery-mobile.css";
 import "../styles/create-mobile.css";
 
@@ -101,10 +102,21 @@ import "../styles/create-mobile.css";
        own Fixer sub-tab render a soon-state note -- see CreateMobile.jsx's
        own header comment for the full disclosure of what's deferred there
        and why.
-     - The hero's gold Folio icon is its OWN separate mobile design file
-       (Folio Mobile.dc.html, not built this pass) -- tapping it surfaces a
-       disclosing toast via window.Toast (mg-notify.js, already loaded on
-       this page) instead of a dead tap.
+
+   FOLIO MOBILE (2026-08-03) -- the hero's gold "🌙 Folio of Honors" icon now
+   opens the real FolioMobile.jsx full-page destination instead of the
+   disclosing "coming later" toast it showed before this pass. `folioOpen`
+   is lifted HERE for the identical reason detailsFor/lbIndex/cmode/VideoMode
+   are: it must survive being opened from the hero (reachable from every tab)
+   and cover the WHOLE shell, so it renders as a fixed overlay sibling below,
+   same level as ImageDetailsMobile/LightboxMobile -- see FolioMobile.jsx's
+   own header comment for why that's a dedicated full-screen presentation
+   rather than MobileScreen.jsx's generic push chrome, and for the full list
+   of real-data deviations from Folio Mobile.dc.html disclosed there. Data/
+   narrator/glitch-reveal/replay logic all live in useFolio.js (lifted out of
+   FolioOverlay.jsx the SAME day, desktop refactored to consume it too) --
+   FolioMobile gets the identical engine, not a second fetch or a second,
+   drifting celebration implementation.
 
    MENU NAVIGATION MECHANISM (2026-08-03) -- the Menu sheet's six destinations
    (My Art / Publish / Train / Import / Contests / Health) now push a REAL
@@ -266,6 +278,13 @@ export default function AppMobile({ boot }) {
   // if it somehow isn't (a filter reloaded out from under an open Details
   // screen), this stays an honest toast rather than opening on a wrong index.
   const [lbIndex, setLbIndex] = useState(null);
+
+  // Folio Mobile (2026-08-03) -- lifted HERE for the identical reason
+  // detailsFor/lbIndex are: reachable from the hero on every tab, must cover
+  // the whole shell. See header comment.
+  const [folioOpen, setFolioOpen] = useState(false);
+  const openFolio = () => setFolioOpen(true);
+  const closeFolio = () => setFolioOpen(false);
   const openLightbox = (mid) => {
     const idx = lib.items.findIndex((it) => it.media_id === mid);
     if (idx < 0) {
@@ -376,10 +395,6 @@ export default function AppMobile({ boot }) {
     await refreshCollections();
   };
 
-  const soonToast = (label) => {
-    if (window.Toast) window.Toast.show({ title: label, msg: "Its own mobile pass — coming later." });
-  };
-
   // NavSpine.jsx's own logout(), ported verbatim (same /api/logout JSON POST +
   // cache-purge-then-navigate shape -- see that file's header comment for why).
   const logOut = () => {
@@ -407,7 +422,7 @@ export default function AppMobile({ boot }) {
         <div className="glm-hero-scrim" aria-hidden="true" />
         <div className="glm-hero-icons">
           <button type="button" className="glm-iconbtn glm-iconbtn-gold" title="Folio of Honors"
-            onClick={() => soonToast("Folio of Honors")}>🌙</button>
+            onClick={openFolio}>🌙</button>
           <button type="button" className="glm-iconbtn glm-iconbtn-teal" title="The Loom — video storyboard"
             onClick={() => setSheet("loom")}>▮</button>
           <button type="button" className="glm-iconbtn glm-iconbtn-lav" title="More"
@@ -532,6 +547,11 @@ export default function AppMobile({ boot }) {
           onOpenDetails={openDetailsFromLightbox}
         />
       )}
+
+      {/* Folio Mobile -- a fixed, full-viewport overlay above the hero/tab
+          bar, same level as ImageDetailsMobile/LightboxMobile (see header
+          comment for why it's not nested in MobileScreen). */}
+      {folioOpen && <FolioMobile onClose={closeFolio} />}
 
       <MobileSheet open={sheet === "loom"} closing={closing} onClose={closeSheet} title="THE LOOM">
         <div className="glm-loom-note">
