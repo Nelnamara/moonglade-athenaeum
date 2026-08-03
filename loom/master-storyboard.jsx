@@ -2807,7 +2807,7 @@ const LOOM_MOBILE_STYLES = `
 .lm-actname{font-family:Georgia,serif;font-style:italic;font-size:14px;color:var(--text);}
 .lm-actcount{font-size:10px;color:var(--overlay0);}
 .lm-addshot{font-size:10.5px;font-weight:700;color:var(--accent);cursor:pointer;background:none;border:none;padding:0;}
-.lm-cardrow{display:flex;align-items:center;gap:6px;margin-bottom:7px;}
+.lm-cardrow{position:relative;display:flex;align-items:center;gap:6px;margin-bottom:7px;}
 .lm-card{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:10px;padding:8px 10px;
   border-radius:11px;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;
   text-align:left;font:inherit;color:inherit;}
@@ -3044,6 +3044,53 @@ const LOOM_MOBILE_STYLES = `
 .lm-pick-t{flex:1 1 auto;font-size:14px;font-weight:600;color:var(--text);}
 .lm-pick-body{flex:1;min-height:0;display:flex;flex-direction:column;}
 .lm-pick-body mg-model-picker{flex:1;min-height:0;}
+
+/* ---- Review & trim (fifth increment, 2026-08-03) -- opened from the board's own ▶ badge
+   on a finished shot, matching the locked design's reviewOpen/cropping/playing full-screen
+   page. Reuses .lm-gen-top/.lm-gen-back/.lm-gen-title/.lm-df-close/.lm-df-body/.lm-microlab/
+   .lm-hint/.lm-addrefbtn unchanged -- the classes below are only the ones this screen's own
+   preview/transport/scrub/trim/crop chrome genuinely needs. */
+.lm-reviewbadge{position:absolute;top:8px;left:10px;width:48px;height:48px;z-index:2;
+  display:flex;align-items:center;justify-content:center;font-size:15px;color:#fff;
+  background:rgba(0,0,0,.28);border:none;border-radius:9px;cursor:pointer;padding:0;}
+.lm-review{position:absolute;inset:0;z-index:22;background:var(--mantle);display:flex;
+  flex-direction:column;animation:lmRise .22s ease both;}
+.lm-review-previewwrap{position:relative;width:100%;aspect-ratio:16/9;border-radius:10px;
+  overflow:hidden;background:var(--base);margin-top:4px;}
+.lm-review-video{width:100%;height:100%;object-fit:contain;background:var(--base);display:block;}
+.lm-review-croprect{position:absolute;border:2px solid #fff;box-shadow:0 0 0 999px rgba(0,0,0,.45);
+  cursor:grab;touch-action:none;}
+.lm-review-crophandle{position:absolute;right:-3px;bottom:-3px;width:12px;height:12px;
+  border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5);}
+.lm-review-playbtn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:52px;height:52px;border-radius:50%;border:none;background:rgba(0,0,0,.4);color:#fff;
+  font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.lm-review-transport{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:10px;}
+.lm-review-transportbtn{width:40px;height:40px;border-radius:50%;border:1px solid var(--surface1);
+  background:var(--surface0);color:var(--text);font-size:15px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;padding:0;}
+.lm-review-transportbtn:hover{border-color:var(--accent);color:var(--accent);}
+.lm-review-scrubtrack{position:relative;height:6px;border-radius:3px;background:var(--surface1);
+  cursor:pointer;touch-action:none;margin:2px 0 4px;}
+.lm-review-scrubfill{position:absolute;top:0;left:0;height:100%;border-radius:3px;background:var(--accent);
+  pointer-events:none;}
+.lm-review-scrubhandle{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;
+  background:var(--accent);border:2px solid var(--text);transform:translate(-50%,-50%);
+  box-shadow:0 1px 4px rgba(0,0,0,.5);pointer-events:none;}
+.lm-review-trimtrack{position:relative;height:18px;border-radius:5px;background:var(--surface1);
+  margin:2px 0 4px;}
+.lm-review-trimrange{position:absolute;top:50%;transform:translateY(-50%);height:5px;border-radius:3px;
+  background:var(--accent);pointer-events:none;}
+.lm-review-trimhandle{position:absolute;top:50%;width:18px;height:18px;border-radius:5px;
+  background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5);transform:translate(-50%,-50%);
+  cursor:ew-resize;touch-action:none;}
+.lm-review-trimreadout{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--subtext);
+  margin-top:2px;}
+.lm-review-actionsrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+.lm-review-cropbtn{font:700 10.5px/1 system-ui;padding:6px 12px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--surface1);background:var(--surface1);color:var(--text);}
+.lm-review-cropbtn.on{background:color-mix(in srgb,var(--accent) 22%,transparent);
+  border-color:var(--accent);color:var(--accent);}
 `;
 
 function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, addCard, addAct, setDraft,
@@ -3055,6 +3102,10 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // functions LoomV2 already uses for its own Deep Focus/Cast&Assets/FrameSlot; threaded
   // straight through, nothing new invented.
   setCard, setAssets, addRef, setRef, delRef, storeThumb, openPick, copyShot,
+  // Fifth increment (2026-08-03): Review & trim's own "✂ Split at playhead" needs the exact
+  // same real splitCardAt-backed mutator LoomV2's own ShotPreview.onSplit already calls
+  // (useShotMutations) -- not a re-derivation of the split logic.
+  splitShot,
   // Not read by earlier increments' Generate-less screens -- lifted to App() (see LoomV2's own
   // prop-list comment) and threaded through here so a still-in-progress draft already
   // survives toggling between this view and LoomV2.
@@ -3126,6 +3177,28 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   const [dfHandoff, setDfHandoff] = useState("");
   const [castSheetOpen, setCastSheetOpen] = useState(false);
   const [castSheetTab, setCastSheetTab] = useState("cast");   // 'cast' | 'footage'
+
+  // ---- Review & trim -- fifth increment (2026-08-03), per the locked design's own
+  // reviewFor/cropping/playing state (Loom Mobile.dc.html). Opens from the board's own ▶
+  // badge on a finished shot -- purely local, ephemeral UI state (no spend, no polling),
+  // same credit-safety category as dfOpen/genOpen/castSheetOpen above. Declared here (up
+  // with this component's other early state), NOT down by `return` -- reviewLive (below,
+  // near dfLive/finishedShots) reads reviewOpen before render, and hooks can't be
+  // forward-referenced.
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewPlaying, setReviewPlaying] = useState(false);
+  const [reviewCropping, setReviewCropping] = useState(false);
+  // Real native playback state off the real <video> element (mirrors ShotPreview's own
+  // component-local `dur`/`playing` state exactly) -- NOT the design's synthetic
+  // setInterval-driven reviewFrac, which only existed because the mockup's "video" is a
+  // plain colored div with nothing to actually play.
+  const [reviewDur, setReviewDur] = useState(0);
+  const [reviewCur, setReviewCur] = useState(0);
+  const reviewVidRef = useRef(null);
+  const reviewTrimTrackRef = useRef(null);
+  const reviewTrimDragRef = useRef(null);   // "in" | "out" | null
+  const reviewCropDragRef = useRef(false);
+  const reviewScrubDragRef = useRef(false);
 
   // ---- Generate -- third increment (2026-08-03), per the locked design's own "genOpen"
   // full-screen page opened from Shot Detail's "Select in Generate →" button. On DESKTOP
@@ -3422,6 +3495,16 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   const castBudget = dfLive ? refBudget(dfLive, project, imgSrc) : null;
   const finishedShots = entries.filter((e) => e.c.resultMid);
 
+  // ---- Review & trim's own "which shot" lookup -- reuses selShot/entries.find() exactly
+  // like dfLive/genOpen's target already do, rather than a second id-tracking field (the
+  // design's own local `reviewFor`). Same live-lookup safety: a shot deleted out from under
+  // an open Review closes it instead of rendering stale data (identical to dfLive's guard
+  // a few lines above).
+  const reviewLive = reviewOpen ? entries.find((x) => x.c.id === selShot) : null;
+  if (reviewOpen && !reviewLive) { setReviewOpen(false); }
+  const reviewPatch = (fn) => reviewLive && setCard(reviewLive.a.id, reviewLive.c.id, fn);
+  const closeReview = () => { setReviewOpen(false); setReviewPlaying(false); setReviewCropping(false); };
+
   // ---- Generate screen helpers (third increment, 2026-08-03) ----
   const genTogglePal = (which) => setGenPalFor((p) => (p === which ? null : which));
   const genAppendTo = (field, term) => dfPatch((cc) => ({ ...cc, [field]: cc[field] ? cc[field] + ", " + term : term }));
@@ -3614,6 +3697,14 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                 const gs = genState[e.c.id];
                 const miss = castMissingImages(e, project, imgSrc);
                 const thumb = cardThumb(e.c);
+                // canReview mirrors the locked design's own `canReview: c.st === 'done'`
+                // (Loom Mobile.dc.html), narrowed to also require a real resultMid -- "done"
+                // and "has a real rendered clip to review" are supposed to always coincide
+                // (every status:"done" write in this file also writes resultMid in the same
+                // patch), but this stays a real, defensive AND rather than trusting that
+                // invariant silently. Reuses `st` (statusOf(e.c)), already computed above for
+                // the status pill -- one statusOf() call, not a second copy.
+                const canReview = st === "done" && !!e.c.resultMid;
                 return (
                   <div key={e.c.id} className="lm-cardrow">
                     <button type="button" className={"lm-card" + (e.c.id === selShot ? " sel" : "")}
@@ -3639,6 +3730,24 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                         </div>
                       </div>
                     </button>
+                    {/* Review & trim's own board affordance -- the locked design's ▶ badge,
+                        overlaid on the thumbnail as a SIBLING of .lm-card (never nested inside
+                        it: .lm-card is a real <button>, and a <button> inside a <button> is
+                        invalid HTML/nesting) rather than the design's own plain-div-inside-
+                        plain-div layering, which had no such constraint. Positioned via
+                        .lm-cardrow{position:relative} + absolute placement so tapping the
+                        thumbnail specifically opens Review while the rest of the card still
+                        opens Shot Detail via the real button beneath it. */}
+                    {canReview && (
+                      <button type="button" className="lm-reviewbadge"
+                        title="Review & trim this shot's rendered clip"
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          setSelShot(e.c.id); setReviewOpen(true);
+                          setReviewCropping(false); setReviewPlaying(false);
+                          setReviewDur(0); setReviewCur(0);
+                        }}>▶</button>
+                    )}
                   </div>
                 );
               })}
@@ -4321,6 +4430,234 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                 </div>
               </>
             )}
+          </div>
+        );
+      })()}
+
+      {/* ---- Review & trim -- fifth increment (2026-08-03), per the locked design's own
+          reviewFor/cropping/playing state (Loom Mobile.dc.html: search "reviewFor",
+          "_trimInMove"/"_trimOutMove"/"_cropDragMove"). Opens from the board's own real ▶
+          badge above (canReview) -- a SEPARATE top-level conditional from dfOpen/genOpen,
+          matching the design's own layout: Review opens directly off the board, never
+          nested inside Shot Detail. reviewLive/reviewPatch/closeReview are declared up with
+          this component's other hooks (Rules of Hooks -- nothing stateful may live inside
+          this IIFE). See this increment's own report for the full trace of which numbers
+          below are copied verbatim from the design's real math (the 0.05 trim min-gap, the
+          0.68 crop max, the 0.15 crop-box-half-width offset) and which one deliberate unit
+          adaptation was necessary (trimIn/trimOut are stored in ABSOLUTE SECONDS everywhere
+          else in this codebase -- ShotPreview, splitCardAt, buildDuplicateCard,
+          importedFootagePatch -- never the design's own 0..1 fraction-of-duration model, so
+          the fraction math below converts to seconds at the moment it patches the card,
+          not before). */}
+      {reviewOpen && reviewLive && (() => {
+        const c = reviewLive.c;
+        // Real native duration once the <video> below reports it (onLoadedMetadata); before
+        // that (or if it never fires -- a bad/missing file), fall back to the shot's own
+        // planned/actual duration field so the trim track never divides by zero.
+        const dur = reviewDur || durOf(c) || 0;
+        const trimIn = c.trimIn || 0;
+        const trimOut = c.trimOut != null ? c.trimOut : dur;
+        const pctOf = (s) => (dur ? Math.max(0, Math.min(100, (s / dur) * 100)) : 0);
+        const fmtT = (s) => (s || 0).toFixed(1) + "s";
+        const crop = c.crop || { x: 0.35, y: 0.35, w: 0.3, h: 0.3 };   // design's own fallback (reviewC.cropX != null ? ... : 0.35)
+
+        // ---- trim handle drag -- real getBoundingClientRect fraction math off the STATIC
+        // track (reviewTrimTrackRef), the same real pattern increment 1's reel scrub and
+        // desktop's own already-shipped ShotPreview.secAt() both use. Deliberately NOT
+        // sourced off the handle element itself the way the design's own _trimInMove/
+        // _trimOutMove read `e.currentTarget.getBoundingClientRect()`: the design binds
+        // those pointer handlers to the 18px handle div, which re-centers to the new trim
+        // position on every render, so that rect is a moving ~18px-wide target and the drag
+        // cannot work as real fraction-of-track math in a real browser -- confirmed by
+        // reading the design's own implementation, not assumed. The CLAMP FORMULAS are
+        // copied verbatim from the design's real math: outFrac - 0.05 / inFrac + 0.05 (the
+        // minimum-gap clamp), expressed here as a fraction of the real clip's native
+        // duration before being multiplied back into the seconds this codebase's trimIn/
+        // trimOut fields actually store.
+        const trimFrac = (e) => {
+          const r = reviewTrimTrackRef.current.getBoundingClientRect();
+          return r.width ? Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) : 0;
+        };
+        const trimInStart = (e) => {
+          try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+          reviewTrimDragRef.current = "in"; trimInMove(e);
+        };
+        const trimInMove = (e) => {
+          if (reviewTrimDragRef.current !== "in" || !dur) return;
+          const outFrac = trimOut / dur;
+          const newFrac = Math.max(0, Math.min(trimFrac(e), outFrac - 0.05));
+          const t = newFrac * dur;
+          reviewPatch((cc) => ({ ...cc, trimIn: t }));
+          const v = reviewVidRef.current; if (v) v.currentTime = t;
+          setReviewCur(t);
+        };
+        const trimInEnd = () => { reviewTrimDragRef.current = null; };
+        const trimOutStart = (e) => {
+          try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+          reviewTrimDragRef.current = "out"; trimOutMove(e);
+        };
+        const trimOutMove = (e) => {
+          if (reviewTrimDragRef.current !== "out" || !dur) return;
+          const inFrac = trimIn / dur;
+          const newFrac = Math.min(1, Math.max(trimFrac(e), inFrac + 0.05));
+          const t = newFrac * dur;
+          reviewPatch((cc) => ({ ...cc, trimOut: t }));
+          const v = reviewVidRef.current; if (v) v.currentTime = t;
+          setReviewCur(t);
+        };
+        const trimOutEnd = () => { reviewTrimDragRef.current = null; };
+
+        // ---- playhead scrub track -- same real fraction-of-width pattern, applied straight
+        // to the real <video>'s currentTime (seconds), matching the design's own separate
+        // "Scrub" track (playheadDragStart/Move/End), not ShotPreview's different hover-
+        // over-the-frame scrub gesture (that one belongs to desktop's own crop-draw UI).
+        const scrubFrac = (e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          return r.width ? Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) : 0;
+        };
+        const scrubTo = (e) => {
+          if (!dur) return;
+          const t = scrubFrac(e) * dur;
+          const v = reviewVidRef.current; if (v) v.currentTime = t;
+          setReviewCur(t);
+        };
+        const scrubStart = (e) => {
+          try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+          reviewScrubDragRef.current = true;
+          scrubTo(e);
+        };
+        const scrubMove = (e) => { if (reviewScrubDragRef.current) scrubTo(e); };
+        const scrubEnd = () => { reviewScrubDragRef.current = false; };
+
+        // ---- crop rectangle drag -- verbatim port of the design's own _cropFrac/
+        // _cropDragMove math: fraction is read off the STATIC preview-wrap container
+        // (e.currentTarget.parentElement), never the moving crop-rect div itself, exactly
+        // like the design already does (this one has no self-recentering bug the trim
+        // handles have, so it needed no mechanical fix -- only the port). A fixed-size
+        // (30%x30%) box you drag to reposition, matching the design's own mobile-specific
+        // crop UX exactly -- deliberately NOT desktop's ShotPreview.cropStart (which draws
+        // an arbitrary new rectangle every time); the two are different, purpose-built UIs
+        // for two different form factors, per the locked design.
+        const cropFrac = (e) => {
+          const r = e.currentTarget.parentElement.getBoundingClientRect();
+          const x = e.clientX - r.left, y = e.clientY - r.top;
+          return { x: Math.max(0, Math.min(1, x / r.width)), y: Math.max(0, Math.min(1, y / r.height)) };
+        };
+        const cropDragStart = (e) => {
+          try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+          reviewCropDragRef.current = true;
+        };
+        const cropDragMove = (e) => {
+          if (!reviewCropDragRef.current) return;
+          const f = cropFrac(e);
+          reviewPatch((cc) => ({ ...cc, crop: {
+            x: Math.max(0, Math.min(f.x - 0.15, 0.68)),
+            y: Math.max(0, Math.min(f.y - 0.15, 0.68)),
+            w: 0.3, h: 0.3,
+          } }));
+        };
+        const cropDragEnd = () => { reviewCropDragRef.current = false; };
+
+        // ---- playback -- a real <video>, real play()/pause()/timeupdate. Loops within the
+        // kept [trimIn, trimOut) range while playing, matching the design's own _togglePlay
+        // intent (its setInterval wraps back to inF on reaching outF and keeps going) --
+        // unlike desktop's ShotPreview, which pauses at the trim-out point instead. Driven
+        // by real playback events here, not a synthetic timer, because there is a real
+        // video to play.
+        const togglePlay = () => {
+          const v = reviewVidRef.current; if (!v) return;
+          if (reviewPlaying) { v.pause(); setReviewPlaying(false); return; }
+          if (v.currentTime < trimIn || v.currentTime >= trimOut) v.currentTime = trimIn;
+          v.play().catch(() => {});
+          setReviewPlaying(true);
+        };
+        const onReviewTimeUpdate = (e) => {
+          const cur = e.currentTarget.currentTime;
+          setReviewCur(cur);
+          if (reviewPlaying && trimOut > trimIn && cur >= trimOut - 0.02) {
+            e.currentTarget.currentTime = trimIn;
+          }
+        };
+        // Nudge back/forward -- the SAME real, already-shipped ±0.25s step ShotPreview's own
+        // seek() uses ("framing a split or crop"), not the design's synthetic 0.04-of-total-
+        // duration nudge (which only made sense against its own fake, interval-driven
+        // reviewFrac). Disclosed adaptation: same purpose, reusing this codebase's real,
+        // working number instead of inventing a new proportional one.
+        const nudge = (delta) => {
+          const v = reviewVidRef.current; if (!v || !dur) return;
+          if (reviewPlaying) { v.pause(); setReviewPlaying(false); }
+          const t = Math.max(0, Math.min(dur, v.currentTime + delta));
+          v.currentTime = t; setReviewCur(t);
+        };
+
+        // ---- split -- the REAL splitCardAt-backed mutator (splitShot, threaded in as a
+        // prop, exactly matching desktop's <ShotPreview onSplit={(t) => splitShot(sel, t)}>
+        // call). Same 0.15s edge guard and the SAME message text as ShotPreview's own
+        // doSplit, reused verbatim rather than inventing new copy. Matches the design's own
+        // _doSplit, which also closes Review on a successful split (`reviewFor: null`).
+        const doSplit = () => {
+          const v = reviewVidRef.current; if (!v) return;
+          const t = v.currentTime;
+          if (t > trimIn + 0.15 && t < trimOut - 0.15) { splitShot(reviewLive, t); closeReview(); }
+          else alert("Move the playhead to where you want the cut first (not at either edge).");
+        };
+
+        return (
+          <div className="lm-review">
+            <div className="lm-gen-top">
+              <button type="button" className="lm-gen-back" onClick={closeReview}>&lsaquo; {reviewLive.code}</button>
+              <span className="lm-gen-title">Review &amp; trim</span>
+              <span className="lm-fill" />
+              <button type="button" className="lm-df-close" title="Close" onClick={closeReview}>&#10005;</button>
+            </div>
+            <div className="lm-df-body">
+              <div className="lm-review-previewwrap">
+                <video key={c.id} ref={reviewVidRef} className="lm-review-video"
+                  src={"/video-file/" + c.resultMid} playsInline preload="metadata"
+                  onLoadedMetadata={(ev) => setReviewDur(ev.currentTarget.duration || 0)}
+                  onTimeUpdate={onReviewTimeUpdate}
+                  onEnded={() => setReviewPlaying(false)} />
+                {reviewCropping && (
+                  <div className="lm-review-croprect"
+                    style={{ left: crop.x * 100 + "%", top: crop.y * 100 + "%", width: crop.w * 100 + "%", height: crop.h * 100 + "%" }}
+                    onPointerDown={cropDragStart} onPointerMove={cropDragMove} onPointerUp={cropDragEnd}>
+                    <div className="lm-review-crophandle" />
+                  </div>
+                )}
+                <button type="button" className="lm-review-playbtn" onClick={togglePlay}>
+                  {reviewPlaying ? "⏸" : "▶"}
+                </button>
+              </div>
+
+              <div className="lm-review-transport">
+                <button type="button" className="lm-review-transportbtn" onClick={() => nudge(-0.25)}>⏪</button>
+                <button type="button" className="lm-review-transportbtn" onClick={togglePlay}>{reviewPlaying ? "⏸" : "▶"}</button>
+                <button type="button" className="lm-review-transportbtn" onClick={() => nudge(0.25)}>⏩</button>
+              </div>
+
+              <span className="lm-microlab">Scrub</span>
+              <div className="lm-review-scrubtrack"
+                onPointerDown={scrubStart} onPointerMove={scrubMove} onPointerUp={scrubEnd}>
+                <div className="lm-review-scrubfill" style={{ width: pctOf(reviewCur) + "%" }} />
+                <div className="lm-review-scrubhandle" style={{ left: pctOf(reviewCur) + "%" }} />
+              </div>
+
+              <span className="lm-microlab">Trim <span className="lm-hint" style={{ display: "inline", padding: 0 }}>drag the in/out handles</span></span>
+              <div className="lm-review-trimtrack" ref={reviewTrimTrackRef}>
+                <div className="lm-review-trimrange" style={{ left: pctOf(trimIn) + "%", right: (100 - pctOf(trimOut)) + "%" }} />
+                <div className="lm-review-trimhandle" style={{ left: pctOf(trimIn) + "%" }}
+                  onPointerDown={trimInStart} onPointerMove={trimInMove} onPointerUp={trimInEnd} />
+                <div className="lm-review-trimhandle" style={{ left: pctOf(trimOut) + "%" }}
+                  onPointerDown={trimOutStart} onPointerMove={trimOutMove} onPointerUp={trimOutEnd} />
+              </div>
+              <div className="lm-review-trimreadout">{fmtT(trimIn)} &rarr; {fmtT(trimOut)}</div>
+
+              <div className="lm-review-actionsrow">
+                <button type="button" className="lm-addrefbtn" style={{ whiteSpace: "nowrap" }} onClick={doSplit}>&#9986; Split at playhead</button>
+                <button type="button" className={"lm-review-cropbtn" + (reviewCropping ? " on" : "")}
+                  onClick={() => setReviewCropping((v) => !v)}>&#9974; {reviewCropping ? "Done" : "Crop"}</button>
+              </div>
+            </div>
           </div>
         );
       })()}
@@ -5478,7 +5815,7 @@ export default function App() {
           project={project} entries={entries} thumbs={thumbs} genState={genState}
           selShot={selShot} setSelShot={setSelShot} addCard={addCard} addAct={addAct} setDraft={setDraft}
           setCard={setCard} setAssets={setAssets} addRef={addRef} setRef={setRef} delRef={delRef}
-          storeThumb={storeThumb} openPick={openPick} copyShot={copyShot}
+          storeThumb={storeThumb} openPick={openPick} copyShot={copyShot} splitShot={splitShot}
           mobileUI={mobileUI} setMobileUI={setMobileUI}
           draftCard={draftCard} setDraftCard={setDraftCard} draftTarget={draftTarget} setDraftTarget={setDraftTarget}
           draftAttachedInfo={draftAttachedInfo} setDraftAttachedInfo={setDraftAttachedInfo}

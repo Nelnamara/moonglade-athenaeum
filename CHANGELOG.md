@@ -17,6 +17,20 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Loom Mobile increment 5 — Review & trim.** Crop rectangle + trim handles on a finished
+  shot, opened from a new ▶ badge on the board. `trimIn`/`trimOut`/`crop` were already real
+  fields on the card (used by desktop's `ShotPreview`, export, and split) — no schema
+  changes. Pointer-drag math traced against the locked design's own real formulas with
+  hand-computed expected values, not just "it moved" — found and correctly did not port a
+  real bug in the design's own reference implementation (its trim-handle math reads off a
+  div that moves every render; sourced off the static track instead, matching the pattern
+  already used elsewhere in this codebase for the same reason). One real Rules-of-Hooks bug
+  caught only by the live render check (static tests can't catch it), fixed same pass. Live
+  verification wrote real values onto a real shot in testing; restored via the app's own
+  existing reset controls, confirmed clean. 669/669 loom tests, 1539/1539 pytest. Only
+  Filter compare remains to complete Loom Mobile. Full reasoning in `docs/DECISIONS.md`'s
+  entry of the same date.
+
 - **Loom Mobile increment 4 — the Image/Edit/Reference/Video standalone-asset generate
   rail, completing "Generate" on mobile.** Adds Image/Edit/Reference tabs (real
   `genImage`/`genEdit`/`genRef`, no forked submit or pricing logic) alongside increment 3's

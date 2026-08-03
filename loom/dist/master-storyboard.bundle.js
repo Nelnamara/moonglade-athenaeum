@@ -2876,7 +2876,7 @@ ${"=".repeat(48)}
 .lm-actname{font-family:Georgia,serif;font-style:italic;font-size:14px;color:var(--text);}
 .lm-actcount{font-size:10px;color:var(--overlay0);}
 .lm-addshot{font-size:10.5px;font-weight:700;color:var(--accent);cursor:pointer;background:none;border:none;padding:0;}
-.lm-cardrow{display:flex;align-items:center;gap:6px;margin-bottom:7px;}
+.lm-cardrow{position:relative;display:flex;align-items:center;gap:6px;margin-bottom:7px;}
 .lm-card{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:10px;padding:8px 10px;
   border-radius:11px;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;
   text-align:left;font:inherit;color:inherit;}
@@ -3113,6 +3113,53 @@ ${"=".repeat(48)}
 .lm-pick-t{flex:1 1 auto;font-size:14px;font-weight:600;color:var(--text);}
 .lm-pick-body{flex:1;min-height:0;display:flex;flex-direction:column;}
 .lm-pick-body mg-model-picker{flex:1;min-height:0;}
+
+/* ---- Review & trim (fifth increment, 2026-08-03) -- opened from the board's own \u25B6 badge
+   on a finished shot, matching the locked design's reviewOpen/cropping/playing full-screen
+   page. Reuses .lm-gen-top/.lm-gen-back/.lm-gen-title/.lm-df-close/.lm-df-body/.lm-microlab/
+   .lm-hint/.lm-addrefbtn unchanged -- the classes below are only the ones this screen's own
+   preview/transport/scrub/trim/crop chrome genuinely needs. */
+.lm-reviewbadge{position:absolute;top:8px;left:10px;width:48px;height:48px;z-index:2;
+  display:flex;align-items:center;justify-content:center;font-size:15px;color:#fff;
+  background:rgba(0,0,0,.28);border:none;border-radius:9px;cursor:pointer;padding:0;}
+.lm-review{position:absolute;inset:0;z-index:22;background:var(--mantle);display:flex;
+  flex-direction:column;animation:lmRise .22s ease both;}
+.lm-review-previewwrap{position:relative;width:100%;aspect-ratio:16/9;border-radius:10px;
+  overflow:hidden;background:var(--base);margin-top:4px;}
+.lm-review-video{width:100%;height:100%;object-fit:contain;background:var(--base);display:block;}
+.lm-review-croprect{position:absolute;border:2px solid #fff;box-shadow:0 0 0 999px rgba(0,0,0,.45);
+  cursor:grab;touch-action:none;}
+.lm-review-crophandle{position:absolute;right:-3px;bottom:-3px;width:12px;height:12px;
+  border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5);}
+.lm-review-playbtn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:52px;height:52px;border-radius:50%;border:none;background:rgba(0,0,0,.4);color:#fff;
+  font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.lm-review-transport{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:10px;}
+.lm-review-transportbtn{width:40px;height:40px;border-radius:50%;border:1px solid var(--surface1);
+  background:var(--surface0);color:var(--text);font-size:15px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;padding:0;}
+.lm-review-transportbtn:hover{border-color:var(--accent);color:var(--accent);}
+.lm-review-scrubtrack{position:relative;height:6px;border-radius:3px;background:var(--surface1);
+  cursor:pointer;touch-action:none;margin:2px 0 4px;}
+.lm-review-scrubfill{position:absolute;top:0;left:0;height:100%;border-radius:3px;background:var(--accent);
+  pointer-events:none;}
+.lm-review-scrubhandle{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;
+  background:var(--accent);border:2px solid var(--text);transform:translate(-50%,-50%);
+  box-shadow:0 1px 4px rgba(0,0,0,.5);pointer-events:none;}
+.lm-review-trimtrack{position:relative;height:18px;border-radius:5px;background:var(--surface1);
+  margin:2px 0 4px;}
+.lm-review-trimrange{position:absolute;top:50%;transform:translateY(-50%);height:5px;border-radius:3px;
+  background:var(--accent);pointer-events:none;}
+.lm-review-trimhandle{position:absolute;top:50%;width:18px;height:18px;border-radius:5px;
+  background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5);transform:translate(-50%,-50%);
+  cursor:ew-resize;touch-action:none;}
+.lm-review-trimreadout{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--subtext);
+  margin-top:2px;}
+.lm-review-actionsrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+.lm-review-cropbtn{font:700 10.5px/1 system-ui;padding:6px 12px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--surface1);background:var(--surface1);color:var(--text);}
+.lm-review-cropbtn.on{background:color-mix(in srgb,var(--accent) 22%,transparent);
+  border-color:var(--accent);color:var(--accent);}
 `;
   function LoomMobile({
     project,
@@ -3140,6 +3187,10 @@ ${"=".repeat(48)}
     storeThumb,
     openPick,
     copyShot,
+    // Fifth increment (2026-08-03): Review & trim's own "✂ Split at playhead" needs the exact
+    // same real splitCardAt-backed mutator LoomV2's own ShotPreview.onSplit already calls
+    // (useShotMutations) -- not a re-derivation of the split logic.
+    splitShot,
     // Not read by earlier increments' Generate-less screens -- lifted to App() (see LoomV2's own
     // prop-list comment) and threaded through here so a still-in-progress draft already
     // survives toggling between this view and LoomV2.
@@ -3210,6 +3261,16 @@ ${"=".repeat(48)}
     const [dfHandoff, setDfHandoff] = useState("");
     const [castSheetOpen, setCastSheetOpen] = useState(false);
     const [castSheetTab, setCastSheetTab] = useState("cast");
+    const [reviewOpen, setReviewOpen] = useState(false);
+    const [reviewPlaying, setReviewPlaying] = useState(false);
+    const [reviewCropping, setReviewCropping] = useState(false);
+    const [reviewDur, setReviewDur] = useState(0);
+    const [reviewCur, setReviewCur] = useState(0);
+    const reviewVidRef = useRef(null);
+    const reviewTrimTrackRef = useRef(null);
+    const reviewTrimDragRef = useRef(null);
+    const reviewCropDragRef = useRef(false);
+    const reviewScrubDragRef = useRef(false);
     const [genOpen, setGenOpen] = useState(false);
     const [genPalFor, setGenPalFor] = useState(null);
     const [genOverrideFlash, setGenOverrideFlash] = useState(false);
@@ -3445,6 +3506,16 @@ ${"=".repeat(48)}
     };
     const castBudget = dfLive ? refBudget(dfLive, project, imgSrc) : null;
     const finishedShots = entries.filter((e) => e.c.resultMid);
+    const reviewLive = reviewOpen ? entries.find((x) => x.c.id === selShot) : null;
+    if (reviewOpen && !reviewLive) {
+      setReviewOpen(false);
+    }
+    const reviewPatch = (fn) => reviewLive && setCard(reviewLive.a.id, reviewLive.c.id, fn);
+    const closeReview = () => {
+      setReviewOpen(false);
+      setReviewPlaying(false);
+      setReviewCropping(false);
+    };
     const genTogglePal = (which) => setGenPalFor((p) => p === which ? null : which);
     const genAppendTo = (field, term) => dfPatch((cc) => ({ ...cc, [field]: cc[field] ? cc[field] + ", " + term : term }));
     useEffect(() => {
@@ -3639,6 +3710,7 @@ ${"=".repeat(48)}
         const gs = genState[e.c.id];
         const miss = castMissingImages(e, project, imgSrc);
         const thumb = cardThumb(e.c);
+        const canReview = st === "done" && !!e.c.resultMid;
         return /* @__PURE__ */ React.createElement("div", { key: e.c.id, className: "lm-cardrow" }, /* @__PURE__ */ React.createElement(
           "button",
           {
@@ -3652,6 +3724,23 @@ ${"=".repeat(48)}
           },
           /* @__PURE__ */ React.createElement("div", { className: "lm-thumb", style: thumb ? { backgroundImage: `url(${thumb})` } : void 0 }, !thumb && e.c.mode),
           /* @__PURE__ */ React.createElement("div", { className: "lm-textcol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-titlerow" }, /* @__PURE__ */ React.createElement("span", { className: "lm-code" }, e.code), /* @__PURE__ */ React.createElement("span", { className: "lm-cardtitle" }, e.c.title || "untitled")), /* @__PURE__ */ React.createElement("div", { className: "lm-pillrow" }, /* @__PURE__ */ React.createElement("span", { className: "lm-modepill" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lm-durpill" }, durOf(e.c), "s"), /* @__PURE__ */ React.createElement("span", { className: "lm-stpill " + st }, gs && gs.msg ? gs.msg : st), miss.length > 0 && /* @__PURE__ */ React.createElement("span", { className: "lm-warn", title: `No picture on this shot for ${miss.join(", ")} \u2014 they are cast here but cannot be referenced, so they are left out of the prompt.` }, "\u26A0 ", miss.length === 1 ? `${miss[0]}: no image` : `${miss.length} cast: no image`)))
+        ), canReview && /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lm-reviewbadge",
+            title: "Review & trim this shot's rendered clip",
+            onClick: (ev) => {
+              ev.stopPropagation();
+              setSelShot(e.c.id);
+              setReviewOpen(true);
+              setReviewCropping(false);
+              setReviewPlaying(false);
+              setReviewDur(0);
+              setReviewCur(0);
+            }
+          },
+          "\u25B6"
         ));
       }), !items.length && /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "No shots yet \u2014 tap + Shot."));
     }), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-addact", onClick: addAct }, "+ New act"), !project.acts.length && /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "No acts yet \u2014 add one below.")), dfOpen && dfLive && (() => {
@@ -4263,6 +4352,211 @@ ${"=".repeat(48)}
           style: { display: pickerKind === "lora" ? "flex" : "none" }
         }
       )))));
+    })(), reviewOpen && reviewLive && (() => {
+      const c = reviewLive.c;
+      const dur = reviewDur || durOf(c) || 0;
+      const trimIn = c.trimIn || 0;
+      const trimOut = c.trimOut != null ? c.trimOut : dur;
+      const pctOf = (s) => dur ? Math.max(0, Math.min(100, s / dur * 100)) : 0;
+      const fmtT = (s) => (s || 0).toFixed(1) + "s";
+      const crop = c.crop || { x: 0.35, y: 0.35, w: 0.3, h: 0.3 };
+      const trimFrac = (e) => {
+        const r = reviewTrimTrackRef.current.getBoundingClientRect();
+        return r.width ? Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) : 0;
+      };
+      const trimInStart = (e) => {
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch (err) {
+        }
+        reviewTrimDragRef.current = "in";
+        trimInMove(e);
+      };
+      const trimInMove = (e) => {
+        if (reviewTrimDragRef.current !== "in" || !dur) return;
+        const outFrac = trimOut / dur;
+        const newFrac = Math.max(0, Math.min(trimFrac(e), outFrac - 0.05));
+        const t = newFrac * dur;
+        reviewPatch((cc) => ({ ...cc, trimIn: t }));
+        const v = reviewVidRef.current;
+        if (v) v.currentTime = t;
+        setReviewCur(t);
+      };
+      const trimInEnd = () => {
+        reviewTrimDragRef.current = null;
+      };
+      const trimOutStart = (e) => {
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch (err) {
+        }
+        reviewTrimDragRef.current = "out";
+        trimOutMove(e);
+      };
+      const trimOutMove = (e) => {
+        if (reviewTrimDragRef.current !== "out" || !dur) return;
+        const inFrac = trimIn / dur;
+        const newFrac = Math.min(1, Math.max(trimFrac(e), inFrac + 0.05));
+        const t = newFrac * dur;
+        reviewPatch((cc) => ({ ...cc, trimOut: t }));
+        const v = reviewVidRef.current;
+        if (v) v.currentTime = t;
+        setReviewCur(t);
+      };
+      const trimOutEnd = () => {
+        reviewTrimDragRef.current = null;
+      };
+      const scrubFrac2 = (e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        return r.width ? Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) : 0;
+      };
+      const scrubTo2 = (e) => {
+        if (!dur) return;
+        const t = scrubFrac2(e) * dur;
+        const v = reviewVidRef.current;
+        if (v) v.currentTime = t;
+        setReviewCur(t);
+      };
+      const scrubStart = (e) => {
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch (err) {
+        }
+        reviewScrubDragRef.current = true;
+        scrubTo2(e);
+      };
+      const scrubMove = (e) => {
+        if (reviewScrubDragRef.current) scrubTo2(e);
+      };
+      const scrubEnd = () => {
+        reviewScrubDragRef.current = false;
+      };
+      const cropFrac = (e) => {
+        const r = e.currentTarget.parentElement.getBoundingClientRect();
+        const x = e.clientX - r.left, y = e.clientY - r.top;
+        return { x: Math.max(0, Math.min(1, x / r.width)), y: Math.max(0, Math.min(1, y / r.height)) };
+      };
+      const cropDragStart = (e) => {
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch (err) {
+        }
+        reviewCropDragRef.current = true;
+      };
+      const cropDragMove = (e) => {
+        if (!reviewCropDragRef.current) return;
+        const f = cropFrac(e);
+        reviewPatch((cc) => ({ ...cc, crop: {
+          x: Math.max(0, Math.min(f.x - 0.15, 0.68)),
+          y: Math.max(0, Math.min(f.y - 0.15, 0.68)),
+          w: 0.3,
+          h: 0.3
+        } }));
+      };
+      const cropDragEnd = () => {
+        reviewCropDragRef.current = false;
+      };
+      const togglePlay = () => {
+        const v = reviewVidRef.current;
+        if (!v) return;
+        if (reviewPlaying) {
+          v.pause();
+          setReviewPlaying(false);
+          return;
+        }
+        if (v.currentTime < trimIn || v.currentTime >= trimOut) v.currentTime = trimIn;
+        v.play().catch(() => {
+        });
+        setReviewPlaying(true);
+      };
+      const onReviewTimeUpdate = (e) => {
+        const cur = e.currentTarget.currentTime;
+        setReviewCur(cur);
+        if (reviewPlaying && trimOut > trimIn && cur >= trimOut - 0.02) {
+          e.currentTarget.currentTime = trimIn;
+        }
+      };
+      const nudge = (delta) => {
+        const v = reviewVidRef.current;
+        if (!v || !dur) return;
+        if (reviewPlaying) {
+          v.pause();
+          setReviewPlaying(false);
+        }
+        const t = Math.max(0, Math.min(dur, v.currentTime + delta));
+        v.currentTime = t;
+        setReviewCur(t);
+      };
+      const doSplit = () => {
+        const v = reviewVidRef.current;
+        if (!v) return;
+        const t = v.currentTime;
+        if (t > trimIn + 0.15 && t < trimOut - 0.15) {
+          splitShot(reviewLive, t);
+          closeReview();
+        } else alert("Move the playhead to where you want the cut first (not at either edge).");
+      };
+      return /* @__PURE__ */ React.createElement("div", { className: "lm-review" }, /* @__PURE__ */ React.createElement("div", { className: "lm-gen-top" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-gen-back", onClick: closeReview }, "\u2039 ", reviewLive.code), /* @__PURE__ */ React.createElement("span", { className: "lm-gen-title" }, "Review & trim"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-df-close", title: "Close", onClick: closeReview }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "lm-df-body" }, /* @__PURE__ */ React.createElement("div", { className: "lm-review-previewwrap" }, /* @__PURE__ */ React.createElement(
+        "video",
+        {
+          key: c.id,
+          ref: reviewVidRef,
+          className: "lm-review-video",
+          src: "/video-file/" + c.resultMid,
+          playsInline: true,
+          preload: "metadata",
+          onLoadedMetadata: (ev) => setReviewDur(ev.currentTarget.duration || 0),
+          onTimeUpdate: onReviewTimeUpdate,
+          onEnded: () => setReviewPlaying(false)
+        }
+      ), reviewCropping && /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          className: "lm-review-croprect",
+          style: { left: crop.x * 100 + "%", top: crop.y * 100 + "%", width: crop.w * 100 + "%", height: crop.h * 100 + "%" },
+          onPointerDown: cropDragStart,
+          onPointerMove: cropDragMove,
+          onPointerUp: cropDragEnd
+        },
+        /* @__PURE__ */ React.createElement("div", { className: "lm-review-crophandle" })
+      ), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-review-playbtn", onClick: togglePlay }, reviewPlaying ? "\u23F8" : "\u25B6")), /* @__PURE__ */ React.createElement("div", { className: "lm-review-transport" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-review-transportbtn", onClick: () => nudge(-0.25) }, "\u23EA"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-review-transportbtn", onClick: togglePlay }, reviewPlaying ? "\u23F8" : "\u25B6"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-review-transportbtn", onClick: () => nudge(0.25) }, "\u23E9")), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Scrub"), /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          className: "lm-review-scrubtrack",
+          onPointerDown: scrubStart,
+          onPointerMove: scrubMove,
+          onPointerUp: scrubEnd
+        },
+        /* @__PURE__ */ React.createElement("div", { className: "lm-review-scrubfill", style: { width: pctOf(reviewCur) + "%" } }),
+        /* @__PURE__ */ React.createElement("div", { className: "lm-review-scrubhandle", style: { left: pctOf(reviewCur) + "%" } })
+      ), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Trim ", /* @__PURE__ */ React.createElement("span", { className: "lm-hint", style: { display: "inline", padding: 0 } }, "drag the in/out handles")), /* @__PURE__ */ React.createElement("div", { className: "lm-review-trimtrack", ref: reviewTrimTrackRef }, /* @__PURE__ */ React.createElement("div", { className: "lm-review-trimrange", style: { left: pctOf(trimIn) + "%", right: 100 - pctOf(trimOut) + "%" } }), /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          className: "lm-review-trimhandle",
+          style: { left: pctOf(trimIn) + "%" },
+          onPointerDown: trimInStart,
+          onPointerMove: trimInMove,
+          onPointerUp: trimInEnd
+        }
+      ), /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          className: "lm-review-trimhandle",
+          style: { left: pctOf(trimOut) + "%" },
+          onPointerDown: trimOutStart,
+          onPointerMove: trimOutMove,
+          onPointerUp: trimOutEnd
+        }
+      )), /* @__PURE__ */ React.createElement("div", { className: "lm-review-trimreadout" }, fmtT(trimIn), " \u2192 ", fmtT(trimOut)), /* @__PURE__ */ React.createElement("div", { className: "lm-review-actionsrow" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-addrefbtn", style: { whiteSpace: "nowrap" }, onClick: doSplit }, "\u2702 Split at playhead"), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "lm-review-cropbtn" + (reviewCropping ? " on" : ""),
+          onClick: () => setReviewCropping((v) => !v)
+        },
+        "\u26F6 ",
+        reviewCropping ? "Done" : "Crop"
+      ))));
     })());
   }
   function useProjectStore(setSelShot) {
@@ -5394,6 +5688,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         storeThumb,
         openPick,
         copyShot,
+        splitShot,
         mobileUI,
         setMobileUI,
         draftCard,

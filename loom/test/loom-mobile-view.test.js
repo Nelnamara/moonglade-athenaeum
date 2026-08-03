@@ -318,27 +318,134 @@ describe("Frame picker: the shared, already-real gallery picker -- not a fabrica
   });
 });
 
-describe("scope discipline: Review & trim / Filter compare / Fixer are still NOT built", () => {
-  test("no Review & trim, Filter-compare, or Fixer UI leaked into LoomMobile", () => {
-    // "Generate reference image" and "Edit instruction" are now REAL (fourth increment's own
-    // scope, asserted positively below) -- removed from this negative list on purpose, not an
-    // oversight. Everything else here remains a later increment: Review & trim and Filter
-    // compare (the locked design's own "Enhance" Edit sub-tab, openFilterCompare/
-    // filterCompareOpen) outright, plus Fixer (the locked design's OTHER Edit sub-tab,
-    // face/hand touch-up) -- deliberately excluded even though this increment DOES build Edit,
-    // because desktop's own real Edit tab (LoomV2, genEdit/genEditState) has no Fixer mode at
-    // all: only the mockup invents one, so building it here would be forked functionality with
-    // no real underlying function to call, not parity (disclosed in this increment's report).
-    for (const phrase of ["Review & trim", "Art filters", "Open filters", "Fixer", "Fix face", "Fix hand", "filterCompareOpen", "fixKind"]) {
+describe("scope discipline: Filter compare / Fixer are still NOT built (Review & trim now IS)", () => {
+  test("no Filter-compare or Fixer UI leaked into LoomMobile", () => {
+    // "Generate reference image" and "Edit instruction" (fourth increment) and "Review &
+    // trim" (fifth increment, asserted positively below via its own JSX text "Review &amp;
+    // trim") are now REAL -- removed from this negative list on purpose, not an oversight.
+    // Everything still checked here remains a later increment: Filter compare (the locked
+    // design's own "Enhance" Edit sub-tab, openFilterCompare/filterCompareOpen) outright,
+    // plus Fixer (the locked design's OTHER Edit sub-tab, face/hand touch-up) -- deliberately
+    // excluded even though the fourth increment built Edit, because desktop's own real Edit
+    // tab (LoomV2, genEdit/genEditState) has no Fixer mode at all: only the mockup invents
+    // one, so building it here would be forked functionality with no real underlying
+    // function to call, not parity (disclosed in that increment's own report).
+    for (const phrase of ["Art filters", "Open filters", "Fixer", "Fix face", "Fix hand", "filterCompareOpen", "fixKind"]) {
       assert.ok(!loomMobileSrc.includes(phrase),
         `LoomMobile should not yet contain "${phrase}" -- that belongs to a later increment or was never real`);
     }
   });
 
-  test("Shot Detail / Cast & assets / Frame picker copy NOW DOES exist (prior increment's scope)", () => {
+  test("Shot Detail / Cast & assets / Frame picker / Review & trim copy NOW DOES exist (prior increments' scope)", () => {
     assert.ok(loomMobileSrc.includes("Cast &amp; assets"), "expected the Cast & assets sheet's own tab label to exist now");
     assert.ok(loomMobileSrc.includes("Other references &amp; @tags"), "expected Shot Detail's real references section to exist now");
     assert.ok(loomMobileSrc.includes("Music / audio cue"), "expected Shot Detail's audio-cue field to exist now");
+    assert.ok(loomMobileSrc.includes("Review &amp; trim"), "expected Review & trim's own screen title to exist now (fifth increment)");
+  });
+});
+
+// Fifth increment (2026-08-03): Review & trim, per the locked design's own reviewFor/
+// cropping/playing state (Loom Mobile.dc.html -- see its own _trimInMove/_trimOutMove/
+// _cropDragMove/_doSplit/_togglePlay implementations). A crop rectangle dragged via real
+// pointer events, two trim handles on a track below, a playhead scrub track, and a real
+// <video> preview -- opened from the board's own real ▶ badge on a finished shot. Filter
+// compare (the locked design's next and final screen) remains out of scope, asserted above.
+describe("Review & trim: the board's own real ▶ affordance opens it on a finished shot", () => {
+  test("canReview is the real, defensive statusOf(c)+resultMid check, not the mockup's bare c.st === 'done'", () => {
+    assert.match(loomMobileSrc, /const canReview = st === "done" && !!e\.c\.resultMid;/);
+  });
+
+  test("the badge is a real sibling <button>, never nested inside the .lm-card <button> beneath it", () => {
+    assert.match(loomMobileSrc, /\{canReview && \(\s*<button type="button" className="lm-reviewbadge"/);
+  });
+
+  test("tapping the badge selects the shot and opens Review, resetting the prior shot's local playback/crop state", () => {
+    assert.match(loomMobileSrc,
+      /setSelShot\(e\.c\.id\); setReviewOpen\(true\);\s*\n\s*setReviewCropping\(false\); setReviewPlaying\(false\);\s*\n\s*setReviewDur\(0\); setReviewCur\(0\);/);
+  });
+});
+
+describe("Review & trim: real data, real live-lookup safety (mirrors dfLive exactly)", () => {
+  test("reviewLive reuses selShot/entries.find() -- no second 'which shot' id invented (the design's own local reviewFor)", () => {
+    assert.match(loomMobileSrc, /const reviewLive = reviewOpen \? entries\.find\(\(x\) => x\.c\.id === selShot\) : null;/);
+  });
+
+  test("a stale reference (the shot vanished out from under it) closes Review instead of rendering blank", () => {
+    assert.match(loomMobileSrc, /if \(reviewOpen && !reviewLive\) \{ setReviewOpen\(false\); \}/);
+  });
+
+  test("the real <video> element points at this shot's actual rendered clip, the same /video-file/ route ShotPreview/SequencePlayer already use", () => {
+    assert.match(loomMobileSrc, /src=\{"\/video-file\/" \+ c\.resultMid\}/);
+  });
+
+  test("trimIn/trimOut/crop are the REAL, already-existing card fields (loom-mutations.js: buildDuplicateCard/importedFootagePatch/splitCardAt; loom-core.js: buildExportClips) -- nothing new was added to the data model", () => {
+    assert.match(loomMobileSrc, /const trimIn = c\.trimIn \|\| 0;/);
+    assert.match(loomMobileSrc, /const trimOut = c\.trimOut != null \? c\.trimOut : dur;/);
+    assert.match(loomMobileSrc, /const crop = c\.crop \|\| \{ x: 0\.35, y: 0\.35, w: 0\.3, h: 0\.3 \};/);
+  });
+});
+
+describe("Review & trim: trim-handle pointer-drag math -- real fraction-of-track, design's own clamp formulas", () => {
+  test("both trim handles wire real pointer handlers, captured via setPointerCapture (not a no-op)", () => {
+    assert.match(loomMobileSrc, /onPointerDown=\{trimInStart\} onPointerMove=\{trimInMove\} onPointerUp=\{trimInEnd\}/);
+    assert.match(loomMobileSrc, /onPointerDown=\{trimOutStart\} onPointerMove=\{trimOutMove\} onPointerUp=\{trimOutEnd\}/);
+    const hits = loomMobileSrc.match(/e\.currentTarget\.setPointerCapture\(e\.pointerId\)/g) || [];
+    assert.ok(hits.length >= 4, "expected setPointerCapture on all four review drags (trim-in, trim-out, scrub, crop)");
+  });
+
+  test("the fraction is read off the STATIC track (reviewTrimTrackRef), not the moving handle the design's own _trimInMove/_trimOutMove read", () => {
+    assert.match(loomMobileSrc, /const r = reviewTrimTrackRef\.current\.getBoundingClientRect\(\);/);
+    assert.match(loomMobileSrc, /r\.width \? Math\.max\(0, Math\.min\(1, \(e\.clientX - r\.left\) \/ r\.width\)\) : 0;/);
+  });
+
+  test("the minimum-gap clamp is the design's own real math verbatim (0.05, in fraction space)", () => {
+    assert.match(loomMobileSrc, /const newFrac = Math\.max\(0, Math\.min\(trimFrac\(e\), outFrac - 0\.05\)\);/);
+    assert.match(loomMobileSrc, /const newFrac = Math\.min\(1, Math\.max\(trimFrac\(e\), inFrac \+ 0\.05\)\);/);
+  });
+
+  test("the resulting fraction is converted to ABSOLUTE SECONDS before patching the real card field (the one disclosed unit adaptation -- the design's own model is 0..1 fractions, this codebase's trimIn/trimOut never are)", () => {
+    assert.match(loomMobileSrc, /const t = newFrac \* dur;\s*\n\s*reviewPatch\(\(cc\) => \(\{ \.\.\.cc, trimIn: t \}\)\);/);
+    assert.match(loomMobileSrc, /const t = newFrac \* dur;\s*\n\s*reviewPatch\(\(cc\) => \(\{ \.\.\.cc, trimOut: t \}\)\);/);
+  });
+
+  test("the readout renders both real seconds values, same one-decimal format as the design's own trimInLabel/trimOutLabel", () => {
+    assert.match(loomMobileSrc, /const fmtT = \(s\) => \(s \|\| 0\)\.toFixed\(1\) \+ "s";/);
+    assert.match(loomMobileSrc, /\{fmtT\(trimIn\)\} &rarr; \{fmtT\(trimOut\)\}/);
+  });
+});
+
+describe("Review & trim: crop-rectangle pointer-drag math -- verbatim port of the design's own _cropFrac/_cropDragMove", () => {
+  test("the fraction is read off the STATIC preview-wrap container via parentElement, exactly like the design's own _cropFrac (this one had no self-recentering bug to fix)", () => {
+    assert.match(loomMobileSrc, /const r = e\.currentTarget\.parentElement\.getBoundingClientRect\(\);/);
+  });
+
+  test("the clamp is the design's own real math verbatim: f.x/f.y minus the 0.15 half-box offset, capped at 0.68 so the fixed-size box stays on-frame", () => {
+    assert.match(loomMobileSrc, /x: Math\.max\(0, Math\.min\(f\.x - 0\.15, 0\.68\)\),/);
+    assert.match(loomMobileSrc, /y: Math\.max\(0, Math\.min\(f\.y - 0\.15, 0\.68\)\),/);
+  });
+
+  test("the crop rect only renders while actively cropping, matching the design's own sc-if gate", () => {
+    assert.match(loomMobileSrc, /\{reviewCropping && \(\s*\n\s*<div className="lm-review-croprect"/);
+  });
+
+  test("the Crop/Done toggle button label flips exactly like the design's own cropLabel", () => {
+    assert.match(loomMobileSrc, /onClick=\{\(\) => setReviewCropping\(\(v\) => !v\)\}>&#9974; \{reviewCropping \? "Done" : "Crop"\}<\/button>/);
+  });
+});
+
+describe("Review & trim: split-at-playhead calls the REAL splitCardAt-backed mutator", () => {
+  test("splitShot is threaded through as a real prop, the same function desktop's ShotPreview.onSplit already calls (not re-derived)", () => {
+    const sigMatch = loomMobileSrc.match(/function LoomMobile\(\{([\s\S]*?)\}\)\s*\{/);
+    assert.ok(sigMatch, "expected to find LoomMobile's function signature");
+    assert.match(sigMatch[1], /\bsplitShot\b/, "LoomMobile's signature should destructure splitShot");
+    const loomMobileCall = src.match(/<LoomMobile\b[\s\S]*?\/>/);
+    assert.ok(loomMobileCall, "expected to find the <LoomMobile .../> call site");
+    assert.ok(loomMobileCall[0].includes("splitShot={splitShot}"), "expected splitShot={splitShot} at the <LoomMobile .../> call site");
+  });
+
+  test("doSplit uses the same 0.15s edge guard and the same message text as ShotPreview's own doSplit -- reused, not reinvented", () => {
+    assert.match(loomMobileSrc, /if \(t > trimIn \+ 0\.15 && t < trimOut - 0\.15\) \{ splitShot\(reviewLive, t\); closeReview\(\); \}/);
+    assert.match(loomMobileSrc, /alert\("Move the playhead to where you want the cut first \(not at either edge\)\."\)/);
   });
 });
 
