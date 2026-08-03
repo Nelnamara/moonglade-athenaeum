@@ -2834,14 +2834,122 @@ const LOOM_MOBILE_STYLES = `
 .lm-addact{text-align:center;font-size:11px;font-weight:700;color:var(--accent);padding:12px;
   border:1px dashed var(--surface1);border-radius:11px;cursor:pointer;margin-top:6px;background:none;width:100%;}
 .lm-empty{text-align:center;color:var(--overlay0);font-size:11px;font-style:italic;padding:10px 6px;}
+
+/* ---- Shot Detail (mobile Deep Focus) -- second increment, 2026-08-03 ---- */
+@keyframes lmRise{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+@keyframes lmSheetUp{from{transform:translateY(100%);}to{transform:translateY(0);}}
+.lm-df{position:absolute;inset:0;z-index:20;background:var(--mantle);display:flex;flex-direction:column;
+  animation:lmRise .22s ease both;}
+.lm-df-top{flex:none;display:flex;align-items:center;gap:8px;
+  padding:max(14px,env(safe-area-inset-top)) 16px 10px;}
+.lm-df-title{flex:1 1 auto;min-width:0;background:transparent;border:none;
+  border-bottom:1px solid var(--surface1);color:var(--text);font:600 14px/1.2 system-ui;padding:4px 0;}
+.lm-df-title:focus{outline:none;border-bottom-color:var(--accent);}
+.lm-df-st{flex:none;border-radius:5px;cursor:pointer;background:var(--base);border:1px solid var(--surface1);
+  padding:4px 8px;}
+.lm-df-cast{flex:none;font:700 11px/1 system-ui;padding:6px 9px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--surface1);background:var(--base);color:var(--subtext);white-space:nowrap;}
+.lm-df-close{flex:none;width:28px;height:28px;display:flex;align-items:center;justify-content:center;
+  border-radius:8px;border:1px solid var(--surface1);color:var(--subtext);cursor:pointer;background:none;
+  font-size:13px;padding:0;}
+.lm-df-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px 30px;-webkit-overflow-scrolling:touch;}
+.lm-microlab{display:block;font:700 9px/1 system-ui;text-transform:uppercase;color:var(--subtext);
+  margin:10px 0 5px;}
+.lm-hint{font-size:9.5px;color:var(--overlay0);padding:5px 2px 0;}
+.lm-modechips{display:flex;gap:5px;}
+.lm-modechip{flex:1;text-align:center;padding:8px 4px;border-radius:8px;font:700 11px/1 system-ui;
+  cursor:pointer;border:1px solid var(--surface1);color:var(--subtext);background:none;}
+.lm-modechip.on{background:color-mix(in srgb,var(--accent) 20%,transparent);border-color:var(--accent);
+  color:var(--accent);}
+.lm-row2{display:flex;gap:10px;margin:10px 0 4px;}
+.lm-col{flex:1;min-width:0;}
+.lm-in{width:100%;box-sizing:border-box;background:var(--base);border:1px solid var(--surface1);
+  border-radius:8px;padding:8px 10px;color:var(--text);font:12.5px/1.3 system-ui;}
+.lm-ta{width:100%;box-sizing:border-box;background:var(--base);border:1px solid var(--surface1);
+  border-radius:9px;padding:10px;color:var(--text);font:12.5px/1.45 system-ui;resize:vertical;
+  min-height:66px;}
+.lm-check{display:flex;align-items:center;gap:7px;cursor:pointer;padding:8px 0 0;font-size:11px;
+  color:var(--subtext);}
+.lm-frow{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;}
+.lm-fcol{flex:1 1 150px;min-width:150px;}
+.lm-inheritbtn{margin-top:6px;display:inline-block;font-size:9.5px;font-weight:600;color:var(--accent);
+  background:var(--surface1);border:none;border-radius:6px;padding:5px 8px;cursor:pointer;}
+.lm-copybtn{display:inline-block;margin-top:18px;font:700 11px/1 system-ui;padding:8px 16px;
+  border-radius:8px;cursor:pointer;border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);
+  background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent);}
+
+/* Other references & @tags rows -- mirrors LoomV2's own sb-ref shape at mobile scale. */
+.lm-refrow{display:flex;gap:10px;align-items:flex-start;background:var(--surface0);
+  border:1px solid var(--surface1);border-radius:9px;padding:10px;margin-bottom:8px;}
+.lm-refprev{width:52px;height:40px;border-radius:6px;border:1px solid var(--surface1);background:var(--base);
+  flex:none;display:flex;align-items:center;justify-content:center;font-size:16px;overflow:hidden;
+  cursor:pointer;}
+.lm-refprev img{width:100%;height:100%;object-fit:cover;}
+.lm-refbody{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:6px;}
+.lm-reftoprow{display:flex;gap:7px;align-items:center;flex-wrap:wrap;}
+.lm-reftag{font-family:ui-monospace,monospace;font-size:11px;color:var(--loomc,#47cbc3);background:var(--base);
+  border:1px solid var(--surface1);border-radius:5px;padding:5px 6px;width:70px;}
+.lm-refkind{font-size:9.5px;color:var(--subtext);}
+.lm-refx{margin-left:auto;background:none;border:none;color:var(--subtext);font-size:14px;cursor:pointer;
+  padding:0 2px;}
+.lm-addrefrow{display:flex;gap:7px;flex-wrap:wrap;margin-top:4px;}
+.lm-addrefbtn{font:700 10.5px/1 system-ui;padding:6px 11px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--surface1);background:var(--surface1);color:var(--text);}
+
+/* ---- Cast & assets sheet (bottom sheet, opened from Shot Detail's 👥 button) ---- */
+.lm-scrim{position:absolute;inset:0;z-index:30;background:rgba(3,2,8,.6);}
+.lm-sheet{position:absolute;left:0;right:0;bottom:0;z-index:31;background:var(--mantle);
+  border-radius:18px 18px 0 0;border:1px solid var(--surface1);border-bottom:none;
+  padding:12px 18px max(20px,env(safe-area-inset-bottom));max-height:75%;overflow-y:auto;
+  animation:lmSheetUp .26s cubic-bezier(.2,.9,.24,1);}
+.lm-sheethandle{width:36px;height:4px;border-radius:3px;background:rgba(255,255,255,.18);margin:0 auto 10px;}
+.lm-tabsrow{display:flex;gap:4px;padding:3px;border-radius:9px;background:rgba(12,10,28,.6);
+  border:1px solid var(--surface1);margin-bottom:10px;}
+.lm-tabbtn{flex:1;text-align:center;padding:7px 4px;border-radius:7px;font:700 11px/1 system-ui;
+  cursor:pointer;background:none;border:none;color:var(--subtext);}
+.lm-tabbtn.on{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent);}
+.lm-budget{font-size:10.5px;color:var(--subtext);margin:4px 0 10px;}
+.lm-budget-over{color:var(--peach);font-weight:700;}
+.lm-i2vnote{font-size:10.5px;font-style:italic;color:var(--peach);margin:4px 0 10px;line-height:1.4;}
+.lm-castrow{display:flex;align-items:center;gap:9px;padding:9px 4px;
+  border:none;border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer;background:none;
+  width:100%;text-align:left;font:inherit;color:inherit;}
+.lm-castbox{width:14px;height:14px;border-radius:4px;border:1px solid var(--surface1);flex:none;}
+.lm-castbox.on{background:var(--accent);border-color:var(--accent);}
+.lm-castthumb{width:30px;height:30px;border-radius:7px;flex:none;background-size:cover;
+  background-position:center;background-color:var(--surface1);display:flex;align-items:center;
+  justify-content:center;font-size:13px;}
+.lm-castcol{flex:1 1 auto;min-width:0;}
+.lm-castname{font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-casttag{font-size:9.5px;font-family:ui-monospace,monospace;color:var(--loomc,#47cbc3);}
+.lm-castmissing{font:700 9px/1 system-ui;color:var(--red);text-transform:uppercase;flex:none;}
+.lm-castlive{flex:none;font:11px/1.3 ui-monospace,monospace;color:var(--loomc,#47cbc3);background:var(--base);
+  border:1px dashed var(--overlay0);border-radius:6px;padding:5px 6px;}
+.lm-castlive.oob{color:var(--peach);border-color:var(--peach);font-size:9px;}
+.lm-castlock{font-size:11px;flex:none;}
+.lm-castaddrow{display:flex;gap:8px;margin-top:10px;}
+.lm-footagegrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px;}
+.lm-fclip{border-radius:8px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--base);}
+.lm-fclip img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;}
+.lm-fclipmeta{display:flex;justify-content:space-between;padding:5px 7px;font-size:9.5px;color:var(--subtext);}
+.lm-sheetclose{margin-top:12px;text-align:center;padding:11px;border-radius:11px;
+  border:1px solid var(--surface1);font:700 12.5px/1 system-ui;color:var(--subtext);cursor:pointer;
+  background:none;width:100%;}
 `;
 
 function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, addCard, addAct, setDraft,
   mobileUI, setMobileUI,
-  // Not read by this increment's board/reel screen -- lifted to App() (see LoomV2's own
-  // prop-list comment) and threaded through here now so the NEXT increment (Generate) never
-  // has to re-plumb the lift a second time; a still-in-progress draft already survives
-  // toggling between this view and LoomV2 today, before Generate itself exists on mobile.
+  // Second increment (2026-08-03): Shot Detail (Deep Focus's mobile equivalent), the
+  // Cast & assets sheet, and the Frame picker all need to actually MUTATE the project and
+  // reach the real gallery picker -- setCard/setAssets/addRef/setRef/delRef (useShotMutations),
+  // storeThumb (useProjectStore), and openPick/copyShot (App() itself) are the same real
+  // functions LoomV2 already uses for its own Deep Focus/Cast&Assets/FrameSlot; threaded
+  // straight through, nothing new invented.
+  setCard, setAssets, addRef, setRef, delRef, storeThumb, openPick, copyShot,
+  // Not read by this increment's Generate-less screens -- lifted to App() (see LoomV2's own
+  // prop-list comment) and threaded through here so the NEXT increment (Generate) never has
+  // to re-plumb the lift a second time; a still-in-progress draft already survives toggling
+  // between this view and LoomV2 today, before Generate itself exists on mobile.
   draftCard, setDraftCard, draftTarget, setDraftTarget, draftAttachedInfo, setDraftAttachedInfo }) {
   // The overlay is position:fixed and covers the whole viewport, but the classic page
   // underneath is a normal tall document -- same reasoning, same fix, as LoomV2's own
@@ -2872,6 +2980,52 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
     const gs = genState[c.id];
     const paused = gs && gs.phase === "paused";
     return paused ? "paused" : (gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : c.status);
+  };
+
+  // ---- Shot Detail (mobile Deep Focus) + Cast & assets sheet -- second increment
+  // (2026-08-03), per the locked design (design_handoff/design_handoff_moonglade_suite/
+  // "Loom Mobile.dc.html"). Tapping a board card (below) now opens this full-screen editor
+  // for that shot, on top of setSelShot's own "binds to Generate" contract from increment 1
+  // -- selecting a shot and opening its detail are the same tap, not two separate actions.
+  const [dfOpen, setDfOpen] = useState(false);
+  // Splice-in-last-frame state for the opening frame's "inherit previous close" button --
+  // mirrors LoomV2's own local `handoff` state (see its FrameSlot extraBtn) exactly:
+  // '' | 'wip' | 'err'.
+  const [dfHandoff, setDfHandoff] = useState("");
+  const [castSheetOpen, setCastSheetOpen] = useState(false);
+  const [castSheetTab, setCastSheetTab] = useState("cast");   // 'cast' | 'footage'
+
+  // ---- mode families for the Cast & assets sheet + ref live-tag badges. Copied verbatim
+  // from LoomV2's own local copies -- neither is exported from loom-core.js/loom-mutations.js
+  // (this file's own DO-NOT-MODIFY pure-logic layer), so every consumer keeps its own, the
+  // same convention LoomV2 already follows rather than exporting a third shared module just
+  // for four small closures. See LoomV2's identical comment (above its own copies) for the
+  // full reasoning: which modes actually SEND the cast/ref image bank with a generation
+  // (R2V/V2V) vs. cite it in the composed prompt only (FLF/I2V, which attach just their
+  // frame(s)) -- the locked mobile design's own Cast sheet mockup only special-cases I2V and
+  // hardcodes "4" reference slots; both are wrong for an FLF shot and for the real, mode-aware
+  // 6-minus-attached-frames budget refBudget() (loom-core.js) computes, so this matches
+  // LoomV2's real, already-correct behavior instead of reproducing the mockup's simplification
+  // (disclosed in the increment's own report).
+  const modeSendsRefs = (m) => usesCloseFrame(m) && m !== "FLF";
+  const modeSendsLine = (m) => (m === "FLF"
+    ? "First & Last sends the start & end frames only — cast & refs here are for continuity/notes, not references"
+    : "I2V sends the opening frame only — cast here is for continuity/notes, not references");
+  const liveTagText = (liveTag, pastBudget, mode) =>
+    liveTag || (pastBudget ? (modeSendsRefs(mode) ? "not sent" : "not cited") : "—");
+  const liveTagTitle = (liveTag, pastBudget, mode, code) => {
+    const framesOnly = mode === "FLF" ? "First & Last sends only the start/end frames" : "I2V sends only the opening frame";
+    if (liveTag) {
+      return modeSendsRefs(mode)
+        ? `Live slot in ${code} — numbered by position; this is what the composed prompt and the generator actually send`
+        : `${code}'s composed-prompt citation — numbered by position. ${framesOnly}, so this picture is not attached to the generation`;
+    }
+    if (pastBudget) {
+      return modeSendsRefs(mode)
+        ? `Past the reference limit for ${code} (6 images minus attached frames) — not sent`
+        : `Past the citation limit for ${code} — left out of the composed prompt. ${framesOnly} either way`;
+    }
+    return `No picture resolved on ${code} — nothing to number`;
   };
 
   const total = entries.reduce((s, x) => s + durOf(x.c), 0);
@@ -2930,6 +3084,56 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   const handleFrac = scrubbing ? scrubFrac : selFrac;
   const scrubEntry = scrubIdx != null ? entries[scrubIdx] : null;
   const posStyle = (frac) => ({ left: `calc(16px + (100% - 32px) * ${frac})` });
+
+  // Re-derived from `entries` every render (never from a stale snapshot captured at tap
+  // time) -- same reasoning as LoomV2's own `deepFocus` -> `live` lookup: setCard's patches
+  // are immutable, so a captured entry object would never show a later edit. If the shot
+  // vanished out from under an open Shot Detail (deleted elsewhere), close it the same
+  // inline way LoomV2 already does for its own veil -- a documented React bail-out (setting
+  // this component's own state during its own render), not a bug.
+  const dfLive = dfOpen ? entries.find((x) => x.c.id === selShot) : null;
+  if (dfOpen && !dfLive) { setDfOpen(false); }
+  const dfSelIdx = dfLive ? entries.findIndex((x) => x.c.id === dfLive.c.id) : -1;
+  const dfPrevEntry = dfSelIdx > 0 ? entries[dfSelIdx - 1] : null;
+  const dfPatch = (fn) => dfLive && setCard(dfLive.a.id, dfLive.c.id, fn);
+  const dfPatchFrame = (key, fp) => dfPatch((cc) => ({ ...cc, [key]: { ...cc[key], ...fp } }));
+  // Frame handoff -- identical mechanic to LoomV2's own inheritPrev (same /api/loom/handoff
+  // splice-the-last-frame-off-a-rendered-clip endpoint, same closeFrame-copy fallback for a
+  // previous shot that hasn't rendered yet), reimplemented here only because that function is
+  // a private closure inside LoomV2's own component body, not something this file exports.
+  const dfInheritPrev = () => {
+    if (!dfPrevEntry) return;
+    const rmid = dfPrevEntry.c.resultMid;
+    if (rmid) {
+      setDfHandoff("wip");
+      fetch("/api/loom/handoff", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ video_media_id: rmid, trim_out: dfPrevEntry.c.trimOut }) })
+        .then((r) => r.json()).then((d) => {
+          if (d.error || !d.frame_media_id) { setDfHandoff("err"); return; }
+          setDfHandoff("");
+          dfPatchFrame("openFrame", { mediaId: d.frame_media_id, thumbId: "", source: "",
+            desc: "handed off from " + (dfPrevEntry.code || "prev shot") });
+        }).catch(() => setDfHandoff("err"));
+    } else {
+      dfPatchFrame("openFrame", { ...dfPrevEntry.c.closeFrame });
+    }
+  };
+  // "Finished shots" (Cast sheet's Footage tab): tapping a rendered shot from elsewhere in
+  // THIS project appends it as a real @videoN reference on the open shot -- the same shape
+  // addRef("video") + a hand-typed source already produce, just pre-filled with a real
+  // resultMid instead of leaving the source blank for the owner to type one in. Deliberately
+  // NOT loom-core.js's pickVideoTarget/shotVideoRefs (the Multi-Reference drawer's slot-
+  // REPLACE machinery) -- a footage tap always APPENDS a brand-new ref, never replaces an
+  // existing numbered slot, so nextTag (addRef's own tag convention in useShotMutations) is
+  // the correct, simpler tool, not a re-derivation of a different real mechanism.
+  const dfPickFootage = (mid, code) => {
+    if (!dfLive) return;
+    const tag = nextTag(dfLive.c.refs.filter((r) => r.kind === "video"), "@video");
+    const newRef = { ...buildNewRef("video", uid()), tag, source: String(mid), role: "footage from " + code };
+    setCard(dfLive.a.id, dfLive.c.id, (c) => ({ ...c, refs: [...c.refs, newRef] }));
+  };
+  const castBudget = dfLive ? refBudget(dfLive, project, imgSrc) : null;
+  const finishedShots = entries.filter((e) => e.c.resultMid);
 
   return (
     <div className="lm-root">
@@ -2993,7 +3197,8 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                 return (
                   <div key={e.c.id} className="lm-cardrow">
                     <button type="button" className={"lm-card" + (e.c.id === selShot ? " sel" : "")}
-                      onClick={() => setSelShot(e.c.id)} title="Select this shot — it binds to Generate">
+                      onClick={() => { setSelShot(e.c.id); setDfOpen(true); }}
+                      title="Open this shot — it binds to Generate">
                       <div className="lm-thumb" style={thumb ? { backgroundImage: `url(${thumb})` } : undefined}>
                         {!thumb && e.c.mode}
                       </div>
@@ -3024,6 +3229,202 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
         <button type="button" className="lm-addact" onClick={addAct}>+ New act</button>
         {!project.acts.length && <div className="lm-empty">No acts yet — add one below.</div>}
       </div>
+
+      {dfOpen && dfLive && (() => {
+        const c = dfLive.c;
+        return (
+          <div className="lm-df">
+            <div className="lm-df-top">
+              <button type="button" className={"lm-df-st lm-stpill " + statusOf(c)}
+                title={`Status: ${statusOf(c)} — tap to cycle`}
+                onClick={() => dfPatch((cc) => ({ ...cc, status: cc.status === "todo" ? "wip" : cc.status === "wip" ? "done" : "todo" }))}>
+                {statusOf(c)}
+              </button>
+              <span className="lm-code">{dfLive.code}</span>
+              <input className="lm-df-title" value={c.title || ""} placeholder="untitled"
+                onChange={(ev) => dfPatch((cc) => ({ ...cc, title: ev.target.value }))} />
+              <button type="button" className="lm-df-cast" onClick={() => setCastSheetOpen(true)}
+                title="Cast & assets bound to this shot">
+                &#128101; {(c.cast || []).length}
+              </button>
+              <button type="button" className="lm-df-close" title="Close" onClick={() => setDfOpen(false)}>&#10005;</button>
+            </div>
+            <div className="lm-df-body">
+              <span className="lm-microlab">Mode</span>
+              <div className="lm-modechips">
+                {MODES.map((m) => (
+                  <button type="button" key={m} className={"lm-modechip" + (m === c.mode ? " on" : "")}
+                    onClick={() => dfPatch((cc) => setShotMode(cc, m))}>{m}</button>
+                ))}
+              </div>
+              <div className="lm-row2">
+                <div className="lm-col">
+                  <span className="lm-microlab">Duration (s)</span>
+                  <input className="lm-in" type="number" min="1" value={c.duration}
+                    onChange={(ev) => dfPatch((cc) => ({ ...cc, duration: Number(ev.target.value) || 1 }))} />
+                </div>
+                <div className="lm-col">
+                  <span className="lm-microlab">Discreet</span>
+                  <label className="lm-check">
+                    <input type="checkbox" checked={!!c.discreet}
+                      onChange={(ev) => dfPatch((cc) => ({ ...cc, discreet: ev.target.checked }))} />blur previews</label>
+                </div>
+              </div>
+              <span className="lm-microlab">Prompt</span>
+              <textarea className="lm-ta" value={c.prompt || ""} placeholder="what happens in this shot"
+                onChange={(ev) => dfPatch((cc) => ({ ...clearPromptOverride(cc), prompt: ev.target.value }))} />
+              <div className="lm-hint">the shot's base prompt &mdash; Camera, Lighting and cast are woven in on top when it generates</div>
+
+              <div className="lm-frow">
+                <div className="lm-fcol">
+                  <FrameSlot which="open" frame={c.openFrame} liveTag={positionTag(dfLive, project, imgSrc, "openFrame")}
+                    discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                    onPatch={(p) => dfPatchFrame("openFrame", p)}
+                    extraBtn={dfPrevEntry ? (
+                      <button type="button" className="lm-inheritbtn" onClick={dfInheritPrev} disabled={dfHandoff === "wip"}>
+                        {dfHandoff === "wip" ? "✂ splicing…" : dfHandoff === "err" ? "✂ splice failed — retry"
+                          : dfPrevEntry.c.resultMid ? `✂ splice ${dfPrevEntry.code}'s last frame` : `↳ inherit ${dfPrevEntry.code} close`}
+                      </button>
+                    ) : null} />
+                </div>
+                <div className="lm-fcol">
+                  <FrameSlot which="close" frame={c.closeFrame} liveTag={positionTag(dfLive, project, imgSrc, "closeFrame")}
+                    discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                    onPatch={(p) => dfPatchFrame("closeFrame", p)} />
+                </div>
+              </div>
+
+              <span className="lm-microlab" style={{ marginTop: 16 }}>Other references &amp; @tags</span>
+              {c.refs.map((r) => {
+                const preview = r.thumbId ? thumbs[r.thumbId] : (r.kind === "image" && r.source.startsWith("http") ? r.source : null);
+                // Image refs only -- @videoN/@audioN are their own namespaces, never
+                // renumbered by position (see loom-core.js's shotText video-ref comment and
+                // LoomV2's identical rule on its own ref rows).
+                const refLiveTag = r.kind === "image" ? positionTag(dfLive, project, imgSrc, r.id) : null;
+                const refPastBudget = r.kind === "image" && !refLiveTag && !!resolvedImage(r, imgSrc);
+                return (
+                  <div className="lm-refrow" key={r.id}>
+                    {r.kind === "image" ? (
+                      <label className="lm-refprev" title="Attach image">
+                        {preview ? <img src={preview} alt={r.tag} /> : "＋"}
+                        <input type="file" accept="image/*" style={{ display: "none" }}
+                          onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const id = await storeThumb(f); setRef(dfLive.a.id, c.id, r.id, { thumbId: id, source: r.source || f.name }); }} />
+                      </label>
+                    ) : <div className="lm-refprev">{r.kind === "video" ? "🎞" : "♪"}</div>}
+                    <div className="lm-refbody">
+                      <div className="lm-reftoprow">
+                        <input className="lm-reftag" value={r.tag} onChange={(e) => setRef(dfLive.a.id, c.id, r.id, { tag: e.target.value })} />
+                        {r.kind === "image" && (
+                          <span className={"lm-castlive" + (refPastBudget ? " oob" : "")}
+                            title={liveTagTitle(refLiveTag, refPastBudget, c.mode, dfLive.code)}>
+                            {liveTagText(refLiveTag, refPastBudget, c.mode)}
+                          </span>
+                        )}
+                        <span className="lm-refkind">{r.kind}</span>
+                        <button type="button" className="lm-refx" onClick={() => delRef(dfLive.a.id, c.id, r)}>&#10005;</button>
+                      </div>
+                      <input className="lm-in" placeholder="what to use it for (motion / camera / mood…)" value={r.role}
+                        onChange={(e) => setRef(dfLive.a.id, c.id, r.id, { role: e.target.value })} />
+                      <input className="lm-in" placeholder="file name or URL" value={r.source}
+                        onChange={(e) => setRef(dfLive.a.id, c.id, r.id, { source: e.target.value })} />
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="lm-addrefrow">
+                <button type="button" className="lm-addrefbtn" onClick={() => addRef(dfLive.a.id, c, "image")}>+ Image</button>
+                <button type="button" className="lm-addrefbtn" onClick={() => addRef(dfLive.a.id, c, "video")}>+ Video</button>
+                <button type="button" className="lm-addrefbtn" onClick={() => addRef(dfLive.a.id, c, "audio")}>+ Audio</button>
+              </div>
+
+              <span className="lm-microlab">Music / audio cue</span>
+              <input className="lm-in" value={c.audioCue} placeholder="track, beat sync, room tone…"
+                onChange={(ev) => dfPatch((cc) => ({ ...cc, audioCue: ev.target.value }))} />
+
+              <span className="lm-microlab">Notes</span>
+              <textarea className="lm-ta" value={c.notes} placeholder="blocking, continuity reminders…"
+                onChange={(ev) => dfPatch((cc) => ({ ...cc, notes: ev.target.value }))} />
+
+              <button type="button" className="lm-copybtn" onClick={() => copyShot(dfLive)}>Copy shot</button>
+            </div>
+
+            {castSheetOpen && (
+              <>
+                <div className="lm-scrim" onClick={() => setCastSheetOpen(false)} />
+                <div className="lm-sheet">
+                  <div className="lm-sheethandle" />
+                  <div className="lm-tabsrow">
+                    <button type="button" className={"lm-tabbtn" + (castSheetTab === "cast" ? " on" : "")}
+                      onClick={() => setCastSheetTab("cast")}>Cast &amp; assets</button>
+                    <button type="button" className={"lm-tabbtn" + (castSheetTab === "footage" ? " on" : "")}
+                      onClick={() => setCastSheetTab("footage")}>Footage</button>
+                  </div>
+                  {castSheetTab === "cast" ? (
+                    <>
+                      {!modeSendsRefs(c.mode) ? (
+                        <div className="lm-i2vnote">{modeSendsLine(c.mode)}</div>
+                      ) : castBudget ? (
+                        <div className="lm-budget">
+                          <span className={castBudget.used > castBudget.budget ? "lm-budget-over" : undefined}>
+                            {castBudget.used} of {castBudget.budget} reference slot{castBudget.budget === 1 ? "" : "s"} used
+                          </span>
+                          {castBudget.frames ? <span> &middot; {castBudget.frames} of 6 held by attached frame{castBudget.frames === 1 ? "" : "s"}</span> : null}
+                        </div>
+                      ) : null}
+                      {(project.assets || []).map((as) => {
+                        const inShot = (c.cast || []).includes(as.id);
+                        const src = frameSrc(as);
+                        const missing = as.kind === "image" && !resolvedImage(as, imgSrc);
+                        const liveTag = inShot && as.kind === "image" ? positionTag(dfLive, project, imgSrc, as.id) : null;
+                        const pastBudget = inShot && as.kind === "image" && !liveTag && !!resolvedImage(as, imgSrc);
+                        return (
+                          <button type="button" key={as.id} className="lm-castrow"
+                            onClick={() => dfPatch((cc) => ({ ...cc, cast: (cc.cast || []).includes(as.id) ? cc.cast.filter((x) => x !== as.id) : [...(cc.cast || []), as.id] }))}>
+                            <span className={"lm-castbox" + (inShot ? " on" : "")} />
+                            <div className="lm-castthumb" style={src ? { backgroundImage: `url(${src})` } : undefined}>
+                              {!src && (as.kind === "audio" ? "♪" : as.kind === "video" ? "🎞" : "🖼")}
+                            </div>
+                            <div className="lm-castcol">
+                              <div className="lm-castname">{as.name || as.kind}</div>
+                              <div className="lm-casttag">{as.tag}</div>
+                            </div>
+                            {missing && <span className="lm-castmissing">missing</span>}
+                            {liveTag || pastBudget ? (
+                              <span className={"lm-castlive" + (pastBudget ? " oob" : "")}>{liveTagText(liveTag, pastBudget, c.mode)}</span>
+                            ) : null}
+                            {!!as.lock && <span className="lm-castlock" title="Lock appearance">&#128274;</span>}
+                          </button>
+                        );
+                      })}
+                      {!(project.assets || []).length && <div className="lm-empty">No cast yet.</div>}
+                      <div className="lm-castaddrow">
+                        <button type="button" className="lm-addrefbtn"
+                          onClick={() => setAssets((a) => [...a, { id: uid(), name: "New reference", kind: "image", tag: nextTag(a, "@image"), thumbId: "", source: "", lock: false }])}>
+                          + Image ref</button>
+                        <button type="button" className="lm-addrefbtn"
+                          onClick={() => setAssets((a) => [...a, { id: uid(), name: "New audio", kind: "audio", tag: nextTag(a, "@audio"), thumbId: "", source: "", lock: false }])}>
+                          + Audio ref</button>
+                      </div>
+                    </>
+                  ) : (
+                    finishedShots.length ? (
+                      <div className="lm-footagegrid">
+                        {finishedShots.map((e) => (
+                          <div key={e.c.id} className="lm-fclip" onClick={() => { dfPickFootage(e.c.resultMid, e.code); setCastSheetOpen(false); }}>
+                            <img src={"/thumbs/" + e.c.resultMid + ".jpg"} alt="" />
+                            <div className="lm-fclipmeta"><b>{e.code}</b><span>{durOf(e.c)}s</span></div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : <div className="lm-empty">no rendered shots yet</div>
+                  )}
+                  <button type="button" className="lm-sheetclose" onClick={() => setCastSheetOpen(false)}>Done</button>
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -4138,6 +4539,8 @@ export default function App() {
         <V2Boundary><LoomMobile
           project={project} entries={entries} thumbs={thumbs} genState={genState}
           selShot={selShot} setSelShot={setSelShot} addCard={addCard} addAct={addAct} setDraft={setDraft}
+          setCard={setCard} setAssets={setAssets} addRef={addRef} setRef={setRef} delRef={delRef}
+          storeThumb={storeThumb} openPick={openPick} copyShot={copyShot}
           mobileUI={mobileUI} setMobileUI={setMobileUI}
           draftCard={draftCard} setDraftCard={setDraftCard} draftTarget={draftTarget} setDraftTarget={setDraftTarget}
           draftAttachedInfo={draftAttachedInfo} setDraftAttachedInfo={setDraftAttachedInfo} /></V2Boundary>

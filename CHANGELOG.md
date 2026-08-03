@@ -17,6 +17,22 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Loom Mobile increment 2 — Shot Detail, Cast & assets sheet, Frame picker.** Built by
+  reusing three of the Loom's existing real, shared components rather than reimplementing
+  them: `FrameSlot` for the opening/closing frame (real `@imageN` tagging, upload, gallery-
+  pick), the one real `<mg-gallery-picker>` for the Frame picker (the locked design's own
+  version was a fictional mock grid with no real backing data), and desktop's exact
+  `copyShot` clipboard call. Five disclosed, independently-verified deviations from the
+  design (a 4th "paused" status the data model doesn't have, a hardcoded reference-slot
+  count that would misreport on a real FLF shot, mode-chip order, no "Select in Generate →"
+  since Generate doesn't exist on mobile yet, no per-row cast picture upload — matching the
+  design exactly, flagged as a real gap regardless). Generate, Review/trim, and Filter
+  compare remain later increments, guarded by a source test. 626/626 loom tests (20 new),
+  1539/1539 pytest, verified live against the real account (real shot data, real cast
+  budget, real gallery picker showing the real 2,313-image count). Full reasoning,
+  including a review-process failure caught and corrected mid-pass, in
+  `docs/DECISIONS.md`'s entry of the same date.
+
 - **Loom — a real "📱 Mobile view" toolbar toggle, plus the first increment of a new
   portrait mobile UI (board + reel).** The Loom is a real, shipped, working app with a
   real backend — this ships the first of several increments toward a portrait-first

@@ -182,8 +182,8 @@ describe("the act-grouped shot board: add-shot / add-act / tap-to-select", () =>
     assert.match(loomMobileSrc, /className="lm-addact" onClick=\{addAct\}/);
   });
 
-  test("tapping a shot card selects it (the documented 'binds to Generate' contract), not a dead tap or a fake modal", () => {
-    assert.match(loomMobileSrc, /className=\{"lm-card"[^}]*\}\s*\n\s*onClick=\{\(\) => setSelShot\(e\.c\.id\)\}/);
+  test("tapping a shot card selects it AND opens Shot Detail (second increment) -- the 'binds to Generate' contract still fires, it's just no longer the only thing the tap does", () => {
+    assert.match(loomMobileSrc, /className=\{"lm-card"[^}]*\}\s*\n\s*onClick=\{\(\) => \{ setSelShot\(e\.c\.id\); setDfOpen\(true\); \}\}/);
   });
 
   test("cards show a real thumbnail resolved the same way LoomV2's own board does (open frame, else the rendered result)", () => {
@@ -198,11 +198,129 @@ describe("the act-grouped shot board: add-shot / add-act / tap-to-select", () =>
   });
 });
 
-describe("scope discipline: this increment does NOT build shot detail / cast sheet / generate / review-trim / filter-compare", () => {
-  test("no Deep-Focus-equivalent, Cast & assets, Generate, Review & trim, or Filter-compare UI leaked into LoomMobile yet", () => {
-    for (const phrase of ["Cast & assets", "Generate reference image", "Review & trim", "Art filters", "Edit instruction", "Generate video"]) {
+// Second increment of the Loom Mobile view (2026-08-03), per the same locked design.
+// Shot Detail (Deep Focus's mobile equivalent), the Cast & assets sheet, and the Frame
+// picker are now built; Generate (all 4 modes), Review & trim, and Filter compare are
+// still out of scope for a later increment.
+
+describe("Shot Detail (mobile Deep Focus): opens from the board, edits the REAL shot", () => {
+  test("renders only while dfOpen && dfLive -- never an empty/placeholder screen", () => {
+    assert.match(loomMobileSrc, /\{dfOpen && dfLive && \(\(\) => \{/);
+    assert.match(loomMobileSrc, /<div className="lm-df">/);
+  });
+
+  test("a stale reference (the shot vanished out from under it) closes Shot Detail instead of rendering blank", () => {
+    assert.match(loomMobileSrc, /const dfLive = dfOpen \? entries\.find\(\(x\) => x\.c\.id === selShot\) : null;/);
+    assert.match(loomMobileSrc, /if \(dfOpen && !dfLive\) \{ setDfOpen\(false\); \}/);
+  });
+
+  test("Mode chips render the real MODES array and write through the real setShotMode reducer", () => {
+    assert.match(loomMobileSrc, /\{MODES\.map\(\(m\) => \(/);
+    assert.match(loomMobileSrc, /onClick=\{\(\) => dfPatch\(\(cc\) => setShotMode\(cc, m\)\)\}/);
+  });
+
+  test("Duration and Discreet bind to the shot's real c.duration/c.discreet fields", () => {
+    assert.match(loomMobileSrc, /value=\{c\.duration\}/);
+    assert.match(loomMobileSrc, /checked=\{!!c\.discreet\}/);
+  });
+
+  test("Prompt is the real c.prompt, and typing it clears an active promptOverride exactly like LoomV2's own Deep Focus", () => {
+    assert.match(loomMobileSrc, /value=\{c\.prompt \|\| ""\} placeholder="what happens in this shot"/);
+    assert.match(loomMobileSrc, /dfPatch\(\(cc\) => \(\{ \.\.\.clearPromptOverride\(cc\), prompt: ev\.target\.value \}\)\)/);
+  });
+
+  test("the status pill cycles the real, persisted 3-state c.status (todo->wip->done->todo) -- 'paused' is a genState display-only phase, never invented as a 4th persisted status", () => {
+    assert.match(loomMobileSrc, /status: cc\.status === "todo" \? "wip" : cc\.status === "wip" \? "done" : "todo"/);
+  });
+
+  test("frame slots reuse the REAL, already-shipped FrameSlot component (not a hand-rolled duplicate) for both Opening and Closing frame", () => {
+    const opens = loomMobileSrc.match(/<FrameSlot which="open"/g) || [];
+    const closes = loomMobileSrc.match(/<FrameSlot which="close"/g) || [];
+    assert.equal(opens.length, 1, "expected exactly one open FrameSlot in Shot Detail");
+    assert.equal(closes.length, 1, "expected exactly one close FrameSlot in Shot Detail");
+    // Real props, not mock data: the real openPick/storeThumb this component now receives,
+    // and the real positionTag() live-slot numbering loom-core.js computes.
+    assert.match(loomMobileSrc, /liveTag=\{positionTag\(dfLive, project, imgSrc, "openFrame"\)\}/);
+    assert.match(loomMobileSrc, /storeThumb=\{storeThumb\} openPick=\{openPick\}/);
+  });
+
+  test("the opening frame's 'inherit previous close' extraBtn only appears with a real previous shot, mirroring LoomV2's own inheritPrev/handoff splice", () => {
+    assert.match(loomMobileSrc, /extraBtn=\{dfPrevEntry \? \(/);
+    assert.match(loomMobileSrc, /fetch\("\/api\/loom\/handoff", \{ method: "POST"/);
+  });
+
+  test("Other references & @tags uses the real addRef/setRef/delRef mutations over c.refs, not the design mockup's flat extraRefs tag-string array", () => {
+    assert.match(loomMobileSrc, /onClick=\{\(\) => addRef\(dfLive\.a\.id, c, "image"\)\}/);
+    assert.match(loomMobileSrc, /onClick=\{\(\) => addRef\(dfLive\.a\.id, c, "video"\)\}/);
+    assert.match(loomMobileSrc, /onClick=\{\(\) => addRef\(dfLive\.a\.id, c, "audio"\)\}/);
+    assert.match(loomMobileSrc, /onClick=\{\(\) => delRef\(dfLive\.a\.id, c\.id, r\)\}/);
+    assert.doesNotMatch(src, /extraRefs/, "extraRefs is the design mockup's own fictional field -- the real card shape has no such field, and none of this file should invent one");
+  });
+
+  test("the Cast button shows the shot's REAL cast count ((c.cast||[]).length), not a separate mock toggle map", () => {
+    assert.match(loomMobileSrc, /className="lm-df-cast" onClick=\{\(\) => setCastSheetOpen\(true\)\}/);
+    assert.match(loomMobileSrc, /&#128101; \{\(c\.cast \|\| \[\]\)\.length\}/);
+  });
+
+  test("Copy shot calls the real, already-shared copyShot(dfLive)", () => {
+    assert.match(loomMobileSrc, /onClick=\{\(\) => copyShot\(dfLive\)\}/);
+  });
+});
+
+describe("Cast & assets sheet: real project.assets, mode-aware budget, and a Footage tab off real finished shots", () => {
+  test("the sheet has its own Cast/Footage tab strip, matching the locked design's own layout", () => {
+    assert.match(loomMobileSrc, /Cast &amp; assets<\/button>/);
+    assert.match(loomMobileSrc, /onClick=\{\(\) => setCastSheetTab\("footage"\)\}>Footage<\/button>/);
+  });
+
+  test("cast rows toggle the shot's REAL c.cast array (project.assets), not a design-mockup castToggle map keyed off array index", () => {
+    assert.match(loomMobileSrc,
+      /onClick=\{\(\) => dfPatch\(\(cc\) => \(\{ \.\.\.cc, cast: \(cc\.cast \|\| \[\]\)\.includes\(as\.id\) \? cc\.cast\.filter\(\(x\) => x !== as\.id\) : \[\.\.\.\(cc\.cast \|\| \[\]\), as\.id\] \}\)\)\}/);
+  });
+
+  test("the budget line is the REAL, mode-aware refBudget()/modeSendsRefs() -- not the design mockup's hardcoded 'N of 4 reference slots' or its I2V-only special case (FLF also doesn't send cast/refs)", () => {
+    assert.match(loomMobileSrc, /const castBudget = dfLive \? refBudget\(dfLive, project, imgSrc\) : null;/);
+    assert.match(loomMobileSrc, /!modeSendsRefs\(c\.mode\)/);
+    assert.doesNotMatch(loomMobileSrc, /of 4 reference slots/, "the real cap is 6 minus attached frames (refBudget), never a hardcoded 4");
+  });
+
+  test("+ Image ref / + Audio ref append real, taggable project.assets entries via setAssets + nextTag", () => {
+    assert.match(loomMobileSrc, /setAssets\(\(a\) => \[\.\.\.a, \{ id: uid\(\), name: "New reference", kind: "image", tag: nextTag\(a, "@image"\)/);
+    assert.match(loomMobileSrc, /setAssets\(\(a\) => \[\.\.\.a, \{ id: uid\(\), name: "New audio", kind: "audio", tag: nextTag\(a, "@audio"\)/);
+  });
+
+  test("the Footage tab lists REAL finished shots (entries with a resultMid), not fabricated footage rows", () => {
+    assert.match(loomMobileSrc, /const finishedShots = entries\.filter\(\(e\) => e\.c\.resultMid\);/);
+    assert.match(loomMobileSrc, /src=\{"\/thumbs\/" \+ e\.c\.resultMid \+ "\.jpg"\}/);
+  });
+
+  test("picking a finished shot appends it as a real @videoN reference on the open shot (dfPickFootage), not the design mockup's fictional extraRefs concat", () => {
+    assert.match(loomMobileSrc, /const dfPickFootage = \(mid, code\) => \{/);
+    assert.match(loomMobileSrc, /const tag = nextTag\(dfLive\.c\.refs\.filter\(\(r\) => r\.kind === "video"\), "@video"\);/);
+    assert.match(loomMobileSrc, /onClick=\{\(\) => \{ dfPickFootage\(e\.c\.resultMid, e\.code\); setCastSheetOpen\(false\); \}\}/);
+  });
+});
+
+describe("Frame picker: the shared, already-real gallery picker -- not a fabricated grid of mock data", () => {
+  test("LoomMobile never defines its own picker grid or mock gallery pool -- it reuses the real FrameSlot -> openPick -> <mg-gallery-picker> chain every other Loom surface already uses", () => {
+    assert.doesNotMatch(loomMobileSrc, /GALLERY_POOL/, "GALLERY_POOL was the LOCKED DESIGN's own fictional placeholder tint grid -- the real app must not reproduce fabricated gallery data");
+    // openPick is threaded in as a real prop and handed straight to FrameSlot -- no second,
+    // parallel picker implementation lives in this component.
+    assert.match(loomMobileSrc, /openPick=\{openPick\}/);
+  });
+});
+
+describe("scope discipline: Generate (all 4 modes) / Review & trim / Filter compare are still NOT built", () => {
+  test("no Generate, Review & trim, or Filter-compare UI leaked into LoomMobile yet", () => {
+    for (const phrase of ["Generate reference image", "Review & trim", "Art filters", "Edit instruction", "Generate video"]) {
       assert.ok(!loomMobileSrc.includes(phrase),
         `LoomMobile should not yet contain "${phrase}" -- that belongs to a later increment`);
     }
+  });
+
+  test("Shot Detail / Cast & assets / Frame picker copy NOW DOES exist (this increment's own scope)", () => {
+    assert.ok(loomMobileSrc.includes("Cast &amp; assets"), "expected the Cast & assets sheet's own tab label to exist now");
+    assert.ok(loomMobileSrc.includes("Other references &amp; @tags"), "expected Shot Detail's real references section to exist now");
+    assert.ok(loomMobileSrc.includes("Music / audio cue"), "expected Shot Detail's audio-cue field to exist now");
   });
 });
