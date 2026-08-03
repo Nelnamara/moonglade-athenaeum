@@ -4,6 +4,7 @@ import App from "./App.jsx";
 import LoginPage from "./components/LoginPage.jsx";
 import LoginPageMobile from "./components/LoginPageMobile.jsx";
 import SetupWizard from "./components/SetupWizard.jsx";
+import SetupWizardMobile from "./components/SetupWizardMobile.jsx";
 import useIsMobile from "./hooks/useIsMobile.js";
 import "./styles.css";
 
@@ -21,16 +22,17 @@ const boot = window.MG_BOOT || {};
 //
 // Root is a real component (not a plain `view` variable, unlike before
 // 2026-08-02) because useIsMobile() needs a component to subscribe its
-// matchMedia listener from -- it live-switches Login between its desktop and
-// mobile presentations on resize/orientation change, not just at first paint.
-// App/SetupWizard have no mobile build yet, so isMobile doesn't affect them.
+// matchMedia listener from -- it live-switches Login and SetupWizard between
+// their desktop and mobile presentations on resize/orientation change, not
+// just at first paint. App has no mobile build yet, so isMobile doesn't
+// affect it.
 function Root() {
   const isMobile = useIsMobile();
   if (boot.authenticated === false) {
     return isMobile ? <LoginPageMobile boot={boot} /> : <LoginPage boot={boot} />;
   }
   if (boot.needs_key || boot.catalog_empty) {
-    return <SetupWizard boot={boot} />;
+    return isMobile ? <SetupWizardMobile boot={boot} /> : <SetupWizard boot={boot} />;
   }
   return <App boot={boot} />;
 }
