@@ -29,7 +29,7 @@ reader could work it out from the code, it does not belong here.
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 147
+- [Decisions](#decisions) &mdash; 148
 
 ---
 
@@ -1337,6 +1337,50 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 ## Decisions
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
+
+### Loom Mobile increment 5 shipped: Review & trim — pointer-drag math verified against the design's own real formulas, one design bug found and correctly NOT ported verbatim  ·  *2026-08-03*
+
+The crop-rectangle drag and the two trim handles, opened from a new ▶ badge on a finished
+shot's board card. `trimIn`/`trimOut` (seconds) and `crop` (`{x,y,w,h}` fractions) were
+already real fields on the card shape — used by `ShotPreview`, `buildExportClips`, and
+`splitCardAt` — nothing new added to `loom-core.js`/`loom-mutations.js` (confirmed zero diff
+on both).
+
+**A real bug in the locked design's own reference implementation was found and correctly
+NOT copied.** `Loom Mobile.dc.html`'s own `_fracFromEvent` reads
+`e.currentTarget.getBoundingClientRect()` off the 18px trim-handle div itself — but that div
+re-centers to the new position every render, making it a moving target no real browser drag
+could resolve correctly. The build sourced the same formula off the static track ref instead,
+matching the exact pattern already used by increment 1's reel scrub and desktop's own
+`ShotPreview.secAt()` (which already uses a separate static track ref for this identical
+reason). The crop rectangle's own math had no such bug (it reads off the static preview-wrap
+already) and was ported verbatim. **Worth remembering:** a locked design file is the pixel
+source of truth for what the UI shows and how it should behave, but its own inline
+implementation code is a mockup, not production code — matching its outcome/behavior exactly
+can still mean fixing a real bug in how it computes that outcome, and this is not a deviation
+from "designs win," it's the same rule applied one layer deeper.
+
+**Verification matched hand-computed expected values, not just "it moved."** Live pointer
+drags were dispatched at specific real pixel coordinates and the resulting readouts were
+checked against independently hand-computed fractions (e.g. dragging to `clientX=300` on a
+468px track at `left:16` → expected `3.762s`, got `3.8s`; crop drag to `(wrap.left+100,
+wrap.top+80)` → expected `x=6.36752%, y=15.3894%` exactly). This is a meaningfully stronger
+verification bar than "the UI responded" — it catches an off-by-one-clamp or wrong-axis bug
+that a looser check would miss.
+
+**A real bug was caught only by the live check, not the two static test suites.** A
+`ReferenceError: Cannot access 'reviewOpen' before initialization` (Rules-of-Hooks ordering)
+only surfaces when the component actually renders in a browser — the regex-based test suite
+can't render React and had no way to catch it. Fixed, rebuilt, full suite re-run green,
+reloaded live to confirm. Reinforces the standing lesson already in this doc: static
+assertions and a live render are not substitutes for each other.
+
+**Disclosed and properly cleaned up:** live verification wrote real `trimIn`/`trimOut`/`crop`
+values onto a real shot in the owner's actual open project. Restored via the app's own
+existing, unmodified desktop reset/clear-crop controls (not a hand-rolled undo), confirmed
+the shot reads exactly as it did before.
+
+With this increment, only Filter compare remains to complete Loom Mobile in full.
 
 ### Loom Mobile increment 4 shipped: the Image/Edit/Reference/Video standalone-asset generate rail — and a real, previously-shipped credit-safety bug (drawer poll dies silently on the Mobile toggle) found and fixed  ·  *2026-08-03*
 
