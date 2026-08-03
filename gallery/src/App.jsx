@@ -13,6 +13,7 @@ import ContestsOverlay from "./components/ContestsOverlay.jsx";
 import ImportOverlay from "./components/ImportOverlay.jsx";
 import ControlPanelOverlay from "./components/ControlPanelOverlay.jsx";
 import ContactSheetOverlay from "./components/ContactSheetOverlay.jsx";
+import FolioOverlay from "./components/FolioOverlay.jsx";
 import GenerateDrawer from "./components/GenerateDrawer.jsx";
 import PickerHost, { isPickerOpen } from "./components/PickerHost.jsx";
 import "./styles/shell.css";
@@ -275,6 +276,11 @@ export default function App({ boot }) {
      The same submit/result pair also ticks the shell's live-run counter. */
   useEffect(() => {
     const refresh = () => { load(1, true); fetchAccount().then(setAccount); };
+    // mg-gen-done also nudges the Folio of Honors to check-and-celebrate any newly
+    // earned achievement -- this is the only "a real action just completed" hook Ach
+    // has outside a hard page load, so it belongs here alongside the grid/account
+    // refresh. Guarded like window.Toast/window.Jobs elsewhere in this file.
+    const onGenDone = () => { refresh(); if (window.Ach) window.Ach.check(); };
     const onSubmit = (e) => {
       const id = e.detail && (e.detail.task_id || e.detail.taskId);
       if (id && window.Jobs) window.Jobs.register(id, "Rendered");
@@ -285,11 +291,11 @@ export default function App({ boot }) {
       if (window.JobsCard) window.JobsCard.refresh();
       setRunning((r) => ({ ...r, count: Math.max(0, r.count - 1) }));
     };
-    window.addEventListener("mg-gen-done", refresh);
+    window.addEventListener("mg-gen-done", onGenDone);
     document.addEventListener("mg-submit", onSubmit);
     document.addEventListener("mg-result", onResult);
     return () => {
-      window.removeEventListener("mg-gen-done", refresh);
+      window.removeEventListener("mg-gen-done", onGenDone);
       document.removeEventListener("mg-submit", onSubmit);
       document.removeEventListener("mg-result", onResult);
     };
@@ -660,6 +666,9 @@ export default function App({ boot }) {
           collectionName={contactSheetTarget.collectionName}
           onClose={() => setOverlay(null)}
         />
+      )}
+      {overlay === "folio" && (
+        <FolioOverlay onClose={() => setOverlay(null)} />
       )}
 
       {/* the Generate dock host: the wrapper carries the outside-click anchor

@@ -344,6 +344,14 @@
     '.ach-m2 .tw.go .tbody .r{animation:m2fade .46s ease 1.1s forwards, m2readalong 4.8s ease-in-out 1.6s infinite;}',
     '@keyframes m2readalong{0%{background-position:118% 0;}52%{background-position:-18% 0;}100%{background-position:-18% 0;}}',
     '@keyframes m2fade{from{opacity:0;transform:translateY(5px);}to{opacity:1;transform:none;}}',
+    // Folio "Unleash" ruby-scramble reveal, played inside this SAME real celebration moment
+    // (Ach.replay()) rather than a second lookalike -- overrides the shimmer text-fill trick
+    // above with a flat ruby fill while glitching/settled, matching the fixed destructive
+    // hue this app never re-skins. .glitch turns the shimmer animation off outright (a
+    // scrambling glyph string reading as "shimmering" too is just noise); .settled-nsfw
+    // leaves it off so the final NSFW line reads calmly, not glinting forever.
+    '.ach-m2 .tbody .r.glitch{font-family:ui-monospace,Menlo,monospace;letter-spacing:.01em;background:none;-webkit-text-fill-color:unset;color:var(--red,#f38ba8);text-shadow:0 0 10px rgba(243,139,168,.55);animation:m2fade .46s ease 1.1s forwards!important;}',
+    '.ach-m2 .tbody .r.settled-nsfw{background:none;-webkit-text-fill-color:unset;color:var(--red,#f38ba8);animation:m2fade .46s ease 1.1s forwards!important;}',
     '.ach-m2 .tier-pill{position:relative;display:inline-block;margin-top:8px;font:800 9px/1 sans-serif;letter-spacing:.09em;text-transform:uppercase;color:#241c10;padding:3px 11px;border-radius:999px;overflow:hidden;background:linear-gradient(180deg,var(--tcl),var(--tc) 46%,var(--tcd));border:1px solid var(--tcl);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 0 11px -1px var(--tc);text-shadow:0 1px 0 rgba(255,255,255,.35);opacity:0;}',
     '.ach-m2 .t-feat .tier-pill{background:linear-gradient(180deg,#c7ccd6,var(--gunmetal,#8a93a2) 46%,var(--gunmetal-deep,#4a515c));border-color:#c7ccd6;color:#171a20;box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 0 11px -1px var(--tc);}',
     '.ach-m2 .tw.go .tier-pill{animation:m2fade .4s ease 1.22s forwards;}',
@@ -1069,7 +1077,48 @@
     document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
     // On load: mark-and-toast any freshly earned feats, and reconcile the active skin.
     document.addEventListener('DOMContentLoaded', function(){ load(true); });
-    return { open:open, close:close, poke:poke, setUnleash:setUnleash, tab:tab, search:search };
+    // check(): same mark-and-toast pass as the DOMContentLoaded listener above, exposed so
+    // callers can ask for it after a real action completes (e.g. a generation finishing)
+    // instead of only ever on a hard page load. Public API surface only -- behavior is
+    // exactly load(true), nothing new.
+    function check(){ load(true); }
+    // replay(a, opts): re-plays the REAL celebration moment (_mkMoment/_play, same chime,
+    // badge sweep, mascot pop, ring pulse, and -- for legendary/feat -- the full fanfare of
+    // falling stars + confetti) for an ALREADY-EARNED achievement, on demand. Added because
+    // the Folio of Honors' "click an earned card" interaction was first built with its own
+    // small hand-rolled toast that didn't match this real moment (wrong look, no fanfare,
+    // and it never auto-dismissed -- caught live by the owner: "the toasts stay like
+    // warnings too and have to be dismissed"). This reuses the real thing instead of a
+    // second, drifting copy of it.
+    // NOT routed through the _q/_next queue -- that queue is for real earn-events arriving
+    // together (e.g. a first sync over an existing library); a manual replay click is a
+    // single, immediate, user-driven action and should never wait behind or get folded into
+    // an unrelated queued celebration.
+    // opts.line, if given, forces the initial displayed roast text (bypassing this
+    // function's own unleashed()-based auto-pick) -- the Folio's ruby-scramble reveal needs
+    // to always start from the CLEAN line itself, on its own timing, regardless of the
+    // classic Trophy Hall's separate localStorage-backed unleashed() flag.
+    // Returns a handle so the caller can drive the scramble in place (setText/setGlitching)
+    // and dismiss early (e.g. if the Folio itself closes while a replay is still showing) --
+    // {} if the achievement has no id (nothing to celebrate).
+    function replay(a, opts){
+      if(!a || !a.id) return {};
+      opts=opts||{};
+      var tier=a.tier||'common';
+      var hold={common:4200,rare:4800,epic:5400,legendary:6400,feat:6400}[tier]||4600;
+      _chime(tier);
+      var built=_mkMoment(a, {eyebrow:'Achievement · Replay', line:opts.line});
+      if(tier==='legendary'||tier==='feat') _fanfare(built.m, tier);
+      _play(built, hold, null);
+      var rEl=built.tw.querySelector('.toast .tbody .r');
+      return {
+        setText:function(text){ if(rEl) rEl.textContent=text; },
+        setGlitching:function(on){ if(rEl) rEl.classList.toggle('glitch', !!on); },
+        setSettledNsfw:function(on){ if(rEl) rEl.classList.toggle('settled-nsfw', !!on); },
+        dismiss:function(){ if(built.m && built.m.parentNode) built.m.click(); },
+      };
+    }
+    return { open:open, close:close, poke:poke, setUnleash:setUnleash, tab:tab, search:search, check:check, replay:replay };
   })();
 
   // ================================================================================

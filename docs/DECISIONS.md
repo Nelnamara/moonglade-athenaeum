@@ -29,7 +29,7 @@ reader could work it out from the code, it does not belong here.
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 131
+- [Decisions](#decisions) &mdash; 132
 
 ---
 
@@ -1337,6 +1337,12 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 ## Decisions
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
+
+### A build task touching a surface with a real, already-shipped counterpart must name that counterpart, not just hand over the design file  ·  *2026-08-02*
+
+Folio of Honors' click-to-replay interaction was scoped from `Folio of Honors.dc.html`'s own prototype markup, which renders its achievement-earn toast as a small, self-contained ~360px corner card — because a static design prototype has no way to call into a real running app's JS, so its toast necessarily has to be its own standalone mockup, not a pointer to the real thing. The build agent ported that prototype markup as if it were the target. The result was smaller than the real thing, had zero confetti/fanfare, and — worse — never auto-dismissed, sitting open "like a warning" until manually closed. The actual, already-shipped celebration a genuine achievement unlock gets — `_mkMoment()`/`_play()`/`_fanfare()`/`_chime()` in `static/mg-notify.js`, confirmed byte-for-byte matching `Ambient Layer.dc.html`'s own locked ambient-layer spec (badge medallion sweep, mascot pop, ring pulse, tier-colored glow, and on legendary/feat tiers a full 84-piece confetti + 46-star fanfare) — sat unused the entire time, a few files away. The owner caught it live, not a review pass: *"The agents custom built a new achievement engine?"* / *"We need to make sure agents know whats SHIPPED when we assign build. this can't happen."* Fixed by adding one new export, `Ach.replay(achievement, opts)`, to the real engine — reusing `_mkMoment`/`_play`/`_fanfare`/`_chime` unchanged — and rewiring the Folio's replay/ruby-scramble logic to drive that real DOM via a returned handle, deleting the custom toast component outright rather than keeping it as a fallback.
+
+**Why.** The general failure mode: a design handoff file (`.dc.html`) is a static prototype and will always contain a self-contained, simplified stand-in for anything that, in the real app, is a shared runtime system — a celebration engine, a toast queue, a job tracker, anything with its own JS module and its own state. Handing an agent only the design file for a surface that touches one of these lets it build a second, drifting, incomplete copy right next to the real one, because nothing in the design file tells it the real one exists. **Standing rule going forward: when scoping a build task for a surface that has a real, live counterpart elsewhere in the app — a shared engine, an existing API route, an established component pattern — the task assignment must explicitly name that counterpart and its location, and instruct the agent to reuse it, not just attach the design file and let the agent port it blind.** This is the same shape of lesson as "install as specified" governs visible copy/content questions, but for behavior: the design file wins on what a surface *looks like* and *says*; a real shared system already in the codebase wins on how a *shared mechanic* actually behaves, every time.
 
 ### Control Panel is a modal, not the page `Control Panel.dc.html` itself specifies  ·  *2026-08-02*
 
