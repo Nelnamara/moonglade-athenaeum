@@ -1,10 +1,13 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import useLibrary from "../hooks/useLibrary.js";
 import useFlavour from "../hooks/useFlavour.js";
+import useGenerate from "../gen/useGenerate.js";
 import { fetchAccount, fetchCollections } from "../api.js";
 import GalleryMobile from "./GalleryMobile.jsx";
+import CreateMobile from "./CreateMobile.jsx";
 import TabBarMobile from "./TabBarMobile.jsx";
 import MobileSheet from "./MobileSheet.jsx";
+import PickerHost from "./PickerHost.jsx";
 import "../styles/gallery-mobile.css";
 
 /* The mobile Gallery/Create/Control shell (design spec: Moonglade Mobile.dc.html)
@@ -14,8 +17,9 @@ import "../styles/gallery-mobile.css";
    (useLibrary.js, already extracted out of App.jsx for this), a new mobile
    presentation component consumes it, desktop is untouched.
 
-   THIS INCREMENT IS GALLERY-TAB ONLY (the owner's explicit scope for this
-   build). What's real:
+   FIRST increment (2026-08-02) was Gallery-tab only. THIS increment adds the
+   Create tab, Image mode (CreateMobile.jsx) on top of that, same shared-hook
+   architecture throughout. What's real:
      - the hero (brand mark, stats, credits chip -- real boot.stats/account data,
        same /api/account App.jsx already calls) and the tab bar (TabBarMobile.jsx)
        switching Gallery/Create/Control;
@@ -24,6 +28,17 @@ import "../styles/gallery-mobile.css";
        a Gallery <-> Create/Control tab switch instead of resetting on remount,
        matching App.jsx's own "the ONE place this state lives" call for the
        equivalent desktop refactor;
+     - the Create tab's Image mode (CreateMobile.jsx) -- fully wired to
+       useGenerate({ costRef }), lifted HERE for the identical reason useLibrary()
+       was: a prompt/model/LoRA/frame/reference draft survives a Create <->
+       Gallery/Control tab switch instead of resetting on remount. costRef is
+       created here too (an imperative DOM handle to the real <mg-cost-badge>
+       CreateMobile mounts, the same pattern GenerateDrawer.jsx uses);
+     - PickerHost -- mounted here for the first time on mobile (previously
+       desktop-only, App.jsx's own mount). CreateMobile's Reference field calls
+       the same askPicker() singleton EditTab/FixTab/FiltersPanel/GenerateDrawer
+       already use; without a mounted host it silently resolves to null, so this
+       is real wiring, not decoration;
      - The Loom sheet (hero's teal icon) -- a real link to /loom, which already
        works in landscape (docs/DECISIONS.md 2026-07-27: "the owner confirmed it
        already works well... only wants a link"), not a rebuild;
@@ -32,10 +47,13 @@ import "../styles/gallery-mobile.css";
        a signed-in mobile session, to make real in this pass).
 
    What's an HONEST placeholder, not a shortcut on anything above:
-     - Create and Control tabs render a soon-state note, matching this app's own
+     - Create's own Edit/Video modes (its segmented control's other two legs)
+       and its Advanced screen render a soon-state note/toast -- see
+       CreateMobile.jsx's own header comment for the full disclosure of what's
+       deferred there and why.
+     - The Control tab renders a soon-state note, matching this app's own
        NavSpine.jsx convention (dimmed, tooltip disclosing why) rather than
-       inventing partial pixels for either -- both are explicitly separate
-       follow-up work per this increment's brief.
+       inventing partial pixels for it -- explicitly separate follow-up work.
      - The hero's gold Folio icon and the Menu sheet's other six destinations
        (My Art / Publish / Train / Import / Contests / Health) are each either
        their OWN separate mobile design file (Folio Mobile.dc.html) or a
@@ -70,6 +88,8 @@ export default function AppMobile({ boot }) {
   const [closing, setClosing] = useState(false);
   const fl = useFlavour(undefined, boot.build_stamp);
   const lib = useLibrary();
+  const costRef = useRef(null);
+  const gen = useGenerate({ costRef });
 
   useEffect(() => { fetchAccount().then(setAccount); }, []);
 
@@ -148,8 +168,7 @@ export default function AppMobile({ boot }) {
           <GalleryMobile boot={boot} collections={collections} refreshCollections={refreshCollections} {...lib} />
         )}
         {tab === "create" && (
-          <Placeholder icon="✦" title="Create"
-            note="Image, Edit, and Video generation — coming in the next mobile pass." />
+          <CreateMobile account={account} costRef={costRef} {...gen} />
         )}
         {tab === "control" && (
           <Placeholder icon="⚙" title="Control"
@@ -158,6 +177,7 @@ export default function AppMobile({ boot }) {
       </div>
 
       <TabBarMobile tab={tab} setTab={setTab} />
+      <PickerHost />
 
       <MobileSheet open={sheet === "loom"} closing={closing} onClose={closeSheet} title="THE LOOM">
         <div className="glm-loom-note">

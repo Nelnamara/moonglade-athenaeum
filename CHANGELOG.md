@@ -17,6 +17,27 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Mobile pass, surface 3 (part 2): Create tab, Image mode.** The Create tab's placeholder
+  (shipped alongside the Gallery tab) is now a real, working Image generator — prompt, the
+  real model/LoRA picker (`<mg-model-picker>`, the same shared web component the desktop dock
+  uses), aspect chips, a reference picker, and a real `/api/price`-backed cost badge that
+  fails closed ("No cost yet — pick a model first") rather than ever showing a fake or
+  formula-derived number. Generate calls the exact same `submitTask()`/`/api/generate` path
+  desktop uses — no mobile-specific fork of the spend logic exists anywhere. The design
+  mockup's own Generate button is a hardcoded 1400ms fake-busy stub with no error handling;
+  this ships the real spend-safety path instead (busy-ref double-submit guard, real
+  error/result feed, real `Jobs.track()` completion callback).
+  Edit and Video modes render as honest, clearly-labeled placeholders this round — each is
+  its own separate increment — and the Advanced screen (LoRA weights, size/steps/cfg/negative)
+  is a disclosing "coming next" toast rather than a dead tap; until it ships, every request
+  goes out with real, sane `GEN_DEFAULTS`, nothing fabricated.
+  One real defect caught by review and fixed before shipping: a hardcoded hex gradient in the
+  new CSS that should have been the existing `--purple-deep` token — fixed to use the real
+  token plus a `color-mix()` derivation, matching this file's own established convention.
+  Verified live against the real account: the segmented control, all fields, and the real
+  model picker all render and open correctly; cost badge correctly shows its real "pick a
+  model" fail-closed state. Full suite green.
+
 - **Mobile pass, surface 3 (part 1): the Gallery/Create/Control shell — real Gallery tab.**
   The mobile app's nav skeleton — a 3-icon Gallery/Create/Control bottom tab bar — ships along
   with a fully real Gallery tab, not a decorative preview of one. Every field the design
