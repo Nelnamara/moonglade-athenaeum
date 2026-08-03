@@ -17,6 +17,29 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Loom — a real "📱 Mobile view" toolbar toggle, plus the first increment of a new
+  portrait mobile UI (board + reel).** The Loom is a real, shipped, working app with a
+  real backend — this ships the first of several increments toward a portrait-first
+  presentation matching the locked `Loom Mobile.dc.html` design, not new backend work. A
+  checkbox-chip in `.lv-top` (styled like the existing Draft chip) switches between the
+  existing desktop-style UI and the new `LoomMobile`, persisted via `localStorage`
+  (`mg_loom_mobile_ui`) — both views read the exact same live project data, so switching
+  never re-fetches or loses the board. An in-progress, not-yet-attached generation draft
+  (`draftCard`/`draftTarget`/`draftAttachedInfo`) was lifted from `LoomV2`'s own local
+  state up to `App()` specifically so it survives a toggle instead of being silently
+  discarded — `LoomV2`'s own behavior is otherwise unchanged (verified live: a marker
+  typed into the draft prompt survived two full round-trips of the toggle). This
+  increment builds only the board/reel — a real hand-rolled pointer-drag scrub (verified
+  live with dispatched `PointerEvent`s, matched frac-to-shot resolution exactly) and the
+  act-grouped shot board (add shot/add act, real thumbnails, cast-missing warnings). Shot
+  detail, Cast sheet, Generate, Review/trim, and Filter compare are explicit later
+  increments (guarded by a source test asserting none of that copy exists yet). One
+  disclosed deviation from the design: added a reciprocal "🖥 Desktop" return chip inside
+  the new mobile view, since the locked design's own mobile top bar has no way back — a
+  straight port would have made the toggle one-way. Full suite green (1539 pytest, 607
+  loom `node --test`, 28 new). Full reasoning in `docs/DECISIONS.md`'s entry of the same
+  date.
+
 - **Folio of Honors Mobile — real data, and the real celebration engine confirmed reused,
   not duplicated.** This is the exact surface where an earlier build this session made a
   real, corrected mistake: building a custom achievement-celebration toast instead of the

@@ -730,6 +730,24 @@ ${"=".repeat(48)}
   };
   var elapsedLabel = (ms) => ms < 36e5 ? Math.round(ms / 6e4) + "m" : Math.round(ms / 36e4) / 10 + "h";
   var emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
+  function useLocalToggle(key, defaultVal) {
+    const [val, setVal] = useState(() => {
+      try {
+        const raw = window.localStorage.getItem(key);
+        return raw === null ? defaultVal : raw === "1";
+      } catch (e) {
+        return defaultVal;
+      }
+    });
+    useEffect(() => {
+      try {
+        window.localStorage.setItem(key, val ? "1" : "0");
+      } catch (e) {
+      }
+    }, [key, val]);
+    return [val, setVal];
+  }
+  var MOBILE_UI_KEY = "mg_loom_mobile_ui";
   var hasStore = typeof window !== "undefined" && window.storage;
   var PKEY = "storyboard:v2:project";
   var PPRE = "storyboard:v2:proj:";
@@ -1344,7 +1362,92 @@ ${"=".repeat(48)}
       )
     )));
   }
-  function LoomV2({ project, setCard, setAssets, entries, durOf: durOf2, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct: moveCardToAct2, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
+  function LoomV2({
+    project,
+    setCard,
+    setAssets,
+    entries,
+    durOf: durOf2,
+    scale,
+    selShot,
+    setSelShot,
+    useExistingVideo,
+    genState,
+    thumbs,
+    openPick,
+    storeThumb,
+    setAct,
+    addCard,
+    importFootage,
+    dupCard,
+    delCard,
+    moveCard,
+    moveCardToAct: moveCardToAct2,
+    addAct,
+    delAct,
+    moveAct,
+    genImgState,
+    imgModel,
+    setImgModel,
+    imgLoras,
+    setImgLoras,
+    imgAdv,
+    setImgAdv,
+    modelDefaults,
+    setModelDefaults,
+    genImage,
+    routeImg,
+    genEditState,
+    setGenEditState,
+    genRefState,
+    setGenRefState,
+    genEdit,
+    genRef,
+    routeGen,
+    projectApi,
+    playSequence,
+    exportCut,
+    batching,
+    batchGenerate,
+    addRef,
+    setRef,
+    delRef,
+    exportAll,
+    exportJSON,
+    exportBundle,
+    bundling,
+    importBackup,
+    setImportOpen,
+    copyShot,
+    setLook,
+    setDraft,
+    splitShot,
+    onVideoSubmit,
+    onVideoResult,
+    onVideoError,
+    onVideoSlow,
+    onVideoPaused,
+    pollShot,
+    costEstimate,
+    refreshEstimate,
+    batchTally,
+    // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
+    // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
+    // this file already keys genState/genImgState/etc). LIFTED to App() (mobile-board-view
+    // pass, 2026-08-03) so a still-in-progress draft survives toggling to Mobile view and back
+    // -- before this, the draft lived only in LoomV2's own component state, so unmounting it
+    // (which is exactly what picking Mobile view does) silently discarded whatever the owner
+    // had half-typed into Generate. Every reference below is unchanged from when these were
+    // local useState calls -- only the declaration moved, so LoomV2's own behavior is identical.
+    mobileUI,
+    setMobileUI,
+    draftCard,
+    setDraftCard,
+    draftTarget,
+    setDraftTarget,
+    draftAttachedInfo,
+    setDraftAttachedInfo
+  }) {
     const [tab, setTab] = useState("Video");
     const [acct, setAcct] = useState(null);
     const [handoff, setHandoff] = useState("");
@@ -1361,33 +1464,6 @@ ${"=".repeat(48)}
     const [palFor, setPalFor] = useState(null);
     const [dzHover, setDzHover] = useState(false);
     const [overrideClearedFlash, setOverrideClearedFlash] = useState(false);
-    const [draftCard, setDraftCard] = useState(() => ({
-      id: "__draft__",
-      mode: "R2V",
-      duration: 5,
-      connect: "new",
-      title: "",
-      prompt: "",
-      camera: "",
-      lighting: "",
-      transIn: "",
-      transOut: "",
-      audioCue: "",
-      notes: "",
-      audioGen: false,
-      audioLanguage: "english",
-      imgPrompt: "",
-      editPrompt: "",
-      refPrompt: "",
-      cast: [],
-      refs: [],
-      openFrame: {},
-      closeFrame: {},
-      promptOverride: false,
-      promptOverrideText: ""
-    }));
-    const [draftTarget, setDraftTarget] = useState("");
-    const [draftAttachedInfo, setDraftAttachedInfo] = useState(null);
     const tlDrag = useRef({ dragging: false, startY: 0, startH: 0 });
     useEffect(() => {
       const prevOverflow = document.body.style.overflow;
@@ -2553,6 +2629,14 @@ ${"=".repeat(48)}
       /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!project.draft, onChange: (e) => setDraft(e.target.checked) }),
       "\u26A1 Draft"
     ), /* @__PURE__ */ React.createElement(
+      "label",
+      {
+        className: "lv-draft" + (mobileUI ? " on" : ""),
+        title: "Switch to a phone-sized board/reel view \u2014 desktop chrome (panels, drawers) hides; your project and any in-progress draft are unaffected"
+      },
+      /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!mobileUI, onChange: (e) => setMobileUI(e.target.checked) }),
+      "\u{1F4F1} Mobile view"
+    ), /* @__PURE__ */ React.createElement(
       "button",
       {
         onClick: () => {
@@ -2745,6 +2829,224 @@ ${"=".repeat(48)}
         setDeepFocus(null);
       } }, "Select in Generate \u2192")));
     })());
+  }
+  var LOOM_MOBILE_STYLES = `
+.lm-root{position:fixed;inset:0;z-index:400;background:var(--mantle);color:var(--text);
+  display:flex;flex-direction:column;font-family:system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
+.lm-top{flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:max(10px,env(safe-area-inset-top)) 16px 8px;}
+.lm-back{font:700 11.5px/1 system-ui;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--subtext);text-decoration:none;white-space:nowrap;background:none;border:none;cursor:pointer;padding:0;}
+.lm-back:hover{color:var(--text);}
+.lm-fill{flex:1 1 auto;}
+.lm-title{font:700 11px/1 system-ui;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--subtext);white-space:nowrap;}
+.lm-chip{display:inline-flex;align-items:center;gap:4px;font:600 10px/1 system-ui;
+  color:var(--subtext);cursor:pointer;padding:6px 10px;border-radius:999px;
+  border:1px solid var(--surface1);background:none;user-select:none;white-space:nowrap;}
+.lm-chip:hover{border-color:var(--accent);color:var(--accent);}
+.lm-chip.on{color:var(--gold);border-color:var(--gold);background:color-mix(in srgb,var(--gold) 15%,transparent);}
+.lm-chip input{margin:0;cursor:pointer;}
+.lm-reelwrap{flex:none;padding:4px 16px 10px;position:relative;}
+.lm-reelbar{display:flex;gap:3px;height:18px;border-radius:4px;cursor:pointer;touch-action:none;}
+.lm-seg{border-radius:3px;height:100%;}
+.lm-seg.todo{background:var(--surface1);}
+.lm-seg.wip{background:var(--accent);}
+.lm-seg.done{background:var(--emerald);}
+.lm-seg.error{background:var(--red);}
+.lm-seg.paused{background:var(--peach);}
+.lm-seg.sel{outline:2px solid var(--text);outline-offset:-2px;}
+.lm-tick{position:absolute;top:6px;bottom:12px;width:1px;background:rgba(255,255,255,.35);pointer-events:none;}
+.lm-handle{position:absolute;top:13px;width:14px;height:14px;border-radius:50%;
+  background:var(--accent);border:2px solid var(--text);transform:translate(-50%,-50%);
+  box-shadow:0 1px 4px rgba(0,0,0,.5);pointer-events:none;}
+.lm-scrubline{position:absolute;top:6px;bottom:12px;width:2px;background:var(--accent);
+  box-shadow:0 0 6px color-mix(in srgb,var(--accent) 70%,transparent);pointer-events:none;}
+.lm-preview{position:absolute;top:100%;margin-top:8px;z-index:10;display:flex;align-items:center;
+  gap:8px;padding:7px 10px;border-radius:10px;background:var(--surface0);border:1px solid var(--surface1);
+  box-shadow:0 10px 26px -8px rgba(0,0,0,.6);pointer-events:none;width:172px;box-sizing:border-box;}
+.lm-prevthumb{width:34px;height:34px;border-radius:7px;flex:none;background-size:cover;
+  background-position:center;background-color:var(--base);}
+.lm-prevcol{min-width:0;display:flex;flex-direction:column;gap:2px;}
+.lm-prevcode{font-family:ui-monospace,monospace;font-size:9px;color:var(--overlay0);}
+.lm-prevtitle{font-size:11px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-prevmeta{font-size:9px;color:var(--subtext);}
+.lm-body{flex:1 1 auto;overflow-y:auto;padding:0 16px 30px;-webkit-overflow-scrolling:touch;}
+.lm-acthead{display:flex;align-items:baseline;gap:8px;padding:14px 0 8px;}
+.lm-actname{font-family:Georgia,serif;font-style:italic;font-size:14px;color:var(--text);}
+.lm-actcount{font-size:10px;color:var(--overlay0);}
+.lm-addshot{font-size:10.5px;font-weight:700;color:var(--accent);cursor:pointer;background:none;border:none;padding:0;}
+.lm-cardrow{display:flex;align-items:center;gap:6px;margin-bottom:7px;}
+.lm-card{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:10px;padding:8px 10px;
+  border-radius:11px;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;
+  text-align:left;font:inherit;color:inherit;}
+.lm-card:hover,.lm-card:focus-visible{border-color:var(--accent);}
+.lm-card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
+.lm-thumb{width:48px;height:48px;border-radius:9px;flex:none;background-size:cover;
+  background-position:center;background-color:var(--surface1);display:grid;place-items:center;
+  font:700 9px/1 system-ui;color:var(--subtext);}
+.lm-textcol{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:4px;}
+.lm-titlerow{display:flex;align-items:baseline;gap:6px;min-width:0;}
+.lm-code{font-family:ui-monospace,monospace;font-size:9.5px;color:var(--overlay0);flex:none;}
+.lm-cardtitle{font-size:12.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-pillrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.lm-modepill{font-size:9px;font-weight:700;padding:2px 6px;border-radius:5px;
+  background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent);flex:none;}
+.lm-durpill{font-size:9.5px;color:var(--subtext);flex:none;}
+.lm-stpill{font-size:9px;font-weight:700;text-transform:uppercase;flex:none;}
+.lm-stpill.done{color:var(--emerald);}
+.lm-stpill.wip{color:var(--accent);}
+.lm-stpill.todo{color:var(--overlay0);}
+.lm-stpill.paused{color:var(--peach);}
+.lm-stpill.error{color:var(--red);}
+.lm-warn{font-size:9px;color:var(--peach);}
+.lm-addact{text-align:center;font-size:11px;font-weight:700;color:var(--accent);padding:12px;
+  border:1px dashed var(--surface1);border-radius:11px;cursor:pointer;margin-top:6px;background:none;width:100%;}
+.lm-empty{text-align:center;color:var(--overlay0);font-size:11px;font-style:italic;padding:10px 6px;}
+`;
+  function LoomMobile({
+    project,
+    entries,
+    thumbs,
+    genState,
+    selShot,
+    setSelShot,
+    addCard,
+    addAct,
+    setDraft,
+    mobileUI,
+    setMobileUI,
+    // Not read by this increment's board/reel screen -- lifted to App() (see LoomV2's own
+    // prop-list comment) and threaded through here now so the NEXT increment (Generate) never
+    // has to re-plumb the lift a second time; a still-in-progress draft already survives
+    // toggling between this view and LoomV2 today, before Generate itself exists on mobile.
+    draftCard,
+    setDraftCard,
+    draftTarget,
+    setDraftTarget,
+    draftAttachedInfo,
+    setDraftAttachedInfo
+  }) {
+    useEffect(() => {
+      const prevOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = prevOverflow;
+      };
+    }, []);
+    const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
+    const frameSrc = (f) => f && f.thumbId ? thumbs[f.thumbId] : f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null;
+    const cardThumb = (c) => frameSrc(c.openFrame) || (c.resultMid ? "/thumbs/" + c.resultMid + ".jpg" : null);
+    const statusOf = (c) => {
+      const gs = genState[c.id];
+      const paused = gs && gs.phase === "paused";
+      return paused ? "paused" : gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : c.status;
+    };
+    const total = entries.reduce((s, x) => s + durOf(x.c), 0);
+    const tickFrac = total > 0 ? Math.min(1, (project.target || 0) / total) : 0;
+    const selIdx = entries.findIndex((x) => x.c.id === selShot);
+    let selFrac = null;
+    if (selIdx >= 0 && total > 0) {
+      let cum = 0;
+      for (let i = 0; i < selIdx; i++) cum += durOf(entries[i].c) || 1;
+      selFrac = (cum + (durOf(entries[selIdx].c) || 1) / 2) / total;
+    }
+    const [scrubbing, setScrubbing] = useState(false);
+    const [scrubFrac, setScrubFrac] = useState(0);
+    const [scrubIdx, setScrubIdx] = useState(null);
+    const fracAt = (e) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      return r.width ? Math.max(0, Math.min(0.9999, (e.clientX - r.left) / r.width)) : 0;
+    };
+    const idxAtFrac = (frac) => {
+      if (!entries.length || !total) return null;
+      const t = frac * total;
+      let cum = 0;
+      for (let i = 0; i < entries.length; i++) {
+        cum += durOf(entries[i].c) || 1;
+        if (t < cum) return i;
+      }
+      return entries.length - 1;
+    };
+    const scrubTo = (e) => {
+      const frac = fracAt(e);
+      setScrubbing(true);
+      setScrubFrac(frac);
+      setScrubIdx(idxAtFrac(frac));
+    };
+    const onReelDown = (e) => {
+      if (!entries.length) return;
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch (err) {
+      }
+      scrubTo(e);
+    };
+    const onReelMove = (e) => {
+      if (scrubbing) scrubTo(e);
+    };
+    const onReelUp = () => {
+      setScrubbing(false);
+      if (scrubIdx != null && entries[scrubIdx]) setSelShot(entries[scrubIdx].c.id);
+    };
+    const onReelLeave = () => setScrubbing(false);
+    const handleFrac = scrubbing ? scrubFrac : selFrac;
+    const scrubEntry = scrubIdx != null ? entries[scrubIdx] : null;
+    const posStyle = (frac) => ({ left: `calc(16px + (100% - 32px) * ${frac})` });
+    return /* @__PURE__ */ React.createElement("div", { className: "lm-root" }, /* @__PURE__ */ React.createElement("style", null, LOOM_MOBILE_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lm-top" }, /* @__PURE__ */ React.createElement("a", { className: "lm-back", href: "/" }, "\u2190 Gallery"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement("span", { className: "lm-title" }, "\u25AA The Loom"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement(
+      "label",
+      {
+        className: "lm-chip" + (project.draft ? " on" : ""),
+        title: "Draft mode renders every shot at the cheaper 'basic' quality \u2014 block out the animatic, then turn Draft off and re-generate the keepers at pro quality"
+      },
+      /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!project.draft, onChange: (e) => setDraft(e.target.checked) }),
+      "\u26A1 Draft"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "lm-chip",
+        onClick: () => setMobileUI(false),
+        title: "Switch back to the full desktop-style Loom"
+      },
+      "\u{1F5A5} Desktop"
+    )), /* @__PURE__ */ React.createElement("div", { className: "lm-reelwrap" }, /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        className: "lm-reelbar",
+        onPointerDown: onReelDown,
+        onPointerMove: onReelMove,
+        onPointerUp: onReelUp,
+        onPointerLeave: onReelLeave
+      },
+      entries.map((x) => /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          key: x.c.id,
+          className: "lm-seg " + statusOf(x.c) + (x.c.id === selShot ? " sel" : ""),
+          style: { flex: `${durOf(x.c) || 1} 1 0` }
+        }
+      ))
+    ), total > 0 && /* @__PURE__ */ React.createElement("div", { className: "lm-tick", style: posStyle(tickFrac) }), scrubbing && /* @__PURE__ */ React.createElement("div", { className: "lm-scrubline", style: posStyle(scrubFrac) }), handleFrac != null && /* @__PURE__ */ React.createElement("div", { className: "lm-handle", style: posStyle(handleFrac) }), scrubbing && scrubEntry && /* @__PURE__ */ React.createElement("div", { className: "lm-preview", style: { left: `clamp(8px, calc(${(scrubFrac * 100).toFixed(3)}% - 86px), calc(100% - 8px - 172px))` } }, /* @__PURE__ */ React.createElement("div", { className: "lm-prevthumb", style: cardThumb(scrubEntry.c) ? { backgroundImage: `url(${cardThumb(scrubEntry.c)})` } : void 0 }), /* @__PURE__ */ React.createElement("div", { className: "lm-prevcol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-prevcode" }, scrubEntry.code), /* @__PURE__ */ React.createElement("div", { className: "lm-prevtitle" }, scrubEntry.c.title || "untitled"), /* @__PURE__ */ React.createElement("div", { className: "lm-prevmeta" }, scrubEntry.c.mode, " \xB7 ", durOf(scrubEntry.c), "s")))), /* @__PURE__ */ React.createElement("div", { className: "lm-body" }, project.acts.map((act, ai) => {
+      const items = entries.filter((e) => e.ai === ai);
+      return /* @__PURE__ */ React.createElement("div", { key: act.id }, /* @__PURE__ */ React.createElement("div", { className: "lm-acthead" }, /* @__PURE__ */ React.createElement("span", { className: "lm-actname" }, act.name), /* @__PURE__ */ React.createElement("span", { className: "lm-actcount" }, items.length, " shot", items.length === 1 ? "" : "s"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-addshot", onClick: () => addCard(act.id) }, "+ Shot")), items.map((e) => {
+        const st = statusOf(e.c);
+        const gs = genState[e.c.id];
+        const miss = castMissingImages(e, project, imgSrc);
+        const thumb = cardThumb(e.c);
+        return /* @__PURE__ */ React.createElement("div", { key: e.c.id, className: "lm-cardrow" }, /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lm-card" + (e.c.id === selShot ? " sel" : ""),
+            onClick: () => setSelShot(e.c.id),
+            title: "Select this shot \u2014 it binds to Generate"
+          },
+          /* @__PURE__ */ React.createElement("div", { className: "lm-thumb", style: thumb ? { backgroundImage: `url(${thumb})` } : void 0 }, !thumb && e.c.mode),
+          /* @__PURE__ */ React.createElement("div", { className: "lm-textcol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-titlerow" }, /* @__PURE__ */ React.createElement("span", { className: "lm-code" }, e.code), /* @__PURE__ */ React.createElement("span", { className: "lm-cardtitle" }, e.c.title || "untitled")), /* @__PURE__ */ React.createElement("div", { className: "lm-pillrow" }, /* @__PURE__ */ React.createElement("span", { className: "lm-modepill" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lm-durpill" }, durOf(e.c), "s"), /* @__PURE__ */ React.createElement("span", { className: "lm-stpill " + st }, gs && gs.msg ? gs.msg : st), miss.length > 0 && /* @__PURE__ */ React.createElement("span", { className: "lm-warn", title: `No picture on this shot for ${miss.join(", ")} \u2014 they are cast here but cannot be referenced, so they are left out of the prompt.` }, "\u26A0 ", miss.length === 1 ? `${miss[0]}: no image` : `${miss.length} cast: no image`)))
+        ));
+      }), !items.length && /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "No shots yet \u2014 tap + Shot."));
+    }), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-addact", onClick: addAct }, "+ New act"), !project.acts.length && /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "No acts yet \u2014 add one below.")));
   }
   function useProjectStore(setSelShot) {
     const [project, setProject] = useState(null);
@@ -3633,6 +3935,34 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
   }
   function App() {
     const [selShot, setSelShot] = useState(null);
+    const [mobileUI, setMobileUI] = useLocalToggle(MOBILE_UI_KEY, false);
+    const [draftCard, setDraftCard] = useState(() => ({
+      id: "__draft__",
+      mode: "R2V",
+      duration: 5,
+      connect: "new",
+      title: "",
+      prompt: "",
+      camera: "",
+      lighting: "",
+      transIn: "",
+      transOut: "",
+      audioCue: "",
+      notes: "",
+      audioGen: false,
+      audioLanguage: "english",
+      imgPrompt: "",
+      editPrompt: "",
+      refPrompt: "",
+      cast: [],
+      refs: [],
+      openFrame: {},
+      closeFrame: {},
+      promptOverride: false,
+      promptOverrideText: ""
+    }));
+    const [draftTarget, setDraftTarget] = useState("");
+    const [draftAttachedInfo, setDraftAttachedInfo] = useState(null);
     const {
       project,
       setProject,
@@ -3813,7 +4143,28 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     const anyDone = entries.some((e) => e.c.resultMid);
     const { total, scale, over } = reelStats(entries, project.target);
     const done = entries.filter((x) => x.c.status === "done").length;
-    return /* @__PURE__ */ React.createElement("div", { className: "sb-root" }, /* @__PURE__ */ React.createElement("style", null, STYLES), /* @__PURE__ */ React.createElement(V2Boundary, null, /* @__PURE__ */ React.createElement(
+    return /* @__PURE__ */ React.createElement("div", { className: "sb-root" }, /* @__PURE__ */ React.createElement("style", null, STYLES), mobileUI ? /* @__PURE__ */ React.createElement(V2Boundary, null, /* @__PURE__ */ React.createElement(
+      LoomMobile,
+      {
+        project,
+        entries,
+        thumbs,
+        genState,
+        selShot,
+        setSelShot,
+        addCard,
+        addAct,
+        setDraft,
+        mobileUI,
+        setMobileUI,
+        draftCard,
+        setDraftCard,
+        draftTarget,
+        setDraftTarget,
+        draftAttachedInfo,
+        setDraftAttachedInfo
+      }
+    )) : /* @__PURE__ */ React.createElement(V2Boundary, null, /* @__PURE__ */ React.createElement(
       LoomV2,
       {
         project,
@@ -3883,7 +4234,15 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         onVideoPaused,
         pollShot,
         costEstimate,
-        refreshEstimate
+        refreshEstimate,
+        mobileUI,
+        setMobileUI,
+        draftCard,
+        setDraftCard,
+        draftTarget,
+        setDraftTarget,
+        draftAttachedInfo,
+        setDraftAttachedInfo
       }
     )), seq && /* @__PURE__ */ React.createElement(SequencePlayer, { clips: seq, onClose: closeSequence }), exp && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
       if (e.target === e.currentTarget && exp.status !== "running") closeExport();

@@ -229,6 +229,26 @@ const fmt = (s) => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s
 // hook) and onVideoSlow/onVideoPaused (inside App(), a different function entirely) need it.
 const elapsedLabel = (ms) => ms < 3600000 ? Math.round(ms / 60000) + "m" : (Math.round(ms / 360000) / 10) + "h";
 const emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
+// A durable, manual owner-preference toggle backed by localStorage -- NOT window.storage
+// (the sGet/sSet/sList/sDel family above, which is the async, server-backed project store):
+// this is a per-browser UI-chrome preference (which SKIN of the Loom to show), not project
+// data, so it has no business round-tripping through the server or living in a storyboard's
+// own JSON. There is no existing hook in this file for that -- the main gallery only ever
+// auto-detects viewport width for its own mobile layout, it never persists a manual override
+// -- so this is a small, real, new one (used by App()'s "📱 Mobile view" switch), not a
+// borrowed one. Reads localStorage exactly once, in the lazy useState initializer, and
+// writes it back only when the value actually changes.
+function useLocalToggle(key, defaultVal) {
+  const [val, setVal] = useState(() => {
+    try { const raw = window.localStorage.getItem(key); return raw === null ? defaultVal : raw === "1"; }
+    catch (e) { return defaultVal; }
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem(key, val ? "1" : "0"); } catch (e) {}
+  }, [key, val]);
+  return [val, setVal];
+}
+const MOBILE_UI_KEY = "mg_loom_mobile_ui";   // "📱 Mobile view" toggle -- see useLocalToggle above
 // CONNECT, CONTINUITY_PHRASE, actLetter, maxTagNum/nextTag, frameLinked, and
 // connectMeta now live in ./src/loom-core.js (imported above) -- Phase 1
 // tooling pass, 2026-07-16. continuityLinked (same module) added 2026-07-23 to
@@ -789,7 +809,16 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
   );
 }
 
-function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
+function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally,
+  // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
+  // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
+  // this file already keys genState/genImgState/etc). LIFTED to App() (mobile-board-view
+  // pass, 2026-08-03) so a still-in-progress draft survives toggling to Mobile view and back
+  // -- before this, the draft lived only in LoomV2's own component state, so unmounting it
+  // (which is exactly what picking Mobile view does) silently discarded whatever the owner
+  // had half-typed into Generate. Every reference below is unchanged from when these were
+  // local useState calls -- only the declaration moved, so LoomV2's own behavior is identical.
+  mobileUI, setMobileUI, draftCard, setDraftCard, draftTarget, setDraftTarget, draftAttachedInfo, setDraftAttachedInfo }) {
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
@@ -818,16 +847,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // Draft generation: the Generate drawer works with no shot selected, exactly like the
   // main gallery's own drawer -- a "card" that lives in component state instead of the
   // project, generation-state dicts keyed by its "__draft__" id right alongside real shots'.
-  const [draftCard, setDraftCard] = useState(() => ({
-    id: "__draft__", mode: "R2V", duration: 5, connect: "new", title: "", prompt: "",
-    camera: "", lighting: "", transIn: "", transOut: "", audioCue: "", notes: "",
-    audioGen: false, audioLanguage: "english",
-    imgPrompt: "", editPrompt: "", refPrompt: "",
-    cast: [], refs: [], openFrame: {}, closeFrame: {},
-    promptOverride: false, promptOverrideText: "",
-  }));
-  const [draftTarget, setDraftTarget] = useState("");              // shot id chosen to route/attach a draft result into
-  const [draftAttachedInfo, setDraftAttachedInfo] = useState(null); // {mid, code} once a draft video is attached to a shot
+  // draftCard/draftTarget/draftAttachedInfo are now App()-level props (see this function's
+  // own signature comment) -- lifted, not removed; every use below is unchanged.
   const tlDrag = useRef({ dragging: false, startY: 0, startH: 0 });
   // The overlay is position:fixed, so it never visibly moves -- but classic Loom's own
   // page underneath is a normal tall document, and without this, its body/html scrollbar
@@ -2448,6 +2469,18 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         <label className={"lv-draft" + (project.draft ? " on" : "")}
           title="Draft mode renders every shot at the cheaper 'basic' quality — block out the animatic, then turn Draft off and re-generate the keepers at pro quality">
           <input type="checkbox" checked={!!project.draft} onChange={(e) => setDraft(e.target.checked)} />⚡ Draft</label>
+        {/* Manual, owner-preference switch to the phone-sized board/reel view (LoomMobile,
+            below useProjectStore) -- unlike everything else in this bar, this is a NEW pattern
+            for the Loom: the main gallery only ever auto-detects viewport width for its own
+            mobile layout, there is no existing "durable manual UI-mode toggle" hook anywhere
+            in this file to reuse. Persisted (useLocalToggle, MOBILE_UI_KEY) so the choice
+            survives a reload; reuses .lv-draft's own checkbox-chip visual pattern rather than
+            inventing a new one. draftCard/draftTarget/draftAttachedInfo are lifted to App() --
+            see this component's own prop-list comment -- specifically so flipping this switch
+            mid-draft never loses it. */}
+        <label className={"lv-draft" + (mobileUI ? " on" : "")}
+          title="Switch to a phone-sized board/reel view — desktop chrome (panels, drawers) hides; your project and any in-progress draft are unaffected">
+          <input type="checkbox" checked={!!mobileUI} onChange={(e) => setMobileUI(e.target.checked)} />📱 Mobile view</label>
         <button onClick={() => {
           // Flush+locally-patch BEFORE calling batchGenerate -- do not trust that a hand-
           // edit committed via blur (the button stealing focus fires the drawer's blur
@@ -2687,6 +2720,310 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           </div>
         );
       })()}
+    </div>
+  );
+}
+
+/* =========================================================================
+   LOOM MOBILE -- first increment (2026-08-03). A phone-sized ALTERNATIVE to
+   LoomV2, chosen by the "📱 Mobile view" toggle in LoomV2's own .lv-top bar
+   (persisted via useLocalToggle/MOBILE_UI_KEY, see App()). Kept INLINE here
+   rather than split into its own loom/src/loom-mobile.jsx file: unlike
+   loom-core.js/loom-mutations.js (deliberately React-free, DOM-free, pure --
+   see loom-core.js's own header -- so they can be `node --test`ed directly and
+   so the Flask /loom route's Babel-standalone fallback can inline them ahead
+   of the JSX by stripping their `export` keywords), LoomMobile IS a React
+   component -- exactly the same category as LoomV2/ProjectSwitcher/ExportMenu/
+   ShotPreview/SequencePlayer/ImportCollection/FrameSlot, every one of which
+   already lives inline in this one file rather than as a separate module.
+   A separate file would also need moonglade_gallery.py's loom() route taught
+   to inline a THIRD file for the default (non-bundle) Babel path -- that
+   route's inliner is hardcoded to exactly loom-core.js + loom-mutations.js
+   (see its own comments), and a raw `import` surviving into that
+   data-presets="react"-only <script type="text/babel"> blob is a hard
+   SyntaxError in every browser (no ESM transform is loaded there) -- i.e. a
+   third module would silently break the DEFAULT /loom page for every desktop
+   user, not just anyone who opts into Mobile view. Matching the codebase's
+   real, established convention (components inline, pure logic in src/) avoids
+   that risk entirely and needs no Python change.
+
+   Scope of THIS increment, per the locked design source (design_handoff/
+   design_handoff_moonglade_suite/"Loom Mobile.dc.html", read in full before
+   writing a line here): the top bar (back-link / title / Draft toggle), the
+   horizontal reel/timeline scrub bar (pointer-drag, fraction-of-width math,
+   floating preview card -- genuinely new for this codebase; LoomV2's own
+   .lv-reel below is click-a-fixed-width-segment only, no drag, no preview),
+   and the act-grouped shot board (add-shot/add-act). Deliberately NOT built
+   yet (next increments): shot detail (Deep Focus's mobile equivalent), the
+   Cast & assets sheet, Generate, Review & trim, Filter compare -- tapping a
+   shot card this increment does the smallest real, honest thing available
+   without any of those: it SELECTS the shot (setSelShot), matching the exact
+   "Click a shot → it binds to Generate" contract LoomV2's own .lv-note
+   already documents for the desktop board.
+   ========================================================================= */
+const LOOM_MOBILE_STYLES = `
+.lm-root{position:fixed;inset:0;z-index:400;background:var(--mantle);color:var(--text);
+  display:flex;flex-direction:column;font-family:system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
+.lm-top{flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:max(10px,env(safe-area-inset-top)) 16px 8px;}
+.lm-back{font:700 11.5px/1 system-ui;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--subtext);text-decoration:none;white-space:nowrap;background:none;border:none;cursor:pointer;padding:0;}
+.lm-back:hover{color:var(--text);}
+.lm-fill{flex:1 1 auto;}
+.lm-title{font:700 11px/1 system-ui;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--subtext);white-space:nowrap;}
+.lm-chip{display:inline-flex;align-items:center;gap:4px;font:600 10px/1 system-ui;
+  color:var(--subtext);cursor:pointer;padding:6px 10px;border-radius:999px;
+  border:1px solid var(--surface1);background:none;user-select:none;white-space:nowrap;}
+.lm-chip:hover{border-color:var(--accent);color:var(--accent);}
+.lm-chip.on{color:var(--gold);border-color:var(--gold);background:color-mix(in srgb,var(--gold) 15%,transparent);}
+.lm-chip input{margin:0;cursor:pointer;}
+.lm-reelwrap{flex:none;padding:4px 16px 10px;position:relative;}
+.lm-reelbar{display:flex;gap:3px;height:18px;border-radius:4px;cursor:pointer;touch-action:none;}
+.lm-seg{border-radius:3px;height:100%;}
+.lm-seg.todo{background:var(--surface1);}
+.lm-seg.wip{background:var(--accent);}
+.lm-seg.done{background:var(--emerald);}
+.lm-seg.error{background:var(--red);}
+.lm-seg.paused{background:var(--peach);}
+.lm-seg.sel{outline:2px solid var(--text);outline-offset:-2px;}
+.lm-tick{position:absolute;top:6px;bottom:12px;width:1px;background:rgba(255,255,255,.35);pointer-events:none;}
+.lm-handle{position:absolute;top:13px;width:14px;height:14px;border-radius:50%;
+  background:var(--accent);border:2px solid var(--text);transform:translate(-50%,-50%);
+  box-shadow:0 1px 4px rgba(0,0,0,.5);pointer-events:none;}
+.lm-scrubline{position:absolute;top:6px;bottom:12px;width:2px;background:var(--accent);
+  box-shadow:0 0 6px color-mix(in srgb,var(--accent) 70%,transparent);pointer-events:none;}
+.lm-preview{position:absolute;top:100%;margin-top:8px;z-index:10;display:flex;align-items:center;
+  gap:8px;padding:7px 10px;border-radius:10px;background:var(--surface0);border:1px solid var(--surface1);
+  box-shadow:0 10px 26px -8px rgba(0,0,0,.6);pointer-events:none;width:172px;box-sizing:border-box;}
+.lm-prevthumb{width:34px;height:34px;border-radius:7px;flex:none;background-size:cover;
+  background-position:center;background-color:var(--base);}
+.lm-prevcol{min-width:0;display:flex;flex-direction:column;gap:2px;}
+.lm-prevcode{font-family:ui-monospace,monospace;font-size:9px;color:var(--overlay0);}
+.lm-prevtitle{font-size:11px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-prevmeta{font-size:9px;color:var(--subtext);}
+.lm-body{flex:1 1 auto;overflow-y:auto;padding:0 16px 30px;-webkit-overflow-scrolling:touch;}
+.lm-acthead{display:flex;align-items:baseline;gap:8px;padding:14px 0 8px;}
+.lm-actname{font-family:Georgia,serif;font-style:italic;font-size:14px;color:var(--text);}
+.lm-actcount{font-size:10px;color:var(--overlay0);}
+.lm-addshot{font-size:10.5px;font-weight:700;color:var(--accent);cursor:pointer;background:none;border:none;padding:0;}
+.lm-cardrow{display:flex;align-items:center;gap:6px;margin-bottom:7px;}
+.lm-card{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:10px;padding:8px 10px;
+  border-radius:11px;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;
+  text-align:left;font:inherit;color:inherit;}
+.lm-card:hover,.lm-card:focus-visible{border-color:var(--accent);}
+.lm-card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
+.lm-thumb{width:48px;height:48px;border-radius:9px;flex:none;background-size:cover;
+  background-position:center;background-color:var(--surface1);display:grid;place-items:center;
+  font:700 9px/1 system-ui;color:var(--subtext);}
+.lm-textcol{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:4px;}
+.lm-titlerow{display:flex;align-items:baseline;gap:6px;min-width:0;}
+.lm-code{font-family:ui-monospace,monospace;font-size:9.5px;color:var(--overlay0);flex:none;}
+.lm-cardtitle{font-size:12.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-pillrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.lm-modepill{font-size:9px;font-weight:700;padding:2px 6px;border-radius:5px;
+  background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent);flex:none;}
+.lm-durpill{font-size:9.5px;color:var(--subtext);flex:none;}
+.lm-stpill{font-size:9px;font-weight:700;text-transform:uppercase;flex:none;}
+.lm-stpill.done{color:var(--emerald);}
+.lm-stpill.wip{color:var(--accent);}
+.lm-stpill.todo{color:var(--overlay0);}
+.lm-stpill.paused{color:var(--peach);}
+.lm-stpill.error{color:var(--red);}
+.lm-warn{font-size:9px;color:var(--peach);}
+.lm-addact{text-align:center;font-size:11px;font-weight:700;color:var(--accent);padding:12px;
+  border:1px dashed var(--surface1);border-radius:11px;cursor:pointer;margin-top:6px;background:none;width:100%;}
+.lm-empty{text-align:center;color:var(--overlay0);font-size:11px;font-style:italic;padding:10px 6px;}
+`;
+
+function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, addCard, addAct, setDraft,
+  mobileUI, setMobileUI,
+  // Not read by this increment's board/reel screen -- lifted to App() (see LoomV2's own
+  // prop-list comment) and threaded through here now so the NEXT increment (Generate) never
+  // has to re-plumb the lift a second time; a still-in-progress draft already survives
+  // toggling between this view and LoomV2 today, before Generate itself exists on mobile.
+  draftCard, setDraftCard, draftTarget, setDraftTarget, draftAttachedInfo, setDraftAttachedInfo }) {
+  // The overlay is position:fixed and covers the whole viewport, but the classic page
+  // underneath is a normal tall document -- same reasoning, same fix, as LoomV2's own
+  // identical effect (see its comment): without this, a touch/wheel scroll that isn't
+  // captured by .lm-body (already at its own scroll limit) bubbles up and scrolls THAT.
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prevOverflow; };
+  }, []);
+
+  // imgSrc/frameSrc mirror LoomV2's own private copies exactly (see LoomV2's imgSrc comment)
+  // -- each consumer in this file closes over its OWN `thumbs` prop rather than sharing one
+  // implementation, which is the established pattern here, not an oversight.
+  const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId]
+    : (source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null);
+  const frameSrc = (f) => (f && f.thumbId ? thumbs[f.thumbId] : (f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null));
+  const cardThumb = (c) => frameSrc(c.openFrame) || (c.resultMid ? "/thumbs/" + c.resultMid + ".jpg" : null);
+  // Single source of truth for "what status does this shot show right now", shared by BOTH
+  // the reel segment's color and the board card's status pill -- computed once per entry
+  // rather than twice, so the two can never silently disagree (the exact two-implementations-
+  // of-one-idea drift this codebase's own loom-core.js header spends its whole first comment
+  // warning against). "paused" mirrors LoomV2's own board-card logic verbatim: a live
+  // genState phase of "paused" means auto-checking genuinely stopped; any other in-flight
+  // phase still just reads as the ordinary "wip" look, and only a settled state falls back to
+  // the shot's own persisted c.status.
+  const statusOf = (c) => {
+    const gs = genState[c.id];
+    const paused = gs && gs.phase === "paused";
+    return paused ? "paused" : (gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : c.status);
+  };
+
+  const total = entries.reduce((s, x) => s + durOf(x.c), 0);
+  const tickFrac = total > 0 ? Math.min(1, (project.target || 0) / total) : 0;
+  // Where the reel's selection handle sits when NOT actively being dragged: the currently
+  // selected shot's own cumulative-duration midpoint, so tapping a board card (or nothing
+  // ever having been scrubbed yet) still shows an honest, live position -- never a stale
+  // handle stuck wherever the last drag happened to end.
+  const selIdx = entries.findIndex((x) => x.c.id === selShot);
+  let selFrac = null;
+  if (selIdx >= 0 && total > 0) {
+    let cum = 0;
+    for (let i = 0; i < selIdx; i++) cum += durOf(entries[i].c) || 1;
+    selFrac = (cum + (durOf(entries[selIdx].c) || 1) / 2) / total;
+  }
+
+  // ---- reel pointer-drag scrub: fraction-of-width -> cumulative-duration index ----
+  // Genuinely new interaction for this codebase (LoomV2's own .lv-reel a few hundred lines up
+  // is click-a-fixed-width-segment only -- no drag, no floating preview). No gesture library:
+  // setPointerCapture + a plain clientX/getBoundingClientRect fraction, matching the design's
+  // own hand-rolled pattern (Loom Mobile.dc.html's scrubFn/scrubStart/scrubMove/scrubEnd)
+  // exactly rather than reinventing the math a different way.
+  const [scrubbing, setScrubbing] = useState(false);
+  const [scrubFrac, setScrubFrac] = useState(0);
+  const [scrubIdx, setScrubIdx] = useState(null);
+  const fracAt = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    return r.width ? Math.max(0, Math.min(0.9999, (e.clientX - r.left) / r.width)) : 0;
+  };
+  const idxAtFrac = (frac) => {
+    if (!entries.length || !total) return null;
+    const t = frac * total;
+    let cum = 0;
+    for (let i = 0; i < entries.length; i++) { cum += durOf(entries[i].c) || 1; if (t < cum) return i; }
+    return entries.length - 1;
+  };
+  const scrubTo = (e) => {
+    const frac = fracAt(e);
+    setScrubbing(true); setScrubFrac(frac); setScrubIdx(idxAtFrac(frac));
+  };
+  const onReelDown = (e) => {
+    if (!entries.length) return;
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+    scrubTo(e);
+  };
+  const onReelMove = (e) => { if (scrubbing) scrubTo(e); };
+  // Release selects the shot the drag landed on -- the reel's own "click a shot" contract
+  // (LoomV2's .lv-reel does this on a plain click; here it's the natural end of a drag).
+  const onReelUp = () => { setScrubbing(false); if (scrubIdx != null && entries[scrubIdx]) setSelShot(entries[scrubIdx].c.id); };
+  // Cancel-without-selecting if the pointer leaves the bar mid-drag. setPointerCapture means
+  // onReelUp already fires reliably even if released outside the element's bounds -- this is
+  // the same defensive belt-and-suspenders handler the design itself carries (scrubCancel),
+  // not load-bearing for the common case.
+  const onReelLeave = () => setScrubbing(false);
+
+  const handleFrac = scrubbing ? scrubFrac : selFrac;
+  const scrubEntry = scrubIdx != null ? entries[scrubIdx] : null;
+  const posStyle = (frac) => ({ left: `calc(16px + (100% - 32px) * ${frac})` });
+
+  return (
+    <div className="lm-root">
+      <style>{LOOM_MOBILE_STYLES}</style>
+      <div className="lm-top">
+        <a className="lm-back" href="/">&larr; Gallery</a>
+        <span className="lm-fill" />
+        <span className="lm-title">&#9642; The Loom</span>
+        <span className="lm-fill" />
+        <label className={"lm-chip" + (project.draft ? " on" : "")}
+          title="Draft mode renders every shot at the cheaper 'basic' quality — block out the animatic, then turn Draft off and re-generate the keepers at pro quality">
+          <input type="checkbox" checked={!!project.draft} onChange={(e) => setDraft(e.target.checked)} />&#9889; Draft</label>
+        {/* Not in the locked design (which only shows back-link/title/Draft here) -- added
+            because the design's own mobile screen has no return path to LoomV2 at all, and
+            without one this toggle would be a one-way trap: flip to Mobile view and the
+            .lv-top bar that carries the ONLY other instance of this switch stops rendering.
+            A real, bidirectional owner-preference switch needs an exit on both sides. */}
+        <button type="button" className="lm-chip" onClick={() => setMobileUI(false)}
+          title="Switch back to the full desktop-style Loom">&#128421; Desktop</button>
+      </div>
+
+      <div className="lm-reelwrap">
+        <div className="lm-reelbar"
+          onPointerDown={onReelDown} onPointerMove={onReelMove} onPointerUp={onReelUp} onPointerLeave={onReelLeave}>
+          {entries.map((x) => (
+            <div key={x.c.id} className={"lm-seg " + statusOf(x.c) + (x.c.id === selShot ? " sel" : "")}
+              style={{ flex: `${durOf(x.c) || 1} 1 0` }} />
+          ))}
+        </div>
+        {total > 0 && <div className="lm-tick" style={posStyle(tickFrac)} />}
+        {scrubbing && <div className="lm-scrubline" style={posStyle(scrubFrac)} />}
+        {handleFrac != null && <div className="lm-handle" style={posStyle(handleFrac)} />}
+        {scrubbing && scrubEntry && (
+          <div className="lm-preview" style={{ left: `clamp(8px, calc(${(scrubFrac * 100).toFixed(3)}% - 86px), calc(100% - 8px - 172px))` }}>
+            <div className="lm-prevthumb" style={cardThumb(scrubEntry.c) ? { backgroundImage: `url(${cardThumb(scrubEntry.c)})` } : undefined} />
+            <div className="lm-prevcol">
+              <div className="lm-prevcode">{scrubEntry.code}</div>
+              <div className="lm-prevtitle">{scrubEntry.c.title || "untitled"}</div>
+              <div className="lm-prevmeta">{scrubEntry.c.mode} &middot; {durOf(scrubEntry.c)}s</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="lm-body">
+        {project.acts.map((act, ai) => {
+          const items = entries.filter((e) => e.ai === ai);
+          return (
+            <div key={act.id}>
+              <div className="lm-acthead">
+                <span className="lm-actname">{act.name}</span>
+                <span className="lm-actcount">{items.length} shot{items.length === 1 ? "" : "s"}</span>
+                <span className="lm-fill" />
+                <button type="button" className="lm-addshot" onClick={() => addCard(act.id)}>+ Shot</button>
+              </div>
+              {items.map((e) => {
+                const st = statusOf(e.c);
+                const gs = genState[e.c.id];
+                const miss = castMissingImages(e, project, imgSrc);
+                const thumb = cardThumb(e.c);
+                return (
+                  <div key={e.c.id} className="lm-cardrow">
+                    <button type="button" className={"lm-card" + (e.c.id === selShot ? " sel" : "")}
+                      onClick={() => setSelShot(e.c.id)} title="Select this shot — it binds to Generate">
+                      <div className="lm-thumb" style={thumb ? { backgroundImage: `url(${thumb})` } : undefined}>
+                        {!thumb && e.c.mode}
+                      </div>
+                      <div className="lm-textcol">
+                        <div className="lm-titlerow">
+                          <span className="lm-code">{e.code}</span>
+                          <span className="lm-cardtitle">{e.c.title || "untitled"}</span>
+                        </div>
+                        <div className="lm-pillrow">
+                          <span className="lm-modepill">{e.c.mode}</span>
+                          <span className="lm-durpill">{durOf(e.c)}s</span>
+                          <span className={"lm-stpill " + st}>{gs && gs.msg ? gs.msg : st}</span>
+                          {miss.length > 0 && (
+                            <span className="lm-warn" title={`No picture on this shot for ${miss.join(", ")} — they are cast here but cannot be referenced, so they are left out of the prompt.`}>
+                              &#9888; {miss.length === 1 ? `${miss[0]}: no image` : `${miss.length} cast: no image`}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                );
+              })}
+              {!items.length && <div className="lm-empty">No shots yet — tap + Shot.</div>}
+            </div>
+          );
+        })}
+        <button type="button" className="lm-addact" onClick={addAct}>+ New act</button>
+        {!project.acts.length && <div className="lm-empty">No acts yet — add one below.</div>}
+      </div>
     </div>
   );
 }
@@ -3630,6 +3967,28 @@ function useExportPipeline(project, thumbs) {
 
 export default function App() {
   const [selShot, setSelShot] = useState(null);   // V2 selected-shot: card.id or null
+  // "📱 Mobile view" -- a manual, owner-preference switch between LoomV2 (desktop-style
+  // shell) and LoomMobile (phone-sized board/reel), persisted via useLocalToggle so it
+  // survives a reload. The toggle itself lives in LoomV2's own .lv-top bar (and, so it's
+  // never a one-way trap, a small reciprocal one in LoomMobile's own top bar).
+  const [mobileUI, setMobileUI] = useLocalToggle(MOBILE_UI_KEY, false);
+  // draftCard/draftTarget/draftAttachedInfo -- LIFTED up from LoomV2's own component state
+  // (mobile-board-view pass, 2026-08-03) so an in-progress Generate-drawer draft (no shot
+  // selected yet, keyed "__draft__" the same way genState/genImgState/etc already are)
+  // survives toggling between LoomV2 and LoomMobile instead of being discarded the moment
+  // whichever one owned it unmounts. Passed down to BOTH below; LoomV2's own behavior is
+  // unchanged -- every reference to these three inside LoomV2 is identical to when they were
+  // its own useState calls, only the declaration moved.
+  const [draftCard, setDraftCard] = useState(() => ({
+    id: "__draft__", mode: "R2V", duration: 5, connect: "new", title: "", prompt: "",
+    camera: "", lighting: "", transIn: "", transOut: "", audioCue: "", notes: "",
+    audioGen: false, audioLanguage: "english",
+    imgPrompt: "", editPrompt: "", refPrompt: "",
+    cast: [], refs: [], openFrame: {}, closeFrame: {},
+    promptOverride: false, promptOverrideText: "",
+  }));
+  const [draftTarget, setDraftTarget] = useState("");              // shot id chosen to route/attach a draft result into
+  const [draftAttachedInfo, setDraftAttachedInfo] = useState(null); // {mid, code} once a draft video is attached to a shot
   const { project, setProject, thumbs, storeThumb, busy,
     projList, projMenu, setProjMenu, projectApi, importBackup, activeId } = useProjectStore(setSelShot);
 
@@ -3775,25 +4134,37 @@ export default function App() {
   return (
     <div className="sb-root">
       <style>{STYLES}</style>
-      <V2Boundary><LoomV2
-        project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}
-        selShot={selShot} setSelShot={setSelShot} useExistingVideo={useExistingVideo} genState={genState}
-        thumbs={thumbs} openPick={openPick} storeThumb={storeThumb}
-        setAct={setAct} addCard={addCard} importFootage={importFootage} dupCard={dupCard} delCard={delCard} moveCard={moveCard}
-        moveCardToAct={moveCardToAct} addAct={addAct} delAct={delAct} moveAct={moveAct}
-        genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel}
-        imgLoras={imgLoras} setImgLoras={setImgLoras} imgAdv={imgAdv} setImgAdv={setImgAdv}
-        modelDefaults={modelDefaults} setModelDefaults={setModelDefaults}
-        genImage={genImage} routeImg={routeImg}
-        genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState} genEdit={genEdit} genRef={genRef} routeGen={routeGen}
-        projectApi={projectApi} playSequence={playSequence} exportCut={exportCut}
-        batching={batching} batchGenerate={batchGenerate} batchTally={batchTally}
-        addRef={addRef} setRef={setRef} delRef={delRef}
-        exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle} bundling={bundling}
-        importBackup={importBackup} setImportOpen={setImportOpen} copyShot={copyShot} setLook={setLook} setDraft={setDraft} splitShot={splitShot}
-        onVideoSubmit={onVideoSubmit} onVideoResult={onVideoResult} onVideoError={onVideoError}
-        onVideoSlow={onVideoSlow} onVideoPaused={onVideoPaused} pollShot={pollShot}
-        costEstimate={costEstimate} refreshEstimate={refreshEstimate} /></V2Boundary>
+      {mobileUI ? (
+        <V2Boundary><LoomMobile
+          project={project} entries={entries} thumbs={thumbs} genState={genState}
+          selShot={selShot} setSelShot={setSelShot} addCard={addCard} addAct={addAct} setDraft={setDraft}
+          mobileUI={mobileUI} setMobileUI={setMobileUI}
+          draftCard={draftCard} setDraftCard={setDraftCard} draftTarget={draftTarget} setDraftTarget={setDraftTarget}
+          draftAttachedInfo={draftAttachedInfo} setDraftAttachedInfo={setDraftAttachedInfo} /></V2Boundary>
+      ) : (
+        <V2Boundary><LoomV2
+          project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}
+          selShot={selShot} setSelShot={setSelShot} useExistingVideo={useExistingVideo} genState={genState}
+          thumbs={thumbs} openPick={openPick} storeThumb={storeThumb}
+          setAct={setAct} addCard={addCard} importFootage={importFootage} dupCard={dupCard} delCard={delCard} moveCard={moveCard}
+          moveCardToAct={moveCardToAct} addAct={addAct} delAct={delAct} moveAct={moveAct}
+          genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel}
+          imgLoras={imgLoras} setImgLoras={setImgLoras} imgAdv={imgAdv} setImgAdv={setImgAdv}
+          modelDefaults={modelDefaults} setModelDefaults={setModelDefaults}
+          genImage={genImage} routeImg={routeImg}
+          genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState} genEdit={genEdit} genRef={genRef} routeGen={routeGen}
+          projectApi={projectApi} playSequence={playSequence} exportCut={exportCut}
+          batching={batching} batchGenerate={batchGenerate} batchTally={batchTally}
+          addRef={addRef} setRef={setRef} delRef={delRef}
+          exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle} bundling={bundling}
+          importBackup={importBackup} setImportOpen={setImportOpen} copyShot={copyShot} setLook={setLook} setDraft={setDraft} splitShot={splitShot}
+          onVideoSubmit={onVideoSubmit} onVideoResult={onVideoResult} onVideoError={onVideoError}
+          onVideoSlow={onVideoSlow} onVideoPaused={onVideoPaused} pollShot={pollShot}
+          costEstimate={costEstimate} refreshEstimate={refreshEstimate}
+          mobileUI={mobileUI} setMobileUI={setMobileUI}
+          draftCard={draftCard} setDraftCard={setDraftCard} draftTarget={draftTarget} setDraftTarget={setDraftTarget}
+          draftAttachedInfo={draftAttachedInfo} setDraftAttachedInfo={setDraftAttachedInfo} /></V2Boundary>
+      )}
       {seq && <SequencePlayer clips={seq} onClose={closeSequence} />}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>

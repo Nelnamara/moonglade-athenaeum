@@ -29,7 +29,7 @@ reader could work it out from the code, it does not belong here.
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 143
+- [Decisions](#decisions) &mdash; 144
 
 ---
 
@@ -1337,6 +1337,68 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 ## Decisions
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
+
+### Loom Mobile increment 1 shipped: a real toolbar toggle, sharing the Loom's existing live data layer directly — and a standing wrong claim about the Loom needing new backend work is retracted  ·  *2026-08-03*
+
+The Loom is a fully real, shipped, working app with a real backend (`/api/loom/*`),
+already reachable on a phone in landscape per an earlier owner decision (2026-07-27). A
+wrong internal note claiming it "needs new backend (acts/shots/board) with no confirmed
+API" had been carried in memory since the mobile-pass scoping pass — the owner corrected
+this directly ("The loom is a fully built and shipped surface. What needs to be built for
+the mobile loom?") and a direct research pass confirmed the real picture: `App()` already
+composes four real hooks (`useProjectStore`/`useShotMutations`/`useGenerationPipeline`/
+`useExportPipeline`) against a real backend and hands their data down as props to one
+rendered child. What's actually new here is a portrait-first presentation of that same
+data, not a data layer.
+
+**The toggle.** A checkbox-chip in `.lv-top`, styled identically to the existing
+`.lv-draft` chip, reading "📱 Mobile view." Persisted via a small new `useLocalToggle`
+hook backed by real `localStorage` (key `mg_loom_mobile_ui`) — deliberately not the async
+`window.storage` project store, so a chrome preference can never corrupt project data.
+`App()` renders `mobileUI ? <LoomMobile/> : <LoomV2/>`, both fed from the exact same
+`useProjectStore` instance — switching views never re-fetches or discards the board.
+
+**The draft-state lift.** `draftCard`/`draftTarget`/`draftAttachedInfo` (an in-progress,
+not-yet-attached generation draft) previously lived only in `LoomV2`'s own local state —
+real user work product that a toggle would have silently discarded. Lifted to `App()` and
+passed to both views; every read/write site inside `LoomV2` is otherwise untouched, so its
+own behavior is provably unchanged (verified live: typed a marker into the draft prompt,
+round-tripped the toggle twice, text survived every time).
+
+**`LoomMobile` lives inline in `master-storyboard.jsx`, not a separate module** — matching
+every other component in this file. The reason is a real constraint, not just convention:
+`moonglade_gallery.py`'s `/loom` route's Babel-fallback inliner is hardcoded to exactly two
+files (`loom-core.js`/`loom-mutations.js`); an unstripped `import` reaching the
+`data-presets="react"`-only Babel blob is a hard `SyntaxError` for every desktop user on
+the *default*, unbundled `/loom` page. `loom-core.js`/`loom-mutations.js` and
+`moonglade_gallery.py` all have zero diff — confirmed by review, not just claimed.
+
+**One disclosed deviation from the locked design.** `Loom Mobile.dc.html`'s own top bar has
+no path back to desktop view — a straight port would have made the toggle one-way. Added a
+reciprocal "🖥 Desktop" chip inside `LoomMobile`'s own top bar. Flagged as a deviation, not
+smuggled in silently.
+
+**Scope, deliberately narrow.** Only the board/reel (with a real hand-rolled pointer-drag
+scrub — `setPointerCapture`, fraction-of-width math, cumulative-duration index resolution)
+shipped this increment. Shot detail, Cast sheet, Generate, Review/trim, and Filter compare
+are explicitly deferred to later increments — guarded by a source test asserting none of
+that copy has leaked into `LoomMobile` yet, so scope creep in either direction is caught
+mechanically, not just by memory.
+
+**Worth keeping visible for whoever builds the next increment:** this reintroduces a
+manual view-toggle on the exact codebase where a V1/V2 layout toggle was tried once before
+and deliberately reversed (`2026-07-17`, "Deliberately no layout switch to choose between
+or maintain") — the driver this time is phone ergonomics against a locked design, not
+obsolescence, so the reasoning doesn't transfer directly, but the precedent is real and
+worth knowing before extending the toggle further. Also: `LoomV2`'s own `.lv-top` toolbar
+already overflows horizontally below ~375px wide, independent of this change (pre-existing,
+out of scope for this pass — `LoomMobile`'s own return chip stays reachable regardless).
+
+**Why record this here.** The "no confirmed backend" claim had already caused one full
+mis-scoping of the mobile pass's sequencing (Loom placed last "because it needs new
+backend work") — recording the correction where decisions live, not just fixing the one
+memory file, so a future session reading this doc directly doesn't reintroduce it a third
+time.
 
 ### The mount-race lesson held up the very next time it mattered — Lightbox Mobile found a third, differently-shaped instance proactively, and correctly left desktop's own latent copy alone  ·  *2026-08-03*
 
