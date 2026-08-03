@@ -2,7 +2,9 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App.jsx";
 import LoginPage from "./components/LoginPage.jsx";
+import LoginPageMobile from "./components/LoginPageMobile.jsx";
 import SetupWizard from "./components/SetupWizard.jsx";
+import useIsMobile from "./hooks/useIsMobile.js";
 import "./styles.css";
 
 const boot = window.MG_BOOT || {};
@@ -16,12 +18,20 @@ const boot = window.MG_BOOT || {};
 // media. SetupWizard owns that state instead of App -- an empty/keyless gallery has
 // nothing for App's fetchLibrary/fetchAccount to usefully show anyway, and the DC's own
 // wizard is a dedicated screen, not a banner bolted onto the real gallery.
-let view;
-if (boot.authenticated === false) {
-  view = <LoginPage boot={boot} />;
-} else if (boot.needs_key || boot.catalog_empty) {
-  view = <SetupWizard boot={boot} />;
-} else {
-  view = <App boot={boot} />;
+//
+// Root is a real component (not a plain `view` variable, unlike before
+// 2026-08-02) because useIsMobile() needs a component to subscribe its
+// matchMedia listener from -- it live-switches Login between its desktop and
+// mobile presentations on resize/orientation change, not just at first paint.
+// App/SetupWizard have no mobile build yet, so isMobile doesn't affect them.
+function Root() {
+  const isMobile = useIsMobile();
+  if (boot.authenticated === false) {
+    return isMobile ? <LoginPageMobile boot={boot} /> : <LoginPage boot={boot} />;
+  }
+  if (boot.needs_key || boot.catalog_empty) {
+    return <SetupWizard boot={boot} />;
+  }
+  return <App boot={boot} />;
 }
-createRoot(document.getElementById("root")).render(view);
+createRoot(document.getElementById("root")).render(<Root />);

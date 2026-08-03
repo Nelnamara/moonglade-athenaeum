@@ -1,0 +1,126 @@
+/* ============================================================================
+   Login — mobile presentation (design spec: Login Mobile.dc.html).
+   Rendered by LoginPageMobile.jsx, mounted in place of LoginPage.jsx/login.css
+   whenever useIsMobile() is true (see main.jsx). Sizing/spacing below is the
+   mobile design comp's own numbers (a genuinely smaller layout, not a scaled
+   copy of login.css's desktop card) -- literal values that match login.css's
+   own precedent are kept literal on purpose (same call the desktop file
+   already made: a bespoke near-black stage background, a heading color with
+   no token of its own, hand-tuned rgba opacities of --text) so the two
+   surfaces read as one product; every color that has a real token in
+   DESIGN_TOKENS_CSS (moonglade_gallery.py) uses that token, no literal hex
+   standing in for one. --emerald's default IS #4fc99a (verified against
+   DESIGN_TOKENS_CSS) -- used bare, no fallback, since the token is always
+   loaded before this stylesheet runs.
+   ========================================================================== */
+
+@keyframes lgnmRise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes lgnmSpin { to { transform: rotate(360deg); } }
+@keyframes lgnmBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@keyframes lgnmGlow { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+@keyframes lgnmMetal { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+@keyframes lgnmFieldIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.lgnm-stage { position: relative; min-height: 100dvh; overflow-y: auto; overflow-x: hidden;
+  box-sizing: border-box; display: grid; place-items: center; padding: 40px 20px;
+  background: #05040d; }
+.lgnm-wash { position: absolute; filter: blur(24px); }
+.lgnm-wash-a { width: 90vw; height: 30vh; left: -20vw; top: -8vh;
+  background: radial-gradient(closest-side, rgba(100, 58, 172, .18), transparent 70%); }
+.lgnm-wash-b { width: 80vw; height: 26vh; right: -18vw; bottom: -6vh;
+  background: radial-gradient(closest-side, rgba(58, 52, 96, .22), transparent 70%); }
+
+.lgnm-frame { position: relative; width: min(300px, calc(100vw - 40px)); }
+
+.lgnm-mascot { position: absolute; left: 50%; top: 0; width: 130px; height: 108px;
+  margin-left: -65px; z-index: 0; transform: translateY(12px);
+  transition: transform .6s cubic-bezier(.3, 1.5, .4, 1); pointer-events: none; }
+.lgnm-mascot.peeked { transform: translateY(-84px); }
+.lgnm-mascot-bob { position: absolute; inset: 0; }
+.lgnm-mascot.peeked .lgnm-mascot-bob { animation: lgnmBob 3s ease-in-out .6s infinite; }
+.lgnm-mascot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+
+.lgnm-card { position: relative; z-index: 1; border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, .07);
+  background: linear-gradient(180deg, rgba(25, 21, 48, .97) 0%, rgba(13, 10, 28, .99) 100%);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .65), 0 0 70px rgba(100, 58, 172, .14);
+  padding: 22px 22px 24px; animation: lgnmRise .5s cubic-bezier(.2, .9, .24, 1) both; }
+
+.lgnm-mark { position: relative; height: 66px; border-radius: 11px; overflow: hidden;
+  box-shadow: 0 0 34px rgba(146, 109, 222, .3);
+  background: radial-gradient(120% 140% at 18% 0%,
+    color-mix(in oklab, var(--accent) 26%, #0b0820) 0%, #0b0820 62%, #070512 100%); }
+.lgnm-mark img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+.lgnm-titlewrap { text-align: center; padding: 14px 0 18px; }
+.lgnm-title { font-family: Georgia, "Times New Roman", serif; font-size: 17px;
+  letter-spacing: .01em; color: #efecf8; }
+.lgnm-tagline { font-size: 8px; font-weight: 700; letter-spacing: .24em;
+  text-transform: uppercase; color: rgba(214, 210, 226, .42); padding-top: 6px;
+  cursor: pointer; transition: opacity .5s ease; opacity: 1; }
+.lgnm-tagline.fading { opacity: 0; }
+.lgnm-framing { font-size: 10.5px; line-height: 1.5; color: var(--subtext);
+  padding-top: 7px; max-width: 220px; margin: 0 auto; }
+
+.lgnm-lbl { font-size: 9px; font-weight: 700; letter-spacing: .16em;
+  color: var(--overlay0); padding-bottom: 5px; margin-top: 12px; }
+.lgnm-input { width: 100%; box-sizing: border-box; background: rgba(7, 5, 16, .9);
+  color: var(--text); border: 1px solid var(--surface1); border-radius: 9px;
+  padding: 10px 11px; font-size: 12.5px; outline: none; transition: border-color .2s;
+  font-family: inherit; }
+.lgnm-input:focus { border-color: rgba(182, 146, 230, .55); }
+.lgnm-input:disabled { opacity: .6; }
+.lgnm-input.err { border-color: var(--red); }
+.lgnm-pass { letter-spacing: .16em; }
+
+.lgnm-fieldin { animation: lgnmFieldIn .4s cubic-bezier(.2, .9, .24, 1) both; }
+.lgnm-fielderr { font-size: 10px; color: var(--red); padding: 4px 1px 0; }
+
+.lgnm-hints { display: flex; flex-direction: column; gap: 3px;
+  padding: 6px 1px 0; font-size: 9.5px; line-height: 1.5; color: var(--overlay0); }
+.lgnm-hints .ok { color: var(--emerald); }
+
+/* Same call as desktop's .lgn-error (login.css): one plain inline error line,
+   no separate calm/red banner treatment -- see LoginPageMobile.jsx's header
+   comment for why. */
+.lgnm-error { margin-top: 10px; font-size: 10.5px; line-height: 1.5;
+  color: var(--red); }
+
+.lgnm-signbtn { margin-top: 18px; width: 100%; display: flex; align-items: center;
+  justify-content: center; gap: 8px; padding: 11px; border-radius: 10px;
+  font-size: 13px; font-weight: 800; font-family: inherit; cursor: pointer;
+  transition: filter .2s; border: 1px solid rgba(255, 255, 255, .3);
+  color: color-mix(in oklab, var(--accent) 26%, #08040f);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .4);
+  background: linear-gradient(100deg,
+    color-mix(in oklab, var(--accent) 50%, #06030d) 0%, var(--accent) 18%,
+    color-mix(in oklab, var(--accent) 22%, #ffffff) 34%, var(--accent) 50%,
+    color-mix(in oklab, var(--accent) 74%, #06030d) 68%, var(--mauve) 84%,
+    color-mix(in oklab, var(--accent) 50%, #06030d) 100%);
+  background-size: 220% 100%; animation: lgnmMetal 7s ease-in-out infinite;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6), inset 0 -2px 4px rgba(10, 5, 20, .45),
+    0 6px 16px rgba(0, 0, 0, .45); }
+.lgnm-signbtn.busy { cursor: default; filter: saturate(.6) brightness(.82); }
+.lgnm-spin { width: 14px; height: 14px; border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(20, 16, 42, 0), rgba(20, 16, 42, .85));
+  animation: lgnmSpin 1.2s linear infinite; flex: none; }
+
+.lgnm-foot { text-align: center; font-size: 9px; color: rgba(214, 210, 226, .34);
+  padding-top: 12px; }
+
+.lgnm-welcome { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;
+  background: rgba(5, 4, 13, .9); backdrop-filter: blur(8px);
+  animation: lgnmRise .4s cubic-bezier(.2, .9, .24, 1) both; }
+.lgnm-welcome-inner { text-align: center; }
+.lgnm-welcome-title { font-family: Georgia, "Times New Roman", serif; font-size: 21px;
+  color: #efecf8; }
+.lgnm-welcome-line { font-size: 9px; font-weight: 700; letter-spacing: .28em;
+  text-transform: uppercase; color: var(--mauve); padding-top: 10px;
+  animation: lgnmGlow 2.2s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lgnm-card, .lgnm-welcome, .lgnm-spin, .lgnm-signbtn, .lgnm-mascot.peeked .lgnm-mascot-bob,
+  .lgnm-fieldin, .lgnm-welcome-line {
+    animation: none; }
+  .lgnm-mascot { transition: none; }
+}

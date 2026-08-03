@@ -16297,6 +16297,12 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Moonglade Athenaeum</title>
 <link rel="icon" href="/branding/favicon.ico">
+<link rel="manifest" href="/next/assets/manifest.json">
+<meta name="theme-color" content="#0a0818">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Moonglade">
+<link rel="apple-touch-icon" href="/next/assets/icon-180.png">
 <script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + """
 <link rel="stylesheet" href="/next/assets/app.css">
 {# The app's ONE palette + every skin override, AFTER the bundle's stylesheet so
@@ -16363,6 +16369,12 @@ __UPSCALE_CONST__
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Moonglade Athenaeum</title>
 <link rel="icon" href="/branding/favicon.ico">
+<link rel="manifest" href="/next/assets/manifest.json">
+<meta name="theme-color" content="#0a0818">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Moonglade">
+<link rel="apple-touch-icon" href="/next/assets/icon-180.png">
 <script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + """
 <link rel="stylesheet" href="/next/assets/app.css">
 <style>
