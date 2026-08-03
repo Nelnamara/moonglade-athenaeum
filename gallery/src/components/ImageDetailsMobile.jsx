@@ -115,6 +115,7 @@ function useSimilar(mediaId) {
 export default function ImageDetailsMobile({
   mediaId, onClose, onNavigate, onRate, onDeleted,
   onFilterByModel, onFilterByBatch, advParams, items,
+  onOpenLightbox,
 }) {
   const [closing, setClosing] = useState(false);
   const [mediaOk, setMediaOk] = useState(true);
@@ -233,7 +234,7 @@ export default function ImageDetailsMobile({
       <div className="idm-topbar">
         <button type="button" className="idm-back" onClick={close}>← Gallery</button>
         <button type="button" className="idm-lb" title="Full-screen viewer"
-          onClick={() => toast("Full-screen viewing", "Its own mobile pass (Lightbox Mobile) — coming next.")}>
+          onClick={() => onOpenLightbox(row.media_id)}>
           ⛶
         </button>
         <div className="idm-fill" />

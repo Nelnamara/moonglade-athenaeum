@@ -1,0 +1,169 @@
+/* ============================================================================
+   Lightbox Mobile -- design spec: "Lightbox Mobile.dc.html" (design_handoff_
+   moonglade_suite/). Mounted by AppMobile.jsx as a full-viewport overlay
+   (position:fixed, covers hero + tab bar too), mutually exclusive with
+   ImageDetailsMobile.jsx -- see LightboxMobile.jsx's own header comment.
+
+   lbm- prefix throughout (Lightbox Mobile), matching every other mobile
+   surface's own prefix convention (glm-/idm-/ctm-/cm-). Colors are all
+   DESIGN_TOKENS_CSS var()s except the handful of literal values the design
+   file itself keeps outside the token system (the void backdrop #05040d, and
+   the metal()/upscale-CTA gradient's own literal gloss/shadow neutrals) --
+   same rule every other mobile stylesheet documents for itself.
+
+   REAL VIEWPORT, not the DC's fixed 390x844 iOS-frame simulation: .lbm-root
+   is position:fixed;inset:0 rather than the DC's literal height:844px box,
+   and top/bottom padding uses env(safe-area-inset-*) instead of the DC's
+   hardcoded 54px/14px guesses at notch/home-indicator gutters -- the same
+   "real viewport" adaptation gallery-mobile.css's own header comment
+   documents for itself. */
+
+@keyframes lbmIn { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes lbmOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(.97); } }
+@keyframes lbmMetal { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+@keyframes lbmSlide { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+.lbm-root { position: fixed; inset: 0; z-index: 55; display: flex; flex-direction: column;
+  background: #05040d; color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  animation: lbmIn .28s cubic-bezier(.2,.9,.24,1) both; }
+.lbm-root.closing { animation: lbmOut .22s ease both; pointer-events: none; }
+
+/* ---- top bar (design's topBarStyle: close / index / stars / slideshow) ---- */
+.lbm-topbar { flex: none; display: flex; align-items: center; gap: 9px;
+  padding: max(14px, env(safe-area-inset-top)) 12px 8px; border-bottom: 1px solid var(--surface1); }
+.lbm-close { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 13px; color: var(--subtext); background: var(--surface0); border: 1px solid var(--surface1);
+  cursor: pointer; font-family: inherit; padding: 0; }
+.lbm-indexwrap { display: flex; align-items: baseline; gap: 5px; flex: none; }
+.lbm-index { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.lbm-total { font-size: 8.5px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
+
+/* stars: 13px, 1px gap, gold lit / faint unlit -- hover-preview (desktop
+   parity for a resized-browser + mouse test) is CSS-only over the shared
+   Stars control, no JS state, matching desktop Lightbox.jsx's own proof that
+   none is needed. */
+.lbm-starswrap { display: flex; flex: none; }
+.lbm-starswrap .stars { display: inline-flex; align-items: center; gap: 1px; }
+.lbm-starswrap .stars .st { font-size: 13px; line-height: 1; padding: 0; color: var(--surface1); transition: color .15s; }
+.lbm-starswrap .stars .st.lit { color: var(--gold); }
+.lbm-starswrap .stars:has(.st:hover) .st:not(:hover):not(:has(~ .st:hover)) { color: var(--surface1); }
+.lbm-starswrap .stars .st:hover,
+.lbm-starswrap .stars .st:has(~ .st:hover) { color: var(--gold); }
+
+.lbm-fill { flex: 1 1 auto; }
+.lbm-slidebtn { flex: none; width: 30px; height: 30px; padding: 0; display: grid; place-items: center;
+  border-radius: 50%; cursor: pointer; font-family: inherit; font-size: 13px; color: var(--text);
+  background: linear-gradient(180deg, rgba(255,255,255,.11), rgba(0,0,0,.16)), color-mix(in srgb, var(--surface0) 88%, #000);
+  border: 1px solid rgba(255,255,255,.14); box-shadow: inset 0 1px 0 rgba(255,255,255,.15), 0 1px 2px rgba(0,0,0,.45); }
+.lbm-slidebtn.on { color: #fff;
+  background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(0,0,0,.14)), color-mix(in srgb, var(--lavender) 32%, var(--surface0));
+  border: 1px solid color-mix(in srgb, var(--lavender) 62%, transparent); }
+
+/* ---- stage (image area) ---- */
+.lbm-stage { position: relative; flex: 1 1 auto; min-height: 0; display: grid; place-items: center;
+  padding: 8px; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.lbm-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 34px; height: 52px;
+  display: grid; place-items: center; border-radius: 10px; font-size: 18px; cursor: pointer; z-index: 3;
+  padding: 0; color: rgba(226,222,238,.8); border: 1px solid rgba(255,255,255,.1); background: rgba(9,7,22,.55); }
+.lbm-prev { left: 4px; }
+.lbm-next { right: 4px; }
+.lbm-herowrap { position: relative; height: 100%; width: 100%; display: grid; place-items: center; min-width: 0; }
+.lbm-hero { position: relative; height: min(100%, 66vh); max-width: 100%; border-radius: 14px; overflow: hidden;
+  border: 1px solid rgba(255,255,255,.12); box-shadow: 0 30px 80px rgba(0,0,0,.7); background: var(--surface0); }
+.lbm-hero img, .lbm-hero video { position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: contain; -webkit-user-drag: none; }
+/* an item with no recorded size cannot carry aspect-ratio: the media sizes the frame */
+.lbm-hero.noar { height: auto; max-height: 100%; width: auto; }
+.lbm-hero.noar img, .lbm-hero.noar video { position: static; width: auto; height: 100%; max-width: 100%; }
+/* slideshow progress: 2px accent fill pinned to the hero's bottom edge */
+.lbm-slidetrack { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: rgba(5,4,13,.5);
+  overflow: hidden; z-index: 2; }
+.lbm-slidefill { height: 100%; width: 100%; transform-origin: 0 50%; background: var(--accent);
+  animation: lbmSlide 4.2s linear both; }
+
+/* ---- bottom: meta / prompt slab / filmstrip / action pills ---- */
+.lbm-bottom { flex: none; display: flex; flex-direction: column; gap: 8px;
+  padding: 8px 0 max(14px, env(safe-area-inset-bottom)); }
+.lbm-metarow { display: flex; align-items: baseline; gap: 10px; padding: 0 12px; font-size: 10.5px;
+  color: var(--overlay0); overflow: hidden; white-space: nowrap; }
+.lbm-model { color: var(--lavender); font-size: 11.5px; }
+
+.lbm-promptbox { margin: 0 12px; padding: 9px 11px; border-radius: 11px; cursor: pointer;
+  background: var(--mantle); border: 1px solid var(--surface1); transition: border-color .2s; }
+.lbm-promptbox.open { border-color: rgba(182,146,230,.4); }
+.lbm-promptline { display: flex; align-items: baseline; gap: 8px; }
+.lbm-kicker { font-size: 8.5px; font-weight: 700; letter-spacing: .12em; color: var(--overlay0); flex: none; }
+.lbm-prompttext { flex: 1 1 auto; min-width: 0; font-size: 11px; line-height: 1.5; color: rgba(226,222,238,.78);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lbm-prompttext.full { overflow: visible; text-overflow: clip; white-space: normal; }
+.lbm-prompttoggle { font-size: 9px; color: var(--lavender); flex: none; }
+.lbm-promptrows { display: flex; flex-direction: column; gap: 6px; padding-top: 9px; margin-top: 8px;
+  border-top: 1px solid var(--surface1); }
+.lbm-prow { display: flex; gap: 8px; }
+.lbm-prow span { font-size: 8.5px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); width: 52px; flex: none; }
+.lbm-prow i { flex: 1 1 auto; font-style: normal; font-size: 10.5px; line-height: 1.5; color: rgba(214,210,226,.7);
+  overflow-wrap: anywhere; }
+.lbm-prow i.mono { font-family: ui-monospace, monospace; }
+
+.lbm-strip { display: flex; flex: none; gap: 6px; overflow-x: auto; padding: 0 12px; }
+.lbm-thumb { flex: none; height: 44px; padding: 0; border: 0; border-radius: 7px; overflow: hidden; cursor: pointer;
+  background: var(--surface0); opacity: .55; outline: 2px solid transparent; outline-offset: 2px;
+  transition: outline-color .2s, opacity .2s; }
+.lbm-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; -webkit-user-drag: none; }
+.lbm-thumb.on { outline-color: var(--accent); opacity: 1; }
+
+.lbm-actsrow { display: flex; flex: none; gap: 6px; overflow-x: auto; padding: 0 12px; }
+.lbm-chip { font-size: 10.5px; font-weight: 600; white-space: nowrap; padding: 7px 12px; border-radius: 14px;
+  cursor: pointer; font-family: inherit; color: var(--text);
+  background: linear-gradient(180deg, rgba(255,255,255,.11), rgba(0,0,0,.16)), color-mix(in srgb, var(--surface0) 88%, #000);
+  border: 1px solid rgba(255,255,255,.14); box-shadow: inset 0 1px 0 rgba(255,255,255,.15), 0 1px 2px rgba(0,0,0,.45); }
+.lbm-chip.on { color: #fff;
+  background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(0,0,0,.14)), color-mix(in srgb, var(--lavender) 32%, var(--surface0));
+  border: 1px solid color-mix(in srgb, var(--lavender) 62%, transparent); }
+/* skin-aware accent-mix metal (kit v2 §1) -- the DC's recipe verbatim, always
+   worn by the Slideshow pill regardless of state (design exact: only this
+   pill's style is metal(true) unconditionally). */
+.lbm-chip-metal { border: 1px solid rgba(255,255,255,.3);
+  color: color-mix(in oklab, var(--accent) 26%, #08040f); text-shadow: 0 1px 0 rgba(255,255,255,.4);
+  background: linear-gradient(100deg,
+    color-mix(in oklab, var(--accent) 50%, #06030d) 0%,
+    var(--accent) 18%,
+    color-mix(in oklab, var(--accent) 22%, #ffffff) 34%,
+    var(--accent) 50%,
+    color-mix(in oklab, var(--accent) 74%, #06030d) 68%,
+    var(--mauve) 84%,
+    color-mix(in oklab, var(--accent) 50%, #06030d) 100%);
+  background-size: 220% 100%; animation: lbmMetal 7s ease-in-out infinite;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.65), inset 0 -2px 4px rgba(40,20,70,.42), 0 6px 16px rgba(0,0,0,.45); }
+
+.lbm-hint { font-size: 9px; color: var(--overlay0); text-align: center; padding: 0 12px; }
+
+/* ---- Upscale bottom sheet -- deliberately mirrors ImageDetailsMobile.jsx's
+   own idm-sheet-scrim/idm-sheet-slab exactly (the real shared <mg-upscale-
+   panel>'s host div must stay permanently in the DOM -- see that file's own
+   header comment / useImageDetails.js's correction 1). ---- */
+.lbm-sheet-scrim { position: fixed; inset: 0; z-index: 65; background: rgba(4,3,10,.66);
+  opacity: 0; pointer-events: none; transition: opacity .24s ease; }
+.lbm-sheet-scrim.open { opacity: 1; pointer-events: auto; }
+.lbm-sheet-slab { position: fixed; left: 0; right: 0; bottom: 0; z-index: 66; max-height: 84vh;
+  overflow-y: auto; -webkit-overflow-scrolling: touch; background: var(--mantle);
+  border-radius: 16px 16px 0 0; border-top: 1px solid var(--lavender);
+  padding: 12px 15px max(22px, env(safe-area-inset-bottom));
+  transform: translateY(100%); pointer-events: none;
+  transition: transform .28s cubic-bezier(.4,0,.2,1); }
+.lbm-sheet-slab.open { transform: translateY(0); pointer-events: auto;
+  transition: transform .28s cubic-bezier(.2,.9,.24,1); }
+.lbm-sheet-head { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; }
+.lbm-sheet-title { font-size: 14px; font-weight: 800; }
+.lbm-sheet-x { margin-left: auto; width: 26px; height: 26px; display: grid; place-items: center;
+  border-radius: 7px; border: 1px solid var(--surface1); background: var(--surface0);
+  color: var(--subtext); font-size: 12px; cursor: pointer; font-family: inherit; }
+mg-upscale-panel[inline] { margin-top: 0 !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lbm-root, .lbm-root.closing { animation-duration: .01s; }
+  .lbm-chip-metal { animation: none; }
+  .lbm-slidefill { animation: none; }
+  .lbm-herowrap { transition: none !important; }
+  .lbm-sheet-scrim, .lbm-sheet-slab { transition: none; }
+}

@@ -29,7 +29,7 @@ reader could work it out from the code, it does not belong here.
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 142
+- [Decisions](#decisions) &mdash; 143
 
 ---
 
@@ -1337,6 +1337,29 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 ## Decisions
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
+
+### The mount-race lesson held up the very next time it mattered — Lightbox Mobile found a third, differently-shaped instance proactively, and correctly left desktop's own latent copy alone  ·  *2026-08-03*
+
+The entry directly below this one recorded a rule after Image Details Mobile shipped a
+mount-race bug missed by two independent passes. The very next build (Lightbox Mobile),
+briefed explicitly to check for this failure class from the start, found a **third, newly-
+shaped instance of it during the build itself**, not after: `LightboxMobile.jsx`'s `if (!it)
+return null` guard can fire on a transient render mid-page-boundary-navigation (`items`
+already updated to a shorter page, `index` not yet caught up), tearing down the Upscale host
+div underneath a `[]`-keyed mount effect exactly like the original bug. Fixed by keying the
+effect to `[mid]` instead, so any real navigation's next valid render recreates it.
+
+Desktop `Lightbox.jsx` has the identical `[]`-keyed effect and, structurally, the identical
+exposure — but the build correctly did **not** silently patch it. It flagged the finding
+separately (as a real, open question: does desktop's own step() logic actually hit this same
+transient window, or does something about its timing avoid it) rather than fixing something
+out of this surface's scope on its own authority.
+
+**Why.** Two things worth keeping distinct: (1) a written-down rule changing behavior on the
+very next relevant task is the actual test of whether a "general lesson" entry was useful, not
+just documentation — this one passed; (2) finding a plausible instance of a known bug class in
+a file you weren't asked to touch is a report, not a mandate to fix it there too — `[[feedback-no-unilateral-deviations]]`'s
+same reasoning applies to bug fixes outside a task's stated scope, not just design deviations.
 
 ### A custom-element mount-once effect must be keyed to when its host div actually renders, not to when the component mounts — the same bug shipped twice, caught the second time only by testing against a real network fetch  ·  *2026-08-03*
 
