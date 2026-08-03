@@ -17,6 +17,32 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Mobile pass, surface 3 (part 7): the hamburger menu's real push-screen navigation.**
+  The ☰ Menu sheet's 6 destinations (My Art/Publish/Train a LoRA/Import/Contests/Health) no
+  longer just show a disclosure toast — tapping one now genuinely dismisses the sheet and
+  pushes a real full-screen destination, reusing `MobileScreen.jsx` exactly as-is (the same
+  component Create's Advanced screen and Control's Branding drill-in already use — no fork,
+  no new push-screen convention). A new `screen`/`screenClosing` pair generalizes the pattern
+  the same way `sheet` already generalizes `MobileSheet.jsx`: one state key driving one shared
+  mount, not six separate open/closed booleans. The screen mounts once at the app-shell level
+  (a sibling of the three tab bodies, not nested inside Gallery specifically) since the
+  hamburger is reachable from all three tabs — verified live that it genuinely survives an
+  underlying tab switch (opened from Gallery, switched to Create while it stayed open, closed
+  it and landed back on Create, not forced back to Gallery).
+  This increment is the navigation mechanism only, not the 6 destinations' real content yet
+  (that's next) — each pushes an honest, destination-specific placeholder rather than generic
+  filler: My Art/Import/Contests/Health each name the real desktop overlay and API route
+  already backing them (`MyArtOverlay`/`GET /api/your-art`, etc. — real, shipped, just not
+  yet ported to this screen), while Publish/Train honestly say nothing exists anywhere yet,
+  matching desktop's own still-`soon:true` state for both. Log Out is untouched — it was
+  never part of the screen mechanism, still a real, direct logout.
+  Verified live end-to-end: hamburger opens all 7 rows in the design's exact order, tapping
+  a destination dismisses the sheet and pushes the screen on the same frame (no animated
+  sheet-close, matching the design's own spec), the back chevron closes cleanly, and Health's
+  screen correctly reads "Collection Health" — distinct from its row label. One cheap cleanup
+  caught by review and applied: an orphaned `.soon`-styling CSS rule left over from before
+  these rows became real navigation. Full suite green.
+
 - **Mobile pass, surface 3 (part 6): Control tab — a real full-page destination, not a
   placeholder anymore.** `ControlMobile.jsx` replaces `AppMobile.jsx`'s Control placeholder.
   Data layer (`useControlPanel.js`) is a mechanical extraction of `ControlPanelOverlay.jsx`'s
