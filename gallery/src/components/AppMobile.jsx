@@ -7,6 +7,7 @@ import { fetchAccount, fetchCollections } from "../api.js";
 import GalleryMobile from "./GalleryMobile.jsx";
 import CreateMobile, { MODES } from "./CreateMobile.jsx";
 import VideoMode from "./VideoMode.jsx";
+import ControlMobile from "./ControlMobile.jsx";
 import TabBarMobile from "./TabBarMobile.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import PickerHost from "./PickerHost.jsx";
@@ -77,32 +78,28 @@ import "../styles/create-mobile.css";
        useEditGenerate.js's header comment). Fixer stays an honest sub-placeholder
        this increment (no touch-canvas box-drawing reference implementation
        exists anywhere yet); Enhance is not built at all on mobile (stays dead --
-       see CreateMobile.jsx's header comment).
+       see CreateMobile.jsx's header comment);
+     - The Control tab (ControlMobile.jsx, 2026-08-03) -- a real full-page
+       destination, NOT lifted above this conditional the way VideoMode was:
+       its data layer (useControlPanel.js, extracted from ControlPanelOverlay.jsx
+       the same day) already re-derives running-job state from the server on
+       every mount, so unmounting it on a tab switch away from Control loses no
+       tracking the way an unmounted <mg-generate-drawer> would -- see that
+       hook's own header comment and ControlMobile.jsx's for the full "outer-
+       tab-switch safety, checked explicitly" account. NOT passed `costRef`/
+       `gen` state -- unrelated to Create's draft-generation surface entirely.
 
    What's an HONEST placeholder, not a shortcut on anything above:
      - Create's own Video mode (its segmented control's third leg), Edit's own
        Fixer sub-tab, and Create's Advanced screen render a soon-state
        note/toast -- see CreateMobile.jsx's own header comment for the full
        disclosure of what's deferred there and why.
-     - The Control tab renders a soon-state note, matching this app's own
-       NavSpine.jsx convention (dimmed, tooltip disclosing why) rather than
-       inventing partial pixels for it -- explicitly separate follow-up work.
      - The hero's gold Folio icon and the Menu sheet's other six destinations
        (My Art / Publish / Train / Import / Contests / Health) are each either
        their OWN separate mobile design file (Folio Mobile.dc.html) or a
        Control-tab-owned surface this increment doesn't build -- tapping one
        surfaces a disclosing toast via window.Toast (mg-notify.js, already
        loaded on this page) instead of a dead tap or a half-built screen. */
-
-function Placeholder({ icon, title, note }) {
-  return (
-    <div className="glm-tab glm-placeholder">
-      <div className="glm-placeholder-icon" aria-hidden="true">{icon}</div>
-      <div className="glm-placeholder-title">{title}</div>
-      <div className="glm-placeholder-note">{note}</div>
-    </div>
-  );
-}
 
 const MENU_SOON = [
   { icon: "📈", label: "My Art" },
@@ -208,8 +205,7 @@ export default function AppMobile({ boot }) {
             cmode={cmode} setCmode={setCmode} edit={edit} {...gen} />
         )}
         {tab === "control" && (
-          <Placeholder icon="⚙" title="Control"
-            note="Sync, Tend, Skins, and account maintenance — coming in the next mobile pass." />
+          <ControlMobile account={account} />
         )}
 
         {/* VideoMode, lifted here (see header comment) so it survives a

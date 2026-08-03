@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import "../styles/overlays.css";
 import "../styles/control-panel.css";
+import useControlPanel, { postJSON, DEDUP_STAGES } from "../hooks/useControlPanel.js";
 
 /* Control Panel -- design spec: Control Panel.dc.html. Ported as a MODAL, per the owner's
    live 2026-08-02 correction ("Control panel is now ALSO modal. no separate pages anymore")
@@ -29,98 +30,36 @@ import "../styles/control-panel.css";
    The DC's Branding tab also specifies 5 image-upload slots (banners/mascots/rewards with
    crop + a "rotating source collection"); only "Icons & marks" is backed by a real route
    (/api/branding only stores mark + anim). The other four slots have no backend at all --
-   not built, not stubbed, left out entirely rather than shipping dead UI. */
+   not built, not stubbed, left out entirely rather than shipping dead UI.
 
-const SKIN_SW = {
-  moonglade: ["#0c0a1c", "#b692e6", "#4fc99a", "#d4af37"],
-  nightfallen: ["#0a0713", "#a678f0", "#7f6fe0", "#d9b3ff"],
-  moonlit: ["#0b1018", "#8fb8e8", "#68d5e0", "#cfe1f5"],
-  ember: ["#160c0c", "#e8935f", "#e0a94b", "#ffcf7a"],
-  verdant: ["#0a1410", "#5fd39a", "#4fc99a", "#c8e6a8"],
-};
-
-const DEDUP_STAGES = [
-  { key: "audit", label: "Audit" },
-  { key: "dedup-dry", label: "Preview" },
-  { key: "dedup-apply", label: "Quarantine 🔒" },
-  { key: "verify-dupes", label: "Verify" },
-  { key: "dedup-delete", label: "Delete 🔒" },
-];
-
-const POLL_MS = 1200;
-const PING_MS = 800;
-const PING_TRIES_MAX = 50;
-
-async function postJSON(url, body) {
-  const r = await fetch(url, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body || {}),
-  });
-  return r.json();
-}
+   DATA LAYER (fetch/poll/action/power) lives in ../hooks/useControlPanel.js as of
+   2026-08-03, extracted so the mobile Control tab (ControlMobile.jsx) can consume the
+   IDENTICAL logic instead of a second, drifting copy -- see that hook's own header
+   comment for the full "what moved, what didn't, and why" account, including the
+   explicit outer-tab-switch job-polling safety check docs/DECISIONS.md's 2026-08-03
+   entry asks every future Control/hamburger surface to make. ActionChip, SkinsRow,
+   BrandingTab, UsersSubOverlay, TrashSubOverlay and PowerModal are exported (not just
+   default-exported ControlPanelOverlay itself) for the exact same reason -- ControlMobile
+   reuses these components verbatim rather than rebuilding equivalents. */
 
 export default function ControlPanelOverlay({ onClose, boot }) {
-  const [summary, setSummary] = useState(null);
-  const [achievements, setAchievements] = useState(null);
-  const [summaryErr, setSummaryErr] = useState("");
   const [tab, setTab] = useState("maint");
   const [subOverlay, setSubOverlay] = useState(null); // 'users' | 'trash'
 
-  const [running, setRunning] = useState(null); // {action, label}
-  const [progress, setProgress] = useState(null);
-  const [log, setLog] = useState([]);
-  const [jobError, setJobError] = useState("");
-  const [jobResult, setJobResult] = useState(null); // last completed job's own tail, kept visible until the next run
-  const [confirmArm, setConfirmArm] = useState(null); // action key awaiting inline confirm
-  const [testPullN, setTestPullN] = useState(20);
-  const pollRef = useRef(null);
+  const {
+    summary, summaryErr, skins, activeSkin, pickSkin,
+    fetchSummary, actionSpec,
+    running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
+    testPullN, setTestPullN,
+    taskId, setTaskId, taskState, importTask,
+    power, powerConfirm, powerPhase, powerErr, clickPower, closePower,
+  } = useControlPanel();
 
-  const [taskId, setTaskId] = useState("");
-  const [taskState, setTaskState] = useState(null); // 'running' | 'done' | {error}
-
-  const [power, setPower] = useState(null); // 'restart' | 'stop'
-  const [powerConfirm, setPowerConfirm] = useState(null); // mode awaiting a first click before it actually fires
-  const [powerPhase, setPowerPhase] = useState("busy"); // 'busy' | 'done' | 'failed'
-  const [powerErr, setPowerErr] = useState("");
-  const pingRef = useRef(null);
-  const powerCancelledRef = useRef(false);
-
-  const fetchSummary = async () => {
-    try {
-      const r = await fetch("/api/panel/summary");
-      if (!r.ok) throw new Error();
-      setSummary(await r.json());
-      setSummaryErr("");
-    } catch {
-      setSummaryErr("Couldn't load the Panel — network error, try reopening it.");
-    }
-  };
-  const fetchAchievements = async () => {
-    try {
-      const r = await fetch("/api/achievements");
-      setAchievements(await r.json());
-    } catch { /* Skins sections just stay hidden without this — non-critical */ }
-  };
-
+  // Escape closes whatever the TOP layer is -- a sub-overlay first, then the whole Panel --
+  // component-local (not part of the shared hook) because it reads THIS component's own
+  // subOverlay/onClose, not anything the data layer owns. See useControlPanel.js's header
+  // comment for why this stayed behind rather than moving with everything else.
   useEffect(() => {
-    fetchSummary();
-    fetchAchievements();
-    // A job can already be running when the Panel opens -- the scheduler fires its own
-    // sync on a timer with no browser tab involved, or another tab/session started one.
-    // Without this check the console renders the idle grid as if nothing were happening,
-    // and clicking a button just gets back a 409 with no progress ever shown.
-    (async () => {
-      try {
-        const r = await fetch("/api/panel/status");
-        const d = await r.json();
-        if (d.status === "running") {
-          setRunning({ action: d.action, label: d.label || d.action });
-          setProgress(d.progress || null);
-          setLog(d.lines || []);
-          pollRef.current = setInterval(tick, POLL_MS);
-        }
-      } catch { /* fall through to idle -- the next real click still works */ }
-    })();
     const onKey = (e) => {
       if (e.key !== "Escape") return;
       if (power) return; // let the power modal's own logic decide
@@ -130,153 +69,7 @@ export default function ControlPanelOverlay({ onClose, boot }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => () => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    if (pingRef.current) clearInterval(pingRef.current);
-  }, []);
-
-  // The LOCALITY-FILTERED list (matching classic's own /panel: panel_visible actions,
-  // destructive ones ONLY for a local session) -- summary.all_actions exists purely to
-  // feed a scheduler dropdown this overlay doesn't have, and using it here would render
-  // every destructive Maintenance button live for a LAN session, which then 403s on the
-  // real confirm click. The Trash/Users/Branding localhost-only controls already gate on
-  // isLocal directly; this is that same rule for the Maintenance job console.
-  const actionSpec = (key) => (summary?.actions || []).find((a) => a.action === key);
-
-  const tick = async () => {
-    let d;
-    try {
-      const r = await fetch("/api/panel/status");
-      d = await r.json();
-    } catch { return; }
-    if (d.status === "running") {
-      setProgress(d.progress || null);
-      setLog(d.lines || []);
-      return;
-    }
-    clearInterval(pollRef.current); pollRef.current = null;
-    setRunning(null);
-    const lines = d.lines || [];
-    if (d.status === "failed") {
-      const rc = d.rc != null ? " (exit " + d.rc + ")" : "";
-      if (lines.length === 1 && String(lines[0]).indexOf("only on the server") !== -1) {
-        setJobError("Job failed" + rc + " — open Moonglade on the server itself to see why.");
-      } else {
-        const tail = lines.slice(-3).filter(Boolean);
-        setJobError(tail.length ? "Job failed" + rc + ": " + tail.join(" · ")
-                                : "Job failed" + rc + " — it ended without printing a reason.");
-      }
-      setJobResult(null);
-    } else {
-      // done / done_with_errors / cancelled -- capture the job's own tail output so it
-      // doesn't vanish the instant `running` flips false (the idle grid has no other
-      // place left to show it), and call out done_with_errors + warn_count specifically
-      // rather than folding it into an identical-looking "done".
-      const tail = lines.slice(-6).filter(Boolean);
-      setJobResult({
-        ok: d.status !== "done_with_errors",
-        warnCount: d.warn_count || 0,
-        lines: tail,
-      });
-      fetchSummary();
-    }
-  };
-
-  const runAction = async (key, extra) => {
-    if (running) return;
-    const spec = actionSpec(key);
-    if (!spec) return;
-    if (spec.destructive && confirmArm !== key) {
-      setConfirmArm(key);
-      return;
-    }
-    setConfirmArm(null);
-    setJobError("");
-    setJobResult(null);
-    setProgress(null);
-    setLog([]);
-    const body = { action: key };
-    if (spec.destructive) body.confirm = true;
-    if (spec.int_param) body.n = extra != null ? extra : (spec.int_default || 1);
-    const d = await postJSON("/api/panel/run", body);
-    if (d.error) { setJobError(d.error); return; }
-    setRunning({ action: key, label: d.label || spec.label || key });
-    pollRef.current = setInterval(tick, POLL_MS);
-    tick();
-  };
-
-  // /api/panel/cancel is LOCALHOST-only (docs/DECISIONS.md 2026-07-27: the button itself
-  // stays visible to every session on purpose -- hiding it would move a security decision
-  // into the UI -- but a LAN session's refusal must still be SEEN, not swallowed).
-  const stopJob = async () => {
-    const d = await postJSON("/api/panel/cancel", {});
-    if (d && d.error) setJobError(d.error);
-  };
-
-  const importTask = async () => {
-    const id = taskId.trim();
-    if (!id || taskState === "running") return;
-    setTaskState("running");
-    const d = await postJSON("/api/import-task", { task_id: id });
-    if (d.error) { setTaskState({ error: d.error }); return; }
-    setTaskState({ done: true, saved: d.saved });
-    fetchSummary();
-  };
-
-  // Sidebar chips arm on the first click ("Confirm -- Restart?") and only actually fire
-  // on the second -- classic gates the same actions behind window.confirm(); this is the
-  // same inline-confirm language ActionChip already uses for destructive Maintenance
-  // actions, reused here rather than a native browser dialog.
-  const clickPower = (mode) => {
-    if (powerConfirm === mode) { setPowerConfirm(null); startPower(mode); }
-    else setPowerConfirm(mode);
-  };
-  const startPower = (mode) => {
-    powerCancelledRef.current = false;
-    setPower(mode); setPowerPhase("busy"); setPowerErr("");
-  };
-  const doPower = async () => {
-    if (power === "stop") {
-      const d = await postJSON("/api/server/stop", {}).catch(() => null);
-      if (powerCancelledRef.current) return; // Cancel was clicked while this was in flight
-      if (d && d.error) { setPowerErr(d.error); setPowerPhase("failed"); return; }
-      _watch(false);
-    } else {
-      const d = await postJSON("/api/server/restart", {}).catch(() => null);
-      if (powerCancelledRef.current) return;
-      if (d && d.error) { setPowerErr(d.error); setPowerPhase("failed"); return; }
-      _watch(true);
-    }
-  };
-  // Ported verbatim from classic's own _watchServer() (moonglade_gallery.py) -- the REAL
-  // mechanism the Stop/Restart reconnect overlay has used for a long time. Restart: poll
-  // until it goes down, THEN comes back -> reload. Stop: poll until it stops answering.
-  const _watch = (comeBack) => {
-    let tries = 0, sawDown = false;
-    pingRef.current = setInterval(() => {
-      tries++;
-      fetch("/api/ping", { cache: "no-store" }).then((r) => r.ok).then((ok) => {
-        if (comeBack && ok && sawDown) { clearInterval(pingRef.current); window.location.reload(); }
-        if (comeBack && ok && tries >= 8 && !sawDown) { clearInterval(pingRef.current); window.location.reload(); }
-      }).catch(() => {
-        sawDown = true;
-        if (!comeBack) { clearInterval(pingRef.current); setPowerPhase("done"); }
-      });
-      if (tries > PING_TRIES_MAX) {
-        clearInterval(pingRef.current);
-        if (comeBack) { setPowerErr("Still restarting… give it a moment, then refresh."); setPowerPhase("failed"); }
-        else setPowerPhase("done");
-      }
-    }, PING_MS);
-  };
-  useEffect(() => { if (power) doPower(); /* eslint-disable-next-line */ }, [power]);
-  const closePower = () => {
-    powerCancelledRef.current = true;
-    if (pingRef.current) clearInterval(pingRef.current);
-    setPower(null); setPowerConfirm(null); setPowerPhase("busy"); setPowerErr("");
-  };
+  }, [power, subOverlay]);
 
   if (summaryErr) {
     return (
@@ -297,8 +90,6 @@ export default function ControlPanelOverlay({ onClose, boot }) {
   if (!summary) return null;
 
   const isLocal = summary.panel_is_local;
-  const skins = achievements?.skins || [];
-  const activeSkin = achievements?.skin || "moonglade";
 
   return (
     <>
@@ -487,7 +278,7 @@ export default function ControlPanelOverlay({ onClose, boot }) {
                       <div className="mgcp-mkick">Recover a task by ID</div>
                       <div className="mgcp-taskrow">
                         <input className="mgcp-taskinput" value={taskId} placeholder="task or media id…"
-                          onChange={(e) => { setTaskId(e.target.value); setTaskState(null); }}
+                          onChange={(e) => setTaskId(e.target.value)}
                           onKeyDown={(e) => { if (e.key === "Enter") importTask(); }} />
                         <button type="button" className="mgcp-chip" onClick={importTask}>⬇ Import</button>
                       </div>
@@ -537,8 +328,7 @@ export default function ControlPanelOverlay({ onClose, boot }) {
                       <div className="mgcp-tile mgcp-tile7">
                         <div className="mgcp-mkick">Skins</div>
                         <div className="mgcp-tilesmall">Cosmetic palette swaps for the whole suite — unlock more by earning achievements.</div>
-                        <SkinsRow skins={skins} active={activeSkin}
-                          onPick={(id) => setSkin(id, achievements, setAchievements)} />
+                        <SkinsRow skins={skins} active={activeSkin} onPick={pickSkin} />
                       </div>
                     )}
                   </div>
@@ -547,8 +337,7 @@ export default function ControlPanelOverlay({ onClose, boot }) {
 
               {tab === "brand" && (
                 <BrandingTab summary={summary} onSaved={fetchSummary} isLocal={isLocal}
-                  skins={skins} activeSkin={activeSkin}
-                  onPickSkin={(id) => setSkin(id, achievements, setAchievements)} />
+                  skins={skins} activeSkin={activeSkin} onPickSkin={pickSkin} />
               )}
             </div>
           </div>
@@ -578,23 +367,7 @@ function tabStyle(on) {
   };
 }
 
-// Applies a skin app-wide, not just inside this Panel's own React state -- classic's
-// pickSkin() and static/mg-notify.js's applySkin() both write the SAME pair
-// (html[data-skin], localStorage['skin']) after a successful POST, since every skin rule
-// in the suite's CSS reads off that attribute, and the pre-paint inline script on next
-// load reads localStorage first. Missing this meant picking a skin here changed nothing
-// visible anywhere outside the clicked card's own checkmark.
-async function setSkin(id, achievements, setAchievements) {
-  const d = await postJSON("/api/skin", { skin: id });
-  if (d.error) return d;
-  setAchievements({ ...achievements, skin: id });
-  if (id === "moonglade") document.documentElement.removeAttribute("data-skin");
-  else document.documentElement.setAttribute("data-skin", id);
-  try { localStorage.setItem("skin", id); } catch { /* private browsing etc -- cosmetic only */ }
-  return d;
-}
-
-function ActionChip({ spec, dgr, label, armed, onRun }) {
+export function ActionChip({ spec, dgr, label, armed, onRun }) {
   if (!spec) return null;
   const text = armed ? "Confirm — " + (label || spec.label) : (label || spec.label);
   return (
@@ -604,7 +377,15 @@ function ActionChip({ spec, dgr, label, armed, onRun }) {
   );
 }
 
-function SkinsRow({ skins, active, onPick }) {
+const SKIN_SW = {
+  moonglade: ["#0c0a1c", "#b692e6", "#4fc99a", "#d4af37"],
+  nightfallen: ["#0a0713", "#a678f0", "#7f6fe0", "#d9b3ff"],
+  moonlit: ["#0b1018", "#8fb8e8", "#68d5e0", "#cfe1f5"],
+  ember: ["#160c0c", "#e8935f", "#e0a94b", "#ffcf7a"],
+  verdant: ["#0a1410", "#5fd39a", "#4fc99a", "#c8e6a8"],
+};
+
+export function SkinsRow({ skins, active, onPick }) {
   // Local, not lifted: the achievements fetch is a mount-time snapshot (see the "picking
   // a skin never refreshes achievements" gap noted in docs/DECISIONS.md), so a card this
   // client still believes is unlocked can get a real 403 "skin locked" back from the
@@ -640,7 +421,7 @@ function SkinsRow({ skins, active, onPick }) {
   );
 }
 
-function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPickSkin }) {
+export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPickSkin }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const marks = summary.branding.marks || [];
@@ -706,7 +487,7 @@ function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPickSkin 
   );
 }
 
-function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
+export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
   const [users, setUsers] = useState(summary.web_users || []);
   const [newUser, setNewUser] = useState("");
   const [newPass, setNewPass] = useState("");
@@ -846,7 +627,7 @@ function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
 
 const TRASH_LIMIT = 60;
 
-function TrashSubOverlay({ isLocal, onClose }) {
+export function TrashSubOverlay({ isLocal, onClose }) {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -995,7 +776,7 @@ function TrashSubOverlay({ isLocal, onClose }) {
   );
 }
 
-function PowerModal({ mode, phase, error, onClose }) {
+export function PowerModal({ mode, phase, error, onClose }) {
   const isRestart = mode === "restart";
   const done = phase === "done";
   const failed = phase === "failed";

@@ -1,0 +1,70 @@
+/* ============================================================================
+   Control tab -- mobile shell (design spec: Moonglade Mobile.dc.html isControl
+   block, lines 186-272 & 600-611 & 1011-1086). ControlMobile.jsx's own new
+   markup only -- everything reusable already existed: .mgcp-* (control-
+   panel.css, the job console/chip/tile/skin-card language ControlPanelOverlay.jsx
+   already shipped), .cm-seg3/.cm-segbtn (create-mobile.css's segmented control),
+   .glm-placeholder* (gallery-mobile.css's loading/soon-state look) and
+   .glm-screen* (MobileScreen.jsx's push chrome, for the Branding drill-in).
+   This file adds ONLY what's genuinely new: the 2x2 stat grid, the Live Mirror
+   status row, and the honest Ledger disclosure note -- ctm- prefix throughout,
+   every color a DESIGN_TOKENS_CSS var(), matching every other mobile sheet's
+   own documented rule. */
+
+.ctm-sec { margin-bottom: 22px; }
+.ctm-sec:last-child { margin-bottom: 4px; }
+
+/* ---- "At a glance" stat grid (DC's 2x2 Images/Videos/Collections/Credits,
+   lines ~600-611) -- reuses .mgcp-sidehead for the section title itself. ---- */
+.ctm-statgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 8px; }
+.ctm-statcard { border: 1px solid var(--surface1); border-radius: 12px; background: var(--mantle);
+  padding: 12px 14px; }
+.ctm-statnum { font-family: Georgia, serif; font-size: 22px; line-height: 1.15;
+  font-variant-numeric: tabular-nums; }
+.ctm-statlabel { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9px;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--overlay0); margin-top: 3px; }
+
+/* ---- Live Mirror status row (DC lines ~1011-1020) -- dot + text real fields
+   are GET /api/watch/status's own (connected/last_event_at/mirrored/
+   stale_reconnects/last_error), the SAME fields classic's own loadWatchStatus()
+   (moonglade_gallery.py PANEL_HTML) already renders, ported to React rather
+   than the DC's invented "watching N files on disk -- M pending" copy (no
+   route anywhere computes a live file/pending count -- inventing one would be
+   exactly the kind of fabrication ControlPanelOverlay.jsx's own header comment
+   already disclosed avoiding for the Ledger/checks-timestamp gap). ---- */
+.ctm-mirror { display: flex; align-items: flex-start; gap: 9px; padding: 12px 14px;
+  border: 1px solid var(--surface1); border-radius: 12px; background: var(--mantle); }
+.ctm-mirrortext { flex: 1 1 auto; min-width: 0; }
+.ctm-mirrorline { font-size: 12.5px; color: var(--subtext); line-height: 1.5; }
+.ctm-mirrorline b { color: var(--emerald); }
+.ctm-mirrorchips { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 8px; }
+
+/* ---- Job console segmented tabs reuse .cm-seg3/.cm-segbtn verbatim (create-
+   mobile.css) -- same segmented-control look as Create's Image/Edit/Video
+   switch, one product. ---- */
+.ctm-jobseg { margin: 10px 0 12px; }
+
+/* ---- Ledger tab: HONEST disclosure, not the DC's fabricated run-history rows
+   (14:02 Sync 57 new / 08:00 Sync 12 new / yesterday Organize preview 0 to
+   move) -- nothing in this app persists per-action run history, the exact
+   same real gap ControlPanelOverlay.jsx's own header comment already discloses
+   for desktop's identical console. Matching that precedent here rather than
+   inventing numbers a second time. ---- */
+.ctm-ledgernote { font-size: 12px; line-height: 1.6; color: var(--overlay0); padding: 16px 4px;
+  text-align: center; }
+
+/* ---- Trash/Accounts 2-col tile grid -- .mgcp-tile itself (control-panel.css)
+   is width-agnostic (border/radius/background/padding/flex-column only, no
+   span baked in), so it drops straight into a plain 2-col grid here instead
+   of the desktop 12-col span system (.mgcp-tile2/.mgcp-tile3/etc, which assume
+   the much wider desktop .mgcp-tiles container). ---- */
+.ctm-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ctm-tiles .mgcp-tile { min-height: 96px; }
+
+/* Branding card's mark-glyph row + Skins section reuse .mgcp-marks/.mgcp-mark
+   and SkinsRow's own .mgcp-skinsrow* classes verbatim -- no override needed,
+   both already wrap onto a narrow width. */
+
+@media (prefers-reduced-motion: reduce) {
+  .ctm-mirror .mgcp-mirrordot { animation: none; }
+}

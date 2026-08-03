@@ -17,6 +17,47 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Mobile pass, surface 3 (part 6): Control tab — a real full-page destination, not a
+  placeholder anymore.** `ControlMobile.jsx` replaces `AppMobile.jsx`'s Control placeholder.
+  Data layer (`useControlPanel.js`) is a mechanical extraction of `ControlPanelOverlay.jsx`'s
+  own fetch/poll/action/power logic — desktop's Control Panel modal now consumes this same
+  hook instead of holding a second copy, the identical "refactor the one place this state
+  lived to consume its own extracted hook" call `useLibrary.js` already made for `App.jsx`.
+  `ActionChip`/`SkinsRow`/`BrandingTab`/`UsersSubOverlay`/`TrashSubOverlay`/`PowerModal` are
+  now also named exports of `ControlPanelOverlay.jsx`, reused verbatim by the mobile tab —
+  Trash/Accounts management and Branding's icon/anim/shortcut controls are therefore
+  full-featured on mobile from this first pass. Chrome call: Control is a sibling tab body
+  (the DC's own `tab` state includes it alongside Gallery/Create, same scrollable body
+  region), not `MobileScreen.jsx`'s push chrome — that IS used one level down, for the
+  Branding drill-in specifically, matching the DC's own documented "Trash/Accounts/Branding
+  drill in via a full-viewport push" behavior regardless of what container Control itself
+  lives in. Job-console outer-tab-switch safety was checked explicitly, per the 2026-08-03
+  DECISIONS.md entry naming this exact console as the next surface to verify: unlike
+  `<mg-generate-drawer>`, whose `disconnectedCallback` sweeps every poll timer on unmount
+  with no way back, `useControlPanel()`'s job-status poll already re-derives `running`/
+  `progress`/`log` from `/api/panel/status` on every mount — these are local maintenance
+  jobs, not billed generations, so switching Gallery/Create ↔ Control just pauses this
+  component's own polling, never the job itself, and resumes tracking correctly on return.
+  So the hook is deliberately NOT lifted above the tab conditional the way `VideoMode` was —
+  no credit-billing risk is being masked by that choice. Two honest departures beyond what
+  `ControlPanelOverlay.jsx` already discloses for desktop: Live Mirror's dot/text are
+  `GET /api/watch/status`'s own real fields (connected/last_event_at/mirrored/
+  stale_reconnects/last_error, the same ones classic's `loadWatchStatus()` already renders),
+  not the DC mockup's invented "watching N files — M pending" (no route computes that
+  anywhere); and the Ledger sub-tab is an honest disclosure note, not the DC's fabricated
+  run-history rows — nothing persists per-action run history, the same gap
+  `ControlPanelOverlay.jsx`'s header comment already discloses for the identical desktop
+  console. Full suite green (1539 passed); `npm run build` clean.
+  **One claim corrected after a live check:** the extraction incidentally changed
+  `ControlPanelOverlay.jsx`'s own Escape-key handler's dependency array (`[]` →
+  `[power, subOverlay]`), which looked like a real fix for a stale closure that used to always
+  close the whole desktop Panel instead of just its top sub-overlay. Pressing Escape against
+  the real running app (Panel open → Trash sub-overlay open → Escape) still closes the whole
+  Panel — `App.jsx` already owns Escape for any open overlay via its own capture-phase
+  handler, which fires first and stops the event from ever reaching this component's handler
+  at all. The dependency-array change is real but has no observable effect either way; not a
+  regression, just not the behavior fix it looked like on paper. See docs/DECISIONS.md.
+
 - **Mobile pass, surface 3 (part 5): Create tab, Advanced screen — the Create tab is now
   functionally complete.** A new shared `MobileScreen.jsx` primitive (full-screen push chrome
   — back chevron, slide-in, scrollable body) is the second reusable mobile overlay pattern

@@ -29,7 +29,7 @@ reader could work it out from the code, it does not belong here.
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 139
+- [Decisions](#decisions) &mdash; 141
 
 ---
 
@@ -1337,6 +1337,66 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 ## Decisions
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
+
+### A component's own nested Escape-key ladder is dead code if `App.jsx`'s capture-phase handler already owns Escape for that overlay — verified live, corrected a review's claim  ·  *2026-08-03*
+
+Extracting `ControlPanelOverlay.jsx`'s logic into `useControlPanel.js` (see the entry below)
+left one piece behind as component-local: an Escape-key effect meant to close whichever layer
+is on top (a sub-overlay first, then the whole Panel), whose dependency array changed from
+`[]` to `[power, subOverlay]` as an incidental part of the same diff. An independent review
+flagged this as a real, positive, unremarked behavioral fix — a stale closure that used to
+always fall through to closing the whole modal, now correctly scoped. Verified live against
+the real running app before accepting that conclusion: opened the Panel, opened the Trash
+sub-overlay, pressed Escape — **the whole Panel closed anyway**, sub-overlay and all,
+contradicting the "fixed" behavior. Root cause: `App.jsx` already registers its own Escape
+handler in the **capture phase** (`addEventListener("keydown", onKey, true)`) that calls
+`e.stopPropagation()` and closes the entire overlay whenever one is open — by design, per its
+own comment ("Esc closes the overlay FIRST — capture beats the drawer's own Esc ladder").
+Capture fires before bubble, so `App.jsx`'s handler always wins and the event never reaches
+`ControlPanelOverlay`'s own bubble-phase listener at all. The dependency-array change is real
+but **functionally inert** — a code-quality improvement to a handler that can never actually
+run, not a behavior change a user would ever see. Not a regression either: the observable
+behavior (Escape always closes the whole Panel) is identical before and after this session's
+refactor.
+
+**Why.** The general lesson: before crediting or reverting any fix to a nested overlay's own
+Escape/keyboard handling in this app, check whether `App.jsx`'s outer capture-phase handler
+already owns that key for the surface in question — if it does, the inner handler is
+observably dead regardless of what its dependency array says, and "verified by reading the
+diff" is not the same as "verified by pressing the key." This is why a live check (a real
+Escape press against the real running app, not a source read) is what caught the
+discrepancy — the same category of lesson as [[feedback-visual-verification]], one layer
+removed from CSS into event handling.
+
+### Control's job console checked against the OUTER-tab-switch rule and found a DIFFERENT, equally valid fix already in place — not lifted like VideoMode  ·  *2026-08-03*
+
+The entry directly below this one (same day) named Control's own Sync/Tend job console as the
+next surface that needed the outer-tab-switch check applied "from the start." Built
+`ControlMobile.jsx` + extracted `useControlPanel.js` (the data layer `ControlPanelOverlay.jsx`
+now consumes too, instead of holding a second copy — same "refactor the one place this state
+lived" call `useLibrary.js` made for `App.jsx`) and checked explicitly before shipping: does
+switching Gallery/Create ↔ Control mid-job stop tracking a real, still-running operation, the
+way an unmounted `<mg-generate-drawer>` would? Answer: no, and not by luck. Unlike the video
+drawer's `disconnectedCallback` — which actively sweeps every poll timer on unmount with no way
+back, forcing that element to never conditionally unmount — `useControlPanel()`'s job-status
+poll already re-fetches `/api/panel/status` on every mount and rebuilds `running`/`progress`/
+`log` from server truth (this existed before this pass; the mount-time "a job can already be
+running" resume check is original to `ControlPanelOverlay.jsx`). These are local maintenance
+jobs the header comment already describes as "designed to keep running with no browser tab
+involved" — not billed PixAI generations — so unmounting just pauses this component's own
+polling, never the job itself, and remounting resumes tracking correctly. `useControlPanel()`
+is therefore deliberately NOT lifted above `AppMobile.jsx`'s tab conditional; doing so would
+have been reflexively applying VideoMode's fix pattern to a surface that doesn't share its
+failure mode. One real, disclosed, NOT-fixed-here gap: the Stop/Restart ping-poll has no
+resume-on-mount check on either desktop or mobile — pre-existing, not introduced by this pass,
+and not a billing risk (the POST fires once, irreversibly, before any unmount could happen).
+
+**Why.** Confirms the general rule the entry below states — "evaluated against the outermost
+switch" — is an evaluation, not a reflex: the right response can be "this surface already has
+an equivalent, differently-shaped fix," not only "lift it like VideoMode." Recording which one
+applies and why stops a future session from either skipping the check (the failure this rule
+exists to prevent) or over-applying VideoMode's specific mechanism where a mount-time resume
+already does the same job more cheaply.
 
 ### Any mobile surface hosting a paid, poll-tracked task must survive the OUTER tab switch, not just its own internal mode switches  ·  *2026-08-03*
 
