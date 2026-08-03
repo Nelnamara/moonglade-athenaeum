@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App.jsx";
+import AppMobile from "./components/AppMobile.jsx";
 import LoginPage from "./components/LoginPage.jsx";
 import LoginPageMobile from "./components/LoginPageMobile.jsx";
 import SetupWizard from "./components/SetupWizard.jsx";
@@ -22,10 +23,14 @@ const boot = window.MG_BOOT || {};
 //
 // Root is a real component (not a plain `view` variable, unlike before
 // 2026-08-02) because useIsMobile() needs a component to subscribe its
-// matchMedia listener from -- it live-switches Login and SetupWizard between
-// their desktop and mobile presentations on resize/orientation change, not
-// just at first paint. App has no mobile build yet, so isMobile doesn't
-// affect it.
+// matchMedia listener from -- it live-switches every surface between its
+// desktop and mobile presentations on resize/orientation change, not just at
+// first paint (a live cross-breakpoint resize genuinely remounts whichever
+// side wasn't showing, on every surface this file mounts -- nothing new here).
+// AppMobile.jsx (2026-08-02) is Gallery-tab-only for now -- Create/Control
+// render honest placeholders inside it (see its own header comment) -- so
+// adding it here does not change App.jsx's own behavior at all: App only ever
+// mounts when isMobile is false, exactly as before this change.
 function Root() {
   const isMobile = useIsMobile();
   if (boot.authenticated === false) {
@@ -34,6 +39,6 @@ function Root() {
   if (boot.needs_key || boot.catalog_empty) {
     return isMobile ? <SetupWizardMobile boot={boot} /> : <SetupWizard boot={boot} />;
   }
-  return <App boot={boot} />;
+  return isMobile ? <AppMobile boot={boot} /> : <App boot={boot} />;
 }
 createRoot(document.getElementById("root")).render(<Root />);

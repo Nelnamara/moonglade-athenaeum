@@ -29,7 +29,7 @@ reader could work it out from the code, it does not belong here.
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 136
+- [Decisions](#decisions) &mdash; 138
 
 ---
 
@@ -1337,6 +1337,41 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 ## Decisions
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
+
+### App.jsx's browse/search/filter/sort/paginate logic gets refactored to consume its own extracted hook, not left as a divergent duplicate  ·  *2026-08-03*
+
+`useLibrary.js` (the shared hook the mobile Gallery tab needed) is a mechanical, byte-for-byte
+lift of `App.jsx`'s own state and handlers — same process as `useLogin.js`/`useSetupWizard.js`
+— but unlike those two, `App.jsx` itself was refactored to consume the new hook rather than
+left untouched with the hook as a second copy. Reasoning: Login/Setup Wizard each have a real
+standalone desktop version that must stay byte-for-byte provably unchanged, so leaving a
+disclosed duplicate was the safer, more conservative choice there. `App.jsx` has no such
+sibling — it's the ONE place this logic has ever lived, so a second copy would just be
+undisclosed drift risk with no compensating safety benefit. An independent review read the
+actual diff (not the build report) and confirmed every prop the desktop grid/filter/actions
+components depend on is supplied identically post-refactor, then re-ran the full suite itself
+rather than trusting the reported count.
+
+**Why.** The general rule this establishes: the "extract into a hook, leave the original
+untouched" pattern from Login/Setup Wizard is for surfaces with a real second consumer to
+protect: recorded so a future extraction doesn't blindly duplicate-and-abandon when the
+source has no sibling to preserve, and doesn't blindly refactor-in-place when it does.
+
+### Both relayed mobile-design corrections came back "nothing to update" — ship as originally specified  ·  *2026-08-02*
+
+`design_handoff/request-mobile-corrections.md` (drafted 2026-08-02, relayed by the owner to
+Claude Design) asked two things: whether the manifest's `orientation:"portrait"` lock should
+change given the Loom's own in-app rotate-to-landscape instruction, and whether every mobile
+design being tap-only (no swipe-dismiss/swipe-back/swipe-through anywhere) was intentional.
+Owner's relayed answer, verbatim: "Claude design said there was nothing to update." Both
+items are closed, no design changes — ship exactly as already specified and already built:
+the manifest keeps its portrait lock (already shipped with Login Mobile), the Loom's rotate
+screen stays as designed, and no swipe gestures get added anywhere across the 7 mobile
+surfaces.
+
+**Why.** Recorded so a future pass doesn't re-open either question thinking they were left
+unresolved — both went to design and came back confirmed-as-is, not ignored. This also means
+no mobile surface currently in flight or planned needs to budget any work for either item.
 
 ### Setup Wizard Mobile confirms the shared-hook architecture catches real-vs-mockup drift, as designed  ·  *2026-08-02*
 

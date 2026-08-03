@@ -17,6 +17,43 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Mobile pass, surface 3 (part 1): the Gallery/Create/Control shell — real Gallery tab.**
+  The mobile app's nav skeleton — a 3-icon Gallery/Create/Control bottom tab bar — ships along
+  with a fully real Gallery tab, not a decorative preview of one. Every field the design
+  shows (search, media pills, Sort sheet, the Advanced Search sheet's 8 fields, the bulk
+  Actions sheet) is wired to the same real data engine desktop uses, not the design mockup's
+  own inert placeholder inputs — real search, real filter/sort, real pagination (Prev/Next,
+  matching the deliberate choice already made for desktop over infinite scroll), real bulk
+  actions via the existing `ActionsMenu.jsx` mounted as-is.
+  A new `useLibrary()` hook (`gallery/src/hooks/useLibrary.js`) is a mechanical, byte-for-byte
+  extraction of `App.jsx`'s own browse/search/filter/sort/paginate/select-mode logic — the
+  same lift-out process already used for `useLogin.js`/`useSetupWizard.js`, except this time
+  desktop's `App.jsx` itself was refactored to consume the new hook (there's no sibling
+  desktop-only copy to preserve here, unlike Login/Setup Wizard) rather than left untouched.
+  This is the single highest-risk change of the mobile pass so far — `App.jsx` is the app's
+  most-used surface — so it got the most scrutiny: an independent review read the actual
+  diff line-by-line and confirmed every prop `Grid.jsx`/`FiltersPanel.jsx`/`ActionsMenu.jsx`
+  depend on is supplied identically, then independently re-ran the full suite itself rather
+  than trusting the build's reported numbers (1539 passed, matching exactly).
+  Selection needed a genuinely new mobile gesture, since desktop's marquee/shift/ctrl-click
+  has no touch equivalent: long-press (480ms, cancelled by >10px movement so scrolling isn't
+  mistaken for a hold) arms select mode, tap toggles once armed — built on Pointer Events, so
+  it also works with a mouse on a resized desktop browser, not just touch.
+  Create and Control tabs render honest "coming in the next pass" placeholders this round —
+  each is substantial enough to be its own build; shipping a fake-looking Create/Control tab
+  instead would have been worse than an honest placeholder.
+  A few small calls made without stopping to ask (each cheap, each judged in the design's own
+  spirit rather than a shortcut): the hero band's 6 non-urgent hamburger-style destinations
+  (My Art/Publish/Train/Import/Contests/Health) show a "coming later" toast rather than being
+  half-built; **Log Out** and **The Loom** link were wired for real since both were cheap and
+  it's a real signed-in session; tapping a tile outside select mode shows a disclosing toast
+  rather than reusing desktop's `Lightbox.jsx` unadapted into a 390px sheet — that would have
+  been exactly the "close enough" shortcut this pass explicitly rejects (Lightbox Mobile is
+  its own separate, not-yet-built surface with its own locked design).
+  Verified live against the real account (2,313 images, 22 videos) — real thumbnails, real
+  pagination reading "Page 1 of 24 · 2,335 matches," a real Sort interaction, zero console
+  errors. Full suite green (1539) twice over (build + independent review each ran it).
+
 - **Mobile pass, surface 2: Setup Wizard Mobile.** `SetupWizardMobile.jsx` (intro carousel →
   key entry → sync → ready) built against `Setup Wizard Mobile.dc.html`, switched in via the
   same `useIsMobile()` hook Login Mobile established. Desktop `SetupWizard.jsx` is untouched —

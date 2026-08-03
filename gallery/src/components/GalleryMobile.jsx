@@ -1,0 +1,270 @@
+import React, { useEffect, useRef, useState } from "react";
+import { ADV_DEFAULTS } from "../hooks/useLibrary.js";
+import GalleryGridMobile from "./GalleryGridMobile.jsx";
+import MobileSheet from "./MobileSheet.jsx";
+import ActionsMenu from "./ActionsMenu.jsx";
+import "../styles/gallery-mobile.css";
+
+/* The Gallery tab (design spec: Moonglade Mobile.dc.html isGallery block, lines
+   65-107 & 912-934) -- the one fully-real tab this increment ships. Every
+   field the DC shows is wired to useLibrary()'s real state/load/applyAdvanced
+   (lifted to AppMobile.jsx, passed down as props -- exactly how Grid.jsx/
+   FiltersPanel.jsx read App.jsx's single useLibrary() instance on desktop, so
+   filters/selection survive a Gallery <-> Create/Control tab switch instead of
+   resetting on every remount): the search box, the media pills, the Sort sheet,
+   the Advanced Search sheet's 8 fields (Collection/Sort/Model/LoRA/From/To/Min
+   rating/Per page -- the DC's own `searchFields` list, no more, no fewer), and
+   the Actions sheet's bulk actions (ActionsMenu.jsx mounted as-is per this
+   increment's brief point 6 -- its own trigger button is auto-clicked once the
+   sheet opens so the real dropdown appears without a redundant second tap, and
+   the sheet auto-closes if a mutation empties the selection out from under it).
+
+   DISCLOSED CUT: a plain tap on a tile OUTSIDE select mode does not open a
+   full-screen viewer. Lightbox Mobile.dc.html is its OWN separate, not-yet-built
+   mobile design file (one of the 7 the mobile pass's own scope decision named,
+   docs/DECISIONS.md 2026-08-02) -- reusing desktop Lightbox.jsx unadapted would
+   cram a 7-button toolbar + filmstrip built for a wide viewport into 390px,
+   which is exactly the "close enough" shortcut this increment's brief forbids.
+   A tap surfaces an honest toast instead of a dead tap or invented pixels. */
+
+const MEDIA_PILLS = [["", "All"], ["image", "Images"], ["video", "Videos"]];
+const SORT_OPTS = [
+  ["newest", "Newest first"], ["oldest", "Oldest first"],
+  ["rating_desc", "Rating"], ["likes", "Most liked"],
+];
+const PER_PAGE_OPTS = [50, 100, 200];
+
+function useSheet() {
+  const [sheet, setSheet] = useState(null);
+  const [closing, setClosing] = useState(false);
+  const timer = useRef(null);
+  const open = (name) => { clearTimeout(timer.current); setClosing(false); setSheet(name); };
+  const close = () => {
+    setClosing(true);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => { setSheet(null); setClosing(false); }, 280);
+  };
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return { sheet, closing, open, close };
+}
+
+export default function GalleryMobile({
+  boot, collections, refreshCollections,
+  media, shelf, perPage,
+  query, setQuery, submitQuery,
+  adv, applyAdvanced,
+  items, total, page, pages, loading, load,
+  selectMode, setSelectMode, selected, setSelected, toggleSelected,
+}) {
+  const { sheet, closing, open: openSheet, close: closeSheet } = useSheet();
+  const [draft, setDraft] = useState(() => ({ ...adv, shelf, perPage }));
+  const actionsHostRef = useRef(null);
+
+  // Refreshed at open-time (below), then left alone until Apply/Clear commits --
+  // same call Flyout.jsx's own draft makes (its `useEffect(() => setD(current),
+  // [current])`), because within one open sheet nothing else mutates adv/shelf/
+  // perPage out from under an in-progress edit.
+  const openSearchSheet = () => { setDraft({ ...adv, shelf, perPage }); openSheet("search"); };
+
+  const applyDraft = () => {
+    applyAdvanced({
+      sort: draft.sort, ratingMin: draft.ratingMin, model: draft.model, lora: draft.lora,
+      dateFrom: draft.dateFrom, dateTo: draft.dateTo,
+      shelf: draft.shelf, perPage: draft.perPage,
+    });
+    closeSheet();
+  };
+  const clearDraft = () => {
+    applyAdvanced({ ...ADV_DEFAULTS, shelf: "", perPage: 100 });
+    closeSheet();
+  };
+
+  const toggleSelectMode = () => { setSelectMode(!selectMode); setSelected(new Set()); };
+  const selIds = [...selected];
+
+  // The Actions sheet only ever opens with a selection; if a mutation (or the
+  // "Clear" pill) empties it out while the sheet is up, follow it closed rather
+  // than leave an empty "0 SELECTED" sheet stranded open.
+  useEffect(() => {
+    if (sheet === "actions" && selected.size === 0) closeSheet();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, sheet]);
+
+  // ActionsMenu.jsx is mounted as-is (this increment's brief, point 6) -- its
+  // own "Actions (N)" trigger button is auto-clicked the moment the sheet
+  // mounts, so the real dropdown menu appears without a redundant second tap.
+  // The trigger stays in the DOM (inside the sheet) as a fallback if the user
+  // dismisses that dropdown and wants it back.
+  useEffect(() => {
+    if (sheet !== "actions") return;
+    const t = setTimeout(() => {
+      const btn = actionsHostRef.current && actionsHostRef.current.querySelector(".mgl-actbtn");
+      if (btn) btn.click();
+    }, 60);
+    return () => clearTimeout(t);
+  }, [sheet]);
+
+  const armSelect = (mid) => {
+    setSelectMode(true);
+    setSelected((old) => { const s = new Set(old); s.add(mid); return s; });
+    if (navigator.vibrate) { try { navigator.vibrate(12); } catch { /* unsupported/blocked */ } }
+  };
+  const tapView = () => {
+    if (window.Toast) {
+      window.Toast.show({ title: "Full-screen viewing",
+        msg: "Its own mobile pass (Lightbox Mobile) — coming next." });
+    }
+  };
+
+  return (
+    <div className="glm-tab glm-tab-gallery">
+      <div className="glm-bar">
+        <div className="glm-search">
+          <span className="glm-search-icon" onClick={() => submitQuery()} title="Search">⚲</span>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") submitQuery(); }}
+            placeholder="words, night* wildcard, an id…"
+          />
+          <button type="button" className="glm-search-adv" onClick={openSearchSheet}>Advanced</button>
+        </div>
+        <button type="button" className={"glm-metal" + (selectMode ? " on" : "")} onClick={toggleSelectMode}>
+          {selectMode ? "Cancel" : "Select"}
+        </button>
+      </div>
+
+      <div className="glm-bar2">
+        {MEDIA_PILLS.map(([v, label]) => (
+          <button key={label} type="button" className={"glm-metal" + (media === v ? " on" : "")}
+            onClick={() => applyAdvanced({ media: v })}>
+            {label}
+          </button>
+        ))}
+        {selectMode ? (
+          <>
+            <button type="button" className="glm-metal" onClick={() => setSelected(new Set())}>Clear</button>
+            <span className="glm-selcount"><b>{selected.size}</b> selected</span>
+            {selected.size > 0 && (
+              <button type="button" className="glm-metal glm-pill-accent" onClick={() => openSheet("actions")}>
+                Actions
+              </button>
+            )}
+          </>
+        ) : (
+          <button type="button" className="glm-metal glm-pill-auto" onClick={() => openSheet("sort")}>
+            Sort ▾
+          </button>
+        )}
+      </div>
+
+      <GalleryGridMobile
+        items={items} loading={loading} selectMode={selectMode} selected={selected}
+        toggleSelected={toggleSelected} onArmSelect={armSelect} onTapView={tapView}
+      />
+
+      {!loading && pages > 1 && (
+        <nav className="glm-pager" aria-label="Pages">
+          <button type="button" className="glm-metal" disabled={page <= 1} onClick={() => load(page - 1, true)}>
+            ‹ Prev
+          </button>
+          <span className="glm-pager-info">
+            Page {page} of {pages}
+            {total != null ? <> · {Number(total).toLocaleString()} match{total === 1 ? "" : "es"}</> : null}
+          </span>
+          <button type="button" className="glm-metal" disabled={page >= pages} onClick={() => load(page + 1, true)}>
+            Next ›
+          </button>
+        </nav>
+      )}
+
+      <MobileSheet open={sheet === "search"} closing={closing} onClose={closeSheet} title="ADVANCED SEARCH">
+        <div className="glm-legend">
+          <div className="glm-legend-cap">these already work — nothing tells you so</div>
+          <div className="glm-legend-line"><code>night*</code> wildcard · <code>model:tsubaki</code> by model</div>
+          <div className="glm-legend-line"><code>2038314167804392533</code> a task or media id</div>
+        </div>
+        <div className="glm-field2">
+          <label className="glm-field">
+            <span>Collection</span>
+            <select value={draft.shelf} onChange={(e) => setDraft((d) => ({ ...d, shelf: e.target.value }))}>
+              <option value="">Any collection</option>
+              {(collections || []).map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </label>
+          <label className="glm-field">
+            <span>Sort</span>
+            <select value={draft.sort} onChange={(e) => setDraft((d) => ({ ...d, sort: e.target.value }))}>
+              {SORT_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </label>
+          <label className="glm-field">
+            <span>Model</span>
+            <input value={draft.model} list="glm-models"
+              onChange={(e) => setDraft((d) => ({ ...d, model: e.target.value }))}
+              placeholder="All models" />
+          </label>
+          <label className="glm-field">
+            <span>LoRA</span>
+            <input value={draft.lora} onChange={(e) => setDraft((d) => ({ ...d, lora: e.target.value }))}
+              placeholder="lora name…" />
+          </label>
+          <label className="glm-field">
+            <span>From</span>
+            <input type="month" value={draft.dateFrom}
+              onChange={(e) => setDraft((d) => ({ ...d, dateFrom: e.target.value }))} />
+          </label>
+          <label className="glm-field">
+            <span>To</span>
+            <input type="month" value={draft.dateTo}
+              onChange={(e) => setDraft((d) => ({ ...d, dateTo: e.target.value }))} />
+          </label>
+          <label className="glm-field">
+            <span>Min rating</span>
+            <select value={draft.ratingMin}
+              onChange={(e) => setDraft((d) => ({ ...d, ratingMin: Number(e.target.value) }))}>
+              <option value={0}>Any</option>
+              {[1, 2, 3, 4, 5].map((r) => <option key={r} value={r}>{"★".repeat(r)}+</option>)}
+            </select>
+          </label>
+          <label className="glm-field">
+            <span>Per page</span>
+            <select value={draft.perPage}
+              onChange={(e) => setDraft((d) => ({ ...d, perPage: Number(e.target.value) }))}>
+              {PER_PAGE_OPTS.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+        </div>
+        <datalist id="glm-models">{(boot.models || []).map((m) => <option key={m} value={m} />)}</datalist>
+        <div className="glm-sheet-actions">
+          <button type="button" className="glm-metal glm-widebtn" onClick={clearDraft}>Clear</button>
+          <button type="button" className="glm-primary" onClick={applyDraft}>Apply</button>
+        </div>
+      </MobileSheet>
+
+      <MobileSheet open={sheet === "sort"} closing={closing} onClose={closeSheet} title="SORT">
+        <div className="glm-sheet-list">
+          {SORT_OPTS.map(([v, label]) => (
+            <button key={v} type="button" className={"glm-metal glm-sheetopt" + (adv.sort === v ? " on" : "")}
+              onClick={() => { applyAdvanced({ sort: v }); closeSheet(); }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </MobileSheet>
+
+      <MobileSheet open={sheet === "actions"} closing={closing} onClose={closeSheet}
+        title={selected.size + " SELECTED"}>
+        <div ref={actionsHostRef} className="glm-actions-host">
+          <ActionsMenu
+            ids={selIds}
+            shelf={shelf}
+            isTrueLocal={boot.is_true_local}
+            clearSelection={() => { setSelected(new Set()); closeSheet(); }}
+            onMutated={refreshCollections}
+          />
+        </div>
+      </MobileSheet>
+    </div>
+  );
+}
