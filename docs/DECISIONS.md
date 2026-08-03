@@ -29,7 +29,7 @@ reader could work it out from the code, it does not belong here.
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 145
+- [Decisions](#decisions) &mdash; 146
 
 ---
 
@@ -1338,7 +1338,52 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
 
-### Loom Mobile increment 2 shipped: Shot Detail, Cast sheet, Frame picker — built by reusing the Loom's existing shared components rather than reimplementing them, and a review that tried to skip its own test run got caught and re-run properly  ·  *2026-08-03*
+### Loom Mobile increment 3 shipped: real Generate submit for a shot's video clip — verified end to end WITHOUT ever submitting a real generation, by injecting fake in-flight state through the app's own real storage layer  ·  *2026-08-03*
+
+Wires the mobile Generate screen (opened from Shot Detail) through `generateShot`/
+`pollShot`/`priceShot` — the exact real functions `batchGenerate`'s own per-card loop
+already calls, unmodified, with no second `fetch` to `/api/loom/generate` or `/api/price`
+anywhere in the file. This is the highest-stakes increment in the series: Generate is a
+real, billed path, and the owner's standing rule is no real generation without his
+explicit, current go-ahead — not given for this increment — so every check below had to
+prove the wiring and the credit-safety fix genuinely work **without spending anything.**
+
+**The credit-safety architecture choice, and why it matters.** `LoomV2`'s own desktop
+`<mg-generate-drawer>` had already been fixed once before (kept permanently mounted,
+CSS-hidden across its own internal tabs) after a tab switch was found to unmount it and
+kill its poll via `disconnectedCallback`. That fix only covers switches *inside* `LoomV2` —
+it does nothing for the Mobile-view toggle, which unmounts `LoomV2` (and the drawer inside
+it) wholesale. Rather than mount a second `<mg-generate-drawer>` inside `LoomMobile` and
+re-solve the exact same fragile lifecycle problem a second time, the build routed mobile's
+submit through the OTHER real pipeline already in this codebase — `useGenerationPipeline`,
+instantiated once in `App()`, above both `LoomV2` and `LoomMobile`. Its poll loop
+(`pollShot`) is a plain recursive `setTimeout` chain with no DOM/custom-element lifecycle
+tie at all, so there is no mount boundary for the Mobile toggle (or anything else) to ever
+threaten. This is a better fix than porting the drawer's own workaround a second time —
+worth remembering for any future Loom Mobile surface that might otherwise reach for
+`<mg-generate-drawer>` directly.
+
+**The verification method is the other thing worth recording.** Rather than trace-only or
+(worse) a real spend, the build injected a synthetic in-flight generation directly through
+`window.storage` — the app's own real, used KV store — setting a real board card to
+`status:"wip"` with a fake task id, then let the app's own real resume-effect pick it up
+and start genuinely polling (confirmed live via the network log, real repeated
+`GET /api/task-status` calls against the fake id). This exercises the exact same code path
+a real in-flight generation would, with the same lifecycle risks, without ever touching the
+billed endpoint. The review independently cross-checked this against the real server log
+and confirmed zero `POST /api/loom/generate` calls anywhere in the entire build/verify
+window — not just trusting the build's own claim. **This injected-fake-state technique is
+a real, reusable pattern for any future credit-safety verification in this app** — prefer
+it over either a real spend or a trace-only check when a live exercise is warranted.
+
+**Disclosed scope gap, confirmed real and not yet built:** the Generate screen this
+increment ships is only the per-shot video-clip submit (I2V/R2V/V2V/FLF). `LoomV2` desktop
+separately has a persistent Image/Edit/Reference/Video tabbed rail (`master-storyboard.jsx`
+`GEN_ICONS`/`lv-sidetabs`, ~line 2580) for generating standalone assets (plain images, edits,
+reference-based generations) independent of any shot's clip — a genuinely different real
+feature the owner flagged directly ("The loom has the full generate panel not just
+video") after the scoping for this increment named only the shot-clip modes. That tabbed
+panel is the next increment, not yet built.: Shot Detail, Cast sheet, Frame picker — built by reusing the Loom's existing shared components rather than reimplementing them, and a review that tried to skip its own test run got caught and re-run properly  ·  *2026-08-03*
 
 Shot Detail (mobile Deep Focus), the Cast & assets sheet, and the Frame picker, built on
 top of increment 1's toggle/board/reel. The one architectural choice worth naming: rather

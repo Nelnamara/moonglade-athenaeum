@@ -17,6 +17,21 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Loom Mobile increment 3 — Generate, real submit for a shot's video clip.** Wires the
+  mobile Generate screen through `generateShot`/`pollShot`/`priceShot` — the exact real
+  functions the desktop batch-generate path already calls, no forked spend logic, no
+  duplicated pricing math. Rather than reproduce desktop's own `<mg-generate-drawer>`
+  mount-lifecycle fix a second time for the Mobile-view toggle, submit routes through the
+  app-level generation-pipeline hook instead (instantiated once above both views, with a
+  plain `setTimeout`-based poll loop with no DOM lifecycle to break). Verified end to end
+  **without ever submitting a real generation** — a synthetic in-flight job was injected
+  through the app's own real storage layer to exercise the exact same poll/lifecycle path a
+  real job would, independently cross-checked against the real server logs to confirm zero
+  real submissions occurred. Disclosed scope: this covers only the per-shot video-clip
+  submit; the separate Image/Edit/Reference tabbed asset-generation panel is a further
+  increment. 640/640 loom tests, 1539/1539 pytest. Full reasoning in `docs/DECISIONS.md`'s
+  entry of the same date.
+
 - **Loom Mobile increment 2 — Shot Detail, Cast & assets sheet, Frame picker.** Built by
   reusing three of the Loom's existing real, shared components rather than reimplementing
   them: `FrameSlot` for the opening/closing frame (real `@imageN` tagging, upload, gallery-
