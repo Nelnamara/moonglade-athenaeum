@@ -240,7 +240,6 @@
   border-bottom: 1px dashed var(--surface1); font-size: 13px; cursor: pointer;
   background: none; border-left: none; border-right: none; border-top: none; color: var(--text);
   text-align: left; font-family: inherit; width: 100%; }
-.glm-menu-item.soon { color: var(--overlay0); }
 .glm-menu-icon { display: inline-block; width: 22px; flex: none; }
 
 /* ---- full-screen push chrome (MobileScreen.jsx) -- the shared "screen"

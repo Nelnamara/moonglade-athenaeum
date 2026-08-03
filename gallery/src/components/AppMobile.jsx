@@ -10,6 +10,7 @@ import VideoMode from "./VideoMode.jsx";
 import ControlMobile from "./ControlMobile.jsx";
 import TabBarMobile from "./TabBarMobile.jsx";
 import MobileSheet from "./MobileSheet.jsx";
+import MobileScreen from "./MobileScreen.jsx";
 import PickerHost from "./PickerHost.jsx";
 import "../styles/gallery-mobile.css";
 import "../styles/create-mobile.css";
@@ -90,25 +91,104 @@ import "../styles/create-mobile.css";
        `gen` state -- unrelated to Create's draft-generation surface entirely.
 
    What's an HONEST placeholder, not a shortcut on anything above:
-     - Create's own Video mode (its segmented control's third leg), Edit's own
-       Fixer sub-tab, and Create's Advanced screen render a soon-state
-       note/toast -- see CreateMobile.jsx's own header comment for the full
-       disclosure of what's deferred there and why.
-     - The hero's gold Folio icon and the Menu sheet's other six destinations
-       (My Art / Publish / Train / Import / Contests / Health) are each either
-       their OWN separate mobile design file (Folio Mobile.dc.html) or a
-       Control-tab-owned surface this increment doesn't build -- tapping one
-       surfaces a disclosing toast via window.Toast (mg-notify.js, already
-       loaded on this page) instead of a dead tap or a half-built screen. */
+     - Create's own Video mode (its segmented control's third leg) and Edit's
+       own Fixer sub-tab render a soon-state note -- see CreateMobile.jsx's
+       own header comment for the full disclosure of what's deferred there
+       and why.
+     - The hero's gold Folio icon is its OWN separate mobile design file
+       (Folio Mobile.dc.html, not built this pass) -- tapping it surfaces a
+       disclosing toast via window.Toast (mg-notify.js, already loaded on
+       this page) instead of a dead tap.
 
-const MENU_SOON = [
-  { icon: "📈", label: "My Art" },
-  { icon: "✎", label: "Publish" },
-  { icon: "⚗", label: "Train a LoRA" },
-  { icon: "⬆", label: "Import" },
-  { icon: "🏅", label: "Contests" },
-  { icon: "♡", label: "Health" },
+   MENU NAVIGATION MECHANISM (2026-08-03) -- the Menu sheet's six destinations
+   (My Art / Publish / Train / Import / Contests / Health) now push a REAL
+   named screen instead of firing a soonToast() stub, using MobileScreen.jsx
+   (already shipped, generic, reused as-is -- see CreateMobile.jsx's Advanced
+   screen and ControlMobile.jsx's Branding drill-in for the two prior
+   generic call sites this one now joins). What's real:
+     - a single `screen` state (mirroring how `sheet` already generalizes
+       MobileSheet.jsx to 'loom'/'menu'/null -- this does the same thing one
+       level up for MobileScreen.jsx: one string key, one shared mount,
+       content/title switch on the key, instead of six local open/closing
+       boolean pairs repeated the way CreateMobile's advOpen/ControlMobile's
+       brandOpen each are);
+     - tapping a Menu row dismisses the sheet and pushes the screen in the
+       SAME click (openScreen below) -- design_handoff's own menuItems onClick
+       (`{ sheet: null, screen: 'X' }`, both in one setState) confirmed this is
+       an instant sheet-dismiss for every row including Log Out, not the
+       animated closeSheet() path scrim/other controls use; ported that way;
+     - the push entry animation, back-chevron header chrome, and dismissal
+       ownership contract are ALL MobileScreen.jsx's existing, unmodified
+       contract (220ms open/closing pair, same as Advanced/Branding) -- no
+       fork, no new push-screen component.
+   What's still a placeholder, honestly, per destination: each pushed screen
+   renders content, not empty space, but the content itself is a labeled
+   stand-in (glm-placeholder, this codebase's own established soon-state
+   look) -- see SCREEN_INFO below for the real state of each ported feature. */
+
+const MENU_ITEMS = [
+  { icon: "📈", label: "My Art", screen: "myart" },
+  { icon: "✎", label: "Publish", screen: "publish" },
+  { icon: "⚗", label: "Train a LoRA", screen: "train" },
+  { icon: "⬆", label: "Import", screen: "import" },
+  { icon: "🏅", label: "Contests", screen: "contests" },
+  { icon: "♡", label: "Health", screen: "health" },
 ];
+
+// Per-screen header title + honest placeholder copy. Title text matches the
+// design spec exactly (Health's screen is titled "Collection Health", not
+// "Health" -- the row label and the pushed screen's title legitimately
+// differ, same as the design mock). The two "real" lines below are not
+// generic filler -- My Art/Import/Contests/Health each already have a real,
+// SHIPPED desktop overlay (MyArtOverlay/ImportOverlay/ContestsOverlay/
+// HealthOverlay.jsx, all wired to real API routes); Publish/Train have no
+// backend or overlay ANYWHERE yet (NavSpine.jsx's own desktop nav still
+// marks both `soon: true`) -- so their copy says that honestly instead of
+// implying a mobile port of something that doesn't exist yet.
+const SCREEN_INFO = {
+  myart: {
+    title: "My Art",
+    lines: [
+      "The real dashboard already exists on desktop — count, likes, comments, and your top-viewed published pieces (MyArtOverlay, live data from /api/your-art).",
+      "Its own mobile pass — coming next.",
+    ],
+  },
+  publish: {
+    title: "Publish",
+    lines: [
+      "Publish isn't built anywhere yet — desktop's own nav still marks it soon too, no backend route exists.",
+      "Parked for a future pass.",
+    ],
+  },
+  train: {
+    title: "Train a LoRA",
+    lines: [
+      "Training isn't built anywhere yet — desktop's own nav still marks it soon too, no backend route exists.",
+      "Parked for a future pass.",
+    ],
+  },
+  import: {
+    title: "Import",
+    lines: [
+      "The real importer already exists on desktop — drag-and-drop or file picker, straight into the catalog, nothing sent to PixAI (ImportOverlay, /api/import-local).",
+      "Its own mobile pass — coming next.",
+    ],
+  },
+  contests: {
+    title: "Contests",
+    lines: [
+      "The real contest list already exists on desktop — official + community entries, real prizes and dates (ContestsOverlay, live data from /api/contests).",
+      "Its own mobile pass — coming next.",
+    ],
+  },
+  health: {
+    title: "Collection Health",
+    lines: [
+      "The real dashboard already exists on desktop — model/tag/LoRA breakdowns and duplicate/reclaimable-space stats (HealthOverlay, live data from /api/health).",
+      "Its own mobile pass — coming next.",
+    ],
+  },
+};
 
 export default function AppMobile({ boot }) {
   const [tab, setTab] = useState("gallery");
@@ -116,6 +196,12 @@ export default function AppMobile({ boot }) {
   const [collections, setCollections] = useState(boot.collections || []);
   const [sheet, setSheet] = useState(null); // 'loom' | 'menu' | null
   const [closing, setClosing] = useState(false);
+  // The Menu sheet's pushed-screen destination -- generalizes MobileScreen.jsx
+  // the same way `sheet` above already generalizes MobileSheet.jsx (one
+  // string key, one shared mount). null | 'myart' | 'publish' | 'train' |
+  // 'import' | 'contests' | 'health'. See header comment.
+  const [screen, setScreen] = useState(null);
+  const [screenClosing, setScreenClosing] = useState(false);
   const fl = useFlavour(undefined, boot.build_stamp);
   const lib = useLibrary();
   const costRef = useRef(null);
@@ -134,6 +220,22 @@ export default function AppMobile({ boot }) {
   const closeSheet = () => {
     setClosing(true);
     setTimeout(() => { setSheet(null); setClosing(false); }, 280);
+  };
+
+  // Menu row -> pushed screen. Both state changes fire in the SAME click,
+  // matching design_handoff's own menuItems onClick (`{ sheet: null, screen:
+  // 'X' }` in one setState) -- the sheet is yanked off instantly under the
+  // incoming screen, not animated through closeSheet()'s 280ms path (that
+  // path stays reserved for the scrim tap and "Not now", per the design
+  // research). Mirrors CreateMobile.jsx's closeAdv() timing exactly for the
+  // screen side -- 220ms, matching MobileScreen.jsx's own CSS duration.
+  const openScreen = (key) => {
+    setSheet(null);
+    setScreen(key);
+  };
+  const closeScreen = () => {
+    setScreenClosing(true);
+    setTimeout(() => { setScreen(null); setScreenClosing(false); }, 220);
   };
 
   const soonToast = (label) => {
@@ -228,6 +330,29 @@ export default function AppMobile({ boot }) {
             <VideoMode visible={tab === "create" && cmode === "video"} />
           </div>
         </div>
+
+        {/* Menu-sheet pushed screen -- a sibling of the tab bodies above
+            within this unpositioned-ancestor-free .glm-body (position:
+            relative), so .glm-screen's position:absolute;inset:0 resolves
+            against .glm-body exactly the way CreateMobile's Advanced screen
+            and .cm-videowrap already do. Mounted HERE (not inside any one
+            tab) because the hamburger is reachable from all three tabs --
+            switching Gallery/Create/Control while a screen is pushed must
+            not unmount it. */}
+        <MobileScreen open={!!screen} closing={screenClosing} onClose={closeScreen}
+          title={screen ? SCREEN_INFO[screen].title : ""}>
+          {screen && (
+            <div className="glm-placeholder cm-soon">
+              <div className="glm-placeholder-icon" aria-hidden="true">
+                {MENU_ITEMS.find((mi) => mi.screen === screen).icon}
+              </div>
+              <div className="glm-placeholder-title">{SCREEN_INFO[screen].title}</div>
+              {SCREEN_INFO[screen].lines.map((line, i) => (
+                <div className="glm-placeholder-note" key={i}>{line}</div>
+              ))}
+            </div>
+          )}
+        </MobileScreen>
       </div>
 
       <TabBarMobile tab={tab} setTab={setTab} />
@@ -246,10 +371,9 @@ export default function AppMobile({ boot }) {
 
       <MobileSheet open={sheet === "menu"} closing={closing} onClose={closeSheet} title="MENU">
         <div className="glm-menu-list">
-          {MENU_SOON.map((mi) => (
-            <button key={mi.label} type="button" className="glm-menu-item soon"
-              title={mi.label + " — its own mobile pass, coming later"}
-              onClick={() => soonToast(mi.label)}>
+          {MENU_ITEMS.map((mi) => (
+            <button key={mi.label} type="button" className="glm-menu-item"
+              onClick={() => openScreen(mi.screen)}>
               <span className="glm-menu-icon" aria-hidden="true">{mi.icon}</span>{mi.label}
             </button>
           ))}
