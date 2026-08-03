@@ -1,0 +1,126 @@
+/* ============================================================================
+   Create tab, Image mode — mobile shell (design spec: Moonglade Mobile.dc.html
+   isCreate block, lines 109-184 & 936-1007). Shared by CreateMobile.jsx only;
+   gallery-mobile.css's own tokens/conventions are reused wherever they already
+   cover a piece (.glm-tab, .glm-scrim, .glm-metal/.glm-metal.on,
+   .glm-placeholder*), matching that file's own "one product" rule -- this
+   sheet only adds what Create needs that Gallery didn't already define.
+   cm- prefix throughout; every color a DESIGN_TOKENS_CSS var(), same rule
+   gallery-mobile.css documents (no literal hex standing in for a token that
+   exists). Sizes/paddings/radii are the DC's own literal numbers (segBtn(),
+   metal(), fieldLbl, modelRowStyle, generateBtnStyle, quoted in this file's
+   own header comments where they came from a named DC constant). */
+
+.cm-pad { padding: 12px 13px 26px; }
+
+/* ---- mode segmented control (DC seg3Style/segBtn: lines 940-941, 863) ---- */
+.cm-seg3 { display: flex; gap: 5px; background: var(--surface0); border-radius: 12px;
+  padding: 3px; margin-bottom: 12px; }
+.cm-segbtn { flex: 1; text-align: center; border-radius: 10px; padding: 7px 4px;
+  font-size: 11.5px; cursor: pointer; color: var(--subtext); background: none;
+  border: none; font-family: inherit; }
+.cm-segbtn.on { background: var(--lavender); color: var(--base); font-weight: 600; }
+
+/* Edit/Video honest sub-placeholder -- reuses .glm-placeholder's own look,
+   just a shorter min-height since it sits below the segmented control rather
+   than filling the whole tab. */
+.cm-soon { min-height: 220px; padding: 36px 20px; }
+
+/* ---- field label + prompt textarea (DC fieldLbl / taStyle) ---- */
+.cm-lbl { font-size: 9.5px; color: var(--overlay0); margin: 12px 0 5px; }
+.cm-ta { width: 100%; box-sizing: border-box; border-radius: 10px; padding: 9px 10px;
+  font-size: 12px; color: var(--text); resize: none; outline: none; font-family: inherit;
+  background: var(--mantle); border: 1px solid var(--surface1); }
+
+/* ---- Model & LoRAs row (DC modelRowStyle/modelThumbStyle/modelRowMetaStyle,
+   lines 958-965) ---- */
+.cm-modelrow { display: flex; align-items: center; gap: 9px; width: 100%; box-sizing: border-box;
+  padding: 8px 10px; border-radius: 10px; background: var(--mantle); border: 1px solid var(--surface1);
+  cursor: pointer; margin-bottom: 8px; font-family: inherit; color: var(--text); text-align: left; }
+.cm-modelthumb { flex: none; width: 34px; height: 34px; border-radius: 7px; overflow: hidden;
+  object-fit: cover; display: block;
+  background: linear-gradient(150deg, var(--purple-deep) 0%, color-mix(in srgb, var(--purple-deep) 55%, black) 100%); }
+.cm-modeltext { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.cm-modelname { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cm-modelmeta { font-size: 9.5px; color: var(--overlay0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cm-browse { flex: none; font-size: 9.5px; color: var(--lavender); }
+.cm-modelrow.empty .cm-modelname { color: var(--mauve); }
+
+.cm-select { width: 100%; box-sizing: border-box; border-radius: 9px; padding: 7px 9px;
+  font-size: 11.5px; color: var(--text); background: var(--base); border: 1px solid var(--surface1);
+  font-family: inherit; margin-bottom: 8px; }
+
+/* ---- chip rows: aspect ratios + LoRA summary chips. Reuses gallery-mobile.css's
+   own .glm-metal / .glm-metal.on chip verbatim (the DC's metal() function,
+   already ported there) -- .cm-chip only carries the DC's size override
+   ("font-size: 10px; padding: 4px 9px;", layered on top of metal() at every
+   chip-row call site in the DC). ---- */
+.cm-chiprow { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 4px; }
+.cm-chip { font-size: 10px; padding: 4px 9px; }
+.cm-lorachip { display: inline-flex; align-items: center; gap: 5px; }
+.cm-lorachip.bad { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, transparent); }
+.cm-chipx { background: none; border: none; color: inherit; cursor: pointer; font-size: 12px;
+  line-height: 1; padding: 0; font-family: inherit; }
+
+/* Not in the DC's Image-mode markup (its only wired route to the LoRA pane is
+   a button inside the deferred Advanced screen) -- added so LoRA add/remove
+   is reachable this increment; see CreateMobile.jsx's header comment for the
+   full disclosure. Styled as a dashed secondary row, distinct from the solid
+   Model & LoRAs row above it. */
+.cm-addlora { display: block; width: 100%; box-sizing: border-box; text-align: center;
+  font-size: 11px; padding: 6px 4px; border-radius: 10px; cursor: pointer; font-family: inherit;
+  color: var(--lavender); background: color-mix(in srgb, var(--lavender) 12%, var(--surface0));
+  border: 1px dashed color-mix(in srgb, var(--lavender) 45%, transparent); margin-bottom: 4px; }
+
+.cm-hint { font-size: 10px; color: var(--overlay0); margin: 2px 0 4px; }
+
+/* ---- reference row (DC refRowStyle/refSlotSmallStyle, lines 973-976) ---- */
+.cm-refrow { display: flex; align-items: center; gap: 9px; margin-bottom: 4px; }
+.cm-refslot { flex: none; width: 46px; height: 46px; border-radius: 9px; cursor: pointer;
+  border: 1.5px dashed var(--surface1); background: var(--surface0); color: var(--overlay0);
+  font-size: 9.5px; overflow: hidden; padding: 0; font-family: inherit; }
+.cm-refslot.filled { border-style: solid; border-color: var(--lavender); }
+.cm-refslot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cm-range { flex: 1 1 auto; height: 3px; cursor: pointer; }
+.cm-refval { font-size: 11px; color: var(--mauve); font-variant-numeric: tabular-nums; }
+.cm-refx { font-size: 15px; color: var(--overlay0); }
+
+/* ---- Advanced row -- its own screen, deferred to a later increment. An
+   honest tap-to-disclose row (same soonToast convention AppMobile.jsx's Menu
+   items already use), not a dead tap or a half-built screen. ---- */
+.cm-advrow { display: block; width: 100%; box-sizing: border-box; text-align: center;
+  font-size: 11px; padding: 6px 8px; border-radius: 10px; cursor: pointer; font-family: inherit;
+  color: var(--text);
+  background: linear-gradient(180deg, rgba(255,255,255,.11), rgba(0,0,0,.16)),
+    color-mix(in srgb, var(--surface0) 88%, #000);
+  border: 1px solid rgba(255,255,255,.14); margin: 10px 0 11px; }
+
+.cm-cost { display: block; margin: 0 0 4px; }
+.cm-gatenote { font-size: 11px; color: var(--overlay0); margin: 0 0 8px; text-align: center; }
+.cm-results { margin-bottom: 10px; }
+
+/* ---- Generate button (DC generateBtnStyle, line 1006) ---- */
+.cm-generate { width: 100%; box-sizing: border-box; text-align: center; border-radius: 14px;
+  padding: 10px 14px; font-size: 13px; font-weight: 700; color: #1a0f2e; cursor: pointer;
+  border: none; font-family: inherit;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--lavender) 92%, #fff), var(--lavender) 52%,
+    color-mix(in srgb, var(--lavender) 76%, #000));
+  box-shadow: 0 0 20px -5px color-mix(in srgb, var(--lavender) 75%, transparent); }
+.cm-generate.off, .cm-generate:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
+
+/* ---- Model/LoRA picker: ModelFlyout.jsx mounted AS-IS (the same
+   <mg-model-picker> web components the desktop dock uses), re-anchored as a
+   bottom sheet -- the exact technique dock.css already uses to re-anchor the
+   same component for the desktop dock (.mgx-dock-host .mfly). Scoped under
+   this wrapper so the rule can't leak onto desktop. ---- */
+.cm-modelwrap .mfly { position: fixed; inset: auto 0 0 0; left: 0; right: 0; top: auto;
+  width: auto; max-width: none; height: 78vh; max-height: 78vh; z-index: 331;
+  border-radius: 16px 16px 0 0; border: 1px solid var(--surface1);
+  border-left: none; border-right: none; border-bottom: none;
+  background: var(--mantle); box-shadow: 0 -20px 60px rgba(0, 0, 0, .55);
+  padding: 12px 13px max(14px, env(safe-area-inset-bottom));
+  animation: glmSheetUp .28s cubic-bezier(.2, .9, .24, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-modelwrap .mfly { animation: none; }
+}
