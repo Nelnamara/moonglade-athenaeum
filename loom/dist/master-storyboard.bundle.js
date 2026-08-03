@@ -3056,6 +3056,63 @@ ${"=".repeat(48)}
 .lm-gencosttext{font-size:12px;font-weight:700;color:var(--emerald);}
 .lm-gensel{width:100%;box-sizing:border-box;background:var(--base);border:1px solid var(--surface1);
   border-radius:8px;padding:8px 10px;color:var(--text);font:12.5px/1.3 system-ui;margin-top:6px;}
+
+/* ---- Image/Edit/Reference tabs -- fourth increment (2026-08-03), added to the SAME
+   Generate screen the third increment built. Reuses lm-in/lm-ta/lm-check/lm-row2/lm-col/
+   lm-genbtn/lm-microlab/lm-hint/lm-genframe/lm-gencost*/lm-gensel unchanged; the classes
+   below are the ones this increment's new fields genuinely need and nothing existing
+   already covers. ---- */
+.lm-bal{font-size:10.5px;color:var(--text);padding:6px 0;border-top:1px solid var(--surface1);
+  border-bottom:1px solid var(--surface1);opacity:.85;}
+.lm-selrow{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;padding:8px 10px;
+  border-radius:8px;background:var(--base);border:1px solid var(--surface1);color:var(--text);
+  cursor:pointer;font:12.5px/1.3 system-ui;text-align:left;}
+.lm-selthumb{width:26px;height:26px;border-radius:6px;object-fit:cover;flex:none;}
+.lm-selname{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-selhint{flex:none;font-size:10px;color:var(--subtext);}
+.lm-caps{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;}
+.lm-cap{font-size:9.5px;padding:2px 8px;border-radius:10px;background:var(--base);
+  border:1px solid var(--surface1);color:var(--subtext);}
+.lm-cap.method{color:var(--gold);border-color:var(--gold);}
+.lm-loras{display:flex;flex-direction:column;gap:5px;margin:8px 0 4px;}
+.lm-lchip{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:6px 8px;border-radius:7px;
+  background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
+.lm-lchip.failed{border-color:var(--red);}
+.lm-lnm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-lchip.failed .lm-lnm{color:var(--red);}
+.lm-lw{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
+.lm-lw input[type=range]{width:78px;}
+.lm-lw b{min-width:28px;text-align:right;font-size:11px;font-weight:600;color:var(--gold);
+  font-variant-numeric:tabular-nums;}
+.lm-lrm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:14px;padding:0 2px;}
+.lm-lrm:hover{color:var(--red);}
+.lm-lorver{flex:1 1 100%;background:var(--base);border:1px solid var(--surface1);border-radius:5px;
+  color:var(--text);font-size:10px;padding:4px 6px;}
+.lm-mini2-btn{font-size:10px;color:var(--accent);background:none;border:none;cursor:pointer;
+  text-decoration:underline;text-underline-offset:2px;padding:6px 0 0;display:block;}
+.lm-gerr{font-size:10.5px;color:var(--red);margin-top:6px;}
+.lm-imgresult{margin-top:10px;border:1px solid var(--surface1);border-radius:9px;padding:8px;}
+.lm-imgresult>img{width:100%;border-radius:7px;display:block;}
+.lm-route{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+.lm-routebtn{font:600 10px/1 system-ui;padding:6px 9px;border-radius:6px;border:1px solid var(--surface1);
+  background:var(--surface1);color:var(--subtext);cursor:pointer;}
+.lm-routebtn.on{background:color-mix(in srgb,var(--accent) 22%,transparent);border-color:var(--accent);
+  color:var(--accent);}
+.lm-ok2{font-size:10px;color:var(--accent);margin-top:6px;}
+.lm-refstrip{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 2px;}
+.lm-refstrip img{width:44px;height:44px;object-fit:cover;border-radius:7px;border:1px solid var(--surface1);}
+
+/* Model/LoRA picker sheet -- a near-full-screen mobile sheet (unlike the half-height Cast
+   sheet: <mg-model-picker>'s search+grid genuinely needs the room), wrapping the SAME real
+   custom element LoomV2's floating .lv-mpick-veil overlay uses. */
+.lm-pick-sheet{position:absolute;left:0;right:0;bottom:0;top:6%;z-index:32;background:var(--mantle);
+  border-radius:18px 18px 0 0;border:1px solid var(--surface1);border-bottom:none;
+  padding:12px 16px max(14px,env(safe-area-inset-bottom));display:flex;flex-direction:column;min-height:0;
+  animation:lmSheetUp .26s cubic-bezier(.2,.9,.24,1);}
+.lm-pick-head{flex:none;display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.lm-pick-t{flex:1 1 auto;font-size:14px;font-weight:600;color:var(--text);}
+.lm-pick-body{flex:1;min-height:0;display:flex;flex-direction:column;}
+.lm-pick-body mg-model-picker{flex:1;min-height:0;}
 `;
   function LoomMobile({
     project,
@@ -3102,7 +3159,37 @@ ${"=".repeat(48)}
     // path: this screen is a new VIEW onto the exact same pipeline LoomV2 already drives.
     generateShot,
     priceShot,
-    useExistingVideo
+    useExistingVideo,
+    // Fourth increment (2026-08-03): Image/Edit/Reference/Video, mirroring LoomV2's own
+    // right-rail GEN_ICONS strip (its "Video" tab is what the third increment above already
+    // built, using generateShot/priceShot rather than <mg-generate-drawer> -- see this
+    // increment's report for why that stays the right call here too). Every one of these is
+    // the SAME hook-level state/function LoomV2 already reads/calls for its Image/Edit/
+    // Reference tabs -- genImage/genEdit/genRef (and their genImgState/genEditState/
+    // genRefState) are plain fetch+setTimeout closures living in useGenerationPipeline, not
+    // tied to any DOM element's lifecycle, so (unlike the drawer) they already survive the
+    // Mobile-view toggle with no fix needed -- confirmed by reading pollImg/
+    // pollTaskWithCeiling, not assumed. No forked submit logic, no reinvented pricing, no new
+    // endpoints: this screen calls the exact same functions LoomV2's Image/Edit/Reference
+    // tab bodies call.
+    genImgState,
+    imgModel,
+    setImgModel,
+    imgLoras,
+    setImgLoras,
+    imgAdv,
+    setImgAdv,
+    modelDefaults,
+    setModelDefaults,
+    genImage,
+    routeImg,
+    genEditState,
+    setGenEditState,
+    genRefState,
+    setGenRefState,
+    genEdit,
+    genRef,
+    routeGen
   }) {
     useEffect(() => {
       const prevOverflow = document.body.style.overflow;
@@ -3128,6 +3215,130 @@ ${"=".repeat(48)}
     const [genOverrideFlash, setGenOverrideFlash] = useState(false);
     const [genSubmitting, setGenSubmitting] = useState(false);
     const [genPrice, setGenPrice] = useState({});
+    const [genTab, setGenTab] = useState("Video");
+    const [acct, setAcct] = useState(null);
+    useEffect(() => {
+      fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {
+      });
+    }, []);
+    const [pickerOpen, setPickerOpen] = useState(false);
+    const [pickerKind, setPickerKind] = useState("base");
+    const [pickerMounted, setPickerMounted] = useState(false);
+    useEffect(() => {
+      if (pickerOpen) setPickerMounted(true);
+    }, [pickerOpen]);
+    useEffect(() => {
+      if (!pickerOpen) return;
+      const onKey = (ev) => {
+        if (ev.key === "Escape") setPickerOpen(false);
+      };
+      window.addEventListener("keydown", onKey);
+      return () => window.removeEventListener("keydown", onKey);
+    }, [pickerOpen]);
+    const basePickerElRef = useRef(null);
+    const loraPickerElRef = useRef(null);
+    const imgModelSeqRef = useRef(0);
+    const loraRange = useMemo(() => {
+      const L = window.MG_LORA;
+      const t = String(imgModel && imgModel.model_type || "").toUpperCase();
+      if (!L) return [-2, 2];
+      return L.ranges && L.ranges[t] || L.fallback || [-2, 2];
+    }, [imgModel]);
+    useEffect(() => {
+      setImgLoras((cur) => {
+        let changed = false;
+        const next = cur.map((l) => {
+          const w = Math.max(loraRange[0], Math.min(loraRange[1], +l.weight));
+          if (w !== l.weight) changed = true;
+          return w === l.weight ? l : { ...l, weight: w };
+        });
+        return changed ? next : cur;
+      });
+    }, [loraRange, setImgLoras]);
+    const bindPicker = useCallback((el) => {
+      basePickerElRef.current = el;
+      if (el && !el._mgBound) {
+        el._mgBound = true;
+        el.addEventListener("mg-pick", (e) => {
+          setPickerOpen(false);
+          const m = { model_id: e.detail.model_id, title: e.detail.title, preview_url: e.detail.preview_url || "" };
+          setImgModel(m);
+          setModelDefaults(null);
+          const mySeq = ++imgModelSeqRef.current;
+          fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1").then((r) => r.json()).then((d) => {
+            if (mySeq !== imgModelSeqRef.current) return;
+            const versions = d && d.versions || [], v = versions[0] || {};
+            setImgModel((cur) => cur ? {
+              ...cur,
+              version_id: v.version_id || "",
+              model_type: v.model_type || "",
+              sampling_method: v.sampling_method || "",
+              capabilities: v.capabilities || [],
+              compatibility: v.compatibility || {},
+              restrictions: v.restrictions || {},
+              versions
+            } : cur);
+            const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+            setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
+            if (has) {
+              setImgAdv((cur) => ({
+                ...cur,
+                negative: v.negative_prompt || cur.negative,
+                steps: v.sampling_steps || cur.steps,
+                cfg: v.cfg_scale || cur.cfg
+              }));
+            }
+          }).catch(() => {
+          });
+        });
+      }
+    }, [setImgModel, setImgAdv, setModelDefaults]);
+    const pickVersion = useCallback((vid) => {
+      if (!imgModel || !imgModel.versions) return;
+      const v = imgModel.versions.find((x) => x.version_id === vid);
+      if (!v) return;
+      setImgModel((cur) => ({
+        ...cur,
+        version_id: v.version_id || "",
+        model_type: v.model_type || "",
+        sampling_method: v.sampling_method || "",
+        capabilities: v.capabilities || [],
+        compatibility: v.compatibility || {},
+        restrictions: v.restrictions || {}
+      }));
+      const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+      setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
+      if (has) {
+        setImgAdv((a) => ({
+          ...a,
+          negative: v.negative_prompt || a.negative,
+          steps: v.sampling_steps || a.steps,
+          cfg: v.cfg_scale || a.cfg
+        }));
+      }
+    }, [imgModel, setImgModel, setImgAdv, setModelDefaults]);
+    const bindLoraPicker = useCallback((el) => {
+      loraPickerElRef.current = el;
+      if (el && !el._mgBound) {
+        el._mgBound = true;
+        el.addEventListener("mg-pick", (e) => {
+          const { model, selected } = e.detail;
+          setImgLoras((cur) => {
+            const i = cur.findIndex((l) => l.model_id === model.model_id);
+            if (!selected) return i < 0 ? cur : cur.filter((l) => l.model_id !== model.model_id);
+            if (i < 0) return [...cur, model];
+            const next = cur.slice();
+            next[i] = model;
+            return next;
+          });
+        });
+      }
+    }, [setImgLoras]);
+    useEffect(() => {
+      if (!pickerMounted) return;
+      const vis = pickerKind === "base" ? basePickerElRef.current : loraPickerElRef.current;
+      if (vis && vis.ensureSearched) vis.ensureSearched();
+    }, [pickerMounted, pickerKind]);
     const modeSendsRefs = (m) => usesCloseFrame(m) && m !== "FLF";
     const modeSendsLine = (m) => m === "FLF" ? "First & Last sends the start & end frames only \u2014 cast & refs here are for continuity/notes, not references" : "I2V sends the opening frame only \u2014 cast here is for continuity/notes, not references";
     const liveTagText = (liveTag, pastBudget, mode) => liveTag || (pastBudget ? modeSendsRefs(mode) ? "not sent" : "not cited" : "\u2014");
@@ -3290,6 +3501,102 @@ ${"=".repeat(48)}
         setGenOpen(false);
         setDfOpen(false);
       }
+    };
+    const editSrcMid = dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId;
+    const refMids = (project.assets || []).filter((a) => a.kind === "image" && a.mediaId).map((a) => a.mediaId);
+    const refMidsKey = refMids.join(",");
+    const [imgPrice, setImgPrice] = useState({});
+    const [editPrice, setEditPrice] = useState({});
+    const [refPrice, setRefPrice] = useState({});
+    useEffect(() => {
+      if (!genOpen || genTab !== "Image" || !dfLive) return;
+      const id = dfLive.c.id;
+      const prompt = (dfLive.c.imgPrompt || "").trim();
+      if (!imgModel || !prompt || anyLoraUnresolved(imgLoras)) {
+        setImgPrice((s) => ({ ...s, [id]: null }));
+        return;
+      }
+      setImgPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true } }));
+      let live = true;
+      const t = setTimeout(() => {
+        fetch("/api/price", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildImgGenBody(imgModel, imgLoras, imgAdv, prompt))
+        }).then((r) => r.json()).then((pr) => {
+          if (live) setImgPrice((s) => ({ ...s, [id]: { loading: false, pr } }));
+        }).catch(() => {
+          if (live) setImgPrice((s) => ({ ...s, [id]: { loading: false, pr: null } }));
+        });
+      }, 250);
+      return () => {
+        live = false;
+        clearTimeout(t);
+      };
+    }, [genOpen, genTab, dfLive && dfLive.c.id, dfLive && dfLive.c.imgPrompt, imgModel, imgLoras, imgAdv]);
+    useEffect(() => {
+      if (!genOpen || genTab !== "Edit" || !dfLive) return;
+      const id = dfLive.c.id;
+      const instruction = (dfLive.c.editPrompt || "").trim();
+      if (!editSrcMid || !instruction) {
+        setEditPrice((s) => ({ ...s, [id]: null }));
+        return;
+      }
+      setEditPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true } }));
+      let live = true;
+      const t = setTimeout(() => {
+        fetch("/api/price", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "edit", source: editSrcMid, instruction, edit_model: "edit-pro" })
+        }).then((r) => r.json()).then((pr) => {
+          if (live) setEditPrice((s) => ({ ...s, [id]: { loading: false, pr } }));
+        }).catch(() => {
+          if (live) setEditPrice((s) => ({ ...s, [id]: { loading: false, pr: null } }));
+        });
+      }, 250);
+      return () => {
+        live = false;
+        clearTimeout(t);
+      };
+    }, [genOpen, genTab, dfLive && dfLive.c.id, dfLive && dfLive.c.editPrompt, editSrcMid]);
+    useEffect(() => {
+      if (!genOpen || genTab !== "Reference" || !dfLive) return;
+      const id = dfLive.c.id;
+      const prompt = (dfLive.c.refPrompt || "").trim();
+      if (!refMids.length || !prompt) {
+        setRefPrice((s) => ({ ...s, [id]: null }));
+        return;
+      }
+      setRefPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true } }));
+      let live = true;
+      const t = setTimeout(() => {
+        fetch("/api/price", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "edit", source: refMids[0], sources: refMids, instruction: prompt, edit_model: "reference-pro" })
+        }).then((r) => r.json()).then((pr) => {
+          if (live) setRefPrice((s) => ({ ...s, [id]: { loading: false, pr } }));
+        }).catch(() => {
+          if (live) setRefPrice((s) => ({ ...s, [id]: { loading: false, pr: null } }));
+        });
+      }, 250);
+      return () => {
+        live = false;
+        clearTimeout(t);
+      };
+    }, [genOpen, genTab, dfLive && dfLive.c.id, dfLive && dfLive.c.refPrompt, refMidsKey]);
+    const priceLine = (priceState, id, noInputMsg) => {
+      const p = priceState[id];
+      if (!p) return noInputMsg;
+      if (p.loading) return "checking\u2026";
+      const tally = p.pr ? tallyPrices([p.pr]) : null;
+      return tally ? formatCostEstimate(tally) : "\u2014";
+    };
+    const priceTitle = (priceState, id) => {
+      const p = priceState[id];
+      const tally = p && p.pr ? tallyPrices([p.pr]) : null;
+      return tally ? costTooltip(tally) : "";
     };
     return /* @__PURE__ */ React.createElement("div", { className: "lm-root" }, /* @__PURE__ */ React.createElement("style", null, LOOM_MOBILE_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lm-top" }, /* @__PURE__ */ React.createElement("a", { className: "lm-back", href: "/" }, "\u2190 Gallery"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement("span", { className: "lm-title" }, "\u25AA The Loom"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement(
       "label",
@@ -3560,7 +3867,293 @@ ${"=".repeat(48)}
       return /* @__PURE__ */ React.createElement("div", { className: "lm-gen" }, /* @__PURE__ */ React.createElement("div", { className: "lm-gen-top" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-gen-back", onClick: () => setGenOpen(false) }, "\u2039 ", dfLive.code), /* @__PURE__ */ React.createElement("span", { className: "lm-gen-title" }, c.title || "untitled"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-df-close", title: "Close", onClick: () => {
         setGenOpen(false);
         setDfOpen(false);
-      } }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "lm-gen-body" }, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Mode"), /* @__PURE__ */ React.createElement("div", { className: "lm-modechips" }, MODES.map((m) => /* @__PURE__ */ React.createElement(
+      } }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "lm-tabsrow", style: { margin: "0 16px 8px" } }, ["Image", "Edit", "Reference", "Video"].map((t) => /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          key: t,
+          className: "lm-tabbtn" + (genTab === t ? " on" : ""),
+          onClick: () => setGenTab(t)
+        },
+        t
+      ))), acct && /* @__PURE__ */ React.createElement("div", { className: "lm-bal", style: { margin: "0 16px 8px" } }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { style: { color: "var(--gold)" } }, " \xB7 +", acct.claim_credits, " claimable") : null), /* @__PURE__ */ React.createElement("div", { className: "lm-gen-body" }, genTab === "Image" && (() => {
+        const gi = genImgState[c.id] || {};
+        const busyI = gi.phase === "submitting" || gi.phase === "running";
+        const compat = imgModel && imgModel.compatibility || {};
+        const restr = imgModel && imgModel.restrictions || {};
+        const negOff = compat.negativePrompt === false;
+        const stepsOff = compat.samplingSteps === false;
+        const cfgOff = compat.cfgScale === false;
+        const stepsB = restr.samplingSteps || {};
+        const cfgB = restr.cfgScale || {};
+        const offTitle = "This model doesn\u2019t use this setting";
+        return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Model"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-selrow", onClick: () => {
+          setPickerKind("base");
+          setPickerOpen(true);
+        } }, imgModel && imgModel.preview_url ? /* @__PURE__ */ React.createElement("img", { className: "lm-selthumb", src: imgModel.preview_url, alt: "" }) : null, /* @__PURE__ */ React.createElement("span", { className: "lm-selname" }, imgModel ? imgModel.title : "none \u2014 browse models"), /* @__PURE__ */ React.createElement("span", { className: "lm-selhint" }, "\u2630 browse")), imgModel && (imgModel.sampling_method || (imgModel.capabilities || []).length > 0) && /* @__PURE__ */ React.createElement("div", { className: "lm-caps" }, imgModel.sampling_method ? /* @__PURE__ */ React.createElement("span", { className: "lm-cap method" }, imgModel.sampling_method) : null, (imgModel.capabilities || []).map((cp) => /* @__PURE__ */ React.createElement("span", { key: cp, className: "lm-cap" }, cp))), imgModel && imgModel.versions && imgModel.versions.length > 1 && /* @__PURE__ */ React.createElement(
+          "select",
+          {
+            className: "lm-gensel",
+            value: imgModel.version_id || "",
+            onChange: (ev) => pickVersion(ev.target.value),
+            title: "This model's published releases -- PixAI defaults to the latest; pick another to generate against it instead",
+            "aria-label": "Model version"
+          },
+          imgModel.versions.map((v) => /* @__PURE__ */ React.createElement("option", { key: v.version_id, value: v.version_id }, v.label || v.version_id))
+        ), imgLoras.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "lm-loras" }, imgLoras.map((l) => {
+          const incompat = loraIncompat(imgModel && imgModel.model_type, l.lora_base_type);
+          return /* @__PURE__ */ React.createElement("div", { key: l.model_id, className: "lm-lchip" + (l.failed || incompat ? " failed" : "") }, /* @__PURE__ */ React.createElement("span", { className: "lm-lnm", title: incompat ? l.title + " \u2014 needs a different base architecture than the one selected; remove it or switch the base" : l.title }, l.title, !l.version_id ? l.failed ? " \u26A0" : " \u23F3" : incompat ? " \u26A0" : ""), /* @__PURE__ */ React.createElement("span", { className: "lm-lw" }, /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              type: "range",
+              step: "0.1",
+              min: loraRange[0],
+              max: loraRange[1],
+              value: l.weight,
+              title: "Weight \u2014 " + loraRange[0] + " to " + loraRange[1] + " for this base model",
+              onChange: (ev) => {
+                const w = Math.max(loraRange[0], Math.min(loraRange[1], +ev.target.value || 0));
+                setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x));
+              }
+            }
+          ), /* @__PURE__ */ React.createElement("b", null, (+l.weight).toFixed(1))), /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              type: "button",
+              className: "lm-lrm",
+              title: "Remove",
+              onClick: () => {
+                const p = loraPickerElRef.current;
+                if (p && p.deselect) p.deselect(l.model_id);
+                setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id));
+              }
+            },
+            "\xD7"
+          ), l.versions && l.versions.length > 1 && /* @__PURE__ */ React.createElement(
+            "select",
+            {
+              className: "lm-lorver",
+              value: l.version_id || "",
+              onChange: (ev) => {
+                const vid = ev.target.value;
+                const v = l.versions.find((x) => x.version_id === vid);
+                if (!v) return;
+                setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? {
+                  ...x,
+                  version_id: v.version_id || "",
+                  lora_base_type: v.lora_base_model_type || "",
+                  trigger_words: v.trigger_words || "",
+                  failed: !v.version_id
+                } : x));
+              }
+            },
+            l.versions.map((v) => /* @__PURE__ */ React.createElement("option", { key: v.version_id, value: v.version_id }, v.label || v.version_id))
+          ));
+        })), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lm-addrefbtn",
+            style: { marginTop: 6 },
+            onClick: () => {
+              setPickerKind("lora");
+              setPickerOpen(true);
+            }
+          },
+          "+ add LoRA"
+        ), acct && acct.lora_cap != null && /* @__PURE__ */ React.createElement("span", { className: "lm-hint", style: { marginLeft: 8 } }, imgLoras.length, " / ", acct.lora_cap, " LoRAs"), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, "Image prompt"), /* @__PURE__ */ React.createElement(
+          "textarea",
+          {
+            className: "lm-ta",
+            value: c.imgPrompt || "",
+            placeholder: "describe the reference still (subject, pose, composition, light)\u2026",
+            onChange: (ev) => dfPatch((cc) => ({ ...cc, imgPrompt: ev.target.value }))
+          }
+        ), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-mini2-btn", onClick: () => dfPatch((cc) => ({ ...cc, imgPrompt: [cc.title, cc.prompt, cc.openFrame && cc.openFrame.desc || "", cc.lighting || ""].filter(Boolean).join(", ") })) }, "\u21A7 seed from shot description"), /* @__PURE__ */ React.createElement("details", { style: { marginTop: 10 } }, /* @__PURE__ */ React.createElement("summary", { className: "lm-hint", style: { cursor: "pointer" } }, "Advanced"), /* @__PURE__ */ React.createElement(
+          "textarea",
+          {
+            className: "lm-ta",
+            style: { marginTop: 6 },
+            value: imgAdv.negative,
+            placeholder: "lowres, text, watermark\u2026",
+            disabled: negOff,
+            title: negOff ? offTitle : "",
+            onChange: (ev) => setImgAdv((a) => ({ ...a, negative: ev.target.value }))
+          }
+        ), /* @__PURE__ */ React.createElement("div", { className: "lm-row2" }, /* @__PURE__ */ React.createElement("div", { className: "lm-col" }, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Steps"), /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            className: "lm-in",
+            type: "number",
+            min: stepsB.min != null ? stepsB.min : 1,
+            max: stepsB.max != null ? stepsB.max : 150,
+            step: "1",
+            value: imgAdv.steps,
+            disabled: stepsOff,
+            title: stepsOff ? offTitle : "",
+            onChange: (ev) => setImgAdv((a) => ({ ...a, steps: +ev.target.value || 25 }))
+          }
+        )), /* @__PURE__ */ React.createElement("div", { className: "lm-col" }, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "CFG scale"), /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            className: "lm-in",
+            type: "number",
+            min: cfgB.min != null ? cfgB.min : 1,
+            max: cfgB.max != null ? cfgB.max : 30,
+            step: "0.5",
+            value: imgAdv.cfg,
+            disabled: cfgOff,
+            title: cfgOff ? offTitle : "",
+            onChange: (ev) => setImgAdv((a) => ({ ...a, cfg: +ev.target.value || 7 }))
+          }
+        ))), modelDefaults && /* @__PURE__ */ React.createElement("div", { className: "lm-hint", style: { display: "flex", justifyContent: "space-between" } }, /* @__PURE__ */ React.createElement("span", null, "\u2713 using this model's tuned preset"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-mini2-btn", onClick: () => setImgAdv((a) => ({
+          ...a,
+          negative: modelDefaults.negative_prompt || a.negative,
+          steps: modelDefaults.sampling_steps || a.steps,
+          cfg: modelDefaults.cfg_scale || a.cfg
+        })) }, "\u21B6 reset"))), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, "Aspect"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 5, flexWrap: "wrap" } }, [
+          [1, 1, "1:1"],
+          [3, 4, "3:4"],
+          [4, 3, "4:3"],
+          [2, 3, "2:3"],
+          [3, 2, "3:2"],
+          [9, 16, "9:16"],
+          [16, 9, "16:9"],
+          [3, 1, "3:1"]
+        ].map(([rw, rh, label]) => /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            key: label,
+            className: "lm-modechip" + (imgAdv.aspectW === rw && imgAdv.aspectH === rh ? " on" : ""),
+            style: { flex: "0 0 auto", padding: "6px 10px" },
+            onClick: () => setImgAdv((a) => ({ ...a, aspectW: rw, aspectH: rh }))
+          },
+          label
+        ))), /* @__PURE__ */ React.createElement("div", { className: "lm-row2" }, /* @__PURE__ */ React.createElement("div", { className: "lm-col" }, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Size \xB7 long edge"), /* @__PURE__ */ React.createElement(
+          "select",
+          {
+            className: "lm-gensel",
+            style: { marginTop: 0 },
+            value: imgAdv.size,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, size: +ev.target.value }))
+          },
+          /* @__PURE__ */ React.createElement("option", { value: "768" }, "S \xB7 768"),
+          /* @__PURE__ */ React.createElement("option", { value: "1024" }, "M \xB7 1024"),
+          /* @__PURE__ */ React.createElement("option", { value: "1536" }, "L \xB7 1536"),
+          /* @__PURE__ */ React.createElement("option", { value: "2048" }, "XL \xB7 2048")
+        )), /* @__PURE__ */ React.createElement("div", { className: "lm-col" }, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Custom W\xD7H"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 5, alignItems: "center" } }, /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            className: "lm-in",
+            type: "number",
+            min: "64",
+            max: "4096",
+            step: "8",
+            placeholder: "W",
+            value: imgAdv.customW,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, customW: ev.target.value }))
+          }
+        ), /* @__PURE__ */ React.createElement("span", { className: "lm-hint" }, "\xD7"), /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            className: "lm-in",
+            type: "number",
+            min: "64",
+            max: "4096",
+            step: "8",
+            placeholder: "H",
+            value: imgAdv.customH,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, customH: ev.target.value }))
+          }
+        )))), /* @__PURE__ */ React.createElement("div", { className: "lm-hint" }, (() => {
+          const d = resolveGenDims(imgAdv);
+          return "\u2192 " + d.w + " \xD7 " + d.h + (d.custom ? " \xB7 custom" : " px");
+        })()), /* @__PURE__ */ React.createElement("div", { className: "lm-row2" }, /* @__PURE__ */ React.createElement("div", { className: "lm-col" }, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Mode"), /* @__PURE__ */ React.createElement(
+          "select",
+          {
+            className: "lm-gensel",
+            style: { marginTop: 0 },
+            value: imgAdv.mode,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, mode: ev.target.value }))
+          },
+          /* @__PURE__ */ React.createElement("option", { value: "auto" }, "Auto"),
+          /* @__PURE__ */ React.createElement("option", { value: "lite" }, "Lite"),
+          /* @__PURE__ */ React.createElement("option", { value: "standard" }, "Standard"),
+          /* @__PURE__ */ React.createElement("option", { value: "pro" }, "Pro"),
+          /* @__PURE__ */ React.createElement("option", { value: "ultra" }, "Ultra")
+        )), /* @__PURE__ */ React.createElement("div", { className: "lm-col" }, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Count"), /* @__PURE__ */ React.createElement(
+          "select",
+          {
+            className: "lm-gensel",
+            style: { marginTop: 0 },
+            value: imgAdv.count,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, count: +ev.target.value }))
+          },
+          /* @__PURE__ */ React.createElement("option", { value: "1" }, "1"),
+          /* @__PURE__ */ React.createElement("option", { value: "2" }, "2"),
+          /* @__PURE__ */ React.createElement("option", { value: "3" }, "3"),
+          /* @__PURE__ */ React.createElement("option", { value: "4" }, "4")
+        ))), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Seed \xB7 blank = random"), /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            className: "lm-in",
+            type: "number",
+            placeholder: "random",
+            value: imgAdv.seed,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, seed: ev.target.value }))
+          }
+        ), /* @__PURE__ */ React.createElement("label", { className: "lm-check", title: "This IS the site's Turbo tier (priority=1000): a faster runner. Costs more credits when paid, but a matching free card covers it." }, /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            type: "checkbox",
+            checked: imgAdv.highPriority,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, highPriority: ev.target.checked }))
+          }
+        ), " High priority \xB7 Turbo (faster)"), /* @__PURE__ */ React.createElement("label", { className: "lm-check" }, /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            type: "checkbox",
+            checked: imgAdv.promptHelper,
+            onChange: (ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))
+          }
+        ), " Prompt helper"), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: priceTitle(imgPrice, c.id) }, priceLine(imgPrice, c.id, "Pick a model and write a prompt to see the cost."))), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lm-genbtn",
+            disabled: busyI || !imgModel || !(c.imgPrompt || "").trim() || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) || overLoraCap(imgLoras, acct && acct.lora_cap),
+            onClick: () => genImage(dfLive)
+          },
+          busyI ? gi.msg || "generating\u2026" : anyLoraUnresolved(imgLoras) ? "waiting on LoRA\u2026" : imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) ? "incompatible LoRA \u2014 remove or switch base" : overLoraCap(imgLoras, acct && acct.lora_cap) ? "remove " + (imgLoras.length - acct.lora_cap) + " LoRA" + (imgLoras.length - acct.lora_cap === 1 ? "" : "s") + " to continue" : "\u2726 Generate reference image"
+        ), gi.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lm-gerr" }, gi.msg), gi.mid && /* @__PURE__ */ React.createElement("div", { className: "lm-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gi.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lm-route" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gi.routed === "open" ? " on" : ""), onClick: () => routeImg(dfLive, "open", c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gi.routed === "close" ? " on" : ""), onClick: () => routeImg(dfLive, "close", c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gi.routed === "cast" ? " on" : ""), onClick: () => routeImg(dfLive, "cast", c.id) }, "cast")), gi.routed && /* @__PURE__ */ React.createElement("div", { className: "lm-ok2" }, "\u2713 sent to ", gi.routed, " \u2014 it now feeds this shot's video gen")));
+      })(), genTab === "Edit" && (() => {
+        const ge = genEditState[c.id] || {};
+        const busyE = ge.phase === "submitting" || ge.phase === "running";
+        const src = c.openFrame && c.openFrame.mediaId;
+        return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Source \u2014 this shot's open frame"), src ? /* @__PURE__ */ React.createElement("div", { className: "lm-genframe", style: { height: 120, maxWidth: 220 } }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + src + ".jpg", alt: "source" })) : /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "No open-frame image yet \u2014 route one from the ", /* @__PURE__ */ React.createElement("b", null, "Image"), " tab, or pick it into the open frame on Shot Detail."), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, "Edit instruction"), /* @__PURE__ */ React.createElement(
+          "textarea",
+          {
+            className: "lm-ta",
+            value: c.editPrompt || "",
+            placeholder: "e.g. make it night, add rain, warmer key light\u2026",
+            onChange: (ev) => dfPatch((cc) => ({ ...cc, editPrompt: ev.target.value }))
+          }
+        ), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: priceTitle(editPrice, c.id) }, priceLine(editPrice, c.id, "Add a source image and instruction to see the cost."))), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-genbtn", disabled: busyE || !src, onClick: () => genEdit(dfLive) }, busyE ? ge.msg || "editing\u2026" : "\u2726 Edit the open frame"), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lm-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lm-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lm-route" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "open" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "open", c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "close" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "close", c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "cast", c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lm-ok2" }, "\u2713 sent to ", ge.routed)));
+      })(), genTab === "Reference" && (() => {
+        const gr = genRefState[c.id] || {};
+        const busyR = gr.phase === "submitting" || gr.phase === "running";
+        const refs = (project.assets || []).filter((a) => a.kind === "image" && a.mediaId);
+        return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "References \u2014 cast @image members (", refs.length, ")"), refs.length ? /* @__PURE__ */ React.createElement("div", { className: "lm-refstrip" }, refs.map((a) => /* @__PURE__ */ React.createElement("img", { key: a.id, src: "/thumbs/" + a.mediaId + ".jpg", title: a.tag, alt: "" }))) : /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "No cast @image references with a gallery image yet \u2014 add some via the Cast & assets sheet."), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, "Prompt"), /* @__PURE__ */ React.createElement(
+          "textarea",
+          {
+            className: "lm-ta",
+            value: c.refPrompt || "",
+            placeholder: "compose a new still from the references\u2026",
+            onChange: (ev) => dfPatch((cc) => ({ ...cc, refPrompt: ev.target.value }))
+          }
+        ), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: priceTitle(refPrice, c.id) }, priceLine(refPrice, c.id, "Add references and a prompt to see the cost."))), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-genbtn", disabled: busyR || !refs.length, onClick: () => genRef(dfLive) }, busyR ? gr.msg || "generating\u2026" : "\u2726 Generate from references"), gr.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lm-gerr" }, gr.msg), gr.mid && /* @__PURE__ */ React.createElement("div", { className: "lm-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gr.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lm-route" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gr.routed === "open" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, dfLive, "open", c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gr.routed === "close" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, dfLive, "close", c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gr.routed === "cast" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, dfLive, "cast", c.id) }, "cast")), gr.routed && /* @__PURE__ */ React.createElement("div", { className: "lm-ok2" }, "\u2713 sent to ", gr.routed)));
+      })(), genTab === "Video" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Mode"), /* @__PURE__ */ React.createElement("div", { className: "lm-modechips" }, MODES.map((m) => /* @__PURE__ */ React.createElement(
         "button",
         {
           type: "button",
@@ -3653,7 +4246,23 @@ ${"=".repeat(48)}
           onClick: () => useExistingVideo(dfLive)
         },
         "Use an existing video instead"
-      )));
+      ))), pickerMounted && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lm-scrim", style: { display: pickerOpen ? "block" : "none" }, onClick: () => setPickerOpen(false) }), /* @__PURE__ */ React.createElement("div", { className: "lm-pick-sheet", style: { display: pickerOpen ? "flex" : "none" } }, /* @__PURE__ */ React.createElement("div", { className: "lm-sheethandle" }), /* @__PURE__ */ React.createElement("div", { className: "lm-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "lm-pick-t" }, "Models & LoRAs"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-df-close", onClick: () => setPickerOpen(false), "aria-label": "Close" }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "lm-tabsrow" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-tabbtn" + (pickerKind === "base" ? " on" : ""), onClick: () => setPickerKind("base") }, "Models"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-tabbtn" + (pickerKind === "lora" ? " on" : ""), onClick: () => setPickerKind("lora") }, "LoRAs")), /* @__PURE__ */ React.createElement("div", { className: "lm-pick-body" }, /* @__PURE__ */ React.createElement(
+        "mg-model-picker",
+        {
+          ref: bindPicker,
+          kind: "base",
+          style: { display: pickerKind === "base" ? "flex" : "none" }
+        }
+      ), /* @__PURE__ */ React.createElement(
+        "mg-model-picker",
+        {
+          ref: bindLoraPicker,
+          kind: "lora",
+          multi: true,
+          "base-type": imgModel && imgModel.model_type || "",
+          style: { display: pickerKind === "lora" ? "flex" : "none" }
+        }
+      )))));
     })());
   }
   function useProjectStore(setSelShot) {
@@ -3984,7 +4593,7 @@ Your currently-open board is left untouched.`)) return;
       splitShot
     };
   }
-  function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId }) {
+  function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI }) {
     const [genState, setGenState] = useState({});
     const resumedRef = useRef({});
     const [genImgState, setGenImgState] = useState({});
@@ -4165,7 +4774,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           pollShot(c.id, c.pendingTaskId, c.genStartedAt);
         }
       }));
-    }, [activeId]);
+    }, [activeId, mobileUI]);
     const useExistingVideo = (entry) => {
       openPick((mid, thumb, isVideo, duration) => {
         const dur = parseFloat(duration);
@@ -4677,7 +5286,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       batchGenerate,
       costEstimate,
       refreshEstimate
-    } = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId });
+    } = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI });
     const onVideoSubmit = useCallback((cardId, detail) => {
       setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering\u2026 (task " + String(detail.task_id).slice(-6) + ")" } }));
       setCardStatus(cardId, { status: "wip", pendingTaskId: detail.task_id, genStartedAt: Date.now() });
@@ -4795,7 +5404,25 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         setDraftAttachedInfo,
         generateShot,
         priceShot,
-        useExistingVideo
+        useExistingVideo,
+        genImgState,
+        imgModel,
+        setImgModel,
+        imgLoras,
+        setImgLoras,
+        imgAdv,
+        setImgAdv,
+        modelDefaults,
+        setModelDefaults,
+        genImage,
+        routeImg,
+        genEditState,
+        setGenEditState,
+        genRefState,
+        setGenRefState,
+        genEdit,
+        genRef,
+        routeGen
       }
     )) : /* @__PURE__ */ React.createElement(V2Boundary, null, /* @__PURE__ */ React.createElement(
       LoomV2,

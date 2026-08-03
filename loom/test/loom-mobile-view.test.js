@@ -318,17 +318,20 @@ describe("Frame picker: the shared, already-real gallery picker -- not a fabrica
   });
 });
 
-describe("scope discipline: Review & trim / Filter compare (and the OTHER 3 Generate tabs) are still NOT built", () => {
-  test("no Review & trim, Filter-compare, or still-image-generation UI leaked into LoomMobile", () => {
-    // "Generate video" is now REAL (this increment's own scope, asserted positively below) --
-    // removed from this negative list on purpose, not an oversight. Everything else here
-    // remains a later increment: Review & trim and Filter compare outright, and the locked
-    // design's Image/Edit/Reference Generate tabs (a different feature -- generating a still,
-    // not submitting this shot's video) which this increment's own "all 4 real MODES" framing
-    // never covered either.
-    for (const phrase of ["Generate reference image", "Review & trim", "Art filters", "Edit instruction"]) {
+describe("scope discipline: Review & trim / Filter compare / Fixer are still NOT built", () => {
+  test("no Review & trim, Filter-compare, or Fixer UI leaked into LoomMobile", () => {
+    // "Generate reference image" and "Edit instruction" are now REAL (fourth increment's own
+    // scope, asserted positively below) -- removed from this negative list on purpose, not an
+    // oversight. Everything else here remains a later increment: Review & trim and Filter
+    // compare (the locked design's own "Enhance" Edit sub-tab, openFilterCompare/
+    // filterCompareOpen) outright, plus Fixer (the locked design's OTHER Edit sub-tab,
+    // face/hand touch-up) -- deliberately excluded even though this increment DOES build Edit,
+    // because desktop's own real Edit tab (LoomV2, genEdit/genEditState) has no Fixer mode at
+    // all: only the mockup invents one, so building it here would be forked functionality with
+    // no real underlying function to call, not parity (disclosed in this increment's report).
+    for (const phrase of ["Review & trim", "Art filters", "Open filters", "Fixer", "Fix face", "Fix hand", "filterCompareOpen", "fixKind"]) {
       assert.ok(!loomMobileSrc.includes(phrase),
-        `LoomMobile should not yet contain "${phrase}" -- that belongs to a later increment`);
+        `LoomMobile should not yet contain "${phrase}" -- that belongs to a later increment or was never real`);
     }
   });
 
@@ -402,9 +405,13 @@ describe("Generate: real submit, real cost preview, real generation-state tracki
     assert.match(genBlock, /costTooltip\(tally\)/);
   });
 
-  test("the price preview is driven by the real priceShot(dfLive), never a hand-rolled fetch('/api/price', ...)", () => {
-    assert.doesNotMatch(loomMobileSrc, /fetch\(["']\/api\/price["']/,
-      "Loom Mobile must reuse priceShot() -- a second, independent /api/price call here would be exactly the forked pricing logic this increment's brief forbids");
+  test("the Video tab's price preview is still driven by the real priceShot(dfLive), untouched by the fourth increment", () => {
+    // A direct fetch("/api/price", ...) now legitimately exists elsewhere in LoomMobile (the
+    // Image/Edit/Reference tabs added in the fourth increment -- see that increment's own
+    // describe block below, which asserts those calls mirror LoomV2's own priceInto bodies
+    // verbatim, not a new pricing shape). This test narrows to what it actually protects: the
+    // VIDEO tab's cost line specifically must still go through priceShot(dfLive), never a
+    // parallel fetch of its own.
     assert.match(loomMobileSrc, /priceShot\(dfLive\)\.then\(\(pr\) => /);
   });
 
@@ -434,5 +441,98 @@ describe("Generate: real submit, real cost preview, real generation-state tracki
     assert.match(loomMobileSrc, /const \[genOpen, setGenOpen\] = useState\(false\);/);
     assert.doesNotMatch(loomMobileSrc, /const \[genState, setGenState\] = useState/,
       "genState must remain a prop LoomMobile reads, never a second local copy of its own");
+  });
+});
+
+describe("Image/Edit/Reference tabs (fourth increment, 2026-08-03) -- LoomV2's own GEN_ICONS rail, ported", () => {
+  test("a 4-tab strip mirrors LoomV2's own GEN_ICONS order (Image, Edit, Reference, Video)", () => {
+    const genBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("genOpen && dfLive && (() => {"));
+    assert.match(genBlock, /\{\["Image", "Edit", "Reference", "Video"\]\.map\(\(t\) => \(/);
+    assert.match(genBlock, /onClick=\{\(\) => setGenTab\(t\)\}/);
+    assert.match(loomMobileSrc, /const \[genTab, setGenTab\] = useState\("Video"\);/,
+      "must default to Video, matching LoomV2's own const [tab, setTab] = useState(\"Video\") default");
+  });
+
+  test("Image/Edit/Reference generation state and setters are threaded through as real props, never re-invented", () => {
+    const sigMatch = loomMobileSrc.match(/function LoomMobile\(\{([\s\S]*?)\}\)\s*\{/);
+    assert.ok(sigMatch, "expected to find LoomMobile's function signature");
+    for (const name of ["genImgState", "imgModel", "setImgModel", "imgLoras", "setImgLoras", "imgAdv", "setImgAdv",
+      "modelDefaults", "setModelDefaults", "genImage", "routeImg",
+      "genEditState", "setGenEditState", "genRefState", "setGenRefState", "genEdit", "genRef", "routeGen"]) {
+      assert.match(sigMatch[1], new RegExp(`\\b${name}\\b`), `LoomMobile's signature should destructure ${name}`);
+    }
+  });
+
+  test("the <LoomMobile .../> call site passes every one of those through from the SAME useGenerationPipeline instance App() already drives", () => {
+    const loomMobileCall = src.match(/<LoomMobile\b[\s\S]*?\/>/);
+    assert.ok(loomMobileCall, "expected to find the <LoomMobile .../> call site");
+    for (const prop of ["genImgState={genImgState}", "imgModel={imgModel}", "setImgModel={setImgModel}",
+      "imgLoras={imgLoras}", "setImgLoras={setImgLoras}", "imgAdv={imgAdv}", "setImgAdv={setImgAdv}",
+      "modelDefaults={modelDefaults}", "setModelDefaults={setModelDefaults}", "genImage={genImage}", "routeImg={routeImg}",
+      "genEditState={genEditState}", "setGenEditState={setGenEditState}", "genRefState={genRefState}", "setGenRefState={setGenRefState}",
+      "genEdit={genEdit}", "genRef={genRef}", "routeGen={routeGen}"]) {
+      assert.ok(loomMobileCall[0].includes(prop), `expected "${prop}" at the <LoomMobile .../> call site`);
+    }
+  });
+
+  test("Image/Edit/Reference submit through the real genImage(dfLive)/genEdit(dfLive)/genRef(dfLive) -- no forked submit, no new endpoint", () => {
+    assert.match(loomMobileSrc, /onClick=\{\(\) => genImage\(dfLive\)\}/);
+    assert.match(loomMobileSrc, /onClick=\{\(\) => genEdit\(dfLive\)\}/);
+    assert.match(loomMobileSrc, /onClick=\{\(\) => genRef\(dfLive\)\}/);
+    assert.doesNotMatch(loomMobileSrc, /fetch\(["']\/api\/generate["']/,
+      "genImage() already owns the real /api/generate submit -- LoomMobile must not duplicate it");
+    assert.doesNotMatch(loomMobileSrc, /fetch\(["']\/api\/edit["']/,
+      "genEdit()/genRef() already own the real submit via runGen() -- LoomMobile must not duplicate it");
+    assert.doesNotMatch(loomMobileSrc, /window\.confirm\(/,
+      "confirmSpend's fail-closed window.confirm gate lives inside genImage/genEdit/genRef themselves -- LoomMobile must not re-implement it");
+  });
+
+  test("routing a result into open/close frame or cast calls the real routeImg/routeGen, targeting dfLive itself (this screen is always bound to a real shot)", () => {
+    assert.match(loomMobileSrc, /onClick=\{\(\) => routeImg\(dfLive, "open", c\.id\)\}/);
+    assert.match(loomMobileSrc, /onClick=\{\(\) => routeImg\(dfLive, "close", c\.id\)\}/);
+    assert.match(loomMobileSrc, /onClick=\{\(\) => routeImg\(dfLive, "cast", c\.id\)\}/);
+    assert.match(loomMobileSrc, /routeGen\(genEditState, setGenEditState, dfLive, "open", c\.id\)/);
+    assert.match(loomMobileSrc, /routeGen\(genRefState, setGenRefState, dfLive, "cast", c\.id\)/);
+  });
+
+  test("the Image/Edit/Reference price previews mirror LoomV2's own priceInto body shapes verbatim -- no new pricing math", () => {
+    assert.match(loomMobileSrc, /buildImgGenBody\(imgModel, imgLoras, imgAdv, prompt\)/);
+    assert.match(loomMobileSrc, /\{ mode: "edit", source: editSrcMid, instruction, edit_model: "edit-pro" \}/);
+    assert.match(loomMobileSrc, /\{ mode: "edit", source: refMids\[0\], sources: refMids, instruction: prompt, edit_model: "reference-pro" \}/);
+    assert.match(loomMobileSrc, /tallyPrices\(\[p\.pr\]\)/, "the preview text must reuse the SAME tallyPrices/formatCostEstimate helpers, not a new formatter");
+  });
+
+  test("the model/LoRA picker mounts the SAME real <mg-model-picker> element LoomV2's own floating overlay uses", () => {
+    assert.match(loomMobileSrc, /<mg-model-picker ref=\{bindPicker\} kind="base"/);
+    assert.match(loomMobileSrc, /<mg-model-picker ref=\{bindLoraPicker\} kind="lora" multi base-type=\{\(imgModel && imgModel\.model_type\) \|\| ""\}/);
+  });
+
+  test("Image tab field parity: Aspect/Size/Custom W×H/Mode/Count/Seed/High-priority/Prompt-helper all exist, same as LoomV2's own Image tab (L536)", () => {
+    for (const label of ["Aspect", "Size &middot; long edge", "Custom W&times;H", "Seed &middot; blank = random",
+      "High priority &middot; Turbo (faster)", "Prompt helper"]) {
+      assert.ok(loomMobileSrc.includes(label), `expected the Image tab to render "${label}"`);
+    }
+    assert.match(loomMobileSrc, /resolveGenDims\(imgAdv\)/);
+  });
+});
+
+describe("Credit safety: the drawer's own component-local poll vs. this increment's fix (fourth increment)", () => {
+  test("useGenerationPipeline's resume-on-reload effect also depends on mobileUI, so a <mg-generate-drawer>-submitted Video render is re-attached the instant the toggle unmounts it", () => {
+    assert.match(src, /function useGenerationPipeline\(\{ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI \}\)/);
+    assert.match(src, /\}, \[activeId, mobileUI\]\);\s*\/\/ eslint-disable-line/);
+  });
+
+  test("App() passes its own mobileUI into useGenerationPipeline, not a stale/local copy", () => {
+    assert.match(src, /= useGenerationPipeline\(\{ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI \}\);/);
+  });
+
+  test("genImage/genEdit/genRef's own polls are plain setTimeout chains (pollImg/pollTaskWithCeiling), never a DOM element's lifecycle -- confirmed, not just asserted", () => {
+    // pollTaskWithCeiling is a closure inside useGenerationPipeline itself -- no
+    // connectedCallback/disconnectedCallback anywhere near it, unlike mg-generate-drawer.js's
+    // own _poll (which explicitly tears down _pollTimers on disconnect -- see that file).
+    assert.match(src, /const pollTaskWithCeiling = \(tid, setState, cardId\) => \{/);
+    assert.doesNotMatch(src.slice(src.indexOf("const pollTaskWithCeiling"), src.indexOf("const pollImg = (cardId, tid)")),
+      /disconnectedCallback|connectedCallback/,
+      "pollTaskWithCeiling must never be tied to a custom element's connect lifecycle");
   });
 });

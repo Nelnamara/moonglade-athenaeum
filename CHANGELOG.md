@@ -17,6 +17,24 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Loom Mobile increment 4 — the Image/Edit/Reference/Video standalone-asset generate
+  rail, completing "Generate" on mobile.** Adds Image/Edit/Reference tabs (real
+  `genImage`/`genEdit`/`genRef`, no forked submit or pricing logic) alongside increment 3's
+  Video tab. Found and fixed a real, pre-existing credit-safety bug along the way: desktop's
+  `<mg-generate-drawer>` (Video tab) has a genuinely component-local poll loop that dies
+  silently on unmount with no recovery event — since the Mobile-view toggle unmounts the
+  whole desktop view, a real in-flight video render was left permanently frozen until a full
+  page reload. Fixed by extending the generation pipeline's existing "resume any in-flight
+  shot" effect to also re-run on the toggle. Verified via the same injected-fake-state
+  technique as increment 3 (a synthetic submit event proved the fix without any real spend).
+  One real Image-tab generation was submitted under the owner's new gated testing
+  allowance (credits confirmed ≥250,000): model `Tsubaki.2`, an in-theme prompt from the
+  owner's own recent catalog, succeeded first try, cost 0 credits (free-card covered) —
+  independently cross-checked by the reviewer against the real catalog/job logs, confirming
+  no scope violation. 651/651 loom tests, 1539/1539 pytest. Remaining for Loom Mobile:
+  Review & trim, Filter compare. Full reasoning in `docs/DECISIONS.md`'s entry of the same
+  date.
+
 - **Loom Mobile increment 3 — Generate, real submit for a shot's video clip.** Wires the
   mobile Generate screen through `generateShot`/`pollShot`/`priceShot` — the exact real
   functions the desktop batch-generate path already calls, no forked spend logic, no

@@ -114,10 +114,16 @@ describe("Per-LoRA version selection (mirrors the base model's #gen-version/.lv-
 
 describe("Image tab Advanced-panel capability gating (extra.compatibility, mirrors the Gallery's gateField())", () => {
   test("compatibility/restrictions ride imgModel from both resolve paths (initial pick + version switch)", () => {
+    // 2 (LoomV2's own bindPicker + pickVersion) doubled to 4 with the mobile-generate-rail
+    // pass (2026-08-03): LoomMobile's Image tab ports the SAME bindPicker/pickVersion pair
+    // verbatim (see master-storyboard.jsx's own comment above LoomMobile's copies), so every
+    // resolve path this test protects now legitimately exists twice -- once per view, not a
+    // regression of the original guarantee.
     const matches = src.match(/compatibility: v\.compatibility \|\| \{\}, restrictions: v\.restrictions \|\| \{\},/g) || [];
-    assert.equal(matches.length, 2,
-      "both bindPicker's initial resolve AND pickVersion's switch must capture compatibility/restrictions -- " +
-      "missing either one leaves the drawer showing stale gating after a version switch or the first pick");
+    assert.equal(matches.length, 4,
+      "both bindPicker's initial resolve AND pickVersion's switch, in BOTH LoomV2 and LoomMobile, must capture " +
+      "compatibility/restrictions -- missing any one leaves that view's drawer showing stale gating after a " +
+      "version switch or the first pick");
   });
 
   test("a field is disabled ONLY on an explicit false -- unknown/absent compatibility fails open", () => {
