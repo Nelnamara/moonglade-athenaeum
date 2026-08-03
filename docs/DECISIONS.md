@@ -29,7 +29,7 @@ reader could work it out from the code, it does not belong here.
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 134
+- [Decisions](#decisions) &mdash; 136
 
 ---
 
@@ -1337,6 +1337,59 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 ## Decisions
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
+
+### Setup Wizard Mobile confirms the shared-hook architecture catches real-vs-mockup drift, as designed  ·  *2026-08-02*
+
+Built as the mobile pass's second surface specifically to test the exact failure mode that
+already happened once this session (see "A build task touching a surface with a real,
+already-shipped counterpart..." below): `Setup Wizard Mobile.dc.html`'s own sync-progress
+step is a fake fixed-timer animation with fabricated numbers, and its key-entry step is a
+dummy task-id 401/403 probe — neither is real, both are necessarily mockup-only stand-ins
+(a static design file can't call a real backend). The real, shipped desktop
+`SetupWizard.jsx` already calls genuinely real endpoints for both: `POST /api/setup/save-key`
+(a live validation call against PixAI with the freshly-pasted key, deliberately not reusing
+the module-cached key path — its own docstring cites a prior real bug that mechanism was
+built to avoid) and `POST /api/panel/run{action:'sync'}` + polled `GET /api/panel/status`,
+which parses real progress lines out of the actual `--sync` subprocess's stdout. The mobile
+build's research phase found this by reading the real desktop code first, not the mockup;
+the build phase carried that real logic over via a new `useSetupWizard.js` hook instead of
+porting the mockup's fake stand-ins; and a dedicated review independently diffed the fetch
+calls in both files side by side and confirmed byte-for-byte matching endpoints, with zero
+trace of the mockup's fake `SYNC_STAGES`/dummy-401 logic anywhere in the new files.
+
+**Why.** This is the direct, deliberate follow-through on
+[[feedback-agents-know-whats-shipped]] — proof the standing rule works when actually applied:
+explicitly instructing the build task to check for and reuse real shipped logic, rather than
+just handing over the design file, prevented the exact class of mistake that shipped a broken
+duplicate achievement-toast engine earlier in this same session. Recorded so future mobile
+surfaces (Gallery shell, Image Details, Lightbox, Folio, Loom) get the same explicit
+real-vs-mockup research step by default, not just when someone remembers to ask for it.
+
+### A live-verification screenshot pane can become genuinely unavailable mid-session, not just occasionally stale — have a non-visual fallback ready  ·  *2026-08-02*
+
+Verifying Setup Wizard Mobile, the sandboxed preview browser's `computer{screenshot}` failed
+four consecutive times with "the Browser pane is not displayed, so the page is not
+compositing frames" — not the previously-seen staleness/hang pattern
+([[feedback-visual-verification]]), a flat unavailability that didn't clear with a wait or an
+interaction. The real-Chrome fallback (`claude-in-chrome`) was already known-broken for this
+specific session (its `resize_window` reports success without the page's actual
+`window.innerWidth` changing — see the Login Mobile entry above). With neither screenshot
+path available, verification fell back to direct DOM/interaction checks: confirming the real
+`window.innerWidth`/`innerHeight` matched the requested viewport, confirming the mobile
+component's real CSS classes were present via `querySelector`, dispatching a real `.click()`
+on the "Next" button and re-reading the DOM afterward to confirm the carousel state actually
+advanced (not just that static markup rendered once), and reading `document.body.innerText`
+to confirm real copy matched the shipped desktop wizard verbatim.
+
+**Why.** [[feedback-visual-verification]] already establishes that computed-style/DOM checks
+alone are not a substitute for a real screenshot when one is available — that still holds.
+This is the narrower, adjacent case: what to do when NEITHER available screenshot path
+actually works, which is different from "a screenshot looked wrong" or "a screenshot is slow."
+The honest move in that state is real interaction + DOM confirmation, stated plainly as what
+it is (not silently upgraded to "visually confirmed" in a report) — a click that provably
+changes DOM state is meaningfully stronger evidence than a static render, even without a
+pixel image, and dispatching one costs nothing extra once `javascript_tool` is already in use
+for the viewport check.
 
 ### Mobile pass scope: installability-only PWA, tablet stays on the desktop layout, architecture is a shared hook per surface  ·  *2026-08-02*
 

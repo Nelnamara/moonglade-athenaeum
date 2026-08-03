@@ -17,6 +17,36 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Mobile pass, surface 2: Setup Wizard Mobile.** `SetupWizardMobile.jsx` (intro carousel →
+  key entry → sync → ready) built against `Setup Wizard Mobile.dc.html`, switched in via the
+  same `useIsMobile()` hook Login Mobile established. Desktop `SetupWizard.jsx` is untouched —
+  its state/handlers were mechanically lifted into a new `useSetupWizard.js` hook (the same
+  tangled-logic shape `LoginPage.jsx` was in before `useLogin.js`), so mobile consumes the
+  identical logic rather than a second copy.
+  **The one thing this surface exists specifically to get right, after the Folio incident
+  earlier this session:** the design mockup's sync-progress step is a fake fixed-timer
+  animation with fabricated numbers, and its key-entry step is a dummy task-id 401/403 probe
+  — neither is real. The shipped desktop wizard, it turns out, already calls REAL endpoints
+  for both (`POST /api/setup/save-key` for live key validation against PixAI,
+  `POST /api/panel/run{action:'sync'}` + polled `GET /api/panel/status` for real sync
+  progress parsed from the actual `--sync` subprocess's stdout) — confirmed by reading the
+  code, not assumed. `useSetupWizard.js` carries that real logic over unchanged; a dedicated
+  review independently diffed the fetch calls in both the desktop and mobile-hook versions
+  side by side and confirmed they hit identical endpoints, with zero trace of the mockup's
+  fake stand-ins (no `localStorage`, no `SYNC_STAGES` timer, no fabricated counts).
+  Verified live: viewport genuinely confirmed at the design's real 390×844 (not just a resize
+  call's success message — see the Login Mobile entry's verification note, the same false-
+  negative risk applies to every browser-automation surface used this pass), the mobile
+  component confirmed mounting via direct DOM check, real click-through confirmed the intro
+  carousel and "Skip to setup" phase transition genuinely work (not just render statically),
+  and both the intro and key-entry phases' copy matched the real desktop wizard verbatim. A
+  pixel screenshot wasn't obtainable this pass (the preview pane's compositor and the real
+  Chrome window's resize were both unavailable in different ways) — verification instead
+  relied on the DOM/interaction/computed-style checks above, stated plainly rather than
+  claimed as a visual confirmation it wasn't. Full suite green (1539 passed). Gallery shell
+  (Moonglade Mobile) is next — it defines the shared mobile nav pattern every remaining
+  surface routes into.
+
 - **Mobile pass, first surface: Login Mobile + real PWA installability.** The React app is
   installable now — a fresh, real `manifest.json` (correct `start_url:"/"`, this app's actual
   theme color, not copied verbatim from either the classic app's live manifest or the design
