@@ -59,6 +59,14 @@ git tags. Full prose notes for tagged versions live on
   happy-path markup. Import's empty state (no fetch on mount) rendered its real
   drop-zone/button copy correctly. Publish/Train's placeholder screens were re-checked
   and are unchanged.
+  **Follow-up verification against the real account** (this commit shipped from an
+  unauthenticated dev session, so its own live check only reached the 401 error state —
+  re-verified separately against real data): My Art shows a real, honest empty state (0
+  published); Collection Health shows real numbers across all 12 tiles (2,486 images on
+  disk, 2.7 GB, 99% full metadata, a real top-models breakdown); Import's real upload UI
+  renders correctly; Contests shows real live PixAI contest data (1 official + 21
+  community contests running, real prize amounts up to 54,500,000 CR, correctly computed
+  "days left"). Zero console errors across all four.
 
 - **Mobile pass, surface 3 (part 7): the hamburger menu's real push-screen navigation.**
   The ☰ Menu sheet's 6 destinations (My Art/Publish/Train a LoRA/Import/Contests/Health) no
