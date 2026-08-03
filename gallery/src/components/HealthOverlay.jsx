@@ -12,13 +12,12 @@ import "../styles/overlays.css";
      · a Top-model count  → filter the gallery to that model
      · a tag chip         → filter to that tag
      · a LoRA chip        → filter to that LoRA
-   Parked affordance: Duplicates/Reclaimable click-through opens the Duplicate
-   Review overlay in the DC — that surface hasn't ported, so the values keep
-   their accent styling but not the click (see overlays.css note). */
+     · Duplicates/Reclaimable → opens the Duplicate Review overlay
+       (DuplicateReviewOverlay.jsx, live 2026-08-02; onOpenDuplicates below) */
 
 const fmt = (n) => (n == null ? "—" : Number(n).toLocaleString());
 
-export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onLoraFilter }) {
+export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onLoraFilter, onOpenDuplicates }) {
   const [h, setH] = useState(null);
   const [err, setErr] = useState(null);
 
@@ -32,7 +31,9 @@ export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onL
   }, []);
 
   // Stats tiles: real fields from collection_health(), in the DC's 12-tile
-  // grid. gold = the celebration numbers; dup = the parked Duplicate pair.
+  // grid. gold = the celebration numbers; dup = the clickable Duplicate pair,
+  // which opens DuplicateReviewOverlay.jsx via onOpenDuplicates (GET
+  // /api/duplicates: same_media/identical_file/same_seed/near_duplicate).
   const stats = h ? [
     { label: "Images on disk", value: fmt(h.total_files) },
     { label: "Library size", value: h.total_size_h || "—" },
@@ -77,10 +78,19 @@ export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onL
                 {stats.map((st) => (
                   <div className="mgh-stat" key={st.label}>
                     <div className="mgh-stat-label">{st.label}</div>
-                    <div className={"mgh-stat-value" + (st.gold ? " gold" : "") + (st.dup ? " dup" : "")}
-                      title={st.dup ? "Duplicate Review ports next" : undefined}>
-                      {st.value}
-                    </div>
+                    {st.dup ? (
+                      <button type="button" className="mgh-stat-value dup"
+                        style={{ display: "block", width: "100%", border: "none", background: "none",
+                          padding: 0, font: "inherit", textAlign: "left" }}
+                        title="Open Duplicate Review"
+                        onClick={() => onOpenDuplicates && onOpenDuplicates()}>
+                        {st.value}
+                      </button>
+                    ) : (
+                      <div className={"mgh-stat-value" + (st.gold ? " gold" : "")}>
+                        {st.value}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

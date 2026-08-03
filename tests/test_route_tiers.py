@@ -209,6 +209,17 @@ ROUTE_TIERS = {
     ("api_trash_list", "GET"): LOGIN,
     ("api_trash_restore", "POST"): LOGIN,
 
+    # Duplicate Review's destructive half (2026-08-02): quarantine/undo move a
+    # file to/from out_dir/_duplicates/, never hard-delete -- the SAME class of
+    # action as api_delete_local/api_trash_restore just above (a reversible
+    # local file move), so LOGIN, not LOCALHOST, by the identical reasoning
+    # those two already establish. CSRF is checked INSIDE the handler
+    # (_check_csrf, the explicit-token class) precisely because this tier alone
+    # doesn't cover that -- this file only proves the tier gate, not the CSRF
+    # gate; see tests/test_duplicates_resolve.py for CSRF coverage.
+    ("api_duplicates_resolve", "POST"): LOGIN,
+    ("api_duplicates_undo", "POST"): LOGIN,
+
     # credit-spending generation surface -- the routes the hand-maintained
     # lists in test_web_auth.py never covered.
     ("api_generate", "POST"): LOGIN,
@@ -226,6 +237,11 @@ ROUTE_TIERS = {
     ("api_artwork_views", "GET"): LOGIN,
     ("api_collections", "GET"): LOGIN,
     ("api_contests", "GET"): LOGIN,
+    # JSON duplicate-groups listing for the React Duplicate Review overlay (2026-08-02) --
+    # same tier as the classic /duplicates page it succeeds: read-only, browses the
+    # owner's own collection, no filesystem mutation (quarantine/Resolve lives at
+    # api_duplicates_resolve/api_duplicates_undo below).
+    ("api_duplicates", "GET"): LOGIN,
     ("api_gallery_images", "GET"): LOGIN,
     # Read-only single-row lookup for <mg-upscale-panel>. LOGIN, same as its sibling
     # above and for the same reason: it reads only the local catalog and returns what

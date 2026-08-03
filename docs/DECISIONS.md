@@ -2585,3 +2585,49 @@ decisions, not engineering defaults — recorded so a future pass doesn't quietl
 back. The portal fix is recorded because it's a real, non-obvious architectural pattern (the
 only overlay so far that needs to print) that the next "print a modal" feature should reuse
 rather than rediscover.
+
+---
+
+## 2026-08-02 — Duplicate Review shipped: real matching, real quarantine, one adversarial-review fix
+
+Built via a 9-agent Workflow (sequential build stages, then a 4-way parallel adversarial
+review), per the scoping decisions in this doc's earlier entry of the same date. Full detail
+in `CHANGELOG.md`'s `[Unreleased]` entry.
+
+**What shipped, exactly as scoped:** four real matching tiers (same-media, identical-file,
+same-seed, near-duplicate via a new hand-rolled dHash — no CLIP-similarity tier, per the
+earlier exclusion), and a real quarantine-only Resolve/Undo pair the owner explicitly asked
+for over the read-only default. No scope crept beyond what was decided.
+
+**The adversarial review earned its place.** Three of four independent reviewers (READ_ONLY
+gating, quarantine-never-hard-delete, CSRF/tier correctness) verified clean with zero
+findings. The fourth — specifically reviewing the frontend's click-guard and Undo
+correctness — found a real, shippable-as-a-bug issue: a partial Undo failure (a multi-file
+group where some files restore and others don't) left the card permanently misreporting
+which files were actually still quarantined, blocked any clean retry, and silently dropped
+the grid refresh for the files that DID come back. This is exactly the class of bug this
+project's checkpoint protocol keeps a dedicated review step around for — it would not have
+been caught by the passing test suite (which tests full-success and full-failure undo, not
+a mixed result) or by a first-pass live click-through (partial-failure needs an induced
+failure to ever trigger). Fixed same-session: undo now tracks per-file outcome, a tile shows
+a real `RESTORED` state (distinct from `KEPT`/`QUARANTINED`) instead of lying, a retry only
+touches files that still need it, and `onResolved` fires on any real restore. Full suite
+re-run green (1539/1539) after the fix, then the actual Resolve→Undo round trip was run live
+against the owner's real library (not a fixture) — real files moved and moved back, counters
+returned to their exact pre-resolve values, zero residue in `_duplicates/` confirmed on disk.
+
+**One finding deliberately NOT fixed this pass:** the same reviewer flagged a low-severity,
+non-data-destroying race — two concurrent Undo calls for the same multi-copy media_id can
+interleave on an unlocked read-scan-write catalog reconcile. Real, but requires two
+same-media-id undo requests landing within the same request window, and per the reviewer's
+own trace both files still genuinely move back correctly (the row just lands on a
+nondeterministic one of the two). Tracked rather than patched here — a proper fix wants a
+per-media_id lock (this codebase already has the `_accounts_lock` pattern for the same class
+of TOCTOU problem — see the concurrent-account-removal fix elsewhere in this doc) plus a
+dedicated concurrency test, not a rushed one-line change to a destructive-path route.
+
+**Why record this separately from the scoping entry.** The scoping entry captures what the
+owner decided to build; this one captures what actually shipped and what the safety review
+process caught — future sessions touching `/api/duplicates*` or `DuplicateReviewOverlay.jsx`
+should read both, and should know the concurrent-undo race is a live, named, tracked gap,
+not an oversight to rediscover from scratch.

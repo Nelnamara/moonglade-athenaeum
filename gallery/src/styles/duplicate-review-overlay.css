@@ -1,0 +1,132 @@
+/* Duplicate Review overlay — own stylesheet, .mgdr-* classes, following
+   import-overlay.css's own-stylesheet precedent. Shell (scrim/host/slab/
+   titlerow/close) comes from overlays.css as-is; .mgh-loading is reused
+   directly for the loading/error copy (same voice, no need to fork it).
+
+   No locked DC mockup exists for this overlay specifically -- built off the
+   classic /duplicates page's real layout (one card per group, keeper vs.
+   reclaimable copies) rather than invented. Stage 3 (resolve/undo/
+   auto-resolve-all) additions below DO follow the DC handoff's own per-tile
+   toggle-pill placement and resolved-card dim treatment (Duplicate Review
+   .dc.html) even though the shell doesn't. All colors ride the shared skin
+   tokens (var(--accent), --emerald, --red, --gold, --peach, --surface0/1, --overlay0)
+   -- no new hardcoded colors. */
+
+.mgdr-slab { width: min(1040px, calc(100vw - 48px)); }
+
+.mgdr-toolbar { display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; padding-top: 4px; }
+.mgdr-summary { font-size: 12px; color: var(--subtext); padding: 10px 0 4px; }
+.mgdr-summary b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+.mgdr-groups { display: flex; flex-direction: column; gap: 10px; padding-top: 10px;
+  max-height: 66vh; overflow-y: auto; }
+.mgdr-group { border-radius: 12px; border: 1px solid var(--surface1);
+  background: rgba(24,20,46,.55); padding: 12px 14px; }
+.mgdr-group-head { display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; padding-bottom: 10px; }
+.mgdr-group-label { font-size: 13px; font-weight: 700; color: var(--text); }
+.mgdr-group-meta { font-size: 11px; color: var(--accent); font-variant-numeric: tabular-nums; }
+
+.mgdr-members { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px; }
+.mgdr-tile { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mgdr-thumb { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden;
+  background: var(--surface0); }
+.mgdr-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mgdr-vglyph { position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 18px; color: rgba(255,255,255,.92); text-shadow: 0 1px 6px rgba(0,0,0,.6);
+  pointer-events: none; }
+.mgdr-keeper { position: absolute; left: 5px; top: 5px; font-size: 9px; font-weight: 800;
+  letter-spacing: .04em; color: var(--emerald); background: rgba(6,10,8,.72);
+  border: 1px solid rgba(148,226,168,.4); border-radius: 5px; padding: 2px 5px; }
+.mgdr-quarantined { position: absolute; left: 5px; top: 5px; font-size: 9px; font-weight: 800;
+  letter-spacing: .04em; color: var(--red); background: rgba(34,17,22,.82);
+  border: 1px solid rgba(243,139,168,.4); border-radius: 5px; padding: 2px 5px; }
+/* A partial Undo can restore this specific file while others in the same
+   group stay quarantined -- distinct from both KEPT (never touched) and
+   QUARANTINED (still moved), so it reads honestly as its own state. */
+.mgdr-restored { position: absolute; left: 5px; top: 5px; font-size: 9px; font-weight: 800;
+  letter-spacing: .04em; color: var(--subtext); background: rgba(20,17,40,.82);
+  border: 1px solid var(--surface1); border-radius: 5px; padding: 2px 5px; }
+
+/* per-tile keep/remove toggle pill -- radio semantics (see the component's
+   own header comment): clicking a non-keeper promotes IT to keeper, so at
+   most one tile per group ever shows "on" at once; clicking the current
+   keeper deselects it (keep-count -> 0, disabling Resolve). */
+.mgdr-toggle { position: absolute; left: 5px; top: 5px; z-index: 2; font-size: 9px;
+  font-weight: 800; letter-spacing: .03em; border-radius: 5px; padding: 2px 6px;
+  cursor: pointer; font-family: inherit; backdrop-filter: blur(3px);
+  border: 1px solid rgba(243,139,168,.4); background: rgba(34,17,22,.82); color: var(--red); }
+.mgdr-toggle.on { border-color: rgba(148,226,168,.4); background: rgba(6,10,8,.72);
+  color: var(--emerald); }
+.mgdr-toggle:disabled { opacity: .5; cursor: default; }
+
+.mgdr-tile.remove .mgdr-thumb img { opacity: .82; }
+.mgdr-group.resolved { opacity: .62; }
+.mgdr-group.resolved .mgdr-thumb img { filter: grayscale(.35); }
+
+.mgdr-tile-meta { display: flex; flex-direction: column; gap: 2px; font-size: 10px;
+  color: var(--subtext); font-variant-numeric: tabular-nums; }
+.mgdr-dims, .mgdr-date, .mgdr-size { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.mgdr-stars { display: inline-flex; gap: 1px; }
+.mgdr-star { font-size: 9px; color: var(--overlay0); }
+.mgdr-star.lit { color: var(--gold); }
+.mgdr-unrated { font-size: 10px; color: var(--overlay0); font-style: italic; }
+
+/* ---- per-group footer: Resolve / Undo / error ---------------------------- */
+.mgdr-groupfoot { display: flex; align-items: center; gap: 10px; padding-top: 10px; }
+.mgdr-grouperr { font-size: 11px; color: var(--red); padding-top: 6px; }
+.mgdr-resolvednote { font-size: 11.5px; color: var(--emerald); font-weight: 600; }
+
+.mgdr-resolve { margin-left: auto; font-size: 11.5px; font-weight: 700; padding: 7px 15px;
+  border-radius: 8px; cursor: pointer; font-family: inherit;
+  border: 1px solid rgba(182,146,230,.5); background: rgba(182,146,230,.16); color: var(--accent); }
+.mgdr-resolve:hover:not(:disabled) { filter: brightness(1.1); }
+.mgdr-resolve:disabled { cursor: not-allowed; border-color: var(--surface1);
+  background: rgba(255,255,255,.03); color: var(--overlay0); }
+
+.mgdr-undo { margin-left: auto; font-size: 11.5px; font-weight: 700; padding: 7px 15px;
+  border-radius: 8px; cursor: pointer; font-family: inherit;
+  border: 1px solid var(--surface1); background: rgba(12,10,28,.6); color: var(--text); }
+.mgdr-undo:hover:not(:disabled) { border-color: var(--accent); }
+.mgdr-undo:disabled { opacity: .55; cursor: default; }
+
+/* ---- toolbar: Auto-resolve all button + its own confirm panel ------------
+   Peach/gold tones (not --red) on purpose -- this is reversible quarantine,
+   not the permanent-delete class of action that earns --ruby/--red treatment
+   elsewhere in this app (Trash's "Delete forever", ActionsMenu's "Delete
+   from PixAI"). Still visually distinct from the plain --accent Resolve
+   button: the confirm panel is the harder gate the task calls for, the
+   button color says "bigger action," not "danger." ---- */
+.mgdr-autobtn { flex: none; font-size: 12px; font-weight: 700; padding: 8px 16px;
+  border-radius: 999px; cursor: pointer; font-family: inherit;
+  border: 1px solid rgba(212,175,55,.45); background: rgba(212,175,55,.12); color: var(--gold); }
+.mgdr-autobtn:hover:not(:disabled) { filter: brightness(1.08); }
+.mgdr-autobtn:disabled { opacity: .4; cursor: not-allowed; border-color: var(--surface1);
+  background: rgba(255,255,255,.03); color: var(--overlay0); }
+
+.mgdr-allresolved { font-size: 12px; color: var(--emerald); padding: 6px 2px 0; }
+
+.mgdr-autoconfirm { margin: 10px 0 4px; padding: 14px 16px; border-radius: 12px;
+  border: 1px solid rgba(250,179,135,.4); background: rgba(250,179,135,.07); }
+.mgdr-autoconfirm-head { font-size: 13px; font-weight: 800; color: var(--peach); }
+.mgdr-autoconfirm-body { font-size: 12px; color: var(--subtext); line-height: 1.6; margin: 6px 0 10px; }
+.mgdr-autoconfirm-body b { color: var(--text); font-variant-numeric: tabular-nums; }
+.mgdr-autoconfirm-body code { font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+  color: var(--text); background: rgba(255,255,255,.06); padding: 1px 5px; border-radius: 4px; }
+.mgdr-autoconfirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.mgdr-autocancel { padding: 8px 16px; border-radius: 999px; cursor: pointer; font-family: inherit;
+  border: 1px solid var(--surface1); background: transparent; color: var(--subtext); font-size: 12px; }
+.mgdr-autocancel:hover:not(:disabled) { border-color: var(--overlay0); }
+.mgdr-autocancel:disabled { opacity: .6; cursor: default; }
+.mgdr-autogo { padding: 8px 18px; border-radius: 999px; border: none; cursor: pointer;
+  font-family: inherit; font-size: 12px; font-weight: 700; background: var(--peach); color: #241c10; }
+.mgdr-autogo:hover:not(:disabled) { filter: brightness(1.06); }
+.mgdr-autogo:disabled { opacity: .55; cursor: default; filter: none; }
+
+/* ---- all-clear (zero groups) -- mirrors classic's own empty-state framing ---- */
+.mgdr-clear { display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 46px 0 36px; text-align: center; color: var(--subtext); font-size: 13px; }
+.mgdr-clear-icon { font-size: 30px; color: var(--emerald); }
