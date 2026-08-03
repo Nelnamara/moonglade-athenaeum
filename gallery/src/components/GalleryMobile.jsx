@@ -19,13 +19,17 @@ import "../styles/gallery-mobile.css";
    sheet opens so the real dropdown appears without a redundant second tap, and
    the sheet auto-closes if a mutation empties the selection out from under it).
 
-   DISCLOSED CUT: a plain tap on a tile OUTSIDE select mode does not open a
-   full-screen viewer. Lightbox Mobile.dc.html is its OWN separate, not-yet-built
-   mobile design file (one of the 7 the mobile pass's own scope decision named,
-   docs/DECISIONS.md 2026-08-02) -- reusing desktop Lightbox.jsx unadapted would
-   cram a 7-button toolbar + filmstrip built for a wide viewport into 390px,
-   which is exactly the "close enough" shortcut this increment's brief forbids.
-   A tap surfaces an honest toast instead of a dead tap or invented pixels. */
+   ENTRY POINT (2026-08-03): a plain tap on a tile OUTSIDE select mode now
+   opens the real Image Details Mobile screen (ImageDetailsMobile.jsx, wired
+   by AppMobile.jsx via the onOpenDetails prop) instead of the disclosed
+   "coming next" toast this used to show. Lightbox Mobile.dc.html is still its
+   OWN separate, not-yet-built mobile design file (one of the 7 the mobile
+   pass's own scope decision named, docs/DECISIONS.md 2026-08-02) -- reusing
+   desktop Lightbox.jsx unadapted would cram a 7-button toolbar + filmstrip
+   built for a wide viewport into 390px, which is exactly the "close enough"
+   shortcut this increment's brief forbids -- so the "⛶ open lightbox" glyph
+   on Details' own top bar still surfaces that same honest toast; only the
+   PLAIN TAP's destination changed, from a toast to a real screen. */
 
 const MEDIA_PILLS = [["", "All"], ["image", "Images"], ["video", "Videos"]];
 const SORT_OPTS = [
@@ -55,6 +59,7 @@ export default function GalleryMobile({
   adv, applyAdvanced,
   items, total, page, pages, loading, load,
   selectMode, setSelectMode, selected, setSelected, toggleSelected,
+  onOpenDetails,
 }) {
   const { sheet, closing, open: openSheet, close: closeSheet } = useSheet();
   const [draft, setDraft] = useState(() => ({ ...adv, shelf, perPage }));
@@ -109,12 +114,7 @@ export default function GalleryMobile({
     setSelected((old) => { const s = new Set(old); s.add(mid); return s; });
     if (navigator.vibrate) { try { navigator.vibrate(12); } catch { /* unsupported/blocked */ } }
   };
-  const tapView = () => {
-    if (window.Toast) {
-      window.Toast.show({ title: "Full-screen viewing",
-        msg: "Its own mobile pass (Lightbox Mobile) — coming next." });
-    }
-  };
+  const tapView = (mid) => onOpenDetails(mid);
 
   return (
     <div className="glm-tab glm-tab-gallery">

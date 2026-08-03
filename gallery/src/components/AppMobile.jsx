@@ -3,8 +3,9 @@ import useLibrary from "../hooks/useLibrary.js";
 import useFlavour from "../hooks/useFlavour.js";
 import useGenerate from "../gen/useGenerate.js";
 import useEditGenerate from "../gen/useEditGenerate.js";
-import { fetchAccount, fetchCollections } from "../api.js";
+import { fetchAccount, fetchCollections, rateImage } from "../api.js";
 import GalleryMobile from "./GalleryMobile.jsx";
+import ImageDetailsMobile from "./ImageDetailsMobile.jsx";
 import CreateMobile, { MODES } from "./CreateMobile.jsx";
 import VideoMode from "./VideoMode.jsx";
 import ControlMobile from "./ControlMobile.jsx";
@@ -159,7 +160,21 @@ import "../styles/create-mobile.css";
        shape) instead of desktop's literal date range.
    Publish and Train stay honest placeholders -- see SOON_INFO below --
    because neither has ANY backend or desktop overlay anywhere in this app
-   yet (unchanged from before this pass). */
+   yet (unchanged from before this pass).
+
+   IMAGE DETAILS MOBILE (2026-08-03) -- a plain tap on a Gallery tile outside
+   select mode now opens the real Image Details screen (ImageDetailsMobile.jsx)
+   instead of GalleryMobile.jsx's old "coming next" toast. detailsFor/
+   openDetails/closeDetails, the rate() ported from App.jsx (no mobile
+   equivalent existed -- the grid itself shows no stars), and the
+   filterByModelFromDetails/filterByBatchFromDetails handlers all live HERE,
+   lifted for the same reason cmode/VideoMode/lib are: Details must survive
+   being opened from the Gallery tab and cover the WHOLE shell (hero + tab
+   bar, not just .glm-body), so it mounts as a fixed overlay sibling below,
+   not nested inside any one tab's own content. See ImageDetailsMobile.jsx's
+   own header comment for the full scope disclosure (what's real vs. a
+   disclosed placeholder) and useImageDetails.js for the shared data/action
+   hook it and desktop's DetailsView.jsx both now consume. */
 
 const MENU_ITEMS = [
   { icon: "📈", label: "My Art", screen: "myart" },
@@ -217,6 +232,57 @@ export default function AppMobile({ boot }) {
   const editCostRef = useRef(null); // Edit mode's OWN cost-badge handle -- never shared with Image's costRef
   const edit = useEditGenerate({ costRef: editCostRef });
   const [cmode, setCmode] = useState("image"); // Create's Image/Edit/Video mode -- lifted, see header comment
+
+  // Image Details Mobile (2026-08-03) -- lifted HERE (not GalleryMobile.jsx)
+  // for the identical reason `screen`/VideoMode/cmode are: it must survive
+  // being opened from a tile tap and cover the WHOLE app shell (hero + tab
+  // bar included, not just .glm-body), so it renders as a sibling of every
+  // tab body below, same level as MobileScreen's own mount. No URL sync
+  // (unlike desktop's bookmarkable /next?image=<mid>) -- see
+  // ImageDetailsMobile.jsx's own header comment for why that's a deliberate,
+  // separate scope call, not an oversight.
+  const [detailsFor, setDetailsFor] = useState(null);
+  const openDetails = (mid) => setDetailsFor(mid);
+  const closeDetails = () => setDetailsFor(null);
+
+  // Same advParams shape App.jsx's own DetailsView mount builds (mirrors
+  // /api/next/library's own filter params) -- so Prev/Next and "Find similar
+  // (model)"/"View batch" walk the SAME filtered/sorted set the lifted
+  // useLibrary() instance is currently showing, exactly like desktop.
+  const detailsAdvParams = {
+    q: lib.applied, media: lib.media, collection: lib.shelf,
+    sort: lib.adv.sort !== "newest" ? lib.adv.sort : "", rating_min: lib.adv.ratingMin || "",
+    model: lib.adv.model, lora: lib.adv.lora, from: lib.adv.dateFrom, to: lib.adv.dateTo,
+    source: lib.adv.source, tag: lib.adv.tag, published: lib.adv.publishedOnly ? "1" : "",
+  };
+
+  // App.jsx's own rate(), ported: optimistic update of the lifted useLibrary()
+  // items array + the real POST. No equivalent existed on mobile before this
+  // (the Gallery grid itself shows no stars), so Details' own Stars control
+  // is the first mobile consumer.
+  const rate = async (mid, value) => {
+    lib.setItems((old) => old.map((it) => (it.media_id === mid ? { ...it, rating: value } : it)));
+    try {
+      await rateImage(mid, value);
+    } catch {
+      /* a failed rate leaves the optimistic value; the next load corrects it */
+    }
+  };
+
+  // Details' "Find similar (model)"/"View batch" chips -- App.jsx's own
+  // filterByModel/filterByBatch, ported: close Details, land on the Gallery
+  // tab (so the filtered result is actually visible), apply through the SAME
+  // lifted useLibrary() instance every other mobile filter control uses.
+  const filterByModelFromDetails = (name) => {
+    closeDetails();
+    setTab("gallery");
+    lib.applyAdvanced({ model: name });
+  };
+  const filterByBatchFromDetails = (batch) => {
+    closeDetails();
+    setTab("gallery");
+    lib.applyAdvanced({ batch });
+  };
 
   useEffect(() => { fetchAccount().then(setAccount); }, []);
 
@@ -331,7 +397,8 @@ export default function AppMobile({ boot }) {
 
       <div className="glm-body">
         {tab === "gallery" && (
-          <GalleryMobile boot={boot} collections={collections} refreshCollections={refreshCollections} {...lib} />
+          <GalleryMobile boot={boot} collections={collections} refreshCollections={refreshCollections} {...lib}
+            onOpenDetails={openDetails} />
         )}
         {tab === "create" && (
           <CreateMobile account={account} costRef={costRef} editCostRef={editCostRef}
@@ -399,6 +466,19 @@ export default function AppMobile({ boot }) {
 
       <TabBarMobile tab={tab} setTab={setTab} />
       <PickerHost />
+
+      {/* Image Details Mobile -- a fixed, full-viewport overlay (its own CSS,
+          z above the hero/tab bar/sheets) rather than a child of .glm-body,
+          per this component's own header comment on why it's lifted here. */}
+      {detailsFor && (
+        <ImageDetailsMobile
+          mediaId={detailsFor} onClose={closeDetails} onNavigate={openDetails}
+          onRate={rate}
+          onDeleted={() => { closeDetails(); lib.load(1, true); }}
+          onFilterByModel={filterByModelFromDetails} onFilterByBatch={filterByBatchFromDetails}
+          advParams={detailsAdvParams} items={lib.items}
+        />
+      )}
 
       <MobileSheet open={sheet === "loom"} closing={closing} onClose={closeSheet} title="THE LOOM">
         <div className="glm-loom-note">
