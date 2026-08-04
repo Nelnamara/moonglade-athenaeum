@@ -1492,8 +1492,19 @@ increment in this file works.
 - [ ] Filter-compare ("Art filters") modal doesn't exist on desktop, same story — mobile's
       real, `MgArtFilters`-backed implementation is the thing to port. Same deferral as above
       (Enhance's entry point into this modal is part of the same Edit-tab sub-strip).
-- [ ] Frame Handoff renders on all 4 Generate tabs instead of Reference-only per spec — confirm
-      this is a deliberate consolidation, not an accident, before deciding whether to fix
+- [~] Frame Handoff renders on all 4 Generate tabs instead of Reference-only per spec —
+      **INVESTIGATED 2026-08-04, deliberate consolidation, not a bug — left as-is.** Traced
+      `active.c.openFrame`/`closeFrame` usage across all 4 tab bodies: the Video tab's own
+      body (`tab === "Video"`, ~line 1857) has NO frame-setting UI of its own — its
+      "Continuity" chips and First/Last-frame weave modes depend entirely on the shared
+      `.lv-framehandoff` block below it to set those frames; the Edit tab (~line 2189)
+      literally reads `active.c.openFrame.mediaId` as its edit source with no separate
+      picker either. `The Loom.dc.html`'s simplified mockup only ever modeled Reference-tab
+      frame-setting (`onRefTab` gate, line 399) — restricting the real block to
+      Reference-only, as the design literally shows, would break Video's weave-mode frame
+      picking and Edit's source-image display, both real functioning features the design's
+      mockup didn't need to account for. Consolidating one shared block across tabs is the
+      correct call here, not a drift to revert.
 
 **Loom Mobile (`LoomMobile`, same file)** vs `Loom Mobile.dc.html`.
 - [ ] Generate → Video tab missing 5 elements outright: weave-mode chips (First Frame/First&
