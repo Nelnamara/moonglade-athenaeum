@@ -497,6 +497,14 @@ ${"=".repeat(48)}
 
   // master-storyboard.jsx
   var { useState, useEffect, useRef, useCallback, useMemo } = React;
+  var LV_TINTS = [
+    "linear-gradient(150deg, #33236d 0%, #1b1733 100%)",
+    "linear-gradient(150deg, #3a3460 0%, #17142b 100%)",
+    "linear-gradient(150deg, #643aac 0%, #241f5b 100%)",
+    "linear-gradient(150deg, #2a4a58 0%, #171f38 100%)",
+    "linear-gradient(150deg, #4a3a6e 0%, #1f1a36 100%)",
+    "linear-gradient(150deg, #3a2b63 0%, #191338 100%)"
+  ];
   var STYLES = `
 :root{
   /* Loom palette now INHERITS the gallery's design tokens (moonglade_gallery.py's
@@ -723,6 +731,19 @@ ${"=".repeat(48)}
     "muffled",
     "rustling fabric"
   ];
+  var FIX_COLORS = { face: "#b692e6", hand: "#4fc99a" };
+  var FIX_MIN_PX = 6;
+  var FIX_MAX_BOXES = 20;
+  var scaleFixBoxes = (boxes, imgEl) => {
+    const scale = imgEl && imgEl.clientWidth ? imgEl.naturalWidth / imgEl.clientWidth : 1;
+    return boxes.map((b) => ({
+      x: Math.round(b.x * scale),
+      y: Math.round(b.y * scale),
+      width: Math.round(b.w * scale),
+      height: Math.round(b.h * scale),
+      tag: b.tag
+    }));
+  };
   var uid = () => Math.random().toString(36).slice(2, 9);
   var fmt = (s) => {
     s = Math.max(0, Math.round(s || 0));
@@ -1024,9 +1045,16 @@ ${"=".repeat(48)}
    rather than inventing a new color. */
 .lv-st.imported{margin-left:0;color:var(--subtext);background:var(--base);}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
-.lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;}
-.lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}.lv-seg.error{background:var(--coral);}
+.lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;
+  display:flex;align-items:flex-end;padding:4px 6px;box-sizing:border-box;overflow:hidden;}
 .lv-seg.sel{outline:2px solid var(--accent);outline-offset:-2px;z-index:2;}
+.lv-segcode{font-size:9px;font-weight:700;color:rgba(6,4,14,.55);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;pointer-events:none;}
+.lv-segbar{position:absolute;left:0;right:0;bottom:0;height:4px;}
+.lv-segbar.todo{background:rgba(255,255,255,.25);}
+.lv-segbar.wip{background:#f2c14a;}
+.lv-segbar.done{background:var(--green,#4fc99a);}
+.lv-segbar.error{background:var(--coral,#f38ba8);}
 .lv-target{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);opacity:.7;}
 .lv-tlinfo{font-size:11px;color:var(--text);}
 .lv-dim{color:var(--subtext);font-style:italic;}
@@ -2022,16 +2050,26 @@ ${"=".repeat(48)}
         crop: sel.c.crop,
         onCrop: (rect) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, crop: rect }))
       }
-    ) : /* @__PURE__ */ React.createElement("div", { className: "lv-tlpreviewbox lv-ph" }, sel ? "This shot hasn't rendered yet." : "Select a shot to preview it here.")), /* @__PURE__ */ React.createElement("div", { className: "lv-tlreelzone" }, /* @__PURE__ */ React.createElement("div", { className: "lv-reel" }, entries.map((x, i) => /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        key: i,
-        className: "lv-seg " + x.c.status + (x.c.id === selShot ? " sel" : ""),
-        style: { width: `${durOf2(x.c) / scale * 100}%` },
-        title: `${x.code} ${x.c.title || ""}`,
-        onClick: () => setSelShot(x.c.id)
-      }
-    )), /* @__PURE__ */ React.createElement("div", { className: "lv-target", style: { left: `${project.target / scale * 100}%` } })), /* @__PURE__ */ React.createElement("div", { className: "lv-tlinfo" }, sel ? /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, sel.code), " \xB7 ", sel.c.title || "untitled", " \xB7 ", sel.c.mode, " \xB7 ", durOf2(sel.c), "s") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "click a shot to select it \u2014 the whole workspace binds to it")))), /* @__PURE__ */ React.createElement("div", { className: "lv-tlhandle", onPointerDown: tlPointerDown, onPointerMove: tlPointerMove, onPointerUp: tlPointerUp, onPointerCancel: tlPointerUp }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlgrip" })));
+    ) : /* @__PURE__ */ React.createElement("div", { className: "lv-tlpreviewbox lv-ph" }, sel ? "This shot hasn't rendered yet." : "Select a shot to preview it here.")), /* @__PURE__ */ React.createElement("div", { className: "lv-tlreelzone" }, /* @__PURE__ */ React.createElement("div", { className: "lv-reel" }, entries.map((x, i) => {
+      const tint = LV_TINTS[(x.ai * 3 + x.ci) % LV_TINTS.length];
+      return /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          key: i,
+          className: "lv-seg" + (x.c.id === selShot ? " sel" : ""),
+          style: {
+            width: `${durOf2(x.c) / scale * 100}%`,
+            backgroundImage: `repeating-linear-gradient(90deg, rgba(0,0,0,.32) 0px, rgba(0,0,0,.32) 1px, transparent 1px, transparent 25px), ${tint}`,
+            backgroundSize: "25px 100%, 25px 100%",
+            backgroundRepeat: "repeat-x, repeat-x"
+          },
+          title: `${x.code} ${x.c.title || ""}`,
+          onClick: () => setSelShot(x.c.id)
+        },
+        /* @__PURE__ */ React.createElement("span", { className: "lv-segcode" }, x.code, " \xB7 ", durOf2(x.c), "s"),
+        /* @__PURE__ */ React.createElement("span", { className: "lv-segbar " + x.c.status })
+      );
+    }), /* @__PURE__ */ React.createElement("div", { className: "lv-target", style: { left: `${project.target / scale * 100}%` } })), /* @__PURE__ */ React.createElement("div", { className: "lv-tlinfo" }, sel ? /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, sel.code), " \xB7 ", sel.c.title || "untitled", " \xB7 ", sel.c.mode, " \xB7 ", durOf2(sel.c), "s") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "click a shot to select it \u2014 the whole workspace binds to it")))), /* @__PURE__ */ React.createElement("div", { className: "lv-tlhandle", onPointerDown: tlPointerDown, onPointerMove: tlPointerMove, onPointerUp: tlPointerUp, onPointerCancel: tlPointerUp }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlgrip" })));
     const GEN_ICONS = [["Image", "\u2726"], ["Edit", "\u270E"], ["Reference", "\u{1F5BC}"], ["Video", "\u{1F3AC}"]];
     let gen;
     {
@@ -3102,6 +3140,27 @@ ${"=".repeat(48)}
 .lm-refstrip{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 2px;}
 .lm-refstrip img{width:44px;height:44px;object-fit:cover;border-radius:7px;border:1px solid var(--surface1);}
 
+/* ---- Fixer (face/hand touch-up repair) -- closes the last disclosed gap in Loom Mobile's
+   original 6-increment plan (2026-08-03). Lives inside Generate's Edit tab, alongside the
+   Edit/Enhance sub-strip (now Edit/Fixer/Enhance -- see LoomMobile's own comment). The
+   canvas overlay is a real, working port of gallery/src/components/FixTab.jsx's own
+   .gd-fixwrap: an <img> in normal flow (sets the wrapper's real rendered height) with a
+   same-sized <canvas> absolutely positioned on top, so canvas pixel coordinates and the
+   image's own displayed pixels are the SAME coordinate space -- exactly what
+   scaleFixBoxes() needs to convert them to original-image pixels afterward. .lm-fixhint/
+   .lm-fixwarn colors/sizes are copied verbatim from the locked design's own real
+   fixHintStyle/fixWarnStyle strings (Loom Mobile.dc.html's data-dc-script), not
+   re-guessed. Face/Hand tag chips reuse .lm-modechips/.lm-modechip (the same chip visual
+   language MODES/CONNECT already use in the Video tab) rather than inventing a second
+   chip style. */
+.lm-fixwrap{position:relative;border-radius:8px;overflow:hidden;background:var(--base);
+  border:1px solid var(--surface1);margin-top:4px;}
+.lm-fixwrap img{width:100%;display:block;}
+.lm-fixwrap canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair;}
+.lm-fixhint{font-size:10.5px;line-height:1.5;color:var(--subtext);margin:12px 0 8px;}
+.lm-fixwarn{font-size:10px;line-height:1.45;color:var(--peach);background:rgba(232,147,95,.08);
+  border:1px solid rgba(232,147,95,.3);border-radius:8px;padding:7px 9px;margin-top:10px;}
+
 /* Model/LoRA picker sheet -- a near-full-screen mobile sheet (unlike the half-height Cast
    sheet: <mg-model-picker>'s search+grid genuinely needs the room), wrapping the SAME real
    custom element LoomV2's floating .lv-mpick-veil overlay uses. */
@@ -3308,7 +3367,15 @@ ${"=".repeat(48)}
     setGenRefState,
     genEdit,
     genRef,
-    routeGen
+    routeGen,
+    // Fixer -- seventh increment (2026-08-03). Same real hook-level state/function shape as
+    // genEditState/genEdit above (useGenerationPipeline): genFixState is a plain cardId->
+    // {phase,msg,mid,routed} dict, genFix is the real confirm-gated submit through the real
+    // /api/fix endpoint. Threaded through for the first time here -- desktop's LoomV2 has no
+    // Fixer tab of its own (out of this increment's scope), so only LoomMobile receives it.
+    genFixState,
+    setGenFixState,
+    genFix
   }) {
     useEffect(() => {
       const prevOverflow = document.body.style.overflow;
@@ -3745,6 +3812,117 @@ ${"=".repeat(48)}
       return tally ? costTooltip(tally) : "";
     };
     const [editSub, setEditSub] = useState("edit");
+    const [fixTag, setFixTag] = useState("face");
+    const [fixBoxes, setFixBoxes] = useState([]);
+    const fixImgRef = useRef(null);
+    const fixCanvasRef = useRef(null);
+    const fixDragRef = useRef(null);
+    const [genFixPrice, setGenFixPrice] = useState({});
+    useEffect(() => {
+      setFixBoxes([]);
+    }, [dfLive && dfLive.c.id, dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId]);
+    const fixPaint = useCallback(() => {
+      const cvs = fixCanvasRef.current, img = fixImgRef.current;
+      if (!cvs || !img) return;
+      const w = img.clientWidth, h = img.clientHeight;
+      if (!w || !h) return;
+      if (cvs.width !== w || cvs.height !== h) {
+        cvs.width = w;
+        cvs.height = h;
+      }
+      const ctx = cvs.getContext("2d");
+      ctx.clearRect(0, 0, w, h);
+      const draw = (b) => {
+        ctx.strokeStyle = FIX_COLORS[b.tag] || FIX_COLORS.face;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(b.x, b.y, b.w, b.h);
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.font = "11px system-ui";
+        ctx.fillText(b.tag, b.x + 3, b.y + 13);
+      };
+      fixBoxes.forEach(draw);
+      if (fixDragRef.current) draw({ ...fixDragRef.current, tag: fixTag });
+    }, [fixBoxes, fixTag]);
+    useEffect(() => {
+      fixPaint();
+    }, [fixPaint]);
+    useEffect(() => {
+      const onResize = () => fixPaint();
+      window.addEventListener("resize", onResize);
+      return () => window.removeEventListener("resize", onResize);
+    }, [fixPaint]);
+    const fixRel = (e) => {
+      const r = fixCanvasRef.current.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    };
+    const fixDown = (e) => {
+      if (e.button !== 0 || !(dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId)) return;
+      const p = fixRel(e);
+      fixDragRef.current = { x: p.x, y: p.y, w: 0, h: 0, ox: p.x, oy: p.y };
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch (err) {
+      }
+      e.preventDefault();
+    };
+    const fixMove = (e) => {
+      if (!fixDragRef.current) return;
+      const p = fixRel(e);
+      const d = fixDragRef.current;
+      fixDragRef.current = {
+        ...d,
+        x: Math.min(d.ox, p.x),
+        y: Math.min(d.oy, p.y),
+        w: Math.abs(p.x - d.ox),
+        h: Math.abs(p.y - d.oy)
+      };
+      fixPaint();
+    };
+    const fixUp = () => {
+      const d = fixDragRef.current;
+      fixDragRef.current = null;
+      if (!d) return;
+      if (d.w > FIX_MIN_PX && d.h > FIX_MIN_PX) {
+        if (fixBoxes.length >= FIX_MAX_BOXES) {
+          if (window.Toast) {
+            window.Toast.show({
+              kind: "err",
+              title: "That's the limit",
+              msg: "A Fix carries at most " + FIX_MAX_BOXES + " boxes \u2014 the rest would be dropped server-side."
+            });
+          }
+        } else {
+          setFixBoxes((old) => old.concat([{ x: d.x, y: d.y, w: d.w, h: d.h, tag: fixTag }]));
+        }
+      }
+      fixPaint();
+    };
+    useEffect(() => {
+      if (!genOpen || genTab !== "Edit" || editSub !== "fixer" || !dfLive) return;
+      const id = dfLive.c.id;
+      const src = dfLive.c.openFrame && dfLive.c.openFrame.mediaId;
+      if (!src || !fixBoxes.length) {
+        setGenFixPrice((s) => ({ ...s, [id]: null }));
+        return;
+      }
+      setGenFixPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true } }));
+      let live = true;
+      const t = setTimeout(() => {
+        fetch("/api/price", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) })
+        }).then((r) => r.json()).then((pr) => {
+          if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr } }));
+        }).catch(() => {
+          if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr: null } }));
+        });
+      }, 250);
+      return () => {
+        live = false;
+        clearTimeout(t);
+      };
+    }, [genOpen, genTab, editSub, dfLive && dfLive.c.id, dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId, fixBoxes]);
     const [fcOpen, setFcOpen] = useState(false);
     const [fcActive, setFcActive] = useState(null);
     const [fcStrength, setFcStrength] = useState(1);
@@ -4385,6 +4563,8 @@ ${"=".repeat(48)}
         const ge = genEditState[c.id] || {};
         const busyE = ge.phase === "submitting" || ge.phase === "running";
         const src = c.openFrame && c.openFrame.mediaId;
+        const gf = genFixState[c.id] || {};
+        const busyF = gf.phase === "submitting" || gf.phase === "running";
         return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lm-tabsrow", style: { marginBottom: 10 } }, /* @__PURE__ */ React.createElement(
           "button",
           {
@@ -4393,6 +4573,14 @@ ${"=".repeat(48)}
             onClick: () => setEditSub("edit")
           },
           "Edit"
+        ), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lm-tabbtn" + (editSub === "fixer" ? " on" : ""),
+            onClick: () => setEditSub("fixer")
+          },
+          "Fixer"
         ), /* @__PURE__ */ React.createElement(
           "button",
           {
@@ -4409,7 +4597,57 @@ ${"=".repeat(48)}
             placeholder: "e.g. make it night, add rain, warmer key light\u2026",
             onChange: (ev) => dfPatch((cc) => ({ ...cc, editPrompt: ev.target.value }))
           }
-        ), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: priceTitle(editPrice, c.id) }, priceLine(editPrice, c.id, "Add a source image and instruction to see the cost."))), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-genbtn", disabled: busyE || !src, onClick: () => genEdit(dfLive) }, busyE ? ge.msg || "editing\u2026" : "\u2726 Edit the open frame"), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lm-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lm-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lm-route" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "open" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "open", c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "close" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "close", c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "cast", c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lm-ok2" }, "\u2713 sent to ", ge.routed))), editSub === "enhance" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Art filters \xB7 free, no generation"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-openfiltersbtn", onClick: openFilterCompare }, "\u25C9 Open filters"), /* @__PURE__ */ React.createElement("div", { className: "lm-hint", style: { marginTop: 8 } }, "Gradient overlays, not AI \u2014 applied right in the browser: no credits, no request, works offline.")));
+        ), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: priceTitle(editPrice, c.id) }, priceLine(editPrice, c.id, "Add a source image and instruction to see the cost."))), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-genbtn", disabled: busyE || !src, onClick: () => genEdit(dfLive) }, busyE ? ge.msg || "editing\u2026" : "\u2726 Edit the open frame"), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lm-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lm-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lm-route" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "open" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "open", c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "close" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "close", c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "cast", c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lm-ok2" }, "\u2713 sent to ", ge.routed))), editSub === "fixer" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Source \u2014 this shot's open frame"), src ? /* @__PURE__ */ React.createElement("div", { className: "lm-fixwrap" }, /* @__PURE__ */ React.createElement(
+          "img",
+          {
+            ref: fixImgRef,
+            src: "/thumbs/" + src + ".jpg",
+            alt: "source",
+            draggable: false,
+            onLoad: fixPaint
+          }
+        ), /* @__PURE__ */ React.createElement(
+          "canvas",
+          {
+            ref: fixCanvasRef,
+            onPointerDown: fixDown,
+            onPointerMove: fixMove,
+            onPointerUp: fixUp,
+            onPointerLeave: fixUp
+          }
+        )) : /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "No open-frame image yet \u2014 route one from the ", /* @__PURE__ */ React.createElement("b", null, "Image"), " tab, or pick it into the open frame on Shot Detail."), src && /* @__PURE__ */ React.createElement("div", { className: "lm-fixhint" }, "Drag a box over the hand or face on the source."), /* @__PURE__ */ React.createElement("div", { className: "lm-modechips" }, ["face", "hand"].map((t) => /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            key: t,
+            className: "lm-modechip" + (fixTag === t ? " on" : ""),
+            style: fixTag === t ? { borderColor: FIX_COLORS[t], color: FIX_COLORS[t] } : null,
+            onClick: () => setFixTag(t)
+          },
+          t === "face" ? "Face" : "Hand"
+        ))), fixBoxes.length > 0 && /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lm-addrefbtn",
+            style: { marginTop: 8 },
+            onClick: () => setFixBoxes([])
+          },
+          "Clear ",
+          fixBoxes.length,
+          " box",
+          fixBoxes.length === 1 ? "" : "es"
+        ), /* @__PURE__ */ React.createElement("div", { className: "lm-fixwarn" }, "A fix can't be card-covered \u2014 it always spends, and always asks first."), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: priceTitle(genFixPrice, c.id) }, priceLine(genFixPrice, c.id, "Drag a box over a hand or face to see the cost."))), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lm-genbtn",
+            disabled: busyF || !src || !fixBoxes.length,
+            title: !src ? "This shot has no open-frame image yet" : !fixBoxes.length ? "Drag at least one box" : "Submit the repair \u2014 always spends",
+            onClick: () => genFix(dfLive, scaleFixBoxes(fixBoxes, fixImgRef.current))
+          },
+          busyF ? gf.msg || "fixing\u2026" : "\u2726 Fix " + fixTag
+        ), gf.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lm-gerr" }, gf.msg), gf.mid && /* @__PURE__ */ React.createElement("div", { className: "lm-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gf.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lm-route" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gf.routed === "open" ? " on" : ""), onClick: () => routeGen(genFixState, setGenFixState, dfLive, "open", c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gf.routed === "close" ? " on" : ""), onClick: () => routeGen(genFixState, setGenFixState, dfLive, "close", c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gf.routed === "cast" ? " on" : ""), onClick: () => routeGen(genFixState, setGenFixState, dfLive, "cast", c.id) }, "cast")), gf.routed && /* @__PURE__ */ React.createElement("div", { className: "lm-ok2" }, "\u2713 sent to ", gf.routed))), editSub === "enhance" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Art filters \xB7 free, no generation"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-openfiltersbtn", onClick: openFilterCompare }, "\u25C9 Open filters"), /* @__PURE__ */ React.createElement("div", { className: "lm-hint", style: { marginTop: 8 } }, "Gradient overlays, not AI \u2014 applied right in the browser: no credits, no request, works offline.")));
       })(), genTab === "Reference" && (() => {
         const gr = genRefState[c.id] || {};
         const busyR = gr.phase === "submitting" || gr.phase === "running";
@@ -5146,6 +5384,7 @@ Your currently-open board is left untouched.`)) return;
     const [modelDefaults, setModelDefaults] = useState(null);
     const [genEditState, setGenEditState] = useState({});
     const [genRefState, setGenRefState] = useState({});
+    const [genFixState, setGenFixState] = useState({});
     const [batching, setBatching] = useState(false);
     const [batchTally, setBatchTally] = useState(null);
     const setBatchOutcome = (cardId, outcome) => setBatchTally((prev) => prev && prev.ids.has(cardId) ? { ...prev, outcomes: { ...prev.outcomes, [cardId]: outcome } } : prev);
@@ -5468,6 +5707,43 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         "Reference \xD7" + refs.length + " \xB7 " + entry.code + " \xB7 " + (c.title || "untitled")
       );
     };
+    const genFix = async (entry, scaledBoxes) => {
+      const c = entry.c;
+      const src = c.openFrame && c.openFrame.mediaId;
+      if (!src) {
+        setGenFixState((s) => ({ ...s, [c.id]: { phase: "error", msg: "the open frame needs a gallery image first (route one from the Image tab, or pick it into the frame)" } }));
+        return;
+      }
+      if (!scaledBoxes || !scaledBoxes.length) {
+        setGenFixState((s) => ({ ...s, [c.id]: { phase: "error", msg: "drag a box over a hand or face first" } }));
+        return;
+      }
+      let pr = null;
+      try {
+        const r = await fetch("/api/price", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "fix", source: src, boxes: scaledBoxes })
+        });
+        pr = await r.json();
+      } catch {
+        pr = null;
+      }
+      const priced = pr && typeof pr.cost === "number" ? pr.cost : null;
+      const quote = priced == null ? "The price could not be verified, and a Fix ALWAYS spends credits (no free card can ever cover it)." : "This will spend " + Number(priced).toLocaleString() + " credits \u2014 a Fix is never covered by a free card.";
+      if (!window.confirm(
+        "Repair " + scaledBoxes.length + " area" + (scaledBoxes.length === 1 ? "" : "s") + "?\n\n" + quote
+      )) return;
+      runGen(
+        setGenFixState,
+        c.id,
+        "/api/fix",
+        { source: src, boxes: scaledBoxes },
+        null,
+        "",
+        "Fix \xB7 " + entry.code + " \xB7 " + (c.title || "untitled")
+      );
+    };
     const batchGenerate = async (entries) => {
       const todo = entries.filter((e) => e.c.status !== "done" && e.c.status !== "wip");
       if (!todo.length) return;
@@ -5561,6 +5837,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setGenEditState,
       genRefState,
       setGenRefState,
+      genFixState,
+      setGenFixState,
       batching,
       batchTally,
       // priceShot exposed (mobile-generate-screen pass, 2026-08-03): the SAME read-only
@@ -5575,6 +5853,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       routeImg,
       genEdit,
       genRef,
+      genFix,
       routeGen,
       batchGenerate,
       costEstimate,
@@ -5795,6 +6074,11 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setGenEditState,
       genRefState,
       setGenRefState,
+      // genFixState/setGenFixState/genFix -- seventh increment (2026-08-03), the real Fixer
+      // submit path (useGenerationPipeline's own genFix). Only LoomMobile receives it below --
+      // desktop's LoomV2 has no Fixer tab (out of this increment's scope).
+      genFixState,
+      setGenFixState,
       batching,
       batchTally,
       // generateShot/priceShot newly destructured here (mobile-generate-screen pass,
@@ -5811,6 +6095,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       routeImg,
       genEdit,
       genRef,
+      genFix,
       routeGen,
       batchGenerate,
       costEstimate,
@@ -5861,6 +6146,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setGenImgState(clearDraft);
       setGenEditState(clearDraft);
       setGenRefState(clearDraft);
+      setGenFixState(clearDraft);
     }, [activeId]);
     const {
       seq,
@@ -5955,7 +6241,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         setGenRefState,
         genEdit,
         genRef,
-        routeGen
+        routeGen,
+        genFixState,
+        setGenFixState,
+        genFix
       }
     )) : /* @__PURE__ */ React.createElement(V2Boundary, null, /* @__PURE__ */ React.createElement(
       LoomV2,

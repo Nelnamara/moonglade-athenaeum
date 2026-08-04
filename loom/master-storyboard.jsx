@@ -40,6 +40,20 @@ import {
   buildImgGenBody, resolveGenDims,
 } from "./src/loom-mutations.js";
 
+// The Loom.dc.html's own TINTS + tint formula (line ~681, ~760): 6 rotating per-shot
+// gradients so same-status shots stay visually distinguishable from each other, not just
+// from other statuses. `(ai*3+ci) % TINTS.length` is the design's real assignment rule --
+// ai/ci already exist on every flat() entry (loom-core.js:118), so this needs no change to
+// that pure-logic file, just reading fields it already provides.
+const LV_TINTS = [
+  "linear-gradient(150deg, #33236d 0%, #1b1733 100%)",
+  "linear-gradient(150deg, #3a3460 0%, #17142b 100%)",
+  "linear-gradient(150deg, #643aac 0%, #241f5b 100%)",
+  "linear-gradient(150deg, #2a4a58 0%, #171f38 100%)",
+  "linear-gradient(150deg, #4a3a6e 0%, #1f1a36 100%)",
+  "linear-gradient(150deg, #3a2b63 0%, #191338 100%)",
+];
+
 /* =========================================================================
    THE EDIT BAY v2 — reusable Seedance 2.0 storyboard with continuity chaining
    Frame handoff (close-of-N -> open-of-N+1), connection methods, a reusable
@@ -222,6 +236,38 @@ const LIGHTING_PALETTE = ["golden hour", "blue hour", "low-key", "high-key", "wa
   "chiaroscuro", "volumetric god rays", "overcast", "silhouette"];
 const AUDIO_PALETTE = ["no music", "room tone", "ambient hum", "soft breathing", "whispered dialogue",
   "distant music", "rain", "heartbeat", "beat sync", "diegetic only", "muffled", "rustling fabric"];
+
+// Fix (face/hand touch-up repair) constants -- ported VERBATIM from the real, already-shipped
+// gallery/src/gen/editCore.js's FIX_COLORS/FIX_MIN_PX/FIX_MAX_BOXES/scaleBoxes, which
+// gallery/src/components/FixTab.jsx's own real box-drawing canvas already uses (Loom Mobile's
+// own Fixer sub-screen, built 2026-08-03, ports that exact real technique -- see LoomMobile's
+// own Fixer comment for the full trace). Deliberately a LOCAL COPY, not a cross-directory
+// `import ... from "../gallery/src/gen/editCore.js"`: this file's only two real ES-module
+// imports are ./src/loom-core.js and ./src/loom-mutations.js, and moonglade_gallery.py's
+// loom() route only knows how to inline THOSE two ahead of the JSX for the default
+// Babel-standalone /loom delivery path (see loom() -- it regex-strips exactly those two
+// import lines and nothing else). A third import would survive that strip as a raw ES
+// `import` statement sitting inside a <script type="text/babel"> block, which is not a real
+// module system and would throw on load, breaking the DEFAULT (non-?bundle=1) Loom page
+// outright. Same convention this file already follows for modeSendsRefs/modeSendsLine/
+// liveTagText/liveTagTitle (LoomMobile's own comment: "neither is exported from
+// loom-core.js/loom-mutations.js... so every consumer keeps its own [copy]") -- a small,
+// verbatim, local copy is the established pattern here for values outside this file's two
+// DO-NOT-MODIFY pure-logic modules, not an oversight.
+const FIX_COLORS = { face: "#b692e6", hand: "#4fc99a" };
+const FIX_MIN_PX = 6;
+const FIX_MAX_BOXES = 20;   // clean_fix_boxes truncates at 20 server-side
+// boxes arrive as {x,y,w,h,tag} in DISPLAY pixels (the canvas's own coordinate space); the
+// wire wants {x,y,width,height,tag} in ORIGINAL-image pixels. Scale comes from the rendered
+// <img> -- naturalWidth/clientWidth -- exactly like editCore.js's scaleBoxes; the server does
+// NOT rescale, so getting this wrong repairs the wrong part of the picture.
+const scaleFixBoxes = (boxes, imgEl) => {
+  const scale = imgEl && imgEl.clientWidth ? (imgEl.naturalWidth / imgEl.clientWidth) : 1;
+  return boxes.map((b) => ({
+    x: Math.round(b.x * scale), y: Math.round(b.y * scale),
+    width: Math.round(b.w * scale), height: Math.round(b.h * scale), tag: b.tag,
+  }));
+};
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const fmt = (s) => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
@@ -475,9 +521,16 @@ const V2_STYLES = `
    rather than inventing a new color. */
 .lv-st.imported{margin-left:0;color:var(--subtext);background:var(--base);}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
-.lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;}
-.lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}.lv-seg.error{background:var(--coral);}
+.lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;
+  display:flex;align-items:flex-end;padding:4px 6px;box-sizing:border-box;overflow:hidden;}
 .lv-seg.sel{outline:2px solid var(--accent);outline-offset:-2px;z-index:2;}
+.lv-segcode{font-size:9px;font-weight:700;color:rgba(6,4,14,.55);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;pointer-events:none;}
+.lv-segbar{position:absolute;left:0;right:0;bottom:0;height:4px;}
+.lv-segbar.todo{background:rgba(255,255,255,.25);}
+.lv-segbar.wip{background:#f2c14a;}
+.lv-segbar.done{background:var(--green,#4fc99a);}
+.lv-segbar.error{background:var(--coral,#f38ba8);}
 .lv-target{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);opacity:.7;}
 .lv-tlinfo{font-size:11px;color:var(--text);}
 .lv-dim{color:var(--subtext);font-style:italic;}
@@ -1703,8 +1756,28 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         )}
         <div className="lv-tlreelzone">
           <div className="lv-reel">
-            {entries.map((x, i) => (<div key={i} className={"lv-seg " + x.c.status + (x.c.id === selShot ? " sel" : "")}
-              style={{ width: `${(durOf(x.c) / scale) * 100}%` }} title={`${x.code} ${x.c.title || ""}`} onClick={() => setSelShot(x.c.id)} />))}
+            {/* The Loom.dc.html:906-914 -- per-shot tint (LV_TINTS, distinct from status
+                color), the diagonal-stripe texture overlay, the shot's code+duration as
+                VISIBLE text (not just the title tooltip, which stays too), and a separate
+                thin status bar under the tint instead of the status color filling the
+                whole segment. Duration-proportional width, selected outline, and the
+                drag-resize grip (elsewhere in this file) are unchanged -- those already
+                matched or exceeded the design. */}
+            {entries.map((x, i) => {
+              const tint = LV_TINTS[(x.ai * 3 + x.ci) % LV_TINTS.length];
+              return (
+                <div key={i} className={"lv-seg" + (x.c.id === selShot ? " sel" : "")}
+                  style={{
+                    width: `${(durOf(x.c) / scale) * 100}%`,
+                    backgroundImage: `repeating-linear-gradient(90deg, rgba(0,0,0,.32) 0px, rgba(0,0,0,.32) 1px, transparent 1px, transparent 25px), ${tint}`,
+                    backgroundSize: "25px 100%, 25px 100%", backgroundRepeat: "repeat-x, repeat-x",
+                  }}
+                  title={`${x.code} ${x.c.title || ""}`} onClick={() => setSelShot(x.c.id)}>
+                  <span className="lv-segcode">{x.code} · {durOf(x.c)}s</span>
+                  <span className={"lv-segbar " + x.c.status} />
+                </div>
+              );
+            })}
             <div className="lv-target" style={{ left: `${(project.target / scale) * 100}%` }} />
           </div>
           <div className="lv-tlinfo">{sel
@@ -3033,6 +3106,27 @@ const LOOM_MOBILE_STYLES = `
 .lm-refstrip{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 2px;}
 .lm-refstrip img{width:44px;height:44px;object-fit:cover;border-radius:7px;border:1px solid var(--surface1);}
 
+/* ---- Fixer (face/hand touch-up repair) -- closes the last disclosed gap in Loom Mobile's
+   original 6-increment plan (2026-08-03). Lives inside Generate's Edit tab, alongside the
+   Edit/Enhance sub-strip (now Edit/Fixer/Enhance -- see LoomMobile's own comment). The
+   canvas overlay is a real, working port of gallery/src/components/FixTab.jsx's own
+   .gd-fixwrap: an <img> in normal flow (sets the wrapper's real rendered height) with a
+   same-sized <canvas> absolutely positioned on top, so canvas pixel coordinates and the
+   image's own displayed pixels are the SAME coordinate space -- exactly what
+   scaleFixBoxes() needs to convert them to original-image pixels afterward. .lm-fixhint/
+   .lm-fixwarn colors/sizes are copied verbatim from the locked design's own real
+   fixHintStyle/fixWarnStyle strings (Loom Mobile.dc.html's data-dc-script), not
+   re-guessed. Face/Hand tag chips reuse .lm-modechips/.lm-modechip (the same chip visual
+   language MODES/CONNECT already use in the Video tab) rather than inventing a second
+   chip style. */
+.lm-fixwrap{position:relative;border-radius:8px;overflow:hidden;background:var(--base);
+  border:1px solid var(--surface1);margin-top:4px;}
+.lm-fixwrap img{width:100%;display:block;}
+.lm-fixwrap canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair;}
+.lm-fixhint{font-size:10.5px;line-height:1.5;color:var(--subtext);margin:12px 0 8px;}
+.lm-fixwarn{font-size:10px;line-height:1.45;color:var(--peach);background:rgba(232,147,95,.08);
+  border:1px solid rgba(232,147,95,.3);border-radius:8px;padding:7px 9px;margin-top:10px;}
+
 /* Model/LoRA picker sheet -- a near-full-screen mobile sheet (unlike the half-height Cast
    sheet: <mg-model-picker>'s search+grid genuinely needs the room), wrapping the SAME real
    custom element LoomV2's floating .lv-mpick-veil overlay uses. */
@@ -3199,7 +3293,13 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // tab bodies call.
   genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv,
   modelDefaults, setModelDefaults, genImage, routeImg,
-  genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen }) {
+  genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen,
+  // Fixer -- seventh increment (2026-08-03). Same real hook-level state/function shape as
+  // genEditState/genEdit above (useGenerationPipeline): genFixState is a plain cardId->
+  // {phase,msg,mid,routed} dict, genFix is the real confirm-gated submit through the real
+  // /api/fix endpoint. Threaded through for the first time here -- desktop's LoomV2 has no
+  // Fixer tab of its own (out of this increment's scope), so only LoomMobile receives it.
+  genFixState, setGenFixState, genFix }) {
   // The overlay is position:fixed and covers the whole viewport, but the classic page
   // underneath is a normal tall document -- same reasoning, same fix, as LoomV2's own
   // identical effect (see its comment): without this, a touch/wheel scroll that isn't
@@ -3729,13 +3829,151 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
     return tally ? costTooltip(tally) : "";
   };
 
+  // ---- Fixer -- the seventh and FINAL increment (2026-08-03), closing the one disclosed gap
+  // left after the six increments below + the kebab-actions-sheet follow-up. A prior
+  // increment's own report deferred it, claiming Fixer's touch box-drawing had "zero
+  // reference implementation anywhere in this codebase" -- that claim was WRONG and has
+  // since been corrected: gallery/src/components/FixTab.jsx is the real, already-shipped
+  // Fixer for regular Gallery images, and its box-drawing already uses the exact same real
+  // technique (Pointer Events + getBoundingClientRect + DISPLAY-to-ORIGINAL-pixel scaling)
+  // already used successfully for the reel scrub (increment 1) and the trim handles/crop
+  // rectangle (increment 5) in THIS component. This screen ports FixTab.jsx's real, working
+  // approach verbatim -- same FIX_COLORS/FIX_MIN_PX/FIX_MAX_BOXES/scaleFixBoxes (this file's
+  // own local copy of editCore.js's constants, see that comment for why it's a copy and not
+  // an import), same paint()/onDown/onMove/onUp box math, same confirm-gated real submit
+  // through the real /api/fix endpoint (genFix, useGenerationPipeline) -- not a re-derived
+  // or lighter-weight version. Declared here, ahead of the Filter-compare block below, so
+  // every one of its own real /api/price calls (the debounced preview effect at the end of
+  // this block) stays OUT of that block's own "no fetch anywhere past this point" contract --
+  // Filter compare is genuinely free/offline and must stay that way; Fixer is a real, billed
+  // surface and must not be mistaken for part of it just because they share one sub-strip.
+  const [editSub, setEditSub] = useState("edit");   // 'edit' | 'fixer' | 'enhance' -- also read by Filter compare below (reached via the Enhance chip)
+  // Fixer's own box-drawing state -- 'face' | 'hand' (fixTag, matches the design's own
+  // fixKind default) and the boxes themselves, {x,y,w,h,tag} in DISPLAY pixels (the canvas's
+  // own coordinate space), scaled to ORIGINAL-image pixels only at submit/price time via
+  // scaleFixBoxes -- same DISPLAY-vs-ORIGINAL split FixTab.jsx's own header comment
+  // documents. Boxes reset whenever the source image changes (a new shot selected, or this
+  // shot's open frame replaced) -- a box drawn against one picture's pixel grid is meaningless
+  // (and potentially misleading) against a different one, so nothing here lets a stale box
+  // silently ride along onto a picture it was never drawn on.
+  const [fixTag, setFixTag] = useState("face");
+  const [fixBoxes, setFixBoxes] = useState([]);
+  const fixImgRef = useRef(null);
+  const fixCanvasRef = useRef(null);
+  const fixDragRef = useRef(null);
+  const [genFixPrice, setGenFixPrice] = useState({});   // cardId -> {loading, pr} -- read-only preview, see the other three price effects above
+  useEffect(() => {
+    setFixBoxes([]);
+  }, [dfLive && dfLive.c.id, dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId]);
+  // ---- the canvas: draw, paint, resize -- verbatim port of FixTab.jsx's own paint()/onDown/
+  // onMove/onUp, adapted only for this component's fixBoxes/fixTag/fixDragRef naming. Canvas
+  // dimensions track the rendered <img>'s own clientWidth/clientHeight every paint (matching
+  // FixTab.jsx exactly), so a box drawn here lives in the SAME pixel space the image is
+  // actually displayed in -- scaleFixBoxes() is what converts that to original-image pixels
+  // before it ever reaches the server.
+  const fixPaint = useCallback(() => {
+    const cvs = fixCanvasRef.current, img = fixImgRef.current;
+    if (!cvs || !img) return;
+    const w = img.clientWidth, h = img.clientHeight;
+    if (!w || !h) return;
+    if (cvs.width !== w || cvs.height !== h) { cvs.width = w; cvs.height = h; }
+    const ctx = cvs.getContext("2d");
+    ctx.clearRect(0, 0, w, h);
+    const draw = (b) => {
+      ctx.strokeStyle = FIX_COLORS[b.tag] || FIX_COLORS.face;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(b.x, b.y, b.w, b.h);
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.font = "11px system-ui";
+      ctx.fillText(b.tag, b.x + 3, b.y + 13);
+    };
+    fixBoxes.forEach(draw);
+    if (fixDragRef.current) draw({ ...fixDragRef.current, tag: fixTag });
+  }, [fixBoxes, fixTag]);
+  useEffect(() => { fixPaint(); }, [fixPaint]);
+  useEffect(() => {
+    const onResize = () => fixPaint();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [fixPaint]);
+  const fixRel = (e) => {
+    const r = fixCanvasRef.current.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+  // setPointerCapture on down -- NOT in FixTab.jsx (a desktop-mouse surface, where
+  // onPointerLeave alone is enough), but the SAME real mobile convention every other
+  // pointer-drag gesture in THIS component already uses (reel scrub's onReelDown, Review &
+  // trim's cropDragStart/trimInStart/trimOutStart/scrubStart, all above) -- a touch drag that
+  // leaves the canvas's own bounds needs capture to keep receiving move/up events, which a
+  // mouse drag on desktop does not. onPointerLeave is kept alongside it anyway, matching
+  // FixTab.jsx's own four-handler set exactly, as a harmless defensive fallback.
+  const fixDown = (e) => {
+    if (e.button !== 0 || !(dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId)) return;
+    const p = fixRel(e);
+    fixDragRef.current = { x: p.x, y: p.y, w: 0, h: 0, ox: p.x, oy: p.y };
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+  };
+  const fixMove = (e) => {
+    if (!fixDragRef.current) return;
+    const p = fixRel(e);
+    const d = fixDragRef.current;
+    fixDragRef.current = {
+      ...d,
+      x: Math.min(d.ox, p.x), y: Math.min(d.oy, p.y),
+      w: Math.abs(p.x - d.ox), h: Math.abs(p.y - d.oy),
+    };
+    fixPaint();
+  };
+  const fixUp = () => {
+    const d = fixDragRef.current;
+    fixDragRef.current = null;
+    if (!d) return;
+    // FixTab.jsx's own minimum: a stray tap is not a box.
+    if (d.w > FIX_MIN_PX && d.h > FIX_MIN_PX) {
+      if (fixBoxes.length >= FIX_MAX_BOXES) {
+        if (window.Toast) {
+          window.Toast.show({
+            kind: "err", title: "That's the limit",
+            msg: "A Fix carries at most " + FIX_MAX_BOXES + " boxes — the rest would be dropped server-side.",
+          });
+        }
+      } else {
+        setFixBoxes((old) => old.concat([{ x: d.x, y: d.y, w: d.w, h: d.h, tag: fixTag }]));
+      }
+    }
+    fixPaint();
+  };
+  // Debounced, read-only /api/price PREVIEW for the Fixer sub-tab -- same shape/convention
+  // as imgPrice/editPrice/refPrice above (this screen's OWN informational cache, distinct
+  // from genFix's own fresh, must-be-current price check right before its real confirm
+  // dialog). mode:"fix" always comes back free:false (server-forced -- see
+  // moonglade_gallery.py's _params_and_nocard), so this line can never show "free", matching
+  // FixTab.jsx's own cost badge, which never offers a card-label for the same reason.
+  useEffect(() => {
+    if (!genOpen || genTab !== "Edit" || editSub !== "fixer" || !dfLive) return;
+    const id = dfLive.c.id;
+    const src = dfLive.c.openFrame && dfLive.c.openFrame.mediaId;
+    if (!src || !fixBoxes.length) { setGenFixPrice((s) => ({ ...s, [id]: null })); return; }
+    setGenFixPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
+    let live = true;
+    const t = setTimeout(() => {
+      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) }) })
+        .then((r) => r.json()).then((pr) => { if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr } })); })
+        .catch(() => { if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr: null } })); });
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [genOpen, genTab, editSub, dfLive && dfLive.c.id, dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId, fixBoxes]);
+
   // ---- Filter compare -- sixth and FINAL increment (2026-08-03), per the locked design's
   // own filterCompareOpen/fcStrength/fcAngle state (Loom Mobile.dc.html: search
   // "filterCompareOpen", "fcSkinFilters", "fcPixaiFilters", "fcStrength", "fcAngle",
   // "fcClear", "fcSaveLibrary", "FILTER_SETS" -- its own internal screen title is "Art
   // filters"). Reached from the SAME place the design puts it: Generate's Edit tab gets its
-  // own Edit/Enhance sub-strip below (editSub), and Enhance's "Open filters" button opens
-  // this screen -- confirmed against the design (editSubChips: Edit/Fixer/Enhance,
+  // own Edit/Fixer/Enhance sub-strip above (editSub), and Enhance's "Open filters" button
+  // opens this screen -- confirmed against the design (editSubChips: Edit/Fixer/Enhance,
   // editSubIsEnhance's own openFilterCompare button) AND independently against the real,
   // already-shipped gallery/src/components/GenerateDrawer.jsx, which carries the EXACT SAME
   // real, current Edit/Fixer/Enhance sub-tab strip (its own mgdock-subtabs; "Enhance" /
@@ -3743,17 +3981,6 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // ArtFiltersPanel. Two independent real sources agreeing is why this is placement, not a
   // guess.
   //
-  // Fixer is deliberately NOT built alongside Enhance here, matching the fourth increment's
-  // own disclosed precedent (loom-mobile-view.test.js's "scope discipline" describe block):
-  // desktop's real Edit tab (genEdit/genEditState) has no fix-a-hand/face submit path
-  // anywhere in useGenerationPipeline, and the real GenerateDrawer's own FixTab is a
-  // Gallery-image feature that has never been ported to a Loom shot. Building a Fixer tab
-  // here with no real function behind its button would be exactly the "forked functionality
-  // with no real underlying function to call" the fourth increment's report already ruled
-  // out -- so the sub-strip below is Edit/Enhance (two-way), not the design's own three-way
-  // Edit/Fixer/Enhance. Disclosed deviation, not a silent one.
-  const [editSub, setEditSub] = useState("edit");   // 'edit' | 'enhance' -- deliberately no 'fixer', see above
-
   // filter/filterStrength/filterAngle are NOT in newCard() -- same "optional field, sensible
   // fallback" convention Review & trim's own `c.crop || {...}` already established in this
   // file (crop isn't in newCard() either): nothing needed to change in the card's base
@@ -4413,18 +4640,22 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
               const ge = genEditState[c.id] || {};
               const busyE = ge.phase === "submitting" || ge.phase === "running";
               const src = c.openFrame && c.openFrame.mediaId;
+              const gf = genFixState[c.id] || {};
+              const busyF = gf.phase === "submitting" || gf.phase === "running";
               return (
                 <>
-                  {/* Edit/Enhance sub-strip -- matches the locked design's own editSubChips
-                      (Edit/Fixer/Enhance) AND the real, already-shipped GenerateDrawer.jsx's
-                      identical mgdock-subtabs, minus Fixer (see this screen's own comment,
-                      declared with this component's other hooks, for why). Reuses
-                      .lm-tabsrow/.lm-tabbtn verbatim -- the same classes the Cast sheet's own
-                      Cast/Footage strip and the model picker's Models/LoRAs strip already use,
-                      not a new sub-tab visual language. */}
+                  {/* Edit/Fixer/Enhance sub-strip -- matches the locked design's own
+                      editSubChips verbatim AND the real, already-shipped
+                      GenerateDrawer.jsx's identical mgdock-subtabs (its own real
+                      Edit/Fixer/Enhance strip, wired to FixTab.jsx and FiltersPanel.jsx).
+                      Reuses .lm-tabsrow/.lm-tabbtn verbatim -- the same classes the Cast
+                      sheet's own Cast/Footage strip and the model picker's Models/LoRAs
+                      strip already use, not a new sub-tab visual language. */}
                   <div className="lm-tabsrow" style={{ marginBottom: 10 }}>
                     <button type="button" className={"lm-tabbtn" + (editSub === "edit" ? " on" : "")}
                       onClick={() => setEditSub("edit")}>Edit</button>
+                    <button type="button" className={"lm-tabbtn" + (editSub === "fixer" ? " on" : "")}
+                      onClick={() => setEditSub("fixer")}>Fixer</button>
                     <button type="button" className={"lm-tabbtn" + (editSub === "enhance" ? " on" : "")}
                       onClick={() => setEditSub("enhance")}>Enhance</button>
                   </div>
@@ -4454,6 +4685,57 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                         <button type="button" className={"lm-routebtn" + (ge.routed === "cast" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, dfLive, "cast", c.id)}>cast</button>
                       </div>
                       {ge.routed && <div className="lm-ok2">&#10003; sent to {ge.routed}</div>}
+                    </div>)}
+                  </>)}
+                  {editSub === "fixer" && (<>
+                  {/* Fixer -- real box-drawing canvas over this shot's real open frame,
+                      real /api/price preview, real confirm-gated submit through the real
+                      /api/fix endpoint (genFix, useGenerationPipeline). See this
+                      component's own Fixer state block (declared with editSub/fixTag/
+                      fixBoxes above) for the full port trace against FixTab.jsx. */}
+                  <span className="lm-microlab">Source — this shot's open frame</span>
+                  {src ? (
+                    <div className="lm-fixwrap">
+                      <img ref={fixImgRef} src={"/thumbs/" + src + ".jpg"} alt="source"
+                        draggable={false} onLoad={fixPaint} />
+                      <canvas ref={fixCanvasRef}
+                        onPointerDown={fixDown} onPointerMove={fixMove}
+                        onPointerUp={fixUp} onPointerLeave={fixUp} />
+                    </div>
+                  ) : <div className="lm-empty">No open-frame image yet — route one from the <b>Image</b> tab, or pick it into the open frame on Shot Detail.</div>}
+                  {src && <div className="lm-fixhint">Drag a box over the hand or face on the source.</div>}
+                  <div className="lm-modechips">
+                    {["face", "hand"].map((t) => (
+                      <button type="button" key={t} className={"lm-modechip" + (fixTag === t ? " on" : "")}
+                        style={fixTag === t ? { borderColor: FIX_COLORS[t], color: FIX_COLORS[t] } : null}
+                        onClick={() => setFixTag(t)}>{t === "face" ? "Face" : "Hand"}</button>
+                    ))}
+                  </div>
+                  {fixBoxes.length > 0 && (
+                    <button type="button" className="lm-addrefbtn" style={{ marginTop: 8 }}
+                      onClick={() => setFixBoxes([])}>
+                      Clear {fixBoxes.length} box{fixBoxes.length === 1 ? "" : "es"}
+                    </button>
+                  )}
+                  <div className="lm-fixwarn">A fix can't be card-covered — it always spends, and always asks first.</div>
+                  <div className="lm-gencost">
+                    <span className="lm-gencosttext" title={priceTitle(genFixPrice, c.id)}>{priceLine(genFixPrice, c.id, "Drag a box over a hand or face to see the cost.")}</span>
+                  </div>
+                  <button type="button" className="lm-genbtn" disabled={busyF || !src || !fixBoxes.length}
+                    title={!src ? "This shot has no open-frame image yet" : !fixBoxes.length ? "Drag at least one box" : "Submit the repair — always spends"}
+                    onClick={() => genFix(dfLive, scaleFixBoxes(fixBoxes, fixImgRef.current))}>
+                    {busyF ? (gf.msg || "fixing…") : "✦ Fix " + fixTag}
+                  </button>
+                  {gf.phase === "error" && <div className="lm-gerr">{gf.msg}</div>}
+                  {gf.mid && (
+                    <div className="lm-imgresult">
+                      <img src={"/thumbs/" + gf.mid + ".jpg"} alt="result" />
+                      <div className="lm-route">
+                        <button type="button" className={"lm-routebtn" + (gf.routed === "open" ? " on" : "")} onClick={() => routeGen(genFixState, setGenFixState, dfLive, "open", c.id)}>open frame</button>
+                        <button type="button" className={"lm-routebtn" + (gf.routed === "close" ? " on" : "")} onClick={() => routeGen(genFixState, setGenFixState, dfLive, "close", c.id)}>close frame</button>
+                        <button type="button" className={"lm-routebtn" + (gf.routed === "cast" ? " on" : "")} onClick={() => routeGen(genFixState, setGenFixState, dfLive, "cast", c.id)}>cast</button>
+                      </div>
+                      {gf.routed && <div className="lm-ok2">&#10003; sent to {gf.routed}</div>}
                     </div>)}
                   </>)}
                   {editSub === "enhance" && (
@@ -5310,6 +5592,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   const [modelDefaults, setModelDefaults] = useState(null);
   const [genEditState, setGenEditState] = useState({});  // shotId -> {phase,msg,mid,routed} (in-Loom instruct-edit)
   const [genRefState, setGenRefState] = useState({});    // shotId -> {...} (multi-reference gen)
+  const [genFixState, setGenFixState] = useState({});     // shotId -> {...} (in-Loom face/hand fix -- seventh increment, 2026-08-03)
   const [batching, setBatching] = useState(false);
   // batchTally: { total, submitted, ids: Set, outcomes: {[cardId]: "done"|"failed"|"stale"} }
   // for the CURRENTLY OPEN batch run, or null between runs. Distinct from tallyPrices()'s
@@ -5764,6 +6047,58 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       // already surfaces), so it rides in the row rather than being lost to "Reference".
       "Reference ×" + refs.length + " · " + entry.code + " · " + (c.title || "untitled"));
   };
+  // ---- In-Loom Fix (face/hand touch-up repair) -- closes the last disclosed gap in Loom
+  // Mobile's original 6-increment plan (2026-08-03). Ported from the real, already-shipped
+  // gallery/src/components/FixTab.jsx -- SAME real endpoint (/api/fix), SAME real body shape
+  // ({source, boxes}, boxes already scaled to ORIGINAL-image pixels by the caller -- see
+  // LoomMobile's own scaleFixBoxes/genFix call site), SAME real /api/price mode:"fix" check,
+  // SAME real confirm wording FixTab.jsx's own run() uses. Reuses runGen -- the exact submit/
+  // poll/register/route machinery genEdit/genRef already share -- for the actual POST, poll,
+  // and Job Tracker registration; only the CONFIRM step is bespoke, because a Fix's spend
+  // gate is genuinely different from confirmSpend's generic one: a Fix can NEVER be
+  // free-card-covered (the /v2/task/fixer endpoint has no kaisuukenId field at all -- see
+  // moonglade_gallery.py's _params_and_nocard, mode=="fix" branch, which forces no_card=True
+  // for exactly this reason, and FixTab.jsx's own header comment), so confirmSpend's generic
+  // "No free card covers it" wording -- which implies one COULD have -- would misdescribe
+  // every single Fix. `scaledBoxes` arrives already converted to ORIGINAL-image pixels by the
+  // caller -- this function never touches DISPLAY-pixel coordinates or a DOM element, matching
+  // every other real submit function in this hook (genEdit/genRef take already-resolved
+  // ids/text, never DOM refs).
+  const genFix = async (entry, scaledBoxes) => {
+    const c = entry.c;
+    const src = c.openFrame && c.openFrame.mediaId;
+    if (!src) { setGenFixState((s) => ({ ...s, [c.id]: { phase: "error", msg: "the open frame needs a gallery image first (route one from the Image tab, or pick it into the frame)" } })); return; }
+    if (!scaledBoxes || !scaledBoxes.length) { setGenFixState((s) => ({ ...s, [c.id]: { phase: "error", msg: "drag a box over a hand or face first" } })); return; }
+    // One fresh /api/price check, right here, right before the confirm -- there is no
+    // debounced cost cache to go stale against in THIS hook (unlike FixTab.jsx's own
+    // colocated cost badge, which has to flush a pending debounce and await it before
+    // reading its own costVal ref), so there is nothing to flush; this fetch already IS the
+    // fresh read the moment the owner taps Fix. mode:"fix" always comes back free:false
+    // (server-forced -- see _params_and_nocard), so `cost` is the only field this confirm
+    // ever needs.
+    let pr = null;
+    try {
+      const r = await fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "fix", source: src, boxes: scaledBoxes }) });
+      pr = await r.json();
+    } catch { pr = null; }
+    const priced = pr && typeof pr.cost === "number" ? pr.cost : null;
+    // Wording ported VERBATIM from FixTab.jsx's own run() -- "ALWAYS spends" / "never
+    // covered by a free card" -- not confirmSpend's generic phrasing, which this Fix gate
+    // deliberately does not call.
+    const quote = priced == null
+      ? "The price could not be verified, and a Fix ALWAYS spends credits (no free card can ever cover it)."
+      : "This will spend " + Number(priced).toLocaleString() + " credits — a Fix is never covered by a free card.";
+    if (!window.confirm(
+      "Repair " + scaledBoxes.length + " area" + (scaledBoxes.length === 1 ? "" : "s") + "?\n\n" + quote
+    )) return;
+    // priceBody is null: runGen's own confirmSpend gate exists for the OTHER two drawer tabs
+    // (which CAN be free-card-covered) -- this submit already ran its own, Fix-correct
+    // confirm above, so passing null here skips a SECOND, wrongly-worded confirm rather than
+    // stacking one on top of it.
+    runGen(setGenFixState, c.id, "/api/fix", { source: src, boxes: scaledBoxes }, null, "",
+      "Fix · " + entry.code + " · " + (c.title || "untitled"));
+  };
   // Batch-generate the whole board: fire every not-done shot in sequence, staggered so
   // the submits don't collide. Each shot manages its own status/poll via generateShot.
   // Takes `entries` as a call-site argument (computed by App() from the current
@@ -5872,13 +6207,13 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel,
     imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults,
     genEditState, setGenEditState,
-    genRefState, setGenRefState, batching, batchTally,
+    genRefState, setGenRefState, genFixState, setGenFixState, batching, batchTally,
     // priceShot exposed (mobile-generate-screen pass, 2026-08-03): the SAME read-only
     // /api/price check generateShot/confirmSpend/batchGenerate already use internally --
     // Loom Mobile's own Generate screen needs a per-shot cost PREVIEW to show before the
     // owner ever taps the real submit button, and this is that exact function, not a new
     // fetch/pricing implementation. It was already defined here; only its exposure is new.
-    generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
+    generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, genFix, routeGen, batchGenerate,
     costEstimate, refreshEstimate, priceShot,
   };
 }
@@ -6026,7 +6361,11 @@ export default function App() {
   const { genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel,
     imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults,
     genEditState, setGenEditState,
-    genRefState, setGenRefState, batching, batchTally,
+    genRefState, setGenRefState,
+    // genFixState/setGenFixState/genFix -- seventh increment (2026-08-03), the real Fixer
+    // submit path (useGenerationPipeline's own genFix). Only LoomMobile receives it below --
+    // desktop's LoomV2 has no Fixer tab (out of this increment's scope).
+    genFixState, setGenFixState, batching, batchTally,
     // generateShot/priceShot newly destructured here (mobile-generate-screen pass,
     // 2026-08-03) -- both already existed on the hook's return value, generateShot simply
     // had no consumer above batchGenerate's own internal call until Loom Mobile's Generate
@@ -6034,7 +6373,7 @@ export default function App() {
     // batch path already uses. Nothing about either function changes; only who else gets a
     // reference to them.
     generateShot, priceShot,
-    pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
+    pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, genFix, routeGen, batchGenerate,
     costEstimate, refreshEstimate }
     // mobileUI passed in (mobile-generate-rail pass, 2026-08-03) so the resume-on-reload
     // effect can also fire on the Mobile-view toggle -- see that effect's own comment.
@@ -6101,9 +6440,13 @@ export default function App() {
   // resurfaces in project B's drawer (still-live thumbnail + a working attach button that
   // writes into whichever shot in B you pick) the moment you switch projects, since nothing
   // else ever clears these four dicts. Reset all of them whenever the active project changes.
+  // genFixState included for the same hygiene even though nothing currently drives it via
+  // "__draft__" (LoomMobile's Fixer always operates on a real, bound dfLive shot -- draft
+  // mode is desktop-only and out of this increment's scope) -- a genuine no-op today, kept
+  // symmetric with its three siblings rather than a silent exception to this comment's own rule.
   useEffect(() => {
     const clearDraft = (s) => { if (!("__draft__" in s)) return s; const n = { ...s }; delete n.__draft__; return n; };
-    setGenState(clearDraft); setGenImgState(clearDraft); setGenEditState(clearDraft); setGenRefState(clearDraft);
+    setGenState(clearDraft); setGenImgState(clearDraft); setGenEditState(clearDraft); setGenRefState(clearDraft); setGenFixState(clearDraft);
   }, [activeId]);
 
   const { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
@@ -6162,7 +6505,8 @@ export default function App() {
           imgLoras={imgLoras} setImgLoras={setImgLoras} imgAdv={imgAdv} setImgAdv={setImgAdv}
           modelDefaults={modelDefaults} setModelDefaults={setModelDefaults} genImage={genImage} routeImg={routeImg}
           genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState}
-          genEdit={genEdit} genRef={genRef} routeGen={routeGen} /></V2Boundary>
+          genEdit={genEdit} genRef={genRef} routeGen={routeGen}
+          genFixState={genFixState} setGenFixState={setGenFixState} genFix={genFix} /></V2Boundary>
       ) : (
         <V2Boundary><LoomV2
           project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}

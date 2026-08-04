@@ -1773,6 +1773,14 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The desktop Loom's reel gets its real visual identity back** — the owner's original
+  complaint that started this whole design-fidelity pass. Design specifies a 6-color rotating
+  per-shot tint, a repeating-stripe texture, visible code/duration text on each segment, and a
+  separate status bar under the tint; shipped code had none of the first three (4 flat status
+  colors, no text, no texture — same-status shots were visually identical). All four restored;
+  the resize handle and live scrub/trim preview, which already exceeded the design, are
+  untouched. 733/733 loom tests, 1539/1539 pytest.
+
 - **Control Panel: a real library-folder picker, desktop.** The design's own approach
   (`<input type="file" webkitdirectory>`) can't work for anyone — browsers never expose an
   absolute host path through a file input. Built a real text-path input against the

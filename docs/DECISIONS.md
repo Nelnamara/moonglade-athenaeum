@@ -1427,11 +1427,12 @@ increment in this file works.
       calls for one consolidated "run all" row — an unflagged divergence, not a loss
 
 **Desktop Loom (`LoomV2` in `loom/master-storyboard.jsx`)** vs `The Loom.dc.html`.
-- [ ] Reel/timeline lost its visual identity — the owner's original complaint, confirmed
-      exactly: design specifies a 6-color rotating per-shot tint + diagonal film-strip texture
-      + visible code/duration text on each segment + a separate thin status bar under the
-      shot's own color; shipped is 4 flat status colors, no text, no texture. (The resize
-      handle and live scrub/trim preview above it genuinely exceed the design — keep those.)
+- [x] Reel/timeline lost its visual identity — the owner's original complaint, confirmed
+      exactly and now **SHIPPED 2026-08-04**: design specifies a 6-color rotating per-shot
+      tint + repeating-stripe texture + visible code/duration text on each segment + a
+      separate thin status bar under the shot's own color; shipped was 4 flat status colors,
+      no text, no texture. (The resize handle and live scrub/trim preview above it genuinely
+      exceed the design — kept, untouched.)
 - [ ] Hero banner region entirely missing — no graphic strip, no hide/show toggle, no state
 - [ ] Edit tab has no Fixer or Enhance sub-tabs at all (desktop-only gap — `LoomMobile`'s
       Fixer, built and verified tonight, and Enhance/Filter-compare both already work
@@ -1711,6 +1712,32 @@ still needed for the rest of the punch list, so the write path is code-reviewed 
 contract-verified but not live-exercised. Desktop only; mobile's Catalog & Files tile still
 doesn't have this shape at all (a smaller, separate gap, not closed in this pass). 1539/1539
 pytest.
+
+### Punch-list item 11 shipped: the desktop Loom's reel gets its real visual identity back  ·  *2026-08-04*
+
+The owner's original complaint, the one that kicked off this whole audit — confirmed exactly
+and fixed. Design (`The Loom.dc.html:906-914`, `TINTS` array + formula at ~681/760) specifies
+each shot segment gets: a rotating 6-color gradient tint (`TINTS[(ai*3+ci) % 6]`, `ai`/`ci`
+being the shot's act-index/card-index — real fields `flat()` already returns, `loom-core.js:118`
+— needed no change to that pure-logic file), a `repeating-linear-gradient` stripe texture
+layered on top, the shot's code+duration rendered as real visible text (not just the hover
+tooltip, which stays too), and a separate thin 4px status bar under the tint instead of the
+status color filling the whole segment. Shipped code had none of the first three — 4 flat
+status colors, no text, no texture, same-status shots visually indistinguishable.
+
+Added `LV_TINTS` (module-level, matching the design's own array verbatim) and the real
+per-segment style computation to `master-storyboard.jsx`'s reel render; CSS moved the status
+color from `.lv-seg`'s background to a new `.lv-segbar` element. The duration-proportional
+width, selected-segment outline, and drag-resize grip handle — all of which already matched or
+exceeded the design — are untouched.
+
+Live-verified: real striped-texture + tint background confirmed via `getComputedStyle`, visible
+"A·01 · 6.2s" code text confirmed in the DOM, separate `.lv-segbar.done` status element
+confirmed distinct from the tint. Only one real storyboard (one shot) exists in this dev
+environment, so multi-segment tint variety couldn't be visually confirmed live — the formula
+itself is a direct, verified port of the design's own math, and the one real segment present
+renders at the mathematically correct tint index (0, for `ai=0,ci=0`). 733/733 loom tests,
+1539/1539 pytest.
 
 ### Loom Mobile follow-up shipped: the per-shot kebab actions sheet (Move up / Move down / Duplicate / Delete)  ·  *2026-08-04*
 
