@@ -1481,29 +1481,31 @@ increment in this file works.
       would be either wiring 3 real achievements to grant these skins (a scoping decision, not
       a port) or showing an honest "not yet unlockable" state instead of the design's copy —
       needs a decision, not a code fix.
-- [x]/[?] Power modal, split in two: restart's progress bar **SHIPPED 2026-08-04** (an
+- [x] Power modal, split in two: restart's progress bar **SHIPPED 2026-08-04** (an
       indeterminate bar, the same real pattern the job console already uses — real ping-polling
       has no stage index to compute an honest percentage from, unlike the design's fake
-      RESTART_STAGES). Shutdown's "Power back on" button — **PROPOSED closed 2026-08-04, owner
-      has NOT confirmed.** My reasoning: `/api/server/stop` calls `_schedule_server_exit(0)` —
-      per `Serve Gallery.pyw`'s own supervisor contract, exit code 0 ends the whole supervisor
-      loop, not just the child, so after a real Stop there is no process left to answer a
-      restart request. That's a real constraint I verified in the code, but "this can't be
-      fixed as the design shows it" is a call I made unilaterally, not one the owner signed
-      off on. Left as a proposal, not a closed item, until he says otherwise.
+      RESTART_STAGES). Shutdown's "Power back on" button — **CONFIRMED CLOSED, owner sign-off
+      2026-08-04 (session 2): this was a Claude Design assumption, not a real capability.**
+      `/api/server/stop` calls `_schedule_server_exit(0)` — per `Serve Gallery.pyw`'s own
+      supervisor contract, exit code 0 ends the whole supervisor loop, not just the child, so
+      after a real Stop there is no process left to answer a restart request. The real code
+      never built this button in the first place (`PowerModal`'s stop/done state has always
+      shown a plain "Close" — verified in `ControlPanelOverlay.jsx:992-993`), so no removal was
+      needed. **Follow-up, scoped not built:** a real "restart a dead server" capability needs
+      something outside the Flask process itself to survive the process dying — e.g. a small
+      always-on watchdog/relauncher process, or an OS-level scheduled task — real design/
+      architecture work, not a quick fix.
 - [x] Sidebar footer shows a filesystem path or nothing instead of a version/date string.
       **SHIPPED 2026-08-04.**
-- [?] Mobile's "Check" region invents 5 separate rows where its own mobile-specific design
-      calls for one consolidated "run all" row — **PROPOSED closed 2026-08-04, owner has NOT
-      confirmed.** My reasoning: `Moonglade Mobile.dc.html:233-236` shows one static row
-      naming three checks ("Corrupt files · Orphan thumbs · DB integrity") behind a single
-      `run all ▸`. The real `ControlMobile.jsx` (~line 293) instead shows 5 real,
-      independently-runnable read-only diagnostics (Catalog stats/Inventory count/Verify
-      `_duplicates/`/Sync artwork metadata/Sync i2v videos) — none of which map 1:1 onto the
-      design's named trio, so "consolidating" would mean either fabricating a check that
-      doesn't exist, or merging 5 unrelated real diagnostics behind one button. That's my own
-      judgment that the real version is better, made without asking — not something the owner
-      has weighed in on. No code was touched for this item. Left as a proposal.
+- [x] Mobile's "Check" region shows 5 separate rows where its own mobile-specific design
+      calls for one consolidated "run all" row — **CONFIRMED KEPT, owner sign-off 2026-08-04
+      (session 2).** `Moonglade Mobile.dc.html:233-236` shows one static row naming three
+      checks ("Corrupt files · Orphan thumbs · DB integrity") behind a single `run all ▸`. The
+      real `ControlMobile.jsx` (~line 293) shows 5 real, independently-runnable read-only
+      diagnostics (Catalog stats/Inventory count/Verify `_duplicates/`/Sync artwork metadata/
+      Sync i2v videos) — none of which map 1:1 onto the design's named trio. Owner kept the 5
+      real diagnostics as shipped. **Flagged for a Claude Design 2nd pass**, so the mobile
+      mockup gets redrawn against the real 5-diagnostic shape rather than staying out of sync.
 
 **Desktop Loom (`LoomV2` in `loom/master-storyboard.jsx`)** vs `The Loom.dc.html`.
 - [x] Reel/timeline lost its visual identity — the owner's original complaint, confirmed
@@ -1514,38 +1516,70 @@ increment in this file works.
       exceed the design — kept, untouched.)
 - [x] Hero banner region entirely missing — no graphic strip, no hide/show toggle, no state.
       **SHIPPED 2026-08-04.**
-- [ ] Edit tab has no Fixer or Enhance sub-tabs at all (desktop-only gap). **Investigated
-      2026-08-04, deferred as its own larger task, not skipped**: `LoomMobile`'s Fixer/Enhance
-      (canvas box-drawing, debounced `/api/price` checks, `genFix` submit, the Filter-compare
-      modal) are deeply embedded in that component's own local closures/refs/state, not a
-      separable module — porting to `LoomV2` is a real, standalone build on the scale of the
-      original Loom Mobile Fixer increment (a dedicated ~35-minute background build), not a
-      quick copy. Given the real financial stakes (a Fix always spends, never card-covered),
-      rushing this inline risked a real bug in a money-spending path. Needs its own dedicated
-      pass.
-- [ ] Filter-compare ("Art filters") modal doesn't exist on desktop, same story — mobile's
-      real, `MgArtFilters`-backed implementation is the thing to port. Same deferral as above
-      (Enhance's entry point into this modal is part of the same Edit-tab sub-strip).
+- [x] Edit tab has no Fixer or Enhance sub-tabs at all (desktop-only gap). **SHIPPED
+      2026-08-04 (session 2).** The real submit pipeline (`genFixState`/`setGenFixState`/
+      `genFix`) already existed on `useGenerationPipeline`'s return value, computed every
+      render in `App()` — it was simply never threaded into `<LoomV2>`'s props (a comment on
+      the prop list said so explicitly: "Only LoomMobile receives it below"). Fixed at the
+      wiring level (3 props added to both the call site and the function signature) plus a
+      genuine port of the canvas box-drawing (verbatim from `LoomMobile`'s own port of
+      `gallery/src/components/FixTab.jsx`, same `FIX_COLORS`/`FIX_MIN_PX`/`FIX_MAX_BOXES`/
+      `scaleFixBoxes` module-scope constants both already shared). No new backend, no new
+      pipeline. Live-verified: real box drawn via actual `PointerEvent`s correctly enables
+      the Fix button (left un-submitted — a Fix always spends real credits, never card-
+      covered, so the live test stopped short of the real submit). 733/733 Loom tests green.
+- [x] Filter-compare ("Art filters") modal doesn't exist on desktop. **SHIPPED 2026-08-04
+      (session 2)**, same pass as Fixer — ported `LoomMobile`'s real `AF.groups()`/`AF.get()`/
+      `AF.renderSwatch()`/`AF.applyPreview()`/`AF.clearPreview()` calls against the same
+      shared `static/mg-art-filters.js` library, rebuilt as a genuine centered modal (`The
+      Loom.dc.html`'s own `filterCompareOpen` spec — 920px cap, 16px radius, real shadow,
+      3-column grid) rather than reusing mobile's full-page layout, since that's what the
+      desktop design actually specifies. Live-verified: modal opens at the exact design
+      width, both filter groups (Moonglade/PixAI, 12 swatches) render from the real shared
+      library, clicking a swatch applies a real live gradient-overlay preview (not a static
+      swatch), "No filter"/Close both work. Free/offline — no spend risk, clicked through
+      fully live.
 - [?] Frame Handoff renders on all 4 Generate tabs instead of Reference-only per spec —
-      **PROPOSED closed 2026-08-04, owner has NOT confirmed.** Traced `active.c.openFrame`/
+      **NEEDS A NEW DESIGN PASS, owner review 2026-08-04 (session 2): do not restrict to
+      Reference-only, real function must not break for a design.** Traced `active.c.openFrame`/
       `closeFrame` usage across all 4 tab bodies: the Video tab's own body
       (`tab === "Video"`, ~line 1857) has NO frame-setting UI of its own — its "Continuity"
       chips and First/Last-frame weave modes depend entirely on the shared `.lv-framehandoff`
       block below it to set those frames; the Edit tab (~line 2189) literally reads
       `active.c.openFrame.mediaId` as its edit source with no separate picker either.
       `The Loom.dc.html`'s simplified mockup only ever modeled Reference-tab frame-setting
-      (`onRefTab` gate, line 399). My read is that restricting the real block to
-      Reference-only, as the design literally shows, would break two working features the
-      mockup didn't account for — but that's my call, made without asking, not the owner's.
-      No code was touched. Left as a proposal.
+      (`onRefTab` gate, line 399) and didn't account for Video/Edit depending on the same
+      block. No code touched — this is desktop Loom only, no mobile surface involved. Logged
+      for Claude Design to re-scope once it understands the block is shared infrastructure
+      across 3 of 4 tabs, not Reference-tab decoration.
 
 **Loom Mobile (`LoomMobile`, same file)** vs `Loom Mobile.dc.html`.
-- [ ] Generate → Video tab missing 5 elements outright: weave-mode chips (First Frame/First&
+- [?] Generate → Video tab missing 5 elements outright: weave-mode chips (First Frame/First&
       Last/Multi-Reference), negative prompt field, Model+Duration row, capability badges
-      (15s/multi-ref/audio/end-frame), Channel/SFW selector — desktop's Video tab already has
-      the Model/Duration/Channel cluster via `<mg-generate-drawer>`, reference it
-- [ ] Generate → Reference tab missing the Opening/Closing frame pair (reuse the existing
-      `FrameSlot` component, already used in Shot Detail)
+      (15s/multi-ref/audio/end-frame), Channel/SFW selector. **CORRECTED 2026-08-04 (session
+      2) — the "reference desktop's <mg-generate-drawer>" note above was wrong, and building
+      2 of these 5 as literally specified would create non-functional controls.** Checked the
+      real submit payload (`shotPayload()`, `loom/src/loom-core.js:508-524`, the SAME function
+      both platforms' real "Generate video" call): it sends exactly `{mode, prompt, images,
+      video_refs, duration, quality, generate_audio, audio_language}` — **no field for
+      negative prompt or channel exists anywhere in the real backend contract, on either
+      platform.** Building UI for either would silently do nothing when a video actually
+      generates. Desktop's Video tab avoids this by mounting `<mg-generate-drawer>` instead of
+      calling `shotPayload` directly — but whether the drawer's own separate submit path
+      genuinely wires these fields for a *Loom shot's* video specifically (vs. carrying
+      leftover UI from its other, image-generation use cases) is unconfirmed, not verified.
+      Weave-mode chips: no `weaveMode`/`c.weave` field exists anywhere in the codebase either;
+      image/reference composition already appears fully driven by the existing, working Mode
+      chips (I2V/FLF/R2V/V2V) — may be redundant, not missing. **Needs an owner decision**
+      (real backend work to add these fields for both platforms, or accept as desktop-only) —
+      not a port. Two genuinely safe, cosmetic-only pieces remain un-added: a static "PixAI
+      Motion v2" model label and the capability badges (15s/multi-ref/audio/end-frame) — both
+      non-interactive text in the design too, no backend question, just not yet built.
+- [x] Generate → Reference tab missing the Opening/Closing frame pair. **SHIPPED 2026-08-04
+      (session 2)** — reused the exact same `FrameSlot` calls Deep Focus's own body already
+      makes (same component, same props), including the design's `dfHasPrev`/`dfInheritPrev`
+      "inherit prev close" affordance on the opening frame. Build verified clean; live
+      click-through not yet done for this specific piece (verified via code+build only).
 - [ ] 4 of 6 designed animations don't exist: `lmMetal` (animated shimmer on every primary
       button — currently flat color), `lmSheetDown`/`lmFadeIn`/`lmFadeOut` (every sheet close
       is an instant unmount, not the designed 280ms slide+fade)
@@ -1568,20 +1602,32 @@ increment in this file works.
       not fabricating it. Same real gap mobile disclosed and skipped.
 - [x] SIMILAR section missing. **SHIPPED 2026-08-04** — reused the exact real `SimilarModal.jsx`
       already proven by `Lightbox.jsx`'s own "✧ Similar" button, not a rebuilt strip.
-- [?] 7 of 11 metadata fields hidden behind a "Full record ▾" toggle. **PROPOSED closed
-      2026-08-04, owner has NOT confirmed — and this one has a real provenance problem.**
-      `DetailsView.jsx`'s own header comment cites a locked prior design decision
-      ("Direction C") explicitly choosing "a quiet curated fact list with a Full record
-      disclosure for the rest" over a raw field grid. But Direction C's own `docs/DECISIONS.md`
-      entry was lost in the 2026-07-27 docs prune — I have no way to confirm from that comment
-      alone whether "Direction C" was ever something the owner actually said, or whether a
-      prior session invented the label. I closed this on the strength of an unverified code
-      comment, which is exactly the kind of claim this repo's own standing rule says needs a
-      provenance review on dispute, not a unilateral close. Left as a proposal pending that
-      review. No code was touched.
-- [x] Zero per-row copy buttons in the ledger. **SHIPPED 2026-08-04** as footer buttons (Copy
-      Seed/Task ID/Filename), not per-row icons — matches Direction C's own "actions demoted
-      to the footer" idiom instead of reintroducing what that redesign moved away from.
+- [x]→rebuilding 7 of 11 metadata fields hidden behind a "Full record ▾" toggle. **Provenance
+      resolved 2026-08-04 (session 2) — the earlier "lost in the 2026-07-27 docs prune" excuse
+      was flatly wrong: "Direction C" was locked by commit `39ff5e8`, 2026-07-30, THREE DAYS
+      AFTER that prune, so it could not have been touched by it.** The real entry (recoverable
+      via `git show 39ff5e8:docs/DECISIONS.md`, since re-copied into this file's Design sources
+      — see the dated entry below) is real and owner-authored, but it is a **motion/composition**
+      decision (View-Transitions reveal choreography, "same bones as Direction A" — a museum-
+      placard layout with "a quiet fact list, actions demoted to a footer strip"). It never
+      specifies a collapse/disclosure toggle hiding specific fields. Checked against all three
+      real sources: **classic** (`moonglade_gallery.py:9769-9790`) shows all ~20 metadata fields
+      flat, always visible, no hide, including every technical field (Steps/Sampler/CFG/Clip
+      Skip); the **current design file** (`Image Details.dc.html:376-386`) shows all 11 fields
+      flat, always visible, no toggle anywhere in the file either. Only the shipped React build
+      hides anything. **Owner decision: rebuild to match classic and the current design file —
+      all 11 fields flat and always visible, "Full record ▾" toggle removed.** **SHIPPED
+      2026-08-04 (session 2)** — `DetailsView.jsx`'s metadata list merged flat, per-row `⧉`
+      copy icons added for Seed/Task ID/Media ID/Filename (matching
+      `ImageDetailsMobile.jsx`'s already-correct pattern), redundant footer copy buttons
+      removed. Clean build (124 modules), full `python -m pytest -q`: **1516 passed, 2
+      skipped, zero failures.** **Not yet live-verified in a browser** — the app needs the
+      owner's own login session; owner to confirm visually.
+- [x] Zero per-row copy buttons in the ledger. Previously **SHIPPED 2026-08-04** as footer
+      buttons (Copy Seed/Task ID/Filename), justified by the same "Direction C" reading now
+      corrected above — **reverted 2026-08-04 (session 2)** to per-row `⧉` copy icons
+      alongside the flat field list, matching `Image Details.dc.html:95-97`'s own
+      `row.copyable` pattern exactly, same code change as above.
 - [x] Header missing the ⛶ Lightbox link and "N of M" index label. **SHIPPED 2026-08-04.**
 - [ ] Upscale flyout (shared by Details + Lightbox, `static/mg-upscale-panel.js`) is a
       top-right-anchored panel with a native `<select>` instead of the design's centered modal
@@ -1612,8 +1658,20 @@ increment in this file works.
       icon format "👁 N · ♥ N" (mobile's own design already specifies spelled-out — left
       mobile). **SHIPPED 2026-08-04, desktop only.**
 - [ ] Mobile stat cards are inverted (value-above-label vs. spec's label-above-value) and use
-      the wrong type family — borrowed wholesale from Control Panel's mobile stat card (still
-      open — a disclosed, deliberate cross-screen-consistency choice, lower priority)
+      the wrong type family — borrowed wholesale from Control Panel's mobile stat card. **Owner
+      sign-off 2026-08-04 (session 2): ratified as-is**, deliberate cross-screen-consistency
+      choice, lower priority.
+- [ ] **NEW FINDING, 2026-08-04 (session 2), not previously tracked: post rows have no image
+      thumbnail at all, both platforms — a real regression from classic, not a build-fidelity
+      bug.** Owner caught this by eye ("this looks remarkably worse than classic"). Checked all
+      four sources: **classic** (`moonglade_gallery.py:7847`) renders a real thumbnail per post
+      (`<img src="/thumbs/{media_id}.jpg">`) in its `art-card` grid. **Neither current design
+      file** — `Moonglade Mobile.dc.html:503-508` (mobile) nor `Frontend Gallery.dc.html`'s
+      `ovMyArt` block (desktop) — references any `<image-slot>`/image for this row; both are
+      rank+title+meta text only. The shipped React (`MyArtOverlay.jsx`/`MyArtMobile.jsx`)
+      faithfully built the thumbnail-less design. **Owner decision: hold back for a Claude
+      Design redesign** (not a quick port — the design itself needs the thumbnail restored,
+      not just the code) rather than have an implementer guess at sizing/placement.
 
 **Health** — `HealthOverlay.jsx`/`HealthMobile.jsx` vs `Frontend Gallery.dc.html`. Backend/data
 logic and most regions are genuinely faithful; these are the real misses:
@@ -1627,10 +1685,17 @@ logic and most regions are genuinely faithful; these are the real misses:
       **SHIPPED 2026-08-04** — reverses a previous implementer's own scope-trim judgment
       call (not an owner-approved decision), reusing the exact same real hook data desktop
       already shows.
-- [ ] Folder breakdown format changed from a fixed "N images · M other" to a generic N-bucket
-      loop (desktop, and now also mobile after porting the same real implementation) — left
-      as-is; the generic loop is arguably more correct for a library with other than 2 real
-      buckets, and rigidly forcing 2 fields risks silently dropping real bucket data.
+- [x] ~~Folder breakdown format changed from a fixed "N images · M other" to a generic N-bucket
+      loop~~ — **CLOSED 2026-08-04 (session 2), NOT a gap, my own earlier "arguably more
+      correct" framing overstated it as a live call when it was never actually different.**
+      Checked classic's own template (`moonglade_gallery.py:10308-10312`): classic has ALWAYS
+      looped over `h.per_bucket.items()` generically (up to 4 real categories —
+      `batches`/`month`/`images`/`other`, depending on real on-disk folder layout) — it was
+      never a fixed 2-field format in the real app. The design mockup's `2,825 images · 6
+      other` (`Frontend Gallery.dc.html:702`) is ordinary static placeholder demo text picking
+      two example categories, not a spec for exactly 2 fields. The shipped React
+      (`HealthOverlay.jsx:130-132`) already matches classic's real, long-standing behavior
+      exactly. No action needed, both platforms.
 
 **Contests** — `ContestsOverlay.jsx`/`ContestsMobile.jsx` vs `Frontend Gallery.dc.html`.
 - [x] "Days left" text dropped from the official contest card, both platforms — **SHIPPED
@@ -1642,15 +1707,15 @@ logic and most regions are genuinely faithful; these are the real misses:
       `c.dates + ' · ' + c.left` formula via a shared `dateWithLeft()` helper
 - [x] ♦ diamond icon missing from every community-card CR pill — only the one featured card
       gets it; design puts it on all of them — **SHIPPED 2026-08-04**
-- [?] "+12 more community contests below the fold — scroll" footer hint missing entirely —
-      **PROPOSED closed 2026-08-04, owner has NOT confirmed.** My reasoning: the design's "+12"
-      is static demo flavor text implying a paginated/preview grid; the real
+- [x]→building "+12 more community contests below the fold — scroll" footer hint missing
+      entirely — **owner decision 2026-08-04 (session 2): Option C.** The design's "+12" is
+      static demo flavor text implying a paginated/preview grid; the real
       `ContestsOverlay.jsx`/`ContestsMobile.jsx` already render every `community` row in one
       unpaginated `.map()` (confirmed reading both files, no `.slice()`/limit anywhere), so
-      there's no real "N more below the fold" number to show without scroll-position tracking.
-      That's my own judgment call that skipping it beats fabricating a number — not the
-      owner's. No code was touched. Left as a proposal; a scroll-measured version is buildable
-      if he wants it instead.
+      there's no real "N more below the fold" number without scroll-position tracking. Owner
+      chose neither skipping it nor building scroll-tracking: **replace with a real total
+      community-contest count plus a mention to check the official Discord for more.** Exact
+      copy pending owner sign-off before shipping.
 
 **Contact Sheet (desktop)** — `ContactSheetOverlay.jsx` vs `Contact Sheet.dc.html`.
 - [x] Print output likely illegible: the design has a dedicated light/print palette
@@ -1669,7 +1734,150 @@ whole punch list; strike items as they ship, each with its own dated entry below
 chronologically) documenting what actually changed and how it was verified — the same pattern
 every other increment in this file already follows.
 
-### Punch-list item 1 shipped: Duplicate Review desktop now built against its real design  ·  *2026-08-04*
+### Owner walkthrough of the 6 reopened items, real decisions made — session 2, *2026-08-04*
+
+Following the correction above (6 items reopened after being closed unilaterally), the owner
+walked every one of them in detail, with each surface's real design file and real code
+re-verified fresh before presenting — not relayed from memory of the prior entries. Real
+decisions, all recorded against their tracker items above:
+
+1. **Shutdown "Power back on"** — a Claude Design assumption, not a real capability. Confirmed
+   closed; real code never built it. Scoped (not built) follow-up: a real dead-server-restart
+   capability needs something outside the Flask process to survive it dying.
+2. **Control Panel mobile Check region** — kept as shipped (5 real diagnostics), flagged for a
+   Claude Design 2nd pass so the mockup catches up to the real shape.
+3. **Desktop Loom Frame Handoff** — NOT an owner pick between the proposal's options at all;
+   owner correctly identified that literally restricting the block to Reference-only would
+   break real Video/Edit tab function, and sent it back for Claude Design to re-scope with that
+   dependency in mind. No mobile surface involved.
+4. **Image Details hidden fields** — see the provenance correction and rebuild decision on the
+   item itself above. Owner's own words on discovering classic shows metrics the shipped React
+   build hides: "HUH???!!! We are not displaying metrics in details?"
+5. **Contests "+12 more"** — Option C, total count + Discord mention, exact copy pending.
+6. **My Art / Health loose ends** — Health folder breakdown fully closed as a non-issue (see
+   correction on the item itself); My Art turned up a real, previously-untracked regression
+   (no thumbnails) that the owner caught by eye and sent back for redesign rather than have it
+   guessed at — see the new finding on the item itself above.
+
+**"Direction C" restored here, in full, so it is never again undiscoverable.** The original
+entry (git commit `39ff5e8`, 2026-07-30, authored by the owner) went missing from this live
+file somewhere in the gallery-top branch churn — NOT the 2026-07-27 docs prune a prior session
+blamed it on, which predates this decision by three days and could not have touched it. Copied
+verbatim from `git show 39ff5e8:docs/DECISIONS.md` so a future session can grep for it directly
+instead of re-discovering it through git archaeology:
+
+> **Status: LOCKED — Direction C, 2026-07-30, no mixing.** Owner picked C outright, then asked
+> that the half-a-beat-later record not just fade up as a block. Refined and confirmed against
+> a second artifact: https://claude.ai/code/artifact/477b4655-10b8-48e5-80c2-eb9a3543df9f ("The
+> Reveal — Motion Detail"), which isolates just the reveal choreography and is now the motion
+> source of truth alongside the board (https://claude.ai/code/artifact/63a55fb3-37bb-475b-a3ad-dfd335c115e3,
+> "Details View — Three Directions"). The locked choreography: the headline LEADS on its own,
+> sliding in from the right, before anything else in the record starts. The rest — kicker, the
+> gold rule drawing itself under the title with a glint riding its tip, the fact ledger stamped
+> in row by row, tags, the star rating — fills in downward at the same cascade rhythm the first
+> pass already had, just shifted later so it follows the headline instead of racing it. The
+> action strip is the closing beat, on its own, and pops up from the bottom with a real
+> overshoot-and-settle bounce rather than a plain rise — deliberately NOT a right-slide like the
+> headline's, so the two entrance vectors read as distinct rather than repeating. Owner asked
+> for the overall pace nudged slower afterward (a feel adjustment, not a re-design).
+>
+> Direction C was described as "same bones as A" — **A — The Placard**: "image beside a
+> museum-label-style record (one confident italic headline, a quiet fact list, actions demoted
+> to a footer strip)." This is real and does support the footer-action-strip idiom. It does
+> **not** specify a collapse/disclosure toggle hiding specific fields — that mechanic was a
+> later implementer's own inference, not something this decision, the board artifact, or either
+> `Image Details.dc.html` (then or the current gallery-era one) ever actually shows.
+
+### Structural fidelity audit: the Loom's panel architecture is a real, severe regression — everything else checked is not  ·  session 2, *2026-08-04*
+
+Owner disputed the whole punch-list-item verification method after the Loom's own audit above
+(feature-presence checks) missed something the owner caught by eye in ten seconds: the Loom's
+left/right side panels render as a static, edge-to-edge split-pane, not the design's floating
+glass panel. **Live-verified with real computed-style + geometry data in a real logged-in
+browser session, not source-reading** — this is the class of bug that only shows up when you
+look at what actually renders, exactly the gap [[verify-artifacts-in-chrome-not-headless]]
+already named once.
+
+**Confirmed real, severe regression — the Loom only:** `loom/master-storyboard.jsx`'s
+`.lv-side` (both left and right panel) measured `position: static`, `border-radius: 0px`,
+`backdrop-filter: none`, `box-shadow: none`, two panels flush against each other splitting the
+screen in half (`x:0,w:560` / `x:560,w:560` in a 966px viewport, zero gap between them). The
+design (`The Loom.dc.html`'s `leftPanelStyle`/`rightPanelStyle`) specifies `position: absolute`,
+20px inset from every edge, 16px rounded corners, `backdrop-filter: blur(18px) saturate(1.12)`,
+a real drop shadow, sliding in over a dimmed backdrop scrim via `cubic-bezier(.18,1.02,.26,1)`.
+Not a close approximation gone slightly wrong — a structurally different, older UI paradigm
+(static docked sidebar) wearing the redesign's color tokens. This is why the owner's "just a
+style applied, not actually installed" read is accurate for this specific surface.
+
+**Checked 8 other surfaces the same way — all confirmed correctly built, not a wider pattern:**
+Control Panel, My Art, Contests, Health, Import, Duplicate Review, and Folio of Honors all use
+one real, shared `.mgv-slab` component — 18px radius, real `0 34px 100px rgba(0,0,0,.78)`
+shadow, genuinely centered over a blurred scrim — matching the design's floating-card
+architecture correctly. Several of these initially LOOKED broken (163px-tall cards, stuck on
+"loading…"/"measuring…"/"scanning…") on a first rushed pass with short waits (250-800ms) —
+these were false alarms from real, slow backend work (Health's full disk walk: ~7.5s;
+Duplicate Review's perceptual-hash scan across the whole library: ~16.5s; My Art's live PixAI
+view-count fetch: ~4s), not rendering bugs. Re-checked each with proper waits and confirmed
+real content loads correctly into the correct structure. Lightbox (`.lbx-shell`, full-bleed, no
+radius/shadow) is also correct — full-bleed is the right treatment for a photo viewer, not a
+card modal, consistent with this file's earlier "Lightbox (both) genuinely faithful" finding.
+
+**Contact Sheet also checked and correct**: `.mgv-slab.mgcs-slab`, same 18px/shadow treatment,
+real content ("Contact Sheet — 1 selected · printed August 4, 2026"). **Image Details checked
+too — correctly NOT a modal at all**: it's a real, bookmarkable page (`/next?image=<mid>`, own
+History API entry, not an overlay), so `.placard`'s `position: static, no radius, no shadow` is
+the right structure, not a regression — matches the design's own "museum placard" composition,
+which was never meant to float over the gallery.
+
+**Not yet checked this way (disruption cost, not skipped for convenience):** Setup Wizard
+(first-run-only state) and Login (would require logging out of the live session). No claim
+either way on these two specifically. Every other real surface in the app has now been checked
+live and confirmed correct except the Loom.
+
+**Why this matters going forward.** Every "SHIPPED"/verified claim in this file's punch list
+above was checked by reading source and, at most, confirming a *feature* renders — never by
+measuring whether the rendered *structure* matches the design's own floating/glass/modal
+architecture. That blind spot let a severe, obvious-once-you-look regression sit undetected
+through multiple "done" claims across sessions. Going forward, any surface claimed faithful
+needs a real computed-style + geometry check in an authenticated browser session, not a
+source-level comparison — a lesson worth restating even though a version of it was already
+written down once and didn't prevent this.
+
+### The Loom's panel architecture rebuilt to the real floating-glass-panel design — session 2, *2026-08-04*
+
+Fixed the regression confirmed in the entry above. `loom/master-storyboard.jsx`'s `.lv-side`
+was a 3-column flex layout (`.lv-shell{display:flex}` containing left-sidebar / board / right-
+sidebar as permanent flex siblings sharing space) — restructured to match `The Loom.dc.html`'s
+real architecture: the board now fills the shell's full width always; Cast (left) and Generate
+(right) are `position:absolute` glass panels that float OVER it on open, with a dimmed
+`backdrop-filter:blur(7px)` scrim behind them (click-to-close), collapsing to a permanent 58px
+icon rail that stays in-flow and now also carries the design's own glass treatment (14px
+radius, blur, shadow) rather than being flat. Added the design's own slide/fade keyframes
+(`lvSlideL`/`lvSlideR`/`lvSlideOutL`/`lvSlideOutR`/`lvFadeIn`/`lvFadeOut`, none of which existed
+in the real file before this) and a two-step close (`leftClosing`/`rightClosing` transient
+state, mirroring the design's own `leftClosing`/`rightClosing`) so the .34s exit animation
+actually plays before the panel unmounts, instead of an instant cut.
+
+**Verified, not assumed:** build clean (esbuild, 402KB bundle); full `.lv-panel`/`.lv-rail`
+computed-style check live in a real logged-in session — `position: absolute`, `border-radius:
+16px`, `backdrop-filter: blur(18px) saturate(1.12)`, real box-shadow, all now correct (was
+`static`/`0px`/`none`/`none`). Settled geometry forced past the animation (see below) and
+measured exactly: left panel `x:20, w:572` (design: `left:20px`, wide-mode cap 572px), right
+panel `20px` gap from the shell's right edge (design: `right:20px`) — both exact. Collapse →
+reopen cycle tested live: clicking the panel's own collapse button removes it from the DOM
+after its close-timer; the rail persists; clicking a rail icon reopens it. Loom's own test
+suite: 733/733 passed, 0 failures. Full `python -m pytest -q`: **1516 passed, 2 skipped, 0
+failures**, same pre-existing Pillow deprecation warnings, unrelated.
+
+**One real limitation of this verification, disclosed rather than glossed over:** the
+automated browser session this was checked in reports `document.hidden: true` /
+`visibilityState: "hidden"` — Chromium throttles CSS animation compositing for backgrounded
+tabs, so the live open/close slide-in was caught mid-first-frame (`transform:
+translateX(-34px) scale(.985)`, stuck) rather than settled, on every timing-based check. Not a
+real bug — forcing `style.animation = 'none'` to read the settled end-state directly confirmed
+the correct final position (`x:20`/`20px` gap, exact), and the functional collapse/reopen cycle
+works regardless of the animation itself. The animation's actual smoothness in a real, focused,
+visible browser tab has not been eye-verified — owner to confirm visually when convenient.
 
 First item off the design-fidelity punch list above, done personally (not delegated to a
 background agent — the owner explicitly redirected from parallel agent dispatch to sequential,

@@ -1208,6 +1208,34 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Desktop Loom's Edit tab had no Fixer or Enhance sub-tabs — mobile had both, fully built.**
+  The real submit pipeline (`genFixState`/`genFix`) already existed at the App level; it was
+  simply never passed as a prop to desktop's `<LoomV2>`. Fixed the wiring, ported the canvas
+  box-drawing verbatim from `LoomMobile`'s own real port of `FixTab.jsx`, and rebuilt Filter
+  compare as a genuine centered modal per the desktop design (not a reuse of mobile's
+  full-page layout) using the same real shared `static/mg-art-filters.js` library mobile
+  already uses. No new backend. Live-verified: real box-drawing enables the Fix button, real
+  filter swatches apply a real live preview. 733/733 Loom tests green.
+- **The Loom's left/right panels were a static, edge-to-edge split layout, not the design's
+  floating glass panels.** `.lv-side` was a 3-column flex sidebar (`position: static`, zero
+  radius, zero blur, zero shadow) sharing space with the board — a different, older UI
+  paradigm than `The Loom.dc.html`'s actual spec (absolutely-positioned panels floating over a
+  full-width board with a dimmed backdrop scrim, 16px radius, real blur+shadow, slide-in
+  animation). Rebuilt to match: permanent 58px glass icon rail always in-flow, Cast/Generate
+  now float as real `position: absolute` panels on open, backdrop scrim added, the design's own
+  slide/fade keyframes added (none existed before). Verified live: correct computed style
+  (radius/blur/shadow/position), settled geometry exact to the design's spec (`left:20px` /
+  `right:20px`, wide-mode 572px cap), collapse→reopen cycle tested working. 733/733 Loom tests
+  green.
+- **Image Details (desktop) hid Steps/Sampler/CFG Scale/Clip Skip/Task ID/Media ID/Filename
+  behind a "Full record ▾" toggle that neither classic nor the current design shows.** Both
+  `moonglade_gallery.py`'s classic detail page and `Image Details.dc.html` render every
+  metadata field flat and always visible — the toggle was a later implementer's own
+  interpretation of a motion/composition decision ("Direction C") that never actually called
+  for hiding fields. Restored to a single flat list, with per-row `⧉` copy icons for
+  Seed/Task ID/Media ID/Filename (matching `Image Details.dc.html:95-97` and the pattern
+  `ImageDetailsMobile.jsx` already used correctly) replacing the footer-only copy buttons
+  that stood in for them.
 - **Loom Mobile's Draft chip lost its active-state glow.** The design's `draftChipStyle`
   adds a soft gold `box-shadow` when draft mode is on; `.lm-chip.on` had the color/border/
   background but not the glow. Restored.

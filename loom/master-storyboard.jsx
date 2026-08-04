@@ -447,26 +447,54 @@ const V2_STYLES = `
 .lv-override-badge{color:var(--amber);font-style:normal;font-weight:600;}
 .lv-overrideflash{font-size:11px;color:var(--amber);background:rgba(0,0,0,.15);border-radius:5px;padding:3px 7px;margin-top:2px;animation:lv-flash-fade 1.6s ease-out forwards;}
 @keyframes lv-flash-fade{0%{opacity:1;}70%{opacity:1;}100%{opacity:0;}}
-/* Fixed 4-region shell: top Timeline drawer (below), then a row of left card /
-   board column / right drawer -- nothing free-floating, nothing draggable. */
-.lv-shell{flex:1;display:flex;min-height:0;overflow:hidden;}
-.lv-side{flex:none;background:var(--surface0);display:flex;flex-direction:column;min-height:0;
-  transition:width .18s ease;overflow-x:hidden;}
-.lv-side.left{width:280px;border-right:1px solid var(--surface1);}
-.lv-side.left.wide{width:560px;}
-.lv-side.right{width:560px;border-left:1px solid var(--surface1);}
-.lv-side.collapsed{width:52px;}
+/* Board fills the shell's full width always; Cast/Generate float over it as glass
+   panels (The Loom.dc.html's leftPanelStyle/rightPanelStyle/leftBackdropStyle),
+   collapsing to a permanent 58px icon rail -- not the old 3-column flex share
+   this replaced (2026-08-04 structural-fidelity fix, see docs/DECISIONS.md).
+   .lv-shell is position:relative so the floating panel + backdrop below
+   resolve their position:absolute against the WHOLE shell (board + rails),
+   exactly like the design's own equivalent wrapper. */
+.lv-shell{flex:1;display:flex;min-height:0;overflow:hidden;position:relative;}
+.lv-rail{flex:none;width:58px;box-sizing:border-box;display:flex;flex-direction:column;
+  align-items:center;gap:7px;padding:10px 0;margin:10px 4px;border-radius:14px;
+  border:1px solid rgba(182,146,230,.32);
+  background:linear-gradient(120deg,rgba(24,18,54,.92) 0%,rgba(14,11,32,.95) 100%);
+  backdrop-filter:blur(18px) saturate(1.12);
+  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px rgba(182,146,230,.14);}
+.lv-boardcol{flex:1;min-width:0;overflow:auto;background:var(--base);}
+
+.lv-backdrop{position:absolute;inset:0;z-index:40;background:rgba(5,4,13,.62);
+  backdrop-filter:blur(7px);animation:lvFadeIn .32s ease both;}
+.lv-backdrop.closing{animation:lvFadeOut .34s ease both;}
+.lv-panel{position:absolute;top:20px;bottom:20px;z-index:41;box-sizing:border-box;
+  display:flex;flex-direction:column;min-height:0;border-radius:16px;
+  border:1px solid rgba(182,146,230,.32);
+  background:linear-gradient(120deg,rgba(24,18,54,.92) 0%,rgba(14,11,32,.95) 100%);
+  backdrop-filter:blur(18px) saturate(1.12);
+  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px rgba(182,146,230,.14);overflow:hidden;}
+.lv-panel.left{left:20px;width:clamp(220px,21vw,292px);
+  animation:lvSlideL .4s cubic-bezier(.18,1.02,.26,1) both;}
+.lv-panel.left.wide{width:min(572px,37vw);}
+.lv-panel.left.closing{animation:lvSlideOutL .34s cubic-bezier(.4,0,.2,1) both;}
+.lv-panel.right{right:20px;width:clamp(332px,35vw,572px);
+  animation:lvSlideR .4s cubic-bezier(.18,1.02,.26,1) both;}
+.lv-panel.right.closing{animation:lvSlideOutR .34s cubic-bezier(.4,0,.2,1) both;}
+@keyframes lvFadeIn{from{opacity:0;}to{opacity:1;}}
+@keyframes lvFadeOut{from{opacity:1;}to{opacity:0;}}
+@keyframes lvSlideL{from{opacity:0;transform:translateX(-34px) scale(.985);}60%{opacity:1;}to{opacity:1;transform:none;}}
+@keyframes lvSlideOutL{from{opacity:1;transform:none;}to{opacity:0;transform:translateX(-34px) scale(.985);}}
+@keyframes lvSlideR{from{opacity:0;transform:translateX(34px) scale(.985);}60%{opacity:1;}to{opacity:1;transform:none;}}
+@keyframes lvSlideOutR{from{opacity:1;transform:none;}to{opacity:0;transform:translateX(34px) scale(.985);}}
+
 .lv-sidehead{flex:none;display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--surface1);}
 .lv-sidetabs{flex:1;min-width:0;margin-bottom:0;}
 .lv-col{width:22px;height:20px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);
   border-radius:5px;cursor:pointer;font-size:11px;flex:0 0 auto;}
 .lv-col:hover{color:var(--accent);}
-.lv-railicons{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 0;width:100%;overflow:auto;}
 .lv-railbtn{width:38px;height:38px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);
   border-radius:8px;cursor:pointer;font-size:17px;line-height:1;flex:0 0 auto;}
 .lv-railbtn:hover{border-color:var(--accent);color:var(--accent);}
 .lv-railbtn.on{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--base));}
-.lv-boardcol{flex:1;min-width:0;overflow:auto;background:var(--base);}
 /* Timeline: genuinely fixed to the banner, full width, never draggable -- unlike every
    other region. Three states (hidden/slim/full) driven by tlState + a live drag height;
    the preview sits ABOVE the scrubber, only rendered once mostly expanded. */
@@ -762,6 +790,46 @@ const V2_STYLES = `
 .lv-bal{font-size:10.5px;color:var(--text);padding:5px 0 3px;border-bottom:1px solid var(--surface1);margin-bottom:9px;letter-spacing:.02em;opacity:.85;}
 .lv-balclaim{color:var(--accent);}
 .lv-editsrc{max-width:100%;max-height:120px;border-radius:8px;border:1px solid var(--surface1);margin:4px 0;display:block}
+/* Fixer canvas wrapper -- same values as LoomMobile's own .lm-fixwrap/.lm-fixhint/.lm-fixwarn
+   (Loom Mobile.dc.html's fixHintStyle/fixWarnStyle), desktop naming only. */
+.lv-fixwrap{position:relative;border-radius:8px;overflow:hidden;background:var(--base);
+  border:1px solid var(--surface1);margin-top:4px;max-width:100%;}
+.lv-fixwrap img{width:100%;max-height:280px;object-fit:contain;display:block;background:#000;}
+.lv-fixwrap canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair;}
+.lv-fixhint{font-size:10.5px;line-height:1.5;color:var(--subtext);margin:10px 0 6px;}
+.lv-fixwarn{font-size:10px;line-height:1.45;color:var(--peach);background:rgba(232,147,95,.08);
+  border:1px solid rgba(232,147,95,.3);border-radius:8px;padding:7px 9px;margin-top:8px;}
+.lv-openfilters{display:block;width:100%;box-sizing:border-box;text-align:center;padding:10px;
+  border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--surface1);
+  background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);margin:6px 0;}
+.lv-openfilters:hover{border-color:var(--accent);}
+/* Filter compare modal -- The Loom.dc.html's own filterCompareOpen, literal values (fixed
+   veil + centered card, 920px cap, 3-column grid: preview/preview/filters+sliders). */
+.lv-fc-veil{position:fixed;inset:0;z-index:47;background:rgba(5,4,13,.72);backdrop-filter:blur(7px);}
+.lv-fc-host{position:fixed;inset:0;z-index:48;display:grid;place-items:center;pointer-events:none;padding:20px;}
+.lv-fc-card{pointer-events:auto;box-sizing:border-box;width:min(920px,calc(100vw - 40px));
+  max-height:92vh;overflow-y:auto;border-radius:16px;border:1px solid var(--surface1);
+  background:var(--surface0);box-shadow:0 34px 80px -18px rgba(0,0,0,.75);padding:16px 20px 20px;}
+.lv-fc-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.lv-fc-title{font-size:15px;font-weight:800;}
+.lv-fc-grid{display:grid;grid-template-columns:1fr 1fr 200px;gap:16px;align-items:start;}
+.lv-fc-previewcol{min-width:0;}
+.lv-fc-previewbox{position:relative;width:100%;aspect-ratio:1;border-radius:10px;overflow:hidden;
+  background:var(--base);border:1px solid var(--surface1);}
+.lv-fc-stage{position:relative;width:100%;height:100%;}
+.lv-fc-img{width:100%;height:100%;object-fit:cover;display:block;}
+.lv-fc-side{display:flex;flex-direction:column;gap:10px;}
+.lv-fc-grouplabel{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--overlay0);margin-bottom:5px;}
+.lv-fc-swatchgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;}
+.lv-fc-tile{position:relative;display:flex;flex-direction:column;gap:3px;cursor:pointer;
+  border-radius:8px;padding:3px;border:1px solid transparent;background:none;}
+.lv-fc-tile.on{border-color:var(--accent);}
+.lv-fc-swatch{width:100%;aspect-ratio:1;border-radius:6px;background:var(--surface1);}
+.lv-fc-name{font-size:8.5px;text-align:center;padding:2px 1px;color:var(--subtext);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lv-fc-range{width:100%;height:3px;cursor:pointer;}
+.lv-fc-btnrow{display:flex;gap:6px;}
 .lv-refstrip{display:flex;gap:5px;flex-wrap:wrap;margin:4px 0 2px}
 .lv-refstrip img{width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--surface1)}
 .lv-imgresult{margin-top:10px;border:1px solid var(--surface1);border-radius:8px;padding:8px;}
@@ -873,7 +941,7 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
   );
 }
 
-function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally,
+function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, genFixState, setGenFixState, genFix, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally,
   // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
   // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
   // this file already keys genState/genImgState/etc). LIFTED to App() (mobile-board-view
@@ -905,8 +973,28 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const [pickerKind, setPickerKind] = useState("base");
   const [leftTab, setLeftTab] = useState("cast");        // 'cast' | 'footage'
   const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [leftClosing, setLeftClosing] = useState(false);  // true for 340ms while the panel plays its slide-out, matching The Loom.dc.html's own leftClosing/lvSlideOutL
   const [density, setDensity] = useState("detailed");    // 'simple' | 'detailed' -- Cast tab only
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [rightClosing, setRightClosing] = useState(false);
+  const leftCloseTimer = useRef(null);
+  const rightCloseTimer = useRef(null);
+  // Panels float over the board now (design's leftPanelStyle/rightPanelStyle), so closing
+  // needs the same two-step the design uses: play the .34s slide-out, THEN actually collapse --
+  // an instant collapse would cut the exit animation off after one frame.
+  const closeLeftPanel = () => {
+    setLeftClosing(true);
+    clearTimeout(leftCloseTimer.current);
+    leftCloseTimer.current = setTimeout(() => { setLeftCollapsed(true); setLeftClosing(false); }, 340);
+  };
+  const closeRightPanel = () => {
+    setRightClosing(true);
+    clearTimeout(rightCloseTimer.current);
+    rightCloseTimer.current = setTimeout(() => { setRightCollapsed(true); setRightClosing(false); }, 340);
+  };
+  const openLeftPanel = () => { clearTimeout(leftCloseTimer.current); setLeftClosing(false); setLeftCollapsed(false); };
+  const openRightPanel = () => { clearTimeout(rightCloseTimer.current); setRightClosing(false); setRightCollapsed(false); };
+  useEffect(() => () => { clearTimeout(leftCloseTimer.current); clearTimeout(rightCloseTimer.current); }, []);
   const [tlState, setTlState] = useState("slim");        // 'hidden' | 'slim' | 'full'
   const [tlDragH, setTlDragH] = useState(null);          // live px height while dragging the handle, else null
   const [palFor, setPalFor] = useState(null);            // which field's "+ terms" popover is open, or null
@@ -1385,6 +1473,144 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const routeTarget = sel || entries.find((e) => e.c.id === draftTarget) || null;
   const frameSrc = (f) => (f && f.thumbId ? thumbs[f.thumbId] : (f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null));
   activeRef.current = active;
+
+  // ---- Fixer -- desktop port of LoomMobile's own seventh increment (2026-08-03), itself a
+  // verbatim port of gallery/src/components/FixTab.jsx's real, already-shipped box-drawing
+  // (same FIX_COLORS/FIX_MIN_PX/FIX_MAX_BOXES/scaleFixBoxes module-scope constants, same
+  // paint()/onDown/onMove/onUp math). The real submit path (genFixState/setGenFixState/
+  // genFix) already existed on useGenerationPipeline's own return value and was already
+  // computed every render in App() -- it just wasn't threaded into this component's props before
+  // this fix (2026-08-04, closing the design-fidelity punch list's "Edit tab has no Fixer or
+  // Enhance sub-tabs at all" item). No new backend, no new pipeline -- purely wiring +
+  // this tab's own canvas UI, same as LoomMobile already proved out.
+  const [editSub, setEditSub] = useState("edit");   // 'edit' | 'fixer' | 'enhance'
+  const [fixTag, setFixTag] = useState("face");
+  const [fixBoxes, setFixBoxes] = useState([]);
+  const fixImgRef = useRef(null);
+  const fixCanvasRef = useRef(null);
+  const fixDragRef = useRef(null);
+  const [genFixPrice, setGenFixPrice] = useState({});
+  useEffect(() => {
+    setFixBoxes([]);
+  }, [active && active.c.id, active && active.c.openFrame && active.c.openFrame.mediaId]);
+  const fixPaint = useCallback(() => {
+    const cvs = fixCanvasRef.current, img = fixImgRef.current;
+    if (!cvs || !img) return;
+    const w = img.clientWidth, h = img.clientHeight;
+    if (!w || !h) return;
+    if (cvs.width !== w || cvs.height !== h) { cvs.width = w; cvs.height = h; }
+    const ctx = cvs.getContext("2d");
+    ctx.clearRect(0, 0, w, h);
+    const draw = (b) => {
+      ctx.strokeStyle = FIX_COLORS[b.tag] || FIX_COLORS.face;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(b.x, b.y, b.w, b.h);
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.font = "11px system-ui";
+      ctx.fillText(b.tag, b.x + 3, b.y + 13);
+    };
+    fixBoxes.forEach(draw);
+    if (fixDragRef.current) draw({ ...fixDragRef.current, tag: fixTag });
+  }, [fixBoxes, fixTag]);
+  useEffect(() => { fixPaint(); }, [fixPaint]);
+  useEffect(() => {
+    const onResize = () => fixPaint();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [fixPaint]);
+  const fixRel = (e) => {
+    const r = fixCanvasRef.current.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+  const fixDown = (e) => {
+    if (e.button !== 0 || !(active && active.c.openFrame && active.c.openFrame.mediaId)) return;
+    const p = fixRel(e);
+    fixDragRef.current = { x: p.x, y: p.y, w: 0, h: 0, ox: p.x, oy: p.y };
+    e.preventDefault();
+  };
+  const fixMove = (e) => {
+    if (!fixDragRef.current) return;
+    const p = fixRel(e);
+    const d = fixDragRef.current;
+    fixDragRef.current = {
+      ...d,
+      x: Math.min(d.ox, p.x), y: Math.min(d.oy, p.y),
+      w: Math.abs(p.x - d.ox), h: Math.abs(p.y - d.oy),
+    };
+    fixPaint();
+  };
+  const fixUp = () => {
+    const d = fixDragRef.current;
+    fixDragRef.current = null;
+    if (!d) return;
+    if (d.w > FIX_MIN_PX && d.h > FIX_MIN_PX) {
+      if (fixBoxes.length >= FIX_MAX_BOXES) {
+        if (window.Toast) {
+          window.Toast.show({
+            kind: "err", title: "That's the limit",
+            msg: "A Fix carries at most " + FIX_MAX_BOXES + " boxes — the rest would be dropped server-side.",
+          });
+        }
+      } else {
+        setFixBoxes((old) => old.concat([{ x: d.x, y: d.y, w: d.w, h: d.h, tag: fixTag }]));
+      }
+    }
+    fixPaint();
+  };
+  // Debounced, read-only /api/price preview -- same shape as LoomMobile's own, mode:"fix"
+  // always comes back free:false server-side (a Fix can never be card-covered), matching
+  // FixTab.jsx's own cost badge.
+  useEffect(() => {
+    if (tab !== "Edit" || editSub !== "fixer" || !active) return;
+    const id = active.c.id;
+    const src = active.c.openFrame && active.c.openFrame.mediaId;
+    if (!src || !fixBoxes.length) { setGenFixPrice((s) => ({ ...s, [id]: null })); return; }
+    setGenFixPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
+    let live = true;
+    const t = setTimeout(() => {
+      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) }) })
+        .then((r) => r.json()).then((pr) => { if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr } })); })
+        .catch(() => { if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr: null } })); });
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, editSub, active && active.c.id, active && active.c.openFrame && active.c.openFrame.mediaId, fixBoxes]);
+
+  // ---- Filter compare -- desktop port of LoomMobile's own sixth increment (2026-08-03).
+  // Real, shared, offline art-filter library (static/mg-art-filters.js) -- PixAI's own 7
+  // gradient-overlay recipes plus this app's own 5, composited entirely client-side (no
+  // network call, no credit spend), same AF.groups()/AF.get()/AF.renderSwatch()/
+  // AF.applyPreview()/AF.clearPreview() API LoomMobile already uses. Genuinely persists via
+  // the same `patch` every other Generate field writes through -- no new endpoint.
+  const AF = typeof window !== "undefined" ? window.MgArtFilters : null;
+  const [fcOpen, setFcOpen] = useState(false);
+  const [fcActive, setFcActive] = useState(null);
+  const [fcStrength, setFcStrength] = useState(1);
+  const [fcAngle, setFcAngle] = useState(180);
+  const fcStageRef = useRef(null);
+  const fcImgRef = useRef(null);
+  const openFilterCompare = () => {
+    if (!active) return;
+    setFcActive(active.c.filter || null);
+    setFcStrength(active.c.filterStrength != null ? active.c.filterStrength : 1);
+    setFcAngle(active.c.filterAngle != null ? active.c.filterAngle : 180);
+    setFcOpen(true);
+  };
+  const closeFilterCompare = () => setFcOpen(false);
+  const fcClear = () => { setFcActive(null); patch((cc) => ({ ...cc, filter: null })); };
+  const fcSave = () => {
+    patch((cc) => ({ ...cc, filter: fcActive, filterStrength: fcStrength, filterAngle: fcAngle }));
+    setFcOpen(false);
+  };
+  useEffect(() => {
+    if (!fcOpen || !AF || !fcStageRef.current) return;
+    const host = fcStageRef.current;
+    AF.clearPreview(host);
+    if (fcActive) AF.applyPreview(host, fcActive, { strength: fcStrength, angle: fcAngle });
+    return () => { AF.clearPreview(host); };
+  }, [fcOpen, fcActive, fcStrength, fcAngle, AF]);
+
   // D-12 increments 2-4: debounced read-only price checks feeding the three badges declared
   // above. Each depends only on primitives (never the whole active.c / project.assets object),
   // so an unrelated re-render -- a poll tick, another tab's state -- doesn't reset the
@@ -2190,27 +2416,99 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       const ge = genEditState[active.c.id] || {};
       const busyE = ge.phase === "submitting" || ge.phase === "running";
       const src = active.c.openFrame && active.c.openFrame.mediaId;
+      const gf = genFixState[active.c.id] || {};
+      const busyF = gf.phase === "submitting" || gf.phase === "running";
+      const fixPriceEntry = genFixPrice[active.c.id];
       tabBody = (
         <div>
-          <label className="lv-lab">Source — {sel ? "this shot's" : "the draft's"} open frame</label>
-          {src ? <img className="lv-editsrc" src={"/thumbs/" + src + ".jpg"} alt="source" />
-               : <div className="lv-ph">No open-frame image yet — {sel ? <>route one from the <b>Image</b> tab, or </> : null}pick it into the open frame above.</div>}
-          <label className="lv-lab">Edit instruction</label>
-          <textarea className="lv-ta" value={active.c.editPrompt || ""} placeholder="e.g. make it night, add rain, warmer key light…"
-            onChange={(ev) => patch((c) => ({ ...c, editPrompt: ev.target.value }))} />
-          <mg-cost-badge ref={editCostRef} hint="Add a source image and instruction to see the cost." card-label="an Edit card"></mg-cost-badge>
-          <button className="lv-go" disabled={busyE || !src} onClick={() => genEdit(active)}>{busyE ? (ge.msg || "editing…") : "✦ Edit the open frame"}</button>
-          {ge.phase === "error" && <div className="lv-gerr">{ge.msg}</div>}
-          {ge.mid && (
-            <div className="lv-imgresult">
-              <img src={"/thumbs/" + ge.mid + ".jpg"} alt="result" />
-              <div className="lv-route"><span className="lv-dim">route &#8594;</span>
-                <button className={"lv-routebtn" + (ge.routed === "open" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "open", active.c.id)}>open frame</button>
-                <button className={"lv-routebtn" + (ge.routed === "close" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "close", active.c.id)}>close frame</button>
-                <button className={"lv-routebtn" + (ge.routed === "cast" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, routeTarget || active, "cast", active.c.id)}>cast</button>
+          {/* Edit/Fixer/Enhance sub-strip -- The Loom.dc.html's editSubChips, ported from
+              LoomMobile's own already-shipped Edit/Fixer/Enhance strip verbatim (same three
+              sub-screens, same underlying real pipelines). Closes the design-fidelity punch
+              list's "Edit tab has no Fixer or Enhance sub-tabs at all (desktop-only gap)"
+              item -- 2026-08-04. */}
+          <div className="lv-tabs" style={{ marginBottom: 9 }}>
+            <span className={"lv-tab" + (editSub === "edit" ? " on" : "")} onClick={() => setEditSub("edit")}>Edit</span>
+            <span className={"lv-tab" + (editSub === "fixer" ? " on" : "")} onClick={() => setEditSub("fixer")}>Fixer</span>
+            <span className={"lv-tab" + (editSub === "enhance" ? " on" : "")} onClick={() => setEditSub("enhance")}>Enhance</span>
+          </div>
+
+          {editSub === "edit" && (
+            <>
+              <label className="lv-lab">Source — {sel ? "this shot's" : "the draft's"} open frame</label>
+              {src ? <img className="lv-editsrc" src={"/thumbs/" + src + ".jpg"} alt="source" />
+                   : <div className="lv-ph">No open-frame image yet — {sel ? <>route one from the <b>Image</b> tab, or </> : null}pick it into the open frame above.</div>}
+              <label className="lv-lab">Edit instruction</label>
+              <textarea className="lv-ta" value={active.c.editPrompt || ""} placeholder="e.g. make it night, add rain, warmer key light…"
+                onChange={(ev) => patch((c) => ({ ...c, editPrompt: ev.target.value }))} />
+              <mg-cost-badge ref={editCostRef} hint="Add a source image and instruction to see the cost." card-label="an Edit card"></mg-cost-badge>
+              <button className="lv-go" disabled={busyE || !src} onClick={() => genEdit(active)}>{busyE ? (ge.msg || "editing…") : "✦ Edit the open frame"}</button>
+              {ge.phase === "error" && <div className="lv-gerr">{ge.msg}</div>}
+              {ge.mid && (
+                <div className="lv-imgresult">
+                  <img src={"/thumbs/" + ge.mid + ".jpg"} alt="result" />
+                  <div className="lv-route"><span className="lv-dim">route &#8594;</span>
+                    <button className={"lv-routebtn" + (ge.routed === "open" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "open", active.c.id)}>open frame</button>
+                    <button className={"lv-routebtn" + (ge.routed === "close" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "close", active.c.id)}>close frame</button>
+                    <button className={"lv-routebtn" + (ge.routed === "cast" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, routeTarget || active, "cast", active.c.id)}>cast</button>
+                  </div>
+                  {ge.routed && <div className="lv-ok2">&#10003; sent to {ge.routed}</div>}
+                </div>)}
+            </>
+          )}
+
+          {editSub === "fixer" && (
+            <>
+              <label className="lv-lab">Source — {sel ? "this shot's" : "the draft's"} open frame</label>
+              {src ? (
+                <div className="lv-fixwrap">
+                  <img ref={fixImgRef} src={"/full/" + encodeURIComponent(src)} alt="source" onLoad={fixPaint} draggable={false} />
+                  <canvas ref={fixCanvasRef}
+                    onPointerDown={fixDown} onPointerMove={fixMove} onPointerUp={fixUp} onPointerLeave={fixUp} />
+                </div>
+              ) : <div className="lv-ph">No open-frame image yet — {sel ? <>route one from the <b>Image</b> tab, or </> : null}pick it into the open frame above.</div>}
+              {src && (
+                <>
+                  <div className="lv-tabs" style={{ marginTop: 8 }}>
+                    <span className={"lv-tab" + (fixTag !== "hand" ? " on" : "")} onClick={() => setFixTag("face")}>Face</span>
+                    <span className={"lv-tab" + (fixTag === "hand" ? " on" : "")} onClick={() => setFixTag("hand")}>Hand</span>
+                    <button className="lv-mini2" disabled={!fixBoxes.length} onClick={() => setFixBoxes([])}>Clear{fixBoxes.length ? " " + fixBoxes.length : ""}</button>
+                  </div>
+                  <div className="lv-fixhint">Drag a box over the hand or face on the source.</div>
+                </>
+              )}
+              <div className="lv-fixwarn">A fix can't be card-covered — it always spends, and always asks first.</div>
+              <div className="lv-dim" style={{ padding: "4px 2px" }}>
+                {fixPriceEntry && fixPriceEntry.loading ? "checking…"
+                  : fixPriceEntry && fixPriceEntry.pr && typeof fixPriceEntry.pr.cost === "number" ? "≈ " + Number(fixPriceEntry.pr.cost).toLocaleString() + " credits — never card-covered"
+                  : !src ? "Pick a source image first."
+                  : !fixBoxes.length ? "Drag at least one box to see the cost."
+                  : "Couldn't verify the cost — a Fix always spends credits."}
               </div>
-              {ge.routed && <div className="lv-ok2">&#10003; sent to {ge.routed}</div>}
-            </div>)}
+              <button className="lv-go" disabled={busyF || !src || !fixBoxes.length}
+                onClick={() => genFix(active, scaleFixBoxes(fixBoxes, fixImgRef.current))}>
+                {busyF ? (gf.msg || "fixing…") : "✦ Fix " + fixTag}
+              </button>
+              {gf.phase === "error" && <div className="lv-gerr">{gf.msg}</div>}
+              {gf.mid && (
+                <div className="lv-imgresult">
+                  <img src={"/thumbs/" + gf.mid + ".jpg"} alt="result" />
+                  <div className="lv-route"><span className="lv-dim">route &#8594;</span>
+                    <button className={"lv-routebtn" + (gf.routed === "open" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeGen(genFixState, setGenFixState, routeTarget, "open", active.c.id)}>open frame</button>
+                    <button className={"lv-routebtn" + (gf.routed === "close" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeGen(genFixState, setGenFixState, routeTarget, "close", active.c.id)}>close frame</button>
+                    <button className={"lv-routebtn" + (gf.routed === "cast" ? " on" : "")} onClick={() => routeGen(genFixState, setGenFixState, routeTarget || active, "cast", active.c.id)}>cast</button>
+                  </div>
+                  {gf.routed && <div className="lv-ok2">&#10003; sent to {gf.routed}</div>}
+                </div>)}
+            </>
+          )}
+
+          {editSub === "enhance" && (
+            <>
+              <label className="lv-lab">Art filters · free, no generation</label>
+              <button className="lv-openfilters" onClick={openFilterCompare}>&#9680; Open filters</button>
+              <div className="lv-dim" style={{ padding: "6px 2px" }}>Gradient overlays, not AI — applied right in the browser: <b style={{ color: "var(--text)" }}>no credits, no request, works offline</b>.</div>
+            </>
+          )}
         </div>
       );
     }
@@ -2652,44 +2950,130 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       })()}
       {timelineDrawer}
       <div className="lv-shell">
-        <div className={"lv-side left" + (leftCollapsed ? " collapsed" : "") + (!leftCollapsed && leftTab === "cast" && density === "detailed" ? " wide" : "")}>
-          <div className="lv-sidehead">
-            {!leftCollapsed && (
-              <div className="lv-tabs lv-sidetabs">
-                <span className={"lv-tab " + (leftTab === "cast" ? "on" : "")} onClick={() => setLeftTab("cast")}>Cast &amp; assets</span>
-                <span className={"lv-tab " + (leftTab === "footage" ? "on" : "")} onClick={() => setLeftTab("footage")}>Footage</span>
-              </div>
-            )}
-            <button className="lv-col" onClick={() => setLeftCollapsed((v) => !v)} title="collapse">{leftCollapsed ? "▸" : "◂"}</button>
-          </div>
-          {leftCollapsed ? (
-            <div className="lv-railicons">
-              <button className={"lv-railbtn" + (leftTab === "cast" ? " on" : "")} title="Cast & assets" onClick={() => { setLeftTab("cast"); setLeftCollapsed(false); }}>&#128100;</button>
-              <button className={"lv-railbtn" + (leftTab === "footage" ? " on" : "")} title="Footage" onClick={() => { setLeftTab("footage"); setLeftCollapsed(false); }}>&#127916;</button>
-            </div>
-          ) : (
-            <div className="lv-cast">{leftTab === "cast" ? castList : footageList}</div>
-          )}
+        <div className="lv-rail">
+          <button className={"lv-railbtn" + (!leftCollapsed && leftTab === "cast" ? " on" : "")} title="Cast & assets"
+            onClick={() => { setLeftTab("cast"); openLeftPanel(); }}>&#128100;</button>
+          <button className={"lv-railbtn" + (!leftCollapsed && leftTab === "footage" ? " on" : "")} title="Footage"
+            onClick={() => { setLeftTab("footage"); openLeftPanel(); }}>&#127916;</button>
         </div>
+
+        {(!leftCollapsed || leftClosing) && (
+          <>
+            <div className={"lv-backdrop" + (leftClosing ? " closing" : "")} onClick={closeLeftPanel} />
+            <div className={"lv-panel left" + (leftClosing ? " closing" : "") + (leftTab === "cast" && density === "detailed" ? " wide" : "")}>
+              <div className="lv-sidehead">
+                <div className="lv-tabs lv-sidetabs">
+                  <span className={"lv-tab " + (leftTab === "cast" ? "on" : "")} onClick={() => setLeftTab("cast")}>Cast &amp; assets</span>
+                  <span className={"lv-tab " + (leftTab === "footage" ? "on" : "")} onClick={() => setLeftTab("footage")}>Footage</span>
+                </div>
+                <button className="lv-col" onClick={closeLeftPanel} title="collapse">&#8249;</button>
+              </div>
+              <div className="lv-cast">{leftTab === "cast" ? castList : footageList}</div>
+            </div>
+          </>
+        )}
 
         <div className="lv-boardcol">{board}</div>
 
-        <div className={"lv-side right" + (rightCollapsed ? " collapsed" : "")}>
-          <div className="lv-sidehead">
-            <button className="lv-col" onClick={() => setRightCollapsed((v) => !v)} title="collapse">{rightCollapsed ? "◂" : "▸"}</button>
-            {!rightCollapsed && (
-              <div className="lv-tabs lv-sidetabs">{["Image", "Edit", "Reference", "Video"].map((t) => (
-                <span key={t} className={"lv-tab " + (t === tab ? "on" : "")} onClick={() => setTab(t)}>{t}</span>))}</div>
-            )}
-          </div>
-          {rightCollapsed ? (
-            <div className="lv-railicons">
-              {GEN_ICONS.map(([t, ic]) => (<button key={t} className={"lv-railbtn" + (t === tab ? " on" : "")} title={t}
-                onClick={() => { setTab(t); setRightCollapsed(false); }}>{ic}</button>))}
+        {(!rightCollapsed || rightClosing) && (
+          <>
+            <div className={"lv-backdrop" + (rightClosing ? " closing" : "")} onClick={closeRightPanel} />
+            <div className={"lv-panel right" + (rightClosing ? " closing" : "")}>
+              <div className="lv-sidehead">
+                <button className="lv-col" onClick={closeRightPanel} title="collapse">&#8250;</button>
+                <div className="lv-tabs lv-sidetabs">{["Image", "Edit", "Reference", "Video"].map((t) => (
+                  <span key={t} className={"lv-tab " + (t === tab ? "on" : "")} onClick={() => setTab(t)}>{t}</span>))}</div>
+              </div>
+              {gen}
             </div>
-          ) : gen}
+          </>
+        )}
+
+        <div className="lv-rail">
+          {GEN_ICONS.map(([t, ic]) => (<button key={t} className={"lv-railbtn" + (!rightCollapsed && t === tab ? " on" : "")} title={t}
+            onClick={() => { setTab(t); openRightPanel(); }}>{ic}</button>))}
         </div>
       </div>
+      {/* ---- Filter compare -- The Loom.dc.html's own filterCompareOpen modal (a centered
+          card, unlike LoomMobile's full-page screen -- desktop's real design spec, not a
+          reused mobile layout). Opens from Generate's Edit tab -> Enhance sub-tab. */}
+      {fcOpen && active && (() => {
+        const c = active.c;
+        const fcSrc = frameSrc(c.openFrame);
+        const fcGroups = AF ? AF.groups() : [];
+        const activeRec = fcActive && AF ? (AF.get(fcActive) || {}) : null;
+        const activeName = activeRec ? (activeRec.name || fcActive) : null;
+        return (
+          <>
+            <div className="lv-fc-veil" onClick={closeFilterCompare} />
+            <div className="lv-fc-host">
+              <div className="lv-fc-card">
+                <div className="lv-fc-head">
+                  <div className="lv-fc-title">&#9680; Art filters</div>
+                  <span className="lv-dim" style={{ flex: "1 1 auto" }} />
+                  <button type="button" className="lv-col" onClick={closeFilterCompare} title="Close">&#10005;</button>
+                </div>
+                {!AF ? (
+                  <div className="lv-ph">The art-filter library did not load on this page.</div>
+                ) : (
+                  <div className="lv-fc-grid">
+                    <div className="lv-fc-previewcol">
+                      <div className="lv-fc-previewbox">
+                        {fcSrc ? <img className="lv-fc-img" src={fcSrc} alt="original" /> : <div className="lv-ph">No open-frame image yet</div>}
+                      </div>
+                      <div className="lv-dim" style={{ textAlign: "center", paddingTop: 6 }}>Original</div>
+                    </div>
+                    <div className="lv-fc-previewcol">
+                      <div className="lv-fc-previewbox">
+                        <div className="lv-fc-stage" ref={fcStageRef}>
+                          {fcSrc ? <img ref={fcImgRef} className="lv-fc-img" src={fcSrc} alt="preview" /> : <div className="lv-ph">No open-frame image yet</div>}
+                        </div>
+                      </div>
+                      <div className="lv-dim" style={{ textAlign: "center", paddingTop: 6 }}>Preview &middot; <b style={{ color: "var(--text)" }}>{activeName || "no filter"}</b></div>
+                    </div>
+                    <div className="lv-fc-side">
+                      {fcGroups.map((g) => (
+                        <div key={g.source}>
+                          <div className="lv-fc-grouplabel">{g.label}</div>
+                          <div className="lv-fc-swatchgrid">
+                            {g.ids.map((id) => {
+                              const rec = AF.get(id) || {};
+                              return (
+                                <button type="button" key={id} className={"lv-fc-tile" + (fcActive === id ? " on" : "")}
+                                  onClick={() => setFcActive((cur) => (cur === id ? null : id))}
+                                  title={(rec.name || id) + " · free, applied in your browser" + (rec.note ? " — " + rec.note : "")}>
+                                  <div className="lv-fc-swatch"
+                                    ref={(el) => { if (el && !el._mgafPainted) { AF.renderSwatch(el, id); el._mgafPainted = true; } }} />
+                                  <div className="lv-fc-name">{(rec.name || id).replace("Filter ", "")}</div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                      <div>
+                        <div className="lv-lab" style={{ margin: "4px 0" }}>Strength <b style={{ color: "var(--text)" }}>{Number(fcStrength).toFixed(2)}</b></div>
+                        <input type="range" min="0" max="1" step="0.05" className="lv-fc-range"
+                          value={fcStrength} onChange={(ev) => setFcStrength(parseFloat(ev.target.value))} />
+                      </div>
+                      <div>
+                        <div className="lv-lab" style={{ margin: "4px 0" }}>Angle <b style={{ color: "var(--text)" }}>{fcAngle}&deg;</b></div>
+                        <input type="range" min="0" max="360" step="1" className="lv-fc-range"
+                          value={fcAngle} onChange={(ev) => setFcAngle(parseInt(ev.target.value, 10))} />
+                      </div>
+                      <div className="lv-fc-btnrow">
+                        <button type="button" className="lv-mini2" onClick={fcClear}>No filter</button>
+                        <button type="button" className="lv-go" style={{ padding: "9px 0" }} onClick={fcSave}>Save</button>
+                      </div>
+                      <div className="lv-dim" style={{ textAlign: "center" }}>{activeName || "No filter"} &middot; nothing sent, nothing spent</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        );
+      })()}
       {deepFocus && (() => {
         // deepFocus itself is a one-time snapshot captured at double-click time -- setCard's
         // patches are immutable, so deepFocus.c never updates. Render from the LIVE entry
@@ -4783,6 +5167,30 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
               const refs = (project.assets || []).filter((a) => a.kind === "image" && a.mediaId);
               return (
                 <>
+                  {/* Opening/Closing frame pair -- Loom Mobile.dc.html's onRefTab block shows
+                      this same pair (with the same dfHasPrev/dfInheritPrev "inherit prev
+                      close" affordance) at the top of the Reference tab, not just inside Deep
+                      Focus's own body. Real gap, closed 2026-08-04 (session 2) by reusing the
+                      exact same FrameSlot calls Deep Focus's body already makes above --
+                      same component, same props shape, not a second implementation. */}
+                  <div className="lm-frow">
+                    <div className="lm-fcol">
+                      <FrameSlot which="open" frame={c.openFrame} liveTag={positionTag(dfLive, project, imgSrc, "openFrame")}
+                        discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                        onPatch={(p) => dfPatchFrame("openFrame", p)}
+                        extraBtn={dfPrevEntry ? (
+                          <button type="button" className="lm-inheritbtn" onClick={dfInheritPrev} disabled={dfHandoff === "wip"}>
+                            {dfHandoff === "wip" ? "✂ splicing…" : dfHandoff === "err" ? "✂ splice failed — retry"
+                              : dfPrevEntry.c.resultMid ? `✂ splice ${dfPrevEntry.code}'s last frame` : `↳ inherit ${dfPrevEntry.code} close`}
+                          </button>
+                        ) : null} />
+                    </div>
+                    <div className="lm-fcol">
+                      <FrameSlot which="close" frame={c.closeFrame} liveTag={positionTag(dfLive, project, imgSrc, "closeFrame")}
+                        discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                        onPatch={(p) => dfPatchFrame("closeFrame", p)} />
+                    </div>
+                  </div>
                   <span className="lm-microlab">References — cast @image members ({refs.length})</span>
                   {refs.length ? (
                     <div className="lm-refstrip">{refs.map((a) => (<img key={a.id} src={"/thumbs/" + a.mediaId + ".jpg"} title={a.tag} alt="" />))}</div>
@@ -6548,6 +6956,7 @@ export default function App() {
           modelDefaults={modelDefaults} setModelDefaults={setModelDefaults}
           genImage={genImage} routeImg={routeImg}
           genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState} genEdit={genEdit} genRef={genRef} routeGen={routeGen}
+          genFixState={genFixState} setGenFixState={setGenFixState} genFix={genFix}
           projectApi={projectApi} playSequence={playSequence} exportCut={exportCut}
           batching={batching} batchGenerate={batchGenerate} batchTally={batchTally}
           addRef={addRef} setRef={setRef} delRef={delRef}

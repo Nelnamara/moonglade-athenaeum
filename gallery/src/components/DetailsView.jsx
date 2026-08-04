@@ -103,11 +103,21 @@ function playReveal(root) {
    onto the lightbox -- matching classic's genuinely separate page.
 
    Design pass (locked, docs/DECISIONS.md "Direction C"): a museum-placard
-   composition -- the art framed beside a record, one confident headline instead
-   of a raw field grid, a quiet curated fact list with a "Full record" disclosure
-   for the rest, actions demoted to a footer strip. Nothing here drops capability:
-   every field and every action from the original port is still reachable, just
-   organized by how often it's actually wanted.
+   composition -- the art framed beside a record, one confident headline, actions
+   demoted to a footer strip. Direction C's own entry (restored in full in
+   docs/DECISIONS.md after going missing from the live file for a while -- it was
+   never actually lost, a prior session just mis-cited which prune removed it) is
+   a motion/composition decision, not a field-hiding one: it never called for a
+   "Full record" disclosure hiding specific fields, and neither classic
+   (moonglade_gallery.py's DETAIL_HTML) nor the current Image Details.dc.html hide
+   anything -- both show every field flat. The disclosure toggle that used to live
+   here was a later implementer's own invention, corrected 2026-08-04 (owner: "We
+   are not displaying metrics in details?"). All fields are flat and always
+   visible again, per-row copy icons matching Image Details.dc.html:95-97's own
+   row.copyable pattern instead of the footer-only copy buttons that stood in for
+   them. Nothing here drops capability: every field and every action from the
+   original port is still reachable, just organized by how often it's actually
+   wanted.
 
    Data comes from /api/next/detail/<mid>, which mirrors classic's detail()
    route: the full catalog row, plus prev_id/next_id computed under the CURRENT
@@ -123,7 +133,6 @@ export default function DetailsView({
     () => (typeof localStorage !== "undefined" && localStorage.getItem("gallery_focus") === "1")
   );
   const [mediaOk, setMediaOk] = useState(true);
-  const [fullRecord, setFullRecord] = useState(false);
   // Image Details.dc.html:127-139's SIMILAR section -- entirely absent on desktop before
   // this (mobile already has it working with real /api/similar data). Reusing the exact
   // real SimilarModal.jsx already proven by Lightbox.jsx's own "✧ Similar" button, not a
@@ -144,11 +153,10 @@ export default function DetailsView({
     handleRate,
   } = useImageDetails({ mediaId, advParams, onRate, onDeleted });
 
-  // this component's OWN local resets on navigate (mediaOk/fullRecord aren't
-  // shared with the mobile surface -- see useImageDetails.js for what is).
+  // this component's OWN local reset on navigate (mediaOk isn't shared with the
+  // mobile surface -- see useImageDetails.js for what is).
   useEffect(() => {
     setMediaOk(true);
-    setFullRecord(false);
   }, [mediaId]);
 
   useEffect(() => {
@@ -280,7 +288,11 @@ export default function DetailsView({
 
             <ul className="p-facts">
               {row.loras ? <li className="p-fact"><span>LoRA</span><b>{row.loras}</b></li> : null}
-              <li className="p-fact"><span>Seed</span><b className="mono">{row.seed || "—"}</b></li>
+              <li className={"p-fact" + (copied === "seed" ? " copied" : "")}>
+                <span>Seed</span><b className="mono">{row.seed || "—"}</b>
+                {row.seed ? <button type="button" className="p-copy" title="Copy" aria-label="Copy Seed"
+                  onClick={() => copy(row.seed, "seed")}>⧉</button> : null}
+              </li>
               {row.is_published === "1" ? (
                 <li className="p-fact">
                   <span>Engagement</span>
@@ -290,6 +302,29 @@ export default function DetailsView({
                 </li>
               ) : null}
               {nsfw ? <li className="p-fact"><span>Content</span><b>{nsfw}</b></li> : null}
+              {/* Steps/Sampler/CFG Scale/Clip Skip/Task ID/Media ID/Filename below used to
+                  sit behind a "Full record" toggle -- restored flat and always-visible,
+                  matching classic and Image Details.dc.html:376-386 exactly (2026-08-04
+                  correction, see this file's own header comment). */}
+              <li className="p-fact"><span>Steps</span><b>{row.steps || "—"}</b></li>
+              <li className="p-fact"><span>Sampler</span><b>{row.sampler || "—"}</b></li>
+              <li className="p-fact"><span>CFG Scale</span><b>{row.cfg_scale || "—"}</b></li>
+              {row.clip_skip ? <li className="p-fact"><span>Clip Skip</span><b>{row.clip_skip}</b></li> : null}
+              <li className={"p-fact" + (copied === "task" ? " copied" : "")}>
+                <span>Task ID</span><b className="mono dim">{row.task_id}</b>
+                {row.task_id ? <button type="button" className="p-copy" title="Copy" aria-label="Copy Task ID"
+                  onClick={() => copy(row.task_id, "task")}>⧉</button> : null}
+              </li>
+              <li className={"p-fact" + (copied === "mid" ? " copied" : "")}>
+                <span>Media ID</span><b className="mono dim">{row.media_id}</b>
+                <button type="button" className="p-copy" title="Copy" aria-label="Copy Media ID"
+                  onClick={() => copy(row.media_id, "mid")}>⧉</button>
+              </li>
+              <li className={"p-fact" + (copied === "fname" ? " copied" : "")}>
+                <span>Filename</span><b className="mono dim">{row.filename}</b>
+                {row.filename ? <button type="button" className="p-copy" title="Copy" aria-label="Copy Filename"
+                  onClick={() => copy(row.filename, "fname")}>⧉</button> : null}
+              </li>
             </ul>
 
             {(tagList.length || collectionList.length) ? (
@@ -299,35 +334,14 @@ export default function DetailsView({
               </div>
             ) : null}
 
-            <button className="p-expand" onClick={() => setFullRecord((v) => !v)}>
-              {fullRecord ? "Hide the full record ▴" : "Full record ▾"}
-            </button>
-            {fullRecord && (
-              <ul className="p-facts p-facts-full">
-                <li><span>Steps</span><b>{row.steps || "—"}</b></li>
-                <li><span>Sampler</span><b>{row.sampler || "—"}</b></li>
-                <li><span>CFG Scale</span><b>{row.cfg_scale || "—"}</b></li>
-                {row.clip_skip ? <li><span>Clip Skip</span><b>{row.clip_skip}</b></li> : null}
-                <li><span>Task ID</span><b className="mono dim">{row.task_id}</b></li>
-                <li><span>Media ID</span><b className="mono dim">{row.media_id}</b></li>
-                <li><span>Filename</span><b className="mono dim">{row.filename}</b></li>
-              </ul>
-            )}
-
             <div className="p-footer">
               <a className="btn" href={"/full/" + encodeURIComponent(row.media_id) + "?dl=1"}>⬇ Download</a>
               <a className="btn" href={"/full/" + encodeURIComponent(row.media_id)} target="_blank" rel="noreferrer">Open Full Size</a>
               {row.url ? <a className="btn" href={row.url} target="_blank" rel="noreferrer">Open on PixAI</a> : null}
               <button className="btn" onClick={() => copy(promptText, "prompt")}>{copied === "prompt" ? "Copied!" : "Copy Prompt"}</button>
-              <button className="btn" onClick={() => copy(row.media_id, "mid")}>{copied === "mid" ? "Copied!" : "Copy media id"}</button>
-              {/* Image Details.dc.html:95-97 gives Seed/Task ID/Filename their own copy
-                  affordance too (mobile has it per-row); Direction C's own idiom demotes
-                  every action to this footer strip rather than inline icons, so these join
-                  Copy Prompt/Copy media id here instead of reintroducing per-row buttons
-                  the locked redesign deliberately moved away from. */}
-              {row.seed ? <button className="btn" onClick={() => copy(row.seed, "seed")}>{copied === "seed" ? "Copied!" : "Copy Seed"}</button> : null}
-              {row.task_id ? <button className="btn" onClick={() => copy(row.task_id, "task")}>{copied === "task" ? "Copied!" : "Copy Task ID"}</button> : null}
-              {row.filename ? <button className="btn" onClick={() => copy(row.filename, "fname")}>{copied === "fname" ? "Copied!" : "Copy Filename"}</button> : null}
+              {/* Seed/Task ID/Media ID/Filename each have their own per-row ⧉ copy icon
+                  now (Image Details.dc.html:95-97's row.copyable pattern) -- removed from
+                  here 2026-08-04 to avoid duplicating the same action in two places. */}
               <button className="btn" onClick={() => window.print()}>🖨 Print</button>
               <button className="btn" onClick={() => setSimilarOpen(true)}>✧ Similar</button>
               {row.is_video !== "1" && (
