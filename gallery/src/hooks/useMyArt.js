@@ -30,11 +30,13 @@ export default function useMyArt() {
 
   const totals = d ? d.totals || {} : {};
   const items = d ? d.items || [] : [];
+  // Frontend Gallery.dc.html:2425-2426 -- design order is PUBLISHED, VIEWS (accent-
+  // highlighted), LIKES, COMMENTS; was PUBLISHED, LIKES, COMMENTS, VIEWS with no accent.
   const stats = d ? [
     { value: fmt(totals.count), label: "PUBLISHED" },
+    { value: d.views_synced ? fmt(totals.views_top) : "—", label: "VIEWS (TOP " + items.length + ")", accent: true },
     { value: fmt(totals.likes), label: "TOTAL LIKES" },
     { value: fmt(totals.comments), label: "COMMENTS" },
-    { value: d.views_synced ? fmt(totals.views_top) : "—", label: "VIEWS (TOP " + items.length + ")" },
   ] : [];
 
   const maxViews = items.length ? Math.max(1, ...items.map((r) => r.views || 0)) : 1;
