@@ -72,7 +72,7 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
     summary, summaryErr, skins, activeSkin, pickSkin,
     fetchSummary, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
-    dedupDone,
+    dedupDone, organizeRes,
     testPullN, setTestPullN,
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,
@@ -252,6 +252,11 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                               <div className="mgcp-tendlbl">Organize into month folders</div>
                               <div className="mgcp-chips">
                                 <ActionChip spec={actionSpec("organize-dry")} armed={confirmArm === "organize-dry"} onRun={() => runAction("organize-dry")} />
+                                <span className="mgcp-arr">→</span>
+                                {/* Control Panel.dc.html:117 -- {{ organizeRes }}, real
+                                    output parsed from cmd_organize()'s own dry-run line
+                                    (useControlPanel.js), not a fabricated preview count. */}
+                                <span className="mgcp-res">{organizeRes || "—"}</span>
                                 <span className="mgcp-arr">→</span>
                                 <ActionChip spec={actionSpec("organize")} dgr armed={confirmArm === "organize"} onRun={() => runAction("organize")} />
                                 <ActionChip spec={actionSpec("undo-organize")} dgr label="Undo" armed={confirmArm === "undo-organize"} onRun={() => runAction("undo-organize")} />
