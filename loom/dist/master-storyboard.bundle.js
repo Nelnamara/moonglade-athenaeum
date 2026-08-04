@@ -3206,6 +3206,18 @@ ${"=".repeat(48)}
   cursor:pointer;border:1px solid var(--surface1);background:rgba(33,31,58,.6);color:var(--text);}
 .lm-fc-btn.primary{border-color:rgba(255,255,255,.3);background:var(--accent);color:var(--base);}
 .lm-fc-spendnote{font-size:10px;color:var(--overlay0);text-align:center;}
+
+/* ---- Kebab actions sheet (completeness pass, 2026-08-03) -- the locked design's own
+   card.onKebab/actionsOpen/actMoveUp/actMoveDown/actDuplicate/actDelete (Loom Mobile.dc.html),
+   the one board-card affordance never wired into this view before now. Reuses .lm-scrim/
+   .lm-sheet/.lm-sheethandle/.lm-sheetclose verbatim -- the Cast & assets sheet's own bottom-
+   sheet convention -- only the row styling below (matching the design's own actionRowStyle/
+   actionRowDangerStyle) is new. */
+.lm-kebab{flex:none;width:30px;height:30px;display:flex;align-items:center;justify-content:center;
+  font-size:16px;color:var(--overlay0);cursor:pointer;background:none;border:none;padding:0;}
+.lm-actionrow{display:block;width:100%;text-align:left;padding:12px 4px;font:13px/1.3 system-ui;
+  color:var(--text);border:none;border-bottom:1px solid rgba(255,255,255,.06);background:none;cursor:pointer;}
+.lm-actionrow.danger{color:var(--red);border-bottom:none;}
 `;
   function LoomMobile({
     project,
@@ -3237,6 +3249,16 @@ ${"=".repeat(48)}
     // same real splitCardAt-backed mutator LoomV2's own ShotPreview.onSplit already calls
     // (useShotMutations) -- not a re-derivation of the split logic.
     splitShot,
+    // Completeness-pass addition (2026-08-03): the per-shot-card kebab (⋮) actions sheet
+    // (Move up / Move down / Duplicate / Delete) was fully specified in the locked design
+    // (Loom Mobile.dc.html: onKebab/actionsOpen/actMoveUp/actMoveDown/actDuplicate/actDelete)
+    // but never wired into this component -- moveCard/dupCard/delCard are the EXACT same real
+    // mutators LoomV2's own board-card buttons already call (useShotMutations, App()), threaded
+    // through for the first time here rather than re-derived. delCard's real window.confirm
+    // gate is preserved verbatim at its one call site below, not dropped for mobile.
+    moveCard,
+    dupCard,
+    delCard,
     // Not read by earlier increments' Generate-less screens -- lifted to App() (see LoomV2's own
     // prop-list comment) and threaded through here so a still-in-progress draft already
     // survives toggling between this view and LoomV2.
@@ -3308,6 +3330,7 @@ ${"=".repeat(48)}
     const [dfHandoff, setDfHandoff] = useState("");
     const [castSheetOpen, setCastSheetOpen] = useState(false);
     const [castSheetTab, setCastSheetTab] = useState("cast");
+    const [actionsOpen, setActionsOpen] = useState(false);
     const [reviewOpen, setReviewOpen] = useState(false);
     const [reviewPlaying, setReviewPlaying] = useState(false);
     const [reviewCropping, setReviewCropping] = useState(false);
@@ -3563,6 +3586,11 @@ ${"=".repeat(48)}
       setReviewPlaying(false);
       setReviewCropping(false);
     };
+    const actionsLive = actionsOpen ? entries.find((x) => x.c.id === selShot) : null;
+    if (actionsOpen && !actionsLive) {
+      setActionsOpen(false);
+    }
+    const closeActions = () => setActionsOpen(false);
     const genTogglePal = (which) => setGenPalFor((p) => p === which ? null : which);
     const genAppendTo = (field, term) => dfPatch((cc) => ({ ...cc, [field]: cc[field] ? cc[field] + ", " + term : term }));
     useEffect(() => {
@@ -3820,9 +3848,67 @@ ${"=".repeat(48)}
             }
           },
           "\u25B6"
+        ), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lm-kebab",
+            title: "More actions for this shot",
+            onClick: (ev) => {
+              ev.stopPropagation();
+              setSelShot(e.c.id);
+              setActionsOpen(true);
+            }
+          },
+          "\u22EE"
         ));
       }), !items.length && /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "No shots yet \u2014 tap + Shot."));
-    }), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-addact", onClick: addAct }, "+ New act"), !project.acts.length && /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "No acts yet \u2014 add one below.")), dfOpen && dfLive && (() => {
+    }), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-addact", onClick: addAct }, "+ New act"), !project.acts.length && /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "No acts yet \u2014 add one below.")), actionsOpen && actionsLive && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lm-scrim", onClick: closeActions }), /* @__PURE__ */ React.createElement("div", { className: "lm-sheet" }, /* @__PURE__ */ React.createElement("div", { className: "lm-sheethandle" }), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "lm-actionrow",
+        onClick: () => {
+          moveCard(actionsLive.a.id, actionsLive.ci, -1);
+          closeActions();
+        }
+      },
+      "\u2191 Move up"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "lm-actionrow",
+        onClick: () => {
+          moveCard(actionsLive.a.id, actionsLive.ci, 1);
+          closeActions();
+        }
+      },
+      "\u2193 Move down"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "lm-actionrow",
+        onClick: () => {
+          dupCard(actionsLive.a.id, actionsLive.c);
+          closeActions();
+        }
+      },
+      "\u29C9 Duplicate"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "lm-actionrow danger",
+        onClick: () => {
+          if (!window.confirm(`Delete shot ${actionsLive.code}${actionsLive.c.title ? ` \u2014 "${actionsLive.c.title}"` : ""}? This can't be undone.`)) return;
+          delCard(actionsLive.a.id, actionsLive.c);
+          closeActions();
+        }
+      },
+      "\u{1F5D1} Delete"
+    ), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-sheetclose", onClick: closeActions }, "Cancel"))), dfOpen && dfLive && (() => {
       const c = dfLive.c;
       return /* @__PURE__ */ React.createElement("div", { className: "lm-df" }, /* @__PURE__ */ React.createElement("div", { className: "lm-df-top" }, /* @__PURE__ */ React.createElement(
         "button",
@@ -5838,6 +5924,9 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         openPick,
         copyShot,
         splitShot,
+        moveCard,
+        dupCard,
+        delCard,
         mobileUI,
         setMobileUI,
         draftCard,

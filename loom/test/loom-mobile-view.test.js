@@ -595,7 +595,14 @@ describe("Image/Edit/Reference tabs (fourth increment, 2026-08-03) -- LoomV2's o
       "genImage() already owns the real /api/generate submit -- LoomMobile must not duplicate it");
     assert.doesNotMatch(loomMobileSrc, /fetch\(["']\/api\/edit["']/,
       "genEdit()/genRef() already own the real submit via runGen() -- LoomMobile must not duplicate it");
-    assert.doesNotMatch(loomMobileSrc, /window\.confirm\(/,
+    // Scoped to the Generate screen's own block, not the whole component -- the completeness-
+    // pass kebab actions sheet (added after this fourth increment) legitimately calls the
+    // REAL window.confirm elsewhere in this file, porting LoomV2's own real delete-confirm
+    // gate verbatim (see that describe block below). This assertion's actual intent is
+    // narrower than "no window.confirm anywhere": Image/Edit/Reference submit specifically
+    // must not re-implement confirmSpend's own gate, so it only inspects Generate's own block.
+    const genBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("genOpen && dfLive && (() => {"));
+    assert.doesNotMatch(genBlock, /window\.confirm\(/,
       "confirmSpend's fail-closed window.confirm gate lives inside genImage/genEdit/genRef themselves -- LoomMobile must not re-implement it");
   });
 
@@ -761,5 +768,156 @@ describe("Filter compare: real live-lookup safety (reuses dfLive, no second 'whi
   test("openFilterCompare guards on dfLive itself, never assumes a shot is selected", () => {
     const openBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("const openFilterCompare = () => {"), loomMobileSrc.indexOf("const closeFilterCompare"));
     assert.match(openBlock, /if \(!dfLive\) return;/);
+  });
+});
+
+// Completeness-pass addition (2026-08-03): the per-shot-card kebab (⋮) actions sheet --
+// Move up / Move down / Duplicate / Delete / Cancel -- was fully specified in the locked
+// design (Loom Mobile.dc.html: onKebab/kebabStyle/actionsOpen/closeActions/actMoveUp/
+// actMoveDown/actDuplicate/actDelete/actionSheetStyle/actionRowDangerStyle) but was never
+// wired into LoomMobile at all across the six increments above -- a real, disclosed gap
+// found in a final completeness pass, closed here. moveCard/dupCard/delCard are the exact
+// same real mutators LoomV2's own board-card buttons already call (useShotMutations, App()),
+// threaded through for the first time; delete keeps the real window.confirm gate.
+describe("Kebab actions sheet: moveCard/dupCard/delCard threaded through, no forked logic", () => {
+  test("LoomMobile's own function signature now receives moveCard/dupCard/delCard", () => {
+    const sigMatch = loomMobileSrc.match(/function LoomMobile\(\{([\s\S]*?)\}\)\s*\{/);
+    assert.ok(sigMatch, "expected to find LoomMobile's function signature");
+    for (const name of ["moveCard", "dupCard", "delCard"]) {
+      assert.match(sigMatch[1], new RegExp(`\\b${name}\\b`), `LoomMobile's signature should destructure ${name}`);
+    }
+  });
+
+  test("the <LoomMobile .../> call site passes all three through from the SAME useShotMutations instance LoomV2 already uses", () => {
+    const loomMobileCall = src.match(/<LoomMobile\b[\s\S]*?\/>/);
+    assert.ok(loomMobileCall, "expected to find the <LoomMobile .../> call site");
+    for (const prop of ["moveCard={moveCard}", "dupCard={dupCard}", "delCard={delCard}"]) {
+      assert.ok(loomMobileCall[0].includes(prop), `expected "${prop}" at the <LoomMobile .../> call site`);
+    }
+  });
+
+  test("moveCard/dupCard/delCard are declared exactly once in the whole file (App()'s useShotMutations) -- no second, forked copy added for mobile", () => {
+    for (const name of ["moveCard", "dupCard", "delCard"]) {
+      const re = new RegExp(`const ${name} = \\(`, "g");
+      const hits = src.match(re) || [];
+      assert.equal(hits.length, 1, `expected exactly one "const ${name} = (" declaration, found ${hits.length}`);
+    }
+  });
+});
+
+describe("Kebab actions sheet: the board-card ⋮ button", () => {
+  test("every board card renders a real sibling <button> kebab, never nested inside .lm-card", () => {
+    assert.match(loomMobileSrc,
+      /<button type="button" className="lm-kebab" title="More actions for this shot"\s*\n\s*onClick=\{\(ev\) => \{ ev\.stopPropagation\(\); setSelShot\(e\.c\.id\); setActionsOpen\(true\); \}\}>&#8942;<\/button>/);
+  });
+
+  test("tapping the kebab selects the shot and opens the actions sheet -- same selShot-reuse convention as the ▶ review badge", () => {
+    assert.match(loomMobileSrc, /setSelShot\(e\.c\.id\); setActionsOpen\(true\);/);
+  });
+
+  test("the kebab is unconditional -- it renders for every card, not gated behind canReview like the ▶ badge", () => {
+    const cardBlock = loomMobileSrc.slice(loomMobileSrc.indexOf('key={e.c.id} className="lm-cardrow"'), loomMobileSrc.indexOf("{!items.length &&"));
+    // canReview's own {canReview && (...)} guard must close BEFORE the kebab button, i.e. the
+    // kebab sits outside that conditional block, not inside it.
+    const kebabIdx = cardBlock.indexOf('className="lm-kebab"');
+    const canReviewCloseIdx = cardBlock.indexOf(")}", cardBlock.indexOf("{canReview && ("));
+    assert.ok(kebabIdx > 0 && canReviewCloseIdx > 0 && kebabIdx > canReviewCloseIdx,
+      "expected the kebab button to render outside (after) the {canReview && (...)} block");
+  });
+});
+
+describe("Kebab actions sheet: real live-lookup safety (mirrors dfLive/reviewLive exactly)", () => {
+  test("actionsOpen is a plain local boolean; actionsLive reuses selShot/entries.find(), no second 'which shot' id invented (the design's own local actionsFor)", () => {
+    assert.match(loomMobileSrc, /const \[actionsOpen, setActionsOpen\] = useState\(false\);/);
+    assert.match(loomMobileSrc, /const actionsLive = actionsOpen \? entries\.find\(\(x\) => x\.c\.id === selShot\) : null;/);
+  });
+
+  test("a stale reference (the shot vanished out from under it) closes the sheet instead of acting on stale data", () => {
+    assert.match(loomMobileSrc, /if \(actionsOpen && !actionsLive\) \{ setActionsOpen\(false\); \}/);
+  });
+
+  test("the sheet only renders while actionsOpen && actionsLive, never an empty/placeholder sheet", () => {
+    assert.match(loomMobileSrc, /\{actionsOpen && actionsLive && \(/);
+  });
+});
+
+describe("Kebab actions sheet: reuses the Cast sheet's own bottom-sheet convention, not a new one", () => {
+  test("wraps with the SAME .lm-scrim/.lm-sheet/.lm-sheethandle classes the Cast & assets sheet already uses", () => {
+    const sheetBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("{actionsOpen && actionsLive && ("), loomMobileSrc.indexOf("{dfOpen && dfLive && (() => {"));
+    assert.match(sheetBlock, /<div className="lm-scrim" onClick=\{closeActions\} \/>/);
+    assert.match(sheetBlock, /<div className="lm-sheet">/);
+    assert.match(sheetBlock, /<div className="lm-sheethandle" \/>/);
+  });
+
+  test("Cancel reuses the SAME .lm-sheetclose class the Cast sheet's own 'Done' button uses, just different label text", () => {
+    const sheetBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("{actionsOpen && actionsLive && ("), loomMobileSrc.indexOf("{dfOpen && dfLive && (() => {"));
+    assert.match(sheetBlock, /<button type="button" className="lm-sheetclose" onClick=\{closeActions\}>Cancel<\/button>/);
+  });
+
+  test("only the row styling (.lm-kebab/.lm-actionrow/.lm-actionrow.danger) is new CSS -- no second scrim/sheet/handle class invented", () => {
+    assert.match(src, /\.lm-kebab\{flex:none;width:30px;height:30px;/);
+    assert.match(src, /\.lm-actionrow\{display:block;width:100%;/);
+    assert.match(src, /\.lm-actionrow\.danger\{color:var\(--red\);border-bottom:none;\}/);
+    assert.doesNotMatch(loomMobileSrc, /lm-actionscrim|lm-actionsheet\b/,
+      "expected the sheet to reuse .lm-scrim/.lm-sheet verbatim, not invent parallel classes");
+  });
+});
+
+describe("Kebab actions sheet: all five rows, wired to the real mutators with the exact e.ci/act.id shape LoomV2's own buttons use", () => {
+  test("Move up calls the real moveCard(actionsLive.a.id, actionsLive.ci, -1)", () => {
+    assert.match(loomMobileSrc, /onClick=\{\(\) => \{ moveCard\(actionsLive\.a\.id, actionsLive\.ci, -1\); closeActions\(\); \}\}>&#8593; Move up<\/button>/);
+  });
+
+  test("Move down calls the real moveCard(actionsLive.a.id, actionsLive.ci, 1)", () => {
+    assert.match(loomMobileSrc, /onClick=\{\(\) => \{ moveCard\(actionsLive\.a\.id, actionsLive\.ci, 1\); closeActions\(\); \}\}>&#8595; Move down<\/button>/);
+  });
+
+  test("Duplicate calls the real dupCard(actionsLive.a.id, actionsLive.c)", () => {
+    assert.match(loomMobileSrc, /onClick=\{\(\) => \{ dupCard\(actionsLive\.a\.id, actionsLive\.c\); closeActions\(\); \}\}>&#10697; Duplicate<\/button>/);
+  });
+
+  test("actionsLive.ci/.a/.c are flat()'s own entry fields (loom-core.js) -- nothing new invented to address the card", () => {
+    // flat()'s shape is {c, a, ai, ci, code}; the sheet uses exactly a/ci/c, the same fields
+    // LoomV2's own real per-card buttons index by (act.id/e.ci/e.c). `entries` (LoomMobile's
+    // own prop) is App()'s real flat(project) -- checked here via the import + the prop wire,
+    // not a second read of loom-core.js (whose own flat() shape is loom-core.test.js's job).
+    assert.match(src, /flat, shotText, castMissingImages, castPastBudget, refBudget, resolvedImage,/, "expected flat to be imported from loom-core.js");
+    assert.match(src, /const entries = flat\(project\);/, "expected App()'s entries -- passed to LoomMobile as-is -- to be built from the real flat(project)");
+  });
+
+  test("Cancel and 'Done' outside a confirm both wire to the same closeActions -- a plain setActionsOpen(false), no other side effect", () => {
+    assert.match(loomMobileSrc, /const closeActions = \(\) => setActionsOpen\(false\);/);
+  });
+});
+
+describe("Kebab actions sheet: Delete keeps the REAL window.confirm gate -- not silently dropped for mobile", () => {
+  test("the confirm message is byte-for-byte the same text LoomV2's own real desktop ✕ button uses", () => {
+    // LoomV2's own real delete button (verified against the exact source above this
+    // component in the same file): window.confirm(`Delete shot ${e.code}${e.c.title ? ` —
+    // "${e.c.title}"` : ""}? This can't be undone.`). This assertion pulls BOTH occurrences
+    // out of the live source and checks they are identical, rather than hand-copying the
+    // string a second time into the test (which could silently drift from either real site).
+    const msgRe = /Delete shot \$\{[^}]+\.code\}\$\{[^}]+\.c\.title \? ` — "\$\{[^}]+\.c\.title\}"` : ""\}\? This can't be undone\./g;
+    const hits = src.match(msgRe) || [];
+    assert.equal(hits.length, 2, "expected the exact same delete-confirm message text at BOTH LoomV2's real button and the mobile kebab sheet's Delete row");
+  });
+
+  test("Delete is gated behind window.confirm before delCard ever runs -- an early return, not a fire-then-ask", () => {
+    assert.match(loomMobileSrc,
+      /if \(!window\.confirm\(`Delete shot \$\{actionsLive\.code\}\$\{actionsLive\.c\.title \? ` — "\$\{actionsLive\.c\.title\}"` : ""\}\? This can't be undone\.`\)\) return;/);
+  });
+
+  test("cancelling the confirm (the early return) never reaches delCard -- delCard is called only AFTER the confirm line, not before it", () => {
+    const delBlock = loomMobileSrc.slice(loomMobileSrc.indexOf('className="lm-actionrow danger"'), loomMobileSrc.indexOf("Delete</button>") + 20);
+    const confirmIdx = delBlock.indexOf("window.confirm(");
+    const delCallIdx = delBlock.indexOf("delCard(actionsLive.a.id, actionsLive.c);");
+    assert.ok(confirmIdx > -1 && delCallIdx > -1 && delCallIdx > confirmIdx,
+      "expected window.confirm to be checked BEFORE delCard is ever called");
+  });
+
+  test("LoomMobile does not define a second, parallel confirm-less delete path for this row", () => {
+    const delBlock = loomMobileSrc.slice(loomMobileSrc.indexOf('className="lm-actionrow danger"'), loomMobileSrc.indexOf("Delete</button>") + 20);
+    const delCardHits = delBlock.match(/delCard\(/g) || [];
+    assert.equal(delCardHits.length, 1, "expected exactly one delCard( call in the Delete row, guarded by the confirm above it");
   });
 });

@@ -29,7 +29,7 @@ reader could work it out from the code, it does not belong here.
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 150
+- [Decisions](#decisions) &mdash; 152
 
 ---
 
@@ -1337,6 +1337,67 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 ## Decisions
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
+
+### Loom Mobile follow-up shipped: the per-shot kebab actions sheet (Move up / Move down / Duplicate / Delete)  ·  *2026-08-04*
+
+Closes the first of the two disclosed gaps found in increment 6's completeness pass. The
+kebab (⋮) on every board card now opens a real bottom sheet reusing `moveCard`/`dupCard`/
+`delCard` — the exact same functions desktop LoomV2's own board buttons already call, simply
+never threaded into `LoomMobile`'s props before. The delete confirm gate is preserved
+byte-identical to desktop's own message text, implemented as a real early return so
+cancelling touches nothing. Verified live against the real project with a genuine
+destructive round trip: duplicated a real shot, moved it, deleted it with `window.confirm`
+stubbed both ways (confirmed the gate fires exactly once and blocks correctly), then
+confirmed via a full server-side page reload — not just client state — that exactly the
+owner's one original shot remained. 708/708 loom tests, 1539/1539 pytest.
+`loom-core.js`/`loom-mutations.js` confirmed zero diff. The one remaining disclosed gap
+(a Loom-specific Fixer port) is still open — task #38.
+
+### A real, severe bug found from the owner's own bug-report videos and fixed live: Image Details' advParams object caused an infinite refetch loop on both desktop and mobile — the actual cause of "stutter"/"never loads"/"seizure inducing"  ·  *2026-08-04*
+
+The owner sent two screen recordings of a real bug (desktop, clicking "Details" from the
+Lightbox) and, after a masonry-grid bug found by a separate concurrent session
+(`a54224d`) turned out not to explain it, described it getting "even worse" —
+"seizure inducing." Frames extracted from the video (via `ffmpeg`, since this tool can't
+play video directly) showed the Details page stuck on "Loading…" for most of the clip,
+with one abrupt flash of real rendered content in the middle before reverting to stuck
+loading — consistent with a fast, repeating render/reset cycle rather than a one-time hang.
+
+**Reproduced live**, not just diagnosed from frames: opening a real image's Lightbox and
+clicking Details in the owner's own real Chrome (`http://127.0.0.1:5057/next`) reproduced
+the exact stuck-"Loading…" state. Patched `window.fetch` to count calls to
+`/api/next/detail/<id>` and found **~1,000 identical requests fired in a few seconds**, all
+`200 OK` — a genuine infinite loop, not a single failed request.
+
+**Root cause**: `App.jsx`'s `<DetailsView advParams={{...}} />` call site built that object as
+an inline literal — a fresh reference every render, regardless of whether any value inside
+it actually changed. `useImageDetails.js`'s data-fetch effect depends on `[mediaId,
+advParams]` by reference. A new `advParams` reference every render re-fires the effect every
+render: `setState({loading:true,...})` → re-render → new `advParams` object → effect fires
+again → forever. This is what produced the flash (a real render briefly completing) followed
+by an immediate revert back to loading (the very next re-render already mid-flight). **The
+exact same bug existed in `AppMobile.jsx`** — `ImageDetailsMobile.jsx` consumes the identical
+`useImageDetails` hook, and its own `detailsAdvParams` was a plain object recomputed every
+render, never memoized, with the identical failure mode.
+
+**Fix**: wrapped both call sites' `advParams` construction in `useMemo`, keyed on the actual
+primitive values it derives from (search query, media type, collection, every advanced-search
+field) — the reference now only changes when a real underlying value does. Verified live:
+patched `window.fetch` again post-fix and confirmed **zero new requests over a 3-second
+settle window** after the initial real load, with Details rendering and staying rendered.
+1539/1539 pytest.
+
+**Why record this prominently.** This is a real, pre-existing, severe production bug — not
+something introduced by tonight's mobile-pass work — affecting the single most common
+navigation path in the app (viewing an image's details) on both desktop and mobile, for
+every image, every time. It was found only because the owner sent real evidence (two videos)
+of something visually wrong and pushed back when an earlier, unrelated fix (the masonry
+feature-slot bug) didn't actually explain what he was still seeing. The general lesson: an
+object/array literal passed as a prop and then used in a `useEffect` dependency array by
+reference is a classic, easy-to-miss React bug shape — worth grep-checking for elsewhere in
+this codebase (`advParams`-shaped props specifically, and any other inline-object-in-JSX
+pattern feeding an effect's dependency array) as a follow-up, not assumed to be the only
+instance.
 
 ### Loom Mobile increment 6 shipped: Filter compare — the real PixAI art-filters library reused end to end, and a "this is now complete" claim corrected down to "complete except two disclosed gaps"  ·  *2026-08-03*
 

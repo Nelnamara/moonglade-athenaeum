@@ -3137,6 +3137,18 @@ const LOOM_MOBILE_STYLES = `
   cursor:pointer;border:1px solid var(--surface1);background:rgba(33,31,58,.6);color:var(--text);}
 .lm-fc-btn.primary{border-color:rgba(255,255,255,.3);background:var(--accent);color:var(--base);}
 .lm-fc-spendnote{font-size:10px;color:var(--overlay0);text-align:center;}
+
+/* ---- Kebab actions sheet (completeness pass, 2026-08-03) -- the locked design's own
+   card.onKebab/actionsOpen/actMoveUp/actMoveDown/actDuplicate/actDelete (Loom Mobile.dc.html),
+   the one board-card affordance never wired into this view before now. Reuses .lm-scrim/
+   .lm-sheet/.lm-sheethandle/.lm-sheetclose verbatim -- the Cast & assets sheet's own bottom-
+   sheet convention -- only the row styling below (matching the design's own actionRowStyle/
+   actionRowDangerStyle) is new. */
+.lm-kebab{flex:none;width:30px;height:30px;display:flex;align-items:center;justify-content:center;
+  font-size:16px;color:var(--overlay0);cursor:pointer;background:none;border:none;padding:0;}
+.lm-actionrow{display:block;width:100%;text-align:left;padding:12px 4px;font:13px/1.3 system-ui;
+  color:var(--text);border:none;border-bottom:1px solid rgba(255,255,255,.06);background:none;cursor:pointer;}
+.lm-actionrow.danger{color:var(--red);border-bottom:none;}
 `;
 
 function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, addCard, addAct, setDraft,
@@ -3152,6 +3164,14 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // same real splitCardAt-backed mutator LoomV2's own ShotPreview.onSplit already calls
   // (useShotMutations) -- not a re-derivation of the split logic.
   splitShot,
+  // Completeness-pass addition (2026-08-03): the per-shot-card kebab (⋮) actions sheet
+  // (Move up / Move down / Duplicate / Delete) was fully specified in the locked design
+  // (Loom Mobile.dc.html: onKebab/actionsOpen/actMoveUp/actMoveDown/actDuplicate/actDelete)
+  // but never wired into this component -- moveCard/dupCard/delCard are the EXACT same real
+  // mutators LoomV2's own board-card buttons already call (useShotMutations, App()), threaded
+  // through for the first time here rather than re-derived. delCard's real window.confirm
+  // gate is preserved verbatim at its one call site below, not dropped for mobile.
+  moveCard, dupCard, delCard,
   // Not read by earlier increments' Generate-less screens -- lifted to App() (see LoomV2's own
   // prop-list comment) and threaded through here so a still-in-progress draft already
   // survives toggling between this view and LoomV2.
@@ -3231,6 +3251,14 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   const [dfHandoff, setDfHandoff] = useState("");
   const [castSheetOpen, setCastSheetOpen] = useState(false);
   const [castSheetTab, setCastSheetTab] = useState("cast");   // 'cast' | 'footage'
+
+  // ---- Kebab actions sheet (completeness pass, 2026-08-03) -- the locked design's own
+  // per-card ⋮ menu (Loom Mobile.dc.html: onKebab/actionsOpen/actMoveUp/actMoveDown/
+  // actDuplicate/actDelete), disclosed as a real, unbuilt gap left after the six increments
+  // above. Purely local, ephemeral "is this sheet showing" state, same category as
+  // dfOpen/castSheetOpen/reviewOpen -- which shot it targets reuses selShot (see actionsLive
+  // below), not a second locally-tracked id like the design's own `actionsFor`.
+  const [actionsOpen, setActionsOpen] = useState(false);
 
   // ---- Review & trim -- fifth increment (2026-08-03), per the locked design's own
   // reviewFor/cropping/playing state (Loom Mobile.dc.html). Opens from the board's own ▶
@@ -3559,6 +3587,15 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   const reviewPatch = (fn) => reviewLive && setCard(reviewLive.a.id, reviewLive.c.id, fn);
   const closeReview = () => { setReviewOpen(false); setReviewPlaying(false); setReviewCropping(false); };
 
+  // ---- Kebab actions sheet's own "which shot" lookup -- same live-lookup safety pattern as
+  // dfLive/reviewLive above: a shot deleted out from under an open sheet closes it instead of
+  // acting on stale data. `.a`/`.ci`/`.code` all come straight off flat()'s own entry shape
+  // (loom-core.js), the same fields LoomV2's real per-card buttons already index by
+  // (act.id/e.ci/e.code) -- nothing new derived here.
+  const actionsLive = actionsOpen ? entries.find((x) => x.c.id === selShot) : null;
+  if (actionsOpen && !actionsLive) { setActionsOpen(false); }
+  const closeActions = () => setActionsOpen(false);
+
   // ---- Generate screen helpers (third increment, 2026-08-03) ----
   const genTogglePal = (which) => setGenPalFor((p) => (p === which ? null : which));
   const genAppendTo = (field, term) => dfPatch((cc) => ({ ...cc, [field]: cc[field] ? cc[field] + ", " + term : term }));
@@ -3885,6 +3922,16 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                           setReviewDur(0); setReviewCur(0);
                         }}>▶</button>
                     )}
+                    {/* Kebab actions sheet (completeness pass, 2026-08-03) -- the locked
+                        design's own card.onKebab (Loom Mobile.dc.html), never wired into this
+                        board before now. A plain flex sibling in .lm-cardrow, NOT absolutely
+                        overlaid like the ▶ badge above -- the design's own kebabStyle is an
+                        ordinary in-flow flex item at the end of the row, not a positioned
+                        overlay, and .lm-cardrow's existing display:flex already lays it out
+                        that way with no extra CSS needed. Also a real sibling <button>, for
+                        the same "no <button> inside .lm-card" reason as the ▶ badge. */}
+                    <button type="button" className="lm-kebab" title="More actions for this shot"
+                      onClick={(ev) => { ev.stopPropagation(); setSelShot(e.c.id); setActionsOpen(true); }}>&#8942;</button>
                   </div>
                 );
               })}
@@ -3895,6 +3942,39 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
         <button type="button" className="lm-addact" onClick={addAct}>+ New act</button>
         {!project.acts.length && <div className="lm-empty">No acts yet — add one below.</div>}
       </div>
+
+      {/* Kebab actions sheet (completeness pass, 2026-08-03) -- Move up / Move down /
+          Duplicate / Delete / Cancel, per the locked design's own actionsOpen/actMoveUp/
+          actMoveDown/actDuplicate/actDelete (Loom Mobile.dc.html). A top-level conditional
+          (like dfOpen/reviewOpen/genOpen below), not nested inside the board map above --
+          it can open from ANY card, board-wide, same as the design's own single shared sheet.
+          moveCard/dupCard/delCard are the exact same real mutators LoomV2's own board-card
+          buttons call (useShotMutations) -- no forked move/duplicate/delete logic. */}
+      {actionsOpen && actionsLive && (
+        <>
+          <div className="lm-scrim" onClick={closeActions} />
+          <div className="lm-sheet">
+            <div className="lm-sheethandle" />
+            <button type="button" className="lm-actionrow"
+              onClick={() => { moveCard(actionsLive.a.id, actionsLive.ci, -1); closeActions(); }}>&#8593; Move up</button>
+            <button type="button" className="lm-actionrow"
+              onClick={() => { moveCard(actionsLive.a.id, actionsLive.ci, 1); closeActions(); }}>&#8595; Move down</button>
+            <button type="button" className="lm-actionrow"
+              onClick={() => { dupCard(actionsLive.a.id, actionsLive.c); closeActions(); }}>&#10697; Duplicate</button>
+            {/* Confirmed, exactly like LoomV2's own real ✕ button -- same window.confirm gate,
+                same message text, ported unmodified rather than dropped for mobile. Only
+                closes the sheet once the delete actually happens; cancelling the confirm
+                leaves the sheet open with nothing changed. */}
+            <button type="button" className="lm-actionrow danger"
+              onClick={() => {
+                if (!window.confirm(`Delete shot ${actionsLive.code}${actionsLive.c.title ? ` — "${actionsLive.c.title}"` : ""}? This can't be undone.`)) return;
+                delCard(actionsLive.a.id, actionsLive.c);
+                closeActions();
+              }}>&#128465; Delete</button>
+            <button type="button" className="lm-sheetclose" onClick={closeActions}>Cancel</button>
+          </div>
+        </>
+      )}
 
       {dfOpen && dfLive && (() => {
         const c = dfLive.c;
@@ -6073,6 +6153,7 @@ export default function App() {
           selShot={selShot} setSelShot={setSelShot} addCard={addCard} addAct={addAct} setDraft={setDraft}
           setCard={setCard} setAssets={setAssets} addRef={addRef} setRef={setRef} delRef={delRef}
           storeThumb={storeThumb} openPick={openPick} copyShot={copyShot} splitShot={splitShot}
+          moveCard={moveCard} dupCard={dupCard} delCard={delCard}
           mobileUI={mobileUI} setMobileUI={setMobileUI}
           draftCard={draftCard} setDraftCard={setDraftCard} draftTarget={draftTarget} setDraftTarget={setDraftTarget}
           draftAttachedInfo={draftAttachedInfo} setDraftAttachedInfo={setDraftAttachedInfo}
