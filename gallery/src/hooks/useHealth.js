@@ -37,19 +37,25 @@ export default function useHealth() {
   // numbers; dup = the clickable Duplicate pair on desktop -- see
   // HealthMobile.jsx's own header comment for why mobile renders those two
   // as plain, non-clickable tiles this pass instead).
+  // Frontend Gallery.dc.html's HEALTH_STATS (search that name) is the real order + the
+  // real gold flag: Duplicates/Reclaimable sit at positions 9-10 (not last), only
+  // Uncataloged is gold (was Published+Total likes instead, an unrelated substitution),
+  // and 3 labels drifted from the design's own wording ("Storage used"/"Model known", not
+  // "Library size"/"Model named" -- "Full-meta", not "Full metadata", matched verbatim even
+  // though it reads a little terse, since that's the design's own literal string).
   const stats = h ? [
     { label: "Images on disk", value: fmt(h.total_files) },
-    { label: "Library size", value: h.total_size_h || "—" },
+    { label: "Storage used", value: h.total_size_h || "—" },
     { label: "Catalog rows", value: fmt(h.catalog_rows) },
-    { label: "Full metadata", value: (h.full_meta_pct != null ? h.full_meta_pct + "%" : "—") },
-    { label: "Model named", value: (h.model_pct != null ? h.model_pct + "%" : "—") },
+    { label: "Full-meta", value: (h.full_meta_pct != null ? h.full_meta_pct + "%" : "—") },
+    { label: "Model known", value: (h.model_pct != null ? h.model_pct + "%" : "—") },
     { label: "Rated", value: fmt(h.rated) },
-    { label: "Published", value: fmt(h.published), gold: true },
-    { label: "Total likes", value: fmt(h.total_likes), gold: true },
-    { label: "Missing files", value: fmt(h.missing) },
-    { label: "Uncataloged", value: fmt(h.uncataloged) },
+    { label: "Published", value: fmt(h.published) },
+    { label: "Total likes", value: fmt(h.total_likes) },
     { label: "Duplicates", value: fmt(h.dup_redundant), dup: true },
     { label: "Reclaimable", value: h.dup_bytes_h || "—", dup: true },
+    { label: "Missing files", value: fmt(h.missing) },
+    { label: "Uncataloged", value: fmt(h.uncataloged), gold: true },
   ] : [];
 
   const monthMax = h && h.by_month && h.by_month.length

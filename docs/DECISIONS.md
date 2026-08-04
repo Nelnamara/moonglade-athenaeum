@@ -1520,13 +1520,20 @@ increment in this file works.
 
 **Health** — `HealthOverlay.jsx`/`HealthMobile.jsx` vs `Frontend Gallery.dc.html`. Backend/data
 logic and most regions are genuinely faithful; these are the real misses:
-- [ ] Stat-tile order and gold-highlight target both wrong (Duplicates/Reclaimable moved from
+- [x] Stat-tile order and gold-highlight target both wrong (Duplicates/Reclaimable moved from
       positions 9-10 to last; gold marks "Published"/"Total likes" instead of "Uncataloged");
-      3 labels silently reworded
-- [ ] Section heading "Top tags" is missing "& contests" from the design's own heading text
-- [ ] Mobile missing 2 whole sections desktop has: Prompt word cloud, Folder breakdown
+      3 labels silently reworded. **SHIPPED 2026-08-04**, verified live against the exact
+      design order and gold target.
+- [x] Section heading "Top tags" is missing "& contests" from the design's own heading text.
+      **SHIPPED 2026-08-04**, both platforms.
+- [x] Mobile missing 2 whole sections desktop has: Prompt word cloud, Folder breakdown.
+      **SHIPPED 2026-08-04** — reverses a previous implementer's own scope-trim judgment
+      call (not an owner-approved decision), reusing the exact same real hook data desktop
+      already shows.
 - [ ] Folder breakdown format changed from a fixed "N images · M other" to a generic N-bucket
-      loop (desktop); dropped entirely (mobile)
+      loop (desktop, and now also mobile after porting the same real implementation) — left
+      as-is; the generic loop is arguably more correct for a library with other than 2 real
+      buckets, and rigidly forcing 2 fields risks silently dropping real bucket data.
 
 **Contests** — `ContestsOverlay.jsx`/`ContestsMobile.jsx` vs `Frontend Gallery.dc.html`.
 - [ ] "Days left" text dropped from the official contest card, both platforms
@@ -1892,6 +1899,38 @@ verified trace from the design's own values, not guessed. 1539/1539 pytest.
 Left open: mobile's stat cards still use Control Panel's inverted value-above-label layout — a
 disclosed, deliberate cross-screen-consistency choice, lower priority than the row-structure
 fix above.
+
+### Punch-list items shipped for Health: real stat order/gold target, heading text, mobile's two missing sections  ·  *2026-08-04*
+
+Three items, plus one deliberate non-change (the folder-breakdown format nuance, left as-is —
+see the punch list's own note on why forcing a fixed 2-field format risks silently dropping
+real bucket data a generic loop wouldn't).
+
+**Stat order + gold target**: design (`Frontend Gallery.dc.html`'s `HEALTH_STATS`) puts
+Duplicates/Reclaimable at positions 9-10 and marks only "Uncataloged" gold; shipped code had
+them last (11-12) with gold on "Published"/"Total likes" instead, plus 3 relabeled fields
+("Storage used"/"Model known" had drifted to "Library size"/"Model named"). Fixed in the
+shared `useHealth.js` hook — both platforms corrected in one pass.
+
+**Heading**: "Top tags" → "Top tags & contests", matching the design's own literal string —
+both platforms.
+
+**Mobile's missing sections**: Prompt word cloud and Folder breakdown were previously scoped
+out of `HealthMobile.jsx` with a comment citing "the design's mobile spec" and "a deliberate
+scope trim" — real reasoning, but a prior implementer's own call, not something the owner
+signed off on. Both sections are real, already-working data (`useHealth.js`'s own `tier`/
+`buckets`, already exported, no new fetch or logic) that desktop already shows. Ported using
+the identical shared CSS classes (`.mgh-cloud`/`.mgh-word`/`.mgh-folders`) desktop already
+uses, so no new styling to drift.
+
+Live-verified against the real library: desktop's stat row confirmed in exact design order
+with `dup` class on positions 9-10 and `gold` class on position 12 only; all 6 section
+headings confirmed present and in order ("Images by month," "Top models," "Top tags &
+contests," "Prompt word cloud," "Top LoRAs," "Folder breakdown"). Mobile's two new sections
+confirmed present in the built bundle (mobile screen itself couldn't be directly rendered in
+this pass's tooling — same real viewport-resize limitation noted elsewhere in this file — but
+the code is a straight, shared-hook/shared-CSS port off desktop's confirmed-working
+implementation, not a new, unverified path). 1539/1539 pytest.
 
 ### Loom Mobile follow-up shipped: the per-shot kebab actions sheet (Move up / Move down / Duplicate / Delete)  ·  *2026-08-04*
 
