@@ -1208,6 +1208,13 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Contests date/prize display didn't match the locked design on either platform.**
+  `Frontend Gallery.dc.html` combines a real date range and computed days-left into one
+  string for every card (`c.dates + ' · ' + c.left`); the official card showed range-only
+  on both platforms, community cards disagreed with each other (desktop range-only, mobile
+  days-left-only), and the ♦ diamond prefix on the CR pill was missing from every community
+  card. `ContestsOverlay.jsx` and `ContestsMobile.jsx` now share a `dateWithLeft()` helper
+  producing the design's exact combined string, and the ♦ prefix is consistent everywhere.
 - **A Multi-Reference shot's Closing Frame was invisible to everything downstream.** The
   card showed its tag as "—", the cast numbered themselves one slot early, and the frame
   never reached the generator at all — the numbering only admitted a closing frame on

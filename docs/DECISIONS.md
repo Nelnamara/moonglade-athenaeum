@@ -1338,6 +1338,25 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
 
+### Contests: combined date+days-left string and ♦ diamond consistency, both platforms  ·  *2026-08-04*
+
+Fix from the design-fidelity punch list above. `Frontend Gallery.dc.html:2434` maps every
+contest card's date field with one formula, `c.dates + ' · ' + c.left` — a real date range
+AND a computed days-left, combined, on every card, official or community. The shipped code
+had three separate drifts from that single line: the official card on both platforms showed
+range-only (no days-left at all); community cards disagreed *with each other* across
+platforms (desktop range-only, mobile days-left-only, neither matching the other or the
+design); and the ♦ diamond prefix on the CR-amount pill was present only on the one featured
+card, missing from every community card on both platforms. `useContests.js` already had both
+`dateRange()` and `daysLeft()` as separate, tested helpers (`daysLeft` built for mobile only,
+never called from the desktop overlay) — no new data logic needed, just a shared
+`dateWithLeft(row)` wrapper added identically to `ContestsOverlay.jsx` and
+`ContestsMobile.jsx`, and the missing `♦ ` prefix added to both platforms' community/
+restOfficial CR pills. Verified live against the real `/api/contests` feed (25 real cards):
+`.mgct-dates` renders e.g. `"2026-07-29 – 2026-08-18 · 14 days left"`, `.mgct-prize` renders
+`"♦ 54,500,000 CR"` on every card checked, official and community, both platforms. Full
+1539-test suite passes.
+
 ### Design-fidelity audit: every shipped surface checked against its real `.dc.html`, real gaps found — punch list  ·  *2026-08-04*
 
 The owner directly disputed that shipped work matches its locked design ("you have strayed from
@@ -1536,12 +1555,15 @@ logic and most regions are genuinely faithful; these are the real misses:
       buckets, and rigidly forcing 2 fields risks silently dropping real bucket data.
 
 **Contests** — `ContestsOverlay.jsx`/`ContestsMobile.jsx` vs `Frontend Gallery.dc.html`.
-- [ ] "Days left" text dropped from the official contest card, both platforms
-- [ ] Combined "date range · days left" string never reproduced for community cards — desktop
+- [x] "Days left" text dropped from the official contest card, both platforms — **SHIPPED
+      2026-08-04**, folded into the combined date-string fix below
+- [x] Combined "date range · days left" string never reproduced for community cards — desktop
       always shows range-only, mobile shows range XOR days-left (platforms disagree with
-      each other, not just with the design)
-- [ ] ♦ diamond icon missing from every community-card CR pill — only the one featured card
-      gets it; design puts it on all of them
+      each other, not just with the design) — **SHIPPED 2026-08-04**, verified live: every
+      card on both platforms now renders `Frontend Gallery.dc.html:2434`'s own
+      `c.dates + ' · ' + c.left` formula via a shared `dateWithLeft()` helper
+- [x] ♦ diamond icon missing from every community-card CR pill — only the one featured card
+      gets it; design puts it on all of them — **SHIPPED 2026-08-04**
 - [ ] "+12 more community contests below the fold — scroll" footer hint missing entirely
 
 **Contact Sheet (desktop)** — `ContactSheetOverlay.jsx` vs `Contact Sheet.dc.html`.

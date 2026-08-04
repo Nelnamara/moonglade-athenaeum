@@ -25,17 +25,15 @@ import "../styles/overlays.css";
       user_vote) on EVERY card that has one, official or community -- same
       real branching ContestsOverlay.jsx already does on desktop, not the
       mock's one-of-each assumption.
-   3. COMMUNITY "DAYS LEFT": the design's community meta is a compact
-      "{cr} CR · {days} left" -- there's no such field in the real payload
-      (only start_at/end_at ISO dates, which the desktop overlay renders as
-      a literal date range). This computes "days left" client-side from
-      end_at (the same math classic's own daysLeft() helper in
-      moonglade_gallery.py already does), matching the design's compact
-      mobile shape without inventing a number. The OFFICIAL card (and any
-      additional official contests folded into the grid) still get the full
-      date range, matching what the design itself shows there and what
-      desktop already renders for every card -- only the plain community
-      cards get the computed "days left".
+   3. COMBINED "range · days left" (CORRECTED 2026-08-04): the design's own mapping
+      (`Frontend Gallery.dc.html:2434`, `c.dates + ' · ' + c.left`) combines BOTH a real
+      date range and a computed days-left for every card, official and community alike.
+      A prior version of this file showed the official card range-only and community
+      cards days-left-only (a real, disclosed choice at the time, but one that didn't
+      actually match the design's own literal formula, confirmed by the 2026-08-04
+      audit) -- now every card gets the same real `dateRange(row) + " · " + daysLeft(row)`
+      combination desktop now also uses, computed client-side from real start_at/end_at
+      (the same math classic's own daysLeft() helper already does), not invented.
    4. COVER ART: the design's cards are flat color tints (no real image
       slot modeled anywhere in that block). Real cover_url renders as an
       actual image when present, falling back to .mgct-cover's own default
@@ -49,6 +47,10 @@ import "../styles/overlays.css";
 
 export default function ContestsMobile() {
   const { d, err, contests, official, community, featured, restOfficial, openContest, dateRange, daysLeft } = useContests();
+  const dateWithLeft = (row) => {
+    const left = daysLeft(row);
+    return left ? dateRange(row) + " · " + left : dateRange(row);
+  };
 
   if (err) return <div className="mgh-loading">couldn't load — {err}</div>;
   if (!d) return <div className="mgh-loading">loading live contests…</div>;
@@ -82,7 +84,7 @@ export default function ContestsMobile() {
                   </span>
                 ) : null}
               </div>
-              <div className="mgct-dates">{dateRange(featured)}</div>
+              <div className="mgct-dates">{dateWithLeft(featured)}</div>
             </div>
           </button>
         </>
@@ -99,14 +101,14 @@ export default function ContestsMobile() {
               <div className="mgct-body">
                 <div className="mgct-title">{c.title}</div>
                 <div className="mgct-tags">
-                  {c.prize_amount > 0 && <span className="mgct-prize">{fmt(c.prize_amount)} CR</span>}
+                  {c.prize_amount > 0 && <span className="mgct-prize">♦ {fmt(c.prize_amount)} CR</span>}
                   {c.vote_type ? (
                     <span className={"mgct-votepick" + (c.vote_type === "user_vote" ? " user" : "")}>
                       {c.vote_type === "user_vote" ? "USER VOTE" : "CREATOR PICK"}
                     </span>
                   ) : null}
                 </div>
-                <div className="mgct-dates">{dateRange(c)}</div>
+                <div className="mgct-dates">{dateWithLeft(c)}</div>
               </div>
             </button>
           ))}
@@ -116,14 +118,14 @@ export default function ContestsMobile() {
               <div className="mgct-body">
                 <div className="mgct-title">{c.title}</div>
                 <div className="mgct-tags">
-                  {c.prize_amount > 0 && <span className="mgct-prize">{fmt(c.prize_amount)} CR</span>}
+                  {c.prize_amount > 0 && <span className="mgct-prize">♦ {fmt(c.prize_amount)} CR</span>}
                   {c.vote_type ? (
                     <span className={"mgct-votepick" + (c.vote_type === "user_vote" ? " user" : "")}>
                       {c.vote_type === "user_vote" ? "USER VOTE" : "CREATOR PICK"}
                     </span>
                   ) : null}
                 </div>
-                <div className="mgct-dates">{daysLeft(c)}</div>
+                <div className="mgct-dates">{dateWithLeft(c)}</div>
               </div>
             </button>
           ))}
