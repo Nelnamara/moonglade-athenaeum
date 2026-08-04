@@ -936,6 +936,17 @@ ${"=".repeat(48)}
    Focus and its nested flyouts, which are otherwise contained inside .lv-overlay's own
    stacking context and can never out-rank a root-level sibling on their own. */
 .lv-overlay.lv-overlay-df{z-index:450;}
+/* The Loom.dc.html:36-45's hero banner -- radial-gradient art layer + hide/show toggle. */
+.lv-banner{position:relative;width:100%;height:160px;overflow:hidden;background:var(--base);
+  flex:none;border-bottom:1px solid var(--surface1);}
+.lv-banner-art{position:absolute;inset:0;
+  background:radial-gradient(120% 140% at 18% 0%, color-mix(in oklab, var(--accent) 26%, #0b0820) 0%, #0b0820 62%, #070512 100%);}
+.lv-banner-hide{position:absolute;top:10px;right:12px;font-size:10px;font-weight:700;letter-spacing:.04em;
+  color:#fff;background:rgba(6,4,14,.55);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.25);
+  border-radius:999px;padding:5px 11px;cursor:pointer;font-family:inherit;}
+.lv-banner-show{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--subtext);
+  background:var(--surface1);border:1px solid var(--surface1);border-radius:7px;padding:7px 11px;
+  cursor:pointer;white-space:nowrap;font-family:inherit;}
 .lv-top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
 .lv-eyebrow{font:700 11px/1 system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);}
 .lv-note{color:var(--subtext);font-size:12px;}
@@ -1476,6 +1487,7 @@ ${"=".repeat(48)}
     draftAttachedInfo,
     setDraftAttachedInfo
   }) {
+    const [bannerOpen, setBannerOpen] = useState(true);
     const [tab, setTab] = useState("Video");
     const [acct, setAcct] = useState(null);
     const [handoff, setHandoff] = useState("");
@@ -2658,7 +2670,25 @@ ${"=".repeat(48)}
       },
       "\u21E9 drag an image here to add it as a cast reference"
     ));
-    return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" + (deepFocus ? " lv-overlay-df" : "") }, /* @__PURE__ */ React.createElement("style", null, V2_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lv-top" }, /* @__PURE__ */ React.createElement("span", { className: "lv-eyebrow" }, "The Loom \xB7 V2"), /* @__PURE__ */ React.createElement("span", { className: "lv-note" }, "Click a shot \u2192 it binds to Generate."), /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), /* @__PURE__ */ React.createElement(
+    return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" + (deepFocus ? " lv-overlay-df" : "") }, /* @__PURE__ */ React.createElement("style", null, V2_STYLES), bannerOpen ? /* @__PURE__ */ React.createElement("div", { className: "lv-banner" }, /* @__PURE__ */ React.createElement("div", { className: "lv-banner-art" }), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "lv-banner-hide",
+        title: "Hide banner",
+        onClick: () => setBannerOpen(false)
+      },
+      "\u2304 Hide banner"
+    )) : null, /* @__PURE__ */ React.createElement("div", { className: "lv-top" }, !bannerOpen && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "lv-banner-show",
+        title: "Show banner",
+        onClick: () => setBannerOpen(true)
+      },
+      "\u{1F5BC} Banner"
+    ), /* @__PURE__ */ React.createElement("span", { className: "lv-eyebrow" }, "The Loom \xB7 V2"), /* @__PURE__ */ React.createElement("span", { className: "lv-note" }, "Click a shot \u2192 it binds to Generate."), /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), /* @__PURE__ */ React.createElement(
       "label",
       {
         className: "lv-draft" + (project.draft ? " on" : ""),
