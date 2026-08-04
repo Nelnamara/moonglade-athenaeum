@@ -1773,6 +1773,11 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Control Panel: sidebar footer shows the real build stamp.** The real version/git-SHA
+  string was already fetched, just misplaced (occupying the header's credits slot before that
+  fix). Moved to the design's own footer position; the local library path stays alongside it.
+  1539/1539 pytest.
+
 - **Control Panel: the restart power-modal shows real progress instead of nothing.** An
   indeterminate bar (matching the job console's own pattern) replaces the design's fake staged
   percentage, which the app had already, correctly, dropped in favor of real ping-polling with

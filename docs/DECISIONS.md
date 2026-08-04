@@ -1416,7 +1416,8 @@ increment in this file works.
       After a real Stop there is no process left to answer ANY request, including one that
       would try to restart it — the existing copy ("goes offline until you relaunch it") is
       the honest behavior already shipped, not a gap.
-- [ ] Sidebar footer shows a filesystem path or nothing instead of a version/date string
+- [x] Sidebar footer shows a filesystem path or nothing instead of a version/date string.
+      **SHIPPED 2026-08-04.**
 - [ ] Mobile's "Check" region invents 5 separate rows where its own mobile-specific design
       calls for one consolidated "run all" row — an unflagged divergence, not a loss
 
@@ -1659,6 +1660,19 @@ would fabricate a mechanism this app doesn't have; flagged for a real scoping de
 (wire real achievements to grant these skins, or show an honest "not yet unlockable" state).
 
 1539/1539 pytest for the one real code change (the progress bar).
+
+### Punch-list item 8 shipped: sidebar footer shows the real build stamp  ·  *2026-08-04*
+
+Design (`Control Panel.dc.html:77`) puts a version/date line at the sidebar's bottom
+(`margin-top:auto`); real code showed a filesystem path (local-only) or nothing. The real
+content for this slot was hiding in plain sight: `boot.build_stamp` (a real git-short-SHA +
+version string, `moonglade_gallery.py`'s `_build_stamp()`) was being shown in the HEADER's
+credits slot instead (fixed earlier this pass) — it was never actually missing data, just
+misplaced. Moved it to the design's own footer slot; kept the local-only out_dir line
+underneath it (a real, useful addition, not something to drop).
+
+Live-verified: footer showed "v2.5.0 · 13f79e8" (real version + the running process's git
+short SHA) plus the local library path beneath it. 1539/1539 pytest.
 
 ### Loom Mobile follow-up shipped: the per-shot kebab actions sheet (Move up / Move down / Duplicate / Delete)  ·  *2026-08-04*
 

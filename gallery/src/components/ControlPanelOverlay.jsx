@@ -202,9 +202,15 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                 )}
               </div>
 
-              {isLocal && summary.out_dir && (
-                <div className="mgcp-ver" title={summary.out_dir}>{summary.out_dir}</div>
-              )}
+              {/* Control Panel.dc.html:77 -- a version/date footer, margin-top:auto to sit
+                  at the sidebar's bottom. boot.build_stamp (git short SHA + version) is the
+                  real content for this slot -- it used to occupy the HEADER's credits slot
+                  instead (see the credits fix above); this is where it actually belongs.
+                  out_dir (local-only) stays as a real, useful addition alongside it. */}
+              <div className="mgcp-ver">
+                {boot?.build_stamp || "—"}
+                {isLocal && summary.out_dir ? <><br /><span title={summary.out_dir}>{summary.out_dir}</span></> : null}
+              </div>
             </div>
 
             <div className="mgcp-main">
