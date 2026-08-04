@@ -318,33 +318,202 @@ describe("Frame picker: the shared, already-real gallery picker -- not a fabrica
   });
 });
 
-describe("scope discipline: Fixer is STILL deliberately not built (everything else now IS -- Loom Mobile is complete)", () => {
-  test("no Fixer UI leaked into LoomMobile", () => {
-    // Filter compare ("Art filters", "Open filters", "filterCompareOpen") is now REAL --
-    // removed from this negative list on purpose (sixth and FINAL increment), not an
-    // oversight. Fixer (the locked design's OTHER Edit sub-tab, face/hand touch-up) is the
-    // ONE thing that remains deliberately excluded, unchanged from the fourth increment's own
-    // disclosed reasoning: desktop's real Edit tab (LoomV2, genEdit/genEditState) has no
-    // Fixer mode at all -- only the mockup invents one -- so building it here would be forked
-    // functionality with no real underlying function to call, not parity. Re-confirmed this
-    // increment (see the sixth increment's own report): still true, still the right call.
-    //
-    // Checking specific UI/logic markers rather than the bare word "Fixer" -- the sixth
-    // increment's own disclosure comments legitimately NAME Fixer in prose (explaining why
-    // it stays out), the same way this describe block's own comment does two lines up; a
-    // plain substring check would fail on its own documentation, not on a real leak.
-    for (const phrase of ["Fix face", "Fix hand", "fixKind", 'editSub === "fixer"', "pickFace", "pickHand"]) {
-      assert.ok(!loomMobileSrc.includes(phrase),
-        `LoomMobile should not contain "${phrase}" -- Fixer has no real underlying function anywhere in this codebase`);
-    }
-  });
-
-  test("Shot Detail / Cast & assets / Frame picker / Review & trim / Filter compare copy ALL exist now -- Loom Mobile is complete", () => {
+describe("scope discipline: Fixer is now REAL (seventh and FINAL increment -- Loom Mobile is complete)", () => {
+  // A prior increment's own report claimed "Fixer's touch box-drawing has zero reference
+  // implementation anywhere in this codebase" and deferred it on that basis. That claim was
+  // WRONG -- gallery/src/components/FixTab.jsx is the real, already-shipped Fixer for
+  // regular Gallery images, using the exact same real Pointer-Events + getBoundingClientRect
+  // + DISPLAY-to-ORIGINAL-pixel-scaling technique already proven in THIS component (the reel
+  // scrub, increment 1; the trim handles/crop rectangle, increment 5). This describe block
+  // replaces the old negative "Fixer must not exist" assertions with real, positive ones.
+  test("Shot Detail / Cast & assets / Frame picker / Review & trim / Filter compare / Fixer copy ALL exist now -- Loom Mobile is complete", () => {
     assert.ok(loomMobileSrc.includes("Cast &amp; assets"), "expected the Cast & assets sheet's own tab label to exist now");
     assert.ok(loomMobileSrc.includes("Other references &amp; @tags"), "expected Shot Detail's real references section to exist now");
     assert.ok(loomMobileSrc.includes("Music / audio cue"), "expected Shot Detail's audio-cue field to exist now");
     assert.ok(loomMobileSrc.includes("Review &amp; trim"), "expected Review & trim's own screen title to exist now (fifth increment)");
     assert.ok(loomMobileSrc.includes("Art filters"), "expected Filter compare's own screen title to exist now (sixth increment)");
+    assert.ok(loomMobileSrc.includes("Drag a box over the hand or face on the source."), "expected Fixer's own real hint text to exist now (seventh increment)");
+  });
+});
+
+// Seventh and FINAL increment (2026-08-03): Fixer (face/hand touch-up repair), per the locked
+// design's own editSubIsFixer/pickFace/pickHand/fixHintStyle/fixWarnStyle/fixKind (Loom
+// Mobile.dc.html). Ported verbatim from the real, already-shipped
+// gallery/src/components/FixTab.jsx -- same FIX_COLORS/FIX_MIN_PX/FIX_MAX_BOXES/scaleBoxes
+// values (editCore.js), same Pointer-Events box-drawing math, same real confirm-gated submit
+// through the real /api/fix endpoint (genFix, useGenerationPipeline). Closes the last
+// disclosed gap in Loom Mobile's original 6-increment plan.
+describe("Fixer: local, verbatim copies of FixTab.jsx's own real editCore.js constants (not a cross-directory import)", () => {
+  test("FIX_COLORS/FIX_MIN_PX/FIX_MAX_BOXES match editCore.js's own real values exactly", () => {
+    assert.match(src, /const FIX_COLORS = \{ face: "#b692e6", hand: "#4fc99a" \};/);
+    assert.match(src, /const FIX_MIN_PX = 6;/);
+    assert.match(src, /const FIX_MAX_BOXES = 20;/);
+  });
+
+  test("scaleFixBoxes is a verbatim port of editCore.js's scaleBoxes: naturalWidth/clientWidth scale, {x,y,width,height,tag} output", () => {
+    assert.match(src, /const scaleFixBoxes = \(boxes, imgEl\) => \{/);
+    assert.match(src, /const scale = imgEl && imgEl\.clientWidth \? \(imgEl\.naturalWidth \/ imgEl\.clientWidth\) : 1;/);
+    assert.match(src, /width: Math\.round\(b\.w \* scale\), height: Math\.round\(b\.h \* scale\), tag: b\.tag,/);
+  });
+
+  test("this file's only two real ES-module imports remain loom-core.js/loom-mutations.js -- no new cross-directory import was added for these constants", () => {
+    // Every LINE mentioning `from "../gallery/` must be a COMMENT (this file's own prose
+    // legitimately names that path -- FIX_COLORS's own header comment explains why such an
+    // import is deliberately absent, not present) -- not a real, live import statement,
+    // which a bare substring/regex check across the whole source can't distinguish.
+    const hits = src.split("\n").filter((line) => /from\s*["']\.\.\/gallery\//.test(line));
+    assert.ok(hits.length > 0, "expected at least one line to legitimately DISCUSS the forbidden import path in prose (sanity check the assertion is exercised)");
+    for (const line of hits) {
+      assert.match(line.trim(), /^(\/\/|\*|\/\*)/, `expected only a comment to mention 'from "../gallery/', found a real line: "${line.trim()}"`);
+    }
+  });
+});
+
+describe("Fixer: the Edit/Fixer/Enhance sub-strip is now the design's real three-way chip row", () => {
+  test("editSub defaults to 'edit' and a real Fixer chip exists alongside Edit/Enhance", () => {
+    assert.match(loomMobileSrc, /const \[editSub, setEditSub\] = useState\("edit"\);/);
+    const editBlock = loomMobileSrc.slice(loomMobileSrc.indexOf('genTab === "Edit" && (() => {'));
+    assert.match(editBlock, /className=\{"lm-tabbtn" \+ \(editSub === "edit" \? " on" : ""\)\}/);
+    assert.match(editBlock, /className=\{"lm-tabbtn" \+ \(editSub === "fixer" \? " on" : ""\)\}/);
+    assert.match(editBlock, /className=\{"lm-tabbtn" \+ \(editSub === "enhance" \? " on" : ""\)\}/);
+    assert.match(editBlock, /onClick=\{\(\) => setEditSub\("fixer"\)\}>Fixer<\/button>/);
+  });
+
+  test("the sub-strip still reuses .lm-tabsrow/.lm-tabbtn verbatim -- no new sub-tab visual language for the third chip", () => {
+    const editBlock = loomMobileSrc.slice(loomMobileSrc.indexOf('genTab === "Edit" && (() => {'));
+    assert.match(editBlock, /<div className="lm-tabsrow" style=\{\{ marginBottom: 10 \}\}>/);
+  });
+});
+
+describe("Fixer: source is this shot's real open frame -- same convention as the Edit sub-tab", () => {
+  test("the Fixer body renders only while editSub === 'fixer', reusing the SAME `src` (c.openFrame.mediaId) the Edit sub-tab already resolves -- not a second, independently-derived source", () => {
+    const editBlock = loomMobileSrc.slice(loomMobileSrc.indexOf('genTab === "Edit" && (() => {'));
+    assert.match(editBlock, /const src = c\.openFrame && c\.openFrame\.mediaId;/);
+    assert.match(editBlock, /\{editSub === "fixer" && \(<>/);
+    const fixerBlock = editBlock.slice(editBlock.indexOf('{editSub === "fixer" && (<>'), editBlock.indexOf('{editSub === "enhance" && ('));
+    assert.match(fixerBlock, /Source — this shot's open frame/);
+    assert.match(fixerBlock, /\{src \? \(/, "the Fixer canvas must gate on the same real `src` the Edit sub-tab uses");
+  });
+});
+
+describe("Fixer: real box-drawing canvas -- verbatim port of FixTab.jsx's paint()/onDown/onMove/onUp", () => {
+  test("the canvas wires all four real pointer handlers over a same-sized <img>+<canvas> stack (.lm-fixwrap)", () => {
+    assert.match(loomMobileSrc, /<div className="lm-fixwrap">/);
+    assert.match(loomMobileSrc, /<img ref=\{fixImgRef\} src=\{"\/thumbs\/" \+ src \+ "\.jpg"\} alt="source"/);
+    assert.match(loomMobileSrc,
+      /<canvas ref=\{fixCanvasRef\}\s*\n\s*onPointerDown=\{fixDown\} onPointerMove=\{fixMove\}\s*\n\s*onPointerUp=\{fixUp\} onPointerLeave=\{fixUp\} \/>/);
+  });
+
+  test("canvas dimensions track the rendered <img>'s own clientWidth/clientHeight every paint, same as FixTab.jsx's own paint()", () => {
+    assert.match(loomMobileSrc, /const w = img\.clientWidth, h = img\.clientHeight;/);
+    assert.match(loomMobileSrc, /if \(cvs\.width !== w \|\| cvs\.height !== h\) \{ cvs\.width = w; cvs\.height = h; \}/);
+  });
+
+  test("boxes are drawn with the real per-tag FIX_COLORS, verbatim strokeRect/fillText port", () => {
+    assert.match(loomMobileSrc, /ctx\.strokeStyle = FIX_COLORS\[b\.tag\] \|\| FIX_COLORS\.face;/);
+    assert.match(loomMobileSrc, /ctx\.strokeRect\(b\.x, b\.y, b\.w, b\.h\);/);
+  });
+
+  test("the drag-box coordinates come from a real getBoundingClientRect + clientX/clientY off the canvas, not a fake/stubbed value", () => {
+    assert.match(loomMobileSrc, /const r = fixCanvasRef\.current\.getBoundingClientRect\(\);/);
+    assert.match(loomMobileSrc, /return \{ x: e\.clientX - r\.left, y: e\.clientY - r\.top \};/);
+  });
+
+  test("onUp applies FixTab.jsx's own minimum-drag-size and max-box-count rules verbatim (FIX_MIN_PX/FIX_MAX_BOXES), not re-derived values", () => {
+    assert.match(loomMobileSrc, /if \(d\.w > FIX_MIN_PX && d\.h > FIX_MIN_PX\) \{/);
+    assert.match(loomMobileSrc, /if \(fixBoxes\.length >= FIX_MAX_BOXES\) \{/);
+    assert.match(loomMobileSrc, /setFixBoxes\(\(old\) => old\.concat\(\[\{ x: d\.x, y: d\.y, w: d\.w, h: d\.h, tag: fixTag \}\]\)\);/);
+  });
+
+  test("setPointerCapture is used on drag-start, the same real mobile convention every other pointer-drag gesture in this component already uses", () => {
+    const fixerStateBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("const [fixTag, setFixTag]"), loomMobileSrc.indexOf("// ---- Filter compare -- sixth and FINAL increment"));
+    assert.match(fixerStateBlock, /try \{ e\.currentTarget\.setPointerCapture\(e\.pointerId\); \} catch \(err\) \{\}/);
+  });
+
+  test("boxes reset whenever the source image changes (new shot selected, or this shot's open frame replaced) -- a stale box is never silently carried onto a different picture", () => {
+    assert.match(loomMobileSrc,
+      /useEffect\(\(\) => \{\s*\n\s*setFixBoxes\(\[\]\);\s*\n\s*\}, \[dfLive && dfLive\.c\.id, dfLive && dfLive\.c\.openFrame && dfLive\.c\.openFrame\.mediaId\]\);/);
+  });
+
+  test("Face/Hand tag chips reuse .lm-modechips/.lm-modechip (the same chip language MODES/CONNECT already use), colored per-tag exactly like FixTab.jsx's own active chip", () => {
+    assert.match(loomMobileSrc, /className=\{"lm-modechip" \+ \(fixTag === t \? " on" : ""\)\}/);
+    assert.match(loomMobileSrc, /style=\{fixTag === t \? \{ borderColor: FIX_COLORS\[t\], color: FIX_COLORS\[t\] \} : null\}/);
+  });
+});
+
+describe("Fixer: the real, mandatory spend warning and confirm-gated submit through the real /api/fix endpoint", () => {
+  test("the warning text is byte-for-byte the locked design's own real fixWarnStyle copy", () => {
+    assert.match(loomMobileSrc, /A fix can't be card-covered — it always spends, and always asks first\./);
+  });
+
+  test("the Fix button label mirrors the locked design's own `Fix {{ fixKind }}` interpolation (lowercase tag)", () => {
+    assert.match(loomMobileSrc, /\{busyF \? \(gf\.msg \|\| "fixing…"\) : "✦ Fix " \+ fixTag\}/);
+  });
+
+  test("genFix is threaded through as a real prop, not re-invented inside LoomMobile", () => {
+    const sigMatch = loomMobileSrc.match(/function LoomMobile\(\{([\s\S]*?)\}\)\s*\{/);
+    assert.ok(sigMatch, "expected to find LoomMobile's function signature");
+    for (const name of ["genFixState", "setGenFixState", "genFix"]) {
+      assert.match(sigMatch[1], new RegExp(`\\b${name}\\b`), `LoomMobile's signature should destructure ${name}`);
+    }
+    const loomMobileCall = src.match(/<LoomMobile\b[\s\S]*?\/>/);
+    assert.ok(loomMobileCall, "expected to find the <LoomMobile .../> call site");
+    for (const prop of ["genFixState={genFixState}", "setGenFixState={setGenFixState}", "genFix={genFix}"]) {
+      assert.ok(loomMobileCall[0].includes(prop), `expected "${prop}" at the <LoomMobile .../> call site`);
+    }
+  });
+
+  test("the submit button calls the real genFix(dfLive, scaleFixBoxes(...)), passing already-scaled ORIGINAL-pixel boxes -- no DOM ref crosses into useGenerationPipeline", () => {
+    assert.match(loomMobileSrc, /onClick=\{\(\) => genFix\(dfLive, scaleFixBoxes\(fixBoxes, fixImgRef\.current\)\)\}/);
+  });
+
+  test("genFix lives in useGenerationPipeline, submits to the real /api/fix endpoint via runGen (the same submit/poll/register machinery genEdit/genRef already share)", () => {
+    assert.match(src, /const genFix = async \(entry, scaledBoxes\) => \{/);
+    assert.match(src, /runGen\(setGenFixState, c\.id, "\/api\/fix", \{ source: src, boxes: scaledBoxes \}, null, "",/);
+  });
+
+  test("genFix runs its own fresh mode:\"fix\" /api/price check right before its confirm -- the real, read-only cost check, not skipped", () => {
+    const genFixBlock = src.slice(src.indexOf("const genFix = async (entry, scaledBoxes) => {"), src.indexOf("// Batch-generate the whole board"));
+    assert.match(genFixBlock, /body: JSON\.stringify\(\{ mode: "fix", source: src, boxes: scaledBoxes \}\)/);
+  });
+
+  test("the confirm wording is ported VERBATIM from FixTab.jsx's own run() -- 'ALWAYS spends' / 'never covered by a free card', never confirmSpend's generic phrasing", () => {
+    const genFixBlock = src.slice(src.indexOf("const genFix = async (entry, scaledBoxes) => {"), src.indexOf("// Batch-generate the whole board"));
+    assert.match(genFixBlock, /"The price could not be verified, and a Fix ALWAYS spends credits \(no free card can ever cover it\)\."/);
+    assert.match(genFixBlock, /"This will spend " \+ Number\(priced\)\.toLocaleString\(\) \+ " credits — a Fix is never covered by a free card\."/);
+    assert.match(genFixBlock, /if \(!window\.confirm\(/, "the real window.confirm gate must fire before any submit");
+  });
+
+  test("genFix passes priceBody:null to runGen -- it must never trigger runGen's OWN confirmSpend gate on top of its own real, Fix-correct confirm above", () => {
+    const genFixBlock = src.slice(src.indexOf("const genFix = async (entry, scaledBoxes) => {"), src.indexOf("// Batch-generate the whole board"));
+    assert.match(genFixBlock, /runGen\(setGenFixState, c\.id, "\/api\/fix", \{ source: src, boxes: scaledBoxes \}, null,/,
+      "priceBody must be null so runGen's own confirmSpend (generic, free-card-implying wording) never runs a second confirm");
+  });
+
+  test("a missing open-frame source or an empty box list is refused BEFORE any price check or confirm, same defensive-gate shape as genEdit", () => {
+    const genFixBlock = src.slice(src.indexOf("const genFix = async (entry, scaledBoxes) => {"), src.indexOf("// One fresh /api/price check"));
+    assert.match(genFixBlock, /if \(!src\) \{ setGenFixState/);
+    assert.match(genFixBlock, /if \(!scaledBoxes \|\| !scaledBoxes\.length\) \{ setGenFixState/);
+  });
+});
+
+describe("Fixer: real cost PREVIEW and real result routing, mirroring the Edit/Reference tabs' own conventions", () => {
+  test("the price preview debounces a real mode:\"fix\" /api/price fetch, gated on genOpen/genTab/editSub, same convention as imgPrice/editPrice/refPrice", () => {
+    assert.match(loomMobileSrc, /const \[genFixPrice, setGenFixPrice\] = useState\(\{\}\);/);
+    assert.match(loomMobileSrc, /if \(!genOpen \|\| genTab !== "Edit" \|\| editSub !== "fixer" \|\| !dfLive\) return;/);
+    assert.match(loomMobileSrc,
+      /body: JSON\.stringify\(\{ mode: "fix", source: src, boxes: scaleFixBoxes\(fixBoxes, fixImgRef\.current\) \}\)/);
+  });
+
+  test("the preview line reuses the SAME priceLine/priceTitle helpers the Image/Edit/Reference tabs already share -- no new formatter", () => {
+    assert.match(loomMobileSrc, /priceLine\(genFixPrice, c\.id, "Drag a box over a hand or face to see the cost\."\)/);
+    assert.match(loomMobileSrc, /priceTitle\(genFixPrice, c\.id\)/);
+  });
+
+  test("a completed Fix result routes into open/close frame or cast via the real, generic routeGen -- same function genEdit/genRef already use, not a forked router", () => {
+    assert.match(loomMobileSrc, /routeGen\(genFixState, setGenFixState, dfLive, "open", c\.id\)/);
+    assert.match(loomMobileSrc, /routeGen\(genFixState, setGenFixState, dfLive, "close", c\.id\)/);
+    assert.match(loomMobileSrc, /routeGen\(genFixState, setGenFixState, dfLive, "cast", c\.id\)/);
   });
 });
 
@@ -476,7 +645,8 @@ describe("Generate: real submit, real cost preview, real generation-state tracki
   });
 
   test("priceShot is exposed by useGenerationPipeline's own return value (not a new fetch/pricing implementation)", () => {
-    assert.match(src, /generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,\s*\n\s*costEstimate, refreshEstimate, priceShot,/);
+    // genFix appended (seventh increment, 2026-08-03) -- same return value, same convention.
+    assert.match(src, /generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, genFix, routeGen, batchGenerate,\s*\n\s*costEstimate, refreshEstimate, priceShot,/);
   });
 
   test("Mode chips render the real MODES array (all 4: I2V/R2V/V2V/FLF) inside the Generate screen too, writing through the real setShotMode reducer", () => {
@@ -703,7 +873,7 @@ describe("Filter compare: reused from the real mg-art-filters.js library, not fo
   });
 });
 
-describe("Filter compare: reached from Generate's Edit tab via a real Edit/Enhance sub-strip (not Shot Detail or the reel directly)", () => {
+describe("Filter compare: reached from Generate's Edit tab via a real Edit/Fixer/Enhance sub-strip (not Shot Detail or the reel directly)", () => {
   test("editSub state exists and defaults to 'edit', matching the sub-strip's own default chip", () => {
     assert.match(loomMobileSrc, /const \[editSub, setEditSub\] = useState\("edit"\);/);
   });
@@ -719,9 +889,13 @@ describe("Filter compare: reached from Generate's Edit tab via a real Edit/Enhan
     assert.match(loomMobileSrc, /<button type="button" className="lm-openfiltersbtn" onClick=\{openFilterCompare\}>&#9673; Open filters<\/button>/);
   });
 
-  test("Fixer is NOT one of the sub-strip's chips -- only Edit and Enhance", () => {
+  // Fixer WAS deliberately excluded from this sub-strip through the sixth increment (see the
+  // "scope discipline" describe block above, and its own updated comment) -- now built as the
+  // seventh and FINAL increment; see the dedicated "Fixer: ..." describe blocks below for its
+  // own coverage. This block only still asserts Edit/Enhance's own unrelated behavior above.
+  test("Fixer IS one of the sub-strip's chips now, matching the locked design's own three-way editSubChips", () => {
     const editBlock = loomMobileSrc.slice(loomMobileSrc.indexOf('genTab === "Edit" && (() => {'), loomMobileSrc.indexOf('{genTab === "Reference"'));
-    assert.doesNotMatch(editBlock, /editSub === "fixer"/);
+    assert.match(editBlock, /editSub === "fixer"/);
   });
 });
 
