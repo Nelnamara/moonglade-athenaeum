@@ -1396,11 +1396,26 @@ increment in this file works.
 - [ ] "Catalog & files" tile missing the library-folder picker (`webkitdirectory` input) + path
       display entirely
 - [ ] Branding tile's mark glyphs don't set the mark in place — click just switches tabs
-- [ ] Skin cards drop the concrete unlock-requirement text (e.g. "Unlock: Hoardsmith (10,000
-      images)") — shows "🔒 locked" with no explanation
-- [ ] Power modal: shutdown state has no "Power back on" button (must close + use sidebar
-      Restart separately); restart state dropped the progress bar entirely, not just the fake
-      stage text (a real indeterminate bar was available elsewhere in this file and unused)
+- [~] Skin cards drop the concrete unlock-requirement text (e.g. "Unlock: Hoardsmith (10,000
+      images)") — shows "🔒 locked" with no explanation. **CHECKED 2026-08-04, not fixable
+      honestly as scoped**: the design's unlock strings name specific achievements
+      (`Control Panel.dc.html:453-457`, e.g. "Hoardsmith (10,000 images)") that don't exist in
+      this app's real `ACHIEVEMENTS` list — grepped the whole file for any `"skin":` field on a
+      real achievement entry, zero matches. All 3 non-free skins (`moonlit`/`ember`/`verdant`)
+      are permanently locked with no real unlock path wired up at all right now. Adding the
+      design's specific achievement names would fabricate data this app doesn't have. Real fix
+      would be either wiring 3 real achievements to grant these skins (a scoping decision, not
+      a port) or showing an honest "not yet unlockable" state instead of the design's copy —
+      needs a decision, not a code fix.
+- [x]/[~] Power modal, split in two: restart's progress bar **SHIPPED 2026-08-04** (an
+      indeterminate bar, the same real pattern the job console already uses — real ping-polling
+      has no stage index to compute an honest percentage from, unlike the design's fake
+      RESTART_STAGES). Shutdown's "Power back on" button **checked, not fixable honestly**:
+      `/api/server/stop` calls `_schedule_server_exit(0)` — per `Serve Gallery.pyw`'s own
+      supervisor contract, exit code 0 ends the whole supervisor loop, not just the child.
+      After a real Stop there is no process left to answer ANY request, including one that
+      would try to restart it — the existing copy ("goes offline until you relaunch it") is
+      the honest behavior already shipped, not a gap.
 - [ ] Sidebar footer shows a filesystem path or nothing instead of a version/date string
 - [ ] Mobile's "Check" region invents 5 separate rows where its own mobile-specific design
       calls for one consolidated "run all" row — an unflagged divergence, not a loss
@@ -1615,6 +1630,35 @@ stats", "Duplicate audit (fast, read-only)") plus "+17 more · one job at a time
 count of the actual other actions in this session's `summary.actions`. Stopped the job
 immediately after confirming (no need to let a full i2v re-walk finish for this check).
 1539/1539 pytest.
+
+### Punch-list item 7 shipped (partial, honestly) + item on skin unlock text and Power-back-on checked and closed as not fixable  ·  *2026-08-04*
+
+Two punch-list items resolved by investigation rather than a port, plus one real fix:
+
+**Restart's progress bar** (`Control Panel.dc.html:687`, `powerBarStyle`) — the design computes
+a real 0-100% width off `RESTART_STAGES`' fake stage index; the app already, correctly,
+replaced those fake stages with real ping-polling (disclosed in this file's own header
+comment) that has no stage index to compute an honest percentage from. Added an indeterminate
+bar instead — same `.mgcp-runbar i.indeterminate` pattern the job console already uses — real
+progress feedback without claiming a fake number. Build-verified (not live-restart-verified:
+triggering a real restart would have taken down this session's own dev server mid-verification
+of the remaining punch-list items, so this one narrow piece was checked by code review + clean
+build rather than live exercise — disclosed, not silently skipped).
+
+**Shutdown's "Power back on" button** — checked and closed, not built. `/api/server/stop` calls
+`_schedule_server_exit(0)`; per `Serve Gallery.pyw`'s own supervisor contract, an exit code of 0
+ends the whole supervisor loop, not just the Flask child. After a real Stop nothing is left
+running to answer any request — the existing shipped copy ("goes offline until you relaunch
+it") is the honest, correct behavior, not a gap to fill with a button that could never work.
+
+**Skin cards' unlock-requirement text** — checked and closed, not built. The design's unlock
+strings name specific achievements ("Hoardsmith (10,000 images)" etc.) that don't exist in this
+app's real `ACHIEVEMENTS` list — confirmed via grep, zero achievements carry a `"skin"` field
+right now. All three locked skins have no real unlock path at all. Copying the design's text
+would fabricate a mechanism this app doesn't have; flagged for a real scoping decision instead
+(wire real achievements to grant these skins, or show an honest "not yet unlockable" state).
+
+1539/1539 pytest for the one real code change (the progress bar).
 
 ### Loom Mobile follow-up shipped: the per-shot kebab actions sheet (Move up / Move down / Duplicate / Delete)  ·  *2026-08-04*
 

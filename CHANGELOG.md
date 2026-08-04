@@ -1773,6 +1773,15 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Control Panel: the restart power-modal shows real progress instead of nothing.** An
+  indeterminate bar (matching the job console's own pattern) replaces the design's fake staged
+  percentage, which the app had already, correctly, dropped in favor of real ping-polling with
+  no stage index to compute a number from. Two related design-fidelity items were investigated
+  and closed as not fixable rather than built: a shutdown "Power back on" button (the server
+  process is genuinely, fully dead after a real Stop — nothing could ever answer that request),
+  and skin-card unlock text naming achievements that don't exist in this app's real roster. See
+  `docs/DECISIONS.md` for the full reasoning on both.
+
 - **Control Panel: the running-job view now shows what else is really blocked.** A dimmed
   row of other-action chips (real labels + a real "+N more · one job at a time" count, sourced
   from the same action list the console already reads) replaces what rendered as nothing.
