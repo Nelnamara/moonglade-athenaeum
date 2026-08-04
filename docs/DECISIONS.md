@@ -1389,7 +1389,8 @@ increment in this file works.
       timestamps both dropped too
 - [x] Dedup's 5-stage sequence isn't actually gated (design: each stage locked until the
       previous one runs; real: every stage always clickable). **SHIPPED 2026-08-04.**
-- [ ] Organize flow drops the "142 would move" result-readout chip between Preview and Apply
+- [x] Organize flow drops the "142 would move" result-readout chip between Preview and Apply.
+      **SHIPPED 2026-08-04.**
 - [ ] Running-job view drops the `lockedMinis` "what's blocked while this runs" chip row
 - [ ] "Catalog & files" tile missing the library-folder picker (`webkitdirectory` input) + path
       display entirely
@@ -1582,6 +1583,21 @@ not just visual dimming). Ran the real (non-destructive) Audit action against th
 image library; on completion Preview unlocked while the two destructive stages stayed locked —
 exactly the design's intended progression. Did not run the destructive stages during
 verification. 1539/1539 pytest.
+
+### Punch-list item 5 shipped: Organize's "N would move" result readout is now real  ·  *2026-08-04*
+
+Design (`Control Panel.dc.html:117`) puts a `{{ organizeRes }}` chip between the Organize
+flow's Preview and Apply buttons — real dry-run feedback before committing to the destructive
+step. Nothing rendered there before. The number comes from `cmd_organize()`'s own real stdout
+line (`moonglade_backup.py`: `"Organize plan: N file(s) -> YYYY-MM/..."`), parsed in
+`useControlPanel.js`'s `tick()` from the job's full, untrimmed line list — `jobResult.lines`
+alone can't supply this, since it's trimmed to the tail 6 lines for the log view and the plan
+line sits near the top of the output, ahead of the per-file preview rows.
+
+Shared through the hook, so both desktop and mobile got it in one pass. Live-verified against
+the real library: ran the real (non-destructive) Organize preview and confirmed the chip
+showed "2308 would move" — the actual real count for the actual real library, not a fixture.
+1539/1539 pytest.
 
 ### Loom Mobile follow-up shipped: the per-shot kebab actions sheet (Move up / Move down / Duplicate / Delete)  ·  *2026-08-04*
 

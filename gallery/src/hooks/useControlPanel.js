@@ -95,6 +95,13 @@ export default function useControlPanel() {
   const [log, setLog] = useState([]);
   const [jobError, setJobError] = useState("");
   const [jobResult, setJobResult] = useState(null); // last completed job's own tail, kept visible until the next run
+  // Control Panel.dc.html:117's {{ organizeRes }} chip, between Preview and Apply --
+  // parsed from cmd_organize()'s own real stdout line (moonglade_backup.py, "Organize
+  // plan: N file(s) -> YYYY-MM/..."), not fabricated. `jobResult.lines` alone can't
+  // supply this: it's trimmed to the tail 6 lines for the log view, and the plan-count
+  // line is near the TOP of organize-dry's output (ahead of the per-file preview rows),
+  // so this is parsed from the job's full, untrimmed line list in tick() instead.
+  const [organizeRes, setOrganizeRes] = useState(null);
   const [confirmArm, setConfirmArm] = useState(null); // action key awaiting inline confirm
   const [testPullN, setTestPullN] = useState(20);
   const pollRef = useRef(null);
@@ -215,6 +222,11 @@ export default function useControlPanel() {
         warnCount: d.warn_count || 0,
         lines: tail,
       });
+      if (finishedKey === "organize-dry") {
+        const planLine = lines.find((ln) => /^Organize plan:/.test(ln));
+        const m = planLine && planLine.match(/^Organize plan:\s*(\d+)\s*file/);
+        setOrganizeRes(m ? m[1] + " would move" : (planLine || "checked"));
+      }
       // Advance dedup gating only on a real, clean "done" -- not
       // done_with_errors or cancelled, so a partial/interrupted stage never
       // unlocks the next (possibly destructive) one on a false pretense.
@@ -246,6 +258,7 @@ export default function useControlPanel() {
     setJobResult(null);
     setProgress(null);
     setLog([]);
+    if (key === "organize-dry") setOrganizeRes(null);
     runningKeyRef.current = key;
     const body = { action: key };
     if (spec.destructive) body.confirm = true;
@@ -341,7 +354,7 @@ export default function useControlPanel() {
     summary, summaryErr, achievements, skins, activeSkin, pickSkin,
     fetchSummary, fetchAchievements, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
-    dedupDone,
+    dedupDone, organizeRes,
     testPullN, setTestPullN,
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,

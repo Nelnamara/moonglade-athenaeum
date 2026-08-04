@@ -1773,6 +1773,12 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Control Panel: Organize's "N would move" result readout is real.** Design puts a real
+  dry-run count between Preview and Apply; nothing rendered there before. Parsed from
+  `cmd_organize()`'s own real stdout line, shared through the hook for both platforms.
+  Live-verified: ran the real preview, chip showed the actual "2308 would move" for the real
+  library. 1539/1539 pytest.
+
 - **Control Panel: Dedup's 5-stage sequence is now really gated, not just visually implied.**
   Design locks each stage (Audit → Preview → Quarantine 🔒 → Verify → Delete 🔒) until the
   previous one has run; every stage was clickable in any order. Fixed in the shared hook, so

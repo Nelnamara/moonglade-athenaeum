@@ -39,6 +39,9 @@
 .mgcp-mirrordot { width: 7px; height: 7px; border-radius: 50%; background: var(--emerald); flex: none; margin-top: 5px;
   animation: cpPulse 2.6s ease-in-out infinite; }
 .mgcp-mirrordot.off { background: var(--overlay0); animation: none; }
+/* Control Panel.dc.html:696's resStyle -- the Organize flow's dry-run result readout. */
+.mgcp-res { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--overlay0);
+  border: 1px dashed var(--surface1); border-radius: 6px; padding: 5px 9px; }
 .mgcp-mirror b.on { color: var(--emerald); font-weight: 600; }
 .mgcp-mirror b { font-weight: 600; }
 .mgcp-srvrow { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
