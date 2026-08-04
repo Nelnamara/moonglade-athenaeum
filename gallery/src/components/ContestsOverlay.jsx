@@ -28,7 +28,14 @@ import "../styles/myart-contests.css";
    CONSUME it rather than hold a second, drifting copy of the same fetch. */
 
 export default function ContestsOverlay({ onClose }) {
-  const { d, err, contests, official, community, featured, restOfficial, openContest, dateRange } = useContests();
+  const { d, err, contests, official, community, featured, restOfficial, openContest, dateRange, daysLeft } = useContests();
+  // Frontend Gallery.dc.html:2434 -- every card's date field is a combined
+  // "range · N days left" string (`c.dates + ' · ' + c.left`); real code showed range-only
+  // everywhere. daysLeft() already existed (built for mobile) but was never called here.
+  const dateWithLeft = (row) => {
+    const left = daysLeft(row);
+    return left ? dateRange(row) + " · " + left : dateRange(row);
+  };
 
   return (
     <>
@@ -72,7 +79,7 @@ export default function ContestsOverlay({ onClose }) {
                           </span>
                         ) : null}
                       </div>
-                      <div className="mgct-dates">{dateRange(featured)}</div>
+                      <div className="mgct-dates">{dateWithLeft(featured)}</div>
                     </div>
                   </button>
                 </>
@@ -89,9 +96,9 @@ export default function ContestsOverlay({ onClose }) {
                       <div className="mgct-body">
                         <div className="mgct-title">{c.title}</div>
                         <div className="mgct-tags">
-                          {c.prize_amount > 0 && <span className="mgct-prize">{fmt(c.prize_amount)} CR</span>}
+                          {c.prize_amount > 0 && <span className="mgct-prize">♦ {fmt(c.prize_amount)} CR</span>}
                         </div>
-                        <div className="mgct-dates">{dateRange(c)}</div>
+                        <div className="mgct-dates">{dateWithLeft(c)}</div>
                       </div>
                     </button>
                   ))}
@@ -101,14 +108,14 @@ export default function ContestsOverlay({ onClose }) {
                       <div className="mgct-body">
                         <div className="mgct-title">{c.title}</div>
                         <div className="mgct-tags">
-                          {c.prize_amount > 0 && <span className="mgct-prize">{fmt(c.prize_amount)} CR</span>}
+                          {c.prize_amount > 0 && <span className="mgct-prize">♦ {fmt(c.prize_amount)} CR</span>}
                           {c.vote_type ? (
                             <span className={"mgct-votepick" + (c.vote_type === "user_vote" ? " user" : "")}>
                               {c.vote_type === "user_vote" ? "USER VOTE" : "CREATOR PICK"}
                             </span>
                           ) : null}
                         </div>
-                        <div className="mgct-dates">{dateRange(c)}</div>
+                        <div className="mgct-dates">{dateWithLeft(c)}</div>
                       </div>
                     </button>
                   ))}
