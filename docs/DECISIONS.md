@@ -1433,7 +1433,8 @@ increment in this file works.
       separate thin status bar under the shot's own color; shipped was 4 flat status colors,
       no text, no texture. (The resize handle and live scrub/trim preview above it genuinely
       exceed the design — kept, untouched.)
-- [ ] Hero banner region entirely missing — no graphic strip, no hide/show toggle, no state
+- [x] Hero banner region entirely missing — no graphic strip, no hide/show toggle, no state.
+      **SHIPPED 2026-08-04.**
 - [ ] Edit tab has no Fixer or Enhance sub-tabs at all (desktop-only gap — `LoomMobile`'s
       Fixer, built and verified tonight, and Enhance/Filter-compare both already work
       correctly on mobile; port the same logic, don't rebuild)
@@ -1738,6 +1739,19 @@ environment, so multi-segment tint variety couldn't be visually confirmed live �
 itself is a direct, verified port of the design's own math, and the one real segment present
 renders at the mathematically correct tint index (0, for `ai=0,ci=0`). 733/733 loom tests,
 1539/1539 pytest.
+
+### Punch-list item 12 shipped: the desktop Loom's hero banner  ·  *2026-08-04*
+
+Design (`The Loom.dc.html:36-45`) specifies a 160px radial-gradient hero strip above the
+toolbar with a real hide/show toggle (`bannerOpen`, plain in-memory state, default `true` —
+the design's own state was never persisted either, so this matches exactly rather than adding
+localStorage a feature never had in spec). Entirely absent before this — no graphic, no toggle,
+no state anywhere in the file.
+
+Added `.lv-banner`/`.lv-banner-art`/`.lv-banner-hide`/`.lv-banner-show` (exact colors/values
+from the design) and the `bannerOpen` state to `LoomV2`. Live-verified: real 160px banner
+confirmed via `getComputedStyle`, Hide button removes it and reveals the Show chip, Show
+restores it — both directions exercised. 733/733 loom tests, 1539/1539 pytest.
 
 ### Loom Mobile follow-up shipped: the per-shot kebab actions sheet (Move up / Move down / Duplicate / Delete)  ·  *2026-08-04*
 

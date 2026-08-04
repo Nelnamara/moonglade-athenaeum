@@ -1773,6 +1773,10 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The desktop Loom's hero banner** — a 160px radial-gradient strip with a real hide/show
+  toggle, entirely absent before this. Live-verified both directions. 733/733 loom tests,
+  1539/1539 pytest.
+
 - **The desktop Loom's reel gets its real visual identity back** — the owner's original
   complaint that started this whole design-fidelity pass. Design specifies a 6-color rotating
   per-shot tint, a repeating-stripe texture, visible code/duration text on each segment, and a
