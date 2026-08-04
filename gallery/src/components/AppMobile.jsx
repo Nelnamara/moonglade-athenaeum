@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import useLibrary from "../hooks/useLibrary.js";
 import useFlavour from "../hooks/useFlavour.js";
 import useGenerate from "../gen/useGenerate.js";
@@ -344,12 +344,23 @@ export default function AppMobile({ boot }) {
   // /api/next/library's own filter params) -- so Prev/Next and "Find similar
   // (model)"/"View batch" walk the SAME filtered/sorted set the lifted
   // useLibrary() instance is currently showing, exactly like desktop.
-  const detailsAdvParams = {
+  //
+  // BUG FIX 2026-08-04 (same root cause found and fixed in App.jsx): this
+  // was a plain object literal recomputed every render, so it got a new
+  // reference every render regardless of whether any value inside it
+  // actually changed. useImageDetails.js's fetch effect depends on
+  // advParams by reference ([mediaId, advParams]), so a fresh reference
+  // every render re-fires it every render: setState -> re-render -> new
+  // object -> effect fires again -> ... an infinite loop that never lets
+  // `loading` settle. useMemo keyed on the real underlying values fixes it.
+  const detailsAdvParams = useMemo(() => ({
     q: lib.applied, media: lib.media, collection: lib.shelf,
     sort: lib.adv.sort !== "newest" ? lib.adv.sort : "", rating_min: lib.adv.ratingMin || "",
     model: lib.adv.model, lora: lib.adv.lora, from: lib.adv.dateFrom, to: lib.adv.dateTo,
     source: lib.adv.source, tag: lib.adv.tag, published: lib.adv.publishedOnly ? "1" : "",
-  };
+  }), [lib.applied, lib.media, lib.shelf, lib.adv.sort, lib.adv.ratingMin, lib.adv.model,
+      lib.adv.lora, lib.adv.dateFrom, lib.adv.dateTo, lib.adv.source, lib.adv.tag,
+      lib.adv.publishedOnly]);
 
   // App.jsx's own rate(), ported: optimistic update of the lifted useLibrary()
   // items array + the real POST. No equivalent existed on mobile before this

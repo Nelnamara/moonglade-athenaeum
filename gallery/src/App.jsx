@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import Banner from "./components/Banner.jsx";
 import SeparatorBar from "./components/SeparatorBar.jsx";
@@ -453,6 +453,26 @@ export default function App({ boot }) {
 
   const dockActive = dockOpen && !dockClosing;
 
+  /* BUG FIX 2026-08-04: this object was previously an inline literal at
+     DetailsView's own JSX call site. A fresh object every render meant a
+     new reference every time regardless of whether any value inside it
+     actually changed -- and useImageDetails.js's fetch effect depends on
+     `advParams` by reference ([mediaId, advParams]), so it re-fired on
+     every single render: setState -> re-render -> new advParams object ->
+     effect fires again -> setState -> ... An infinite loop, hammering
+     GET /api/next/detail/<mid> continuously and never settling out of
+     `loading`, which is what actually produced the reported stuck-
+     Loading/rapid-flash bug (reproduced live: ~1000 identical requests in
+     a few seconds). useMemo keyed on the real underlying values fixes it --
+     the reference only changes when a value inside it actually does. */
+  const detailsAdvParams = useMemo(() => ({
+    q: applied, media, collection: shelf,
+    sort: adv.sort !== "newest" ? adv.sort : "", rating_min: adv.ratingMin || "",
+    model: adv.model, lora: adv.lora, from: adv.dateFrom, to: adv.dateTo,
+    source: adv.source, tag: adv.tag, published: adv.publishedOnly ? "1" : "",
+  }), [applied, media, shelf, adv.sort, adv.ratingMin, adv.model, adv.lora,
+      adv.dateFrom, adv.dateTo, adv.source, adv.tag, adv.publishedOnly]);
+
   return (
     <div className="app">
       {/* Banner + separator ride together in one sticky band. The old
@@ -505,12 +525,7 @@ export default function App({ boot }) {
             onRate={rate} onEdit={requestEdit}
             onDeleted={() => { closeDetails(); load(1, true); }}
             onFilterByModel={filterByModel} onFilterByBatch={filterByBatch}
-            advParams={{
-              q: applied, media, collection: shelf,
-              sort: adv.sort !== "newest" ? adv.sort : "", rating_min: adv.ratingMin || "",
-              model: adv.model, lora: adv.lora, from: adv.dateFrom, to: adv.dateTo,
-              source: adv.source, tag: adv.tag, published: adv.publishedOnly ? "1" : "",
-            }}
+            advParams={detailsAdvParams}
           />
         ) : (
           <Grid
