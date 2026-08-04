@@ -755,11 +755,13 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
 .p-facts b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
 .p-facts .mono { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
 .p-facts .dim { color: var(--overlay0); }
-.p-facts-full { margin-top: -2px; }
 
-.p-expand { align-self: flex-start; border: 0; background: none; padding: 0; cursor: pointer;
-  font-size: 11px; color: var(--accent); }
-.p-expand:hover { text-decoration: underline; }
+/* per-row copy icon, mirroring ImageDetailsMobile.jsx's .idm-row-copy so both
+   platforms share one visual pattern for the same affordance. */
+.p-copy { flex: none; border: none; background: none; font-family: inherit; font-size: 11px;
+  cursor: pointer; padding: 2px 5px; border-radius: 6px; color: var(--overlay0); }
+.p-copy:hover { color: var(--text); background: var(--surface1); }
+.p-fact.copied .p-copy { color: var(--emerald); }
 
 .p-tags { display: flex; gap: 6px; flex-wrap: wrap; }
 .p-tag { opacity: 0; font-size: 10.5px; color: var(--subtext); padding: 3px 10px;
