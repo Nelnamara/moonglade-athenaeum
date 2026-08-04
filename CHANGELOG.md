@@ -1773,6 +1773,12 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Loom Mobile Fixer sub-screen — properly disclosed.** This was built and verified before
+  the design-fidelity audit started, then rode along uncommitted into two later commits
+  without being called out on its own (a real process miss). Re-verified now: real
+  Face/Hand box-drawing (ported from `FixTab.jsx`'s proven math), real price/confirm/submit
+  through `/api/fix`, no real Fix ever submitted during verification. 733/733 loom tests.
+
 - **The desktop Loom's hero banner** — a 160px radial-gradient strip with a real hide/show
   toggle, entirely absent before this. Live-verified both directions. 733/733 loom tests,
   1539/1539 pytest.

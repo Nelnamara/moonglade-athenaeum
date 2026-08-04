@@ -1753,6 +1753,30 @@ from the design) and the `bannerOpen` state to `LoomV2`. Live-verified: real 160
 confirmed via `getComputedStyle`, Hide button removes it and reveals the Show chip, Show
 restores it — both directions exercised. 733/733 loom tests, 1539/1539 pytest.
 
+### Correction: the Loom Mobile Fixer-port build was silently included in commits 6989611/d5ff861, disclosing it properly now  ·  *2026-08-04*
+
+The Fixer sub-screen for Loom Mobile was built by a background agent BEFORE the design-fidelity
+audit started (task #38 on the working list) and was deliberately held back uncommitted pending
+review once the audit found problems with how tonight's work was being verified. Because the
+audit's own fixes (the reel visual-identity restore, the hero banner) landed in the same file
+(`loom/master-storyboard.jsx`) and were staged with the whole file each time, that held-back
+Fixer code rode along into commits `6989611` and `d5ff861` without being called out on its own
+— a real process miss, caught by checking `git status` after the banner commit and finding the
+file unexpectedly clean.
+
+What actually shipped (verified again now, not just trusting the original agent report): a real,
+working Fixer sub-screen inside `LoomMobile`'s Edit tab — Face/Hand box-drawing canvas ported
+verbatim from `gallery/src/components/FixTab.jsx`'s own proven pointer-event math (local
+`scaleFixBoxes`/`FIX_COLORS`/etc., not imported, disclosed reason: a real cross-directory import
+would survive `/loom`'s Babel-standalone route untranspiled), a real `/api/price` check before
+a `window.confirm` using FixTab's exact wording, and real submission through `/api/fix` via the
+existing generation pipeline. No real Fix was ever submitted during the original build's
+verification (confirm dialogs captured-and-cancelled). Re-ran the full loom suite just now with
+this code plus everything since: 733/733 still passing. Committing the one remaining
+uncommitted piece (`loom/test/loom-mobile-view.test.js`, the Fixer's own test additions) now,
+properly attributed, instead of leaving it to ride along into whatever the next fix happens to
+be.
+
 ### Loom Mobile follow-up shipped: the per-shot kebab actions sheet (Move up / Move down / Duplicate / Delete)  ·  *2026-08-04*
 
 Closes the first of the two disclosed gaps found in increment 6's completeness pass. The
