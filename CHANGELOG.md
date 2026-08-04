@@ -1208,6 +1208,9 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Loom Mobile's Draft chip lost its active-state glow.** The design's `draftChipStyle`
+  adds a soft gold `box-shadow` when draft mode is on; `.lm-chip.on` had the color/border/
+  background but not the glow. Restored.
 - **Contact Sheet's print output used dark-theme text colors on a white page.** The
   `@media print` block reset layout but never color, so printed text inherited the app's
   dark-theme tokens instead of the design's dedicated light/print palette
