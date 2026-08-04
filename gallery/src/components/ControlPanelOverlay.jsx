@@ -56,6 +56,7 @@ function timeAgo(ts) {
 export default function ControlPanelOverlay({ onClose, boot, account }) {
   const [tab, setTab] = useState("maint");
   const [subOverlay, setSubOverlay] = useState(null); // 'users' | 'trash'
+  const [markBusy, setMarkBusy] = useState(false); // inline mark-pick from the Branding tile
 
   // Live Mirror -- ControlMobile.jsx already ships this against the real,
   // read-only /api/watch/status route (its own header comment explains why
@@ -402,13 +403,30 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                     <div className="mgcp-tile mgcp-tile5">
                       <div className="mgcp-mkick">Branding</div>
                       <div className="mgcp-marks">
+                        {/* Control Panel.dc.html:246-254 -- sl.onPick sets the mark
+                            in place, right from this tile; clicking here used to just
+                            redirect to the Branding tab instead of doing anything.
+                            Same real /api/branding call BrandingTab's own pickMark()
+                            already uses (not a second, forked write path). */}
                         {(summary.branding.marks || []).slice(0, 6).map((m) => (
                           <button type="button" key={m.id}
                             className={"mgcp-mark" + (m.id === summary.branding.mark ? " on" : "")}
-                            title={m.id} onClick={() => setTab("brand")}>{m.id === "logo" ? "🌙" : "◈"}</button>
+                            disabled={markBusy}
+                            title={m.id === summary.branding.mark ? m.id + " (active)" : "Set " + m.id}
+                            onClick={async () => {
+                              if (m.id === summary.branding.mark) return;
+                              setMarkBusy(true);
+                              await postJSON("/api/branding", { mark: m.id });
+                              setMarkBusy(false);
+                              fetchSummary();
+                            }}>{m.id === "logo" ? "🌙" : "◈"}</button>
                         ))}
                       </div>
-                      <div className="mgcp-tilenote">mark · animation — open the Branding tab</div>
+                      <div className="mgcp-tilenote">
+                        <span onClick={() => setTab("brand")} style={{ cursor: "pointer", textDecoration: "underline dotted" }}>
+                          mark · animation
+                        </span> — click a glyph to set it, or open the Branding tab for more
+                      </div>
                     </div>
 
                     {skins.length > 0 && (

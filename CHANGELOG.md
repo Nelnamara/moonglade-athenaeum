@@ -1773,6 +1773,11 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Control Panel: Branding tile's mark glyphs actually set the mark now.** Clicking used to
+  just redirect to the Branding tab; now wired to the same real `/api/branding` call the
+  Branding tab's own picker uses. Live-verified against the real account (switched marks,
+  confirmed, restored the original). 1539/1539 pytest.
+
 - **Control Panel: sidebar footer shows the real build stamp.** The real version/git-SHA
   string was already fetched, just misplaced (occupying the header's credits slot before that
   fix). Moved to the design's own footer position; the local library path stays alongside it.

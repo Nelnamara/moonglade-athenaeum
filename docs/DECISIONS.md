@@ -1395,7 +1395,8 @@ increment in this file works.
       **SHIPPED 2026-08-04.**
 - [ ] "Catalog & files" tile missing the library-folder picker (`webkitdirectory` input) + path
       display entirely
-- [ ] Branding tile's mark glyphs don't set the mark in place — click just switches tabs
+- [x] Branding tile's mark glyphs don't set the mark in place — click just switches tabs.
+      **SHIPPED 2026-08-04.**
 - [~] Skin cards drop the concrete unlock-requirement text (e.g. "Unlock: Hoardsmith (10,000
       images)") — shows "🔒 locked" with no explanation. **CHECKED 2026-08-04, not fixable
       honestly as scoped**: the design's unlock strings name specific achievements
@@ -1673,6 +1674,18 @@ underneath it (a real, useful addition, not something to drop).
 
 Live-verified: footer showed "v2.5.0 · 13f79e8" (real version + the running process's git
 short SHA) plus the local library path beneath it. 1539/1539 pytest.
+
+### Punch-list item 9 shipped: Branding tile's mark glyphs actually set the mark now  ·  *2026-08-04*
+
+Design (`Control Panel.dc.html:246-254`, `sl.onPick`) has each mark glyph on the tile directly
+clickable to set it in place. Real code just redirected to the Branding tab instead. Wired the
+tile's glyphs to the same real `POST /api/branding` call `BrandingTab`'s own `pickMark()`
+already uses — not a second, forked write path, the identical mutation. Tile note text now
+tells you both that a click sets it and that the Branding tab has more.
+
+Live-verified against the real account: clicked a different mark, confirmed the active-state
+border/title moved to it via DOM inspection, then clicked back to the original mark to leave
+the real branding setting unchanged. 1539/1539 pytest.
 
 ### Loom Mobile follow-up shipped: the per-shot kebab actions sheet (Move up / Move down / Duplicate / Delete)  ·  *2026-08-04*
 
