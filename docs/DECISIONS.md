@@ -1468,8 +1468,18 @@ increment in this file works.
       the honest behavior already shipped, not a gap.
 - [x] Sidebar footer shows a filesystem path or nothing instead of a version/date string.
       **SHIPPED 2026-08-04.**
-- [ ] Mobile's "Check" region invents 5 separate rows where its own mobile-specific design
-      calls for one consolidated "run all" row — an unflagged divergence, not a loss
+- [~] Mobile's "Check" region invents 5 separate rows where its own mobile-specific design
+      calls for one consolidated "run all" row — **REVIEWED 2026-08-04, left as-is, same
+      precedent as Health's stat-tile count and folder-breakdown format above.**
+      `Moonglade Mobile.dc.html:233-236` shows one static row naming three checks ("Corrupt
+      files · Orphan thumbs · DB integrity") behind a single `run all ▸`. The real
+      `ControlMobile.jsx` (~line 293) instead shows 5 real, independently-runnable read-only
+      diagnostics (Catalog stats/Inventory count/Verify `_duplicates/`/Sync artwork
+      metadata/Sync i2v videos) — none of which map 1:1 onto the design's named trio, so
+      "consolidating" would mean either fabricating a corrupt-files/orphan-thumbs/DB-integrity
+      check that doesn't exist, or merging 5 unrelated real diagnostics behind one button and
+      losing the ability to run just one. Both are worse than what's shipped. Kept as 5
+      separate real rows.
 
 **Desktop Loom (`LoomV2` in `loom/master-storyboard.jsx`)** vs `The Loom.dc.html`.
 - [x] Reel/timeline lost its visual identity — the owner's original complaint, confirmed
