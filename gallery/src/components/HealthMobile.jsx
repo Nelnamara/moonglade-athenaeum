@@ -56,21 +56,24 @@ import "../styles/menu-screens-mobile.css";
       exactly (a plain onClick on the tile's value, `st.dup` gates which
       tiles get it) -- same real GET /api/health numbers, now a real
       destination instead of a dead tap.
-   5. SCOPED OUT, ON PURPOSE: the prompt word-cloud and folder-breakdown
-      sections (both real, both on desktop) aren't in the design's mobile
-      spec at all, and are lower-signal, more decorative sections on a
-      screen already carrying 12 stats + 2 bar-lists + 2 chip rows -- left
-      out of THIS pass as a deliberate scope trim, not an oversight or a
-      "skip real data" call (unlike point 1, nothing here is being hidden
-      that the design itself asked for).
+   5. CORRECTION (2026-08-04 design-fidelity audit): the prompt word-cloud
+      and folder-breakdown sections, previously scoped out here as "not in
+      the design's mobile spec... a deliberate scope trim," are added now.
+      That earlier reasoning was a real judgment call by whoever built this
+      screen, not something the owner explicitly signed off on -- and both
+      sections are real, already-working data desktop already shows (the
+      same `tier`/`buckets` useHealth.js already computes, no new fetch,
+      no new logic). Reversing a scope trim that wasn't actually locked, in
+      favor of showing real data the design's own desktop counterpart
+      treats as worth having. Flagged here plainly in case the owner
+      disagrees with un-trimming it.
    6. UNCATALOGED FOOTER: real count (not the mock's hardcoded "4"), and --
       since Import is a real screen this SAME pass -- tapping it opens the
       Import screen directly, a real destination that didn't exist before
       this batch, instead of the design's plain static note. */
 
 export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter, onOpenImport, boot, onDuplicatesResolved }) {
-  const { h, err, stats, monthMax, modelMax, buckets } = useHealth();
-  void buckets; // folder breakdown intentionally not shown on mobile this pass -- see header comment, point 5
+  const { h, err, stats, monthMax, modelMax, buckets, tier } = useHealth();
 
   // Duplicate Review drill-in -- MobileScreen.jsx's ownership contract,
   // mirrored exactly from ControlMobile.jsx's own Branding screen (open/
@@ -136,7 +139,7 @@ export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter,
         ))}
       </div>
 
-      <div className="cm-subhead">Top tags</div>
+      <div className="cm-subhead">Top tags &amp; contests</div>
       <div className="mgh-chips">
         {(h.top_tags || []).map(([label, count]) => (
           <button type="button" className="mgh-chip" key={label}
@@ -144,6 +147,16 @@ export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter,
             onClick={() => onTagFilter && onTagFilter(label)}>
             {label} <span className="n">{fmt(count)}</span>
           </button>
+        ))}
+      </div>
+
+      {/* Frontend Gallery.dc.html's ovHealth -- Prompt word cloud, same real
+          h.top_words data + tier() index-based sizing HealthOverlay.jsx (desktop)
+          already uses (see this file's header comment, point 5). */}
+      <div className="cm-subhead">Prompt word cloud</div>
+      <div className="mgh-cloud">
+        {(h.top_words || []).map(([word], i) => (
+          <span className={"mgh-word " + tier(i)} key={word}>{word}</span>
         ))}
       </div>
 
@@ -157,6 +170,18 @@ export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter,
           </button>
         ))}
       </div>
+
+      {/* Folder breakdown -- same real buckets data desktop shows. */}
+      {buckets.length > 0 && (
+        <>
+          <div className="cm-subhead">Folder breakdown</div>
+          <div className="mgh-folders">
+            {buckets.map(([name, count], i) => (
+              <span key={name}>{i > 0 ? " · " : ""}<b>{fmt(count)}</b> {name}</span>
+            ))}
+          </div>
+        </>
+      )}
 
       {h.uncataloged > 0 && (
         onOpenImport ? (

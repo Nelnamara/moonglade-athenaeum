@@ -1773,6 +1773,13 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Health: real stat order/gold target, heading text, mobile's two missing sections.** Stat
+  tiles now match the design's real order and gold-highlight target (was showing gold on the
+  wrong two tiles). Heading corrected to "Top tags & contests". Mobile gained the Prompt word
+  cloud and Folder breakdown sections — real, already-working data desktop already shows,
+  reversing a prior scope-trim call that wasn't owner-approved. Live-verified against the real
+  library. 1539/1539 pytest.
+
 - **My Art: real mobile row structure, desktop rank tiers, stat order, icon metric line.**
   Mobile was reusing desktop's bordered card component squeezed into one column instead of
   the design's flat dashed-divider row — new classes so this can't drift back. Desktop gained

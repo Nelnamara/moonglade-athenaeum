@@ -94,7 +94,7 @@ export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onL
                 ))}
               </div>
 
-              <div className="mgh-h">Top tags</div>
+              <div className="mgh-h">Top tags &amp; contests</div>
               <div className="mgh-chips">
                 {(h.top_tags || []).map(([label, count]) => (
                   <button type="button" className="mgh-chip" key={label}
