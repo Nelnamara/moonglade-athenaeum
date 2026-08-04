@@ -174,14 +174,25 @@
   animation: mgNelSpin 1.9s cubic-bezier(.6, .1, .4, .9) infinite; }
 
 /* =========================== SEPARATOR BAR ================================== */
-.mgx-sep { position: relative; display: flex; align-items: center; gap: 14px;
+/* Real narrow-width fix (confirmed live via getBoundingClientRect overlap testing at
+   ~500-580px CSS width -- a real desktop-window band, not covered by useIsMobile's 430px
+   breakpoint): .mgx-sep used to be a single, non-wrapping flex ROW, so when .mgx-sepleft's
+   OWN internal wrapping grew taller than one line, .mgx-sepright (flex:none, vertically
+   centered across that now-taller row) could land on top of sepleft's later wrapped rows --
+   "Health"/"Panel" measured literally overlapping "idle · nothing in the queue" text.
+   flex-wrap:wrap on the outer container is the real fix: when there's no room for sepright
+   on sepleft's current row, it drops to its own new row below instead of overlapping one.
+   margin-left:auto on sepright keeps it right-aligned whenever it DOES have room (unchanged
+   from before), and align-items:flex-start keeps a wrapped-multi-row sepleft from stretching
+   sepright's own single row taller than it needs to be. */
+.mgx-sep { position: relative; display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px 14px;
   padding: 6px 20px; min-height: 42px;
   border-top: 1px solid rgba(255, 255, 255, .06);
   border-bottom: 1px solid rgba(255, 255, 255, .06);
   background: linear-gradient(180deg, rgba(18, 14, 42, .72) 0%, rgba(10, 8, 24, .86) 100%); }
 .mgx-sepleft { position: relative; display: flex; align-items: center; flex-wrap: wrap;
   gap: 8px 20px; flex: 1 1 auto; min-width: 0; }
-.mgx-sepright { display: flex; align-items: center; gap: 12px; flex: none; }
+.mgx-sepright { display: flex; align-items: center; gap: 12px; flex: none; margin-left: auto; }
 
 /* ---- glyph-spine nav pills ---- */
 .mgx-navspine { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; }

@@ -1491,13 +1491,14 @@ increment in this file works.
       with a custom animated dropdown
 
 **Desktop Gallery shell** — `NavSpine.jsx`/`shell.css`/`Grid.jsx` vs `Frontend Gallery.dc.html`.
-- [ ] Real, live-reproduced CSS bug: `.mgx-sep`'s right cluster (`flex:none`, no wrap/scroll
+**All three SHIPPED 2026-08-04**, see dated entry below.
+- [x] Real, live-reproduced CSS bug: `.mgx-sep`'s right cluster (`flex:none`, no wrap/scroll
       fallback) can literally overlap the stacked nav pills at real desktop window widths
       (~500-580px, confirmed via `getBoundingClientRect` overlap test) — not a phone-only issue,
       `useIsMobile()`'s 430px breakpoint doesn't cover this band
-- [ ] "Publish"/"Train" nav items are dimmed stubs wired to nothing — clicking produces zero
+- [x] "Publish"/"Train" nav items are dimmed stubs wired to nothing — clicking produces zero
       feedback; needs at least a "coming soon" acknowledgment
-- [ ] Bottom-of-grid "Page X of Y · N per page · N items" caption missing, undisclosed (the
+- [x] Bottom-of-grid "Page X of Y · N per page · N items" caption missing, undisclosed (the
       "Load N more" removal next to it IS a disclosed, deliberate owner decision — leave that)
 
 **My Art** — `MyArtOverlay.jsx`/`MyArtMobile.jsx` vs `Frontend Gallery.dc.html` /
@@ -1824,6 +1825,42 @@ own Similar button already exercises, not a broken feature). 1539/1539 pytest.
 
 LINEAGE remains open — confirmed (again) that no real backend lineage/derivative-chain data
 exists anywhere in this app; not fabricating it, matching mobile's own disclosed skip.
+
+### Punch-list items shipped for the desktop Gallery shell: the real nav-bar overflow bug, dead Publish/Train stubs, the page caption  ·  *2026-08-04*
+
+Three items, all real and independent of each other.
+
+**The nav-bar overflow bug** — `.mgx-sep` was a single, non-wrapping flex row; when
+`.mgx-sepleft` (nav pills) wrapped internally to multiple lines at a narrow-but-still-desktop
+width, `.mgx-sepright` (credits/activity, `flex:none`, vertically centered across the now-taller
+row) could land on top of sepleft's later wrapped lines — this is exactly what "Health"/"Panel"
+overlapping "idle · nothing in the queue" was. Fix: `flex-wrap:wrap` on the outer `.mgx-sep`
+itself, so when there's no room on sepleft's current row, sepright drops to its own new row
+below instead of overlapping one; `margin-left:auto` keeps it right-aligned whenever it does
+have room (unchanged from before).
+
+Verified NOT just "no overlap" but real wrapping behavior: constrained `.mgx-sep`'s own width
+directly via JS (the `resize_window` tool wasn't reliably changing the actual CSS viewport in
+this session — confirmed by checking `window.innerWidth` after a resize call, still 657px
+regardless of the requested size, a real tooling limitation, not a false-positive test) across
+400-650px and confirmed zero pill/text overlap at every width, then confirmed `.mgx-sepright`'s
+`top` genuinely sits below `.mgx-navspine`'s `bottom` at 450px — a real row-wrap, not
+coincidental non-collision at the one width tested.
+
+**Dead Publish/Train stubs** — clicking called `onOverlay("publish"/"train")` regardless of
+`soon:true`, which `App.jsx`'s overlay switch has no case for — silent no-op. Now intercepted
+before `onOverlay` is ever called, showing a real toast (`window.Toast.show`, the same
+mechanism `ActionsMenu.jsx` already uses for real UI feedback) instead. Live-verified: real
+`.mg-toast` element confirmed in the DOM with the exact "Publish — coming soon." text.
+
+**Page caption** — "Page X of Y · N per page · N items" was missing with no disclosed reason
+(unlike the deliberately-removed "Load N more" button next to it, which stays gone per the
+owner's own 2026-07-30 QA decision, cited in `Grid.jsx`'s own header comment). Sourced from
+real pagination state already in the component (`items.length` for the real per-page count,
+not a hardcoded constant). Live-verified: "Page 1 of 24 · 100 per page · 2,337 items" against
+the real library.
+
+1539/1539 pytest.
 
 ### Loom Mobile follow-up shipped: the per-shot kebab actions sheet (Move up / Move down / Duplicate / Delete)  ·  *2026-08-04*
 

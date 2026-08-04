@@ -350,7 +350,17 @@ export default function Grid({
       </div>
       {loading && <div className="sentinel">summoning…</div>}
       {!loading && pages > 1 && (
-        <PageBar page={page} pages={pages} go={go} />
+        <>
+          <PageBar page={page} pages={pages} go={go} />
+          {/* Frontend Gallery.dc.html:205-208 -- "Page X of Y · N per page · N items",
+              missing with no disclosed reason (unlike the deliberately-removed "Load N
+              more" button next to it, which stays gone -- a real owner decision, see this
+              file's header comment). Real per-page count is items.length, the actual
+              number of rows this page loaded, not a hardcoded page-size constant. */}
+          <div className="pagecaption">
+            Page {page} of {pages} · {items.length} per page · {Number(total).toLocaleString()} item{total === 1 ? "" : "s"}
+          </div>
+        </>
       )}
     </div>
   );

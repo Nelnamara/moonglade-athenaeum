@@ -1773,6 +1773,13 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Desktop Gallery shell: a real nav-bar overflow bug, dead Publish/Train stubs, the page
+  caption.** The nav bar could literally overlap the credits/activity cluster at real desktop
+  window widths (~500-580px, not a phone-only issue) — fixed with real flex-wrap, not a patch
+  at one width. Publish/Train used to silently no-op; now show a real toast. "Page X of Y · N
+  per page · N items" restored under the pager, sourced from real pagination state.
+  Live-verified across multiple widths and against the real library. 1539/1539 pytest.
+
 - **Desktop Image Details: SIMILAR section, footer copy buttons, header nav.** SIMILAR reuses
   the exact real `SimilarModal.jsx` component the Lightbox already uses (not a rebuild); Copy
   Seed/Task ID/Filename joined the existing footer copy buttons; the header gained a real

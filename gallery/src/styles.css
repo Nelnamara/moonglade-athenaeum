@@ -589,6 +589,9 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
 /* ---- real pagination: Prev/Next + windowed numbers, replacing infinite scroll ---- */
 .pagebar { display: flex; justify-content: center; align-items: center; gap: 6px;
   padding: 22px 12px; flex-wrap: wrap; }
+/* Frontend Gallery.dc.html:205-208 -- "Page X of Y · N per page · N items" under the pager. */
+.pagecaption { text-align: center; font-size: 10.5px; color: var(--overlay0);
+  font-variant-numeric: tabular-nums; padding: 0 12px 18px; }
 .pg-nav, .pg-num { border-radius: 10px; font-size: 12.5px; padding: 6px 13px;
   color: var(--text); border: 1px solid var(--surface1);
   background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(0,0,0,.14)), var(--surface0); }
