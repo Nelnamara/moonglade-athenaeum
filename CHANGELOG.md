@@ -17,6 +17,16 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Loom Mobile follow-up — the per-shot kebab (⋮) actions sheet.** Move up / Move down /
+  Duplicate / Delete, reusing the exact same `moveCard`/`dupCard`/`delCard` functions
+  desktop LoomV2's own board already calls — they simply weren't threaded into
+  `LoomMobile`'s props before. The delete confirm gate is byte-identical to desktop's own
+  message, a real early return so cancelling touches nothing. Verified live with a genuine
+  destructive round trip (duplicate → move → delete with the confirm stubbed both ways →
+  full server-side page reload confirming exactly one shot remained). 708/708 loom tests,
+  1539/1539 pytest. Closes one of the two disclosed gaps from increment 6's completeness
+  pass — a Loom-specific Fixer port remains open.
+
 - **Loom Mobile increment 6 — Filter compare ("Art filters"), the last screen of the locked
   mobile design.** Applies one of PixAI's real, free, client-side art filters
   (`static/mg-art-filters.js`, already used by the Gallery's own `FiltersPanel.jsx`) to a
@@ -1760,6 +1770,24 @@ git tags. Full prose notes for tagged versions live on
   one: **no account holds a power another one lacks.** The gate asks where you are sitting, not
   who you are — your own account is refused from the LAN exactly as a guest's would be, and any
   account can do all of it sitting at the server machine.
+
+### Fixed
+
+- **A real, severe, pre-existing bug: opening Image Details (desktop and mobile) could
+  enter an infinite refetch loop** — reported by the owner via two screen recordings
+  ("even worse now," "seizure inducing"), reproduced live (~1,000 identical
+  `GET /api/next/detail/<id>` requests fired in a few seconds), and root-caused to
+  `App.jsx`'s (and `AppMobile.jsx`'s identical copy for `ImageDetailsMobile.jsx`)
+  `advParams` object being built fresh every render and used by reference in
+  `useImageDetails.js`'s fetch effect's dependency array — a new reference every render
+  re-fired the effect every render, forever. This is what produced the reported stutter/
+  stuck-loading/flashing: a real render briefly completing, then immediately reverting as
+  the next re-render already had a new `advParams` object queued. Fixed by memoizing both
+  call sites' `advParams` on the actual underlying values, not the object identity.
+  Verified live post-fix: zero new requests over a 3-second settle window after the initial
+  load, Details rendering and staying rendered. 1539/1539 pytest. Full reasoning, including
+  why this affected every image on both platforms and not just the one in the report video,
+  in `docs/DECISIONS.md`'s entry of the same date.
 
 ## [2.5.0] - 2026-07-25 — Upscale where PixAI puts it, five filters of our own, metadata that captures itself, and a settable library folder
 
