@@ -98,6 +98,20 @@ export default function useControlPanel() {
   const [confirmArm, setConfirmArm] = useState(null); // action key awaiting inline confirm
   const [testPullN, setTestPullN] = useState(20);
   const pollRef = useRef(null);
+  const runningKeyRef = useRef(null); // the action key tick() is currently polling for --
+  // a ref (not `running` state) because runAction() sets this synchronously before the
+  // interval is ever created, avoiding the stale-closure trap `tick`'s own closure over
+  // `running` would otherwise hit (setRunning triggers a re-render; the specific `tick`
+  // function instance handed to setInterval was created during THIS render, before that
+  // re-render happens, so its own closed-over `running` would still read null).
+
+  // Dedup stage sequential gating (Control Panel.dc.html:637-641, `dedupDone`/`st.onRun`'s
+  // `i <= s.dedupDone` check) -- session-local, matching the design's own `dedupDone: 0`
+  // in-memory-only state (never persisted there either, confirmed at design line 508). NOT
+  // the same gap as the disclosed "no run-history persisted" one above: this doesn't need
+  // to survive a reload, it only needs to survive within one open Panel session, exactly
+  // like the design's own state does.
+  const [dedupDone, setDedupDone] = useState(0);
 
   const [taskId, setTaskIdRaw] = useState("");
   const [taskState, setTaskState] = useState(null); // 'running' | 'done' | {error}
@@ -140,6 +154,7 @@ export default function useControlPanel() {
         const r = await fetch("/api/panel/status");
         const d = await r.json();
         if (d.status === "running") {
+          runningKeyRef.current = d.action;
           setRunning({ action: d.action, label: d.label || d.action });
           setProgress(d.progress || null);
           setLog(d.lines || []);
@@ -176,6 +191,8 @@ export default function useControlPanel() {
     }
     clearInterval(pollRef.current); pollRef.current = null;
     setRunning(null);
+    const finishedKey = runningKeyRef.current;
+    runningKeyRef.current = null;
     const lines = d.lines || [];
     if (d.status === "failed") {
       const rc = d.rc != null ? " (exit " + d.rc + ")" : "";
@@ -198,6 +215,13 @@ export default function useControlPanel() {
         warnCount: d.warn_count || 0,
         lines: tail,
       });
+      // Advance dedup gating only on a real, clean "done" -- not
+      // done_with_errors or cancelled, so a partial/interrupted stage never
+      // unlocks the next (possibly destructive) one on a false pretense.
+      if (d.status === "done") {
+        const idx = DEDUP_STAGES.findIndex((s) => s.key === finishedKey);
+        if (idx !== -1) setDedupDone((prev) => Math.max(prev, idx + 1));
+      }
       fetchSummary();
     }
   };
@@ -206,6 +230,13 @@ export default function useControlPanel() {
     if (running) return;
     const spec = actionSpec(key);
     if (!spec) return;
+    // Explicit early-return guard, not just the button's disabled attribute
+    // (same rule this app applies everywhere a real gate matters -- see
+    // DuplicateReviewOverlay's resolveGroup for the precedent): a dedup
+    // stage clicked out of order is refused here regardless of how it got
+    // clicked.
+    const dedupIdx = DEDUP_STAGES.findIndex((s) => s.key === key);
+    if (dedupIdx !== -1 && dedupIdx > dedupDone) return;
     if (spec.destructive && confirmArm !== key) {
       setConfirmArm(key);
       return;
@@ -215,11 +246,12 @@ export default function useControlPanel() {
     setJobResult(null);
     setProgress(null);
     setLog([]);
+    runningKeyRef.current = key;
     const body = { action: key };
     if (spec.destructive) body.confirm = true;
     if (spec.int_param) body.n = extra != null ? extra : (spec.int_default || 1);
     const d = await postJSON("/api/panel/run", body);
-    if (d.error) { setJobError(d.error); return; }
+    if (d.error) { runningKeyRef.current = null; setJobError(d.error); return; }
     setRunning({ action: key, label: d.label || spec.label || key });
     pollRef.current = setInterval(tick, POLL_MS);
     tick();
@@ -309,6 +341,7 @@ export default function useControlPanel() {
     summary, summaryErr, achievements, skins, activeSkin, pickSkin,
     fetchSummary, fetchAchievements, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
+    dedupDone,
     testPullN, setTestPullN,
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,

@@ -1773,6 +1773,13 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Control Panel: Dedup's 5-stage sequence is now really gated, not just visually implied.**
+  Design locks each stage (Audit → Preview → Quarantine 🔒 → Verify → Delete 🔒) until the
+  previous one has run; every stage was clickable in any order. Fixed in the shared hook, so
+  both desktop and mobile got it in one pass. Only advances on a clean completion, never a
+  partial/errored/cancelled run. Live-verified against the real library: ran real Audit,
+  confirmed Preview unlocked while the destructive stages stayed locked. 1539/1539 pytest.
+
 - **Control Panel (desktop): real credit balance and a real Live Mirror, both previously
   missing.** The overlay was never given the `account` data `App.jsx` already fetches, so its
   header fell back to a build-stamp string and its vitals list stayed 3 items instead of the
