@@ -1387,8 +1387,8 @@ increment in this file works.
 - [ ] No job run-history/ledger anywhere (desktop: zero; mobile: a toggle with only a disclosure
       sentence behind it) — Sync's "last run/rc/auto-schedule" line and Check rows' last-run
       timestamps both dropped too
-- [ ] Dedup's 5-stage sequence isn't actually gated (design: each stage locked until the
-      previous one runs; real: every stage always clickable)
+- [x] Dedup's 5-stage sequence isn't actually gated (design: each stage locked until the
+      previous one runs; real: every stage always clickable). **SHIPPED 2026-08-04.**
 - [ ] Organize flow drops the "142 would move" result-readout chip between Preview and Apply
 - [ ] Running-job view drops the `lockedMinis` "what's blocked while this runs" chip row
 - [ ] "Catalog & files" tile missing the library-folder picker (`webkitdirectory` input) + path
@@ -1557,6 +1557,31 @@ Live-verified against the real account/watch state (not injected): header showed
 version/date-stamp gap (design line ~77 — currently shows a filesystem path or nothing) is a
 separate, lower-priority punch-list item and was deliberately left open, not silently dropped.
 1539/1539 pytest.
+
+### Punch-list item 4 shipped: Dedup's 5-stage sequence is now really gated  ·  *2026-08-04*
+
+Design (`Control Panel.dc.html:637-641`) locks each dedup stage (Audit → Preview →
+Quarantine 🔒 → Verify → Delete 🔒) until the previous one has actually run; the shipped app let
+every stage fire in any order regardless. The design's own gating state (`dedupDone`) is itself
+just in-memory, never persisted (confirmed at design line 508) — so this needed no new backend
+or schema, only real session-local sequencing in `useControlPanel.js` (shared by both
+desktop and mobile, so both platforms got the fix in one pass, not two).
+
+Implementation note: `tick()` (the poll loop that resolves a running job) previously had no
+reliable way to know which action key had just finished — `running` state closes over a stale
+value inside the specific `tick` closure `setInterval` was given, so a `runningKeyRef` ref was
+added instead (set synchronously in `runAction`, read in `tick`) to sidestep that trap. Gating
+only advances on a clean `"done"` status, never `done_with_errors`/`cancelled`, so a partial
+run can't unlock a destructive next stage on a false pretense. `runAction` also gained an
+explicit early-return guard for an out-of-order dedup key (same "don't trust the disabled
+attribute alone" rule this app applies everywhere a real gate matters).
+
+Live-verified against the real library: at rest, only Audit was enabled (Preview/Quarantine/
+Verify/Delete all disabled with a real HTML `disabled` attribute, confirmed via DOM inspection,
+not just visual dimming). Ran the real (non-destructive) Audit action against the real ~2,337
+image library; on completion Preview unlocked while the two destructive stages stayed locked —
+exactly the design's intended progression. Did not run the destructive stages during
+verification. 1539/1539 pytest.
 
 ### Loom Mobile follow-up shipped: the per-shot kebab actions sheet (Move up / Move down / Duplicate / Delete)  ·  *2026-08-04*
 

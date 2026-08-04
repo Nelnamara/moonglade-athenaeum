@@ -89,6 +89,7 @@ export default function ControlMobile({ account }) {
     summary, summaryErr, skins, activeSkin, pickSkin,
     fetchSummary, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
+    dedupDone,
     testPullN, setTestPullN,
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,
@@ -258,7 +259,9 @@ export default function ControlMobile({ account }) {
                     {DEDUP_STAGES.map((st, i) => (
                       <React.Fragment key={st.key}>
                         <ActionChip spec={actionSpec(st.key)} label={st.label}
-                          armed={confirmArm === st.key} onRun={() => runAction(st.key)} />
+                          armed={confirmArm === st.key} onRun={() => runAction(st.key)}
+                          disabled={i > dedupDone}
+                          title={i > dedupDone ? "Run the earlier stages first" : undefined} />
                         {i < DEDUP_STAGES.length - 1 && <span className="mgcp-arr">→</span>}
                       </React.Fragment>
                     ))}

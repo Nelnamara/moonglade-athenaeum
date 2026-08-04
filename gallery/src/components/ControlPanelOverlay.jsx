@@ -72,6 +72,7 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
     summary, summaryErr, skins, activeSkin, pickSkin,
     fetchSummary, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
+    dedupDone,
     testPullN, setTestPullN,
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,
@@ -262,7 +263,9 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                                 {DEDUP_STAGES.map((st, i) => (
                                   <React.Fragment key={st.key}>
                                     <ActionChip spec={actionSpec(st.key)} label={st.label}
-                                      armed={confirmArm === st.key} onRun={() => runAction(st.key)} />
+                                      armed={confirmArm === st.key} onRun={() => runAction(st.key)}
+                                      disabled={i > dedupDone}
+                                      title={i > dedupDone ? "Run the earlier stages first" : undefined} />
                                     {i < DEDUP_STAGES.length - 1 && <span className="mgcp-arr">→</span>}
                                   </React.Fragment>
                                 ))}
@@ -426,11 +429,12 @@ function tabStyle(on) {
   };
 }
 
-export function ActionChip({ spec, dgr, label, armed, onRun }) {
+export function ActionChip({ spec, dgr, label, armed, onRun, disabled, title }) {
   if (!spec) return null;
   const text = armed ? "Confirm — " + (label || spec.label) : (label || spec.label);
   return (
-    <button type="button" className={"mgcp-chip" + (dgr || spec.destructive ? " dgr" : "")} onClick={onRun}>
+    <button type="button" className={"mgcp-chip" + (dgr || spec.destructive ? " dgr" : "")}
+      onClick={onRun} disabled={disabled} title={title}>
       {text}
     </button>
   );
