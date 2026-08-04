@@ -335,6 +335,20 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                             <div key={i} className={ln.indexOf("✓") === 0 ? "ok" : ""}>{ln}</div>
                           ))}
                         </div>
+                        {/* Control Panel.dc.html:205-210's lockedMinis -- real other-action
+                            labels from summary.actions (the same list actionSpec() already
+                            reads), not the design's fixed 3-example array. */}
+                        <div className="mgcp-lockedrow">
+                          {(summary.actions || []).filter((a) => a.action !== running.action)
+                            .slice(0, 3).map((a) => (
+                              <span className="mgcp-lockchip" key={a.action}>{a.label}</span>
+                            ))}
+                          {(summary.actions || []).length - 1 > 3 && (
+                            <span className="mgcp-lockchip">
+                              +{(summary.actions || []).length - 1 - 3} more · one job at a time
+                            </span>
+                          )}
+                        </div>
                       </div>
                     )}
                     {jobError && <div className="mgcp-runerr">{jobError}</div>}

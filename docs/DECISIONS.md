@@ -1391,7 +1391,8 @@ increment in this file works.
       previous one runs; real: every stage always clickable). **SHIPPED 2026-08-04.**
 - [x] Organize flow drops the "142 would move" result-readout chip between Preview and Apply.
       **SHIPPED 2026-08-04.**
-- [ ] Running-job view drops the `lockedMinis` "what's blocked while this runs" chip row
+- [x] Running-job view drops the `lockedMinis` "what's blocked while this runs" chip row.
+      **SHIPPED 2026-08-04.**
 - [ ] "Catalog & files" tile missing the library-folder picker (`webkitdirectory` input) + path
       display entirely
 - [ ] Branding tile's mark glyphs don't set the mark in place — click just switches tabs
@@ -1597,6 +1598,22 @@ line sits near the top of the output, ahead of the per-file preview rows.
 Shared through the hook, so both desktop and mobile got it in one pass. Live-verified against
 the real library: ran the real (non-destructive) Organize preview and confirmed the chip
 showed "2308 would move" — the actual real count for the actual real library, not a fixture.
+1539/1539 pytest.
+
+### Punch-list item 6 shipped: the running-job view now shows what's really blocked  ·  *2026-08-04*
+
+Design (`Control Panel.dc.html:205-210`) dims a row of other-action chips while a job runs, so
+it's visible at a glance what's blocked, not just implied by disabled buttons scattered around
+the console. The design's own `lockedMinis` is a hardcoded 4-item demo array; the real version
+here is built from `summary.actions` (the same list `actionSpec()` already reads) minus
+whichever action is currently running — first 3 real labels, then a real
+"+N more · one job at a time" count, not a fabricated one.
+
+Live-verified against the real library: triggered the real "Sync i2v videos" action, confirmed
+the row showed the real other-action labels ("Sync now — pull new + fill metadata", "Catalog
+stats", "Duplicate audit (fast, read-only)") plus "+17 more · one job at a time" — the actual
+count of the actual other actions in this session's `summary.actions`. Stopped the job
+immediately after confirming (no need to let a full i2v re-walk finish for this check).
 1539/1539 pytest.
 
 ### Loom Mobile follow-up shipped: the per-shot kebab actions sheet (Move up / Move down / Duplicate / Delete)  ·  *2026-08-04*

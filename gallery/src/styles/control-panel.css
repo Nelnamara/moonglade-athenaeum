@@ -42,6 +42,12 @@
 /* Control Panel.dc.html:696's resStyle -- the Organize flow's dry-run result readout. */
 .mgcp-res { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--overlay0);
   border: 1px dashed var(--surface1); border-radius: 6px; padding: 5px 9px; }
+/* Control Panel.dc.html:205-210/693 -- lockedMinis, the dimmed "what else is blocked while
+   this job runs" row. lockChipStyle = flowChip with cursor:default + opacity:.55 (611/693). */
+.mgcp-lockedrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; opacity: .6; }
+.mgcp-lockchip { display: inline-flex; align-items: center; background: var(--surface0);
+  border: 1px solid var(--surface1); border-radius: 8px; padding: 6px 11px; font-size: 12px;
+  color: var(--text); cursor: default; }
 .mgcp-mirror b.on { color: var(--emerald); font-weight: 600; }
 .mgcp-mirror b { font-weight: 600; }
 .mgcp-srvrow { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; margin-top: 8px; }

@@ -1773,6 +1773,11 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Control Panel: the running-job view now shows what else is really blocked.** A dimmed
+  row of other-action chips (real labels + a real "+N more · one job at a time" count, sourced
+  from the same action list the console already reads) replaces what rendered as nothing.
+  Live-verified against a real running job. 1539/1539 pytest.
+
 - **Control Panel: Organize's "N would move" result readout is real.** Design puts a real
   dry-run count between Preview and Apply; nothing rendered there before. Parsed from
   `cmd_organize()`'s own real stdout line, shared through the hook for both platforms.
