@@ -1773,6 +1773,15 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Control Panel (desktop): real credit balance and a real Live Mirror, both previously
+  missing.** The overlay was never given the `account` data `App.jsx` already fetches, so its
+  header fell back to a build-stamp string and its vitals list stayed 3 items instead of the
+  design's 4. Live Mirror had working CSS and a working mobile implementation
+  (`/api/watch/status`, already shipped) that was simply never ported to desktop's own,
+  separate section. Both fixed; live-verified against real account/watch state. 1539/1539
+  pytest. Second/third items off the design-fidelity punch list — see
+  `docs/DECISIONS.md`.
+
 - **Duplicate Review (desktop) rebuilt against its real, previously-unopened design.** The
   component's own header comment claimed no locked mockup existed for this overlay — it did
   (`Duplicate Review.dc.html`, complete, 244 lines) and was never read. Now matches it: the

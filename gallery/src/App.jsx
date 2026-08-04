@@ -596,7 +596,7 @@ export default function App({ boot }) {
         />
       )}
       {overlay === "panel" && (
-        <ControlPanelOverlay onClose={() => setOverlay(null)} boot={boot} />
+        <ControlPanelOverlay onClose={() => setOverlay(null)} boot={boot} account={account} />
       )}
       {overlay === "contactsheet" && (
         <ContactSheetOverlay

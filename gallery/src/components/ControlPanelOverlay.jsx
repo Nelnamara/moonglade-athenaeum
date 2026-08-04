@@ -42,9 +42,31 @@ import useControlPanel, { postJSON, DEDUP_STAGES } from "../hooks/useControlPane
    default-exported ControlPanelOverlay itself) for the exact same reason -- ControlMobile
    reuses these components verbatim rather than rebuilding equivalents. */
 
-export default function ControlPanelOverlay({ onClose, boot }) {
+// Verbatim copy of ControlMobile.jsx's own helper (same tiny function, kept
+// per-file rather than a new shared-utils module for one four-line helper --
+// matches how small formatters already live alongside their own component
+// elsewhere in this codebase).
+function timeAgo(ts) {
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  if (s < 60) return s + "s ago";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  return Math.floor(s / 3600) + "h ago";
+}
+
+export default function ControlPanelOverlay({ onClose, boot, account }) {
   const [tab, setTab] = useState("maint");
   const [subOverlay, setSubOverlay] = useState(null); // 'users' | 'trash'
+
+  // Live Mirror -- ControlMobile.jsx already ships this against the real,
+  // read-only /api/watch/status route (its own header comment explains why
+  // it stays a local fetch-on-mount rather than folding into
+  // useControlPanel.js: no interval needed, the tab's own mount/unmount
+  // cadence is the natural refresh trigger). Same pattern here, desktop side
+  // -- was simply never ported when this file was first built.
+  const [watch, setWatch] = useState(null);
+  useEffect(() => {
+    fetch("/api/watch/status").then((r) => r.json()).then(setWatch).catch(() => {});
+  }, []);
 
   const {
     summary, summaryErr, skins, activeSkin, pickSkin,
@@ -90,6 +112,23 @@ export default function ControlPanelOverlay({ onClose, boot }) {
   if (!summary) return null;
 
   const isLocal = summary.panel_is_local;
+  const credits = account && account.credits != null ? Number(account.credits).toLocaleString() : "—";
+  const cards = account && account.cards != null ? Number(account.cards) : null;
+
+  // Design's own {{ mirrorLead }}/{{ mirrorRest }} split (bold lead-in +
+  // plain rest, Control Panel.dc.html:64) -- built from the same real
+  // /api/watch/status fields ControlMobile.jsx already renders, just split
+  // into the two pieces the desktop design's markup expects instead of one
+  // run-on string.
+  const mirrorLead = !watch ? "Checking." : watch.connected ? "Listening." : "Reconnecting.";
+  const mirrorRest = !watch
+    ? ""
+    : watch.connected
+      ? [
+          (watch.mirrored || 0) + " mirrored this session",
+          watch.last_event_at ? "last event " + timeAgo(watch.last_event_at) : null,
+        ].filter(Boolean).join(" · ")
+      : (watch.last_error || "waiting to reconnect…");
 
   return (
     <>
@@ -103,7 +142,15 @@ export default function ControlPanelOverlay({ onClose, boot }) {
               <div className="mgcp-titlesub">Control Panel</div>
             </div>
             <div className="mgcp-headright">
-              <div className="mgcp-credits">{boot?.build_stamp || "—"}</div>
+              {/* Control Panel.dc.html:42 -- the header's own right slot is credits,
+                  not a build/version stamp (that belongs in the sidebar footer,
+                  design line ~77 -- a separate, still-open gap; see
+                  docs/DECISIONS.md's punch list). boot?.build_stamp was occupying
+                  this slot before; credits is what the design actually puts here. */}
+              <div className="mgcp-credits">
+                <b>{credits}</b> credits
+                {cards != null ? <><br />{cards} free card{cards !== 1 ? "s" : ""}</> : null}
+              </div>
               <button type="button" className="mgv-x" onClick={onClose} aria-label="Close">×</button>
             </div>
           </div>
@@ -115,12 +162,24 @@ export default function ControlPanelOverlay({ onClose, boot }) {
                 <div className="mgcp-sidehead">At a glance</div>
                 {[
                   ["images", summary.stats.images], ["videos", summary.stats.videos],
-                  ["collections", summary.stats.collections],
+                  ["collections", summary.stats.collections], ["credits", credits],
                 ].map(([label, num]) => (
                   <div className="mgcp-vital" key={label}>
-                    <b>{Number(num || 0).toLocaleString()}</b><span>{label}</span>
+                    <b>{typeof num === "number" ? num.toLocaleString() : num}</b><span>{label}</span>
                   </div>
                 ))}
+              </div>
+
+              <div>
+                {/* Control Panel.dc.html:60-66 -- Live Mirror, its own section
+                    (distinct from Server below, unlike ControlMobile's merged
+                    card -- the desktop design keeps them separate). Ported from
+                    ControlMobile.jsx's own real /api/watch/status wiring. */}
+                <div className="mgcp-sidekick">Live Mirror</div>
+                <div className="mgcp-mirror">
+                  <span className={"mgcp-mirrordot" + (watch?.connected ? "" : " off")} />
+                  <div><b className={watch?.connected ? "on" : ""}>{mirrorLead}</b> {mirrorRest}</div>
+                </div>
               </div>
 
               <div>
