@@ -76,5 +76,16 @@
     background: none !important; padding: 0 !important; }
   .mgcs-grid { gap: 10px 8px; }
   .mgcs-img { border-color: #ccc; }
+  /* Contact Sheet.dc.html's own print palette (lines 22/23/25/42/43/45) --
+     the on-screen colors above are dark-theme tokens (var(--text) etc.),
+     chosen for the live overlay, not the printed page. Without this
+     override print output inherited those dark-theme values, which the
+     browser's own print styles then render as pale/washed-out text on
+     white paper -- illegible. These are the design's literal hex values,
+     not a re-derivation. */
+  .mgcs-eyebrow, .mgcs-h1, .mgcs-cap-title { color: #1b1733 !important; }
+  .mgcs-label, .mgcs-sub { color: #746c8a !important; }
+  .mgcs-meta, .mgcs-cap-sub, .mgcs-empty { color: #8a8398 !important; }
+  .mgcs-no { color: #2a8f86 !important; }
   @page { margin: 12mm; }
 }

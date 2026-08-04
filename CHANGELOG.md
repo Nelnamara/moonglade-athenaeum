@@ -1208,6 +1208,11 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Contact Sheet's print output used dark-theme text colors on a white page.** The
+  `@media print` block reset layout but never color, so printed text inherited the app's
+  dark-theme tokens instead of the design's dedicated light/print palette
+  (`#1b1733`/`#746c8a`/`#8a8398`/`#2a8f86`) — likely illegible on paper. Now overridden
+  per class with the design's literal hex values.
 - **Contests date/prize display didn't match the locked design on either platform.**
   `Frontend Gallery.dc.html` combines a real date range and computed days-left into one
   string for every card (`c.dates + ' · ' + c.left`); the official card showed range-only

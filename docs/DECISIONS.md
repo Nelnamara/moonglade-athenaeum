@@ -1338,6 +1338,22 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
 
+### Contact Sheet desktop: print output used dark-theme text colors on a white page  ·  *2026-08-04*
+
+Fix from the design-fidelity punch list above. `Contact Sheet.dc.html` is itself a light/print
+mockup with a dedicated 4-color palette (`#1b1733` main ink, `#746c8a` secondary label,
+`#8a8398` tertiary caption, `#2a8f86` accent) baked directly into its inline styles — but
+`contact-sheet-overlay.css`'s `@media print` block only reset layout (hide app chrome, flatten
+the slab) and never touched color. Every text class still resolved the app's dark-theme CSS
+custom properties (`var(--text)`, `var(--subtext)`, `var(--blue)`) at print time, which read as
+pale/washed-out on white paper — real but hard to catch without actually opening a print
+preview, since on-screen (dark background) those same tokens look correct. Added explicit
+`!important` hex overrides per class inside the print block, matching the design's literal
+values class-for-class. Verified by inspecting the live CSSOM of the built stylesheet's
+`@media print` rule directly (not the source file) — confirmed `rgb(27,23,51)` (`#1b1733`) and
+`rgb(116,108,138)` (`#746c8a`) present exactly where expected. Pure CSS change, no data/logic
+path touched — no pytest coverage applies; full `python -m pytest -q` suite still run and green.
+
 ### Contests: combined date+days-left string and ♦ diamond consistency, both platforms  ·  *2026-08-04*
 
 Fix from the design-fidelity punch list above. `Frontend Gallery.dc.html:2434` maps every
@@ -1355,7 +1371,7 @@ never called from the desktop overlay) — no new data logic needed, just a shar
 restOfficial CR pills. Verified live against the real `/api/contests` feed (25 real cards):
 `.mgct-dates` renders e.g. `"2026-07-29 – 2026-08-18 · 14 days left"`, `.mgct-prize` renders
 `"♦ 54,500,000 CR"` on every card checked, official and community, both platforms. Full
-1539-test suite passes.
+full `python -m pytest -q` suite passes.
 
 ### Design-fidelity audit: every shipped surface checked against its real `.dc.html`, real gaps found — punch list  ·  *2026-08-04*
 
@@ -1564,13 +1580,25 @@ logic and most regions are genuinely faithful; these are the real misses:
       `c.dates + ' · ' + c.left` formula via a shared `dateWithLeft()` helper
 - [x] ♦ diamond icon missing from every community-card CR pill — only the one featured card
       gets it; design puts it on all of them — **SHIPPED 2026-08-04**
-- [ ] "+12 more community contests below the fold — scroll" footer hint missing entirely
+- [~] "+12 more community contests below the fold — scroll" footer hint missing entirely —
+      **REVIEWED 2026-08-04, deliberate non-fix.** The design's "+12" is static demo flavor
+      text implying a paginated/preview grid; the real `ContestsOverlay.jsx`/`ContestsMobile.jsx`
+      already render every `community` row in one unpaginated `.map()` (confirmed reading both
+      files, no `.slice()`/limit anywhere). There's no real "N more below the fold" number to
+      show without fragile scroll-position/viewport measurement — same class of skip as the
+      other items in this doc that would require fabricating data rather than showing something
+      real. Flagged here in case the owner wants a scroll-measured version built anyway.
 
 **Contact Sheet (desktop)** — `ContactSheetOverlay.jsx` vs `Contact Sheet.dc.html`.
-- [ ] Print output likely illegible: the design has a dedicated light/print palette
-      (`#1b1733`/`#746c8a`/`#8a8398`/`#2a8f86` on white); the `@media print` block never resets
-      the app's dark-theme CSS tokens (`var(--text)` etc.), so printing probably produces pale
-      text on white paper
+- [x] Print output likely illegible: the design has a dedicated light/print palette
+      (`#1b1733`/`#746c8a`/`#8a8398`/`#2a8f86` on white); the `@media print` block never reset
+      the app's dark-theme CSS tokens (`var(--text)` etc.), so printing produced pale text on
+      white paper — **SHIPPED 2026-08-04**, `contact-sheet-overlay.css`'s `@media print` block
+      now overrides every text class (`.mgcs-eyebrow`/`.mgcs-h1`/`.mgcs-cap-title` →`#1b1733`,
+      `.mgcs-label`/`.mgcs-sub` →`#746c8a`, `.mgcs-meta`/`.mgcs-cap-sub`/`.mgcs-empty` →`#8a8398`,
+      `.mgcs-no` →`#2a8f86`) with the design's literal hex values. Verified the built
+      stylesheet's `@media print` rule holds the exact `rgb()` equivalents of all four hex
+      colors (CSSOM inspection of the live loaded sheet, not a source-file read).
 
 **Why the backlog lives here, not a new file.** Standing rule: no audit ever creates a new
 tracking doc, findings land in the one tracker. This entry stays the single source for the
