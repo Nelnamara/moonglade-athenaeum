@@ -1773,6 +1773,18 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Duplicate Review (desktop) rebuilt against its real, previously-unopened design.** The
+  component's own header comment claimed no locked mockup existed for this overlay — it did
+  (`Duplicate Review.dc.html`, complete, 244 lines) and was never read. Now matches it: the
+  real header (← Library / divider / label / filter-by-filename search), a hero block
+  (eyebrow/serif title/3 stat cards), a color-coded similarity badge (red/gold/purple/blue,
+  driven by the real per-group `closeness_pct`), a "★ suggested keep" ribbon tracking the
+  algorithm's own pick independent of whatever the owner has toggled, a corrected Resolve
+  label ("keep 1, remove N"), and a session-local "Skip for now" (hides a card, no mutation).
+  Live-verified against the real library (218 real duplicate groups). 1539/1539 pytest. First
+  item off a full design-fidelity audit covering every shipped surface — see
+  `docs/DECISIONS.md`'s "Design-fidelity audit... punch list" entry for the complete backlog.
+
 - **A real, severe, pre-existing bug: opening Image Details (desktop and mobile) could
   enter an infinite refetch loop** — reported by the owner via two screen recordings
   ("even worse now," "seizure inducing"), reproduced live (~1,000 identical
