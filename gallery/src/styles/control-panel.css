@@ -39,6 +39,8 @@
 .mgcp-mirrordot { width: 7px; height: 7px; border-radius: 50%; background: var(--emerald); flex: none; margin-top: 5px;
   animation: cpPulse 2.6s ease-in-out infinite; }
 .mgcp-mirrordot.off { background: var(--overlay0); animation: none; }
+.mgcp-mirror b.on { color: var(--emerald); font-weight: 600; }
+.mgcp-mirror b { font-weight: 600; }
 .mgcp-srvrow { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
 .mgcp-svtag { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9.5px; letter-spacing: .12em;
   text-transform: uppercase; color: var(--emerald); border: 1px solid rgba(79,201,154,.4); border-radius: 999px; padding: 4px 9px; }

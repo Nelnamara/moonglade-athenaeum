@@ -1374,10 +1374,11 @@ increment in this file works.
 
 **Control Panel** — `ControlPanelOverlay.jsx`/`ControlMobile.jsx`/`useControlPanel.js` vs
 `Control Panel.dc.html`.
-- [ ] Credit balance shown nowhere on desktop (header shows build-stamp instead; vitals list is
-      3 items not 4) — mobile has this correctly, port the pattern
-- [ ] Live Mirror section entirely unrendered on desktop despite existing unused CSS
-      (`.mgcp-mirror`) and a real, working mobile implementation to port from
+- [x] Credit balance shown nowhere on desktop (header shows build-stamp instead; vitals list is
+      3 items not 4) — mobile has this correctly, port the pattern. **SHIPPED 2026-08-04.**
+- [x] Live Mirror section entirely unrendered on desktop despite existing unused CSS
+      (`.mgcp-mirror`) and a real, working mobile implementation to port from.
+      **SHIPPED 2026-08-04, same pass as credits — see dated entry below.**
 - [ ] Branding tab ~80% unbuilt: only Icons&marks + Animation work; Banner-main/Banner-login/
       Mascots/Rewards slots, per-slot crop-guide preview, upload chips, rotating-source note,
       and the "Sealed" explainer are all absent (disclosed as one summary sentence, but the
@@ -1527,6 +1528,35 @@ reclaimable — not injected data): header/hero/caption/badge/ribbon all confirm
 DOM inspection, Resolve/Skip/search filter all exercised (Skip hides a card with zero fetch
 calls; search filters to 0 with a real "no match" message). No real resolve/quarantine was
 fired during verification. `npm run build` clean, full pytest 1539/1539.
+
+### Punch-list items 2-3 shipped: Control Panel desktop now shows real credits and a real Live Mirror  ·  *2026-08-04*
+
+Second and third items off the design-fidelity punch list, both in `ControlPanelOverlay.jsx`
+since they're adjacent regions in the same sidebar. Root cause of both: the component was
+simply never given the data it needed. `App.jsx` already fetches `account` (credits/cards) and
+passes it to `SeparatorBar`/`GenerateDrawer` — `ControlPanelOverlay` was never added to that
+list, so its header fell back to `boot.build_stamp` (a version string occupying the design's
+credits slot) and its "At a glance" vitals stayed a 3-item list. Fixed by threading `account`
+through (`App.jsx`'s `<ControlPanelOverlay>` mount now passes it) and building the header/vitals
+markup the design (`Control Panel.dc.html:42`, `:51-57`) actually specifies.
+
+Live Mirror was a real, working feature that existed only on mobile — `ControlMobile.jsx` already
+polls `/api/watch/status` (a real, already-shipped route) once per mount and renders a
+connected/mirrored-count/last-event line; desktop's CSS for this (`.mgcp-mirror`/
+`.mgcp-mirrordot`) was already written and simply never given matching JSX. Ported the same
+fetch-on-mount pattern (kept local to the component, not folded into `useControlPanel.js`,
+matching `ControlMobile.jsx`'s own disclosed reasoning for keeping it separate — no polling
+interval needed, the overlay's own mount/unmount is the natural refresh point) and built the
+design's own bold-lead/plain-rest sentence structure (`mirrorLead`/`mirrorRest`,
+`Control Panel.dc.html:64`) from the real fields, as its own section between "At a glance" and
+"Server" (desktop's design keeps these separate, unlike mobile's merged card).
+
+Live-verified against the real account/watch state (not injected): header showed the real
+"3,593,991 credits · 24 free cards", vitals grew to 4 items, Live Mirror rendered "Listening.
+210 mirrored this session" as its own section between the right headings. The sidebar's
+version/date-stamp gap (design line ~77 — currently shows a filesystem path or nothing) is a
+separate, lower-priority punch-list item and was deliberately left open, not silently dropped.
+1539/1539 pytest.
 
 ### Loom Mobile follow-up shipped: the per-shot kebab actions sheet (Move up / Move down / Duplicate / Delete)  ·  *2026-08-04*
 
