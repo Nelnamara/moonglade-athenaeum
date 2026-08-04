@@ -1338,6 +1338,196 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
 
+### Design-fidelity audit: every shipped surface checked against its real `.dc.html`, real gaps found — punch list  ·  *2026-08-04*
+
+The owner directly disputed that shipped work matches its locked design ("you have strayed from
+the design on nearly every surface... it was all built over the last day in THIS session").
+Investigation started from a live, reproducible symptom (the desktop Loom's reel/timeline
+rendering as a plain 4-color bar instead of the design's per-shot-tinted, textured, labeled
+film-strip) and expanded into a full audit: every `.dc.html` in `design_handoff/` read in full
+and diffed section-by-section against its real component. Two confirmed root causes recur
+across almost every finding below: (1) a component's own header comment sometimes asserts no
+design source exists when one does (`DuplicateReviewOverlay.jsx`'s "No locked DC mockup exists"
+claim against a real, complete 244-line `Duplicate Review.dc.html`), and (2) desktop and mobile
+builds of the *same* feature frequently disagree — several regions built correctly for mobile
+were never ported back to desktop (Folio's tier carousel, Image Details' LINEAGE/SIMILAR
+sections, the Loom's Filter-compare and Fixer/Enhance tabs, Control Panel's Live Mirror).
+Not every surface is guilty — Lightbox (both), Login (both), Setup Wizard (both), and large
+parts of Health/Gallery-shell/Loom Mobile structure are genuinely faithful, several exceeding
+the static mock (real thumbnails, live-wired click targets the mock left decorative, real video
+scrub/trim replacing a fake `setInterval`). This entry is the fix backlog; items get struck
+through (not deleted) as they land, each with its own dated Decisions entry the way every other
+increment in this file works.
+
+**Duplicate Review (desktop)** — `gallery/src/components/DuplicateReviewOverlay.jsx` vs
+`Duplicate Review.dc.html`. Worst case in the audit: a real design exists and was never opened.
+**SHIPPED 2026-08-04, see dated entry below.**
+- [x] Header: "← Library" crumb, icon+label, filter-by-title search input (design ~28-38)
+- [x] Hero block: eyebrow + serif H1 + 3 stat cards (groups/images/reclaimable) (~43-63)
+- [x] Caption row: "sorted by highest similarity first..." (~65-71)
+- [x] Color-coded similarity badge by %, not flat text (~84, ~192/205) — real `closeness_pct`
+      exists on the near_duplicate tier already, use it
+- [x] "★ suggested keep" gold ribbon on the keeper tile (~100/236)
+- [x] Resolve button: "keep {N}, remove {M}" (currently remove-count only) (~110)
+- [x] "Skip for now" button next to Resolve (~111)
+- [x] Correct/remove the false "no mockup exists" claim in the file's own header comment
+
+**Control Panel** — `ControlPanelOverlay.jsx`/`ControlMobile.jsx`/`useControlPanel.js` vs
+`Control Panel.dc.html`.
+- [ ] Credit balance shown nowhere on desktop (header shows build-stamp instead; vitals list is
+      3 items not 4) — mobile has this correctly, port the pattern
+- [ ] Live Mirror section entirely unrendered on desktop despite existing unused CSS
+      (`.mgcp-mirror`) and a real, working mobile implementation to port from
+- [ ] Branding tab ~80% unbuilt: only Icons&marks + Animation work; Banner-main/Banner-login/
+      Mascots/Rewards slots, per-slot crop-guide preview, upload chips, rotating-source note,
+      and the "Sealed" explainer are all absent (disclosed as one summary sentence, but the
+      scope is much larger than that sentence implies) — needs new backend, largest remaining
+      item, may need its own scoping pass rather than a quick port
+- [ ] No job run-history/ledger anywhere (desktop: zero; mobile: a toggle with only a disclosure
+      sentence behind it) — Sync's "last run/rc/auto-schedule" line and Check rows' last-run
+      timestamps both dropped too
+- [ ] Dedup's 5-stage sequence isn't actually gated (design: each stage locked until the
+      previous one runs; real: every stage always clickable)
+- [ ] Organize flow drops the "142 would move" result-readout chip between Preview and Apply
+- [ ] Running-job view drops the `lockedMinis` "what's blocked while this runs" chip row
+- [ ] "Catalog & files" tile missing the library-folder picker (`webkitdirectory` input) + path
+      display entirely
+- [ ] Branding tile's mark glyphs don't set the mark in place — click just switches tabs
+- [ ] Skin cards drop the concrete unlock-requirement text (e.g. "Unlock: Hoardsmith (10,000
+      images)") — shows "🔒 locked" with no explanation
+- [ ] Power modal: shutdown state has no "Power back on" button (must close + use sidebar
+      Restart separately); restart state dropped the progress bar entirely, not just the fake
+      stage text (a real indeterminate bar was available elsewhere in this file and unused)
+- [ ] Sidebar footer shows a filesystem path or nothing instead of a version/date string
+- [ ] Mobile's "Check" region invents 5 separate rows where its own mobile-specific design
+      calls for one consolidated "run all" row — an unflagged divergence, not a loss
+
+**Desktop Loom (`LoomV2` in `loom/master-storyboard.jsx`)** vs `The Loom.dc.html`.
+- [ ] Reel/timeline lost its visual identity — the owner's original complaint, confirmed
+      exactly: design specifies a 6-color rotating per-shot tint + diagonal film-strip texture
+      + visible code/duration text on each segment + a separate thin status bar under the
+      shot's own color; shipped is 4 flat status colors, no text, no texture. (The resize
+      handle and live scrub/trim preview above it genuinely exceed the design — keep those.)
+- [ ] Hero banner region entirely missing — no graphic strip, no hide/show toggle, no state
+- [ ] Edit tab has no Fixer or Enhance sub-tabs at all (desktop-only gap — `LoomMobile`'s
+      Fixer, built and verified tonight, and Enhance/Filter-compare both already work
+      correctly on mobile; port the same logic, don't rebuild)
+- [ ] Filter-compare ("Art filters") modal doesn't exist on desktop, same story — mobile's
+      real, `MgArtFilters`-backed implementation is the thing to port
+- [ ] Frame Handoff renders on all 4 Generate tabs instead of Reference-only per spec — confirm
+      this is a deliberate consolidation, not an accident, before deciding whether to fix
+
+**Loom Mobile (`LoomMobile`, same file)** vs `Loom Mobile.dc.html`.
+- [ ] Generate → Video tab missing 5 elements outright: weave-mode chips (First Frame/First&
+      Last/Multi-Reference), negative prompt field, Model+Duration row, capability badges
+      (15s/multi-ref/audio/end-frame), Channel/SFW selector — desktop's Video tab already has
+      the Model/Duration/Channel cluster via `<mg-generate-drawer>`, reference it
+- [ ] Generate → Reference tab missing the Opening/Closing frame pair (reuse the existing
+      `FrameSlot` component, already used in Shot Detail)
+- [ ] 4 of 6 designed animations don't exist: `lmMetal` (animated shimmer on every primary
+      button — currently flat color), `lmSheetDown`/`lmFadeIn`/`lmFadeOut` (every sheet close
+      is an instant unmount, not the designed 280ms slide+fade)
+- [ ] Draft-chip's active glow (`box-shadow`) dropped
+- [ ] Frame/gallery picker isn't its own mobile screen — silently reuses the desktop
+      `<mg-gallery-picker>` component instead of the design's 3-column mobile sheet
+
+**Folio of Honors (desktop)** — `FolioOverlay.jsx` vs `Folio of Honors.dc.html`. Mobile
+(`FolioMobile.jsx`) already builds both of these correctly for the same feature — port.
+- [ ] "All" tab's featured tier carousel (plinth/prev-next/pips) entirely missing on desktop
+- [ ] "Every rung, every ladder" cross-ladder section entirely missing on desktop
+
+**Image Details (desktop)** — `DetailsView.jsx` vs `Image Details.dc.html`. Mobile
+(`ImageDetailsMobile.jsx`) already has all four of these correctly — port the pattern.
+- [ ] LINEAGE section missing (verify real backend lineage data exists before building —
+      mobile skipped this on purpose for the same reason; don't fabricate if there's no data)
+- [ ] SIMILAR section missing (mobile already has this working with real `/api/similar` data)
+- [ ] 7 of 11 metadata fields hidden behind an undisclosed "Full record ▾" toggle the design
+      never specifies — design shows all 11 unconditionally
+- [ ] Zero per-row copy buttons in the ledger (mobile has them on every copyable row)
+- [ ] Header missing the ⛶ Lightbox link and "N of M" index label
+- [ ] Upscale flyout (shared by Details + Lightbox, `static/mg-upscale-panel.js`) is a
+      top-right-anchored panel with a native `<select>` instead of the design's centered modal
+      with a custom animated dropdown
+
+**Desktop Gallery shell** — `NavSpine.jsx`/`shell.css`/`Grid.jsx` vs `Frontend Gallery.dc.html`.
+- [ ] Real, live-reproduced CSS bug: `.mgx-sep`'s right cluster (`flex:none`, no wrap/scroll
+      fallback) can literally overlap the stacked nav pills at real desktop window widths
+      (~500-580px, confirmed via `getBoundingClientRect` overlap test) — not a phone-only issue,
+      `useIsMobile()`'s 430px breakpoint doesn't cover this band
+- [ ] "Publish"/"Train" nav items are dimmed stubs wired to nothing — clicking produces zero
+      feedback; needs at least a "coming soon" acknowledgment
+- [ ] Bottom-of-grid "Page X of Y · N per page · N items" caption missing, undisclosed (the
+      "Load N more" removal next to it IS a disclosed, deliberate owner decision — leave that)
+
+**My Art** — `MyArtOverlay.jsx`/`MyArtMobile.jsx` vs `Frontend Gallery.dc.html` /
+`Moonglade Mobile.dc.html`.
+- [ ] Mobile post rows reuse desktop's bordered/rounded card component squeezed into one
+      column, instead of the mobile design's flat dashed-divider list row — same failure
+      pattern as the Contests/Health mobile-reuse cases
+- [ ] Desktop rank-tier coloring (gold #1, mauve top-3) entirely missing — flat gray for every
+      rank, also undersized (13px vs 19px)
+- [ ] Desktop stat order wrong (VIEWS moved from 2nd to last) and its accent-color highlight
+      is missing; value type shrunk 24px→21px
+- [ ] Desktop per-post metric line uses spelled-out "N views · N likes" instead of the design's
+      icon format "👁 N · ♥ N" (mobile's own design already specifies spelled-out — leave mobile)
+- [ ] Mobile stat cards are inverted (value-above-label vs. spec's label-above-value) and use
+      the wrong type family — borrowed wholesale from Control Panel's mobile stat card
+
+**Health** — `HealthOverlay.jsx`/`HealthMobile.jsx` vs `Frontend Gallery.dc.html`. Backend/data
+logic and most regions are genuinely faithful; these are the real misses:
+- [ ] Stat-tile order and gold-highlight target both wrong (Duplicates/Reclaimable moved from
+      positions 9-10 to last; gold marks "Published"/"Total likes" instead of "Uncataloged");
+      3 labels silently reworded
+- [ ] Section heading "Top tags" is missing "& contests" from the design's own heading text
+- [ ] Mobile missing 2 whole sections desktop has: Prompt word cloud, Folder breakdown
+- [ ] Folder breakdown format changed from a fixed "N images · M other" to a generic N-bucket
+      loop (desktop); dropped entirely (mobile)
+
+**Contests** — `ContestsOverlay.jsx`/`ContestsMobile.jsx` vs `Frontend Gallery.dc.html`.
+- [ ] "Days left" text dropped from the official contest card, both platforms
+- [ ] Combined "date range · days left" string never reproduced for community cards — desktop
+      always shows range-only, mobile shows range XOR days-left (platforms disagree with
+      each other, not just with the design)
+- [ ] ♦ diamond icon missing from every community-card CR pill — only the one featured card
+      gets it; design puts it on all of them
+- [ ] "+12 more community contests below the fold — scroll" footer hint missing entirely
+
+**Contact Sheet (desktop)** — `ContactSheetOverlay.jsx` vs `Contact Sheet.dc.html`.
+- [ ] Print output likely illegible: the design has a dedicated light/print palette
+      (`#1b1733`/`#746c8a`/`#8a8398`/`#2a8f86` on white); the `@media print` block never resets
+      the app's dark-theme CSS tokens (`var(--text)` etc.), so printing probably produces pale
+      text on white paper
+
+**Why the backlog lives here, not a new file.** Standing rule: no audit ever creates a new
+tracking doc, findings land in the one tracker. This entry stays the single source for the
+whole punch list; strike items as they ship, each with its own dated entry below (or above,
+chronologically) documenting what actually changed and how it was verified — the same pattern
+every other increment in this file already follows.
+
+### Punch-list item 1 shipped: Duplicate Review desktop now built against its real design  ·  *2026-08-04*
+
+First item off the design-fidelity punch list above, done personally (not delegated to a
+background agent — the owner explicitly redirected from parallel agent dispatch to sequential,
+narrated, self-executed fixes mid-session: "you will port these designs page by page... YOU
+WILL execute the design file as given to you"). Read `Duplicate Review.dc.html` in full,
+rebuilt `DuplicateReviewOverlay.jsx`/`duplicate-review-overlay.css` against it: the real
+header (← Library / divider / ⧉ label / filter-by-filename search — filename instead of the
+design's "title," since no title field exists on a duplicate group's member records, disclosed
+in code), the hero block (eyebrow/serif H1/3 stat cards), the "sorted by..." caption, a
+color-coded similarity badge (red/gold/purple/blue, keyed off the real `closeness_pct` for
+near_duplicate and a defensible fixed tier for the exact-match tiers that have no percentage
+concept), a "★ suggested keep" ribbon tracking the algorithm's own `bestKeeperPath` (distinct
+from whatever the owner has currently toggled), the corrected Resolve label ("keep 1, remove
+N"), and a session-local "Skip for now" (hides a card, zero network calls, re-shows on reopen
+— not a mutation). Also corrected the file's own header comment, which previously claimed no
+locked design existed for this overlay; it does, and it's now the thing this file matches.
+
+Live-verified against the real library (218 real same-seed duplicate groups, 751.7 MB
+reclaimable — not injected data): header/hero/caption/badge/ribbon all confirmed rendering via
+DOM inspection, Resolve/Skip/search filter all exercised (Skip hides a card with zero fetch
+calls; search filters to 0 with a real "no match" message). No real resolve/quarantine was
+fired during verification. `npm run build` clean, full pytest 1539/1539.
+
 ### Loom Mobile follow-up shipped: the per-shot kebab actions sheet (Move up / Move down / Duplicate / Delete)  ·  *2026-08-04*
 
 Closes the first of the two disclosed gaps found in increment 6's completeness pass. The

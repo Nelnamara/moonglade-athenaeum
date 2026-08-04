@@ -1,5 +1,5 @@
-import React from "react";
-import useDuplicateReview, { MATCH_LABEL, fmtBytes } from "../hooks/useDuplicateReview.js";
+import React, { useState } from "react";
+import useDuplicateReview, { MATCH_LABEL, fmtBytes, bestKeeperPath } from "../hooks/useDuplicateReview.js";
 import "../styles/overlays.css";
 import "../styles/duplicate-review-overlay.css";
 
@@ -63,14 +63,18 @@ import "../styles/duplicate-review-overlay.css";
        still strictly MORE friction than the zero-dialog per-group Resolve:
        a second explicit click on a dialog that names real numbers.
 
-   No locked DC mockup exists for this overlay specifically (unlike Health's
-   ovHealth / Import's ovImport slabs) -- built off the classic /duplicates
-   page's real information architecture (one card per group, keeper vs.
-   reclaimable) instead of invented, the same "port the real behavior, not a
-   guess" approach Import took from classic's ImportUI. The keep/remove
-   toggle pill placement and the resolved-card treatment DO follow the DC
-   handoff file's own real interaction design (per-tile pill, top-left;
-   resolved cards dim) even though the overall shell doesn't.
+   CORRECTION (2026-08-04): a prior version of this comment claimed no locked
+   DC mockup exists for this overlay. That was wrong -- design_handoff/
+   design_handoff_moonglade_suite/Duplicate Review.dc.html is a real, complete
+   244-line mockup that was never opened when this file was first built. The
+   header below (← Library / divider / ⧉ label / filter-by-title search),
+   the hero stat block, the "sorted by similarity" caption, the color-coded
+   similarity badge, the "★ suggested keep" ribbon, and the "Skip for now"
+   button are ported from that real file per the docs/DECISIONS.md audit
+   entry "Design-fidelity audit... punch list" -- not invented, and not from
+   the classic /duplicates page. The keep/remove toggle pill placement and
+   resolved-card dim treatment already matched the DC's own interaction
+   design even before this correction.
 
    Backend: GET /api/duplicates (moonglade_gallery.py, LOGIN tier). Four real
    tiers -- matchType drives the label, never a fabricated "reason" string:
@@ -100,6 +104,36 @@ export function MemberStars({ rating }) {
   );
 }
 
+// filename portion of a member's path -- the closest real field this backend
+// has to the DC's "title" search (no prompt/title is carried on a duplicate
+// group's member records; filename is what a user actually recognizes a
+// specific file by, and is the same value MemberStars' sibling meta row
+// already shows nowhere else -- so this doesn't duplicate existing UI).
+function baseName(p) {
+  if (!p) return "";
+  const parts = String(p).replace(/\\/g, "/").split("/");
+  return parts[parts.length - 1] || "";
+}
+
+// Duplicate Review.dc.html's color-coded similarity badge (red>=100, gold>=90,
+// purple>=80, blue below). Only the near_duplicate tier carries a real
+// closeness_pct (useDuplicateReview.js's own contract); same_media/
+// identical_file ARE exact matches by definition (same media_id or
+// byte-identical content), so they get the design's red/100% treatment
+// honestly rather than a fabricated number. same_seed has no percentage
+// concept at all -- it gets the design's lowest (blue) tier as a plain tag.
+function similarityTier(g) {
+  if (g.matchType === "same_media" || g.matchType === "identical_file") return "tier-red";
+  if (g.matchType === "near_duplicate") {
+    const pct = Number(g.closeness_pct) || 0;
+    if (pct >= 100) return "tier-red";
+    if (pct >= 90) return "tier-gold";
+    if (pct >= 80) return "tier-purple";
+    return "tier-blue";
+  }
+  return "tier-blue";
+}
+
 export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
   const csrf = (boot && boot.csrf) || "";
   const {
@@ -112,13 +146,42 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
     runAutoResolve,
   } = useDuplicateReview({ csrf, onResolved });
 
+  // Design_handoff's {{ q }}/onSearch (Duplicate Review.dc.html:35) -- a
+  // client-side filter over the already-fetched groups, same as the design's
+  // own binding implies (no server round-trip). Matches against filename
+  // (see baseName() above), case-insensitive.
+  const [q, setQ] = useState("");
+  const qNorm = q.trim().toLowerCase();
+
+  // Duplicate Review.dc.html:111's "Skip for now" -- a session-local dismiss,
+  // not a mutation (nothing is quarantined/touched server-side). Reappears on
+  // reopen, same as the design's own un-persisted demo state implies. Skipped
+  // groups still count toward the real pending/reclaimable totals above --
+  // skipping hides a card from view, it doesn't change what's actually true
+  // about the library.
+  const [skipped, setSkipped] = useState({});
+
+  const visibleGroups = groups.filter((g) => {
+    if (skipped[g.id] && !resolvedByGroup[g.id]) return false;
+    if (!qNorm) return true;
+    return (g.members || []).some((m) => baseName(m.path).toLowerCase().includes(qNorm));
+  });
+
   return (
     <>
       <div className="mgv-scrim" onClick={onClose} />
       <div className="mgv-host">
         <div className="mgv-slab mgdr-slab" role="dialog" aria-label="Duplicate Review">
-          <div className="mgv-titlerow">
-            <div className="mgv-title">Duplicate Review</div>
+          <div className="mgdr-headrow">
+            <div className="mgdr-back" onClick={onClose} title="Back to the library">← Library</div>
+            <div className="mgdr-headdiv" aria-hidden="true" />
+            <div className="mgdr-headlabel">⧉ Duplicate Review</div>
+            <div className="mgdr-headspacer" />
+            <div className="mgdr-search">
+              <span className="mgdr-search-icon" aria-hidden="true">⌕</span>
+              <input type="text" placeholder="filter by filename…" value={q}
+                onChange={(e) => setQ(e.target.value)} />
+            </div>
             <button type="button" className="mgv-x" onClick={onClose} aria-label="Close">×</button>
           </div>
 
@@ -134,6 +197,30 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
 
           {data && groups.length > 0 && (
             <>
+              <div className="mgdr-hero">
+                <div className="mgdr-hero-eyebrow">The Moonglade Athenaeum · housekeeping</div>
+                <h1 className="mgdr-hero-title">Duplicate Review</h1>
+                <div className="mgdr-hero-stats">
+                  <div className="mgdr-hero-stat">
+                    <b>{pendingCount}</b>
+                    <span>group{pendingCount !== 1 ? "s" : ""}{groups.length !== pendingCount ? " of " + groups.length : ""}</span>
+                  </div>
+                  <div className="mgdr-hero-stat">
+                    <b>{groups.reduce((n, g) => n + (g.members || []).length, 0)}</b>
+                    <span>images involved</span>
+                  </div>
+                  <div className="mgdr-hero-stat">
+                    <b>{fmtBytes(pendingReclaimable)}</b>
+                    <span>reclaimable</span>
+                  </div>
+                </div>
+              </div>
+              <div className="mgdr-caption">Sorted by highest reclaimable size first · the starred frame is the suggested keeper</div>
+
+              {qNorm && visibleGroups.length === 0 && (
+                <div className="mgdr-nomatch">No filenames in any pending group match "{q}".</div>
+              )}
+
               <div className="mgdr-toolbar">
                 <div className="mgdr-summary">
                   <b>{pendingCount}</b> group{pendingCount !== 1 ? "s" : ""} pending ·{" "}
@@ -187,7 +274,7 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
               )}
 
               <div className="mgdr-groups">
-                {groups.map((g) => {
+                {visibleGroups.map((g) => {
                   const keeperPath = keeperByGroup[g.id];
                   const resolved = resolvedByGroup[g.id];
                   const keepCount = keeperPath ? 1 : 0;
@@ -196,20 +283,22 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                   return (
                     <div className={"mgdr-group" + (resolved ? " resolved" : "")} key={g.id}>
                       <div className="mgdr-group-head">
-                        <span className="mgdr-group-label">{MATCH_LABEL(g)}</span>
+                        <span className={"mgdr-group-label " + similarityTier(g)}>{MATCH_LABEL(g)}</span>
                         <span className="mgdr-group-meta">
                           {g.members.length} file{g.members.length !== 1 ? "s" : ""} ·{" "}
                           {fmtBytes(g.reclaimable_bytes)} reclaimable
                         </span>
                       </div>
                       <div className="mgdr-members">
-                        {g.members.map((m) => {
+                        {(() => { const suggestedPath = bestKeeperPath(g); return g.members.map((m) => {
                           const isKeeper = m.path === keeperPath;
+                          const isSuggested = m.path === suggestedPath;
                           return (
                             <div className={"mgdr-tile" + (isKeeper ? " keep" : " remove")} key={m.path}>
                               <div className="mgdr-thumb">
                                 <img src={m.thumb} alt="" loading="lazy" draggable={false} />
                                 {m.is_video ? <span className="mgdr-vglyph">▶</span> : null}
+                                {!resolved && isSuggested ? <span className="mgdr-ribbon">★ suggested keep</span> : null}
                                 {resolved ? (
                                   isKeeper
                                     ? <span className="mgdr-keeper">KEPT</span>
@@ -246,7 +335,7 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                               </div>
                             </div>
                           );
-                        })}
+                        }); })()}
                       </div>
 
                       {groupErr && <div className="mgdr-grouperr">⚠ {groupErr}</div>}
@@ -264,14 +353,29 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                             </button>
                           </>
                         ) : (
-                          <button type="button" className="mgdr-resolve"
-                            disabled={keepCount === 0 || busy || autoBusy}
-                            title={keepCount === 0 ? "Select a keeper first" : undefined}
-                            onClick={() => resolveGroup(g)}>
-                            {busy ? "Resolving…" : (keepCount
-                              ? "Resolve — quarantine " + (g.members.length - 1)
-                              : "Resolve")}
-                          </button>
+                          // Duplicate Review.dc.html:109-111 -- Resolve + Skip as a
+                          // gap:8px pair (design's own row), pushed right via the
+                          // wrapper (not Resolve itself) to match this app's other
+                          // footer-action convention (e.g. Undo above).
+                          <div className="mgdr-footactions">
+                            <button type="button" className="mgdr-resolve"
+                              disabled={keepCount === 0 || busy || autoBusy}
+                              title={keepCount === 0 ? "Select a keeper first" : undefined}
+                              onClick={() => resolveGroup(g)}>
+                              {busy ? "Resolving…" : (keepCount
+                                ? "Resolve — keep 1, remove " + (g.members.length - 1)
+                                : "Resolve")}
+                            </button>
+                            {/* Skip leaves the group untouched, same as just not
+                                clicking Resolve -- an explicit "I looked, not now"
+                                distinct from silently scrolling past. */}
+                            <button type="button" className="mgdr-skip"
+                              disabled={busy || autoBusy}
+                              title="Leave this group as-is for now"
+                              onClick={() => setSkipped((prev) => ({ ...prev, [g.id]: true }))}>
+                              Skip for now
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
