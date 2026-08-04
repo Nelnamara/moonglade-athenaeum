@@ -1435,11 +1435,18 @@ increment in this file works.
       exceed the design — kept, untouched.)
 - [x] Hero banner region entirely missing — no graphic strip, no hide/show toggle, no state.
       **SHIPPED 2026-08-04.**
-- [ ] Edit tab has no Fixer or Enhance sub-tabs at all (desktop-only gap — `LoomMobile`'s
-      Fixer, built and verified tonight, and Enhance/Filter-compare both already work
-      correctly on mobile; port the same logic, don't rebuild)
+- [ ] Edit tab has no Fixer or Enhance sub-tabs at all (desktop-only gap). **Investigated
+      2026-08-04, deferred as its own larger task, not skipped**: `LoomMobile`'s Fixer/Enhance
+      (canvas box-drawing, debounced `/api/price` checks, `genFix` submit, the Filter-compare
+      modal) are deeply embedded in that component's own local closures/refs/state, not a
+      separable module — porting to `LoomV2` is a real, standalone build on the scale of the
+      original Loom Mobile Fixer increment (a dedicated ~35-minute background build), not a
+      quick copy. Given the real financial stakes (a Fix always spends, never card-covered),
+      rushing this inline risked a real bug in a money-spending path. Needs its own dedicated
+      pass.
 - [ ] Filter-compare ("Art filters") modal doesn't exist on desktop, same story — mobile's
-      real, `MgArtFilters`-backed implementation is the thing to port
+      real, `MgArtFilters`-backed implementation is the thing to port. Same deferral as above
+      (Enhance's entry point into this modal is part of the same Edit-tab sub-strip).
 - [ ] Frame Handoff renders on all 4 Generate tabs instead of Reference-only per spec — confirm
       this is a deliberate consolidation, not an accident, before deciding whether to fix
 
@@ -1464,13 +1471,21 @@ increment in this file works.
 
 **Image Details (desktop)** — `DetailsView.jsx` vs `Image Details.dc.html`. Mobile
 (`ImageDetailsMobile.jsx`) already has all four of these correctly — port the pattern.
-- [ ] LINEAGE section missing (verify real backend lineage data exists before building —
-      mobile skipped this on purpose for the same reason; don't fabricate if there's no data)
-- [ ] SIMILAR section missing (mobile already has this working with real `/api/similar` data)
-- [ ] 7 of 11 metadata fields hidden behind an undisclosed "Full record ▾" toggle the design
-      never specifies — design shows all 11 unconditionally
-- [ ] Zero per-row copy buttons in the ledger (mobile has them on every copyable row)
-- [ ] Header missing the ⛶ Lightbox link and "N of M" index label
+- [ ] LINEAGE section missing — still open. No real backend lineage data exists (confirmed);
+      not fabricating it. Same real gap mobile disclosed and skipped.
+- [x] SIMILAR section missing. **SHIPPED 2026-08-04** — reused the exact real `SimilarModal.jsx`
+      already proven by `Lightbox.jsx`'s own "✧ Similar" button, not a rebuilt strip.
+- [~] 7 of 11 metadata fields hidden behind a "Full record ▾" toggle. **INVESTIGATED
+      2026-08-04, NOT a gap**: the component's own header comment cites a locked prior design
+      decision ("Direction C," `docs/DECISIONS.md`) explicitly choosing "a quiet curated fact
+      list with a Full record disclosure for the rest" over a raw field grid — deliberate, not
+      accidental, even though Direction C's own entry was lost in an earlier docs prune.
+      Left as-is; undoing a real locked decision to match an older mockup would be the same
+      mistake in the other direction.
+- [x] Zero per-row copy buttons in the ledger. **SHIPPED 2026-08-04** as footer buttons (Copy
+      Seed/Task ID/Filename), not per-row icons — matches Direction C's own "actions demoted
+      to the footer" idiom instead of reintroducing what that redesign moved away from.
+- [x] Header missing the ⛶ Lightbox link and "N of M" index label. **SHIPPED 2026-08-04.**
 - [ ] Upscale flyout (shared by Details + Lightbox, `static/mg-upscale-panel.js`) is a
       top-right-anchored panel with a native `<select>` instead of the design's centered modal
       with a custom animated dropdown
@@ -1776,6 +1791,39 @@ this code plus everything since: 733/733 still passing. Committing the one remai
 uncommitted piece (`loom/test/loom-mobile-view.test.js`, the Fixer's own test additions) now,
 properly attributed, instead of leaving it to ride along into whatever the next fix happens to
 be.
+
+### Punch-list items shipped for desktop Image Details: SIMILAR, footer copy buttons, header nav — one item correctly NOT touched  ·  *2026-08-04*
+
+Four items off the punch list, one real finding that changed the plan mid-investigation:
+`DetailsView.jsx`'s own header comment cites a locked prior design decision ("Direction C")
+that deliberately hides most metadata behind a "Full record ▾" disclosure and demotes actions
+to a footer strip — Direction C's own `docs/DECISIONS.md` entry was lost in the 2026-07-27 docs
+prune, but the code's citation of it is real and its stated intent ("a quiet curated fact list
+... instead of a raw field grid") is unambiguous. Undoing that to match the older, superseded
+`.dc.html` mockup would have been the same mistake as everything else in this audit, just in
+the opposite direction — a locked decision overwritten without permission. Left untouched.
+
+What DID ship, all consistent with Direction C's own footer-action idiom rather than mobile's
+inline-icon one:
+- **SIMILAR section** — reused the exact real `SimilarModal.jsx` component `Lightbox.jsx`'s own
+  "✧ Similar" button already opens, not a rebuilt strip. Same real `/api/similar` data mobile
+  uses.
+- **Copy Seed / Copy Task ID / Copy Filename** — joined the existing Copy Prompt / Copy media id
+  footer buttons, not per-row icons (which would have reintroduced exactly what Direction C
+  moved away from).
+- **Header ⛶ Lightbox link + "N of M" index label** — wired to the same real `items` array
+  `App.jsx` already threads through the grid; the index is a real position within the
+  currently-loaded, currently-filtered list, computed the same way `ImageDetailsMobile.jsx`'s
+  own `indexLabel` already is.
+
+Live-verified against the real library: index label read "1 of 100" against a real filtered
+set, the Lightbox button and all three copy buttons confirmed present via DOM inspection,
+SIMILAR modal opened and completed a real fetch (returned "No similar images found for this
+one" — a legitimate empty result for that specific image, same fails-soft path `Lightbox.jsx`'s
+own Similar button already exercises, not a broken feature). 1539/1539 pytest.
+
+LINEAGE remains open — confirmed (again) that no real backend lineage/derivative-chain data
+exists anywhere in this app; not fabricating it, matching mobile's own disclosed skip.
 
 ### Loom Mobile follow-up shipped: the per-shot kebab actions sheet (Move up / Move down / Duplicate / Delete)  ·  *2026-08-04*
 

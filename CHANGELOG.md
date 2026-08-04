@@ -1773,6 +1773,15 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Desktop Image Details: SIMILAR section, footer copy buttons, header nav.** SIMILAR reuses
+  the exact real `SimilarModal.jsx` component the Lightbox already uses (not a rebuild); Copy
+  Seed/Task ID/Filename joined the existing footer copy buttons; the header gained a real
+  Lightbox link and "N of M" index label sourced from the actual loaded/filtered grid.
+  Investigated the "hidden metadata fields" report too — found it's a deliberate, locked prior
+  design decision ("Direction C"), not a gap, and left it untouched rather than overwriting a
+  real decision to match an older mockup. Live-verified against the real library. 1539/1539
+  pytest.
+
 - **Loom Mobile Fixer sub-screen — properly disclosed.** This was built and verified before
   the design-fidelity audit started, then rode along uncommitted into two later commits
   without being called out on its own (a real process miss). Re-verified now: real

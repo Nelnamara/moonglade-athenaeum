@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
 import useImageDetails from "../hooks/useImageDetails.js";
+import SimilarModal from "./SimilarModal.jsx";
 
 /* Motion: the reveal choreography locked 2026-07-30 (docs/DECISIONS.md, artifact
    477b4655 "The Reveal -- Motion Detail"). The headline LEADS on its own, sliding
@@ -116,12 +117,18 @@ function playReveal(root) {
 export default function DetailsView({
   mediaId, onClose, onNavigate, onRate, onEdit, onDeleted,
   onFilterByModel, onFilterByBatch, advParams,
+  items, onOpenLightbox,
 }) {
   const [focusMode, setFocusMode] = useState(
     () => (typeof localStorage !== "undefined" && localStorage.getItem("gallery_focus") === "1")
   );
   const [mediaOk, setMediaOk] = useState(true);
   const [fullRecord, setFullRecord] = useState(false);
+  // Image Details.dc.html:127-139's SIMILAR section -- entirely absent on desktop before
+  // this (mobile already has it working with real /api/similar data). Reusing the exact
+  // real SimilarModal.jsx already proven by Lightbox.jsx's own "✧ Similar" button, not a
+  // rebuilt strip -- fits Direction C's own "actions demoted to a footer strip" idiom.
+  const [similarOpen, setSimilarOpen] = useState(false);
   const recordRef = useRef(null);
 
   const {
@@ -169,6 +176,12 @@ export default function DetailsView({
     playReveal(recordRef.current);
   }, [row && row.media_id, focusMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Image Details.dc.html:39-43 -- the header's ⛶ Lightbox link + "N of M" index label,
+  // both missing before this. Same real computation ImageDetailsMobile.jsx's own
+  // indexLabel already uses -- position within the currently-loaded grid `items`.
+  const detailIdx = row && items ? items.findIndex((it) => it.media_id === row.media_id) : -1;
+  const indexLabel = detailIdx >= 0 && items ? (detailIdx + 1) + " of " + items.length : "";
+
   const navHref = (mid) => "/next?image=" + encodeURIComponent(mid || "");
   const navClick = (mid) => (e) => {
     if (!mid) { e.preventDefault(); return; }
@@ -196,6 +209,11 @@ export default function DetailsView({
     <div className={"detail-wrap" + (focusMode ? " focus-mode" : "")}>
       <div className="detail-nav">
         <a className="back-link" href="/next" onClick={navClick(null)}>&larr; Back to gallery</a>
+        {onOpenLightbox ? (
+          <button type="button" className="nav-arrow" title="Full-screen viewer"
+            onClick={() => onOpenLightbox(row.media_id)}>&#9974;</button>
+        ) : null}
+        {indexLabel ? <span className="detail-index">{indexLabel}</span> : null}
         <span className="sp" />
         {state.data.prev_id
           ? <a className="nav-arrow" href={navHref(state.data.prev_id)} onClick={navClick(state.data.prev_id)}>&lsaquo; Prev</a>
@@ -302,7 +320,16 @@ export default function DetailsView({
               {row.url ? <a className="btn" href={row.url} target="_blank" rel="noreferrer">Open on PixAI</a> : null}
               <button className="btn" onClick={() => copy(promptText, "prompt")}>{copied === "prompt" ? "Copied!" : "Copy Prompt"}</button>
               <button className="btn" onClick={() => copy(row.media_id, "mid")}>{copied === "mid" ? "Copied!" : "Copy media id"}</button>
+              {/* Image Details.dc.html:95-97 gives Seed/Task ID/Filename their own copy
+                  affordance too (mobile has it per-row); Direction C's own idiom demotes
+                  every action to this footer strip rather than inline icons, so these join
+                  Copy Prompt/Copy media id here instead of reintroducing per-row buttons
+                  the locked redesign deliberately moved away from. */}
+              {row.seed ? <button className="btn" onClick={() => copy(row.seed, "seed")}>{copied === "seed" ? "Copied!" : "Copy Seed"}</button> : null}
+              {row.task_id ? <button className="btn" onClick={() => copy(row.task_id, "task")}>{copied === "task" ? "Copied!" : "Copy Task ID"}</button> : null}
+              {row.filename ? <button className="btn" onClick={() => copy(row.filename, "fname")}>{copied === "fname" ? "Copied!" : "Copy Filename"}</button> : null}
               <button className="btn" onClick={() => window.print()}>🖨 Print</button>
+              <button className="btn" onClick={() => setSimilarOpen(true)}>✧ Similar</button>
               {row.is_video !== "1" && (
                 <>
                   <a className="btn" href={"/contact-sheet?ids=" + encodeURIComponent(row.media_id) + "&format=photo"} target="_blank" rel="noreferrer">4×6 photo</a>
@@ -358,6 +385,11 @@ export default function DetailsView({
             <span id="save-status">{saveStatus}</span>
           </div>
         </div>
+      )}
+
+      {similarOpen && (
+        <SimilarModal mediaId={row.media_id} onClose={() => setSimilarOpen(false)}
+          onOpenDetails={(mid) => { setSimilarOpen(false); onNavigate(mid); }} />
       )}
     </div>
   );
