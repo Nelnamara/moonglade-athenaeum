@@ -225,6 +225,17 @@ export default function ControlMobile({ account }) {
                 <div key={i} className={ln.indexOf("✓") === 0 ? "ok" : ""}>{ln}</div>
               ))}
             </div>
+            <div className="mgcp-lockedrow">
+              {(summary.actions || []).filter((a) => a.action !== running.action)
+                .slice(0, 3).map((a) => (
+                  <span className="mgcp-lockchip" key={a.action}>{a.label}</span>
+                ))}
+              {(summary.actions || []).length - 1 > 3 && (
+                <span className="mgcp-lockchip">
+                  +{(summary.actions || []).length - 1 - 3} more · one job at a time
+                </span>
+              )}
+            </div>
           </div>
         ) : (
           <>
