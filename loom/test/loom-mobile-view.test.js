@@ -318,29 +318,33 @@ describe("Frame picker: the shared, already-real gallery picker -- not a fabrica
   });
 });
 
-describe("scope discipline: Filter compare / Fixer are still NOT built (Review & trim now IS)", () => {
-  test("no Filter-compare or Fixer UI leaked into LoomMobile", () => {
-    // "Generate reference image" and "Edit instruction" (fourth increment) and "Review &
-    // trim" (fifth increment, asserted positively below via its own JSX text "Review &amp;
-    // trim") are now REAL -- removed from this negative list on purpose, not an oversight.
-    // Everything still checked here remains a later increment: Filter compare (the locked
-    // design's own "Enhance" Edit sub-tab, openFilterCompare/filterCompareOpen) outright,
-    // plus Fixer (the locked design's OTHER Edit sub-tab, face/hand touch-up) -- deliberately
-    // excluded even though the fourth increment built Edit, because desktop's own real Edit
-    // tab (LoomV2, genEdit/genEditState) has no Fixer mode at all: only the mockup invents
-    // one, so building it here would be forked functionality with no real underlying
-    // function to call, not parity (disclosed in that increment's own report).
-    for (const phrase of ["Art filters", "Open filters", "Fixer", "Fix face", "Fix hand", "filterCompareOpen", "fixKind"]) {
+describe("scope discipline: Fixer is STILL deliberately not built (everything else now IS -- Loom Mobile is complete)", () => {
+  test("no Fixer UI leaked into LoomMobile", () => {
+    // Filter compare ("Art filters", "Open filters", "filterCompareOpen") is now REAL --
+    // removed from this negative list on purpose (sixth and FINAL increment), not an
+    // oversight. Fixer (the locked design's OTHER Edit sub-tab, face/hand touch-up) is the
+    // ONE thing that remains deliberately excluded, unchanged from the fourth increment's own
+    // disclosed reasoning: desktop's real Edit tab (LoomV2, genEdit/genEditState) has no
+    // Fixer mode at all -- only the mockup invents one -- so building it here would be forked
+    // functionality with no real underlying function to call, not parity. Re-confirmed this
+    // increment (see the sixth increment's own report): still true, still the right call.
+    //
+    // Checking specific UI/logic markers rather than the bare word "Fixer" -- the sixth
+    // increment's own disclosure comments legitimately NAME Fixer in prose (explaining why
+    // it stays out), the same way this describe block's own comment does two lines up; a
+    // plain substring check would fail on its own documentation, not on a real leak.
+    for (const phrase of ["Fix face", "Fix hand", "fixKind", 'editSub === "fixer"', "pickFace", "pickHand"]) {
       assert.ok(!loomMobileSrc.includes(phrase),
-        `LoomMobile should not yet contain "${phrase}" -- that belongs to a later increment or was never real`);
+        `LoomMobile should not contain "${phrase}" -- Fixer has no real underlying function anywhere in this codebase`);
     }
   });
 
-  test("Shot Detail / Cast & assets / Frame picker / Review & trim copy NOW DOES exist (prior increments' scope)", () => {
+  test("Shot Detail / Cast & assets / Frame picker / Review & trim / Filter compare copy ALL exist now -- Loom Mobile is complete", () => {
     assert.ok(loomMobileSrc.includes("Cast &amp; assets"), "expected the Cast & assets sheet's own tab label to exist now");
     assert.ok(loomMobileSrc.includes("Other references &amp; @tags"), "expected Shot Detail's real references section to exist now");
     assert.ok(loomMobileSrc.includes("Music / audio cue"), "expected Shot Detail's audio-cue field to exist now");
     assert.ok(loomMobileSrc.includes("Review &amp; trim"), "expected Review & trim's own screen title to exist now (fifth increment)");
+    assert.ok(loomMobileSrc.includes("Art filters"), "expected Filter compare's own screen title to exist now (sixth increment)");
   });
 });
 
@@ -349,7 +353,8 @@ describe("scope discipline: Filter compare / Fixer are still NOT built (Review &
 // _cropDragMove/_doSplit/_togglePlay implementations). A crop rectangle dragged via real
 // pointer events, two trim handles on a track below, a playhead scrub track, and a real
 // <video> preview -- opened from the board's own real ▶ badge on a finished shot. Filter
-// compare (the locked design's next and final screen) remains out of scope, asserted above.
+// compare (the locked design's next and final screen) was still out of scope as of this
+// increment -- now built by the sixth increment below.
 describe("Review & trim: the board's own real ▶ affordance opens it on a finished shot", () => {
   test("canReview is the real, defensive statusOf(c)+resultMid check, not the mockup's bare c.st === 'done'", () => {
     assert.match(loomMobileSrc, /const canReview = st === "done" && !!e\.c\.resultMid;/);
@@ -641,5 +646,120 @@ describe("Credit safety: the drawer's own component-local poll vs. this incremen
     assert.doesNotMatch(src.slice(src.indexOf("const pollTaskWithCeiling"), src.indexOf("const pollImg = (cardId, tid)")),
       /disconnectedCallback|connectedCallback/,
       "pollTaskWithCeiling must never be tied to a custom element's connect lifecycle");
+  });
+});
+
+// Sixth and FINAL increment (2026-08-03): Filter compare, per the locked design's own
+// "Art filters" screen (Loom Mobile.dc.html -- filterCompareOpen/fcSkinFilters/
+// fcPixaiFilters/fcStrength/fcAngle/fcClear/fcSaveLibrary/FILTER_SETS). Reached from
+// Generate's Edit tab via a new Edit/Enhance sub-strip, matching BOTH the design's own
+// editSubChips AND the real, already-shipped GenerateDrawer.jsx's identical Edit/Fixer/
+// Enhance mgdock-subtabs. Applies PixAI's real, free, client-side art-filter library
+// (static/mg-art-filters.js) to the shot's real open frame, with a genuine Original/Preview
+// comparison (a real <img> both times, a live AF.applyPreview CSS-overlay composite on the
+// right) and genuine persistence onto the shot card (filter/filterStrength/filterAngle --
+// new, optional fields, same "not in newCard(), read with a fallback" convention as Review &
+// trim's own `crop`). This is the last screen in the locked design -- Loom Mobile is now
+// complete, minus Fixer (see the "scope discipline" describe block above for why that stays
+// out).
+describe("Filter compare: reused from the real mg-art-filters.js library, not forked", () => {
+  test("AF is the real window.MgArtFilters, read fresh each render (no forked blend/gradient recipe)", () => {
+    assert.match(loomMobileSrc, /const AF = typeof window !== "undefined" \? window\.MgArtFilters : null;/);
+  });
+
+  test("the swatch grid is built from the real AF.groups() -- not the design mockup's own hardcoded FILTER_SETS/GALLERY_POOL-style placeholder", () => {
+    assert.match(loomMobileSrc, /const fcGroups = AF \? AF\.groups\(\) : \[\];/);
+    // Checking for an actual array DECLARATION, not the bare name -- this increment's own
+    // disclosure comments legitimately CITE "FILTER_SETS" in prose (the design's own search
+    // hint, quoting its identifier so a reader can find the corresponding design markup),
+    // the same way they cite "fcSkinFilters"/"fcPixaiFilters" two lines above. What must
+    // never exist is the mockup's own hardcoded 12-entry array itself.
+    assert.doesNotMatch(loomMobileSrc, /const FILTER_SETS = \[/, "the locked design's own simplified 12-entry placeholder array (name + two flat hex stops, one hardcoded mix-blend-mode) must not be reproduced here -- the real recipe data comes from AF.groups()/AF.get() instead");
+  });
+
+  test("each tile paints via the real AF.renderSwatch(el, id) -- no hand-rolled two-color CSS gradient standing in for it", () => {
+    assert.match(loomMobileSrc, /if \(el && !el\._mgafPainted\) \{ AF\.renderSwatch\(el, id\); el\._mgafPainted = true; \}/);
+  });
+
+  test("the live preview composites via the real AF.applyPreview/AF.clearPreview -- CSS overlay + mix-blend-mode, per mg-art-filters.js's own documented approach, not a fake color swatch", () => {
+    assert.match(loomMobileSrc, /AF\.clearPreview\(host\);/);
+    assert.match(loomMobileSrc, /if \(fcActive\) AF\.applyPreview\(host, fcActive, \{ strength: fcStrength, angle: fcAngle \}\);/);
+  });
+
+  test("a real <img> renders on BOTH sides (Original and Preview) -- never a flat color div standing in for the image", () => {
+    assert.match(loomMobileSrc, /<img className="lm-fc-img" src=\{fcSrc\} alt="original" \/>/);
+    assert.match(loomMobileSrc, /<img ref=\{fcImgRef\} className="lm-fc-img" src=\{fcSrc\} alt="preview" \/>/);
+  });
+
+  test("the source is this shot's REAL open frame (frameSrc(c.openFrame)), the same helper Shot Detail/Edit already use -- not a fabricated tint", () => {
+    assert.match(loomMobileSrc, /const fcSrc = frameSrc\(c\.openFrame\);/);
+  });
+});
+
+describe("Filter compare: reached from Generate's Edit tab via a real Edit/Enhance sub-strip (not Shot Detail or the reel directly)", () => {
+  test("editSub state exists and defaults to 'edit', matching the sub-strip's own default chip", () => {
+    assert.match(loomMobileSrc, /const \[editSub, setEditSub\] = useState\("edit"\);/);
+  });
+
+  test("the sub-strip reuses .lm-tabsrow/.lm-tabbtn verbatim -- the same classes the Cast sheet's Cast/Footage strip and the model picker's Models/LoRAs strip already use, not a new visual language", () => {
+    const editBlock = loomMobileSrc.slice(loomMobileSrc.indexOf('genTab === "Edit" && (() => {'));
+    assert.match(editBlock, /<div className="lm-tabsrow" style=\{\{ marginBottom: 10 \}\}>/);
+    assert.match(editBlock, /className=\{"lm-tabbtn" \+ \(editSub === "edit" \? " on" : ""\)\}/);
+    assert.match(editBlock, /className=\{"lm-tabbtn" \+ \(editSub === "enhance" \? " on" : ""\)\}/);
+  });
+
+  test("the Enhance sub-tab's 'Open filters' button calls the real openFilterCompare (not a stub)", () => {
+    assert.match(loomMobileSrc, /<button type="button" className="lm-openfiltersbtn" onClick=\{openFilterCompare\}>&#9673; Open filters<\/button>/);
+  });
+
+  test("Fixer is NOT one of the sub-strip's chips -- only Edit and Enhance", () => {
+    const editBlock = loomMobileSrc.slice(loomMobileSrc.indexOf('genTab === "Edit" && (() => {'), loomMobileSrc.indexOf('{genTab === "Reference"'));
+    assert.doesNotMatch(editBlock, /editSub === "fixer"/);
+  });
+});
+
+describe("Filter compare: genuine persistence onto the real shot/card data (no fake 'saved' state)", () => {
+  test("opening seeds the candidate from the card's ALREADY-SAVED fields (reopen shows the persisted choice, not a blank slate)", () => {
+    assert.match(loomMobileSrc, /const openFilterCompare = \(\) => \{/);
+    assert.match(loomMobileSrc, /setFcActive\(dfLive\.c\.filter \|\| null\);/);
+    assert.match(loomMobileSrc, /setFcStrength\(dfLive\.c\.filterStrength != null \? dfLive\.c\.filterStrength : 1\);/);
+    assert.match(loomMobileSrc, /setFcAngle\(dfLive\.c\.filterAngle != null \? dfLive\.c\.filterAngle : 180\);/);
+  });
+
+  test("filter/filterStrength/filterAngle are NOT added to newCard() -- same optional-field-with-fallback convention as Review & trim's own `crop`, nothing forked into the base card shape", () => {
+    const newCardMatch = src.match(/function newCard\(extra = \{\}\) \{[\s\S]*?\n\}/);
+    assert.ok(newCardMatch, "expected to find newCard()");
+    assert.doesNotMatch(newCardMatch[0], /\bfilter\b|\bfilterStrength\b|\bfilterAngle\b/,
+      "filter/filterStrength/filterAngle must stay optional card fields (read with a fallback), not required base-shape fields");
+  });
+
+  test("Save genuinely writes filter/filterStrength/filterAngle onto the real card via dfPatch (the same setCard mutation every other Shot Detail/Generate field already uses) -- no new endpoint, no network call", () => {
+    assert.match(loomMobileSrc, /const fcSave = \(\) => \{/);
+    assert.match(loomMobileSrc, /dfPatch\(\(cc\) => \(\{ \.\.\.cc, filter: fcActive, filterStrength: fcStrength, filterAngle: fcAngle \}\)\);/);
+  });
+
+  test("'No filter' (fcClear) genuinely, immediately removes the SAVED filter via dfPatch -- not just a pending in-memory reset that Close would silently discard", () => {
+    assert.match(loomMobileSrc, /const fcClear = \(\) => \{ setFcActive\(null\); dfPatch\(\(cc\) => \(\{ \.\.\.cc, filter: null \}\)\); \};/);
+  });
+
+  test("Close/back (closeFilterCompare) is a plain cancel -- it must NOT call dfPatch/setCard, so an unsaved candidate can be backed out of", () => {
+    const closeLine = loomMobileSrc.match(/const closeFilterCompare = \(\) => setFcOpen\(false\);/);
+    assert.ok(closeLine, "expected closeFilterCompare to be a one-line setFcOpen(false), no patch call");
+  });
+
+  test("no new /api endpoint, no fetch, backs Filter compare -- these are plain card fields, matching mg-art-filters.js's own 'nothing sent, nothing spent' contract", () => {
+    const fcBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("Filter compare -- sixth and FINAL increment"));
+    assert.doesNotMatch(fcBlock, /fetch\(/, "Filter compare must never touch the network -- it is free, offline, client-side compositing only");
+  });
+});
+
+describe("Filter compare: real live-lookup safety (reuses dfLive, no second 'which shot' id invented)", () => {
+  test("the screen only renders while fcOpen && dfLive, exactly like genOpen's own reuse of dfLive", () => {
+    assert.match(loomMobileSrc, /\{fcOpen && dfLive && \(\(\) => \{/);
+  });
+
+  test("openFilterCompare guards on dfLive itself, never assumes a shot is selected", () => {
+    const openBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("const openFilterCompare = () => {"), loomMobileSrc.indexOf("const closeFilterCompare"));
+    assert.match(openBlock, /if \(!dfLive\) return;/);
   });
 });

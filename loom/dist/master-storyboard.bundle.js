@@ -3160,6 +3160,52 @@ ${"=".repeat(48)}
   border:1px solid var(--surface1);background:var(--surface1);color:var(--text);}
 .lm-review-cropbtn.on{background:color-mix(in srgb,var(--accent) 22%,transparent);
   border-color:var(--accent);color:var(--accent);}
+
+/* ---- Filter compare -- sixth and FINAL increment (2026-08-03), the locked design's own
+   "Art filters" screen (filterCompareOpen/fcSkinFilters/fcPixaiFilters/fcStrength/fcAngle).
+   Reuses .lm-gen-top/.lm-gen-back/.lm-gen-title/.lm-fill/.lm-df-close (top bar),
+   .lm-tabsrow/.lm-tabbtn (Edit/Enhance sub-strip -- same classes the Cast sheet's own
+   Cast/Footage strip and the model picker's Models/LoRAs strip already use), .lm-df-body/
+   .lm-microlab/.lm-hint/.lm-empty (body chrome) unchanged. Everything below is only what
+   this screen's own preview/swatch-grid/slider chrome genuinely needs. */
+.lm-openfiltersbtn{display:block;width:100%;box-sizing:border-box;text-align:center;padding:12px;
+  border-radius:9px;font:700 12px/1 system-ui;cursor:pointer;border:1px solid var(--surface1);
+  background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);margin-top:8px;}
+.lm-fc{position:absolute;inset:0;z-index:26;background:var(--mantle);display:flex;
+  flex-direction:column;animation:lmRise .22s ease both;}
+.lm-fc-previewrow{display:flex;gap:8px;margin:4px 0 16px;}
+.lm-fc-previewcol{flex:1;min-width:0;}
+.lm-fc-previewbox{position:relative;width:100%;aspect-ratio:1;border-radius:10px;
+  overflow:hidden;background:var(--base);border:1px solid var(--surface1);
+  display:flex;align-items:center;justify-content:center;}
+/* .mgaf-stage (mg-art-filters.js's own injected stylesheet) already supplies
+   position:relative + isolation:isolate -- the load-bearing line for mix-blend-mode -- the
+   moment AF.applyPreview() touches this element; width/height:100% is this screen's own
+   layout need on top of that, not a replacement for it. */
+.lm-fc-stage{position:relative;width:100%;height:100%;}
+.lm-fc-img{width:100%;height:100%;object-fit:cover;display:block;}
+.lm-fc-previewcap{font-size:10px;color:var(--subtext);text-align:center;padding-top:6px;}
+.lm-fc-grouplabel{font:700 9px/1 system-ui;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--overlay0);margin:0 0 6px;}
+.lm-fc-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;}
+.lm-fc-tile{display:flex;flex-direction:column;gap:3px;cursor:pointer;border-radius:9px;
+  padding:3px;border:1px solid transparent;background:none;font:inherit;}
+.lm-fc-tile.on{border-color:var(--accent);}
+/* Fallback paint only -- AF.renderSwatch() overwrites this with the filter's own real
+   gradient layers (via .mgaf-swatch, injected by mg-art-filters.js itself) the instant its
+   ref callback fires. */
+.lm-fc-swatch{width:100%;aspect-ratio:1;border-radius:7px;background:var(--surface1);}
+.lm-fc-name{font-size:8.5px;text-align:center;padding:3px 1px 0;color:var(--subtext);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lm-fc-sliderwrap{margin-bottom:14px;}
+.lm-fc-sliderlab{font:700 9px/1 system-ui;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--overlay0);margin-bottom:5px;}
+.lm-fc-range{width:100%;height:3px;cursor:pointer;}
+.lm-fc-btnrow{display:flex;gap:8px;margin-bottom:10px;}
+.lm-fc-btn{flex:1;text-align:center;padding:11px;border-radius:9px;font:700 11.5px/1 system-ui;
+  cursor:pointer;border:1px solid var(--surface1);background:rgba(33,31,58,.6);color:var(--text);}
+.lm-fc-btn.primary{border-color:rgba(255,255,255,.3);background:var(--accent);color:var(--base);}
+.lm-fc-spendnote{font-size:10px;color:var(--overlay0);text-align:center;}
 `;
   function LoomMobile({
     project,
@@ -3252,6 +3298,7 @@ ${"=".repeat(48)}
     const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
     const frameSrc = (f) => f && f.thumbId ? thumbs[f.thumbId] : f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null;
     const cardThumb = (c) => frameSrc(c.openFrame) || (c.resultMid ? "/thumbs/" + c.resultMid + ".jpg" : null);
+    const AF = typeof window !== "undefined" ? window.MgArtFilters : null;
     const statusOf = (c) => {
       const gs = genState[c.id];
       const paused = gs && gs.phase === "paused";
@@ -3669,6 +3716,38 @@ ${"=".repeat(48)}
       const tally = p && p.pr ? tallyPrices([p.pr]) : null;
       return tally ? costTooltip(tally) : "";
     };
+    const [editSub, setEditSub] = useState("edit");
+    const [fcOpen, setFcOpen] = useState(false);
+    const [fcActive, setFcActive] = useState(null);
+    const [fcStrength, setFcStrength] = useState(1);
+    const [fcAngle, setFcAngle] = useState(180);
+    const fcStageRef = useRef(null);
+    const fcImgRef = useRef(null);
+    const openFilterCompare = () => {
+      if (!dfLive) return;
+      setFcActive(dfLive.c.filter || null);
+      setFcStrength(dfLive.c.filterStrength != null ? dfLive.c.filterStrength : 1);
+      setFcAngle(dfLive.c.filterAngle != null ? dfLive.c.filterAngle : 180);
+      setFcOpen(true);
+    };
+    const closeFilterCompare = () => setFcOpen(false);
+    const fcClear = () => {
+      setFcActive(null);
+      dfPatch((cc) => ({ ...cc, filter: null }));
+    };
+    const fcSave = () => {
+      dfPatch((cc) => ({ ...cc, filter: fcActive, filterStrength: fcStrength, filterAngle: fcAngle }));
+      setFcOpen(false);
+    };
+    useEffect(() => {
+      if (!fcOpen || !AF || !fcStageRef.current) return;
+      const host = fcStageRef.current;
+      AF.clearPreview(host);
+      if (fcActive) AF.applyPreview(host, fcActive, { strength: fcStrength, angle: fcAngle });
+      return () => {
+        AF.clearPreview(host);
+      };
+    }, [fcOpen, fcActive, fcStrength, fcAngle, AF]);
     return /* @__PURE__ */ React.createElement("div", { className: "lm-root" }, /* @__PURE__ */ React.createElement("style", null, LOOM_MOBILE_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lm-top" }, /* @__PURE__ */ React.createElement("a", { className: "lm-back", href: "/" }, "\u2190 Gallery"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement("span", { className: "lm-title" }, "\u25AA The Loom"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement(
       "label",
       {
@@ -4220,7 +4299,23 @@ ${"=".repeat(48)}
         const ge = genEditState[c.id] || {};
         const busyE = ge.phase === "submitting" || ge.phase === "running";
         const src = c.openFrame && c.openFrame.mediaId;
-        return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Source \u2014 this shot's open frame"), src ? /* @__PURE__ */ React.createElement("div", { className: "lm-genframe", style: { height: 120, maxWidth: 220 } }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + src + ".jpg", alt: "source" })) : /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "No open-frame image yet \u2014 route one from the ", /* @__PURE__ */ React.createElement("b", null, "Image"), " tab, or pick it into the open frame on Shot Detail."), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, "Edit instruction"), /* @__PURE__ */ React.createElement(
+        return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lm-tabsrow", style: { marginBottom: 10 } }, /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lm-tabbtn" + (editSub === "edit" ? " on" : ""),
+            onClick: () => setEditSub("edit")
+          },
+          "Edit"
+        ), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lm-tabbtn" + (editSub === "enhance" ? " on" : ""),
+            onClick: () => setEditSub("enhance")
+          },
+          "Enhance"
+        )), editSub === "edit" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Source \u2014 this shot's open frame"), src ? /* @__PURE__ */ React.createElement("div", { className: "lm-genframe", style: { height: 120, maxWidth: 220 } }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + src + ".jpg", alt: "source" })) : /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "No open-frame image yet \u2014 route one from the ", /* @__PURE__ */ React.createElement("b", null, "Image"), " tab, or pick it into the open frame on Shot Detail."), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, "Edit instruction"), /* @__PURE__ */ React.createElement(
           "textarea",
           {
             className: "lm-ta",
@@ -4228,7 +4323,7 @@ ${"=".repeat(48)}
             placeholder: "e.g. make it night, add rain, warmer key light\u2026",
             onChange: (ev) => dfPatch((cc) => ({ ...cc, editPrompt: ev.target.value }))
           }
-        ), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: priceTitle(editPrice, c.id) }, priceLine(editPrice, c.id, "Add a source image and instruction to see the cost."))), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-genbtn", disabled: busyE || !src, onClick: () => genEdit(dfLive) }, busyE ? ge.msg || "editing\u2026" : "\u2726 Edit the open frame"), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lm-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lm-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lm-route" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "open" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "open", c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "close" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "close", c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "cast", c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lm-ok2" }, "\u2713 sent to ", ge.routed)));
+        ), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: priceTitle(editPrice, c.id) }, priceLine(editPrice, c.id, "Add a source image and instruction to see the cost."))), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-genbtn", disabled: busyE || !src, onClick: () => genEdit(dfLive) }, busyE ? ge.msg || "editing\u2026" : "\u2726 Edit the open frame"), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lm-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lm-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lm-route" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "open" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "open", c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "close" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "close", c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, dfLive, "cast", c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lm-ok2" }, "\u2713 sent to ", ge.routed))), editSub === "enhance" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Art filters \xB7 free, no generation"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-openfiltersbtn", onClick: openFilterCompare }, "\u25C9 Open filters"), /* @__PURE__ */ React.createElement("div", { className: "lm-hint", style: { marginTop: 8 } }, "Gradient overlays, not AI \u2014 applied right in the browser: no credits, no request, works offline.")));
       })(), genTab === "Reference" && (() => {
         const gr = genRefState[c.id] || {};
         const busyR = gr.phase === "submitting" || gr.phase === "running";
@@ -4557,6 +4652,60 @@ ${"=".repeat(48)}
         "\u26F6 ",
         reviewCropping ? "Done" : "Crop"
       ))));
+    })(), fcOpen && dfLive && (() => {
+      const c = dfLive.c;
+      const fcSrc = frameSrc(c.openFrame);
+      const fcGroups = AF ? AF.groups() : [];
+      const activeRec = fcActive && AF ? AF.get(fcActive) || {} : null;
+      const activeName = activeRec ? activeRec.name || fcActive : null;
+      return /* @__PURE__ */ React.createElement("div", { className: "lm-fc", key: c.id }, /* @__PURE__ */ React.createElement("div", { className: "lm-gen-top" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-gen-back", onClick: closeFilterCompare }, "\u2039 ", dfLive.code), /* @__PURE__ */ React.createElement("span", { className: "lm-gen-title" }, "Art filters"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-df-close", title: "Close", onClick: closeFilterCompare }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "lm-df-body" }, !AF ? /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "The art-filter library did not load on this page.") : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lm-fc-previewrow" }, /* @__PURE__ */ React.createElement("div", { className: "lm-fc-previewcol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-fc-previewbox" }, fcSrc ? /* @__PURE__ */ React.createElement("img", { className: "lm-fc-img", src: fcSrc, alt: "original" }) : /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "No open-frame image yet")), /* @__PURE__ */ React.createElement("div", { className: "lm-fc-previewcap" }, "Original")), /* @__PURE__ */ React.createElement("div", { className: "lm-fc-previewcol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-fc-previewbox" }, /* @__PURE__ */ React.createElement("div", { className: "lm-fc-stage", ref: fcStageRef }, fcSrc ? /* @__PURE__ */ React.createElement("img", { ref: fcImgRef, className: "lm-fc-img", src: fcSrc, alt: "preview" }) : /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "No open-frame image yet"))), /* @__PURE__ */ React.createElement("div", { className: "lm-fc-previewcap" }, "Preview \xB7 ", /* @__PURE__ */ React.createElement("b", null, activeName || "no filter")))), fcGroups.map((g) => /* @__PURE__ */ React.createElement("div", { key: g.source }, /* @__PURE__ */ React.createElement("div", { className: "lm-fc-grouplabel" }, g.label), /* @__PURE__ */ React.createElement("div", { className: "lm-fc-grid" }, g.ids.map((id) => {
+        const rec = AF.get(id) || {};
+        return /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            key: id,
+            className: "lm-fc-tile" + (fcActive === id ? " on" : ""),
+            onClick: () => setFcActive((cur) => cur === id ? null : id),
+            title: (rec.name || id) + " \xB7 free, applied in your browser" + (rec.note ? " \u2014 " + rec.note : "")
+          },
+          /* @__PURE__ */ React.createElement(
+            "div",
+            {
+              className: "lm-fc-swatch",
+              ref: (el) => {
+                if (el && !el._mgafPainted) {
+                  AF.renderSwatch(el, id);
+                  el._mgafPainted = true;
+                }
+              }
+            }
+          ),
+          /* @__PURE__ */ React.createElement("div", { className: "lm-fc-name" }, (rec.name || id).replace("Filter ", ""))
+        );
+      })))), /* @__PURE__ */ React.createElement("div", { className: "lm-fc-sliderwrap" }, /* @__PURE__ */ React.createElement("div", { className: "lm-fc-sliderlab" }, "Strength \u2014 ", Number(fcStrength).toFixed(2)), /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          type: "range",
+          min: "0",
+          max: "1",
+          step: "0.05",
+          className: "lm-fc-range",
+          value: fcStrength,
+          onChange: (ev) => setFcStrength(parseFloat(ev.target.value))
+        }
+      )), /* @__PURE__ */ React.createElement("div", { className: "lm-fc-sliderwrap" }, /* @__PURE__ */ React.createElement("div", { className: "lm-fc-sliderlab" }, "Angle \u2014 ", fcAngle, "\xB0"), /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          type: "range",
+          min: "0",
+          max: "360",
+          step: "1",
+          className: "lm-fc-range",
+          value: fcAngle,
+          onChange: (ev) => setFcAngle(parseInt(ev.target.value, 10))
+        }
+      )), /* @__PURE__ */ React.createElement("div", { className: "lm-fc-btnrow" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-fc-btn", onClick: fcClear }, "No filter"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-fc-btn primary", onClick: fcSave }, "Save")), /* @__PURE__ */ React.createElement("div", { className: "lm-fc-spendnote" }, activeName || "No filter", " \xB7 nothing sent, nothing spent"))));
     })());
   }
   function useProjectStore(setSelShot) {

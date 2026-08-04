@@ -29,7 +29,7 @@ reader could work it out from the code, it does not belong here.
 - [Settled constraints](#settled-constraints) &mdash; 45
 - [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
 - [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 149
+- [Decisions](#decisions) &mdash; 150
 
 ---
 
@@ -1337,6 +1337,47 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 ## Decisions
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
+
+### Loom Mobile increment 6 shipped: Filter compare — the real PixAI art-filters library reused end to end, and a "this is now complete" claim corrected down to "complete except two disclosed gaps"  ·  *2026-08-03*
+
+The last screen of the locked mobile design: apply one of PixAI's real, free, client-side
+"art filters" (`static/mg-art-filters.js` — no generation call, no credit cost, already used
+by the Gallery's own `FiltersPanel.jsx`) to a shot's frame, with a genuine Original/Preview
+comparison and live Strength/Angle sliders. No blend or gradient math was reimplemented —
+every filter operation calls straight into the real `window.MgArtFilters` API
+(`groups()`/`get()`/`renderSwatch()`/`applyPreview()`/`clearPreview()`), confirmed by tracing
+the code line by line and by live-rendering the real swatch tiles against the library's own
+baked recipes. `filter`/`filterStrength`/`filterAngle` are new, optional card fields (same
+convention as increment 5's `crop`) — `loom-core.js`/`loom-mutations.js` confirmed zero diff.
+A real Save→reload→persisted round trip and a Clear→reload→cleared round trip were both
+verified live against the real project, through a real `POST /api/loom/set`.
+
+**A real backend change was needed and disclosed:** the Loom's own page shell
+(`moonglade_gallery.py`'s `_LOOM_SHELL`) never loaded `mg-art-filters.js` at all — added one
+script tag. Since that shell template is built once at Flask process start, this needed an
+actual server restart to take effect, which the review pass did directly against the
+owner's own designated port-5057 verification sandbox (supervised launcher restart, not a
+bare invocation) — confirmed the fresh, non-injected page now genuinely has
+`window.MgArtFilters` available and the full Save/reload/persist round trip works for real,
+not just via the build's own runtime-injected workaround.
+
+**Two real, disclosed gaps mean "Loom Mobile is complete" needs a qualifier, not a flat
+claim.** A final design-completeness pass (prompted by this being the last planned
+increment) found the per-shot-card kebab (⋮) actions sheet — Move up / Move down /
+Duplicate / Delete — was never on any of the six increments' own scope lists and is
+genuinely unbuilt: `moveCard`/`dupCard`/`delCard` are real functions already used by desktop
+LoomV2, but they aren't even threaded into `LoomMobile`'s own props yet, so wiring this in is
+real, scoped, non-trivial-adjacent work, not a one-line fix. "Duplicate" has a workaround via
+Shot Detail's existing "Copy shot" button; **Move up/down and Delete have no mobile path at
+all today.** Separately, Fixer (face/hand touch-up) was omitted from the new Edit/Enhance
+sub-strip — correctly the right call (LoomV2's own shot-generation pipeline has no Fixer
+path), but the build's own summary line claimed "no real fix-a-hand/face function exists
+anywhere in this codebase," which is false: `gallery/src/components/FixTab.jsx` + the real
+`/api/fix` route are a fully shipped, currently-live Gallery feature, just never ported to a
+Loom shot specifically — the code's own inline comment said this correctly; only the
+human-facing summary overstated it. **Record the accurate framing going forward: Loom
+Mobile is complete except two disclosed, real, scoped follow-ups — the shot-actions sheet
+and a Loom-specific Fixer port — neither fictional nor hidden, just not yet built.**
 
 ### Contact Sheet Mobile + Duplicate Review Mobile shipped, built in parallel against the same shared checkout — a real process risk that happened to resolve cleanly, worth a standing rule anyway  ·  *2026-08-03*
 

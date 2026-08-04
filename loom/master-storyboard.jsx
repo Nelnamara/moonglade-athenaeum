@@ -3091,6 +3091,52 @@ const LOOM_MOBILE_STYLES = `
   border:1px solid var(--surface1);background:var(--surface1);color:var(--text);}
 .lm-review-cropbtn.on{background:color-mix(in srgb,var(--accent) 22%,transparent);
   border-color:var(--accent);color:var(--accent);}
+
+/* ---- Filter compare -- sixth and FINAL increment (2026-08-03), the locked design's own
+   "Art filters" screen (filterCompareOpen/fcSkinFilters/fcPixaiFilters/fcStrength/fcAngle).
+   Reuses .lm-gen-top/.lm-gen-back/.lm-gen-title/.lm-fill/.lm-df-close (top bar),
+   .lm-tabsrow/.lm-tabbtn (Edit/Enhance sub-strip -- same classes the Cast sheet's own
+   Cast/Footage strip and the model picker's Models/LoRAs strip already use), .lm-df-body/
+   .lm-microlab/.lm-hint/.lm-empty (body chrome) unchanged. Everything below is only what
+   this screen's own preview/swatch-grid/slider chrome genuinely needs. */
+.lm-openfiltersbtn{display:block;width:100%;box-sizing:border-box;text-align:center;padding:12px;
+  border-radius:9px;font:700 12px/1 system-ui;cursor:pointer;border:1px solid var(--surface1);
+  background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);margin-top:8px;}
+.lm-fc{position:absolute;inset:0;z-index:26;background:var(--mantle);display:flex;
+  flex-direction:column;animation:lmRise .22s ease both;}
+.lm-fc-previewrow{display:flex;gap:8px;margin:4px 0 16px;}
+.lm-fc-previewcol{flex:1;min-width:0;}
+.lm-fc-previewbox{position:relative;width:100%;aspect-ratio:1;border-radius:10px;
+  overflow:hidden;background:var(--base);border:1px solid var(--surface1);
+  display:flex;align-items:center;justify-content:center;}
+/* .mgaf-stage (mg-art-filters.js's own injected stylesheet) already supplies
+   position:relative + isolation:isolate -- the load-bearing line for mix-blend-mode -- the
+   moment AF.applyPreview() touches this element; width/height:100% is this screen's own
+   layout need on top of that, not a replacement for it. */
+.lm-fc-stage{position:relative;width:100%;height:100%;}
+.lm-fc-img{width:100%;height:100%;object-fit:cover;display:block;}
+.lm-fc-previewcap{font-size:10px;color:var(--subtext);text-align:center;padding-top:6px;}
+.lm-fc-grouplabel{font:700 9px/1 system-ui;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--overlay0);margin:0 0 6px;}
+.lm-fc-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;}
+.lm-fc-tile{display:flex;flex-direction:column;gap:3px;cursor:pointer;border-radius:9px;
+  padding:3px;border:1px solid transparent;background:none;font:inherit;}
+.lm-fc-tile.on{border-color:var(--accent);}
+/* Fallback paint only -- AF.renderSwatch() overwrites this with the filter's own real
+   gradient layers (via .mgaf-swatch, injected by mg-art-filters.js itself) the instant its
+   ref callback fires. */
+.lm-fc-swatch{width:100%;aspect-ratio:1;border-radius:7px;background:var(--surface1);}
+.lm-fc-name{font-size:8.5px;text-align:center;padding:3px 1px 0;color:var(--subtext);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lm-fc-sliderwrap{margin-bottom:14px;}
+.lm-fc-sliderlab{font:700 9px/1 system-ui;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--overlay0);margin-bottom:5px;}
+.lm-fc-range{width:100%;height:3px;cursor:pointer;}
+.lm-fc-btnrow{display:flex;gap:8px;margin-bottom:10px;}
+.lm-fc-btn{flex:1;text-align:center;padding:11px;border-radius:9px;font:700 11.5px/1 system-ui;
+  cursor:pointer;border:1px solid var(--surface1);background:rgba(33,31,58,.6);color:var(--text);}
+.lm-fc-btn.primary{border-color:rgba(255,255,255,.3);background:var(--accent);color:var(--base);}
+.lm-fc-spendnote{font-size:10px;color:var(--overlay0);text-align:center;}
 `;
 
 function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, addCard, addAct, setDraft,
@@ -3151,6 +3197,14 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
     : (source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null);
   const frameSrc = (f) => (f && f.thumbId ? thumbs[f.thumbId] : (f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null));
   const cardThumb = (c) => frameSrc(c.openFrame) || (c.resultMid ? "/thumbs/" + c.resultMid + ".jpg" : null);
+  // Real, shared, offline art-filter library (static/mg-art-filters.js) -- PixAI's own 7
+  // gradient-overlay recipes plus this app's own 5, composited entirely client-side (no
+  // network call, no credit spend). Read fresh each render rather than memoized: it is a
+  // load-once global singleton (script tag in _LOOM_SHELL, loaded before this bundle), so
+  // every render sees the same object reference. See Filter compare's own comment (below,
+  // with this component's other hooks) for why this screen uses it instead of a simplified
+  // local recipe.
+  const AF = typeof window !== "undefined" ? window.MgArtFilters : null;
   // Single source of truth for "what status does this shot show right now", shared by BOTH
   // the reel segment's color and the board card's status pill -- computed once per entry
   // rather than twice, so the two can never silently disagree (the exact two-implementations-
@@ -3637,6 +3691,89 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
     const tally = p && p.pr ? tallyPrices([p.pr]) : null;
     return tally ? costTooltip(tally) : "";
   };
+
+  // ---- Filter compare -- sixth and FINAL increment (2026-08-03), per the locked design's
+  // own filterCompareOpen/fcStrength/fcAngle state (Loom Mobile.dc.html: search
+  // "filterCompareOpen", "fcSkinFilters", "fcPixaiFilters", "fcStrength", "fcAngle",
+  // "fcClear", "fcSaveLibrary", "FILTER_SETS" -- its own internal screen title is "Art
+  // filters"). Reached from the SAME place the design puts it: Generate's Edit tab gets its
+  // own Edit/Enhance sub-strip below (editSub), and Enhance's "Open filters" button opens
+  // this screen -- confirmed against the design (editSubChips: Edit/Fixer/Enhance,
+  // editSubIsEnhance's own openFilterCompare button) AND independently against the real,
+  // already-shipped gallery/src/components/GenerateDrawer.jsx, which carries the EXACT SAME
+  // real, current Edit/Fixer/Enhance sub-tab strip (its own mgdock-subtabs; "Enhance" /
+  // "Art filters — free, in your browser") wired to gallery/src/components/FiltersPanel.jsx's
+  // ArtFiltersPanel. Two independent real sources agreeing is why this is placement, not a
+  // guess.
+  //
+  // Fixer is deliberately NOT built alongside Enhance here, matching the fourth increment's
+  // own disclosed precedent (loom-mobile-view.test.js's "scope discipline" describe block):
+  // desktop's real Edit tab (genEdit/genEditState) has no fix-a-hand/face submit path
+  // anywhere in useGenerationPipeline, and the real GenerateDrawer's own FixTab is a
+  // Gallery-image feature that has never been ported to a Loom shot. Building a Fixer tab
+  // here with no real function behind its button would be exactly the "forked functionality
+  // with no real underlying function to call" the fourth increment's report already ruled
+  // out -- so the sub-strip below is Edit/Enhance (two-way), not the design's own three-way
+  // Edit/Fixer/Enhance. Disclosed deviation, not a silent one.
+  const [editSub, setEditSub] = useState("edit");   // 'edit' | 'enhance' -- deliberately no 'fixer', see above
+
+  // filter/filterStrength/filterAngle are NOT in newCard() -- same "optional field, sensible
+  // fallback" convention Review & trim's own `c.crop || {...}` already established in this
+  // file (crop isn't in newCard() either): nothing needed to change in the card's base
+  // shape, a shot simply has no filter until one is genuinely Saved (below).
+  const [fcOpen, setFcOpen] = useState(false);
+  const [fcActive, setFcActive] = useState(null);     // candidate filter id, or null
+  const [fcStrength, setFcStrength] = useState(1);
+  const [fcAngle, setFcAngle] = useState(180);
+  const fcStageRef = useRef(null);
+  const fcImgRef = useRef(null);
+
+  // Opening seeds the candidate from whatever is ALREADY SAVED on the real card, so
+  // reopening shows the persisted choice rather than a blank slate. Reuses dfLive directly
+  // (no separate "which shot" id) -- this can only ever be called from the Enhance sub-tab
+  // inside Generate, which only renders while genOpen && dfOpen are both true, so dfLive is
+  // already guaranteed live at the point this fires (same reasoning genOpen's own JSX
+  // already relies on, unlike reviewOpen's separate entries.find() -- Review opens straight
+  // off the board with no dfOpen underneath it to guarantee a live shot).
+  const openFilterCompare = () => {
+    if (!dfLive) return;
+    setFcActive(dfLive.c.filter || null);
+    setFcStrength(dfLive.c.filterStrength != null ? dfLive.c.filterStrength : 1);
+    setFcAngle(dfLive.c.filterAngle != null ? dfLive.c.filterAngle : 180);
+    setFcOpen(true);
+  };
+  // A plain cancel: closes without writing anything. This is the one place this screen's
+  // real behavior can't match the design's own closeFilterCompare verbatim -- the mock never
+  // actually persisted filter/filterStrength/filterAngle anywhere else, so its
+  // closeFilterCompare and fcSaveLibrary do the literal same thing (setState + close). Here
+  // Save genuinely writes to the card (below) and Close/back genuinely does not, so an
+  // unsaved filter pick can be backed out of just by closing. Disclosed adaptation, not a
+  // silent difference.
+  const closeFilterCompare = () => setFcOpen(false);
+  // "No filter" -- genuinely, immediately removes any SAVED filter (not just the
+  // in-progress candidate), matching the task's own "should genuinely remove it": a clear is
+  // a real, one-tap undo, not a pending edit that would be lost by tapping Close instead of
+  // Save.
+  const fcClear = () => { setFcActive(null); dfPatch((cc) => ({ ...cc, filter: null })); };
+  // Save -- genuinely persists the candidate onto the real card via the SAME dfPatch/setCard
+  // mutation every other Shot Detail/Generate field already writes through. No new endpoint,
+  // no network call, no spend: filter/filterStrength/filterAngle become plain card fields,
+  // read back by openFilterCompare (above) and the preview effect (below) like any other.
+  const fcSave = () => {
+    dfPatch((cc) => ({ ...cc, filter: fcActive, filterStrength: fcStrength, filterAngle: fcAngle }));
+    setFcOpen(false);
+  };
+  // Live preview -- genuinely composites via the real AF.applyPreview/clearPreview (CSS
+  // overlay divs + mix-blend-mode, exactly mg-art-filters.js's own documented approach), not
+  // a fake color swatch. Re-runs on every strength/angle change so both sliders visibly
+  // affect the SAME real overlay while dragging.
+  useEffect(() => {
+    if (!fcOpen || !AF || !fcStageRef.current) return;
+    const host = fcStageRef.current;
+    AF.clearPreview(host);
+    if (fcActive) AF.applyPreview(host, fcActive, { strength: fcStrength, angle: fcAngle });
+    return () => { AF.clearPreview(host); };
+  }, [fcOpen, fcActive, fcStrength, fcAngle, AF]);
 
   return (
     <div className="lm-root">
@@ -4198,6 +4335,20 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
               const src = c.openFrame && c.openFrame.mediaId;
               return (
                 <>
+                  {/* Edit/Enhance sub-strip -- matches the locked design's own editSubChips
+                      (Edit/Fixer/Enhance) AND the real, already-shipped GenerateDrawer.jsx's
+                      identical mgdock-subtabs, minus Fixer (see this screen's own comment,
+                      declared with this component's other hooks, for why). Reuses
+                      .lm-tabsrow/.lm-tabbtn verbatim -- the same classes the Cast sheet's own
+                      Cast/Footage strip and the model picker's Models/LoRAs strip already use,
+                      not a new sub-tab visual language. */}
+                  <div className="lm-tabsrow" style={{ marginBottom: 10 }}>
+                    <button type="button" className={"lm-tabbtn" + (editSub === "edit" ? " on" : "")}
+                      onClick={() => setEditSub("edit")}>Edit</button>
+                    <button type="button" className={"lm-tabbtn" + (editSub === "enhance" ? " on" : "")}
+                      onClick={() => setEditSub("enhance")}>Enhance</button>
+                  </div>
+                  {editSub === "edit" && (<>
                   <span className="lm-microlab">Source — this shot's open frame</span>
                   {src ? (
                     <div className="lm-genframe" style={{ height: 120, maxWidth: 220 }}>
@@ -4224,6 +4375,14 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                       </div>
                       {ge.routed && <div className="lm-ok2">&#10003; sent to {ge.routed}</div>}
                     </div>)}
+                  </>)}
+                  {editSub === "enhance" && (
+                    <>
+                      <span className="lm-microlab">Art filters &middot; free, no generation</span>
+                      <button type="button" className="lm-openfiltersbtn" onClick={openFilterCompare}>&#9673; Open filters</button>
+                      <div className="lm-hint" style={{ marginTop: 8 }}>Gradient overlays, not AI — applied right in the browser: no credits, no request, works offline.</div>
+                    </>
+                  )}
                 </>
               );
             })()}
@@ -4657,6 +4816,104 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                 <button type="button" className={"lm-review-cropbtn" + (reviewCropping ? " on" : "")}
                   onClick={() => setReviewCropping((v) => !v)}>&#9974; {reviewCropping ? "Done" : "Crop"}</button>
               </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ---- Filter compare -- sixth and FINAL increment (2026-08-03), the locked design's
+          own "Art filters" screen (Loom Mobile.dc.html: search "filterCompareOpen",
+          "fcSkinFilters", "fcPixaiFilters", "fcStrength", "fcAngle", "fcClear",
+          "fcSaveLibrary", "FILTER_SETS"). Opens from Generate's Edit tab -> Enhance sub-tab
+          (openFilterCompare, declared with this component's other hooks above). Reuses
+          dfLive directly rather than a second entries.find() lookup -- see openFilterCompare's
+          own comment for why that's safe here specifically (unlike reviewOpen). */}
+      {fcOpen && dfLive && (() => {
+        const c = dfLive.c;
+        const fcSrc = frameSrc(c.openFrame);
+        const fcGroups = AF ? AF.groups() : [];
+        const activeRec = fcActive && AF ? (AF.get(fcActive) || {}) : null;
+        const activeName = activeRec ? (activeRec.name || fcActive) : null;
+        return (
+          <div className="lm-fc" key={c.id}>
+            <div className="lm-gen-top">
+              <button type="button" className="lm-gen-back" onClick={closeFilterCompare}>&lsaquo; {dfLive.code}</button>
+              <span className="lm-gen-title">Art filters</span>
+              <span className="lm-fill" />
+              <button type="button" className="lm-df-close" title="Close" onClick={closeFilterCompare}>&#10005;</button>
+            </div>
+            <div className="lm-df-body">
+              {!AF ? (
+                <div className="lm-empty">The art-filter library did not load on this page.</div>
+              ) : (
+                <>
+                  {/* Original vs. Preview -- a REAL image (this shot's real open frame) both
+                      times, never a fake color swatch. The right box is a live AF.applyPreview
+                      compositing (CSS gradient overlay divs + mix-blend-mode, per
+                      mg-art-filters.js's own documented approach) driven by the effect
+                      declared with this component's other hooks -- nothing here paints the
+                      overlay itself. */}
+                  <div className="lm-fc-previewrow">
+                    <div className="lm-fc-previewcol">
+                      <div className="lm-fc-previewbox">
+                        {fcSrc ? <img className="lm-fc-img" src={fcSrc} alt="original" />
+                          : <div className="lm-empty">No open-frame image yet</div>}
+                      </div>
+                      <div className="lm-fc-previewcap">Original</div>
+                    </div>
+                    <div className="lm-fc-previewcol">
+                      <div className="lm-fc-previewbox">
+                        <div className="lm-fc-stage" ref={fcStageRef}>
+                          {fcSrc ? <img ref={fcImgRef} className="lm-fc-img" src={fcSrc} alt="preview" />
+                            : <div className="lm-empty">No open-frame image yet</div>}
+                        </div>
+                      </div>
+                      <div className="lm-fc-previewcap">Preview &middot; <b>{activeName || "no filter"}</b></div>
+                    </div>
+                  </div>
+
+                  {/* Swatch grids -- AF.groups() IS the real "Moonglade" (5, ours) / "PixAI"
+                      (7, verbatim) split; nothing here hardcodes a count or a group label.
+                      Each tile paints via the real AF.renderSwatch (the same gradient/blend
+                      math the tile's own filter would apply as a preview), not a
+                      hand-rolled two-color CSS gradient. */}
+                  {fcGroups.map((g) => (
+                    <div key={g.source}>
+                      <div className="lm-fc-grouplabel">{g.label}</div>
+                      <div className="lm-fc-grid">
+                        {g.ids.map((id) => {
+                          const rec = AF.get(id) || {};
+                          return (
+                            <button type="button" key={id} className={"lm-fc-tile" + (fcActive === id ? " on" : "")}
+                              onClick={() => setFcActive((cur) => (cur === id ? null : id))}
+                              title={(rec.name || id) + " · free, applied in your browser" + (rec.note ? " — " + rec.note : "")}>
+                              <div className="lm-fc-swatch"
+                                ref={(el) => { if (el && !el._mgafPainted) { AF.renderSwatch(el, id); el._mgafPainted = true; } }} />
+                              <div className="lm-fc-name">{(rec.name || id).replace("Filter ", "")}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+
+                  <div className="lm-fc-sliderwrap">
+                    <div className="lm-fc-sliderlab">Strength — {Number(fcStrength).toFixed(2)}</div>
+                    <input type="range" min="0" max="1" step="0.05" className="lm-fc-range"
+                      value={fcStrength} onChange={(ev) => setFcStrength(parseFloat(ev.target.value))} />
+                  </div>
+                  <div className="lm-fc-sliderwrap">
+                    <div className="lm-fc-sliderlab">Angle — {fcAngle}&deg;</div>
+                    <input type="range" min="0" max="360" step="1" className="lm-fc-range"
+                      value={fcAngle} onChange={(ev) => setFcAngle(parseInt(ev.target.value, 10))} />
+                  </div>
+                  <div className="lm-fc-btnrow">
+                    <button type="button" className="lm-fc-btn" onClick={fcClear}>No filter</button>
+                    <button type="button" className="lm-fc-btn primary" onClick={fcSave}>Save</button>
+                  </div>
+                  <div className="lm-fc-spendnote">{activeName || "No filter"} &middot; nothing sent, nothing spent</div>
+                </>
+              )}
             </div>
           </div>
         );

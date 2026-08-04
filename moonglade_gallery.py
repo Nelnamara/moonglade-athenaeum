@@ -3965,6 +3965,13 @@ __BABEL_LIB_TAG__
      all. Same pairing the gallery shell above documents at length. -->
 <script src="/static/mg-cost-badge.js"></script>
 <script src="/static/mg-generate-drawer.js"></script>
+<!-- LoomMobile's Filter compare screen (sixth increment, 2026-08-03) is the first real use of
+     PixAI's client-side art filters inside The Loom -- same real, offline, credit-free
+     library the Gallery's own GenerateDrawer Enhance tab already loads (see the gallery
+     shell's own NEXT_PAGE template, same file, for the identical pairing). Loaded here,
+     not just there: without it window.MgArtFilters is undefined on /loom and Filter compare
+     would render its own "did not load" fallback instead of the real swatch grid. -->
+<script src="/static/mg-art-filters.js"></script>
 <script src="/static/mg-notify.js"></script>
 __UPSCALE_CONST__
 </head><body>

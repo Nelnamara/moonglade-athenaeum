@@ -17,6 +17,22 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Loom Mobile increment 6 — Filter compare ("Art filters"), the last screen of the locked
+  mobile design.** Applies one of PixAI's real, free, client-side art filters
+  (`static/mg-art-filters.js`, already used by the Gallery's own `FiltersPanel.jsx`) to a
+  shot's frame — Original/Preview comparison, live Strength/Angle sliders, no reimplemented
+  blend/gradient math anywhere (traced and live-verified against the real library).
+  `filter`/`filterStrength`/`filterAngle` are new, optional card fields; `loom-core.js`/
+  `loom-mutations.js` untouched. Needed one real backend change — the Loom's page shell never
+  loaded `mg-art-filters.js` at all — verified end to end (Save→reload→persisted,
+  Clear→reload→cleared) against a real, freshly-restarted dev server, not a workaround.
+  687/687 loom tests, 1539/1539 pytest. **Two real, disclosed gaps remain, so this is
+  "complete except two follow-ups," not flatly done:** the shot card's Move up/down/Delete
+  actions sheet has no mobile path at all yet (Duplicate has a workaround via Shot Detail's
+  Copy button); Fixer (face/hand touch-up) was correctly left out of this pass but is a real,
+  already-shipped Gallery feature never ported to a Loom shot, not a nonexistent one. Full
+  reasoning in `docs/DECISIONS.md`'s entry of the same date.
+
 - **Contact Sheet Mobile + Duplicate Review Mobile.** Both reuse this session's
   hook-extraction pattern (`useContactSheet.js`/`useDuplicateReview.js`) against
   already-real, already-shipped backends — no new endpoints, no forked write paths.
