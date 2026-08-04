@@ -526,6 +526,11 @@ export default function App({ boot }) {
             onDeleted={() => { closeDetails(); load(1, true); }}
             onFilterByModel={filterByModel} onFilterByBatch={filterByBatch}
             advParams={detailsAdvParams}
+            items={items}
+            onOpenLightbox={(mid) => {
+              const i = items.findIndex((it) => it.media_id === mid);
+              if (i >= 0) setLbIndex(i);
+            }}
           />
         ) : (
           <Grid

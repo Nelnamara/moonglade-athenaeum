@@ -86,7 +86,7 @@ import "../styles/image-details-mobile.css";
        Lightbox.jsx's own flyout already differs from any per-screen mock,
        because it is a REUSED shared component, not rebuilt per screen. */
 
-function useSimilar(mediaId) {
+export function useSimilar(mediaId) {
   const [state, setState] = useState({ loading: true, images: [], error: "" });
   const seq = useRef(0);
 

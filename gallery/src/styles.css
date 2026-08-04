@@ -662,8 +662,11 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
 .back-link { color: var(--accent); text-decoration: none; font-size: 13px; }
 .back-link:hover { text-decoration: underline; }
 .nav-arrow { color: var(--accent); text-decoration: none; font-size: 13px; padding: 4px 10px;
-  border: 1px solid var(--surface1); border-radius: 6px; }
+  border: 1px solid var(--surface1); border-radius: 6px; background: none; font-family: inherit; cursor: pointer; }
 .nav-arrow:hover { background: var(--surface0); }
+/* Image Details.dc.html:39-43 -- the header's "N of M" index label, next to the
+   ⛶ Lightbox link (which reuses .nav-arrow's own look, now button-safe above). */
+.detail-index { color: var(--subtext); font-size: 12px; font-variant-numeric: tabular-nums; }
 .nav-disabled { color: var(--overlay0); font-size: 13px; padding: 4px 10px;
   border: 1px solid var(--surface0); border-radius: 6px; cursor: default; }
 .focus-btn { font-size: 12px; padding: 4px 12px; cursor: pointer; border-radius: 6px;
