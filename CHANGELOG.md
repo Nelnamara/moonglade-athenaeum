@@ -1773,6 +1773,12 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **My Art: real mobile row structure, desktop rank tiers, stat order, icon metric line.**
+  Mobile was reusing desktop's bordered card component squeezed into one column instead of
+  the design's flat dashed-divider row — new classes so this can't drift back. Desktop gained
+  rank-tier coloring (gold #1, mauve top-3), correct stat order with VIEWS accented, and the
+  design's icon-format metric line. Live-verified against the real account. 1539/1539 pytest.
+
 - **Desktop Gallery shell: a real nav-bar overflow bug, dead Publish/Train stubs, the page
   caption.** The nav bar could literally overlap the credits/activity cluster at real desktop
   window widths (~500-580px, not a phone-only issue) — fixed with real flex-wrap, not a patch

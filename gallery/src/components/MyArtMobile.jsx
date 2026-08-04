@@ -72,17 +72,25 @@ export default function MyArtMobile() {
           Nothing published yet — publish an image from its Details page.
         </div>
       ) : (
-        <div className="mgma-posts" style={{ gridTemplateColumns: "1fr" }}>
+        // Moonglade Mobile.dc.html:506, artPostRowStyle/artRankStyle -- a flat, dashed-
+        // divider list row, no card chrome. Was reusing desktop's bordered/rounded
+        // .mgma-post card (squeezed into one column) instead of this mobile-specific row --
+        // the exact "reused the desktop piece instead of building the real structure"
+        // pattern flagged elsewhere in this audit. New .gmob-artrow/.gmob-artrank classes,
+        // not .mgma-*, so this can never silently drift back onto the desktop card again.
+        <div className="gmob-artlist">
           {items.map((r, i) => {
             const title = (r.title || "").trim() || (r.prompt_preview || "").trim() || "untitled";
             const meta = fmt(r.views) + " views · " + fmt(r.likes) + " likes"
               + (r.comments ? " · " + fmt(r.comments) + " comments" : "");
             return (
-              <div className="mgma-post" key={r.media_id} style={{ cursor: "default" }}>
-                <div className="mgma-rank">{i + 1}</div>
-                <div className="mgma-postbody">
-                  <div className="mgma-posttitle" title={title}>{title}</div>
-                  <div className="mgma-postmeta">{meta}</div>
+              <div className="gmob-artrow" key={r.media_id}>
+                <div className="gmob-artrank">{i + 1}</div>
+                <div className="gmob-artcol">
+                  <div className="gmob-arttitle" title={title}>{title}</div>
+                  <div className="gmob-artmeta">{meta}</div>
+                  {/* Progress bar is a disclosed addition beyond the mobile design's own
+                      row (which is rank+title+meta only) -- kept, not a fidelity loss. */}
                   <div className="mgma-barwrap">
                     <div className="mgma-bar" style={{ width: Math.max(2, ((r.views || 0) / maxViews) * 100) + "%" }} />
                   </div>

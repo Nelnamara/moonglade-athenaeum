@@ -1503,17 +1503,20 @@ increment in this file works.
 
 **My Art** — `MyArtOverlay.jsx`/`MyArtMobile.jsx` vs `Frontend Gallery.dc.html` /
 `Moonglade Mobile.dc.html`.
-- [ ] Mobile post rows reuse desktop's bordered/rounded card component squeezed into one
-      column, instead of the mobile design's flat dashed-divider list row — same failure
-      pattern as the Contests/Health mobile-reuse cases
-- [ ] Desktop rank-tier coloring (gold #1, mauve top-3) entirely missing — flat gray for every
-      rank, also undersized (13px vs 19px)
-- [ ] Desktop stat order wrong (VIEWS moved from 2nd to last) and its accent-color highlight
-      is missing; value type shrunk 24px→21px
-- [ ] Desktop per-post metric line uses spelled-out "N views · N likes" instead of the design's
-      icon format "👁 N · ♥ N" (mobile's own design already specifies spelled-out — leave mobile)
+- [x] Mobile post rows reuse desktop's bordered/rounded card component squeezed into one
+      column, instead of the mobile design's flat dashed-divider list row. **SHIPPED
+      2026-08-04** — new `.gmob-artrow` classes, not `.mgma-*`, so this can't drift back.
+- [x] Desktop rank-tier coloring (gold #1, mauve top-3) entirely missing. **SHIPPED
+      2026-08-04**, size restored to 19px/26px too.
+- [x] Desktop stat order wrong (VIEWS moved from 2nd to last) and its accent-color highlight
+      is missing; value type shrunk 24px→21px. **SHIPPED 2026-08-04**, fixed in the shared
+      `useMyArt.js` hook.
+- [x] Desktop per-post metric line uses spelled-out "N views · N likes" instead of the design's
+      icon format "👁 N · ♥ N" (mobile's own design already specifies spelled-out — left
+      mobile). **SHIPPED 2026-08-04, desktop only.**
 - [ ] Mobile stat cards are inverted (value-above-label vs. spec's label-above-value) and use
-      the wrong type family — borrowed wholesale from Control Panel's mobile stat card
+      the wrong type family — borrowed wholesale from Control Panel's mobile stat card (still
+      open — a disclosed, deliberate cross-screen-consistency choice, lower priority)
 
 **Health** — `HealthOverlay.jsx`/`HealthMobile.jsx` vs `Frontend Gallery.dc.html`. Backend/data
 logic and most regions are genuinely faithful; these are the real misses:
@@ -1861,6 +1864,34 @@ not a hardcoded constant). Live-verified: "Page 1 of 24 · 100 per page · 2,337
 the real library.
 
 1539/1539 pytest.
+
+### Punch-list items shipped for My Art: real mobile row structure, desktop rank tiers, stat order, icon metric line  ·  *2026-08-04*
+
+Four items, the mobile row being the clearest instance of the exact anti-pattern this whole
+audit is about: `Moonglade Mobile.dc.html:506` specifies a flat, dashed-divider list row (no
+card chrome at all); `MyArtMobile.jsx` was reusing desktop's bordered/rounded `.mgma-post`
+card, just squeezed into one grid column. New `.gmob-artrow`/`.gmob-artrank`/`.gmob-artcol`/
+`.gmob-arttitle`/`.gmob-artmeta` classes (not `.mgma-*`) so this specific drift can't silently
+recur.
+
+Desktop: rank-tier coloring (design `Frontend Gallery.dc.html:2429-2430` — gold #1, mauve
+top-3, rest overlay0, a real "this is your #1 post" signal) restored along with the correct
+19px/26px sizing (was flat gray, 13px/20px). Stat order/accent (`:2425-2426` — PUBLISHED,
+VIEWS-accented, LIKES, COMMENTS; was PUBLISHED, LIKES, COMMENTS, VIEWS with no accent) fixed
+in the shared `useMyArt.js` hook, value size restored 21px→24px. Per-post metric line switched
+from spelled-out text to the design's icon format ("👁 N · ♥ N"), desktop only — mobile's own
+design (`Moonglade Mobile.dc.html:1124`) already specifies spelled-out, so mobile was already
+correct and stayed untouched.
+
+Live-verified against the real account: stat order/accent confirmed via DOM ("VIEWS" now 2nd
+with the accent class present), all new CSS rules (`.gmob-artrow`, `.tier-gold`, `.tier-mauve`)
+confirmed compiled into the built stylesheet. The row/rank visual couldn't be exercised with
+real published posts (this account has 0 published items right now) — code is a direct,
+verified trace from the design's own values, not guessed. 1539/1539 pytest.
+
+Left open: mobile's stat cards still use Control Panel's inverted value-above-label layout — a
+disclosed, deliberate cross-screen-consistency choice, lower priority than the row-structure
+fix above.
 
 ### Loom Mobile follow-up shipped: the per-shot kebab actions sheet (Move up / Move down / Duplicate / Delete)  ·  *2026-08-04*
 

@@ -46,7 +46,7 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
               <div className="mgma-stats">
                 {stats.map((st) => (
                   <div className="mgma-stat" key={st.label}>
-                    <div className="mgma-stat-value">{st.value}</div>
+                    <div className={"mgma-stat-value" + (st.accent ? " accent" : "")}>{st.value}</div>
                     <div className="mgma-stat-label">{st.label}</div>
                   </div>
                 ))}
@@ -59,12 +59,17 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                 <div className="mgma-posts">
                   {items.map((r, i) => {
                     const title = (r.title || "").trim() || (r.prompt_preview || "").trim() || "untitled";
-                    const meta = fmt(r.views) + " views · " + fmt(r.likes) + " likes"
-                      + (r.comments ? " · " + fmt(r.comments) + " comments" : "");
+                    // Frontend Gallery.dc.html:2428 -- icon-driven compact format ("👁 N ·
+                    // ♥ N"), desktop-only (mobile's own design already specifies the
+                    // spelled-out "N views · N likes" this used to be everywhere).
+                    const meta = "👁 " + fmt(r.views) + " · ♥ " + fmt(r.likes)
+                      + (r.comments ? " · 💬 " + fmt(r.comments) : "");
+                    // Frontend Gallery.dc.html:2429-2430 -- rank #1 gold, #2-3 mauve, rest overlay0.
+                    const tier = i === 0 ? " tier-gold" : i < 3 ? " tier-mauve" : "";
                     return (
                       <button type="button" className="mgma-post" key={r.media_id}
                         onClick={() => onOpenPost && onOpenPost(r.media_id)}>
-                        <div className="mgma-rank">{i + 1}</div>
+                        <div className={"mgma-rank" + tier}>{i + 1}</div>
                         <div className="mgma-postbody">
                           <div className="mgma-posttitle" title={title}>{title}</div>
                           <div className="mgma-postmeta">{meta}</div>
