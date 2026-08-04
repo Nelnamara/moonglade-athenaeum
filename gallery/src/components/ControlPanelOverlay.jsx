@@ -888,6 +888,16 @@ export function PowerModal({ mode, phase, error, onClose }) {
           </div>
           <div className="mgcp-pwr-title">{title}</div>
           {line && <div className="mgcp-pwr-line">{line}</div>}
+          {/* Control Panel.dc.html:687's powerBarStyle drove a discrete 0-100% bar off
+              RESTART_STAGES' fake stage index -- replaced (disclosed above) with real
+              ping-polling that has no stage index to compute a real percentage from.
+              An indeterminate bar (same real pattern the job console already uses,
+              .mgcp-runbar i.indeterminate) is the honest middle ground: visible progress
+              feedback without claiming a fake percentage. Restart-busy only -- stop has
+              no comeback signal to show progress toward (see below). */}
+          {isRestart && busy && (
+            <div className="mgcp-runbar mgcp-pwr-bar"><i className="indeterminate" /></div>
+          )}
           {error && <div className="mgcp-pwr-err">{error}</div>}
           {failed ? (
             <button type="button" className="mgcp-pwr-primary" onClick={onClose}>Close</button>
