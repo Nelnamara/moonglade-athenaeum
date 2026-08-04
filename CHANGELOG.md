@@ -1773,6 +1773,13 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Control Panel: a real library-folder picker, desktop.** The design's own approach
+  (`<input type="file" webkitdirectory>`) can't work for anyone — browsers never expose an
+  absolute host path through a file input. Built a real text-path input against the
+  already-complete `/api/library-path` route instead, including its "doesn't exist yet, create
+  it?" confirm step. Read side live-verified against the real config; the write path wasn't
+  exercised live (real consequence on next restart). 1539/1539 pytest.
+
 - **Control Panel: Branding tile's mark glyphs actually set the mark now.** Clicking used to
   just redirect to the Branding tab; now wired to the same real `/api/branding` call the
   Branding tab's own picker uses. Live-verified against the real account (switched marks,

@@ -58,6 +58,39 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
   const [subOverlay, setSubOverlay] = useState(null); // 'users' | 'trash'
   const [markBusy, setMarkBusy] = useState(false); // inline mark-pick from the Branding tile
 
+  // Control Panel.dc.html:240-243 -- the library-folder picker. The design's own
+  // <input type="file" webkitdirectory> can't actually supply what /api/library-path
+  // needs: browsers never expose a real absolute host path through a file input, for
+  // security reasons (only file.webkitRelativePath, a relative in-picker structure) --
+  // so this is a real text-path input instead of a fake native picker that couldn't
+  // work anyway. GET is safe/read-only; POST is localhost-only (same trust class as
+  // /api/setup/save-key) and never moves anything -- it only changes what folder the
+  // NEXT server start loads.
+  const [libOpen, setLibOpen] = useState(false);
+  const [libInfo, setLibInfo] = useState(null); // {path, stored, configured, default}
+  const [libInput, setLibInput] = useState("");
+  const [libBusy, setLibBusy] = useState(false);
+  const [libMsg, setLibMsg] = useState("");
+  const [libNeedsCreate, setLibNeedsCreate] = useState(null); // path pending a create confirm
+  const openLibPicker = async () => {
+    setLibOpen(true);
+    setLibMsg(""); setLibNeedsCreate(null);
+    const r = await fetch("/api/library-path");
+    const d = await r.json().catch(() => null);
+    if (d) { setLibInfo(d); setLibInput(d.stored || d.path || ""); }
+  };
+  const saveLibPath = async (createIfMissing) => {
+    if (!libInput.trim()) return;
+    setLibBusy(true); setLibMsg("");
+    const d = await postJSON("/api/library-path", { path: libInput.trim(), create: !!createIfMissing });
+    setLibBusy(false);
+    if (d.needs_create) { setLibNeedsCreate(d.path); return; }
+    setLibNeedsCreate(null);
+    if (d.error) { setLibMsg("⚠ " + d.error); return; }
+    setLibMsg("✓ Saved — takes effect on the next server restart.");
+    setLibInfo((prev) => ({ ...prev, stored: libInput.trim() }));
+  };
+
   // Live Mirror -- ControlMobile.jsx already ships this against the real,
   // read-only /api/watch/status route (its own header comment explains why
   // it stays a local fetch-on-mount rather than folding into
@@ -396,8 +429,29 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                       <div className="mgcp-mkick">Catalog &amp; files</div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
                         <a className="mgcp-smallchip" href="/export-csv" style={{ textDecoration: "none" }}>⬇ Download catalog (CSV)</a>
+                        {isLocal && (
+                          <button type="button" className="mgcp-smallchip" onClick={openLibPicker}>library folder…</button>
+                        )}
                       </div>
-                      {isLocal && <div className="mgcp-ver" style={{ marginTop: "auto" }}>{summary.out_dir}</div>}
+                      {libOpen ? (
+                        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                          <input value={libInput} onChange={(e) => { setLibInput(e.target.value); setLibNeedsCreate(null); setLibMsg(""); }}
+                            placeholder={libInfo?.default || "absolute path"} disabled={libBusy}
+                            style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, background: "var(--base)",
+                              border: "1px solid var(--surface1)", borderRadius: 6, color: "var(--text)", padding: "5px 8px" }} />
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button type="button" className="mgcp-smallchip" disabled={libBusy}
+                              onClick={() => saveLibPath(!!libNeedsCreate)}>
+                              {libNeedsCreate ? "Create + Save" : "Save"}
+                            </button>
+                            <button type="button" className="mgcp-smallchip" onClick={() => setLibOpen(false)}>Cancel</button>
+                          </div>
+                          {libNeedsCreate && <div style={{ fontSize: 10.5, color: "var(--peach)" }}>Doesn't exist yet — Create + Save makes it.</div>}
+                          {libMsg && <div style={{ fontSize: 10.5, color: libMsg[0] === "⚠" ? "var(--red)" : "var(--emerald)" }}>{libMsg}</div>}
+                        </div>
+                      ) : (
+                        isLocal && <div className="mgcp-ver" style={{ marginTop: "auto" }}>{summary.out_dir}</div>
+                      )}
                     </div>
 
                     <div className="mgcp-tile mgcp-tile5">

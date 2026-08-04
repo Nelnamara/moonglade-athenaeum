@@ -1393,8 +1393,12 @@ increment in this file works.
       **SHIPPED 2026-08-04.**
 - [x] Running-job view drops the `lockedMinis` "what's blocked while this runs" chip row.
       **SHIPPED 2026-08-04.**
-- [ ] "Catalog & files" tile missing the library-folder picker (`webkitdirectory` input) + path
-      display entirely
+- [x] "Catalog & files" tile missing the library-folder picker (desktop). **SHIPPED
+      2026-08-04** as a real text-path input, not the design's native folder picker (browsers
+      never expose an absolute host path through `<input type="file" webkitdirectory>`, for
+      security reasons — the design's own approach couldn't have worked as literally specified
+      regardless of who built it). Mobile still doesn't have this tile's shape at all —
+      separate, smaller, not done in this pass.
 - [x] Branding tile's mark glyphs don't set the mark in place — click just switches tabs.
       **SHIPPED 2026-08-04.**
 - [~] Skin cards drop the concrete unlock-requirement text (e.g. "Unlock: Hoardsmith (10,000
@@ -1686,6 +1690,27 @@ tells you both that a click sets it and that the Branding tab has more.
 Live-verified against the real account: clicked a different mark, confirmed the active-state
 border/title moved to it via DOM inspection, then clicked back to the original mark to leave
 the real branding setting unchanged. 1539/1539 pytest.
+
+### Punch-list item 10 shipped: the Catalog & files library-folder picker, real text-path not a fake native picker  ·  *2026-08-04*
+
+Design (`Control Panel.dc.html:240-243`) specifies `<input type="file" webkitdirectory>` for
+picking the library folder. That element cannot supply what the real backend needs — a genuine
+absolute host filesystem path — because browsers only ever expose a folder's *relative*
+in-picker structure (`file.webkitRelativePath`) through a file input, deliberately, for
+security. This isn't a shortcut this app's build took; the design's own literal approach
+couldn't have worked for any implementation. Built a real text-path input instead, wired to the
+already-real, already-complete `GET/POST /api/library-path` route (localhost-only on write,
+same trust class as `/api/setup/save-key`; never moves files, only changes what folder the
+*next* server start loads) — including the route's own `needs_create` confirm step for a path
+that doesn't exist yet.
+
+Live-verified the read side against the real config: opened the picker, confirmed it loaded
+the real stored path. Did NOT submit a save during verification — this setting has real
+consequences on the next restart (which folder loads), and this session's own dev server was
+still needed for the rest of the punch list, so the write path is code-reviewed and route-
+contract-verified but not live-exercised. Desktop only; mobile's Catalog & Files tile still
+doesn't have this shape at all (a smaller, separate gap, not closed in this pass). 1539/1539
+pytest.
 
 ### Loom Mobile follow-up shipped: the per-shot kebab actions sheet (Move up / Move down / Duplicate / Delete)  ·  *2026-08-04*
 
