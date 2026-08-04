@@ -1338,6 +1338,16 @@ https://claude.ai/code/artifact/335ef4e7-2459-4c99-990a-b8c5751324c3 — the ach
 
 *What was decided and why. The WHY is the part no amount of code-reading recovers.*
 
+### Loom Mobile: Draft chip's active-state glow was missing  ·  *2026-08-04*
+
+Fix from the design-fidelity punch list above. `Loom Mobile.dc.html`'s `draftChipStyle`
+(line 670) adds `box-shadow: 0 0 10px rgba(212,175,55,.35)` when draft mode is on, alongside
+the gold color/border/background — the real `.lm-chip.on` rule
+(`loom/master-storyboard.jsx`) had the color/border/background but not the glow. One-line CSS
+addition. Verified live: switched Loom to mobile view, toggled Draft on, read the real
+element's computed `boxShadow` — matches the design's value exactly. Loom's own `npm test`
+suite and the full `python -m pytest -q` suite both green.
+
 ### Contact Sheet desktop: print output used dark-theme text colors on a white page  ·  *2026-08-04*
 
 Fix from the design-fidelity punch list above. `Contact Sheet.dc.html` is itself a light/print
@@ -1495,7 +1505,11 @@ increment in this file works.
 - [ ] 4 of 6 designed animations don't exist: `lmMetal` (animated shimmer on every primary
       button — currently flat color), `lmSheetDown`/`lmFadeIn`/`lmFadeOut` (every sheet close
       is an instant unmount, not the designed 280ms slide+fade)
-- [ ] Draft-chip's active glow (`box-shadow`) dropped
+- [x] Draft-chip's active glow (`box-shadow`) dropped — **SHIPPED 2026-08-04**,
+      `.lm-chip.on` in `loom/master-storyboard.jsx` now carries the design's exact
+      `box-shadow: 0 0 10px rgba(212,175,55,.35)` (`Loom Mobile.dc.html:670`'s `draftChipStyle`).
+      Verified live via computed style on the real toggled chip: `rgba(212, 175, 55, 0.35) 0px
+      0px 10px 0px`.
 - [ ] Frame/gallery picker isn't its own mobile screen — silently reuses the desktop
       `<mg-gallery-picker>` component instead of the design's 3-column mobile sheet
 

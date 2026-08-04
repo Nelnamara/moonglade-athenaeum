@@ -2877,7 +2877,8 @@ const LOOM_MOBILE_STYLES = `
   color:var(--subtext);cursor:pointer;padding:6px 10px;border-radius:999px;
   border:1px solid var(--surface1);background:none;user-select:none;white-space:nowrap;}
 .lm-chip:hover{border-color:var(--accent);color:var(--accent);}
-.lm-chip.on{color:var(--gold);border-color:var(--gold);background:color-mix(in srgb,var(--gold) 15%,transparent);}
+.lm-chip.on{color:var(--gold);border-color:var(--gold);background:color-mix(in srgb,var(--gold) 15%,transparent);
+  box-shadow:0 0 10px rgba(212,175,55,.35);}
 .lm-chip input{margin:0;cursor:pointer;}
 .lm-reelwrap{flex:none;padding:4px 16px 10px;position:relative;}
 .lm-reelbar{display:flex;gap:3px;height:18px;border-radius:4px;cursor:pointer;touch-action:none;}
