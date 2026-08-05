@@ -303,6 +303,21 @@
 .mgx-cred:hover .mgx-credtip, .mgx-cred:focus-visible .mgx-credtip {
   opacity: 1; transform: translateY(0); }
 
+/* claim pill -- classic's own #acct-claim (Acct.claim() in moonglade_gallery.py),
+   ported verbatim: hidden until claim_credits > 0, instant claim + toast on
+   click, no modal ceremony. Sits beside .mgx-cred, same row. The newer
+   ClaimModal (claim-modal.css) is additive, not a replacement -- this pill is
+   the always-there quiet reminder even after the modal's been dismissed for
+   the session. */
+@keyframes mgxClaimPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(79,201,154,.45); } 50% { box-shadow: 0 0 0 6px rgba(79,201,154,0); } }
+button.mgx-claim { display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+  font-weight: 600; padding: 7px 13px; border-radius: 999px; cursor: pointer; font-family: inherit;
+  border: 1px solid var(--emerald); background: rgba(79,201,154,.14); color: var(--emerald);
+  animation: mgxClaimPulse 2.6s ease-in-out infinite; white-space: nowrap; }
+button.mgx-claim:hover:not(:disabled) { background: rgba(79,201,154,.26); }
+button.mgx-claim:disabled { opacity: .7; cursor: default; animation: none; }
+button.mgx-claim .coin { font-size: 13px; }
+
 /* <mg-cost-badge compact> host — hidden until a dock/composer pushes its first
    price (its idle hint would otherwise sit in the bar as permanent noise) */
 .mgx-costslot { display: none; }

@@ -4392,3 +4392,67 @@ exist to prevent recurring — a plausible-looking new system that silently dupl
 destroys an existing one, caught this time by the owner's own knowledge of the real tree, not
 by any test or review this session ran. The next session designing storage for anything under
 `branding/` should read this before writing a line of code.
+
+### Daily-claim UI: a real gap in `/next`, found and closed — pill, popup, and a new mascot  ·  *2026-08-05*
+
+Owner noticed classic's daily-credit claim never reached the React front door: `#acct-claim`
+(`Acct.claim()` in `moonglade_gallery.py`) — a small pill next to the credits chip, hidden
+until something's claimable, instant-claims on click. Confirmed real: `POST /api/claim` and
+`GET /api/account`'s `claim_credits`/`claim_ids` fields were already fully built and shared —
+React's own `fetchAccount()` already pulled `claim_credits` through into every component's
+`account` object, just never read by any of them. **Checked every locked DC mockup
+(`Frontend Gallery.dc.html`, `Moonglade Mobile.dc.html`, `Control Panel.dc.html`) — none show
+a claim badge anywhere.** This predates the Claude Design process entirely; it was missed
+because nothing ever prompted a port, not dropped from a spec.
+
+**Scope grew past a straight port, by owner direction.** Wanted something newer *in addition
+to* the pill: a popup modeled on the Power modal's mascot-in-a-halo shell
+(`PowerModal`/`ControlPanelOverlay.jsx`), and explicitly **not** PixAI's own claim popup,
+which the owner called out by name: *"the one on their site happens every page load it's
+annoying at times."* Settled cadence: fires **at most once per real session** (a
+`sessionStorage` flag, not `localStorage` — a fresh tab gets asked again if still unclaimed,
+but nothing inside the SPA re-triggers it), and dismissing counts the same as claiming for
+that flag — the point is to ask once, never to punish "not now" by asking again a minute
+later. The always-on pill is deliberately **not** gated by that flag; it reads
+`claim_credits > 0` directly, so dismissing the popup only de-escalates it to a quiet
+reminder, never makes the reward disappear from view. Owner also asked for a "1-up"-style coin
+jump on close (either path) — built CSS-only (`mgclaimCoinJump`, a hand-drawn radial-gradient
+coin, no art dependency) specifically so it didn't block on art that didn't exist yet.
+
+**Shipped:**
+- `useClaimModal.js` — the shared hook both `App.jsx` (desktop) and `AppMobile.jsx` (mobile)
+  mount off, against their own already-independently-tracked `account` state (see
+  `useControlPanel.js`'s own header comment for why that split is correct, not a smell, in
+  this codebase). Owns the once-per-session gate, the claim/dismiss/exit state machine, and
+  the real `POST /api/claim` call.
+- `ClaimModal.jsx` + `claim-modal.css` — its own namespace (`mgclaim-*`), not folded into
+  `control-panel.css`, since this is an app-wide popup, not a Control-Panel one; z-index band
+  sits above every existing overlay including Power modal's. Backdrop-click and Escape both
+  dismiss (unlike Power modal, which deliberately blocks Escape mid-restart — a missed free
+  reward has nothing to protect against an accidental close).
+- The pill itself, shipped this same pass, not left as a follow-up: `SeparatorBar.jsx`'s
+  `.mgx-claim` and `AppMobile.jsx`'s `.glm-hero-claim`, both calling the *same* hook's `claim`
+  — one action, not two drifting copies.
+- Real art: owner-supplied `nel_redeem.png` + an animated `nel_redeem.webp`, landed at
+  `branding/mascots/nel_redeem.{png,webp}` — the same convention `gen_nel.png`/
+  `nel_shutdown.png` already use, with the identical webp→png→narrator fallback ladder
+  `LoginPage.jsx`'s `MASCOT_FALLBACKS` established. **Git-ignored like all branding art — the
+  files exist on this work machine only; they need to be copied onto the home machine (and any
+  other real install) by hand, same as every other piece of branding art.**
+
+**Verified live against the real running server, not just the build.** Nothing was actually
+claimable on the test account, so the client-side `/api/account` response was intercepted to
+simulate one — `POST /api/claim` itself was **not** mocked and still hit the real route (which
+re-checks PixAI directly regardless of what the client displays, so this can't manufacture a
+phantom claim). Confirmed: the real animated webp loads, the claim button gets a real 200 back,
+the coin-exit sequence completes and unmounts on schedule, the session-seen flag persists
+correctly, the pill survives a modal dismiss and still fires its own independent claim.
+Mobile got structural verification only (same shared hook and component, not a second
+implementation) — a tooling limit in this remote browser session (can't inject fake data
+before `AppMobile`'s own one-time mount fetch without losing the intercept on reload), not a
+gap in the code path itself.
+
+**Why.** Recorded in the same detail as everything else this session: what was actually
+missing (a real gap, not a corner cut), why the cadence deliberately diverges from PixAI's own
+pattern, and exactly what still needs a manual step (copying the two art files) before this is
+visible anywhere but this machine.
