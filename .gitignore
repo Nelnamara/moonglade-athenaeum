@@ -110,6 +110,7 @@ static/_mockup_*.html
 # egg, so they must exist and must not carry anyone else's art.
 /branding/
 /branding.json
+/branding_slots.json
 
 # The Claude Design handoff package (design_handoff_moonglade_suite): DC prototype
 # surfaces, drift report, and ASSETS INCLUDING THE OWNER'S BRANDING ART -- which is

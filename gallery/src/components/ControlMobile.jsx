@@ -68,9 +68,6 @@ import "../styles/control-mobile.css";
      run-history rows -- nothing persists per-action run history (the exact
      gap ControlPanelOverlay.jsx's own header comment already discloses for
      the identical desktop console).
-   - Trash's tile shows "--", matching desktop's own tile exactly (the real
-     count only resolves once TrashSubOverlay's own fetch runs) -- not a new
-     gap, the same one desktop already ships.
    - Sync's hint stays the real "pull new + fill metadata" desktop already
      shows -- no per-run last-run/rc/auto-schedule timestamp exists anywhere
      to report (the React port never wired /api/panel/schedule at all; see
@@ -86,7 +83,7 @@ function timeAgo(ts) {
 
 export default function ControlMobile({ account }) {
   const {
-    summary, summaryErr, skins, activeSkin, pickSkin,
+    summary, summaryErr, skins, activeSkin, pickSkin, brandingUnlocked,
     fetchSummary, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
     dedupDone, organizeRes,
@@ -351,7 +348,7 @@ export default function ControlMobile({ account }) {
       <div className="ctm-sec ctm-tiles">
         <div className="mgcp-tile click" onClick={() => setSubOverlay("trash")}>
           <div className="mgcp-mkick">Trash</div>
-          <div className="mgcp-tilebig">—</div>
+          <div className="mgcp-tilebig">{summary.trash_count.toLocaleString()}</div>
           <button type="button" className="mgcp-smallchip">Open…</button>
         </div>
         <div className="mgcp-tile click" onClick={() => setSubOverlay("users")}>
@@ -367,21 +364,23 @@ export default function ControlMobile({ account }) {
         <a className="mgcp-smallchip" href="/export-csv" style={{ textDecoration: "none" }}>⬇ Download catalog (CSV)</a>
       </div>
 
-      <div className="ctm-sec">
-        <div className="mgcp-tile click" onClick={openBrand}>
-          <div className="mgcp-mkick">Branding</div>
-          <div className="mgcp-marks">
-            {(summary.branding.marks || []).slice(0, 6).map((m) => (
-              <button type="button" key={m.id}
-                className={"mgcp-mark" + (m.id === summary.branding.mark ? " on" : "")}
-                title={m.id} onClick={(e) => { e.stopPropagation(); openBrand(); }}>
-                {m.id === "logo" ? "🌙" : "◈"}
-              </button>
-            ))}
+      {brandingUnlocked && (
+        <div className="ctm-sec">
+          <div className="mgcp-tile click" onClick={openBrand}>
+            <div className="mgcp-mkick">Branding</div>
+            <div className="mgcp-marks">
+              {(summary.branding.marks || []).slice(0, 6).map((m) => (
+                <button type="button" key={m.id}
+                  className={"mgcp-mark" + (m.id === summary.branding.mark ? " on" : "")}
+                  title={m.id} onClick={(e) => { e.stopPropagation(); openBrand(); }}>
+                  {m.id === "logo" ? "🌙" : "◈"}
+                </button>
+              ))}
+            </div>
+            <div className="mgcp-tilenote">mark · animation — open Branding</div>
           </div>
-          <div className="mgcp-tilenote">mark · animation — open Branding</div>
         </div>
-      </div>
+      )}
 
       {skins.length > 0 && (
         <div className="ctm-sec">

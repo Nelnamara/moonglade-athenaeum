@@ -17,6 +17,54 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Control Panel Branding tab — Phase 1 backend groundwork.** The 4 previously-unbuilt slots
+  (Banner-main/Banner-login/Mascots/Rewards) get real storage for the first time: one uniform
+  shape across all four — `branding/<slot>/manifest.json` + `<id>.png`, "many assets stored,
+  one active," the same relationship marks already have to their own `marks.json` — instead of
+  a bespoke scheme per slot, so the eventual SQLite-bundle work has one storage seam to take
+  over rather than four. New routes: `POST /api/branding/slot` (upload, re-encoded through
+  Pillow regardless of what the browser sent), `/slot/crop`, `/slot/active`. Rotating-source
+  selection is explicitly deferred (owner call) until the branding-folder/SQLite-bundle
+  transition lands. **Disclosed, still open:** the slot-picker UI itself isn't built yet
+  (nothing renders these slots in the Branding tab), and `banner_main`/`banner_login` don't
+  yet write to the real `branding/banner.png`/`login-banner.png` paths the header/login
+  templates actually read, so an upload through the new routes doesn't display anywhere yet.
+  Full reasoning in `docs/DECISIONS.md`'s entry of the same date.
+- **The real "Under the Hood" easter-egg trigger, built for the first time.** The 2026-07-26
+  design (empty nested slot folders + one README breadcrumb; drop a raw PNG/JPEG into a slot
+  folder and the app adopts it automatically; that adoption fires the achievement and unlocks
+  the Branding tab) had never actually been implemented — what shipped instead was the older,
+  already-rejected `list_marks()`-non-empty trigger. `ensure_branding_discovery_tree()` creates
+  the empty tree + breadcrumb at server startup (idempotent, purely additive); `sweep_branding_drops()`
+  scans for a raw hand-dropped file, re-encodes it through Pillow, and adopts it — running on
+  every `/api/achievements`/`/api/branding`/`/api/panel/summary` fetch rather than once a day,
+  so a real find pays off on the next reload. The Branding tab, its Maintenance-tab quick-tile,
+  and mobile's Branding tile are now genuinely gated behind the real achievement (owner
+  decision, 2026-08-05) on both platforms — previously there was no functional gate at all.
+  Live-verified end to end against the real running server: a raw file dropped straight into
+  `branding/mascots/` from outside the app, with no API call involved, correctly earned the
+  achievement and unlocked the tab on the next reload.
+
+### Fixed
+
+- **Control Panel's Trash tile showed a hardcoded "—" instead of a real count**, on both
+  platforms — nothing had ever fetched one. `/api/panel/summary` now carries a real
+  `trash_count`.
+- **A near-miss, caught and closed the same session it was introduced:** the first version of
+  the branding-drop sweep above scanned ALL four new slots, including `mascots/`/`rewards/` —
+  which are not empty user-customizable buckets in the real app, they already hold
+  specifically-named files real code depends on (the narrator mascot, Setup Wizard and Power
+  modal poses, the claim icon, a per-achievement mascot chain). The sweep would have
+  adopted-then-**deleted** every one of them on any install that actually has them. Caught by
+  the owner mid-session, not by the test suite (which stayed fully green throughout — nothing
+  in it guarded those filenames). Fixed by excluding `mascots`/`rewards` from the sweep
+  entirely rather than trying to enumerate every reserved filename (the per-achievement chain
+  has no fixed, grep-able list) — only `banner_main`/`banner_login`/`marks` are swept until
+  Mascots/Rewards get a real design. No real data was lost: this machine's `branding/` folder
+  was empty before this session and nothing had reached the home machine yet. Live-verified
+  twice — pytest regression guard plus planting real-named files on the actual running server
+  and confirming they survive every trigger route. Full account in `docs/DECISIONS.md`.
+
 - **Loom Mobile follow-up — the per-shot kebab (⋮) actions sheet.** Move up / Move down /
   Duplicate / Delete, reusing the exact same `moveCard`/`dupCard`/`delCard` functions
   desktop LoomV2's own board already calls — they simply weren't threaded into
