@@ -52,6 +52,22 @@ export const RARITY_ORDER = ["common", "rare", "epic", "legendary"];
 // constant) -- FolioMobile.jsx uses this full array rather than hand-copying
 // the mock's shorter one, one narrator voice, one source of truth, matching
 // this file's own established rule for shared product copy.
+// Byte-for-byte from static/mg-notify.js's own `poke()` (~line 1061) -- the
+// REAL escalating warning toast every poke already shows in the classic
+// Trophy Hall. The React port was posting to /api/ach-event silently with no
+// per-click feedback at all, which is what made 5 real pokes feel trivial/
+// unearned compared to classic's actual build-up -- not a missing time-gate
+// (verified: neither poke() nor /api/ach-event's server handler has ANY
+// cooldown/rate-limit, client or server side; 5 real, separate clicks is the
+// only real gate there ever was), just this missing feedback loop.
+export const POKES = [
+  "The narrator ignores you.",
+  "The narrator raises an eyebrow. Do you mind?",
+  "The narrator is DESCRIBING things. Hands off.",
+  "The narrator’s eye twitches. Last warning.",
+  "FINE. You want the REAL commentary? Unleashed. Happy now?",
+];
+
 export const NARRATOR_LINES = [
   "Keep going. The Void will not archive itself.",
   "Every relic you skip, I catalog as a grudge.",
@@ -140,7 +156,7 @@ export function buildViewModel(data) {
     .filter((a) => a.earned && earnedAt[a.id])
     .slice()
     .sort((x, y) => (earnedAt[y.id] || "").localeCompare(earnedAt[x.id] || ""))
-    .slice(0, 6);
+    .slice(0, 4);
 
   // ---- Within reach: closest LOCKED non-feat achievements to their threshold.
   // Feats are excluded -- most are one-shot triggers where a "% there" number
@@ -161,7 +177,10 @@ export function buildViewModel(data) {
     const rows = nonFeat.filter((a) => a.tier === tier);
     return { tier, earned: rows.filter((a) => a.earned).length, total: rows.length };
   });
-  const ladderRows = ladders.map((l) => ({ id: l.id, name: l.name, earned: l.earnedCount, total: l.totalCount }));
+  const ladderRows = ladders.map((l) => ({
+    id: l.id, name: l.name, earned: l.earnedCount, total: l.totalCount,
+    iconTierId: l.tiers[0] && l.tiers[0].id,
+  }));
 
   return {
     achievements, ladders,
@@ -374,6 +393,13 @@ export default function useFolio() {
       .then((r) => r.json())
       .then((res) => {
         if (!mountedRef.current) return;
+        // Same escalating warning toast the classic poke() shows on every
+        // single click, byte-for-byte (POKES above) -- the real feedback
+        // loop that makes 5 pokes feel earned, not the count alone.
+        if (window.Toast && res) {
+          const n = Math.max(1, Math.min(res.pokes || 1, POKES.length));
+          window.Toast.show({ title: POKES[n - 1], kind: n >= POKES.length ? "err" : "", icon: "👆" });
+        }
         if (res && (res.snapped || (res.pokes || 0) >= 5)) {
           setTriggered(true);
           fetch("/api/achievements")
@@ -426,6 +452,19 @@ export default function useFolio() {
   const filteredMasteries = vm ? vm.masteries.filter((a) => matchesQuery(a, qlc)) : [];
   const filteredFeats = vm ? vm.feats.filter((a) => matchesQuery(a, qlc)) : [];
 
+  // ---- "Every rung, every ladder" (desktop-only, Folio of Honors.dc.html's
+  // showGroups/ladderGroups): every ladder's OWN filtered tiers, grouped --
+  // not just the one active ladder. Nested under showLadders in the DC's own
+  // markup (both sc-ifs close together), so this only matters while a caller
+  // also gates rendering on showLadders -- matching that same nesting here. ----
+  const filteredLadderGroups = vm
+    ? vm.ladders
+        .map((l) => ({ ...l, filteredTiers: l.tiers.filter((t) => matchesQuery(t, qlc)) }))
+        .filter((l) => l.filteredTiers.length > 0)
+    : [];
+  const groupedTierCount = filteredLadderGroups.reduce((n, l) => n + l.filteredTiers.length, 0);
+  const showGroups = groupedTierCount > 0;
+
   const nothingFound = !!qlc && (
     (!showLadders || filteredActiveTiers.length === 0) &&
     (!showMilestones || filteredMilestones.length === 0) &&
@@ -444,5 +483,6 @@ export default function useFolio() {
     pokeNarrator, replayToast, close,
     showLadders, showMilestones, showMasteries, showFeats,
     filteredActiveTiers, filteredMilestones, filteredMasteries, filteredFeats, nothingFound,
+    filteredLadderGroups, showGroups, groupedTierCount,
   };
 }

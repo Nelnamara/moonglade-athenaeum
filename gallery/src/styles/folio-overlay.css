@@ -24,6 +24,11 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* Folio of Honors.dc.html line 37's own screen background -- the generic
+     .mgv-slab flat gradient every other overlay uses was never overridden
+     here, so the Folio never got this radial depth (the "glass" richness a
+     flat fill can't produce). */
+  background: radial-gradient(120% 80% at 22% -10%, var(--surface0) 0%, var(--mantle) 52%, #05040d 100%);
 }
 
 /* ---- Header row ---- */
@@ -88,7 +93,21 @@
 
 /* ---- Body: scrolling main column + fixed-width rail ---- */
 .mgfo-body { display: flex; flex: 1 1 auto; min-height: 0; }
-.mgfo-main { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 26px 32px 30px; }
+.mgfo-main { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 22px 30px 24px; scrollbar-width: thin; scrollbar-color: var(--surface1) transparent; }
+
+/* Folio of Honors.dc.html lines 27-32's own custom scrollbar. `scrollbar-width`
+   is Firefox-only -- Chrome/Edge/Safari need the ::-webkit-scrollbar rules too,
+   which this file never had, so the custom scrollbar silently never showed in
+   any Chromium browser (same two-rule pattern lightbox.css already uses). */
+.mgfo-main::-webkit-scrollbar, .mgfo-rail-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.mgfo-main::-webkit-scrollbar-thumb, .mgfo-rail-scroll::-webkit-scrollbar-thumb {
+  background: var(--surface1); border: 3px solid transparent; background-clip: padding-box; border-radius: 8px;
+}
+.mgfo-main::-webkit-scrollbar-thumb:hover, .mgfo-rail-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--overlay0); border: 3px solid transparent; background-clip: padding-box;
+}
+.mgfo-main::-webkit-scrollbar-track, .mgfo-rail-scroll::-webkit-scrollbar-track { background: transparent; }
+.mgfo-main::-webkit-scrollbar-corner, .mgfo-rail-scroll::-webkit-scrollbar-corner { background: transparent; }
 
 .mgfo-title-row { display: flex; align-items: flex-end; gap: 26px; flex-wrap: wrap; }
 .mgfo-title-col { flex: 1 1 380px; min-width: 0; }
@@ -152,7 +171,7 @@
 /* ---- Section headings, shared across all three tabs ---- */
 .mgfo-sec-h {
   display: flex; align-items: baseline; gap: 10px; padding-bottom: 8px;
-  border-bottom: 1px dashed var(--surface0); margin: 26px 0 12px;
+  border-bottom: 1px dashed var(--surface0); margin: 20px 0 10px;
 }
 .mgfo-sec-h b {
   font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 10px;
@@ -169,27 +188,36 @@
 }
 
 /* ---- Two-column tab bodies (Summary + Statistics) ---- */
-.mgfo-grid2 { display: grid; grid-template-columns: 1.5fr 1fr; gap: 30px; margin-top: 26px; }
+.mgfo-grid2 { display: grid; grid-template-columns: 1.5fr 1fr; gap: 24px; margin-top: 18px; }
 .mgfo-grid2.even { grid-template-columns: 1fr 1fr; }
 .mgfo-grid2 .mgfo-sec-h:first-child { margin-top: 0; }
 
 /* ---- Recently entered ---- */
 .mgfo-recent { display: flex; flex-direction: column; gap: 6px; }
 .mgfo-recrow {
-  display: flex; align-items: center; gap: 12px; padding: 8px 13px; border-radius: 12px;
+  position: relative; display: flex; align-items: center; gap: 12px; padding: 8px 13px; border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, .08); background: rgba(9, 7, 22, .6); transition: border-color .15s;
+  cursor: pointer;
 }
 .mgfo-recrow:hover { border-color: color-mix(in srgb, var(--tc, var(--accent)) 55%, transparent); }
+/* The recentRows gemStyle, Folio of Honors.dc.html line 114 (`r.gemStyle`) --
+   the same tier-colored top accent every achievement card already has
+   (.mgfo-card-gem), never ported to this row. Recent entries are always
+   earned, so this uses the "earned" (bright/glowing) variant unconditionally. */
+.mgfo-recrow-gem {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: 12px 12px 0 0;
+  pointer-events: none; opacity: .9; box-shadow: 0 0 8px var(--tc);
+  background: linear-gradient(90deg, transparent, var(--tc) 22%, var(--tcl) 50%, var(--tc) 78%, transparent);
+}
 .mgfo-recico { width: 42px; height: 42px; border-radius: 9px; flex: none; overflow: hidden; }
 .mgfo-recico img { width: 100%; height: 100%; object-fit: cover; }
 .mgfo-rectxt { flex: 1 1 auto; min-width: 0; }
 .mgfo-recnm {
   font-family: Georgia, serif; font-size: 15px; color: var(--text);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .mgfo-recds {
   font-size: 11.5px; font-style: italic; color: var(--subtext); margin-top: 2px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color .25s;
+  line-height: 1.35; transition: color .25s;
 }
 .mgfo-recside { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
 .mgfo-recmeta {
@@ -203,6 +231,9 @@
   border-radius: 13px; background: rgba(9, 7, 22, .6); padding: 14px 16px;
 }
 .mgfo-progrow { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+/* Ladder completion's own badge -- design's ladderRows spec (18px) never got
+   ported at all; enlarged per owner direction (24px, not just restored). */
+.mgfo-progrow-ico { width: 24px; height: 24px; border-radius: 6px; flex: none; opacity: .9; object-fit: cover; }
 .mgfo-progrow-lab {
   flex: none; width: 118px; text-align: right; font-size: 9.5px; font-weight: 700;
   letter-spacing: .1em; text-transform: uppercase; color: var(--overlay0);
@@ -232,8 +263,8 @@
   border: 1px solid rgba(255, 255, 255, .08); border-radius: 13px; background: rgba(9, 7, 22, .6); padding: 11px 14px;
 }
 .mgfo-reachtop { display: flex; align-items: baseline; gap: 9px; }
-.mgfo-reachtop b { font-family: Georgia, serif; font-weight: 400; font-size: 14.5px; color: var(--text); }
-.mgfo-reachnote { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--overlay0); }
+.mgfo-reachtop b { font-family: Georgia, serif; font-weight: 400; font-size: 14.5px; color: var(--text); white-space: nowrap; }
+.mgfo-reachnote { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--overlay0); white-space: nowrap; }
 .mgfo-reachpts { font-size: 10.5px; color: var(--gold); }
 .mgfo-reachcard .mgfo-bar { margin-top: 8px; }
 
@@ -243,8 +274,8 @@
   border: 1px solid rgba(255, 255, 255, .08); border-radius: 13px; background: rgba(9, 7, 22, .6); padding: 6px 16px 12px;
 }
 .mgfo-relicrow {
-  display: flex; align-items: center; gap: 9px; padding: 8px 0;
-  border-bottom: 1px dashed var(--surface0); opacity: .6;
+  position: relative; display: flex; align-items: center; gap: 9px; padding: 8px 0;
+  border-bottom: 1px dashed var(--surface0); opacity: .6; cursor: pointer;
 }
 .mgfo-relicrow.unlocked, .mgfo-relicrow.active { opacity: 1; }
 .mgfo-relicnm { font-size: 11.5px; color: var(--subtext); }
@@ -257,6 +288,26 @@
 }
 .mgfo-relicsub-txt { font-size: 11.5px; color: var(--subtext); }
 .mgfo-relicrow.dim { opacity: .55; }
+
+/* ---- Relic swatches + hover tooltip, Folio of Honors.dc.html lines 176-190 ---- */
+.mgfo-relic-sw { display: flex; gap: 3px; flex: none; }
+.mgfo-relic-sw span { width: 11px; height: 11px; border-radius: 3px; border: 1px solid rgba(255, 255, 255, .14); }
+.mgfo-relic-tip {
+  display: none; position: absolute; right: 0; bottom: 100%; margin-bottom: 8px; z-index: 50;
+  pointer-events: none; width: 210px; filter: drop-shadow(0 6px 16px rgba(0, 0, 0, .65));
+  border-radius: 10px; padding: 10px 13px; background: rgba(9, 7, 22, .97);
+  border: 1px solid var(--surface1); border-top: 2px solid var(--accent);
+}
+.mgfo-relicrow:hover .mgfo-relic-tip { display: block; }
+.mgfo-relic-tip-nm {
+  margin: 0 0 4px; font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9px;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--accent);
+}
+.mgfo-relic-tip-ds { margin: 0; font-size: 11px; color: var(--subtext); line-height: 1.5; }
+.mgfo-relic-secret {
+  font-size: 10px; font-style: italic; color: var(--overlay0);
+  padding-top: 6px; border-top: 1px dashed var(--surface0);
+}
 
 /* ---- Empty states ---- */
 .mgfo-empty-mini { color: var(--overlay0); font-size: 12px; font-style: italic; padding: 8px 0; }
@@ -291,8 +342,115 @@
 }
 .mgfo-ladderbadge.on .mgfo-lb-name { color: var(--lavender); }
 
+/* ---- Hero tier carousel (the "plinth"): floating badge, Prev/Next, pips,
+   name/desc/rarity/reward/threshold/entered detail column -- Folio of
+   Honors.dc.html lines 219-271. Desktop's own local tierIdx state
+   (FolioOverlay.jsx), same modulo-safety pattern as mobile's fm-herowrap. ---- */
+@keyframes mgfoFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+
+.mgfo-plinth-row { display: grid; grid-template-columns: 330px 1fr; gap: 28px; margin-top: 26px; }
+.mgfo-plinth-col { display: flex; flex-direction: column; }
+.mgfo-plinth {
+  position: relative; border-radius: 13px; border: 1px solid rgba(255, 255, 255, .08);
+  background: var(--base); aspect-ratio: 1 / 1; display: flex; align-items: center; justify-content: center;
+  overflow: hidden; box-shadow: inset 0 0 70px color-mix(in srgb, var(--tc) 11%, transparent);
+  transition: box-shadow .6s ease; cursor: pointer;
+}
+.mgfo-plinth-inset {
+  position: absolute; inset: 0; pointer-events: none; border-radius: 13px; z-index: 3;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14), inset 0 0 60px color-mix(in srgb, var(--purple-bright) 18%, transparent);
+}
+.mgfo-plinth-float { position: relative; z-index: 2; animation: mgfoFloat 4.2s ease-in-out infinite; }
+.mgfo-plinth-badge {
+  width: 246px; height: 246px; border-radius: 22px; overflow: hidden;
+  filter: grayscale(.75) brightness(.4); outline: 3px solid var(--surface1); outline-offset: 5px;
+  transition: all .6s ease;
+}
+.mgfo-plinth-badge img { width: 100%; height: 100%; object-fit: cover; }
+.mgfo-plinth-badge.earned {
+  filter: drop-shadow(0 0 22px color-mix(in srgb, var(--tc) 73%, transparent));
+  outline-color: var(--tc);
+}
+.mgfo-plinth-glow {
+  position: absolute; left: 10%; right: 10%; bottom: 5%; height: 20%; border-radius: 50%; z-index: 1;
+  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--tc) 27%, transparent) 0%, transparent 70%);
+  filter: blur(10px); transition: background .6s ease;
+}
+.mgfo-plinth-navrow { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.mgfo-plinth-arrow {
+  flex: none; font-family: ui-monospace, Menlo, monospace; font-size: 10px; font-weight: 600;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--subtext); border: 1px solid var(--surface1);
+  background: var(--surface0); border-radius: 7px; padding: 6px 11px; cursor: pointer; transition: all .15s;
+}
+.mgfo-plinth-arrow:hover { color: var(--text); border-color: var(--accent); }
+.mgfo-plinth-pips { flex: 1; display: flex; gap: 5px; justify-content: center; }
+.mgfo-plinth-pip {
+  border-radius: 999px; cursor: pointer; transition: all .2s; height: 6px; width: 6px;
+  background: var(--surface1); border: none; padding: 0;
+}
+.mgfo-plinth-pip.earned { background: color-mix(in srgb, var(--tc) 55%, transparent); }
+.mgfo-plinth-pip.on { width: 18px; background: var(--tc); }
+
+.mgfo-plinth-detailcol { min-width: 0; display: flex; flex-direction: column; gap: 10px; justify-content: center; }
+.mgfo-plinth-eyebrow {
+  font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 10px; letter-spacing: .2em;
+  text-transform: uppercase; color: var(--tc); transition: color .4s ease;
+}
+.mgfo-plinth-name {
+  font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-weight: 400;
+  font-size: 29px; line-height: 1.1; color: var(--text);
+}
+.mgfo-plinth-rule {
+  position: relative; height: 2px; overflow: hidden; max-width: 420px;
+  background: linear-gradient(90deg, var(--tc), rgba(0, 0, 0, 0) 80%); transition: background .6s ease;
+}
+.mgfo-plinth-rule::after {
+  content: ""; position: absolute; inset: 0; width: 60px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .75), transparent);
+  animation: mgfoGlint 3.6s ease-in-out infinite;
+}
+.mgfo-plinth-desc { font-size: 13px; font-style: italic; line-height: 1.55; color: var(--subtext); max-width: 480px; }
+.mgfo-plinth-facts { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.mgfo-plinth-fact {
+  display: flex; align-items: baseline; gap: 10px; padding: 4px 0; max-width: 480px;
+  border-bottom: 1px dashed var(--surface0);
+}
+.mgfo-plinth-fact.last { border-bottom: none; }
+.mgfo-plinth-fact-lab {
+  flex: none; width: 118px; text-align: right; font-family: ui-monospace, Menlo, monospace; font-weight: 600;
+  font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--overlay0);
+}
+.mgfo-plinth-fact-gold { font-size: 12px; color: var(--gold); }
+.mgfo-plinth-fact-val { font-size: 12px; color: var(--subtext); }
+.mgfo-plinth-fact-entered { font-size: 12px; font-style: italic; color: var(--overlay0); }
+.mgfo-plinth-fact-entered.earned { font-style: normal; color: var(--emerald); }
+
+@media (prefers-reduced-motion: reduce) {
+  .mgfo-plinth-float, .mgfo-plinth-rule::after { animation: none; }
+}
+
+/* ---- "Every rung, every ladder": every ladder's OWN filtered tiers,
+   grouped -- Folio of Honors.dc.html lines 333-380. ---- */
+.mgfo-groups { display: flex; flex-direction: column; gap: 26px; }
+.mgfo-group-h { display: flex; align-items: baseline; gap: 9px; margin-bottom: 11px; }
+.mgfo-group-icon { width: 15px; height: 15px; border-radius: 4px; flex: none; opacity: .85; object-fit: cover; align-self: center; }
+.mgfo-group-name {
+  font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9.5px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--accent);
+}
+.mgfo-group-count { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--overlay0); font-variant-numeric: tabular-nums; }
+.mgfo-group-rule { flex: 1; height: 1px; align-self: center; background: linear-gradient(90deg, rgba(255, 255, 255, .1), transparent); }
+
+/* ---- Statistics: Library/Coverage/Top models/Monthly activity, owner-
+   requested addition beyond the DC mock, reusing real Health data. ---- */
+.mgfo-stats-extra { margin-top: 8px; }
+.mgfo-stats-extra .mgh-stats { margin-bottom: 8px; }
+
 /* ---- Achievement / tier cards ---- */
 .mgfo-cardgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+.mgfo-card-wrap { width: 100%; }
+.mgfo-card-wrap.last-odd { grid-column: span 2; display: flex; justify-content: center; }
+.mgfo-card-wrap.last-odd .mgfo-card { width: 50%; }
 .mgfo-card {
   position: relative; display: flex; align-items: center; gap: 14px; padding: 14px 16px;
   border-radius: 13px; min-height: 118px; box-sizing: border-box; background: rgba(9, 7, 22, .6);
@@ -411,6 +569,8 @@
   width: 100%; max-height: 220px; object-fit: contain; display: block;
   filter: drop-shadow(0 4px 22px rgba(182, 146, 230, .35));
 }
+.mgfo-narrator-img.poke { cursor: pointer; transition: filter .15s; }
+.mgfo-narrator-img.poke:hover { filter: drop-shadow(0 4px 26px rgba(182, 146, 230, .55)); }
 .mgfo-narrator-quote {
   text-align: center; font-size: 11.5px; font-style: italic; color: var(--subtext);
   margin-top: 10px; line-height: 1.55; padding: 9px 12px; border-radius: 9px;
@@ -436,6 +596,10 @@
   .mgfo-rail { width: auto; border-left: none; border-top: 1px solid rgba(255, 255, 255, .06); }
   .mgfo-grid2, .mgfo-grid2.even { grid-template-columns: 1fr; }
   .mgfo-cardgrid, .mgfo-laddergrid { grid-template-columns: repeat(2, 1fr); }
+  .mgfo-plinth-row { grid-template-columns: 1fr; }
+  .mgfo-plinth { max-width: 330px; margin: 0 auto; }
+  .mgfo-plinth-row { grid-template-columns: 1fr; }
+  .mgfo-plinth { max-width: 330px; margin: 0 auto; }
   .mgfo-search input { width: 90px; }
   .mgfo-stats-trio { gap: 14px; }
 }

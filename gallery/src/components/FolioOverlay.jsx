@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useState } from "react";
 import "../styles/overlays.css";
 import "../styles/folio-overlay.css";
 import useFolio, { BUCKETS, NARRATOR_LINES, commentary, revealMod, fmt } from "../hooks/useFolio.js";
+import useHealth from "../hooks/useHealth.js";
 
 /* The Folio of Honors -- the seventh designed nav overlay to port, opened from
    Banner.jsx's gold "🏆 Folio" button (App.jsx's onFolio -> openOverlay("folio"),
@@ -36,6 +37,18 @@ import useFolio, { BUCKETS, NARRATOR_LINES, commentary, revealMod, fmt } from ".
    shared per-achievement state that drives both surfaces off one source
    of truth. See useFolio.js's runScramble/rerunToast/replayToast for the
    exact 34ms/26-tick algorithm, copied from the DC's own _runScramble. */
+
+// Byte-for-byte from static/mg-notify.js's own Ach IIFE (`SKIN_SW`, ~line 11225) --
+// the classic Trophy Hall's relic-row swatch colors, the SAME table FolioMobile.jsx
+// already carries (that file's own header comment, point 4) -- not a second,
+// differently-invented palette.
+const SKIN_SW = {
+  moonglade: ["#0c0a1c", "#b692e6", "#4fc99a", "#d4af37"],
+  nightfallen: ["#0a0713", "#a678f0", "#7f6fe0", "#d9b3ff"],
+  moonlit: ["#0b1018", "#8fb8e8", "#68d5e0", "#cfe1f5"],
+  ember: ["#160c0c", "#e8935f", "#e0a94b", "#ffcf7a"],
+  verdant: ["#0a1410", "#5fd39a", "#4fc99a", "#c8e6a8"],
+};
 
 function Bar({ pct, variant, tier }) {
   return (
@@ -107,14 +120,22 @@ function AchCard({ a, ladderName, date, skinsById, reveal, onReplay }) {
   );
 }
 
+// spanWrap: the DC's own tierCard/flatCard helper (wrapStyle/innerStyle) --
+// a trailing ODD card spans both grid columns and centers at half width,
+// instead of stretching full-width alone on its own row.
 function CardGrid({ items, ladderName, earnedAt, skinsById, emptyLabel, reveal, onReplay }) {
   if (!items.length) return emptyLabel ? <div className="mgfo-empty-mini">{emptyLabel}</div> : null;
   return (
     <div className="mgfo-cardgrid">
-      {items.map((a) => (
-        <AchCard key={a.id} a={a} ladderName={ladderName} date={earnedAt[a.id]} skinsById={skinsById}
-          reveal={reveal} onReplay={onReplay} />
-      ))}
+      {items.map((a, i) => {
+        const lastOdd = items.length % 2 !== 0 && i === items.length - 1;
+        return (
+          <div key={a.id} className={"mgfo-card-wrap" + (lastOdd ? " last-odd" : "")}>
+            <AchCard a={a} ladderName={ladderName} date={earnedAt[a.id]} skinsById={skinsById}
+              reveal={reveal} onReplay={onReplay} />
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -131,6 +152,7 @@ export default function FolioOverlay({ onClose }) {
     pokeNarrator, replayToast, close,
     showLadders, showMilestones, showMasteries, showFeats,
     filteredActiveTiers, filteredMilestones, filteredMasteries, filteredFeats, nothingFound,
+    filteredLadderGroups, showGroups, groupedTierCount,
   } = useFolio();
 
   // Close (scrim / crumb / ✕ / Esc via App.jsx's global handler) clears every
@@ -142,6 +164,38 @@ export default function FolioOverlay({ onClose }) {
     close();
     onClose();
   }
+
+  // Hero tier carousel (the plinth), Folio of Honors.dc.html lines 219-271.
+  // Local UI-only position state, matching FolioMobile.jsx's own tierIdx
+  // precedent (not shared data, so it doesn't belong in useFolio.js).
+  const [tierIdx, setTierIdx] = useState(0);
+  const ladderTiers = activeLadder ? activeLadder.tiers : [];
+  const tiersLen = ladderTiers.length;
+  const tierIdxSafe = tiersLen ? ((tierIdx % tiersLen) + tiersLen) % tiersLen : 0;
+  const carTier = tiersLen ? ladderTiers[tierIdxSafe] : null;
+  const prevTier = () => setTierIdx(tiersLen ? (tierIdxSafe - 1 + tiersLen) % tiersLen : 0);
+  const nextTier = () => setTierIdx(tiersLen ? (tierIdxSafe + 1) % tiersLen : 0);
+  const selectLadder = (id) => { setActiveLadderId(id); setTierIdx(0); };
+
+  // Feats-total denominator: only folds the real feat count in once
+  // data.feats_revealed (== "any feat earned"), matching FolioMobile.jsx's
+  // own grandTotal (that file's header comment, point 5). Desktop previously
+  // never added it back in (vm.totalNonFeat alone), permanently excluding
+  // feats from these two header numbers even after the first was earned.
+  const grandTotal = vm ? vm.totalNonFeat + (data && data.feats_revealed ? vm.totalFeats : 0) : 0;
+
+  // Statistics tab, owner-requested addition (not in the DC mock): more of
+  // the real collection data already computed for Health, reused rather
+  // than a second fetch/derivation. Library size + Coverage render as stat
+  // tiles (Health's own .mgh-stats/.mgh-stat, already global via
+  // overlays.css) specifically so they read differently from the bar rows
+  // already on this tab (By rarity/The buckets/Ladder completion) --
+  // point values aren't comparative, so they don't get a bar.
+  const { h, stats: healthStats, monthMax, modelMax } = useHealth();
+  const LIBRARY_LABELS = ["Images on disk", "Storage used", "Catalog rows"];
+  const COVERAGE_LABELS = ["Full-meta", "Model known", "Uncataloged"];
+  const libraryStats = healthStats.filter((s) => LIBRARY_LABELS.includes(s.label));
+  const coverageStats = healthStats.filter((s) => COVERAGE_LABELS.includes(s.label));
 
   return (
     <>
@@ -164,7 +218,7 @@ export default function FolioOverlay({ onClose }) {
               </div>
             )}
             <div className="mgfo-spacer" />
-            {vm && <div className="mgfo-index">record {fmt(vm.earnedNonFeat)} of {fmt(vm.totalNonFeat)}</div>}
+            {vm && <div className="mgfo-index">record {fmt(vm.earnedNonFeat)} of {fmt(grandTotal)}</div>}
             <div className="mgfo-search">
               <span className="mgfo-search-ic">⌕</span>
               <input type="text" placeholder="search the record…" value={q} onChange={onSearchChange} />
@@ -193,7 +247,7 @@ export default function FolioOverlay({ onClose }) {
                     <div className="mgfo-stat">
                       <div className="mgfo-stat-lab">Earned</div>
                       <div className="mgfo-stat-val">{fmt(vm.earnedNonFeat)}</div>
-                      <div className="mgfo-stat-sub">of {fmt(vm.totalNonFeat)} honors</div>
+                      <div className="mgfo-stat-sub">of {fmt(grandTotal)} honors</div>
                     </div>
                     <div className="mgfo-stat">
                       <div className="mgfo-stat-lab feat">Feats</div>
@@ -219,11 +273,12 @@ export default function FolioOverlay({ onClose }) {
                 {tab === "summary" && (
                   <div className="mgfo-grid2">
                     <div>
-                      <div className="mgfo-sec-h"><b>Recently entered</b><span>the newest lines in the record</span></div>
+                      <div className="mgfo-sec-h"><b>Recently Earned</b><span>the newest lines in the record</span></div>
                       <div className="mgfo-recent">
                         {vm.recent.length === 0 && <div className="mgfo-empty-mini">Nothing yet — go make something.</div>}
                         {vm.recent.map((a) => (
-                          <div className={"mgfo-recrow mgfo-t-" + a.tier} key={a.id}>
+                          <div className={"mgfo-recrow mgfo-t-" + a.tier} key={a.id} onClick={() => replayToast(a)}>
+                            <span className="mgfo-recrow-gem" aria-hidden="true" />
                             <div className="mgfo-recico">
                               <img src={"/badge-thumb/" + encodeURIComponent(a.id) + ".png"} alt=""
                                 onError={(e) => e.currentTarget.remove()} />
@@ -277,9 +332,16 @@ export default function FolioOverlay({ onClose }) {
                       <div className="mgfo-relics">
                         {vm.relics.map((r) => (
                           <div className={"mgfo-relicrow" + (r.active ? " active" : r.earned ? " unlocked" : "")} key={r.id}>
+                            <div className="mgfo-relic-sw">
+                              {(SKIN_SW[r.id] || SKIN_SW.moonglade).map((c, i) => <span key={i} style={{ background: c }} />)}
+                            </div>
                             <span className="mgfo-relicnm">{r.name}</span>
                             <i className="mgfo-flex1" />
                             <span className="mgfo-relicsub">{r.active ? "active" : r.earned ? "unlocked" : "🔒 locked"}</span>
+                            <div className="mgfo-relic-tip">
+                              <p className="mgfo-relic-tip-nm">{r.name}</p>
+                              <p className="mgfo-relic-tip-ds">{r.desc}</p>
+                            </div>
                           </div>
                         ))}
                         <div className="mgfo-relicrow dim">
@@ -294,6 +356,7 @@ export default function FolioOverlay({ onClose }) {
                           <i className="mgfo-flex1" />
                           <span className="mgfo-relicsub">🔒 any feat</span>
                         </div>
+                        <div className="mgfo-relic-secret">…and one the Athenaeum keeps to itself.</div>
                       </div>
                     </div>
                   </div>
@@ -316,6 +379,62 @@ export default function FolioOverlay({ onClose }) {
 
                     {showLadders && vm.ladders.length > 0 && (
                       <>
+                        {activeLadder && carTier && (
+                          <div className={"mgfo-plinth-row mgfo-t-" + (carTier.tier || "common")}>
+                            <div className="mgfo-plinth-col">
+                              <div className="mgfo-plinth" onClick={() => replayToast(carTier)}>
+                                <div className="mgfo-plinth-inset" />
+                                <div className="mgfo-plinth-float">
+                                  <div className={"mgfo-plinth-badge" + (carTier.earned ? " earned" : "")}>
+                                    <img src={"/badge-thumb/" + encodeURIComponent(carTier.id) + ".png"} alt=""
+                                      draggable={false} onError={(e) => e.currentTarget.remove()} />
+                                  </div>
+                                </div>
+                                <div className="mgfo-plinth-glow" />
+                              </div>
+                              <div className="mgfo-plinth-navrow">
+                                <button type="button" className="mgfo-plinth-arrow" onClick={prevTier}>‹ Prev</button>
+                                <div className="mgfo-plinth-pips">
+                                  {ladderTiers.map((t, i) => (
+                                    <button type="button" key={t.id}
+                                      className={"mgfo-plinth-pip" + (i === tierIdxSafe ? " on" : (t.earned ? " earned" : ""))}
+                                      onClick={() => setTierIdx(i)} aria-label={t.name} />
+                                  ))}
+                                </div>
+                                <button type="button" className="mgfo-plinth-arrow" onClick={nextTier}>Next ›</button>
+                              </div>
+                            </div>
+                            <div className="mgfo-plinth-detailcol">
+                              <div className="mgfo-plinth-eyebrow">
+                                {activeLadder.name} · rung {tierIdxSafe + 1} of {tiersLen} · {activeLadder.earnedCount} earned
+                              </div>
+                              <div className="mgfo-plinth-name">{carTier.name}</div>
+                              <div className="mgfo-plinth-rule" />
+                              <div className="mgfo-plinth-desc">{carTier.desc}</div>
+                              <div className="mgfo-plinth-facts">
+                                <div className="mgfo-plinth-fact">
+                                  <span className="mgfo-plinth-fact-lab">Rarity</span>
+                                  <span className="mgfo-pill">{carTier.tier}</span>
+                                </div>
+                                <div className="mgfo-plinth-fact">
+                                  <span className="mgfo-plinth-fact-lab">Reward</span>
+                                  <span className="mgfo-plinth-fact-gold">+{carTier.points} points</span>
+                                </div>
+                                <div className="mgfo-plinth-fact">
+                                  <span className="mgfo-plinth-fact-lab">Threshold</span>
+                                  <span className="mgfo-plinth-fact-val">{fmt(carTier.threshold)}</span>
+                                </div>
+                                <div className="mgfo-plinth-fact last">
+                                  <span className="mgfo-plinth-fact-lab">Entered</span>
+                                  <span className={"mgfo-plinth-fact-entered" + (carTier.earned ? " earned" : "")}>
+                                    {carTier.earned && earnedAt[carTier.id] ? earnedAt[carTier.id] : "not yet — the page waits"}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
                         <div className="mgfo-sec-h">
                           <b>The ten tracks</b><span>pick a wing of the record</span>
                           <i className="mgfo-flex1" />
@@ -326,7 +445,7 @@ export default function FolioOverlay({ onClose }) {
                             const on = activeLadder && l.id === activeLadder.id;
                             return (
                               <div key={l.id} className={"mgfo-ladderbadge" + (on ? " on" : "") + (l.earnedCount ? "" : " zero")}
-                                onClick={() => setActiveLadderId(l.id)}>
+                                onClick={() => selectLadder(l.id)}>
                                 <div className="mgfo-lb-img">
                                   <img src={l.tiers[0] ? "/badge-thumb/" + encodeURIComponent(l.tiers[0].id) + ".png" : ""} alt=""
                                     onError={(e) => e.currentTarget.remove()} />
@@ -351,6 +470,35 @@ export default function FolioOverlay({ onClose }) {
                               earnedAt={earnedAt} skinsById={vm.skinsById}
                               emptyLabel="No rung on this track answers the search."
                               reveal={reveal} onReplay={replayToast} />
+                          </>
+                        )}
+
+                        {showGroups && (
+                          <>
+                            <div className="mgfo-sec-h">
+                              <b>Every rung, every ladder</b>
+                              <i className="mgfo-flex1" />
+                              <span className="mgfo-count">{groupedTierCount} rungs</span>
+                            </div>
+                            <div className="mgfo-groups">
+                              {filteredLadderGroups.map((l) => (
+                                <div key={l.id} className="mgfo-group">
+                                  <div className="mgfo-group-h">
+                                    <img className="mgfo-group-icon"
+                                      src={l.tiers[0] ? "/badge-thumb/" + encodeURIComponent(l.tiers[0].id) + ".png" : ""}
+                                      alt="" onError={(e) => e.currentTarget.remove()} />
+                                    <span className="mgfo-group-name">{l.name} — measured in {l.metric}</span>
+                                    <span className="mgfo-group-count">
+                                      {l.filteredTiers.filter((t) => t.earned).length}/{l.filteredTiers.length}
+                                    </span>
+                                    <div className="mgfo-group-rule" />
+                                  </div>
+                                  <CardGrid items={l.filteredTiers} ladderName={l.name}
+                                    earnedAt={earnedAt} skinsById={vm.skinsById}
+                                    reveal={reveal} onReplay={replayToast} />
+                                </div>
+                              ))}
+                            </div>
                           </>
                         )}
                       </>
@@ -427,11 +575,66 @@ export default function FolioOverlay({ onClose }) {
                       <div className="mgfo-statblock">
                         {vm.ladderRows.map((l) => (
                           <div className="mgfo-progrow" key={l.id}>
+                            {l.iconTierId && (
+                              <img className="mgfo-progrow-ico" src={"/badge-thumb/" + encodeURIComponent(l.iconTierId) + ".png"} alt=""
+                                onError={(e) => e.currentTarget.remove()} />
+                            )}
                             <div className="mgfo-progrow-lab wide">{l.name}</div>
                             <Bar pct={l.total ? (l.earned / l.total) * 100 : 0} />
                             <div className="mgfo-progrow-ct">{l.earned}/{l.total}</div>
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {tab === "stats" && h && (
+                  <div className="mgfo-stats-extra">
+                    <div className="mgfo-sec-h"><b>Library</b><span>the raw numbers</span></div>
+                    <div className="mgh-stats">
+                      {libraryStats.map((s) => (
+                        <div className="mgh-stat" key={s.label}>
+                          <div className="mgh-stat-label">{s.label}</div>
+                          <div className="mgh-stat-value">{s.value}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mgfo-sec-h"><b>Coverage</b><span>how complete the catalog is</span></div>
+                    <div className="mgh-stats">
+                      {coverageStats.map((s) => (
+                        <div className="mgh-stat" key={s.label}>
+                          <div className="mgh-stat-label">{s.label}</div>
+                          <div className={"mgh-stat-value" + (s.gold ? " gold" : "")}>{s.value}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mgfo-grid2 even">
+                      <div>
+                        <div className="mgfo-sec-h"><b>Top models</b></div>
+                        <div className="mgfo-statblock">
+                          {(h.top_models || []).map(([label, count]) => (
+                            <div className="mgfo-progrow" key={label}>
+                              <div className="mgfo-progrow-lab wide" title={label}>{label}</div>
+                              <Bar pct={Math.max(0.5, (count / modelMax) * 100)} />
+                              <div className="mgfo-progrow-ct">{fmt(count)}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="mgfo-sec-h"><b>Monthly activity</b></div>
+                        <div className="mgfo-statblock">
+                          {(h.by_month || []).map(([label, count]) => (
+                            <div className="mgfo-progrow" key={label}>
+                              <div className="mgfo-progrow-lab wide">{label}</div>
+                              <Bar pct={Math.max(0.5, (count / monthMax) * 100)} />
+                              <div className="mgfo-progrow-ct">{fmt(count)}</div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -459,10 +662,13 @@ export default function FolioOverlay({ onClose }) {
                   <div className="mgfo-raildiv" />
                   <div className="mgfo-narrator">
                     <div className="mgfo-narrator-h"><span className="mgfo-dot" />The narrator</div>
-                    {/* Rail portrait stays inert on purpose -- the DC only ever
-                        wires the poke onto the small header avatar, never this one. */}
-                    <img className="mgfo-narrator-img" src="/branding/mascots/gen_nel.png" alt="Nel, the Athenaeum archivist"
-                      onError={(e) => e.currentTarget.remove()} />
+                    {/* Rail portrait also pokes now -- the same real
+                        pokeNarrator() the header avatar uses, per owner
+                        direction (the DC's own mock never wired this one,
+                        but there's no reason the bigger portrait shouldn't
+                        answer a click too). */}
+                    <img className="mgfo-narrator-img poke" src="/branding/mascots/gen_nel.png" alt="Nel, the Athenaeum archivist"
+                      onClick={pokeNarrator} onError={(e) => e.currentTarget.remove()} />
                     <div className="mgfo-narrator-quote" title="she has opinions about your backlog">
                       "{NARRATOR_LINES[quoteIdx]}"
                     </div>
