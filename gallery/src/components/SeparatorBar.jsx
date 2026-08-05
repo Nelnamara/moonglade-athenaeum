@@ -38,6 +38,7 @@ export default function SeparatorBar({
   thumb, thumbMax, onThumb,
   running, dockOpen, onToggleDock,
   onOverlay,
+  onClaim, claiming,
 }) {
   /* <mg-cost-badge> is a web component; mount once, never unmount (same
      discipline as the drawer's price badge). Any mg-cost push reveals it. */
@@ -62,6 +63,8 @@ export default function SeparatorBar({
   const warn = lapse(account);
   const tipText = warn ||
     "Your PixAI balance — credits and free generation cards. Click to buy packs on PixAI.";
+
+  const claimCredits = account && account.claim_credits;
 
   const count = (running && running.count) || 0;
   const pct = running && running.pct != null ? running.pct : null;
@@ -132,6 +135,14 @@ export default function SeparatorBar({
           <span className="mgx-credlab cards">CARDS</span>
           <span className="mgx-credtip" role="tooltip">{tipText}</span>
         </button>
+
+        {claimCredits ? (
+          <button type="button" className="mgx-claim" onClick={onClaim} disabled={claiming}
+            title="Claim your free daily credits">
+            <span className="coin">◈</span>
+            {claiming ? "claiming…" : "+" + Number(claimCredits).toLocaleString() + " claim"}
+          </button>
+        ) : null}
 
         {/* slim-state Generate launcher — the banner's big button is hidden then */}
         {slim ? (

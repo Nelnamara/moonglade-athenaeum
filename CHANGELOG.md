@@ -17,6 +17,19 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **The daily-credit claim UI, ported to `/next` for the first time.** Classic's `#acct-claim`
+  pill (instant-claim, hidden until something's ready) never reached the React front door —
+  the backend (`POST /api/claim`, `/api/account`'s `claim_credits`) was already fully shared
+  and working, just never read by any component. Shipped as two pieces: the pill itself
+  (`SeparatorBar.jsx`/`AppMobile.jsx`), and a new popup (`ClaimModal.jsx`, owner-requested,
+  modeled on the Power modal's mascot-in-a-halo shell but its own `mgclaim-*` namespace) that
+  fires at most once per real session — deliberately not PixAI's own every-page-load pattern.
+  Both share one `useClaimModal.js` hook and one claim action, not two copies. On close
+  (claim or dismiss), a CSS-drawn coin pops out and arcs away — no art dependency. New mascot
+  art (`nel_redeem.png`/`.webp`) landed at `branding/mascots/`, same fallback-ladder convention
+  `LoginPage.jsx` already uses; git-ignored like all branding art, so it needs a manual copy
+  onto any other real install. Live-verified against the real running server (the real
+  `/api/claim` route, not mocked) — full account in `docs/DECISIONS.md`.
 - **Control Panel Branding tab — Phase 1 backend groundwork.** The 4 previously-unbuilt slots
   (Banner-main/Banner-login/Mascots/Rewards) get real storage for the first time: one uniform
   shape across all four — `branding/<slot>/manifest.json` + `<id>.png`, "many assets stored,

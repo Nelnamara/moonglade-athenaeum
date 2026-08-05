@@ -16,6 +16,8 @@ import ContactSheetOverlay from "./components/ContactSheetOverlay.jsx";
 import FolioOverlay from "./components/FolioOverlay.jsx";
 import GenerateDrawer from "./components/GenerateDrawer.jsx";
 import PickerHost, { isPickerOpen } from "./components/PickerHost.jsx";
+import ClaimModal from "./components/ClaimModal.jsx";
+import useClaimModal from "./hooks/useClaimModal.js";
 import "./styles/shell.css";
 import {
   fetchAccount, fetchCollections,
@@ -61,6 +63,8 @@ export default function App({ boot }) {
     selectMode, setSelectMode, selected, setSelected, toggleSelected,
   } = useLibrary();
   const [account, setAccount] = useState(null);
+  const refreshAccount = () => fetchAccount().then(setAccount);
+  const claimModal = useClaimModal(account, refreshAccount);
   const [collections, setCollections] = useState(boot.collections || []);
   // ui -- blur shares the classic gallery's localStorage key on purpose: one
   // setting, both surfaces, exactly the classic semantics (all thumbs 16px,
@@ -515,6 +519,7 @@ export default function App({ boot }) {
           running={running}
           dockOpen={dockActive} onToggleDock={toggleDock}
           onOverlay={openOverlay}
+          onClaim={claimModal.claim} claiming={claimModal.claiming}
         />
       </header>
 
@@ -626,6 +631,11 @@ export default function App({ boot }) {
           request={genRequest} />
       </div>
       <PickerHost />
+      {claimModal.open && (
+        <ClaimModal credits={claimModal.credits} exiting={claimModal.exiting}
+          claiming={claimModal.claiming} error={claimModal.error}
+          onClaim={claimModal.claim} onDismiss={claimModal.dismiss} />
+      )}
     </div>
   );
 }

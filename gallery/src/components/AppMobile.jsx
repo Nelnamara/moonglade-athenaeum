@@ -20,6 +20,8 @@ import ImportMobile from "./ImportMobile.jsx";
 import ContestsMobile from "./ContestsMobile.jsx";
 import FolioMobile from "./FolioMobile.jsx";
 import ContactSheetMobile from "./ContactSheetMobile.jsx";
+import ClaimModal from "./ClaimModal.jsx";
+import useClaimModal from "../hooks/useClaimModal.js";
 import "../styles/gallery-mobile.css";
 import "../styles/create-mobile.css";
 
@@ -268,6 +270,7 @@ const SOON_INFO = {
 export default function AppMobile({ boot }) {
   const [tab, setTab] = useState("gallery");
   const [account, setAccount] = useState(null);
+  const claimModal = useClaimModal(account, () => fetchAccount().then(setAccount));
   const [collections, setCollections] = useState(boot.collections || []);
   const [sheet, setSheet] = useState(null); // 'loom' | 'menu' | null
   const [closing, setClosing] = useState(false);
@@ -506,6 +509,12 @@ export default function AppMobile({ boot }) {
           target="_blank" rel="noopener noreferrer">
           ✦ {credits}
         </a>
+        {account && account.claim_credits ? (
+          <button type="button" className="glm-hero-claim" onClick={claimModal.claim}
+            disabled={claimModal.claiming}>
+            ◈ {claimModal.claiming ? "claiming…" : "+" + Number(account.claim_credits).toLocaleString() + " claim"}
+          </button>
+        ) : null}
       </header>
 
       <div className="glm-body">
@@ -581,6 +590,11 @@ export default function AppMobile({ boot }) {
 
       <TabBarMobile tab={tab} setTab={setTab} />
       <PickerHost />
+      {claimModal.open && (
+        <ClaimModal credits={claimModal.credits} exiting={claimModal.exiting}
+          claiming={claimModal.claiming} error={claimModal.error}
+          onClaim={claimModal.claim} onDismiss={claimModal.dismiss} />
+      )}
 
       {/* Image Details Mobile -- a fixed, full-viewport overlay (its own CSS,
           z above the hero/tab bar/sheets) rather than a child of .glm-body,
