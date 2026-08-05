@@ -294,6 +294,14 @@ ROUTE_TIERS = {
     ("api_snippets", "POST"): LOGIN,
     ("api_branding", "GET"): LOGIN,
     ("api_branding", "POST"): LOGIN,
+    # Branding-tab slot uploads (banner_main/banner_login/mascots/rewards,
+    # 2026-08-05) -- same trust level as api_branding just above: cosmetic app
+    # data written into branding/, not config.json, not a host-filesystem
+    # action outside that tree (unlike api_branding_shortcut, which stays
+    # LOCALHOST for shelling out to PowerShell/COM).
+    ("api_branding_slot_upload", "POST"): LOGIN,
+    ("api_branding_slot_crop", "POST"): LOGIN,
+    ("api_branding_slot_active", "POST"): LOGIN,
     ("api_skin", "POST"): LOGIN,
     ("api_ach_event", "POST"): LOGIN,
     # api_users_remove is LOGIN, not LOCALHOST, because it is genuinely reachable

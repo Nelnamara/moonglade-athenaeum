@@ -90,6 +90,22 @@ def test_panel_summary_matches_the_page_route(tmp_path):
     assert "csrf" in d and d["csrf"]
     assert d["branding"]["mark"] == "logo"                 # load_branding()'s own default
     assert "anims" in d["branding"] and "classic" in d["branding"]["anims"]
+    assert set(d["branding"]["slots"].keys()) == {"banner_main", "banner_login", "mascots", "rewards"}
+    assert d["trash_count"] == 0                            # nothing quarantined yet
+
+
+def test_panel_summary_trash_count_is_real(tmp_path):
+    """Control Panel.dc.html:226's {{ trashCount }} -- the Trash tile's own real
+    count. Previously hardcoded to "--" on both platforms (2026-08-05 fix):
+    nothing fetched it until now, the real number only ever resolved once
+    TrashSubOverlay's own /api/trash/list call ran."""
+    import moonglade_gallery as g
+    qdir = tmp_path / g.DELETED_DIRNAME
+    qdir.mkdir()
+    (qdir / "a.webp").write_bytes(b"x")
+    (qdir / "b.webp").write_bytes(b"x")
+    cli = _authed_client(tmp_path)
+    assert cli.get("/api/panel/summary").get_json()["trash_count"] == 2
 
 
 def test_panel_summary_withholds_out_dir_from_lan(tmp_path):

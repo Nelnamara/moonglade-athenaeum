@@ -1663,6 +1663,312 @@ def list_marks(out_dir):
     return out
 
 
+# The 4 Branding-tab slots Control Panel.dc.html specs beyond Icons & marks
+# (banner-main/banner-login/mascots/rewards) -- none had any backend at all
+# before this. Deliberately ONE shape for all four (manifest.json + <id>.png
+# per slot, same "many stored, one exists-checked" contract list_marks() above
+# already established) rather than a bespoke single-file slot vs. a bespoke
+# multi-file slot: the F1/F2 SQLite-bundle work only has to learn ONE storage
+# shape to take over, not four. Rotating-source selection (Banner-main's own
+# "pick FROM a collection" mechanic) is explicitly deferred until that bundle
+# work lands (owner call, 2026-08-05) -- for now every slot is just "the
+# uploaded assets, one of which is active", identical to how marks/mark
+# already relate, so that later mechanic has real asset ids to pick FROM
+# instead of a schema migration first.
+BRANDING_SLOTS = ("banner_main", "banner_login", "mascots", "rewards")
+
+
+def _slot_dir(slot):
+    return branding_root() / slot
+
+
+def list_slot_assets(out_dir, slot):
+    """Uploaded assets for one Branding slot: branding/<slot>/manifest.json
+    entries whose .png actually exists. Empty on a fresh install / until that
+    slot's first real upload, exactly like list_marks() above."""
+    if slot not in BRANDING_SLOTS:
+        return []
+    sdir = _slot_dir(slot)
+    try:
+        data = json.loads((sdir / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, dict):
+        return []          # corrupt manifest degrades to "no assets", never a 500
+    out = []
+    for it in data.get("items") or []:
+        if not isinstance(it, dict):
+            continue
+        iid = str(it.get("id") or "")
+        if iid and (sdir / (iid + ".png")).exists():
+            out.append({"id": iid, "crop": it.get("crop") or "center",
+                        "png": "/branding/%s/%s.png" % (slot, iid)})
+    return out
+
+
+def _slot_active_path(out_dir):
+    # Sibling of branding.json/branding/, same machine-local git-ignored tree --
+    # kept in its OWN file rather than folded into branding.json so that file's
+    # existing read-modify-write cycle (load_branding/save_branding, mark+anim
+    # only) can never clobber slot-active state it doesn't know about.
+    return branding_root().parent / "branding_slots.json"
+
+
+def load_slot_active(out_dir):
+    """Which uploaded asset (by id) is the ACTIVE one per slot -- the same
+    relationship branding.json's own "mark" field already has to list_marks():
+    many stored, one worn. Self-heals exactly like load_branding() does for
+    "mark": a recorded active id that no longer exists on disk (deleted file,
+    corrupt manifest) falls back to the first real asset, or None."""
+    active = {}
+    try:
+        raw = json.loads(_slot_active_path(out_dir).read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            active = {k: str(v) for k, v in raw.items() if k in BRANDING_SLOTS and v}
+    except (OSError, ValueError):
+        pass
+    for slot in BRANDING_SLOTS:
+        have = {a["id"] for a in list_slot_assets(out_dir, slot)}
+        if active.get(slot) not in have:
+            active[slot] = next(iter(have), None)
+    return active
+
+
+def save_slot_active(out_dir, active):
+    _slot_active_path(out_dir).write_text(
+        json.dumps({k: v for k, v in active.items() if v}, indent=2), encoding="utf-8")
+
+
+def add_slot_asset(out_dir, slot, png_bytes, crop="center"):
+    """Save a new upload into one Branding slot and make it the active one.
+    Returns the new asset dict, or None for an unknown slot. Caller (the
+    /api/branding/slot route) is responsible for making sure png_bytes is a
+    real PNG before this is called -- this function just persists it."""
+    if slot not in BRANDING_SLOTS:
+        return None
+    sdir = _slot_dir(slot)
+    sdir.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads((sdir / "manifest.json").read_text(encoding="utf-8"))
+        items = list(data.get("items") or []) if isinstance(data, dict) else []
+    except (OSError, ValueError):
+        items = []
+    new_id = secrets.token_hex(4)
+    (sdir / (new_id + ".png")).write_bytes(png_bytes)
+    items.append({"id": new_id, "crop": crop})
+    (sdir / "manifest.json").write_text(json.dumps({"items": items}, indent=2), encoding="utf-8")
+    active = load_slot_active(out_dir)
+    active[slot] = new_id
+    save_slot_active(out_dir, active)
+    return {"id": new_id, "crop": crop, "png": "/branding/%s/%s.png" % (slot, new_id)}
+
+
+def set_slot_crop(out_dir, slot, item_id, crop):
+    """Update one already-uploaded asset's crop position (left/center/right --
+    Control Panel.dc.html's cycleCrop). False for an unknown slot/item/crop,
+    never a 500."""
+    if slot not in BRANDING_SLOTS or crop not in ("left", "center", "right"):
+        return False
+    sdir = _slot_dir(slot)
+    try:
+        data = json.loads((sdir / "manifest.json").read_text(encoding="utf-8"))
+        items = data.get("items") if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return False
+    if not isinstance(items, list):
+        return False
+    found = False
+    for it in items:
+        if isinstance(it, dict) and str(it.get("id")) == str(item_id):
+            it["crop"] = crop
+            found = True
+    if not found:
+        return False
+    (sdir / "manifest.json").write_text(json.dumps({"items": items}, indent=2), encoding="utf-8")
+    return True
+
+
+def set_slot_active(out_dir, slot, item_id):
+    """Mark an already-uploaded asset as the active one for its slot. False for
+    an unknown slot or an item_id that isn't a real asset in it -- there is no
+    "clear to none" here on purpose: the design never models deselecting a slot
+    back to empty, only picking among what's uploaded, and load_slot_active()'s
+    own self-heal (falling back to the first real asset when nothing is
+    recorded) would silently undo a stored None anyway, since the two cases
+    look identical on disk."""
+    if slot not in BRANDING_SLOTS:
+        return False
+    if not item_id or item_id not in {a["id"] for a in list_slot_assets(out_dir, slot)}:
+        return False
+    active = load_slot_active(out_dir)
+    active[slot] = item_id
+    save_slot_active(out_dir, active)
+    return True
+
+
+def branding_slots_payload(out_dir):
+    """The Branding tab's full slot state -- assets + which one is active, per
+    slot -- in the one shape both /api/branding and /api/panel/summary hand to
+    the React BrandingTab. A single function so both routes can never disagree
+    about what a slot looks like."""
+    active = load_slot_active(out_dir)
+    return {slot: {"assets": list_slot_assets(out_dir, slot), "active": active.get(slot)}
+            for slot in BRANDING_SLOTS}
+
+
+# "Under the Hood" intended flow (docs/DECISIONS.md, 2026-07-26, owner-confirmed
+# 2026-08-05): a fresh install ships the branding slot folders EMPTY, with a
+# single README breadcrumb the only hint. A curious user drops a raw PNG/JPEG
+# directly into one of them; the app ADOPTS it into that slot on its own --
+# no marks.json to hand-author, no upload UI. That adoption is what fires the
+# hidden feat and unlocks the Control Panel Branding tab. The earn path can
+# never be "use the Branding tab's own upload API" -- that tab sits BEHIND
+# this exact unlock -- so this has to work by scanning raw filesystem drops,
+# not by extending the authenticated upload routes above.
+_BRANDING_README = "Maybe something goes in here.\n"
+_BRANDING_DISCOVERY_SLOTS = BRANDING_SLOTS + ("marks",)
+
+
+def ensure_branding_discovery_tree():
+    """Create the empty, nested slot folders + the one breadcrumb README, so
+    there is actually something for a tinkerer to find. Idempotent and additive
+    only -- never touches a folder or file that already exists, so it is safe
+    to call on every server start regardless of what's already on disk (the
+    owner's own real branding/, a returning install with real uploads, ...).
+    Called once at app startup (create_app), not per-request."""
+    root = branding_root()
+    for slot in _BRANDING_DISCOVERY_SLOTS:
+        (root / slot).mkdir(parents=True, exist_ok=True)
+    readme = root / "README.txt"
+    if not readme.exists():
+        try:
+            readme.write_text(_BRANDING_README, encoding="utf-8")
+        except OSError:
+            pass
+
+
+def _adopt_dropped_file(path):
+    """Re-encode a raw dropped image (PNG/JPEG/anything Pillow can read) into
+    real PNG bytes, or None if it isn't a readable image at all -- the same
+    defense-in-depth the authenticated upload route above applies, just
+    against a file that arrived by hand instead of by POST."""
+    try:
+        from PIL import Image
+        import io
+        im = Image.open(path)
+        im.load()
+        buf = io.BytesIO()
+        im.convert("RGBA").save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
+def _adopt_mark(out_dir, raw_stem, png_bytes):
+    """Register a raw dropped file into marks.json + write its .png, then make
+    it the active mark -- the marks-folder half of sweep_branding_drops()'s
+    auto-adopt (marks predate BRANDING_SLOTS and keep their own established
+    list_marks()/marks.json shape rather than being folded into the newer
+    per-slot manifest convention)."""
+    mdir = branding_root() / "marks"
+    mid = re.sub(r"[^a-z0-9_-]+", "-", raw_stem.lower()).strip("-")[:40] or "custom"
+    have = {m["id"] for m in list_marks(out_dir)}
+    if mid in have:
+        mid = (mid + "-" + secrets.token_hex(3))[:40]
+    try:
+        data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
+        marks = list(data.get("marks") or []) if isinstance(data, dict) else []
+    except (OSError, ValueError):
+        marks = []
+    marks.append({"id": mid, "label": mid.replace("-", " "), "kind": "tile"})
+    (mdir / "marks.json").write_text(json.dumps({"marks": marks}, indent=2), encoding="utf-8")
+    (mdir / (mid + ".png")).write_bytes(png_bytes)
+    cfg = load_branding(out_dir)
+    cfg["mark"] = mid
+    save_branding(out_dir, cfg)
+
+
+# SAFETY, 2026-08-05: mascots/ and rewards/ are NOT empty user-customizable
+# buckets -- they already hold a family of specifically-named, role-bound
+# files real shipped code reads by exact filename (the narrator/login/power-
+# modal mascots, the claim icon, and a per-achievement ach/<id>.png chain that
+# has no fixed, enumerable list). The original version of this sweep had no
+# awareness of that and would have adopted-then-DELETED every one of those
+# files the first time it ran against an install that actually has them --
+# caught before it ever ran against real assets, but only just. Until
+# mascots/rewards get a real design (named-role overrides, most likely, not
+# a manifest-of-many-pick-one-active gallery like the other two slots), the
+# sweep only ever touches the two slots that map cleanly onto a real,
+# already-established single flat file: banner_main -> branding/banner.png
+# and banner_login -> branding/login-banner.png (not yet wired to write
+# THOSE exact paths either -- a separate, disclosed follow-up -- but at least
+# no longer at risk of eating someone's real art in the meantime).
+_SWEEPABLE_SLOTS = ("banner_main", "banner_login")
+
+
+def sweep_branding_drops(out_dir):
+    """Scan the SWEEPABLE branding slot folders (_SWEEPABLE_SLOTS + marks) for
+    a raw file that arrived by hand and isn't already a known asset, adopt
+    each one found, and fire the 'Under the Hood' hidden feat if anything was
+    adopted. Runs on every /api/achievements fetch rather than
+    sweep_telemetry()'s once-a-day cadence -- a real find deserves to pay off
+    on the next reload, not up to a day later. Cheap: a handful of small
+    directory listings, matching list_marks()/list_quarantined()'s own "stays
+    cheap" precedent. Returns True if anything was adopted this call."""
+    adopted = False
+    for slot in _SWEEPABLE_SLOTS:
+        sdir = _slot_dir(slot)
+        if not sdir.is_dir():
+            continue
+        known = {a["id"] for a in list_slot_assets(out_dir, slot)}
+        try:
+            entries = sorted(sdir.iterdir())
+        except OSError:
+            continue
+        for p in entries:
+            if not p.is_file() or p.name == "manifest.json" or p.stem in known:
+                continue
+            png_bytes = _adopt_dropped_file(p)
+            if png_bytes is None:
+                continue
+            # Delete the raw drop BEFORE writing the adopted copy, not after: the
+            # adopted asset's own filename can legitimately collide with the raw
+            # drop's path (add_slot_asset uses a random id, but a stem-derived id
+            # elsewhere -- see _adopt_mark below -- routinely does), and deleting
+            # afterward would then remove the file it just wrote instead of the
+            # original. png_bytes is already read into memory, so the source file
+            # is safe to remove first regardless of what gets written next.
+            try:
+                p.unlink()
+            except OSError:
+                pass
+            add_slot_asset(out_dir, slot, png_bytes,
+                           crop="left" if slot.startswith("banner") else "center")
+            adopted = True
+    mdir = branding_root() / "marks"
+    if mdir.is_dir():
+        known = {m["id"] for m in list_marks(out_dir)}
+        try:
+            entries = sorted(mdir.iterdir())
+        except OSError:
+            entries = []
+        for p in entries:
+            if not p.is_file() or p.name == "marks.json" or p.suffix.lower() == ".ico" or p.stem in known:
+                continue
+            png_bytes = _adopt_dropped_file(p)
+            if png_bytes is None:
+                continue
+            try:              # delete first -- see the identical note above
+                p.unlink()
+            except OSError:
+                pass
+            _adopt_mark(out_dir, p.stem, png_bytes)
+            adopted = True
+    if adopted:
+        telem_flag("branding_custom_file", out_dir=out_dir)
+    return adopted
+
+
 def load_branding(out_dir):
     """Current branding choice, validated against what exists on disk. Falls back
     to the legacy drop-in logo.png ('logo') when no cut marks are present."""
@@ -4181,6 +4487,7 @@ def create_app(out_dir: Path):
     backfill_batches(out_dir, db_path)
     thumb_dir = out_dir / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
+    ensure_branding_discovery_tree()   # "Under the Hood" needs empty folders to find
 
     # Redacts THIS MACHINE's own filesystem paths out of an exception message before
     # it's stored or served to any LOGIN-tier caller (any signed-in LAN account, not
@@ -12030,9 +12337,21 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                   if v.get("panel_visible", True) and (panel_is_local or not v["destructive"])]
         import moonglade_backup as core
         session.setdefault("csrf", secrets.token_hex(16))
+        try:
+            sweep_branding_drops(out_dir)   # see api_branding()'s own GET for why
+        except Exception:
+            pass
         branding = load_branding(out_dir)
+        # Control Panel.dc.html:226's {{ trashCount }} -- the Trash tile's own real
+        # count, previously hardcoded to "--" on both platforms (nothing fetched
+        # it; the real number only ever resolved once TrashSubOverlay's own
+        # /api/trash/list call ran). Reuses list_quarantined()'s own total rather
+        # than a second counting pass -- see that function's docstring for why an
+        # os.scandir()-based count stays cheap even at a large trash size.
+        trash_count = list_quarantined(out_dir, page=1, page_size=1)[1]
         return jsonify({
             "stats": catalog_counts(db_path),
+            "trash_count": trash_count,
             "supervised": _supervised(),
             "panel_is_local": panel_is_local,
             "actions": actions, "all_actions": all_actions,
@@ -12041,7 +12360,8 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             "current_username": session.get("user"),
             "csrf": session["csrf"],
             "branding": {"mark": branding["mark"], "anim": branding["anim"],
-                        "anims": MARK_ANIMS, "marks": list_marks(out_dir)},
+                        "anims": MARK_ANIMS, "marks": list_marks(out_dir),
+                        "slots": branding_slots_payload(out_dir)},
         })
 
     def _check_csrf(body):
@@ -15208,6 +15528,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 telem_flag("session_hour", out_dir=out_dir)
         except Exception:
             pass
+        # "Under the Hood"'s real trigger -- unlike sweep_telemetry above, this runs
+        # EVERY call, not once a day: a curious user who just dropped a file into
+        # branding/<slot>/ deserves the achievement on their next reload, not up to
+        # a day later. See sweep_branding_drops()'s own docstring.
+        try:
+            sweep_branding_drops(out_dir)
+        except Exception:
+            pass
         metrics = achievement_metrics(db_path)
         metrics.update(telemetry_metrics(out_dir))
         persist_error = None
@@ -15323,9 +15651,18 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         read or change it, same as the rest of the LOGIN-tier settings surface.
         Persists to out_dir/branding.json."""
         if request.method == "GET":
+            # Reflects a raw filesystem drop immediately, same as /api/achievements --
+            # a caller reading branding state directly (this route, not the achievements
+            # one) must never see a stale pre-adoption picture. Cheap; see
+            # sweep_branding_drops()'s own docstring.
+            try:
+                sweep_branding_drops(out_dir)
+            except Exception:
+                pass
             cfg = load_branding(out_dir)
             return jsonify({"mark": cfg["mark"], "anim": cfg["anim"],
-                            "anims": MARK_ANIMS, "marks": list_marks(out_dir)})
+                            "anims": MARK_ANIMS, "marks": list_marks(out_dir),
+                            "slots": branding_slots_payload(out_dir)})
         body = request.get_json(silent=True) or {}
         cfg = load_branding(out_dir)
         have = {m["id"] for m in list_marks(out_dir)}
@@ -15345,6 +15682,56 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if cfg["anim"] == "eclipse":           # Eclipse: sun and moon in balance
             telem_flag("eclipse_anim_triggered", out_dir=out_dir)
         return jsonify({"mark": cfg["mark"], "anim": cfg["anim"]})
+
+    @app.route("/api/branding/slot", methods=["POST"])
+    def api_branding_slot_upload():
+        """Upload a new asset into one Branding slot (banner_main/banner_login/
+        mascots/rewards -- Control Panel.dc.html's 'From disk' chip). LOGIN tier,
+        matching /api/branding just above: cosmetic, no host-filesystem risk
+        beyond writing into branding/, the same machine-local git-ignored tree
+        marks already live in (NOT the shortcut route's stricter local-only gate).
+        Re-encodes through Pillow rather than trusting the upload's own bytes/
+        extension, the same defense-in-depth this app already applies to real
+        library thumbnails (see _thumb_for, above)."""
+        slot = request.form.get("slot") or ""
+        if slot not in BRANDING_SLOTS:
+            return jsonify({"error": "unknown slot"}), 400
+        f = request.files.get("file")
+        if f is None or not f.filename:
+            return jsonify({"error": "no file"}), 400
+        try:
+            import io
+            from PIL import Image
+            im = Image.open(f.stream)
+            im.load()
+            buf = io.BytesIO()
+            im.convert("RGBA").save(buf, format="PNG")
+        except Exception:
+            return jsonify({"error": "not a readable image"}), 400
+        crop = "left" if slot.startswith("banner") else "center"
+        item = add_slot_asset(out_dir, slot, buf.getvalue(), crop=crop)
+        return jsonify({"slot": slot, "item": item, "assets": list_slot_assets(out_dir, slot)})
+
+    @app.route("/api/branding/slot/crop", methods=["POST"])
+    def api_branding_slot_crop():
+        """Cycle one uploaded asset's crop position (Control Panel.dc.html's
+        cycleCrop -- left/center/right). LOGIN tier, same as the upload route."""
+        body = request.get_json(silent=True) or {}
+        slot, item_id, crop = body.get("slot"), str(body.get("id") or ""), body.get("crop")
+        if not set_slot_crop(out_dir, slot, item_id, crop):
+            return jsonify({"error": "unknown slot, asset, or crop value"}), 400
+        return jsonify({"assets": list_slot_assets(out_dir, slot)})
+
+    @app.route("/api/branding/slot/active", methods=["POST"])
+    def api_branding_slot_active():
+        """Pick which already-uploaded asset is active for a slot. LOGIN tier,
+        same as the upload route. There is no "clear to none" -- see
+        set_slot_active()'s own docstring for why."""
+        body = request.get_json(silent=True) or {}
+        slot, item_id = body.get("slot"), body.get("id")
+        if not set_slot_active(out_dir, slot, str(item_id) if item_id else None):
+            return jsonify({"error": "unknown slot or asset"}), 400
+        return jsonify({"slots": branding_slots_payload(out_dir)})
 
     @app.route("/api/branding/shortcut", methods=["POST"])
     def api_branding_shortcut():

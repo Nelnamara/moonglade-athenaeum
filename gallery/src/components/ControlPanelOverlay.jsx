@@ -103,7 +103,7 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
   }, []);
 
   const {
-    summary, summaryErr, skins, activeSkin, pickSkin,
+    summary, summaryErr, skins, activeSkin, pickSkin, brandingUnlocked,
     fetchSummary, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
     dedupDone, organizeRes,
@@ -111,6 +111,14 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,
   } = useControlPanel();
+
+  // Belt-and-suspenders against the tab ever reading "brand" while locked --
+  // can't happen today (the only way in is the button below, which doesn't
+  // render unlocked=false), but this is cheap insurance against a future
+  // second entry point reopening the gate the owner just asked to close.
+  useEffect(() => {
+    if (tab === "brand" && !brandingUnlocked) setTab("maint");
+  }, [tab, brandingUnlocked]);
 
   // Escape closes whatever the TOP layer is -- a sub-overlay first, then the whole Panel --
   // component-local (not part of the shared hook) because it reads THIS component's own
@@ -251,8 +259,10 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
               <div className="mgcp-tabs">
                 <button type="button" className={"mgv-x-off"} style={tabStyle(tab === "maint")}
                   onClick={() => setTab("maint")}>Maintenance</button>
-                <button type="button" style={tabStyle(tab === "brand")}
-                  onClick={() => setTab("brand")}>✦ Branding</button>
+                {brandingUnlocked && (
+                  <button type="button" style={tabStyle(tab === "brand")}
+                    onClick={() => setTab("brand")}>✦ Branding</button>
+                )}
               </div>
 
               {tab === "maint" && (
@@ -413,7 +423,7 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
 
                     <div className="mgcp-tile mgcp-tile2 click" onClick={() => setSubOverlay("trash")}>
                       <div className="mgcp-mkick">Trash</div>
-                      <div className="mgcp-tilebig">—</div>
+                      <div className="mgcp-tilebig">{summary.trash_count.toLocaleString()}</div>
                       <button type="button" className="mgcp-smallchip">Open…</button>
                     </div>
 
@@ -454,37 +464,40 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                       )}
                     </div>
 
-                    <div className="mgcp-tile mgcp-tile5">
-                      <div className="mgcp-mkick">Branding</div>
-                      <div className="mgcp-marks">
-                        {/* Control Panel.dc.html:246-254 -- sl.onPick sets the mark
-                            in place, right from this tile; clicking here used to just
-                            redirect to the Branding tab instead of doing anything.
-                            Same real /api/branding call BrandingTab's own pickMark()
-                            already uses (not a second, forked write path). */}
-                        {(summary.branding.marks || []).slice(0, 6).map((m) => (
-                          <button type="button" key={m.id}
-                            className={"mgcp-mark" + (m.id === summary.branding.mark ? " on" : "")}
-                            disabled={markBusy}
-                            title={m.id === summary.branding.mark ? m.id + " (active)" : "Set " + m.id}
-                            onClick={async () => {
-                              if (m.id === summary.branding.mark) return;
-                              setMarkBusy(true);
-                              await postJSON("/api/branding", { mark: m.id });
-                              setMarkBusy(false);
-                              fetchSummary();
-                            }}>{m.id === "logo" ? "🌙" : "◈"}</button>
-                        ))}
+                    {brandingUnlocked && (
+                      <div className="mgcp-tile mgcp-tile5">
+                        <div className="mgcp-mkick">Branding</div>
+                        <div className="mgcp-marks">
+                          {/* Control Panel.dc.html:246-254 -- sl.onPick sets the mark
+                              in place, right from this tile; clicking here used to just
+                              redirect to the Branding tab instead of doing anything.
+                              Same real /api/branding call BrandingTab's own pickMark()
+                              already uses (not a second, forked write path). */}
+                          {(summary.branding.marks || []).slice(0, 6).map((m) => (
+                            <button type="button" key={m.id}
+                              className={"mgcp-mark" + (m.id === summary.branding.mark ? " on" : "")}
+                              disabled={markBusy}
+                              title={m.id === summary.branding.mark ? m.id + " (active)" : "Set " + m.id}
+                              onClick={async () => {
+                                if (m.id === summary.branding.mark) return;
+                                setMarkBusy(true);
+                                await postJSON("/api/branding", { mark: m.id });
+                                setMarkBusy(false);
+                                fetchSummary();
+                              }}>{m.id === "logo" ? "🌙" : "◈"}</button>
+                          ))}
+                        </div>
+                        <div className="mgcp-tilenote">
+                          <span onClick={() => setTab("brand")} style={{ cursor: "pointer", textDecoration: "underline dotted" }}>
+                            mark · animation
+                          </span> — click a glyph to set it, or open the Branding tab for more
+                        </div>
                       </div>
-                      <div className="mgcp-tilenote">
-                        <span onClick={() => setTab("brand")} style={{ cursor: "pointer", textDecoration: "underline dotted" }}>
-                          mark · animation
-                        </span> — click a glyph to set it, or open the Branding tab for more
-                      </div>
-                    </div>
+                    )}
 
                     {skins.length > 0 && (
-                      <div className="mgcp-tile mgcp-tile7">
+                      <div className="mgcp-tile mgcp-tile7"
+                        style={!brandingUnlocked ? { gridColumn: "span 12" } : undefined}>
                         <div className="mgcp-mkick">Skins</div>
                         <div className="mgcp-tilesmall">Cosmetic palette swaps for the whole suite — unlock more by earning achievements.</div>
                         <SkinsRow skins={skins} active={activeSkin} onPick={pickSkin} />
@@ -494,7 +507,7 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                 </>
               )}
 
-              {tab === "brand" && (
+              {tab === "brand" && brandingUnlocked && (
                 <BrandingTab summary={summary} onSaved={fetchSummary} isLocal={isLocal}
                   skins={skins} activeSkin={activeSkin} onPickSkin={pickSkin} />
               )}

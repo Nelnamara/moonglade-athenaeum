@@ -1448,11 +1448,19 @@ increment in this file works.
 - [x] Live Mirror section entirely unrendered on desktop despite existing unused CSS
       (`.mgcp-mirror`) and a real, working mobile implementation to port from.
       **SHIPPED 2026-08-04, same pass as credits — see dated entry below.**
-- [ ] Branding tab ~80% unbuilt: only Icons&marks + Animation work; Banner-main/Banner-login/
+- [~] Branding tab ~80% unbuilt: only Icons&marks + Animation work; Banner-main/Banner-login/
       Mascots/Rewards slots, per-slot crop-guide preview, upload chips, rotating-source note,
       and the "Sealed" explainer are all absent (disclosed as one summary sentence, but the
       scope is much larger than that sentence implies) — needs new backend, largest remaining
-      item, may need its own scoping pass rather than a quick port
+      item, may need its own scoping pass rather than a quick port. **Phase 1 backend
+      groundwork SHIPPED 2026-08-05** (4-slot storage, upload/crop/active routes, real
+      achievement gating) — see the dated entries below starting "Control Panel Branding:
+      Phase 1 backend groundwork." **Still open:** the actual slot-picker UI (Phase 2,
+      nothing renders it yet), and `banner_main`/`banner_login` don't yet write to the real
+      `branding/banner.png`/`login-banner.png` paths the header/login templates read —
+      uploads through the new routes don't display anywhere yet. Rotating-source stays
+      deferred until the SQLite bundle work (owner call). Mascots/Rewards need a real design
+      pass before any upload/adoption touches them at all — see the near-miss entry below.
 - [ ] No job run-history/ledger anywhere (desktop: zero; mobile: a toggle with only a disclosure
       sentence behind it) — Sync's "last run/rc/auto-schedule" line and Check rows' last-run
       timestamps both dropped too
@@ -4232,3 +4240,155 @@ owner decided to build; this one captures what actually shipped and what the saf
 process caught — future sessions touching `/api/duplicates*` or `DuplicateReviewOverlay.jsx`
 should read both, and should know the concurrent-undo race is a live, named, tracked gap,
 not an oversight to rediscover from scratch.
+
+### Control Panel Branding: Phase 1 backend groundwork shipped  ·  *2026-08-05*
+
+Live-audited the Control Panel surface against `Control Panel.dc.html` (real computed-style +
+DOM inspection in a real logged-in browser session, not source-reading alone — the same
+standard the earlier Loom panel-architecture finding set). The floating-glass modal shell,
+the job console, and every already-disclosed Maintenance-tab piece matched the design almost
+exactly. Two real, live-confirmed gaps landed this pass:
+
+- **Trash tile showed a hardcoded "—"** instead of a real count (`Control Panel.dc.html:226`'s
+  `{{ trashCount }}`) on both platforms — nothing ever fetched one. `/api/panel/summary` now
+  carries a real `trash_count`, reusing `list_quarantined()`'s own total rather than a second
+  counting pass (see that function's own docstring for why an `os.scandir()`-based count
+  stays cheap even at a large trash size).
+- **The Branding tab's 4 missing slots (Banner-main/Banner-login/Mascots/Rewards) got real
+  backend groundwork**, scoped explicitly to survive the eventual F1/F2 SQLite-bundle
+  transition rather than needing a rewrite when it lands: one uniform storage shape for all
+  four slots — `branding/<slot>/manifest.json` + `<id>.png`, the SAME "many assets stored,
+  one active" relationship `marks.json`/`load_branding()`'s own `mark` field already has —
+  instead of a bespoke single-file slot vs. a bespoke multi-file slot. New routes:
+  `POST /api/branding/slot` (upload, re-encoded through Pillow regardless of what the browser
+  sent), `POST /api/branding/slot/crop`, `POST /api/branding/slot/active`. `branding_slots_payload()`
+  is the one function both `/api/branding` and `/api/panel/summary` read through, so they can
+  never disagree about a slot's shape. Rotating-source selection (Banner-main's own "pick FROM
+  a collection" mechanic) is explicitly OUT of this pass — owner call: deferred until the
+  branding-folder transition and SQLite bundling land, so it has real asset ids to pick from
+  instead of a schema migration first.
+
+**Still open, disclosed:** nothing renders the actual slot-picker UI yet (Phase 2 — the 5-slot
+list, per-slot crop-guide preview, upload chips, "Moved in on unlock" strip, "Sealed"
+explainer are all still just the DC's own spec, not built). `banner_main`/`banner_login`
+write to this new storage, NOT to the real `branding/banner.png` / `branding/login-banner.png`
+flat files the header/login templates actually read — an upload through the new routes
+doesn't display anywhere in the app yet. See the near-miss entry below for why Mascots/Rewards
+specifically need a real design pass before anything auto-adopts into them.
+
+**Why.** Keeps the Branding-tab backlog item in the design-fidelity punch list (above,
+2026-08-04) pointing at real, dated, verifiable progress instead of going stale next to a
+struck checkbox with no explanation.
+
+### Branding tab gated behind the real `under-the-hood` achievement — owner decision  ·  *2026-08-05*
+
+Prior entries left this genuinely undecided: 2026-07-24's "Easter-egg PAYOFF is a separate
+decision from the trigger" explicitly recorded that *"there is no code gate that earning
+`under-the-hood` currently switches on... adding a real functional gate is a separate owner
+decision."* Asked directly this session; owner, verbatim: **"Must Gate - We want to get that
+groundwork done- Claude design did not have the specific code and gating info in context."**
+
+Implemented as a single derived boolean in `useControlPanel.js` (`brandingUnlocked`, read off
+`/api/achievements`' own real earned-state for the `under-the-hood` id — masked to a fake
+`hidden-feat-N` id until earned, per that route's own docstring, so "no real id present" IS
+the locked check, no separate flag needed) — gating the ✦ Branding tab button, its
+Maintenance-tab quick-tile, and mobile's Branding tile identically on both platforms. A
+`useEffect` forces `tab` back to `"maint"` if it's ever `"brand"` while locked, as insurance
+against a future second entry point reopening the gate, not because today's single entry
+point (the tab button) can actually reach it while hidden.
+
+**Why.** Closes the exact gap the 2026-07-24 entry named, on an explicit, dated owner
+instruction — not a default the code drifted into.
+
+### "Under the Hood": the real 2026-07-26 intended flow, finally built  ·  *2026-08-05*
+
+The 2026-07-26 "Under the Hood intended flow" entry above (fresh install ships empty nested
+slot folders + one README breadcrumb; a raw PNG/JPEG dropped into a slot folder gets adopted
+automatically; that adoption fires the achievement; the achievement unlocks the Branding tab)
+had never been built — grepped the whole codebase for any trace of the breadcrumb, the nested
+folder creation, or an auto-adopt mechanism; none existed. What shipped instead, and was
+gated behind (the entry above), was still the OLD, 2026-07-23-rejected mechanism
+(`list_marks()` non-empty). Owner, asked to confirm the flow was still current: **"YES God
+damn it. — The branding tab is UNLOCKED on the raw file drop to the branding folder. Upon
+discovering the ability and the achievement fires the user is given the interface to do it
+easily with a basic guide of whats available to brand."**
+
+Built:
+- `ensure_branding_discovery_tree()` — creates the empty nested slot folders (the 4
+  `BRANDING_SLOTS` + `marks/`) and the one breadcrumb (`branding/README.txt`, "Maybe
+  something goes in here.") at server startup. Idempotent and purely additive — never
+  touches a folder or file that already exists, so it's safe to call unconditionally on
+  every start regardless of what's already on disk.
+- `sweep_branding_drops()` — scans for a raw file that arrived by hand and isn't already a
+  known asset, re-encodes it through Pillow (`_adopt_dropped_file()` — PNG or JPEG in, real
+  PNG out), deletes the raw drop, writes the adopted copy, and fires
+  `telem_flag("branding_custom_file")` if anything was adopted. Runs on every
+  `/api/achievements`, `/api/branding`, and `/api/panel/summary` fetch — not gated to
+  `sweep_telemetry()`'s once-a-day cadence, since a real find deserves to pay off on the next
+  reload, not up to a day later.
+- The one structural constraint the whole design has to honor: the earn path can never route
+  through the Branding tab's own upload API, because that UI sits BEHIND the exact unlock it
+  would need to grant. Adoption has to work by scanning raw filesystem drops from outside the
+  app, which is exactly what the 2026-07-26 flow already specified.
+
+**Live-verified end to end against the real running server, not just pytest fixtures:**
+restarted it, confirmed the real discovery tree appeared on disk, dropped a real PNG straight
+into `branding/mascots/` from outside the app entirely (no API call), reloaded, and watched
+`under-the-hood` flip to earned and the Branding tab actually render — then confirmed the
+dropped file was consumed and replaced with the properly adopted asset.
+
+**Why.** The 2026-07-26 design was correct and detailed; it simply never got built, and the
+code that WAS gated behind (list_marks-non-empty) had already been explicitly rejected three
+days earlier for exactly the reasons this flow was designed to fix. Building the wrong trigger
+and gating a real UI behind it would have shipped a tab nobody could ever reasonably find.
+
+### Near-miss: the branding-drop sweep would have deleted real, already-shipped assets  ·  *2026-08-05*
+
+The first version of `sweep_branding_drops()` (previous entry) scanned all 4 `BRANDING_SLOTS`
+(`banner_main`/`banner_login`/`mascots`/`rewards`) plus `marks/`. It was built and tested
+entirely against isolated pytest tmp_paths and this machine's own `branding/` folder, which
+was empty before this session — so nothing caught that `mascots/` and `rewards/` are NOT
+empty user-customizable buckets in the real, already-shipped app. They already hold a family
+of specifically-named, role-bound files real code reads by exact filename: `gen_nel.png` (the
+narrator mascot, referenced from `FolioOverlay.jsx`, `SetupWizard.jsx`, the classic template,
+and more), `nel_carl.png`/`nel_micdrop.png` (Setup Wizard poses), `login_nel.png`/`.webp`,
+`nel_shutdown.png`/`nel_restart.png` (the Power modal), `claim.png` (the header claim icon),
+and a per-achievement `mascots/ach/<id>.png` chain with no fixed, grep-able list. `banner_main`
+and `banner_login` had the same class of miss, just non-destructively: the real header/login
+templates read flat files (`branding/banner.png`, `branding/login-banner.png`) that this
+system's new manifest-based storage never wrote to at all.
+
+Caught by the owner mid-session, not by any test — the full 1500+ test suite stayed green
+throughout, because nothing in it guarded those specific filenames. Owner: **"I think you
+reinvented the wheel a bit. the branding folder already exists... The entire tree is built in
+the code already... Please be sure to check these things in codebase before starting brand
+new backend work. some frameworks are in place."** Full audit (`grep` across both
+`moonglade_gallery.py` and `gallery/src/`) confirmed the real tree; nothing had actually been
+lost — this machine's `branding/` was empty before this session, every earlier test ran
+against isolated tmp_paths, and none of this had reached the home machine, where the real
+files live.
+
+**Fix, live-verified twice:** `sweep_branding_drops()` now only ever scans `_SWEEPABLE_SLOTS`
+(`banner_main`, `banner_login`) plus `marks/` — never `mascots`/`rewards`. Not a denylist of
+known filenames (already proven incomplete by the per-achievement chain); the two folders are
+excluded from the scan entirely until they get a real design. Verified in pytest
+(`test_sweep_never_touches_mascots_or_rewards`, a hard regression guard) AND live against the
+real server: planted files named exactly `gen_nel.png`/`claim.png` in the real `branding/`
+folder, hit all three trigger routes several times, confirmed both survived untouched under
+their own names.
+
+**Still open, needs a real product decision before Mascots/Rewards can be anything more than
+excluded:** the real `mascots/`/`rewards/` folders hold multiple SPECIFIC named roles at once
+(narrator, login companion, shutdown pose, restart pose, claim icon, per-achievement art) —
+not "many uploaded options, pick one active" the way `marks/` and the two banner slots work.
+Whatever Mascots/Rewards customization ends up meaning, it's very likely a checklist of named
+roles to individually override, not a generic upload gallery. Saved as a standing project
+memory (`moonglade-audit-existing-conventions-first`) so a future session greps for existing
+conventions before building new backend storage, not after.
+
+**Why.** The whole point of recording this in full, not just fixing it quietly: this is
+exactly the class of mistake `docs/architecture.md`'s Invariants section and this file both
+exist to prevent recurring — a plausible-looking new system that silently duplicates and then
+destroys an existing one, caught this time by the owner's own knowledge of the real tree, not
+by any test or review this session ran. The next session designing storage for anything under
+`branding/` should read this before writing a line of code.
