@@ -1479,16 +1479,24 @@ increment in this file works.
 - [x] Branding tile's mark glyphs don't set the mark in place — click just switches tabs.
       **SHIPPED 2026-08-04.**
 - [~] Skin cards drop the concrete unlock-requirement text (e.g. "Unlock: Hoardsmith (10,000
-      images)") — shows "🔒 locked" with no explanation. **CHECKED 2026-08-04, not fixable
-      honestly as scoped**: the design's unlock strings name specific achievements
-      (`Control Panel.dc.html:453-457`, e.g. "Hoardsmith (10,000 images)") that don't exist in
-      this app's real `ACHIEVEMENTS` list — grepped the whole file for any `"skin":` field on a
-      real achievement entry, zero matches. All 3 non-free skins (`moonlit`/`ember`/`verdant`)
-      are permanently locked with no real unlock path wired up at all right now. Adding the
-      design's specific achievement names would fabricate data this app doesn't have. Real fix
-      would be either wiring 3 real achievements to grant these skins (a scoping decision, not
-      a port) or showing an honest "not yet unlockable" state instead of the design's copy —
-      needs a decision, not a code fix.
+      images)") — shows "🔒 locked" with no explanation. ~~**CHECKED 2026-08-04, not fixable
+      honestly as scoped**: the design's unlock strings name specific achievements... that
+      don't exist in this app's real `ACHIEVEMENTS` list — grepped the whole file for any
+      `"skin":` field on a real achievement entry, zero matches.~~ **CORRECTED 2026-08-05: that
+      grep was wrong.** This codebase's dict literals use single quotes; `grep "'skin':"`
+      (not `"skin":"`) finds 3 real matches — `hoardsmith` (moonglade_gallery.py:872,
+      `metric:'images', threshold:10000`), `reel-director` (:939, `metric:'videos',
+      threshold:50`), `menagerie` (:1044, `metric:'models', threshold:25`) — and their
+      names/thresholds match `Control Panel.dc.html:453-457`'s unlock copy exactly. The
+      unlock mechanism is fully wired and live (`compute_achievements()` builds `earned_skins`
+      off these fields, `/api/skin` server-enforces it, both covered by
+      `tests/test_achievements.py`) — the skins are NOT "permanently locked with no real
+      unlock path." **Real gap is narrower than previously stated:** `SKINS`
+      (moonglade_gallery.py:1566) and the `/api/achievements` skins payload carry no `unlock`
+      string field, and `ControlPanelOverlay.jsx`'s `SkinsRow` (~line 578) renders only "🔒
+      locked" with no explanation — a copy/plumbing addition (thread an `unlock` string
+      through), not new achievement-wiring or an honesty tradeoff. No owner decision needed on
+      whether to fabricate data; the data is real.
 - [x] Power modal, split in two: restart's progress bar **SHIPPED 2026-08-04** (an
       indeterminate bar, the same real pattern the job console already uses — real ping-polling
       has no stage index to compute an honest percentage from, unlike the design's fake
@@ -4377,14 +4385,14 @@ real server: planted files named exactly `gen_nel.png`/`claim.png` in the real `
 folder, hit all three trigger routes several times, confirmed both survived untouched under
 their own names.
 
-**Still open, needs a real product decision before Mascots/Rewards can be anything more than
-excluded:** the real `mascots/`/`rewards/` folders hold multiple SPECIFIC named roles at once
-(narrator, login companion, shutdown pose, restart pose, claim icon, per-achievement art) —
-not "many uploaded options, pick one active" the way `marks/` and the two banner slots work.
-Whatever Mascots/Rewards customization ends up meaning, it's very likely a checklist of named
-roles to individually override, not a generic upload gallery. Saved as a standing project
-memory (`moonglade-audit-existing-conventions-first`) so a future session greps for existing
-conventions before building new backend storage, not after.
+**CLOSED, not open — see the 2026-08-05 correction entry below ("Mascots/Rewards permanently
+excluded from Branding").** ~~Still open, needs a real product decision before Mascots/Rewards
+can be anything more than excluded~~: the real `mascots/`/`rewards/` folders hold multiple
+SPECIFIC named roles at once (narrator, login companion, shutdown pose, restart pose, claim
+icon, per-achievement art) — not "many uploaded options, pick one active" the way `marks/` and
+the two banner slots work. Owner confirmed exclusion is permanent, not pending a design pass.
+Saved as a standing project memory (`moonglade-audit-existing-conventions-first`) so a future
+session greps for existing conventions before building new backend storage, not after.
 
 **Why.** The whole point of recording this in full, not just fixing it quietly: this is
 exactly the class of mistake `docs/architecture.md`'s Invariants section and this file both
@@ -4456,3 +4464,51 @@ gap in the code path itself.
 missing (a real gap, not a corner cut), why the cadence deliberately diverges from PixAI's own
 pattern, and exactly what still needs a manual step (copying the two art files) before this is
 visible anywhere but this machine.
+
+### Mascots/Rewards permanently excluded from Branding — owner correction, not a pending decision  ·  *2026-08-05*
+
+The entry above ("Still open, needs a real product decision before Mascots/Rewards can be
+anything more than excluded") framed this as open. Owner, reviewing the punch list directly:
+**"Mascots do not get included in branding - this was made clear."** This is a correction, not
+a new call: Mascots/Rewards do not get a slot-picker, upload flow, or any adoption path under
+the Branding tab, full stop — not "pending a design pass," not "likely a checklist of named
+roles," just excluded. `sweep_branding_drops()`'s existing exclusion of `mascots`/`rewards`
+(the near-miss fix, same date) already matches this; only the doc's framing of it as open was
+wrong.
+
+**Why.** Standing rule: verbatim owner words only, never a manufactured "still open" where the
+owner has already closed it. Leaving the prior framing in place risked a future session
+re-opening a design-pass conversation for something already decided.
+
+### Branding marks: real thumbnails restored — both React mark pickers were discarding real data  ·  *2026-08-06*
+
+Owner flagged the Branding tab's mark selection by screenshot — the "Icons & marks" list showed
+plain text rows (`mark_4`, `mark_12`, …) next to an identical generic ◆ glyph for every non-logo
+mark, and the Control Panel Hub tile's 5-glyph "Branding" summary row showed the same repeated
+generic glyph. Classic's own selector (`moonglade_gallery.py:11517-11521`) has always rendered
+real per-mark artwork and real names.
+
+**Root cause: not a backend gap.** `/api/panel/summary` already ships real `png`
+(`/branding/marks/<id>.png`) and `label` ("Void Sentinel," etc.) per mark via `list_marks()`
+(moonglade_gallery.py:1643) — classic reads exactly these two fields correctly. Both React
+call sites — the Hub tile's summary row (`ControlPanelOverlay.jsx:476-487`) and the Branding
+tab's full list (`:630-636`) — had the real `marks` array in hand and simply never read
+`m.png`/`m.label`, hardcoding `{m.id === "logo" ? "🌙" : "◈"}` and printing the raw internal
+id as the label instead.
+
+**Fixed:** both sites now render `<img src={m.png}>` (sized to the existing `.mgcp-mark`/
+`.mgcp-markglyph` glyph boxes, `object-fit: cover`, an 8px-equivalent inner radius only for
+`kind === "tile"` marks — mirrors classic's own `m.kind==='tile' ? 'border-radius:8px' : ''`
+exactly) with a fallback to the old emoji glyph if a mark ever ships with no `png`, and the
+label text now reads `m.label || m.id` instead of the bare id. `overflow: hidden` added to
+both glyph-container CSS rules (`control-panel.css:150-151`, `:174-175`) so the image clips to
+the existing rounded box. No backend or route change — the data was already correct and
+already flowing to the client.
+
+**Verified:** `npm run build` inside `gallery/` — clean build, no new errors (one pre-existing
+warning about `api.js`'s dynamic+static import, unrelated). Not yet live-verified in a browser
+against a real logged-in session — that needs the owner's own account, same tooling limit as
+every other React surface check this file already documents.
+
+**Why.** Two independent render sites had drifted from the real data shape the same way,
+independently — worth recording together since it's the same bug, not two.

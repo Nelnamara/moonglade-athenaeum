@@ -148,7 +148,8 @@ button.mgcp-smallchip { display: inline-flex; align-items: center; gap: 6px; bac
   font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; outline: none; }
 .mgcp-marks { display: flex; gap: 7px; margin-top: 8px; flex-wrap: wrap; }
 button.mgcp-mark { width: 32px; height: 32px; border-radius: 8px; background: var(--surface0);
-  display: grid; place-items: center; font-size: 15px; cursor: pointer; border: 1px solid var(--surface1); font-family: inherit; }
+  display: grid; place-items: center; font-size: 15px; cursor: pointer; border: 1px solid var(--surface1);
+  font-family: inherit; overflow: hidden; }
 button.mgcp-mark.on { border-color: var(--gold); }
 .mgcp-skinsrow { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 9px; }
 .mgcp-skincard { width: 140px; flex: none; border-radius: 11px; padding: 8px 10px 9px; display: flex;
@@ -172,7 +173,7 @@ button.mgcp-markrow { display: flex; align-items: center; gap: 10px; padding: 9p
   font-family: inherit; text-align: left; }
 button.mgcp-markrow.on { border-color: var(--surface1); background: var(--surface0); color: var(--text); font-weight: 600; }
 .mgcp-markglyph { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; font-size: 13px;
-  flex: none; background: var(--surface0); }
+  flex: none; background: var(--surface0); overflow: hidden; }
 button.mgcp-animrow { display: block; width: 100%; text-align: left; padding: 8px 11px; border-radius: 8px;
   font-size: 12.5px; cursor: pointer; border: 1px solid var(--surface1); background: transparent; color: var(--subtext);
   font-family: inherit; margin-top: 6px; }
