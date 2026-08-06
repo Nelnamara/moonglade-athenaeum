@@ -591,6 +591,7 @@ export function SkinsRow({ skins, active, onPick }) {
               <div className="mgcp-skinname">{sk.name}{on ? " ✓" : ""}</div>
               <div className="mgcp-skindesc">{sk.desc}</div>
               {!sk.earned && <div className="mgcp-skinlock">🔒 locked</div>}
+              {!sk.earned && sk.unlock && <div className="mgcp-skinunlock">{sk.unlock}</div>}
             </div>
           );
         })}
@@ -976,7 +977,7 @@ export function PowerModal({ mode, phase, error, onClose }) {
   // keep showing "jobs drain first" right next to the refusal text, reading as though a
   // restart already refused outright was still somehow in progress).
   const line = failed ? "" : mode === "stop"
-      ? (done ? "Server stopped — safe to close this tab." : "The web interface goes offline until you relaunch it.")
+      ? (done ? "Server stopped. There's no restart-from-here — close this tab or window to finish." : "The web interface goes offline until you relaunch it.")
       : (done ? "Reconnected." : "It goes offline for a few seconds, then this page reconnects automatically.");
 
   return (
@@ -1015,7 +1016,13 @@ export function PowerModal({ mode, phase, error, onClose }) {
             )
           ) : (
             done ? (
-              <button type="button" className="mgcp-pwr-primary" onClick={onClose}>Close</button>
+              // window.close() only succeeds on a tab/window the page itself opened via
+              // script; a normally-navigated tab silently ignores it (browser security,
+              // not a bug here). onClose is kept as a fallback so the button still does
+              // *something* -- it dismisses back to the (now server-less) Panel -- rather
+              // than looking dead if the close is blocked.
+              <button type="button" className="mgcp-pwr-primary"
+                onClick={() => { window.close(); onClose(); }}>Close this tab</button>
             ) : (
               <div className="mgcp-pwr-hint">this tab can be closed — the archive sleeps until the server returns</div>
             )

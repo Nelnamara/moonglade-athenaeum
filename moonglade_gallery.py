@@ -1577,6 +1577,15 @@ SKINS = [
 ]
 _SKIN_IDS = {s["id"] for s in SKINS}
 
+# Real unlock text per locked skin, matching Control Panel.dc.html:453-457 exactly --
+# each name/threshold names the real achievement that actually grants it (hoardsmith/
+# reel-director/menagerie, see their 'skin' field above). Free skins carry no entry.
+_SKIN_UNLOCK_TEXT = {
+    "moonlit": "Unlock: Hoardsmith (10,000 images)",
+    "ember":   "Unlock: Reel Director (50 videos)",
+    "verdant": "Unlock: Menagerie (25 distinct models)",
+}
+
 # The 10 Evolution Ladder tracks each ladder achievement's 'track' field points at
 # (see ACHIEVEMENTS' 'track'/'rung'/'rungs_total' fields, sourced from
 # docs/achievements_roster_57.json's roster.tracks). Single source of truth for
@@ -2195,7 +2204,8 @@ def compute_achievements(metrics, seen=(), sets=None):
         comp["current"] = 1 if done == len(pool) else 0
         comp["earned"] = done == len(pool)
     skins = [{"id": s["id"], "name": s["name"], "desc": s["desc"],
-              "earned": bool(s.get("free")) or s["id"] in earned_skins}
+              "earned": bool(s.get("free")) or s["id"] in earned_skins,
+              "unlock": _SKIN_UNLOCK_TEXT.get(s["id"])}
              for s in SKINS]
     newly = [a["id"] for a in achs if a["earned"] and a["id"] not in seen]
     earned_points = sum(x["points"] for x in achs if x["earned"])

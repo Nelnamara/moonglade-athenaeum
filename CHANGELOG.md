@@ -60,6 +60,16 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Locked skin cards showed only "🔒 locked" with no explanation of how to unlock them.**
+  The design names the exact achievement + threshold for each (`Control Panel.dc.html:453-457`)
+  and all three achievements already grant their skin correctly — the gap was purely a missing
+  `unlock` text field. Added; renders under the lock line on each locked card.
+- **Power modal's "Close" button on a stopped server dismissed the modal but didn't actually
+  close anything** — the server is dead at that point, so returning to the (now non-functional)
+  Panel behind it was a dead end. Button now attempts `window.close()` first, with a code
+  comment flagging the real browser limit (only tabs opened via script can be closed by script;
+  a normally-navigated tab silently ignores the call). Copy also updated to state plainly that
+  there's no restart-from-here.
 - **Branding tab mark pickers showed a generic glyph and the raw internal id instead of real
   per-mark artwork and names**, on both the Control Panel Hub tile's summary row and the full
   "Icons & marks" list. The real thumbnail (`m.png`) and display name (`m.label`) were already
