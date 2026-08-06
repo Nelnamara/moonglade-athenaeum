@@ -17,6 +17,14 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **Control Panel Branding tab — Phase 2 slot-picker UI for Banner-main/Banner-login.**
+  Upload from disk, cycle crop position (left/center/right), and pick which uploaded asset
+  is active, all against the Phase 1 backend routes shipped 2026-08-05. Scoped to just the
+  2 banner slots — Mascots/Rewards are permanently out of scope, and Icons & marks keeps its
+  own existing picker rather than being folded into this. **Disclosed, still open:** "From
+  the gallery…" and rotating-source aren't built, and the active banner doesn't display
+  anywhere yet — the header/login page still read the old flat `banner.png`/`login-banner.png`
+  files directly, which this picker doesn't write to. Full account in `docs/DECISIONS.md`.
 - **The daily-credit claim UI, ported to `/next` for the first time.** Classic's `#acct-claim`
   pill (instant-claim, hidden until something's ready) never reached the React front door —
   the backend (`POST /api/claim`, `/api/account`'s `claim_credits`) was already fully shared
