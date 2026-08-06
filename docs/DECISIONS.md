@@ -1478,8 +1478,12 @@ increment in this file works.
       separate, smaller, not done in this pass.
 - [x] Branding tile's mark glyphs don't set the mark in place — click just switches tabs.
       **SHIPPED 2026-08-04.**
-- [~] Skin cards drop the concrete unlock-requirement text (e.g. "Unlock: Hoardsmith (10,000
-      images)") — shows "🔒 locked" with no explanation. ~~**CHECKED 2026-08-04, not fixable
+- [x] Skin cards drop the concrete unlock-requirement text (e.g. "Unlock: Hoardsmith (10,000
+      images)") — shows "🔒 locked" with no explanation. **SHIPPED 2026-08-06** — a static
+      `_SKIN_UNLOCK_TEXT` map (moonglade_gallery.py:1580-1585) threaded into the skins payload
+      as `unlock` (:2206-2208), rendered in `SkinsRow` right under the lock line
+      (`ControlPanelOverlay.jsx:593-594`, new `.mgcp-skinunlock` class). `npm run build` clean,
+      `pytest tests/test_achievements.py` 11/11 green. ~~**CHECKED 2026-08-04, not fixable
       honestly as scoped**: the design's unlock strings name specific achievements... that
       don't exist in this app's real `ACHIEVEMENTS` list — grepped the whole file for any
       `"skin":` field on a real achievement entry, zero matches.~~ **CORRECTED 2026-08-05: that
@@ -1609,8 +1613,13 @@ increment in this file works.
 
 **Folio of Honors (desktop)** — `FolioOverlay.jsx` vs `Folio of Honors.dc.html`. Mobile
 (`FolioMobile.jsx`) already builds both of these correctly for the same feature — port.
-- [ ] "All" tab's featured tier carousel (plinth/prev-next/pips) entirely missing on desktop
-- [ ] "Every rung, every ladder" cross-ladder section entirely missing on desktop
+- [x] "All" tab's featured tier carousel (plinth/prev-next/pips) entirely missing on desktop.
+      **SHIPPED same day, commit `fbce1d9` (2026-08-04 21:45), just hours after this audit was
+      written — never struck here.** Real build: `FolioOverlay.jsx:380-435` (`.mgfo-plinth-*`),
+      matching `Folio of Honors.dc.html:219-271` per the code's own header comment at :168.
+- [x] "Every rung, every ladder" cross-ladder section entirely missing on desktop. **Same
+      commit, same miss.** Real build: `FolioOverlay.jsx:479-497` — literal heading text
+      `<b>Every rung, every ladder</b>` at :479, looping every ladder's `CardGrid` at :496.
 
 **Image Details (desktop)** — `DetailsView.jsx` vs `Image Details.dc.html`. Mobile
 (`ImageDetailsMobile.jsx`) already has all four of these correctly — port the pattern.

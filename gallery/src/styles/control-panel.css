@@ -161,6 +161,7 @@ button.mgcp-mark.on { border-color: var(--gold); }
 .mgcp-skinname { font-size: 12px; font-weight: 700; color: var(--text); }
 .mgcp-skindesc { font-size: 10px; line-height: 1.4; color: var(--subtext); }
 .mgcp-skinlock { font-size: 9.5px; color: var(--gold); }
+.mgcp-skinunlock { font-size: 9.5px; color: var(--subtext); margin-top: 2px; }
 
 .mgcp-brandgrid { display: grid; grid-template-columns: 280px 1fr; border: 1px solid var(--surface1);
   border-radius: 14px; overflow: hidden; background: var(--mantle); }
