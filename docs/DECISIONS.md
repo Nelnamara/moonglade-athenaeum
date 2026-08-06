@@ -1455,12 +1455,21 @@ increment in this file works.
       item, may need its own scoping pass rather than a quick port. **Phase 1 backend
       groundwork SHIPPED 2026-08-05** (4-slot storage, upload/crop/active routes, real
       achievement gating) — see the dated entries below starting "Control Panel Branding:
-      Phase 1 backend groundwork." **Still open:** the actual slot-picker UI (Phase 2,
-      nothing renders it yet), and `banner_main`/`banner_login` don't yet write to the real
-      `branding/banner.png`/`login-banner.png` paths the header/login templates read —
-      uploads through the new routes don't display anywhere yet. Rotating-source stays
-      deferred until the SQLite bundle work (owner call). Mascots/Rewards need a real design
-      pass before any upload/adoption touches them at all — see the near-miss entry below.
+      Phase 1 backend groundwork." **Phase 2 slot-picker UI SHIPPED 2026-08-06**, scoped
+      to `banner_main`/`banner_login` only (Mascots/Rewards permanently excluded, marks
+      already has its own working picker — see the owner correction above and the
+      AskUserQuestion in-session before this was built: added alongside the existing layout,
+      not a rebuild of the whole tab into the design's literal single-sidebar SLOTS paradigm).
+      New `BannerSlotCard` component (`ControlPanelOverlay.jsx`), reusing the Phase 1 routes
+      verbatim — upload (`⬆ From disk`), crop cycling (`✂ Size & crop · subject-{left/center/
+      right}`, math copied from `Control Panel.dc.html:664-665`), and a thumbnail strip to
+      pick the active asset when more than one is uploaded. `npm run build` clean,
+      `pytest tests/test_branding.py` 28/28 green. **Still open, disclosed in the tab's own
+      copy:** "From the gallery…" and the rotating-source chip aren't built; `banner_main`/
+      `banner_login` still don't write to the real `branding/banner.png`/`login-banner.png`
+      flat files the header/login templates actually read, so an uploaded/active banner
+      doesn't display anywhere in the app yet — that write-through is the next real decision
+      to scope. Rotating-source stays deferred until the SQLite bundle work (owner call).
 - [ ] No job run-history/ledger anywhere (desktop: zero; mobile: a toggle with only a disclosure
       sentence behind it) — Sync's "last run/rc/auto-schedule" line and Check rows' last-run
       timestamps both dropped too

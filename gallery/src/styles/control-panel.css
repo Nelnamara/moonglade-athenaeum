@@ -181,6 +181,36 @@ button.mgcp-animrow { display: block; width: 100%; text-align: left; padding: 8p
 button.mgcp-animrow.on { border-color: var(--accent); color: var(--text); background: rgba(182,146,230,.1); }
 .mgcp-shortcutbtn { margin-top: 14px; }
 
+/* ---- Banner slot cards -- Control Panel.dc.html:291-315's slot editor, scoped to just
+   banner_main/banner_login (mascots/rewards permanently excluded, marks already has its
+   own picker above). Crop-guide math (left/center/right) copied verbatim from
+   Control Panel.dc.html:664-665's cropGuideStyle. ---- */
+.mgcp-slotcards { display: flex; flex-direction: column; gap: 16px; margin-top: 10px; }
+.mgcp-slotcard { display: flex; flex-direction: column; gap: 9px; }
+.mgcp-slotcard-head { display: flex; align-items: baseline; gap: 10px; }
+.mgcp-slotcard-title { font-family: Georgia, serif; font-style: italic; font-size: 14px; color: var(--text); }
+.mgcp-slotcard-spec { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--gold); letter-spacing: .05em; }
+.mgcp-slotcard-prev { position: relative; border: 1px solid var(--surface1); border-radius: 12px;
+  background: var(--mantle); overflow: hidden; aspect-ratio: 4 / 1; max-width: 640px; }
+.mgcp-slotcard-prev img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.mgcp-slotcard-ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  text-align: center; padding: 0 18px; font-size: 11px; color: var(--overlay0); }
+.mgcp-slotcard-cropguide { position: absolute; top: 12px; bottom: 12px; border: 1.5px dashed rgba(212,175,55,.55);
+  border-radius: 6px; pointer-events: none; transition: left .3s cubic-bezier(.2,.9,.24,1), right .3s cubic-bezier(.2,.9,.24,1); }
+.mgcp-slotcard-cropguide.left { left: 12px; right: 38%; }
+.mgcp-slotcard-cropguide.center { left: 12px; right: 12px; }
+.mgcp-slotcard-cropguide.right { left: 38%; right: 12px; }
+.mgcp-slotcard-cropguide i { position: absolute; width: 9px; height: 9px; background: var(--gold); border-radius: 2px; }
+.mgcp-slotcard-cropguide i.tl { left: -5px; top: -5px; } .mgcp-slotcard-cropguide i.tr { right: -5px; top: -5px; }
+.mgcp-slotcard-cropguide i.bl { left: -5px; bottom: -5px; } .mgcp-slotcard-cropguide i.br { right: -5px; bottom: -5px; }
+.mgcp-slotcard-chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.mgcp-slotcard-uploadchip { cursor: pointer; }
+.mgcp-slotcard-thumbs { display: flex; gap: 6px; flex-wrap: wrap; }
+button.mgcp-slotcard-thumb { width: 48px; height: 30px; border-radius: 6px; overflow: hidden; padding: 0;
+  border: 1px solid var(--surface1); background: var(--surface0); cursor: pointer; }
+button.mgcp-slotcard-thumb.on { border-color: var(--gold); }
+.mgcp-slotcard-thumb img { width: 100%; height: 100%; object-fit: cover; }
+
 /* ---- Users / Trash sub-overlays: a modal ON TOP of the Panel's own modal, matching the
    DC's own z-index intent (siblings at 40/41 to the whole page, here nested one z-band
    higher than the Panel's own scrim/host so they visibly stack). ---- */

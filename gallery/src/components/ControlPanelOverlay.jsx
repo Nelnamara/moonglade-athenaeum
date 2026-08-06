@@ -601,6 +601,97 @@ export function SkinsRow({ skins, active, onPick }) {
   );
 }
 
+// One Banner slot (banner_main / banner_login) -- Control Panel.dc.html's slot editor
+// (lines 291-315), scoped to just these 2 real slots (mascots/rewards are permanently
+// excluded from Branding, 2026-08-05 owner correction; Icons & marks already has its own
+// working picker above and isn't refit into this pattern). Reuses the Phase 1 backend
+// routes shipped 2026-08-05 (add_slot_asset/set_slot_crop/set_slot_active) verbatim --
+// no backend change in this pass. "From the gallery…" and the rotating-source chip are
+// deliberately not built here (the former needs wiring into PickerHost, the latter is an
+// owner-deferred feature pending the SQLite-bundle work) -- disclosed below, not silently
+// dropped.
+function BannerSlotCard({ slot, title, spec, ph, data, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const assets = data.assets || [];
+  const active = assets.find((a) => a.id === data.active) || assets[0] || null;
+  const cropCls = active ? (active.crop || "center") : "center";
+
+  const upload = async (file) => {
+    if (!file) return;
+    setBusy(true); setMsg("");
+    const fd = new FormData();
+    fd.append("slot", slot);
+    fd.append("file", file);
+    const r = await fetch("/api/branding/slot", { method: "POST", body: fd });
+    const d = await r.json();
+    setBusy(false);
+    if (d.error) { setMsg("⚠ " + d.error); return; }
+    onChanged();
+  };
+  const cycleCrop = async () => {
+    if (!active) return;
+    const order = ["left", "center", "right"];
+    const next = order[(order.indexOf(active.crop || "center") + 1) % order.length];
+    setBusy(true); setMsg("");
+    const d = await postJSON("/api/branding/slot/crop", { slot, id: active.id, crop: next });
+    setBusy(false);
+    if (d.error) { setMsg("⚠ " + d.error); return; }
+    onChanged();
+  };
+  const pick = async (id) => {
+    setBusy(true); setMsg("");
+    const d = await postJSON("/api/branding/slot/active", { slot, id });
+    setBusy(false);
+    if (d.error) { setMsg("⚠ " + d.error); return; }
+    onChanged();
+  };
+
+  return (
+    <div className="mgcp-slotcard">
+      <div className="mgcp-slotcard-head">
+        <span className="mgcp-slotcard-title">{title}</span>
+        <span className="mgcp-slotcard-spec">{spec}</span>
+      </div>
+      <div className="mgcp-slotcard-prev">
+        {active
+          ? <img src={active.png} alt="" />
+          : <span className="mgcp-slotcard-ph">{ph}</span>}
+        {active && (
+          <div className={"mgcp-slotcard-cropguide " + cropCls}>
+            <i className="tl" /><i className="tr" /><i className="bl" /><i className="br" />
+          </div>
+        )}
+      </div>
+      <div className="mgcp-slotcard-chips">
+        <label className="mgcp-chip mgcp-slotcard-uploadchip">
+          ⬆ From disk
+          <input type="file" accept="image/*" disabled={busy} style={{ display: "none" }}
+            onChange={(e) => { upload(e.target.files[0]); e.target.value = ""; }} />
+        </label>
+        {active && (
+          <button type="button" className="mgcp-chip" disabled={busy} onClick={cycleCrop}>
+            ✂ Size &amp; crop · subject-{cropCls}
+          </button>
+        )}
+      </div>
+      {assets.length > 1 && (
+        <div className="mgcp-slotcard-thumbs">
+          {assets.map((a) => (
+            <button type="button" key={a.id}
+              className={"mgcp-slotcard-thumb" + (a.id === data.active ? " on" : "")}
+              onClick={() => pick(a.id)} disabled={busy}
+              title={a.id === data.active ? "active" : "Set active"}>
+              <img src={a.png} alt="" />
+            </button>
+          ))}
+        </div>
+      )}
+      {msg && <div className="mgcp-tilenote" style={{ marginTop: 4 }}>{msg}</div>}
+    </div>
+  );
+}
+
 export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPickSkin }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -664,9 +755,25 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
         <div className="mgcp-sidehead" style={{ margin: 0 }}>Skins</div>
         <div className="mgcp-tilesmall">Cosmetic palette swaps for the whole suite — unlock more by earning achievements.</div>
         {skins.length > 0 && <SkinsRow skins={skins} active={activeSkin} onPick={onPickSkin} />}
+
+        <div className="mgcp-sidehead" style={{ margin: "18px 0 0" }}>Banners</div>
+        <div className="mgcp-slotcards">
+          <BannerSlotCard slot="banner_main" title="Banner — main"
+            spec="1920 × 480 · 4:1 · subject-left" ph="your banner art — cropped live, subject-left honored"
+            data={(summary.branding.slots || {}).banner_main || { assets: [], active: null }}
+            onChanged={onSaved} />
+          <BannerSlotCard slot="banner_login" title="Banner — login"
+            spec="1920 × 480 · 4:1" ph="the login banner — same canvas, quieter mood"
+            data={(summary.branding.slots || {}).banner_login || { assets: [], active: null }}
+            onChanged={onSaved} />
+        </div>
+
         <div style={{ fontSize: 11.5, color: "var(--overlay0)", lineHeight: 1.6, marginTop: 8 }}>
-          Banner, mascot, and reward-art slots aren't wired up yet — only the icon/mark and
-          animation you're setting here, and the skin palette, are live.
+          Uploading and picking a crop here is real and saved. <b style={{ color: "var(--subtext)" }}>Still not
+          wired:</b> the active banner doesn't display anywhere yet — the header and login page still
+          read the older flat <code>branding/banner.png</code>/<code>login-banner.png</code> files
+          directly, and this picker doesn't write to those yet. "From the gallery…" and a rotating
+          source aren't built. Mascot and reward-art slots are permanently out of scope for this tab.
         </div>
       </div>
     </div>
