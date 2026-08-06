@@ -60,6 +60,13 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Branding tab mark pickers showed a generic glyph and the raw internal id instead of real
+  per-mark artwork and names**, on both the Control Panel Hub tile's summary row and the full
+  "Icons & marks" list. The real thumbnail (`m.png`) and display name (`m.label`) were already
+  in every API response — `/api/panel/summary` via `list_marks()` — both React render sites
+  just never read them, hardcoding a static ◆/🌙 glyph and the bare id instead. Classic's own
+  selector always rendered this correctly. Fixed at both sites; full account in
+  `docs/DECISIONS.md`.
 - **Control Panel's Trash tile showed a hardcoded "—" instead of a real count**, on both
   platforms — nothing had ever fetched one. `/api/panel/summary` now carries a real
   `trash_count`.

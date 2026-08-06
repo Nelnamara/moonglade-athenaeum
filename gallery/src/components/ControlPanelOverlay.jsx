@@ -477,14 +477,20 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                             <button type="button" key={m.id}
                               className={"mgcp-mark" + (m.id === summary.branding.mark ? " on" : "")}
                               disabled={markBusy}
-                              title={m.id === summary.branding.mark ? m.id + " (active)" : "Set " + m.id}
+                              title={(m.label || m.id) + (m.id === summary.branding.mark ? " (active)" : "")}
                               onClick={async () => {
                                 if (m.id === summary.branding.mark) return;
                                 setMarkBusy(true);
                                 await postJSON("/api/branding", { mark: m.id });
                                 setMarkBusy(false);
                                 fetchSummary();
-                              }}>{m.id === "logo" ? "🌙" : "◈"}</button>
+                              }}>
+                              {m.png
+                                ? <img src={m.png} alt=""
+                                    style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: m.kind === "tile" ? 6 : 0 }}
+                                    onError={(e) => e.currentTarget.remove()} />
+                                : (m.id === "logo" ? "🌙" : "◈")}
+                            </button>
                           ))}
                         </div>
                         <div className="mgcp-tilenote">
@@ -630,8 +636,14 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
           {marks.map((m) => (
             <button type="button" key={m.id}
               className={"mgcp-markrow" + (m.id === summary.branding.mark ? " on" : "")}
-              onClick={() => pickMark(m.id)} disabled={busy}>
-              <span className="mgcp-markglyph">{m.id === "logo" ? "🌙" : "◈"}</span>{m.id}
+              onClick={() => pickMark(m.id)} disabled={busy} title={m.label || m.id}>
+              <span className="mgcp-markglyph">
+                {m.png
+                  ? <img src={m.png} alt=""
+                      style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: m.kind === "tile" ? 6 : 0 }}
+                      onError={(e) => e.currentTarget.remove()} />
+                  : (m.id === "logo" ? "🌙" : "◈")}
+              </span>{m.label || m.id}
             </button>
           ))}
         </div>
