@@ -5212,6 +5212,20 @@ def create_app(out_dir: Path):
             _log.warning("live mirror: catch-up after %s failed: %s: %s",
                          reason, type(e).__name__, _redact_host_paths(str(e))[:200])
 
+    def _periodic_catchup():
+        """Backstop for _watch_catchup's other two triggers (startup, reconnect), both of
+        which fire off a WS lifecycle event -- so a connection that stays nominally
+        "subscribed" for a long stretch never gets a fresh sweep. Found live: PixAI's
+        personalEvents push simply did not fire for an app-submitted generation (a
+        website-submitted one, same session, did) -- no error, no disconnect, nothing to
+        react to, so reconnect-triggered catch-up alone left it undiscovered. This loop
+        just calls the same rate-limited, bounded _watch_catchup on a fixed clock, so
+        discovery never depends entirely on the socket's own reconnect cadence."""
+        import time as _time
+        while True:
+            _time.sleep(WATCH_CATCHUP_MIN_GAP)
+            _watch_catchup("periodic")
+
     def _watch_loop():
         import asyncio
         import logging as _logging
@@ -5233,6 +5247,7 @@ def create_app(out_dir: Path):
         # The app was closed until now, so by definition the mirror saw nothing in that window.
         # Off-thread: this does network I/O and must not delay the first subscribe.
         threading.Thread(target=_watch_catchup, args=("startup",), daemon=True).start()
+        threading.Thread(target=_periodic_catchup, daemon=True).start()
         backoff = 5
         while True:
             try:
