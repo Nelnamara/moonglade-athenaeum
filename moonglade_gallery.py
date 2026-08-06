@@ -5058,8 +5058,17 @@ def create_app(out_dir: Path):
         would overwrite a perfectly good done+media_ids event in read_jobs()'s
         last-event-wins merge. The authoritative failure writers stay /api/task-status and
         the orphan sweep; a mirror problem is recorded where it belongs, in
-        _watch_status['last_error'] (surfaced by /api/watch/status and the Panel)."""
+        _watch_status['last_error'] (surfaced by /api/watch/status and the Panel) --
+        and ALSO in the persistent log (added 2026-08-05): last_error alone is
+        in-memory-only, gone on restart and invisible to anyone reading moonglade.log
+        after the fact. Found live: a task stuck failing every catch-up sweep for
+        hours produced nothing but repeated "N finished task(s) were never mirrored"
+        warnings in the log -- true, but silent about WHY, because the actual
+        exception only ever reached last_error. A restart cleared the symptom (fresh
+        process, fresh attempt) without anyone learning the cause."""
+        import logging as _logging
         import moonglade_backup as core
+        _log = _logging.getLogger(__name__)
         try:
             session = core._make_session(None)
             got = _collect_single_flight(core, session, tid)
@@ -5068,6 +5077,8 @@ def create_app(out_dir: Path):
         except Exception as e:
             with _watch_lock:
                 _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
+            _log.warning("live mirror: failed to mirror task %s: %s: %s",
+                         tid, type(e).__name__, _redact_host_paths(str(e))[:200])
             return
         # Outside the except above ON PURPOSE: _log_mirrored_media swallows its own
         # failures, and keeping it out of that handler makes it structurally impossible for
