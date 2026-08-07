@@ -14,6 +14,7 @@ git tags. Full prose notes for tagged versions live on
 > does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- Train panel: the Category dropdown now carries PixAI's real nine LoRA categories (character, animal, style, realistic, pose, clothing, background, detail, other), replacing the design mockup's placeholder three.
 - Train panel: Model Type (DiT.2/DiT.1/SDXL/SD 1.5) and Model Theme now use PixAI's real trainable-model list — real names and covers, themes filtered by the selected architecture, and the correct model-version id sent on submit.
 - Train a LoRA: pick a dataset from your recent generations, name it, set trigger words/category/base model, and submit a real PixAI training. Shows how many free trainings you have left, and refuses to spend credits without an explicit extra confirmation.
 - Publish panel: the inline image strip, ✦ suggest-a-title (PixAI's own image-to-prompt, free) and the live tag dropdown are all built as designed.

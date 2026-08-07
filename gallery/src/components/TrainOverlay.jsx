@@ -28,7 +28,14 @@ import useScrollLock from "../hooks/useScrollLock.js";
    app CANNOT quote the amount; the server refuses that submit unless the extra
    accept-cost acknowledgment is sent, and this panel makes you tick it deliberately. */
 
-const CATEGORIES = [["character", "Character"], ["style", "Style"], ["concept", "Concept"]];
+// PixAI's real LoRA categories + their display labels, probed live off the train-lora
+// page 2026-08-06 (the design's character/style/concept was placeholder). "detail"
+// shows as "Detail Enhancement", matching the site.
+const CATEGORIES = [
+  ["character", "Character"], ["animal", "Animal"], ["style", "Style"],
+  ["realistic", "Realistic"], ["pose", "Pose"], ["clothing", "Clothing"],
+  ["background", "Background"], ["detail", "Detail Enhancement"], ["other", "Other"],
+];
 const MIN_IMAGES = 10;
 const MAX_IMAGES = 100;
 

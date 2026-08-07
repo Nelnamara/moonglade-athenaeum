@@ -5175,3 +5175,20 @@ DiT.2 -> Tsubaki.2, DiT.1 -> Tsubaki/Serin/Tsubaki Flash/Tsubaki v1.1, SDXL -> t
 bases, SD 1.5 -> its models -- all real names with covers; switching Type swaps the grid;
 a real version_id (1983308862240288769) flows through preview and validates. Nothing
 submitted; quota still 9.
+
+### Train categories — the real nine, probed live off PixAI's own page  ·  *2026-08-06*
+
+The design mockup's Category = character/style/concept was PLACEHOLDER, and the harvest
+didn't inline the real list (it loads from an i18n-keyed prop). Owner: "The category set
+has to be there. we should just do a quick probe of the actual page with the menus in
+play." Did exactly that -- read the live train-lora page's own category select
+(read-only, menu open): the real set is NINE, and "concept" isn't one of them:
+
+  character · animal · style · realistic · pose · clothing · background · detail · other
+
+Labels are PixAI's own (detail shows as "Detail Enhancement"). Updated the validator
+(`TRAIN_CATEGORIES`) and the panel select to match. Verified live: the panel renders all
+nine with the site's exact labels; `category=detail` previews clean; the old placeholder
+`category=concept` is now correctly rejected 400. Lesson banked: when the design carries a
+data list the harvest doesn't inline, probe the live page rather than shipping the mock's
+placeholder.
