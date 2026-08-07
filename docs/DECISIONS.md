@@ -5231,3 +5231,34 @@ Verified live: Model Type shows DiT.2/DiT.1/SDXL/SD 1.5; SDXL lists Illustrious-
 NoobAI XL, Hinata v2, Illustrious-v0.1 ... (exact match to the site, 15/15 covers loaded);
 prices flow through; a real version_id validates through preview. Nothing submitted;
 quota still 9.
+
+### Corrections + scoping pass — Browse-from-disk, Under-the-Hood, mobile handoff  ·  *2026-08-06*
+
+Two "waiting on owner" items were wrong and are corrected:
+
+- **Publish "Browse from disk" is NOT captcha-blocked.** Earlier I called it blocked by
+  Turnstile. Re-read the harvested submit code: `z(e,r){const t={}; return r &&
+  (t["X-Turnstile-Token"]=r), S.artwork.createFromMedia(e,{headers:t})}` -- the token
+  header is added ONLY when a token exists, and createFromMedia is called with or without
+  it. Turnstile is a best-effort anti-abuse signal, not a hard gate. So Browse-from-disk
+  is buildable via our API path (uploadMedia / the existing free `/api/upload` -> a
+  media_id -> upsertArtwork with that mediaId). Owner confirmed they see no captcha on the
+  site. Moved from "blocked, owner's call" to buildable.
+
+- **Under-the-Hood trigger is already DECIDED + LIVE, not an open question.** The old
+  "three scoped options, needs owner go" is stale. It's the shipped `under-the-hood` feat
+  (metric `branding_custom_file`, threshold 1): drop your own mark file into the branding
+  folder and it earns, which unlocks the Branding tab (`brandingUnlocked`). Removed from
+  the pending list.
+
+Still genuinely waiting on the owner: the **mascot/system-art pick-list** -- which of the
+~14 SYSTEM roles (narrator, login companion, spinners, status poses, claim/gift icons,
+easter-egg set -- NOT achievement art) become user-customizable behind Under-the-Hood.
+
+Mobile parity: created `design_handoff/FOR_CLAUDE_DESIGN_mobile-2026-08-06.md` (gitignored)
+flagging three design-blocked mobile surfaces -- My Art (full redesign to the new tabbed
+card gallery, incl. the missing post thumbnail), Publish, and Train -- all live on desktop
+but stuck on old/absent mobile designs.
+
+LINEAGE re-scoped as buildable (see the Image Details punch item above): batch siblings
+via task_id (free today) + a derivation chain via a new source_media_id column.
