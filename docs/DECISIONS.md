@@ -4536,7 +4536,7 @@ independently — worth recording together since it's the same bug, not two.
 
 ### Two render-harness tests silently broken by earlier shipped features — root-caused and fixed  ·  *2026-08-06*
 
-`tests/test_render_harness.py` had 2 of 15 tests failing. Both **verified pre-existing**
+`tests/test_render_harness.py` had 2 of its tests failing. Both **verified pre-existing**
 (identical failures reproduced in a clean worktree of `867ba9a`, the commit before this
 session's work) — each broken by a legitimately-shipped earlier feature whose author never
 re-ran this harness:
