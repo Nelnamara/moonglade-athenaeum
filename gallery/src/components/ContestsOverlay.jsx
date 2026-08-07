@@ -63,23 +63,27 @@ export default function ContestsOverlay({ onClose }) {
               {featured && (
                 <>
                   <div className="mgct-h official">☀ Official <span className="n">{fmt(official.length)}</span></div>
+                  {/* Gallery-era correction (handoff-2026-08-06 §5): one FULL-WIDTH 3:1
+                      banner, title/pills/dates OVERLAID along the bottom over a gradient
+                      scrim -- no separate body block below the image anymore. */}
                   <button type="button" className="mgct-official" onClick={() => openContest(featured)}>
-                    <div className="mgct-cover">
+                    <div className="mgct-cover official">
                       {featured.cover_url ? <img src={featured.cover_url} alt="" /> : null}
-                    </div>
-                    <div className="mgct-body">
-                      <div className="mgct-title">{featured.title}</div>
-                      <div className="mgct-tags">
-                        {featured.prize_amount > 0 && (
-                          <span className="mgct-prize">♦ {fmt(featured.prize_amount)} CR</span>
-                        )}
-                        {featured.vote_type ? (
-                          <span className={"mgct-votepick" + (featured.vote_type === "user_vote" ? " user" : "")}>
-                            {featured.vote_type === "user_vote" ? "USER VOTE" : "CREATOR PICK"}
-                          </span>
-                        ) : null}
+                      <div className="mgct-scrim" />
+                      <div className="mgct-overlaid">
+                        <div className="mgct-title big">{featured.title}</div>
+                        <div className="mgct-tags">
+                          {featured.prize_amount > 0 && (
+                            <span className="mgct-prize strong">♦ {fmt(featured.prize_amount)} CR</span>
+                          )}
+                          {featured.vote_type ? (
+                            <span className={"mgct-votepick" + (featured.vote_type === "user_vote" ? " user" : "")}>
+                              {featured.vote_type === "user_vote" ? "USER VOTE" : "CREATOR PICK"}
+                            </span>
+                          ) : null}
+                          <span className="mgct-dates dim">{dateWithLeft(featured)}</span>
+                        </div>
                       </div>
-                      <div className="mgct-dates">{dateWithLeft(featured)}</div>
                     </div>
                   </button>
                 </>

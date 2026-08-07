@@ -60,11 +60,20 @@
 .mgct-h.official { color: var(--gold); }
 .mgct-h.community { color: var(--mauve); }
 
-.mgct-official { width: min(420px, 100%); border-radius: 12px; overflow: hidden;
+/* Official banner -- gallery-era correction (Frontend Gallery.dc.html ovContests,
+   2026-08-06): FULL width, 3:1, radius 14, info overlaid on a bottom gradient scrim. */
+.mgct-official { width: 100%; border-radius: 14px; overflow: hidden;
   border: 1px solid rgba(212,175,55,.45); background: rgba(33,31,58,.5); cursor: pointer;
   display: block; font-family: inherit; text-align: left; padding: 0; }
 .mgct-cover { position: relative; aspect-ratio: 2.4 / 1; background: var(--surface0); }
+.mgct-cover.official { aspect-ratio: 3 / 1; }
 .mgct-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.mgct-scrim { position: absolute; inset: 0;
+  background: linear-gradient(to top, rgba(8,6,20,.92) 0%, rgba(8,6,20,.35) 40%, rgba(8,6,20,0) 70%); }
+.mgct-overlaid { position: absolute; left: 0; right: 0; bottom: 0; padding: 16px 18px; }
+.mgct-title.big { font-size: 16px; margin-bottom: 8px; }
+.mgct-prize.strong { background: rgba(212,175,55,.2); border-color: rgba(212,175,55,.5); }
+.mgct-dates.dim { color: rgba(226,222,238,.72); font-size: 10.5px; }
 .mgct-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 7px; }
 .mgct-title { font-size: 12.5px; font-weight: 700; line-height: 1.4; }
 .mgct-tags { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -77,7 +86,8 @@
   background: rgba(182,146,230,.12); color: var(--mauve); }
 .mgct-dates { font-size: 10.5px; color: var(--subtext); font-variant-numeric: tabular-nums; }
 
-.mgct-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+/* Fixed 2-col (gallery-era correction) -- was auto-fill minmax(300px). */
+.mgct-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .mgct-card { border-radius: 12px; overflow: hidden; border: 1px solid var(--surface1);
   background: rgba(33,31,58,.5); cursor: pointer; transition: border-color .2s;
   display: block; font-family: inherit; text-align: left; padding: 0; width: 100%; }
