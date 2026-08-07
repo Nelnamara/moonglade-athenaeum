@@ -5065,3 +5065,37 @@ the confirm sheet resolved a real tag, reported `zzzznotarealtag99` as unattacha
 named the batch position. **Nothing has been published** -- the first real publish is the
 owner's to make. Mobile's Publish screen still says "no backend route exists", now
 false; its parity pass is scoped but not built.
+
+### Publish panel deviations RETRACTED and built as specified  ·  *2026-08-06*
+
+Owner: *"Who gave permission to ignore a design spec?"* Nobody. The prior entry listed
+three deviations as settled facts and merely disclosed them -- that breaks the standing
+rule outright: implementers LIST proposed deviations, the OWNER decides. Disclosure is
+not permission. All three are now built to the design:
+
+- **The inline "CHOOSE A DIFFERENT IMAGE" strip is back** (DC L314-321) at the design's
+  own geometry -- 52px tall, width derived from each image's aspect, accent outline on
+  the selected one -- carrying REAL recent library art in place of the DC's blank
+  aspect swatches. The shared picker is now an ADDITION beneath it ("Browse the whole
+  library…"), not a replacement for the strip.
+- **The ✦ suggest-a-title popover is built** (DC L326-340). The skip rested on a claim
+  that it was "spend-adjacent" -- **false**: `core.suggest_prompt`'s own docstring says
+  FREE, read-only, and `/api/suggest-prompt` was already shipped. Owner spotted this as
+  the tell that the reasoning was assumed rather than checked.
+- **Tags use the DC's chips + dropdown**, with options from PixAI's live tag search
+  (`/api/tag-suggest`, also already shipped and free) instead of the DC's fixed demo
+  list. Typed free text still commits on Enter, so nothing is unreachable.
+
+**One control is genuinely blocked and is RELAYED, not decided:** the DC's
+"⬆ Browse from disk…". Publishing an arbitrary uploaded file runs through PixAI's
+`createFromMedia`, which their own form gates behind a Cloudflare **Turnstile captcha**
+(`X-Turnstile-Token`, action `artworkUpload` -- harvested SubmitForm chunk). Solving or
+bypassing a captcha is off-limits, so that control cannot be made to work honestly from
+here. Publishing from the library (`createArtworkFromTaskV2`) carries no such gate,
+which is why every other path works. **Owner's call** on what that button should do:
+leave it out, show it disabled with the reason, or something else.
+
+Verified live: 24 real swatches at 29px wide for an 864x1536 portrait (52 x aspect,
+exact), all 24 thumbnails loading, selection updating the source; the suggest popover
+returned 4 real PixAI suggestions (tag list + NL description) for the chosen image; the
+tag dropdown returned 8 live matches for "moon" and picking one added a real chip.

@@ -11,21 +11,30 @@ import useScrollLock from "../hooks/useScrollLock.js";
    with its real dimensions/model as SOURCE; right = title/description/tags/contest
    and the toggles, ending in the metallic Publish button.
 
-   Real-data adaptations from the DC, disclosed:
-   - The DC's "choose a different image" strip is a pool of blank aspect swatches
-     (PUB_PICKS). Real art has to come from the real library, so that row opens the
-     SHARED <mg-gallery-picker> the Loom and the Branding banner editor already use,
-     rather than a second, parallel image-chooser. "Browse from disk" is dropped for
-     the same reason: you publish something already in your library, and the picker
-     is how this app has always answered "pick one of my images".
-   - Tags are free text here, not the DC's fixed PUBLISH_TAGS list: PixAI resolves
-     tags to real "tack" ids server-side, and the confirm step reports any that don't
-     resolve instead of pretending a made-up list is authoritative.
-   - Contest is populated from the live GET /api/contests feed (the same one the
-     Contests overlay shows), not a demo list.
-   - The ✦ suggest-a-title popover is NOT built this pass; the prompt already prefills
-     the title, and a real suggestion would be a spend-adjacent call. Left out rather
-     than faked.
+   Built AS SPECIFIED. Where the DC carries demo data, the same control is wired to
+   the real equivalent (the standing rule: the design wins every visible question):
+   - "CHOOSE A DIFFERENT IMAGE" is the DC's inline horizontal strip, exactly as drawn
+     -- its PUB_PICKS blank aspect swatches replaced by REAL recent library images at
+     the same 52px-tall, aspect-derived-width geometry and the same selected outline.
+     (An earlier pass wrongly substituted a modal picker for this strip; corrected
+     2026-08-06.) The shared <mg-gallery-picker> is offered ALONGSIDE it for reaching
+     past the recent window, not instead of it.
+   - The ✦ suggest-a-title popover is REAL: GET /api/suggest-prompt (PixAI's own
+     image-to-prompt, free and read-only -- an earlier pass skipped this on a wrong
+     "spend-adjacent" assumption; suggest_prompt is documented FREE).
+   - Tags use the DC's chips + dropdown, with the options coming from PixAI's live tag
+     search (GET /api/tag-suggest, free) instead of the DC's fixed demo PUBLISH_TAGS
+     list; free text still commits on Enter so nothing is unreachable.
+   - Contest is populated from the live GET /api/contests feed, not a demo list.
+
+   ONE control is NOT built and is a REAL blocker, not a preference: the DC's
+   "⬆ Browse from disk…". Publishing an arbitrary uploaded file goes through PixAI's
+   createFromMedia path, which their own form gates behind a Cloudflare TURNSTILE
+   captcha (X-Turnstile-Token, action "artworkUpload" -- see the harvested SubmitForm
+   chunk). Solving or bypassing a captcha is off-limits, so this control cannot be
+   made to work honestly from here; it is surfaced to the owner rather than silently
+   dropped. Publishing from the library (createArtworkFromTaskV2) has no such gate,
+   which is why everything else here works.
 
    Nothing reaches the PixAI account until the confirm step: the panel asks the server
    for a preview (what it would do, which tags resolved, which image of the batch it
@@ -52,6 +61,14 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
   const [done, setDone] = useState(null);
   const [picking, setPicking] = useState(false);
   const pickerRef = useRef(null);
+  // The DC's inline "choose a different image" strip, on real recent library images.
+  const [strip, setStrip] = useState([]);
+  // ✦ suggest-a-title: PixAI's own image-to-prompt (free, read-only).
+  const [sugOpen, setSugOpen] = useState(false);
+  const [sugs, setSugs] = useState(null);
+  // Tag dropdown backed by PixAI's live tag search (free).
+  const [tagOpts, setTagOpts] = useState([]);
+  const [tagOpen, setTagOpen] = useState(false);
 
   // Prefill from the real catalog row -- title, tags and prompt are already there.
   useEffect(() => {
@@ -72,13 +89,44 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
     return () => { dead = true; };
   }, [mid]);
 
-  // CSRF rides on /api/myart/items (MG_BOOT doesn't carry it); contests are the live feed.
+  // CSRF rides on /api/myart/items (MG_BOOT doesn't carry it); contests are the live
+  // feed; the strip is the real recent library (images only -- the DC's swatch pool,
+  // with actual art in it).
   useEffect(() => {
     fetch("/api/myart/items").then((r) => r.json()).then((d) => setCsrf(d.csrf || "")).catch(() => {});
     fetch("/api/contests").then((r) => r.json())
       .then((d) => setContests((d.contests || []).filter((c) => c && c.title)))
       .catch(() => {});
+    fetch("/api/next/library?page=1&page_size=24&media=image&sort=newest")
+      .then((r) => r.json()).then((d) => setStrip((d.items || []).slice(0, 24)))
+      .catch(() => {});
   }, []);
+
+  // ✦ Suggest a title -- PixAI's image-to-prompt for THIS image. Free and read-only
+  // (core.suggest_prompt's own docstring says so); fetched only when the popover opens.
+  const openSuggest = () => {
+    setSugOpen(!sugOpen);
+    if (sugOpen || sugs || !mid) return;
+    setSugs("loading");
+    fetch("/api/suggest-prompt?media_id=" + encodeURIComponent(mid))
+      .then((r) => r.json())
+      .then((d) => setSugs((d.suggestions || []).filter(Boolean)))
+      .catch(() => setSugs([]));
+  };
+
+  // Live tag options as you type (free tag search), the DC's dropdown with real data.
+  useEffect(() => {
+    const q = tagDraft.trim();
+    if (q.length < 2) { setTagOpts([]); return; }
+    let dead = false;
+    const t = setTimeout(() => {
+      fetch("/api/tag-suggest?q=" + encodeURIComponent(q))
+        .then((r) => r.json())
+        .then((d) => { if (!dead) setTagOpts((d.tags || []).slice(0, 8)); })
+        .catch(() => {});
+    }, 220);
+    return () => { dead = true; clearTimeout(t); };
+  }, [tagDraft]);
 
   const bindPicker = (el) => {
     pickerRef.current = el;
@@ -150,8 +198,25 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
                 <span className="k">SOURCE</span>
                 <span className="v">{srcLabel || (mid ? "loading…" : "nothing picked yet")}</span>
               </div>
+              {/* DC L314-321 -- the inline strip, at the DC's own geometry (52px tall,
+                  width from the image's aspect, accent outline on the selected one),
+                  carrying real recent art instead of blank swatches. */}
+              <div className="mgpub-pickhead">CHOOSE A DIFFERENT IMAGE</div>
+              <div className="mgpub-strip">
+                {strip.map((s) => {
+                  const w = Math.round(52 * ((s.w || 1) / (s.h || 1)));
+                  return (
+                    <button type="button" key={s.media_id} title={(s.w || "?") + "×" + (s.h || "?")}
+                      className={"mgpub-swatch" + (s.media_id === mid ? " on" : "")}
+                      style={{ width: Math.max(28, Math.min(w, 120)) + "px" }}
+                      onClick={() => setMid(s.media_id)}>
+                      <img src={s.thumb} alt="" loading="lazy" />
+                    </button>
+                  );
+                })}
+              </div>
               <button type="button" className="mgpub-browse" onClick={() => setPicking(true)}>
-                🖼 Choose a different image…
+                🖼 Browse the whole library…
               </button>
               {already ? (
                 <div className="mgpub-note warn">
@@ -164,8 +229,28 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
             {/* RIGHT: the form */}
             <div className="mgpub-right">
               <label className="mgpub-lab">Title</label>
-              <input className="mgpub-in" value={title} placeholder="Describe your artwork."
-                onChange={(e) => setTitle(e.target.value)} />
+              {/* DC L326-340 -- title input + the ✦ suggest popover, on PixAI's own
+                  free image-to-prompt for this exact image. */}
+              <div className="mgpub-titlerow">
+                <input className="mgpub-in" value={title} placeholder="Describe your artwork."
+                  onChange={(e) => setTitle(e.target.value)} />
+                <button type="button" title="Suggest a title from the image"
+                  className={"mgpub-suggest" + (sugOpen ? " on" : "")}
+                  disabled={!mid} onClick={openSuggest}>✦</button>
+                {sugOpen && (
+                  <div className="mgpub-sugpop">
+                    <div className="h">Suggested Titles</div>
+                    {sugs === "loading" && <div className="m">reading the image…</div>}
+                    {Array.isArray(sugs) && sugs.length === 0 && <div className="m">nothing came back for this one.</div>}
+                    {Array.isArray(sugs) && sugs.map((s, i) => (
+                      <button type="button" className="mgpub-sugitem" key={i}
+                        onClick={() => { setTitle(String(s).slice(0, 140)); setSugOpen(false); }}>
+                        {String(s).slice(0, 140)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               <label className="mgpub-lab">Description</label>
               <textarea className="mgpub-in" rows={3} value={desc}
@@ -179,16 +264,28 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
                 ))}
                 <input className="mgpub-taginput" value={tagDraft}
                   placeholder={tags.length ? "" : "Select the tags related to your artwork."}
-                  onChange={(e) => setTagDraft(e.target.value)}
+                  onChange={(e) => { setTagDraft(e.target.value); setTagOpen(true); }}
+                  onFocus={() => setTagOpen(true)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag(tagDraft); }
+                    if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag(tagDraft); setTagOpen(false); }
                     else if (e.key === "Backspace" && !tagDraft && tags.length) setTags(tags.slice(0, -1));
-                  }}
-                  onBlur={() => addTag(tagDraft)} />
+                    else if (e.key === "Escape") setTagOpen(false);
+                  }} />
               </div>
+              {/* DC L343-358's dropdown, with PixAI's live tag search behind it instead
+                  of the mock's fixed list -- so what you pick is a tag that really exists. */}
+              {tagOpen && tagOpts.length > 0 && (
+                <div className="mgpub-tagmenu">
+                  {tagOpts.filter((t) => !tags.includes(t)).map((t) => (
+                    <button type="button" className="mgpub-tagopt" key={t}
+                      onClick={() => { addTag(t); setTagOpen(false); }}>{t}</button>
+                  ))}
+                </div>
+              )}
               <div className="mgpub-hint">
-                Tags are matched to PixAI's own tag list when you publish — anything it
-                can't match is reported before the upload, not dropped quietly.
+                Picking from the list guarantees the tag exists on PixAI. Typed tags are
+                matched when you publish — anything that can't be matched is reported
+                before the upload, not dropped quietly.
               </div>
 
               {contests.length > 0 && (
