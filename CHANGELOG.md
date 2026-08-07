@@ -68,6 +68,16 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Two render-harness tests had been silently failing since 2026-08-05** — one broken by
+  the Branding achievement gate (the ✦ Branding button the test clicks never renders in an
+  isolated test environment, since the isolation correctly hides the real marks folder the
+  earn path reads), one by the floating-glass-panel rebuild (the Loom's side panels now
+  float over the board with click-blocking backdrops, so the test's direct card
+  double-click could never land — a real user collapses the panels first, and the test now
+  does too). Both verified pre-existing against the pre-session baseline commit, both fixed
+  at the harness level: the fixture now seeds the real Under-the-Hood earn-state
+  (telemetry flag) plus a full seen/earned pre-seed so no achievement toast races page
+  load. 15/15 module green. Full failure chains in `docs/DECISIONS.md`.
 - **Locked skin cards showed only "🔒 locked" with no explanation of how to unlock them.**
   The design names the exact achievement + threshold for each (`Control Panel.dc.html:453-457`)
   and all three achievements already grant their skin correctly — the gap was purely a missing
