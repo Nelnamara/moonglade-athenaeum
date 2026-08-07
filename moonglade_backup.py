@@ -7539,8 +7539,12 @@ def resolve_tack_ids(session, tags):
                     or str(n.get("defaultName") or "").lower() == name.lower():
                 hit = n
                 break
-        if hit is None and edges:
-            hit = (edges[0] or {}).get("node") or None      # closest match
+        # NO fuzzy fallback to edges[0] here -- that used to silently attach whatever
+        # ranked first in PixAI's search (e.g. typing "moon" attaching "moonlight") with
+        # no signal in the preview, contradicting this function's own contract below.
+        # Found by ultrareview 2026-08-06: a real, unreported substitution onto a public
+        # artwork. Only an EXACT codeName/defaultName match counts as resolved now;
+        # anything else is reported in `unmatched`, exactly as promised.
         if hit and hit.get("id"):
             ids.append(str(hit["id"]))
         else:

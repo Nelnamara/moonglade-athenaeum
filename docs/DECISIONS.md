@@ -5298,3 +5298,46 @@ proved manage-mode selection (checkbox, card highlight, no Details-open), the bu
 ("1 selected" + all four buttons), a real confirm sheet ("Make 1 item private on
 PixAI?"), Cancel provably doing nothing (item still public after), and Clear resetting
 the selection. Test row reverted after. Full suite green (1587).
+
+### Ultrareview: three real bugs found and fixed  ·  *2026-08-06*
+
+Ran `/code-review ultra` against `review-base-build` (the Branding/My Art/Publish/Train
+work). All three findings verified independently against current code before fixing --
+line numbers in the report had drifted from later edits, so each was re-located by
+content match, not trusted at face value.
+
+**bug_004 (normal) -- `resolve_tack_ids` silently attached the wrong tag.** After the
+exact codeName/defaultName match loop failed, a leftover fallback took `edges[0]` --
+PixAI's top-ranked FUZZY search hit -- as a "closest match" and attached it with zero
+signal in the preview, directly contradicting the function's own docstring ("a tag that
+has no tack simply cannot be attached, and is reported back to the caller"). A user
+typing `moon` could have `moonlight` silently attached to a PUBLIC artwork. The prior
+verification pass that "proved" this worked only tested a nonsense string
+(`zzzznotarealtag99`), which returns zero search edges and never reaches the fallback
+branch -- it never tested a partial/ambiguous real word, which is the actual failure
+mode. Fixed: fallback deleted, unmatched reported as promised. Verified live against the
+real account: `moon` now resolves via a genuine EXACT match (PixAI has a real tack
+literally named "moon"), while the deliberately-fragmentary `moonligh` (no exact match)
+now correctly reports unmatched instead of silently becoming `moonlight`.
+
+**bug_003 (nit) -- confirmed publish silently reverted a cleared title.** The preview
+branch correctly preserved an intentionally-empty title (`title if title is not None
+else row["title"]`); the confirm branch used `title or row["title"] or ""`, where Python
+treats `""` as falsy -- so clearing the title field and confirming published the
+catalog's STALE old title while the confirm sheet had shown the user "(untitled)". Fixed
+to the same null-preserving expression the preview already used. Proven both ways: the
+new regression test fails against the old code and passes against the fix.
+
+**bug_002 (nit) -- stale suggest-a-title cache after switching images.** `openSuggest`
+guarded on `sugs` alone; the per-image reset effect (`[mid]`) never touched `sugs`/
+`sugOpen`, so switching images via the swatch strip or the shared picker left the
+PREVIOUS image's cached suggestions in place -- a second popover open skipped the
+refetch and offered the wrong image's caption under the new image's name. Fixed with a
+second `[mid]`-keyed effect clearing both. Verified live: reopening the popover for a
+newly-selected image now shows "reading the image..." (a genuine refetch), not an
+instant stale result.
+
+New regression coverage: `tests/test_tack_resolution.py` (8 tests, direct against
+`resolve_tack_ids` -- no route stub can see this bug, since the existing route tests
+stub the function itself) plus 2 new tests in `test_panel.py` for the title-clearing
+case. Full suite green (1597, up from 1587).

@@ -15878,9 +15878,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                             "irreversible": action == "delete"})
         try:
             if action == "publish":
+                # Same null-preserving expression the preview above uses (line ~15873) --
+                # an intentionally CLEARED title (title == "") must publish empty, not
+                # silently fall back to the catalog's old title. `or` treats "" as falsy,
+                # which is exactly the bug: the confirm sheet showed "(untitled)" but the
+                # mutation went out with the stale title. Only an absent field (title is
+                # None, the client never sent it) falls back. Found by ultrareview 2026-08-06.
                 art = core.publish_artwork_from_task(
-                    session, row["task_id"], media_index=media_index,
-                    title=title or row["title"] or "", description=body.get("description") or "",
+                    session, row["task_id"],
+                    media_index=media_index,
+                    title=(title if title is not None else row["title"]) or "",
+                    description=body.get("description") or "",
                     tack_ids=tack_ids, private=bool(private),
                     hide_prompts=bool(body.get("hide_prompts")),
                     challenge=body.get("challenge") or None)
