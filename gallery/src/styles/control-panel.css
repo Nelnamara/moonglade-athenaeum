@@ -163,23 +163,108 @@ button.mgcp-mark.on { border-color: var(--gold); }
 .mgcp-skinlock { font-size: 9.5px; color: var(--gold); }
 .mgcp-skinunlock { font-size: 9.5px; color: var(--subtext); margin-top: 2px; }
 
-.mgcp-brandgrid { display: grid; grid-template-columns: 280px 1fr; border: 1px solid var(--surface1);
-  border-radius: 14px; overflow: hidden; background: var(--mantle); }
-@media (max-width: 800px) { .mgcp-brandgrid { grid-template-columns: 1fr; } }
-.mgcp-brandside { border-right: 1px solid var(--surface0); padding: 18px 20px; }
-.mgcp-brandmain { padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.mgcp-marklist { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
-button.mgcp-markrow { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 9px;
-  font-size: 13px; cursor: pointer; border: 1px solid transparent; background: transparent; color: var(--subtext);
-  font-family: inherit; text-align: left; }
-button.mgcp-markrow.on { border-color: var(--surface1); background: var(--surface0); color: var(--text); font-weight: 600; }
-.mgcp-markglyph { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; font-size: 13px;
-  flex: none; background: var(--surface0); overflow: hidden; }
-button.mgcp-animrow { display: block; width: 100%; text-align: left; padding: 8px 11px; border-radius: 8px;
-  font-size: 12.5px; cursor: pointer; border: 1px solid var(--surface1); background: transparent; color: var(--subtext);
-  font-family: inherit; margin-top: 6px; }
-button.mgcp-animrow.on { border-color: var(--accent); color: var(--text); background: rgba(182,146,230,.1); }
-.mgcp-shortcutbtn { margin-top: 14px; }
+/* ---- Branding tab, rebuilt to the 10:42pm Control Panel.dc.html (2026-08-06):
+   sub-nav'd two-level layout (DC:291-303 -- natural height min 620px, 210px nav
+   column, no inner scrollboxes), three sections switched in the right pane. ---- */
+.mgcp-brandgrid { display: grid; grid-template-columns: 210px 1fr; border: 1px solid var(--surface1);
+  border-radius: 14px; overflow: hidden; background: var(--mantle); min-height: 620px; align-items: stretch; }
+@media (max-width: 800px) { .mgcp-brandgrid { grid-template-columns: 1fr; min-height: 0; } }
+.mgcp-brandside { border-right: 1px solid var(--surface0); padding: 22px 24px; }
+.mgcp-brandmain { padding: 24px 30px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+/* DC:901-904 -- the section nav rows. */
+button.mgcp-brandnav { display: block; width: 100%; text-align: left; padding: 10px 12px; border-radius: 8px;
+  font-size: 12px; font-weight: 500; cursor: pointer; margin: 6px 0; border: 1px solid transparent;
+  background: transparent; color: var(--subtext); font-family: inherit;
+  transition: background .15s, color .15s; }
+button.mgcp-brandnav.on { background: rgba(182,146,230,.14); color: var(--text); font-weight: 600; }
+/* DC:299 -- the sealed note. */
+.mgcp-sealed { margin-top: 22px; padding: 12px 14px; border: 1px dashed #3a3050; border-radius: 10px;
+  font-size: 11.5px; color: var(--overlay0); line-height: 1.6; }
+.mgcp-sealed b { color: var(--subtext); }
+.mgcp-brandsec { display: flex; flex-direction: column; gap: 16px; }
+.mgcp-brandh { font-family: Georgia, serif; font-style: italic; font-weight: 400; font-size: 22px;
+  margin: 0; color: var(--text); }
+
+/* Marks section: the 168px live preview (DC:396) hosting the REAL header mark scaled
+   up from its 56px chrome size. */
+.mgcp-markprevrow { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.mgcp-markprevbox { width: 168px; height: 168px; border-radius: 20px; background: rgba(12,10,28,.55);
+  border: 1px solid var(--surface1); display: grid; place-items: center; perspective: 500px;
+  overflow: hidden; flex: none; }
+.mgcp-markprevscale { transform: scale(1.714); transform-style: preserve-3d; }
+.mgcp-markprevside { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.mgcp-markprevcap { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--overlay0); }
+.mgcp-marksbig { display: flex; gap: 8px; flex-wrap: wrap; }
+button.mgcp-markbig { width: 46px; height: 46px; border-radius: 12px; background: var(--surface0);
+  display: grid; place-items: center; font-size: 22px; cursor: pointer; overflow: hidden; padding: 0;
+  border: 2px solid var(--surface1); font-family: inherit; }
+button.mgcp-markbig.on { border-color: var(--gold); }
+button.mgcp-markbig img { width: 100%; height: 100%; object-fit: cover; }
+/* DC:922-927 -- animation picker chips (real MARK_ANIMS values, chip form). */
+.mgcp-animchips { display: flex; gap: 8px; flex-wrap: wrap; }
+button.mgcp-animchip { padding: 8px 14px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  cursor: pointer; border: 1px solid var(--surface1); background: rgba(12,10,28,.55);
+  color: var(--subtext); font-family: inherit; }
+button.mgcp-animchip.on { border-color: var(--accent); background: rgba(182,146,230,.14); color: var(--text); }
+/* DC:928-931 -- launcher setter. */
+.mgcp-launcherbtn { align-self: flex-start; padding: 9px 16px; border-radius: 9px; font-size: 12px;
+  font-weight: 600; cursor: pointer; border: 1px solid var(--accent); background: rgba(182,146,230,.14);
+  color: var(--text); font-family: inherit; }
+
+/* Skins section: the live core-element sample (DC:354-370, 933-943). Inline styles
+   carry the per-skin colors; these rules carry the geometry. */
+.mgcp-skinsample { border-radius: 14px; padding: 18px 20px; border: 1px solid var(--surface1);
+  box-shadow: 0 12px 34px rgba(0,0,0,.4); display: flex; flex-direction: column; gap: 11px; max-width: 520px; }
+.mgcp-skinsample-kick { font-size: 10px; letter-spacing: .16em; text-transform: uppercase; }
+.mgcp-skinsample-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mgcp-skinsample-mark { width: 42px; height: 42px; border-radius: 11px; display: grid; place-items: center;
+  font-size: 20px; flex: none; }
+/* DC:939 samplePrimaryBtn -- geometry + metal motion; gradient colors arrive inline. */
+.mgcp-skinsample-primary { padding: 7px 13px; border-radius: 8px; font-size: 11.5px; font-weight: 700;
+  white-space: nowrap; border: 1px solid rgba(255,255,255,.3); text-shadow: 0 1px 0 rgba(255,255,255,.4);
+  background-size: 220% 100%; animation: mgMetal 7s ease-in-out infinite;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.65), inset 0 -2px 4px rgba(40,20,70,.42), 0 6px 16px rgba(0,0,0,.45); }
+.mgcp-skinsample-ghost { padding: 7px 13px; border-radius: 8px; font-size: 11.5px; font-weight: 600;
+  border: 1px solid; }
+.mgcp-skinsample-chip { padding: 5px 11px; border-radius: 999px; font-size: 10.5px; font-weight: 700; }
+.mgcp-skinsample-track { height: 7px; border-radius: 999px; overflow: hidden; }
+.mgcp-skinsample-fill { width: 62%; height: 100%; border-radius: inherit; }
+
+/* Banner slots section: pills (DC:955-963), big preview (DC:982-983), sliders
+   (DC:326-339). The preview img carries its object-position/scale inline (DC:953). */
+.mgcp-bannerpills { display: flex; gap: 8px; flex-wrap: wrap; }
+button.mgcp-bannerpill { display: flex; align-items: center; gap: 8px; padding: 8px 13px;
+  border-radius: 999px; font-size: 12.5px; cursor: pointer; border: 1px solid var(--surface1);
+  background: rgba(12,10,28,.55); color: var(--subtext); font-family: inherit;
+  transition: background .18s, border-color .18s; }
+button.mgcp-bannerpill.on { border-color: var(--accent); background: rgba(182,146,230,.14);
+  color: var(--text); font-weight: 600; }
+button.mgcp-bannerpill .ic { font-style: normal; font-size: 14px; }
+.mgcp-bannerhead { display: flex; align-items: baseline; gap: 14px; }
+.mgcp-bannerspec { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--gold);
+  letter-spacing: .06em; }
+.mgcp-bannerprev { position: relative; border: 1px solid var(--surface1); border-radius: 12px;
+  background: var(--mantle); overflow: hidden; min-height: 120px; max-width: 1100px; }
+.mgcp-bannerprev img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.mgcp-bannerph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  text-align: center; padding: 0 18px; font-size: 11px; color: var(--overlay0); }
+.mgcp-bannerguide { position: absolute; inset: 12px; border: 1.5px dashed rgba(212,175,55,.55);
+  border-radius: 6px; pointer-events: none; }
+.mgcp-bannerguide i { position: absolute; width: 9px; height: 9px; background: var(--gold); border-radius: 2px; }
+.mgcp-bannerguide i.tl { left: -5px; top: -5px; } .mgcp-bannerguide i.tr { right: -5px; top: -5px; }
+.mgcp-bannerguide i.bl { left: -5px; bottom: -5px; } .mgcp-bannerguide i.br { right: -5px; bottom: -5px; }
+.mgcp-sliderbox { display: flex; flex-direction: column; gap: 14px; border: 1px solid var(--surface1);
+  border-radius: 12px; padding: 16px 18px; background: rgba(12,10,28,.4); max-width: 1100px; }
+.mgcp-sliderrow { display: flex; flex-direction: column; gap: 7px; }
+.mgcp-sliderhead { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--overlay0); }
+.mgcp-sliderval { font-family: ui-monospace, Menlo, monospace; color: var(--subtext); }
+.mgcp-sliderrow input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+.mgcp-bannerchips { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+/* Maintenance's post-unlock pointer tile (DC:284). */
+.mgcp-openbrandbtn { align-self: flex-start; padding: 8px 14px; border-radius: 8px; font-size: 12px;
+  font-weight: 600; cursor: pointer; background: rgba(182,146,230,.14); border: 1px solid var(--accent);
+  color: var(--text); font-family: inherit; margin-top: 6px; }
 
 /* ---- Job console heart: Pipelines/Ledger segmented toggle + the ledger view --
    Control Panel.dc.html:157-181 (heartLedger) + :106-107 (sync meta) + :149 (check
@@ -235,25 +320,6 @@ button.mgcp-neverchip:hover { opacity: 1; border-color: var(--accent); color: va
    banner_main/banner_login (mascots/rewards permanently excluded, marks already has its
    own picker above). Crop-guide math (left/center/right) copied verbatim from
    Control Panel.dc.html:664-665's cropGuideStyle. ---- */
-.mgcp-slotcards { display: flex; flex-direction: column; gap: 16px; margin-top: 10px; }
-.mgcp-slotcard { display: flex; flex-direction: column; gap: 9px; }
-.mgcp-slotcard-head { display: flex; align-items: baseline; gap: 10px; }
-.mgcp-slotcard-title { font-family: Georgia, serif; font-style: italic; font-size: 14px; color: var(--text); }
-.mgcp-slotcard-spec { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--gold); letter-spacing: .05em; }
-.mgcp-slotcard-prev { position: relative; border: 1px solid var(--surface1); border-radius: 12px;
-  background: var(--mantle); overflow: hidden; aspect-ratio: 4 / 1; max-width: 640px; }
-.mgcp-slotcard-prev img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.mgcp-slotcard-ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  text-align: center; padding: 0 18px; font-size: 11px; color: var(--overlay0); }
-.mgcp-slotcard-cropguide { position: absolute; top: 12px; bottom: 12px; border: 1.5px dashed rgba(212,175,55,.55);
-  border-radius: 6px; pointer-events: none; transition: left .3s cubic-bezier(.2,.9,.24,1), right .3s cubic-bezier(.2,.9,.24,1); }
-.mgcp-slotcard-cropguide.left { left: 12px; right: 38%; }
-.mgcp-slotcard-cropguide.center { left: 12px; right: 12px; }
-.mgcp-slotcard-cropguide.right { left: 38%; right: 12px; }
-.mgcp-slotcard-cropguide i { position: absolute; width: 9px; height: 9px; background: var(--gold); border-radius: 2px; }
-.mgcp-slotcard-cropguide i.tl { left: -5px; top: -5px; } .mgcp-slotcard-cropguide i.tr { right: -5px; top: -5px; }
-.mgcp-slotcard-cropguide i.bl { left: -5px; bottom: -5px; } .mgcp-slotcard-cropguide i.br { right: -5px; bottom: -5px; }
-.mgcp-slotcard-chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .mgcp-slotcard-uploadchip { cursor: pointer; }
 .mgcp-slotcard-thumbs { display: flex; gap: 6px; flex-wrap: wrap; }
 button.mgcp-slotcard-thumb { width: 48px; height: 30px; border-radius: 6px; overflow: hidden; padding: 0;

@@ -4943,3 +4943,32 @@ etc.), the /crop route still accepts the old names, and new uploads start neutra
 the DC's exact gradient. Found + fixed in test: independent 4-edge rounding could
 collapse a sub-pixel crop box to zero height (banker's rounding) -- origin+size
 rounding now guarantees >=1px. Branding/panel/loom suites all green.
+
+### Stage 1 / increment 2 — the Branding tab rebuilt to the sub-nav design  ·  *2026-08-06*
+
+ControlPanelOverlay's BrandingTab rebuilt to the 10:42pm Control Panel.dc.html:
+**sub-nav'd two-level layout** (210px nav column, natural height min 620px, no inner
+scrollboxes -- the design's own answer to the owner's "needs scrolls and navigation"
+critique), three sections. **Marks**: the 168px live preview hosts the REAL header
+mark -- Strip.jsx's exact .mk markup with the real anim-<name> classes, scaled up from
+its 56px chrome size -- so the preview animates with the header's actual effects, not a
+re-implementation; 46px mark tiles; the real 16 MARK_ANIMS as Title-cased chips (the
+DC's chip FORM over the shipped anim VALUES -- its own 7-item list is placeholder);
+launcher setter kept. **Skins**: the DC's live core-element sample repainted per skin
+via a SKIN_VARS literal map (mirrors design-tokens.css -- the html[data-skin] cascade
+can't paint a non-applied skin), including the skin-aware metallic Generate button
+(caught live: inline background shorthand was resetting background-size and freezing
+the mgMetal scroll -- switched to backgroundImage). **Banner slots**: 3 pills (main/
+login/Loom), big aspect-true preview whose img carries DC:953's exact object-position/
+scale expression (the same math the server bakes), three sliders (local-state drag,
+commit on release), From disk / From the gallery... / Reset crop chips, thumbs strip.
+"From the gallery..." is REAL: the shared <mg-gallery-picker> (mount-is-open, the
+Loom's own event bridge pattern) feeds a new media_id path on the upload route that
+sources from the library via find_files_for_media_id. **Maintenance**: per DC:250-286
+the unlocked state replaces the inline mark/skins pickers with one "Branding & skins"
+pointer tile (Open Branding >); pre-unlock keeps the skins picker inline. Old
+BannerSlotCard + its CSS removed. Verified LIVE in the owner's browser: grid 210px/
+620px, 3 nav rows, sealed note, 168px preview animating the real mark, 16 chips,
+sample repaint + 220% metal scroll, 3 pills, 12:1 Loom preview, slider ranges,
+pointer tile. Render harness updated to the chip structure; full render+branding+js
+suites green.

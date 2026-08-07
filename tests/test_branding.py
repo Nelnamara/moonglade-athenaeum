@@ -658,6 +658,25 @@ def test_loom_banner_slot_writes_its_own_12to1_flat(tmp_path):
     assert not (tmp_path / "branding" / "login-banner.png").exists()
 
 
+def test_branding_slot_from_gallery_sources_by_media_id(tmp_path):
+    """The 'From the gallery...' chip (Control Panel.dc.html:342): POSTing a media_id
+    instead of a file sources the asset from the user's own library via the shared
+    media_id->file resolver, re-encoded through Pillow exactly like an upload."""
+    lib = tmp_path / "images"
+    lib.mkdir(parents=True)
+    (lib / "prompt_task_m123abc.png").write_bytes(_png_bytes((7, 8, 9)))
+    cli = _client(tmp_path)
+    r = cli.post("/api/branding/slot", data={"slot": "banner_main", "media_id": "m123abc"},
+                 content_type="multipart/form-data")
+    assert r.status_code == 200
+    item = r.get_json()["item"]
+    assert (tmp_path / "branding" / "banner_main" / (item["id"] + ".png")).exists()
+    assert (tmp_path / "branding" / "banner.png").exists()   # write-through fired too
+    r = cli.post("/api/branding/slot", data={"slot": "banner_main", "media_id": "nope404"},
+                 content_type="multipart/form-data")
+    assert r.status_code == 400
+
+
 def test_legacy_crop_manifest_migrates_to_transform(tmp_path):
     """A manifest written under the OLD left/center/right model (pre 2026-08-06)
     surfaces as the equivalent zoom/cropX/cropY -- an existing install's banners

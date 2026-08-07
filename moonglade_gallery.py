@@ -15925,12 +15925,24 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if slot not in BRANDING_SLOTS:
             return jsonify({"error": "unknown slot"}), 400
         f = request.files.get("file")
-        if f is None or not f.filename:
+        media_id = (request.form.get("media_id") or "").strip()
+        if (f is None or not f.filename) and not media_id:
             return jsonify({"error": "no file"}), 400
         try:
             import io
             from PIL import Image
-            im = Image.open(f.stream)
+            if f is not None and f.filename:
+                im = Image.open(f.stream)
+            else:
+                # "From the gallery..." (Control Panel.dc.html:342) -- source the asset
+                # from the user's own library by media_id, via the same shared resolver
+                # every other media_id->file path uses. Images only; a video id simply
+                # resolves to no usable frame here.
+                hits = find_files_for_media_id(out_dir, media_id)
+                img_hit = next((p for p in hits if p.suffix.lower() in _IMAGE_EXTS), None)
+                if img_hit is None:
+                    return jsonify({"error": "no local image for that media id"}), 400
+                im = Image.open(img_hit)
             im.load()
             buf = io.BytesIO()
             im.convert("RGBA").save(buf, format="PNG")

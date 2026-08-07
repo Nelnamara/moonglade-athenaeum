@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import "../styles/overlays.css";
 import "../styles/control-panel.css";
 import useControlPanel, { postJSON, DEDUP_STAGES } from "../hooks/useControlPanel.js";
@@ -82,7 +82,6 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const [tab, setTab] = useState("maint");
   const [subOverlay, setSubOverlay] = useState(null); // 'users' | 'trash'
-  const [markBusy, setMarkBusy] = useState(false); // inline mark-pick from the Branding tile
 
   // Control Panel.dc.html:240-243 -- the library-folder picker. The design's own
   // <input type="file" webkitdirectory> can't actually supply what /api/library-path
@@ -626,50 +625,29 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                       )}
                     </div>
 
-                    {brandingUnlocked && (
+                    {/* Control Panel.dc.html:250-286 -- once Branding is unlocked, the
+                        mark/skins pickers LEAVE Maintenance: one pointer tile replaces
+                        them ("moved out on unlock"). Pre-unlock, the inline pickers are
+                        the only home those controls have. */}
+                    {brandingUnlocked ? (
                       <div className="mgcp-tile mgcp-tile5">
-                        <div className="mgcp-mkick">Branding</div>
-                        <div className="mgcp-marks">
-                          {/* Control Panel.dc.html:246-254 -- sl.onPick sets the mark
-                              in place, right from this tile; clicking here used to just
-                              redirect to the Branding tab instead of doing anything.
-                              Same real /api/branding call BrandingTab's own pickMark()
-                              already uses (not a second, forked write path). */}
-                          {(summary.branding.marks || []).slice(0, 6).map((m) => (
-                            <button type="button" key={m.id}
-                              className={"mgcp-mark" + (m.id === summary.branding.mark ? " on" : "")}
-                              disabled={markBusy}
-                              title={(m.label || m.id) + (m.id === summary.branding.mark ? " (active)" : "")}
-                              onClick={async () => {
-                                if (m.id === summary.branding.mark) return;
-                                setMarkBusy(true);
-                                await postJSON("/api/branding", { mark: m.id });
-                                setMarkBusy(false);
-                                fetchSummary();
-                              }}>
-                              {m.png
-                                ? <img src={m.png} alt=""
-                                    style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: m.kind === "tile" ? 6 : 0 }}
-                                    onError={(e) => e.currentTarget.remove()} />
-                                : (m.id === "logo" ? "🌙" : "◈")}
-                            </button>
-                          ))}
+                        <div className="mgcp-mkick">Branding &amp; skins</div>
+                        <div className="mgcp-tilesmall">
+                          Marks, animation, launcher icon, skins and banners now live in
+                          their own <b style={{ color: "var(--text)" }}>✦ Branding</b> tab.
                         </div>
-                        <div className="mgcp-tilenote">
-                          <span onClick={() => setTab("brand")} style={{ cursor: "pointer", textDecoration: "underline dotted" }}>
-                            mark · animation
-                          </span> — click a glyph to set it, or open the Branding tab for more
+                        <button type="button" className="mgcp-openbrandbtn" onClick={() => setTab("brand")}>
+                          Open Branding ▸
+                        </button>
+                      </div>
+                    ) : (
+                      skins.length > 0 && (
+                        <div className="mgcp-tile mgcp-tile7" style={{ gridColumn: "span 12" }}>
+                          <div className="mgcp-mkick">Skins</div>
+                          <div className="mgcp-tilesmall">Cosmetic palette swaps for the whole suite — unlock more by earning epic achievements in the gallery (🏆).</div>
+                          <SkinsRow skins={skins} active={activeSkin} onPick={pickSkin} />
                         </div>
-                      </div>
-                    )}
-
-                    {skins.length > 0 && (
-                      <div className="mgcp-tile mgcp-tile7"
-                        style={!brandingUnlocked ? { gridColumn: "span 12" } : undefined}>
-                        <div className="mgcp-mkick">Skins</div>
-                        <div className="mgcp-tilesmall">Cosmetic palette swaps for the whole suite — unlock more by earning achievements.</div>
-                        <SkinsRow skins={skins} active={activeSkin} onPick={pickSkin} />
-                      </div>
+                      )
                     )}
                   </div>
                 </>
@@ -772,84 +750,274 @@ export function SkinsRow({ skins, active, onPick }) {
 // deliberately not built here (the former needs wiring into PickerHost, the latter is an
 // owner-deferred feature pending the SQLite-bundle work) -- disclosed below, not silently
 // dropped.
-function BannerSlotCard({ slot, title, spec, ph, data, onChanged }) {
+/* The three banner slots, in the DC's own pill order (Control Panel.dc.html:566-573,
+   BANNER_IDX = [1, 2, 5]). spec strings verbatim from the SLOTS array. */
+const BANNER_SLOTS = [
+  { slot: "banner_main", icon: "🖼", name: "Banner — main", title: "Banner — main",
+    spec: "1920 × 480 · 4:1 · subject-left", ratio: "4 / 1",
+    ph: "your banner art — cropped live, subject-left honored" },
+  { slot: "banner_login", icon: "🔐", name: "Banner — login", title: "Banner — login",
+    spec: "1920 × 480 · 4:1", ratio: "4 / 1",
+    ph: "the login banner — same canvas, quieter mood" },
+  { slot: "banner_loom", icon: "🎬", name: "Banner — Loom", title: "Banner — Loom",
+    spec: "1920 × 160 · 12:1 · workspace strip", ratio: "12 / 1",
+    ph: "the Loom workspace banner — wide and low" },
+];
+
+/* Per-skin var subset for the live sample frame (Control Panel.dc.html:354-370): the
+   sample repaints under the SELECTED card's palette, which may not be the applied skin,
+   so the html[data-skin] cascade can't paint it -- these are the same literal values as
+   static/design-tokens.css's html[data-skin=...] blocks (source of truth:
+   moonglade_gallery.DESIGN_TOKENS_CSS; sync-pinned there, spot-check here on drift). */
+const SKIN_VARS = {
+  moonglade:   { mantle: "#0a0818", surface0: "#211f3a", surface1: "#3a3460", text: "#d6d2e2", subtext: "#9a93ab", overlay0: "#6a6088", accent: "#b692e6", mauve: "#c4a6f0", emerald: "#4fc99a" },
+  nightfallen: { mantle: "#080610", surface0: "#241a3f", surface1: "#3c2b63", text: "#e7ddff", subtext: "#a493c9", overlay0: "#7a6aa6", accent: "#a678f0", mauve: "#d3b6ff", emerald: "#7f6fe0" },
+  moonlit:     { mantle: "#080d15", surface0: "#1c2735", surface1: "#334358", text: "#e6eefb", subtext: "#93a6bd", overlay0: "#6f8298", accent: "#8fb8e8", mauve: "#c6dbf7", emerald: "#68d5e0" },
+  ember:       { mantle: "#120909", surface0: "#33201c", surface1: "#5a352c", text: "#fbe6df", subtext: "#c79b8d", overlay0: "#a5786a", accent: "#e8935f", mauve: "#f3c3a5", emerald: "#e0a94b" },
+  verdant:     { mantle: "#08110d", surface0: "#173026", surface1: "#2a5140", text: "#e2f5ea", subtext: "#93bda6", overlay0: "#6f9d84", accent: "#5fd39a", mauve: "#a5f3cf", emerald: "#4fc99a" },
+};
+
+function MarksSection({ summary, busy, msg, pickMark, pickAnim, setShortcut, isLocal }) {
+  const marks = summary.branding.marks || [];
+  const anims = summary.branding.anims || [];
+  const cur = marks.find((m) => m.id === summary.branding.mark) || null;
+  const anim = summary.branding.anim || "classic";
+  return (
+    <div className="mgcp-brandsec">
+      <h3 className="mgcp-brandh">Icons, marks &amp; animation</h3>
+      <div className="mgcp-markprevrow">
+        {/* DC:396 -- the 168px live preview. The inner element is the REAL header mark
+            (Strip.jsx:74's exact .mk markup, real anim-<name> classes from styles.css),
+            scaled up from its 56px chrome size -- so what animates here is literally
+            what the header will do, not a re-implementation of it. */}
+        <div className="mgcp-markprevbox">
+          <div className="mgcp-markprevscale">
+            <span className={"mk anim-" + anim + (cur && cur.kind === "tile" ? " mk-tile" : "")}
+              style={{ "--mark-url": "url('" + ((cur && cur.png) || "/branding/logo.png") + "')" }}>
+              <span className="mark-m">M</span>
+              <img src={(cur && cur.png) || "/branding/logo.png"} alt=""
+                onError={(e) => e.currentTarget.remove()} />
+            </span>
+          </div>
+        </div>
+        <div className="mgcp-markprevside">
+          <div className="mgcp-markprevcap">Shown at 44px · animated live</div>
+          <div className="mgcp-marksbig">
+            {marks.map((m) => (
+              <button type="button" key={m.id}
+                className={"mgcp-markbig" + (m.id === summary.branding.mark ? " on" : "")}
+                onClick={() => pickMark(m.id)} disabled={busy} title={m.label || m.id}>
+                {m.png
+                  ? <img src={m.png} alt="" onError={(e) => e.currentTarget.remove()} />
+                  : (m.id === "logo" ? "🌙" : "◈")}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="mgcp-mkick">Animation</div>
+      <div className="mgcp-animchips">
+        {anims.map((a) => (
+          <button type="button" key={a}
+            className={"mgcp-animchip" + (a === summary.branding.anim ? " on" : "")}
+            onClick={() => pickAnim(a)} disabled={busy}>
+            {a.charAt(0).toUpperCase() + a.slice(1)}
+          </button>
+        ))}
+      </div>
+      {isLocal && (
+        <>
+          <div className="mgcp-tilesmall" style={{ marginTop: 4 }}>
+            The selected mark doubles as this machine's app launcher and browser-tab icon.
+          </div>
+          <button type="button" className="mgcp-launcherbtn" onClick={setShortcut} disabled={busy}>
+            Set {cur ? (cur.label || cur.id) : "mark"} as launcher
+          </button>
+        </>
+      )}
+      {msg && <div className="mgcp-tilenote">{msg}</div>}
+    </div>
+  );
+}
+
+function SkinsSection({ skins, activeSkin, onPickSkin }) {
+  // The sample previews the SELECTED card (hover-free: last clicked), which is also the
+  // applied skin -- picking a card both applies it and repaints the sample, exactly the
+  // coupling the DC's own onPick uses.
+  const v = SKIN_VARS[activeSkin] || SKIN_VARS.moonglade;
+  const name = (skins.find((s) => s.id === activeSkin) || {}).name || activeSkin;
+  return (
+    <div className="mgcp-brandsec">
+      <h3 className="mgcp-brandh">Skins</h3>
+      {/* DC:354-370 -- the core-element sample frame, repainted under the selected
+          skin's own vars. Every color below comes from SKIN_VARS, not the page. */}
+      <div className="mgcp-skinsample" style={{ background: v.mantle, borderColor: v.surface1 }}>
+        <div className="mgcp-skinsample-kick" style={{ color: v.overlay0 }}>Preview · {name}</div>
+        <div className="mgcp-skinsample-row">
+          <div className="mgcp-skinsample-mark" style={{ background: v.surface0, color: v.accent }}>✦</div>
+          <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: v.text }}>Nelnamara turns to camera</div>
+            <div style={{ fontSize: 11, color: v.subtext }}>R2V · 5s · queued</div>
+          </div>
+        </div>
+        <div className="mgcp-skinsample-row">
+          {/* DC:939 samplePrimaryBtn -- the skin-aware metallic recipe, gradient built
+              from the skin's accent+mauve, scrolled by the shared mgMetal keyframes. */}
+          <span className="mgcp-skinsample-primary" style={{
+            color: "color-mix(in oklab, " + v.accent + " 26%, #08040f)",
+            /* backgroundImage, NOT the background shorthand -- the shorthand resets
+               background-size and kills the class's 220% mgMetal scroll (caught live). */
+            backgroundImage: "linear-gradient(100deg, color-mix(in oklab, " + v.accent + " 50%, #06030d) 0%, "
+              + v.accent + " 18%, color-mix(in oklab, " + v.accent + " 22%, #ffffff) 34%, "
+              + v.accent + " 50%, color-mix(in oklab, " + v.accent + " 74%, #06030d) 68%, "
+              + v.mauve + " 84%, color-mix(in oklab, " + v.accent + " 50%, #06030d) 100%)",
+          }}>✦ Generate</span>
+          <span className="mgcp-skinsample-ghost" style={{ color: v.subtext, background: v.surface0, borderColor: v.surface1 }}>Preview</span>
+          <span className="mgcp-skinsample-chip" style={{ color: v.mantle, background: v.emerald }}>emerald magic</span>
+        </div>
+        <div className="mgcp-skinsample-track" style={{ background: v.surface0 }}>
+          <div className="mgcp-skinsample-fill" style={{ background: "linear-gradient(90deg, " + v.accent + ", " + v.emerald + ")" }} />
+        </div>
+      </div>
+      {skins.length > 0 && <SkinsRow skins={skins} active={activeSkin} onPick={onPickSkin} />}
+    </div>
+  );
+}
+
+function BannerEditor({ summary, onSaved }) {
+  const [slotIdx, setSlotIdx] = useState(0);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [picking, setPicking] = useState(false);
+  // Live slider state: local while dragging (the preview must track the thumb with no
+  // network in the loop), committed to /api/branding/slot/crop on release.
+  const [t, setT] = useState(null);       // {zoom, cropX, cropY} or null = mirror server
+  const pickerRef = useRef(null);
+
+  const cfg = BANNER_SLOTS[slotIdx];
+  const data = (summary.branding.slots || {})[cfg.slot] || { assets: [], active: null };
   const assets = data.assets || [];
   const active = assets.find((a) => a.id === data.active) || assets[0] || null;
-  const cropCls = active ? (active.crop || "center") : "center";
+  const shown = t || active || { zoom: 100, cropX: 50, cropY: 50 };
 
+  useEffect(() => { setT(null); setMsg(""); }, [slotIdx, data.active]);
+
+  // Bridge the shared <mg-gallery-picker> (already loaded on this page for the classic
+  // surfaces) exactly the way the Loom binds it -- events, not attributes.
+  const bindPicker = (el) => {
+    pickerRef.current = el;
+    if (el && !el._mgBound) {
+      el._mgBound = true;
+      el.addEventListener("mg-pick", (e) => { setPicking(false); fromGallery(e.detail.media_id); });
+      el.addEventListener("mg-close", () => setPicking(false));
+    }
+  };
+
+  const refresh = async (d) => { if (d && d.error) { setMsg("⚠ " + d.error); } else { setMsg(""); onSaved(); } };
   const upload = async (file) => {
     if (!file) return;
     setBusy(true); setMsg("");
-    const fd = new FormData();
-    fd.append("slot", slot);
-    fd.append("file", file);
+    const fd = new FormData(); fd.append("slot", cfg.slot); fd.append("file", file);
     const r = await fetch("/api/branding/slot", { method: "POST", body: fd });
-    const d = await r.json();
-    setBusy(false);
-    if (d.error) { setMsg("⚠ " + d.error); return; }
-    onChanged();
+    setBusy(false); refresh(await r.json());
   };
-  const cycleCrop = async () => {
+  const fromGallery = async (mediaId) => {
+    setBusy(true); setMsg("");
+    const fd = new FormData(); fd.append("slot", cfg.slot); fd.append("media_id", mediaId);
+    const r = await fetch("/api/branding/slot", { method: "POST", body: fd });
+    setBusy(false); refresh(await r.json());
+  };
+  const commit = async (next) => {
     if (!active) return;
-    const order = ["left", "center", "right"];
-    const next = order[(order.indexOf(active.crop || "center") + 1) % order.length];
-    setBusy(true); setMsg("");
-    const d = await postJSON("/api/branding/slot/crop", { slot, id: active.id, crop: next });
-    setBusy(false);
-    if (d.error) { setMsg("⚠ " + d.error); return; }
-    onChanged();
+    setBusy(true);
+    const d = await postJSON("/api/branding/slot/crop",
+      { slot: cfg.slot, id: active.id, zoom: next.zoom, cropX: next.cropX, cropY: next.cropY });
+    setBusy(false); refresh(d);
   };
-  const pick = async (id) => {
+  const resetCrop = () => { const n = { zoom: 100, cropX: 50, cropY: 50 }; setT(n); commit(n); };
+  const pickActive = async (id) => {
     setBusy(true); setMsg("");
-    const d = await postJSON("/api/branding/slot/active", { slot, id });
-    setBusy(false);
-    if (d.error) { setMsg("⚠ " + d.error); return; }
-    onChanged();
+    refresh(await postJSON("/api/branding/slot/active", { slot: cfg.slot, id }));
   };
 
-  return (
-    <div className="mgcp-slotcard">
-      <div className="mgcp-slotcard-head">
-        <span className="mgcp-slotcard-title">{title}</span>
-        <span className="mgcp-slotcard-spec">{spec}</span>
+  const slider = (label, key, min, max) => (
+    <div className="mgcp-sliderrow">
+      <div className="mgcp-sliderhead">
+        <span>{label}</span>
+        <span className="mgcp-sliderval">{shown[key]}%</span>
       </div>
-      <div className="mgcp-slotcard-prev">
+      <input type="range" min={min} max={max} value={shown[key]} disabled={!active || busy}
+        onChange={(e) => setT({ ...shown, [key]: +e.target.value })}
+        onPointerUp={() => t && commit(t)}
+        onKeyUp={(e) => { if (t && (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End")) commit(t); }} />
+    </div>
+  );
+
+  return (
+    <div className="mgcp-brandsec">
+      <div className="mgcp-bannerpills">
+        {BANNER_SLOTS.map((b, i) => (
+          <button type="button" key={b.slot}
+            className={"mgcp-bannerpill" + (i === slotIdx ? " on" : "")}
+            onClick={() => setSlotIdx(i)}>
+            <span className="ic">{b.icon}</span>{b.name}
+          </button>
+        ))}
+      </div>
+      <div className="mgcp-bannerhead">
+        <h3 className="mgcp-brandh">{cfg.title}</h3>
+        <span className="mgcp-bannerspec">{cfg.spec}</span>
+      </div>
+      <div className="mgcp-bannerprev" style={{ aspectRatio: cfg.ratio }}>
         {active
-          ? <img src={active.png} alt="" />
-          : <span className="mgcp-slotcard-ph">{ph}</span>}
+          ? <img src={active.png} alt="" style={{
+              /* DC:953 verbatim -- the same expression _banner_window() replicates
+                 server-side, so this preview IS what the saved flat will show. */
+              objectPosition: shown.cropX + "% " + shown.cropY + "%",
+              transform: "scale(" + (shown.zoom / 100) + ")",
+              transformOrigin: shown.cropX + "% " + shown.cropY + "%",
+            }} />
+          : <span className="mgcp-bannerph">{cfg.ph}</span>}
         {active && (
-          <div className={"mgcp-slotcard-cropguide " + cropCls}>
+          <div className="mgcp-bannerguide">
             <i className="tl" /><i className="tr" /><i className="bl" /><i className="br" />
           </div>
         )}
       </div>
-      <div className="mgcp-slotcard-chips">
+      <div className="mgcp-sliderbox">
+        {slider("Zoom", "zoom", 100, 250)}
+        {slider("Horizontal", "cropX", 0, 100)}
+        {slider("Vertical", "cropY", 0, 100)}
+      </div>
+      <div className="mgcp-bannerchips">
         <label className="mgcp-chip mgcp-slotcard-uploadchip">
           ⬆ From disk
           <input type="file" accept="image/*" disabled={busy} style={{ display: "none" }}
             onChange={(e) => { upload(e.target.files[0]); e.target.value = ""; }} />
         </label>
-        {active && (
-          <button type="button" className="mgcp-chip" disabled={busy} onClick={cycleCrop}>
-            ✂ Size &amp; crop · subject-{cropCls}
-          </button>
-        )}
+        {/* Mounting IS opening for <mg-gallery-picker> (connectedCallback builds the
+            modal) -- same conditional-render pattern the Loom uses. */}
+        <button type="button" className="mgcp-chip" disabled={busy} onClick={() => setPicking(true)}>
+          🖼 From the gallery…
+        </button>
+        <button type="button" className="mgcp-chip" disabled={!active || busy} onClick={resetCrop}>
+          ↺ Reset crop
+        </button>
       </div>
       {assets.length > 1 && (
         <div className="mgcp-slotcard-thumbs">
           {assets.map((a) => (
             <button type="button" key={a.id}
               className={"mgcp-slotcard-thumb" + (a.id === data.active ? " on" : "")}
-              onClick={() => pick(a.id)} disabled={busy}
+              onClick={() => pickActive(a.id)} disabled={busy}
               title={a.id === data.active ? "active" : "Set active"}>
               <img src={a.png} alt="" />
             </button>
           ))}
         </div>
       )}
-      {msg && <div className="mgcp-tilenote" style={{ marginTop: 4 }}>{msg}</div>}
+      {msg && <div className="mgcp-tilenote">{msg}</div>}
+      {picking && <mg-gallery-picker ref={bindPicker} default-type="image"></mg-gallery-picker>}
     </div>
   );
 }
@@ -857,8 +1025,8 @@ function BannerSlotCard({ slot, title, spec, ph, data, onChanged }) {
 export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPickSkin }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
-  const marks = summary.branding.marks || [];
-  const anims = summary.branding.anims || [];
+  // DC:895-909 -- brandSections sub-nav; marks is the default section.
+  const [section, setSection] = useState("marks");
 
   const pickMark = async (id) => {
     setBusy(true); setMsg("");
@@ -881,62 +1049,35 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
     setMsg(d.error ? "⚠ " + d.error : "✓ Desktop shortcut updated");
   };
 
+  const SECTIONS = [
+    { key: "marks", label: "Icons, marks & animation" },
+    { key: "skins", label: "Skins" },
+    { key: "banners", label: "Banner slots" },
+  ];
+
   return (
     <div className="mgcp-brandgrid">
       <div className="mgcp-brandside">
         <div className="mgcp-mkick">Make it yours</div>
-        <div className="mgcp-sidehead">Icons &amp; marks</div>
-        <div className="mgcp-marklist">
-          {marks.map((m) => (
-            <button type="button" key={m.id}
-              className={"mgcp-markrow" + (m.id === summary.branding.mark ? " on" : "")}
-              onClick={() => pickMark(m.id)} disabled={busy} title={m.label || m.id}>
-              <span className="mgcp-markglyph">
-                {m.png
-                  ? <img src={m.png} alt=""
-                      style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: m.kind === "tile" ? 6 : 0 }}
-                      onError={(e) => e.currentTarget.remove()} />
-                  : (m.id === "logo" ? "🌙" : "◈")}
-              </span>{m.label || m.id}
-            </button>
-          ))}
-        </div>
-        <div className="mgcp-mkick" style={{ marginTop: 16 }}>Animation</div>
-        {anims.map((a) => (
-          <button type="button" key={a} className={"mgcp-animrow" + (a === summary.branding.anim ? " on" : "")}
-            onClick={() => pickAnim(a)} disabled={busy}>{a}</button>
+        {SECTIONS.map((sec) => (
+          <button type="button" key={sec.key}
+            className={"mgcp-brandnav" + (section === sec.key ? " on" : "")}
+            onClick={() => setSection(sec.key)}>{sec.label}</button>
         ))}
-        {isLocal && (
-          <button type="button" className="mgcp-chip mgcp-shortcutbtn" onClick={setShortcut} disabled={busy}>
-            Set launcher icon (this machine)
-          </button>
-        )}
-        {msg && <div className="mgcp-tilenote" style={{ marginTop: 10 }}>{msg}</div>}
+        {/* DC:299 -- the sealed note, verbatim. */}
+        <div className="mgcp-sealed"><b>Sealed:</b> badges, tier frames, achievement data.</div>
       </div>
       <div className="mgcp-brandmain">
-        <div className="mgcp-sidehead" style={{ margin: 0 }}>Skins</div>
-        <div className="mgcp-tilesmall">Cosmetic palette swaps for the whole suite — unlock more by earning achievements.</div>
-        {skins.length > 0 && <SkinsRow skins={skins} active={activeSkin} onPick={onPickSkin} />}
-
-        <div className="mgcp-sidehead" style={{ margin: "18px 0 0" }}>Banners</div>
-        <div className="mgcp-slotcards">
-          <BannerSlotCard slot="banner_main" title="Banner — main"
-            spec="1920 × 480 · 4:1 · subject-left" ph="your banner art — cropped live, subject-left honored"
-            data={(summary.branding.slots || {}).banner_main || { assets: [], active: null }}
-            onChanged={onSaved} />
-          <BannerSlotCard slot="banner_login" title="Banner — login"
-            spec="1920 × 480 · 4:1" ph="the login banner — same canvas, quieter mood"
-            data={(summary.branding.slots || {}).banner_login || { assets: [], active: null }}
-            onChanged={onSaved} />
-        </div>
-
-        <div style={{ fontSize: 11.5, color: "var(--overlay0)", lineHeight: 1.6, marginTop: 8 }}>
-          Uploading and picking a crop here is real and saved. <b style={{ color: "var(--subtext)" }}>Still not
-          wired:</b> the active banner doesn't display anywhere yet — the header and login page still
-          read the older flat <code>branding/banner.png</code>/<code>login-banner.png</code> files
-          directly, and this picker doesn't write to those yet. "From the gallery…" and a rotating
-          source aren't built. Mascot and reward-art slots are permanently out of scope for this tab.
-        </div>
+        {section === "marks" && (
+          <MarksSection summary={summary} busy={busy} msg={msg} isLocal={isLocal}
+            pickMark={pickMark} pickAnim={pickAnim} setShortcut={setShortcut} />
+        )}
+        {section === "skins" && (
+          <SkinsSection skins={skins} activeSkin={activeSkin} onPickSkin={onPickSkin} />
+        )}
+        {section === "banners" && (
+          <BannerEditor summary={summary} onSaved={onSaved} />
+        )}
       </div>
     </div>
   );
