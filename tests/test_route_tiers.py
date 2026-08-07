@@ -272,6 +272,8 @@ ROUTE_TIERS = {
     ("api_train_quota", "GET"): LOGIN,           # read-only quota read, free
     ("api_train_models", "GET"): LOGIN,          # read-only trainable-model list, free
     ("api_train_cover", "GET"): LOGIN,           # host-guarded CDN thumbnail proxy, free
+                                                  # (two routes -> one endpoint: /api/train/cover
+                                                  # + /api/pixai-cdn/thumb both map to api_train_cover)
     # The app's newest SPEND path. LOGIN tier like every other spend route here
     # (/api/generate et al); the real protection is preview-first + explicit-token
     # CSRF + the server's refusal to submit a PAID training without accept_credit_cost.

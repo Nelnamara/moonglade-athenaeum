@@ -5261,3 +5261,40 @@ but stuck on old/absent mobile designs.
 
 LINEAGE re-scoped as buildable (see the Image Details punch item above): batch siblings
 via task_id (free today) + a derivation chain via a new source_media_id column.
+
+### My Art bulk Manage + real LoRAs tab  ·  *2026-08-06*
+
+Two small-real-work items, both scoped and built the same session.
+
+**Bulk Manage** is NOT a second code path -- it is the exact same real
+`/api/myart/publish` preview/confirm pipeline the per-card actions already use, called
+in a loop over the selection behind ONE confirm sheet (visibility/delete need no
+per-item server resolution before confirming, unlike a single publish's media_index or
+tags' tack_ids, so bulk skips straight to the confirm rather than firing N preview
+round-trips first). Manage mode replaces the visibility badge with a checkbox (DC:2340-
+2341) and hides the hover actions so a single-item action can't fire mid-selection.
+Calls run one at a time, never parallel -- same politeness-to-PixAI's-servers ethos as
+every other multi-call path in this app -- and the result is counted (N done / N failed)
+rather than left as an unordered pile of racing responses.
+
+**Models & LoRAs tab** rides the SAME market route the Generate drawer's own picker
+already uses (`/api/model-search?src=mine&kind=lora` -- "the ordinary market connection
+filtered by the signed-in user's own id, exactly as PixAI's MY LORA tab does it", per
+that route's own docstring). Real cards: title, base-architecture badge (DC's own
+XL/DiT.2/SD tint map; anything else falls to its own named fallback, not an invented
+color), uses/comments/likes. Two disclosed omissions: the DC's UNPUBLISHED lock (the
+route carries no visibility field for a LoRA row -- verified, not guessed at) and the
+pager (the DC's own was a no-op; up to 48 load in one page).
+
+**Found + fixed in verification, not in the plan:** the LoRA covers hit the identical
+PixAI-CDN cross-origin block the Train panel's base-model covers hit earlier today.
+Reused that proxy rather than building a second one -- renamed it from the
+Train-specific `/api/train/cover` to the general `/api/pixai-cdn/thumb` (old path kept
+as an alias, same view function, so nothing that already used it broke).
+
+Verified live end-to-end on the real dev catalog: 4 real LoRAs render with correct
+titles/bases/covers (all 4/4 images loading post-proxy-fix); a seeded test artwork
+proved manage-mode selection (checkbox, card highlight, no Details-open), the bulk bar
+("1 selected" + all four buttons), a real confirm sheet ("Make 1 item private on
+PixAI?"), Cancel provably doing nothing (item still public after), and Clear resetting
+the selection. Test row reverted after. Full suite green (1587).

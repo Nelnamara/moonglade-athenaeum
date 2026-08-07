@@ -15994,12 +15994,15 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     import requests as _rq
 
     @app.route("/api/train/cover")
+    @app.route("/api/pixai-cdn/thumb")   # the general name -- covers My Art's LoRA cards too
     def api_train_cover():
-        """Proxy a training base-model cover thumbnail. The covers are PixAI CDN URLs
-        (images-ng.pixai.art) that the browser can't load cross-origin from localhost, but
-        the server fetches fine. SSRF-guarded: the URL host MUST be exactly the PixAI image
-        CDN -- nothing else is fetchable through here. Read-only, cached a day (these
-        thumbnails are immutable)."""
+        """Proxy a PixAI CDN thumbnail (images-ng.pixai.art), which the browser can't load
+        cross-origin from localhost but the server fetches fine. Started as the Train
+        panel's base-model covers; My Art's Models & LoRAs tab (2026-08-06) hit the exact
+        same block for its own cover_url rows and reuses this route rather than growing a
+        second proxy. SSRF-guarded: the URL host MUST be exactly the PixAI image CDN --
+        nothing else is fetchable through here. Read-only, cached a day (these thumbnails
+        are immutable)."""
         import urllib.parse as _up
         raw = request.args.get("u") or ""
         try:
