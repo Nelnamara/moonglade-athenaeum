@@ -104,6 +104,13 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **The "lightbox and details sometimes load slowly" mystery, solved.** It was never the
+  images or the database — it was Windows trying IPv6 first on every fresh `localhost`
+  connection and burning ~300ms falling back to the IPv4-only server. The gallery now
+  listens on IPv6 loopback too (takes effect on the next restart). The lightbox also
+  pre-warms the previous/next images so arrow-key browsing renders from cache, and large
+  images decode off the main thread.
+
 - **Two render-harness tests had been silently failing since 2026-08-05** — one broken by
   the Branding achievement gate (the ✦ Branding button the test clicks never renders in an
   isolated test environment, since the isolation correctly hides the real marks folder the

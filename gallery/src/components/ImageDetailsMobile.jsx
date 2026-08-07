@@ -256,7 +256,7 @@ export default function ImageDetailsMobile({
               <source src={"/video-file/" + encodeURIComponent(row.media_id)} />
             </video>
           ) : (
-            <img src={"/full/" + encodeURIComponent(row.media_id)} alt="" onError={() => setMediaOk(false)} />
+            <img src={"/full/" + encodeURIComponent(row.media_id)} alt="" decoding="async" onError={() => setMediaOk(false)} />
           )}
         </div>
 

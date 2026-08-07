@@ -1637,7 +1637,10 @@ increment in this file works.
       New payload-shape guard in `loom-core.test.js`; full Loom suite green. Negative
       prompt + weave removals recorded in the Claude Design handoff doc
       (`design_handoff/FOR_CLAUDE_DESIGN_2026-08-06.md`, corrected to keep the Channel).
-      Item CLOSED — nothing left to build.
+      Item CLOSED — nothing left to build. **Label ruling 2026-08-06 (the returned
+      handoff's Loom Mobile cycles "Normal ↔ Mature"): owner — "Normal/Enhanced wins."**
+      The shipped Normal/👑 Enhanced select and its `is_private` mapping stand; the
+      design's "Mature" label is overruled, matching the Generate drawer's real control.
 - [x] Generate → Reference tab missing the Opening/Closing frame pair. **SHIPPED 2026-08-04
       (session 2)** — reused the exact same `FrameSlot` calls Deep Focus's own body already
       makes (same component, same props), including the design's `dfHasPrev`/`dfInheritPrev`
@@ -4774,3 +4777,48 @@ blurred scrim, dropdown opens with its rise animation listing the real 5 upscale
 picking updates the box and closes the list, Escape closes the list while the panel stays
 open, the default selection was restored afterward, and everything closed cleanly.
 No spend path touched at any point.
+
+### "Load more" stays axed — third and final resurrection  ·  *2026-08-06*
+
+The returned design handoff reinstated a "⟳ Load N more" append control under the gallery
+pager (a better version than the one removed: manual bounded append, pager tracks the
+loaded range). Owner reviewed it against his own original 2026-07-30 QA reasoning
+(`Grid.jsx`'s header: "why have a per page setting" + a 35k-deep library's ever-growing
+DOM) and ruled: **keep it axed.** The new design answers the per-page objection but not
+the DOM-growth one, and the owner's live concern that Lightbox/Details already load
+slowly argued against adding page weight for a saved click. Deep browsing stays served by
+the per-page chip (up to 500) and the picker's own infinite scroll. Flagged for the next
+Claude Design relay: drop the control from the Frontend Gallery mockup so it can't
+resurrect a fourth time.
+
+### Lightbox/Details "sometimes slow" — diagnosed to the millisecond, three fixes  ·  *2026-08-06*
+
+Owner report ("The lightbox and details can load slowly sometimes already"), run down with
+real browser resource-timing against the live server rather than guessed at:
+
+**The finding.** `/api/next/detail` measured ~280–360ms per call — but the server's actual
+work is ~40ms (list_media_ids 21ms + sibling count 14ms + get_row 2ms, timed directly
+against the real catalog). Resource timing split the difference cleanly: **connect 312ms,
+TTFB 39ms.** Chrome resolves `localhost` dual-stack and tries IPv6 `::1` FIRST; the server
+binds IPv4 `127.0.0.1` only, so every FRESH connection burns ~300ms failing that attempt
+before falling back. Keep-alive reuse hides it; every new connection pays it — which is
+exactly why it felt intermittent. Full-res image serving itself was already healthy
+(~50ms cold, <10ms browser-cached, 1-year immutable + ETag).
+
+**Fixes shipped:**
+1. **Companion IPv6 loopback listener** — a second werkzeug server on `[::1]`, same port,
+   same app, started as a daemon thread before `app.run()`. Gated to loopback-ish hosts
+   (an explicit LAN `--host` sprouts nothing extra); fails soft with no IPv6 stack. The
+   IPv4 bind and LAN behavior are untouched. Guarded by a source-level gate test plus a
+   real bind-and-serve-over-[::1] smoke test (skips on machines without IPv6).
+   **Takes effect on the next server restart.**
+2. **Lightbox neighbor preload** — arrow-nav also paid a cold /full fetch+decode per step;
+   prev/next images now warm into the browser's immutable cache on every index change
+   (images only — never preloading neighbor VIDEOS' whole mp4s).
+3. **`decoding="async"`** on all four full-res image sites (Lightbox, Details, both mobile
+   twins) — large-image decode off the main thread's critical path.
+
+**Verified:** the diagnosis numbers are live measurements; the companion listener is
+covered by its own functional test; full render harness + syntax suites green. The
+before/after connect-time comparison needs the owner's restart to measure — expected
+result is fresh-connection API calls dropping from ~300ms to single digits.

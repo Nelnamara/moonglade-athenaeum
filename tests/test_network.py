@@ -1319,3 +1319,54 @@ def test_backfill_full_meta_refetches_rows_that_have_only_a_prompt(tmp_path, moc
                         side_effect=lambda s, tid: calls.append(tid) or task)
     core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
     assert calls == [], "the filled row is being re-fetched on every run"
+
+
+# ---------------------------------------------------------------------------
+# The IPv6 loopback companion listener (2026-08-06)
+# ---------------------------------------------------------------------------
+# Chrome resolves `localhost` dual-stack and tries ::1 FIRST; a server bound only
+# to 127.0.0.1 makes every fresh browser connection burn ~300ms failing that
+# attempt (measured live: connect 312ms vs 39ms of real server work). The gallery
+# now starts a second werkzeug listener on [::1] beside the IPv4 bind.
+
+def test_gallery_starts_an_ipv6_loopback_companion():
+    """Source-level guard: the companion block exists, is gated to loopback-ish
+    hosts only (an explicit LAN --host must not sprout extra listeners), and
+    fails soft when the machine has no IPv6 stack."""
+    import pathlib
+    src = pathlib.Path("moonglade_gallery.py").read_text(encoding="utf-8")
+    assert 'if args.host in ("127.0.0.1", "0.0.0.0", "localhost"):' in src
+    assert '_make_server6("::1", args.port, app' in src
+    assert src.index('_make_server6("::1"') < src.index(
+        "app.run(host=args.host, port=args.port"), \
+        "the companion must be up BEFORE app.run() blocks"
+
+
+def test_ipv6_loopback_actually_serves_a_wsgi_app():
+    """Functional smoke on this machine: werkzeug really can bind [::1] and answer
+    over IPv6 -- the exact mechanism the companion uses. Skips (never fails) where
+    the OS has no usable IPv6 loopback."""
+    import socket
+    import threading
+    import urllib.request
+
+    from werkzeug.serving import make_server
+
+    def app(environ, start_response):
+        start_response("200 OK", [("Content-Type", "text/plain")])
+        return [b"ok6"]
+
+    try:
+        srv = make_server("::1", 0, app, threaded=True)
+    except (OSError, socket.gaierror) as e:  # pragma: no cover - machine-dependent
+        pytest.skip("no usable IPv6 loopback on this machine: %s" % e)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        port = srv.server_port
+        body = urllib.request.urlopen(
+            "http://[::1]:%d/" % port, timeout=5).read()
+        assert body == b"ok6"
+    finally:
+        srv.shutdown()
+        t.join(timeout=5)
