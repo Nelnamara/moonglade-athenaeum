@@ -948,6 +948,7 @@ ${"=".repeat(48)}
   flex:none;border-bottom:1px solid var(--surface1);}
 .lv-banner-art{position:absolute;inset:0;
   background:radial-gradient(120% 140% at 18% 0%, color-mix(in oklab, var(--accent) 26%, #0b0820) 0%, #0b0820 62%, #070512 100%);}
+.lv-banner-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
 .lv-banner-hide{position:absolute;top:10px;right:12px;font-size:10px;font-weight:700;letter-spacing:.04em;
   color:#fff;background:rgba(6,4,14,.55);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.25);
   border-radius:999px;padding:5px 11px;cursor:pointer;font-family:inherit;}
@@ -2944,6 +2945,14 @@ ${"=".repeat(48)}
       "\u21E9 drag an image here to add it as a cast reference"
     ));
     return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" + (deepFocus ? " lv-overlay-df" : "") }, /* @__PURE__ */ React.createElement("style", null, V2_STYLES), bannerOpen ? /* @__PURE__ */ React.createElement("div", { className: "lv-banner" }, /* @__PURE__ */ React.createElement("div", { className: "lv-banner-art" }), /* @__PURE__ */ React.createElement(
+      "img",
+      {
+        className: "lv-banner-img",
+        src: "/branding/banner-loom.png",
+        alt: "",
+        onError: (e) => e.currentTarget.remove()
+      }
+    ), /* @__PURE__ */ React.createElement(
       "button",
       {
         type: "button",

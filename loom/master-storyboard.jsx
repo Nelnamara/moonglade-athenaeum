@@ -417,6 +417,7 @@ const V2_STYLES = `
   flex:none;border-bottom:1px solid var(--surface1);}
 .lv-banner-art{position:absolute;inset:0;
   background:radial-gradient(120% 140% at 18% 0%, color-mix(in oklab, var(--accent) 26%, #0b0820) 0%, #0b0820 62%, #070512 100%);}
+.lv-banner-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
 .lv-banner-hide{position:absolute;top:10px;right:12px;font-size:10px;font-weight:700;letter-spacing:.04em;
   color:#fff;background:rgba(6,4,14,.55);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.25);
   border-radius:999px;padding:5px 11px;cursor:pointer;font-family:inherit;}
@@ -2867,6 +2868,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       {bannerOpen ? (
         <div className="lv-banner">
           <div className="lv-banner-art" />
+          {/* The real Branding-slot flat (banner_loom -> /branding/banner-loom.png,
+              written through by the Control Panel's banner editor). Layers OVER the
+              design's gradient; onError removes itself so a fresh install with no
+              upload shows the gradient exactly as the DC draws it. */}
+          <img className="lv-banner-img" src="/branding/banner-loom.png" alt=""
+            onError={(e) => e.currentTarget.remove()} />
           <button type="button" className="lv-banner-hide" title="Hide banner"
             onClick={() => setBannerOpen(false)}>⌄ Hide banner</button>
         </div>

@@ -267,7 +267,7 @@ def test_branding_slots_empty_on_fresh_install(tmp_path):
     rewards) added 2026-08-05 -- no backend existed for them before this."""
     cli = _client(tmp_path)
     d = cli.get("/api/branding").get_json()
-    assert set(d["slots"].keys()) == {"banner_main", "banner_login", "mascots", "rewards"}
+    assert set(d["slots"].keys()) == {"banner_main", "banner_login", "mascots", "rewards", "banner_loom"}
     for slot in d["slots"].values():
         assert slot == {"assets": [], "active": None}
 
@@ -280,7 +280,8 @@ def test_branding_slot_upload_becomes_active(tmp_path):
     d = r.get_json()
     assert r.status_code == 200
     item = d["item"]
-    assert item["crop"] == "left"        # banner slots default subject-left
+    # uploads start at the neutral transform (the DC's own slider defaults)
+    assert (item["zoom"], item["cropX"], item["cropY"]) == (100, 50, 50)
     assert item["png"] == "/branding/banner_main/%s.png" % item["id"]
     assert d["assets"] == [item]
     # really on disk as a real PNG, re-encoded through Pillow regardless of the
@@ -294,12 +295,13 @@ def test_branding_slot_upload_becomes_active(tmp_path):
     assert slots["banner_main"] == {"assets": [item], "active": item["id"]}
 
 
-def test_branding_slot_non_banner_defaults_center_crop(tmp_path):
+def test_branding_slot_non_banner_defaults_neutral_transform(tmp_path):
     cli = _client(tmp_path)
     r = cli.post("/api/branding/slot", data={"slot": "mascots",
                  "file": (io_bytes(_png_bytes()), "m.png")},
                  content_type="multipart/form-data")
-    assert r.get_json()["item"]["crop"] == "center"
+    it = r.get_json()["item"]
+    assert (it["zoom"], it["cropX"], it["cropY"]) == (100, 50, 50)
 
 
 def test_branding_slot_second_upload_stays_available_and_becomes_active(tmp_path):
@@ -344,9 +346,25 @@ def test_branding_slot_crop_and_active_endpoints(tmp_path):
     # the second upload auto-became active -- prove /active can select back to the first
     assert cli.get("/api/branding").get_json()["slots"]["banner_login"]["active"] == second["id"]
 
-    r = cli.post("/api/branding/slot/crop", json={"slot": "banner_login", "id": first["id"], "crop": "right"})
+    # the three-slider transform (Control Panel.dc.html:326-339) is the primary surface
+    r = cli.post("/api/branding/slot/crop",
+                 json={"slot": "banner_login", "id": first["id"], "zoom": 180, "cropX": 25, "cropY": 70})
     assert r.status_code == 200
-    assert next(a["crop"] for a in r.get_json()["assets"] if a["id"] == first["id"]) == "right"
+    a = next(a for a in r.get_json()["assets"] if a["id"] == first["id"])
+    assert (a["zoom"], a["cropX"], a["cropY"]) == (180, 25, 70)
+    # partial update keeps the untouched fields
+    r = cli.post("/api/branding/slot/crop", json={"slot": "banner_login", "id": first["id"], "cropX": 90})
+    a = next(a for a in r.get_json()["assets"] if a["id"] == first["id"])
+    assert (a["zoom"], a["cropX"], a["cropY"]) == (180, 90, 70)
+    # out-of-range values clamp to the sliders' own bounds, never error
+    r = cli.post("/api/branding/slot/crop",
+                 json={"slot": "banner_login", "id": first["id"], "zoom": 900, "cropX": -5, "cropY": 400})
+    a = next(a for a in r.get_json()["assets"] if a["id"] == first["id"])
+    assert (a["zoom"], a["cropX"], a["cropY"]) == (250, 0, 100)
+    # legacy left/center/right still accepted (pre-2026-08-06 callers) -> a cropX pan
+    r = cli.post("/api/branding/slot/crop", json={"slot": "banner_login", "id": first["id"], "crop": "right"})
+    a = next(a for a in r.get_json()["assets"] if a["id"] == first["id"])
+    assert a["cropX"] == 100
     assert cli.post("/api/branding/slot/crop", json={"slot": "banner_login", "id": first["id"], "crop": "diagonal"}).status_code == 400
     assert cli.post("/api/branding/slot/crop", json={"slot": "banner_login", "id": "nope", "crop": "left"}).status_code == 400
 
@@ -583,26 +601,76 @@ def test_banner_login_slot_writes_its_own_flat(tmp_path):
 
 
 def test_banner_crop_change_rerenders_the_flat(tmp_path):
-    """The crop control is REAL now: left vs right anchors select different pixels of a
-    wider-than-4:1 source, and changing the active asset's crop rewrites the flat."""
+    """The transform sliders are REAL: zoom/cropX select different pixels of a
+    wider-than-4:1 source (red left half, blue right half), and changing the active
+    asset's transform rewrites the flat. Mirrors Control Panel.dc.html:953's preview
+    math -- the flat must match what the sliders showed."""
     from PIL import Image
     cli = _client(tmp_path)
     d = cli.post("/api/branding/slot", data={"slot": "banner_main",
                  "file": (io_bytes(_wide_png_bytes()), "b.png")},
                  content_type="multipart/form-data").get_json()
-    item = d["item"]                       # banner default: subject-left
+    item = d["item"]                       # neutral default: centered window
     flat = tmp_path / "branding" / "banner.png"
     with Image.open(flat) as im:
-        left_pixel = im.convert("RGB").getpixel((0, 0))
-    assert left_pixel == (255, 0, 0), "subject-left keeps the red (left) half"
-    cli.post("/api/branding/slot/crop", json={"slot": "banner_main",
-             "id": item["id"], "crop": "right"})
-    with Image.open(flat) as im:
         w = im.size[0]
-        right_pixel = im.convert("RGB").getpixel((w - 1, 0))
-        first_pixel = im.convert("RGB").getpixel((0, 0))
-    assert right_pixel == (0, 0, 255)
-    assert first_pixel == (0, 0, 255), "subject-right shows the blue (right) window"
+        assert im.size == (1920, 480), "flat is normalized to the DC's 1920x480 canvas"
+        rgb = im.convert("RGB")
+        assert rgb.getpixel((0, 0)) == (255, 0, 0), "centered window starts in the red half"
+        assert rgb.getpixel((w - 1, 0)) == (0, 0, 255), "and ends in the blue half"
+    # pan hard left -> all red
+    cli.post("/api/branding/slot/crop", json={"slot": "banner_main",
+             "id": item["id"], "cropX": 0})
+    with Image.open(flat) as im:
+        rgb = im.convert("RGB")
+        assert rgb.getpixel((0, 0)) == (255, 0, 0)
+        assert rgb.getpixel((im.size[0] - 1, 0)) == (255, 0, 0), "cropX 0 shows only the red window"
+    # pan hard right -> all blue
+    cli.post("/api/branding/slot/crop", json={"slot": "banner_main",
+             "id": item["id"], "cropX": 100})
+    with Image.open(flat) as im:
+        rgb = im.convert("RGB")
+        assert rgb.getpixel((0, 0)) == (0, 0, 255)
+        assert rgb.getpixel((im.size[0] - 1, 0)) == (0, 0, 255), "cropX 100 shows only the blue window"
+    # zoom 200 at cropX 0 halves the window: still all red, from an even tighter slice
+    cli.post("/api/branding/slot/crop", json={"slot": "banner_main",
+             "id": item["id"], "zoom": 200, "cropX": 0})
+    with Image.open(flat) as im:
+        rgb = im.convert("RGB")
+        assert rgb.getpixel((im.size[0] - 1, 0)) == (255, 0, 0), "zoomed-in left window stays red"
+
+
+def test_loom_banner_slot_writes_its_own_12to1_flat(tmp_path):
+    """banner_loom is a real written-through slot: an upload renders
+    branding/banner-loom.png at the DC's 1920x160 (12:1) canvas, and never
+    touches the other two banner flats."""
+    from PIL import Image
+    cli = _client(tmp_path)
+    r = cli.post("/api/branding/slot", data={"slot": "banner_loom",
+                 "file": (io_bytes(_wide_png_bytes()), "strip.png")},
+                 content_type="multipart/form-data")
+    assert r.status_code == 200
+    flat = tmp_path / "branding" / "banner-loom.png"
+    assert flat.exists()
+    with Image.open(flat) as im:
+        assert im.size == (1920, 160)
+    assert not (tmp_path / "branding" / "banner.png").exists()
+    assert not (tmp_path / "branding" / "login-banner.png").exists()
+
+
+def test_legacy_crop_manifest_migrates_to_transform(tmp_path):
+    """A manifest written under the OLD left/center/right model (pre 2026-08-06)
+    surfaces as the equivalent zoom/cropX/cropY -- an existing install's banners
+    keep displaying unchanged until re-tuned."""
+    import json as _json
+    import moonglade_gallery as g
+    sdir = tmp_path / "branding" / "banner_main"
+    sdir.mkdir(parents=True)
+    (sdir / "abcd1234.png").write_bytes(_png_bytes())
+    (sdir / "manifest.json").write_text(
+        _json.dumps({"items": [{"id": "abcd1234", "crop": "left"}]}), encoding="utf-8")
+    assets = g.list_slot_assets(tmp_path, "banner_main")
+    assert (assets[0]["zoom"], assets[0]["cropX"], assets[0]["cropY"]) == (100, 0, 50)
 
 
 def test_banner_pick_active_rerenders_the_flat(tmp_path):
