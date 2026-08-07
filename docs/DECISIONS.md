@@ -1672,9 +1672,10 @@ increment in this file works.
       alongside the flat field list, matching `Image Details.dc.html:95-97`'s own
       `row.copyable` pattern exactly, same code change as above.
 - [x] Header missing the ⛶ Lightbox link and "N of M" index label. **SHIPPED 2026-08-04.**
-- [ ] Upscale flyout (shared by Details + Lightbox, `static/mg-upscale-panel.js`) is a
+- [x] Upscale flyout (shared by Details + Lightbox, `static/mg-upscale-panel.js`) is a
       top-right-anchored panel with a native `<select>` instead of the design's centered modal
-      with a custom animated dropdown
+      with a custom animated dropdown. **SHIPPED 2026-08-06** — see the dated entry below
+      ("Upscale: the centered modal and the custom dropdown").
 
 **Desktop Gallery shell** — `NavSpine.jsx`/`shell.css`/`Grid.jsx` vs `Frontend Gallery.dc.html`.
 **All three SHIPPED 2026-08-04**, see dated entry below.
