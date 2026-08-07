@@ -1138,13 +1138,16 @@ def test_train_refuses_to_spend_credits_without_explicit_acceptance(tmp_path, mo
     so the same click that was free must NOT silently spend. 402 until the caller
     explicitly accepts."""
     cli, calls = _train_setup(tmp_path, monkeypatch, free_quota=0)
-    prev = _post_train(cli, _GOOD_TRAIN).get_json()
-    assert prev["is_free"] is False and "cannot quote" in prev["cost_note"]
-    r = _post_train(cli, dict(_GOOD_TRAIN, confirm=True))
+    # a REAL base model version -> the preview quotes its real price (Illustrious = SDXL = 25k)
+    body = dict(_GOOD_TRAIN, base_model_id="1844843519625072849")
+    prev = _post_train(cli, body).get_json()
+    assert prev["is_free"] is False and prev["price"] == 25000
+    assert "25,000" in prev["cost_note"]
+    r = _post_train(cli, dict(body, confirm=True))
     assert r.status_code == 402
     assert not calls
     # explicit acceptance lets it through
-    d = _post_train(cli, dict(_GOOD_TRAIN, confirm=True, accept_credit_cost=True)).get_json()
+    d = _post_train(cli, dict(body, confirm=True, accept_credit_cost=True)).get_json()
     assert d["submitted"] is True and d["was_free"] is False
     assert len(calls) == 1
 
@@ -1176,30 +1179,23 @@ def test_trigger_words_normalize_to_pixais_rules():
     assert core.normalize_trigger_words("  nel   druid  ") == "nel druid"
     assert core.normalize_trigger_words(None) == ""
 
-def test_list_trainable_base_models_groups_by_arch_with_versionids(monkeypatch):
-    """The train picker's data contract: models grouped by architecture with PixAI's
-    own friendly labels (DiT.2/DiT.1/SDXL/SD 1.5), each carrying the VERSION id the
-    submit needs (not the model id) and a real title. Empty architectures drop out."""
-    def _fake_gql(session, q, variables=None, **kw):
-        t = (variables or {}).get("type")
-        rows = {
-            "MMDIT26A_MODEL": [("m1", "v1", "Tsubaki.2")],
-            "DIT7_MODEL": [("m2", "v2", "Tsubaki")],
-            "SDXL_MODEL": [("m3", "v3", "blue_pencil-XL"), ("m4", "", "no-version")],
-            "SD_V1_MODEL": [],                       # empty -> dropped
-            "MMDIT26B_MODEL": [],                    # empty -> dropped
-        }.get(t, [])
-        return {"generationModels": {"edges": [
-            {"node": {"id": mid, "title": title,
-                      "media": {"urls": [{"url": "http://x/%s.jpg" % mid}]},
-                      "latestAvailableVersion": ({"id": vid} if vid else None)}}
-            for (mid, vid, title) in rows]}}
-    monkeypatch.setattr(core, "gql_adhoc", _fake_gql)
-    groups = core.list_trainable_base_models(object())
+def test_list_trainable_base_models_is_the_curated_snapshot_grouped_by_arch():
+    """The picker's data contract: PixAI's curated base list (captured snapshot, NOT the
+    public model catalog -- the owner caught the first build pulling the general feed),
+    grouped by architecture with the friendly labels and each model's VERSION id."""
+    groups = core.list_trainable_base_models()
     labels = [g["label"] for g in groups]
-    assert labels == ["DiT.2", "DiT.1", "SDXL"]     # SD 1.5 + DiT.3 empty -> dropped, order kept
+    assert labels == ["DiT.2", "DiT.1", "SDXL", "SD 1.5"]     # DiT.3 has no models -> dropped
     sdxl = next(g for g in groups if g["label"] == "SDXL")
-    assert [m["title"] for m in sdxl["models"]] == ["blue_pencil-XL"]   # unversioned dropped
-    assert sdxl["models"][0]["version_id"] == "v3"   # the VERSION id, not model id m3
-    assert sdxl["models"][0]["cover"].endswith(".jpg")
+    titles = [m["title"] for m in sdxl["models"]]
+    assert "Illustrious-v1.0" in titles and "NoobAI XL" in titles   # the real curated set
+    assert "xl aaa" not in titles                                   # not the community feed
+    assert sdxl["price"] == 25000
+    il = next(m for m in sdxl["models"] if m["title"] == "Illustrious-v1.0")
+    assert il["version_id"] == "1844843519625072849"     # the VERSION id, submit-ready
+    assert il["cover"].startswith("https://images-ng.pixai.art/")
+    # DiT.2 is the priciest; SD 1.5 the cheapest -- real captured pricing
+    assert core.training_price_for_version("1983308862240288769") == 100000   # Tsubaki.2 (DiT.2)
+    assert core.training_price_for_version("1648918127446573124") == 25000    # Moonbeam (SD 1.5)
+    assert core.training_price_for_version("not-a-real-version") is None
 

@@ -15919,9 +15919,44 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         generic market search and rendered raw model ids with no architecture grouping."""
         try:
             core, session = _gen_session()
-            return jsonify({"groups": core.list_trainable_base_models(session)})
+            return jsonify({"groups": core.list_trainable_base_models(),
+                            "pricing": core._TRAIN_PRICING})
         except Exception as e:
             return jsonify({"groups": [], "error": _redact_host_paths(str(e))[:200]}), 200
+
+    import requests as _rq
+
+    @app.route("/api/train/cover")
+    def api_train_cover():
+        """Proxy a training base-model cover thumbnail. The covers are PixAI CDN URLs
+        (images-ng.pixai.art) that the browser can't load cross-origin from localhost, but
+        the server fetches fine. SSRF-guarded: the URL host MUST be exactly the PixAI image
+        CDN -- nothing else is fetchable through here. Read-only, cached a day (these
+        thumbnails are immutable)."""
+        import urllib.parse as _up
+        raw = request.args.get("u") or ""
+        try:
+            parsed = _up.urlparse(raw)
+        except ValueError:
+            return ("bad url", 400)
+        if parsed.scheme != "https" or parsed.netloc != "images-ng.pixai.art":
+            return ("forbidden host", 403)
+        try:
+            # PUBLIC CDN thumbnails -- no auth needed (verified). A PLAIN per-request
+            # requests.get, NOT _gen_session() and NOT a shared Session: the panel loads
+            # ~15 covers at once across Flask's request threads, and (a) minting an
+            # authenticated PixAI session per image is too slow, while (b) sharing one
+            # requests.Session across those threads is not thread-safe and hangs them.
+            # A fresh get() per call is thread-safe and plenty fast for cached thumbnails.
+            r = _rq.get(raw, timeout=20)
+            if r.status_code != 200:
+                return ("upstream %d" % r.status_code, 502)
+            resp = app.response_class(r.content,
+                                      mimetype=r.headers.get("content-type", "image/webp"))
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
+        except Exception:
+            return ("fetch failed", 502)
 
     @app.route("/api/train/submit", methods=["POST"])
     def api_train_submit():
@@ -15960,23 +15995,27 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
         free_left = core.training_free_quota(session)
         is_free = free_left > 0
+        price = core.training_price_for_version(base_model_id)   # credits, or None if unknown
+        if is_free:
+            cost_note = "Free — uses 1 of your %d free trainings." % free_left
+        elif price is not None:
+            cost_note = ("No free trainings left — this base costs %s credits to train."
+                         % "{:,}".format(price))
+        else:
+            cost_note = ("No free trainings left, and this app can't price this base — "
+                         "check the cost on PixAI before going ahead.")
         if not bool(body.get("confirm")):
             return jsonify({
                 "preview": True, "image_count": len(media_ids),
                 "title": title.strip(), "trigger_words": tw, "category": category,
                 "free_trainings_left": free_left, "is_free": is_free,
-                "cost_note": ("Free — uses 1 of your %d free trainings." % free_left)
-                             if is_free else
-                             "You have no free trainings left. This will charge real "
-                             "credits, and PixAI only prices training in its own client, "
-                             "so this app cannot quote the amount — check PixAI before "
-                             "going ahead.",
+                "price": price, "cost_note": cost_note,
             })
         if not is_free and not bool(body.get("accept_credit_cost")):
-            return jsonify({"error": "No free trainings left — this would charge credits "
-                                     "of an amount this app can't determine. Re-send with "
-                                     "accept_credit_cost if you've checked the price on "
-                                     "PixAI and want to proceed."}), 402
+            return jsonify({"error": "This training charges credits (%s). Re-send with "
+                                     "accept_credit_cost to proceed."
+                                     % (("{:,}".format(price)) if price is not None
+                                        else "amount unknown")}), 402
         try:
             task = core.submit_training(session, base_model_id, media_ids, title, trigger,
                                         category)

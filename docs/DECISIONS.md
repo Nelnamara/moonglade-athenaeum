@@ -5192,3 +5192,33 @@ nine with the site's exact labels; `category=detail` previews clean; the old pla
 `category=concept` is now correctly rejected 400. Lesson banked: when the design carries a
 data list the harvest doesn't inline, probe the live page rather than shipping the mock's
 placeholder.
+
+### Train base models — the real curated list + real pricing (owner-captured)  ·  *2026-08-06*
+
+Owner was right that the base list was wrong ("feels like its grabbing model picker
+generation models" -- it was: the public generationModels catalog). Probed the real
+source exhaustively and found it's NOT reachable: the connection's `feed` arg is ignored,
+`category:"in-house"` covers only SD 1.5, the SDXL officials (Illustrious/NoobAI) aren't in
+the public catalog at all (keyword search finds nothing), and the train page's config is
+served bundled + cached in a way no documented endpoint or the RE harvest exposes -- every
+automated network-capture path in the session failed (tracking resets on nav, perf buffer
+shows only cache-misses, Apollo not on window, list not in inline scripts).
+
+So the owner pasted the real config response. Baked it as the canonical source
+(_TRAIN_BASE_MODELS, 20 models: 1 DiT.2 / 1 DiT.1 / 15 SDXL / 3 SD 1.5, each with
+versionId + cover), with a documented refresh path (re-paste the config when PixAI adds
+bases). The paste also carried the **real pricing matrix**, which corrects an earlier
+wrong assumption: training is NOT unpriceable client-side magic -- it's a flat per-arch
+lookup (SDXL/SD1.5 25k, DiT.1 50k, DiT.2 100k credits; reuse = half). So the cost gate now
+QUOTES the real number when free quota is gone, instead of "amount unknown".
+
+Covers are PixAI CDN URLs the browser can't hotlink from localhost -> a host-guarded
+backend proxy (/api/train/cover, locked to images-ng.pixai.art, SSRF-safe). Debugging the
+proxy surfaced two real bugs: a shared requests.Session isn't thread-safe across Flask's
+request threads (hung ~15 concurrent cover loads -> switched to a plain per-request get),
+and `loading="lazy"` on covers that sit below the panel fold never triggered (-> eager).
+
+Verified live: Model Type shows DiT.2/DiT.1/SDXL/SD 1.5; SDXL lists Illustrious-v1.0,
+NoobAI XL, Hinata v2, Illustrious-v0.1 ... (exact match to the site, 15/15 covers loaded);
+prices flow through; a real version_id validates through preview. Nothing submitted;
+quota still 9.
