@@ -1087,3 +1087,92 @@ def test_myart_publish_refuses_when_the_batch_position_is_unresolvable(tmp_path,
     assert "refusing to publish" in r.get_json()["error"]
     assert not [c for c in calls if c[0] == "publish"]
 
+# --- LoRA training: the spend path. Every test here stubs the account at the core
+# module (see _publish_setup's comment for why a moonglade_gallery attribute patch
+# would silently let a real session through). ---
+
+def _train_setup(tmp_path, monkeypatch, free_quota=9):
+    save_catalog(tmp_path / "catalog.db", [_row(media_id="1", filename="a_1.png")])
+    calls = []
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "training_free_quota", lambda s: free_quota)
+
+    def _submit(session, *a, **kw):
+        calls.append(("submit", a, kw))
+        return {"id": "trn1", "refId": "model9"}
+
+    monkeypatch.setattr(core, "submit_training", _submit)
+    return login_test_client(create_app(tmp_path)), calls
+
+
+def _post_train(cli, body):
+    csrf = cli.get("/api/panel/summary").get_json()["csrf"]
+    return cli.post("/api/train/submit", json=dict(body, csrf=csrf))
+
+
+_GOOD_TRAIN = {"base_model_id": "bm1", "media_ids": [str(i) for i in range(12)],
+               "title": "Nel test", "trigger_words": "nelnamara druid",
+               "category": "character"}
+
+
+def test_train_preview_reports_free_quota_and_fires_nothing(tmp_path, monkeypatch):
+    cli, calls = _train_setup(tmp_path, monkeypatch, free_quota=9)
+    d = _post_train(cli, _GOOD_TRAIN).get_json()
+    assert d["preview"] is True and d["is_free"] is True
+    assert d["free_trainings_left"] == 9 and d["image_count"] == 12
+    assert "Free" in d["cost_note"]
+    assert not calls                       # nothing submitted
+
+
+def test_train_confirmed_submits_when_free(tmp_path, monkeypatch):
+    cli, calls = _train_setup(tmp_path, monkeypatch, free_quota=9)
+    d = _post_train(cli, dict(_GOOD_TRAIN, confirm=True)).get_json()
+    assert d["submitted"] is True and d["was_free"] is True
+    assert d["task"]["refId"] == "model9"
+    assert d["free_trainings_left"] == 8
+    assert len(calls) == 1
+
+
+def test_train_refuses_to_spend_credits_without_explicit_acceptance(tmp_path, monkeypatch):
+    """With no free quota the cost is real AND unquotable (PixAI prices client-side),
+    so the same click that was free must NOT silently spend. 402 until the caller
+    explicitly accepts."""
+    cli, calls = _train_setup(tmp_path, monkeypatch, free_quota=0)
+    prev = _post_train(cli, _GOOD_TRAIN).get_json()
+    assert prev["is_free"] is False and "cannot quote" in prev["cost_note"]
+    r = _post_train(cli, dict(_GOOD_TRAIN, confirm=True))
+    assert r.status_code == 402
+    assert not calls
+    # explicit acceptance lets it through
+    d = _post_train(cli, dict(_GOOD_TRAIN, confirm=True, accept_credit_cost=True)).get_json()
+    assert d["submitted"] is True and d["was_free"] is False
+    assert len(calls) == 1
+
+
+def test_train_validates_with_pixais_own_rules_before_any_network(tmp_path, monkeypatch):
+    cli, calls = _train_setup(tmp_path, monkeypatch)
+    bad = [
+        (dict(_GOOD_TRAIN, media_ids=["1", "2"]), "at least 10"),
+        (dict(_GOOD_TRAIN, title=""), "name"),
+        (dict(_GOOD_TRAIN, trigger_words="   "), "trigger words"),
+        (dict(_GOOD_TRAIN, category="wrong"), "category"),
+        (dict(_GOOD_TRAIN, base_model_id=""), "base model"),
+    ]
+    for body, needle in bad:
+        r = _post_train(cli, dict(body, confirm=True))
+        assert r.status_code == 400, needle
+        assert needle in r.get_json()["error"], (needle, r.get_json())
+    assert not calls
+
+
+def test_train_submit_requires_csrf(tmp_path, monkeypatch):
+    cli, calls = _train_setup(tmp_path, monkeypatch)
+    r = cli.post("/api/train/submit", json=dict(_GOOD_TRAIN, confirm=True))
+    assert r.status_code == 400
+    assert not calls
+
+
+def test_trigger_words_normalize_to_pixais_rules():
+    assert core.normalize_trigger_words("  nel   druid  ") == "nel druid"
+    assert core.normalize_trigger_words(None) == ""
+

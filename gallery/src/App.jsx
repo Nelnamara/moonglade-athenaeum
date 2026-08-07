@@ -10,6 +10,7 @@ import HealthOverlay from "./components/HealthOverlay.jsx";
 import DuplicateReviewOverlay from "./components/DuplicateReviewOverlay.jsx";
 import MyArtOverlay from "./components/MyArtOverlay.jsx";
 import PublishOverlay from "./components/PublishOverlay.jsx";
+import TrainOverlay from "./components/TrainOverlay.jsx";
 import ContestsOverlay from "./components/ContestsOverlay.jsx";
 import ImportOverlay from "./components/ImportOverlay.jsx";
 import ControlPanelOverlay from "./components/ControlPanelOverlay.jsx";
@@ -573,9 +574,10 @@ export default function App({ boot }) {
       )}
 
       {/* OVERLAY MOUNT POINT — the six designed nav overlays land here.
-          Health/My Art/Contests/Publish are live (Publish since 2026-08-06,
-          on the real createArtworkFromTaskV2 pipeline); Train/Import are still
-          `soon`-dimmed in NavSpine until their own backend routes exist (My
+          Health/My Art/Contests/Publish/Train are live (Publish and Train since
+          2026-08-06, on the real createArtworkFromTaskV2 / createTrainingTask
+          pipelines); Import is still `soon`-dimmed in NavSpine until its own
+          backend route exists (My
           Art and Contests already had real, working routes sitting unused --
           see docs/DECISIONS.md 2026-08-02). Scrim z 300, slab 301 (band per
           drift §3); Esc-first is handled by the capture listener above. The
@@ -605,6 +607,9 @@ export default function App({ boot }) {
       )}
       {overlay === "contests" && (
         <ContestsOverlay onClose={() => setOverlay(null)} />
+      )}
+      {overlay === "train" && (
+        <TrainOverlay onClose={() => setOverlay(null)} />
       )}
       {overlay === "publish" && (
         <PublishOverlay

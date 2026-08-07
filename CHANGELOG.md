@@ -14,6 +14,7 @@ git tags. Full prose notes for tagged versions live on
 > does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- Train a LoRA: pick a dataset from your recent generations, name it, set trigger words/category/base model, and submit a real PixAI training. Shows how many free trainings you have left, and refuses to spend credits without an explicit extra confirmation.
 - Publish panel: the inline image strip, ✦ suggest-a-title (PixAI's own image-to-prompt, free) and the live tag dropdown are all built as designed.
 - Publish is live: the nav Publish panel plus the ☁ Publish buttons in the Lightbox and Image Details all open a real publish flow (title/description/tags/contest/private), with a preview-and-confirm step and no credits spent. Already-published images say so instead of offering to publish again.
 - My Art: publish, re-tag and delete your artworks on PixAI directly from the card grid. Every action previews what it will do (including which tags resolved) and only runs when you confirm; no credits are spent.

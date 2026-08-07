@@ -5099,3 +5099,46 @@ Verified live: 24 real swatches at 29px wide for an 864x1536 portrait (52 x aspe
 exact), all 24 thumbnails loading, selection updating the source; the suggest popover
 returned 4 real PixAI suggestions (tag list + NL description) for the chosen image; the
 tag dropdown returned 8 live matches for "moon" and picking one added a real chip.
+
+### Train a LoRA — built, on the real createTrainingTask pipeline  ·  *2026-08-06*
+
+Design was ready (`ovTrain`, Frontend Gallery.dc.html L392+); the payload came out of the
+harvest like Publish did (`_app.train-lora-main-*.js` carries PixAI's own submit builder,
+`Er()`, with its validation rules). Nothing needed a fresh probe.
+
+**The cost finding that shaped the whole build.** The owner said he had "7-8 free
+trainings", which sounded like free cards -- it is NOT. `/v2/kaisuuken/summary` lists
+only generation cards (verified live: Tsubaki.2 / V4.0 Preview x2, none for training).
+Free trainings are a **QUOTA** under currency `free::user_lora_training`, read via
+`getMeWithQuotaForCurrency` -- confirmed live at **9**. Building on the card assumption
+would have made a "free" test cost real credits. And there is no server price to fall
+back on: PixAI computes training price CLIENT-side from a matrix (already documented in
+private/GENERATOR_SURFACE.md), which is why every `pricing` probe 400s.
+
+That gives exactly two honest states, and the route encodes them:
+- **quota > 0** -> free, consumes one unit. Preview says so with the real number.
+- **quota == 0** -> costs credits, amount UNQUOTABLE by this app. The confirmed submit
+  is **refused with 402** unless the caller also sends `accept_credit_cost: true`, and
+  the panel makes that a deliberate tick-box. The same click that was free can never
+  silently spend a large unknown amount.
+
+Core: `training_free_quota` (read-only, returns 0 on failure -- the safe direction),
+`normalize_trigger_words` (PixAI's own no-double/leading/trailing-space rule),
+`validate_training` (mirrors `Er()`: >=10 and <=100 images, title, trigger words,
+category), and `submit_training` through **gql_mutate** + `_check_read_only` -- a retry
+would start a SECOND training and burn a second quota unit. Registered in
+`tests/test_spend_no_retry.py`'s SPEND_PATHS along with the three artwork mutations,
+which had also been missing from it.
+
+Panel built to the design: dataset counter with the min-10 gate and 100 cap, tile grid of
+real recent generations to toggle, name / trigger words with live counter / category /
+Model Type / Model Theme. Model Type is wired as the architecture FILTER over the theme
+cards (which is what it really is -- the submitted field is baseModelId); theme cards come
+from the existing `/api/model-search?kind=base`, reusing the Generate drawer's own route.
+
+Verified live: quota route returned 9; panel showed "✓ 9 free trainings left"; 60 real
+tiles, 24 real base models; the min-10 gate held ("Add 10 more images", disabled) and
+released at 11; trigger-word counter live; preview returned "Free — uses 1 of your 9 free
+trainings". **Nothing was submitted** -- backed out at the confirm sheet and re-checked
+the quota, still 9. The first real training is the owner's to run, with a dataset and
+name he picks.
