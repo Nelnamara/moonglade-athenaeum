@@ -15900,6 +15900,79 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         result["unmatched_tags"] = unmatched
         return jsonify(result)
 
+    @app.route("/api/train/quota")
+    def api_train_quota():
+        """How many FREE LoRA trainings are left (PixAI quota `free::user_lora_training`,
+        NOT a kaisuuken card -- the card pool is generation-only). Read-only, free."""
+        try:
+            core, session = _gen_session()
+            return jsonify({"free_trainings": core.training_free_quota(session)})
+        except Exception as e:
+            return jsonify({"free_trainings": 0,
+                            "error": _redact_host_paths(str(e))[:200]}), 200
+
+    @app.route("/api/train/submit", methods=["POST"])
+    def api_train_submit():
+        """Submit a LoRA training task -- PREVIEW-FIRST, like /api/myart/publish.
+
+        Without `confirm: true` this makes NO mutating call: it validates the request
+        with the site's own rules and reports the real cost position (how many free
+        trainings remain, whether this one is free).
+
+        COST SAFETY. PixAI prices training CLIENT-side from a matrix, so there is no
+        server value to quote (documented in private/GENERATOR_SURFACE.md). That gives
+        exactly two honest states:
+          * free quota > 0  -> this training is FREE and consumes one quota unit.
+          * free quota == 0 -> it costs real credits, and this app CANNOT say how many.
+            The confirmed call is then REFUSED unless the caller also sends
+            `accept_credit_cost: true`, so nobody spends a large unknown amount by
+            clicking the same button they used when it was free.
+        READ_ONLY still refuses the confirmed form inside core. Explicit-token CSRF."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        media_ids = body.get("media_ids") if isinstance(body.get("media_ids"), list) else []
+        base_model_id = str(body.get("base_model_id") or "").strip()
+        title = str(body.get("title") or "")
+        trigger = str(body.get("trigger_words") or "")
+        category = str(body.get("category") or "")
+        try:
+            core, session = _gen_session()
+        except Exception as e:
+            return jsonify({"error": "PixAI session unavailable: %s" % e}), 502
+
+        try:
+            tw = core.validate_training(base_model_id, media_ids, title, trigger, category)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
+        free_left = core.training_free_quota(session)
+        is_free = free_left > 0
+        if not bool(body.get("confirm")):
+            return jsonify({
+                "preview": True, "image_count": len(media_ids),
+                "title": title.strip(), "trigger_words": tw, "category": category,
+                "free_trainings_left": free_left, "is_free": is_free,
+                "cost_note": ("Free — uses 1 of your %d free trainings." % free_left)
+                             if is_free else
+                             "You have no free trainings left. This will charge real "
+                             "credits, and PixAI only prices training in its own client, "
+                             "so this app cannot quote the amount — check PixAI before "
+                             "going ahead.",
+            })
+        if not is_free and not bool(body.get("accept_credit_cost")):
+            return jsonify({"error": "No free trainings left — this would charge credits "
+                                     "of an amount this app can't determine. Re-send with "
+                                     "accept_credit_cost if you've checked the price on "
+                                     "PixAI and want to proceed."}), 402
+        try:
+            task = core.submit_training(session, base_model_id, media_ids, title, trigger,
+                                        category)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 502
+        return jsonify({"submitted": True, "task": task, "was_free": is_free,
+                        "free_trainings_left": max(0, free_left - 1) if is_free else 0})
+
     _telem_day = {"day": None}   # once-per-day throttle for the passive marks
 
     @app.route("/api/achievements")

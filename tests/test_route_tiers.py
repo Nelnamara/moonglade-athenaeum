@@ -268,6 +268,11 @@ ROUTE_TIERS = {
     # like every other account-touching web action here (/api/generate, /api/claim), with
     # explicit-token CSRF and a preview-before-confirm step doing the real protecting.
     ("api_myart_publish", "POST"): LOGIN,
+    ("api_train_quota", "GET"): LOGIN,           # read-only quota read, free
+    # The app's newest SPEND path. LOGIN tier like every other spend route here
+    # (/api/generate et al); the real protection is preview-first + explicit-token
+    # CSRF + the server's refusal to submit a PAID training without accept_credit_cost.
+    ("api_train_submit", "POST"): LOGIN,
 
     # jobs -- ONE rule string, TWO endpoints (the case a rule-keyed dict drops)
     ("api_jobs", "GET"): LOGIN,

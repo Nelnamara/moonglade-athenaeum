@@ -7542,6 +7542,96 @@ def resolve_tack_ids(session, tags):
     return ids, unmatched
 
 
+_TRAIN_FREE_CURRENCY = "free::user_lora_training"
+_CREATE_TRAINING = ("mutation createTrainingTask($input: CreateTrainingTaskInput!) {"
+                    " createTrainingTask(input: $input) { id refId } }")
+TRAIN_CATEGORIES = ("character", "style", "concept")
+TRAIN_MIN_IMAGES = 10
+TRAIN_MAX_IMAGES = 100
+
+
+def training_free_quota(session):
+    """How many FREE LoRA trainings the account has left. PixAI tracks these as a QUOTA
+    under the currency `free::user_lora_training` -- NOT as a kaisuuken free card (the
+    card pool is generation-only, which is why /v2/kaisuuken/summary never lists one).
+    Read-only. Returns an int; 0 on any failure, which is the safe direction: 0 means
+    'treat this as paid', never 'assume it's free'."""
+    try:
+        d = gql_adhoc(session,
+                      "query($currency:String!){ me { id quotaAmount(currency:$currency) } }",
+                      {"currency": _TRAIN_FREE_CURRENCY}) or {}
+        return int(((d.get("me") or {}).get("quotaAmount")) or 0)
+    except (PixAIError, TypeError, ValueError):
+        return 0
+
+
+def normalize_trigger_words(text):
+    """PixAI's own trigger-word rules, from the train-LoRA form: no leading/trailing
+    spaces and no consecutive spaces (the form states both). Returns the cleaned string."""
+    return " ".join(str(text or "").split())
+
+
+def validate_training(base_model_id, media_ids, title, trigger_words, category,
+                      training_task_id=""):
+    """Mirror the site's OWN pre-submit validation (its Er() builder) so a bad request is
+    refused here instead of burning a round trip -- or worse, a free-training quota unit.
+    Returns the normalized trigger words. Raises PixAIError with a plain-language reason."""
+    if not base_model_id:
+        raise PixAIError("pick a base model to train on")
+    ids = [str(m) for m in (media_ids or []) if str(m).strip()]
+    if len(ids) < TRAIN_MIN_IMAGES and not training_task_id:
+        raise PixAIError("training needs at least %d images -- you have %d"
+                         % (TRAIN_MIN_IMAGES, len(ids)))
+    if len(ids) > TRAIN_MAX_IMAGES:
+        raise PixAIError("training takes at most %d images -- you have %d"
+                         % (TRAIN_MAX_IMAGES, len(ids)))
+    if not str(title or "").strip():
+        raise PixAIError("give the LoRA a name")
+    tw = normalize_trigger_words(trigger_words)
+    if not tw:
+        raise PixAIError("trigger words are required -- they're how you summon the LoRA")
+    if len(tw) > 200:
+        raise PixAIError("trigger words are too long")
+    if str(category or "") not in TRAIN_CATEGORIES:
+        raise PixAIError("pick a category (%s)" % "/".join(TRAIN_CATEGORIES))
+    return tw
+
+
+def submit_training(session, base_model_id, media_ids, title, trigger_words, category,
+                    training_task_id="", primary_lora_model_id="", kaisuuken_id=""):
+    """Submit a real LoRA training task to PixAI (`createTrainingTask`).
+
+    SPENDS unless the account has free-training quota left (see training_free_quota) --
+    so it goes through gql_mutate: SINGLE ATTEMPT, no retry, for exactly the reason
+    every other spend path does. A lost response after the server accepted the task
+    would, on retry, start a SECOND training and consume a second quota unit (or a real
+    credit charge, which for training is large). _check_read_only gates it like every
+    other account mutation.
+
+    This function does NOT decide whether the user wants to pay: callers preview first
+    (quota + validation) and only call this once the user has confirmed. Input shape
+    mirrors the site's own form exactly. Returns the created task dict."""
+    _check_read_only("submit a LoRA training task")
+    tw = validate_training(base_model_id, media_ids, title, trigger_words, category,
+                           training_task_id)
+    inp = {
+        "baseModelId": str(base_model_id),
+        "mediaIds": [str(m) for m in (media_ids or []) if str(m).strip()],
+        "title": str(title).strip(),
+        "type": "USER_MULTI_LORA",
+        "triggerWords": tw,
+        "category": str(category),
+    }
+    if training_task_id:
+        inp["trainingTaskId"] = str(training_task_id)
+    if primary_lora_model_id:
+        inp["primaryLoraModelId"] = str(primary_lora_model_id)
+    if kaisuuken_id:
+        inp["kaisuukenId"] = str(kaisuuken_id)
+    d = gql_mutate(session, _CREATE_TRAINING, {"input": inp}) or {}
+    return d.get("createTrainingTask") or {}
+
+
 def task_media_index(session, task_id, media_id):
     """Which image of a task a given media_id IS -- the `mediaIndex` the publish mutation
     needs. Derived from the task's own ordered output list (`_task_image_media`, the same
