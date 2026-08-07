@@ -93,6 +93,14 @@ git tags. Full prose notes for tagged versions live on
 - **The Loom Mobile frame/gallery picker got its own bottom sheet** — the same shared
   picker, reshaped into the mobile design's glass sheet with real slide-up/down closes,
   instead of the desktop modal squeezed onto a phone.
+- **The Loom's video Channel (Normal/Enhanced) reaches every submit path** — the real
+  `is_private` setting the Generate drawer always had is now carried per-shot through the
+  Loom's own price previews and generates too, with the design's Channel row on the mobile
+  Video tab. An earlier audit note claiming the field didn't exist was wrong and is
+  corrected in the tracker.
+- **The Contests overlay footer is honest now** — the mockup's fake "+12 more below the
+  fold" became the real live community-contest count plus a link to the official PixAI
+  Discord, on both platforms.
 
 ### Fixed
 

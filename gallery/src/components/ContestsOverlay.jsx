@@ -121,6 +121,19 @@ export default function ContestsOverlay({ onClose }) {
                   ))}
                 </div>
               )}
+              {/* Frontend Gallery.dc.html:642's "+12 more below the fold" replaced per the
+                  owner's Option C (2026-08-04) with the REAL live count + the official
+                  Discord (link owner-supplied 2026-08-06; copy owner-approved same day).
+                  community.length is the full unpaginated API list -- an accurate number,
+                  not the mock's static demo text. */}
+              {community.length > 0 && (
+                <div className="mgct-footer">
+                  {fmt(community.length)} community contest{community.length === 1 ? "" : "s"} running
+                  {" — find more on the "}
+                  <a className="mgct-discord" href="https://discord.gg/cRtTuq5Z4"
+                    target="_blank" rel="noopener noreferrer">official PixAI Discord</a>.
+                </div>
+              )}
             </>
           )}
         </div>
