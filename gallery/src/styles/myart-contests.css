@@ -95,6 +95,30 @@ button.mgma2-toolbtn:disabled { opacity: .55; cursor: not-allowed; }
 .mgma2-fdate { font-size: 9.5px; color: var(--overlay0); font-variant-numeric: tabular-nums; }
 .mgma2-likes { font-size: 11px; font-variant-numeric: tabular-nums; }
 
+/* Card actions + the confirm step (2026-08-06 publish pipeline). Nothing here fires
+   a PixAI mutation until the confirm sheet is accepted -- see MyArtOverlay.jsx. */
+.mgma2-tagedit { position: absolute; inset: auto 8px 8px 8px; z-index: 4; display: flex;
+  flex-direction: column; gap: 7px; padding: 9px; border-radius: 10px;
+  border: 1px solid var(--surface1); background: rgba(8,6,20,.94); backdrop-filter: blur(6px); }
+.mgma2-tagedit input { width: 100%; box-sizing: border-box; background: var(--surface0);
+  border: 1px solid var(--surface1); border-radius: 7px; color: var(--text);
+  padding: 7px 10px; font-size: 11px; outline: none; font-family: inherit; }
+.mgma2-tagedit-row { display: flex; gap: 6px; justify-content: flex-end; }
+.mgma2-godone { padding: 6px 14px; border-radius: 8px; font-size: 11px; font-weight: 700;
+  cursor: pointer; color: var(--mantle, #0a0818); background: var(--accent);
+  border: 1px solid var(--accent); font-family: inherit; }
+.mgma2-godone.danger { background: var(--red, #f38ba8); border-color: var(--red, #f38ba8); }
+.mgma2-godone:disabled { opacity: .6; cursor: not-allowed; }
+.mgma2-acterr { font-size: 11.5px; color: var(--red, #f38ba8); }
+.mgma2-confirm { flex: none; margin: 0 26px 12px; padding: 12px 14px; border-radius: 11px;
+  border: 1px solid var(--accent); background: rgba(182,146,230,.1); display: flex;
+  flex-direction: column; gap: 8px; }
+.mgma2-confirmtitle { font-size: 13px; font-weight: 700; color: var(--text); }
+.mgma2-confirmbody { font-size: 11.5px; color: var(--subtext); line-height: 1.6; }
+.mgma2-confirmbody .warn { color: var(--gold); }
+.mgma2-confirmnote { font-size: 10.5px; color: var(--overlay0); margin-top: 4px; }
+.mgma2-confirmacts { display: flex; gap: 8px; justify-content: flex-end; }
+
 .mgma-barwrap { height: 4px; border-radius: 2px; background: var(--surface0); overflow: hidden; }
 .mgma-bar { height: 100%; border-radius: 2px; background: var(--accent); }
 .mgma-footnote { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px;

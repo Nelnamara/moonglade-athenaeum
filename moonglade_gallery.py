@@ -15763,7 +15763,127 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 "tags": [t.strip() for t in (tags or "").split(",") if t.strip()][:4],
                 "public": pub == "1", "likes": likes, "comments": comments,
             })
-        return jsonify({"items": items})
+        # The card actions POST to /api/myart/publish, which is in the explicit-token
+        # CSRF class; MG_BOOT doesn't carry the token, so it rides along here rather
+        # than making the overlay fetch the whole Control Panel summary for one field.
+        return jsonify({"items": items, "csrf": session.get("csrf", "")})
+
+    def _artwork_row(mid):
+        """The catalog row behind one media_id (artwork_id/task_id/title), or None."""
+        con = _connect(db_path)
+        try:
+            r = con.execute(
+                "SELECT media_id, artwork_id, task_id, title, art_tags, is_published"
+                " FROM catalog WHERE media_id = ? LIMIT 1", (str(mid),)).fetchone()
+        finally:
+            con.close()
+        if not r:
+            return None
+        return {"media_id": r[0], "artwork_id": r[1], "task_id": r[2],
+                "title": r[3], "art_tags": r[4], "is_published": r[5]}
+
+    @app.route("/api/myart/publish", methods=["POST"])
+    def api_myart_publish():
+        """Publish / unpublish / re-tag / delete one of the owner's artworks -- the My Art
+        card actions and the Lightbox/Details Publish button.
+
+        PREVIEW-FIRST, like every other account-mutating path in this app: without
+        `confirm: true` the route performs NO network call and returns exactly what it
+        WOULD do (action, target, resolved tag ids, and anything it could not resolve).
+        The UI shows that preview and only then sends the confirmed call. READ_ONLY in
+        config.json refuses the confirmed form regardless, inside the core functions.
+
+        Actions:
+          publish   -- createArtworkFromTaskV2 for a media_id that has no artwork yet
+                       (needs its task_id + the image's index in that task)
+          visibility-- upsertArtwork flipping public/private on an existing artwork
+          tags      -- upsertArtwork replacing the tack list
+          delete    -- deleteArtwork (irreversible on PixAI; local files untouched)
+
+        CSRF: explicit-token class, matching /api/duplicates/resolve and the user-admin
+        routes -- a real account mutation triggered by one web click."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        action = str(body.get("action") or "").strip()
+        mid = str(body.get("media_id") or "").strip()
+        if action not in ("publish", "visibility", "tags", "delete"):
+            return jsonify({"error": "unknown action"}), 400
+        row = _artwork_row(mid)
+        if not row:
+            return jsonify({"error": "unknown media id"}), 400
+        confirm = bool(body.get("confirm"))
+        tags = body.get("tags") if isinstance(body.get("tags"), list) else None
+        private = body.get("private")
+        title = body.get("title")
+
+        if action == "publish" and row["artwork_id"]:
+            return jsonify({"error": "already published -- use visibility/tags instead"}), 400
+        if action != "publish" and not row["artwork_id"]:
+            return jsonify({"error": "not published yet -- publish it first"}), 400
+        if action == "publish" and not row["task_id"]:
+            return jsonify({"error": "no task id for that image -- it can't be published from a task"}), 400
+
+        try:
+            core, session = _gen_session()
+        except Exception as e:
+            return jsonify({"error": "PixAI session unavailable: %s" % e}), 502
+
+        tack_ids, unmatched = [], []
+        if tags is not None:
+            tack_ids, unmatched = core.resolve_tack_ids(session, tags)   # read-only
+
+        if not confirm:
+            return jsonify({"preview": True, "action": action, "media_id": mid,
+                            "artwork_id": row["artwork_id"], "task_id": row["task_id"],
+                            "title": title if title is not None else row["title"],
+                            "private": private, "tack_ids": tack_ids,
+                            "unmatched_tags": unmatched,
+                            "spends_credits": False,
+                            "irreversible": action == "delete"})
+        try:
+            if action == "publish":
+                art = core.publish_artwork_from_task(
+                    session, row["task_id"], media_index=int(body.get("media_index") or 0),
+                    title=title or row["title"] or "", description=body.get("description") or "",
+                    tack_ids=tack_ids, private=bool(private),
+                    hide_prompts=bool(body.get("hide_prompts")))
+                result = {"artwork_id": art.get("id"), "published": True}
+            elif action == "delete":
+                core.delete_artwork(session, row["artwork_id"])
+                result = {"deleted": True}
+            else:
+                art = core.update_artwork(
+                    session, row["artwork_id"],
+                    title=title,
+                    tack_ids=(tack_ids if tags is not None else None),
+                    private=(None if private is None else bool(private)))
+                result = {"artwork_id": art.get("id") or row["artwork_id"], "updated": True}
+        except Exception as e:
+            return jsonify({"error": str(e)}), 502
+
+        # Mirror the change into the catalog so the grid reflects it without a full sync.
+        con = _connect(db_path)
+        try:
+            if action == "delete":
+                con.execute("UPDATE catalog SET artwork_id='', is_published='0' WHERE media_id=?", (mid,))
+            else:
+                if action == "publish":
+                    con.execute("UPDATE catalog SET artwork_id=?, is_published=? WHERE media_id=?",
+                                (result.get("artwork_id") or "", "0" if private else "1", mid))
+                if private is not None:
+                    con.execute("UPDATE catalog SET is_published=? WHERE media_id=?",
+                                ("0" if private else "1", mid))
+                if tags is not None:
+                    con.execute("UPDATE catalog SET art_tags=? WHERE media_id=?",
+                                (", ".join(str(t).lstrip("#").strip() for t in tags), mid))
+                if title is not None:
+                    con.execute("UPDATE catalog SET title=? WHERE media_id=?", (title, mid))
+            con.commit()
+        finally:
+            con.close()
+        result["unmatched_tags"] = unmatched
+        return jsonify(result)
 
     _telem_day = {"day": None}   # once-per-day throttle for the passive marks
 
