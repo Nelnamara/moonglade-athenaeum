@@ -385,6 +385,23 @@
 .mgdock-reusefrom:hover { border-color: rgba(182, 146, 230, .8); }
 .mgdock-composer-top .sp { flex: 1 1 auto; }
 
+/* ★ Snippets -- Frontend Gallery.dc.html:2827-2829 (button, accent border + text
+   color while open) and :1222-1224 (the chip row, mgSlab entrance, chips hover to
+   accent). Literal values from the DC's own inline styles. */
+button.mgdock-snipbtn { font-size: 10px; font-weight: 600; padding: 4px 9px;
+  border-radius: 7px; cursor: pointer; font-family: inherit; white-space: nowrap;
+  transition: border-color .2s, color .2s;
+  border: 1px solid var(--surface1); background: rgba(33, 31, 58, .7);
+  color: var(--subtext); }
+button.mgdock-snipbtn.on { border-color: var(--accent); color: var(--text); }
+.mgdock-sniprow { display: flex; flex-wrap: wrap; gap: 5px; padding-top: 8px;
+  animation: mgSlab .3s cubic-bezier(.22, 1, .36, 1) both; }
+button.mgdock-snip { font-size: 10px; padding: 4px 9px; border-radius: 7px;
+  border: 1px solid var(--surface1); background: rgba(33, 31, 58, .7);
+  color: var(--subtext); cursor: pointer; font-family: inherit;
+  transition: border-color .18s, color .18s; }
+button.mgdock-snip:hover { border-color: var(--accent); color: var(--text); }
+
 .mgdock-prompt { width: 100%; background: transparent; border: none; outline: none;
   resize: none; overflow-y: auto; color: var(--text); font-family: inherit;
   font-size: 16px; line-height: 1.5; font-weight: 300; padding: 0;

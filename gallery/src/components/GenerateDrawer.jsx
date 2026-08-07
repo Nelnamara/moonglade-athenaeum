@@ -28,6 +28,17 @@ import "../styles/dock.css";
    on close would orphan an in-flight (already charged) video task from every
    surface, and a v4.0 15s render is ~210,000 credits. */
 
+/* Prompt snippets -- Frontend Gallery.dc.html:1340-1345's own [label, insert] pairs,
+   carried verbatim (they're the design's shipped content, not placeholder model data).
+   A chip appends its insert text to the prompt with the DC's exact comma-joining
+   (:2832): trailing comma trimmed, ", " added only when a prompt already exists. */
+const SNIPPETS = [
+  ["masterpiece, best quality", "masterpiece, best quality"],
+  ["moonlit grove", "moonlit grove, volumetric light"],
+  ["cinematic lighting", "cinematic lighting, rim light"],
+  ["detailed background", "highly detailed background"],
+];
+
 function VideoTab({ visible, prefillRequest }) {
   const host = useRef(null);
   const el = useRef(null);
@@ -57,6 +68,7 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   const [expanded, setExpanded] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [promptFocus, setPromptFocus] = useState(false);
+  const [snippetsOpen, setSnippetsOpen] = useState(false); // ★ Snippets chip row toggle
   const [editSource, setEditSource] = useState("");
   const [videoPrefill, setVideoPrefill] = useState(null);
   const [flyOpen, setFlyOpen] = useState(false);
@@ -331,7 +343,12 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
 
   const d = dims(s);
   const custom = !!(parseInt(s.customW, 10) > 0 && parseInt(s.customH, 10) > 0);
-  const frameSummary = d.width + " × " + d.height + " px" + (s.count > 1 ? " · " + s.count + " images" : "");
+  // Frontend Gallery.dc.html:2893's own formula: "768×1024 · Auto · ×3" -- size, the
+  // TUNING mode's display name, and the design's ×N count form (was "px" + "N images",
+  // neither of which the design uses), with its no-model nudge prefix.
+  const modeName = (MODES.find(([v]) => v === s.mode) || ["", s.mode])[1];
+  const frameSummary = (m ? "" : "pick a model · ") + d.width + "×" + d.height + " · " + modeName
+    + (s.count > 1 ? " · ×" + s.count : "");
   const modelShort = m ? (m.resolving ? "Resolving…" : m.title) : "Pick a model";
 
   /* The peek pill can only OPEN the dock through the host's own toggle verbs;
@@ -690,12 +707,26 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
                   </button>
                 )}
                 <span className="sp" />
+                {/* Frontend Gallery.dc.html:1218 -- the ★ Snippets toggle, right-aligned
+                    at the end of the composer's header row. */}
+                <button type="button" className={"mgdock-snipbtn" + (snippetsOpen ? " on" : "")}
+                  onClick={() => setSnippetsOpen((v) => !v)}>★ Snippets</button>
               </div>
               <textarea className="mgdock-prompt" rows={promptRows} value={s.prompt}
                 placeholder="Describe your image…"
                 onChange={(e) => set({ prompt: e.target.value })}
                 onFocus={() => setPromptFocus(true)}
                 onBlur={() => setPromptFocus(false)} />
+              {snippetsOpen && (
+                <div className="mgdock-sniprow">
+                  {SNIPPETS.map(([label, insert]) => (
+                    <button type="button" className="mgdock-snip" key={label}
+                      onClick={() => set({
+                        prompt: (s.prompt.trim() ? s.prompt.replace(/,\s*$/, "") + ", " : "") + insert,
+                      })}>{label}</button>
+                  ))}
+                </div>
+              )}
               {expanded && (
                 <div className="mgdock-negrow">
                   <span className="mgdock-lbl">NEGATIVE</span>
