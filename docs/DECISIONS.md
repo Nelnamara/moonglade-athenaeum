@@ -1681,8 +1681,19 @@ increment in this file works.
 
 **Image Details (desktop)** — `DetailsView.jsx` vs `Image Details.dc.html`. Mobile
 (`ImageDetailsMobile.jsx`) already has all four of these correctly — port the pattern.
-- [ ] LINEAGE section missing — still open. No real backend lineage data exists (confirmed);
-      not fabricating it. Same real gap mobile disclosed and skipped.
+- [ ] LINEAGE section missing — OPEN and now **scoped as buildable** (owner correction
+      2026-08-06). The earlier "no real backend lineage data exists" was WRONG. Two real,
+      trackable dimensions:
+      (a) **Batch siblings** — images sharing a `task_id` are the up-to-4 outputs of one
+          generation. `task_id` is already a catalog column; this dimension is queryable
+          TODAY with zero new data.
+      (b) **Derivation chain** — upscale / edit / img2video record their SOURCE image's
+          `mediaId` in the task params (`params["mediaId"]`, moonglade_backup.py:5528; video
+          the same), which PixAI persists and `task_detail_gql` reads back; `poster_media_id`
+          already links a video to its still. Needs one `source_media_id` catalog column,
+          populated forward at submit time + backfilled from task params for history.
+      Not a dead end — the DC's LINEAGE panel maps onto real relationships. Build order:
+      (a) first (free), then (b) behind the schema add.
 - [x] SIMILAR section missing. **SHIPPED 2026-08-04** — reused the exact real `SimilarModal.jsx`
       already proven by `Lightbox.jsx`'s own "✧ Similar" button, not a rebuilt strip.
 - [x]→rebuilding 7 of 11 metadata fields hidden behind a "Full record ▾" toggle. **Provenance
@@ -1745,17 +1756,15 @@ increment in this file works.
       the wrong type family — borrowed wholesale from Control Panel's mobile stat card. **Owner
       sign-off 2026-08-04 (session 2): ratified as-is**, deliberate cross-screen-consistency
       choice, lower priority.
-- [ ] **NEW FINDING, 2026-08-04 (session 2), not previously tracked: post rows have no image
-      thumbnail at all, both platforms — a real regression from classic, not a build-fidelity
-      bug.** Owner caught this by eye ("this looks remarkably worse than classic"). Checked all
-      four sources: **classic** (`moonglade_gallery.py:7847`) renders a real thumbnail per post
-      (`<img src="/thumbs/{media_id}.jpg">`) in its `art-card` grid. **Neither current design
-      file** — `Moonglade Mobile.dc.html:503-508` (mobile) nor `Frontend Gallery.dc.html`'s
-      `ovMyArt` block (desktop) — references any `<image-slot>`/image for this row; both are
-      rank+title+meta text only. The shipped React (`MyArtOverlay.jsx`/`MyArtMobile.jsx`)
-      faithfully built the thumbnail-less design. **Owner decision: hold back for a Claude
-      Design redesign** (not a quick port — the design itself needs the thumbnail restored,
-      not just the code) rather than have an implementer guess at sizing/placement.
+- [x]→NARROWED-TO-MOBILE **post rows have no image thumbnail** — DESKTOP RESOLVED
+      2026-08-06: the My Art rebuild (Stage 2A) replaced the text list with the design's
+      3:4 card grid, which renders a real `/thumbs/<mid>.jpg` per card. **Mobile still
+      open**: `MyArtMobile.jsx` remains the thumbnail-less rank+title+meta list, because
+      `Moonglade Mobile.dc.html:503-508` itself has no image in the row (the DESIGN needs the
+      thumbnail restored, not just the code). **FLAGGED FOR CLAUDE DESIGN**: mobile My Art
+      post row needs a thumbnail added to the design before the mobile build can follow.
+      (Original finding: owner caught it by eye 2026-08-04, "this looks remarkably worse than
+      classic"; classic `moonglade_gallery.py:7847` had `<img src="/thumbs/{media_id}.jpg">`.)
 
 **Health** — `HealthOverlay.jsx`/`HealthMobile.jsx` vs `Frontend Gallery.dc.html`. Backend/data
 logic and most regions are genuinely faithful; these are the real misses:
