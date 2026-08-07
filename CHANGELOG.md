@@ -75,6 +75,14 @@ git tags. Full prose notes for tagged versions live on
   `branding/mascots/` from outside the app, with no API call involved, correctly earned the
   achievement and unlocked the tab on the next reload.
 
+### Added (2026-08-06 polish pass)
+
+- **The Generate composer's ★ Snippets** — the design's quick-insert prompt chips, plus the
+  size summary corrected to the design's own "1024×1024 · Auto · ×N" format.
+- **Loom Mobile's four missing animations** — the metal shimmer on every primary button
+  (skin-aware, stops when disabled/reduced-motion) and real slide-down + fade sheet closes
+  replacing instant unmounts, on all three bottom sheets.
+
 ### Fixed
 
 - **Two render-harness tests had been silently failing since 2026-08-05** — one broken by

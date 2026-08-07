@@ -1607,6 +1607,11 @@ increment in this file works.
       not a port. Two genuinely safe, cosmetic-only pieces remain un-added: a static "PixAI
       Motion v2" model label and the capability badges (15s/multi-ref/audio/end-frame) — both
       non-interactive text in the design too, no backend question, just not yet built.
+      **The two cosmetic pieces SHIPPED 2026-08-06** (static "PixAI Motion v2" model row +
+      the 4 capability badges, DC's literal styles, placed in the design's own sequence
+      before the audio block — no fake Duration duplicate invented next to the label, that
+      control already lives on Shot Detail). The blocked functional half (negative prompt/
+      channel/weave-mode) stays blocked on the same owner decision as before.
 - [x] Generate → Reference tab missing the Opening/Closing frame pair. **SHIPPED 2026-08-04
       (session 2)** — reused the exact same `FrameSlot` calls Deep Focus's own body already
       makes (same component, same props), including the design's `dfHasPrev`/`dfInheritPrev`

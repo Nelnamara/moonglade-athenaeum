@@ -3487,6 +3487,15 @@ const LOOM_MOBILE_STYLES = `
 .lm-genoverride{font-size:11px;color:var(--gold);margin-top:4px;}
 .lm-genflash{font-size:10.5px;color:var(--gold);background:rgba(0,0,0,.15);border-radius:5px;padding:4px 7px;
   margin-top:4px;}
+/* Video tab's static model row + capability badges -- Loom Mobile.dc.html:854/856-857/930's
+   own literal values (engineThumb gradient, caps chip chrome). */
+.lm-genmodelrow{display:flex;align-items:center;padding:8px 10px;border-radius:8px;
+  background:var(--base);border:1px solid var(--surface1);font:600 12px/1.2 system-ui;color:var(--text);}
+.lm-genmodelthumb{width:26px;height:26px;border-radius:6px;flex:none;
+  background:linear-gradient(150deg,#643aac 0%,#241f5b 100%);margin-right:8px;}
+.lm-gencaps{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0;}
+.lm-gencap{font:600 9px/1.2 system-ui;padding:3px 7px;border-radius:5px;
+  border:1px solid var(--surface1);background:rgba(33,31,58,.6);color:var(--subtext);}
 .lm-gencost{display:flex;flex-direction:column;gap:2px;margin-top:14px;}
 .lm-gencosttext{font-size:12px;font-weight:700;color:var(--emerald);}
 .lm-gensel{width:100%;box-sizing:border-box;background:var(--base);border:1px solid var(--surface1);
@@ -5367,6 +5376,21 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                   mockup string. Shows the owner the exact text about to be submitted, honoring
                   an active promptOverride verbatim, before they ever tap Generate. */}
               <div className="lm-genpreview">{shotText(dfLive, project, imgSrc)}</div>
+
+              {/* The Video tab's two sanctioned cosmetic pieces (owner correction 2026-08-04:
+                  of the design's 5 missing elements, only these two are safe to add --
+                  negative prompt/channel have no real submit field, weave-mode may be
+                  redundant). Loom Mobile.dc.html:408 (the static "PixAI Motion v2" model
+                  row, non-interactive there too) and :411 (the capability badges). The
+                  design pairs the model row with Duration -- that control already lives on
+                  Shot Detail here, so no duplicate is invented alongside the label. */}
+              <span className="lm-microlab" style={{ marginTop: 12 }}>Model</span>
+              <div className="lm-genmodelrow"><span className="lm-genmodelthumb" />PixAI Motion v2</div>
+              <div className="lm-gencaps">
+                {["15s", "multi-ref", "audio", "end-frame"].map((cap) => (
+                  <span key={cap} className="lm-gencap">{cap}</span>
+                ))}
+              </div>
 
               {/* generate_audio / audio_language -- REAL fields the card shape has always
                   carried (see newCard()'s own audioGen/audioLanguage comment), but with no UI
