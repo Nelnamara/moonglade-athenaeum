@@ -4845,3 +4845,13 @@ gradient scrim — the separate body block below the image is gone; the communit
 fixed 2-col (was auto-fill minmax(300px)). Desktop overlay only, per the handoff (mobile
 contests untouched by this pass). Live-verified: full content width, 3/1 computed aspect,
 scrim + overlaid nodes present, 2 computed grid columns.
+
+**3. Health animated charts — SHIPPED.** The DC's own keyframes and chart math verbatim:
+every bar grows in (hGrow); "Images by month" became "Images over time" with a Trend/Bars
+toggle — Trend is the 680×150 inline SVG (area fill + 1.5s line draw + staggered dots) on
+a SQRT scale so small months still read, footed by first · ▲peak · last; "Top models"
+gained a Bars/Share toggle — Share is the conic-gradient donut (top 5 + Other, DC's
+DONUT_COLORS) with the tagged total in the hole and a % legend. The model-count filter
+click stays on the Bars view (the legend is display-only, per the DC). Reduced-motion
+kills all of it to settled states. Live-verified with real data: both toggles, 2 paths +
+dots in the SVG, real conic gradient, 1,938 tagged / 6 legend rows.

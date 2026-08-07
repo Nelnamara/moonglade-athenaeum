@@ -83,6 +83,46 @@
 .mgh-loading { padding: 40px 0 30px; text-align: center; font-size: 12px;
   color: var(--subtext); }
 
+/* ---- Animated charts (gallery-era pass, handoff-2026-08-06 §4) -- the DC's own
+   keyframes (Frontend Gallery.dc.html:41-46) + the Trend/Bars & Bars/Share chrome. ---- */
+@keyframes hGrow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes hRise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes hDraw { to { stroke-dashoffset: 0; } }
+@keyframes hArea { from { opacity: 0; } to { opacity: 1; } }
+@keyframes hDot { from { opacity: 0; transform: scale(0); } to { opacity: 1; transform: scale(1); } }
+@keyframes hRing { from { opacity: 0; transform: rotate(-90deg) scale(.7); } to { opacity: 1; transform: rotate(0) scale(1); } }
+.mgh-bar { transform-origin: left; animation: hGrow .8s cubic-bezier(.2,.9,.24,1) both; }
+.mgh-hrow { display: flex; align-items: center; gap: 10px; padding: 18px 0 10px; }
+.mgh-hrow .mgh-h { padding: 0; flex: 1 1 auto; }
+.mgh-seg { display: flex; gap: 2px; padding: 3px; border-radius: 9px;
+  border: 1px solid var(--surface1); background: rgba(12,10,28,.6); }
+button.mgh-segbtn { padding: 5px 12px; border-radius: 7px; font-size: 11px; font-weight: 700;
+  cursor: pointer; transition: background .18s, color .18s; border: none; background: none;
+  color: var(--subtext); font-family: inherit; }
+button.mgh-segbtn.on { background: var(--accent); color: var(--mantle); }
+.mgh-trendbox { position: relative; border-radius: 13px; border: 1px solid var(--surface1);
+  background: rgba(12,10,28,.5); padding: 14px 12px 8px; }
+.mgh-trendfoot { display: flex; justify-content: space-between;
+  font-family: ui-monospace, Menlo, monospace; font-size: 9px; color: var(--overlay0);
+  padding: 4px 4px 0; }
+.mgh-donutwrap { display: flex; gap: 26px; align-items: center; flex-wrap: wrap; padding: 6px 0; }
+.mgh-donut { flex: none; position: relative; width: 150px; height: 150px;
+  animation: hRing .7s cubic-bezier(.2,.9,.24,1) both; }
+.mgh-donutring { position: absolute; inset: 0; border-radius: 50%; }
+.mgh-donuthole { position: absolute; inset: 26px; border-radius: 50%; background: #0d0a1e;
+  display: grid; place-items: center; text-align: center; }
+.mgh-donuttotal { font-size: 20px; font-weight: 800; color: var(--text);
+  font-variant-numeric: tabular-nums; }
+.mgh-donutlab { font-size: 8.5px; letter-spacing: .12em; color: var(--overlay0); }
+.mgh-donutlegend { flex: 1 1 200px; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.mgh-donutrow { display: flex; align-items: center; gap: 9px; }
+.mgh-donutdot { flex: none; width: 11px; height: 11px; border-radius: 3px; }
+.mgh-donutname { flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--subtext);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgh-donutpct { flex: none; font-size: 10.5px; font-weight: 700; color: var(--text);
+  font-variant-numeric: tabular-nums; }
+
 @media (prefers-reduced-motion: reduce) {
   .mgv-scrim, .mgv-slab { animation: none; }
+  .mgh-bar, .mgh-donut, .mgh-trendbox svg path, .mgh-trendbox svg circle { animation: none !important; opacity: 1; stroke-dashoffset: 0 !important; }
 }
