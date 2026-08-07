@@ -89,6 +89,12 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
     return () => { dead = true; };
   }, [mid]);
 
+  // Suggested titles are per-image; without this, switching images (the swatch strip or
+  // the shared picker) left the PREVIOUS image's cached suggestions in `sugs`, so
+  // openSuggest's `if (sugs) return` skipped the refetch and the popover offered a wrong-
+  // image caption under the new image's name. Found by ultrareview 2026-08-06.
+  useEffect(() => { setSugs(null); setSugOpen(false); }, [mid]);
+
   // CSRF rides on /api/myart/items (MG_BOOT doesn't carry it); contests are the live
   // feed; the strip is the real recent library (images only -- the DC's swatch pool,
   // with actual art in it).

@@ -14,6 +14,7 @@ git tags. Full prose notes for tagged versions live on
 > does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- Fixed: publish/re-tag could silently attach the wrong PixAI tag on an ambiguous partial match, and confirming a cleared title could silently republish the old one. Both caught by ultrareview.
 - My Art: bulk Manage (multi-select publish/unpublish/delete, one confirm for the whole batch) and a real Models & LoRAs tab showing your own published LoRAs.
 - Image Details: a real LINEAGE section — batch siblings and the derivation chain (which edit/upscale/video an image came from, and what came from it), click-to-navigate, hidden when there's nothing to show.
 - Train panel: the Model Theme list is now PixAI's real curated base-model set (Illustrious, NoobAI XL, Moonbeam, …) with covers, and the cost line quotes the real training price per base when free trainings run out.

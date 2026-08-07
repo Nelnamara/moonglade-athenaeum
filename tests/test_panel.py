@@ -1046,6 +1046,31 @@ def test_myart_publish_confirmed_mutates_and_mirrors_the_catalog(tmp_path, monke
     assert any(i["media_id"] == "mUn" and i["public"] for i in items)
 
 
+def test_myart_publish_confirm_honors_a_deliberately_cleared_title(tmp_path, monkeypatch):
+    """Regression, ultrareview 2026-08-06 bug_003: the confirm branch used to `title or
+    row["title"] or ""`, so an intentionally-cleared title (empty string, not omitted)
+    silently fell back to the catalog's stale title -- while the preview/confirm sheet had
+    already shown the user an empty title. `mUn`'s catalog row starts with a real title
+    ("Unpublished one"); sending title="" must publish EMPTY, not that stale title."""
+    cli, calls = _publish_setup(tmp_path, monkeypatch)
+    d = _post_publish(cli, {"action": "publish", "media_id": "mUn", "confirm": True,
+                            "title": ""}).get_json()
+    assert d["published"] is True
+    _, _, kw = next(c for c in calls if c[0] == "publish")
+    assert kw["title"] == "", "an explicitly empty title must not fall back to the catalog row's stale title"
+
+
+def test_myart_publish_confirm_falls_back_only_when_title_is_omitted(tmp_path, monkeypatch):
+    """The counterpart to the test above: when the client never sends `title` at all
+    (field genuinely absent, not cleared), falling back to the catalog's own title is
+    correct -- that's the "publish with no explicit title" case, unaffected by this fix."""
+    cli, calls = _publish_setup(tmp_path, monkeypatch)
+    d = _post_publish(cli, {"action": "publish", "media_id": "mUn", "confirm": True}).get_json()
+    assert d["published"] is True
+    _, _, kw = next(c for c in calls if c[0] == "publish")
+    assert kw["title"] == "Unpublished one"
+
+
 def test_myart_actions_guard_their_preconditions(tmp_path, monkeypatch):
     cli, calls = _publish_setup(tmp_path, monkeypatch)
     # an unpublished image has no artwork to toggle
