@@ -1464,12 +1464,18 @@ increment in this file works.
       verbatim — upload (`⬆ From disk`), crop cycling (`✂ Size & crop · subject-{left/center/
       right}`, math copied from `Control Panel.dc.html:664-665`), and a thumbnail strip to
       pick the active asset when more than one is uploaded. `npm run build` clean,
-      `pytest tests/test_branding.py` 28/28 green. **Still open, disclosed in the tab's own
-      copy:** "From the gallery…" and the rotating-source chip aren't built; `banner_main`/
-      `banner_login` still don't write to the real `branding/banner.png`/`login-banner.png`
-      flat files the header/login templates actually read, so an uploaded/active banner
-      doesn't display anywhere in the app yet — that write-through is the next real decision
-      to scope. Rotating-source stays deferred until the SQLite bundle work (owner call).
+      `pytest tests/test_branding.py` 28/28 green. **Write-through SHIPPED 2026-08-06**
+      (owner: "Yes, seems obvious") — every path that changes which asset displays (upload,
+      pick-active, crop the active one, a raw drop the sweep adopts) now renders that
+      slot's active asset over its real flat file (`_write_banner_flat`: the largest 4:1
+      window of the source, anchored left/center/right per the stored crop — which makes
+      the crop control REAL; it was stored metadata nothing read before). Regression tests
+      include pixel-level left-vs-right anchor checks; needs a server restart to go live,
+      as ever. **Still open:** "From the gallery…" isn't built; rotating-source stays
+      deferred until the SQLite bundle work (owner call). **Owner critique 2026-08-06,
+      logged for the Claude Design handoff:** "The branding tab seems poorly designed a
+      bit. Needs scrolls and navigation" — the tab now stacks marks + animation + skins +
+      two banner cards in one tall pane and needs a real internal-navigation design pass.
 - [x] No job run-history/ledger anywhere (desktop: zero; mobile: a toggle with only a disclosure
       sentence behind it) — Sync's "last run/rc/auto-schedule" line and Check rows' last-run
       timestamps both dropped too. **SHIPPED 2026-08-06** — see the dated entry below ("The
@@ -1586,7 +1592,7 @@ increment in this file works.
       across 3 of 4 tabs, not Reference-tab decoration.
 
 **Loom Mobile (`LoomMobile`, same file)** vs `Loom Mobile.dc.html`.
-- [?] Generate → Video tab missing 5 elements outright: weave-mode chips (First Frame/First&
+- [x] Generate → Video tab missing 5 elements outright: weave-mode chips (First Frame/First&
       Last/Multi-Reference), negative prompt field, Model+Duration row, capability badges
       (15s/multi-ref/audio/end-frame), Channel/SFW selector. **CORRECTED 2026-08-04 (session
       2) — the "reference desktop's <mg-generate-drawer>" note above was wrong, and building
@@ -1610,8 +1616,15 @@ increment in this file works.
       **The two cosmetic pieces SHIPPED 2026-08-06** (static "PixAI Motion v2" model row +
       the 4 capability badges, DC's literal styles, placed in the design's own sequence
       before the audio block — no fake Duration duplicate invented next to the label, that
-      control already lives on Shot Detail). The blocked functional half (negative prompt/
-      channel/weave-mode) stays blocked on the same owner decision as before.
+      control already lives on Shot Detail). **Functional half RESOLVED 2026-08-06, owner
+      decisions:** the negative prompt is DROPPED — owner, verbatim: "The negative prompt
+      can go - PixAI does not use neg prompting in videos. Claude design inferred." The
+      weave-mode chips are SKIPPED — "Skip the weave. Your assumption should be right"
+      (the redundancy trace above stands). The Channel selector goes to Claude Design to
+      remove or re-scope (no real submit field exists; likely inferred from PixAI's own
+      site UI the same way the negative prompt was). All three recorded in the Claude
+      Design handoff doc (`design_handoff/FOR_CLAUDE_DESIGN_2026-08-06.md`, machine-local,
+      for the owner to carry into the design project). Item CLOSED — nothing left to build.
 - [x] Generate → Reference tab missing the Opening/Closing frame pair. **SHIPPED 2026-08-04
       (session 2)** — reused the exact same `FrameSlot` calls Deep Focus's own body already
       makes (same component, same props), including the design's `dfHasPrev`/`dfInheritPrev`
@@ -1626,8 +1639,19 @@ increment in this file works.
       `box-shadow: 0 0 10px rgba(212,175,55,.35)` (`Loom Mobile.dc.html:670`'s `draftChipStyle`).
       Verified live via computed style on the real toggled chip: `rgba(212, 175, 55, 0.35) 0px
       0px 10px 0px`.
-- [ ] Frame/gallery picker isn't its own mobile screen — silently reuses the desktop
-      `<mg-gallery-picker>` component instead of the design's 3-column mobile sheet
+- [x] Frame/gallery picker isn't its own mobile screen — silently reuses the desktop
+      `<mg-gallery-picker>` component instead of the design's 3-column mobile sheet.
+      **SHIPPED 2026-08-06** (owner: "Scope and build a mobile picker using the known
+      style set by the new design - Modal, glass etc.") — an opt-in `[sheet]` attribute
+      on the SAME shared element, set by the Loom's Mobile-view toggle: the modal
+      reshapes into the mobile design's bottom sheet (`Loom Mobile.dc.html:822` geometry —
+      bottom-anchored from 16%, 18px top radius) wearing the UI Kit glass face the box
+      already had, sliding on the lm sheets' own timings both ways. No new picker, no
+      forked machinery; the auto-fill 122px grid lands on the DC's 3 columns at phone
+      width by arithmetic. Live-verified in the real Loom (mobile view toggled on, frame
+      slot → picker → computed-style checks on geometry/animation/glass, sheet-down exit
+      confirmed, owner's desktop-view preference restored after). Loom suite + web-pick
+      suites green.
 
 **Folio of Honors (desktop)** — `FolioOverlay.jsx` vs `Folio of Honors.dc.html`. Mobile
 (`FolioMobile.jsx`) already builds both of these correctly for the same feature — port.
