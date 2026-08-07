@@ -85,6 +85,7 @@ export default function TrainOverlay({ onClose }) {
     setBaseModel(g && g.models.length ? g.models[0].version_id : "");
   };
   const themes = (groups[archIdx] || {}).models || [];
+  const selectedPrice = (groups[archIdx] || {}).price ?? null;   // credits for this arch
 
   const toggle = (mid) => {
     setPicked((cur) => (cur.includes(mid)
@@ -140,12 +141,15 @@ export default function TrainOverlay({ onClose }) {
             <button type="button" className="mgv-x" onClick={onClose} aria-label="Close">×</button>
           </div>
 
-          {/* The cost position, stated before anything else. */}
+          {/* The cost position, stated before anything else. With free quota it's free;
+              without, we now quote the REAL price of the selected base (captured matrix). */}
           <div className={"mgtr-cost" + (quota === 0 ? " paid" : "")}>
             {quota === null ? "checking your free trainings…"
               : quota > 0
                 ? "✓ " + quota + " free training" + (quota === 1 ? "" : "s") + " left — this one costs nothing."
-                : "⚠ No free trainings left. Training charges real credits, and PixAI prices it in its own client — this app can't quote the amount."}
+                : (selectedPrice != null
+                    ? "⚠ No free trainings left — this base costs " + selectedPrice.toLocaleString() + " credits to train."
+                    : "⚠ No free trainings left. Training charges real credits — check the price on PixAI before going ahead.")}
           </div>
 
           <div className="mgtr-body">
@@ -223,7 +227,16 @@ export default function TrainOverlay({ onClose }) {
                     <button type="button" key={m.version_id} title={m.title}
                       className={"mgtr-theme" + (baseModel === m.version_id ? " on" : "")}
                       onClick={() => setBaseModel(m.version_id)}>
-                      {m.cover ? <img src={m.cover} alt="" loading="lazy" /> : null}
+                      {/* Covers are PixAI CDN URLs the browser can't hotlink cross-origin
+                          from localhost -- proxied through the (host-guarded) backend. The
+                          selected card's img load can get aborted by the selection
+                          re-render; onError retries it once (cache-buster) so the browser
+                          doesn't leave it blank. */}
+                      {/* NOT loading="lazy": the theme grid sits below the panel's fold,
+                          so lazy covers never entered the viewport and never loaded. Only
+                          ~15 small thumbnails, so eager is fine. */}
+                      {m.cover ? <img src={"/api/train/cover?u=" + encodeURIComponent(m.cover)} alt=""
+                        onError={(e) => { const el = e.currentTarget; if (!el.dataset.retried) { el.dataset.retried = "1"; el.src = el.src + "&r=1"; } }} /> : null}
                       <span className="n">{m.title}</span>
                       {baseModel === m.version_id && <span className="mgtr-check">✓</span>}
                     </button>

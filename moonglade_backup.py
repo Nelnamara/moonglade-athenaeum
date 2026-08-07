@@ -7569,46 +7569,76 @@ _TRAIN_ARCHS = (
     ("SD_V1_MODEL",    "SD 1.5"),
 )
 
-_TRAINABLE_MODELS_Q = (
-    "query($first:Int,$type:GenerationModelType,$feed:String){"
-    " generationModels(first:$first,type:$type,feed:$feed){ edges{ node{"
-    " id title mediaId media{urls{url}}"
-    " latestAvailableVersion{ id status } } } } }")
+# PixAI's curated training-base list is NOT the public generationModels catalog (the
+# owner caught this -- my first build pulled the general model-picker feed). The real
+# list is served bundled with the pricing matrix by the train page's own config, which
+# is NOT reachable through any documented endpoint or the RE harvest (probed exhaustively
+# 2026-08-06: the connection's `feed` arg is ignored, `category:"in-house"` only covers
+# SD 1.5, and the SDXL officials aren't in the public catalog at all). So this is a
+# CAPTURED SNAPSHOT of that config (owner pasted the real response 2026-08-06). It matches
+# the site exactly. To refresh when PixAI adds base models: on the train-lora page, capture
+# the config response (models[] + pricing) and replace both constants below.
+_TRAIN_BASE_MODELS = [
+    # (version_id, model_id, title, modelType, usage, cover)
+    ("1983308862240288769", "1982880136609467518", "Tsubaki.2", "MMDIT26A_MODEL", "animation", "https://images-ng.pixai.art/images/stillThumb/b03c47d1-fcfa-4502-af96-7ef049ebaade"),
+    ("1894092844569363483", "1884107375027888751", "Tsubaki", "DIT7_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/98cd261b-9a65-42cd-916b-df27b5e61607"),
+    ("1844843519625072849", "1844843518698131638", "Illustrious-v1.0", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/2e0591cc-50fa-4e37-89c6-e641cf65c483"),
+    ("1830737069924162722", "1800107133055979065", "NoobAI XL", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/bd4ff6a2-b3de-4645-94e8-3ad19ed82f3f"),
+    ("1869108561160475178", "1869108554114044295", "Hinata v2", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/43cf3a51-b7e3-4e8c-8847-38b44471f03b"),
+    ("1795876005752987687", "1795876005744599078", "Illustrious-v0.1", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/dc62608f-53f3-426f-a462-ea49578115cd"),
+    ("1861558740588989558", "1861558737426484240", "Haruka-v2", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/1c51e854-da5d-4e38-9a60-5532d1e64d23"),
+    ("1856956435031440023", "1856956427276171616", "Otome-v2", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/908f0958-f377-4cca-93ee-11438fd0752f"),
+    ("1805666669332128958", "1805666668619097261", "Haruka", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/8f07e40a-dca1-41fe-a950-cf5c06a59d3f"),
+    ("1772043571096449082", "1772043569905266745", "Hikari", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/11ca16f5-a018-4c4f-92e5-4f7d67d8ac84"),
+    ("1856964022763541122", "1856964021647856206", "Illustrious-v2.0", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/2f6816a5-82f3-47e4-afa9-58a8415d0f22"),
+    ("1788325270093701704", "1788325267627450916", "Waterfront-v0.9", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/52b7f937-5abc-4406-b753-b826115f92a3"),
+    ("1728110559428576906", "1728110558497441412", "Animagine XL", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/49c70b8b-82f0-435b-97f9-0887139aa375"),
+    ("1722800994358889032", "1722800993478085189", "PhotoPedia XL", "SDXL_MODEL", "realistic", "https://images-ng.pixai.art/images/thumb/1b5538ef-4ffd-4e00-ab27-393104db7b51"),
+    ("1954632828118619567", "1954632827019711809", "Hoshino v2", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/fbc85e5d-6f5e-4b02-a54a-fc679001770f"),
+    ("1811528826405408057", "1811528825797233974", "Hoshino", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/d3b638af-7bac-4878-8f3a-1ec4b62998ab"),
+    ("1854247165841065427", "1854247164461139322", "Hinata v1", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/060b9c8c-ed2e-4e45-98c1-ac5df005b248"),
+    ("1648918127446573124", "1648918125777240131", "Moonbeam", "SD_V1_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/96596124-b2cd-4619-819a-55b425c79307"),
+    ("1718827626761711784", "1718827626749128871", "majicMIX realistic", "SD_V1_MODEL", "realistic", "https://images-ng.pixai.art/images/thumb/9bb8d254-ef76-44ef-8a1a-9a64a95df76b"),
+    ("1648918115270508582", "1648918113336934437", "Anything V5", "SD_V1_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/e0e7b6a7-baa5-4178-adbe-36610797019f"),
+]
+
+# Real training prices per architecture (captured with the model list 2026-08-06). PixAI
+# prices training from this matrix, keyed by modelType: `price` for a fresh dataset,
+# `reuse` when re-using an existing dataset, `retrain` for a re-run. A free-training quota
+# unit overrides all of this to 0. `originalPrice` (when present) is the pre-discount tag.
+_TRAIN_PRICING = {
+    "SD_V1_MODEL":    {"price": 25000, "retrain": 25000, "reuse": 12500},
+    "SDXL_MODEL":     {"price": 25000, "retrain": 25000, "reuse": 12500, "originalPrice": 75000},
+    "DIT7_MODEL":     {"price": 50000, "retrain": 50000, "reuse": 25000, "originalPrice": 150000},
+    "MMDIT26A_MODEL": {"price": 100000, "retrain": 50000, "reuse": 50000, "originalPrice": 200000},
+}
 
 
-def list_trainable_base_models(session, per_type=24):
+def training_price_for_version(version_id):
+    """The base training price (fresh dataset) for the base model behind version_id, from
+    the captured pricing matrix -- or None if the version isn't a known base or its type
+    isn't priced. None means 'unknown', which the caller must treat as the unsafe case."""
+    arch = next((m[3] for m in _TRAIN_BASE_MODELS if m[0] == str(version_id)), None)
+    row = _TRAIN_PRICING.get(arch or "")
+    return row.get("price") if row else None
+
+
+def list_trainable_base_models(session=None, per_type=None):
     """The base models a LoRA can be trained on, grouped by architecture -- the train
-    page's Model Type -> Model Theme picker. For each architecture PixAI offers, returns
-    its official base models with a real title, a cover url, and the VERSION id the
-    training submit actually wants. Read-only. Groups with no models are omitted so the
-    UI never shows a dead architecture button.
-
-    Each model dict: {version_id, model_id, title, cover}. version_id is
-    latestAvailableVersion.id -- that is what `submit_training(base_model_id=...)` takes."""
+    page's Model Type -> Model Theme picker. Served from PixAI's own curated config (see
+    _TRAIN_BASE_MODELS' note). `session` is accepted but unused: the list is a captured
+    snapshot, not a live query, because the real config endpoint isn't reachable. Each
+    model dict: {version_id, model_id, title, cover, usage}. version_id is what
+    `submit_training(base_model_id=...)` takes."""
     groups = []
     for arch, label in _TRAIN_ARCHS:
-        try:
-            d = gql_adhoc(session, _TRAINABLE_MODELS_Q,
-                          {"first": int(per_type), "type": arch, "feed": "official"})
-        except PixAIError:
-            continue
-        edges = ((d or {}).get("generationModels") or {}).get("edges") or []
-        models = []
-        for e in edges:
-            n = (e or {}).get("node") or {}
-            ver = (n.get("latestAvailableVersion") or {})
-            vid = str(ver.get("id") or "")
-            if not vid:
-                continue                      # unversioned -> not actually trainable
-            urls = ((n.get("media") or {}).get("urls")) or []
-            cover = (urls[0].get("url") if urls and isinstance(urls[0], dict) else "") or ""
-            models.append({
-                "version_id": vid, "model_id": str(n.get("id") or ""),
-                "title": (n.get("title") or "").strip() or str(n.get("id") or ""),
-                "cover": cover,
-            })
+        models = [
+            {"version_id": v, "model_id": mid, "title": title, "cover": cover, "usage": usage}
+            for (v, mid, title, mtype, usage, cover) in _TRAIN_BASE_MODELS if mtype == arch
+        ]
         if models:
-            groups.append({"arch": arch, "label": label, "models": models})
+            price = (_TRAIN_PRICING.get(arch) or {}).get("price")
+            groups.append({"arch": arch, "label": label, "models": models, "price": price})
     return groups
 
 
