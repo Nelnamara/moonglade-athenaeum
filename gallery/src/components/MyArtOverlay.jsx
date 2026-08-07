@@ -70,18 +70,61 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
   const { d, err, stats } = useMyArt();          // stat row: live views, as before
   const [rows, setRows] = useState(null);
   const [rowsErr, setRowsErr] = useState(null);
+  const [csrf, setCsrf] = useState("");
   const [tab, setTab] = useState("artworks");
   const [vis, setVis] = useState("all");
   const [sort, setSort] = useState("latest");
+  // The confirm step: every account action previews first (what it will do, resolved
+  // tags, whether it's irreversible) and only fires when the owner says go.
+  const [ask, setAsk] = useState(null);       // {action, item, preview} | null
+  const [busy, setBusy] = useState(false);
+  const [actErr, setActErr] = useState("");
+  const [editing, setEditing] = useState(null);   // media_id whose tags are being edited
+  const [tagDraft, setTagDraft] = useState("");
+
+  const load = () => fetch("/api/myart/items")
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
+    .then((j) => { setRows(j.items || []); setCsrf(j.csrf || ""); });
 
   useEffect(() => {
     let dead = false;
     fetch("/api/myart/items")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((j) => { if (!dead) setRows(j.items || []); })
+      .then((j) => { if (!dead) { setRows(j.items || []); setCsrf(j.csrf || ""); } })
       .catch((e) => { if (!dead) setRowsErr(String(e.message || e)); });
     return () => { dead = true; };
   }, []);
+
+  // Step 1: ask the server what this action WOULD do (no mutation, no spend).
+  const preview = async (action, item, extra) => {
+    setActErr(""); setBusy(true);
+    try {
+      const r = await fetch("/api/myart/publish", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, media_id: item.media_id, csrf, ...extra }),
+      });
+      const p = await r.json();
+      if (p.error) { setActErr(p.error); return; }
+      setAsk({ action, item, extra: extra || {}, preview: p });
+    } catch (e) { setActErr(String(e.message || e)); } finally { setBusy(false); }
+  };
+
+  // Step 2: the owner confirmed -- fire the real PixAI mutation.
+  const confirm = async () => {
+    if (!ask) return;
+    setBusy(true); setActErr("");
+    try {
+      const r = await fetch("/api/myart/publish", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: ask.action, media_id: ask.item.media_id,
+                               csrf, confirm: true, ...ask.extra }),
+      });
+      const res = await r.json();
+      if (res.error) { setActErr(res.error); return; }
+      setAsk(null); setEditing(null);
+      await load();
+    } catch (e) { setActErr(String(e.message || e)); } finally { setBusy(false); }
+  };
 
   const media = useMemo(() => {
     const all = rows || [];
@@ -146,9 +189,44 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
               <Dropdown kick="Visibility" value={vis} opts={VIS_OPTS} onPick={setVis} />
               <Dropdown kick="Sort" value={sort} opts={SORT_OPTS} onPick={setSort} />
               <button type="button" className="mgma2-toolbtn" disabled
-                title="Bulk publish/unpublish/delete arrive with the publish pipeline">
+                title="Bulk actions come next — per-card publish, tags and delete are live now">
                 ✎ Manage
               </button>
+              {actErr && <span className="mgma2-acterr">⚠ {actErr}</span>}
+            </div>
+          )}
+
+          {/* Confirm step. Nothing reaches the PixAI account until this is accepted --
+              the server previewed exactly what it would do (including which tags it
+              could resolve) without making a single mutating call. */}
+          {ask && (
+            <div className="mgma2-confirm">
+              <div className="mgma2-confirmtitle">
+                {ask.action === "delete" ? "Delete this artwork from PixAI?"
+                  : ask.action === "tags" ? "Update tags on PixAI?"
+                  : ask.preview.private ? "Make this private on PixAI?"
+                  : "Make this public on PixAI?"}
+              </div>
+              <div className="mgma2-confirmbody">
+                <b>{ask.item.title}</b>
+                {ask.action === "tags" && (
+                  <> — {ask.preview.tack_ids.length} tag{ask.preview.tack_ids.length === 1 ? "" : "s"} will be set
+                    {ask.preview.unmatched_tags.length > 0 && (
+                      <span className="warn"> · not found on PixAI: {ask.preview.unmatched_tags.join(", ")}</span>
+                    )}
+                  </>
+                )}
+                {ask.preview.irreversible && <span className="warn"> · this can't be undone on PixAI (your local copy stays)</span>}
+                <div className="mgma2-confirmnote">No credits are spent by this action.</div>
+              </div>
+              <div className="mgma2-confirmacts">
+                <button type="button" className="mgma2-toolbtn" onClick={() => setAsk(null)} disabled={busy}>Cancel</button>
+                <button type="button"
+                  className={"mgma2-godone" + (ask.preview.irreversible ? " danger" : "")}
+                  onClick={confirm} disabled={busy}>
+                  {busy ? "working…" : ask.action === "delete" ? "Delete it" : "Do it"}
+                </button>
+              </div>
             </div>
           )}
 
@@ -172,12 +250,35 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                         <span className={"mgma2-vis" + (it.public ? " pub" : " priv")}>
                           {it.public ? "◉ Public" : "🔒 Private"}
                         </span>
-                        {/* DC's hover actions -- rendered, honestly disabled (Phase B). */}
-                        <span className="mgma2-acts">
-                          <button type="button" disabled title="Publish/unpublish arrives with the publish pipeline">{it.public ? "🔒" : "◉"}</button>
-                          <button type="button" disabled title="Tag editing arrives with the publish pipeline">✎</button>
-                          <button type="button" disabled title="Delete arrives with the publish pipeline">🗑</button>
+                        {/* DC:698-702 hover actions, now REAL -- each previews first. */}
+                        <span className="mgma2-acts" onClick={(e) => e.stopPropagation()}>
+                          <button type="button" disabled={busy}
+                            title={it.public ? "Make private on PixAI" : "Make public on PixAI"}
+                            onClick={() => preview("visibility", it, { private: it.public })}>
+                            {it.public ? "🔒" : "◉"}
+                          </button>
+                          <button type="button" disabled={busy} title="Edit tags"
+                            onClick={() => { setEditing(it.media_id); setTagDraft(it.tags.join(", ")); }}>✎</button>
+                          <button type="button" disabled={busy} title="Delete from PixAI"
+                            onClick={() => preview("delete", it)}>🗑</button>
                         </span>
+                        {editing === it.media_id && (
+                          <div className="mgma2-tagedit" onClick={(e) => e.stopPropagation()}>
+                            <input value={tagDraft} autoFocus
+                              placeholder="tags, comma separated"
+                              onChange={(e) => setTagDraft(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  preview("tags", it, { tags: tagDraft.split(",").map((s) => s.trim()).filter(Boolean) });
+                                } else if (e.key === "Escape") setEditing(null);
+                              }} />
+                            <div className="mgma2-tagedit-row">
+                              <button type="button" className="mgma2-toolbtn" onClick={() => setEditing(null)}>Cancel</button>
+                              <button type="button" className="mgma2-godone" disabled={busy}
+                                onClick={() => preview("tags", it, { tags: tagDraft.split(",").map((s) => s.trim()).filter(Boolean) })}>Done</button>
+                            </div>
+                          </div>
+                        )}
                         {it.tags.length > 0 && (
                           <div className="mgma2-tagband">
                             {it.tags.map((t) => <span className="mgma2-tag" key={t}>#{t}</span>)}

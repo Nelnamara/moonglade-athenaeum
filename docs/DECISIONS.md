@@ -4994,3 +4994,37 @@ artworks -- the production install's 26 will populate on its next run); the card
 path is pinned by a seeded route test. Server restarted via the app's own restart
 mechanism (launcher preserved) -- which also put the Health fixes live: /api/health
 measured 175ms cold / 6ms cached in the owner's browser, from 1.1s+ before.
+
+### Stage 2B/3 — the publish pipeline: real artwork mutations, preview-first  ·  *2026-08-06*
+
+The My Art card actions are REAL now. No fresh probe was needed: the captured harvest
+already held every shape -- `private/harvest/operations.json` carries the full
+`createArtworkFromTaskV2` / `upsertArtwork` / `deleteArtwork` / `markArtwork` documents
+and variable types, and the site's own publish form (harvest chunks) gave the exact
+input construction: title/description, `tags: []` ALWAYS empty with `tackIds` carrying
+the real tags, visibility PUBLIC|PRIVATE alongside `isPrivate`, `hidePrompts`,
+`mediaIndex` for which image of a batch, and `challenge`/`description` inside `extra`.
+(An earlier turn stopped short here claiming the payloads were uncaptured -- wrong; the
+owner was right that the data was already in the documents.)
+
+Core (moonglade_backup): `publish_artwork_from_task`, `update_artwork`,
+`delete_artwork`, plus read-only `resolve_tack_ids` (tags are 'tacks' with ids -- an
+unresolvable tag is REPORTED, never silently dropped). All three mutations go through
+`gql_mutate` (single attempt, no retry -- a lost response must not publish or delete
+twice) and call `_check_read_only` first, matching the house contract.
+
+Route `/api/myart/publish` is PREVIEW-FIRST: without `confirm: true` it makes no
+mutating call at all and returns what it WOULD do (action, target, resolved tack ids,
+unmatched tags, irreversible flag, spends_credits false). The UI shows that as a confirm
+sheet; only accepting it fires the real call. Explicit-token CSRF class. Successful
+mutations mirror into the catalog so the grid updates without a full --sync-artworks.
+UI: the design's hover actions are live (publish-toggle, inline tag editor, delete);
+bulk Manage still deferred.
+
+Verified: route + both guards (unknown media, missing CSRF) live in the browser; the
+five route tests stub the account AT THE CORE MODULE -- note `_gen_session` is a closure
+inside create_app, so patching a moonglade_gallery attribute silently does nothing and
+would have let a real session through (found and fixed while writing them); spend-safety
+suite green. `resolve_tack_ids` validated against the LIVE account read-only (real tack
+ids returned, a nonsense tag correctly reported unmatched). No publish/edit/delete has
+been fired against the account -- the first real one is the owner's to make.

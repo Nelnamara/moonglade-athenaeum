@@ -7498,6 +7498,125 @@ def artwork_views(session, artwork_id):
         return 0
 
 
+_UPSERT_ARTWORK = (
+    "mutation upsertArtwork($input: UpsertArtworkInput!, $id: ID) {"
+    " upsertArtwork(input: $input, id: $id) { id mediaId title visibility hidePrompts } }")
+_PUBLISH_FROM_TASK = (
+    "mutation createArtworkFromTaskV2($taskId: ID!, $input: CreateArtworkFromTaskInput!) {"
+    " createArtworkFromTaskV2(taskId: $taskId, input: $input)"
+    " { id mediaId title visibility hidePrompts } }")
+_DELETE_ARTWORK = "mutation deleteArtwork($id: ID!) { deleteArtwork(id: $id) }"
+_LIST_TACKS = (
+    "query listTacks($q: String, $first: Int) { tacks(q: $q, first: $first) {"
+    " edges { node { id codeName defaultName } } } }")
+
+
+def resolve_tack_ids(session, tags):
+    """Map plain tag strings to PixAI 'tack' ids (their tag objects). The publish form
+    sends `tackIds`, not free text -- `tags` is always [] in the real payload -- so a tag
+    that has no tack simply cannot be attached, and is reported back to the caller rather
+    than silently dropped. Read-only. Returns (ids, unmatched)."""
+    ids, unmatched = [], []
+    for t in tags or []:
+        name = str(t).lstrip("#").strip()
+        if not name:
+            continue
+        try:
+            d = gql_adhoc(session, _LIST_TACKS, {"q": name, "first": 8}) or {}
+            edges = ((d.get("tacks") or {}).get("edges")) or []
+        except PixAIError:
+            edges = []
+        hit = None
+        for e in edges:
+            n = (e or {}).get("node") or {}
+            if str(n.get("codeName") or "").lower() == name.lower() \
+                    or str(n.get("defaultName") or "").lower() == name.lower():
+                hit = n
+                break
+        if hit is None and edges:
+            hit = (edges[0] or {}).get("node") or None      # closest match
+        if hit and hit.get("id"):
+            ids.append(str(hit["id"]))
+        else:
+            unmatched.append(name)
+    return ids, unmatched
+
+
+def publish_artwork_from_task(session, task_id, media_index=0, title="", description="",
+                              tack_ids=None, private=False, hide_prompts=False,
+                              challenge=None, extra=None):
+    """Publish one image of a generation task as a PixAI ARTWORK
+    (`createArtworkFromTaskV2`). Account-mutating (it puts work on your public profile),
+    so it goes through gql_mutate -- single attempt, no retry: a lost response after the
+    server already created the artwork would otherwise publish a duplicate. Costs no
+    credits. Input shape mirrors the site's own publish form exactly (title/description/
+    visibility/isPrivate/hidePrompts/tags=[]/tackIds/mediaIndex, challenge inside extra).
+    Returns the created artwork dict; raises PixAIError on failure."""
+    _check_read_only("publish an artwork to your PixAI account")
+    vis = "PRIVATE" if private else "PUBLIC"
+    ex = dict(extra or {})
+    if challenge:
+        ex["challenge"] = challenge
+    if description:
+        ex["description"] = description
+    inp = {
+        "title": title or "",
+        "description": description or "",
+        "tags": [],                       # always empty on the wire; tackIds carries tags
+        "tackIds": list(tack_ids or []),
+        "visibility": vis,
+        "isPrivate": bool(private),
+        "hidePrompts": bool(hide_prompts),
+        "mediaIndex": int(media_index or 0),
+        "extra": ex,
+    }
+    d = gql_mutate(session, _PUBLISH_FROM_TASK,
+                   {"taskId": str(task_id), "input": inp}) or {}
+    return d.get("createArtworkFromTaskV2") or {}
+
+
+def update_artwork(session, artwork_id, media_id=None, title=None, description=None,
+                   tack_ids=None, private=None, hide_prompts=None, extra=None):
+    """Edit an EXISTING artwork (`upsertArtwork` with an id) -- retitle, re-tag, or flip
+    visibility (the My Art publish-toggle / edit-tags actions). Account-mutating ->
+    gql_mutate. Only the fields you pass are sent, so a tag edit can't silently reset a
+    title. Returns the updated artwork dict; raises PixAIError on failure."""
+    _check_read_only("edit an artwork on your PixAI account")
+    inp = {}
+    if media_id is not None:
+        inp["mediaId"] = str(media_id)
+    if title is not None:
+        inp["title"] = title
+    if tack_ids is not None:
+        inp["tags"] = []
+        inp["tackIds"] = list(tack_ids)
+    if private is not None:
+        inp["visibility"] = "PRIVATE" if private else "PUBLIC"
+        inp["isPrivate"] = bool(private)
+    if hide_prompts is not None:
+        inp["hidePrompts"] = bool(hide_prompts)
+    ex = dict(extra or {})
+    if description is not None:
+        ex["description"] = description
+    if ex:
+        inp["extra"] = ex
+    if not inp:
+        raise PixAIError("update_artwork: nothing to change")
+    d = gql_mutate(session, _UPSERT_ARTWORK,
+                   {"id": str(artwork_id), "input": inp}) or {}
+    return d.get("upsertArtwork") or {}
+
+
+def delete_artwork(session, artwork_id):
+    """Unpublish/delete one artwork from your PixAI account (`deleteArtwork`).
+    IRREVERSIBLE on their side; your local files and catalog row are untouched.
+    Single attempt (gql_mutate) so a flaky network can never delete twice. Like
+    deleteGenerationTask, success is the ABSENCE of an error, not the payload."""
+    _check_read_only("delete an artwork from your PixAI account")
+    gql_mutate(session, _DELETE_ARTWORK, {"id": str(artwork_id)})
+    return True
+
+
 def account_info(session, raise_on_error=False):
     """Fetch credits + membership/subscription via ad-hoc GraphQL. Returns the `me` dict.
     Fails soft to {} by default (the web header chip relies on that); pass raise_on_error=True

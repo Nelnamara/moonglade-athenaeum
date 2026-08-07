@@ -971,3 +971,96 @@ def test_myart_items_returns_card_ready_artwork_rows(tmp_path):
     assert items["m3"]["is_video"] is True
     assert [it["media_id"] for it in d["items"]] == ["m3", "m2", "m1"]   # newest first
 
+def _publish_setup(tmp_path, monkeypatch):
+    """Logged-in client with every PixAI call stubbed AT THE CORE MODULE -- these tests
+    must never touch the real account. (The route's own _gen_session is a closure inside
+    create_app, so patching a module attribute of moonglade_gallery would silently do
+    nothing and let a real session through; patching moonglade_backup itself is what
+    actually intercepts. Found the hard way while writing these.) Returns (client, calls)."""
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="mUn", task_id="t99", title="Unpublished one", filename="x_mUn.png",
+             created_at="2026-07-01T00:00:00"),
+        _row(media_id="mPub", task_id="t1", artwork_id="a1", title="Published one",
+             is_published="1", art_tags="elf", filename="x_mPub.png",
+             created_at="2026-07-02T00:00:00"),
+    ])
+    calls = []
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+
+    def _tacks(session, tags):
+        calls.append(("resolve_tack_ids", list(tags)))
+        return ([("tack-" + str(t).lstrip("#")) for t in tags if t != "nosuchtag"],
+                [t for t in tags if t == "nosuchtag"])
+
+    def _publish(session, task_id, **kw):
+        calls.append(("publish", task_id, kw)); return {"id": "newart1"}
+
+    def _update(session, artwork_id, **kw):
+        calls.append(("update", artwork_id, kw)); return {"id": artwork_id}
+
+    def _delete(session, artwork_id):
+        calls.append(("delete", artwork_id)); return True
+
+    monkeypatch.setattr(core, "resolve_tack_ids", _tacks)
+    monkeypatch.setattr(core, "publish_artwork_from_task", _publish)
+    monkeypatch.setattr(core, "update_artwork", _update)
+    monkeypatch.setattr(core, "delete_artwork", _delete)
+    return login_test_client(create_app(tmp_path)), calls
+
+
+def _post_publish(cli, body):
+    # the live session token, the same source the React panel reads it from
+    csrf = cli.get("/api/panel/summary").get_json()["csrf"]
+    return cli.post("/api/myart/publish", json=dict(body, csrf=csrf))
+
+
+def test_myart_publish_previews_without_touching_the_account(tmp_path, monkeypatch):
+    """No confirm -> NO mutation fires. The route reports what it WOULD do, including
+    resolved tag ids and any tag it could not resolve."""
+    cli, calls = _publish_setup(tmp_path, monkeypatch)
+    d = _post_publish(cli, {"action": "publish", "media_id": "mUn",
+                            "tags": ["elf", "nosuchtag"]}).get_json()
+    assert d["preview"] is True and d["action"] == "publish" and d["task_id"] == "t99"
+    assert d["tack_ids"] == ["tack-elf"] and d["unmatched_tags"] == ["nosuchtag"]
+    assert d["spends_credits"] is False
+    assert [c[0] for c in calls] == ["resolve_tack_ids"]   # read-only lookup only
+
+
+def test_myart_publish_confirmed_mutates_and_mirrors_the_catalog(tmp_path, monkeypatch):
+    cli, calls = _publish_setup(tmp_path, monkeypatch)
+    d = _post_publish(cli, {"action": "publish", "media_id": "mUn", "confirm": True,
+                            "title": "New title", "media_index": 2}).get_json()
+    assert d["published"] is True and d["artwork_id"] == "newart1"
+    _, task_id, kw = next(c for c in calls if c[0] == "publish")
+    assert task_id == "t99" and kw["media_index"] == 2 and kw["title"] == "New title"
+    items = cli.get("/api/myart/items").get_json()["items"]
+    assert any(i["media_id"] == "mUn" and i["public"] for i in items)
+
+
+def test_myart_actions_guard_their_preconditions(tmp_path, monkeypatch):
+    cli, calls = _publish_setup(tmp_path, monkeypatch)
+    # an unpublished image has no artwork to toggle
+    assert _post_publish(cli, {"action": "visibility", "media_id": "mUn",
+                               "private": True, "confirm": True}).status_code == 400
+    # an already-published one cannot be published again
+    assert _post_publish(cli, {"action": "publish", "media_id": "mPub",
+                               "confirm": True}).status_code == 400
+    assert _post_publish(cli, {"action": "nope", "media_id": "mPub"}).status_code == 400
+    assert _post_publish(cli, {"action": "delete", "media_id": "ghost"}).status_code == 400
+    assert not [c for c in calls if c[0] in ("publish", "update", "delete")]
+    # the real flip works and mirrors into the catalog
+    d = _post_publish(cli, {"action": "visibility", "media_id": "mPub",
+                            "private": True, "confirm": True}).get_json()
+    assert d["updated"] is True
+    assert next(c for c in calls if c[0] == "update")[2]["private"] is True
+    items = {i["media_id"]: i for i in cli.get("/api/myart/items").get_json()["items"]}
+    assert items["mPub"]["public"] is False
+
+
+def test_myart_publish_requires_csrf(tmp_path, monkeypatch):
+    cli, calls = _publish_setup(tmp_path, monkeypatch)
+    r = cli.post("/api/myart/publish", json={"action": "delete", "media_id": "mPub",
+                                             "confirm": True})
+    assert r.status_code == 400
+    assert not calls          # nothing reached the account
+
