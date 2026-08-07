@@ -5142,3 +5142,36 @@ released at 11; trigger-word counter live; preview returned "Free — uses 1 of 
 trainings". **Nothing was submitted** -- backed out at the confirm sheet and re-checked
 the quota, still 9. The first real training is the owner's to run, with a dataset and
 name he picks.
+
+### Train panel — Model Type / Theme rebuilt on the REAL model structure  ·  *2026-08-06*
+
+Owner caught three real bugs in the first Train build (with PixAI's own train page open
+beside it): Model Type control missing, Model Theme cards showing raw model IDs instead
+of names, and no Type->Theme relationship. Correct read: I had inferred the mechanism
+(derive types from generic market-search rows) instead of reading it. It was fieldable
+from the harvest -- no Claude Design ask needed.
+
+The real structure, pulled from the harvest + verified live:
+- **Model Type IS the base architecture.** Friendly labels are PixAI's own
+  (constants-*.js: `mmdit26b->DiT.3, mmdit26a->DiT.2, dit7->DiT.1, sdxl->SDXL`, plus
+  `SD_V1_MODEL->SD 1.5`). Picking one FILTERS which base models ("Model Theme") show --
+  the site does this client-side (`H.filter(f => We(f.modelType, C))`).
+- **The theme list is `generationModels` filtered by `type`, feed `official`** -- real
+  titles + covers, one query per architecture (4 queries, ~0.6s total).
+- **CORRECTNESS BUG, also fixed:** the submit's `baseModelId` is the model's
+  **latestAvailableVersion.id (version id), NOT the model id** -- the harvested submit
+  builder names the field baseModelId but assigns it `versionId`. My first build sent the
+  model id; a real training would have failed or trained the wrong base. Caught before any
+  real submit.
+
+New read-only route `/api/train/models` returns `[{arch, label, models:[{version_id,
+title, cover}]}]` (empty architectures dropped so no dead buttons). Panel rewritten:
+Model Type buttons are the returned groups; selecting one swaps the theme grid; the
+submit sends the selected theme's version_id. Category stays character/style/concept (the
+design's own three, which the validator already enforces).
+
+Verified LIVE against the real account: buttons render **DiT.2 / DiT.1 / SDXL / SD 1.5**;
+DiT.2 -> Tsubaki.2, DiT.1 -> Tsubaki/Serin/Tsubaki Flash/Tsubaki v1.1, SDXL -> the XL
+bases, SD 1.5 -> its models -- all real names with covers; switching Type swaps the grid;
+a real version_id (1983308862240288769) flows through preview and validates. Nothing
+submitted; quota still 9.

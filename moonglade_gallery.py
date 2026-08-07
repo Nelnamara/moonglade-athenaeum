@@ -15911,6 +15911,18 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"free_trainings": 0,
                             "error": _redact_host_paths(str(e))[:200]}), 200
 
+    @app.route("/api/train/models")
+    def api_train_models():
+        """Trainable base models grouped by architecture (the train panel's Model Type ->
+        Model Theme picker). Read-only, free. Each model carries the VERSION id the submit
+        needs, its real title, and a cover -- fixing the earlier build, which used the
+        generic market search and rendered raw model ids with no architecture grouping."""
+        try:
+            core, session = _gen_session()
+            return jsonify({"groups": core.list_trainable_base_models(session)})
+        except Exception as e:
+            return jsonify({"groups": [], "error": _redact_host_paths(str(e))[:200]}), 200
+
     @app.route("/api/train/submit", methods=["POST"])
     def api_train_submit():
         """Submit a LoRA training task -- PREVIEW-FIRST, like /api/myart/publish.
