@@ -4822,3 +4822,19 @@ exactly why it felt intermittent. Full-res image serving itself was already heal
 covered by its own functional test; full render harness + syntax suites green. The
 before/after connect-time comparison needs the owner's restart to measure — expected
 result is fresh-connection API calls dropping from ~300ms to single digits.
+
+### Handoff corrections 1–5 (gallery-era pass) — staged increments  ·  *2026-08-06*
+
+The five design-only corrections from the 2026-08-06 returned handoff
+(`design_handoff/v2/handoff-2026-08-06.md`), owner-ordered ("queue up 1-5 ... stage as
+needed"), each its own commit below this entry:
+
+**1. Image Details full-window takeover — SHIPPED.** `Image Details.dc.html:36/38/345/347`:
+`.detail-wrap` becomes a fixed inset-0 layer (z 40 — above page chrome, below the real
+overlay band) with the DC's dvFrame entrance and its literal radial background; the nav
+bar goes translucent + blur(8px); the body grid fills the remaining height; the image
+column centers vertically (image cap now viewport-derived, not 74vh); the record column
+scrolls internally — the page itself never scrolls. Print gets a static-position escape
+so the record still paginates. Live-verified via computed style on the real server:
+fixed/hidden root, dvFrame running, blur bar, page scroll gone, record overflow-y auto,
+frame centered.
