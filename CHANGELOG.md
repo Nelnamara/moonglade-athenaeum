@@ -75,6 +75,21 @@ git tags. Full prose notes for tagged versions live on
   `branding/mascots/` from outside the app, with no API call involved, correctly earned the
   achievement and unlocked the tab on the next reload.
 
+### Added (2026-08-06 handoff corrections, gallery-era pass)
+
+- **Image Details is a full-window takeover** — floating blurred bar, centered image,
+  internally-scrolling record; the page never scrolls.
+- **Contests: full-width 3:1 official banner** with overlaid info + a fixed 2-column
+  community grid.
+- **Health charts animate** — bars grow in; Images-over-time gains a Trend view (SVG area
+  line on a sqrt scale) and Top models gains a Share donut, each behind a toggle.
+- **Loom Frame Handoff clarified** — shows on Reference/Video/Edit with a label naming its
+  role per tab; hidden on Image.
+- **☁ Publish buttons on Lightbox + Details** — coming-soon stand-ins until the Publish
+  panel builds.
+- **Speed:** the localhost IPv6 stall fixed (restart required), lightbox neighbors
+  preload, large images decode async.
+
 ### Added (2026-08-06 polish pass)
 
 - **The Generate composer's ★ Snippets** — the design's quick-insert prompt chips, plus the
