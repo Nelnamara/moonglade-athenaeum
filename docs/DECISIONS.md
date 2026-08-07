@@ -5405,3 +5405,65 @@ a tooling limitation encountered for the first time on a *mobile* verification p
 not a code issue. Recorded here rather than glossed over, per this project's own
 verify-before-presenting-state standard: the layout/interaction pass on these three
 screens is still owed, next session or once the resize tooling is sorted.
+
+### Browse-from-disk: the 2026-08-06 "not blocked" correction was itself wrong — and a real scope  ·  *2026-08-07*
+
+Answering a status check ("how are we on the lists"), I re-read the 2026-08-06
+correction that reclassified Publish's omitted "⬆ Browse from disk…" control from
+"hard blocker" to "buildable" (`uploadMedia` -> `/api/upload` -> `upsertArtwork`). That
+correction was wrong too, on a different axis than the original claim -- and both
+`PublishOverlay.jsx` and today's `PublishMobile.jsx` carried a version of the wrong
+story until this entry. Corrected both header comments; this entry is the real scope.
+
+**What the harvested contract chunks actually show** (`private/harvest/chunks/
+contract-CfBjORe9.js`, not previously read this deep for this control):
+
+- `createFromMedia` is a **REST** endpoint, not a GraphQL mutation — the 2026-08-06
+  correction's own proposed fix (`upsertArtwork`) was never going to work; `upsertArtwork`
+  only **edits an existing** artwork (`update_artwork` always sends `id: artwork_id`),
+  it has no create-from-bare-mediaId mode. The real router: `a.prefix("/artwork")...
+  createFromMedia: POST /from-media`, input `{mediaId (required), title?, isPrivate?,
+  visibility?, tags?, tackIds?, hidePrompts?, extra?}` -- the same shape
+  `publish_artwork_from_task`'s input already uses, just keyed by `mediaId` instead of
+  `taskId`+`mediaIndex`. By exact structural match to the sibling `/kaisuuken` router
+  (`a.prefix("/kaisuuken")...`, whose `/check` path is already live at `REST_API_BASE +
+  "/kaisuuken/check"`), the real call is `_rest_post(session, "/artwork/from-media",
+  body)` -- `REST_API_BASE` already resolves to `.../v2`.
+- The endpoint's own contract **description** reads: *"Creates a new artwork from
+  user-uploaded media. Requires authentication and Turnstile verification for web
+  clients."* That is the server's own stated contract, not client-side UI copy.
+- The **calling code** (`z(e,r){const t={}; return r&&(t["X-Turnstile-Token"]=r),
+  S.artwork.createFromMedia(e,{context:{headers:t}})}`) only attaches the token when one
+  exists -- consistent with either a soft/best-effort check, or a hard check that just
+  always has a token in practice because it's only ever called from a page that solved
+  one first.
+
+Those two facts don't resolve to an answer by reading more code -- the contract's own
+"Requires... Turnstile verification" line is real evidence FOR a hard gate that the
+2026-08-06 correction didn't have (or didn't weigh) when it called this buildable.
+
+**Scope, if it turns out to be buildable:**
+1. Backend: `create_artwork_from_media(session, media_id, title, description, tack_ids,
+   private, hide_prompts, extra)` in `moonglade_backup.py`, symmetric to
+   `publish_artwork_from_task` (line ~7791) but via `_rest_post` instead of `gql_mutate`
+   -- single attempt, no retry, same account-mutation discipline either way.
+2. A new dedicated route, not an extra branch on `/api/myart/publish` -- that route's
+   whole shape (`_artwork_row(mid)` lookup, task_id requirement) assumes a catalog row
+   that an uploaded file doesn't have. Preview-then-confirm, same as every other
+   account-mutating route here.
+3. Frontend: the actual "⬆ Browse from disk…" button (currently absent, not just
+   disabled) in both `PublishOverlay.jsx` and `PublishMobile.jsx` -- file input ->
+   `/api/upload` (already free, already proven) -> the new route.
+4. **Open product question, not mine to decide:** does a published-from-upload image
+   join the local catalog as a new row (so it shows up in My Art / gets backed up /
+   dedup-checked like everything else), or stay purely a PixAI-side publish with nothing
+   local? Every other publish path here starts from a catalog row; this is the first one
+   that wouldn't.
+
+**Before any of #1-3 gets written:** one real, disclosed, single test call is the only
+way to actually settle the Turnstile question -- calling the endpoint with a real
+`/api/upload` media_id and no token, live. That would either 400/403 cleanly (blocker
+confirmed, stays omitted) or genuinely publish something to the account (needs deleting
+after, or keeping if it's a real image you want up anyway). It's real and account-visible
+either way, so it's not something to run unilaterally -- next step is your call on
+whether to spend that one test.
