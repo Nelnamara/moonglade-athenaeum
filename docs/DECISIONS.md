@@ -4623,3 +4623,35 @@ applies it; nothing here forces a restart of a live instance.
 what's real today is status + rc + error text, and that is what ships — result-line parsing
 (e.g. lifting "57 new" out of a sync's own output) would be a separate, honest enhancement,
 not silently faked in this pass.
+
+### Generate composer: Snippets built, size-summary format fixed — and one claimed gap withdrawn  ·  *2026-08-06*
+
+Owner-reported by screenshot pair (the design's composer vs shipped). Three findings, two
+real:
+
+**Built — ★ Snippets** (`Frontend Gallery.dc.html:1218` button, `:1221-1227` chip row,
+`:1340-1345` content, `:2832` insert formula). The toggle sits at the end of the composer's
+header row (accent border + text while open), the 4 design-shipped snippet chips animate in
+under the prompt (`mgSlab`, the dock's existing keyframe), and a chip appends its insert
+text with the DC's exact comma-joining (trailing comma trimmed, ", " only when a prompt
+already exists). All in `GenerateDrawer.jsx` + `dock.css` with the DC's literal style
+values; no new machinery.
+
+**Fixed — the size/mode summary** (`:2893`). Shipped was `1024 × 1024 px · 3 images`;
+the design is `1024×1024 · Auto · ×3` (size · the TUNING mode's display name · the ×N count
+form) plus the "pick a model · " nudge prefix when no base model is set. Rebuilt on the
+real `MODES` pairs `genCore.js` already exports — the same source the TUNING label reads.
+
+**Withdrawn — the "negative default doesn't match the design" claim from this session's own
+audit.** Wrong on inspection: the shipped mechanism already matches the design exactly —
+`negative` starts empty (`genCore.js`'s initial state) and fills from the picked model's own
+real preset (`useGenerate.js`'s presetPatch, off the model-version API's `negative_prompt`).
+The apparent mismatch was the design's placeholder demo preset ('lowres, bad hands,
+watermark') vs Tsubaki.2's real API preset — real data wins over a mockup's demo strings,
+same rule as every other placeholder-vs-real call in this file.
+
+**Verified:** clean build; full `tests/test_render_harness.py` green (the drawer is a
+tested surface). Live in a real authenticated session: the new summary renders
+("pick a model · 1024×1024 · Auto"), the Snippets row opens, and two chip clicks produced
+exactly `"cinematic lighting, rim light, masterpiece, best quality"` in the prompt —
+the DC's joining formula character-for-character. Test text cleared afterward.
