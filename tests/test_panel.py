@@ -90,7 +90,7 @@ def test_panel_summary_matches_the_page_route(tmp_path):
     assert "csrf" in d and d["csrf"]
     assert d["branding"]["mark"] == "logo"                 # load_branding()'s own default
     assert "anims" in d["branding"] and "classic" in d["branding"]["anims"]
-    assert set(d["branding"]["slots"].keys()) == {"banner_main", "banner_login", "mascots", "rewards"}
+    assert set(d["branding"]["slots"].keys()) == {"banner_main", "banner_login", "mascots", "rewards", "banner_loom"}
     assert d["trash_count"] == 0                            # nothing quarantined yet
 
 

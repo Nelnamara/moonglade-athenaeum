@@ -1684,17 +1684,45 @@ def list_marks(out_dir):
 # uploaded assets, one of which is active", identical to how marks/mark
 # already relate, so that later mechanic has real asset ids to pick FROM
 # instead of a schema migration first.
-BRANDING_SLOTS = ("banner_main", "banner_login", "mascots", "rewards")
+# banner_loom (12:1 workspace strip) added 2026-08-06 with the Branding-tab rebuild
+# (Control Panel.dc.html SLOTS index 5: "Banner - Loom", 1920x160). It joins the two
+# 4:1 banners as a real, written-through slot; mascots/rewards stay excluded from the
+# sweep (see _SWEEPABLE_SLOTS + the mascots-in-branding correction 2026-08-06).
+BRANDING_SLOTS = ("banner_main", "banner_login", "mascots", "rewards", "banner_loom")
 
 
 def _slot_dir(slot):
     return branding_root() / slot
 
 
+def _asset_transform(it):
+    """Normalize one manifest item's crop transform to the design's zoom/cropX/cropY
+    model (Control Panel.dc.html:953 -- object-position cropX% cropY% + scale(zoom/100)).
+    Back-compat: an item written under the OLD left/center/right crop model (pre
+    2026-08-06) maps to the equivalent pan -- left->cropX 0, center->50, right->100 --
+    at zoom 100, cropY 50, so an existing install's banners keep displaying unchanged
+    until re-tuned."""
+    if not isinstance(it, dict):
+        it = {}
+    if "zoom" in it or "cropX" in it or "cropY" in it:
+        z = it.get("zoom", 100); cx = it.get("cropX", 50); cy = it.get("cropY", 50)
+    else:
+        legacy = {"left": 0, "right": 100}.get(it.get("crop") or "center", 50)
+        z, cx, cy = 100, legacy, 50
+    try:
+        z = max(100, min(int(z), 250))
+        cx = max(0, min(int(cx), 100))
+        cy = max(0, min(int(cy), 100))
+    except (TypeError, ValueError):
+        z, cx, cy = 100, 50, 50
+    return {"zoom": z, "cropX": cx, "cropY": cy}
+
+
 def list_slot_assets(out_dir, slot):
     """Uploaded assets for one Branding slot: branding/<slot>/manifest.json
     entries whose .png actually exists. Empty on a fresh install / until that
-    slot's first real upload, exactly like list_marks() above."""
+    slot's first real upload, exactly like list_marks() above. Each asset carries
+    its zoom/cropX/cropY transform (normalized, legacy crop migrated)."""
     if slot not in BRANDING_SLOTS:
         return []
     sdir = _slot_dir(slot)
@@ -1710,7 +1738,7 @@ def list_slot_assets(out_dir, slot):
             continue
         iid = str(it.get("id") or "")
         if iid and (sdir / (iid + ".png")).exists():
-            out.append({"id": iid, "crop": it.get("crop") or "center",
+            out.append({"id": iid, **_asset_transform(it),
                         "png": "/branding/%s/%s.png" % (slot, iid)})
     return out
 
@@ -1748,11 +1776,13 @@ def save_slot_active(out_dir, active):
         json.dumps({k: v for k, v in active.items() if v}, indent=2), encoding="utf-8")
 
 
-def add_slot_asset(out_dir, slot, png_bytes, crop="center"):
+def add_slot_asset(out_dir, slot, png_bytes, zoom=100, cropx=50, cropy=50):
     """Save a new upload into one Branding slot and make it the active one.
     Returns the new asset dict, or None for an unknown slot. Caller (the
     /api/branding/slot route) is responsible for making sure png_bytes is a
-    real PNG before this is called -- this function just persists it."""
+    real PNG before this is called -- this function just persists it. New
+    uploads start at the neutral transform (zoom 100, centered) -- the
+    equivalent of the design's own defaults."""
     if slot not in BRANDING_SLOTS:
         return None
     sdir = _slot_dir(slot)
@@ -1764,20 +1794,22 @@ def add_slot_asset(out_dir, slot, png_bytes, crop="center"):
         items = []
     new_id = secrets.token_hex(4)
     (sdir / (new_id + ".png")).write_bytes(png_bytes)
-    items.append({"id": new_id, "crop": crop})
+    t = _asset_transform({"zoom": zoom, "cropX": cropx, "cropY": cropy})
+    items.append({"id": new_id, **t})
     (sdir / "manifest.json").write_text(json.dumps({"items": items}, indent=2), encoding="utf-8")
     active = load_slot_active(out_dir)
     active[slot] = new_id
     save_slot_active(out_dir, active)
     _write_banner_flat(out_dir, slot)   # the new upload is now active -> display it
-    return {"id": new_id, "crop": crop, "png": "/branding/%s/%s.png" % (slot, new_id)}
+    return {"id": new_id, **t, "png": "/branding/%s/%s.png" % (slot, new_id)}
 
 
-def set_slot_crop(out_dir, slot, item_id, crop):
-    """Update one already-uploaded asset's crop position (left/center/right --
-    Control Panel.dc.html's cycleCrop). False for an unknown slot/item/crop,
-    never a 500."""
-    if slot not in BRANDING_SLOTS or crop not in ("left", "center", "right"):
+def set_slot_crop(out_dir, slot, item_id, zoom=None, cropx=None, cropy=None):
+    """Update one already-uploaded asset's zoom/cropX/cropY transform (Control
+    Panel.dc.html's three banner sliders -- zoom 100-250, cropX/cropY 0-100).
+    Any field left None keeps its stored value. False for an unknown slot/item,
+    never a 500. Widened 2026-08-06 from the old 3-value left/center/right crop."""
+    if slot not in BRANDING_SLOTS:
         return False
     sdir = _slot_dir(slot)
     try:
@@ -1790,13 +1822,21 @@ def set_slot_crop(out_dir, slot, item_id, crop):
     found = False
     for it in items:
         if isinstance(it, dict) and str(it.get("id")) == str(item_id):
-            it["crop"] = crop
+            cur = _asset_transform(it)
+            merged = {
+                "zoom": cur["zoom"] if zoom is None else zoom,
+                "cropX": cur["cropX"] if cropx is None else cropx,
+                "cropY": cur["cropY"] if cropy is None else cropy,
+            }
+            norm = _asset_transform(merged)
+            it.pop("crop", None)          # drop the legacy field once re-tuned
+            it.update(norm)
             found = True
     if not found:
         return False
     (sdir / "manifest.json").write_text(json.dumps({"items": items}, indent=2), encoding="utf-8")
     if load_slot_active(out_dir).get(slot) == str(item_id):
-        _write_banner_flat(out_dir, slot)   # crop is baked into the displayed flat
+        _write_banner_flat(out_dir, slot)   # the transform is baked into the displayed flat
     return True
 
 
@@ -1916,26 +1956,87 @@ def _adopt_mark(out_dir, raw_stem, png_bytes):
 # and banner_login -> branding/login-banner.png (WIRED to write those exact
 # paths as of 2026-08-06 -- see _write_banner_flat below; owner call: "Yes,
 # seems obvious").
-_SWEEPABLE_SLOTS = ("banner_main", "banner_login")
+_SWEEPABLE_SLOTS = ("banner_main", "banner_login", "banner_loom")
 
-# The flat files the header/login templates have always read directly
-# (moonglade_gallery.py's own <img src="/branding/banner.png"> and the login
-# page's login-banner.png-with-banner.png-fallback). The slot system stores
-# MANY assets; these flats are the ONE the app displays -- so every path that
-# changes which asset is active (upload, pick-active, crop the active one, a
-# raw drop the sweep adopts) re-renders its slot's flat.
-_BANNER_FLAT = {"banner_main": "banner.png", "banner_login": "login-banner.png"}
+# The flat files the header/login/Loom templates read directly (the header's
+# <img src="/branding/banner.png">, the login page's login-banner.png, and the
+# Loom's workspace strip). The slot system stores MANY assets; these flats are
+# the ONE the app displays -- so every path that changes which asset is active
+# (upload, pick-active, re-crop the active one, a raw drop the sweep adopts)
+# re-renders its slot's flat.
+_BANNER_FLAT = {"banner_main": "banner.png", "banner_login": "login-banner.png",
+                "banner_loom": "banner-loom.png"}
+# The output aspect each banner flat is cropped to (width / height). banner_loom
+# is the 12:1 workspace strip added with the Branding-tab rebuild.
+_BANNER_RATIO = {"banner_main": 4.0, "banner_login": 4.0, "banner_loom": 12.0}
+# Canonical output pixel size per slot (the DC's own spec strings: 1920x480,
+# 1920x160). The saved flat is resized to this so downstream CSS never upsamples
+# an oddly-sized source.
+_BANNER_OUT = {"banner_main": (1920, 480), "banner_login": (1920, 480),
+               "banner_loom": (1920, 160)}
+
+
+def _banner_window(w, h, target_ar, zoom, cropx, cropy):
+    """The source-pixel crop box that reproduces the design's live preview EXACTLY
+    (Control Panel.dc.html:953): an object-fit:cover image with
+    `object-position: cropX% cropY%`, `transform: scale(zoom/100)`,
+    `transform-origin: cropX% cropY%`. WYSIWYG matters here -- the owner tunes the
+    sliders watching that preview, so the flat must match it, not merely approximate.
+
+    Derivation: model a display frame of the target aspect, replicate the CSS
+    (cover-fit, then object-position, then the scale about the crop-origin), and map
+    the frame's four corners back into source-pixel space; their bounding rectangle
+    is the visible window. Returns (left, top, right, bottom) clamped to the source.
+    """
+    z = max(1.0, zoom / 100.0)
+    px, py = cropx / 100.0, cropy / 100.0
+    # A frame of the target aspect, sized in the source's own units (height = h) so
+    # the cover math stays in familiar pixels; only the ratio matters.
+    FH = float(h)
+    FW = target_ar * FH
+    sc = max(FW / w, FH / h)                      # object-fit: cover
+    disp_w, disp_h = w * sc, h * sc
+    over_x, over_y = disp_w - FW, disp_h - FH     # >= 0
+    img_l, img_t = -px * over_x, -py * over_y     # object-position placement
+    ox, oy = px * FW, py * FH                     # transform-origin in frame coords
+
+    def src(fx, fy):
+        # undo scale(z) about (ox,oy), then undo cover placement -> source px
+        qx = ox + (fx - ox) / z
+        qy = oy + (fy - oy) / z
+        return (qx - img_l) / sc, (qy - img_t) / sc
+
+    corners = [src(0, 0), src(FW, 0), src(0, FH), src(FW, FH)]
+    xs = [c[0] for c in corners]; ys = [c[1] for c in corners]
+    l, t, r, b = min(xs), min(ys), max(xs), max(ys)
+    # clamp into the source, then re-fit the exact target aspect inside the clamp so
+    # the saved file's aspect is precise even at an edge-panned extreme.
+    l, t = max(0.0, l), max(0.0, t)
+    r, b = min(float(w), r), min(float(h), b)
+    cw, ch = r - l, b - t
+    if cw <= 0 or ch <= 0:
+        return (0, 0, w, h)
+    if cw / ch > target_ar:                       # too wide -> trim width, keep centre
+        nw = ch * target_ar; l += (cw - nw) / 2; r = l + nw
+    else:                                         # too tall -> trim height
+        nh = cw / target_ar; t += (ch - nh) / 2; b = t + nh
+    # Size-preserving integer rounding: round the origin, derive the far edge from the
+    # SIZE (min 1px). Rounding all four edges independently can collapse a sub-pixel-
+    # tall box to zero height (round(1.5)=2 and round(2.5)=2 under banker's rounding),
+    # which made Pillow produce an empty crop for small sources.
+    li, ti = int(round(l)), int(round(t))
+    wi = max(1, int(round(r - l))); hi = max(1, int(round(b - t)))
+    li = max(0, min(li, w - wi)); ti = max(0, min(ti, h - hi))
+    return (li, ti, li + wi, ti + hi)
 
 
 def _write_banner_flat(out_dir, slot):
     """Render a banner slot's ACTIVE asset over its real flat file, baking the
-    stored crop in: the largest 4:1 window that fits the source (the DC's own
-    1920x480 banner canvas), anchored left/center/right per the asset's crop
-    when the source is wider than 4:1, vertically centered when it's taller.
-    That is what makes the Phase 2 crop control REAL -- before this, crop was
-    stored metadata nothing ever read. Fails soft (False), never a 500: a
-    banner that fails to render leaves the previous flat in place, which still
-    displays -- strictly better than a broken header image."""
+    stored zoom/cropX/cropY transform in via _banner_window (the design's own
+    preview math). That is what makes the banner sliders REAL -- the transform
+    was stored metadata nothing rendered before. Fails soft (False), never a
+    500: a banner that fails to render leaves the previous flat in place, which
+    still displays -- strictly better than a broken header image."""
     name = _BANNER_FLAT.get(slot)
     if not name:
         return False
@@ -1948,15 +2049,12 @@ def _write_banner_flat(out_dir, slot):
         im = Image.open(_slot_dir(slot) / (a["id"] + ".png"))
         im.load()
         w, hh = im.size
-        if w * 1 >= hh * 4:                      # wider than 4:1 -- window slides sideways
-            cw, ch = hh * 4, hh
-            x0 = {"left": 0, "right": w - cw}.get(a.get("crop") or "center", (w - cw) // 2)
-            box = (x0, 0, x0 + cw, ch)
-        else:                                     # taller -- full width, vertically centered
-            cw, ch = w, max(1, w // 4)
-            y0 = (hh - ch) // 2
-            box = (0, y0, w, y0 + ch)
-        im.crop(box).save(branding_root() / name, format="PNG")
+        ar = _BANNER_RATIO.get(slot, 4.0)
+        box = _banner_window(w, hh, ar, a.get("zoom", 100), a.get("cropX", 50), a.get("cropY", 50))
+        crop = im.crop(box)
+        ow, oh = _BANNER_OUT.get(slot, (1920, int(round(1920 / ar))))
+        crop = crop.resize((ow, oh), Image.LANCZOS)
+        crop.save(branding_root() / name, format="PNG")
         return True
     except Exception:
         return False
@@ -1998,8 +2096,7 @@ def sweep_branding_drops(out_dir):
                 p.unlink()
             except OSError:
                 pass
-            add_slot_asset(out_dir, slot, png_bytes,
-                           crop="left" if slot.startswith("banner") else "center")
+            add_slot_asset(out_dir, slot, png_bytes)   # neutral transform (zoom 100, centered)
             adopted = True
     mdir = branding_root() / "marks"
     if mdir.is_dir():
@@ -15839,18 +15936,27 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             im.convert("RGBA").save(buf, format="PNG")
         except Exception:
             return jsonify({"error": "not a readable image"}), 400
-        crop = "left" if slot.startswith("banner") else "center"
-        item = add_slot_asset(out_dir, slot, buf.getvalue(), crop=crop)
+        item = add_slot_asset(out_dir, slot, buf.getvalue())   # neutral transform to start
         return jsonify({"slot": slot, "item": item, "assets": list_slot_assets(out_dir, slot)})
 
     @app.route("/api/branding/slot/crop", methods=["POST"])
     def api_branding_slot_crop():
-        """Cycle one uploaded asset's crop position (Control Panel.dc.html's
-        cycleCrop -- left/center/right). LOGIN tier, same as the upload route."""
+        """Update one uploaded asset's zoom/cropX/cropY transform (Control
+        Panel.dc.html's three banner sliders). LOGIN tier, same as the upload
+        route. Any of the three fields may be omitted to keep its stored value.
+        Legacy `crop` (left/center/right) is still accepted for back-compat and
+        mapped to a cropX pan. Widened 2026-08-06 from the old cycleCrop."""
         body = request.get_json(silent=True) or {}
-        slot, item_id, crop = body.get("slot"), str(body.get("id") or ""), body.get("crop")
-        if not set_slot_crop(out_dir, slot, item_id, crop):
-            return jsonify({"error": "unknown slot, asset, or crop value"}), 400
+        slot, item_id = body.get("slot"), str(body.get("id") or "")
+        zoom, cropx, cropy = body.get("zoom"), body.get("cropX"), body.get("cropY")
+        if zoom is None and cropx is None and cropy is None:
+            legacy = {"left": 0, "center": 50, "right": 100}
+            crop = str(body.get("crop") or "")
+            if crop not in legacy:
+                return jsonify({"error": "unknown crop value"}), 400
+            cropx = legacy[crop]
+        if not set_slot_crop(out_dir, slot, item_id, zoom=zoom, cropx=cropx, cropy=cropy):
+            return jsonify({"error": "unknown slot or asset"}), 400
         return jsonify({"assets": list_slot_assets(out_dir, slot)})
 
     @app.route("/api/branding/slot/active", methods=["POST"])

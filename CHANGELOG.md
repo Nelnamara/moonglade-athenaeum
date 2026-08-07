@@ -14,6 +14,7 @@ git tags. Full prose notes for tagged versions live on
 > does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- Branding: new Loom banner slot (12:1, written through to `branding/banner-loom.png`, displayed in the Loom's banner strip) and a real zoom/pan crop model (zoom 100-250% + 2-axis position) replacing the 3-position crop; saved banners now match the editor preview pixel-for-pixel.
 
 ### Added
 

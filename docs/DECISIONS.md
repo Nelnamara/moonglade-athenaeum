@@ -4924,3 +4924,22 @@ stretch, no inner scrollbars — supersedes the 9:45 handoff doc's "each column 
 scroll" note); (2) the skin sample frame's primary button takes the skin-aware metallic
 recipe instead of a flat accent chip. No new work items — Stage 1 of the pipeline plan
 simply builds from this version. Repo design_handoff copy synced.
+
+### Stage 1 / increment 1 — banner_loom slot + the zoom/pan crop model (backend)  ·  *2026-08-06*
+
+The Branding-tab rebuild's backend, built to the 10:42pm Control Panel.dc.html:
+**banner_loom** joins BRANDING_SLOTS/_SWEEPABLE_SLOTS/_BANNER_FLAT as a real
+written-through slot (branding/banner-loom.png, 1920x160, 12:1 -- SLOTS index 5), and
+the crop model widens from 3-position left/center/right to the design's three sliders:
+zoom 100-250 + cropX/cropY 0-100 (DC:326-339). `_banner_window()` reproduces the DC's
+preview CSS (DC:953 -- object-fit:cover + object-position + scale about the crop
+origin) numerically, mapping the frame corners back to source pixels, so the saved
+flat matches the live preview pixel-for-pixel (WYSIWYG -- the owner tunes against
+that preview). Flats also normalize to the DC's canvas sizes (1920x480 / 1920x160).
+Back-compat: legacy `crop` manifests surface as the equivalent transform (left->cropX 0
+etc.), the /crop route still accepts the old names, and new uploads start neutral
+(100/50/50). The Loom's banner strip (already shipped gradient-only) now layers
+/branding/banner-loom.png over the gradient, onError-removed so a fresh install shows
+the DC's exact gradient. Found + fixed in test: independent 4-edge rounding could
+collapse a sub-pixel crop box to zero height (banker's rounding) -- origin+size
+rounding now guarantees >=1px. Branding/panel/loom suites all green.
