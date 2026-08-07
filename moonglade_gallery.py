@@ -15975,6 +15975,43 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         return jsonify({"media_id": mid, "siblings": siblings,
                         "parent": parent, "children": children})
 
+    @app.route("/api/train/recent-tasks")
+    def api_train_recent_tasks():
+        """Recent generations grouped by task, for the mobile Train dataset picker
+        (Moonglade Mobile.dc.html's 'tap a task, it adds its images' tile grid). Desktop's
+        picker selects individual images one at a time; the mobile design picks whole
+        TASKS instead -- each tile is one generation, tapping it adds every real sibling
+        image from that batch. The design's own mock assumes every task contributes
+        exactly 4 images (a fixed demo constant); real batches are 1-4, so this returns
+        each task's REAL image count and media_id list rather than a hardcoded number --
+        the mobile picker's running total is a sum of real counts, not tiles*4.
+        Pure catalog read, no network."""
+        try:
+            limit = max(1, min(int(request.args.get("limit") or 18), 60))
+        except ValueError:
+            limit = 18
+        con = _connect(db_path)
+        try:
+            rows = con.execute(
+                "SELECT media_id, task_id, is_video, created_at FROM catalog"
+                " WHERE task_id != '' AND is_video != '1' AND filename != ''"
+                " ORDER BY created_at DESC LIMIT 400").fetchall()
+        finally:
+            con.close()
+        groups, order = {}, []
+        for r in rows:
+            tid = r["task_id"]
+            if tid not in groups:
+                if len(order) >= limit:
+                    continue
+                groups[tid] = []
+                order.append(tid)
+            if tid in groups:
+                groups[tid].append(r["media_id"])
+        tasks = [{"task_id": tid, "media_ids": groups[tid], "count": len(groups[tid]),
+                  "thumb": "/thumbs/%s.jpg" % groups[tid][0]} for tid in order]
+        return jsonify({"tasks": tasks})
+
     @app.route("/api/train/quota")
     def api_train_quota():
         """How many FREE LoRA trainings are left (PixAI quota `free::user_lora_training`,

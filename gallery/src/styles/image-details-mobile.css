@@ -60,6 +60,7 @@
 .idm-chip.on { border-color: color-mix(in srgb, var(--lavender) 62%, transparent);
   background: color-mix(in srgb, var(--lavender) 26%, var(--surface0)); color: var(--text); }
 .idm-chip-danger { border: 1px solid rgba(243,139,168,.35); background: rgba(243,139,168,.1); color: var(--red); }
+.idm-chip.is-off { opacity: .55; cursor: default; }
 
 /* ---- stat row (stars / rating label / dims+date) ---- */
 .idm-statrow { display: flex; align-items: center; gap: 9px; }

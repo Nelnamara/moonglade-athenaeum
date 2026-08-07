@@ -1282,3 +1282,34 @@ def test_extract_full_meta_includes_lineage_fields():
     fm2 = core.extract_full_meta({"parameters": {"prompts": "a cat"}, "outputs": {}})
     assert fm2["source_media_id"] == "" and fm2["derive_kind"] == ""
 
+def test_train_recent_tasks_groups_real_images_by_real_task_id(tmp_path):
+    """The mobile Train dataset picker taps a TASK, not an image -- each tile must carry
+    the task's REAL image count (1-4), not a hardcoded assumption. Videos and rows with
+    no local file are excluded (nothing to train on); newest-task-first."""
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="b1", task_id="tBatch", filename="x_b1.png", created_at="2026-07-03T00:00:00"),
+        _row(media_id="b2", task_id="tBatch", filename="x_b2.png", created_at="2026-07-03T00:00:00"),
+        _row(media_id="b3", task_id="tBatch", filename="x_b3.png", created_at="2026-07-03T00:00:00"),
+        _row(media_id="s1", task_id="tSingle", filename="x_s1.png", created_at="2026-07-01T00:00:00"),
+        _row(media_id="v1", task_id="tVideo", filename="x_v1.mp4", is_video="1", created_at="2026-07-04T00:00:00"),
+        _row(media_id="n1", task_id="tNoFile", filename="", created_at="2026-07-05T00:00:00"),
+    ])
+    cli = login_test_client(create_app(tmp_path))
+    d = cli.get("/api/train/recent-tasks").get_json()
+    by_id = {t["task_id"]: t for t in d["tasks"]}
+    assert "tVideo" not in by_id and "tNoFile" not in by_id
+    assert by_id["tBatch"]["count"] == 3
+    assert set(by_id["tBatch"]["media_ids"]) == {"b1", "b2", "b3"}
+    assert by_id["tSingle"]["count"] == 1
+    # newest task first
+    assert [t["task_id"] for t in d["tasks"]] == ["tBatch", "tSingle"]
+
+
+def test_train_recent_tasks_respects_limit(tmp_path):
+    rows = [_row(media_id="m%d" % i, task_id="t%d" % i, filename="x_%d.png" % i,
+                 created_at="2026-07-%02dT00:00:00" % (i % 28 + 1)) for i in range(30)]
+    save_catalog(tmp_path / "catalog.db", rows)
+    cli = login_test_client(create_app(tmp_path))
+    d = cli.get("/api/train/recent-tasks?limit=5").get_json()
+    assert len(d["tasks"]) == 5
+

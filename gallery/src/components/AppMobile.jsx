@@ -18,6 +18,8 @@ import MyArtMobile from "./MyArtMobile.jsx";
 import HealthMobile from "./HealthMobile.jsx";
 import ImportMobile from "./ImportMobile.jsx";
 import ContestsMobile from "./ContestsMobile.jsx";
+import PublishMobile from "./PublishMobile.jsx";
+import TrainMobile from "./TrainMobile.jsx";
 import FolioMobile from "./FolioMobile.jsx";
 import ContactSheetMobile from "./ContactSheetMobile.jsx";
 import ClaimModal from "./ClaimModal.jsx";
@@ -181,9 +183,16 @@ import "../styles/create-mobile.css";
        cover_url images, and pixai.art click-through all ported forward;
        community cards show a computed "days left" (design's own compact
        shape) instead of desktop's literal date range.
-   Publish and Train stay honest placeholders -- see SOON_INFO below --
-   because neither has ANY backend or desktop overlay anywhere in this app
-   yet (unchanged from before this pass).
+     - Publish (2026-08-07): single column, real /api/myart/publish preview-
+       then-confirm pipeline (the exact one desktop's PublishOverlay.jsx
+       proved), real recent-image strip, live suggest-a-title + tag search,
+       real contest list. Reachable from the Menu AND from Image Details
+       Mobile's own new ☁ Publish chip via publishFor/openPublish below.
+     - Train a LoRA (2026-08-07): the dataset picker taps a whole recent
+       generation TASK (new GET /api/train/recent-tasks), adding all of that
+       task's REAL images (1-4, not the design's fixed demo "4") -- real
+       free-quota-aware cost line, real curated base models + pricing (same
+       /api/train/quota + /api/train/models desktop's TrainOverlay.jsx uses).
 
    IMAGE DETAILS MOBILE (2026-08-03) -- a plain tap on a Gallery tile outside
    select mode now opens the real Image Details screen (ImageDetailsMobile.jsx)
@@ -242,11 +251,8 @@ const MENU_ITEMS = [
 // Per-screen header title -- text matches the design spec exactly (Health's
 // screen is titled "Collection Health", not "Health" -- the row label and
 // the pushed screen's title legitimately differ, same as the design mock).
-// My Art/Import/Contests/Health render their own real component below
-// (MyArtMobile/ImportMobile/ContestsMobile/HealthMobile.jsx); Publish/Train
-// still render the honest placeholder in SOON_INFO -- neither has a backend
-// or a desktop overlay ANYWHERE in this app yet (NavSpine.jsx's own desktop
-// nav still marks both `soon: true`).
+// My Art/Import/Contests/Health/Publish/Train (2026-08-07) all render their own real
+// component below -- every Menu destination is now live, matching desktop.
 const SCREEN_TITLES = {
   myart: "My Art",
   publish: "Publish",
@@ -254,17 +260,6 @@ const SCREEN_TITLES = {
   import: "Import",
   contests: "Contests",
   health: "Collection Health",
-};
-
-const SOON_INFO = {
-  publish: [
-    "Publish isn't built anywhere yet — desktop's own nav still marks it soon too, no backend route exists.",
-    "Parked for a future pass.",
-  ],
-  train: [
-    "Training isn't built anywhere yet — desktop's own nav still marks it soon too, no backend route exists.",
-    "Parked for a future pass.",
-  ],
 };
 
 export default function AppMobile({ boot }) {
@@ -299,6 +294,13 @@ export default function AppMobile({ boot }) {
   const [detailsFor, setDetailsFor] = useState(null);
   const openDetails = (mid) => setDetailsFor(mid);
   const closeDetails = () => setDetailsFor(null);
+
+  // Publish (2026-08-07) -- which image a cross-page "☁ Publish" tap (Image Details
+  // Mobile) handed to the Publish screen. Empty when Publish is opened from the Menu --
+  // the screen then starts with its own recent-image strip instead of a pre-chosen one.
+  // Mirrors desktop App.jsx's publishFor/openPublish exactly.
+  const [publishFor, setPublishFor] = useState("");
+  const openPublish = (mid) => { setPublishFor(mid || ""); setScreen("publish"); };
 
   // Lightbox Mobile (2026-08-03) -- mutually exclusive with detailsFor, see
   // header comment. openLightbox is only ever called from Details (its own
@@ -418,7 +420,7 @@ export default function AppMobile({ boot }) {
   };
   const closeScreen = () => {
     setScreenClosing(true);
-    setTimeout(() => { setScreen(null); setScreenClosing(false); }, 220);
+    setTimeout(() => { setScreen(null); setScreenClosing(false); setPublishFor(""); }, 220);
   };
 
   // Health's tag/model/LoRA filter taps -- HealthMobile.jsx's own header
@@ -454,6 +456,12 @@ export default function AppMobile({ boot }) {
     lib.load(1, true);
     await refreshCollections();
   };
+
+  // Publish/Train's own onPublished/onSubmitted -- same afterMutation() shape: a
+  // freshly-published artwork or queued training doesn't change what the grid shows,
+  // but Details' artwork_id (the "already published" state) does, so a reload keeps
+  // that badge honest if the owner backs out to Details right after.
+  const afterPublishOrTrain = async () => { lib.load(1, true); };
 
   // NavSpine.jsx's own logout(), ported verbatim (same /api/logout JSON POST +
   // cache-purge-then-navigate shape -- see that file's header comment for why).
@@ -561,7 +569,9 @@ export default function AppMobile({ boot }) {
             not unmount it. */}
         <MobileScreen open={!!screen} closing={screenClosing} onClose={closeScreen}
           title={screen ? SCREEN_TITLES[screen] : ""}>
-          {screen === "myart" && <MyArtMobile />}
+          {screen === "myart" && (
+            <MyArtMobile onOpenPost={openDetails} onOpenTrain={() => setScreen("train")} />
+          )}
           {screen === "health" && (
             <HealthMobile
               onModelFilter={(m) => filterFromHealth({ model: m })}
@@ -574,16 +584,11 @@ export default function AppMobile({ boot }) {
           )}
           {screen === "import" && <ImportMobile collections={collections} onImported={afterImported} />}
           {screen === "contests" && <ContestsMobile />}
-          {(screen === "publish" || screen === "train") && (
-            <div className="glm-placeholder cm-soon">
-              <div className="glm-placeholder-icon" aria-hidden="true">
-                {MENU_ITEMS.find((mi) => mi.screen === screen).icon}
-              </div>
-              <div className="glm-placeholder-title">{SCREEN_TITLES[screen]}</div>
-              {SOON_INFO[screen].map((line, i) => (
-                <div className="glm-placeholder-note" key={i}>{line}</div>
-              ))}
-            </div>
+          {screen === "publish" && (
+            <PublishMobile mediaId={publishFor} onClose={closeScreen} onPublished={afterPublishOrTrain} />
+          )}
+          {screen === "train" && (
+            <TrainMobile onClose={closeScreen} />
           )}
         </MobileScreen>
       </div>
@@ -607,6 +612,7 @@ export default function AppMobile({ boot }) {
           onFilterByModel={filterByModelFromDetails} onFilterByBatch={filterByBatchFromDetails}
           advParams={detailsAdvParams} items={lib.items}
           onOpenLightbox={openLightbox}
+          onPublish={(mid) => { closeDetails(); openPublish(mid); }}
         />
       )}
 

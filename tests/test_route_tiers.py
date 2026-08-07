@@ -269,6 +269,7 @@ ROUTE_TIERS = {
     # like every other account-touching web action here (/api/generate, /api/claim), with
     # explicit-token CSRF and a preview-before-confirm step doing the real protecting.
     ("api_myart_publish", "POST"): LOGIN,
+    ("api_train_recent_tasks", "GET"): LOGIN,    # pure catalog read, free
     ("api_train_quota", "GET"): LOGIN,           # read-only quota read, free
     ("api_train_models", "GET"): LOGIN,          # read-only trainable-model list, free
     ("api_train_cover", "GET"): LOGIN,           # host-guarded CDN thumbnail proxy, free
