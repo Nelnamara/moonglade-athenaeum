@@ -4838,3 +4838,10 @@ scrolls internally — the page itself never scrolls. Print gets a static-positi
 so the record still paginates. Live-verified via computed style on the real server:
 fixed/hidden root, dvFrame running, blur bar, page scroll gone, record overflow-y auto,
 frame centered.
+
+**2. Contests layout — SHIPPED.** The official contest becomes ONE full-width 3:1 banner
+(radius 14) with title/prize/vote/dates overlaid along the bottom over the DC's own
+gradient scrim — the separate body block below the image is gone; the community grid goes
+fixed 2-col (was auto-fill minmax(300px)). Desktop overlay only, per the handoff (mobile
+contests untouched by this pass). Live-verified: full content width, 3/1 computed aspect,
+scrim + overlaid nodes present, 2 computed grid columns.
