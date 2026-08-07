@@ -3,6 +3,7 @@ import "../styles/overlays.css";
 import "../styles/folio-overlay.css";
 import useFolio, { BUCKETS, NARRATOR_LINES, commentary, revealMod, fmt } from "../hooks/useFolio.js";
 import useHealth from "../hooks/useHealth.js";
+import useScrollLock from "../hooks/useScrollLock.js";
 
 /* The Folio of Honors -- the seventh designed nav overlay to port, opened from
    Banner.jsx's gold "🏆 Folio" button (App.jsx's onFolio -> openOverlay("folio"),
@@ -141,6 +142,7 @@ function CardGrid({ items, ladderName, earnedAt, skinsById, emptyLabel, reveal, 
 }
 
 export default function FolioOverlay({ onClose }) {
+  useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const {
     data, err, vm, earnedAt,
     tab, setTab, q, onSearchChange,

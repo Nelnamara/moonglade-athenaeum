@@ -2,6 +2,7 @@ import React from "react";
 import useMyArt, { fmt } from "../hooks/useMyArt.js";
 import "../styles/overlays.css";
 import "../styles/myart-contests.css";
+import useScrollLock from "../hooks/useScrollLock.js";
 
 /* "Your Art" overlay — ported from the Frontend Gallery DC's ovMyArt slab
    (lines ~567-599): stats row + top-published-by-views list. Real data from
@@ -26,6 +27,7 @@ import "../styles/myart-contests.css";
    rather than hold a second, drifting copy of the same fetch. */
 
 export default function MyArtOverlay({ onClose, onOpenPost }) {
+  useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const { d, err, items, stats, maxViews } = useMyArt();
 
   return (

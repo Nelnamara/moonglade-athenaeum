@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
 import useImageDetails from "../hooks/useImageDetails.js";
 import SimilarModal from "./SimilarModal.jsx";
+import useScrollLock from "../hooks/useScrollLock.js";
 
 /* Motion: the reveal choreography locked 2026-07-30 (docs/DECISIONS.md, artifact
    477b4655 "The Reveal -- Motion Detail"). The headline LEADS on its own, sliding
@@ -129,6 +130,7 @@ export default function DetailsView({
   onFilterByModel, onFilterByBatch, advParams,
   items, onOpenLightbox,
 }) {
+  useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const [focusMode, setFocusMode] = useState(
     () => (typeof localStorage !== "undefined" && localStorage.getItem("gallery_focus") === "1")
   );

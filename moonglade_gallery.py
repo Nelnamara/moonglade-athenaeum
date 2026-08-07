@@ -2704,12 +2704,6 @@ def collection_health(out_dir, db_path):
     # no-op, whereas dropping the exclusion would sweep a legacy folder into a scan.
     branding_dir = out_dir / "branding"
 
-    def _under(p, parent):
-        try:
-            p.relative_to(parent); return True
-        except ValueError:
-            return False
-
     per_bucket = Counter()
     total_files = 0
     total_bytes = 0
@@ -2721,13 +2715,38 @@ def collection_health(out_dir, db_path):
     mid_sizes = defaultdict(list)  # media_id -> [sizes] to estimate reclaimable
     _video_exts = {".mp4", ".webm", ".mov", ".mkv", ".m4v"}
 
-    for p in out_dir.rglob("*"):
+    # The walk is the panel's cost at scale (owner report 2026-08-06: "VERY slow" at
+    # 35k images). The old rglob walked EVERY file -- including the entire gallery/
+    # thumbnail tree, only to exclude each one by path-prefix afterward -- and then
+    # paid a separate stat() per kept file. This scandir recursion (a) PRUNES the
+    # excluded subtrees (gallery/, _duplicates/, the deleted dir, legacy branding/)
+    # so their thousands of entries are never enumerated at all, and (b) reads
+    # is_file/size straight off the DirEntry, which on Windows comes from the
+    # directory read itself -- no per-file syscall. Same results, same exclusions,
+    # guarded by tests/test_gallery_filters.py's existing health tests.
+    import os as _os
+    _pruned = {str(gallery_dir), str(quarantine_dir), str(deleted_dir), str(branding_dir)}
+
+    def _walk(dirpath):
+        try:
+            with _os.scandir(dirpath) as entries:
+                for e in entries:
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            if e.path not in _pruned:
+                                yield from _walk(e.path)
+                        elif e.is_file(follow_symlinks=False):
+                            yield e
+                    except OSError:
+                        continue
+        except OSError:
+            return
+
+    for e in _walk(str(out_dir)):
+        p = Path(e.path)
         ext = p.suffix.lower()
         is_img = ext in _IMAGE_EXTS
-        if (not is_img and ext not in _video_exts) or not p.is_file():
-            continue
-        if (p.name.endswith(".part") or _under(p, gallery_dir) or _under(p, quarantine_dir)
-                or _under(p, deleted_dir) or _under(p, branding_dir)):
+        if (not is_img and ext not in _video_exts) or p.name.endswith(".part"):
             continue
         rel = p.relative_to(out_dir)
         on_disk_rels.add(str(rel).replace("\\", "/"))
@@ -2743,7 +2762,7 @@ def collection_health(out_dir, db_path):
         else:
             bucket = "other"
         try:
-            sz = p.stat().st_size
+            sz = e.stat(follow_symlinks=False).st_size   # from the DirEntry -- no extra syscall on Windows
         except OSError:
             continue
         total_files += 1
@@ -12342,13 +12361,33 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         return render_template_string(
             HEALTH_HTML, h=collection_health(out_dir, db_path))
 
+    _health_cache = {"ts": 0, "payload": None}   # api_health's TTL cache -- see its docstring
+
     @app.route("/api/health")
     def api_health():
         """The health dashboard's data as JSON -- gap-audit route #10, consumed by the
         React app's HealthOverlay (the in-app modal that replaces bouncing to the
         /health page). Same computation, same fields, same LOGIN tier as the page it
-        un-bakes; the page route stays until demolition."""
-        return jsonify(collection_health(out_dir, db_path))
+        un-bakes; the page route stays until demolition.
+
+        ROUTE-LEVEL TTL CACHE (owner report 2026-08-06: "VERY slow" at 35k images).
+        collection_health() walks the whole library; at production scale that is
+        seconds of disk work per open, and the numbers it produces are glance-stats
+        that do not change second to second. 120s of staleness on a dashboard is
+        invisible; re-walking 70k files per open is not. The cache lives HERE, not in
+        collection_health() itself, so every direct caller (the classic /health page,
+        the tests) stays pure. ?fresh=1 bypasses -- the client sends it on an explicit
+        user refresh, never on a plain open."""
+        import time as _time
+        now = _time.time()
+        if (not request.args.get("fresh")
+                and _health_cache.get("payload") is not None
+                and now - _health_cache.get("ts", 0) < 120):
+            return jsonify(_health_cache["payload"])
+        payload = collection_health(out_dir, db_path)
+        _health_cache["payload"] = payload
+        _health_cache["ts"] = now
+        return jsonify(payload)
 
     @app.route("/panel")
     def panel():
