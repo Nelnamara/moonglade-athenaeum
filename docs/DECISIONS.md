@@ -1681,19 +1681,18 @@ increment in this file works.
 
 **Image Details (desktop)** — `DetailsView.jsx` vs `Image Details.dc.html`. Mobile
 (`ImageDetailsMobile.jsx`) already has all four of these correctly — port the pattern.
-- [ ] LINEAGE section missing — OPEN and now **scoped as buildable** (owner correction
-      2026-08-06). The earlier "no real backend lineage data exists" was WRONG. Two real,
-      trackable dimensions:
-      (a) **Batch siblings** — images sharing a `task_id` are the up-to-4 outputs of one
-          generation. `task_id` is already a catalog column; this dimension is queryable
-          TODAY with zero new data.
-      (b) **Derivation chain** — upscale / edit / img2video record their SOURCE image's
-          `mediaId` in the task params (`params["mediaId"]`, moonglade_backup.py:5528; video
-          the same), which PixAI persists and `task_detail_gql` reads back; `poster_media_id`
-          already links a video to its still. Needs one `source_media_id` catalog column,
-          populated forward at submit time + backfilled from task params for history.
-      Not a dead end — the DC's LINEAGE panel maps onto real relationships. Build order:
-      (a) first (free), then (b) behind the schema add.
+- [x] LINEAGE section — **SHIPPED 2026-08-06**. Both dimensions from the re-scope built:
+      batch siblings (`task_id`, free) and the derivation chain (new `source_media_id` +
+      `derive_kind` columns, `core.source_media_of_task()` reading edit/upscale/video's
+      source mediaId out of task params, wired into `extract_full_meta` so both the forward
+      sync and `--backfill-full-meta` fill it going forward; a dedicated `--backfill-lineage`
+      command covers rows that already have full meta, with a real `lineage_checked` column
+      so a confirmed original is never re-fetched). New `/api/lineage/<mid>` route (pure
+      catalog read) returns siblings/parent/children; Image Details renders the DC's exact
+      chip-strip design (74x74, accent-highlighted "this", real thumbnails, click-to-navigate),
+      hidden entirely when there's nothing to show. Verified live on the real dev catalog: a
+      real 4-image batch rendered all 3 siblings + "this", navigating a sibling refetched
+      lineage for the new image, and a lone original correctly showed no section at all.
 - [x] SIMILAR section missing. **SHIPPED 2026-08-04** — reused the exact real `SimilarModal.jsx`
       already proven by `Lightbox.jsx`'s own "✧ Similar" button, not a rebuilt strip.
 - [x]→rebuilding 7 of 11 metadata fields hidden behind a "Full record ▾" toggle. **Provenance

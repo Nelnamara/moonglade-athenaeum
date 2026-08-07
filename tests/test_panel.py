@@ -1199,3 +1199,61 @@ def test_list_trainable_base_models_is_the_curated_snapshot_grouped_by_arch():
     assert core.training_price_for_version("1648918127446573124") == 25000    # Moonbeam (SD 1.5)
     assert core.training_price_for_version("not-a-real-version") is None
 
+# --- Lineage (2026-08-06): batch siblings (task_id) + derivation chain (source_media_id).
+
+def test_source_media_of_task_reads_all_three_derive_shapes():
+    edit = core.source_media_of_task({"parameters": {"chat": {"mediaId": "111", "modelId": "x"}}})
+    assert edit == ("111", "edit")
+    video = core.source_media_of_task({"parameters": {"i2v": {"mediaId": "222"}}})
+    assert video == ("222", "video")
+    upscale = core.source_media_of_task({"parameters": {"mediaId": "333", "upscale": 2}})
+    assert upscale == ("333", "upscale")
+    enlarge = core.source_media_of_task({"parameters": {"mediaId": "444", "enlarge": 2}})
+    assert enlarge == ("444", "upscale")
+    original = core.source_media_of_task({"parameters": {"prompts": "a cat"}})
+    assert original == (None, None)
+    assert core.source_media_of_task(None) == (None, None)
+    assert core.source_media_of_task({}) == (None, None)
+
+
+def test_api_lineage_returns_siblings_parent_and_children(tmp_path):
+    save_catalog(tmp_path / "catalog.db", [
+        # a 2-image batch: mBatch1/mBatch2 share task_id "tBatch"
+        _row(media_id="mBatch1", task_id="tBatch", title="Batch one", filename="x_1.png"),
+        _row(media_id="mBatch2", task_id="tBatch", title="Batch two", filename="x_2.png"),
+        # mUp was upscaled FROM mBatch1
+        _row(media_id="mUp", task_id="tUp", source_media_id="mBatch1", derive_kind="upscale",
+             title="Upscaled", filename="x_3.png"),
+        # an edit made from mUp too, so mUp has both a parent (mBatch1) and a child (mEdit)
+        _row(media_id="mEdit", task_id="tEdit", source_media_id="mUp", derive_kind="edit",
+             title="Edited", filename="x_4.png"),
+        # an unrelated original, no lineage at all
+        _row(media_id="mLoner", task_id="tLoner", title="Alone", filename="x_5.png"),
+    ])
+    cli = login_test_client(create_app(tmp_path))
+
+    d = cli.get("/api/lineage/mBatch1").get_json()
+    assert [s["media_id"] for s in d["siblings"]] == ["mBatch2"]
+    assert d["parent"] is None
+    assert [c["media_id"] for c in d["children"]] == ["mUp"]   # mUp was made FROM mBatch1
+    assert d["children"][0]["kind"] == "upscale"
+
+    d = cli.get("/api/lineage/mUp").get_json()
+    assert d["siblings"] == []                              # tUp has only mUp
+    assert d["parent"]["media_id"] == "mBatch1" and d["parent"]["kind"] == "upscale"
+    assert [c["media_id"] for c in d["children"]] == ["mEdit"]
+    assert d["children"][0]["kind"] == "edit"
+
+    d = cli.get("/api/lineage/mLoner").get_json()
+    assert d["siblings"] == [] and d["parent"] is None and d["children"] == []
+
+    assert cli.get("/api/lineage/does-not-exist").status_code == 404
+
+
+def test_extract_full_meta_includes_lineage_fields():
+    fm = core.extract_full_meta({"parameters": {"chat": {"mediaId": "999", "modelId": "x"}},
+                                 "outputs": {}})
+    assert fm["source_media_id"] == "999" and fm["derive_kind"] == "edit"
+    fm2 = core.extract_full_meta({"parameters": {"prompts": "a cat"}, "outputs": {}})
+    assert fm2["source_media_id"] == "" and fm2["derive_kind"] == ""
+

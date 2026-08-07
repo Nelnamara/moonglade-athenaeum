@@ -263,6 +263,7 @@ ROUTE_TIERS = {
     ("api_watch_status", "GET"): LOGIN,
     ("api_your_art", "GET"): LOGIN,
     ("api_myart_items", "GET"): LOGIN,          # catalog read, same tier as /api/your-art
+    ("api_lineage", "GET"): LOGIN,               # pure catalog read, same tier
     # Mutates the PixAI ACCOUNT (publish/re-tag/delete an artwork) but spends nothing and
     # is cosmetic-adjacent in the same way the branding slot routes are -- LOGIN tier,
     # like every other account-touching web action here (/api/generate, /api/claim), with
