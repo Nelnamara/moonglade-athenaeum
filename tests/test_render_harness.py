@@ -1413,10 +1413,13 @@ def test_control_panel_runs_real_jobs_and_manages_a_real_account(logged_in_page,
     _dismiss_any_achievement_toast(page)
     page.click('button:has-text("✦ Branding")')
     page.wait_for_selector(".mgcp-brandgrid")
-    page.click('.mgcp-animrow:has-text("glow")')
+    # The 2026-08-06 rebuild: anims are Title-cased chips in the default
+    # "Icons, marks & animation" section (Control Panel.dc.html:922-927's chip form
+    # over the real MARK_ANIMS values -- "glow" renders as "Glow").
+    page.click('.mgcp-animchip:has-text("Glow")')
     page.wait_for_function(
-        "() => { const el = document.querySelector('.mgcp-animrow.on'); "
-        "return el && el.textContent === 'glow'; }")
+        "() => { const el = document.querySelector('.mgcp-animchip.on'); "
+        "return el && el.textContent === 'Glow'; }")
 
     # --- Power modal: the client-side ping-poll reconnect logic (ported from classic's
     # real _watchServer()), proven against STUBBED /api/server/restart + /api/ping --
