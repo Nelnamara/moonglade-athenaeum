@@ -578,6 +578,7 @@ const V2_STYLES = `
 .lv-unbind{margin-left:auto;flex:none;font:600 10px/1 system-ui;background:var(--surface1);border:1px solid var(--surface1);
   color:var(--subtext);border-radius:6px;padding:4px 8px;cursor:pointer;}
 .lv-unbind:hover{border-color:var(--accent);color:var(--accent);}
+.lv-fhlabel{font-size:9.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--overlay0);margin-bottom:6px;}
 .lv-framehandoff{display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1);}
 .lv-framehandoff .sb-frame{flex:1 1 0;min-width:0;}
 /* The @tag input (.sb-tagin) is 90px in classic Loom's own wide layout -- too wide for
@@ -2557,18 +2558,31 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             </select>
           </div>
         )}
-        <div className="lv-framehandoff">
-          <FrameSlot which="open" frame={active.c.openFrame} liveTag={positionTag(active, project, imgSrc, "openFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
-            onPatch={(p) => patchFrame("openFrame", p)}
-            extraBtn={prevEntry ? <button className="sb-btn ghost sm" onClick={inheritPrev} disabled={handoff === "wip"}
-                title={prevEntry.c.resultMid ? `Splice in ${prevEntry.code}'s generated clip's last frame` : `Copy ${prevEntry.code}'s closing frame here`}>
-                {handoff === "wip" ? "✂ splicing…" : handoff === "err" ? "✂ splice failed — retry"
-                  : prevEntry.c.resultMid ? `✂ splice ${prevEntry.code}'s last frame` : `↳ inherit ${prevEntry.code} close`}</button>
-              : <span className="sb-hint">{sel ? "first shot — no previous frame" : "draft — no shot sequence to inherit from"}</span>} />
-          <div className="sb-conn-mid">&#8594;</div>
-          <FrameSlot which="close" frame={active.c.closeFrame} liveTag={positionTag(active, project, imgSrc, "closeFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
-            onPatch={(p) => patchFrame("closeFrame", p)} />
-        </div>
+        {/* Gallery-era correction (handoff-2026-08-06 / The Loom.dc.html:399-427): the
+            shared Frame Handoff block shows on the THREE tabs that consume it —
+            Reference (still composition), Video (its Continuity/weave modes read these
+            frames), Edit (reads openFrame as its source) — with a contextual label
+            naming which role it plays. Hidden on Image, the one tab that doesn't use
+            it. This is the re-scope the owner sent back 2026-08-04: shared
+            infrastructure, never Reference-only. */}
+        {(tab === "Reference" || tab === "Video" || tab === "Edit") && (
+          <>
+            <div className="lv-fhlabel">FRAME HANDOFF — {
+              tab === "Video" ? "drives this shot’s motion" : tab === "Edit" ? "edit source" : "still composition"}</div>
+            <div className="lv-framehandoff">
+              <FrameSlot which="open" frame={active.c.openFrame} liveTag={positionTag(active, project, imgSrc, "openFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                onPatch={(p) => patchFrame("openFrame", p)}
+                extraBtn={prevEntry ? <button className="sb-btn ghost sm" onClick={inheritPrev} disabled={handoff === "wip"}
+                    title={prevEntry.c.resultMid ? `Splice in ${prevEntry.code}'s generated clip's last frame` : `Copy ${prevEntry.code}'s closing frame here`}>
+                    {handoff === "wip" ? "✂ splicing…" : handoff === "err" ? "✂ splice failed — retry"
+                      : prevEntry.c.resultMid ? `✂ splice ${prevEntry.code}'s last frame` : `↳ inherit ${prevEntry.code} close`}</button>
+                  : <span className="sb-hint">{sel ? "first shot — no previous frame" : "draft — no shot sequence to inherit from"}</span>} />
+              <div className="sb-conn-mid">&#8594;</div>
+              <FrameSlot which="close" frame={active.c.closeFrame} liveTag={positionTag(active, project, imgSrc, "closeFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                onPatch={(p) => patchFrame("closeFrame", p)} />
+            </div>
+          </>
+        )}
         {/* The Image/Edit/Reference/Video tab strip lives in the rail's .lv-sidehead
             (like the left rail's Cast/Footage tabs), so `gen` must NOT render its own --
             an identical strip here stacked a duplicate directly below the header one

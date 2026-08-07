@@ -4855,3 +4855,19 @@ DONUT_COLORS) with the tagged total in the hole and a % legend. The model-count 
 click stays on the Bars view (the legend is display-only, per the DC). Reduced-motion
 kills all of it to settled states. Live-verified with real data: both toggles, 2 paths +
 dots in the SVG, real conic gradient, 1,938 tagged / 6 legend rows.
+
+**4. Desktop Loom Frame Handoff re-scoped — SHIPPED.** The answer to the 2026-08-04
+send-back, per the returned `The Loom.dc.html:399-427`: the shared block now renders on
+exactly the THREE tabs that consume it — Reference ("still composition"), Video ("drives
+this shot's motion" — its Continuity/weave modes read these frames), Edit ("edit source"
+— reads openFrame directly) — each with the DC's contextual FRAME HANDOFF label, and is
+hidden on Image, the one tab that never used it (shipped code previously rendered it on
+all four, unlabeled). Loom suite green.
+
+**5. ☁ Publish buttons (Lightbox + Details) — SHIPPED with a disclosed stand-in.** The
+returned designs add ☁ Publish to both surfaces, handing the image to the new Publish
+panel (`ovPublish`) — which is a LATER build phase of this handoff. Until that panel
+exists the buttons ride the exact coming-soon acknowledgment the Publish nav stub already
+uses (a visible, honest control — never a dead navigation to a panel that isn't there).
+Upgrade path is one swap: replace the toast with the DC's `mg_publish` hand-off when the
+panel ships. Render harness + syntax suites green across all five corrections.
