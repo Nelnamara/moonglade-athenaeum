@@ -335,11 +335,44 @@
     '.ach-m2 .ring{position:absolute;width:96px;height:96px;border-radius:50%;border:3px solid var(--tc);opacity:0;transform:scale(.4);pointer-events:none;}',
     '.ach-m2 .tw.go .ring{animation:m2ring .6s ease-out .76s;}',
     '@keyframes m2ring{0%{opacity:0;transform:scale(.4);}22%{opacity:.85;}100%{opacity:0;transform:scale(1.75);}}',
+    // Badge-local ambient decoration, legendary/feat only -- ported from Ambient Layer.dc.html's
+    // achMoonHaloStyle/achMotes (legendary) and achFlameGlowStyle/achRuneAStyle/achRuneBStyle/
+    // achWisps (feat), lines 532-542. Confirmed absent from this file until 2026-08-06 --
+    // everything else in this achievement moment (mascot, confetti, star-rain, chime/synth,
+    // badge sweep/bding, ring) was already built; only these two badge-column ambient effects
+    // and the name text treatment below were the real gap. Centering (top/left/translate) is
+    // added explicitly -- the design's own snippet omits it, relying on its authoring tool's
+    // grid place-items rather than an explicit position, which doesn't carry over to a plain
+    // absolutely-positioned element.
+    '.ach-m2 .m2-halo{position:absolute;top:50%;left:50%;width:208px;height:208px;margin:-104px 0 0 -104px;border-radius:50%;pointer-events:none;z-index:0;background:radial-gradient(circle,transparent 55%,rgba(255,244,209,.42) 64%,rgba(255,244,209,.14) 73%,transparent 82%);filter:blur(2px);animation:m2halopulse 3.2s ease-in-out infinite;}',
+    '@keyframes m2halopulse{0%,100%{opacity:.55;transform:scale(1);}50%{opacity:.85;transform:scale(1.06);}}',
+    '.ach-m2 .m2-motewrap{position:absolute;top:50%;left:50%;width:182px;height:182px;margin:-91px 0 0 -91px;z-index:0;pointer-events:none;animation:m2sunburstspin 24s linear infinite;}',
+    '@keyframes m2sunburstspin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}',
+    '.ach-m2 .m2-mote{position:absolute;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle,#fff4d1,#e8cb7c 60%,transparent 76%);box-shadow:0 0 7px 1px rgba(232,203,124,.85);}',
+    '.ach-m2 .m2-flameglow{position:absolute;inset:-16px;border-radius:50%;pointer-events:none;z-index:0;background:radial-gradient(circle,rgba(255,120,60,.55),rgba(224,53,94,.4) 45%,transparent 72%);filter:blur(8px);animation:m2flameflicker 1.3s ease-in-out infinite;}',
+    '@keyframes m2flameflicker{0%,100%{opacity:.55;transform:scale(1);}18%{opacity:.9;transform:scale(1.06);}34%{opacity:.4;transform:scale(.95);}52%{opacity:.95;transform:scale(1.1);}68%{opacity:.5;transform:scale(.98);}84%{opacity:.8;transform:scale(1.04);}}',
+    '.ach-m2 .m2-runeA{position:absolute;top:50%;left:50%;width:148px;height:148px;margin:-74px 0 0 -74px;border-radius:50%;border:1.5px dashed rgba(224,53,94,.6);pointer-events:none;z-index:0;animation:m2runespinA 9s linear infinite;}',
+    '@keyframes m2runespinA{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}',
+    '.ach-m2 .m2-runeB{position:absolute;top:50%;left:50%;width:164px;height:164px;margin:-82px 0 0 -82px;border-radius:50%;border:1px dotted rgba(138,147,162,.55);pointer-events:none;z-index:0;animation:m2runespinB 14s linear infinite;}',
+    '@keyframes m2runespinB{from{transform:rotate(360deg);}to{transform:rotate(0deg);}}',
+    '.ach-m2 .m2-wisp{position:absolute;bottom:-2px;border-radius:50%;background:radial-gradient(circle,rgba(255,178,90,.95),rgba(255,90,50,.8) 40%,rgba(224,53,94,.55) 65%,transparent 78%);filter:blur(1.5px);pointer-events:none;animation-name:m2flamewisp;animation-timing-function:ease-in;animation-iteration-count:infinite;}',
+    '@keyframes m2flamewisp{0%{opacity:0;transform:translate(0,0) scale(.5) rotate(0deg);}18%{opacity:.95;}55%{opacity:.9;transform:translate(var(--sway,10px),-50px) scale(1.2) rotate(var(--rot,10deg));}100%{opacity:0;transform:translate(calc(var(--sway,10px) * 1.7),-104px) scale(.25) rotate(var(--rot,10deg));}}',
+    '@media (prefers-reduced-motion: reduce){ .ach-m2 .m2-halo,.ach-m2 .m2-motewrap,.ach-m2 .m2-flameglow,.ach-m2 .m2-runeA,.ach-m2 .m2-runeB,.ach-m2 .m2-wisp{animation:none!important;} }',
     '.ach-m2 .tbody{min-width:0;flex:1;}',
     '.ach-m2 .tbody .u{font:700 10px/1 sans-serif;letter-spacing:.22em;text-transform:uppercase;color:var(--tc);opacity:0;}',
     '.ach-m2 .tw.go .tbody .u{animation:m2fade .4s ease .86s forwards;}',
     '.ach-m2 .tbody .n{font:700 22px/1.08 Georgia,serif;margin:3px 0 5px;opacity:0;color:var(--text);}',
     '.ach-m2 .tw.go .tbody .n{animation:m2fade .42s ease .98s forwards;}',
+    // Name text treatment, legendary/feat only -- Ambient Layer.dc.html's achNameStyle
+    // (achShimmerText for legendary, achEmberText for feat, lines 477-480). Higher specificity
+    // than the plain .tw.go rule above (extra .t-legendary/.t-feat class) so it wins outright,
+    // combining the SAME entrance fade with its own infinite tier animation rather than
+    // replacing it.
+    '.ach-m2 .tw.go.t-legendary .tbody .n{background:linear-gradient(100deg,#b3924a,#fff4d1 45%,#e8cb7c 55%,#b3924a);background-size:220% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:m2fade .42s ease .98s forwards, m2shimmertext 3.2s ease-in-out 1.4s infinite;}',
+    '@keyframes m2shimmertext{0%{background-position:0% 0;}50%{background-position:100% 0;}100%{background-position:0% 0;}}',
+    '.ach-m2 .tw.go.t-feat .tbody .n{animation:m2fade .42s ease .98s forwards, m2embertext 1.4s ease-in-out 1.4s infinite;}',
+    '@keyframes m2embertext{0%,100%{color:#ff6a3d;text-shadow:0 0 14px rgba(255,90,40,.75),0 0 4px rgba(255,200,140,.6);}50%{color:#fff0e0;text-shadow:0 0 24px rgba(255,60,60,1),0 0 8px rgba(255,255,255,.85);}}',
+    '@media (prefers-reduced-motion: reduce){ .ach-m2 .tbody .n{animation:none!important;background:none!important;-webkit-text-fill-color:unset!important;color:var(--text)!important;} }',
     '.ach-m2 .tbody .r{font-size:13px;line-height:1.5;font-style:italic;opacity:0;margin-top:1px;background:linear-gradient(90deg,#b3a2dc 0%,#b3a2dc 43%,#efe6ff 50%,#b3a2dc 57%,#b3a2dc 100%);background-size:235% 100%;background-position:118% 0;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;filter:drop-shadow(0 0 5px rgba(198,180,255,.22));}',
     '.ach-m2 .tw.go .tbody .r{animation:m2fade .46s ease 1.1s forwards, m2readalong 4.8s ease-in-out 1.6s infinite;}',
     '@keyframes m2readalong{0%{background-position:118% 0;}52%{background-position:-18% 0;}100%{background-position:-18% 0;}}',
@@ -982,6 +1015,36 @@
         b.src='/branding/badges/'+encodeURIComponent(a.id)+'.png';
         cap.appendChild(b);
         var ring=document.createElement('div'); ring.className='ring'; cap.appendChild(ring);
+        // Badge-local ambient decoration, legendary/feat only -- positions/counts copied
+        // verbatim from Ambient Layer.dc.html's achMotes (5, evenly spaced at 72°, alternating
+        // 5/7px) and achWisps (8, staggered left offset + alternating sway/rotate direction).
+        if(tier==='legendary'){
+          var halo=document.createElement('div'); halo.className='m2-halo'; cap.appendChild(halo);
+          var moteWrap=document.createElement('div'); moteWrap.className='m2-motewrap';
+          [0,72,144,216,288].forEach(function(deg,i){
+            var r=50, rad=deg*Math.PI/180, x=50+r*Math.cos(rad), y=50+r*Math.sin(rad), sz=i%2?5:7;
+            var mt=document.createElement('span'); mt.className='m2-mote';
+            mt.style.left=x.toFixed(1)+'%'; mt.style.top=y.toFixed(1)+'%';
+            mt.style.width=sz+'px'; mt.style.height=sz+'px';
+            moteWrap.appendChild(mt);
+          });
+          cap.appendChild(moteWrap);
+        } else if(tier==='feat'){
+          var flame=document.createElement('div'); flame.className='m2-flameglow'; cap.appendChild(flame);
+          cap.appendChild(document.createElement('div')).className='m2-runeA';
+          cap.appendChild(document.createElement('div')).className='m2-runeB';
+          for(var wi=0; wi<8; wi++){
+            var sway=(wi%2?1:-1)*(10+wi*3), rot=(wi%2?1:-1)*(8+wi*2), sz=10+(wi%3)*4;
+            var wisp=document.createElement('div'); wisp.className='m2-wisp';
+            wisp.style.left=(16+wi*9)+'%';
+            wisp.style.width=sz+'px'; wisp.style.height=sz+'px';
+            wisp.style.setProperty('--sway', sway+'px');
+            wisp.style.setProperty('--rot', rot+'deg');
+            wisp.style.animationDuration=(1.1+(wi%4)*0.15).toFixed(2)+'s';
+            wisp.style.animationDelay=(1.4+wi*0.12).toFixed(2)+'s';
+            cap.appendChild(wisp);
+          }
+        }
       }
       if(opts.mascot!==false){                       // the mascot leaps from the TOP edge
         var mfall=(tier==='feat')?'legendary':tier;
