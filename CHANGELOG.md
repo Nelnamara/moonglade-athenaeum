@@ -17,6 +17,15 @@ git tags. Full prose notes for tagged versions live on
 
 ### Added
 
+- **The job console's Ledger — run history, the standing order, and last-run stamps.** A
+  Pipelines/Ledger toggle in the Control Panel's console header (both platforms) opens the
+  real maintenance run history: dated rows with result + exit code, "run again" on safe
+  jobs, a "Never run here" footer of safe jobs with no recorded run, and the auto-sync
+  standing order (editable on/off + interval from the serving machine). The Sync card gains
+  its "last run … · auto on/off — every N hours" meta line and every Check row remembers
+  when it last ran. All real data: panel runs were always logged to `jobs.jsonl`, the React
+  UI just never read them — the only backend change is two enriched event fields (`action`,
+  `rc`). Full account in `docs/DECISIONS.md`.
 - **Control Panel Branding tab — Phase 2 slot-picker UI for Banner-main/Banner-login.**
   Upload from disk, cycle crop position (left/center/right), and pick which uploaded asset
   is active, all against the Phase 1 backend routes shipped 2026-08-05. Scoped to just the

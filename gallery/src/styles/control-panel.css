@@ -181,6 +181,56 @@ button.mgcp-animrow { display: block; width: 100%; text-align: left; padding: 8p
 button.mgcp-animrow.on { border-color: var(--accent); color: var(--text); background: rgba(182,146,230,.1); }
 .mgcp-shortcutbtn { margin-top: 14px; }
 
+/* ---- Job console heart: Pipelines/Ledger segmented toggle + the ledger view --
+   Control Panel.dc.html:157-181 (heartLedger) + :106-107 (sync meta) + :149 (check
+   last-run stamps). Same segmented-control pattern ControlMobile's cm-segbtn ships. ---- */
+.mgcp-seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--surface1);
+  border-radius: 9px; background: var(--surface0); }
+button.mgcp-segbtn { border: none; background: transparent; color: var(--subtext); font-family: inherit;
+  font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 7px; cursor: pointer; }
+button.mgcp-segbtn.on { background: var(--mantle); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.35); }
+
+.mgcp-syncmeta { font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.9;
+  color: var(--subtext); margin-top: 12px; }
+.mgcp-syncmeta b { color: var(--text); font-weight: 600; }
+.mgcp-syncmeta b.ok { color: var(--emerald); }
+
+.mgcp-checklast { margin-left: auto; font-family: ui-monospace, Menlo, monospace; font-size: 10.5px;
+  color: var(--overlay0); white-space: nowrap; }
+.mgcp-checklast.ok { color: var(--emerald); }
+
+.mgcp-ledger { display: flex; flex-direction: column; }
+.mgcp-standing { display: flex; align-items: baseline; gap: 9px; padding: 7px 0 10px;
+  border-bottom: 1px solid var(--surface1); font-size: 12.5px; flex-wrap: wrap; }
+.mgcp-standing-lab { color: var(--emerald); font-weight: 600; }
+.mgcp-standing-body { color: var(--subtext); }
+.mgcp-standing-body b { color: var(--text); font-weight: 600; }
+.mgcp-standing-body b.ok { color: var(--emerald); }
+.mgcp-standing-sel { background: var(--surface0); color: var(--text); border: 1px solid var(--surface1);
+  border-radius: 6px; font-family: inherit; font-size: 11.5px; padding: 2px 4px; }
+button.mgcp-standing-toggle { border: 1px solid var(--surface1); background: var(--surface0);
+  color: var(--subtext); font-family: inherit; font-size: 11px; font-weight: 700;
+  padding: 2px 10px; border-radius: 999px; cursor: pointer; }
+button.mgcp-standing-toggle.on { color: var(--emerald); border-color: rgba(148,226,168,.4);
+  background: rgba(148,226,168,.08); }
+.mgcp-standing-next { margin-left: auto; font-family: ui-monospace, Menlo, monospace;
+  font-size: 10.5px; color: var(--overlay0); }
+.mgcp-ledger-empty { font-size: 12px; color: var(--subtext); padding: 14px 0; }
+.mgcp-ledgerrow { display: flex; align-items: baseline; gap: 9px; padding: 8px 0;
+  border-bottom: 1px dashed rgba(38,34,66,.9); font-size: 12.5px; color: var(--subtext); }
+.mgcp-ledger-when { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px;
+  color: var(--overlay0); min-width: 110px; flex: none; }
+.mgcp-ledger-name { color: var(--text); font-weight: 600; }
+.mgcp-ledger-result { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgcp-ledger-result.ok { color: var(--emerald); }
+.mgcp-ledger-spacer { flex: 1 1 auto; }
+.mgcp-neverrun { margin-top: 16px; font-size: 11.5px; color: var(--overlay0); display: flex;
+  align-items: center; gap: 6px; flex-wrap: wrap; }
+button.mgcp-neverchip { border: 1px solid var(--surface1); background: transparent; color: var(--subtext);
+  font-family: inherit; font-size: 11.5px; padding: 5px 10px; border-radius: 999px; cursor: pointer;
+  opacity: .65; }
+button.mgcp-neverchip:hover { opacity: 1; border-color: var(--accent); color: var(--text); }
+
 /* ---- Banner slot cards -- Control Panel.dc.html:291-315's slot editor, scoped to just
    banner_main/banner_login (mascots/rewards permanently excluded, marks already has its
    own picker above). Crop-guide math (left/center/right) copied verbatim from

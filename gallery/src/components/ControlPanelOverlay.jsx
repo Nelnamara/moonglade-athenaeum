@@ -53,6 +53,30 @@ function timeAgo(ts) {
   return Math.floor(s / 3600) + "h ago";
 }
 
+// Ledger timestamps -- Control Panel.dc.html:517's own "today 14:02" shape, extended
+// with yesterday/date for real multi-day history the DC's demo data never had.
+function fmtWhen(ts) {
+  if (!ts) return "—";
+  const d = new Date(ts * 1000);
+  const now = new Date();
+  const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return "today " + hm;
+  const yd = new Date(now); yd.setDate(now.getDate() - 1);
+  if (d.toDateString() === yd.toDateString()) return "yesterday " + hm;
+  return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + hm;
+}
+
+// One ledger row's result column, from the job's REAL terminal event fields
+// (status/rc/error -- rc only exists on events written 2026-08-06+; older rows
+// render without it rather than faking one).
+function ledgerResult(j) {
+  if (j.status === "failed") return { text: j.error || "failed", good: false };
+  if (j.status === "done_with_errors")
+    return { text: (j.error || "finished with warnings") + (j.rc != null ? " · rc " + j.rc : ""), good: false };
+  if (j.status === "done") return { text: "done" + (j.rc != null ? " · rc " + j.rc : ""), good: true };
+  return { text: j.status || "…", good: false };
+}
+
 export default function ControlPanelOverlay({ onClose, boot, account }) {
   const [tab, setTab] = useState("maint");
   const [subOverlay, setSubOverlay] = useState(null); // 'users' | 'trash'
@@ -104,6 +128,7 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
 
   const {
     summary, summaryErr, skins, activeSkin, pickSkin, brandingUnlocked,
+    panelHistory, schedule, saveSchedule,
     fetchSummary, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
     dedupDone, organizeRes,
@@ -111,6 +136,18 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,
   } = useControlPanel();
+  // Console heart: pipelines (the run buttons) vs ledger (the run history) --
+  // Control Panel.dc.html's own consoleHeart enum, surfaced as the same segmented
+  // control ControlMobile.jsx already ships for the identical choice.
+  const [heart, setHeart] = useState("pipelines");
+  const [schedMsg, setSchedMsg] = useState("");
+  // Newest event per machine action key -- /api/jobs is newest-first, so the first
+  // hit per action IS its latest run. Older events predate the `action` field
+  // (2026-08-06) and simply don't index; their rows still render in the ledger.
+  const lastByAction = {};
+  for (const j of panelHistory) {
+    if (j.action && !lastByAction[j.action]) lastByAction[j.action] = j;
+  }
 
   // Belt-and-suspenders against the tab ever reading "brand" while locked --
   // can't happen today (the only way in is the button below, which doesn't
@@ -272,6 +309,15 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                       <>
                         <div className="mgcp-consolehead">
                           <h3>The job console</h3>
+                          {/* consoleHeart: 'pipelines' | 'ledger' -- the DC models both views
+                              behind a preview enum; the real control is the same segmented
+                              toggle ControlMobile.jsx already ships for this exact choice. */}
+                          <div className="mgcp-seg">
+                            <button type="button" className={"mgcp-segbtn" + (heart === "pipelines" ? " on" : "")}
+                              onClick={() => setHeart("pipelines")}>Pipelines</button>
+                            <button type="button" className={"mgcp-segbtn" + (heart === "ledger" ? " on" : "")}
+                              onClick={() => setHeart("ledger")}>Ledger</button>
+                          </div>
                           <span className="mgcp-consolehint">one job at a time</span>
                         </div>
                         {jobResult && (
@@ -287,6 +333,7 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                             )}
                           </div>
                         )}
+                        {heart === "pipelines" && (
                         <div className="mgcp-grid">
                           <div>
                             <div className="mgcp-grp">Sync — the daily pull</div>
@@ -294,6 +341,23 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                               <b>↻ Sync now</b>
                               <span>pull new + fill metadata</span>
                             </button>
+                            {/* Control Panel.dc.html:106-107 -- the sync meta line. Real
+                                fields only: the latest sync run off the jobs paper trail
+                                (rc included once the event carries one), and the real
+                                standing-order state off schedule.json. */}
+                            <div className="mgcp-syncmeta">
+                              {lastByAction.sync ? (
+                                <>last run <b>{fmtWhen(lastByAction.sync.ts)}</b>{" · "}
+                                  <b className={ledgerResult(lastByAction.sync).good ? "ok" : ""}>
+                                    {ledgerResult(lastByAction.sync).text}</b><br /></>
+                              ) : (
+                                <>last run <b>—</b><br /></>
+                              )}
+                              {schedule && (
+                                <>auto <b className={schedule.enabled ? "ok" : ""}>{schedule.enabled ? "on" : "off"}</b>
+                                  {" — every "}<b>{schedule.interval_hours || 6} hours</b> · safe jobs only</>
+                              )}
+                            </div>
                           </div>
 
                           <div>
@@ -346,6 +410,13 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                               actionSpec(key) ? (
                                 <div className="mgcp-checkrow" key={key}>
                                   <b>{label}</b>
+                                  {/* Control Panel.dc.html:149 -- the row remembers its last
+                                      answer. Real per-action stamp off the jobs paper trail;
+                                      "—" until an action's first run under the (2026-08-06)
+                                      action-keyed events. */}
+                                  <span className={"mgcp-checklast" + (lastByAction[key] && ledgerResult(lastByAction[key]).good ? " ok" : "")}>
+                                    {lastByAction[key] ? fmtWhen(lastByAction[key].ts) : "—"}
+                                  </span>
                                   <button type="button" className="mgcp-run" onClick={() => runAction(key)}>run ▸</button>
                                 </div>
                               ) : null
@@ -362,6 +433,95 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                             </div>
                           </div>
                         </div>
+                        )}
+
+                        {/* ---- The ledger: run history + the standing order ----
+                            Control Panel.dc.html:157-181 (heartLedger). Rows are the REAL
+                            jobs.jsonl paper trail (type:"panel"), the standing-order line
+                            is the real schedule.json, and "Never run here:" lists the safe
+                            actions with no recorded run yet -- each a live run chip, per
+                            the DC's own onRun handlers on those chips. */}
+                        {heart === "ledger" && (
+                          <div className="mgcp-ledger">
+                            {schedule && (
+                              <div className="mgcp-standing">
+                                <b className="mgcp-standing-lab">⏱ Standing order</b>
+                                <span className="mgcp-standing-body">
+                                  run <b>{(summary.all_actions || summary.actions || []).find((a) => a.action === schedule.action)?.label || schedule.action}</b>
+                                  {" every "}
+                                  {isLocal ? (
+                                    <select className="mgcp-standing-sel" value={schedule.interval_hours || 6}
+                                      onChange={async (e) => {
+                                        const d = await saveSchedule({ interval_hours: Number(e.target.value) });
+                                        setSchedMsg(d.error ? "⚠ " + d.error : "");
+                                      }}>
+                                      {[1, 3, 6, 12, 24].map((h) => <option key={h} value={h}>{h} hour{h > 1 ? "s" : ""}</option>)}
+                                    </select>
+                                  ) : (
+                                    <b>{schedule.interval_hours || 6} hours</b>
+                                  )}
+                                  {" — "}
+                                  {isLocal ? (
+                                    <button type="button" className={"mgcp-standing-toggle" + (schedule.enabled ? " on" : "")}
+                                      onClick={async () => {
+                                        const d = await saveSchedule({ enabled: !schedule.enabled });
+                                        setSchedMsg(d.error ? "⚠ " + d.error : "");
+                                      }}>{schedule.enabled ? "on" : "off"}</button>
+                                  ) : (
+                                    <b className={schedule.enabled ? "ok" : ""}>{schedule.enabled ? "on" : "off"}</b>
+                                  )}
+                                  {" · "}{schedule.workers || 4} workers
+                                </span>
+                                <span className="mgcp-standing-next">
+                                  {schedule.enabled && schedule.last_run
+                                    ? (() => {
+                                        const left = (schedule.last_run + (schedule.interval_hours || 6) * 3600) - Date.now() / 1000;
+                                        if (left <= 0) return "due now";
+                                        return "next in " + Math.floor(left / 3600) + "h " + Math.floor((left % 3600) / 60) + "m";
+                                      })()
+                                    : schedule.enabled ? "next: on schedule" : ""}
+                                </span>
+                              </div>
+                            )}
+                            {schedMsg && <div className="mgcp-tilenote">{schedMsg}</div>}
+                            {panelHistory.length === 0 && (
+                              <div className="mgcp-ledger-empty">
+                                No maintenance runs recorded yet — jobs land here as they finish.
+                              </div>
+                            )}
+                            {panelHistory.slice(0, 20).map((j) => {
+                              const res = ledgerResult(j);
+                              return (
+                                <div className="mgcp-ledgerrow" key={j.job_id}>
+                                  <span className="mgcp-ledger-when">{fmtWhen(j.ts)}</span>
+                                  <b className="mgcp-ledger-name">{j.label || j.action || j.job_id}</b>
+                                  <span className={"mgcp-ledger-result" + (res.good ? " ok" : "")}>{res.text}</span>
+                                  <span className="mgcp-ledger-spacer" />
+                                  {/* Safe actions only: a destructive re-run belongs to the
+                                      pipelines chips, whose arm-then-confirm UI is the real
+                                      guard -- a bare link here would invisibly half-arm it. */}
+                                  {j.action && actionSpec(j.action) && !actionSpec(j.action).destructive && !running && (
+                                    <button type="button" className="mgcp-run"
+                                      onClick={() => runAction(j.action)}>↻ run again</button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {(() => {
+                              const never = (summary.actions || []).filter(
+                                (a) => !a.destructive && !lastByAction[a.action]);
+                              return never.length > 0 && (
+                                <div className="mgcp-neverrun">
+                                  Never run here:
+                                  {never.map((a) => (
+                                    <button type="button" className="mgcp-neverchip" key={a.action}
+                                      onClick={() => runAction(a.action)}>{a.label}</button>
+                                  ))}
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        )}
                         {!isLocal && (
                           <div className="mgcp-footnote">
                             <span>🔒 destructive stages: serving machine only</span>

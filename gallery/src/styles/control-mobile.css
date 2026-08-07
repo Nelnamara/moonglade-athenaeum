@@ -63,6 +63,21 @@
    inventing numbers a second time. ---- */
 .ctm-ledgernote { font-size: 12px; line-height: 1.6; color: var(--overlay0); padding: 16px 4px;
   text-align: center; }
+/* Real ledger rows (2026-08-06) -- the desktop .mgcp-ledger* family, mobile-compact:
+   when-stamp wraps above the name instead of holding a fixed 110px column. */
+.ctm-ledger { display: flex; flex-direction: column; }
+.ctm-standing { font-size: 12px; line-height: 1.7; color: var(--subtext); padding: 6px 2px 10px;
+  border-bottom: 1px solid var(--surface1); }
+.ctm-standing b { color: var(--text); font-weight: 600; }
+.ctm-standing b.ok { color: var(--emerald); }
+.ctm-ledgerrow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
+  padding: 8px 2px; border-bottom: 1px dashed rgba(38,34,66,.9); font-size: 12px;
+  color: var(--subtext); }
+.ctm-ledger-when { flex: none; width: 100%; font-family: ui-monospace, Menlo, monospace;
+  font-size: 10px; color: var(--overlay0); }
+.ctm-ledger-name { color: var(--text); font-weight: 600; }
+.ctm-ledger-result { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctm-ledger-result.ok { color: var(--emerald); }
 
 /* ---- Trash/Accounts 2-col tile grid -- .mgcp-tile itself (control-panel.css)
    is width-agnostic (border/radius/background/padding/flex-column only, no

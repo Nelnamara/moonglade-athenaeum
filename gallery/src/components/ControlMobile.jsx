@@ -64,15 +64,12 @@ import "../styles/control-mobile.css";
      already renders), fetched fresh each time this tab mounts. The DC's own
      copy ("watching 2,831 files on disk -- 0 pending") has no backing route
      anywhere in this app -- not rendered, rather than inventing a number.
-   - The Ledger sub-tab is an honest disclosure note, not the DC's fabricated
-     run-history rows -- nothing persists per-action run history (the exact
-     gap ControlPanelOverlay.jsx's own header comment already discloses for
-     the identical desktop console).
-   - Sync's hint stays the real "pull new + fill metadata" desktop already
-     shows -- no per-run last-run/rc/auto-schedule timestamp exists anywhere
-     to report (the React port never wired /api/panel/schedule at all; see
-     useControlPanel.js's header comment), so the DC's "last run today 14:02 ·
-     57 new · rc 0 -- auto every 6h" line is not shown here either. */
+   - The Ledger sub-tab shows the REAL run history as of 2026-08-06: panel
+     jobs were always logged to jobs.jsonl (type:"panel"), the React side
+     just never read them. Rows come from the same /api/jobs feed the
+     Activity card polls, via useControlPanel's panelHistory; the standing
+     order is /api/panel/schedule's real persisted settings. (This replaces
+     the honest disclosure note that sat here while nothing was wired.) */
 
 function timeAgo(ts) {
   const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
@@ -81,9 +78,31 @@ function timeAgo(ts) {
   return Math.floor(s / 3600) + "h ago";
 }
 
+// Verbatim from ControlPanelOverlay.jsx's own pair (same per-file convention as
+// timeAgo above) -- ledger row timestamp + result-column text off real event fields.
+function fmtWhen(ts) {
+  if (!ts) return "—";
+  const d = new Date(ts * 1000);
+  const now = new Date();
+  const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return "today " + hm;
+  const yd = new Date(now); yd.setDate(now.getDate() - 1);
+  if (d.toDateString() === yd.toDateString()) return "yesterday " + hm;
+  return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + hm;
+}
+
+function ledgerResult(j) {
+  if (j.status === "failed") return { text: j.error || "failed", good: false };
+  if (j.status === "done_with_errors")
+    return { text: (j.error || "finished with warnings") + (j.rc != null ? " · rc " + j.rc : ""), good: false };
+  if (j.status === "done") return { text: "done" + (j.rc != null ? " · rc " + j.rc : ""), good: true };
+  return { text: j.status || "…", good: false };
+}
+
 export default function ControlMobile({ account }) {
   const {
     summary, summaryErr, skins, activeSkin, pickSkin, brandingUnlocked,
+    panelHistory, schedule,
     fetchSummary, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
     dedupDone, organizeRes,
@@ -91,6 +110,12 @@ export default function ControlMobile({ account }) {
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,
   } = useControlPanel();
+  // Newest event per action key -- same derivation as ControlPanelOverlay's; kept
+  // per-file like timeAgo below rather than a shared util for a 3-line loop.
+  const lastByAction = {};
+  for (const j of panelHistory) {
+    if (j.action && !lastByAction[j.action]) lastByAction[j.action] = j;
+  }
 
   // Live Mirror -- new, mobile-only glue reusing the already-shipped, read-
   // only /api/watch/status route (see this file's header comment for why
@@ -295,6 +320,9 @@ export default function ControlMobile({ account }) {
                   actionSpec(key) ? (
                     <div className="mgcp-checkrow" key={key}>
                       <b>{label}</b>
+                      <span className={"mgcp-checklast" + (lastByAction[key] && ledgerResult(lastByAction[key]).good ? " ok" : "")}>
+                        {lastByAction[key] ? fmtWhen(lastByAction[key].ts) : "—"}
+                      </span>
                       <button type="button" className="mgcp-run" onClick={() => runAction(key)}>run ▸</button>
                     </div>
                   ) : null
@@ -316,11 +344,31 @@ export default function ControlMobile({ account }) {
                 )}
               </>
             ) : (
-              <div className="ctm-ledgernote">
-                Run history isn't kept between sessions yet — Pipelines above shows
-                anything running live, and a job the scheduler fires with no tab
-                open still runs; this tab just can't look back at what already
-                finished.
+              <div className="ctm-ledger">
+                {schedule && (
+                  <div className="ctm-standing">
+                    <b>⏱ Standing order</b>{" "}
+                    run <b>{(summary.all_actions || summary.actions || []).find((a) => a.action === schedule.action)?.label || schedule.action}</b>
+                    {" every "}<b>{schedule.interval_hours || 6}h</b>
+                    {" — "}<b className={schedule.enabled ? "ok" : ""}>{schedule.enabled ? "on" : "off"}</b>
+                    {" · "}{schedule.workers || 4} workers
+                  </div>
+                )}
+                {panelHistory.length === 0 && (
+                  <div className="ctm-ledgernote">
+                    No maintenance runs recorded yet — jobs land here as they finish.
+                  </div>
+                )}
+                {panelHistory.slice(0, 12).map((j) => {
+                  const res = ledgerResult(j);
+                  return (
+                    <div className="ctm-ledgerrow" key={j.job_id}>
+                      <span className="ctm-ledger-when">{fmtWhen(j.ts)}</span>
+                      <b className="ctm-ledger-name">{j.label || j.action || j.job_id}</b>
+                      <span className={"ctm-ledger-result" + (res.good ? " ok" : "")}>{res.text}</span>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </>

@@ -4765,8 +4765,13 @@ def create_app(out_dir: Path):
             _panel_job["progress"] = None                # clear the bar when the job ends
             _panel_job["proc"] = None
         if jid:                                          # cancelled/done both close the card row cleanly
+            # rc rides the terminal event for the same reason `action` rides the start
+            # one: the ledger's result column shows the design's own "… · rc 0" format
+            # (Control Panel.dc.html:106/517), and until now a successful run's exit
+            # code was simply never written anywhere.
             _log_job(jid, status=("failed" if status == "failed" else
                                   "done_with_errors" if status == "done_with_errors" else "done"),
+                     rc=rc,
                      error=("exited {}".format(rc) if status == "failed" else
                            "{} file(s) failed to download".format(warn_n) if status == "done_with_errors"
                            else None))
@@ -4828,7 +4833,11 @@ def create_app(out_dir: Path):
             raise
         with _panel_lock:
             _panel_job["proc"] = proc
-        _log_job(job_id, status="running", type="panel", label=spec["label"])
+        # `action` rides the start event so the reconstructed job carries the machine
+        # key alongside the display label -- the Panel's run-history ledger needs it
+        # for per-action last-run lookups and its "run again" control. Merge semantics
+        # (_reconstruct_jobs' cur.update) keep it through every later event.
+        _log_job(job_id, status="running", type="panel", label=spec["label"], action=action)
         threading.Thread(target=_panel_reader, args=(proc,), daemon=True).start()
         return True
 
