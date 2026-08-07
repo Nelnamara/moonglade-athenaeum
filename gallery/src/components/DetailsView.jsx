@@ -128,7 +128,7 @@ function playReveal(root) {
 export default function DetailsView({
   mediaId, onClose, onNavigate, onRate, onEdit, onDeleted,
   onFilterByModel, onFilterByBatch, advParams,
-  items, onOpenLightbox,
+  items, onOpenLightbox, onPublish,
 }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const [focusMode, setFocusMode] = useState(
@@ -338,11 +338,13 @@ export default function DetailsView({
 
             <div className="p-footer">
               <a className="btn" href={"/full/" + encodeURIComponent(row.media_id) + "?dl=1"}>⬇ Download</a>
-              {/* ☁ Publish -- gallery-era cross-page hand-off (Image Details.dc.html:391).
-                  Same coming-soon acknowledgment as the Lightbox's button and the Publish
-                  nav stub until the ovPublish panel builds; see Lightbox.jsx's comment. */}
-              <button className="btn" title="Publish this image to PixAI"
-                onClick={() => { if (window.Toast) window.Toast.show({ kind: "ok", title: "Publish", msg: "Publish — coming soon." }); }}>☁ Publish</button>
+              {/* ☁ Publish -- cross-page hand-off (Image Details.dc.html:391), REAL since
+                  2026-08-06. Already-published rows say so instead of offering it twice;
+                  this row is the full catalog row, so artwork_id is right here. */}
+              {(row.artwork_id || "").trim()
+                ? <span className="btn is-off" title="Already on your PixAI profile — manage it from My Art">☁ Published</span>
+                : <button className="btn" title="Publish this image to PixAI"
+                    onClick={() => onPublish && onPublish(row.media_id)}>☁ Publish</button>}
               <a className="btn" href={"/full/" + encodeURIComponent(row.media_id)} target="_blank" rel="noreferrer">Open Full Size</a>
               {row.url ? <a className="btn" href={row.url} target="_blank" rel="noreferrer">Open on PixAI</a> : null}
               <button className="btn" onClick={() => copy(promptText, "prompt")}>{copied === "prompt" ? "Copied!" : "Copy Prompt"}</button>

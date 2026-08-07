@@ -15833,21 +15833,36 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if tags is not None:
             tack_ids, unmatched = core.resolve_tack_ids(session, tags)   # read-only
 
+        # Which image of its task this media_id is. Resolved SERVER-side from the task's
+        # own ordered outputs, never taken from the client: publishing index 2 when the
+        # user picked index 0 puts the wrong picture on their public profile, and that is
+        # not a recoverable mistake. Read-only lookup, so it runs during preview too --
+        # which is what lets the preview refuse an unresolvable image before confirming.
+        media_index = None
+        if action == "publish":
+            media_index = core.task_media_index(session, row["task_id"], mid)
+            if media_index is None:
+                return jsonify({"error": "couldn't work out which image of task %s this is "
+                                         "-- refusing to publish rather than risk the wrong "
+                                         "one" % row["task_id"]}), 400
+
         if not confirm:
             return jsonify({"preview": True, "action": action, "media_id": mid,
                             "artwork_id": row["artwork_id"], "task_id": row["task_id"],
                             "title": title if title is not None else row["title"],
                             "private": private, "tack_ids": tack_ids,
                             "unmatched_tags": unmatched,
+                            "media_index": media_index,
                             "spends_credits": False,
                             "irreversible": action == "delete"})
         try:
             if action == "publish":
                 art = core.publish_artwork_from_task(
-                    session, row["task_id"], media_index=int(body.get("media_index") or 0),
+                    session, row["task_id"], media_index=media_index,
                     title=title or row["title"] or "", description=body.get("description") or "",
                     tack_ids=tack_ids, private=bool(private),
-                    hide_prompts=bool(body.get("hide_prompts")))
+                    hide_prompts=bool(body.get("hide_prompts")),
+                    challenge=body.get("challenge") or None)
                 result = {"artwork_id": art.get("id"), "published": True}
             elif action == "delete":
                 core.delete_artwork(session, row["artwork_id"])

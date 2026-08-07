@@ -7542,6 +7542,29 @@ def resolve_tack_ids(session, tags):
     return ids, unmatched
 
 
+def task_media_index(session, task_id, media_id):
+    """Which image of a task a given media_id IS -- the `mediaIndex` the publish mutation
+    needs. Derived from the task's own ordered output list (`_task_image_media`, the same
+    enumeration the downloader uses), never guessed from a filename: a batchSize>1 task
+    stores individuals under outputs.batch[] and their ORDER is the index PixAI means.
+    Read-only. Returns the int index, or None if the task/media can't be resolved -- the
+    caller decides whether that's fatal (it is, for publishing: publishing the wrong image
+    of a batch is not a recoverable mistake)."""
+    if not task_id or not media_id:
+        return None
+    try:
+        task = task_detail_gql(session, str(task_id))
+    except PixAIError:
+        return None
+    if not task:
+        return None
+    pairs = _task_image_media(task.get("outputs") or {})
+    for i, (mid, _seed) in enumerate(pairs):
+        if str(mid) == str(media_id):
+            return i
+    return None
+
+
 def publish_artwork_from_task(session, task_id, media_index=0, title="", description="",
                               tack_ids=None, private=False, hide_prompts=False,
                               challenge=None, extra=None):

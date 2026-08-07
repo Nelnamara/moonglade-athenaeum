@@ -812,6 +812,10 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
   text-decoration: none; }
 .btn:hover { background: var(--surface1); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
+/* A state, not a control: an action that has already happened (e.g. an image that's
+   already on the PixAI profile) reads as text, not a button you can press again. */
+.btn.is-off { opacity: .55; cursor: default; }
+.btn.is-off:hover { background: transparent; }
 .btn-primary { background: var(--accent); color: var(--base); border-color: var(--accent); font-weight: 600; }
 .btn-primary:hover { background: color-mix(in srgb, var(--accent) 85%, white); }
 .btn-danger { background: color-mix(in srgb, var(--red) 15%, var(--mantle)); color: var(--red);

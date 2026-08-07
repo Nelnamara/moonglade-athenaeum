@@ -1001,6 +1001,11 @@ def _publish_setup(tmp_path, monkeypatch):
     def _delete(session, artwork_id):
         calls.append(("delete", artwork_id)); return True
 
+    def _media_index(session, task_id, media_id):
+        calls.append(("task_media_index", task_id, media_id))
+        return None if media_id == "mNoIdx" else 1
+
+    monkeypatch.setattr(core, "task_media_index", _media_index)
     monkeypatch.setattr(core, "resolve_tack_ids", _tacks)
     monkeypatch.setattr(core, "publish_artwork_from_task", _publish)
     monkeypatch.setattr(core, "update_artwork", _update)
@@ -1023,7 +1028,9 @@ def test_myart_publish_previews_without_touching_the_account(tmp_path, monkeypat
     assert d["preview"] is True and d["action"] == "publish" and d["task_id"] == "t99"
     assert d["tack_ids"] == ["tack-elf"] and d["unmatched_tags"] == ["nosuchtag"]
     assert d["spends_credits"] is False
-    assert [c[0] for c in calls] == ["resolve_tack_ids"]   # read-only lookup only
+    assert d["media_index"] == 1        # resolved from the task, shown in the preview
+    # both lookups are read-only; NO publish/update/delete reached the account
+    assert sorted(c[0] for c in calls) == ["resolve_tack_ids", "task_media_index"]
 
 
 def test_myart_publish_confirmed_mutates_and_mirrors_the_catalog(tmp_path, monkeypatch):
@@ -1032,7 +1039,9 @@ def test_myart_publish_confirmed_mutates_and_mirrors_the_catalog(tmp_path, monke
                             "title": "New title", "media_index": 2}).get_json()
     assert d["published"] is True and d["artwork_id"] == "newart1"
     _, task_id, kw = next(c for c in calls if c[0] == "publish")
-    assert task_id == "t99" and kw["media_index"] == 2 and kw["title"] == "New title"
+    # media_index comes from the TASK's own ordered outputs, not the client's body --
+    # the request said 2, the server resolved 1, and the server wins.
+    assert task_id == "t99" and kw["media_index"] == 1 and kw["title"] == "New title"
     items = cli.get("/api/myart/items").get_json()["items"]
     assert any(i["media_id"] == "mUn" and i["public"] for i in items)
 
@@ -1063,4 +1072,18 @@ def test_myart_publish_requires_csrf(tmp_path, monkeypatch):
                                              "confirm": True})
     assert r.status_code == 400
     assert not calls          # nothing reached the account
+
+def test_myart_publish_refuses_when_the_batch_position_is_unresolvable(tmp_path, monkeypatch):
+    """If the server can't tell WHICH image of a task a media_id is, it refuses rather
+    than defaulting to index 0 -- publishing the wrong picture of a batch to a public
+    profile is not a recoverable mistake."""
+    cli, calls = _publish_setup(tmp_path, monkeypatch)
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="mNoIdx", task_id="t77", title="Ambiguous", filename="x_mNoIdx.png",
+             created_at="2026-07-05T00:00:00"),
+    ])
+    r = _post_publish(cli, {"action": "publish", "media_id": "mNoIdx", "confirm": True})
+    assert r.status_code == 400
+    assert "refusing to publish" in r.get_json()["error"]
+    assert not [c for c in calls if c[0] == "publish"]
 
