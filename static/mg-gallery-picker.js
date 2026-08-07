@@ -75,6 +75,22 @@
     'mg-gallery-picker.mg-closing .mg-pk-box{animation:mgPkBoxOut .34s cubic-bezier(.4,0,.2,1) both;}',
     '@keyframes mgPkBoxIn{from{opacity:0;transform:translateY(34px) scale(.985);}to{opacity:1;transform:none;}}',
     '@keyframes mgPkBoxOut{from{opacity:1;transform:none;}to{opacity:0;transform:translateY(34px) scale(.985);}}',
+    /* [sheet] -- the Loom Mobile mount (2026-08-06, punch-list item "frame/gallery picker
+       isn't its own mobile screen"). Reshapes this SAME modal into the mobile design's
+       bottom sheet: Loom Mobile.dc.html:822's geometry (bottom-anchored, top 16%, 18px
+       top radius, no bottom border) wearing the glass face the box already has (owner
+       call: "the known style set by the new design - Modal, glass"), entering/leaving on
+       the lm sheets' own slide timings. Same element, same fetch/search/pick machinery,
+       same both-ways contract; only geometry and travel direction change. The auto-fill
+       122px tile grid lands on the DC's own 3 columns at phone width by arithmetic, not
+       by a forced column count that would waste a landscape phone. */
+    'mg-gallery-picker[sheet]{padding:0;}',
+    'mg-gallery-picker[sheet] .mg-pk-box{position:absolute;left:0;right:0;bottom:0;top:16%;',
+    ' width:auto;max-width:none;height:auto;border-radius:18px 18px 0 0;border-bottom:none;',
+    ' animation:mgPkSheetUp .26s cubic-bezier(.2,.9,.24,1) both;}',
+    'mg-gallery-picker[sheet].mg-closing .mg-pk-box{animation:mgPkSheetDown .28s cubic-bezier(.4,0,.2,1) both;}',
+    '@keyframes mgPkSheetUp{from{transform:translateY(100%);}to{transform:translateY(0);}}',
+    '@keyframes mgPkSheetDown{from{transform:translateY(0);}to{transform:translateY(100%);}}',
     'mg-gallery-picker .mg-pk-head{display:flex;align-items:center;gap:9px;}',
     'mg-gallery-picker .mg-pk-t{font-size:15px;font-weight:700;white-space:nowrap;color:var(--text,#d6d2e2);}',
     'mg-gallery-picker .mg-pk-q{flex:1;min-width:140px;background:var(--base,#0c0a1c);border:1px solid var(--surface1,#3a3460);',

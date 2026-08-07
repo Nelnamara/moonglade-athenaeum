@@ -7103,9 +7103,12 @@ export default function App() {
             <button className="sb-btn ghost sm" style={{ alignSelf: "center" }} onClick={closeBundleMissing}>Close</button>
           </div>
         </div>)}
+      {/* [sheet] rides the Mobile-view toggle: the SAME picker element reshapes into the
+          Loom Mobile design's bottom sheet (see mg-gallery-picker.js's [sheet] block) --
+          the punch-list item was that mobile silently reused the desktop modal shape. */}
       {pickCb && (pickAllowType
-        ? <mg-gallery-picker ref={bindGalleryPicker} default-type={pickKind} show-type></mg-gallery-picker>
-        : <mg-gallery-picker ref={bindGalleryPicker} default-type={pickKind}></mg-gallery-picker>)}
+        ? <mg-gallery-picker ref={bindGalleryPicker} default-type={pickKind} show-type sheet={mobileUI ? "" : undefined}></mg-gallery-picker>
+        : <mg-gallery-picker ref={bindGalleryPicker} default-type={pickKind} sheet={mobileUI ? "" : undefined}></mg-gallery-picker>)}
       {importOpen && <ImportCollection onClose={() => setImportOpen(false)} onImport={importCollection} />}
 
     </div>

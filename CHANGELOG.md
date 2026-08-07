@@ -86,6 +86,13 @@ git tags. Full prose notes for tagged versions live on
   click-to-close scrim, centered card, and a custom animated dropdown for the upscaler
   instead of a native `<select>` — with the Escape-closes-list-first chain. The mobile
   sheets' inline mount and every spend-safety guard are unchanged.
+- **Picking a banner now actually changes the banner.** Upload, crop, or switch the active
+  asset in the Branding tab and the header/login banners update for real — the crop
+  position genuinely selects which part of a wide image shows. (Takes effect after the
+  next server restart.)
+- **The Loom Mobile frame/gallery picker got its own bottom sheet** — the same shared
+  picker, reshaped into the mobile design's glass sheet with real slide-up/down closes,
+  instead of the desktop modal squeezed onto a phone.
 
 ### Fixed
 
