@@ -27,14 +27,24 @@ import useScrollLock from "../hooks/useScrollLock.js";
      list; free text still commits on Enter so nothing is unreachable.
    - Contest is populated from the live GET /api/contests feed, not a demo list.
 
-   ONE control is NOT built and is a REAL blocker, not a preference: the DC's
-   "⬆ Browse from disk…". Publishing an arbitrary uploaded file goes through PixAI's
-   createFromMedia path, which their own form gates behind a Cloudflare TURNSTILE
-   captcha (X-Turnstile-Token, action "artworkUpload" -- see the harvested SubmitForm
-   chunk). Solving or bypassing a captcha is off-limits, so this control cannot be
-   made to work honestly from here; it is surfaced to the owner rather than silently
-   dropped. Publishing from the library (createArtworkFromTaskV2) has no such gate,
-   which is why everything else here works.
+   ONE control is still NOT built: the DC's "⬆ Browse from disk…". Corrected
+   2026-08-07 -- the earlier "hard captcha blocker" framing here was itself wrong,
+   and so was the 2026-08-06 "not blocked, just build it" correction that followed
+   it; the truth sits between the two and is still unresolved. What's actually in
+   the harvested code: `createFromMedia` is a REST endpoint (`POST /artwork/
+   from-media`, oRPC, NOT a GraphQL mutation like createArtworkFromTaskV2), whose
+   own contract description reads "Requires authentication and Turnstile
+   verification for web clients" -- but the calling code only attaches
+   X-Turnstile-Token when a token exists (`r && (t["X-Turnstile-Token"]=r)`),
+   which is consistent with either a soft/best-effort check OR a hard one that
+   just happens to be called from a page that always has a token in practice.
+   Nothing in the harvested chunks proves it either way. Structurally the rest is
+   ready -- /api/upload already turns a local file into a real media_id for free,
+   and the endpoint's own input shape (mediaId/title/isPrivate/visibility/tags/
+   tackIds/hidePrompts/extra) mirrors the task-based publish input closely enough
+   to reuse most of this panel's existing form. See docs/DECISIONS.md's
+   2026-08-07 scoping entry for the plan and the one live test that would settle
+   the open question before any of this gets built.
 
    Nothing reaches the PixAI account until the confirm step: the panel asks the server
    for a preview (what it would do, which tags resolved, which image of the batch it

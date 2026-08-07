@@ -22,9 +22,11 @@ import "../styles/publish-mobile.css";
      challenge only -- no "feature" concept). Read as the design's own duplicate/second
      tag-suggestion affordance rather than a distinct field, and folded into the one
      real Tags control instead of building a second, meaningless one.
-   - Browse from disk: PixAI's createFromMedia is gated behind a Cloudflare Turnstile
-     captcha the app cannot solve (same disclosed block as desktop's panel) -- omitted
-     here too, for the same reason.
+   - Browse from disk: omitted, same as desktop's PublishOverlay.jsx. NOT a settled
+     "captcha blocks it" -- corrected 2026-08-07, see that file's header comment and
+     docs/DECISIONS.md's 2026-08-07 scoping entry. Whether PixAI's REST createFromMedia
+     endpoint actually enforces its documented Turnstile requirement is unresolved;
+     omitted here pending that answer, not pending a design decision.
    Preview -> confirm gate matches the design: "Preview & publish ->" opens a confirm
    sheet: preview + title + visibility/contest/tag summary; Back / Confirm & publish. */
 
