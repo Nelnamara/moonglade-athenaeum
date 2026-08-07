@@ -29,7 +29,7 @@ import useScrollLock from "../hooks/useScrollLock.js";
    page-level close back to the gallery. */
 export default function Lightbox({
   items, index, setIndex, onClose, onRate, page, pages, loadPage, onEdit, onToVideo,
-  onOpenDetails,
+  onOpenDetails, onPublish,
 }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const it = items[index];
@@ -285,13 +285,11 @@ export default function Lightbox({
               onClick={() => setSimilarFor(it.media_id)}>✧ Similar</button>
             <button className="lbx-chip" title="Upscale or Hires this picture"
               onClick={() => upEl.current && upEl.current.open(it.media_id)}>⇱ Upscale</button>
-            {/* ☁ Publish -- the gallery-era pass's cross-page hand-off (Lightbox.dc.html:357).
-                The destination panel (ovPublish) is a LATER build phase, so until it lands
-                this rides the same coming-soon acknowledgment the Publish nav stub already
-                uses -- a visible, honest control, never a dead one. Upgrade path: swap the
-                toast for the mg_publish hand-off when the panel ships. */}
+            {/* ☁ Publish -- the cross-page hand-off (Lightbox.dc.html:357), REAL since
+                2026-08-06: it hands this image to the Publish panel, which runs the actual
+                createArtworkFromTaskV2 pipeline (preview, then confirm). */}
             <button className="lbx-chip" title="Publish this image to PixAI"
-              onClick={() => { if (window.Toast) window.Toast.show({ kind: "ok", title: "Publish", msg: "Publish — coming soon." }); }}>☁ Publish</button>
+              onClick={() => onPublish && onPublish(it.media_id)}>☁ Publish</button>
             <a className="lbx-chip" title="Open the full record"
               href={"/next?image=" + encodeURIComponent(it.media_id)}
               onClick={(e) => {

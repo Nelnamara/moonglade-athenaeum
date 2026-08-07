@@ -5028,3 +5028,40 @@ would have let a real session through (found and fixed while writing them); spen
 suite green. `resolve_tack_ids` validated against the LIVE account read-only (real tack
 ids returned, a nonsense tag correctly reported unmatched). No publish/edit/delete has
 been fired against the account -- the first real one is the owner's to make.
+
+### The Publish panel — every ☁ Publish link now goes somewhere real  ·  *2026-08-06*
+
+Owner: *"None of the publish links go to anything."* Correct -- the pipeline shipped
+earlier the same day, but the three surfaces that offer Publish were still the
+coming-soon stand-ins written before it existed. All three are real now:
+
+- **NavSpine's Publish** lost `soon: true` (the `overlay: "publish"` key was already
+  right) and mounts the new **PublishOverlay** -- the DC's ovPublish panel (min(1040px)
+  slab, "Publish artwork", two-column minmax(300px,440px) 1fr body).
+- **Lightbox** and **Image Details** hand their image to that panel instead of toasting
+  "coming soon". Details, which holds the full catalog row, renders **☁ Published** as a
+  flat state (new `.btn.is-off`) when the row already has an artwork_id, rather than
+  offering to publish it twice.
+
+Real-data adaptations from the DC, disclosed: its "choose a different image" strip is a
+pool of blank aspect swatches, so that row opens the SHARED `<mg-gallery-picker>` the
+Loom and the banner editor already use (and "Browse from disk" is dropped -- you publish
+something already in your library); tags are free text resolved against PixAI's real tag
+list rather than the DC's fixed demo list; Contest comes from the live /api/contests
+feed; the ✦ suggest-a-title popover is NOT built (the prompt already prefills the title,
+and a real suggestion is a spend-adjacent call) -- left out rather than faked.
+
+**`mediaIndex` is now resolved SERVER-side** (`core.task_media_index`) from the task's own
+ordered outputs -- the same enumeration the downloader uses -- and the route REFUSES to
+publish when it can't work the index out, instead of defaulting to 0. The scoping pass
+had flagged this as the one genuine gap, and it is the difference between publishing the
+picture the owner chose and a different one from the same batch. Proven live: the panel
+correctly reported **"image 4 of its batch"** for a real batch generation.
+
+Verified live end-to-end on the real account, READ-ONLY throughout (the preview step
+makes no mutating call): nav opens the panel with the real contest list; the picker
+returned 120 real images and picking one prefilled real dimensions/model/title/preview;
+the confirm sheet resolved a real tag, reported `zzzznotarealtag99` as unattachable, and
+named the batch position. **Nothing has been published** -- the first real publish is the
+owner's to make. Mobile's Publish screen still says "no backend route exists", now
+false; its parity pass is scoped but not built.

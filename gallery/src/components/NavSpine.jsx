@@ -15,7 +15,7 @@ const NAV = [
   // pills always pointed at -- they had real, working backend routes
   // (/api/your-art, /api/contests) sitting unused the whole time.
   { label: "My Art", tip: "How your published art is doing", overlay: "myart" },
-  { label: "Publish", tip: "Publish to PixAI", overlay: "publish", soon: true },
+  { label: "Publish", tip: "Publish to PixAI", overlay: "publish" },
   { label: "Train", tip: "Train a LoRA on PixAI", overlay: "train", soon: true },
   // Import (2026-08-02): ported from classic's real, proven ImportUI
   // (moonglade_gallery.py's Web Import modal) -- same /api/import-local

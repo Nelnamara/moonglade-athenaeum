@@ -9,6 +9,7 @@ import DetailsView from "./components/DetailsView.jsx";
 import HealthOverlay from "./components/HealthOverlay.jsx";
 import DuplicateReviewOverlay from "./components/DuplicateReviewOverlay.jsx";
 import MyArtOverlay from "./components/MyArtOverlay.jsx";
+import PublishOverlay from "./components/PublishOverlay.jsx";
 import ContestsOverlay from "./components/ContestsOverlay.jsx";
 import ImportOverlay from "./components/ImportOverlay.jsx";
 import ControlPanelOverlay from "./components/ControlPanelOverlay.jsx";
@@ -121,6 +122,11 @@ export default function App({ boot }) {
   /* ---- overlays (drift §16): six nav destinations open floating overlays.
      State + verb live here; the surfaces are the overlays workstream's. ---- */
   const [overlay, setOverlay] = useState(null);
+  // Which image a cross-page "☁ Publish" click handed to the panel (Lightbox /
+  // Details). Empty when Publish is opened from the nav -- the panel then starts
+  // with its own picker instead of a pre-chosen image.
+  const [publishFor, setPublishFor] = useState("");
+  const openPublish = useCallback((mid) => { setPublishFor(mid || ""); setOverlay("publish"); }, []);
   const overlayRef = useRef(null);
   useEffect(() => { overlayRef.current = overlay; });
   const openOverlay = useCallback((key) => {
@@ -527,7 +533,7 @@ export default function App({ boot }) {
         {detailsFor ? (
           <DetailsView
             mediaId={detailsFor} onClose={closeDetails} onNavigate={openDetails}
-            onRate={rate} onEdit={requestEdit}
+            onRate={rate} onEdit={requestEdit} onPublish={openPublish}
             onDeleted={() => { closeDetails(); load(1, true); }}
             onFilterByModel={filterByModel} onFilterByBatch={filterByBatch}
             advParams={detailsAdvParams}
@@ -562,11 +568,13 @@ export default function App({ boot }) {
           page={page} pages={pages} loadPage={load}
           onEdit={requestEdit} onToVideo={requestVideo}
           onOpenDetails={openDetails}
+          onPublish={openPublish}
         />
       )}
 
       {/* OVERLAY MOUNT POINT — the six designed nav overlays land here.
-          Health/My Art/Contests are live; Publish/Train/Import are still
+          Health/My Art/Contests/Publish are live (Publish since 2026-08-06,
+          on the real createArtworkFromTaskV2 pipeline); Train/Import are still
           `soon`-dimmed in NavSpine until their own backend routes exist (My
           Art and Contests already had real, working routes sitting unused --
           see docs/DECISIONS.md 2026-08-02). Scrim z 300, slab 301 (band per
@@ -597,6 +605,13 @@ export default function App({ boot }) {
       )}
       {overlay === "contests" && (
         <ContestsOverlay onClose={() => setOverlay(null)} />
+      )}
+      {overlay === "publish" && (
+        <PublishOverlay
+          mediaId={publishFor}
+          onClose={() => { setOverlay(null); setPublishFor(""); }}
+          onPublished={afterMutation}
+        />
       )}
       {overlay === "import" && (
         <ImportOverlay
