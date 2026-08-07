@@ -1,0 +1,61 @@
+/* Publish mobile -- Moonglade Mobile.dc.html screenIsPublish block + pubconfirm sheet
+   (2026-08-07). Single column; reuses publish.css's shared metallic .glm-* button
+   classes where they already exist, adds the mobile-only layout pieces. */
+
+.pubm-wrap { display: flex; flex-direction: column; }
+.pubm-frame { position: relative; width: 100%; max-height: 42vh; border-radius: 12px;
+  overflow: hidden; background: var(--surface0); border: 1px solid rgba(255,255,255,.1);
+  margin-bottom: 10px; }
+.pubm-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.pubm-frame.small { max-height: 160px; margin-bottom: 12px; }
+.pubm-srcrow { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
+.pubm-srcrow .k { font-size: 9px; font-weight: 700; letter-spacing: .12em; color: var(--overlay0); }
+.pubm-srcrow .v { font-size: 10.5px; color: var(--subtext); font-variant-numeric: tabular-nums; }
+
+.pubm-lab { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--overlay0); margin: 12px 0 6px; }
+.pubm-stripwrap { display: flex; gap: 6px; overflow-x: auto; padding: 2px; margin-bottom: 4px; }
+.pubm-swatch { flex: none; width: 52px; height: 52px; border-radius: 8px; overflow: hidden;
+  padding: 0; border: none; background: var(--surface0); outline: 2px solid transparent;
+  outline-offset: 2px; opacity: .6; }
+.pubm-swatch.on { outline-color: var(--lavender); opacity: 1; }
+.pubm-swatch img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.pubm-in { width: 100%; box-sizing: border-box; background: var(--surface0);
+  border: 1px solid var(--surface1); border-radius: 9px; color: var(--text);
+  padding: 9px 11px; font-size: 12.5px; font-family: inherit; outline: none; resize: vertical; }
+.pubm-titlerow { display: flex; gap: 8px; align-items: center; position: relative; }
+.pubm-suggest { flex: none; width: 34px; height: 34px; border-radius: 9px; display: grid;
+  place-items: center; font-size: 14px; cursor: pointer; color: var(--mauve);
+  border: 1px solid var(--surface1); background: rgba(12,10,28,.7); font-family: inherit; }
+.pubm-hint { font-size: 10.5px; color: var(--overlay0); margin-top: 6px; }
+.pubm-sugrow { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.pubm-sugchip { font-size: 9.5px; padding: 5px 9px; border-radius: 999px; cursor: pointer;
+  color: var(--text); background: var(--surface0); border: 1px solid var(--surface1); }
+
+.pubm-tagbox { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; min-height: 20px;
+  background: var(--surface0); border: 1px solid var(--surface1); border-radius: 9px; padding: 8px 10px; }
+.pubm-chip { font-size: 10px; font-weight: 600; padding: 3px 9px; border-radius: 999px; cursor: pointer;
+  color: var(--mauve); background: rgba(182,146,230,.16); border: 1px solid rgba(182,146,230,.32); }
+.pubm-taginput { flex: 1 1 80px; min-width: 80px; background: transparent; border: none; outline: none;
+  color: var(--text); font-size: 12.5px; font-family: inherit; }
+.pubm-tagopts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.pubm-tagopt { font-size: 10px; font-weight: 600; padding: 4px 9px; border-radius: 999px; cursor: pointer;
+  color: var(--subtext); background: var(--surface0); border: 1px solid var(--surface1); }
+
+.pubm-toggle { display: flex; align-items: center; gap: 9px; margin-top: 12px; font-size: 12px;
+  color: var(--subtext); }
+.pubm-note { margin-top: 12px; font-size: 11px; line-height: 1.5; padding: 9px 11px; border-radius: 9px;
+  border: 1px solid var(--surface1); background: rgba(12,10,28,.5); color: var(--subtext); }
+.pubm-note.warn { border-color: rgba(212,175,55,.4); color: var(--gold); }
+.pubm-note.err { border-color: rgba(243,139,168,.4); color: var(--red, #f38ba8); }
+.pubm-donebox { padding: 30px 0; text-align: center; font-size: 12.5px; color: var(--emerald); }
+
+.pubm-go { width: 100%; box-sizing: border-box; text-align: center; margin-top: 18px;
+  border-radius: 14px; padding: 11px 14px; font-size: 13px; font-weight: 700; cursor: pointer;
+  color: #1a0f2e; background: linear-gradient(180deg, color-mix(in srgb, var(--lavender) 88%, #fff), var(--lavender));
+  border: none; font-family: inherit; }
+.pubm-go:disabled { opacity: .5; cursor: not-allowed; background: var(--surface0); color: var(--overlay0); }
+
+.pubm-confirmtitle { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+.pubm-confirmmeta { font-size: 11px; color: var(--subtext); line-height: 1.5; margin-bottom: 12px; }

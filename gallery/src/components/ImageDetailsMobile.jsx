@@ -115,7 +115,7 @@ export function useSimilar(mediaId) {
 export default function ImageDetailsMobile({
   mediaId, onClose, onNavigate, onRate, onDeleted,
   onFilterByModel, onFilterByBatch, advParams, items,
-  onOpenLightbox,
+  onOpenLightbox, onPublish,
 }) {
   const [closing, setClosing] = useState(false);
   const [mediaOk, setMediaOk] = useState(true);
@@ -262,6 +262,12 @@ export default function ImageDetailsMobile({
 
         <div className="idm-chiprow">
           <a className="idm-chip" href={"/full/" + encodeURIComponent(row.media_id) + "?dl=1"}>⬇ Download</a>
+          {/* ☁ Publish -- real since 2026-08-07, same real pipeline as desktop's
+              DetailsView.jsx. Already-published rows say so instead of offering it
+              twice; this row is the full catalog row, artwork_id is right here. */}
+          {(row.artwork_id || "").trim()
+            ? <span className="idm-chip is-off" title="Already on your PixAI profile — manage it from My Art">☁ Published</span>
+            : <button type="button" className="idm-chip" onClick={() => onPublish && onPublish(row.media_id)}>☁ Publish</button>}
           <button type="button" className="idm-chip" onClick={() => copy(promptText, "prompt")}>
             {copied === "prompt" ? "Copied!" : "⧉ Copy prompt"}
           </button>

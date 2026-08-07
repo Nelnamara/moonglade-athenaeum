@@ -1,0 +1,41 @@
+/* Train mobile -- Moonglade Mobile.dc.html screenIsTrain block + trainconfirm sheet
+   (2026-08-07). Reuses publish-mobile.css's .pubm-lab/.pubm-in/.pubm-go/.pubm-note
+   form primitives rather than a second copy; these are the pieces unique to training. */
+
+.trm-wrap { display: flex; flex-direction: column; }
+.trm-cost { padding: 9px 12px; border-radius: 9px; font-size: 11px; font-weight: 600;
+  border: 1px solid rgba(79,201,154,.4); background: rgba(79,201,154,.1); color: var(--emerald);
+  margin-bottom: 14px; }
+.trm-cost.paid { border-color: rgba(212,175,55,.45); background: rgba(212,175,55,.1); color: var(--gold); }
+
+.trm-dshead { display: flex; justify-content: space-between; align-items: baseline; font-size: 11.5px;
+  color: var(--subtext); }
+.trm-dshead b { color: var(--text); font-variant-numeric: tabular-nums; }
+.trm-dshead .need { font-size: 9.5px; color: var(--red, #f38ba8); font-weight: 600; }
+.trm-dshead .ok { font-size: 9.5px; color: var(--emerald); font-weight: 600; }
+.trm-bar { height: 5px; border-radius: 3px; background: var(--surface0); overflow: hidden; margin: 6px 0; }
+.trm-barfill { height: 100%; border-radius: inherit; background: var(--lavender); }
+.trm-tilehead { font-size: 9.5px; color: var(--overlay0); margin-bottom: 6px; }
+.trm-tilehead i { color: var(--overlay0); font-style: normal; }
+.trm-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.trm-tile { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; padding: 0;
+  cursor: pointer; background: var(--surface0); border: none; outline: none; }
+.trm-tile.on { outline: 2px solid var(--lavender); outline-offset: 0; }
+.trm-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.trm-tilebadge { position: absolute; left: 4px; bottom: 4px; font-size: 8px; font-weight: 700;
+  padding: 1px 5px; border-radius: 4px; background: rgba(5,4,13,.72); color: var(--text); }
+.trm-tilecheck { position: absolute; top: 4px; right: 4px; width: 15px; height: 15px; border-radius: 5px;
+  display: grid; place-items: center; font-size: 9px; background: var(--lavender); color: #160f26; }
+
+.trm-typerow { display: flex; gap: 6px; flex-wrap: wrap; }
+.trm-typechip { font-size: 10.5px; padding: 5px 10px; border-radius: 999px; cursor: pointer;
+  color: var(--subtext); background: var(--surface0); border: 1px solid var(--surface1); }
+.trm-typechip.on { color: var(--text); background: color-mix(in srgb, var(--lavender) 22%, var(--surface0));
+  border-color: color-mix(in srgb, var(--lavender) 55%, transparent); }
+.trm-themerow { display: flex; gap: 6px; flex-wrap: wrap; }
+.trm-themechip { font-size: 9.5px; padding: 4px 8px; border-radius: 999px; cursor: pointer;
+  color: var(--subtext); background: var(--surface0); border: 1px solid var(--surface1);
+  max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trm-themechip.on { color: var(--text); background: color-mix(in srgb, var(--lavender) 22%, var(--surface0));
+  border-color: color-mix(in srgb, var(--lavender) 55%, transparent); }
+.trm-donebox { padding: 30px 0; text-align: center; font-size: 12.5px; color: var(--emerald); }

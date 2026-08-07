@@ -5341,3 +5341,67 @@ New regression coverage: `tests/test_tack_resolution.py` (8 tests, direct agains
 `resolve_tack_ids` -- no route stub can see this bug, since the existing route tests
 stub the function itself) plus 2 new tests in `test_panel.py` for the title-clearing
 case. Full suite green (1597, up from 1587).
+
+### Mobile My Art, Publish, and Train a LoRA -- real data, no more placeholders  ·  *2026-08-07*
+
+`Moonglade Mobile.dc.html`'s `handoff-2026-08-07.md` answered
+`FOR_CLAUDE_DESIGN_mobile-2026-08-06.md`, the design-blocker note this project sent
+covering three mobile gaps: My Art was still the pre-rebuild flat ranked-text list
+(built on the retired `useMyArt.js`, predating the whole desktop My Art rebuild), and
+Publish/Train were both `cm-soon` placeholders with no backend route wired at all. All
+three are real and live now, on the same proven pipelines desktop already uses.
+
+**My Art (`MyArtMobile.jsx`, rewritten):** the same tabbed card gallery desktop has --
+Artworks/Animations tabs, real thumbnails/visibility badges/tags/likes, sort, bulk
+Manage (multi-select publish/unpublish/delete via one confirm sheet), per-card overflow
+menu, edit-tags sheet -- all against `/api/myart/items` + `/api/myart/publish`, the
+exact routes desktop's `MyArt.jsx`/`PublishOverlay.jsx` already proved.
+
+**Publish (`PublishMobile.jsx`, new):** single-column mobile version of the same real
+pipeline (`/api/next/detail`, `/api/next/library` image strip, `/api/suggest-prompt`
+✦-suggest, `/api/tag-suggest` live tag search, `/api/contests`, `/api/myart/publish`
+preview-then-confirm). Two disclosed adaptations rather than silent decisions: the
+design's second "Feature" tag-chip row (`FEATURE_LIST`, a separate demo array) doesn't
+map to any field PixAI's real publish mutation accepts -- folded into the one real Tags
+control instead of building a second, meaningless one; and "Browse from disk" is
+omitted, the same Cloudflare-Turnstile block that already keeps it off desktop.
+
+**Train a LoRA (`TrainMobile.jsx` + `train-mobile.css`, new):** real categories (the
+same 9-item PixAI list desktop's build already corrected the design's own placeholder
+3-item list to), real Model Type/Theme architecture groups with real per-architecture
+pricing (`/api/train/models`), real free-training quota (`/api/train/quota`), and
+preview-then-confirm submit (`/api/train/submit`). One real gap needed a new route: the
+design's dataset picker taps a "task" tile and its own copy assumes every task
+contributes exactly 4 images (`TRAIN_TILES`, 6 hardcoded fake tasks always ×4) -- real
+PixAI batches are 1-4 images. Added `GET /api/train/recent-tasks` (groups recent catalog
+rows by `task_id`, returns each task's REAL image list + count, pure catalog read); the
+mobile picker's running count and the "min 10" gate now sum real per-task counts instead
+of multiplying by a fixed 4. The design's actual mechanism -- tap a task, not an image --
+is unchanged; only the fabricated "always 4" is replaced with the true number.
+
+`ImageDetailsMobile.jsx` also gained the same real ☁ Publish chip desktop's
+`DetailsView.jsx` has (inert "☁ Published" once `artwork_id` is set, otherwise opens
+Publish for that image) -- `AppMobile.jsx` wires `publishFor`/`openPublish` for the
+cross-screen hand-off, mirroring desktop `App.jsx`'s own pattern exactly.
+
+Backend: new route + 2 new tests (`tests/test_panel.py`, real per-task grouping and
+`limit` behavior) + 1 new route-tier entry (`tests/test_route_tiers.py`). Full suite
+green. `npm run build` clean (one CSS-comment-termination bug caught and fixed along the
+way: a header comment's own literal text contained an embedded `*/`, which esbuild read
+as the real end of the block comment -- reworded, rebuilt clean).
+
+**Verification, and its real limit.** Every backend route these three screens depend on
+was spot-checked live against the real account from an authenticated browser session --
+`/api/train/recent-tasks` (real grouped tasks, real counts of 4 and 1, real media_id
+lists), `/api/train/models` (all 4 real architecture groups, real prices), `/api/train/
+quota`, `/api/myart/items` (genuinely 0 items right now -- this account has no
+`artwork_id`-tagged rows at the moment, not a bug in the new code), `/api/next/detail`,
+`/api/contests` (27 real live contests), `/api/next/library` -- all returned correctly
+shaped real data. What did **not** get done: true mobile-viewport pixel/interaction
+verification. Real Chrome's window resize did not propagate to the rendered viewport
+this session (`innerWidth` stayed desktop-sized after both a `resize_window` call and a
+reload; a follow-up OS-level window-resize attempt hit an unrelated tool schema bug) --
+a tooling limitation encountered for the first time on a *mobile* verification pass,
+not a code issue. Recorded here rather than glossed over, per this project's own
+verify-before-presenting-state standard: the layout/interaction pass on these three
+screens is still owed, next session or once the resize tooling is sorted.
