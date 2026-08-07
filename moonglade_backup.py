@@ -7545,7 +7545,11 @@ def resolve_tack_ids(session, tags):
 _TRAIN_FREE_CURRENCY = "free::user_lora_training"
 _CREATE_TRAINING = ("mutation createTrainingTask($input: CreateTrainingTaskInput!) {"
                     " createTrainingTask(input: $input) { id refId } }")
-TRAIN_CATEGORIES = ("character", "style", "concept")
+# PixAI's real LoRA-training categories, probed live off the train-lora page's own
+# category select 2026-08-06 (the design mockup's character/style/concept was placeholder
+# -- "concept" isn't a real PixAI value). Values are what the mutation takes.
+TRAIN_CATEGORIES = ("character", "animal", "style", "realistic", "pose", "clothing",
+                    "background", "detail", "other")
 TRAIN_MIN_IMAGES = 10
 TRAIN_MAX_IMAGES = 100
 
