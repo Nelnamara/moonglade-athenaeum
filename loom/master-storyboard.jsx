@@ -3324,6 +3324,14 @@ const LOOM_MOBILE_STYLES = `
 /* ---- Shot Detail (mobile Deep Focus) -- second increment, 2026-08-03 ---- */
 @keyframes lmRise{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
 @keyframes lmSheetUp{from{transform:translateY(100%);}to{transform:translateY(0);}}
+/* Loom Mobile.dc.html:18-21 -- the design's other 4 sheet/button animations, absent
+   until 2026-08-06 (every sheet close was an instant unmount; primary buttons were
+   flat). Close timing per the DC's own styles: sheet lmSheetDown .28s
+   cubic-bezier(.4,0,.2,1) both, scrim lmFadeOut .28s / lmFadeIn .24s. */
+@keyframes lmMetal{0%{background-position:0% 50%;}50%{background-position:100% 50%;}100%{background-position:0% 50%;}}
+@keyframes lmSheetDown{from{transform:translateY(0);}to{transform:translateY(100%);}}
+@keyframes lmFadeIn{from{opacity:0;}to{opacity:1;}}
+@keyframes lmFadeOut{from{opacity:1;}to{opacity:0;}}
 .lm-df{position:absolute;inset:0;z-index:20;background:var(--mantle);display:flex;flex-direction:column;
   animation:lmRise .22s ease both;}
 .lm-df-top{flex:none;display:flex;align-items:center;gap:8px;
@@ -3383,11 +3391,14 @@ const LOOM_MOBILE_STYLES = `
   border:1px solid var(--surface1);background:var(--surface1);color:var(--text);}
 
 /* ---- Cast & assets sheet (bottom sheet, opened from Shot Detail's 👥 button) ---- */
-.lm-scrim{position:absolute;inset:0;z-index:30;background:rgba(3,2,8,.6);}
+.lm-scrim{position:absolute;inset:0;z-index:30;background:rgba(3,2,8,.6);
+  animation:lmFadeIn .24s ease both;}
+.lm-scrim.closing{animation:lmFadeOut .28s ease both;}
 .lm-sheet{position:absolute;left:0;right:0;bottom:0;z-index:31;background:var(--mantle);
   border-radius:18px 18px 0 0;border:1px solid var(--surface1);border-bottom:none;
   padding:12px 18px max(20px,env(safe-area-inset-bottom));max-height:75%;overflow-y:auto;
   animation:lmSheetUp .26s cubic-bezier(.2,.9,.24,1);}
+.lm-sheet.closing{animation:lmSheetDown .28s cubic-bezier(.4,0,.2,1) both;}
 .lm-sheethandle{width:36px;height:4px;border-radius:3px;background:rgba(255,255,255,.18);margin:0 auto 10px;}
 .lm-tabsrow{display:flex;gap:4px;padding:3px;border-radius:9px;background:rgba(12,10,28,.6);
   border:1px solid var(--surface1);margin-bottom:10px;}
@@ -3434,11 +3445,18 @@ const LOOM_MOBILE_STYLES = `
 .lm-gen-title{flex:1 1 auto;min-width:0;font:600 13px/1.2 system-ui;color:var(--text);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lm-gen-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px 30px;-webkit-overflow-scrolling:touch;}
-.lm-genbtn{display:block;width:100%;box-sizing:border-box;margin-top:12px;background:var(--accent);
-  color:var(--base);border:none;border-radius:9px;padding:11px;font:700 12.5px/1 system-ui;cursor:pointer;
+.lm-genbtn{display:block;width:100%;box-sizing:border-box;margin-top:12px;
+  border:1px solid rgba(255,255,255,.3);
+  color:color-mix(in oklab,var(--accent) 26%,#08040f);
+  text-shadow:0 1px 0 rgba(255,255,255,.4);
+  background:linear-gradient(100deg,color-mix(in oklab,var(--accent) 50%,#06030d) 0%,var(--accent) 18%,color-mix(in oklab,var(--accent) 22%,#ffffff) 34%,var(--accent) 50%,color-mix(in oklab,var(--accent) 74%,#06030d) 68%,var(--mauve) 84%,color-mix(in oklab,var(--accent) 50%,#06030d) 100%);
+  background-size:220% 100%;animation:lmMetal 7s ease-in-out infinite;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.6),inset 0 -2px 4px rgba(10,5,20,.45),0 6px 16px rgba(0,0,0,.45);
+  border-radius:9px;padding:11px;font:800 12.5px/1 system-ui;cursor:pointer;
   text-align:center;}
 .lm-genbtn:hover{filter:brightness(1.08);}
-.lm-genbtn:disabled{opacity:.5;cursor:default;}
+.lm-genbtn:disabled{opacity:.5;cursor:default;animation:none;}
+@media (prefers-reduced-motion:reduce){.lm-genbtn{animation:none;}}
 .lm-genexisting{display:block;width:100%;box-sizing:border-box;margin-top:7px;background:transparent;
   color:var(--subtext);border:1px solid var(--surface1);border-radius:8px;padding:9px;font:600 11px/1 system-ui;
   cursor:pointer;text-align:center;}
@@ -3547,6 +3565,7 @@ const LOOM_MOBILE_STYLES = `
   border-radius:18px 18px 0 0;border:1px solid var(--surface1);border-bottom:none;
   padding:12px 16px max(14px,env(safe-area-inset-bottom));display:flex;flex-direction:column;min-height:0;
   animation:lmSheetUp .26s cubic-bezier(.2,.9,.24,1);}
+.lm-pick-sheet.closing{animation:lmSheetDown .28s cubic-bezier(.4,0,.2,1) both;}
 .lm-pick-head{flex:none;display:flex;align-items:center;gap:8px;margin-bottom:8px;}
 .lm-pick-t{flex:1 1 auto;font-size:14px;font-weight:600;color:var(--text);}
 .lm-pick-body{flex:1;min-height:0;display:flex;flex-direction:column;}
@@ -3764,6 +3783,17 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   const [dfHandoff, setDfHandoff] = useState("");
   const [castSheetOpen, setCastSheetOpen] = useState(false);
   const [castSheetTab, setCastSheetTab] = useState("cast");   // 'cast' | 'footage'
+  // Sheet-close choreography -- Loom Mobile.dc.html's own *Closing states (lmSheetDown
+  // .28s + lmFadeOut on the scrim), absent until 2026-08-06: every close was an instant
+  // unmount. Same closing-state + ref-held-timer pattern LoomV2's closeLeftPanel/
+  // closeRightPanel already establish (340ms there, the DC's own 280ms here).
+  const [castSheetClosing, setCastSheetClosing] = useState(false);
+  const castSheetCloseTimer = useRef(null);
+  const closeCastSheet = () => {
+    setCastSheetClosing(true);
+    clearTimeout(castSheetCloseTimer.current);
+    castSheetCloseTimer.current = setTimeout(() => { setCastSheetOpen(false); setCastSheetClosing(false); }, 280);
+  };
 
   // ---- Kebab actions sheet (completeness pass, 2026-08-03) -- the locked design's own
   // per-card ⋮ menu (Loom Mobile.dc.html: onKebab/actionsOpen/actMoveUp/actMoveDown/
@@ -3772,6 +3802,8 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // dfOpen/castSheetOpen/reviewOpen -- which shot it targets reuses selShot (see actionsLive
   // below), not a second locally-tracked id like the design's own `actionsFor`.
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [actionsClosing, setActionsClosing] = useState(false);
+  const actionsCloseTimer = useRef(null);
 
   // ---- Review & trim -- fifth increment (2026-08-03), per the locked design's own
   // reviewFor/cropping/playing state (Loom Mobile.dc.html). Opens from the board's own ▶
@@ -3844,10 +3876,20 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerKind, setPickerKind] = useState("base");
   const [pickerMounted, setPickerMounted] = useState(false);
+  // Slide-out close (see closeCastSheet's comment). The picker stays MOUNTED through and
+  // after the close (the display-toggle contract above) -- the closing class only drives
+  // the 280ms lmSheetDown before display flips to none.
+  const [pickerClosing, setPickerClosing] = useState(false);
+  const pickerCloseTimer = useRef(null);
+  const closePicker = () => {
+    setPickerClosing(true);
+    clearTimeout(pickerCloseTimer.current);
+    pickerCloseTimer.current = setTimeout(() => { setPickerOpen(false); setPickerClosing(false); }, 280);
+  };
   useEffect(() => { if (pickerOpen) setPickerMounted(true); }, [pickerOpen]);
   useEffect(() => {
     if (!pickerOpen) return;
-    const onKey = (ev) => { if (ev.key === "Escape") setPickerOpen(false); };
+    const onKey = (ev) => { if (ev.key === "Escape") closePicker(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [pickerOpen]);
@@ -3878,7 +3920,7 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
     if (el && !el._mgBound) {
       el._mgBound = true;
       el.addEventListener("mg-pick", (e) => {
-        setPickerOpen(false);
+        closePicker();
         const m = { model_id: e.detail.model_id, title: e.detail.title, preview_url: e.detail.preview_url || "" };
         setImgModel(m);
         setModelDefaults(null);
@@ -4107,7 +4149,13 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // (act.id/e.ci/e.code) -- nothing new derived here.
   const actionsLive = actionsOpen ? entries.find((x) => x.c.id === selShot) : null;
   if (actionsOpen && !actionsLive) { setActionsOpen(false); }
-  const closeActions = () => setActionsOpen(false);
+  // Slide-out close (see closeCastSheet's comment): actionsOpen stays true through the
+  // 280ms lmSheetDown window, so actionsLive above keeps resolving while it plays.
+  const closeActions = () => {
+    setActionsClosing(true);
+    clearTimeout(actionsCloseTimer.current);
+    actionsCloseTimer.current = setTimeout(() => { setActionsOpen(false); setActionsClosing(false); }, 280);
+  };
 
   // ---- Generate screen helpers (third increment, 2026-08-03) ----
   const genTogglePal = (which) => setGenPalFor((p) => (p === which ? null : which));
@@ -4592,8 +4640,8 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
           buttons call (useShotMutations) -- no forked move/duplicate/delete logic. */}
       {actionsOpen && actionsLive && (
         <>
-          <div className="lm-scrim" onClick={closeActions} />
-          <div className="lm-sheet">
+          <div className={"lm-scrim" + (actionsClosing ? " closing" : "")} onClick={closeActions} />
+          <div className={"lm-sheet" + (actionsClosing ? " closing" : "")}>
             <div className="lm-sheethandle" />
             <button type="button" className="lm-actionrow"
               onClick={() => { moveCard(actionsLive.a.id, actionsLive.ci, -1); closeActions(); }}>&#8593; Move up</button>
@@ -4737,8 +4785,8 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
 
             {castSheetOpen && (
               <>
-                <div className="lm-scrim" onClick={() => setCastSheetOpen(false)} />
-                <div className="lm-sheet">
+                <div className={"lm-scrim" + (castSheetClosing ? " closing" : "")} onClick={closeCastSheet} />
+                <div className={"lm-sheet" + (castSheetClosing ? " closing" : "")}>
                   <div className="lm-sheethandle" />
                   <div className="lm-tabsrow">
                     <button type="button" className={"lm-tabbtn" + (castSheetTab === "cast" ? " on" : "")}
@@ -4797,7 +4845,7 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                     finishedShots.length ? (
                       <div className="lm-footagegrid">
                         {finishedShots.map((e) => (
-                          <div key={e.c.id} className="lm-fclip" onClick={() => { dfPickFootage(e.c.resultMid, e.code); setCastSheetOpen(false); }}>
+                          <div key={e.c.id} className="lm-fclip" onClick={() => { dfPickFootage(e.c.resultMid, e.code); closeCastSheet(); }}>
                             <img src={"/thumbs/" + e.c.resultMid + ".jpg"} alt="" />
                             <div className="lm-fclipmeta"><b>{e.code}</b><span>{durOf(e.c)}s</span></div>
                           </div>
@@ -4805,7 +4853,7 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                       </div>
                     ) : <div className="lm-empty">no rendered shots yet</div>
                   )}
-                  <button type="button" className="lm-sheetclose" onClick={() => setCastSheetOpen(false)}>Done</button>
+                  <button type="button" className="lm-sheetclose" onClick={closeCastSheet}>Done</button>
                 </div>
               </>
             )}
@@ -5368,12 +5416,14 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                 close/reopen never loses either picker's own search/scroll state. */}
             {pickerMounted && (
               <>
-                <div className="lm-scrim" style={{ display: pickerOpen ? "block" : "none" }} onClick={() => setPickerOpen(false)} />
-                <div className="lm-pick-sheet" style={{ display: pickerOpen ? "flex" : "none" }}>
+                <div className={"lm-scrim" + (pickerClosing ? " closing" : "")}
+                  style={{ display: pickerOpen || pickerClosing ? "block" : "none" }} onClick={closePicker} />
+                <div className={"lm-pick-sheet" + (pickerClosing ? " closing" : "")}
+                  style={{ display: pickerOpen || pickerClosing ? "flex" : "none" }}>
                   <div className="lm-sheethandle" />
                   <div className="lm-pick-head">
                     <span className="lm-pick-t">Models &amp; LoRAs</span>
-                    <button type="button" className="lm-df-close" onClick={() => setPickerOpen(false)} aria-label="Close">&#10005;</button>
+                    <button type="button" className="lm-df-close" onClick={closePicker} aria-label="Close">&#10005;</button>
                   </div>
                   <div className="lm-tabsrow">
                     <button type="button" className={"lm-tabbtn" + (pickerKind === "base" ? " on" : "")} onClick={() => setPickerKind("base")}>Models</button>

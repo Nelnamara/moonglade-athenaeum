@@ -1612,9 +1612,10 @@ increment in this file works.
       makes (same component, same props), including the design's `dfHasPrev`/`dfInheritPrev`
       "inherit prev close" affordance on the opening frame. Build verified clean; live
       click-through not yet done for this specific piece (verified via code+build only).
-- [ ] 4 of 6 designed animations don't exist: `lmMetal` (animated shimmer on every primary
+- [x] 4 of 6 designed animations don't exist: `lmMetal` (animated shimmer on every primary
       button — currently flat color), `lmSheetDown`/`lmFadeIn`/`lmFadeOut` (every sheet close
-      is an instant unmount, not the designed 280ms slide+fade)
+      is an instant unmount, not the designed 280ms slide+fade). **SHIPPED 2026-08-06** —
+      see the dated entry below ("Loom Mobile: the four missing animations").
 - [x] Draft-chip's active glow (`box-shadow`) dropped — **SHIPPED 2026-08-04**,
       `.lm-chip.on` in `loom/master-storyboard.jsx` now carries the design's exact
       `box-shadow: 0 0 10px rgba(212,175,55,.35)` (`Loom Mobile.dc.html:670`'s `draftChipStyle`).
@@ -4655,3 +4656,39 @@ tested surface). Live in a real authenticated session: the new summary renders
 ("pick a model · 1024×1024 · Auto"), the Snippets row opens, and two chip clicks produced
 exactly `"cinematic lighting, rim light, masterpiece, best quality"` in the prompt —
 the DC's joining formula character-for-character. Test text cleared afterward.
+
+### Loom Mobile: the four missing animations — metal shimmer + real sheet closes  ·  *2026-08-06*
+
+The punch list's "4 of 6 designed animations don't exist" item, per `Loom Mobile.dc.html`'s
+own keyframes (:16-21) and style formulas:
+
+- **`lmMetal`** — the design's `metal` treatment (:505) installed on `.lm-genbtn`, the one
+  shared primary-button class all 6 primary actions already reuse (Generate video/reference/
+  edit/fix, Select in Generate, submit). Verbatim gradient: `color-mix` stops off
+  `var(--accent)` (the DC's own note — metal derives from the ACTIVE skin's accent family,
+  so it re-tints under every skin), 220% background-size, the 7s ease-in-out shimmer.
+  Disabled buttons stop shimmering (a glinting disabled spend button would be a lie), and
+  `prefers-reduced-motion` kills it entirely.
+- **`lmSheetDown` + `lmFadeIn`/`lmFadeOut`** — every bottom sheet (kebab actions, Cast &
+  assets, the model/LoRA picker) now plays the DC's close choreography: scrim fades in
+  .24s/out .28s, sheet slides down .28s `cubic-bezier(.4,0,.2,1)` before unmounting —
+  using the exact closing-state + ref-held-timer pattern LoomV2's own
+  `closeLeftPanel`/`closeRightPanel` already established (280ms here, the DC's own timing).
+  All seven close paths route through the animated closers: scrim taps, Cancel/Done, the
+  footage-pick auto-close, the picker's ✕/Escape/`mg-pick` auto-close. The picker keeps its
+  display-toggle mount contract (its comment's own rule — never unmount the web component);
+  the closing class plays before display flips, nothing remounts.
+
+**Known nuance, disclosed:** the picker's `lmSheetUp` OPEN animation only plays on its first
+mount (pre-existing display-toggle behavior, unchanged) — re-opens appear instantly. Worth
+folding into the "picker gets its own real mobile sheet" punch item when that lands.
+
+**Two stale test guards updated, one of them a pre-existing failure:** the kebab-sheet
+text guards pinned the old instant-close one-liner and unanimated classNames (updated to
+assert the new choreography), and the FrameSlot count guard still demanded "exactly one"
+pair — failing since 2026-08-04's Reference-tab work legitimately added the second pair and
+never re-ran this suite (verified failing at HEAD before tonight's edits). Same lesson as
+this morning's render-harness pair, third instance this week.
+
+**Verified:** loom bundle rebuilt; full Loom suite 733/733; `test_js_syntax.py` green; the
+desktop Deep Focus render test green against the rebuilt bundle.

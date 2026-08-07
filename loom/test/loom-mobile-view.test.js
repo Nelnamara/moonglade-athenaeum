@@ -244,8 +244,12 @@ describe("Shot Detail (mobile Deep Focus): opens from the board, edits the REAL 
   test("frame slots reuse the REAL, already-shipped FrameSlot component (not a hand-rolled duplicate) for both Opening and Closing frame", () => {
     const opens = loomMobileSrc.match(/<FrameSlot which="open"/g) || [];
     const closes = loomMobileSrc.match(/<FrameSlot which="close"/g) || [];
-    assert.equal(opens.length, 1, "expected exactly one open FrameSlot in Shot Detail");
-    assert.equal(closes.length, 1, "expected exactly one close FrameSlot in Shot Detail");
+    // Two pairs since 2026-08-04: Shot Detail's own, plus the Generate > Reference tab's
+    // Opening/Closing pair (the punch-list item shipped that day reusing this exact
+    // component). This guard still failed at "exactly one" until 2026-08-06 -- the
+    // Reference-pair commit never re-ran this suite; caught by the next full run.
+    assert.equal(opens.length, 2, "expected the Shot Detail + Reference-tab open FrameSlots");
+    assert.equal(closes.length, 2, "expected the Shot Detail + Reference-tab close FrameSlots");
     // Real props, not mock data: the real openPick/storeThumb this component now receives,
     // and the real positionTag() live-slot numbering loom-core.js computes.
     assert.match(loomMobileSrc, /liveTag=\{positionTag\(dfLive, project, imgSrc, "openFrame"\)\}/);
@@ -305,7 +309,9 @@ describe("Cast & assets sheet: real project.assets, mode-aware budget, and a Foo
   test("picking a finished shot appends it as a real @videoN reference on the open shot (dfPickFootage), not the design mockup's fictional extraRefs concat", () => {
     assert.match(loomMobileSrc, /const dfPickFootage = \(mid, code\) => \{/);
     assert.match(loomMobileSrc, /const tag = nextTag\(dfLive\.c\.refs\.filter\(\(r\) => r\.kind === "video"\), "@video"\);/);
-    assert.match(loomMobileSrc, /onClick=\{\(\) => \{ dfPickFootage\(e\.c\.resultMid, e\.code\); setCastSheetOpen\(false\); \}\}/);
+    // closeCastSheet (not a bare setCastSheetOpen(false)) since 2026-08-06 -- the animated
+    // close plays lmSheetDown before the sheet actually unmounts.
+    assert.match(loomMobileSrc, /onClick=\{\(\) => \{ dfPickFootage\(e\.c\.resultMid, e\.code\); closeCastSheet\(\); \}\}/);
   });
 });
 
@@ -1018,8 +1024,10 @@ describe("Kebab actions sheet: real live-lookup safety (mirrors dfLive/reviewLiv
 describe("Kebab actions sheet: reuses the Cast sheet's own bottom-sheet convention, not a new one", () => {
   test("wraps with the SAME .lm-scrim/.lm-sheet/.lm-sheethandle classes the Cast & assets sheet already uses", () => {
     const sheetBlock = loomMobileSrc.slice(loomMobileSrc.indexOf("{actionsOpen && actionsLive && ("), loomMobileSrc.indexOf("{dfOpen && dfLive && (() => {"));
-    assert.match(sheetBlock, /<div className="lm-scrim" onClick=\{closeActions\} \/>/);
-    assert.match(sheetBlock, /<div className="lm-sheet">/);
+    // Both carry the (2026-08-06) closing-state ternary -- the design's own lmSheetDown/
+    // lmFadeOut close choreography -- same classes, now animated.
+    assert.match(sheetBlock, /<div className=\{"lm-scrim" \+ \(actionsClosing \? " closing" : ""\)\} onClick=\{closeActions\} \/>/);
+    assert.match(sheetBlock, /<div className=\{"lm-sheet" \+ \(actionsClosing \? " closing" : ""\)\}>/);
     assert.match(sheetBlock, /<div className="lm-sheethandle" \/>/);
   });
 
@@ -1059,8 +1067,10 @@ describe("Kebab actions sheet: all five rows, wired to the real mutators with th
     assert.match(src, /const entries = flat\(project\);/, "expected App()'s entries -- passed to LoomMobile as-is -- to be built from the real flat(project)");
   });
 
-  test("Cancel and 'Done' outside a confirm both wire to the same closeActions -- a plain setActionsOpen(false), no other side effect", () => {
-    assert.match(loomMobileSrc, /const closeActions = \(\) => setActionsOpen\(false\);/);
+  test("Cancel and 'Done' outside a confirm both wire to the same closeActions -- the animated close (2026-08-06): closing state first, setActionsOpen(false) only after the 280ms lmSheetDown window", () => {
+    assert.match(loomMobileSrc, /const closeActions = \(\) => \{\s*setActionsClosing\(true\);/);
+    assert.match(loomMobileSrc,
+      /actionsCloseTimer\.current = setTimeout\(\(\) => \{ setActionsOpen\(false\); setActionsClosing\(false\); \}, 280\);/);
   });
 });
 
