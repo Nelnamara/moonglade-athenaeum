@@ -82,7 +82,11 @@ import threading
 import pytest
 
 import moonglade_backup as core
-from moonglade_gallery import CATALOG_FIELDS, create_app, load_catalog, save_catalog
+from moonglade_gallery import (
+    CATALOG_FIELDS, create_app, load_catalog, save_catalog,
+    achievement_metrics, compute_achievements, save_ach_state,
+    telem_flag, telemetry_metrics, load_telemetry,
+)
 
 # No playwright (or no browser) => this whole module skips. It is not installed by
 # .github/workflows/tests.yml, so these tests SKIP in CI today and run locally.
@@ -235,6 +239,40 @@ def render_server(tmp_path_factory):
     cfg["PIXAI_API_KEY"] = "sk-render-harness-fake"
     config_path.write_text(json.dumps(cfg))
 
+    # Same "already-onboarded" reasoning as the API key above, extended to achievements.
+    # Two pieces, both load-bearing:
+    #
+    # 1. The Under-the-Hood earn-state. The Branding tab is gated behind the real
+    #    `under-the-hood` feat (owner decision 2026-08-05, `brandingUnlocked` in
+    #    useControlPanel.js) -- and conftest's autouse `_isolated_branding` fixture
+    #    (correctly) points branding_root() at an empty per-test tmp dir, so the
+    #    sweep_telemetry()/sweep_branding_drops() earn paths can never fire in a test:
+    #    no marks, nothing to adopt, feat never earned, ✦ Branding button never
+    #    renders. test_control_panel_runs_real_jobs_and_manages_a_real_account has been
+    #    failing on exactly that since the gate landed (verified: identical failure on
+    #    the pre-gate-session baseline; NOT an isolation leak -- the isolation is doing
+    #    its job, the gate just shipped without updating this harness). The telemetry
+    #    flag below is the REAL persisted earn-state (sweep_branding_drops fires this
+    #    exact flag on a real adoption), scoped to this module's own out_dir --
+    #    per-test-tmp-independent, no real branding folder involved.
+    telem_flag("branding_custom_file", out_dir=root)
+    #
+    # 2. Everything earned is pre-marked SEEN, so no toast fires on page load. A truly
+    #    fresh state file makes every already-earned achievement "newly earned" on first
+    #    fetch, and the celebration overlay (.ach-m2 -- a deliberate full-screen,
+    #    click-or-timeout-to-dismiss design, not a bug) blocks every click under it for
+    #    4.2-6.4s per achievement. Computed the same way api_achievements itself does
+    #    (catalog metrics + telemetry metrics + telemetry sets), so `seen` covers
+    #    exactly what the server will report as earned.
+    import datetime as _dt
+    _telem = load_telemetry(root)
+    _metrics = achievement_metrics(root / "catalog.db")
+    _metrics.update(telemetry_metrics(root))
+    _ach_result = compute_achievements(_metrics, sets=_telem.get("sets", {}))
+    _today = _dt.date.today().isoformat()
+    _earned_ids = [a["id"] for a in _ach_result["achievements"] if a["earned"]]
+    save_ach_state(root, {"seen": _earned_ids, "earned_at": {i: _today for i in _earned_ids}})
+
     server = make_server("127.0.0.1", 0, create_app(root), threaded=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True,
                               name="render-harness-server")
@@ -292,6 +330,21 @@ def logged_in_page(render_server, render_browser, monkeypatch):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+def _dismiss_any_achievement_toast(page):
+    """Click-dismiss a real achievement celebration (.ach-m2) if one happens to be up.
+
+    render_server's fixture pre-seeds `seen` from the harness's INITIAL catalog state
+    (suppresses the page-load toast), but a test's own real actions -- a job run, an
+    account add -- can organically cross a NEW achievement threshold mid-test (telemetry
+    counters, day/session flags), firing a fresh one the pre-seed can't have predicted.
+    `.ach-m2` is a deliberate full-screen, click-or-timeout-to-dismiss overlay (by design,
+    not a bug -- see mg-notify.js's own `_play()`), so left alone it blocks every click
+    under it for its real 4.2-6.4s hold. A no-op when nothing is showing.
+    """
+    toast = page.locator(".ach-m2")
+    if toast.count():
+        toast.first.click(timeout=1000)
+        page.wait_for_selector(".ach-m2", state="detached", timeout=2000)
 def _login(page):
     """Post the real /login form. No bypass, no fabricated session cookie.
 
@@ -873,6 +926,16 @@ def test_deep_focus_veil_wins_over_the_corner_fabs(logged_in_page):
     _visit(page, "/loom?bundle=1")
     page.wait_for_selector(".lv-overlay")
     page.wait_for_selector(".lv-card")
+    # The floating side panels (the real floating-glass-panel design, 2026-08-05 rebuild)
+    # open OVER the board, each with its own backdrop -- while either is up, no board
+    # card is clickable, by design. A real user collapses them first (each panel's own
+    # ‹/› button), so the test does exactly that. This test predates the floating
+    # rebuild; it used to reach the card directly because the old panels were docked
+    # siblings, not overlays.
+    for side in ("left", "right"):
+        if page.locator(".lv-panel." + side).count():
+            page.click(".lv-panel." + side + " .lv-col")
+            page.wait_for_selector(".lv-panel." + side, state="detached")
     _freeze_motion(page)                       # re-applied: React injects its own <style>
     page.dblclick(".lv-card")                  # -> setDeepFocus(entry)
     page.wait_for_selector(".lv-df-veil")
@@ -1345,7 +1408,9 @@ def test_control_panel_runs_real_jobs_and_manages_a_real_account(logged_in_page,
     page.wait_for_selector('[aria-label="Accounts"]', state="detached")
 
     # --- Branding tab: a REAL POST /api/branding, picking a real animation from the
-    # real MARK_ANIMS list this harness's own out_dir/branding.json now persists. ---
+    # real MARK_ANIMS list this harness's own out_dir/branding.json now persists.
+    # (The tab is achievement-gated -- see render_server's telem_flag seeding.) ---
+    _dismiss_any_achievement_toast(page)
     page.click('button:has-text("✦ Branding")')
     page.wait_for_selector(".mgcp-brandgrid")
     page.click('.mgcp-animrow:has-text("glow")')

@@ -4530,3 +4530,43 @@ every other React surface check this file already documents.
 
 **Why.** Two independent render sites had drifted from the real data shape the same way,
 independently — worth recording together since it's the same bug, not two.
+
+### Two render-harness tests silently broken by earlier shipped features — root-caused and fixed  ·  *2026-08-06*
+
+`tests/test_render_harness.py` had 2 of 15 tests failing. Both **verified pre-existing**
+(identical failures reproduced in a clean worktree of `867ba9a`, the commit before this
+session's work) — each broken by a legitimately-shipped earlier feature whose author never
+re-ran this harness:
+
+**1. `test_control_panel_runs_real_jobs_and_manages_a_real_account`** — broken by the
+2026-08-05 Branding achievement gate (`26f02b7`). The chain: conftest's autouse
+`_isolated_branding` fixture (correctly) points `branding_root()` at an empty per-test tmp
+dir → `list_marks()` empty → `sweep_telemetry()` never sets `branding_custom_file` →
+`under-the-hood` never earned → `brandingUnlocked` false → the ✦ Branding button the test
+clicks **never renders at all**. The isolation fixture is doing its job; the gate shipped
+without updating the harness. NOT primarily a toast-timing problem, though that was the
+first (wrong) theory — a standalone repro outside pytest passed because it lacked the
+conftest patch and saw the real checkout's marks folder, which is what finally isolated the
+difference. Fixed in `render_server`: `telem_flag("branding_custom_file", out_dir=root)` —
+the REAL persisted earn-state `sweep_branding_drops()` fires on a genuine adoption, scoped
+to the module's own tmp out_dir — plus a full pre-seed of `seen`/`earned_at` computed
+exactly the way `api_achievements` computes (catalog + telemetry metrics + telemetry sets),
+so no achievement toast ever fires on page load. A `_dismiss_any_achievement_toast()`
+helper also guards the Branding click against organic mid-test earns (`.ach-m2` is a
+deliberate full-screen click-to-dismiss overlay that blocks clicks for 4.2–6.4s).
+
+**2. `test_deep_focus_veil_wins_over_the_corner_fabs`** — broken by the 2026-08-05
+floating-glass-panel rebuild (`b9c2bc4`). The old Loom side panels were docked siblings of
+the board; the rebuild makes them float OVER it, each with its own click-blocking backdrop
+— so the test's direct `dblclick(".lv-card")` can never land while either panel is up (a
+real user can't do it either; they collapse the panel first). Fixed the test to do exactly
+the real interaction: collapse both panels via their own ‹/› buttons, wait for the real
+340ms slide-out unmount, then double-click.
+
+**Verified:** both tests green individually AND the full module green — 15/15,
+`python -m pytest tests/test_render_harness.py`.
+
+**Why.** Recorded with the failure chains spelled out because both are the same lesson the
+tiered-testing rule already encodes: a feature that changes what a UI *renders* (a gate, a
+layout paradigm) has to re-run the render harness before shipping, or the suite silently
+rots and the NEXT session pays the diagnosis bill — this one cost most of an evening.
