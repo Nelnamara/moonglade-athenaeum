@@ -940,3 +940,34 @@ def test_dedup_delete_refuses_without_confirm(tmp_path, monkeypatch):
     r = cli.post("/api/panel/run", json={"action": "dedup-delete"})   # no confirm
     assert r.status_code == 400 and "confirm" in r.get_json()["error"]
     assert spawned["n"] == base
+
+def test_myart_items_returns_card_ready_artwork_rows(tmp_path):
+    """GET /api/myart/items (the My Art tabbed gallery, 2026-08-06): every catalog
+    row with an artwork_id -- public AND private -- card-ready: thumb URL, title
+    with prompt fallback, is_video split, parsed tags, visibility flag. Rows with
+    no artwork_id (never published/synced) are excluded."""
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="m1", artwork_id="a1", title="Titled One", prompt_preview="p1",
+             is_video="0", is_published="1", liked_count="12", art_tags="elf, moon",
+             created_at="2026-07-01T10:00:00", filename="x_m1.png"),
+        _row(media_id="m2", artwork_id="a2", title="", prompt_preview="fallback prompt here",
+             is_video="0", is_published="0", created_at="2026-07-02T10:00:00",
+             filename="x_m2.png"),
+        _row(media_id="m3", artwork_id="a3", title="Vid", is_video="1", is_published="1",
+             liked_count="3", art_tags="loop", created_at="2026-07-03T10:00:00",
+             filename="x_m3.mp4"),
+        _row(media_id="m4", title="No artwork", created_at="2026-07-04T10:00:00",
+             filename="x_m4.png"),
+    ])
+    cli = login_test_client(create_app(tmp_path))
+    d = cli.get("/api/myart/items").get_json()
+    items = {it["media_id"]: it for it in d["items"]}
+    assert set(items) == {"m1", "m2", "m3"}          # m4 has no artwork_id
+    assert items["m1"]["public"] is True and items["m1"]["likes"] == 12
+    assert items["m1"]["tags"] == ["elf", "moon"]
+    assert items["m1"]["thumb"] == "/thumbs/m1.jpg"
+    assert items["m2"]["public"] is False
+    assert items["m2"]["title"].startswith("fallback prompt")   # title falls back
+    assert items["m3"]["is_video"] is True
+    assert [it["media_id"] for it in d["items"]] == ["m3", "m2", "m1"]   # newest first
+

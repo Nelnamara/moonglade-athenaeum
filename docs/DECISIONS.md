@@ -4972,3 +4972,25 @@ BannerSlotCard + its CSS removed. Verified LIVE in the owner's browser: grid 210
 sample repaint + 220% metal scroll, 3 pills, 12:1 Loom preview, slider ranges,
 pointer tile. Render harness updated to the chip structure; full render+branding+js
 suites green.
+
+### Stage 2A — My Art rebuilt as the tabbed card gallery (display-only)  ·  *2026-08-06*
+
+MyArtOverlay rebuilt to the handoff's ovMyArt design (Frontend Gallery.dc.html
+599-809/2277-2436): 980px slab, sticky header (serif "Your artwork" + the live-views
+stat row it already had + Artworks/Animations/Models&LoRAs/Assets sub-tabs with count
+pills), Visibility/Sort dropdown toolbar, and a 3:4 card grid -- real local thumbnails,
+public(emerald)/private(gold) badges, tag chips over the bottom gradient, NL-avatar
+footer with the DC's literal heart-color rule -- replacing the text-only ranked list.
+New backend GET /api/myart/items: every catalog row with an artwork_id (public AND
+private -- "everything you've made, published or held back"), card-ready, pure catalog
+read (title/likes/tags arrive via --sync-artworks; thumbs are local). Disclosed Phase-A
+lines: hover actions (publish/edit-tags/delete) + bulk Manage render per the design but
+DISABLED with honest titles -- they are PixAI account mutations that belong to the
+Publish-flow stage; LoRAs/Assets tabs show the design's "Nothing here yet." plus a
+one-line why (no local ownership/upload data exists -- verified). Card click opens the
+real Details view. MyArtMobile untouched (its own design pass later). Verified live:
+shell/tabs/toolbar/empty states on the dev library (which truly has zero synced
+artworks -- the production install's 26 will populate on its next run); the card data
+path is pinned by a seeded route test. Server restarted via the app's own restart
+mechanism (launcher preserved) -- which also put the Health fixes live: /api/health
+measured 175ms cold / 6ms cached in the owner's browser, from 1.1s+ before.

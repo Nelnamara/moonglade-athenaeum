@@ -15731,6 +15731,40 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 pass
         return jsonify({"items": top, "totals": totals, "views_synced": views_synced})
 
+    @app.route("/api/myart/items")
+    def api_myart_items():
+        """Card-ready rows for the My Art tabbed gallery (Frontend Gallery.dc.html's
+        ovMyArt, rebuilt 2026-08-06): every catalog row that exists as a PixAI ARTWORK
+        (artwork_id set by --sync-artworks), public AND private -- the design's
+        Visibility filter distinguishes them ('everything you've made, published or
+        held back'). Pure catalog read, no network: title/likes/comments/tags/nsfw
+        arrive via --sync-artworks; thumbs are the local /thumbs/<mid>.jpg the grid
+        already serves. The Artworks/Animations tab split is the is_video flag."""
+        con = _connect(db_path)
+        try:
+            rows = con.execute(
+                "SELECT media_id, artwork_id, title, prompt_preview, is_video, is_nsfw,"
+                " created_at, art_tags, is_published,"
+                " CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER) AS likes,"
+                " CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments"
+                " FROM catalog WHERE COALESCE(artwork_id,'') != '' AND media_id != ''"
+                " ORDER BY created_at DESC").fetchall()
+        finally:
+            con.close()
+        items = []
+        for (mid, aid, title, preview, is_video, is_nsfw, created, tags, pub,
+             likes, comments) in rows:
+            items.append({
+                "media_id": mid, "artwork_id": aid,
+                "title": (title or "").strip() or (preview or "").strip()[:60] or mid,
+                "thumb": "/thumbs/%s.jpg" % mid,
+                "is_video": is_video == "1", "is_nsfw": is_nsfw == "1",
+                "date": (created or "")[:10],
+                "tags": [t.strip() for t in (tags or "").split(",") if t.strip()][:4],
+                "public": pub == "1", "likes": likes, "comments": comments,
+            })
+        return jsonify({"items": items})
+
     _telem_day = {"day": None}   # once-per-day throttle for the passive marks
 
     @app.route("/api/achievements")

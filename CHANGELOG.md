@@ -14,6 +14,7 @@ git tags. Full prose notes for tagged versions live on
 > does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- My Art: rebuilt as the design's tabbed card gallery (Artworks/Animations with real thumbnails, visibility badges, tags, likes; sort + visibility filters). Mutations and the LoRA/Assets tabs arrive with the publish pipeline.
 - Branding tab rebuilt to the new design: sub-nav sections (marks/skins/banners), live mark preview animating the real header effects, per-skin sample frame, and a full banner editor (3 slots incl. the Loom strip, zoom/pan sliders, gallery-sourced uploads).
 - Branding: new Loom banner slot (12:1, written through to `branding/banner-loom.png`, displayed in the Loom's banner strip) and a real zoom/pan crop model (zoom 100-250% + 2-axis position) replacing the 3-position crop; saved banners now match the editor preview pixel-for-pixel.
 
