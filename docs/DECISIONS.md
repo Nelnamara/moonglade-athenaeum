@@ -4914,3 +4914,13 @@ protection was right, the scope note around it was wrong. The art-inventory arti
 being updated with a SYSTEM / SHARED / ACHIEVEMENT classification so the owner can mark
 which roles become user-unlockable behind Under the Hood; that pick-list is the input to
 the eventual design pass.
+
+### 10:42pm handoff drop — one-file refinement to the Branding-tab design  ·  *2026-08-06*
+
+Diffed in full against the 9:45pm suite: identical except `Control Panel.dc.html` (10
+lines). Two refinements to the not-yet-built Branding sub-nav design: (1) the tab drops
+its fixed 540px internally-scrolling panes for natural height (min 620px, columns
+stretch, no inner scrollbars — supersedes the 9:45 handoff doc's "each column its own
+scroll" note); (2) the skin sample frame's primary button takes the skin-aware metallic
+recipe instead of a flat accent chip. No new work items — Stage 1 of the pipeline plan
+simply builds from this version. Repo design_handoff copy synced.
