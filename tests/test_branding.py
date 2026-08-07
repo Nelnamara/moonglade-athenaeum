@@ -538,3 +538,96 @@ def test_login_mascot_takes_webp_or_png_like_the_achievement_mascots(tmp_path):
     # It must still END by hiding the element: a broken-image icon is the one
     # thing worse than no mascot at all.
     assert 'img.style.display = "none"' in src
+
+
+# ---- Banner write-through (2026-08-06, owner: "Yes, seems obvious") -------------------
+# The slot system stores many assets; branding/banner.png and login-banner.png are the
+# ONE file the header/login templates actually read. Every path that changes which asset
+# displays must re-render its slot's flat -- before this, picking a banner saved a choice
+# that displayed nowhere.
+
+def _wide_png_bytes(w=80, h=10):
+    """Wider than 4:1, with a red left half and blue right half -- so the left/right
+    crop anchors produce DIFFERENT pixels and the test can tell which window won."""
+    import io
+    from PIL import Image
+    im = Image.new("RGB", (w, h), (0, 0, 255))
+    im.paste((255, 0, 0), (0, 0, w // 2, h))
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_banner_upload_writes_the_flat_file_the_header_reads(tmp_path):
+    from PIL import Image
+    cli = _client(tmp_path)
+    flat = tmp_path / "branding" / "banner.png"
+    assert not flat.exists()
+    cli.post("/api/branding/slot", data={"slot": "banner_main",
+             "file": (io_bytes(_wide_png_bytes()), "b.png")},
+             content_type="multipart/form-data")
+    assert flat.exists(), "an active banner must land in branding/banner.png"
+    with Image.open(flat) as im:
+        w, h = im.size
+        assert w == h * 4, "the flat is cropped to the 4:1 banner canvas"
+
+
+def test_banner_login_slot_writes_its_own_flat(tmp_path):
+    cli = _client(tmp_path)
+    cli.post("/api/branding/slot", data={"slot": "banner_login",
+             "file": (io_bytes(_wide_png_bytes()), "b.png")},
+             content_type="multipart/form-data")
+    assert (tmp_path / "branding" / "login-banner.png").exists()
+    assert not (tmp_path / "branding" / "banner.png").exists(), \
+        "the two banner slots must never write each other's flat"
+
+
+def test_banner_crop_change_rerenders_the_flat(tmp_path):
+    """The crop control is REAL now: left vs right anchors select different pixels of a
+    wider-than-4:1 source, and changing the active asset's crop rewrites the flat."""
+    from PIL import Image
+    cli = _client(tmp_path)
+    d = cli.post("/api/branding/slot", data={"slot": "banner_main",
+                 "file": (io_bytes(_wide_png_bytes()), "b.png")},
+                 content_type="multipart/form-data").get_json()
+    item = d["item"]                       # banner default: subject-left
+    flat = tmp_path / "branding" / "banner.png"
+    with Image.open(flat) as im:
+        left_pixel = im.convert("RGB").getpixel((0, 0))
+    assert left_pixel == (255, 0, 0), "subject-left keeps the red (left) half"
+    cli.post("/api/branding/slot/crop", json={"slot": "banner_main",
+             "id": item["id"], "crop": "right"})
+    with Image.open(flat) as im:
+        w = im.size[0]
+        right_pixel = im.convert("RGB").getpixel((w - 1, 0))
+        first_pixel = im.convert("RGB").getpixel((0, 0))
+    assert right_pixel == (0, 0, 255)
+    assert first_pixel == (0, 0, 255), "subject-right shows the blue (right) window"
+
+
+def test_banner_pick_active_rerenders_the_flat(tmp_path):
+    """Switching the active asset re-renders the flat to the newly-picked one."""
+    from PIL import Image
+    cli = _client(tmp_path)
+    cli.post("/api/branding/slot", data={"slot": "banner_main",
+             "file": (io_bytes(_png_bytes((10, 200, 10))), "a.png")},
+             content_type="multipart/form-data")
+    d2 = cli.post("/api/branding/slot", data={"slot": "banner_main",
+                  "file": (io_bytes(_png_bytes((200, 30, 30))), "b.png")},
+                  content_type="multipart/form-data").get_json()
+    first_id = [a for a in d2["assets"] if a["id"] != d2["item"]["id"]][0]["id"]
+    cli.post("/api/branding/slot/active", json={"slot": "banner_main", "id": first_id})
+    flat = tmp_path / "branding" / "banner.png"
+    from PIL import Image
+    with Image.open(flat) as im:
+        px = im.convert("RGB").getpixel((0, 0))
+    assert px == (10, 200, 10), "the flat shows the re-picked FIRST upload"
+
+
+def test_non_banner_slots_never_write_a_flat(tmp_path):
+    cli = _client(tmp_path)
+    cli.post("/api/branding/slot", data={"slot": "mascots",
+             "file": (io_bytes(_png_bytes()), "m.png")},
+             content_type="multipart/form-data")
+    assert not (tmp_path / "branding" / "banner.png").exists()
+    assert not (tmp_path / "branding" / "login-banner.png").exists()

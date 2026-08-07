@@ -1769,6 +1769,7 @@ def add_slot_asset(out_dir, slot, png_bytes, crop="center"):
     active = load_slot_active(out_dir)
     active[slot] = new_id
     save_slot_active(out_dir, active)
+    _write_banner_flat(out_dir, slot)   # the new upload is now active -> display it
     return {"id": new_id, "crop": crop, "png": "/branding/%s/%s.png" % (slot, new_id)}
 
 
@@ -1794,6 +1795,8 @@ def set_slot_crop(out_dir, slot, item_id, crop):
     if not found:
         return False
     (sdir / "manifest.json").write_text(json.dumps({"items": items}, indent=2), encoding="utf-8")
+    if load_slot_active(out_dir).get(slot) == str(item_id):
+        _write_banner_flat(out_dir, slot)   # crop is baked into the displayed flat
     return True
 
 
@@ -1812,6 +1815,7 @@ def set_slot_active(out_dir, slot, item_id):
     active = load_slot_active(out_dir)
     active[slot] = item_id
     save_slot_active(out_dir, active)
+    _write_banner_flat(out_dir, slot)
     return True
 
 
@@ -1909,10 +1913,53 @@ def _adopt_mark(out_dir, raw_stem, png_bytes):
 # a manifest-of-many-pick-one-active gallery like the other two slots), the
 # sweep only ever touches the two slots that map cleanly onto a real,
 # already-established single flat file: banner_main -> branding/banner.png
-# and banner_login -> branding/login-banner.png (not yet wired to write
-# THOSE exact paths either -- a separate, disclosed follow-up -- but at least
-# no longer at risk of eating someone's real art in the meantime).
+# and banner_login -> branding/login-banner.png (WIRED to write those exact
+# paths as of 2026-08-06 -- see _write_banner_flat below; owner call: "Yes,
+# seems obvious").
 _SWEEPABLE_SLOTS = ("banner_main", "banner_login")
+
+# The flat files the header/login templates have always read directly
+# (moonglade_gallery.py's own <img src="/branding/banner.png"> and the login
+# page's login-banner.png-with-banner.png-fallback). The slot system stores
+# MANY assets; these flats are the ONE the app displays -- so every path that
+# changes which asset is active (upload, pick-active, crop the active one, a
+# raw drop the sweep adopts) re-renders its slot's flat.
+_BANNER_FLAT = {"banner_main": "banner.png", "banner_login": "login-banner.png"}
+
+
+def _write_banner_flat(out_dir, slot):
+    """Render a banner slot's ACTIVE asset over its real flat file, baking the
+    stored crop in: the largest 4:1 window that fits the source (the DC's own
+    1920x480 banner canvas), anchored left/center/right per the asset's crop
+    when the source is wider than 4:1, vertically centered when it's taller.
+    That is what makes the Phase 2 crop control REAL -- before this, crop was
+    stored metadata nothing ever read. Fails soft (False), never a 500: a
+    banner that fails to render leaves the previous flat in place, which still
+    displays -- strictly better than a broken header image."""
+    name = _BANNER_FLAT.get(slot)
+    if not name:
+        return False
+    active_id = load_slot_active(out_dir).get(slot)
+    a = next((x for x in list_slot_assets(out_dir, slot) if x["id"] == active_id), None)
+    if not a:
+        return False
+    try:
+        from PIL import Image
+        im = Image.open(_slot_dir(slot) / (a["id"] + ".png"))
+        im.load()
+        w, hh = im.size
+        if w * 1 >= hh * 4:                      # wider than 4:1 -- window slides sideways
+            cw, ch = hh * 4, hh
+            x0 = {"left": 0, "right": w - cw}.get(a.get("crop") or "center", (w - cw) // 2)
+            box = (x0, 0, x0 + cw, ch)
+        else:                                     # taller -- full width, vertically centered
+            cw, ch = w, max(1, w // 4)
+            y0 = (hh - ch) // 2
+            box = (0, y0, w, y0 + ch)
+        im.crop(box).save(branding_root() / name, format="PNG")
+        return True
+    except Exception:
+        return False
 
 
 def sweep_branding_drops(out_dir):
