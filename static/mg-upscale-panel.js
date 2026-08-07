@@ -63,36 +63,47 @@
   var CSS = [
     'mg-upscale-panel{display:none;}',
     'mg-upscale-panel[open]{display:block;}',
-    // Anchored by CSS, not by measured coordinates. The flyout is opened from the lightbox
-    // bar, which is itself pinned to the top of a full-screen overlay, so "under the bar, at
-    // the right edge" is a fixed, predictable spot -- and unlike a getBoundingClientRect()
-    // placement it cannot be computed against a stale or slid-away rect. z-index must clear
-    // the lightbox's own 300, or the panel opens BEHIND the picture it is about to upscale.
-    'mg-upscale-panel:not([inline]){position:fixed;z-index:320;top:56px;right:12px;',
-    ' width:min(420px,calc(100vw - 24px));max-height:calc(100vh - 72px);overflow:auto;}',
-    '@media (max-width:520px){mg-upscale-panel:not([inline]){left:12px;right:12px;width:auto;}}',
+    // The DC's centered modal (Image Details.dc.html:143-146), replacing the old
+    // top-right flyout anchoring (the design-fidelity punch-list item): the host is a
+    // fixed full-viewport layer whose ::before is the blurred scrim (:144), with the
+    // card grid-centered. z-index must still clear the lightbox's own 300, or the
+    // modal opens BEHIND the picture it is about to upscale.
+    'mg-upscale-panel:not([inline])[open]{display:grid;}',
+    'mg-upscale-panel:not([inline]){position:fixed;inset:0;z-index:320;',
+    ' place-items:center;padding:20px;box-sizing:border-box;}',
+    'mg-upscale-panel:not([inline])::before{content:"";position:absolute;inset:0;',
+    ' background:rgba(5,4,13,.55);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);}',
     'mg-upscale-panel[inline]{margin-top:14px;}',
-    // The glass face (design spec). ONE surface for both mounts -- only the anchoring
-    // above differs. The rgba numbers are the spec's literal glass values, not palette.
-    'mg-upscale-panel{border-radius:16px;border:1px solid rgba(182,146,230,.32);',
+    // Card faces. Non-inline wears the DC modal's own slab (:146 -- opaque gradient,
+    // 34px drop, 430px cap); the inline mount (the mobile sheets) keeps the glass face
+    // it has always had, on the host as before -- its card div is a plain passthrough.
+    'mg-upscale-panel:not([inline]) .mgu-card{position:relative;z-index:1;box-sizing:border-box;',
+    ' width:min(430px,calc(100vw - 40px));max-height:92vh;overflow-y:auto;',
+    ' border-radius:16px;border:1px solid var(--surface1);',
+    ' background:linear-gradient(180deg,rgba(18,14,42,.99) 0%,rgba(10,8,24,.99) 100%);',
+    ' box-shadow:0 34px 100px rgba(0,0,0,.78);}',
+    'mg-upscale-panel[inline]{border-radius:16px;border:1px solid rgba(182,146,230,.32);',
     ' background:linear-gradient(120deg,rgba(24,18,54,.92),rgba(14,11,32,.95));',
     ' -webkit-backdrop-filter:blur(18px) saturate(1.12);backdrop-filter:blur(18px) saturate(1.12);',
     ' box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px rgba(182,146,230,.14);}',
     // Overlay law: both directions animate. Close is a [closing] attribute plus a 340ms
     // deferred drop of [open] in close() -- without the deferral the display:none flip
-    // lands first and the exit keyframes are never seen. The flyout slides for the edge
-    // it lives on; the inline mount is part of the page, so it fade-rises like one.
-    '@keyframes mguIn{from{opacity:0;transform:translateX(34px) scale(.985);}to{opacity:1;transform:none;}}',
-    '@keyframes mguOut{from{opacity:1;transform:none;}to{opacity:0;transform:translateX(34px) scale(.985);}}',
-    'mg-upscale-panel:not([inline])[open]{animation:mguIn .4s cubic-bezier(.18,1.02,.26,1);}',
+    // lands first and the exit keyframes are never seen. The modal fades its scrim while
+    // the card rises/sinks (the DC's dvRise timing); the inline mount is part of the
+    // page, so it fade-rises like one.
+    '@keyframes mguFade{from{opacity:0;}to{opacity:1;}}',
+    '@keyframes mguFadeOut{from{opacity:1;}to{opacity:0;}}',
+    '@keyframes mguRise{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}',
+    '@keyframes mguSink{from{opacity:1;transform:none;}to{opacity:0;transform:translateY(6px);}}',
+    'mg-upscale-panel:not([inline])[open]{animation:mguFade .24s ease both;}',
+    'mg-upscale-panel:not([inline])[open] .mgu-card{animation:mguRise .28s cubic-bezier(.2,.9,.24,1) both;}',
     // pointer-events:none while closing: the fade window is 340ms of a still-mounted,
     // still-[open] panel, and .mgu-go re-enables before close() on the submit path --
     // without this, a second click during the exit fade lands on a live Go and pays for
     // a SECOND generation. The instant close used to be this guard; the animation isn't
     // allowed to un-guard a spend path.
-    'mg-upscale-panel:not([inline])[closing]{animation:mguOut .34s cubic-bezier(.4,0,.2,1) forwards;pointer-events:none;}',
-    '@keyframes mguRise{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}',
-    '@keyframes mguSink{from{opacity:1;transform:none;}to{opacity:0;transform:translateY(6px);}}',
+    'mg-upscale-panel:not([inline])[closing]{animation:mguFadeOut .34s cubic-bezier(.4,0,.2,1) forwards;pointer-events:none;}',
+    'mg-upscale-panel:not([inline])[closing] .mgu-card{animation:mguSink .34s cubic-bezier(.4,0,.2,1) forwards;}',
     'mg-upscale-panel[inline][open]{animation:mguRise .22s cubic-bezier(.2,.9,.24,1);}',
     'mg-upscale-panel[inline][closing]{animation:mguSink .34s cubic-bezier(.4,0,.2,1) forwards;pointer-events:none;}',
     '.mgu-body{padding:12px 14px 14px;}',
@@ -123,6 +134,23 @@
     '.mgu-seg button:hover .mgu-tip,.mgu-seg button:focus-visible .mgu-tip{opacity:1;transform:translate(-50%,0);}',
     '.mgu-sel{width:100%;padding:6px 8px;border-radius:7px;background:var(--surface0);',
     ' color:var(--text);border:1px solid var(--surface1);font-size:12px;}',
+    // The upscaler's custom animated dropdown -- Image Details.dc.html:164-174 (box, open
+    // border, floating option list with its own .18s rise) and :301-306 (option rows,
+    // selected wash). Replaces the native <select> the punch-list item called out; both
+    // designs (desktop modal AND Image Details Mobile.dc.html:128-131) specify this shape.
+    '.mgu-scalerwrap{position:relative;}',
+    '.mgu-scalerbox{display:flex;align-items:center;gap:7px;box-sizing:border-box;width:100%;',
+    ' background:rgba(12,10,28,.8);color:var(--text);border:1px solid var(--surface1);',
+    ' border-radius:9px;padding:8px 11px;font-size:12px;cursor:pointer;text-align:left;',
+    ' font-family:inherit;}',
+    '.mgu-scalerbox[aria-expanded="true"]{border-color:rgba(182,146,230,.6);}',
+    '.mgu-scalerbox .mgu-caret{margin-left:auto;font-size:8px;color:var(--overlay0);}',
+    '.mgu-scalerlist{position:absolute;z-index:5;left:0;right:0;top:calc(100% + 5px);padding:4px;',
+    ' border-radius:10px;border:1px solid rgba(182,146,230,.4);background:rgba(9,7,22,.98);',
+    ' box-shadow:0 18px 50px rgba(0,0,0,.65);animation:mguRise .18s cubic-bezier(.2,.9,.25,1) both;}',
+    '.mgu-scaleropt{padding:7px 10px;border-radius:7px;font-size:12px;cursor:pointer;color:var(--subtext);}',
+    '.mgu-scaleropt:hover{background:rgba(182,146,230,.12);color:var(--text);}',
+    '.mgu-scaleropt.on{background:rgba(182,146,230,.22);color:var(--text);}',
     '.mgu-note{font-size:11px;color:var(--subtext);margin-top:4px;}',
     '.mgu-note.bad{color:var(--red);}',
     '.mgu-val{color:var(--lavender);}',
@@ -218,6 +246,17 @@
       var self = this;
       injectStyle();
 
+      // All content rides inside .mgu-card: the modal mount styles it as the DC's
+      // centered slab, the inline mount leaves it a plain passthrough div, so one DOM
+      // shape serves both. Clicking the host OUTSIDE the card (i.e. the scrim -- the
+      // ::before is not an event target, those clicks land on the host itself) closes,
+      // exactly like the DC's own scrim onClick (:144).
+      var card = h('div', 'mgu-card');
+      this.appendChild(card);
+      this.addEventListener('click', function (e) {
+        if (!self.hasAttribute('inline') && e.target === self) self.close();
+      });
+
       var head = h('div', 'mgu-head');
       head.appendChild(h('span', null, '⇱ Upscale'));
       var x = h('button', 'x', '×');
@@ -225,10 +264,10 @@
       x.setAttribute('aria-label', 'Close');
       x.onclick = function () { self.close(); };
       if (!this.hasAttribute('inline')) head.appendChild(x);
-      this.appendChild(head);
+      card.appendChild(head);
 
       var body = h('div', 'mgu-body');
-      this.appendChild(body);
+      card.appendChild(body);
 
       this._source = h('div', 'mgu-note');
       body.appendChild(this._source);
@@ -269,12 +308,26 @@
       body.appendChild(this._dims);
 
       // enlarge only -- PixAI's Hires has no upscaler dropdown, and that asymmetry is theirs.
+      // The control itself is the DC's custom animated dropdown (Image Details.dc.html:
+      // 164-174), not a native <select> -- the design-fidelity punch-list item. Same
+      // machinery underneath: _scaler is the one value the submit body reads as
+      // enlarge_model. (Named without parens here on purpose -- a test anchors its
+      // source slice on the payload method's first textual occurrence.)
       this._upWrap = h('div');
       this._upWrap.setAttribute('data-mgu', 'upscaler');
       this._upWrap.appendChild(h('div', 'mgu-lbl', 'Upscaler'));
-      this._upModel = h('select', 'mgu-sel');
-      this._upModel.onchange = function () { self._price(); };
-      this._upWrap.appendChild(this._upModel);
+      this._scaler = '';
+      this._scalerWrap = h('div', 'mgu-scalerwrap');
+      this._scalerBox = h('button', 'mgu-scalerbox');
+      this._scalerBox.type = 'button';
+      this._scalerBox.setAttribute('aria-haspopup', 'listbox');
+      this._scalerBox.setAttribute('aria-expanded', 'false');
+      this._scalerLbl = h('span', null, '');
+      this._scalerBox.appendChild(this._scalerLbl);
+      this._scalerBox.appendChild(h('span', 'mgu-caret', '▾'));
+      this._scalerBox.onclick = function (e) { e.stopPropagation(); self._toggleScaler(); };
+      this._scalerWrap.appendChild(this._scalerBox);
+      this._upWrap.appendChild(this._scalerWrap);
       body.appendChild(this._upWrap);
 
       // Hires only.
@@ -338,15 +391,50 @@
       body.appendChild(this._msg);
 
       var c = consts();
-      if (c && c.enlargeModels) {
-        c.enlargeModels.forEach(function (name) {
-          var o = document.createElement('option');
-          o.value = name;
-          o.textContent = name;
-          if (name === c.defaultEnlargeModel) o.selected = true;
-          self._upModel.appendChild(o);
-        });
-      }
+      this._scalerNames = (c && c.enlargeModels) || [];
+      this._scaler = (c && c.defaultEnlargeModel) || this._scalerNames[0] || '';
+      this._scalerLbl.textContent = this._scaler;
+    }
+
+    // ---- the upscaler dropdown (custom, animated -- never a native select) -----------
+    _toggleScaler() {
+      if (this._scalerList) { this._closeScaler(); return; }
+      var self = this;
+      var list = h('div', 'mgu-scalerlist');
+      list.setAttribute('role', 'listbox');
+      this._scalerNames.forEach(function (name) {
+        var o = h('div', 'mgu-scaleropt' + (name === self._scaler ? ' on' : ''), name);
+        o.setAttribute('role', 'option');
+        o.onclick = function (e) {
+          e.stopPropagation();
+          self._scaler = name;
+          self._scalerLbl.textContent = name;
+          self._closeScaler();
+          self._price();
+        };
+        list.appendChild(o);
+      });
+      this._scalerWrap.appendChild(list);
+      this._scalerList = list;
+      this._scalerBox.setAttribute('aria-expanded', 'true');
+      // Escape closes the dropdown FIRST, then a second Escape closes the modal -- the
+      // DC's own two-step chain (Image Details.dc.html:247). Capture phase, or the
+      // lightbox's own Escape handler closes the whole panel out from under the list.
+      this._scalerKey = function (e) {
+        if (e.key === 'Escape') { e.stopPropagation(); self._closeScaler(); }
+      };
+      window.addEventListener('keydown', this._scalerKey, true);
+      // A click anywhere else dismisses it (the box's own click stopPropagation()s out).
+      this._scalerDoc = function () { self._closeScaler(); };
+      document.addEventListener('click', this._scalerDoc);
+    }
+
+    _closeScaler() {
+      if (this._scalerList && this._scalerList.parentNode) this._scalerList.remove();
+      this._scalerList = null;
+      if (this._scalerBox) this._scalerBox.setAttribute('aria-expanded', 'false');
+      if (this._scalerKey) { window.removeEventListener('keydown', this._scalerKey, true); this._scalerKey = null; }
+      if (this._scalerDoc) { document.removeEventListener('click', this._scalerDoc); this._scalerDoc = null; }
     }
 
     // ---- state -------------------------------------------------------------------------
@@ -547,6 +635,7 @@
       // length -- so the exit is ever seen at all (overlay law). Closing an already
       // closed panel stays a no-op.
       if (!this.hasAttribute('open')) return this;
+      this._closeScaler();          // an open dropdown never outlives its panel
       this.setAttribute('closing', '');
       clearTimeout(this._closeT);
       this._closeT = setTimeout(function () {
@@ -589,7 +678,7 @@
       };
       if (this.mode === 'enlarge') {
         body.enlarge = r;
-        body.enlarge_model = this._upModel.value || '';
+        body.enlarge_model = this._scaler || '';
       } else {
         body.upscale = r;
         body.upscale_denoise = +this._dn.value;

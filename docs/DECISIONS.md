@@ -4697,3 +4697,37 @@ this morning's render-harness pair, third instance this week.
 
 **Verified:** loom bundle rebuilt; full Loom suite 733/733; `test_js_syntax.py` green; the
 desktop Deep Focus render test green against the rebuilt bundle.
+
+### Upscale: the centered modal and the custom dropdown  ·  *2026-08-06*
+
+The punch list's last unstarted Image Details item. `Image Details.dc.html:143-189`'s
+upscale treatment, installed in the one shared component (`static/mg-upscale-panel.js`)
+so Details and Lightbox both get it:
+
+- **Centered modal** replacing the top-right flyout (non-inline mount only): the host is a
+  fixed full-viewport layer whose `::before` is the DC's blurred scrim (:144, click-to-close),
+  with the card grid-centered — the DC's own 430px slab (:146 literal values: opaque
+  gradient, 16px radius, 34px drop shadow). The scrim fades .24s in / .34s out while the
+  card rises/sinks; the [open]/[closing] machinery, the 340ms deferred unmount, and the
+  pointer-events-while-closing spend guard all carry over untouched. The **inline** mount
+  (the mobile sheets) keeps its existing face and behavior — its own designs already
+  shipped around it.
+- **Custom animated dropdown** for the upscaler (:164-174 box + floating list, :301-306
+  option rows with the selected wash), replacing the native `<select>` — which both the
+  desktop AND mobile DCs specify (`Image Details Mobile.dc.html:128-131`), so the shared
+  swap serves every mount. Escape closes the list first and the modal second (the DC's own
+  :247 chain, capture-phase so the Lightbox's Escape handler can't jump the queue);
+  outside-click dismisses; the selected name feeds the same `enlarge_model` submit field.
+- **Nothing else moved:** pricing, submit, the version-id/model-id split, the fallback
+  model, the picker, the ratio-cap derivation — all untouched, and all their guards stayed
+  green unmodified. One comment was reworded because a test anchors its source slice on
+  the payload method's first textual occurrence, which the new comment collided with —
+  noted inline so the next person doesn't trip the same wire.
+
+**Verified:** upscale + syntax + FULL render harness green (the harness's three real
+upscale-panel interaction tests pass against the new modal unchanged). Live in a real
+authenticated session: modal opens dead-center over the lightbox with the slab face and
+blurred scrim, dropdown opens with its rise animation listing the real 5 upscalers,
+picking updates the box and closes the list, Escape closes the list while the panel stays
+open, the default selection was restored afterward, and everything closed cleanly.
+No spend path touched at any point.
