@@ -18454,6 +18454,26 @@ def main():
     # other out all evening). Naming the cookie by port lets instances coexist. Costs one
     # re-login per instance when this ships, then never again.
     app.config["SESSION_COOKIE_NAME"] = "moonglade_session_{}".format(args.port)
+    # Companion IPv6 loopback listener -- the fix for "the Lightbox/Details sometimes
+    # load slowly" (owner report, diagnosed live 2026-08-06). Chrome resolves
+    # `localhost` dual-stack and tries IPv6 ::1 FIRST; bound only to 127.0.0.1, every
+    # FRESH connection burns ~300ms failing that attempt before falling back to IPv4
+    # (measured: connect 312ms vs 39ms of actual server work on /api/next/detail).
+    # Keep-alive reuse hides it, every new connection pays it -- hence "sometimes."
+    # A second werkzeug server on [::1], same port, same app, makes the browser's
+    # first attempt succeed instead. The main IPv4 bind below is UNTOUCHED (LAN via
+    # --host 0.0.0.0 keeps working exactly as before); an explicit non-loopback
+    # --host skips this; no IPv6 stack on the machine -> fail-soft, nothing changes.
+    if args.host in ("127.0.0.1", "0.0.0.0", "localhost"):
+        try:
+            import threading as _threading
+            from werkzeug.serving import make_server as _make_server6
+            _srv6 = _make_server6("::1", args.port, app, threaded=True,
+                                  ssl_context=ssl_context)
+            _threading.Thread(target=_srv6.serve_forever, daemon=True,
+                              name="moonglade-ipv6-loopback").start()
+        except Exception:
+            pass                     # IPv6 unavailable -- IPv4-only, as ever
     app.run(host=args.host, port=args.port, debug=False, threaded=True, ssl_context=ssl_context)
 
 

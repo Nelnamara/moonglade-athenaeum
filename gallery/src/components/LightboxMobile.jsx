@@ -308,7 +308,7 @@ export default function LightboxMobile({
               <video key={it.media_id} src={"/video-file/" + encodeURIComponent(it.media_id)}
                 controls autoPlay loop playsInline />
             ) : (
-              <img key={it.media_id} src={"/full/" + encodeURIComponent(it.media_id)} alt="" draggable={false} />
+              <img key={it.media_id} src={"/full/" + encodeURIComponent(it.media_id)} alt="" decoding="async" draggable={false} />
             )}
             {slideOn ? (
               <div className="lbm-slidetrack" aria-hidden="true">

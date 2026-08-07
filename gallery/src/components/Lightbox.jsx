@@ -32,6 +32,17 @@ export default function Lightbox({
 }) {
   const it = items[index];
   const mid = it ? it.media_id : null;
+  // Warm the neighbors: arrow-nav's cost was a cold /full fetch + decode from zero on
+  // every step (part of the owner's "lightbox can load slowly" report, 2026-08-06 —
+  // the other, larger part was the IPv6-loopback connect stall, fixed server-side the
+  // same day). The browser caches /full/ hard (immutable, 1y), so warming prev/next
+  // into that cache makes a step render from memory. Images only — preloading a
+  // neighbor VIDEO would pull whole mp4s on every step.
+  useEffect(() => {
+    for (const n of [items[index - 1], items[index + 1]]) {
+      if (n && !n.is_video) { const im = new Image(); im.src = "/full/" + n.media_id; }
+    }
+  }, [items, index]);
   const [similarFor, setSimilarFor] = useState(null);
   const [slideOn, setSlideOn] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -308,7 +319,7 @@ export default function Lightbox({
                   style={{ viewTransitionName: "vt-reveal" }} />
               ) : (
                 <img key={it.media_id} src={"/full/" + it.media_id} alt="" draggable={false}
-                  style={{ viewTransitionName: "vt-reveal" }} />
+                  decoding="async" style={{ viewTransitionName: "vt-reveal" }} />
               )}
               {slideOn ? (
                 <div className="lbx-slidetrack" aria-hidden="true">

@@ -244,7 +244,7 @@ export default function DetailsView({
             </video>
           ) : (
             <a href={"/full/" + encodeURIComponent(row.media_id)} target="_blank" rel="noreferrer">
-              <img src={"/full/" + encodeURIComponent(row.media_id)} alt="" onError={() => setMediaOk(false)} />
+              <img src={"/full/" + encodeURIComponent(row.media_id)} alt="" decoding="async" onError={() => setMediaOk(false)} />
             </a>
           )}
         </div>
