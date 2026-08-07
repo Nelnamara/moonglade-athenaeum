@@ -14,6 +14,7 @@ git tags. Full prose notes for tagged versions live on
 > does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- Image Details: a real LINEAGE section — batch siblings and the derivation chain (which edit/upscale/video an image came from, and what came from it), click-to-navigate, hidden when there's nothing to show.
 - Train panel: the Model Theme list is now PixAI's real curated base-model set (Illustrious, NoobAI XL, Moonbeam, …) with covers, and the cost line quotes the real training price per base when free trainings run out.
 - Train panel: the Category dropdown now carries PixAI's real nine LoRA categories (character, animal, style, realistic, pose, clothing, background, detail, other), replacing the design mockup's placeholder three.
 - Train panel: Model Type (DiT.2/DiT.1/SDXL/SD 1.5) and Model Theme now use PixAI's real trainable-model list — real names and covers, themes filtered by the selected architecture, and the correct model-version id sent on submit.

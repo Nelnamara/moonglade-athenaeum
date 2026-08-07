@@ -797,6 +797,32 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
 .p-vitals .rating-label { font-size: 12px; }
 .p-vsep { color: var(--overlay0); }
 
+/* LINEAGE (Image Details.dc.html:108-123) -- a strip of 74x74 chips, "this" accent-
+   highlighted, matching the DC's own geometry exactly. Deliberately NOT wired into
+   playReveal's staggered opacity:0 choreography (that animation is hand-tuned and fires
+   once on mount; lineage data arrives async off a fetch, so joining it risks the section
+   staying invisible if the fetch resolves after the reveal already ran, or under
+   reduced-motion where only the fixed selector list gets un-hidden) -- it just renders. */
+.p-lineage { display: flex; flex-direction: column; gap: 10px; margin-top: 4px;
+  padding-top: 14px; border-top: 1px solid var(--surface0); }
+.p-lineage-head { display: flex; flex-direction: column; gap: 2px; }
+.p-lineage-head .k { font-size: 9.5px; font-weight: 700; letter-spacing: .14em;
+  color: var(--overlay0); }
+.p-lineage-head .s { font-size: 11px; color: var(--subtext); }
+.p-lineage-strip { display: flex; align-items: center; gap: 6px; overflow-x: auto;
+  padding: 2px; }
+.p-lin-chip { position: relative; flex: none; width: 74px; height: 74px; border-radius: 10px;
+  overflow: hidden; cursor: pointer; padding: 0; background: var(--surface0);
+  border: 1px solid rgba(255,255,255,.1); box-shadow: 0 6px 16px rgba(0,0,0,.4); }
+.p-lin-chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.p-lin-chip.this { cursor: default; border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 8px 20px rgba(0,0,0,.5); }
+.p-lin-chip .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 5px;
+  font-size: 8px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  text-align: center; color: rgba(226,222,238,.72); background: rgba(5,4,13,.78); }
+.p-lin-chip.this .cap { color: var(--text); }
+.p-lin-arrow { flex: none; color: var(--overlay0); font-size: 13px; }
+
 /* actions demoted: the same capability as before, quieter and smaller -- a
    glass-chip strip like .card/.gd-chip elsewhere, not a wall of solid buttons. */
 .p-footer { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px; padding-top: 12px;

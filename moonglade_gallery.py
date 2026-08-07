@@ -63,6 +63,11 @@ CATALOG_FIELDS = [
     "loras",
     # Extra reproduction params from getTaskById (full-meta)
     "negative_prompt", "clip_skip",
+    # LINEAGE (2026-08-06): the source image a derived gen was made from + the kind of
+    # derivation ("edit"/"upscale"/"video"). Blank for originals. See source_media_of_task.
+    # lineage_checked is the persisted "confirmed original, don't re-fetch" marker for
+    # --backfill-lineage -- see that command's docstring for why it's a real column.
+    "source_media_id", "derive_kind", "lineage_checked",
     # Image-to-video tasks (--sync-videos): is_video='1', poster_media_id is the
     # still-frame media id (its image is the gallery poster), duration in seconds.
     "is_video", "poster_media_id", "video_duration",
@@ -111,6 +116,9 @@ CREATE TABLE IF NOT EXISTS catalog (
     width           TEXT,
     height          TEXT,
     prompt_preview  TEXT,
+    source_media_id TEXT DEFAULT '',
+    derive_kind     TEXT DEFAULT '',
+    lineage_checked TEXT DEFAULT '',
     status          TEXT,
     created_at      TEXT,
     prompt_full     TEXT,
@@ -203,6 +211,19 @@ _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN nsfw_scores TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN paid_credit TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN phash TEXT DEFAULT ''",
+    # LINEAGE (2026-08-06): the SOURCE image a derived generation was made from, and the
+    # kind of derivation ("edit"/"upscale"/"video"). Empty for original txt2img rows.
+    # Populated from task params (source_media_of_task); batch siblings need no column
+    # (they share task_id already). Indexed so "what did this image spawn" is a fast lookup.
+    "ALTER TABLE catalog ADD COLUMN source_media_id TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN derive_kind TEXT DEFAULT ''",
+    "CREATE INDEX IF NOT EXISTS idx_source_media_id ON catalog(source_media_id)",
+    # A real txt2img original legitimately has an EMPTY source_media_id forever, which
+    # makes "blank" ambiguous with "never checked" -- this is the persisted "checked, found
+    # nothing" marker --backfill-lineage needs so it doesn't re-fetch every original task on
+    # every single run (an in-memory-only marker was tried first and silently discarded by
+    # save_catalog, since it isn't a real column -- caught before it shipped).
+    "ALTER TABLE catalog ADD COLUMN lineage_checked TEXT DEFAULT ''",
 ]
 
 def _connect(db_path):
@@ -15899,6 +15920,52 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             con.close()
         result["unmatched_tags"] = unmatched
         return jsonify(result)
+
+    def _lineage_card(row):
+        """One image reduced to a lineage chip: id, thumb, video flag, and a title hint."""
+        mid = row["media_id"]
+        return {"media_id": mid, "thumb": "/thumbs/%s.jpg" % mid,
+                "is_video": (row["is_video"] == "1"),
+                "title": (row["title"] or "").strip() or (row["prompt_preview"] or "").strip()[:48]}
+
+    @app.route("/api/lineage/<media_id>")
+    def api_lineage(media_id):
+        """The family tree of one image, for Image Details' LINEAGE panel:
+          * siblings -- the other outputs of the SAME generation task (share task_id; up to
+            4 per batch). Free -- task_id is already indexed.
+          * parent   -- the SOURCE image this one was derived from (source_media_id), plus
+            the kind of derivation (edit/upscale/video).
+          * children -- every image derived FROM this one (rows whose source_media_id == this).
+        Pure catalog read, no network. Any dimension can be empty (an original txt2img with
+        a batch size of 1 and no derivatives has an empty tree)."""
+        mid = str(media_id or "").strip()
+        con = _connect(db_path)
+        try:
+            me = con.execute(
+                "SELECT media_id, task_id, source_media_id, derive_kind FROM catalog"
+                " WHERE media_id = ? LIMIT 1", (mid,)).fetchone()
+            if not me:
+                return jsonify({"error": "unknown media id"}), 404
+            cols = ("media_id, is_video, title, prompt_preview")
+            siblings = []
+            if me["task_id"]:
+                siblings = [_lineage_card(r) for r in con.execute(
+                    "SELECT %s FROM catalog WHERE task_id = ? AND media_id != ?"
+                    " ORDER BY media_id" % cols, (me["task_id"], mid)).fetchall()]
+            parent = None
+            if me["source_media_id"]:
+                pr = con.execute("SELECT %s FROM catalog WHERE media_id = ? LIMIT 1" % cols,
+                                 (me["source_media_id"],)).fetchone()
+                if pr:
+                    parent = dict(_lineage_card(pr), kind=me["derive_kind"] or "derived")
+            children = [dict(_lineage_card(r), kind=(r["derive_kind"] or "derived"))
+                        for r in con.execute(
+                            "SELECT %s, derive_kind FROM catalog WHERE source_media_id = ?"
+                            " ORDER BY created_at" % cols, (mid,)).fetchall()]
+        finally:
+            con.close()
+        return jsonify({"media_id": mid, "siblings": siblings,
+                        "parent": parent, "children": children})
 
     @app.route("/api/train/quota")
     def api_train_quota():

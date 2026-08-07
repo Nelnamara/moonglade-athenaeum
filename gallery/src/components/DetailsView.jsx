@@ -140,6 +140,10 @@ export default function DetailsView({
   // real SimilarModal.jsx already proven by Lightbox.jsx's own "✧ Similar" button, not a
   // rebuilt strip -- fits Direction C's own "actions demoted to a footer strip" idiom.
   const [similarOpen, setSimilarOpen] = useState(false);
+  // LINEAGE (Image Details.dc.html:108-123, 2026-08-06): where this image came from and
+  // what came from it -- GET /api/lineage/<mid>, a pure catalog read (batch siblings via
+  // task_id, derivation chain via source_media_id). Real data, fetched per image.
+  const [lineage, setLineage] = useState(null);
   const recordRef = useRef(null);
 
   const {
@@ -159,6 +163,17 @@ export default function DetailsView({
   // mobile surface -- see useImageDetails.js for what is).
   useEffect(() => {
     setMediaOk(true);
+  }, [mediaId]);
+
+  useEffect(() => {
+    if (!mediaId) { setLineage(null); return; }
+    let dead = false;
+    setLineage(null);
+    fetch("/api/lineage/" + encodeURIComponent(mediaId))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!dead) setLineage(d); })
+      .catch(() => { if (!dead) setLineage(null); });
+    return () => { dead = true; };
   }, [mediaId]);
 
   useEffect(() => {
@@ -333,6 +348,57 @@ export default function DetailsView({
               <div className="p-tags">
                 {tagList.map((t) => <span key={"t" + t} className="p-tag">{t}</span>)}
                 {collectionList.map((c) => <span key={"c" + c} className="p-tag p-tag-shelf">{c}</span>)}
+              </div>
+            ) : null}
+
+            {/* LINEAGE (Image Details.dc.html:108-123) -- where this image came from and
+                what came from it, REAL: batch siblings (same task_id) before "this",
+                derivatives (edit/upscale/video, source_media_id) after. A linear strip
+                like the DC draws it; siblings sit alongside "this" since they're from the
+                same generation moment, not a chain. Hidden entirely when there's nothing
+                to show (a lone original) -- no empty rail. */}
+            {lineage && (lineage.parent || lineage.siblings.length || lineage.children.length) ? (
+              <div className="p-lineage">
+                <div className="p-lineage-head">
+                  <span className="k">LINEAGE</span>
+                  <span className="s">where this came from, and what came from it</span>
+                </div>
+                <div className="p-lineage-strip">
+                  {lineage.parent && (
+                    <>
+                      <button type="button" className="p-lin-chip" title={lineage.parent.title}
+                        onClick={() => onNavigate(lineage.parent.media_id)}>
+                        <img src={lineage.parent.thumb} alt="" />
+                        <span className="cap">{lineage.parent.kind}</span>
+                      </button>
+                      <span className="p-lin-arrow">→</span>
+                    </>
+                  )}
+                  {lineage.siblings.map((s) => (
+                    <React.Fragment key={s.media_id}>
+                      <button type="button" className="p-lin-chip" title={s.title}
+                        onClick={() => onNavigate(s.media_id)}>
+                        <img src={s.thumb} alt="" />
+                        <span className="cap">batch</span>
+                      </button>
+                      <span className="p-lin-arrow">→</span>
+                    </React.Fragment>
+                  ))}
+                  <div className="p-lin-chip this" title="This record">
+                    <img src={"/thumbs/" + encodeURIComponent(row.media_id) + ".jpg"} alt="" />
+                    <span className="cap">this</span>
+                  </div>
+                  {lineage.children.map((c) => (
+                    <React.Fragment key={c.media_id}>
+                      <span className="p-lin-arrow">→</span>
+                      <button type="button" className="p-lin-chip" title={c.title}
+                        onClick={() => onNavigate(c.media_id)}>
+                        <img src={c.thumb} alt="" />
+                        <span className="cap">{c.kind}</span>
+                      </button>
+                    </React.Fragment>
+                  ))}
+                </div>
               </div>
             ) : null}
 

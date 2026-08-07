@@ -2080,6 +2080,7 @@ _FULL_META_FIELDS = (
     "prompt_full", "natural_prompt", "seed", "steps",
     "sampler", "cfg_scale", "model_id", "model_name", "loras",
     "negative_prompt", "clip_skip", "paid_credit",
+    "source_media_id", "derive_kind",
 )
 
 
@@ -3516,7 +3517,12 @@ def extract_full_meta(task):
     # resolves locally: a Fix's Model reads "Reference Pro" rather than a 19-digit id, with no
     # extra network round trip. Callers that also run model_name_gql still overwrite it.
     chat_label = (edit_model_by_id(model_id) or {}).get("label", "") if chat else ""
+    # LINEAGE: the source image + derivation kind, if this task derived from another image.
+    # Filled here so both the forward sync and --backfill-full-meta populate it for free.
+    src_mid, derive_kind = source_media_of_task(task)
     return {
+        "source_media_id": src_mid or "",
+        "derive_kind":     derive_kind or "",
         "prompt_full":    params.get("prompts", ""),
         "natural_prompt": extra.get("naturalPrompts", ""),
         "seed":           str(outputs.get("seed") or ""),
@@ -7726,6 +7732,35 @@ def submit_training(session, base_model_id, media_ids, title, trigger_words, cat
     return d.get("createTrainingTask") or {}
 
 
+def source_media_of_task(task):
+    """The SOURCE image a derived generation was made FROM, plus what kind of derivation
+    it was -- returns (source_media_id, kind) or (None, None) for an original generation.
+
+    This is the data behind Image Details' LINEAGE panel. Every derive path already puts
+    its input image's mediaId in the submit parameters, and PixAI persists it on the task,
+    so it is readable back from getTaskById for history as well as recordable going
+    forward. The three real shapes (see build_video_parameters / build_chat_edit_parameters
+    / the upscale block):
+      * img2video      -> parameters.i2v.mediaId          (kind "video")
+      * edit/reference -> parameters.chat.mediaId         (kind "edit")
+      * upscale/hires  -> parameters.mediaId + upscale|enlarge ratio  (kind "upscale")
+    A plain txt2img has no input image and returns (None, None)."""
+    params = ((task or {}).get("parameters") or {})
+    if not isinstance(params, dict):
+        return (None, None)
+    i2v = params.get("i2v")
+    if isinstance(i2v, dict) and i2v.get("mediaId"):
+        return (str(i2v["mediaId"]), "video")
+    chat = params.get("chat")
+    if isinstance(chat, dict) and chat.get("mediaId"):
+        return (str(chat["mediaId"]), "edit")
+    mid = params.get("mediaId")
+    if mid:
+        ratio = params.get("upscale") or params.get("enlarge")
+        return (str(mid), "upscale" if ratio else "derived")
+    return (None, None)
+
+
 def task_media_index(session, task_id, media_id):
     """Which image of a task a given media_id IS -- the `mediaIndex` the publish mutation
     needs. Derived from the task's own ordered output list (`_task_image_media`, the same
@@ -9394,6 +9429,91 @@ def run_backfill_full_meta(args):
                   "--workers 2 --delay 1")
 
 
+def run_backfill_lineage(args):
+    """--backfill-lineage: fill source_media_id/derive_kind for rows that already have full
+    meta (so --backfill-full-meta's own _needs() gate would never revisit them) but predate
+    lineage tracking. Same per-task getTaskById + source_media_of_task as the forward path
+    (extract_full_meta), just re-scoped to target ONLY the two lineage columns so a catalog
+    that's already fully backfilled doesn't need a second full re-fetch to gain lineage.
+    Safe to re-run -- skips rows that already have EITHER column set (an original txt2img
+    legitimately has both blank forever, so "blank" alone can't be the skip signal; a task_id
+    already visited is tracked instead so an original is never re-fetched every run)."""
+    out = Path(args.out)
+    db_path = _ensure_db(out)
+    session = _make_session(getattr(args, "token", None))
+
+    if not TASK_DETAIL_HASH:
+        raise PixAIError(
+            "TASK_DETAIL_HASH is empty -- the built-in default is missing or was overridden "
+            "with a blank value in config.json. Restore it, or capture a current getTaskById "
+            "sha256Hash from DevTools if the hash rotated.")
+
+    rows = load_catalog(db_path)
+    # A task is "done" once ANY of its rows carries a real source_media_id OR the persisted
+    # lineage_checked marker (a confirmed original -- "blank" alone is ambiguous with "never
+    # checked", which is exactly what lineage_checked exists to disambiguate).
+    done_tasks = {r["task_id"] for r in rows
+                  if r.get("task_id") and (r.get("source_media_id") or r.get("lineage_checked"))}
+    task_ids = list(dict.fromkeys(
+        r["task_id"] for r in rows if r.get("task_id") and r["task_id"] not in done_tasks))
+    print("Found {:,} unfiled tasks to check for lineage.".format(len(task_ids)))
+    if not task_ids:
+        print("Nothing to backfill.")
+        return
+
+    workers = max(1, getattr(args, "workers", 1) or 1)
+
+    def _fetch(tid):
+        task_data = task_detail_gql(session, tid)
+        src, kind = source_media_of_task(task_data)
+        return (src or "", kind or "")
+
+    task_lineage = {}
+    found = checked = 0
+    _prog = getattr(args, "progress", None)
+    err_kinds = {}
+
+    def _note_error(tid, exc):
+        key = "{}: {}".format(type(exc).__name__, str(exc).strip().splitlines()[0][:120]
+                              if str(exc).strip() else "(no message)")
+        err_kinds[key] = err_kinds.get(key, 0) + 1
+
+    for tid, res in _parallel_map(task_ids, _fetch, workers, _prog, delay=args.delay,
+                                  on_error=_note_error):
+        src, kind = res or ("", "")
+        task_lineage[tid] = (src, kind)
+        checked += 1
+        if src:
+            found += 1
+        if not _prog and workers <= 1:
+            sys.stdout.write("\r  Tasks {:,}/{:,}  derived {:,}  ".format(
+                checked, len(task_ids), found))
+            sys.stdout.flush()
+
+    print("\nApplying to catalog rows...")
+    for row in rows:
+        tid = row.get("task_id")
+        if tid not in task_lineage:
+            continue
+        src, kind = task_lineage[tid]
+        if src:
+            row["source_media_id"] = src
+            row["derive_kind"] = kind
+        # No source image -- a confirmed original, not "not yet checked". Persisted (a real
+        # catalog column) so this task is skipped on every future run instead of re-fetched
+        # forever -- see this command's docstring.
+        row["lineage_checked"] = "1"
+
+    save_catalog(db_path, rows)
+    errored = sum(err_kinds.values())
+    print("Done. Checked {:,} tasks, {:,} carried a derivation source, {:,} errored. "
+          "Catalog updated.".format(checked, found, errored))
+    if err_kinds:
+        print("Why they failed:")
+        for kind, n in sorted(err_kinds.items(), key=lambda kv: -kv[1])[:5]:
+            print("  {:>7,}  {}".format(n, kind))
+
+
 def run_backfill_phash(args):
     """--backfill-phash: compute a perceptual difference-hash (compute_dhash(), a 64-bit
     dHash -- see its docstring in moonglade_gallery.py) for every catalog row missing
@@ -10177,6 +10297,11 @@ def main():
                     help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
                          "no recorded credit cost yet (recovers the paid_credit column for older "
                          "generations from the task record; long run)")
+    ap.add_argument("--backfill-lineage", action="store_true",
+                    help="fill in source_media_id/derive_kind (which image an edit/upscale/"
+                         "video was made FROM) for rows that predate lineage tracking, via "
+                         "getTaskById; powers Image Details' LINEAGE panel. Idempotent -- a "
+                         "confirmed original is remembered and never re-fetched. Then exit.")
     ap.add_argument("--backfill-phash", action="store_true",
                     help="compute a perceptual difference-hash (dHash) for every image catalog "
                          "row that lacks one, powering the near-duplicate ('upscaled or "
@@ -10636,6 +10761,9 @@ def main():
             return
         if args.backfill_full_meta:
             run_backfill_full_meta(args)
+            return
+        if getattr(args, "backfill_lineage", False):
+            run_backfill_lineage(args)
             return
         if getattr(args, "backfill_phash", False):
             run_backfill_phash(args)
