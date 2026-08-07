@@ -4894,3 +4894,23 @@ body-overflow mechanism LoomMobile already used) applied to all ten full-screen 
 Health, My Art, Contests, Import, Folio, Control Panel, Duplicate Review, Contact Sheet,
 Lightbox, Details. Verified live: body overflow visible → hidden while open → visible on
 close.
+
+### Mascots-in-Branding: the exclusion was over-broad — owner correction  ·  *2026-08-06*
+
+Owner, verbatim: "I think an older decision was misunderstood or mistakenly overturned.
+Mascots were removed completely from the branding panel and my plan was to allow the
+system mascots be customizable. Not Achievements - Just system."
+
+Corrected reading of the 2026-08-05 rulings: what is permanently excluded from Branding
+is **achievement-bound art** (the 57 badges, the per-achievement mascot poses under
+`mascots/ach/`, tier art) — "one achievement never opens another's reward" stands. What
+is IN scope for future Branding customization is the **system mascot/flair set**: the
+named-role files real chrome reads by filename (narrator, login companion, Setup Wizard
+poses, Power-modal poses, claim popup, the Job-Tracker spinner + status poses, the claim/
+gift icons, the easter-egg set). Shape stays what the near-miss entry predicted: a
+checklist of named roles to individually override, not a pick-one-active gallery. The
+sweep still must not auto-adopt into `mascots/`/`rewards/` until that design exists — the
+protection was right, the scope note around it was wrong. The art-inventory artifact is
+being updated with a SYSTEM / SHARED / ACHIEVEMENT classification so the owner can mark
+which roles become user-unlockable behind Under the Hood; that pick-list is the input to
+the eventual design pass.
