@@ -1620,11 +1620,24 @@ increment in this file works.
       decisions:** the negative prompt is DROPPED — owner, verbatim: "The negative prompt
       can go - PixAI does not use neg prompting in videos. Claude design inferred." The
       weave-mode chips are SKIPPED — "Skip the weave. Your assumption should be right"
-      (the redundancy trace above stands). The Channel selector goes to Claude Design to
-      remove or re-scope (no real submit field exists; likely inferred from PixAI's own
-      site UI the same way the negative prompt was). All three recorded in the Claude
-      Design handoff doc (`design_handoff/FOR_CLAUDE_DESIGN_2026-08-06.md`, machine-local,
-      for the owner to carry into the design project). Item CLOSED — nothing left to build.
+      (the redundancy trace above stands). ~~The Channel selector goes to Claude Design to
+      remove~~ **CORRECTED same day, owner: "Youre incorrect - The normal/enhanced channel
+      switcher is live in the code and has been within mg-generate for a while."** Verified
+      on inspection: `mg-generate-drawer.js` has always carried the Normal/Enhanced select,
+      submitting the real `is_private` field; `build_shot_video_params` (the shared builder
+      behind BOTH the Loom's price and generate routes) has always accepted it; core
+      threads it to PixAI as `isPrivate`, and the CLI even has `--vchannel`. The
+      2026-08-04 audit's "no field for negative prompt or channel exists anywhere in the
+      real backend contract" was HALF wrong — true of `shotPayload()` (the one function it
+      checked), false of the contract. **Channel BUILT 2026-08-06:** `shotPayload` now
+      carries `is_private: !!c.isPrivate` (per-shot, default Normal matching the drawer's
+      own default, feeding both the price preview and the real submit), and the mobile
+      Video tab gets the design's Channel row (Normal/👑 Enhanced select + the SFW note,
+      `Loom Mobile.dc.html:412-414`), mapping enhanced→is_private exactly like the drawer.
+      New payload-shape guard in `loom-core.test.js`; full Loom suite green. Negative
+      prompt + weave removals recorded in the Claude Design handoff doc
+      (`design_handoff/FOR_CLAUDE_DESIGN_2026-08-06.md`, corrected to keep the Channel).
+      Item CLOSED — nothing left to build.
 - [x] Generate → Reference tab missing the Opening/Closing frame pair. **SHIPPED 2026-08-04
       (session 2)** — reused the exact same `FrameSlot` calls Deep Focus's own body already
       makes (same component, same props), including the design's `dfHasPrev`/`dfInheritPrev`
