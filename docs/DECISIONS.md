@@ -1470,9 +1470,12 @@ increment in this file works.
       flat files the header/login templates actually read, so an uploaded/active banner
       doesn't display anywhere in the app yet — that write-through is the next real decision
       to scope. Rotating-source stays deferred until the SQLite bundle work (owner call).
-- [ ] No job run-history/ledger anywhere (desktop: zero; mobile: a toggle with only a disclosure
+- [x] No job run-history/ledger anywhere (desktop: zero; mobile: a toggle with only a disclosure
       sentence behind it) — Sync's "last run/rc/auto-schedule" line and Check rows' last-run
-      timestamps both dropped too
+      timestamps both dropped too. **SHIPPED 2026-08-06** — see the dated entry below ("The
+      job console's Ledger"). Real data end to end: jobs.jsonl was already logging every
+      panel run, React just never read it; two small event enrichments (`action`, `rc`) plus
+      wiring, no new storage.
 - [x] Dedup's 5-stage sequence isn't actually gated (design: each stage locked until the
       previous one runs; real: every stage always clickable). **SHIPPED 2026-08-04.**
 - [x] Organize flow drops the "142 would move" result-readout chip between Preview and Apply.
@@ -4570,3 +4573,53 @@ the real interaction: collapse both panels via their own ‹/› buttons, wait f
 tiered-testing rule already encodes: a feature that changes what a UI *renders* (a gate, a
 layout paradigm) has to re-run the render harness before shipping, or the suite silently
 rots and the NEXT session pays the diagnosis bill — this one cost most of an evening.
+
+### The job console's Ledger: run history, standing order, sync meta, check stamps  ·  *2026-08-06*
+
+The punch list's last unstarted Control Panel item ("no job run-history/ledger anywhere"),
+built per `Control Panel.dc.html`'s own `consoleHeart` enum (:157-181 ledger view, :106-107
+sync meta line, :149 check-row last-run stamps) — owner-approved as phase 4 of the 2>3>4
+session plan, "low priority, can we build this."
+
+**The scoping surprise: the backend already had almost everything.** Every panel run has
+always written start + terminal events to `out_dir/jobs.jsonl` (`type:"panel"`, via
+`_panel_run`/`_panel_reader`'s `_log_job`), served by the same `/api/jobs` feed the Activity
+card polls; `/api/panel/schedule` already persisted the standing order (enabled/action/
+interval_hours/workers/last_run). React simply never read either. The only real backend gaps
+were two missing event fields: the machine `action` key (start event — needed for per-action
+last-run lookups and "run again") and `rc` (terminal event — the design's own "· rc 0" result
+format). Both added as one-line enrichments to the existing `_log_job` calls; no new storage,
+no new routes. Guarded by `test_panel_job_events_carry_action_and_rc` (asserts through the
+real `read_jobs()` reconstruction, not raw log lines).
+
+**Shipped, both platforms:**
+- `useControlPanel.js`: `panelHistory` (jobs feed filtered to panel events, refetched on every
+  job completion), `schedule` + `saveSchedule` (POST is localhost-only server-side; the 403
+  surfaces as the control's own error text rather than a silently-unstuck toggle).
+- Desktop: a Pipelines/Ledger segmented toggle in the console header (the DC models the choice
+  as a preview enum; the real control reuses the exact segmented pattern `ControlMobile.jsx`
+  already shipped for this same choice). Ledger view: standing-order row (interval select +
+  on/off toggle, editable only for a local session), dated run rows (`when · name · result`,
+  emerald on clean, "↻ run again" on SAFE actions only — a destructive re-run belongs to the
+  pipelines chips whose arm-then-confirm UI is the real guard), and "Never run here:" chips
+  (the DC's own footer: safe actions with no recorded run, each a live run chip). Sync card
+  gains the "last run … / auto on|off — every N hours · safe jobs only" meta line; Check rows
+  gain their per-action last-run stamp.
+- Mobile: the Ledger sub-tab's honest disclosure note (which correctly said nothing was
+  wired) replaced with the real rows + standing order, mobile-compact; check rows get the
+  same stamps. The stale header comment claiming "nothing persists per-action run history"
+  corrected — it was never true of the backend, only of the frontend wiring.
+
+**Verified:** `npm run build` clean; `tests/test_panel.py` 37/37 (including the new event
+guard) + `test_js_syntax.py` green. Live against the real running server: the toggle, the
+standing-order row (real schedule.json state: off · every 6 hours · 4 workers), the honest
+empty-state, all 15 never-run chips, the sync meta line, and the check-row stamps all render;
+screenshots taken in a real authenticated session. **Known cold-start state, disclosed:** the
+live server predates the `action`/`rc` fields, so existing history rows carry no rc and no
+"run again" until runs happen under a restarted server — the owner's own Panel Restart
+applies it; nothing here forces a restart of a live instance.
+
+**Why.** The DC's ledger demo data ("57 new · rc 0") implied parsed per-run result summaries;
+what's real today is status + rc + error text, and that is what ships — result-line parsing
+(e.g. lifting "57 new" out of a sync's own output) would be a separate, honest enhancement,
+not silently faked in this pass.

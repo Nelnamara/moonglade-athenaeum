@@ -89,6 +89,8 @@ export default function useControlPanel() {
   const [summary, setSummary] = useState(null);
   const [achievements, setAchievements] = useState(null);
   const [summaryErr, setSummaryErr] = useState("");
+  const [panelHistory, setPanelHistory] = useState([]); // jobs.jsonl, type:"panel" only
+  const [schedule, setSchedule] = useState(null);       // /api/panel/schedule settings
 
   const [running, setRunning] = useState(null); // {action, label}
   const [progress, setProgress] = useState(null);
@@ -140,6 +142,30 @@ export default function useControlPanel() {
       setSummaryErr("Couldn't load the Panel — network error, try reopening it.");
     }
   };
+  // ---- Run-history ledger + the standing order (Control Panel.dc.html:157-181) ----
+  // History is the REAL jobs.jsonl paper trail filtered to type:"panel" -- the same
+  // /api/jobs feed the Activity card already polls, not a second bespoke store. The
+  // schedule is /api/panel/schedule's real persisted settings (GET login-tier;
+  // writes are localhost-only server-side, so saveSchedule surfaces the 403 as its
+  // error string rather than pretending a LAN toggle stuck).
+  const fetchPanelHistory = async () => {
+    try {
+      const r = await fetch("/api/jobs");
+      const d = await r.json();
+      setPanelHistory((d.jobs || []).filter((j) => j.type === "panel" && !j.dismissed));
+    } catch { /* the ledger view just renders empty -- non-critical */ }
+  };
+  const fetchSchedule = async () => {
+    try {
+      const r = await fetch("/api/panel/schedule");
+      if (r.ok) setSchedule(await r.json());
+    } catch { /* standing-order row stays hidden -- non-critical */ }
+  };
+  const saveSchedule = async (patch) => {
+    const d = await postJSON("/api/panel/schedule", patch);
+    if (!d.error) setSchedule(d);
+    return d;
+  };
   const fetchAchievements = async () => {
     try {
       const r = await fetch("/api/achievements");
@@ -150,6 +176,8 @@ export default function useControlPanel() {
   useEffect(() => {
     fetchSummary();
     fetchAchievements();
+    fetchPanelHistory();
+    fetchSchedule();
     // A job can already be running when this mounts -- the scheduler fires its own sync
     // on a timer with no browser tab involved, or another tab/session started one. Without
     // this check the console renders the idle grid as if nothing were happening, and
@@ -236,6 +264,10 @@ export default function useControlPanel() {
       }
       fetchSummary();
     }
+    // Either branch: the run just wrote its terminal event to jobs.jsonl, so the
+    // ledger has a new row to show (failed runs are ledger rows too, by design --
+    // the DC colors them, it doesn't hide them).
+    fetchPanelHistory();
   };
 
   const runAction = async (key, extra) => {
@@ -364,6 +396,7 @@ export default function useControlPanel() {
 
   return {
     summary, summaryErr, achievements, skins, activeSkin, pickSkin, brandingUnlocked,
+    panelHistory, schedule, saveSchedule,
     fetchSummary, fetchAchievements, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
     dedupDone, organizeRes,

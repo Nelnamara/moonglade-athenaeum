@@ -208,6 +208,41 @@ def test_run_safe_action_spawns_and_status(tmp_path, monkeypatch):
     assert "line two" in d["lines"]
 
 
+def test_panel_job_events_carry_action_and_rc(tmp_path, monkeypatch):
+    """The run-history ledger (2026-08-06) reads jobs.jsonl's panel events: the start
+    event must carry the machine `action` key (per-action last-run lookups + "run
+    again"), and the terminal event must carry `rc` (the design's own "… · rc 0"
+    result format). Reconstructed via the same read_jobs() the /api/jobs feed uses,
+    so this asserts what the ledger actually receives, not raw log lines."""
+    import subprocess
+
+    class FakeProc:
+        def __init__(self):
+            import io
+            self.stdout = io.StringIO("line one\n")
+        def wait(self):
+            return 0
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: FakeProc())
+
+    cli = _authed_client(tmp_path)
+    cli.post("/api/panel/run", json={"action": "sync"})
+    import time
+    for _ in range(50):
+        d = cli.get("/api/panel/status").get_json()
+        if d["status"] != "running":
+            break
+        time.sleep(0.02)
+    assert d["status"] == "done"
+
+    import moonglade_backup as core
+    jobs = [j for j in core.read_jobs(tmp_path) if j.get("type") == "panel"]
+    assert jobs, "the panel run never reached jobs.jsonl"
+    job = jobs[0]
+    assert job.get("action") == "sync", "start event lost the machine action key"
+    assert job.get("rc") == 0, "terminal event lost the exit code"
+    assert job.get("status") == "done"
+
+
 def test_run_reports_done_with_errors_from_the_warn_marker(tmp_path, monkeypatch):
     """D-4: the CLI subprocess prints a ~=MGWARN=~N marker line when some files failed
     but the run itself completed (exit 0). Before the fix, _panel_reader had no idea
