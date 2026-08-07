@@ -1,6 +1,7 @@
 import React from "react";
 import useHealth, { fmt } from "../hooks/useHealth.js";
 import "../styles/overlays.css";
+import useScrollLock from "../hooks/useScrollLock.js";
 
 /* The Collection Health overlay — the first of the six designed nav overlays
    to port (Frontend Gallery DC, the ovHealth slab). In-app modal, NOT the
@@ -60,6 +61,7 @@ function donutData(models) {
 }
 
 export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onLoraFilter, onOpenDuplicates }) {
+  useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const { h, err, stats, monthMax, modelMax, tier, buckets } = useHealth();
   const [monthView, setMonthView] = React.useState("trend");   // DC default
   const [modelView, setModelView] = React.useState("bars");    // DC default

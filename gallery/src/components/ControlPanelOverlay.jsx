@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import "../styles/overlays.css";
 import "../styles/control-panel.css";
 import useControlPanel, { postJSON, DEDUP_STAGES } from "../hooks/useControlPanel.js";
+import useScrollLock from "../hooks/useScrollLock.js";
 
 /* Control Panel -- design spec: Control Panel.dc.html. Ported as a MODAL, per the owner's
    live 2026-08-02 correction ("Control panel is now ALSO modal. no separate pages anymore")
@@ -78,6 +79,7 @@ function ledgerResult(j) {
 }
 
 export default function ControlPanelOverlay({ onClose, boot, account }) {
+  useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const [tab, setTab] = useState("maint");
   const [subOverlay, setSubOverlay] = useState(null); // 'users' | 'trash'
   const [markBusy, setMarkBusy] = useState(false); // inline mark-pick from the Branding tile

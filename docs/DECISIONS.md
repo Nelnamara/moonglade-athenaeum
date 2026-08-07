@@ -4871,3 +4871,26 @@ exists the buttons ride the exact coming-soon acknowledgment the Publish nav stu
 uses (a visible, honest control — never a dead navigation to a panel that isn't there).
 Upgrade path is one swap: replace the toast with the DC's `mg_publish` hand-off when the
 panel ships. Render harness + syntax suites green across all five corrections.
+
+### Health at 35k + panel scroll-lock — two owner reports, both fixed  ·  *2026-08-06*
+
+**Health "VERY slow" on the 35k production install.** Profiled: 1.13s at the work
+machine's 2.5k images, dominated by the disk walk — the old rglob enumerated EVERY file
+(including the entire gallery/ thumbnail tree, discarded per-file afterward) and paid a
+separate stat() each. Three fixes: (1) the walk is now a pruning os.scandir recursion —
+excluded subtrees are never entered, sizes come off the DirEntry with no per-file syscall
+on Windows — measured 1126ms → 278ms locally (4x) with byte-identical results, all 50
+existing health tests green; (2) /api/health gained a 120s route-level TTL cache
+(collection_health itself stays pure for the classic page + tests; ?fresh=1 bypasses);
+(3) useHealth renders the last payload instantly on reopen while refetching in place
+(stale-while-revalidate). Verified live: reopen paints stats in <60ms. At 35k the cold
+compute should drop from tens of seconds toward ~2-3s, and every open after the first is
+instant.
+
+**Panels no longer scroll the gallery behind them** (owner: "its a bit of an
+annoyance"). One shared reference-counted `useScrollLock` hook (stacked overlays — Panel
+→ Trash, Lightbox → Details — restore only when the LAST layer closes; same
+body-overflow mechanism LoomMobile already used) applied to all ten full-screen layers:
+Health, My Art, Contests, Import, Folio, Control Panel, Duplicate Review, Contact Sheet,
+Lightbox, Details. Verified live: body overflow visible → hidden while open → visible on
+close.

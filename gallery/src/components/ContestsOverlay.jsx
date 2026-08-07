@@ -2,6 +2,7 @@ import React from "react";
 import useContests, { fmt } from "../hooks/useContests.js";
 import "../styles/overlays.css";
 import "../styles/myart-contests.css";
+import useScrollLock from "../hooks/useScrollLock.js";
 
 /* Contests overlay — ported from the Frontend Gallery DC's ovContests slab
    (lines ~601-645): one official contest, a grid of community ones. Real
@@ -28,6 +29,7 @@ import "../styles/myart-contests.css";
    CONSUME it rather than hold a second, drifting copy of the same fetch. */
 
 export default function ContestsOverlay({ onClose }) {
+  useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const { d, err, contests, official, community, featured, restOfficial, openContest, dateRange, daysLeft } = useContests();
   // Frontend Gallery.dc.html:2434 -- every card's date field is a combined
   // "range · N days left" string (`c.dates + ' · ' + c.left`); real code showed range-only

@@ -19,15 +19,22 @@ import { useEffect, useState } from "react";
 
 export const fmt = (n) => (n == null ? "—" : Number(n).toLocaleString());
 
+// Stale-while-revalidate (owner report 2026-08-06: the panel was "VERY slow" at 35k
+// images). The last payload survives across opens for the whole page session; a reopen
+// renders those numbers INSTANTLY while the refetch replaces them in place. First open
+// still waits (nothing to show yet) -- that first wait is what the server-side walk
+// rewrite + api_health's TTL cache attack.
+let _lastHealth = null;
+
 export default function useHealth() {
-  const [h, setH] = useState(null);
+  const [h, setH] = useState(_lastHealth);
   const [err, setErr] = useState(null);
 
   useEffect(() => {
     let dead = false;
     fetch("/api/health")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((d) => { if (!dead) setH(d); })
+      .then((d) => { _lastHealth = d; if (!dead) setH(d); })
       .catch((e) => { if (!dead) setErr(String(e.message || e)); });
     return () => { dead = true; };
   }, []);

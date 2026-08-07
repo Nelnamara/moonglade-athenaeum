@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import useContactSheet, { pad } from "../hooks/useContactSheet.js";
 import "../styles/overlays.css";
 import "../styles/contact-sheet-overlay.css";
+import useScrollLock from "../hooks/useScrollLock.js";
 
 /* Contact Sheet overlay — a native React build, not a hand-off to the classic
    /contact-sheet page (that route stays, untouched, for classic's own use
@@ -32,6 +33,7 @@ import "../styles/contact-sheet-overlay.css";
    height) and print this sibling's own natural (small) height instead. */
 
 export default function ContactSheetOverlay({ ids, collectionName, onClose }) {
+  useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const { data, err } = useContactSheet({ ids, collectionName });
 
   return createPortal(

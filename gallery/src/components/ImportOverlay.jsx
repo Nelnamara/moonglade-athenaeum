@@ -2,6 +2,7 @@ import React, { useRef } from "react";
 import useImport from "../hooks/useImport.js";
 import "../styles/overlays.css";
 import "../styles/import-overlay.css";
+import useScrollLock from "../hooks/useScrollLock.js";
 
 /* Import overlay — ported from the Frontend Gallery DC's ovImport slab
    (lines ~723-763): a file list with a collection picker, Cancel/Import N.
@@ -31,6 +32,7 @@ import "../styles/import-overlay.css";
    why those didn't move). */
 
 export default function ImportOverlay({ onClose, collections, onImported }) {
+  useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const {
     files, dragActive, setDragActive, collection, setCollection, collOpen, setCollOpen,
     newCollName, setNewCollName, busy, result, setResult,

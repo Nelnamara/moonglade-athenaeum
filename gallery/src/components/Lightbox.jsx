@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
 import SimilarModal from "./SimilarModal.jsx";
 import "../styles/lightbox.css";
+import useScrollLock from "../hooks/useScrollLock.js";
 
 /* Full-bleed viewer -- the DC respec (Lightbox.dc.html) over the classic's
    capability set (owner, 2026-07-30: "the current lightbox is full of
@@ -30,6 +31,7 @@ export default function Lightbox({
   items, index, setIndex, onClose, onRate, page, pages, loadPage, onEdit, onToVideo,
   onOpenDetails,
 }) {
+  useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const it = items[index];
   const mid = it ? it.media_id : null;
   // Warm the neighbors: arrow-nav's cost was a cold /full fetch + decode from zero on

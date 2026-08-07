@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import useDuplicateReview, { MATCH_LABEL, fmtBytes, bestKeeperPath } from "../hooks/useDuplicateReview.js";
 import "../styles/overlays.css";
 import "../styles/duplicate-review-overlay.css";
+import useScrollLock from "../hooks/useScrollLock.js";
 
 /* Duplicate Review overlay — the sixth designed nav overlay to port, opened
    from Collection Health's Duplicates/Reclaimable tiles (HealthOverlay.jsx).
@@ -135,6 +136,7 @@ function similarityTier(g) {
 }
 
 export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
+  useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const csrf = (boot && boot.csrf) || "";
   const {
     data, err, groups, countChips,
