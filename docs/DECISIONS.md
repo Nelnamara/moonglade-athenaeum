@@ -1788,15 +1788,20 @@ logic and most regions are genuinely faithful; these are the real misses:
       `c.dates + ' · ' + c.left` formula via a shared `dateWithLeft()` helper
 - [x] ♦ diamond icon missing from every community-card CR pill — only the one featured card
       gets it; design puts it on all of them — **SHIPPED 2026-08-04**
-- [x]→building "+12 more community contests below the fold — scroll" footer hint missing
+- [x] "+12 more community contests below the fold — scroll" footer hint missing
       entirely — **owner decision 2026-08-04 (session 2): Option C.** The design's "+12" is
       static demo flavor text implying a paginated/preview grid; the real
       `ContestsOverlay.jsx`/`ContestsMobile.jsx` already render every `community` row in one
       unpaginated `.map()` (confirmed reading both files, no `.slice()`/limit anywhere), so
       there's no real "N more below the fold" number without scroll-position tracking. Owner
       chose neither skipping it nor building scroll-tracking: **replace with a real total
-      community-contest count plus a mention to check the official Discord for more.** Exact
-      copy pending owner sign-off before shipping.
+      community-contest count plus a mention to check the official Discord for more.**
+      **SHIPPED 2026-08-06** — copy owner-approved (option 1 of three samples): "N community
+      contest(s) running — find more on the official PixAI Discord.", where N is the live
+      `community.length` (the full unpaginated API list, verified accurate against the
+      rendered cards: 26 = 26 at ship time) and the Discord is a real owner-supplied invite
+      link (discord.gg/cRtTuq5Z4, new tab). Both platforms, DC:642's own footer type face.
+      Live-verified against the real server.
 
 **Contact Sheet (desktop)** — `ContactSheetOverlay.jsx` vs `Contact Sheet.dc.html`.
 - [x] Print output likely illegible: the design has a dedicated light/print palette

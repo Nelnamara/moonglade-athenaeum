@@ -131,6 +131,15 @@ export default function ContestsMobile() {
           ))}
         </div>
       )}
+      {/* Same real-count + Discord footer as ContestsOverlay.jsx -- see its comment. */}
+      {community.length > 0 && (
+        <div className="mgct-footer">
+          {fmt(community.length)} community contest{community.length === 1 ? "" : "s"} running
+          {" — find more on the "}
+          <a className="mgct-discord" href="https://discord.gg/cRtTuq5Z4"
+            target="_blank" rel="noopener noreferrer">official PixAI Discord</a>.
+        </div>
+      )}
     </>
   );
 }

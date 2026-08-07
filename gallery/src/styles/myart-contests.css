@@ -85,3 +85,10 @@
 .mgct-card .mgct-title { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mgct-card .mgct-body { padding: 9px 12px 11px; gap: 6px; }
 .mgct-empty { font-size: 11.5px; color: var(--subtext); padding: 20px 0; }
+/* Footer -- the DC's own hint face (Frontend Gallery.dc.html:642: 10.5px, overlay0,
+   12px top padding), carrying the real count + the official Discord link instead of
+   the mock's static "+12 more" demo text (owner Option C). */
+.mgct-footer { font-size: 10.5px; color: var(--overlay0); padding-top: 12px; }
+.mgct-footer .mgct-discord { color: var(--lavender); text-decoration: underline;
+  text-underline-offset: 2px; }
+.mgct-footer .mgct-discord:hover { color: var(--text); }
