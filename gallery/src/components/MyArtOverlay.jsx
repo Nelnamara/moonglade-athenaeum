@@ -11,20 +11,20 @@ import useScrollLock from "../hooks/useScrollLock.js";
    visibility badges, tag chips, and the footer avatar/title/date/likes row —
    replacing the old text-only ranked list.
 
-   PHASE A (display-only), disclosed:
-   - Artworks/Animations tabs run on REAL local data: GET /api/myart/items (every
-     catalog row with an artwork_id, public and private, card-ready — thumbs are
-     the local /thumbs/<mid>.jpg). The stat row keeps /api/your-art's LIVE view
-     counts, exactly as before.
-   - The design's hover actions (publish-toggle/edit-tags/delete) and bulk Manage
-     are PixAI account MUTATIONS that have no backend yet (the Publish-flow
-     stage). They render per the design but disabled, labeled honestly; wiring
-     arrives with that stage. Card click opens Details, the app's real target.
-   - Models & LoRAs / Assets: no local data source exists for ownership/uploads
-     (verified against the catalog + routes 2026-08-06), so these tabs show the
-     design's own "Nothing here yet." empty state plus a one-line why.
-   - The heart-color rule, badge colors, tab pills, and grid geometry are the
-     DC's literal values (heartCol: >10 mauve, >0 subtext, else overlay0). */
+   Real local data throughout: GET /api/myart/items (every catalog row with an
+   artwork_id, public and private, card-ready — thumbs are the local
+   /thumbs/<mid>.jpg). The stat row keeps /api/your-art's LIVE view counts.
+   The heart-color rule, badge colors, tab pills, and grid geometry are the
+   DC's literal values (heartCol: >10 mauve, >0 subtext, else overlay0).
+
+   Per-card actions (publish-toggle/edit-tags/delete) and bulk Manage all run
+   through the SAME real /api/myart/publish pipeline, preview-then-confirm --
+   bulk Manage (2026-08-06) is not a second code path, it is the identical
+   preview()/confirm() calling in a loop over the selection with ONE confirm
+   sheet in front of all of them, so a batch action can't fire N account
+   mutations off one accidental tap. Models & LoRAs / Assets: LoRAs is real
+   (see loras state below); Assets still has no local data source, so it stays
+   the design's own "Nothing here yet." empty state plus a one-line why. */
 
 const VIS_OPTS = [["all", "All"], ["public", "Public"], ["private", "Private"]];
 const SORT_OPTS = [["latest", "Latest"], ["oldest", "Oldest"], ["liked", "Most liked"]];
@@ -58,6 +58,16 @@ function Dropdown({ kick, value, opts, onPick }) {
 // DC:2324 verbatim -- the heart color scales with the like count.
 const heartCol = (n) => (n > 10 ? "var(--mauve)" : n > 0 ? "var(--subtext)" : "var(--overlay0)");
 
+// DC's BASE_TINT (L2393): named colors for the three architectures it called out by
+// name; anything else falls to its own fallback (subtext on surface0) rather than a
+// made-up color -- includes DiT.1/DiT.3, which the design never assigned a tint.
+const BASE_TINT = {
+  SDXL_MODEL: ["var(--emerald)", "rgba(79,201,154,.18)", "XL"],
+  MMDIT26A_MODEL: ["var(--mauve)", "rgba(182,146,230,.18)", "DiT.2"],
+  SD_V1_MODEL: ["var(--gold)", "rgba(212,175,55,.18)", "SD"],
+};
+const baseTint = (t) => BASE_TINT[t] || ["var(--subtext)", "var(--surface0)", t ? t.replace("_MODEL", "") : "?"];
+
 const dateLabel = (iso) => {
   if (!iso) return "";
   const d = new Date(iso + "T00:00:00");
@@ -81,6 +91,32 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
   const [actErr, setActErr] = useState("");
   const [editing, setEditing] = useState(null);   // media_id whose tags are being edited
   const [tagDraft, setTagDraft] = useState("");
+  // Bulk Manage (DC:661-678): a selection mode over the SAME real pipeline the per-card
+  // actions use. Visibility/delete need no server-side resolution before confirming
+  // (unlike a single publish's media_index, or tags' tack_ids), so bulk skips the
+  // preview round-trip and goes straight to one confirm sheet covering the whole batch.
+  const [manageOn, setManageOn] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkAsk, setBulkAsk] = useState(null);     // {action, extra, count} | null
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkErr, setBulkErr] = useState("");
+  const [bulkResult, setBulkResult] = useState(null);   // {ok, fail} after a run, transient
+
+  // Models & LoRAs tab: real data via the SAME market route the Generate drawer's own
+  // picker already uses (src=mine -- "the ordinary market connection filtered by the
+  // signed-in user's own id, exactly as PixAI's MY LORA tab does it", per that route's
+  // own docstring). Fetched once, lazily, the first time the tab is opened.
+  const [loras, setLoras] = useState(null);
+  const [lorasErr, setLorasErr] = useState("");
+  useEffect(() => {
+    if (tab !== "loras" || loras !== null) return;
+    let dead = false;
+    fetch("/api/model-search?src=mine&kind=lora&size=48")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
+      .then((d) => { if (!dead) setLoras(d.results || []); })
+      .catch((e) => { if (!dead) setLorasErr(String(e.message || e)); });
+    return () => { dead = true; };
+  }, [tab, loras]);
 
   const load = () => fetch("/api/myart/items")
     .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
@@ -126,6 +162,42 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
     } catch (e) { setActErr(String(e.message || e)); } finally { setBusy(false); }
   };
 
+  const toggleManage = () => { setManageOn((v) => !v); setSelected(new Set()); setBulkResult(null); };
+  const toggleSelect = (mid) => setSelected((cur) => {
+    const next = new Set(cur);
+    if (next.has(mid)) next.delete(mid); else next.add(mid);
+    return next;
+  });
+
+  const askBulk = (action, extra) => {
+    setBulkErr(""); setBulkResult(null);
+    setBulkAsk({ action, extra: extra || {}, count: selected.size });
+  };
+
+  // One confirm covers the whole batch; the individual account mutations still run one
+  // request at a time (never parallel) -- polite to PixAI's servers, same pacing ethos
+  // as every other multi-call path in this app, and it means a partial failure midway
+  // is countable rather than an unordered pile of racing responses.
+  const confirmBulk = async () => {
+    if (!bulkAsk) return;
+    setBulkBusy(true); setBulkErr("");
+    let ok = 0, fail = 0;
+    for (const mid of selected) {
+      try {
+        const r = await fetch("/api/myart/publish", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: bulkAsk.action, media_id: mid, csrf,
+                                 confirm: true, ...bulkAsk.extra }),
+        });
+        const res = await r.json();
+        if (res.error) fail++; else ok++;
+      } catch (e) { fail++; }
+    }
+    setBulkAsk(null); setBulkBusy(false); setBulkResult({ ok, fail });
+    setSelected(new Set());
+    await load();
+  };
+
   const media = useMemo(() => {
     const all = rows || [];
     let list = all.filter((r) => (tab === "animations" ? r.is_video : !r.is_video));
@@ -140,9 +212,9 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
     return {
       artworks: all.filter((r) => !r.is_video).length,
       animations: all.filter((r) => r.is_video).length,
-      loras: 0, assets: 0,
+      loras: loras ? loras.length : 0, assets: 0,
     };
-  }, [rows]);
+  }, [rows, loras]);
 
   const mediaTab = tab === "artworks" || tab === "animations";
 
@@ -183,16 +255,68 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
             </div>
           </div>
 
-          {/* Toolbar (DC:627-664). Manage is a mutation surface -- Phase B. */}
+          {/* Toolbar (DC:627-664). */}
           {mediaTab && (
             <div className="mgma2-toolbar">
               <Dropdown kick="Visibility" value={vis} opts={VIS_OPTS} onPick={setVis} />
               <Dropdown kick="Sort" value={sort} opts={SORT_OPTS} onPick={setSort} />
-              <button type="button" className="mgma2-toolbtn" disabled
-                title="Bulk actions come next — per-card publish, tags and delete are live now">
-                ✎ Manage
+              <button type="button" className={"mgma2-toolbtn" + (manageOn ? " on" : "")}
+                onClick={toggleManage}>
+                {manageOn ? "Done" : "✎ Manage"}
               </button>
               {actErr && <span className="mgma2-acterr">⚠ {actErr}</span>}
+            </div>
+          )}
+
+          {/* Bulk bar (DC:667-678) -- same real pipeline as the per-card actions, one
+              confirm sheet covering the whole selection. */}
+          {mediaTab && manageOn && (
+            <div className="mgma2-bulkbar">
+              <span className="n">{selected.size} selected</span>
+              {selected.size > 0 && (
+                <>
+                  <button type="button" className="mgma2-toolbtn"
+                    onClick={() => askBulk("visibility", { private: false })}>◉ Publish</button>
+                  <button type="button" className="mgma2-toolbtn"
+                    onClick={() => askBulk("visibility", { private: true })}>🔒 Unpublish</button>
+                  <button type="button" className="mgma2-toolbtn danger"
+                    onClick={() => askBulk("delete", {})}>🗑 Delete</button>
+                </>
+              )}
+              <button type="button" className="mgma2-toolbtn" disabled={selected.size === 0}
+                onClick={() => setSelected(new Set())}>Clear</button>
+              {bulkResult && (
+                <span className="mgma2-bulkresult">
+                  {bulkResult.ok} done{bulkResult.fail ? ", " + bulkResult.fail + " failed" : ""}
+                </span>
+              )}
+              {bulkErr && <span className="mgma2-acterr">⚠ {bulkErr}</span>}
+            </div>
+          )}
+
+          {/* Bulk confirm -- same shape as the per-card one, scoped to the whole batch. */}
+          {bulkAsk && (
+            <div className="mgma2-confirm">
+              <div className="mgma2-confirmtitle">
+                {bulkAsk.action === "delete"
+                  ? "Delete " + bulkAsk.count + " artwork" + (bulkAsk.count === 1 ? "" : "s") + " from PixAI?"
+                  : (bulkAsk.extra.private ? "Make " : "Make ") + bulkAsk.count + " item"
+                    + (bulkAsk.count === 1 ? "" : "s") + (bulkAsk.extra.private ? " private" : " public") + " on PixAI?"}
+              </div>
+              <div className="mgma2-confirmbody">
+                {bulkAsk.action === "delete" && (
+                  <span className="warn">this can't be undone on PixAI (your local copies stay)</span>
+                )}
+                <div className="mgma2-confirmnote">No credits are spent by this action.</div>
+              </div>
+              <div className="mgma2-confirmacts">
+                <button type="button" className="mgma2-toolbtn" onClick={() => setBulkAsk(null)} disabled={bulkBusy}>Cancel</button>
+                <button type="button"
+                  className={"mgma2-godone" + (bulkAsk.action === "delete" ? " danger" : "")}
+                  onClick={confirmBulk} disabled={bulkBusy}>
+                  {bulkBusy ? "working…" : bulkAsk.action === "delete" ? "Delete them" : "Do it"}
+                </button>
+              </div>
             </div>
           )}
 
@@ -240,17 +364,28 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                 <div className="mgma2-empty">Nothing here yet.</div>
               ) : (
                 <div className="mgma2-grid">
-                  {media.map((it) => (
-                    <div className="mgma2-card" key={it.media_id} role="button" tabIndex={0}
-                      onClick={() => onOpenPost && onOpenPost(it.media_id)}
-                      onKeyDown={(e) => { if (e.key === "Enter") onOpenPost && onOpenPost(it.media_id); }}>
+                  {media.map((it) => {
+                    const isSel = selected.has(it.media_id);
+                    return (
+                    <div className={"mgma2-card" + (manageOn && isSel ? " sel" : "")}
+                      key={it.media_id} role="button" tabIndex={0}
+                      onClick={() => (manageOn ? toggleSelect(it.media_id) : (onOpenPost && onOpenPost(it.media_id)))}
+                      onKeyDown={(e) => { if (e.key === "Enter") (manageOn ? toggleSelect(it.media_id) : (onOpenPost && onOpenPost(it.media_id))); }}>
                       <div className="mgma2-art">
                         <img src={it.thumb} alt="" loading="lazy"
                           onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
-                        <span className={"mgma2-vis" + (it.public ? " pub" : " priv")}>
-                          {it.public ? "◉ Public" : "🔒 Private"}
-                        </span>
-                        {/* DC:698-702 hover actions, now REAL -- each previews first. */}
+                        {/* DC:2340-2341 -- the bulk-select checkbox replaces the visibility
+                            badge while managing (it hides itself in manage mode below). */}
+                        {manageOn ? (
+                          <span className={"mgma2-checkbox" + (isSel ? " on" : "")}>{isSel ? "✓" : ""}</span>
+                        ) : (
+                          <span className={"mgma2-vis" + (it.public ? " pub" : " priv")}>
+                            {it.public ? "◉ Public" : "🔒 Private"}
+                          </span>
+                        )}
+                        {/* DC:698-702 hover actions, REAL -- hidden during manage mode so a
+                            single-item action can't fire mid-selection. */}
+                        {!manageOn && (
                         <span className="mgma2-acts" onClick={(e) => e.stopPropagation()}>
                           <button type="button" disabled={busy}
                             title={it.public ? "Make private on PixAI" : "Make public on PixAI"}
@@ -262,7 +397,8 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                           <button type="button" disabled={busy} title="Delete from PixAI"
                             onClick={() => preview("delete", it)}>🗑</button>
                         </span>
-                        {editing === it.media_id && (
+                        )}
+                        {!manageOn && editing === it.media_id && (
                           <div className="mgma2-tagedit" onClick={(e) => e.stopPropagation()}>
                             <input value={tagDraft} autoFocus
                               placeholder="tags, comma separated"
@@ -293,19 +429,53 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                         <span className="mgma2-likes" style={{ color: heartCol(it.likes) }}>♥ {fmt(it.likes)}</span>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )
             )}
 
             {tab === "loras" && (
-              <div className="mgma2-empty">
-                Nothing here yet.
-                <div className="mgma2-emptywhy">
-                  Your published models &amp; LoRAs live on your PixAI account — listing them
-                  here arrives with the publish pipeline.
+              lorasErr ? (
+                <div className="mgma2-empty">couldn't load — {lorasErr}</div>
+              ) : loras === null ? (
+                <div className="mgh-loading">loading your models &amp; LoRAs…</div>
+              ) : loras.length === 0 ? (
+                <div className="mgma2-empty">Nothing here yet.</div>
+              ) : (
+                /* DC:775-805 -- 4:5 LoRA cards, real data from PixAI's own market
+                   connection (src=mine). Not built: the DC's UNPUBLISHED lock -- the
+                   route this rides on carries no visibility field for a LoRA row
+                   (verified 2026-08-06), so it's left off rather than always-published
+                   guessed; and the pager -- the DC's own was a no-op, and up to 48
+                   LoRAs load in one page, past what any real account here has. */
+                <div className="mgma2-loragrid">
+                  {loras.map((m) => {
+                    const [tc, tbg, tlabel] = baseTint(m.lora_base_model_type);
+                    return (
+                      <a className="mgma2-loracard" key={m.model_id}
+                        href={"https://pixai.art/model/" + encodeURIComponent(m.model_id)}
+                        target="_blank" rel="noreferrer">
+                        <div className="mgma2-loraart">
+                          {/* Same PixAI CDN cross-origin issue the Train picker's covers
+                              hit (images-ng.pixai.art won't hotlink from localhost) --
+                              same host-guarded proxy, and eager for the same reason
+                              (this grid can sit below the fold too). */}
+                          {m.cover_url ? <img src={"/api/pixai-cdn/thumb?u=" + encodeURIComponent(m.cover_url)} alt="" /> : null}
+                          <span className="mgma2-lorabadge">◈ USER LORA</span>
+                          <span className="mgma2-lorabase" style={{ color: tc, background: tbg, borderColor: tc }}>{tlabel}</span>
+                          <div className="mgma2-loraname">{m.title}</div>
+                        </div>
+                        <div className="mgma2-lorastats">
+                          <span className="fire">🔥 {fmt(m.ref_count)}</span>
+                          <span>💬 {fmt(m.comment_count)}</span>
+                          <span className="mgma2-lorapill">♥ {fmt(m.liked_count)}</span>
+                        </div>
+                      </a>
+                    );
+                  })}
                 </div>
-              </div>
+              )
             )}
             {tab === "assets" && (
               <div className="mgma2-empty">

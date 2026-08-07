@@ -53,6 +53,15 @@ button.mgma2-toolbtn { display: flex; align-items: center; gap: 7px; padding: 8p
   color: var(--subtext); border: 1px solid var(--surface1); background: rgba(33,31,58,.5);
   font-family: inherit; }
 button.mgma2-toolbtn:disabled { opacity: .55; cursor: not-allowed; }
+button.mgma2-toolbtn.on { border-color: var(--accent); background: rgba(182,146,230,.14); color: var(--text); }
+button.mgma2-toolbtn.danger { color: var(--red, #f38ba8); border-color: rgba(243,139,168,.4);
+  background: rgba(243,139,168,.1); }
+/* Bulk bar (DC:667-678) -- the real pipeline, one confirm for the whole selection. */
+.mgma2-bulkbar { flex: none; margin: 0 26px 12px; padding: 10px 14px; border-radius: 11px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  border: 1px solid var(--accent); background: rgba(182,146,230,.1); }
+.mgma2-bulkbar .n { font-size: 12px; font-weight: 700; color: var(--text); }
+.mgma2-bulkresult { font-size: 11.5px; color: var(--emerald); }
 .mgma2-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 26px 22px; }
 .mgma2-empty { padding: 60px 0; text-align: center; color: var(--overlay0); font-size: 13px; }
 .mgma2-emptywhy { font-size: 11px; margin-top: 8px; max-width: 420px;
@@ -70,6 +79,40 @@ button.mgma2-toolbtn:disabled { opacity: .55; cursor: not-allowed; }
   font-weight: 700; padding: 3px 8px; border-radius: 999px; backdrop-filter: blur(4px);
   background: rgba(8,6,20,.72); }
 .mgma2-vis.pub { border: 1px solid rgba(79,201,154,.4); color: var(--emerald); }
+/* DC:2340-2341 -- the bulk-select checkbox, same slot the visibility badge sits in. */
+.mgma2-checkbox { position: absolute; top: 8px; left: 8px; z-index: 3; width: 22px;
+  height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 12px;
+  font-weight: 800; color: transparent; background: rgba(8,6,20,.8);
+  border: 1px solid var(--surface1); }
+.mgma2-checkbox.on { color: var(--mantle, #0a0818); background: var(--accent);
+  border-color: var(--accent); }
+.mgma2-card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+/* Models & LoRAs tab (DC:775-805) -- 4:5 cards, real data. */
+.mgma2-loragrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 14px; }
+.mgma2-loracard { position: relative; display: block; border-radius: 13px; overflow: hidden;
+  border: 1px solid var(--surface1); background: rgba(33,31,58,.5); text-decoration: none;
+  transition: border-color .2s, transform .2s; }
+.mgma2-loracard:hover { border-color: var(--accent); transform: translateY(-2px); }
+.mgma2-loraart { position: relative; aspect-ratio: 4 / 5; background: var(--surface0); }
+.mgma2-loraart img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.mgma2-lorabadge { position: absolute; top: 8px; left: 8px; z-index: 2; font-size: 9px;
+  font-weight: 800; letter-spacing: .04em; padding: 3px 8px; border-radius: 999px;
+  color: var(--mauve); background: rgba(20,14,42,.85); border: 1px solid rgba(182,146,230,.4);
+  backdrop-filter: blur(4px); }
+.mgma2-lorabase { position: absolute; top: 8px; right: 8px; z-index: 2; font-size: 9px;
+  font-weight: 800; padding: 3px 8px; border-radius: 999px; border: 1px solid;
+  backdrop-filter: blur(4px); }
+.mgma2-loraname { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1;
+  padding: 30px 11px 10px;
+  background: linear-gradient(to top, rgba(8,6,20,.94) 0%, rgba(8,6,20,.5) 60%, rgba(8,6,20,0) 100%);
+  font-family: Georgia, serif; font-size: 13.5px; color: var(--text); line-height: 1.3; }
+.mgma2-lorastats { display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  font-size: 11px; color: var(--subtext); font-variant-numeric: tabular-nums; }
+.mgma2-lorastats .fire { color: var(--gold); }
+.mgma2-lorapill { margin-left: auto; display: flex; align-items: center; gap: 4px;
+  padding: 3px 9px; border-radius: 999px; background: var(--surface0); }
 .mgma2-vis.priv { border: 1px solid rgba(212,175,55,.4); color: var(--gold); }
 .mgma2-acts { position: absolute; top: 8px; right: 8px; z-index: 3; display: flex; gap: 5px;
   opacity: 0; transition: opacity .18s; }
