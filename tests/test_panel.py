@@ -1176,3 +1176,30 @@ def test_trigger_words_normalize_to_pixais_rules():
     assert core.normalize_trigger_words("  nel   druid  ") == "nel druid"
     assert core.normalize_trigger_words(None) == ""
 
+def test_list_trainable_base_models_groups_by_arch_with_versionids(monkeypatch):
+    """The train picker's data contract: models grouped by architecture with PixAI's
+    own friendly labels (DiT.2/DiT.1/SDXL/SD 1.5), each carrying the VERSION id the
+    submit needs (not the model id) and a real title. Empty architectures drop out."""
+    def _fake_gql(session, q, variables=None, **kw):
+        t = (variables or {}).get("type")
+        rows = {
+            "MMDIT26A_MODEL": [("m1", "v1", "Tsubaki.2")],
+            "DIT7_MODEL": [("m2", "v2", "Tsubaki")],
+            "SDXL_MODEL": [("m3", "v3", "blue_pencil-XL"), ("m4", "", "no-version")],
+            "SD_V1_MODEL": [],                       # empty -> dropped
+            "MMDIT26B_MODEL": [],                    # empty -> dropped
+        }.get(t, [])
+        return {"generationModels": {"edges": [
+            {"node": {"id": mid, "title": title,
+                      "media": {"urls": [{"url": "http://x/%s.jpg" % mid}]},
+                      "latestAvailableVersion": ({"id": vid} if vid else None)}}
+            for (mid, vid, title) in rows]}}
+    monkeypatch.setattr(core, "gql_adhoc", _fake_gql)
+    groups = core.list_trainable_base_models(object())
+    labels = [g["label"] for g in groups]
+    assert labels == ["DiT.2", "DiT.1", "SDXL"]     # SD 1.5 + DiT.3 empty -> dropped, order kept
+    sdxl = next(g for g in groups if g["label"] == "SDXL")
+    assert [m["title"] for m in sdxl["models"]] == ["blue_pencil-XL"]   # unversioned dropped
+    assert sdxl["models"][0]["version_id"] == "v3"   # the VERSION id, not model id m3
+    assert sdxl["models"][0]["cover"].endswith(".jpg")
+

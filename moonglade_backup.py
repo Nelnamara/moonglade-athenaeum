@@ -7550,6 +7550,64 @@ TRAIN_MIN_IMAGES = 10
 TRAIN_MAX_IMAGES = 100
 
 
+# The trainable base-model architectures, in the order PixAI's own train page shows them,
+# each mapped to its friendly label. The label map is PixAI's own (harvested
+# constants-*.js: mmdit26b->DiT.3, mmdit26a->DiT.2, dit7->DiT.1, sdxl->SDXL) plus SD 1.5.
+# "Model Type" on the train page IS this architecture -- picking one filters which base
+# models ("Model Theme") are offered; the value actually submitted is the chosen model's
+# VERSION id, not its model id (the site names the field baseModelId but assigns it the
+# versionId -- confirmed in the harvested submit builder).
+_TRAIN_ARCHS = (
+    ("MMDIT26B_MODEL", "DiT.3"),
+    ("MMDIT26A_MODEL", "DiT.2"),
+    ("DIT7_MODEL",     "DiT.1"),
+    ("SDXL_MODEL",     "SDXL"),
+    ("SD_V1_MODEL",    "SD 1.5"),
+)
+
+_TRAINABLE_MODELS_Q = (
+    "query($first:Int,$type:GenerationModelType,$feed:String){"
+    " generationModels(first:$first,type:$type,feed:$feed){ edges{ node{"
+    " id title mediaId media{urls{url}}"
+    " latestAvailableVersion{ id status } } } } }")
+
+
+def list_trainable_base_models(session, per_type=24):
+    """The base models a LoRA can be trained on, grouped by architecture -- the train
+    page's Model Type -> Model Theme picker. For each architecture PixAI offers, returns
+    its official base models with a real title, a cover url, and the VERSION id the
+    training submit actually wants. Read-only. Groups with no models are omitted so the
+    UI never shows a dead architecture button.
+
+    Each model dict: {version_id, model_id, title, cover}. version_id is
+    latestAvailableVersion.id -- that is what `submit_training(base_model_id=...)` takes."""
+    groups = []
+    for arch, label in _TRAIN_ARCHS:
+        try:
+            d = gql_adhoc(session, _TRAINABLE_MODELS_Q,
+                          {"first": int(per_type), "type": arch, "feed": "official"})
+        except PixAIError:
+            continue
+        edges = ((d or {}).get("generationModels") or {}).get("edges") or []
+        models = []
+        for e in edges:
+            n = (e or {}).get("node") or {}
+            ver = (n.get("latestAvailableVersion") or {})
+            vid = str(ver.get("id") or "")
+            if not vid:
+                continue                      # unversioned -> not actually trainable
+            urls = ((n.get("media") or {}).get("urls")) or []
+            cover = (urls[0].get("url") if urls and isinstance(urls[0], dict) else "") or ""
+            models.append({
+                "version_id": vid, "model_id": str(n.get("id") or ""),
+                "title": (n.get("title") or "").strip() or str(n.get("id") or ""),
+                "cover": cover,
+            })
+        if models:
+            groups.append({"arch": arch, "label": label, "models": models})
+    return groups
+
+
 def training_free_quota(session):
     """How many FREE LoRA trainings the account has left. PixAI tracks these as a QUOTA
     under the currency `free::user_lora_training` -- NOT as a kaisuuken free card (the
@@ -7576,6 +7634,8 @@ def validate_training(base_model_id, media_ids, title, trigger_words, category,
     """Mirror the site's OWN pre-submit validation (its Er() builder) so a bad request is
     refused here instead of burning a round trip -- or worse, a free-training quota unit.
     Returns the normalized trigger words. Raises PixAIError with a plain-language reason."""
+    # base_model_id is the model VERSION id (list_trainable_base_models' version_id) --
+    # PixAI's baseModelId input takes the version, not the model, id.
     if not base_model_id:
         raise PixAIError("pick a base model to train on")
     ids = [str(m) for m in (media_ids or []) if str(m).strip()]

@@ -38,9 +38,11 @@ export default function TrainOverlay({ onClose }) {
   const [quota, setQuota] = useState(null);
   const [pool, setPool] = useState([]);       // recent library images to choose from
   const [picked, setPicked] = useState([]);   // media_ids in the dataset
-  const [models, setModels] = useState([]);
-  const [modelType, setModelType] = useState("");
-  const [baseModel, setBaseModel] = useState("");
+  // Trainable base models grouped by architecture -- the real Model Type -> Model Theme
+  // structure (each group is one architecture: DiT.2, DiT.1, SDXL, SD 1.5).
+  const [groups, setGroups] = useState([]);
+  const [archIdx, setArchIdx] = useState(0);       // selected Model Type
+  const [baseModel, setBaseModel] = useState("");  // selected theme's VERSION id
 
   const [name, setName] = useState("");
   const [trigger, setTrigger] = useState("");
@@ -59,28 +61,29 @@ export default function TrainOverlay({ onClose }) {
       .catch(() => setQuota(0));
     fetch("/api/next/library?page=1&page_size=60&media=image&sort=newest")
       .then((r) => r.json()).then((d) => setPool(d.items || [])).catch(() => {});
-    fetch("/api/model-search?kind=base&size=24&sort=popular")
+    fetch("/api/train/models")
       .then((r) => r.json())
       .then((d) => {
-        const rows = d.models || d.items || d.results || [];
-        setModels(rows);
-        if (rows.length && !baseModel) setBaseModel(String(rows[0].id || rows[0].model_id || ""));
+        const gs = d.groups || [];
+        setGroups(gs);
+        if (gs.length && gs[0].models.length) setBaseModel(gs[0].models[0].version_id);
       })
       .catch(() => {});
   }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Selecting a Model Type shows that architecture's models and defaults to its first.
+  const pickArch = (i) => {
+    setArchIdx(i);
+    const g = groups[i];
+    setBaseModel(g && g.models.length ? g.models[0].version_id : "");
+  };
+  const themes = (groups[archIdx] || {}).models || [];
 
   const toggle = (mid) => {
     setPicked((cur) => (cur.includes(mid)
       ? cur.filter((x) => x !== mid)
       : (cur.length >= MAX_IMAGES ? cur : cur.concat([mid]))));
   };
-
-  // Architecture filter over the theme cards (the DC's Model Type control), built from
-  // whatever the real model rows actually report rather than a guessed enum list.
-  const types = Array.from(new Set(models.map((m) => m.model_type || m.modelType || "").filter(Boolean)));
-  const shownModels = modelType
-    ? models.filter((m) => (m.model_type || m.modelType) === modelType)
-    : models;
 
   const body = () => ({
     base_model_id: baseModel, media_ids: picked, title: name,
@@ -191,36 +194,35 @@ export default function TrainOverlay({ onClose }) {
                 {CATEGORIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
 
-              {types.length > 1 && (
+              {groups.length > 1 && (
                 <>
                   <label className="mgpub-lab">Model Type</label>
                   <div className="mgtr-types">
-                    <button type="button" className={"mgtr-type" + (modelType === "" ? " on" : "")}
-                      onClick={() => setModelType("")}>All</button>
-                    {types.map((t) => (
-                      <button type="button" key={t}
-                        className={"mgtr-type" + (modelType === t ? " on" : "")}
-                        onClick={() => setModelType(t)}>{t}</button>
+                    {groups.map((g, i) => (
+                      <button type="button" key={g.arch}
+                        className={"mgtr-type" + (archIdx === i ? " on" : "")}
+                        onClick={() => pickArch(i)}>{g.label}</button>
                     ))}
                   </div>
                 </>
               )}
 
               <label className="mgpub-lab">Model Theme</label>
-              <div className="mgtr-themes">
-                {shownModels.map((m) => {
-                  const id = String(m.id || m.model_id || "");
-                  return (
-                    <button type="button" key={id} title={m.name || id}
-                      className={"mgtr-theme" + (baseModel === id ? " on" : "")}
-                      onClick={() => setBaseModel(id)}>
-                      {m.cover_url || m.thumb ? <img src={m.cover_url || m.thumb} alt="" loading="lazy" /> : null}
-                      <span className="n">{m.name || id}</span>
-                      {baseModel === id && <span className="mgtr-check">✓</span>}
+              {themes.length === 0 ? (
+                <div className="mgpub-hint">loading base models…</div>
+              ) : (
+                <div className="mgtr-themes">
+                  {themes.map((m) => (
+                    <button type="button" key={m.version_id} title={m.title}
+                      className={"mgtr-theme" + (baseModel === m.version_id ? " on" : "")}
+                      onClick={() => setBaseModel(m.version_id)}>
+                      {m.cover ? <img src={m.cover} alt="" loading="lazy" /> : null}
+                      <span className="n">{m.title}</span>
+                      {baseModel === m.version_id && <span className="mgtr-check">✓</span>}
                     </button>
-                  );
-                })}
-              </div>
+                  ))}
+                </div>
+              )}
 
               {err && <div className="mgpub-note err">⚠ {err}</div>}
 
