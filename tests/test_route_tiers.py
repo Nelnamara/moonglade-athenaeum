@@ -262,6 +262,12 @@ ROUTE_TIERS = {
     ("api_task_status", "GET"): LOGIN,
     ("api_watch_status", "GET"): LOGIN,
     ("api_your_art", "GET"): LOGIN,
+    ("api_myart_items", "GET"): LOGIN,          # catalog read, same tier as /api/your-art
+    # Mutates the PixAI ACCOUNT (publish/re-tag/delete an artwork) but spends nothing and
+    # is cosmetic-adjacent in the same way the branding slot routes are -- LOGIN tier,
+    # like every other account-touching web action here (/api/generate, /api/claim), with
+    # explicit-token CSRF and a preview-before-confirm step doing the real protecting.
+    ("api_myart_publish", "POST"): LOGIN,
 
     # jobs -- ONE rule string, TWO endpoints (the case a rule-keyed dict drops)
     ("api_jobs", "GET"): LOGIN,
