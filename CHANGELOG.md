@@ -82,6 +82,10 @@ git tags. Full prose notes for tagged versions live on
 - **Loom Mobile's four missing animations** — the metal shimmer on every primary button
   (skin-aware, stops when disabled/reduced-motion) and real slide-down + fade sheet closes
   replacing instant unmounts, on all three bottom sheets.
+- **The Upscale panel became the design's centered modal** (Details + Lightbox): blurred
+  click-to-close scrim, centered card, and a custom animated dropdown for the upscaler
+  instead of a native `<select>` — with the Escape-closes-list-first chain. The mobile
+  sheets' inline mount and every spend-safety guard are unchanged.
 
 ### Fixed
 
