@@ -362,20 +362,19 @@ describe("Fixer: local, verbatim copies of FixTab.jsx's own real editCore.js con
     assert.match(src, /width: Math\.round\(b\.w \* scale\), height: Math\.round\(b\.h \* scale\), tag: b\.tag,/);
   });
 
-  test("the Fixer constants stay LOCAL copies -- the only real cross-dir import is the shared art-filter engine", () => {
-    // Since the Loom went bundle-only (2026-08-08) real cross-directory imports from
-    // gallery/src are allowed, and the art-filter ENGINE is the one deliberate such import
-    // (gallery/src/art/artFilters.js). Every OTHER line mentioning `from "../gallery/` must
-    // be a COMMENT -- in particular FIX_COLORS's own header prose explaining why importing
-    // editCore.js's constants is deliberately absent -- never a live import that would
-    // couple those constants cross-dir instead of keeping the verbatim local copy.
-    const ENGINE_IMPORT = /import\s+MgArtFilters\s+from\s*["']\.\.\/gallery\/src\/art\/artFilters\.js["']/;
-    const hits = src.split("\n").filter((line) =>
-      /from\s*["']\.\.\/gallery\//.test(line) && !ENGINE_IMPORT.test(line));
-    assert.ok(hits.length > 0, "expected at least one line to legitimately DISCUSS a cross-dir gallery import in prose (sanity check the assertion is exercised)");
-    for (const line of hits) {
-      assert.match(line.trim(), /^(\/\/|\*|\/\*)/, `expected only a comment (or the art-filter engine import) to mention 'from "../gallery/', found a real line: "${line.trim()}"`);
-    }
+  test("the Fixer constants stay LOCAL copies -- editCore.js's constants are not cross-dir imported", () => {
+    // Since the Loom went bundle-only (2026-08-08), real cross-directory imports from
+    // ../gallery/src ARE the intended pattern -- shared modules the campaign is converging
+    // (artFilters, GalleryPicker, more to come) live there and import normally. So this no
+    // longer polices ALL gallery imports; it pins the ONE thing this describe block is about:
+    // FixTab.jsx's editCore.js constants (FIX_COLORS/FIX_MIN_PX/FIX_MAX_BOXES/scaleBoxes)
+    // must stay the verbatim LOCAL copies checked above, never an import of editCore.js.
+    // ^-anchored (multiline) so it matches only a REAL import statement, not the prose
+    // comment right above the local copies that quotes `import ... from ".../editCore.js"`
+    // to explain why the import is deliberately absent.
+    assert.doesNotMatch(src,
+      /^\s*import[^\n]*from\s*["']\.\.\/gallery\/src\/gen\/editCore\.js["']/m,
+      "the Fixer constants must stay LOCAL verbatim copies, not a live import of editCore.js");
   });
 });
 

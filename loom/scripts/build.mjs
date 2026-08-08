@@ -67,6 +67,14 @@ async function main() {
     bundle: true,
     platform: "browser",
     format: "iife",
+    // React/ReactDOM are runtime globals (loom/vendor/*), NOT bundled. Shared React
+    // components import "react"/"react-dom" normally (for the gallery's Vite build); these
+    // aliases map those imports onto the globals for the Loom build so React isn't
+    // double-bundled. master-storyboard.jsx's own React import is stripped separately above.
+    alias: {
+      "react": path.join(here, "react-global-shim.js"),
+      "react-dom": path.join(here, "react-dom-global-shim.js"),
+    },
     globalName: "LoomBundle",     // -> window.LoomBundle.default is the App component
     jsx: "transform",             // classic runtime: React.createElement(...), matches
                                    // the Babel-standalone path (data-presets="react")

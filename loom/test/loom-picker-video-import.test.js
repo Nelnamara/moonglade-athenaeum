@@ -33,10 +33,11 @@ import path from "node:path";
 // source-presence assertions, no jsdom. The server side of the chain (type='' vs
 // type=all vs type=video) is exercised for real in tests/test_web_pick.py.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const pickerSrc = readFileSync(path.join(__dirname, "../../static/mg-gallery-picker.js"), "utf8");
+// GalleryPicker.jsx since 2026-08-08 (ported out of static/mg-gallery-picker.js).
+const pickerSrc = readFileSync(path.join(__dirname, "../../gallery/src/components/GalleryPicker.jsx"), "utf8");
 const storyboardSrc = readFileSync(path.join(__dirname, "../master-storyboard.jsx"), "utf8");
 
-describe("mg-gallery-picker: videos are reachable through the type filter", () => {
+describe("GalleryPicker: videos are reachable through the type filter", () => {
   test("the combined type option submits type=all, not the silently-image empty string", () => {
     assert.match(pickerSrc, /<option value="all">Image \+ video<\/option>/,
       "the 'Image + video' option must carry value=\"all\" -- /api/gallery-images treats " +
@@ -47,18 +48,19 @@ describe("mg-gallery-picker: videos are reachable through the type filter", () =
       "server resolves it to images-only");
   });
 
-  test("default-type=\"all\" resolves to the real 'all' filter, not ''", () => {
-    assert.match(pickerSrc, /dt === 'video' \? 'video' : dt === 'all' \? 'all' : 'image'/,
-      "the element's internal default type must be 'all' for default-type=\"all\" so the " +
-      "first fetch asks the server for both kinds instead of the ''->image fallback");
+  test("defaultType=\"all\" resolves to the real 'all' filter, not ''", () => {
+    assert.match(pickerSrc, /defaultType === "video" \? "video" : defaultType === "all" \? "all" : "image"/,
+      "the component's resolved initType must be 'all' for defaultType=\"all\" so the first " +
+      "fetch asks the server for both kinds instead of the ''->image fallback");
   });
 
-  test("the type select's DISPLAYED value is initialized from the resolved default", () => {
-    assert.match(pickerSrc, /this\._typeEl\.value = this\._type/,
-      "without syncing the select to _type, the dropdown always shows the first option " +
-      "('Image + video') even when the active filter is image or video -- so 'Browse " +
-      "library' lies about what it's showing, and any later filter change re-reads the " +
-      "wrong displayed value and silently drops the video filter");
+  test("the type select's DISPLAYED value tracks the resolved default", () => {
+    assert.match(pickerSrc, /const \[type, setType\] = useState\(initType\)/,
+      "type state seeds from the resolved initType");
+    assert.match(pickerSrc, /<select data-f="type" value=\{type\}/,
+      "the select is CONTROLLED by `type` -- without value={type} the dropdown would show " +
+      "its first option ('Image + video') even for an image/video default, so 'Browse " +
+      "library' would lie about what it's showing and drop the video filter on the next change");
   });
 });
 

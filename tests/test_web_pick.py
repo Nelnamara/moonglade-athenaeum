@@ -147,10 +147,14 @@ def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces():
     # test died with the classic cut, 2026-08-08. The shared components below are the
     # surviving surfaces, and their own is_nsfw/data-nsfw/privacy-blur handling -- used
     # by the React shell and the Loom alike -- is what stays pinned.)
-    picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-gallery-picker.js").read_text(encoding="utf-8")
-    assert "if (m.is_nsfw === '1') c.setAttribute('data-nsfw', '1');" in picker_js
-    assert "is_nsfw: m.is_nsfw === '1'" in picker_js
-    assert 'body.privacy-blur mg-gallery-picker .mg-pk-cell[data-nsfw="1"] img' in picker_js
+    # The picker is the React GalleryPicker since 2026-08-08 (ported out of
+    # static/mg-gallery-picker.js); the is_nsfw/data-nsfw handling moved with it, the
+    # privacy-blur CSS to gallery-picker.css (element selector -> .mg-gallery-picker class).
+    picker_jsx = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "components" / "GalleryPicker.jsx").read_text(encoding="utf-8")
+    assert 'data-nsfw={m.is_nsfw === "1" ? "1" : undefined}' in picker_jsx
+    assert 'is_nsfw: m.is_nsfw === "1"' in picker_jsx
+    picker_css = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "styles" / "gallery-picker.css").read_text(encoding="utf-8")
+    assert 'body.privacy-blur .mg-gallery-picker .mg-pk-cell[data-nsfw="1"] img' in picker_css
 
     drawer_js = (Path(__file__).resolve().parents[1] / "static" / "mg-generate-drawer.js").read_text(encoding="utf-8")
     assert drawer_js.count("box.setAttribute('data-nsfw', '1');") == 3   # _renderSlots, _renderEndSlot, _renderVidSlots
@@ -158,7 +162,9 @@ def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces():
     assert 'body.privacy-blur mg-generate-drawer .mgd-slot[data-nsfw="1"] img' in drawer_js
 
     loom_jsx = (Path(__file__).resolve().parents[1] / "loom" / "master-storyboard.jsx").read_text(encoding="utf-8")
-    assert "cb(e.detail.media_id, e.detail.thumb, e.detail.is_video, e.detail.duration, e.detail.is_nsfw);" in loom_jsx
+    # onGalleryPick (the React onPick prop) forwards the media fields as m.* now -- was the
+    # <mg-gallery-picker> element's e.detail.* (2026-08-08) -- still preserving is_nsfw.
+    assert "cb(m.media_id, m.thumb, m.is_video, m.duration, m.is_nsfw);" in loom_jsx
     assert 'openPick((mid, thumb, isVideo, duration, isNsfw) => e.detail.respond(mid, thumb, isNsfw)' in loom_jsx
 
     loom_bundle = (Path(__file__).resolve().parents[1] / "loom" / "dist" / "master-storyboard.bundle.js").read_text(encoding="utf-8")

@@ -85,10 +85,14 @@ def test_every_page_carries_the_401_guard(client, path):
 
 
 def _hook_list(text, label):
-    """Pull the hook names out of a `... { a, b, c } ... React` construct."""
+    """Pull the hook NAMES out of a `... { a, b, c } ... React` construct. Takes the key
+    before any `:` -- since the Loom went bundle-only + the react-global-shim alias landed
+    (2026-08-08), esbuild may locally rename the injected `var {...} = React` preamble to
+    avoid a bundle-scope collision (`useState: useState2`); the destructured HOOK is still
+    `useState`, so compare on the key, not the local binding."""
     m = re.search(r"\{([^}]*)\}\s*(?:from\s*[\"']react[\"']|=\s*React)", text)
     assert m, "no React hook destructure/import found in " + label
-    return [h.strip() for h in m.group(1).split(",") if h.strip()]
+    return [h.split(":")[0].strip() for h in m.group(1).split(",") if h.strip()]
 
 
 def test_loom_hook_preamble_matches_source_in_every_delivery_path():

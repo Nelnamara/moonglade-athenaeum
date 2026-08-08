@@ -376,27 +376,21 @@ is in `docs/DECISIONS.md`.
 framework-neutral `static/mg-*.js` files load via a plain `<script src>` tag with no build
 step — the last vanilla front-end in the app — and are being folded into the React build one
 at a time until `static/` is empty (then master merge + v3.0). **Done so far:** the art-filter
-engine, moved to `gallery/src/art/artFilters.js` (a plain ES-module import now, no longer a
-`window.AF` global); and The Loom went **bundle-only** (its esbuild bundle is the sole
-delivery — the in-browser Babel transpile is retired — so it imports shared modules like a
-normal build). **Remaining (7):** the files below, each still `<script>`-loaded by both the
-React gallery shell and the Loom shell, ported in dependency order (picker-core+gallery-picker
-→ model-picker → upscale-panel → notify → generate-drawer → cost-badge). Each self-injects its
-own `<style>` reading `DESIGN_TOKENS_CSS` so it re-skins with the app:
+engine (`gallery/src/art/artFilters.js`); the image picker (`GalleryPicker.jsx` + `pickerCore.js`,
+which absorbed the old `picker-core.js` engine); and The Loom went **bundle-only** (its esbuild
+bundle is the sole delivery — the in-browser Babel transpile is retired — so it imports shared
+modules like a normal build, with `react`/`react-dom` aliased to the runtime globals and a
+sibling `master-storyboard.bundle.css` for their CSS). **Remaining (5):** the files below, each
+still `<script>`-loaded by both the React gallery shell and the Loom shell, ported in dependency
+order. Each self-injects its own `<style>` reading `DESIGN_TOKENS_CSS` so it re-skins with the app:
 
 | File | Element / global | Role |
 |---|---|---|
 | `mg-model-picker.js` | `<mg-model-picker>` | Model/LoRA picker: search box + cover cards + hover preview card. With the opt-in `market` attribute it also renders the browse chrome: a **source** row (Market / Bookmarked / Mine — Mine is LoRA-only), sort, nine category chips, and Posted-at / Source / License dropdowns. Filters are hidden **and not sent** on the bookmark source, which honours only a keyword and the architecture filter |
-| `mg-gallery-picker.js` | `<mg-gallery-picker>` | Whole-catalog image picker modal (search, Collection/Source/Rating/Sort filters, infinite scroll); wraps `picker-core.js` |
 | `mg-generate-drawer.js` | `<mg-generate-drawer>` | The full Generate/Edit/Video form (Multi-ref slots, cost line, submit+poll) |
 | `mg-cost-badge.js` | `<mg-cost-badge>` | The one renderer for "this costs N credits" / "a free card covers it" |
 | `mg-notify.js` | `Ach` / `Toast` / `Jobs` / `JobsCard` (plain globals, not a custom element) | Achievement-toast celebrations, the corner Toast utility, and the Job activity tracker |
 | `mg-upscale-panel.js` | `<mg-upscale-panel>` | The image-view upscale surface. Two distinct mechanisms, deliberately not conflated: `enlarge` (ESRGAN, a model choice) and `upscale` (Hires, denoising strength + steps). The ratio cap is computed from the source's own dimensions against the pixel ceiling, not fixed |
-
-`static/picker-core.js` is a sixth file worth knowing about but is not one of the five: it's
-the framework-agnostic browse/filter/paginate/infinite-scroll logic that `mg-gallery-picker`
-wraps (and that the Loom's own `GalleryPick` also shares) — no DOM, no custom element, just
-the shared engine underneath.
 
 ## Testing
 

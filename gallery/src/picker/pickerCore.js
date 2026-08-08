@@ -9,7 +9,12 @@
    renders the results however its own markup/CSS wants to (gallery: .pick-cell divs;
    Loom: .sb-pick-cell JSX). No build step -- attaches to `window.PickerCore`, loaded via
    a plain <script src> tag (mirrors how the Loom already gets React/ReactDOM as globals). */
-(function (global) {
+/* Ported from static/picker-core.js into the React/Vite build (2026-08-08, the
+   vanilla static/ -> React campaign). Framework-agnostic browse/filter/paginate/
+   infinite-scroll engine behind GalleryPicker; the IIFE body is kept VERBATIM,
+   only the boundary changed: `global.PickerCore = {...}` is now a returned +
+   default-exported const. */
+const PickerCore = (function () {
   'use strict';
 
   function createPickerCore(opts) {
@@ -120,5 +125,7 @@
     };
   }
 
-  global.PickerCore = { create: createPickerCore };
-})(typeof window !== 'undefined' ? window : this);
+  return { create: createPickerCore };
+})();
+
+export default PickerCore;

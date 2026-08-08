@@ -6050,3 +6050,45 @@ be local is now gone).
 -> notify -> generate-drawer -> cost-badge (last, its spend-safety lifecycle gets a real
 redesign). Each still `<script>`-loaded in the shells; port each to a React component,
 delete its tag + file, until static/ is empty -> then master merge + v3.0.
+
+### Vanilla campaign 2/8: gallery-picker -> React, + the shared-component infra it needed  ·  *2026-08-08*
+
+The image picker, plus the two build-boundary problems every remaining shared component needs
+solved. Owner picked "faithful port + converge the Loom's own picker" and flagged a later
+Claude Design pass (see memory: moonglade-claude-design-flags).
+
+**picker-core.js -> gallery/src/picker/pickerCore.js** (ES module, verbatim, same as artFilters).
+**mg-gallery-picker.js (~380 lines) -> gallery/src/components/GalleryPicker.jsx + gallery-picker.css.**
+A faithful 1:1 React port of the "pick an image from your catalog" modal (glass scrim animated
+both ways, .sheet mobile variant, search + collection/type/rating/sort filters, infinite scroll,
+upload, persisted tile-size + copy-prompt, NSFW blur). The CSS is the element's own spec-literal
+design-final-pass values, extracted VERBATIM (only the `mg-gallery-picker` element selector ->
+`.mg-gallery-picker` class, `[sheet]` -> `.sheet`). Contract mirrors the element: onPick(media)
+instant, onClose() after the 340ms exit. Consumers rewired off the old two integration patterns
+(askPicker() singleton in PickerHost + JSX `<mg-gallery-picker ref=bindPicker>` in ControlPanel/
+Publish/Loom) to `<GalleryPicker onPick onClose>` props. The Loom's own older GalleryPick was
+already converged onto the shared element in a prior pass, so this just swapped the last mount.
+Both static files + the orphaned static/mg-gallery-picker.html design-kit harness deleted ->
+static/ is down to 5. Verified live end-to-end on the gallery (renders styled, search 2,329 ->
+1,790 -> 0, pick resolves, close animates + unmounts) and the Loom (bundle CSS loads, rules present).
+
+**Two build-boundary problems solved ONCE, reusable for the remaining components:**
+1. **Shared-component CSS in the Loom.** GalleryPicker imports its .css; Vite bundles that into
+   the gallery's app.css, but the Loom's esbuild emits a SIBLING loom/dist/master-storyboard.bundle.css.
+   LOOM_PAGE_BUNDLE now `<link>`s it. Every future shared component's CSS rides that same bundle.
+2. **React double-bundling in the Loom.** GalleryPicker does `import React from "react"` (for the
+   gallery's Vite build), but the Loom loads React as a runtime GLOBAL. Without help, esbuild
+   bundled a SECOND React (~90 KB + a preamble collision). Fix: loom/scripts/react-global-shim.js
+   + react-dom-global-shim.js (individual re-exports of window.React/ReactDOM, NOT a `{...} = React`
+   destructure -- that would collide with master-storyboard's injected preamble), aliased in
+   build.mjs. The preamble staleness guard (_hook_list) now compares hook NAMES, tolerating
+   esbuild's benign local renaming (useState: useState2).
+
+Tests reconciled: web-pick privacy-blur -> GalleryPicker.jsx + gallery-picker.css; the loom
+parity-attrs + video-import node-tests retargeted to GalleryPicker.jsx; the Fixer cross-dir-import
+guard narrowed from "only artFilters allowed" to "editCore.js not imported" (real gallery/src
+imports are the intended pattern now); design-kit set dropped the removed harness. Full Python
+suite 1530 green; loom node suite 714/714.
+
+**Remaining 5:** model-picker, upscale-panel, notify, generate-drawer, cost-badge (order pending a
+scoping pass -- cost-badge is the drawer's cost line, so it lands with/before the drawer).
