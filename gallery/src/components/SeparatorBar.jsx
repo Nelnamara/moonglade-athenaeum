@@ -61,8 +61,16 @@ export default function SeparatorBar({
   const cards = account && account.cards != null
     ? Number(account.cards).toLocaleString() : "—";
   const warn = lapse(account);
-  const tipText = warn ||
-    "Your PixAI balance — credits and free generation cards. Click to buy packs on PixAI.";
+  // Rich hover tooltip: real paid/free split + per-type card breakdown, all already on
+  // /api/account. The paid/free split is the one sensitive number (real spendable balance),
+  // so it's GATED behind the privacy blur -- shown only when the grid is unblurred, hidden
+  // (with a hint, not silently) when blur is on. Card TYPE counts aren't sensitive, always
+  // shown. `blur` true = grid blurred = privacy guard on.
+  const paid = account && account.credits_paid;
+  const freeCr = account && account.credits_free;
+  const hasSplit = typeof paid === "number" && typeof freeCr === "number";
+  const cardsBy = (account && account.cards_by ? account.cards_by : []).filter((c) => c.count > 0);
+  const cardExpiry = account && account.card_expiry;
 
   const claimCredits = account && account.claim_credits;
 
@@ -133,7 +141,36 @@ export default function SeparatorBar({
           <span className="mgx-creddiv" aria-hidden="true" />
           <span className="mgx-credval cards">{cards}</span>
           <span className="mgx-credlab cards">CARDS</span>
-          <span className="mgx-credtip" role="tooltip">{tipText}</span>
+          <span className="mgx-credtip" role="tooltip">
+            {warn ? <span className="mgx-tipwarn">{warn}</span> : null}
+            <span className="mgx-tiprow">
+              <span className="mgx-tipk">Credits</span><b className="mgx-tipv">{credits}</b>
+            </span>
+            {hasSplit ? (
+              blur ? (
+                <span className="mgx-tipdim">paid / free — hidden while blurred</span>
+              ) : (
+                <span className="mgx-tipdim">
+                  {Number(paid).toLocaleString()} paid · {Number(freeCr).toLocaleString()} free
+                </span>
+              )
+            ) : null}
+            <span className="mgx-tiprow head">
+              <span className="mgx-tipk">Free cards</span><b className="mgx-tipv">{cards}</b>
+            </span>
+            {cardsBy.slice(0, 8).map((c) => (
+              <span className="mgx-tipcard" key={c.name}>
+                <b>{c.count}</b>
+                <span className="nm">{c.name}</span>
+                {c.category ? <i>{c.category}</i> : null}
+              </span>
+            ))}
+            {cardsBy.length > 8 ? (
+              <span className="mgx-tipdim">+{cardsBy.length - 8} more types</span>
+            ) : null}
+            {cardExpiry ? <span className="mgx-tipdim">soonest expiry: {cardExpiry}</span> : null}
+            <span className="mgx-tipfoot">Click to buy credits or cards on PixAI</span>
+          </span>
         </button>
 
         {claimCredits ? (
