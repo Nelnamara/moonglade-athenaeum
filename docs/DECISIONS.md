@@ -6092,3 +6092,27 @@ suite 1530 green; loom node suite 714/714.
 
 **Remaining 5:** model-picker, upscale-panel, notify, generate-drawer, cost-badge (order pending a
 scoping pass -- cost-badge is the drawer's cost line, so it lands with/before the drawer).
+
+### Vanilla campaign 3/8 (gallery side): model-picker -> React ModelPicker  ·  *2026-08-08*
+
+The model/LoRA picker (static/mg-model-picker.js, 863 lines -- the biggest component yet:
+search + cover cards + hover preview, with opt-in multi / market / base-type modes, continuous
+scroll, and the two-phase async LoRA resolve) is now gallery/src/components/ModelPicker.jsx +
+model-picker.css (spec-literal CSS extracted verbatim, element selector -> .model-picker class).
+Faithful port with ONE React-idiom change: selection is CONTROLLED (host passes value / selected),
+which drops the element's internal _selected + deselect() imperative method AND structurally
+eliminates the "un-pick a LoRA mid-resolve resurrects it" bug -- the /api/model-version resolve
+checks the live `selected` before re-dispatching. Rewired the gallery consumers (ModelFlyout ->
+renders <ModelPicker>; GenerateDrawer + CreateMobile pass value={m} selected={loras}, dropped
+their deselectRef plumbing). Verified live: renders with full market chrome (Market/Bookmarked,
+4 sorts, model-type chips, Posted/Licence), 24 model cards load from /api/model-search, a base
+pick ("Haruka v2") closes the flyout and applies the model.
+
+**Split commit -- Loom side deferred deliberately.** The Loom mounts the picker on TWO surfaces
+(LoomV2 image-gen rail + the second composer), each with its OWN bindPicker (a spend-adjacent
+base-pick that resolves /api/model-version?all=1 and applies the model author's tuned preset) +
+bindLoraPicker + ensureSearched effect -- intricate enough that it earns its own careful pass
+rather than being rushed. Until then static/mg-model-picker.js stays (the Loom still uses the
+custom element; the gallery shell's now-unused script tag is harmless), so this commit is purely
+ADDITIVE and the app works on both surfaces. NEXT: convert both Loom surfaces to <ModelPicker>,
+remove the script tags, delete the file, reconcile the loom node-tests, then component 3 is done.

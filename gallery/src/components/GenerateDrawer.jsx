@@ -77,7 +77,6 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   const [reuseFrom, setReuseFrom] = useState(null);   // {jobId, tag}
   const costRef = useRef(null);
   const costHost = useRef(null);
-  const deselectRef = useRef(null);
   const drawerRef = useRef(null);
   const g = useGenerate({ costRef });
   const { s, set } = g;
@@ -375,8 +374,8 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   }, [g]);
 
   const removeLora = (modelId) => {
+    // Controlled selection: removing from state un-lights the picker card automatically.
     g.removeLora(modelId);
-    if (deselectRef.current) deselectRef.current(modelId);
   };
 
   const pickRef = async () => {
@@ -830,9 +829,9 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
       <ModelFlyout
         open={flyOpen} kind={flyKind} setKind={setFlyKind}
         baseType={m ? m.model_type : ""}
+        value={m} selected={s.loras}
         onBasePick={onBasePick} onLoraPick={onLoraPick}
         onClose={() => setFlyOpen(false)}
-        deselectRef={deselectRef}
       />
       <FiltersPanel open={filtersOpen} onClose={() => setFiltersOpen(false)} drawerRef={drawerRef}
         onSendToEdit={(mid) => { sendToEdit(mid); setTab("edit"); setSub("edit"); }} />

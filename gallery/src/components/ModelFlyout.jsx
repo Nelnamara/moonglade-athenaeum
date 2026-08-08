@@ -1,60 +1,15 @@
-import React, { useEffect, useRef, useState } from "react";
+import React from "react";
+import ModelPicker from "./ModelPicker.jsx";
 
-/* The model/LoRA browser: the SAME two <mg-model-picker> mounts the classic
-   drawer and the Loom use -- base (single, market) and lora (multi, market).
-
-   TWO contracts the review caught the first cut breaking:
-   1. A `multi` picker's mg-pick detail is {model, selected}, NOT the raw row --
-      a deliberate shape difference. The single (base) picker sends the row.
-   2. Listeners bind ONCE at mount, so they must call through refs that always
-      point at the current handlers; a captured closure goes stale the moment
-      state changes and silently breaks toggle-to-remove.
-   The host must also call deselect() on every chip-removal path or the picker
-   card stays lit (the exact bug that API exists for). */
+/* The model/LoRA browser: the base (single, market) and lora (multi, market) pickers the
+   drawer and the Loom share. Since 2026-08-08 these are the React <ModelPicker> component
+   (was the <mg-model-picker> custom element). Selection is CONTROLLED here: the host passes
+   `value` (the chosen base row) and `selected` (the LoRA entries), so a LoRA chip removed by
+   the host un-lights its card automatically -- no deselect() plumbing. Both pickers stay
+   mounted and toggle display, so each keeps its own last search across a tab switch. */
 export default function ModelFlyout({
-  open, kind, setKind, baseType, onBasePick, onLoraPick, onClose, deselectRef,
+  open, kind, setKind, baseType, value, selected, onBasePick, onLoraPick, onClose,
 }) {
-  const baseHost = useRef(null);
-  const loraHost = useRef(null);
-  const [mounted, setMounted] = useState(false);
-  // refs re-pointed every render -> the once-bound listeners never go stale
-  const baseCb = useRef(onBasePick);
-  const loraCb = useRef(onLoraPick);
-  baseCb.current = onBasePick;
-  loraCb.current = onLoraPick;
-
-  useEffect(() => {
-    if (!open || mounted) return;
-    const base = document.createElement("mg-model-picker");
-    base.setAttribute("kind", "base");
-    base.setAttribute("market", "");
-    base.addEventListener("mg-pick", (e) => baseCb.current(e.detail));
-    baseHost.current.appendChild(base);
-
-    const lora = document.createElement("mg-model-picker");
-    lora.setAttribute("kind", "lora");
-    lora.setAttribute("multi", "");
-    lora.setAttribute("market", "");
-    // multi contract: detail = {model, selected}
-    lora.addEventListener("mg-pick", (e) => {
-      const d = e.detail || {};
-      loraCb.current(d.model, d.selected);
-    });
-    loraHost.current.appendChild(lora);
-
-    if (deselectRef) deselectRef.current = (modelId) => lora.deselect && lora.deselect(modelId);
-    setMounted(true);
-  }, [open, mounted, deselectRef]);
-
-  // keep the LoRA picker's architecture filter following the chosen base
-  useEffect(() => {
-    const lora = loraHost.current && loraHost.current.firstChild;
-    if (lora) {
-      if (baseType) lora.setAttribute("base-type", baseType);
-      else lora.removeAttribute("base-type");
-    }
-  }, [baseType, mounted]);
-
   return (
     <div className={"mfly" + (open ? " open" : "")} aria-hidden={!open}>
       <div className="mfly-head">
@@ -63,8 +18,14 @@ export default function ModelFlyout({
         <span className="sp" />
         <button className="card" onClick={onClose} title="Esc">✕</button>
       </div>
-      <div ref={baseHost} style={{ display: kind === "base" ? "" : "none" }} />
-      <div ref={loraHost} style={{ display: kind === "lora" ? "" : "none" }} />
+      <div style={{ display: kind === "base" ? "" : "none" }}>
+        <ModelPicker kind="base" market visible={open && kind === "base"}
+          value={value} onPick={onBasePick} />
+      </div>
+      <div style={{ display: kind === "lora" ? "" : "none" }}>
+        <ModelPicker kind="lora" multi market baseType={baseType} visible={open && kind === "lora"}
+          selected={selected || []} onToggle={onLoraPick} />
+      </div>
     </div>
   );
 }
