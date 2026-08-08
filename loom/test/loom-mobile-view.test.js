@@ -800,9 +800,16 @@ describe("Image/Edit/Reference tabs (fourth increment, 2026-08-03) -- LoomV2's o
     assert.match(loomMobileSrc, /tallyPrices\(\[p\.pr\]\)/, "the preview text must reuse the SAME tallyPrices/formatCostEstimate helpers, not a new formatter");
   });
 
-  test("the model/LoRA picker mounts the SAME real <mg-model-picker> element LoomV2's own floating overlay uses", () => {
-    assert.match(loomMobileSrc, /<mg-model-picker ref=\{bindPicker\} kind="base"/);
-    assert.match(loomMobileSrc, /<mg-model-picker ref=\{bindLoraPicker\} kind="lora" multi base-type=\{\(imgModel && imgModel\.model_type\) \|\| ""\}/);
+  test("the model/LoRA picker mounts the SAME real <ModelPicker> component LoomV2's own floating overlay uses (ported from <mg-model-picker>: attrs->props, mg-pick CustomEvent->onPick/onToggle, controlled value/selected)", () => {
+    // Base picker: kind/visible props (was kind attr + the ensureSearched display:none dance),
+    // value={imgModel} controlled selection (was the element's internal _selected), and the
+    // mg-pick CustomEvent is now the onPick={onBasePick} prop (bindPicker's ref-callback logic
+    // survives verbatim as onBasePick).
+    assert.match(loomMobileSrc, /<ModelPicker kind="base" visible=\{pickerKind === "base"\} value=\{imgModel\} onPick=\{onBasePick\}/);
+    // LoRA picker: multi mode + baseType prop (was the base-type attr), controlled selected={imgLoras}
+    // array (was the element's internal _selected + deselect()), and the multi mg-pick detail
+    // {model,selected} is now onToggle={onLoraPick}(model, selected) (bindLoraPicker survives as onLoraPick).
+    assert.match(loomMobileSrc, /<ModelPicker kind="lora" multi baseType=\{\(imgModel && imgModel\.model_type\) \|\| ""\} visible=\{pickerKind === "lora"\} selected=\{imgLoras\} onToggle=\{onLoraPick\}/);
   });
 
   test("Image tab field parity: Aspect/Size/Custom W×H/Mode/Count/Seed/High-priority/Prompt-helper all exist, same as LoomV2's own Image tab (L536)", () => {

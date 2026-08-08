@@ -72,7 +72,7 @@ const SORTS = [["trending", "Trending"], ["liked", "Most Liked"], ["used", "Most
 
 export default function ModelPicker({
   kind = "base", multi = false, market = false, baseType = "",
-  value = null, selected = [], onPick, onToggle, visible = true,
+  value = null, selected = [], onPick, onToggle, visible = true, style,
 }) {
   const [q, setQ] = useState("");
   const [qDebounced, setQDebounced] = useState("");
@@ -230,7 +230,7 @@ export default function ModelPicker({
   const p = preview && preview.m;
 
   return (
-    <div className="model-picker">
+    <div className="model-picker" style={style}>
       <input className="mg-q" type="text" placeholder="Search" aria-label="Search models"
         value={q} onChange={(e) => setQ(e.target.value)} />
 

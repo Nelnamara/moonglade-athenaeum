@@ -49,6 +49,7 @@ import MgArtFilters from "../gallery/src/art/artFilters.js";
 // converged onto the shared picker in an earlier pass, so this just swaps the last
 // <mg-gallery-picker> web-component mount for the React component.
 import GalleryPicker from "../gallery/src/components/GalleryPicker.jsx";
+import ModelPicker from "../gallery/src/components/ModelPicker.jsx";
 
 // The Loom.dc.html's own TINTS + tint formula (line ~681, ~760): 6 rotating per-shot
 // gradients so same-status shots stay visually distinguishable from each other, not just
@@ -742,7 +743,7 @@ const V2_STYLES = `
 /* D-11: LoRA chips in the Image tab -- mirrors the Gallery's own .lora-chip shape
    (moonglade_gallery.py) at the Loom's smaller scale/token set, not a copy-paste of it. */
 /* picker-parity-round2 (2026-07-24): this used to be a show/hide toggle that expanded the
-   LoRA <mg-model-picker> INLINE into this ~280px rail column -- the owner's exact complaint
+   LoRA <ModelPicker> INLINE into this ~280px rail column -- the owner's exact complaint
    ("cramped mess... does not have a flyout like the gallery"). It now opens the SAME
    .lv-mpick-veil overlay the Model row's own trigger does (see below), just pre-selected to
    the LoRAs segment -- reuses .lv-chip's chrome unchanged, only what the click DOES changed. */
@@ -762,7 +763,7 @@ const V2_STYLES = `
 .lv-lchip .lv-lrm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:13px;padding:0 2px;line-height:1;}
 .lv-lchip .lv-lrm:hover{color:var(--coral);}
 /* picker-parity-round2 (problem 2): the Image tab's model/LoRA picker used to render
-   <mg-model-picker> INLINE in this ~280px rail (cramped: results, a toggle button, a
+   <ModelPicker> INLINE in this ~280px rail (cramped: results, a toggle button, a
    SECOND search box, more results, all stacked). Now a trigger row (mirrors
    moonglade_gallery.py's own #gen-selrow) that opens a floating overlay -- .lv-mpick-veil below
    -- matching the Gallery's #model-flyout presentation: ONE picker experience, not a
@@ -794,7 +795,7 @@ const V2_STYLES = `
 .lv-mpick-seg button{flex:1;padding:6px 0;border-radius:7px;background:transparent;border:1px solid var(--line);color:var(--ink2);cursor:pointer;font-size:12px;}
 .lv-mpick-seg button.on{background:var(--panel2);color:var(--ink);border-color:var(--amber);font-weight:600;}
 .lv-mpick-body{padding:10px 14px 14px;display:flex;flex-direction:column;min-height:0;flex:1;}
-.lv-mpick-body mg-model-picker{flex:1;min-height:0;}
+.lv-mpick-body .model-picker{flex:1;min-height:0;}
 .lv-bal{font-size:10.5px;color:var(--text);padding:5px 0 3px;border-bottom:1px solid var(--surface1);margin-bottom:9px;letter-spacing:.02em;opacity:.85;}
 .lv-balclaim{color:var(--accent);}
 .lv-editsrc{max-width:100%;max-height:120px;border-radius:8px;border:1px solid var(--surface1);margin:4px 0;display:block}
@@ -973,7 +974,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // as deepFocus itself; the IIFE below only reads/writes it via closure.
   const [dfPalFor, setDfPalFor] = useState(null);     // which term-palette is open in Deep Focus, or null
   // picker-parity-round2 (problem 2): replaces the old loraOpen boolean (D-11), which just
-  // toggled the LoRA <mg-model-picker> INLINE into this rail -- the owner's exact complaint.
+  // toggled the LoRA <ModelPicker> INLINE into this rail -- the owner's exact complaint.
   // pickerOpen/pickerKind instead drive the floating .lv-mpick-veil overlay (mirrors
   // moonglade_gallery.py's #model-flyout open state + Models/LoRAs segment), opened via either
   // the Model row's trigger (kind="base") or "+ add LoRA" (kind="lora").
@@ -1039,14 +1040,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [pickerOpen]);
-  // picker-parity-round2: lazy-mount both <mg-model-picker> instances on FIRST open (mirrors
+  // picker-parity-round2: lazy-mount both <ModelPicker> instances on FIRST open (mirrors
   // moonglade_gallery.py's ensurePickers() -- "only fetch on first open", not an always-mounted
   // base+LoRA fetch on every Loom load just because the right rail happens to be expanded).
   // Once true, stays true -- the pickers then persist (hidden via .lv-mpick-veil's own
   // display:none/.open) so a close/reopen never loses either one's search/scroll state.
   const [pickerMounted, setPickerMounted] = useState(false);
   useEffect(() => { if (pickerOpen) setPickerMounted(true); }, [pickerOpen]);
-  // Bridge the shared <mg-model-picker> web component to React: a ref callback (React
+  // Bridge the shared <ModelPicker> web component to React: a ref callback (React
   // doesn't route custom events through JSX props) that binds the 'mg-pick' listener once.
   // imgModelSeqRef guards the /api/model-version fetch below the same way the Gallery's own
   // selectCard() guards its identical fetch with a local selSeq/mySeq pair: a fast second
@@ -1075,73 +1076,62 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       return changed ? next : cur;
     });
   }, [loraRange, setImgLoras]);
-  // Persist the two <mg-model-picker> DOM elements outside the ref-callback closures
-  // (bindPicker/bindLoraPicker below only run on mount/unmount) so the ensureSearched()
-  // effect further down can reach whichever one just became visible on a tab switch.
-  const basePickerElRef = useRef(null);
-  const loraPickerElRef = useRef(null);
-  const bindPicker = useCallback((el) => {
-    basePickerElRef.current = el;
-    if (el && !el._mgBound) {
-      el._mgBound = true;
-      el.addEventListener("mg-pick", (e) => {
-        // Owner report 2026-07-24: picking a model left the overlay open, forcing a
-        // manual close -- close it the instant a base model is picked (single-select:
-        // one choice ends the browsing task), mirroring moonglade_gallery.py's onBasePick.
-        // LoRA picking (the other <mg-model-picker> mount, kind="lora" multi) is
-        // deliberately left open -- see the "+ add LoRA" toggle below.
-        setPickerOpen(false);
-        const m = { model_id: e.detail.model_id, title: e.detail.title, preview_url: e.detail.preview_url || "" };
-        setImgModel(m);
-        setModelDefaults(null);
-        // L536 + D-11: resolve model_type (so the LoRA compat warning has a real base to
-        // compare against -- the Loom never fetched this at all before) and prefill the
-        // model author's own tuned preset (negative/steps/cfg), mirroring
-        // moonglade_gallery.py's Gen.applyModelDefaults() exactly: only for fields the model
-        // actually has data for, and it OVERWRITES whatever's currently in imgAdv, same as
-        // the Gallery's own (deliberate, already-shipped) behavior on every base-model pick.
-        // picker-parity-round2 (problem 4/5): ?all=1 replaces the old single-version fetch --
-        // ONE request either way (same endpoint), but now returns every published release
-        // (versions[0] is the same "latest" the old fetch always resolved) so the version
-        // picker + sampling_method + capabilities the app was resolving and discarding can
-        // finally be shown, mirroring moonglade_gallery.py's onBasePick/applyVersion exactly.
-        const mySeq = ++imgModelSeqRef.current;
-        fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1")
-          .then((r) => r.json())
-          .then((d) => {
-            if (mySeq !== imgModelSeqRef.current) return;   // a newer pick superseded this fetch
-            const versions = (d && d.versions) || [], v = versions[0] || {};
-            // Owner report 2026-07-24: the version dropdown never appeared on the Loom for a
-            // model confirmed (same model, same account) to show one on the Gallery. Root
-            // cause: this updater ALSO required cur.model_id===m.model_id on top of the
-            // mySeq check above -- redundant for the "newer pick superseded this one" case
-            // mySeq already covers, but a real liability for anything else that can touch
-            // imgModel while this fetch is in flight (a shot switch, a project reload) --
-            // any of those silently drops the whole versions/compatibility/restrictions
-            // payload with no error, no retry, nothing visibly wrong. The Gallery's own
-            // onBasePick has never done a model_id re-check here, only the sequence guard --
-            // matching it exactly rather than carrying an extra condition that was never
-            // proven necessary and demonstrably breaks the one thing it must never break.
-            setImgModel((cur) => cur ? {
-              ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
-              sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
-              compatibility: v.compatibility || {}, restrictions: v.restrictions || {},
-              versions,
-            } : cur);
-            const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
-            setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
-            if (has) {
-              setImgAdv((cur) => ({
-                ...cur,
-                negative: v.negative_prompt || cur.negative,
-                steps: v.sampling_steps || cur.steps,
-                cfg: v.cfg_scale || cur.cfg,
-              }));
-            }
-          })
-          .catch(() => {});
-      });
-    }
+  const onBasePick = useCallback((row) => {
+    // Owner report 2026-07-24: picking a model left the overlay open, forcing a
+    // manual close -- close it the instant a base model is picked (single-select:
+    // one choice ends the browsing task), mirroring moonglade_gallery.py's onBasePick.
+    // LoRA picking (the other <ModelPicker> mount, kind="lora" multi) is
+    // deliberately left open -- see the "+ add LoRA" toggle below.
+    setPickerOpen(false);
+    const m = { model_id: row.model_id, title: row.title, preview_url: row.preview_url || "" };
+    setImgModel(m);
+    setModelDefaults(null);
+    // L536 + D-11: resolve model_type (so the LoRA compat warning has a real base to
+    // compare against -- the Loom never fetched this at all before) and prefill the
+    // model author's own tuned preset (negative/steps/cfg), mirroring
+    // moonglade_gallery.py's Gen.applyModelDefaults() exactly: only for fields the model
+    // actually has data for, and it OVERWRITES whatever's currently in imgAdv, same as
+    // the Gallery's own (deliberate, already-shipped) behavior on every base-model pick.
+    // picker-parity-round2 (problem 4/5): ?all=1 replaces the old single-version fetch --
+    // ONE request either way (same endpoint), but now returns every published release
+    // (versions[0] is the same "latest" the old fetch always resolved) so the version
+    // picker + sampling_method + capabilities the app was resolving and discarding can
+    // finally be shown, mirroring moonglade_gallery.py's onBasePick/applyVersion exactly.
+    const mySeq = ++imgModelSeqRef.current;
+    fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1")
+      .then((r) => r.json())
+      .then((d) => {
+        if (mySeq !== imgModelSeqRef.current) return;   // a newer pick superseded this fetch
+        const versions = (d && d.versions) || [], v = versions[0] || {};
+        // Owner report 2026-07-24: the version dropdown never appeared on the Loom for a
+        // model confirmed (same model, same account) to show one on the Gallery. Root
+        // cause: this updater ALSO required cur.model_id===m.model_id on top of the
+        // mySeq check above -- redundant for the "newer pick superseded this one" case
+        // mySeq already covers, but a real liability for anything else that can touch
+        // imgModel while this fetch is in flight (a shot switch, a project reload) --
+        // any of those silently drops the whole versions/compatibility/restrictions
+        // payload with no error, no retry, nothing visibly wrong. The Gallery's own
+        // onBasePick has never done a model_id re-check here, only the sequence guard --
+        // matching it exactly rather than carrying an extra condition that was never
+        // proven necessary and demonstrably breaks the one thing it must never break.
+        setImgModel((cur) => cur ? {
+          ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
+          sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
+          compatibility: v.compatibility || {}, restrictions: v.restrictions || {},
+          versions,
+        } : cur);
+        const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+        setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
+        if (has) {
+          setImgAdv((cur) => ({
+            ...cur,
+            negative: v.negative_prompt || cur.negative,
+            steps: v.sampling_steps || cur.steps,
+            cfg: v.cfg_scale || cur.cfg,
+          }));
+        }
+      })
+      .catch(() => {});
   }, [setImgModel, setImgAdv, setModelDefaults]);
   // problem 4: PixAI's own model/LoRA cards offer a version selector; resolve_version_meta
   // always silently took the newest release. imgModel.versions (populated by bindPicker's
@@ -1173,34 +1163,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // detail shape is { model, selected } (not the raw row bindPicker above expects) --
   // upsert-by-model_id on selected=true (covers both the initial pending entry and the
   // later resolved-version_id update, same entry re-dispatched), remove on selected=false.
-  const bindLoraPicker = useCallback((el) => {
-    loraPickerElRef.current = el;
-    if (el && !el._mgBound) {
-      el._mgBound = true;
-      el.addEventListener("mg-pick", (e) => {
-        const { model, selected } = e.detail;
-        setImgLoras((cur) => {
-          const i = cur.findIndex((l) => l.model_id === model.model_id);
-          if (!selected) return i < 0 ? cur : cur.filter((l) => l.model_id !== model.model_id);
-          if (i < 0) return [...cur, model];
-          const next = cur.slice(); next[i] = model; return next;
-        });
-      });
-    }
+  const onLoraPick = useCallback((model, selected) => {
+    setImgLoras((cur) => {
+      const i = cur.findIndex((l) => l.model_id === model.model_id);
+      if (!selected) return i < 0 ? cur : cur.filter((l) => l.model_id !== model.model_id);
+      if (i < 0) return [...cur, model];
+      const next = cur.slice(); next[i] = model; return next;
+    });
   }, [setImgLoras]);
-  // Owner report 2026-07-24 ("still slow"): both pickers mount together on first open
-  // (pickerMounted, so switching tabs never re-fetches -- "each keeps its OWN
-  // last-searched results independently"), but mg-model-picker.js now defers its own
-  // browse-on-open search when it starts hidden (see that file's connectedCallback
-  // comment) -- something has to call ensureSearched() on whichever one just became
-  // visible, or the hidden tab would just never search at all, forever. ensureSearched()
-  // is a no-op after the first real call, so this firing on every pickerKind change costs
-  // nothing once both have searched once.
-  useEffect(() => {
-    if (!pickerMounted) return;
-    const vis = pickerKind === "base" ? basePickerElRef.current : loraPickerElRef.current;
-    if (vis && vis.ensureSearched) vis.ensureSearched();
-  }, [pickerMounted, pickerKind]);
   // D-12 increments 2-4: read-only cost badges for the Image/Edit/Reference tabs -- refs to
   // the <mg-cost-badge> custom elements (imperative setChecking/setPrice/clear API, the same
   // component the Gallery's Generate and Edit tabs use). Kept ALONGSIDE -- not instead of --
@@ -2187,7 +2157,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             <span className="lv-selname">{imgModel ? imgModel.title : "none — browse models"}</span>
             <span className="lv-dim lv-selhint">☰ browse</span>
           </button>
-          {/* problem 5: sampling_method/capabilities were resolved by bindPicker above and
+          {/* problem 5: sampling_method/capabilities were resolved by onBasePick above and
               discarded -- read-only surfacing (not a submit field, see the Gallery's own
               identical applyModelDefaults() comment for why sampling_method stays display-only). */}
           {imgModel && (imgModel.sampling_method || (imgModel.capabilities || []).length > 0) && (
@@ -2236,19 +2206,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                         setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x)); }} />
                     <b>{(+l.weight).toFixed(1)}</b>
                   </span>
-                  {/* deselect() as well as dropping it here: the picker keeps its own copy
-                      of what's picked and never saw this removal, so the card stayed lit,
-                      clicking it again read as a remove rather than a re-add, and a version
-                      resolve still in flight re-dispatched the LoRA straight back in. */}
+                  {/* Controlled selection: dropping the LoRA from state un-lights the picker card too. */}
                   <button type="button" className="lv-lrm" title="Remove"
                     onClick={() => {
-                      const p = loraPickerElRef.current;
-                      if (p && p.deselect) p.deselect(l.model_id);
                       setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id));
                     }}>×</button>
                   {/* Per-LoRA version selection: only when this LoRA actually has more than one
                       published release (l.versions, resolved alongside version_id itself by
-                      mg-model-picker.js's ?all=1 fetch -- see bindLoraPicker above). Mirrors
+                      the model picker's ?all=1 fetch -- see onLoraPick above). Mirrors
                       the base model's own #gen-version/.lv-versel switcher exactly, just
                       applied to this one chip's entry instead of the single imgModel. No new
                       network call -- the full version list is already on the entry. */}
@@ -2636,10 +2601,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             <div className="lv-mpick-body">
               {pickerMounted && (
                 <>
-                  <mg-model-picker ref={bindPicker} kind="base"
-                    style={{ display: pickerKind === "base" ? "flex" : "none" }}></mg-model-picker>
-                  <mg-model-picker ref={bindLoraPicker} kind="lora" multi base-type={(imgModel && imgModel.model_type) || ""}
-                    style={{ display: pickerKind === "lora" ? "flex" : "none" }}></mg-model-picker>
+                  <ModelPicker kind="base" visible={pickerKind === "base"} value={imgModel} onPick={onBasePick}
+                    style={{ display: pickerKind === "base" ? "flex" : "none" }} />
+                  <ModelPicker kind="lora" multi baseType={(imgModel && imgModel.model_type) || ""} visible={pickerKind === "lora"} selected={imgLoras} onToggle={onLoraPick}
+                    style={{ display: pickerKind === "lora" ? "flex" : "none" }} />
                 </>
               )}
             </div>
@@ -3595,7 +3560,7 @@ const LOOM_MOBILE_STYLES = `
   border:1px solid rgba(232,147,95,.3);border-radius:8px;padding:7px 9px;margin-top:10px;}
 
 /* Model/LoRA picker sheet -- a near-full-screen mobile sheet (unlike the half-height Cast
-   sheet: <mg-model-picker>'s search+grid genuinely needs the room), wrapping the SAME real
+   sheet: <ModelPicker>'s search+grid genuinely needs the room), wrapping the SAME real
    custom element LoomV2's floating .lv-mpick-veil overlay uses. */
 .lm-pick-sheet{position:absolute;left:0;right:0;bottom:0;top:6%;z-index:32;background:var(--mantle);
   border-radius:18px 18px 0 0;border:1px solid var(--surface1);border-bottom:none;
@@ -3605,7 +3570,7 @@ const LOOM_MOBILE_STYLES = `
 .lm-pick-head{flex:none;display:flex;align-items:center;gap:8px;margin-bottom:8px;}
 .lm-pick-t{flex:1 1 auto;font-size:14px;font-weight:600;color:var(--text);}
 .lm-pick-body{flex:1;min-height:0;display:flex;flex-direction:column;}
-.lm-pick-body mg-model-picker{flex:1;min-height:0;}
+.lm-pick-body .model-picker{flex:1;min-height:0;}
 
 /* ---- Review & trim (fifth increment, 2026-08-03) -- opened from the board's own ▶ badge
    on a finished shot, matching the locked design's reviewOpen/cropping/playing full-screen
@@ -3900,7 +3865,7 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   useEffect(() => { fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {}); }, []);
 
   // ---- Model/LoRA picker overlay for the Image tab -- a mobile sheet wrapping the SAME
-  // real <mg-model-picker> custom element LoomV2's own floating .lv-mpick-veil uses, bound
+  // real <ModelPicker> custom element LoomV2's own floating .lv-mpick-veil uses, bound
   // the same way (bindPicker/bindLoraPicker below are close-to-verbatim ports of LoomV2's
   // own, adapted only for this screen's local naming -- imgModel/imgLoras/imgAdv/
   // modelDefaults themselves are the SAME hook-level state LoomV2 reads/writes, passed down
@@ -3929,8 +3894,6 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [pickerOpen]);
-  const basePickerElRef = useRef(null);
-  const loraPickerElRef = useRef(null);
   const imgModelSeqRef = useRef(0);
   // LoRA weight bounds for the current base model's architecture -- verbatim copy of
   // LoomV2's own loraRange memo (same shared window.MG_LORA table, same fallback).
@@ -3951,41 +3914,35 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
       return changed ? next : cur;
     });
   }, [loraRange, setImgLoras]);
-  const bindPicker = useCallback((el) => {
-    basePickerElRef.current = el;
-    if (el && !el._mgBound) {
-      el._mgBound = true;
-      el.addEventListener("mg-pick", (e) => {
-        closePicker();
-        const m = { model_id: e.detail.model_id, title: e.detail.title, preview_url: e.detail.preview_url || "" };
-        setImgModel(m);
-        setModelDefaults(null);
-        const mySeq = ++imgModelSeqRef.current;
-        fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1")
-          .then((r) => r.json())
-          .then((d) => {
-            if (mySeq !== imgModelSeqRef.current) return;
-            const versions = (d && d.versions) || [], v = versions[0] || {};
-            setImgModel((cur) => cur ? {
-              ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
-              sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
-              compatibility: v.compatibility || {}, restrictions: v.restrictions || {},
-              versions,
-            } : cur);
-            const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
-            setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
-            if (has) {
-              setImgAdv((cur) => ({
-                ...cur,
-                negative: v.negative_prompt || cur.negative,
-                steps: v.sampling_steps || cur.steps,
-                cfg: v.cfg_scale || cur.cfg,
-              }));
-            }
-          })
-          .catch(() => {});
-      });
-    }
+  const onBasePick = useCallback((row) => {
+    closePicker();
+    const m = { model_id: row.model_id, title: row.title, preview_url: row.preview_url || "" };
+    setImgModel(m);
+    setModelDefaults(null);
+    const mySeq = ++imgModelSeqRef.current;
+    fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1")
+      .then((r) => r.json())
+      .then((d) => {
+        if (mySeq !== imgModelSeqRef.current) return;
+        const versions = (d && d.versions) || [], v = versions[0] || {};
+        setImgModel((cur) => cur ? {
+          ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
+          sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
+          compatibility: v.compatibility || {}, restrictions: v.restrictions || {},
+          versions,
+        } : cur);
+        const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+        setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
+        if (has) {
+          setImgAdv((cur) => ({
+            ...cur,
+            negative: v.negative_prompt || cur.negative,
+            steps: v.sampling_steps || cur.steps,
+            cfg: v.cfg_scale || cur.cfg,
+          }));
+        }
+      })
+      .catch(() => {});
   }, [setImgModel, setImgAdv, setModelDefaults]);
   const pickVersion = useCallback((vid) => {
     if (!imgModel || !imgModel.versions) return;
@@ -4007,26 +3964,14 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
       }));
     }
   }, [imgModel, setImgModel, setImgAdv, setModelDefaults]);
-  const bindLoraPicker = useCallback((el) => {
-    loraPickerElRef.current = el;
-    if (el && !el._mgBound) {
-      el._mgBound = true;
-      el.addEventListener("mg-pick", (e) => {
-        const { model, selected } = e.detail;
-        setImgLoras((cur) => {
-          const i = cur.findIndex((l) => l.model_id === model.model_id);
-          if (!selected) return i < 0 ? cur : cur.filter((l) => l.model_id !== model.model_id);
-          if (i < 0) return [...cur, model];
-          const next = cur.slice(); next[i] = model; return next;
-        });
-      });
-    }
+  const onLoraPick = useCallback((model, selected) => {
+    setImgLoras((cur) => {
+      const i = cur.findIndex((l) => l.model_id === model.model_id);
+      if (!selected) return i < 0 ? cur : cur.filter((l) => l.model_id !== model.model_id);
+      if (i < 0) return [...cur, model];
+      const next = cur.slice(); next[i] = model; return next;
+    });
   }, [setImgLoras]);
-  useEffect(() => {
-    if (!pickerMounted) return;
-    const vis = pickerKind === "base" ? basePickerElRef.current : loraPickerElRef.current;
-    if (vis && vis.ensureSearched) vis.ensureSearched();
-  }, [pickerMounted, pickerKind]);
 
   // ---- mode families for the Cast & assets sheet + ref live-tag badges. Copied verbatim
   // from LoomV2's own local copies -- neither is exported from loom-core.js/loom-mutations.js
@@ -5000,8 +4945,6 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                             </span>
                             <button type="button" className="lm-lrm" title="Remove"
                               onClick={() => {
-                                const p = loraPickerElRef.current;
-                                if (p && p.deselect) p.deselect(l.model_id);
                                 setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id));
                               }}>&times;</button>
                             {l.versions && l.versions.length > 1 && (
@@ -5482,7 +5425,7 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
             </>)}
             </div>
             {/* Model/LoRA picker -- a full-screen mobile sheet wrapping the SAME real
-                <mg-model-picker> element LoomV2's own floating overlay uses. Lazy-mounted on
+                <ModelPicker> element LoomV2's own floating overlay uses. Lazy-mounted on
                 first open (pickerMounted), then left mounted for the rest of the session --
                 same "CSS-hide instead of unmount" contract as LoomV2's .lv-mpick-veil, so a
                 close/reopen never loses either picker's own search/scroll state. */}
@@ -5502,10 +5445,10 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                     <button type="button" className={"lm-tabbtn" + (pickerKind === "lora" ? " on" : "")} onClick={() => setPickerKind("lora")}>LoRAs</button>
                   </div>
                   <div className="lm-pick-body">
-                    <mg-model-picker ref={bindPicker} kind="base"
-                      style={{ display: pickerKind === "base" ? "flex" : "none" }}></mg-model-picker>
-                    <mg-model-picker ref={bindLoraPicker} kind="lora" multi base-type={(imgModel && imgModel.model_type) || ""}
-                      style={{ display: pickerKind === "lora" ? "flex" : "none" }}></mg-model-picker>
+                    <ModelPicker kind="base" visible={pickerKind === "base"} value={imgModel} onPick={onBasePick}
+                      style={{ display: pickerKind === "base" ? "flex" : "none" }} />
+                    <ModelPicker kind="lora" multi baseType={(imgModel && imgModel.model_type) || ""} visible={pickerKind === "lora"} selected={imgLoras} onToggle={onLoraPick}
+                      style={{ display: pickerKind === "lora" ? "flex" : "none" }} />
                   </div>
                 </div>
               </>

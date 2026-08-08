@@ -399,9 +399,9 @@ var LoomBundle = (() => {
     if (d.phase === "failed") return { phase: "failed", msg: friendlyGenErr(d.error || d.status || "failed") };
     return { phase: "pending" };
   }
-  function buildShotListText(project, fmt2, actLetter2, shotText2) {
+  function buildShotListText(project, fmt3, actLetter2, shotText2) {
     let out = `${project.name}
-Runtime target ${fmt2(project.target)}
+Runtime target ${fmt3(project.target)}
 `;
     if ((project.assets || []).length) {
       out += `
@@ -1583,6 +1583,376 @@ ${"=".repeat(48)}
     );
   }
 
+  // ../gallery/src/components/ModelPicker.jsx
+  function fmt(n) {
+    return (Number(n) || 0).toLocaleString();
+  }
+  function fmtCompact(n) {
+    n = Number(n) || 0;
+    if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, "") + "B";
+    if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+    if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "K";
+    return String(n);
+  }
+  function tyShort(t) {
+    t = (t || "").toUpperCase();
+    if (t.indexOf("LORA") >= 0) return "LoRA";
+    if (t.indexOf("MMDIT") >= 0) return "MMDiT";
+    if (t.indexOf("DIT") >= 0) return "DiT";
+    if (t.indexOf("SDXL") >= 0) return "SDXL";
+    if (t.indexOf("SD_V1") >= 0) return "SD1.5";
+    if (t.indexOf("SD3") >= 0) return "SD3";
+    if (t.indexOf("Z_IMAGE") >= 0) return "Z-Image";
+    if (t.indexOf("CHAT") >= 0) return "Chat";
+    return (t.split("_")[0] || "model").toLowerCase();
+  }
+  function baseLabel(cat) {
+    cat = (cat || "").replace(/^uploaded-/, "").replace(/[-_]+/g, " ").trim();
+    if (!cat) return "";
+    if (/sdxl/i.test(cat)) return "SDXL";
+    if (/sd3/i.test(cat)) return "SD3";
+    if (/^sd ?v?1/i.test(cat)) return "SD1.5";
+    if (/flux/i.test(cat)) return "Flux";
+    if (/pony/i.test(cat)) return "Pony";
+    if (/illustrious/i.test(cat)) return "Illustrious";
+    return cat.replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  function archLabel(m, kind) {
+    const b = baseLabel(m.base_model);
+    if (b) return b;
+    const t = m.lora_base_model_type || m.model_type || "";
+    if (t) return tyShort(t);
+    if (kind === "base" && m.type) return tyShort(m.type);
+    return "";
+  }
+  var LORA_CATS = [
+    ["", "All"],
+    ["character", "Character"],
+    ["animal", "Animal"],
+    ["style", "Style"],
+    ["realistic", "Realistic"],
+    ["pose", "Pose"],
+    ["clothing", "Clothing"],
+    ["background", "Background"],
+    ["detail", "Detail"],
+    ["other", "Other"]
+  ];
+  var BASE_TYPES = [
+    ["", "All"],
+    ["MMDIT26B_MODEL", "DiT.3"],
+    ["MMDIT26A_MODEL", "DiT.2"],
+    ["DIT7_MODEL", "DiT.1"],
+    ["USER_DIT26A_MODEL", "Community DiT"],
+    ["SDXL_MODEL", "SDXL"],
+    ["SD_V1_MODEL", "SD 1.5"]
+  ];
+  var SORTS = [["trending", "Trending"], ["liked", "Most Liked"], ["used", "Most Used"], ["newest", "Latest"]];
+  function ModelPicker({
+    kind = "base",
+    multi = false,
+    market = false,
+    baseType = "",
+    value = null,
+    selected = [],
+    onPick,
+    onToggle,
+    visible = true,
+    style
+  }) {
+    const [q, setQ] = useState("");
+    const [qDebounced, setQDebounced] = useState("");
+    const [rows, setRows] = useState([]);
+    const [err, setErr] = useState("");
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [dim, setDim] = useState(false);
+    const [src, setSrc] = useState("market");
+    const [sort, setSort] = useState("trending");
+    const [category, setCategory] = useState("");
+    const [modelTypes, setModelTypes] = useState([]);
+    const [source, setSource] = useState("");
+    const [posted, setPosted] = useState("");
+    const [license, setLicense] = useState("");
+    const [preview, setPreview] = useState(null);
+    const seqRef = useRef(0);
+    const cursorRef = useRef("");
+    const hasMoreRef = useRef(false);
+    const loadingMoreRef = useRef(false);
+    const gridRef = useRef(null);
+    const lastKeyRef = useRef(null);
+    const previewTimerRef = useRef(null);
+    const scrollRafRef = useRef(null);
+    const selectedRef = useRef(selected);
+    selectedRef.current = selected;
+    useEffect(() => {
+      const t = setTimeout(() => setQDebounced(q), 250);
+      return () => clearTimeout(t);
+    }, [q]);
+    const searchUrl = useCallback((cursor) => {
+      let u = "/api/model-search?kind=" + encodeURIComponent(kind) + "&size=24&q=" + encodeURIComponent(qDebounced || "");
+      if (market) {
+        u += "&src=" + encodeURIComponent(src);
+        if (src !== "bookmark") {
+          u += "&sort=" + encodeURIComponent(sort) + "&category=" + encodeURIComponent(category) + "&posted=" + encodeURIComponent(posted) + "&source=" + encodeURIComponent(source) + "&license=" + encodeURIComponent(license);
+          modelTypes.forEach((t) => {
+            u += "&model_type=" + encodeURIComponent(t);
+          });
+        }
+      }
+      if (kind === "lora" && baseType) u += "&base_type=" + encodeURIComponent(baseType);
+      if (cursor) u += "&cursor=" + encodeURIComponent(cursor);
+      return u;
+    }, [kind, qDebounced, market, src, sort, category, posted, source, license, modelTypes, baseType]);
+    const doSearch = useCallback(() => {
+      const mine = ++seqRef.current;
+      cursorRef.current = "";
+      hasMoreRef.current = false;
+      setDim(true);
+      fetch(searchUrl()).then((r) => r.json()).then((d) => {
+        if (mine !== seqRef.current) return;
+        hasMoreRef.current = !!(d && d.has_more);
+        cursorRef.current = d && d.next_cursor || "";
+        setErr(d && d.error ? d.error : "");
+        setRows(d && d.results || []);
+        setDim(false);
+      }).catch(() => {
+        if (mine !== seqRef.current) return;
+        setErr("network error");
+        setRows([]);
+        setDim(false);
+      });
+    }, [searchUrl]);
+    const loadMore = useCallback(() => {
+      if (!hasMoreRef.current || loadingMoreRef.current) return;
+      const mine = seqRef.current;
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+      fetch(searchUrl(cursorRef.current)).then((r) => r.json()).then((d) => {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+        if (mine !== seqRef.current) return;
+        if (d && d.error) return;
+        hasMoreRef.current = !!(d && d.has_more);
+        cursorRef.current = d && d.next_cursor || "";
+        setRows((old) => old.concat(d && d.results || []));
+      }).catch(() => {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      });
+    }, [searchUrl]);
+    useEffect(() => {
+      if (!visible) return;
+      const key = searchUrl();
+      if (key === lastKeyRef.current) return;
+      lastKeyRef.current = key;
+      doSearch();
+    }, [visible, searchUrl, doSearch]);
+    const onScroll = () => {
+      if (scrollRafRef.current) return;
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollRafRef.current = null;
+        const g = gridRef.current;
+        if (g && g.scrollHeight - g.scrollTop - g.clientHeight < 150) loadMore();
+      });
+    };
+    const isSelected = useCallback((m) => multi ? selected.some((e) => e.model_id === m.model_id) : !!(value && value.model_id === m.model_id), [multi, selected, value]);
+    const toggleMulti = (m) => {
+      const cur = selectedRef.current;
+      const at = cur.findIndex((e) => e.model_id === m.model_id);
+      if (at >= 0) {
+        onToggle && onToggle(cur[at], false);
+        return;
+      }
+      const entry = {
+        model_id: m.model_id,
+        title: m.title,
+        preview_url: m.preview_url,
+        version_id: "",
+        weight: 0.7,
+        lora_base_type: "",
+        trigger_words: "",
+        failed: false
+      };
+      onToggle && onToggle(entry, true);
+      fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1").then((r) => r.json()).then((d) => {
+        if (!selectedRef.current.some((e) => e.model_id === m.model_id)) return;
+        const versions = d && d.versions || [], v = versions[0] || {};
+        onToggle && onToggle({
+          ...entry,
+          version_id: v.version_id || "",
+          lora_base_type: v.lora_base_model_type || "",
+          trigger_words: v.trigger_words || "",
+          versions,
+          failed: !v.version_id
+        }, true);
+      }).catch(() => {
+        if (!selectedRef.current.some((e) => e.model_id === m.model_id)) return;
+        onToggle && onToggle({ ...entry, failed: true }, true);
+      });
+    };
+    const pick = (m) => {
+      hidePreview();
+      if (multi) {
+        toggleMulti(m);
+        return;
+      }
+      onPick && onPick(m);
+    };
+    const showPreview = (m, anchorEl) => {
+      const r = anchorEl.getBoundingClientRect(), w = 300, gap = 12;
+      let x = r.right + gap;
+      if (x + w > window.innerWidth - 8) x = Math.max(8, r.left - w - gap);
+      const y = Math.max(8, Math.min(r.top - 10, window.innerHeight - 380));
+      setPreview({ m, x, y });
+    };
+    const schedulePreview = (m, anchorEl) => {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = setTimeout(() => showPreview(m, anchorEl), 130);
+    };
+    const hidePreview = () => {
+      clearTimeout(previewTimerRef.current);
+      setPreview(null);
+    };
+    useEffect(() => () => {
+      clearTimeout(previewTimerRef.current);
+      if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
+    }, []);
+    const filtersHidden = market && src === "bookmark";
+    const p = preview && preview.m;
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "model-picker", style }, /* @__PURE__ */ react_global_shim_default.createElement(
+      "input",
+      {
+        className: "mg-q",
+        type: "text",
+        placeholder: "Search",
+        "aria-label": "Search models",
+        value: q,
+        onChange: (e) => setQ(e.target.value)
+      }
+    ), market && /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-mktsrc" }, [["market", "Market"], ["bookmark", "Bookmarked"], ...kind === "lora" ? [["mine", "Mine"]] : []].map(([v, label]) => /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        key: v,
+        className: src === v ? "on" : "",
+        "data-src": v,
+        onClick: () => setSrc(v)
+      },
+      label
+    ))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-mktfilters", style: filtersHidden ? { display: "none" } : void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-mktsort" }, SORTS.map(([v, label]) => /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        key: v,
+        className: sort === v ? "on" : "",
+        "data-sort": v,
+        onClick: () => setSort(v)
+      },
+      label
+    ))), kind === "lora" ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-mktcats" }, LORA_CATS.map(([v, label]) => /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        key: v || "all",
+        className: category === v ? "on" : "",
+        "data-cat": v,
+        onClick: () => setCategory(v)
+      },
+      label
+    ))) : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-mktcats mg-mkttypes" }, BASE_TYPES.map(([v, label]) => {
+      const on = v ? modelTypes.includes(v) : !modelTypes.length;
+      return /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          type: "button",
+          key: v || "all",
+          className: on ? "on" : "",
+          "data-mt": v,
+          onClick: () => setModelTypes((old) => !v ? [] : old.includes(v) ? old.filter((x) => x !== v) : old.concat(v))
+        },
+        label
+      );
+    })), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-mktsel" }, /* @__PURE__ */ react_global_shim_default.createElement(
+      "select",
+      {
+        className: "mg-posted" + (posted ? " on" : ""),
+        "aria-label": "Posted at",
+        value: posted,
+        onChange: (e) => setPosted(e.target.value)
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "" }, "Any time"),
+      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "yesterday" }, "Yesterday"),
+      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "7d" }, "Past 7 days"),
+      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "30d" }, "Past 30 days")
+    ), kind === "lora" && /* @__PURE__ */ react_global_shim_default.createElement(
+      "select",
+      {
+        className: "mg-source" + (source ? " on" : ""),
+        "aria-label": "Source",
+        value: source,
+        onChange: (e) => setSource(e.target.value)
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "" }, "Any source"),
+      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "pixai" }, "PixAI-trained"),
+      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "external" }, "External")
+    ), /* @__PURE__ */ react_global_shim_default.createElement(
+      "select",
+      {
+        className: "mg-license" + (license ? " on" : ""),
+        "aria-label": "License",
+        value: license,
+        onChange: (e) => setLicense(e.target.value)
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "" }, "Any licence"),
+      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "COMMERCIAL" }, "Commercial use OK")
+    )))), err ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-empty", style: { display: "block" } }, "\u26A0 ", err) : !rows.length ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-empty", style: { display: "block" } }, "No results \u2014 try another search.") : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-empty" }), /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        className: "mg-grid",
+        role: "listbox",
+        ref: gridRef,
+        onScroll,
+        style: { opacity: dim ? 0.45 : 1 }
+      },
+      rows.map((m) => {
+        const incompat = m.compat === "no";
+        const arch = archLabel(m, kind);
+        const sel = isSelected(m);
+        let tip = m.description || m.title || "";
+        if (incompat && arch) tip += (tip ? " " : "") + "Needs a " + arch + " base.";
+        const cost = kind !== "lora" ? "" : incompat ? arch ? "needs " + arch : "" : (() => {
+          const L = typeof window !== "undefined" ? window.MG_LORA : null;
+          if (!L) return "";
+          const r = L.ranges && L.ranges[(baseType || "").toUpperCase()] || L.fallback;
+          if (!r || r.length < 2 || !isFinite(r[0]) || !isFinite(r[1])) return "";
+          return "weight " + Number(r[0]).toFixed(2) + "\u2013" + Number(r[1]).toFixed(2);
+        })();
+        const clickable = !incompat || sel;
+        return /* @__PURE__ */ react_global_shim_default.createElement(
+          "div",
+          {
+            key: m.model_id,
+            className: "mg-card" + (sel ? " sel" : "") + (incompat ? " incompat" : ""),
+            "data-mid": m.model_id,
+            title: tip || void 0,
+            onClick: clickable ? () => pick(m) : void 0,
+            onMouseEnter: (e) => schedulePreview(m, e.currentTarget),
+            onMouseLeave: hidePreview
+          },
+          /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-cov" }, m.preview_url && /* @__PURE__ */ react_global_shim_default.createElement("img", { className: m.should_blur ? "blur" : void 0, loading: "lazy", src: m.preview_url, alt: "" }), m.official && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-pill" }, "Official"), incompat && arch && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-ibadge" }, "\u26A0 ", arch)),
+          /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-meta" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-nm" }, m.title), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-sub" }, arch && /* @__PURE__ */ react_global_shim_default.createElement("span", null, arch), /* @__PURE__ */ react_global_shim_default.createElement("span", null, fmtCompact(m.liked_count), " likes")), cost && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-costline" }, cost))
+        );
+      })
+    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-loadmore" + (loadingMore ? " on" : ""), "aria-hidden": "true" }, "loading more\u2026"), /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        className: "mg-preview" + (p ? " open" : ""),
+        "aria-hidden": p ? "false" : "true",
+        style: p ? { left: preview.x, top: preview.y } : void 0
+      },
+      p && /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, (p.cover_url || p.preview_url) && /* @__PURE__ */ react_global_shim_default.createElement("img", { src: p.cover_url || p.preview_url, className: p.should_blur ? "blur" : void 0, alt: "" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-meta" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-nm" }, p.title), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-sub" }, /* @__PURE__ */ react_global_shim_default.createElement("span", null, tyShort(p.type)), p.ref_count ? /* @__PURE__ */ react_global_shim_default.createElement("span", null, "\u25C8 ", fmtCompact(p.ref_count), " uses") : null, /* @__PURE__ */ react_global_shim_default.createElement("span", null, "\u2665 ", fmt(p.liked_count)), p.comment_count ? /* @__PURE__ */ react_global_shim_default.createElement("span", null, "\u{1F4AC} ", fmt(p.comment_count)) : null), (baseLabel(p.base_model) || p.official) && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-badges" }, baseLabel(p.base_model) && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "bdg base" }, baseLabel(p.base_model)), p.official && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "bdg official", title: "In-house / official model" }, "\u2713 Official")), p.description && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-desc" }, p.description)))
+    ));
+  }
+
   // master-storyboard.jsx
   var { useState: useState2, useEffect: useEffect2, useRef: useRef2, useCallback: useCallback2, useMemo: useMemo2 } = React;
   var LV_TINTS = [
@@ -1833,7 +2203,7 @@ ${"=".repeat(48)}
     }));
   };
   var uid = () => Math.random().toString(36).slice(2, 9);
-  var fmt = (s) => {
+  var fmt2 = (s) => {
     s = Math.max(0, Math.round(s || 0));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   };
@@ -2348,7 +2718,7 @@ ${"=".repeat(48)}
 /* D-11: LoRA chips in the Image tab -- mirrors the Gallery's own .lora-chip shape
    (moonglade_gallery.py) at the Loom's smaller scale/token set, not a copy-paste of it. */
 /* picker-parity-round2 (2026-07-24): this used to be a show/hide toggle that expanded the
-   LoRA <mg-model-picker> INLINE into this ~280px rail column -- the owner's exact complaint
+   LoRA <ModelPicker> INLINE into this ~280px rail column -- the owner's exact complaint
    ("cramped mess... does not have a flyout like the gallery"). It now opens the SAME
    .lv-mpick-veil overlay the Model row's own trigger does (see below), just pre-selected to
    the LoRAs segment -- reuses .lv-chip's chrome unchanged, only what the click DOES changed. */
@@ -2368,7 +2738,7 @@ ${"=".repeat(48)}
 .lv-lchip .lv-lrm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:13px;padding:0 2px;line-height:1;}
 .lv-lchip .lv-lrm:hover{color:var(--coral);}
 /* picker-parity-round2 (problem 2): the Image tab's model/LoRA picker used to render
-   <mg-model-picker> INLINE in this ~280px rail (cramped: results, a toggle button, a
+   <ModelPicker> INLINE in this ~280px rail (cramped: results, a toggle button, a
    SECOND search box, more results, all stacked). Now a trigger row (mirrors
    moonglade_gallery.py's own #gen-selrow) that opens a floating overlay -- .lv-mpick-veil below
    -- matching the Gallery's #model-flyout presentation: ONE picker experience, not a
@@ -2400,7 +2770,7 @@ ${"=".repeat(48)}
 .lv-mpick-seg button{flex:1;padding:6px 0;border-radius:7px;background:transparent;border:1px solid var(--line);color:var(--ink2);cursor:pointer;font-size:12px;}
 .lv-mpick-seg button.on{background:var(--panel2);color:var(--ink);border-color:var(--amber);font-weight:600;}
 .lv-mpick-body{padding:10px 14px 14px;display:flex;flex-direction:column;min-height:0;flex:1;}
-.lv-mpick-body mg-model-picker{flex:1;min-height:0;}
+.lv-mpick-body .model-picker{flex:1;min-height:0;}
 .lv-bal{font-size:10.5px;color:var(--text);padding:5px 0 3px;border-bottom:1px solid var(--surface1);margin-bottom:9px;letter-spacing:.02em;opacity:.85;}
 .lv-balclaim{color:var(--accent);}
 .lv-editsrc{max-width:100%;max-height:120px;border-radius:8px;border:1px solid var(--surface1);margin:4px 0;display:block}
@@ -2749,45 +3119,37 @@ ${"=".repeat(48)}
         return changed ? next : cur;
       });
     }, [loraRange, setImgLoras]);
-    const basePickerElRef = useRef2(null);
-    const loraPickerElRef = useRef2(null);
-    const bindPicker = useCallback2((el) => {
-      basePickerElRef.current = el;
-      if (el && !el._mgBound) {
-        el._mgBound = true;
-        el.addEventListener("mg-pick", (e) => {
-          setPickerOpen(false);
-          const m = { model_id: e.detail.model_id, title: e.detail.title, preview_url: e.detail.preview_url || "" };
-          setImgModel(m);
-          setModelDefaults(null);
-          const mySeq = ++imgModelSeqRef.current;
-          fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1").then((r) => r.json()).then((d) => {
-            if (mySeq !== imgModelSeqRef.current) return;
-            const versions = d && d.versions || [], v = versions[0] || {};
-            setImgModel((cur) => cur ? {
-              ...cur,
-              version_id: v.version_id || "",
-              model_type: v.model_type || "",
-              sampling_method: v.sampling_method || "",
-              capabilities: v.capabilities || [],
-              compatibility: v.compatibility || {},
-              restrictions: v.restrictions || {},
-              versions
-            } : cur);
-            const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
-            setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
-            if (has) {
-              setImgAdv((cur) => ({
-                ...cur,
-                negative: v.negative_prompt || cur.negative,
-                steps: v.sampling_steps || cur.steps,
-                cfg: v.cfg_scale || cur.cfg
-              }));
-            }
-          }).catch(() => {
-          });
-        });
-      }
+    const onBasePick = useCallback2((row) => {
+      setPickerOpen(false);
+      const m = { model_id: row.model_id, title: row.title, preview_url: row.preview_url || "" };
+      setImgModel(m);
+      setModelDefaults(null);
+      const mySeq = ++imgModelSeqRef.current;
+      fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1").then((r) => r.json()).then((d) => {
+        if (mySeq !== imgModelSeqRef.current) return;
+        const versions = d && d.versions || [], v = versions[0] || {};
+        setImgModel((cur) => cur ? {
+          ...cur,
+          version_id: v.version_id || "",
+          model_type: v.model_type || "",
+          sampling_method: v.sampling_method || "",
+          capabilities: v.capabilities || [],
+          compatibility: v.compatibility || {},
+          restrictions: v.restrictions || {},
+          versions
+        } : cur);
+        const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+        setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
+        if (has) {
+          setImgAdv((cur) => ({
+            ...cur,
+            negative: v.negative_prompt || cur.negative,
+            steps: v.sampling_steps || cur.steps,
+            cfg: v.cfg_scale || cur.cfg
+          }));
+        }
+      }).catch(() => {
+      });
     }, [setImgModel, setImgAdv, setModelDefaults]);
     const pickVersion = useCallback2((vid) => {
       if (!imgModel || !imgModel.versions) return;
@@ -2813,28 +3175,16 @@ ${"=".repeat(48)}
         }));
       }
     }, [imgModel, setImgModel, setImgAdv, setModelDefaults]);
-    const bindLoraPicker = useCallback2((el) => {
-      loraPickerElRef.current = el;
-      if (el && !el._mgBound) {
-        el._mgBound = true;
-        el.addEventListener("mg-pick", (e) => {
-          const { model, selected } = e.detail;
-          setImgLoras((cur) => {
-            const i = cur.findIndex((l) => l.model_id === model.model_id);
-            if (!selected) return i < 0 ? cur : cur.filter((l) => l.model_id !== model.model_id);
-            if (i < 0) return [...cur, model];
-            const next = cur.slice();
-            next[i] = model;
-            return next;
-          });
-        });
-      }
+    const onLoraPick = useCallback2((model, selected) => {
+      setImgLoras((cur) => {
+        const i = cur.findIndex((l) => l.model_id === model.model_id);
+        if (!selected) return i < 0 ? cur : cur.filter((l) => l.model_id !== model.model_id);
+        if (i < 0) return [...cur, model];
+        const next = cur.slice();
+        next[i] = model;
+        return next;
+      });
     }, [setImgLoras]);
-    useEffect2(() => {
-      if (!pickerMounted) return;
-      const vis = pickerKind === "base" ? basePickerElRef.current : loraPickerElRef.current;
-      if (vis && vis.ensureSearched) vis.ensureSearched();
-    }, [pickerMounted, pickerKind]);
     const imgCostRef = useRef2(null);
     const editCostRef = useRef2(null);
     const refCostRef = useRef2(null);
@@ -3535,8 +3885,6 @@ ${"=".repeat(48)}
               className: "lv-lrm",
               title: "Remove",
               onClick: () => {
-                const p = loraPickerElRef.current;
-                if (p && p.deselect) p.deselect(l.model_id);
                 setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id));
               }
             },
@@ -3839,19 +4187,23 @@ ${"=".repeat(48)}
           }
         },
         /* @__PURE__ */ React.createElement("div", { className: "lv-mpick-panel", role: "dialog", "aria-label": "Models and LoRAs" }, /* @__PURE__ */ React.createElement("div", { className: "lv-mpick-head" }, /* @__PURE__ */ React.createElement("span", { className: "t" }, "Models & LoRAs"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "x", onClick: () => setPickerOpen(false), "aria-label": "Close" }, "\xD7")), /* @__PURE__ */ React.createElement("div", { className: "lv-mpick-seg" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: pickerKind === "base" ? "on" : "", onClick: () => setPickerKind("base") }, "Models"), /* @__PURE__ */ React.createElement("button", { type: "button", className: pickerKind === "lora" ? "on" : "", onClick: () => setPickerKind("lora") }, "LoRAs")), /* @__PURE__ */ React.createElement("div", { className: "lv-mpick-body" }, pickerMounted && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
-          "mg-model-picker",
+          ModelPicker,
           {
-            ref: bindPicker,
             kind: "base",
+            visible: pickerKind === "base",
+            value: imgModel,
+            onPick: onBasePick,
             style: { display: pickerKind === "base" ? "flex" : "none" }
           }
         ), /* @__PURE__ */ React.createElement(
-          "mg-model-picker",
+          ModelPicker,
           {
-            ref: bindLoraPicker,
             kind: "lora",
             multi: true,
-            "base-type": imgModel && imgModel.model_type || "",
+            baseType: imgModel && imgModel.model_type || "",
+            visible: pickerKind === "lora",
+            selected: imgLoras,
+            onToggle: onLoraPick,
             style: { display: pickerKind === "lora" ? "flex" : "none" }
           }
         ))))
@@ -4653,7 +5005,7 @@ ${"=".repeat(48)}
   border:1px solid rgba(232,147,95,.3);border-radius:8px;padding:7px 9px;margin-top:10px;}
 
 /* Model/LoRA picker sheet -- a near-full-screen mobile sheet (unlike the half-height Cast
-   sheet: <mg-model-picker>'s search+grid genuinely needs the room), wrapping the SAME real
+   sheet: <ModelPicker>'s search+grid genuinely needs the room), wrapping the SAME real
    custom element LoomV2's floating .lv-mpick-veil overlay uses. */
 .lm-pick-sheet{position:absolute;left:0;right:0;bottom:0;top:6%;z-index:32;background:var(--mantle);
   border-radius:18px 18px 0 0;border:1px solid var(--surface1);border-bottom:none;
@@ -4663,7 +5015,7 @@ ${"=".repeat(48)}
 .lm-pick-head{flex:none;display:flex;align-items:center;gap:8px;margin-bottom:8px;}
 .lm-pick-t{flex:1 1 auto;font-size:14px;font-weight:600;color:var(--text);}
 .lm-pick-body{flex:1;min-height:0;display:flex;flex-direction:column;}
-.lm-pick-body mg-model-picker{flex:1;min-height:0;}
+.lm-pick-body .model-picker{flex:1;min-height:0;}
 
 /* ---- Review & trim (fifth increment, 2026-08-03) -- opened from the board's own \u25B6 badge
    on a finished shot, matching the locked design's reviewOpen/cropping/playing full-screen
@@ -4947,8 +5299,6 @@ ${"=".repeat(48)}
       window.addEventListener("keydown", onKey);
       return () => window.removeEventListener("keydown", onKey);
     }, [pickerOpen]);
-    const basePickerElRef = useRef2(null);
-    const loraPickerElRef = useRef2(null);
     const imgModelSeqRef = useRef2(0);
     const loraRange = useMemo2(() => {
       const L = window.MG_LORA;
@@ -4967,43 +5317,37 @@ ${"=".repeat(48)}
         return changed ? next : cur;
       });
     }, [loraRange, setImgLoras]);
-    const bindPicker = useCallback2((el) => {
-      basePickerElRef.current = el;
-      if (el && !el._mgBound) {
-        el._mgBound = true;
-        el.addEventListener("mg-pick", (e) => {
-          closePicker();
-          const m = { model_id: e.detail.model_id, title: e.detail.title, preview_url: e.detail.preview_url || "" };
-          setImgModel(m);
-          setModelDefaults(null);
-          const mySeq = ++imgModelSeqRef.current;
-          fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1").then((r) => r.json()).then((d) => {
-            if (mySeq !== imgModelSeqRef.current) return;
-            const versions = d && d.versions || [], v = versions[0] || {};
-            setImgModel((cur) => cur ? {
-              ...cur,
-              version_id: v.version_id || "",
-              model_type: v.model_type || "",
-              sampling_method: v.sampling_method || "",
-              capabilities: v.capabilities || [],
-              compatibility: v.compatibility || {},
-              restrictions: v.restrictions || {},
-              versions
-            } : cur);
-            const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
-            setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
-            if (has) {
-              setImgAdv((cur) => ({
-                ...cur,
-                negative: v.negative_prompt || cur.negative,
-                steps: v.sampling_steps || cur.steps,
-                cfg: v.cfg_scale || cur.cfg
-              }));
-            }
-          }).catch(() => {
-          });
-        });
-      }
+    const onBasePick = useCallback2((row) => {
+      closePicker();
+      const m = { model_id: row.model_id, title: row.title, preview_url: row.preview_url || "" };
+      setImgModel(m);
+      setModelDefaults(null);
+      const mySeq = ++imgModelSeqRef.current;
+      fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1").then((r) => r.json()).then((d) => {
+        if (mySeq !== imgModelSeqRef.current) return;
+        const versions = d && d.versions || [], v = versions[0] || {};
+        setImgModel((cur) => cur ? {
+          ...cur,
+          version_id: v.version_id || "",
+          model_type: v.model_type || "",
+          sampling_method: v.sampling_method || "",
+          capabilities: v.capabilities || [],
+          compatibility: v.compatibility || {},
+          restrictions: v.restrictions || {},
+          versions
+        } : cur);
+        const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+        setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
+        if (has) {
+          setImgAdv((cur) => ({
+            ...cur,
+            negative: v.negative_prompt || cur.negative,
+            steps: v.sampling_steps || cur.steps,
+            cfg: v.cfg_scale || cur.cfg
+          }));
+        }
+      }).catch(() => {
+      });
     }, [setImgModel, setImgAdv, setModelDefaults]);
     const pickVersion = useCallback2((vid) => {
       if (!imgModel || !imgModel.versions) return;
@@ -5029,28 +5373,16 @@ ${"=".repeat(48)}
         }));
       }
     }, [imgModel, setImgModel, setImgAdv, setModelDefaults]);
-    const bindLoraPicker = useCallback2((el) => {
-      loraPickerElRef.current = el;
-      if (el && !el._mgBound) {
-        el._mgBound = true;
-        el.addEventListener("mg-pick", (e) => {
-          const { model, selected } = e.detail;
-          setImgLoras((cur) => {
-            const i = cur.findIndex((l) => l.model_id === model.model_id);
-            if (!selected) return i < 0 ? cur : cur.filter((l) => l.model_id !== model.model_id);
-            if (i < 0) return [...cur, model];
-            const next = cur.slice();
-            next[i] = model;
-            return next;
-          });
-        });
-      }
+    const onLoraPick = useCallback2((model, selected) => {
+      setImgLoras((cur) => {
+        const i = cur.findIndex((l) => l.model_id === model.model_id);
+        if (!selected) return i < 0 ? cur : cur.filter((l) => l.model_id !== model.model_id);
+        if (i < 0) return [...cur, model];
+        const next = cur.slice();
+        next[i] = model;
+        return next;
+      });
     }, [setImgLoras]);
-    useEffect2(() => {
-      if (!pickerMounted) return;
-      const vis = pickerKind === "base" ? basePickerElRef.current : loraPickerElRef.current;
-      if (vis && vis.ensureSearched) vis.ensureSearched();
-    }, [pickerMounted, pickerKind]);
     const modeSendsRefs = (m) => usesCloseFrame(m) && m !== "FLF";
     const modeSendsLine = (m) => m === "FLF" ? "First & Last sends the start & end frames only \u2014 cast & refs here are for continuity/notes, not references" : "I2V sends the opening frame only \u2014 cast here is for continuity/notes, not references";
     const liveTagText = (liveTag, pastBudget, mode) => liveTag || (pastBudget ? modeSendsRefs(mode) ? "not sent" : "not cited" : "\u2014");
@@ -5876,8 +6208,6 @@ ${"=".repeat(48)}
               className: "lm-lrm",
               title: "Remove",
               onClick: () => {
-                const p = loraPickerElRef.current;
-                if (p && p.deselect) p.deselect(l.model_id);
                 setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id));
               }
             },
@@ -6326,19 +6656,23 @@ ${"=".repeat(48)}
         /* @__PURE__ */ React.createElement("div", { className: "lm-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "lm-pick-t" }, "Models & LoRAs"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-df-close", onClick: closePicker, "aria-label": "Close" }, "\u2715")),
         /* @__PURE__ */ React.createElement("div", { className: "lm-tabsrow" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-tabbtn" + (pickerKind === "base" ? " on" : ""), onClick: () => setPickerKind("base") }, "Models"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-tabbtn" + (pickerKind === "lora" ? " on" : ""), onClick: () => setPickerKind("lora") }, "LoRAs")),
         /* @__PURE__ */ React.createElement("div", { className: "lm-pick-body" }, /* @__PURE__ */ React.createElement(
-          "mg-model-picker",
+          ModelPicker,
           {
-            ref: bindPicker,
             kind: "base",
+            visible: pickerKind === "base",
+            value: imgModel,
+            onPick: onBasePick,
             style: { display: pickerKind === "base" ? "flex" : "none" }
           }
         ), /* @__PURE__ */ React.createElement(
-          "mg-model-picker",
+          ModelPicker,
           {
-            ref: bindLoraPicker,
             kind: "lora",
             multi: true,
-            "base-type": imgModel && imgModel.model_type || "",
+            baseType: imgModel && imgModel.model_type || "",
+            visible: pickerKind === "lora",
+            selected: imgLoras,
+            onToggle: onLoraPick,
             style: { display: pickerKind === "lora" ? "flex" : "none" }
           }
         ))
@@ -7446,7 +7780,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setTimeout(() => URL.revokeObjectURL(url), 1e3);
     };
     const exportAll = () => download(
-      buildShotListText(project, fmt, actLetter, shotText),
+      buildShotListText(project, fmt2, actLetter, shotText),
       `${project.name.replace(/\s+/g, "_")}_shotlist.txt`,
       "text/plain"
     );

@@ -16,10 +16,14 @@ import path from "node:path";
 // #model-flyout onto this component entirely (two instances, kind="base"/kind="lora" --
 // see test_web_pick.py::test_gallery_model_flyout_is_the_shared_mg_model_picker_component),
 // so this test's own size=24 pin is now the ONLY copy of that number anywhere in the app.
+// Port 2026-08-08: <mg-model-picker> (static/mg-model-picker.js) was migrated to the React
+// component gallery/src/components/ModelPicker.jsx; its _searchUrl() became the searchUrl()
+// useCallback that builds the /api/model-search fetch. The size=24 page-size pin lives there
+// now, so this test reads the React source.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const src = readFileSync(path.join(__dirname, "../../static/mg-model-picker.js"), "utf8");
+const src = readFileSync(path.join(__dirname, "../../gallery/src/components/ModelPicker.jsx"), "utf8");
 
-test("mg-model-picker.js requests size=24 per page", () => {
+test("ModelPicker.jsx requests size=24 per page", () => {
   assert.match(src, /&size=24&q=/,
     "the model-search fetch must request 24 results per page -- this is now the gallery's " +
     "OWN model/LoRA picker too, not just the Loom's, so a regression here hits both surfaces");
