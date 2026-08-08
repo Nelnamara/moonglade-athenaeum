@@ -5527,3 +5527,89 @@ and transition is complete."* All four present_* files removed from the C: dev t
 code untouched for now — it fail-softs through the 404 to "no mascot" — and gets marked
 deprecated as part of the bundle-transition work, per the owner's sequencing, not
 before.
+
+### Branch review (agent workflow): 13 confirmed findings, 2 highs fixed same-day  ·  *2026-08-07*
+
+Owner-requested agent review of the whole design-final-pass branch (23 agents: 5 scoped
+finders over the 48.5k-line diff, adversarial verify on the top findings, then the
+classic-UI mappers below). 40 raw findings → 14 verified → **13 CONFIRMED, 1 refuted**
+(the "/api/next/library untested" claim — the verifier found real coverage).
+
+**Fixed immediately (both highs, regression-tested):**
+
+- **`--backfill-lineage` permanently stamped errored tasks as confirmed originals**
+  (`moonglade_backup.py` ~9485). `_parallel_map` yields `(item, None)` after a worker
+  exception; the loop folded that into `("", "")` — indistinguishable from a real fetch
+  confirming an original — and persisted `lineage_checked='1'`, so one rate-limited run
+  silently excluded those tasks from every future run (no reset path exists short of
+  manual SQL). Fixed: `res is None` → skip, task stays unfiled and retries next run.
+  New `tests/test_backfill_lineage.py` (2 tests) proven both ways — fails on the old
+  code, passes on the fix; also pins that a REAL no-source fetch still stamps.
+- **Mobile My Art per-card Delete fired the irreversible PixAI delete on a single tap**
+  (`MyArtMobile.jsx` — shipped 2026-08-06, caught next day). `mutate()` hardcodes
+  `confirm:true`; the ⋯ sheet's Delete row called it directly, skipping any confirm
+  step while the file's own header claimed preview-then-confirm everywhere. Fixed:
+  per-card delete now routes into the SAME confirm sheet bulk uses (explicit `mids`
+  list; 300ms handoff so the two sheets' shared `closing` flag doesn't render the
+  confirm sheet backwards). Also fixed here: `mutate()` now catches network/non-JSON
+  errors into `{error}` so a mid-flight failure can no longer latch `busy=true`
+  forever (a separately-confirmed finding). Reversible per-card edits (visibility,
+  tags) still apply on tap by design — the sheet tap IS the intent; only irreversible
+  actions confirm.
+
+**Confirmed, open (the work list, severity order):** `/api/login` (the LIVE React auth
+path since 2026-08-01) has zero direct test coverage — classic `/login` POST tests
+don't touch it, render-harness playwright skips in CI; duplicate-review keeper
+protection is a raw string-prefix path compare (bypassable spelling variants);
+`/api/duplicates` re-hashes the whole library uncached per request; GenerateDrawer
+Edit-source nonce breaks on re-request of the same image; App.jsx capture-phase Escape
+closes the whole Control Panel over inner layers; useControlPanel `postJSON` throws
+leave Panel actions busy-stuck; Strip.jsx + ArtBand.jsx are dead files (import
+nothing/imported by nothing); price-quote debounce+seq machinery hand-copied in 4
+places; MobileSheet reopen-within-280ms timer race (AppMobile); PublishMobile/
+TrainMobile confirm-failure renders the error behind the still-open sheet. Plus 26
+lower-confidence unverified findings banked in the workflow output (notable cluster:
+the three Mobile screens duplicate their desktop counterparts' state machines
+wholesale — a shared-hook refactor candidate, deliberately not rushed).
+
+### Classic-UI demolition readiness — mapped, verdict: closer than it looks  ·  *2026-08-07*
+
+Same workflow, second half (3 mappers + synthesis, cross-checked against code). Full
+detail in the workflow output; the durable facts:
+
+**No new backend is needed anywhere.** Every classic capability already has a JSON
+surface (`/api/snippets`, `/api/view-presets` read+write, filtered `/export-csv`,
+JSON twins for all five desktop form routes). The entire demolition backlog is UI-side.
+
+**Deletable today, zero loss:** `/health`, `/panel`, `/duplicates` (React equivalents
+shipped). `/classic` + `/image/<id>` blocked only by: two hard-coded `/image/<mid>`
+links inside mg-notify.js:1398 + mg-generate-drawer.js:1202 (repoint first), the
+`url_for("index")` `_safe_back` fallbacks (7 sites → `/next`), and the NavSpine escape
+pill. Template constants BASE/INDEX/DETAIL/HEALTH/DUPES/PANEL_HTML (~5541-11964, minus
+LOGIN_HTML) all die; DESIGN_TOKENS_CSS and `__UPSCALE_CONST__` survive (Loom + NEXT_PAGE
+inject them — the "INDEX/DETAIL only" comment near :4292 is stale).
+
+**Port-first (the real work, ~one focused session):** (1) prompt-snippets manager UI —
+endpoint exists, React has 4 hardcoded chips; (2) saved-views WRITE UI — React is
+read-only against what classic writes; (3) desktop form-route switchover — App.jsx +
+useImageDetails.js still POST 6 classic redirect routes whose JSON twins mobile already
+uses; (4) filtered CSV export href. **Owner calls:** grid right-click context menu
+(React has none; all 5 actions reachable elsewhere), PWA service worker (only classic
+registers it), `/logout` GET (deliberate stale-tab safety design), and the LAN-bootstrap
+login edge — the ONE undesigned surface, keeps LOGIN_HTML alive past everything else.
+
+**Vanilla static/*.js: zero of 8 are classic-only — all are load-bearing for the React
+shell** (NEXT_PAGE loads all 8; Loom loads 7). Retirement is a separate post-demolition
+campaign in dependency order: mg-art-filters (easiest, no deps) → mg-gallery-picker
+(+absorb picker-core) → mg-model-picker + mg-upscale-panel → mg-notify (big blast
+radius: jobs/achievements/toasts) → mg-generate-drawer + mg-cost-badge dead last (the
+drawer deliberately never unmounts, spend-safety poll lifecycle must be REDESIGNED not
+transliterated; cost-badge is its hard dep, guarded by
+test_web_pick.py::test_cost_badge_ships_with_every_price_surface). Loom independently
+loads 7 of 8, so each retirement lands in BOTH apps — realistically the campaign waits
+until/unless the Loom folds into the main React app.
+
+**Phased order:** 0) link repoints + dead-file deletes (minutes) → 1) desktop
+switchover to JSON twins (small) → 2) the three ports + owner calls → 3) THE CUT
+(routes + templates, full-suite phase gate) → 4) LAN-bootstrap login design, then
+LOGIN_HTML dies → 5) vanilla campaign, art-filters first, generate-drawer last.

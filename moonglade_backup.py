@@ -9484,7 +9484,14 @@ def run_backfill_lineage(args):
 
     for tid, res in _parallel_map(task_ids, _fetch, workers, _prog, delay=args.delay,
                                   on_error=_note_error):
-        src, kind = res or ("", "")
+        if res is None:
+            # The fetch RAISED (network blip, rate limit, PixAI 500) -- _parallel_map
+            # calls on_error and then still yields the item with res=None. Leaving the
+            # task OUT of task_lineage keeps lineage_checked unstamped so the next run
+            # retries it; folding it in as ("", "") would stamp the error as a confirmed
+            # original and permanently exclude the task from every future run.
+            continue
+        src, kind = res
         task_lineage[tid] = (src, kind)
         checked += 1
         if src:
