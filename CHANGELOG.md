@@ -14,6 +14,7 @@ git tags. Full prose notes for tagged versions live on
 > does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- Fixed: Image Details now truly takes over the whole window — it was rendering underneath the banner. Also fixed alongside it: "← Back to gallery" was a dead click (only Escape closed the view), and the app's stylesheets/scripts could be served days-stale from browser cache after an update (they now always revalidate, so a fix you just got is the fix you see).
 - Gallery grid: right-click a thumbnail for a quick menu — Edit, Send to Video, Find similar, Copy id, Open details.
 - Login: the React sign-in page now covers every first-run case, including a device that reaches the app over the network before any account exists (it shows a "set this up on the server machine first" message instead of a form it can't use). The old server-rendered login page is no longer needed for that case.
 - Generate drawer: ★ Snippets is now a real per-account manager (save the current prompt, insert, delete with one-level Undo) instead of four fixed chips — your saved snippets sync across machines.

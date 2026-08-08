@@ -17577,7 +17577,17 @@ __DESIGN_TOKENS__
 
     @app.route("/next/assets/<path:fname>")
     def next_assets(fname):
-        return send_from_directory(str(_NEXT_DIST), fname)
+        resp = send_from_directory(str(_NEXT_DIST), fname)
+        # The bundle changes on every `npm run build` with NO url change, and this
+        # response carried no Cache-Control -- so browsers HEURISTICALLY cached
+        # app.css/app.js and kept painting days-old layout. Bit for real (2026-08-08):
+        # the Details full-window takeover looked "overridden by the banner" on the
+        # owner's everyday tab -- a stale cached app.css from BEFORE the takeover fix,
+        # while a fresh session's probe of the same server looked perfect. no-cache
+        # forces revalidation; ETag/Last-Modified make that a cheap 304 on localhost/
+        # LAN, so repeat loads stay fast but can never be stale again.
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
 
     @app.route("/api/next/library")
     def api_next_library():
@@ -18905,6 +18915,17 @@ __DESIGN_TOKENS__
                     resp.headers["Vary"] = "Accept-Encoding"
         except Exception:
             pass
+        return resp
+
+    @app.after_request
+    def _code_assets_no_cache(resp):
+        # Same staleness class as /next/assets (see next_assets): the shared
+        # static/mg-*.js web components change on edit with no url change, and
+        # heuristic caching kept old copies live in real tabs. Scoped to /static/
+        # ONLY -- thumbnails and full media stay freely cacheable (huge, and a
+        # media file's content never changes under its id).
+        if request.path.startswith("/static/"):
+            resp.headers["Cache-Control"] = "no-cache"
         return resp
 
     @app.after_request
