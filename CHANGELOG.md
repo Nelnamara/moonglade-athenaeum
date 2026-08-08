@@ -14,6 +14,7 @@ git tags. Full prose notes for tagged versions live on
 > does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- **The classic interface is gone.** The React app is now the only interface — the old server-rendered pages (`/classic`, the old image page, `/health`, `/panel`, `/duplicates`, the old login/logout pages) and their offline service worker have been removed, along with roughly 6,400 lines of legacy code. Everything they did lives in the React app; result links from the job tray now open the new Image Details. Two API paths were renamed for consistency (`/rate` → `/api/rate`, `/edit-prompt` → `/api/edit-prompt`). "Add to home screen" installability is unchanged.
 - Fixed: Image Details now truly takes over the whole window — it was rendering underneath the banner. Also fixed alongside it: "← Back to gallery" was a dead click (only Escape closed the view), and the app's stylesheets/scripts could be served days-stale from browser cache after an update (they now always revalidate, so a fix you just got is the fix you see).
 - Gallery grid: right-click a thumbnail for a quick menu — Edit, Send to Video, Find similar, Copy id, Open details.
 - Login: the React sign-in page now covers every first-run case, including a device that reaches the app over the network before any account exists (it shows a "set this up on the server machine first" message instead of a form it can't use). The old server-rendered login page is no longer needed for that case.

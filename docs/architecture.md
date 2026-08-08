@@ -337,36 +337,35 @@ asserts it against a live request, so it is the authority when prose and code di
 ## The React front door (`gallery/`)
 
 Since the 2026-08-01 flip, `/` and `/next` serve a React SPA (source in `gallery/src/`,
-built by Vite to `gallery/dist/`, `npm run build` from `gallery/`) instead of the classic
-Jinja gallery — classic survives at `/classic` only until demolition. `main.jsx` reads a
-`window.MG_BOOT` payload the server inlines and branches to exactly one top-level view:
+built by Vite to `gallery/dist/`, `npm run build` from `gallery/`). **The classic Jinja
+gallery was cut entirely on 2026-08-08** — every classic page route (`/classic`,
+`/image/<id>`, `/health`, `/panel`, `/duplicates`, `/logout`, the form-POST routes, the
+service worker) and all seven inline templates are gone; the React app is the ONLY UI.
+`main.jsx` reads a `window.MG_BOOT` payload the server inlines and branches to exactly
+one top-level view:
 
 - `boot.authenticated === false` → `LoginPage.jsx` — real `POST /api/login` JSON auth
-  (`login()`'s GET branch decides `LOGIN_PAGE` vs classic `LOGIN_HTML` on `no_accounts`),
-  with a `mode: "create"` first-run bootstrap path when `boot.no_accounts`.
+  (GET `/login` always serves the React shell; `boot.no_accounts` + `boot.is_local` pick
+  sign-in vs local bootstrap-create vs the LAN-first-run safety message).
 - `boot.needs_key || boot.catalog_empty` → `SetupWizard.jsx` — a 4-phase first-run flow
   (intro → key entry → sync → ready) over `/api/setup/save-key` and the same
   `/api/panel/run{action:'sync'}` + `/api/panel/status` polling the Control Panel uses.
-  `needs_key`/`catalog_empty` are computed in `next_gallery()` identically to classic's
-  `index()` (a fresh `config.json` read, not the module-cached `core._cfg`).
+  `needs_key`/`catalog_empty` are computed in `next_gallery()` off a fresh
+  `config.json` read (never the module-cached `core._cfg`).
 - otherwise → `App.jsx`, the real gallery grid. Its `NavSpine.jsx` `NAV` array drives a
   set of floating overlays mounted at App's "OVERLAY MOUNT POINT" (each a real port of a
   `Frontend Gallery.dc.html` / `Control Panel.dc.html` design-handoff slab, not a fresh
   design): `HealthOverlay`, `MyArtOverlay`, `ContestsOverlay`, `ImportOverlay` (real
   `/api/import-local`, ported from classic's own `ImportUI`), and `ControlPanelOverlay`
-  (Maintenance job console via `/api/panel/run`+`/api/panel/status`, Branding, Users/Trash
-  as nested sub-overlays, and a server Stop/Restart modal using classic's own real
-  `_watchServer()` ping-poll reconnect logic — **launched as a modal from the nav pill,
-  not the `/panel` page classic still serves**). `GET /api/panel/summary` is the one new
-  route this needed: a JSON twin of `/panel`'s own long-standing aggregation.
+  (Maintenance job console via `/api/panel/run`+`/api/panel/status`, Branding,
+  Users/Trash/PixAI-account as nested sub-overlays, and a server Stop/Restart modal —
+  launched as a modal from the nav pill). `GET /api/panel/summary` is its JSON
+  aggregation route.
 
-**Not yet ported:** Publish and Train have complete designs in the handoff
-(`Frontend Gallery.dc.html`'s `ovPublish`/`ovTrain`) but no backend route under any name —
-building either needs new backend work first, not just a port. Folio of Honors, Duplicate
-Review (reachable from Health's own Duplicates/Reclaimable stat rows in the handoff, not
-from the Panel), Contact Sheet, the Loom's real chrome respec to the new design tokens,
-and all seven mobile-width surfaces remain unbuilt. Dated build history for each shipped
-piece is in `CHANGELOG.md`; the reasoning behind specific calls (why Users' add/remove
+Every handoff surface is built now (Publish, Train, Folio, Duplicate Review, Contact
+Sheet, and all the mobile-width surfaces shipped across 2026-08-02..08-07); the one
+still-vanilla layer is `static/mg-*.js` below, whose React rewrite is the next campaign.
+Dated build history for each shipped piece is in `CHANGELOG.md`; the reasoning behind specific calls (why Users' add/remove
 sits at a different trust tier, why the sync phase's progress UI departs from the design
 handoff's fake timers, why Control Panel is a modal and not the page the handoff specifies)
 is in `docs/DECISIONS.md`.

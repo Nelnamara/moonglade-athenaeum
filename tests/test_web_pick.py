@@ -5,7 +5,6 @@ monkeypatched so nothing touches the network."""
 import io
 import json
 import os
-import re
 from pathlib import Path
 
 import moonglade_backup as core
@@ -45,7 +44,6 @@ def test_gallery_images_requires_login_over_lan_but_then_works(tmp_path):
     refused like every other route, and the regression this test guards becomes 'the
     picker still works over LAN for a signed-in user' -- not 'works over LAN with no
     auth at all', which was the whole security gap this rewrite closed."""
-    core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path, [
         _row(media_id="1", filename="a_1.png", prompt_preview="p",
              created_at="2025-01-01T00:00:00"),
@@ -54,13 +52,9 @@ def test_gallery_images_requires_login_over_lan_but_then_works(tmp_path):
     r = cli.get("/api/gallery-images", environ_overrides={"REMOTE_ADDR": LAN})
     assert r.status_code == 401                        # no session -> refused
 
-    html = cli.get("/login").get_data(as_text=True)
-    # Either the classic hidden input (bootstrap_mode) or the React shell's
-    # window.MG_BOOT JSON blob (the common case: a real account already
-    # exists, so GET /login now serves LoginPage.jsx -- 2026-08-02).
-    m = re.search(r'name="csrf" value="([^"]+)"|"csrf":\s*"([^"]+)"', html)
-    csrf = m.group(1) or m.group(2)
-    cli.post("/login", data={"username": "alice", "password": "hunter2", "csrf": csrf})
+    # Sign in the way the real app does now (classic cut, 2026-08-08): GET /login's
+    # MG_BOOT csrf -> POST /api/login (JSON), wrapped by the shared conftest helper.
+    cli = login_existing_client(cli, username="alice", password="hunter2")
     d = cli.get("/api/gallery-images", environ_overrides={"REMOTE_ADDR": LAN}).get_json()
     assert len(d["images"]) == 1 and d["total"] == 1    # same LAN address, now logged in
 
@@ -132,7 +126,7 @@ def test_gallery_images_includes_is_nsfw_for_privacy_blur(tmp_path):
     assert by_id["2"]["is_nsfw"] == ""
 
 
-def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces(tmp_path):
+def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces():
     """Audit 2026-07-21, S5 (the client half): with is_nsfw now on the wire (test above),
     every surface rendering /api/gallery-images results needs to set data-nsfw on the card
     it builds, and body.privacy-blur needs a rule that actually blurs it -- neither existed
@@ -149,22 +143,10 @@ def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces(tmp_path):
     boundary, since Gen.renderGenRef's #gen-ref-slot setter (checked below) still does a
     strict === '1' comparison -- this is the one place left in moonglade_gallery.py that needs
     is_nsfw to reach it as a real value, not just be forwarded blindly."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "if(f) f(d.media_id, d.thumb, d.prompt||'', d.is_nsfw?'1':'');" in html, (
-        "Picker.open's mg-pick bridge must convert the component's boolean is_nsfw back to "
-        "'1'/'' -- passing the raw boolean through would silently break the strict ===  '1' "
-        "check in Gen.renderGenRef's #gen-ref-slot setter below")
-    assert "Picker.open(function(mid, thumb, prompt, is_nsfw){ d.respond(mid, thumb, is_nsfw); }" in html
-    assert 'genRef={media_id:mid, thumb:thumb, is_nsfw:is_nsfw}' in html          # #gen-ref-slot
-    assert 'body.privacy-blur #gen-ref-slot[data-nsfw="1"] img' in html
-    # The old #pick-modal grid (and its dead privacy-blur branch) must be functionally
-    # gone -- checked as the real CSS rule / DOM class assignment, not a bare substring,
-    # since explanatory comments in the CSS legitimately still mention the old name.
-    assert '.pick-cell{' not in html and "className='pick-cell'" not in html, (
-        "the old #pick-modal grid should be fully gone -- <mg-gallery-picker>'s own "
-        ".mg-pk-cell covers this now (see picker_js below)")
-
+    # (The classic gallery page's own Picker.open bridge / #gen-ref-slot half of this
+    # test died with the classic cut, 2026-08-08. The shared components below are the
+    # surviving surfaces, and their own is_nsfw/data-nsfw/privacy-blur handling -- used
+    # by the React shell and the Loom alike -- is what stays pinned.)
     picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-gallery-picker.js").read_text(encoding="utf-8")
     assert "if (m.is_nsfw === '1') c.setAttribute('data-nsfw', '1');" in picker_js
     assert "is_nsfw: m.is_nsfw === '1'" in picker_js
@@ -181,116 +163,6 @@ def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces(tmp_path):
 
     loom_bundle = (Path(__file__).resolve().parents[1] / "loom" / "dist" / "master-storyboard.bundle.js").read_text(encoding="utf-8")
     assert "is_nsfw" in loom_bundle or "isNsfw" in loom_bundle   # esbuild output stays in sync with the .jsx source
-
-
-def test_gallery_picker_is_the_shared_mg_gallery_picker_component(tmp_path):
-    """O13 (Phase 2): the gallery's own image picker is <mg-gallery-picker> now -- the same
-    component the Loom mounts -- instead of the old hand-rolled #pick-modal grid. Pins the
-    script include and the mount/bridge shape, and asserts the old markup/grid/upload/filter
-    IDs are gone, the same 'new surface present + old one gone' shape as
-    test_gallery_video_tab_is_the_shared_drawer_component (the Video tab's own Option-A
-    migration) -- so this swap can't silently regress back to the old hand-rolled form."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "/static/mg-gallery-picker.js" in html                    # component script on the gallery
-    assert "document.createElement('mg-gallery-picker')" in html     # mounted by Picker.open(), not static markup
-    assert "el.setAttribute('show-source', '');" in html             # gallery-parity attrs actually requested
-    assert "el.setAttribute('show-upload', '');" in html
-    assert "el.setAttribute('show-copy-prompt', '');" in html
-    assert "el.addEventListener('mg-pick'" in html
-    assert "el.addEventListener('mg-close'" in html
-    # the old hand-rolled picker markup/grid/upload/filter chrome is gone
-    for old_id in ('id="pick-modal"', 'id="pick-scrim"', 'id="pick-grid"', 'id="pick-q"',
-                   'id="pick-up"', 'id="pick-file"', 'id="pick-more"', 'id="pick-copy"',
-                   'id="pick-collection"', 'id="pick-source"', 'id="pick-rating"', 'id="pick-sort"'):
-        assert old_id not in html, "old #pick-modal markup survived the O13 migration: " + old_id
-    assert "Picker.onFilter" not in html and "Picker.onScroll" not in html and "Picker.toggleCopy" not in html
-
-
-def test_gallery_model_flyout_is_the_shared_mg_model_picker_component(tmp_path):
-    """O12 (Phase 2): #model-flyout's own hand-rolled search/grid/hover-preview/market UI is
-    two <mg-model-picker> instances now (kind="base" and kind="lora" multi market), lazily
-    mounted into #gen-picker-host on first open -- not the old #gen-grid/#gen-q/.gen-card
-    rendering. Same 'new surface present + old one gone' shape as the O13 test above."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "/static/mg-model-picker.js" in html
-    assert 'id="gen-picker-host"' in html
-    assert "document.createElement('mg-model-picker')" in html
-    assert "basePickerEl.setAttribute('kind','base');" in html
-    assert "loraPickerEl.setAttribute('kind','lora');" in html
-    assert "loraPickerEl.setAttribute('multi','');" in html
-    assert "loraPickerEl.setAttribute('market','');" in html   # O13's sort/category parity for LoRAs
-    assert "addEventListener('mg-pick', function(e){ onBasePick(e.detail); });" in html
-    assert "addEventListener('mg-pick', function(e){ onLoraPick(e.detail.model, e.detail.selected); });" in html
-    # the old hand-rolled grid/search/market chrome is gone
-    for old_id in ('id="gen-grid"', 'id="gen-empty"', 'id="gen-q"', 'id="mkt-sort"',
-                   'id="mkt-cats"', 'id="mkt-popular"', 'id="mkt-newest"'):
-        assert old_id not in html, "old #model-flyout grid markup survived the O12 migration: " + old_id
-    assert "function selectCard(" not in html and "function toggleLora(" not in html
-    assert "function search(){" not in html and "function render(rows" not in html
-
-
-def test_model_flyout_grid_fills_the_panel_instead_of_a_fixed_320px_cap(tmp_path):
-    """picker-parity-round2 (problem 1): the owner's live screenshot showed only ~2 rows of
-    cards then a large dead area filling the rest of #model-flyout's real height. Root cause
-    was TWO independent height constraints fighting each other: .gen-body was an
-    overflow:auto scroll container AND <mg-model-picker>'s own .mg-grid had a fixed
-    max-height:320px (see mg-model-picker.js's own tests for that half of the fix) -- so on
-    any flyout taller than ~380px, .gen-body's real extra height just sat there empty below
-    the capped grid. Fix: hand the real height down to the GRID so IT is the one scrolling
-    region, scoped to #model-flyout only (the main Generate form's own .gen-body is a plain
-    tall scrolling form and must stay untouched)."""
-    cli = _authed_client(tmp_path, [])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "#model-flyout .gen-body{overflow:hidden;display:flex;flex-direction:column;min-height:0;}" in html
-    assert "#model-flyout #gen-picker-host{flex:1;min-height:0;display:flex;flex-direction:column;}" in html
-    assert "#model-flyout mg-model-picker{flex:1;min-height:0;}" in html
-    # #gen-drawer's own .gen-body (the main form) must be UNTOUCHED -- only ONE overflow:auto
-    # rule for the base .gen-body class, not overridden away by this fix.
-    assert html.count(".gen-body{padding:12px 14px;overflow-y:auto;flex:1;}") == 1
-
-
-def test_model_flyout_surfaces_version_picker_and_capabilities(tmp_path):
-    """picker-parity-round2 (problems 4/5): resolve_version_meta() already fetches a
-    model's OTHER releases + the author's own sampling_method/capabilities -- this was being
-    resolved and thrown away. #gen-version/#gen-caps surface both; base-type wiring feeds
-    the resolved architecture into the LoRA picker for problem 3's compat sort/badge."""
-    cli = _authed_client(tmp_path, [])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert 'id="gen-version"' in html and 'onchange="Gen.pickVersion(this.value)"' in html
-    assert 'id="gen-caps"' in html
-    assert 'id="gen-modeldefaults-label"' in html   # sampling_method note target
-    assert "pickVersion:pickVersion" in html         # exposed on the Gen public object
-    # every base pick re-resolves via ?all=1 (the version LIST, not just the latest)...
-    assert "fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id)+'&all=1')" in html
-    # ...and feeds the resolved architecture straight into the LoRA picker (problem 3)
-    assert "if(loraPickerEl) loraPickerEl.setAttribute('base-type', selected.model_type||'');" in html
-
-
-def test_base_model_version_dropdown_is_hidden_when_there_is_only_one_version(tmp_path):
-    """AUDIT_2026-07-21 follow-up: renderVersions() rendered the base-model version <select>
-    even for a single-option list -- a control that cannot do anything, on the majority of
-    picks (most models publish exactly one release). The gate already existed in TWO other
-    places in this codebase and is reused verbatim rather than reinvented: the Gallery's own
-    per-LoRA chips (renderLoras -> `l.versions&&l.versions.length>1`) and the Loom's
-    .lv-versel (`imgModel.versions.length > 1`).
-
-    #gen-selmeta itself must still open for the capability badges alone -- those are
-    independent of how many versions exist -- so the gate hides the <select>, not the row."""
-    cli = _authed_client(tmp_path, [])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "var multi=versions.length>1;" in html
-    assert "sel.style.display=multi?'':'none';" in html
-    # the <option> list is only built when there's a real choice...
-    assert "sel.innerHTML=multi?versions.map(function(v){" in html
-    # ...and the containing row still shows for capabilities-only models
-    assert "wrap.classList.toggle('show', multi||caps>0);" in html
-    # the established gate this copies, still present on the per-LoRA chips
-    assert "var verSel=(l.versions&&l.versions.length>1)" in html
-    # submit still reads selected.version_id, never the <select>'s value -- hiding the
-    # control must not be able to change what gets generated
-    assert "return { version_id:(selected&&selected.version_id)||''," in html
 
 
 def test_model_search_lora_always_uses_graphql_even_without_market_filters(tmp_path, monkeypatch):
@@ -724,7 +596,7 @@ def test_snippets_are_independent_for_accounts_differing_only_by_case(tmp_path):
         "nel's save overwrote Nel's snippets -- case-collision on disk")
 
 
-def test_gallery_model_preview_hover_is_debounced_not_instant(tmp_path):
+def test_gallery_model_preview_hover_is_debounced_not_instant():
     """D-11 fix, originally landed as the gallery's OWN scheduleShowPreview/cancelPreview
     (a raw mouseenter re-triggered an instant, freshly-repositioned popup on every card the
     mouse passed over while scanning the grid). O12 (Phase 2) moved the whole search-grid
@@ -733,14 +605,9 @@ def test_gallery_model_preview_hover_is_debounced_not_instant(tmp_path):
     This is fundamentally a feel/timing bug (real verification is manual, in a browser) --
     this only guards against a future edit reverting to raw, un-debounced wiring, wherever
     that wiring now lives."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "/static/mg-model-picker.js" in html   # the gallery's own grid IS this component now
-    # The old hand-rolled copy must be gone, not just superseded -- two independently-
-    # debounced implementations is exactly the kind of drift this migration exists to end.
-    assert "function scheduleShowPreview(" not in html
-    assert "function cancelPreview(" not in html
-
+    # (The classic page that used to mount this component -- and the hand-rolled copy
+    # it replaced -- died with the classic cut, 2026-08-08. The debounce itself lives
+    # in the shared component, which the React shell and the Loom both load.)
     picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-model-picker.js").read_text(encoding="utf-8")
     assert "c.addEventListener('mouseenter', function () { self._schedulePreview(m, c); });" in picker_js
     assert "_schedulePreview(m, anchor) {" in picker_js
@@ -1384,48 +1251,33 @@ def test_unauthenticated_lan_request_to_index_is_redirected_to_login(tmp_path):
     index() at all -- it's redirected to /login instead of rendering anything."""
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
-    r = cli.get("/classic", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
+    r = cli.get("/", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
     assert r.status_code in (301, 302, 303, 307, 308)
     assert "/login" in r.headers["Location"]
 
 
 def test_logged_in_lan_request_gets_the_same_full_ui_as_local(tmp_path):
     """A LAN request carrying a valid login session is authorized exactly like the
-    local owner for the LOGIN-tier controls this test actually checks -- Generate/Loom,
-    no read-only banner. There is only ONE access tier for THOSE once you're behind the
-    front door (a logged-in session -- see index()'s `is_local=True` comment for why
-    that template flag is now a hardcoded constant rather than a live check). Both
-    views below are captured AFTER logging in: an unauthenticated LOCAL request no
-    longer gets the full owner UI either (the loopback bypass is gone), so the only
-    real distinction left to prove for LOGIN-tier controls is authenticated-vs-not,
-    never the request's address -- see
-    test_unauthenticated_lan_request_to_index_is_redirected_to_login for that side of
-    the boundary. Community + browse surfaces (Contests / My Art) render either way,
-    as before. NOT claimed identical here, deliberately: the header also renders a
-    LOCALHOST-tier "^ Import" button, gated on the real `is_true_local` check rather
-    than this shared LOGIN-tier flag -- see
-    tests/test_route_tiers.py::test_index_withholds_the_import_button_from_a_lan_session
-    for that control's own local-vs-LAN pair (docs/AUDIT_2026-07-21.md P3/S5-3,
-    FIXED 2026-07-24)."""
-    core.add_or_update_web_user("alice", "hunter2")
+    local owner: there is only ONE access tier behind the front door (a logged-in
+    session), never the request's address. The classic page this test used to scrape
+    for owner-only controls died with the classic cut (2026-08-08); the surviving
+    surface is the React shell at "/", served whole to any authenticated session --
+    next_gallery() even hardcodes is_local=True in the boot blob -- so what's left to
+    pin is that the shell (MG_BOOT + the app bundle) reaches a logged-in LAN session
+    identically to localhost, with no read-only in-between tier. See
+    test_unauthenticated_lan_request_to_index_is_redirected_to_login for the other
+    side of the boundary, and tests/test_route_tiers.py for the LOCALHOST-tier
+    exceptions (e.g. Import/setup)."""
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
-    html = cli.get("/login").get_data(as_text=True)
-    # Either the classic hidden input (bootstrap_mode) or the React shell's
-    # window.MG_BOOT JSON blob (the common case: a real account already
-    # exists, so GET /login now serves LoginPage.jsx -- 2026-08-02).
-    m = re.search(r'name="csrf" value="([^"]+)"|"csrf":\s*"([^"]+)"', html)
-    csrf = m.group(1) or m.group(2)
-    cli.post("/login", data={"username": "alice", "password": "hunter2", "csrf": csrf})
-    localhost = cli.get("/classic").get_data(as_text=True)
-    lan = cli.get("/classic", environ_overrides={"REMOTE_ADDR": "192.168.1.50"}).get_data(as_text=True)
-    # The Generate button (btn-primary) + The Loom header link are owner-level controls.
-    _loom = "video storyboard, where shots"   # unique to the header Loom link title (owner-only)
-    assert _loom in localhost and "read-only LAN view" not in localhost
-    assert _loom in lan and "read-only LAN view" not in lan
-    # community + browse surfaces render on both
-    for html in (localhost, lan):
-        assert "Contests.open()" in html and "YourArt.open()" in html
+    cli = login_existing_client(cli, username="alice", password="hunter2")
+    localhost = cli.get("/")
+    lan = cli.get("/", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
+    assert localhost.status_code == 200 and lan.status_code == 200
+    for r in (localhost, lan):
+        html = r.get_data(as_text=True)
+        assert "window.MG_BOOT" in html and "/next/assets/app.js" in html
+        assert "read-only LAN view" not in html
 
 
 def test_export_csv_downloads_as_attachment(tmp_path):
@@ -1481,239 +1333,11 @@ def test_export_csv_honours_the_gallery_filters(tmp_path):
     assert ids("?q=nothingmatchesthis") == set()             # empty result is a header-only CSV
 
 
-def test_grid_export_link_appears_only_when_filtered(tmp_path):
-    """The filtered-export backend (above) shipped with no way to REACH it: the only CSV link
-    lived on the Control Panel and always dumped the whole catalog. The gallery grid now grows
-    an 'Export this view' link -- but ONLY inside the {% if chips %} active-filter bar, so an
-    unfiltered grid still routes people to the Panel's full dump instead of a redundant one."""
-    cli = _authed_client(tmp_path, [
-        _row(media_id="1", filename="a_1.png", prompt_preview="night elf", model_name="WAI",
-             created_at="2025-01-01T00:00:00"),
-        _row(media_id="2", filename="b_2.png", prompt_preview="daylight", model_name="WAI",
-             created_at="2025-02-01T00:00:00"),
-    ])
-    plain = cli.get("/classic").get_data(as_text=True)
-    assert "Export this view" not in plain and "/export-csv?" not in plain   # unfiltered: none
-    filtered = cli.get("/classic?q=night").get_data(as_text=True)
-    assert "Export this view" in filtered                                    # filtered: it shows
-    assert "/export-csv?" in filtered and "q=night" in filtered              # carries the query
-
-
-def test_grid_export_link_drives_the_filtered_export_end_to_end(tmp_path):
-    """The link must carry the LIVE query string, so following it exports exactly the filtered
-    view -- this proves the reachability wiring end to end, not just the backend (which its own
-    test above already covers)."""
-    import re
-    import html as htmlmod
-    import csv
-    cli = _authed_client(tmp_path, [
-        _row(media_id="1", filename="a_1.png", prompt_preview="night elf", model_name="WAI",
-             created_at="2025-01-01T00:00:00"),
-        _row(media_id="2", filename="b_2.png", prompt_preview="daylight city", model_name="WAI",
-             created_at="2025-02-01T00:00:00"),
-        _row(media_id="3", filename="c_3.png", prompt_preview="night market", model_name="Other",
-             created_at="2026-01-01T00:00:00"),
-    ])
-    grid = cli.get("/classic?q=night&model=WAI").get_data(as_text=True)
-    m = re.search(r'href="(/export-csv\?[^"]+)"', grid)
-    assert m, "filtered grid did not render an /export-csv link"
-    href = htmlmod.unescape(m.group(1))          # Jinja escaped & -> &amp; in the attribute
-    r = cli.get(href)
-    assert r.status_code == 200 and r.mimetype == "text/csv"
-    ids = {row["media_id"] for row in csv.DictReader(io.StringIO(r.get_data(as_text=True)))}
-    assert ids == {"1"}                          # q=night AND model=WAI -> only row 1
-
-
 def test_branding_absent_is_404(tmp_path):
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.get("/branding/banner.png").status_code == 404      # onerror removes the img
     assert cli.get("/branding/../catalog.db").status_code == 404    # traversal rejected
-
-
-def test_enhance_subtab_is_the_local_art_filters_surface(tmp_path):
-    """The Enhance sub-tab is where art filters live, and they run entirely in the browser.
-
-    Every control that submitted a `pixai-panelplugin` task is gone -- PixAI never dispatches
-    one from an API key (see tests/test_enhance.py's test_no_panelplugin_submit_path_survives
-    for the measurement) -- and so is the paid `pixai-image-filter` submit that used to be the
-    other half of the same command. PixAI's seven art filters are gradient composites served
-    from a public config endpoint, so the tab now applies them locally: no credits, no request.
-
-    What must remain: the sub-tab button, the filters entry point, the flyout it opens, and a
-    line saying which PixAI tools still only run on their own site. What must NOT: any element
-    the deleted panelplugin JS addressed, and no route that would send a filter to a worker."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
-                                  created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "Gen.setEditSub('enhance')" in html            # the tab itself survives
-    assert 'id="edit-sub-enhance"' in html
-    assert "pixai.art" in html                            # the pane says what does NOT run here
-    # the local filters surface: the module, the entry point, and the side-by-side flyout
-    assert '/static/mg-art-filters.js' in html
-    assert 'Gen.toggleFilters()' in html
-    assert 'id="filters-flyout"' in html
-    for part in ('id="af-stage"', 'id="af-img"', 'id="af-swatches"', 'id="af-strength"',
-                 'id="af-save"'):
-        assert part in html, part + " is missing from the filters flyout"
-    for dead in ('class="enh-shelf"', 'class="enh-card"', 'id="enh-q"', 'id="enh-list"',
-                 'id="enh-go"', 'id="enh-result"', 'id="enh-selected"',
-                 'id="enhance-cost"', "Gen.selectEnhance(", "Gen.runEnhance(",
-                 "function selectEnhance", "function runEnhance", "function renderWorkflows",
-                 "/api/workflows", "/api/enhance", "pixai-image-filter"):
-        assert dead not in html, dead + " is still in the page"
-
-
-def test_art_filters_flyout_is_a_comparison_and_placed_like_the_model_flyout(tmp_path):
-    """Three properties of the filters panel that a plain "the ids are present" check misses.
-
-    1. THREE COLUMNS, in order: the untouched original, the filtered preview, then the palette
-       rail. Judging a filter is a COMPARISON -- with one image you had to toggle No filter
-       back and forth and hold the difference in your head. The two pictures also have to be
-       two distinct <img> elements: MgArtFilters mutates the preview's element (a CSS `filter`
-       for image_parameters, overlay divs at inset:0), so anything sharing it would be filtered
-       too and there would be nothing left to compare against.
-    2. The image columns take an EXPLICIT flex-basis, never `auto`. From an `auto` basis a
-       column's base size is the image's INTRINSIC width, which overflows the panel and makes
-       flex-wrap drop the rail under the pictures at every width -- measured on the old
-       two-column build, and the whole point of the panel is lost.
-    3. Positioned by the in-repo overlay idiom, not a new one. #filters-flyout is a top-level
-       fixed panel placed by JS (the same shape as #model-preview, which mg-model-picker's
-       _place() drives) -- it must NOT be a child of #gen-drawer, because the drawer carries
-       `transform: translateX(...)` and a transform makes its box the containing block for
-       position:fixed descendants, so viewport coordinates computed from
-       getBoundingClientRect() would land relative to the drawer instead.
-    """
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
-                                  created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    # (1) the layout rule, not just the markup
-    assert "#filters-flyout .af-wrap{display:flex;" in html
-    orig_at = html.index('id="af-orig"')
-    stage_at = html.index('id="af-stage"')
-    rail_at = html.index('id="af-swatches"')
-    assert orig_at < stage_at < rail_at, (
-        "column order must read original -> preview -> palette rail")
-    assert html.count('id="af-orig"') == 1 and html.count('id="af-img"') == 1
-    assert orig_at < html.index('id="af-img"'), (
-        "the original must not live inside #af-stage -- the filter would be applied to it too")
-    # (2) explicit basis on the growing columns, fixed width on the rail
-    assert "#filters-flyout .af-col{flex:1 1 250px;" in html
-    assert "#filters-flyout .af-rail{flex:0 0 236px;" in html
-    # (3) fixed + JS-placed, and OUTSIDE the transformed drawer
-    assert "#filters-flyout{position:fixed;" in html
-    drawer_at = html.index('<aside id="gen-drawer"')
-    drawer_end = html.index("</aside>", drawer_at)
-    flyout_at = html.index('id="filters-flyout"')
-    assert flyout_at > drawer_end, (
-        "#filters-flyout is inside #gen-drawer, whose transform would capture its "
-        "position:fixed coordinates")
-    assert "function placeFilters(" in html
-
-
-def test_art_filters_rail_groups_both_sets_and_offers_four_actions(tmp_path):
-    """The rail is two headed sets, and the action row is the agreed four buttons.
-
-    Ours lead because they are the house set; PixAI's follow. The grouping is not decoration --
-    the sets do not behave alike (four of PixAI's seven use Photoshop whole-colour blend modes
-    that CSS can only approximate, so their saved file differs from their preview; the
-    Moonglade five are exact-only), and a tile's tooltip is where that is said.
-
-    Publish is present but DISABLED: publishing to PixAI is Epic C and its mutation is
-    deliberately not wired. Shown-with-a-reason rather than hidden, so the group matches the
-    agreed layout instead of silently growing a fourth button later.
-    """
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
-                                  created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "AF.groups().forEach(" in html, "the rail must be built from the grouped API"
-    assert ".af-grp{" in html and ".af-tiles{" in html
-    for bid in ("af-none", "af-save", "af-send", "af-publish"):
-        assert 'id="%s"' % bid in html, "missing action button: " + bid
-    pub = html.index('id="af-publish"')
-    assert "disabled" in html[pub:pub + 260], "Publish must ship disabled until Epic C lands"
-    assert "Gen.filterSend()" in html and "filterSend:filterSend" in html
-
-
-def test_art_filters_send_uploads_for_free_and_never_touches_the_local_import(tmp_path):
-    """"Send to image gen" goes through /api/upload -- the free 3-step S3 handshake -- and
-    hands the returned media_id to the Edit source.
-
-    Two things this pins. It must NOT reuse /api/import-local: that route writes into the
-    owner's library and returns no media_id, so an i2i path keyed on a media_id would get
-    nothing. And it must not submit anything: the upload spends no credits, and the generation
-    the drawer then runs is the priced step. A regression that made this button generate would
-    charge for a button whose label says it only sends.
-    """
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
-                                  created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    body = html[html.index("function filterSend("):]
-    body = body[:body.index("window.addEventListener('resize', placeFilters)")]
-    assert "'/api/upload'" in body
-    assert "import-local" not in body, "Send must not go through the library-import route"
-    assert "/api/generate" not in body and "/api/edit" not in body, (
-        "Send uploads only -- it must not submit a generation")
-    assert "setEditSource(String(d.media_id))" in body
-
-
-def test_filter_actions_close_the_panel_without_re_opening_it(tmp_path):
-    """`toggleFilters()` is a TOGGLE, and both filter actions run across an await.
-
-    Nothing disables the panel's own close paths while a request is in flight -- only the
-    pressed button is disabled -- so the header's x, `#gen-scrim` and the unconditional
-    global `Escape -> Gen.close()` all stay live. Calling the toggle blind on resolve
-    therefore RE-OPENS a panel the user already dismissed, and `placeFilters()` then measures
-    a drawer that has slid away (`transform:translateX(100%)`), landing the panel over the
-    gallery with nothing behind it -- the exact state `Gen.close()` exists to prevent.
-
-    So the resolve handlers must go through `closeFiltersIfOpen()`, which checks `.open`
-    first, and must never call `toggleFilters()` directly.
-    """
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
-                                  created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "function closeFiltersIfOpen(" in html
-    guard = html[html.index("function closeFiltersIfOpen("):]
-    guard = guard[:guard.index("function afActing(")]
-    assert "classList.contains('open')" in guard, (
-        "closeFiltersIfOpen must check the panel is open before toggling it")
-
-    for fn in ("function filterSave(", "function filterSend("):
-        body = html[html.index(fn):]
-        body = body[:body.index("\n  function ", 10)] if "\n  function " in body[10:] else body
-        body = body[:body.index("window.addEventListener('resize', placeFilters)")] \
-            if "window.addEventListener('resize', placeFilters)" in body else body
-        assert "toggleFilters()" not in body, (
-            fn + " calls the toggle directly -- it re-opens a panel closed mid-request")
-
-
-def test_filter_actions_capture_the_filter_before_the_await(tmp_path):
-    """`afId` is module state and the tiles and **No filter** stay clickable during a
-    request, so it can change or be cleared before the resolve handler runs.
-
-    `AF.get()` answers an unknown id with `null` -- deliberately, so an unmapped filter is
-    never silently rendered as something else -- which makes `AF.get(afId).name` a TypeError
-    thrown inside a `.then` SUCCESS handler. The sibling rejection handler on the same
-    `.then` cannot catch its own success handler's throw, so every side effect still lands
-    and the only trace is an unhandled rejection in the console: the panel closes, the source
-    switches, and no toast ever appears.
-
-    Both actions must therefore resolve the filter ONCE, before the await, via afActing().
-    """
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
-                                  created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "function afActing(" in html
-    for fn in ("function filterSave(", "function filterSend("):
-        body = html[html.index(fn):]
-        body = body[:body.index("window.addEventListener('resize', placeFilters)")] \
-            if "window.addEventListener('resize', placeFilters)" in body else body[:4000]
-        assert "afActing()" in body, fn + " does not capture the acting filter"
-        # The capture has to happen BEFORE the network call, not inside the handler.
-        assert body.index("afActing()") < body.index("AF.toBlob("), fn
-        assert "AF.get(afId)" not in body, (
-            fn + " still reads afId after the await -- AF.get() can return null there")
 
 
 def test_edit_model_id_and_quality_omit():
@@ -1747,14 +1371,6 @@ def test_edit_price_uses_selected_model(tmp_path, monkeypatch):
                                  "resolution": "2K", "quality": "high", "aspect": "1:1"})
     chat = seen["p"]["chat"]
     assert chat["modelId"] == core.EDIT_PRO_MODEL_ID and chat["modelConfig"]["quality"] == "high"
-
-
-def test_edit_card_has_model_picker(tmp_path):
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert 'id="em-edit-pro"' in html and 'id="em-reference-pro"' in html
-    assert "Gen.setEditModel('reference-pro')" in html
-    assert "EDIT_CAPS" in html and "'reference-pro'" in html   # capability-driven dropdowns
 
 
 def test_clamp_edit_config_snaps_to_model_caps():
@@ -1804,98 +1420,7 @@ def test_edit_multi_reference_sources(tmp_path, monkeypatch):
     assert seen["p"]["chat"]["mediaIds"] == ["9"]
 
 
-def test_portrait_mobile_pass(tmp_path):
-    """The <=480px portrait pass: 2-up grid, header nav swipe strip, full-width drawer +
-    centered model flyout, lightbox arrows moved off the image."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "@media (max-width: 480px)" in html
-    assert "repeat(2, minmax(0, 1fr)) !important" in html           # 2-up grid, ignores saved --thumb
-    # The drawer/flyout half of this pass is asserted by CASCADE, not by substring --
-    # see test_portrait_mobile_drawer_rules_actually_win below for why.
-
-
 PHONE, DESKTOP = 375, 1280
-
-
-def test_portrait_mobile_drawer_rules_actually_win(tmp_path):
-    """The Generate drawer's <=480px overrides must WIN the cascade, not merely exist.
-
-    This test replaces a presence check that could not fail. The old version asserted
-    the mobile rule's TEXT was inside the 480px block -- and it was, correct and
-    completely dead, for as long as the rule had shipped. Every declaration below
-    leans on a bare `#gen-drawer` / `#model-flyout` / `.dock-ctl button` /
-    `.gen-head .x` selector, and the 480px block sat ~1,500 lines ABOVE the drawer's
-    own <style> block. Equal specificity + earlier position = the base rules won; a
-    media query adds no specificity. Measured in a real browser at 375x812 while the
-    old test was green: the open dock-right drawer was 352.5px wide (a 22.5px dead
-    gutter beside a "full-width" sheet) and the flyout sat at rect y=-332.9px, half
-    of it above the top of the viewport. `.wide` and `.dock-left` looked right the
-    whole time -- their compound selectors out-specify the bare base rule -- which is
-    why eyeballing the phone layout never caught it either.
-
-    So: resolve the winner the way a browser does (!important, specificity, document
-    order) and assert on that. Moving these rules back above the drawer's stylesheet
-    now fails here instead of shipping silently.
-    """
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    rules = css_rules(cli.get("/classic").get_data(as_text=True))
-
-    def win(levels, prop, width):
-        w = winning(rules, levels, prop, width)
-        assert w is not None, "nothing declares {!r} for this element".format(prop)
-        return w
-
-    # --- the drawer is a full-width sheet on a phone, in every dock/width variant ---
-    for extra in ({}, {"wide"}, {"dock-left"}, {"dock-top"}, {"dock-bottom"}):
-        drawer = element(id="gen-drawer", classes={"open"} | set(extra))
-        label = "+".join(sorted(extra)) or "default dock"
-        assert win(drawer, "width", PHONE).value == "100%", \
-            "phone drawer width lost the cascade ({})".format(label)
-        assert win(drawer, "max-width", PHONE).value == "100vw", \
-            "phone drawer max-width lost the cascade ({})".format(label)
-
-    # --- the model flyout is a centered, reachable overlay in every dock ---
-    for dock in ({}, {"dock-left"}, {"dock-top"}, {"dock-bottom"}):
-        flyout = element(id="model-flyout", classes={"open"},
-                         ancestors=[dict(id="gen-drawer", classes={"open"} | set(dock))])
-        label = "+".join(sorted(dock)) or "default dock"
-        # position/top/left are the three the base rule actually contested and won.
-        assert win(flyout, "position", PHONE).value == "fixed", \
-            "phone flyout position lost the cascade ({})".format(label)
-        assert win(flyout, "top", PHONE).value == "50%", \
-            "phone flyout top lost the cascade ({})".format(label)
-        assert win(flyout, "left", PHONE).value == "50%", \
-            "phone flyout left lost the cascade ({})".format(label)
-        # transform was the one declaration that DID survive -- the base rule sets no
-        # transform, so nothing contested it. That is exactly what stranded the panel
-        # off-screen: a centering transform applied to un-centered coordinates.
-        assert win(flyout, "transform", PHONE).value == "translate(-50%,-50%)", \
-            "phone flyout transform lost the cascade ({})".format(label)
-        assert win(flyout, "width", PHONE).value == "94vw", \
-            "phone flyout width lost the cascade ({})".format(label)
-
-    # --- the touch targets this pass exists to enlarge ---
-    dock_btn = element(tag="button", ancestors=[dict(classes={"dock-ctl"})])
-    assert win(dock_btn, "width", PHONE).value == "34px"     # was stuck at the 22px base
-    assert win(dock_btn, "height", PHONE).value == "34px"
-    close_x = element(classes={"x"}, ancestors=[dict(classes={"gen-head"})])
-    assert win(close_x, "font-size", PHONE).value == "28px"  # was stuck at the 22px base
-    assert win(close_x, "min-width", PHONE).value == "40px"
-
-    # --- and none of it leaks onto desktop: the base rules still win at 1280px ---
-    desktop_drawer = element(id="gen-drawer", classes={"open"})
-    assert win(desktop_drawer, "width", DESKTOP).value == "420px"
-    assert win(desktop_drawer, "max-width", DESKTOP).value == "94vw"
-    assert win(element(id="gen-drawer", classes={"open", "wide"}), "width", DESKTOP).value == "600px"
-    desktop_flyout = element(id="model-flyout", classes={"open"},
-                             ancestors=[dict(id="gen-drawer", classes={"open"})])
-    assert win(desktop_flyout, "position", DESKTOP).value == "absolute"
-    assert win(desktop_flyout, "top", DESKTOP).value == "0"
-    assert win(desktop_flyout, "width", DESKTOP).value == "372px"
-    assert winning(rules, desktop_flyout, "transform", DESKTOP) is None
-    assert win(dock_btn, "width", DESKTOP).value == "22px"
-    assert win(close_x, "font-size", DESKTOP).value == "22px"
 
 
 def test_css_cascade_resolver_can_actually_fail(tmp_path):
@@ -1917,37 +1442,6 @@ def test_css_cascade_resolver_can_actually_fail(tmp_path):
     # A higher-specificity earlier rule still beats a later bare one.
     assert winning(css_rules("<style>#d.x{width:1px;}#d{width:2px;}</style>"),
                    element(id="d", classes={"x"}), "width", PHONE).value == "1px"
-
-
-def test_dead_css_selectors_removed_in_broader_sweep():
-    """O9's broader mechanical sweep (audit 2026-07-21): after the two NAMED dead rules
-    (.vp-chip/.gen-ce) were deleted in a prior pass, this extracts every class selector out of
-    moonglade_gallery.py's inline <style> blocks and checks each for a real producer (a template
-    element, or a classList.add/className site in the inline JS). Two more turned up with zero
-    producers anywhere in the repo:
-      - .dock-right on #gen-drawer -- Gen.setDock(d) only ever toggles 'dock-'+x for x in
-        ['left','top','bottom']; picking "right" (the default -- #gen-drawer starts with no
-        class attribute at all, and the "Dock right" button's onclick is setDock('right'))
-        REMOVES all three instead of ever adding a 'dock-right' class, so that compound
-        selector never matched a real element.
-      - #model-preview .mp-tags (+ its `span` rule) -- showPreview() builds mp-meta/mp-nm/
-        mp-sub/mp-badges/mp-desc into #model-preview's innerHTML but never emits an .mp-tags
-        element; nothing else in the repo references it either.
-    Removing them is a no-op for real rendering: the bare #gen-drawer / #model-flyout selectors
-    already at the front of those same comma-lists match unconditionally, so the mobile
-    full-width-drawer / centered-flyout behavior (checked by
-    test_portrait_mobile_drawer_rules_actually_win above) is unaffected. Their LIVE siblings
-    (dock-left/top/bottom, the rest of .mp-*) must survive.
-
-    NOTE the assertion below is a blunt substring check over the whole module, so it also
-    trips on the WORD in ordinary prose, not just on a live selector. If a comment needs to
-    describe that dock, spell it "the right-hand dock" rather than hyphenating it."""
-    src = (Path(__file__).resolve().parents[1] / "moonglade_gallery.py").read_text(encoding="utf-8")
-    assert "dock-right" not in src
-    assert "mp-tags" not in src
-    for still_alive in ("dock-left", "dock-top", "dock-bottom",
-                        "mp-nm", "mp-sub", "mp-desc", "mp-badges"):
-        assert still_alive in src, "a LIVE sibling selector was removed: " + still_alive
 
 
 def test_video_v40_full_cost_warning():
@@ -1987,10 +1481,11 @@ def test_cost_badge_ships_with_every_price_surface(tmp_path):
     import moonglade_gallery as pg
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                          created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert '<mg-cost-badge id="gen-cost"' in html        # gallery Generate tab
-    assert '<mg-cost-badge id="edit-cost"' in html       # gallery Edit tab
-    assert '/static/mg-cost-badge.js' in html            # ...and the definition they need
+    # The classic page and its inline gen-cost/edit-cost badges died with the classic
+    # cut (2026-08-08); the React shell at "/" is the gallery surface now, and it must
+    # keep loading the definition its badges upgrade from.
+    html = cli.get("/").get_data(as_text=True)
+    assert '/static/mg-cost-badge.js' in html            # the React shell's badges
     assert '/static/mg-cost-badge.js' in pg._LOOM_SHELL  # the Loom's drawer needs it too
 
 
@@ -2000,13 +1495,13 @@ def test_toasts_anchored_top_right(tmp_path):
     checks the page loads the shared script and that the script's own CSS still positions
     toasts top-right (unchanged) at the z-index raised above the Loom's own overlays."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
+    html = cli.get("/").get_data(as_text=True)   # the React shell (classic cut, 2026-08-08)
     assert '<script src="/static/mg-notify.js"></script>' in html
     notify_js = (Path(__file__).resolve().parents[1] / "static" / "mg-notify.js").read_text(encoding="utf-8")
     assert "#mg-toasts{position:fixed;right:16px;top:64px" in notify_js   # top-right, clear of the header
 
 
-def test_flyout_open_does_not_search_the_hidden_tab(tmp_path):
+def test_flyout_open_does_not_search_the_hidden_tab():
     """Owner report 2026-07-24 ("still slow"): ensurePickers() creates AND mounts both the
     base and LoRA pickers together the moment the flyout first opens, so both used to fire
     a full network search immediately -- including the one nobody had asked to see yet,
@@ -2018,13 +1513,11 @@ def test_flyout_open_does_not_search_the_hidden_tab(tmp_path):
     assert "if (this.style.display !== 'none') { this._searched = true; this._search(); }" in picker_js
     assert "ensureSearched() {" in picker_js
     assert "if (this._searched && !this._stale) return;" in picker_js
-
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "if(vis && vis.ensureSearched) vis.ensureSearched();" in html
+    # (The classic page's own setKind() -> ensureSearched() call site died with the
+    # classic cut, 2026-08-08; the component keeps the deferred-search contract.)
 
 
-def test_picking_a_base_model_does_not_double_search_the_hidden_lora_picker(tmp_path):
+def test_picking_a_base_model_does_not_double_search_the_hidden_lora_picker():
     """AUDIT_2026-07-21 follow-up: the deferred-search fix closed only one of two redundant
     requests. Picking a base model sets `base-type` on the LoRA picker -- which is normally
     still HIDDEN, since both hosts mount base+LoRA together and reveal one -- and
@@ -2043,80 +1536,11 @@ def test_picking_a_base_model_does_not_double_search_the_hidden_lora_picker(tmp_
     assert ("if (this.style.display === 'none') { if (this._searched) this._stale = true; return; }"
             in picker_js)
     assert "this._stale = false;" in picker_js   # initialized, never undefined on first reveal
-
-    # The Gallery still feeds the resolved architecture straight into the LoRA picker -- the
-    # deferral changes WHEN the search happens, never whether base_type reaches the server.
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "if(loraPickerEl) loraPickerEl.setAttribute('base-type', selected.model_type||'');" in html
+    # (The classic page's base-type feed into the LoRA picker died with the classic
+    # cut, 2026-08-08; the deferral contract itself lives in the component above.)
 
 
-def test_generate_card_has_seed_field(tmp_path):
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert 'id="gen-seed"' in html and "seed:(el('gen-seed')" in html   # UI + payload wire the seed
-
-
-def test_generate_drawer_gates_on_the_real_account_lora_cap(tmp_path):
-    """The account's real LoRA-per-generation cap (Acct.loraCap(), sourced from
-    membership.privilege via /api/account) now shows next to the LoRAs label, blocks
-    Generate when exceeded, and warns with the exact count to remove -- rather than the
-    old behavior of no cap at all (see the O12 CHANGELOG note on why a silent hard-refuse
-    in the picker itself was deliberately rejected)."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert 'id="gen-lora-cap"' in html                      # the indicator next to "LoRAs"
-    assert "function overLoraCap(){ var cap=window.Acct&&Acct.loraCap?Acct.loraCap():null; return cap!=null && loras.length>cap; }" in html
-    assert "anyIncompat() || anyLoraUnresolved() || overLoraCap()" in html   # Go button gate
-    assert "Your account allows " in html                   # the over-cap warning text
-    assert "if(window.Gen && Gen.refreshLoraCap) Gen.refreshLoraCap();" in html   # Acct pushes the cap into Gen on every refresh
-
-
-def test_generate_drawer_gates_advanced_controls_by_model_compatibility(tmp_path):
-    """extra.compatibility (probed live 2026-07-06, memory pixai-model-capability-schema)
-    says which Advanced-panel params a model actually HONORS -- e.g. Tsubaki.2 ignores CFG
-    scale entirely and runs sampling steps FIXED at 16. An editable control that silently
-    does nothing was worse than no control at all -- gateField() disables it (never hides;
-    the owner can still see it exists and why it's off) and fails OPEN on unknown/absent
-    data (only an explicit `false` disables anything), same convention as every other
-    fail-open gate in this app."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "function gateField(id, honored, bounds, defMin, defMax){" in html
-    assert "var off = honored===false;" in html                # fail open: undefined/true never disables
-    assert "f.title = off ? 'This model doesn\\u2019t use this setting' : '';" in html
-    # min/max must ALWAYS resolve to something (the model's own bounds, or the field's real
-    # default) -- never left conditionally untouched, or a stale bound from a PREVIOUSLY
-    # selected model leaks forward onto one with no restrictions at all (caught live 2026-07-24).
-    assert "if(defMin!=null) f.min = (bounds&&bounds.min!=null) ? bounds.min : defMin;" in html
-    assert "if(defMax!=null) f.max = (bounds&&bounds.max!=null) ? bounds.max : defMax;" in html
-    assert "gateField('gen-neg', compat.negativePrompt, null);" in html
-    assert "gateField('gen-steps', compat.samplingSteps, restr.samplingSteps, 1, 150);" in html
-    assert "gateField('gen-cfg', compat.cfgScale, restr.cfgScale, 1, 30);" in html
-    assert "selected.compatibility=v.compatibility||{}; selected.restrictions=v.restrictions||{};" in html
-    assert "applyCapabilityGating();" in html                  # called from applyVersion, covers both onBasePick + pickVersion
-
-
-def test_generate_drawer_offers_a_per_lora_version_selector(tmp_path):
-    """resolve_version_meta() (and the old single-fetch LoRA resolve) always silently took
-    the newest release; PixAI's own model/LoRA cards offer a version selector, the base
-    model already got one (picker-parity-round2). This closes the matching gap for an
-    already-added LoRA chip: a <select> appears only when the LoRA actually has more than
-    one published release (mirrors the base model's #gen-version -- the common single-
-    version case renders nothing extra), and picking a different one applies its OWN
-    version_id/lora_base_type/trigger_words with no new network call (the full version list
-    was already resolved when the LoRA was first picked, by mg-model-picker.js's
-    ?all=1 fetch)."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "l.versions&&l.versions.length>1" in html          # conditional, not always-shown
-    assert 'onchange="Gen.loraPickVersion(' in html
-    assert "function loraPickVersion(i, vid){" in html
-    assert "l.version_id=v.version_id||''; l.lora_base_type=v.lora_base_model_type||'';" in html
-    assert "loraPickVersion:loraPickVersion" in html           # exposed on Gen's public API
-
-
-def test_generate_drawer_blocks_submit_on_unresolved_lora(tmp_path):
+def test_generate_drawer_blocks_submit_on_unresolved_lora():
     """A LoRA whose /api/model-version lookup never resolves (still pending, or
     permanently failed) used to just vanish from payload()'s loras filter -- the
     generation submitted anyway, spending full credits on a result silently missing
@@ -2132,15 +1556,10 @@ def test_generate_drawer_blocks_submit_on_unresolved_lora(tmp_path):
     it. So the failed-tracking assertions now check mg-model-picker.js; everything that
     still lives in moonglade_gallery.py (the Go-button gate, generate()'s submit-time guard,
     anyLoraUnresolved() itself) is unchanged and still checked against the gallery page."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    # The silent-drop shape must be gone: a bare `.catch(function(){ renderLoras(); });`
-    # right after the model-version fetch, with no failed-state tracking at all.
-    assert ".catch(function(){ renderLoras(); });" not in html
-    assert "function anyLoraUnresolved(){ return loras.some(function(l){ return !l.version_id; }); }" in html
-    assert "anyIncompat() || anyLoraUnresolved()" in html          # Go button gate
-    assert "if(anyLoraUnresolved()){ el('gen-lora-note').scrollIntoView" in html   # submit-time guard
-
+    # (The classic gallery's own Go-button gate / submit-time guard died with the
+    # classic cut, 2026-08-08. The component's failed-state tracking below is the
+    # surviving half of this fix -- the entry.failed distinction every consumer of
+    # <mg-model-picker> builds its own gating on.)
     picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-model-picker.js").read_text(encoding="utf-8")
     assert "entry.failed = true;" in picker_js
     assert "entry.failed = !entry.version_id;" in picker_js
@@ -2198,8 +1617,8 @@ def test_import_task_by_id(tmp_path, monkeypatch):
     d = cli.post("/api/import-task", json={"task_id": "999"}).get_json()
     assert d.get("already") is True and d["saved"] == 0 and "ex1" in d["media_ids"]
     assert "tid" not in called                                             # no re-collect
-    html = cli.get("/panel").get_data(as_text=True)
-    assert 'id="import-tid"' in html and "importTask()" in html            # the panel card + wiring
+    # (The Panel page's own card + wiring died with the classic cut, 2026-08-08;
+    # the React app owns the recover-a-task surface now.)
 
 
 def test_import_task_closes_the_original_orphaned_job_entry(tmp_path, monkeypatch):
@@ -2403,167 +1822,15 @@ def test_claim_endpoint_gated_and_claims_ready(tmp_path, monkeypatch):
     assert claimed == ["pixai-daily-credits"]
 
 
-def test_gallery_video_tab_is_the_shared_drawer_component(tmp_path):
-    """Web parity step 2 (the drawer swap): the gallery's Video tab is the shared
-    <mg-generate-drawer> web component now -- the same element the Loom mounts, giving the
-    gallery the full-parity Video form (6 image + 3 video + 1 audio refs, negative prompt,
-    Channel, full model roster) over the proven /api/loom/generate submit path. Pins the
-    script include, the mount point, and the host's mg-pick-request wiring, and asserts the
-    old hand-rolled form (9 image slots, 5-model select, no video/audio/negative/channel)
-    is gone -- so the swap can't silently regress back to simple mode."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "/static/mg-generate-drawer.js" in html              # component script on the gallery
-    assert "<mg-generate-drawer></mg-generate-drawer>" in html  # mounted in the Video tab
-    assert "mg-pick-request" in html                            # host wires the gallery Picker
-    # the old hand-rolled video form is gone
-    assert 'id="video-slots"' not in html
-    assert 'id="video-model"' not in html
-    assert "Gen.videoGenerate()" not in html
-
-
-def test_gallery_video_tab_registers_with_the_job_tracker(tmp_path):
-    """Audit 2026-07-21, B4: the drawer swap above wired mg-pick-request but not mg-submit
-    or mg-result, so a Video tab generation never showed up in the Activity card and never
-    refreshed the header's credit balance -- both things every OTHER tab (Generate/Edit/Fix,
-    still the pre-migration runTask()) already gets for free. The drawer polls and renders
-    its OWN result inline regardless (self-contained, same as the Loom's mount), which is
-    exactly why this was invisible: the generation itself always looked like it worked.
-
-    Bite: remove either listener and this fails, naming which one.
-    """
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    # Checked as the exact listener registrations, not bare substrings -- Acct.refresh() in
-    # particular already appears twice elsewhere on this page (runTask's own callback), so
-    # "Acct.refresh() in html" alone would pass even with this entire fix reverted.
-    assert "document.addEventListener('mg-submit', function(e){" in html, (
-        "no mg-submit listener -- a Video tab generation never reaches the Activity card")
-    assert "window.Jobs.register(d.task_id, 'Rendered')" in html, (
-        "mg-submit fires but nothing registers the job with the Activity tracker")
-    assert "document.addEventListener('mg-result', function(){ Acct.refresh(); });" in html, (
-        "no mg-result listener calling Acct.refresh() -- the header credit balance never "
-        "refreshes after a Video tab generation completes")
-
-
-def test_edit_card_has_reference_slots(tmp_path):
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert 'id="edit-refs"' in html and 'id="edit-ref-cap"' in html
-    assert "renderEditRefs" in html and "editRefs" in html
-
-
-def test_generate_card_has_size_and_custom_dimensions(tmp_path):
-    """The Generate card must expose real dimensions — size presets + custom W/H + a wider
-    aspect set — not the old 5 hardcoded ~512px buttons. The API has no size cap (backend
-    _dim only floors to /8), so the card shouldn't self-throttle to half a megapixel."""
+def test_thumbnails_are_not_served_immutable(tmp_path):
+    """Ported off the deleted service-worker suite (the SW and /sw.js died with the
+    classic cut, 2026-08-08): thumbnails are rewritten IN PLACE at the same
+    /thumbs/<media_id>.jpg URL by --rebuild-thumbs, so the server must never claim
+    they are immutable -- any cache honoring 'immutable' (the browser's own HTTP
+    cache, now that no worker sits in front of it) pins the exact stale poster the
+    rebuild was meant to repair, for the life of the cache entry."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert 'id="gen-size"' in html and 'id="gen-cw"' in html and 'id="gen-ch"' in html
-    assert 'data-rw="16" data-rh="9"' in html and 'data-rw="3" data-rh="1"' in html  # ratio-based
-    assert 'value="1536"' in html and 'value="2048"' in html   # L / XL presets
-    assert 'data-w="512"' not in html                           # old hardcoded caps gone
-
-
-def test_lightbox_video_uses_load_not_premature_seek(tmp_path):
-    """Mobile (iOS Safari) fix: after changing the lightbox <video> src we must call
-    load() and must NOT seek currentTime before metadata loads (that throws on iOS and
-    aborts playback). Guards against reintroducing the desktop-only-works regression."""
-    cli = _authed_client(tmp_path, [_row(media_id="9", filename="v_9.mp4", is_video="1",
-                                  created_at="2025-02-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "vid.load()" in html                       # explicit reload after src change
-    assert "vid.currentTime = 0;" not in html          # the premature seek is gone
-    assert "vid.error" in html                          # surfaces the MediaError code on failure
-
-
-# Cache generations that shipped a poisoning bug. A client holding one of these must be
-# force-healed by a bump, so the live cache name may never be any of them again:
-#   v1 -- froze 404s in (blank video tile until a hard-refresh)
-#   v2 -- cache-first on /thumbs/, which pinned the stale poster --rebuild-thumbs repairs
-_POISONED_CACHES = ("pixai-img-v1", "pixai-img-v2", "pixai-img-v3")
-
-
-def test_service_worker_never_caches_misses(tmp_path):
-    """The SW must NOT freeze a 404 (a thumbnail that didn't exist yet) into its cache --
-    that was the 'blank video tile until a hard-refresh' bug. It must only cache OK
-    responses, use a cache name bumped past every known-poisoned generation, and delete the
-    old cache on activate so existing clients self-heal without Ctrl+Shift+R."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
-                                  created_at="2025-01-01T00:00:00")])
-    sw = cli.get("/sw.js").get_data(as_text=True)
-    assert "resp.ok" in sw and "c.put" in sw                # caches only successful fetches
-    assert "caches.delete" in sw                            # purges the poisoned old cache
-    # Assert the invariant, not a literal: pinning the exact name here meant every
-    # legitimate bump broke this test, which is how it came to assert a stale version.
-    m = re.search(r"const C='(pixai-img-v\d+)'", sw)
-    assert m, "SW must declare a versioned cache name"
-    assert m.group(1) not in _POISONED_CACHES, (
-        "cache name {} shipped a poisoning bug -- bump it so held clients self-heal"
-        .format(m.group(1)))
-
-
-def test_service_worker_never_caches_a_followed_login_redirect(tmp_path):
-    """`resp.ok` alone is not a cache guard here, because a GATED media response is a 200.
-
-    /thumbs/, /img/ and /full/ are not under _JSON_GATE_PREFIXES, so the front door answers
-    an unauthorized request for one with `redirect(url_for("login", ...))`. An <img>
-    subresource has redirect mode "follow", so the browser follows it and hands the worker
-    the LOGIN PAGE at status 200 / ok===true / redirected===true -- which the old guard
-    happily wrote into Cache Storage under the image's own URL.
-
-    On /img/ and /full/ that branch is cache-first with no revalidation (`r||fetch`), so the
-    poisoned entry is served forever: through re-login, reloads and restarts, curable only
-    by Ctrl+Shift+R. The trigger is ordinary -- Sign out is a global revoke, so signing out
-    on the desktop kills the tablet's session mid-lazy-load.
-
-    Bite: drop either `!resp.redirected` and this fails, naming the branch.
-    """
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
-                                         created_at="2025-01-01T00:00:00")])
-    sw = cli.get("/sw.js").get_data(as_text=True)
-
-    writes = re.findall(r"if\(resp&&resp\.ok([^)]*)\)c\.put\(", sw)
-    assert len(writes) == 2, (
-        "expected exactly two cache writes (originals + thumbnails), found {} -- if a third "
-        "was added it needs the same redirect guard".format(len(writes)))
-    for i, guard in enumerate(writes):
-        assert "!resp.redirected" in guard, (
-            "cache write #{} writes any ok response, including a login page reached by "
-            "following the front door's 302. Add `&&!resp.redirected`.".format(i + 1))
-
-    # And prove the premise rather than asserting it: a gated media URL really does answer
-    # with a redirect whose target is a 200, which is the response shape being guarded.
-    anon = create_app(tmp_path).test_client()
-    r = anon.get("/img/2025-01/a_1.png")
-    assert r.status_code in (301, 302, 303, 307, 308), (
-        "the front door no longer redirects gated media -- if it now 401s, resp.ok would "
-        "catch it and this guard's rationale needs revisiting")
-    assert "/login" in (r.headers.get("Location") or "")
-
-
-def test_service_worker_revalidates_thumbnails(tmp_path):
-    """Thumbnails are rewritten IN PLACE at the same /thumbs/<media_id>.jpg URL by
-    --rebuild-thumbs, so they must NOT be served cache-first: this worker never consults
-    Cache-Control, so a cache-first hit pins the broken poster the rebuild was meant to
-    repair -- for the life of the cache. Thumbs get stale-while-revalidate (paint from
-    cache, refresh behind it); only write-once originals stay cache-first."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
-                                  created_at="2025-01-01T00:00:00")])
-    sw = cli.get("/sw.js").get_data(as_text=True)
-    # /thumbs/ is handled on its own branch, separate from the originals' cache-first one
-    assert "isThumb" in sw and "isOrig" in sw
-    # the thumb branch always fires a fetch -- it does not short-circuit on a cache hit.
-    # Sliced from a marker unique to the thumb branch (not a brace-count split, which
-    # used to grab the trailing "});\n" off the LAST "}" in the whole rest of the
-    # string -- a no-op slice that made every assertion below it unconditionally true).
-    assert "const n=fetch(e.request,{cache:'no-cache'})" in sw, \
-        "thumb branch's revalidate fetch not found where expected -- if it moved, update the slice marker below"
-    thumb_branch = sw[sw.index("const n=fetch(e.request,{cache:'no-cache'})"):]
-    assert "r||n" in thumb_branch, "thumbs must fall back to the network, not stop at a cache hit"
-    assert "c.put" in thumb_branch, "the thumb branch itself must revalidate-write, not just some other branch"
-    # and the server must stop claiming thumbnails are immutable
     hdr = cli.get("/thumbs/1.jpg").headers.get("Cache-Control", "")
     assert "immutable" not in hdr, (
         "thumbnails are rewritten in place; 'immutable' pins the stale one. Got: " + hdr)
@@ -2617,71 +1884,3 @@ def test_price_route_prices_the_loom_image_edit_and_reference_bodies(tmp_path, m
         "edit-pro and reference-pro priced to identical params -- edit_model didn't thread through"
 
 
-# ---------------------------------------------------------------------------
-# Import: creating a collection on the way in
-# ---------------------------------------------------------------------------
-
-def test_import_modal_can_create_a_collection_on_import(tmp_path):
-    """The dropdown could only pick a collection that already existed, so importing into a
-    NEW one meant importing uncollected first and re-collecting afterwards. A collection is
-    just a name applied to rows (add_to_collection), so an unseen name creates one -- the
-    only thing missing was the way in.
-
-    The sentinel must never reach the server as a collection name: chosenCollection()
-    resolves it to the typed value before the request is built.
-    """
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
-                                         created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-
-    assert 'value="__new__"' in html, "no '+ New collection' option in the import dropdown"
-    assert 'id="imp-newcoll"' in html, "the option exists but there is nowhere to type the name"
-    assert 'ImportUI.onCollectionChange()' in html, "picking the option reveals nothing"
-
-    # The sentinel is resolved client-side, never appended as a collection name.
-    assert "chosenCollection" in html
-    assert "fd.append('collection', coll)" in html, (
-        "the import still appends the raw <select> value -- '__new__' would be sent as a "
-        "literal collection name")
-
-
-def test_import_modal_refuses_to_import_into_an_unnamed_new_collection(tmp_path):
-    """Picking "New collection…" and leaving it blank must not fall through to importing
-    uncollected -- that is the failure you notice later, hunting for files that went
-    somewhere else. chosenCollection() returns null for that state and doImport stops.
-    """
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
-                                         created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "if(coll===null)" in html, (
-        "doImport does not distinguish 'no collection chosen' from 'new collection, name "
-        "still blank' -- a blank name would silently import uncollected")
-
-
-def test_import_collection_choice_does_not_persist_between_imports(tmp_path):
-    """reset() runs on both open() and close(), so a name typed for one batch cannot ride
-    along on the next -- collection choice is per-import, not sticky."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
-                                         created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "if(cs)cs.value=''" in html and "if(cn)cn.value=''" in html, (
-        "reset() leaves the collection selection or the typed new-collection name behind")
-
-
-def test_fix_tab_warns_before_it_spends(tmp_path):
-    """The Fix sub-tab (hand/face box-fixer) used to fire /api/fix with zero warning of any
-    kind -- the only credit-spending action in the app with neither a price nor a confirm.
-    It carries both now: an <mg-cost-badge> priced through /api/price and a confirm that
-    quotes the badge's number. The confirm is not redundant, because a Fix can never be
-    covered by a free card -- every press spends. Cost-badge and pricing detail live in
-    tests/test_fix.py; this stays the guard that the SUBMIT is gated."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
-                                         created_at="2025-01-01T00:00:00")])
-    html = cli.get("/classic").get_data(as_text=True)
-    start = html.index("function fix(){")
-    end = html.index("function openEdit(mid){", start)   # the next function, whole fix() in between
-    fix_fn = html[start:end]
-    assert "window.confirm(" in fix_fn, "fix() submits with no spend confirmation at all"
-    # the confirm must gate the actual submit, not just exist somewhere nearby
-    assert fix_fn.index("window.confirm(") < fix_fn.index("runTask('/api/fix'"), (
-        "the confirm exists but doesn't actually gate the runTask('/api/fix') call")

@@ -38,7 +38,13 @@ def _scripts(html):
 
 
 @pytest.mark.skipif(NODE is None, reason="node not installed")
-@pytest.mark.parametrize("path", ["/classic", "/image/1", "/health", "/duplicates", "/panel", "/login"])
+# Post-classic-cut (2026-08-08): the surviving server-rendered pages with plain
+# embedded JS are the React shells ("/" and "/login" -- boot/skin/guard inline
+# scripts). The classic pages (/classic /image /health /duplicates /panel) are gone,
+# and /loom is NOT here on purpose: its inline code rides Babel-standalone (not plain
+# JS Node can --check) and its delivery is pinned by the dedicated bundle/preamble
+# tests below plus the 401-guard test, where it has always lived.
+@pytest.mark.parametrize("path", ["/", "/login"])
 def test_embedded_js_is_valid(client, tmp_path, path):
     html = client.get(path).get_data(as_text=True)
     blocks = _scripts(html)
@@ -58,7 +64,7 @@ def test_embedded_js_is_valid(client, tmp_path, path):
     assert rc == 0, f"{path} has invalid JS:\n{out.read_text(encoding='utf-8')}"
 
 
-@pytest.mark.parametrize("path", ["/", "/panel", "/health", "/duplicates", "/loom", "/login"])
+@pytest.mark.parametrize("path", ["/", "/loom", "/login"])
 def test_every_page_carries_the_401_guard(client, path):
     """A browser crawl found ~90 fetch() calls across the inline JS, static/*.js and
     the Loom bundle, and NOT ONE inspected response status. The front door answers an
@@ -214,29 +220,3 @@ def test_committed_loom_bundle_matches_a_fresh_build(tmp_path):
         .format(len(committed), len(fresh)))
 
 
-def test_no_real_newline_inside_confirm_string(client):
-    """Even without Node: the cloud-delete confirm must keep its escaped newline as
-    the two chars backslash-n, not an actual line break that splits the literal.
-
-    confirmBulkDeleteCloud's confirm() argument is several single-quoted JS literals
-    joined with `+` across multiple source lines -- a real newline BETWEEN those
-    literals (where the template wraps the `+`-concatenation) is harmless source
-    formatting, but a real newline INSIDE one of the quoted literals is a JS syntax
-    error. The old version checked the newline-freedom of the WHOLE matched span
-    (picking up that harmless formatting newline) and then papered over the resulting
-    false positive with `"\\n\\n" in html`, which is true on every render regardless
-    of what is inside the confirm() call -- it only checks the escape sequence exists
-    SOMEWHERE on the whole page, which it always does. That made the assertion pass
-    unconditionally, even with the real bug reintroduced (audit: tests-that-dont-bite,
-    2026-07-21). Tightened: pull out each quoted literal from the matched span and
-    check each ONE for a real newline, not the span they're formatted across."""
-    html = client.get("/classic").get_data(as_text=True)
-    m = re.search(r"confirm\('Delete '.*?\)\)", html, flags=re.S)
-    assert m, "confirmBulkDeleteCloud string not found"
-    literals = re.findall(r"'((?:[^'\\]|\\.)*)'", m.group(0), flags=re.S)
-    assert literals, "no quoted string literals found inside the confirm() call"
-    bad = [s for s in literals if "\n" in s]
-    assert not bad, (
-        "confirmBulkDeleteCloud has a real newline inside a JS string literal -- "
-        "it should be the escaped two chars backslash-n, not an actual line break "
-        "(which is a JS syntax error): {!r}".format(bad))

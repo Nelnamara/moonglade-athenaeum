@@ -919,7 +919,7 @@
           +'<span class="rnm">'+esc(s.name)+'</span>'
           +(active?'<span class="rck">&#10003;</span>':(!s.earned?'<span class="rlk">&#128274;</span>':''))+'</div>';
       });
-      pinned+='</div><div class="rail-foot">Skins live in the <a href="/panel">Control Panel</a> now &middot; earn epics to unlock more.</div></div>';
+      pinned+='</div><div class="rail-foot">Skins live in the Control Panel now (the &#9881; Panel pill) &middot; earn epics to unlock more.</div></div>';
       host.innerHTML=top+pinned;
       host.querySelectorAll('[data-jump]').forEach(function(el2){ el2.onclick=function(){ jump(el2.getAttribute('data-jump')); }; });
     }
@@ -1395,7 +1395,7 @@
              ? '<span class="jt-warn jt-glyph">?</span><img class="jt-nel" src="/branding/mascots/trk_fail.png" onerror="this.remove()">'
              : '<span class="jt-spin'+(queued?' jt-queued':'')+'"><img class="jt-nel" src="/branding/gen_nel.png" onerror="this.remove()"><i class="gen-ring"></i></span>';
       var mid=(j.media_ids||[])[0]||'';
-      var thumb=(st==='done'&&mid)?'<a class="jt-thumb" href="/image/'+encodeURIComponent(mid)+'"><img src="/thumbs/'+encodeURIComponent(mid)+'.jpg" alt=""></a>':'';
+      var thumb=(st==='done'&&mid)?'<a class="jt-thumb" href="/next?image='+encodeURIComponent(mid)+'"><img src="/thumbs/'+encodeURIComponent(mid)+'.jpg" alt=""></a>':'';
       var bar='';
       if(st==='running' && j.total){ var pct=Math.min(100, Math.round((j.done||0)/j.total*100)); bar='<div class="jt-bar"><i style="width:'+pct+'%"></i></div>'; }
       var errmsg=((st==='failed'||st==='done_with_errors'||st==='stale')&&j.error)?'<div class="jt-errmsg">'+esc(j.error)+'</div>':'';

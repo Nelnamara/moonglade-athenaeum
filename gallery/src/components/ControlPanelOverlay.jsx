@@ -1238,7 +1238,8 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
           {pwMsg && <div className={pwMsg[0] === "⚠" ? "mgcp-usererr" : "mgcp-usermsg"}>{pwMsg}</div>}
           <div className="mgcp-mkick" style={{ marginTop: 14 }}>Add user</div>
           <div className="mgcp-userform">
-            <input className="mgcp-userinput" placeholder="username" value={newUser} onChange={(e) => setNewUser(e.target.value)} />
+            <input className="mgcp-userinput" placeholder="username" value={newUser} maxLength={64}
+              onChange={(e) => setNewUser(e.target.value)} />
             <input className="mgcp-userinput" type="password" placeholder="password" value={newPass} onChange={(e) => setNewPass(e.target.value)} />
             <input className="mgcp-userinput" type="password" placeholder="confirm" value={newConfirm} onChange={(e) => setNewConfirm(e.target.value)} />
             <button type="button" className="mgcp-chip" onClick={addUser} disabled={addBusy}>+ Add</button>

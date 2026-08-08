@@ -5950,3 +5950,46 @@ the banner" with a screenshot. Three real bugs found and fixed while running it 
 3. **"Back to gallery" was a dead click**: `navClick(null)` called preventDefault then
    returned WITHOUT onClose() -- only Escape ever closed the takeover. Fixed; verified the
    full round trip live (open -> Back closes -> grid -> context-menu reopens -> Escape).
+
+### THE CLASSIC CUT — executed in full  ·  *2026-08-08*
+
+Owner directive, verbatim: *"I wanted to migrate to react COMPLETELY. This was made clear
+and that no trace of Vanilla JS should survive"* + *"One thing I will not abide is just
+leaving behind code 'Because it's harmless.'"* Everything classic is gone; nothing was
+soft-kept. `moonglade_gallery.py` dropped ~6,400 lines (~18,400 → ~12,000).
+
+**Deleted:** routes `/classic` `/image/<id>` `/health` `/panel` `/duplicates` `/logout`
+(GET+POST) `/delete/<id>` `/delete-bulk` `/delete-tasks-bulk` `/collection-add`
+`/collection-remove` `/bulk-replace-prompt` `/img/<path>` `/manifest.webmanifest` `/sw.js`
+(the service worker was classic-only — React installability is manifest.json + icons,
+untouched); all seven inline templates (BASE/INDEX/DETAIL/LOGIN/HEALTH/DUPES/PANEL_HTML,
+with every url_for('index') back-plumbing inside them); the classic form-POST branch of
+login() (/login is GET-only now; a stale pre-cut form replay gets 405 — all its
+enforcement lives in /api/login with its own suite); orphaned helpers `_page_range`/
+`_safe_back`/`_back_with` + `_LOGOUT_HTML`; the NavSpine "Classic" escape pill.
+**Renamed** to the one JSON convention: `/rate/<id>` → `/api/rate/<id>`,
+`/edit-prompt/<id>` → `/api/edit-prompt/<id>` (`_JSON_GATE_PREFIXES` is just
+`("/api/",)` now). **Repointed:** mg-notify + mg-generate-drawer result links →
+`/next?image=<mid>`; wiki (Control-Panel/Gallery/Health/Folio) + architecture.md rewritten
+to the React-only reality. **KEPT deliberately (verified live callers, not leftovers):**
+`/export-csv` `/export-zip` `/full/` `/thumbs` `/video-file` (downloads/media are browser
+navigations, not JSON APIs — the /api/ prefix means JSON here).
+
+**One real casualty found by live probe, fixed:** `api_health` 500'd — its `_health_cache`
+TTL dict had lived beside the deleted /health page; moved to its surviving consumer.
+
+**Test reconciliation, two agent waves (23 files):** delete tests whose SUBJECT died with
+classic; update tests of surviving behavior to the JSON mechanisms (conftest's login
+helpers now authenticate via /api/login — the single systemic fix that cured ~324 of 572
+initial failures); PORT unique enforcement coverage rather than delete it (the
+next-sanitizer bypasses, lockout-clears/race, csrf setdefault, weak-password policy et al
+all live on /api/login now; test_med_gallery_ui deleted whole — every one of its cases targeted deleted inline
+JS with nothing to port to). Full suite green as the gate below. Live-verified end to end:
+all dead routes 404, the React app (grid/nav/Panel/vitals/overlays) fully working, no
+Classic pill.
+
+**What remains vanilla (NEXT CAMPAIGN, per the same directive — static/ ends EMPTY):**
+the 8 `static/mg-*.js` components, React-rewritten in dependency order: art-filters →
+gallery-picker(+absorb picker-core) → model-picker + upscale-panel → notify →
+generate-drawer + cost-badge last (its never-unmount spend-safety lifecycle gets a real
+redesign, not a transliteration); each lands in BOTH gallery/src and the Loom.

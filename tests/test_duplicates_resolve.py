@@ -28,13 +28,13 @@ def _row(**kw):
 
 
 def _csrf(cli):
-    """The session's real csrf token, off /panel's embedded `var CSRF = "...";`
-    -- the same extraction tests/test_panel_users.py uses for every
+    """The session's real csrf token, off /api/panel/summary's JSON (the classic
+    /panel page and its embedded `var CSRF = "...";` died in the classic cut,
+    2026-08-08) -- the same source tests/test_panel.py uses for every
     _check_csrf()-protected route in this app."""
-    html = cli.get("/panel").get_data(as_text=True)
-    m = re.search(r'var CSRF = "([^"]+)";', html)
-    assert m, "panel page did not embed a CSRF token"
-    return m.group(1)
+    d = cli.get("/api/panel/summary").get_json()
+    assert d and d.get("csrf"), "/api/panel/summary did not return a CSRF token"
+    return d["csrf"]
 
 
 def _exists_with_bytes(p, b):
@@ -516,7 +516,7 @@ def test_resolve_requires_valid_csrf(tmp_path):
     save_catalog(db, [_row(media_id="1", filename="a_1.webp"),
                       _row(media_id="2", filename="b_2.webp")])
     cli = login_client(tmp_path)
-    cli.get("/panel")  # establishes the session; deliberately ignore its real csrf
+    cli.get("/api/panel/summary")  # establishes the session; deliberately ignore its real csrf
 
     r = cli.post("/api/duplicates/resolve", json={
         "csrf": "forged-token-not-in-session",
@@ -613,7 +613,7 @@ def test_undo_requires_valid_csrf(tmp_path):
     assert q["ok"] is True
 
     cli = login_client(tmp_path)
-    cli.get("/panel")
+    cli.get("/api/panel/summary")  # session established; deliberately ignore its real csrf
     r = cli.post("/api/duplicates/undo", json={
         "csrf": "forged-token-not-in-session", "quarantine_path": q["quarantine_path"]})
 

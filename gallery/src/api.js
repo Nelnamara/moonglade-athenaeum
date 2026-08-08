@@ -99,7 +99,7 @@ export async function resolveVideoIds(idList, known) {
 }
 
 export async function rateImage(mediaId, rating) {
-  const r = await fetch("/rate/" + mediaId, {
+  const r = await fetch("/api/rate/" + mediaId, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ rating }),

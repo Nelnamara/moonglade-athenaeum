@@ -15,9 +15,16 @@ Four of them did, all in one evening:
      `#model-flyout` lands at y = -332.9px, half above the viewport.
   4. `test_portrait_mobile_pass` passes anyway, because it asserts the rule's TEXT.
 
-Every assertion below is a regression guard for one of those, written the only way that
-can actually see them: drive a REAL browser against a REAL server and measure the
+Every assertion below is a regression guard written the only way that can actually see
+this class of defect: drive a REAL browser against a REAL server and measure the
 resulting layout / stacking / computed style.
+
+2026-08-08, the classic-UI cut: the classic pages (/classic, /image/<id>, their inline
+JS) were deleted, and every guard that DROVE a classic page went with them -- the four
+numbered defects above were classic-flyout/drawer layout bugs and are historical context
+now, not live subjects. What remains here targets the two surviving hosts: the React
+shell at "/" (which still ships the pre-paint skin script, the design tokens with every
+skin, and the shared mg-notify.js Activity tray) and the Loom at /loom.
 
 Design, and why
 ---------------
@@ -26,9 +33,10 @@ Design, and why
   throwaway catalog, started once for the module so the cost is paid once.
 * **Real login, no bypass.** `moonglade_gallery.py`'s `_is_authorized_request()` has no
   localhost bypass and re-validates the session against `config.json`'s `AUTH_USERS` on
-  every request, so the harness posts the real `/login` form with a real scrypt-hashed
-  account made by `core.add_or_update_web_user` -- the same thing `tests/conftest.py`'s
-  `login_client()` helpers do for the test client. Nothing here weakens an auth path.
+  every request, so the harness drives the real React login page (GET /login serves the
+  shell; its form fetches POST /api/login) with a real scrypt-hashed account made by
+  `core.add_or_update_web_user` -- the same endpoint `tests/conftest.py`'s
+  `login_client()` helpers post to for the test client. Nothing here weakens an auth path.
 * **The conftest interaction that matters.** `tests/conftest.py::_isolated_auth_config` is
   autouse and function-scoped: it re-points `core._config_path()` at each test's own
   `tmp_path`. Our server outlives an individual test and reads that same function on every
@@ -102,8 +110,6 @@ _PASSWORD = "a-real-test-password-1"
 
 # 1280x900 desktop: what every threshold below was measured at.
 DESKTOP = {"width": 1280, "height": 900}
-# 375x812 portrait phone: inside the <=480px breakpoint, matching the audit's own probe.
-MOBILE_PORTRAIT = {"width": 375, "height": 812}
 
 # Kill every transition/animation so a geometry read can never catch an interpolated
 # mid-flight value. `*` + !important beats the app's id-selector rules; applied to the
@@ -113,23 +119,6 @@ _FREEZE_MOTION_CSS = (
     " transition: none !important; transition-duration: 0s !important;"
     " animation: none !important; animation-duration: 0s !important; }"
 )
-
-# /api/model-search reaches PixAI's live API. Fulfilled from the test instead: 24 rows is
-# what the real endpoint's default page size returns, so the grid gets a realistic amount
-# of content to overflow with. preview_url is empty on purpose -- the picker renders no
-# <img> for a falsy url, so there is no outbound image request to stub as well.
-_FAKE_MODEL_SEARCH = {
-    "results": [
-        {"model_id": str(1000 + i), "name": "Harness Model %d" % i, "author": "harness",
-         "model_type": "SDXL_MODEL", "likes": 12, "ref_count": 34, "preview_url": "",
-         "should_blur": False, "description": "a fixture row", "category": "sdxl",
-         "official": False}
-        for i in range(24)
-    ],
-    "has_more": True,
-    "next_cursor": "24",
-}
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -384,497 +373,6 @@ def _settle(page):
                   "() => requestAnimationFrame(r)))")
 
 
-def _stub_model_search(page):
-    page.route("**/api/model-search*", lambda route: route.fulfill(
-        status=200, content_type="application/json", body=json.dumps(_FAKE_MODEL_SEARCH)))
-
-
-def _open_drawer_and_model_flyout(page):
-    """Click the real controls (never a private helper) and wait on each post-condition."""
-    page.click("button.btn-primary:has-text('Generate')")     # header -> Gen.open()
-    page.wait_for_selector("#gen-drawer.open", state="attached")
-    page.click("#gen-selrow")                                 # -> Gen.toggleFlyout()
-    page.wait_for_selector("#model-flyout.open", state="attached")
-    # The grid is filled by fetch -> render. Wait for the LAST card, not the first: a
-    # geometry read taken mid-render measures a grid that is still growing.
-    page.wait_for_function(
-        "() => document.querySelectorAll('#model-flyout .mg-card').length === %d"
-        % len(_FAKE_MODEL_SEARCH["results"]))
-    _settle(page)
-
-
-_PICKER_METRICS_JS = """() => {
-  const panel = document.getElementById('model-flyout');
-  const grid  = panel.querySelector('mg-model-picker .mg-grid');
-  const r = el => el.getBoundingClientRect().toJSON();
-  return {
-    panel: r(panel),
-    grid: r(grid),
-    cards: grid.querySelectorAll('.mg-card').length,
-    gridScrollHeight: grid.scrollHeight,
-    gridClientHeight: grid.clientHeight,
-    deadSpaceBelowGrid: r(panel).bottom - r(grid).bottom,
-  };
-}"""
-
-# The pre-fix CSS, restored as a later-in-cascade !important override so it wins against
-# the shipped id-scoped rules. This is the state of the repo BEFORE the picker-parity-round2
-# fix: mg-model-picker was display:block, .mg-grid carried its own fixed max-height:320px,
-# and #model-flyout .gen-body was the outer scroll container. NEVER committed to any CSS.
-_REVERT_PICKER_FIX_CSS = """
-mg-model-picker { display: block !important; }
-mg-model-picker .mg-grid { flex: none !important; max-height: 320px !important; }
-#model-flyout .gen-body { overflow: auto !important; display: block !important; }
-"""
-
-
-# ---------------------------------------------------------------------------
-# 1. The picker grid fills its panel  (the "panel is cut in half" bug)
-# ---------------------------------------------------------------------------
-def test_model_picker_grid_fills_the_flyout_panel(logged_in_page):
-    """The model picker's grid must consume the flyout panel, leaving no dead strip.
-
-    THRESHOLD, from measured reality at 1280x900:
-      as shipped   dead space below the grid = 13.0px
-      pre-fix      dead space below the grid = 442.4px
-
-    13.0px is not slack, it is the panel's own chrome: `.gen-body{padding:12px 14px}`
-    contributes 12px of bottom padding and `#model-flyout` a 1px border. 24px is therefore
-    ~2x the real chrome (room for a padding bump or a scrollbar gutter) and ~18x smaller
-    than the defect, so it cannot be satisfied by a regression: half a card row is ~100px.
-    """
-    page = logged_in_page(**DESKTOP)
-    _stub_model_search(page)
-    _visit(page, "/classic")
-    _open_drawer_and_model_flyout(page)
-
-    m = page.evaluate(_PICKER_METRICS_JS)
-    assert m["cards"] == 24, "measured an empty grid -- the metric would be meaningless"
-    assert m["deadSpaceBelowGrid"] <= 24, (
-        "dead space below the picker grid is {:.1f}px in a {:.0f}px panel -- the grid is "
-        "not filling the flyout (the 'panel is cut in half' regression)".format(
-            m["deadSpaceBelowGrid"], m["panel"]["height"]))
-    # The grid, not the panel, must be the scrolling region -- that is the shape of the fix.
-    assert m["gridScrollHeight"] > m["gridClientHeight"], (
-        "the grid has no internal overflow, so 24 cards are not actually scrollable in it")
-
-    # --- phase 2: prove the guard bites. Restore the pre-fix CSS in-page only. ---
-    page.add_style_tag(content=_REVERT_PICKER_FIX_CSS)
-    _settle(page)
-    reverted = page.evaluate(_PICKER_METRICS_JS)
-    assert reverted["deadSpaceBelowGrid"] > 24, (
-        "the pre-fix CSS was re-applied and this metric did NOT go over threshold "
-        "({:.1f}px) -- the assertion above is vacuous".format(
-            reverted["deadSpaceBelowGrid"]))
-
-
-# ---------------------------------------------------------------------------
-# 2. The model flyout is fully inside the viewport when open
-# ---------------------------------------------------------------------------
-# Parameterised by element id: the same containment property is asserted for #model-flyout
-# below and for #filters-flyout in section 3, and the two panels are positioned by different
-# mechanisms (CSS dock rules vs Gen.placeFilters()), so one shared measurement keeps them
-# honest against each other rather than drifting into two near-identical checks.
-_RECT_JS = """(id) => {
-  const f = document.getElementById(id);
-  const r = f.getBoundingClientRect().toJSON();
-  r.innerWidth = window.innerWidth;
-  r.innerHeight = window.innerHeight;
-  return r;
-}"""
-
-
-def _assert_within_viewport(rect, label):
-    assert rect["width"] > 0 and rect["height"] > 0, label + " has no box -- did it open?"
-    assert rect["top"] >= 0, (
-        "{}'s top is {:.1f}px -- it is hanging above the viewport".format(label, rect["top"]))
-    assert rect["bottom"] <= rect["innerHeight"], (
-        "{}'s bottom is {:.1f}px past the {:.0f}px viewport".format(
-            label, rect["bottom"] - rect["innerHeight"], rect["innerHeight"]))
-    assert rect["left"] >= 0, (
-        "{}'s left is {:.1f}px -- it is hanging off the left edge".format(label, rect["left"]))
-    assert rect["right"] <= rect["innerWidth"], (
-        "{}'s right is {:.1f}px past the {:.0f}px viewport".format(
-            label, rect["right"] - rect["innerWidth"], rect["innerWidth"]))
-
-
-def test_model_flyout_is_fully_inside_the_viewport_at_desktop(logged_in_page):
-    """Measured as shipped at 1280x900: top 0, bottom 900 (== innerHeight), left 489,
-    right 861. Exactly flush at the bottom, which is why `<=` and not `<`."""
-    page = logged_in_page(**DESKTOP)
-    _stub_model_search(page)
-    _visit(page, "/classic")
-    _open_drawer_and_model_flyout(page)
-    _assert_within_viewport(page.evaluate(_RECT_JS, "model-flyout"), "#model-flyout")
-
-
-def test_model_flyout_is_fully_inside_the_viewport_at_mobile_portrait(logged_in_page):
-    """Same assertion, 375x812.
-
-    This carried an xfail(strict=False) while the defect it describes was open: at <=480px
-    both mobile @media rules used bare id selectors and lost to later base rules at equal
-    specificity, so #model-flyout kept its desktop right:100%/height:100% geometry and
-    landed at y = -332.9px, half above the viewport. That fix has LANDED -- the drawer's
-    portrait overrides now sit at the end of the drawer's own stylesheet, after the rules
-    they override -- and this test went XPASS on the strength of it. The marker is gone
-    rather than left to report XPASS forever, because an xfail'd guard is a dead guard: a
-    regression would come back as "expected failure" and read as green, which is the exact
-    class of blind spot this whole module exists to remove. Measured after the fix: the
-    flyout is fixed/centered and fully inside the viewport in every dock.
-    """
-    page = logged_in_page(**MOBILE_PORTRAIT)
-    _stub_model_search(page)
-    _visit(page, "/classic")
-    _open_drawer_and_model_flyout(page)
-    _assert_within_viewport(page.evaluate(_RECT_JS, "model-flyout"), "#model-flyout")
-
-
-# ---------------------------------------------------------------------------
-# 3. The art-filters flyout is genuinely SIDE BY SIDE  (the flex-basis wrap bug)
-# ---------------------------------------------------------------------------
-def _open_filters_flyout(page):
-    """Click the real controls, then wait on each post-condition -- including the image's own
-    decode, because the panel's height and the left column's width both depend on it."""
-    page.click("button.btn-primary:has-text('Generate')")       # header -> Gen.open()
-    page.wait_for_selector("#gen-drawer.open", state="attached")
-    page.click("#gm-edit")                                      # -> Gen.setMode('edit')
-    page.click("#es-enhance")                                   # -> Gen.setEditSub('enhance')
-    page.fill("#edit-src", "100")
-    page.dispatch_event("#edit-src", "input")                   # -> Gen.setEditSource('100')
-    page.click("#af-open")                                      # -> Gen.toggleFilters()
-    page.wait_for_selector("#filters-flyout.open", state="attached")
-    # 12 tiles in two headed groups: the Moonglade five lead, PixAI's seven follow.
-    page.wait_for_function("() => document.querySelectorAll('#af-swatches .af-tile').length === 12")
-    page.wait_for_function("() => document.querySelectorAll('#af-swatches .af-grp').length === 2")
-    page.wait_for_function("() => ['af-img','af-orig'].every(id => { const i ="
-                           " document.getElementById(id); return i.complete && i.naturalWidth > 0; })")
-    _settle(page)
-    page.click('.af-tile[data-af="filter-v1-m4"]')              # a filter with image_parameters
-    page.wait_for_function("() => document.querySelectorAll("
-                           "'#af-stage > [data-mgaf-layer]').length === 2")
-    _settle(page)
-
-
-_FILTERS_LAYOUT_JS = """() => {
-  const f = document.getElementById('filters-flyout');
-  const img = document.getElementById('af-img');
-  const og = document.getElementById('af-orig');
-  const stage = document.getElementById('af-stage');
-  const sw = document.getElementById('af-swatches');
-  const frame = img.closest('.af-frame'), oframe = og.closest('.af-frame');
-  const r = el => el.getBoundingClientRect().toJSON();
-  const fr = r(f), ir = r(img), sr = r(stage), wr = r(sw), or = r(og), fmr = r(frame);
-  const ofr = r(oframe);
-  return {
-    flyout: fr, image: ir, stage: sr, swatches: wr, original: or,
-    // The comparison: original LEFT of the preview, on the same row.
-    originalLeftOfPreview: or.right <= ir.left,
-    originalShareTopBand: Math.abs(or.top - ir.top) < 80,
-    originalWidth: or.width,
-    // ...and genuinely UNFILTERED. applyPreview() puts a CSS `filter` on its target <img> and
-    // stacks overlay divs in the stage; if either reached the original there would be two
-    // filtered pictures side by side and nothing to compare against. Read from the computed
-    // style, not the inline one, so a stylesheet rule cannot sneak one in either.
-    originalFilter: getComputedStyle(og).filter,
-    originalOverlays: og.parentElement.querySelectorAll('[data-mgaf-layer]').length,
-    innerWidth: window.innerWidth, innerHeight: window.innerHeight,
-    // side by side == the controls start to the RIGHT of the picture and share the top band of
-    // the COLUMN. A wrapped layout fails the first half; a swapped one would fail it too.
-    // Measured against the frame, not the image: the frames stretch to the row's height and
-    // centre their picture inside, so a landscape source sits a couple of hundred px below
-    // the rail's top while being perfectly in-row. Comparing image tops would fail on
-    // matting, which is a layout SUCCESS.
-    controlsRightOfImage: wr.left >= ir.right,
-    controlsShareTopBand: Math.abs(wr.top - fmr.top) < 80,
-    frame: fmr, originalFrame: ofr,
-    // ALL THREE on one row -- the actual claim. Checking any PAIR is not enough: with an
-    // `auto` basis the original wraps to its own line while the preview and the rail still
-    // fit together on the next one, so a preview-vs-rail comparison reads a broken panel as
-    // intact. Measured: rail top 571, preview frame top 571, original stranded above.
-    oneRow: Math.abs(wr.top - fmr.top) < 80 && Math.abs(ofr.top - fmr.top) < 80,
-    // the stage is MgArtFilters' overlay host: its box must be the image's box exactly, or
-    // the gradient layers (inset:0) paint over letterbox bars the image is not using.
-    stageMatchesImage: Math.abs(sr.width - ir.width) < 1 && Math.abs(sr.height - ir.height) < 1,
-    layers: stage.querySelectorAll(':scope > [data-mgaf-layer]').length,
-    blendModes: [...stage.querySelectorAll(':scope > [data-mgaf-layer]')]
-                  .map(d => getComputedStyle(d).mixBlendMode),
-    imageFilter: img.style.filter || '',
-  };
-}"""
-
-# The pre-fix CSS, restored as a later-in-cascade !important override. `flex: 1 1 auto` was
-# what shipped first: from an `auto` basis an image column's base size is the IMAGE's
-# max-content width (900px for a normal generation, since `max-width:100%` cannot resolve
-# against a container the image is itself sizing), the columns' hypothetical sizes exceed the
-# panel, and flex-wrap breaks the line -- dropping the rail under the pictures at every panel
-# width. Worse now than when it was first found: there are TWO image columns to overflow.
-# NEVER committed to any CSS.
-_REVERT_FILTERS_FLEX_CSS = """
-#filters-flyout .af-col { flex: 1 1 auto !important; min-width: 260px !important; }
-"""
-
-
-def test_art_filters_flyout_is_side_by_side_with_the_image_left(logged_in_page):
-    """The filters panel exists so a filter can be JUDGED, which needs both pictures at size
-    on one row -- original, preview, then the swatches. That is a layout fact no HTML-string
-    assertion can see, and neither is the one that matters most here: that the LEFT picture is
-    genuinely unfiltered. Sharing one <img> between the two columns, or letting the stage's
-    overlays reach the original, yields two filtered pictures and no comparison at all, while
-    every markup assertion still passes.
-
-    Measured at 1280x900, right dock, Edit tab (a 600px `.wide` drawer): 647px of room beside
-    the drawer is below AF_MIN_SIDE, so placeFilters() takes its centred branch -- the same
-    fallback #model-flyout documents for the top/bottom docks -- and the panel clamps to the
-    viewport with both columns comfortably over 200px.
-
-    The pre-fix `flex: 1 1 auto` (phase 2 below) is why an explicit basis is load-bearing
-    rather than a style preference: from an `auto` basis each image column is as wide as the
-    image's intrinsic width, so the rail wrapped below the pictures at every panel width.
-
-    Also asserts the two things that would make a side-by-side panel useless anyway: that the
-    overlay stage is exactly the image's box (so the gradients don't spill onto letterbox
-    bars), and that the browser really ACCEPTED the mapped blend modes instead of silently
-    falling back to `normal`, which would render a flat gradient and look like a working
-    filter.
-    """
-    page = logged_in_page(**DESKTOP)
-    _visit(page, "/classic")
-    _open_filters_flyout(page)
-
-    m = page.evaluate(_FILTERS_LAYOUT_JS)
-    assert m["image"]["width"] > 200, (
-        "the preview image is only {:.1f}px wide -- too small to judge a filter on, and the "
-        "metrics below would be measuring a collapsed column".format(m["image"]["width"]))
-    assert m["controlsRightOfImage"], (
-        "the swatches start at x={:.1f} but the image ends at x={:.1f} -- the controls have "
-        "WRAPPED under the image instead of sitting beside it".format(
-            m["swatches"]["left"], m["image"]["right"]))
-    assert m["originalLeftOfPreview"] and m["originalShareTopBand"], (
-        "the original is at x={:.1f}..{:.1f} y={:.1f} and the preview at x={:.1f} y={:.1f} -- "
-        "they are not a side-by-side pair".format(
-            m["original"]["left"], m["original"]["right"], m["original"]["top"],
-            m["image"]["left"], m["image"]["top"]))
-    assert m["originalWidth"] > 200, (
-        "the original is only {:.1f}px wide -- too small to compare against".format(
-            m["originalWidth"]))
-    # The load-bearing property of the whole relayout: the left picture is UNTOUCHED.
-    assert m["originalFilter"] == "none" and m["originalOverlays"] == 0, (
-        "the original is being filtered too (filter={!r}, {} overlay layers) -- there is "
-        "nothing left to compare the preview against".format(
-            m["originalFilter"], m["originalOverlays"]))
-    assert m["oneRow"], (
-        "original/preview/rail tops are {:.1f}/{:.1f}/{:.1f} -- the three columns are not on "
-        "one row".format(m["originalFrame"]["top"], m["frame"]["top"], m["swatches"]["top"]))
-    assert m["controlsShareTopBand"], (
-        "the swatches' top is {:.1f}px from the picture frame's -- they are not on the same "
-        "row".format(abs(m["swatches"]["top"] - m["frame"]["top"])))
-    assert m["stageMatchesImage"], (
-        "the overlay stage is {:.1f}x{:.1f} but the image is {:.1f}x{:.1f} -- the gradient "
-        "layers (inset:0) would paint outside the picture".format(
-            m["stage"]["width"], m["stage"]["height"],
-            m["image"]["width"], m["image"]["height"]))
-    # filter-v1-m4 is soft-light + color-burn, and carries image_parameters.
-    assert m["layers"] == 2
-    assert m["blendModes"] == ["soft-light", "color-burn"], (
-        "the browser resolved the overlay blend modes to {} -- a mode it does not accept "
-        "computes as `normal`, which paints a flat gradient and is not the filter".format(
-            m["blendModes"]))
-    assert m["imageFilter"] == "brightness(1.04) contrast(1.05) saturate(1.1)", (
-        "filter-v1-m4's image_parameters (+0.04/+0.05/+0.1 as signed OFFSETS from 1) did not "
-        "reach the <img>: got {!r}".format(m["imageFilter"]))
-    _assert_within_viewport(page.evaluate(_RECT_JS, "filters-flyout"), "#filters-flyout")
-
-    # --- phase 2: prove the guard bites. Restore the pre-fix flex basis in-page only. ---
-    page.add_style_tag(content=_REVERT_FILTERS_FLEX_CSS)
-    _settle(page)
-    reverted = page.evaluate(_FILTERS_LAYOUT_JS)
-    # The symptom is that the row BREAKS, which is why this checks the top band rather than
-    # the horizontal order: an `auto` basis sizes each column to the image's intrinsic width
-    # (measured: a 902px frame in a 1180px panel), so the columns wrap onto their own lines --
-    # and a picture narrower than its blown-out column can still leave the rail to its right
-    # while sitting hundreds of px below it. Comparing x alone read that as "fine".
-    assert not reverted["oneRow"], (
-        "`flex: 1 1 auto` was re-applied and the panel did NOT break (original frame top "
-        "{:.1f}, preview frame top {:.1f}, rail top {:.1f}, column {:.1f}px wide) -- the "
-        "in-row assertion above is vacuous".format(
-            reverted["originalFrame"]["top"], reverted["frame"]["top"],
-            reverted["swatches"]["top"], reverted["frame"]["width"]))
-
-
-def test_art_filters_flyout_is_fully_inside_the_viewport_at_mobile_portrait(logged_in_page):
-    """375x812: the panel is far wider than the phone, so placeFilters() must fall through to
-    its centred branch and clamp. The layout is expected to STACK here (that is what the
-    `flex-wrap` + `min-width` pair is for), so this asserts containment only -- and that the
-    page itself never gains a horizontal scroll, which is how an unclamped fixed panel shows
-    up to a user rather than as an off-screen rect."""
-    page = logged_in_page(**MOBILE_PORTRAIT)
-    _visit(page, "/classic")
-    _open_filters_flyout(page)
-    _assert_within_viewport(page.evaluate(_RECT_JS, "filters-flyout"), "#filters-flyout")
-    assert page.evaluate("() => document.documentElement.scrollWidth <= window.innerWidth + 1"), (
-        "the document scrolls horizontally with the filters panel open -- it is overflowing "
-        "the viewport rather than being clamped into it")
-
-
-_UPSCALE_JS = """() => {
-  const p = document.getElementById('up-panel');
-  // Addressed by their own data hooks rather than by "is there a visible <select>": the
-  // panel has a second one for the model fallback, and probing by tag matched THAT and
-  // reported the upscaler as visible under Hires, where it is not.
-  const vis = sel => { const e = p.querySelector(sel);
-                       return !!e && getComputedStyle(e).display !== 'none'; };
-  const ratio = p.querySelector('input[type=range]');
-  return {
-    open: p.hasAttribute('open'),
-    ratioMax: parseFloat(ratio.max),
-    ratioDisabled: ratio.disabled,
-    // The upscaler dropdown exists only for enlarge; the denoising pair only for Hires.
-    upscalerShown: vis('[data-mgu="upscaler"]'),
-    denoiseShown: vis('[data-mgu="denoise"]'),
-    pickerOffered: vis('.mgu-pick') || [...p.querySelectorAll('button')]
-                     .some(b => /choose a model/i.test(b.textContent)
-                                && getComputedStyle(b).display !== 'none'),
-    text: p.innerText,
-    goDisabled: p.querySelector('.mgu-go').disabled,
-    // 'idle' means the badge was never fed at all. It is the state an invented API name
-    // leaves it in -- a custom element swallows an unknown method call, so the panel looks
-    // finished while its price line silently never updates.
-    costState: (p.querySelector('mg-cost-badge') || {}).state || 'missing',
-  };
-}"""
-
-
-def test_the_upscale_panel_derives_its_ratio_cap_from_the_real_picture(logged_in_page):
-    """The whole reason Upscale moved out of the Generate drawer: the cap is DYNAMIC, derived
-    from the source's own dimensions against a per-mode pixel ceiling, and a drawer has no
-    source. Here there is one -- a real 900x600 bitmap with a catalog row to match -- so the
-    number the slider offers can be checked against the Python the server clamps to.
-
-    Also asserts the control asymmetry, which is PixAI's and not a layout shortcut: the
-    upscaler dropdown exists only for `enlarge`, the denoising pair only for Hires.
-    """
-    page = logged_in_page(**DESKTOP)
-    _visit(page, "/image/100")
-    page.click("#upscale-btn")
-    page.wait_for_selector("mg-upscale-panel[open]", state="attached")
-    page.wait_for_function("() => { const r = document.querySelector('mg-upscale-panel "
-                           "input[type=range]'); return r && parseFloat(r.max) > 1; }")
-    _settle(page)
-
-    enlarge = page.evaluate(_UPSCALE_JS)
-    assert enlarge["open"]
-    assert enlarge["ratioMax"] == core.max_upscale_ratio(900, 600, "enlarge"), (
-        "the slider offers {}x but the server clamps 900x600 enlarge to {}x -- a client that "
-        "offers more has the ratio silently pulled back with nothing on screen to say so"
-        .format(enlarge["ratioMax"], core.max_upscale_ratio(900, 600, "enlarge")))
-    assert enlarge["upscalerShown"], "enlarge must offer the 5-option upscaler picker"
-    assert not enlarge["denoiseShown"], "enlarge has no denoising controls -- that is Hires"
-    assert "900\u00d7600" in enlarge["text"], "the panel must name the real source size"
-    assert not enlarge["goDisabled"], "the row has a model, so the submit must be available"
-    # This harness has no API key, so the price check fails -- which is exactly why it is
-    # worth asserting: the badge must have been FED (checking, then an error), not left
-    # untouched on its idle hint.
-    assert enlarge["costState"] != "idle", (
-        "the cost badge was never fed -- the panel is calling a method it does not have")
-
-    # Switch to Hires: a different ceiling, a different cap, and the opposite control set.
-    page.click("mg-upscale-panel .mgu-seg button:nth-child(2)")
-    _settle(page)
-    hires = page.evaluate(_UPSCALE_JS)
-    assert hires["ratioMax"] == core.max_upscale_ratio(900, 600, "upscale")
-    assert hires["ratioMax"] != enlarge["ratioMax"], (
-        "both methods offered the same cap -- the per-mode ceiling is not being applied")
-    assert hires["denoiseShown"], "Hires must offer denoising strength and steps"
-    assert not hires["upscalerShown"], "Hires has no upscaler dropdown"
-
-
-def test_choosing_a_model_scrolls_the_picker_into_view(logged_in_page):
-    """Owner report, from the lightbox flyout: "asks me to choose a model but a picker does
-    not open."
-
-    It did open. The panel scrolls (overflow:auto) and the Model row sits near the bottom, so
-    mounting the picker without moving to it put the whole thing BELOW the fold -- the click
-    looked like it did nothing. Measured before the fix in that exact flyout: the panel was
-    711px tall in an 828px box with the picker appended past the visible area.
-
-    This asserts the OUTCOME -- the picker ends up inside the panel's visible box -- rather
-    than that scrollIntoView was called, because the first is what the owner experiences.
-    """
-    # A SHORT viewport on purpose: the panel is max-height:calc(100vh - 72px), so it only
-    # scrolls -- and can therefore only hide the picker -- once its content exceeds that.
-    # At 1280x900 it fits whole and the bug does not reproduce, which is exactly why the
-    # first version of this test passed against the broken build.
-    page = logged_in_page(width=1280, height=420)
-    _visit(page, "/classic")
-    page.evaluate("() => openLightbox(null, 1)")        # media 101: no model -> offers the picker
-    page.wait_for_selector("#lightbox.open", state="attached")
-    page.click("#lb-upscale")
-    page.wait_for_selector("mg-upscale-panel[open]", state="attached")
-    _settle(page)
-    page.evaluate("""() => {
-      const p = document.getElementById('up-flyout');
-      const b = [...p.querySelectorAll('button')].find(x => /choose a model/i.test(x.textContent));
-      b.click();
-    }""")
-    page.wait_for_selector("#up-flyout mg-model-picker", state="attached")
-    _settle(page)
-    page.wait_for_timeout(500)                          # the scroll is smooth + rAF-deferred
-    m = page.evaluate("""() => {
-      const p = document.getElementById('up-flyout');
-      const el = p.querySelector('mg-model-picker');
-      const pr = p.getBoundingClientRect(), er = el.getBoundingClientRect();
-      return {picker: {top: er.top, bottom: er.bottom, h: er.height},
-              panel: {top: pr.top, bottom: pr.bottom},
-              // How much of the picker is ACTUALLY on screen. "its top edge is inside the
-              // box" is not enough: measured against the broken build at this viewport, the
-              // top edge sat 9px above the panel's bottom edge -- technically inside, and
-              // nine pixels of a 254px control is not a picker anyone can see or use.
-              shown: Math.max(0, Math.min(pr.bottom, er.bottom) - Math.max(pr.top, er.top)),
-              zIndex: getComputedStyle(p).zIndex};
-    }""")
-    assert m["picker"]["h"] > 40, "the picker mounted with no height"
-    assert m["shown"] >= 120, (
-        "only {:.0f}px of the picker is on screen (it sits at y={:.0f}, the panel's visible "
-        "box is {:.0f}..{:.0f}) -- it opened below the fold, which reads as nothing "
-        "happening".format(m["shown"], m["picker"]["top"], m["panel"]["top"],
-                           m["panel"]["bottom"]))
-    # It must also be ABOVE the lightbox it is opened over, not behind the picture.
-    assert int(m["zIndex"]) > 300, "the flyout is behind the lightbox overlay"
-
-
-def test_the_upscale_panel_offers_a_picker_when_the_model_is_unknown(logged_in_page):
-    """An upscale is an i2i generation and every generation needs a model. Row 101 has none --
-    the state a catalog that has never been swept is in, and the permanent state of anything
-    imported from this computer, which has no PixAI task behind it at all.
-
-    It must still be upscalable. PixAI's own upscale dialog has NO model control at all --
-    their submit sets a fixed model version and takes the prompt off the source's original
-    task -- so requiring one here was this app's own invention, and it left every locally
-    imported file with a dead Go button behind "pick a model first" (and no way out at all
-    on a page where the picker failed to render).
-
-    So: submit is ENABLED against core's UPSCALE_FALLBACK_VERSION_ID, the reason is still
-    named along with the command that fixes it, and the SAME picker the Generate drawer uses
-    is still offered -- as an override now, because naming the original model IS better when
-    it is known (Hires re-diffuses, so the original keeps the style).
-    """
-    page = logged_in_page(**DESKTOP)
-    _visit(page, "/image/101")
-    page.click("#upscale-btn")
-    page.wait_for_selector("mg-upscale-panel[open]", state="attached")
-    _settle(page)
-    m = page.evaluate(_UPSCALE_JS)
-    assert not m["goDisabled"], (
-        "an image with no recorded model must still be upscalable -- PixAI does not ask "
-        "for one either")
-    assert "backfill-full-meta" in m["text"], (
-        "the panel must still name the command that fills the catalog in")
-    assert m["pickerOffered"], "the owner must be able to pick a model rather than be blocked"
-    # It is the shared component, not a bespoke model list built for this panel.
-    assert page.evaluate("() => !!window.customElements.get('mg-model-picker')"), (
-        "the detail page must load the shared picker the fallback mounts")
-
-
 # ---------------------------------------------------------------------------
 # 4. Deep Focus's veil vs the corner FABs  (stacking OUTCOME, not a z-index number)
 # ---------------------------------------------------------------------------
@@ -992,9 +490,14 @@ def test_skins_retint_real_components(logged_in_page):
       verdant     rgb(8, 17, 13)
     Five distinct values, so the assertion is "all five differ", which is strictly stronger
     than the brief's "at least two".
+
+    Since the classic cut this measures the React shell at "/" -- its sticky
+    `<header class="mgx-hdr">` reads `var(--mantle)` exactly as classic's header did
+    (gallery/src/styles/shell.css), so the measured values are unchanged.
     """
     page = logged_in_page(**DESKTOP)
-    _visit(page, "/classic")
+    _visit(page, "/")
+    page.wait_for_selector("header")     # the React bundle must mount App first
     _settle(page)
 
     seen = {s: page.evaluate(_READ_SKIN_JS, s) for s in _SKINS}
@@ -1055,9 +558,13 @@ def test_saved_skin_is_applied_before_the_body_exists(logged_in_page):
     Measured as shipped: the first `data-skin` mutation is `value='ember'` with
     `document.body === null` and `readyState === 'loading'` -- i.e. during head parsing,
     before `<body>` is even parsed, therefore before any paint.
+
+    Since the classic cut this measures the React shell at "/" -- NEXT_PAGE carries the
+    same pre-paint inline script in `<head>`, and mg-notify.js (loaded on "/" too) still
+    does the post-load syncSkin() reconcile this test's seeding dance exists for.
     """
     page = logged_in_page(**DESKTOP)
-    _visit(page, "/classic")
+    _visit(page, "/")
     # THE RACE THIS TEST FIRST TRIPPED ON, and a live example of why nothing here sleeps:
     # static/mg-notify.js's syncSkin() reconciles the pre-paint guess against the server
     # ("server is source of truth") after /api/achievements resolves, and writes the result
@@ -1176,7 +683,7 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
     reads "est. 27s wait".
     """
     seen = {}
-    for host, path in (("gallery", "/classic"), ("loom", "/loom?bundle=1")):
+    for host, path in (("gallery", "/"), ("loom", "/loom?bundle=1")):
         page = logged_in_page(**DESKTOP)
         _open_tray_with_queued_job(page, path)
         m = page.evaluate(_TRAY_QUEUED_JS)

@@ -144,13 +144,15 @@ def test_ach_grid_stacks_its_sections_instead_of_tiling_them():
     assert "grid-template-columns:repeat(auto-fill,minmax(216px,1fr))" not in notify_js
 
 
-def test_the_hall_was_renamed_the_folio_of_honors(tmp_path):
-    """2026-07-22 owner decision, off the STATE.md rename shortlist -- guards against a
-    straggler reference surviving a future edit to the modal skeleton in moonglade_gallery.py."""
-    cli, _ = _client(tmp_path, [])
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "The Folio of Honors" in html
-    assert "Trophy Hall" not in html
+def test_the_hall_was_renamed_the_folio_of_honors():
+    """2026-07-22 owner decision, off the STATE.md rename shortlist. The classic
+    page's modal skeleton is gone with the classic UI; the Folio now ships in the
+    React bundle -- guard the rename there so a straggler 'Trophy Hall' reference
+    can't creep back into the user-visible shell. (Source-file comments citing the
+    classic Trophy Hall as provenance are fine; the built bundle strips them.)"""
+    bundle = (Path(__file__).resolve().parent.parent / "gallery" / "dist" / "app.js").read_text(encoding="utf-8")
+    assert "The Folio of Honors" in bundle
+    assert "Trophy Hall" not in bundle
 
 
 def test_api_achievements_marks_seen_once(tmp_path):

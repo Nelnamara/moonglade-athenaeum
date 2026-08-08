@@ -3,27 +3,17 @@ All hermetic -- fake mark assets are written into tmp, subprocess is mocked, and
 nothing touches a real Desktop or PowerShell."""
 import json
 import pathlib
-import re
 
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
-from tests.conftest import login_test_client
+from tests.conftest import login_existing_client, login_test_client
 
 # Captured at IMPORT time -- collection runs before any autouse fixture, so this is the genuine
 # resolver rather than the tmp_path-redirected one conftest._isolated_branding installs. Needed
 # because that fixture is what lets every other test in this file keep its old semantics, and it
 # would otherwise hide the production behaviour completely.
 _REAL_BRANDING_ROOT = g.branding_root
-
-
-def _csrf(html):
-    # Either the classic hidden input (bootstrap_mode) or the React shell's
-    # window.MG_BOOT JSON blob (the common case: a real account already
-    # exists, so GET /login now serves LoginPage.jsx -- 2026-08-02).
-    m = re.search(r'name="csrf" value="([^"]+)"|"csrf":\s*"([^"]+)"', html)
-    assert m, "login page did not render a csrf token (classic hidden field or MG_BOOT)"
-    return m.group(1) or m.group(2)
 
 
 def _row(**kw):
@@ -39,8 +29,8 @@ def _app(tmp_path):
 def _client(tmp_path):
     """Authenticated version of _app() -- for the plain functionality tests below that
     don't care about the auth boundary itself (see test_shortcut_refuses_authenticated_lan_session
-    for the one that deliberately hand-rolls its own login instead of using this, and needs
-    _app()'s bare, unauthenticated app to start from)."""
+    for the one that deliberately logs in its own separate account instead of using this, and
+    needs _app()'s bare, unauthenticated app to start from)."""
     return login_test_client(_app(tmp_path))
 
 
@@ -62,9 +52,9 @@ def test_branding_defaults_when_no_assets(tmp_path):
     assert d["anim"] == "classic" and d["marks"] == []
     assert d["mark"] == "logo"            # legacy drop-in logo.png fallback
     assert "eclipse" in d["anims"] and "classic" in d["anims"]
-    # the header renders the legacy logo + classic animation class
-    html = cli.get("/classic").get_data(as_text=True)
-    assert "anim-classic" in html and "/branding/logo.png" in html
+    # (the classic header render of the legacy logo died with BASE_HTML/INDEX_HTML
+    # in the 2026-08-08 classic cut; the React gallery reads /api/branding, whose
+    # defaults are what the assertions above pin)
 
 
 def test_branding_save_and_render(tmp_path):
@@ -76,13 +66,10 @@ def test_branding_save_and_render(tmp_path):
     r = cli.post("/api/branding", json={"mark": "mark_12", "anim": "eclipse"})
     assert r.get_json() == {"mark": "mark_12", "anim": "eclipse"}
     assert json.loads((tmp_path / "branding.json").read_text())["anim"] == "eclipse"
-    html = cli.get("/classic").get_data(as_text=True)
-    # The rendered mark span's OWN class attribute, not a bare substring -- BASE_HTML's
-    # shared stylesheet permanently contains ".mark:not(.anim-classic)..." and every
-    # anim-*/mk-tile class name as CSS selector text on every page, so a bare "anim-eclipse
-    # in html" / "mk-tile in html" check passed even on a default, unbranded page.
-    assert 'class="mark anim-eclipse mk-tile"' in html
-    assert "/branding/marks/mark_12.png" in html
+    # the saved choice reads back through the same API the React header consumes
+    # (the classic BASE_HTML mark-span render died in the 2026-08-08 classic cut)
+    d = cli.get("/api/branding").get_json()
+    assert d["mark"] == "mark_12" and d["anim"] == "eclipse"
 
 
 def test_branding_validation_and_lan_gate(tmp_path):
@@ -141,7 +128,6 @@ def test_shortcut_refuses_authenticated_lan_session(tmp_path, monkeypatch):
     gate from _is_local_request() to the wider _is_authorized_request(),
     flagged and reverted 2026-07-19."""
     import subprocess
-    import moonglade_backup as core
     _cut_fake_marks(tmp_path)
 
     class R:
@@ -149,11 +135,11 @@ def test_shortcut_refuses_authenticated_lan_session(tmp_path, monkeypatch):
         stderr = ""
         stdout = ""
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
-    core.add_or_update_web_user("alice", "hunter2")
     cli = _app(tmp_path).test_client()
     LAN = "203.0.113.5"
-    html = cli.get("/login").get_data(as_text=True)
-    cli.post("/login", data={"username": "alice", "password": "hunter2", "csrf": _csrf(html)})
+    # a real account, logged in the one way that exists since the classic cut
+    # (GET /login for the MG_BOOT csrf, then POST /api/login)
+    login_existing_client(cli, "alice", "hunter2")
     # Prove the session really is authenticated (it can reach an ordinary
     # authorized-LAN route) before proving it still can't reach this one.
     assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
@@ -164,38 +150,17 @@ def test_shortcut_refuses_authenticated_lan_session(tmp_path, monkeypatch):
 
 def test_branding_survives_corrupt_manifests(tmp_path):
     """A hand-edited/corrupt marks.json or branding.json must degrade to the
-    logo.png defaults -- never 500 every page via the context processor."""
+    logo.png defaults -- never 500 every page via the context processor
+    (_inject_branding still runs brand_context() on every rendered template;
+    the React shell at /next is the surviving page that proves it)."""
     mdir = tmp_path / "branding" / "marks"
     mdir.mkdir(parents=True)
     (mdir / "marks.json").write_text('{"marks": ["not-a-dict", 42]}', encoding="utf-8")
     (tmp_path / "branding.json").write_text('["not", "an", "object"]', encoding="utf-8")
     cli = _client(tmp_path)
-    assert cli.get("/classic").status_code == 200
+    assert cli.get("/next").status_code == 200
     d = cli.get("/api/branding").get_json()
     assert d["marks"] == [] and d["mark"] == "logo" and d["anim"] == "classic"
-
-
-def test_subpage_headers_carry_anim_class(tmp_path):
-    """Health/Panel headers must render the same anim-* class as the gallery, so
-    the classic animation isn't muted there and a chosen anim applies everywhere."""
-    cli = _client(tmp_path)
-    for path in ("/health", "/panel"):
-        html = cli.get(path).get_data(as_text=True)
-        # The rendered mark span's own class, not a bare substring -- the shared
-        # stylesheet's ".mark:not(.anim-classic)" selector puts "anim-classic" on
-        # every page regardless of what the header's actual mark element carries.
-        assert 'class="mark anim-classic"' in html, path
-
-
-def test_banner_band_class(tmp_path):
-    """With no branding/banner.png the header is the classic slim bar; once the
-    file exists the header renders class="bannered" (the visible banner band)."""
-    cli = _client(tmp_path)
-    assert 'class="bannered"' not in cli.get("/classic").get_data(as_text=True)
-    bdir = tmp_path / "branding"
-    bdir.mkdir(parents=True, exist_ok=True)
-    (bdir / "banner.png").write_bytes(b"\x89PNG fake")
-    assert 'class="bannered"' in cli.get("/classic").get_data(as_text=True)
 
 
 def test_shortcut_requires_cut_ico(tmp_path, monkeypatch):

@@ -1199,7 +1199,7 @@
       var cost = d.paid_credit === 0 ? 'free (card used)' : ((d.paid_credit || 0).toLocaleString() + ' credits');
       var html = '<div style="color:var(--emerald,#4fc99a);font-size:12px;margin-bottom:6px;">✓ Rendered — ' + cost + '. Added to your gallery.</div>';
       ids.forEach(function (mid) {
-        html += '<a href="/image/' + esc(mid) + '"><img src="/thumbs/' + esc(mid) + '.jpg" alt="result" loading="lazy"></a>';
+        html += '<a href="/next?image=' + esc(mid) + '"><img src="/thumbs/' + esc(mid) + '.jpg" alt="result" loading="lazy"></a>';
       });
       line.innerHTML = html;
     }

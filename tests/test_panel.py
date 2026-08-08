@@ -36,29 +36,28 @@ def _authed_client(tmp_path):
     return login_test_client(_client(tmp_path))
 
 
-def test_panel_page_renders_with_actions(tmp_path):
-    html = _authed_client(tmp_path).get("/panel").get_data(as_text=True)
-    assert "Control Panel" in html
-    assert "Sync now" in html
-    # ACTIONS drives the Maintenance BUTTONS (panel_visible only); ALL_ACTIONS drives the
-    # scheduler dropdown and must still include the background-only jobs.
-    buttons_json = html.split("var ACTIONS = ", 1)[1].split(";", 1)[0]
-    dropdown_json = html.split("var ALL_ACTIONS = ", 1)[1].split(";", 1)[0]
-    assert '"action": "sync"' in buttons_json
+def test_panel_actions_table_reaches_the_client(tmp_path):
+    """PORTED from the classic /panel page-scrape (test_panel_page_renders_with_actions;
+    the page and its inline var ACTIONS/ALL_ACTIONS died in the 2026-08-08 classic cut).
+    The action TABLE survives and now reaches the client solely via /api/panel/summary:
+    `actions` drives the Maintenance buttons (panel_visible only), `all_actions` drives
+    the scheduler dropdown and must still include the background-only jobs."""
+    d = _authed_client(tmp_path).get("/api/panel/summary").get_json()
+    by_action = {a["action"]: a for a in d["actions"]}
+    all_by_action = {a["action"]: a for a in d["all_actions"]}
+    assert "sync" in by_action
     # update/backfill-meta/fix-models folded into --sync -- no longer standalone actions
     for gone in ("update", "backfill-meta", "fix-models"):
-        assert gone not in buttons_json and gone not in dropdown_json
+        assert gone not in by_action and gone not in all_by_action
     # sync-videos / sync-artworks GAINED buttons in the web-parity pass: nothing should
     # need the CLI. They are full-history re-walks, so their labels say so out loud
     # rather than hiding them.
     for shown in ("sync-videos", "sync-artworks"):
-        assert '"action": "{}"'.format(shown) in buttons_json
-        assert "full re-walk" in buttons_json
+        assert shown in by_action, "{} has no Maintenance button".format(shown)
+        assert "full re-walk" in by_action[shown]["label"]
     # undo-organize / restore-orphans were the last two CLI-only maintenance actions;
-    # they must RENDER a button (not merely be runnable), which is the point of adding
-    # them -- and render among the DESTRUCTIVE ones, since both move files on disk.
-    import json
-    by_action = {a["action"]: a for a in json.loads(buttons_json)}
+    # they must reach the client as visible actions (not merely be runnable), which is
+    # the point of adding them -- flagged DESTRUCTIVE, since both move files on disk.
     for shown in ("undo-organize", "restore-orphans"):
         assert shown in by_action, "{} has no Maintenance button".format(shown)
         assert by_action[shown]["destructive"] is True
@@ -66,8 +65,8 @@ def test_panel_page_renders_with_actions(tmp_path):
     # runs it as its final step (run_sync's pipeline), so a button would be a second path
     # to work that just happened, inviting someone to run it and wonder why nothing
     # changed. It stays schedulable for anyone wanting it on its own cadence.
-    assert "reconcile-deleted" not in buttons_json
-    assert '"action": "reconcile-deleted"' in dropdown_json
+    assert "reconcile-deleted" not in by_action
+    assert "reconcile-deleted" in all_by_action
 
 
 def test_panel_summary_matches_the_page_route(tmp_path):
@@ -166,7 +165,12 @@ def test_destructive_action_refuses_authenticated_lan_session(tmp_path, monkeypa
     cli = _client(tmp_path).test_client()
     LAN = "203.0.113.5"
     html = cli.get("/login").get_data(as_text=True)
-    cli.post("/login", data={"username": "alice", "password": "hunter2", "csrf": _csrf(html)})
+    # POST /api/login (JSON) is the one and only sign-in path since the classic cut
+    # (2026-08-08) -- a form POST to /login is 405 now. Deliberately hand-rolled (not
+    # conftest's helpers) because THIS test's own account/session is its subject.
+    r_login = cli.post("/api/login", json={"username": "alice", "password": "hunter2",
+                                           "csrf": _csrf(html)})
+    assert r_login.get_json().get("ok") is True
     # Prove the session really is authenticated (it can reach an ordinary
     # authorized-LAN route) before proving it still can't reach this one.
     assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
@@ -471,10 +475,16 @@ def test_server_restart_needs_supervisor(tmp_path, monkeypatch):
     assert d["action"] == "restart" and codes == [42]
 
 
-def test_panel_shows_restart_state(tmp_path, monkeypatch):
+def test_panel_summary_reports_restart_state(tmp_path, monkeypatch):
+    """PORTED from the classic /panel page-scrape (test_panel_shows_restart_state; the
+    page and its inline Restart/Stop buttons died in the 2026-08-08 classic cut). The
+    React Control Panel decides whether to offer Restart off /api/panel/summary's
+    `supervised` field -- the same _supervised() the old template branched on."""
+    cli = _authed_client(tmp_path)
     monkeypatch.setattr(g, "_supervised", lambda: True)
-    html = _authed_client(tmp_path).get("/panel").get_data(as_text=True)
-    assert "Restart server" in html and "Stop server" in html
+    assert cli.get("/api/panel/summary").get_json()["supervised"] is True
+    monkeypatch.setattr(g, "_supervised", lambda: False)
+    assert cli.get("/api/panel/summary").get_json()["supervised"] is False
 
 
 # --- Cancel a running maintenance job from the browser (no Task Manager) ---
@@ -915,13 +925,13 @@ def test_advanced_actions_are_flagged_and_kept_off_the_scheduler(tmp_path):
     """The panel hands the client an `advanced` flag per action (so they render in the
     Advanced section, not the main button rows) and the scheduler dropdown filters on it.
     Server-side backstop: the scheduler LOOP also skips advanced actions, so even a
-    hand-edited schedule naming one never fires. Here we pin the flag the client keys on."""
-    import json
+    hand-edited schedule naming one never fires. Here we pin the flag the client keys on.
+    (PORTED off the classic /panel page's inline var ALL_ACTIONS, which died in the
+    2026-08-08 classic cut; the same list now reaches the client solely as
+    /api/panel/summary's `all_actions`.)"""
     cli = _authed_client(tmp_path)
-    html = cli.get("/panel").get_data(as_text=True)
-    m = re.search(r"var ALL_ACTIONS = (\[.*?\]);", html)
-    assert m, "ALL_ACTIONS not found on the panel page"
-    by_action = {a["action"]: a for a in json.loads(m.group(1))}
+    d = cli.get("/api/panel/summary").get_json()
+    by_action = {a["action"]: a for a in d["all_actions"]}
     for adv in ("resync-full", "inventory", "test-pull"):
         assert by_action[adv]["advanced"] is True
     assert by_action["test-pull"]["int_param"] is True

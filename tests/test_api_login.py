@@ -1,32 +1,21 @@
 """POST /api/login -- the JSON sign-in/bootstrap endpoint the React LoginPage
-actually submits to (2026-08-02). It reimplements classic login()'s POST branch
-(JSON body instead of a form) and PROMISES parity in its docstring: same lockout
-counter (_login_seconds_locked/_login_try_acquire), same server-side bootstrap
-gate (no_accounts AND _is_local_request, re-checked per request), and the exact
-same deliberately-generic error strings so the JSON endpoint and the classic
-form are never distinguishable to an attacker probing for accounts.
-
-This file is that promise's direct coverage. tests/test_web_auth.py owns the
-classic /login form route; the parity tests at the bottom POST BOTH routes and
-compare, so a future edit that lets the two drift apart fails here by name.
-Until this file existed, the live auth path's only test was an anonymous
-empty-body probe in tests/test_route_tiers.py."""
-import re
-
+submits to (2026-08-02), and -- since the classic UI cut -- the ONLY way to sign
+in (GET /login just serves the React shell with the csrf token in window.MG_BOOT;
+a form POST to /login is 405). This file is the auth path's direct coverage:
+the IP-keyed lockout counter (_login_seconds_locked/_login_try_acquire), the
+server-side bootstrap gate (no_accounts AND _is_local_request, re-checked per
+request), csrf enforcement/rotation, and the deliberately-generic error strings
+-- pinned VERBATIM at the bottom so a reworded message that leaks which field
+was wrong fails loudly. (The classic /login form route and the cross-route
+parity tests that compared both endpoints were removed with the classic UI;
+the wording pins and the counter's session-independence coverage were ported
+to stand alone here.)"""
 import moonglade_backup as core
 from moonglade_gallery import create_app
 
 
 def _client(tmp_path):
     return create_app(tmp_path)
-
-
-def _csrf(html):
-    # Same extraction test_web_auth.py uses: the classic hidden input
-    # (bootstrap_mode) or the React shell's window.MG_BOOT JSON blob.
-    m = re.search(r'name="csrf" value="([^"]+)"|"csrf":\s*"([^"]+)"', html)
-    assert m, "login page did not render a csrf token (classic hidden field or MG_BOOT)"
-    return m.group(1) or m.group(2)
 
 
 def _session_csrf(cli):
@@ -138,18 +127,20 @@ def test_api_login_rate_limit_locks_out_after_five_failures(tmp_path):
     assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 401
 
 
-def test_api_login_lockout_is_shared_with_the_classic_form(tmp_path):
-    """The docstring's 'one IP-keyed counter for both modes' claim, proven: an
-    address locked out via classic /login form failures is locked out of
-    /api/login too. If api_login ever grew its own counter, an attacker could
-    double the guess budget just by alternating endpoints."""
+def test_api_login_lockout_is_ip_keyed_not_session_keyed(tmp_path):
+    """Port of the old 'one IP-keyed counter for both modes' parity test (the
+    classic form endpoint it compared against is gone): the counter must key on
+    the ADDRESS, never the session. An address locked out in one session is
+    locked out from a brand-new session (fresh cookie jar, fresh csrf) too --
+    if the counter ever moved into the session, an attacker could reset the
+    guess budget just by discarding cookies."""
     core.add_or_update_web_user("alice", "hunter2")
-    cli = _client(tmp_path).test_client()
+    app = _client(tmp_path)
+    cli = app.test_client()
     for _ in range(5):
-        html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
-        cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
-                 data={"username": "alice", "password": "wrong", "csrf": _csrf(html)})
-    body = _api_login(cli, {"username": "alice", "password": "hunter2"},
+        _api_login(cli, {"username": "alice", "password": "wrong"}, remote_addr=LAN)
+    fresh = app.test_client()   # no cookies -- a "new browser" from the same address
+    body = _api_login(fresh, {"username": "alice", "password": "hunter2"},
                       remote_addr=LAN)
     assert "too many failed attempts" in body["error"].lower()
 
@@ -235,31 +226,29 @@ def test_api_login_bootstrap_enforces_password_policy_server_side(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Error-string parity with the classic /login form
+# Error-string wording pins (were parity checks against the classic /login form;
+# the form is gone, so the exact strings are pinned here directly instead)
 # ---------------------------------------------------------------------------
 
-def test_api_login_wrong_password_error_text_identical_to_classic_form(tmp_path):
-    """api_login's docstring promises its errors are 'the identical generic
-    strings login() gives' so the two routes are never distinguishable by error
-    text. Enforce it end-to-end for the wrong-password case: POST both routes
-    with the same bad credentials and require the JSON error to appear VERBATIM
-    in the form's re-rendered page. A rewording of either side breaks this."""
+def test_api_login_wrong_password_error_text_pinned_verbatim(tmp_path):
+    """The generic bad-credentials string, pinned VERBATIM for both failure
+    shapes (wrong password, unknown user). This used to be enforced by parity
+    with the classic form's rendered page; with that route gone, the exact
+    wording -- capitalization, period and all -- is asserted here so a reworded
+    message (especially one that leaks which field was wrong) fails by name."""
     core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
-
-    api_error = _api_login(cli, {"username": "alice", "password": "wrong-pw"})["error"]
-
-    html = cli.get("/login").get_data(as_text=True)
-    classic_body = cli.post("/login", data={"username": "alice", "password": "wrong-pw",
-                                            "csrf": _csrf(html)}).get_data(as_text=True)
-    assert api_error == "Invalid username or password."
-    assert api_error in classic_body
+    wrong_pw = _api_login(cli, {"username": "alice", "password": "wrong-pw"})["error"]
+    unknown = _api_login(cli, {"username": "nobody-at-all", "password": "wrong-pw"})["error"]
+    assert wrong_pw == "Invalid username or password."
+    assert unknown == "Invalid username or password."
 
 
-def test_api_login_lockout_error_text_identical_to_classic_form(tmp_path):
-    """Parity for the lockout message too -- the counter is shared, so an
-    attacker alternating endpoints sees the same text with the same wording
-    (including the same rounded minutes figure) from both."""
+def test_api_login_lockout_error_text_pinned_verbatim(tmp_path):
+    """The lockout wording, pinned exactly -- sentence AND the rounded minutes
+    figure a fresh 15-minute lockout reports. The other lockout tests match a
+    lowercase substring; this is the one place the user-facing text itself is
+    load-bearing, so a rewording can't slip through unnoticed."""
     core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     for _ in range(5):
@@ -267,12 +256,7 @@ def test_api_login_lockout_error_text_identical_to_classic_form(tmp_path):
     api_error = _api_login(cli, {"username": "alice", "password": "hunter2"},
                            remote_addr=LAN)["error"]
     assert "Too many failed attempts from this address." in api_error
-
-    html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
-    classic_body = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
-                            data={"username": "alice", "password": "hunter2",
-                                  "csrf": _csrf(html)}).get_data(as_text=True)
-    assert api_error in classic_body
+    assert "Try again in about 15 minutes." in api_error
 
 
 def test_api_failed_post_rotates_csrf_and_returned_token_works(tmp_path):
