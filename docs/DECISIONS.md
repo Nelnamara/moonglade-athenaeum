@@ -6254,3 +6254,26 @@ errors. **No generation was submitted** (hands-off). Tests: the 6 test_upscale_b
 tests retargeted to UpscalePanel.jsx/CostBadge.jsx (quote forms + slice markers adjusted), the
 design-kit harness set dropped mg-upscale-panel.html, the cost-badge "two embedders" notes now say
 one. Gallery build clean, loom 721, full Python green. Remaining 2: notify, generate-drawer.
+
+### Job-tracker frontend redesign — DEFERRED to a design pass after the faithful notify port  ·  *2026-08-08*
+
+Owner asked (before the notify port) whether a design change to the **job tracker specifically**
+should go to design now or after. **Decision: port `mg-notify.js` faithfully first, redesign the
+job-tracker frontend as a focused follow-up** — the same "built faithful, design pass pending"
+pattern GalleryPicker already follows.
+
+**Why.** `mg-notify.js` is two layers: the ENGINE (`Jobs.track` -- the spend-critical poller that
+drives paid-generation completion, silent-death detection, per-job cost, QUEUED/ETA; plus `Ach`
+and `Toast`) and the CHROME (the `#jobs-fab`, `#jobs-tray`, job cards). The faithful port moves the
+*engine* to React verbatim; a redesign only restyles the *chrome*. Doing both at once would fuse a
+redesign into the biggest, most spend-critical component and lose the "does the ported behavior
+still match the old one" verify safety net a spend surface needs — and a restyle needs a locked
+pixel mockup first anyway (STANDARDS.md Part 2 / the standing mock-before-code rule). So: (1) notify
+ported faithfully → static/ empties → merge + v3.0; (2) the job-tracker redesign lands after, as its
+own isolated change against the React component, with a locked mockup as the source of truth.
+
+**Design exploration MAY start now, in parallel** — it's about the *appearance* of the FAB/tray/
+cards, independent of the React internals, so it neither blocks nor is invalidated by the port.
+Give the designer the CURRENT job tracker as the starting point (a real, recently-shipped surface:
+silent-death detection, per-job cost, QUEUED + ETA, 2026-07-25) so the redesign is a deliberate
+evolution, not a from-scratch guess. **Flagged so it is not lost when the port lands.**
