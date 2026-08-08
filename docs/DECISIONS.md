@@ -5467,3 +5467,55 @@ confirmed, stays omitted) or genuinely publish something to the account (needs d
 after, or keeping if it's a real image you want up anyway). It's real and account-visible
 either way, so it's not something to run unilaterally -- next step is your call on
 whether to spend that one test.
+
+### OWNER RULING: the system-art pick-list — all 14 roles decided  ·  *2026-08-07*
+
+The open "mascot/system-art pick-list" (waiting on owner since the 2026-08-06
+correction) is DECIDED. The Art Asset Inventory artifact was rebuilt with live previews
+of the real art + per-role decision controls; the owner worked through every card and
+pasted the export back. Ruling, verbatim from the export:
+
+**KEEP FIXED (never customizable):**
+- Narrator (`mascots/gen_nel.png`) — ⚑ art needs work
+- Setup Wizard poses (`nel_carl`/`nel_micdrop`) — ⚑ art needs work
+- Hidden-feat mask (`mystery/secret_feat.png`)
+- Easter-egg set (`ee_nelstarfall` + both oggs) — owner note: **"Never replaced"**
+  (sealed permanently; do not re-propose)
+
+**UNDER-THE-HOOD (user-customizable once the bundle lands):**
+- Login companion (`login_nel.webp`)
+- Power poses (`nel_shutdown`/`nel_restart`)
+- Claim popup (`nel_redeem` — still not installed, see 2026-08-07 findings)
+- Job-Tracker spinner (root `gen_nel.png`) — ⚑ art needs work
+- Job status poses (`trk_done`/`trk_fail`/`trk_empty`)
+- Claim pill icon (`rewards/claim.png`) — ⚑ art needs work
+- Gift icon (`rewards/gift.png`)
+- Drop-in logo (`logo.png`) — ⚑ art needs work · owner note: **"This should not be the
+  default - Default should be Void Sentinel"** (= `marks/mark_4`, per marks.json). The
+  bundle's default logo asset ships Void Sentinel, not the current logo.png art.
+- Favicon (`favicon.png`) — ⚑ art needs work (opens up the previously-fixed
+  "favicon stays the Gem Tome" call)
+- PWA icons (`gallery/public/icon-*.png`) — ⚑ art needs work · owner note: "This is
+  terrible" (note: PWA icons are the one git-tracked art set; customization implies a
+  per-install build step — the UTH mechanics here need a design look)
+
+**Art-redo work list (7):** Narrator, Setup Wizard poses, Job-Tracker spinner, Claim
+pill icon, Drop-in logo, Favicon, PWA icons. No sealed achievement art was flagged.
+
+**Orphans:** frames/ (feat + legendary) — DELETE → **executed**, both files + the empty
+dir removed from the C: dev tree same day (zero code refs re-verified first; the loom
+"frames" grep hits are storyboard shot-frames, unrelated). The D: run copy still has its
+stale copies — notify-only rule, owner clears that side. ART.md rows updated.
+
+**present_* tier mascots — DELETE ruling HELD, wrong premise found.** The inventory
+artifact called present_common/rare/epic/legendary "orphaned, zero refs in shipped
+code" — that was WRONG. `static/mg-notify.js:1056` builds the path dynamically
+(`'/branding/mascots/present_'+mfall+'.png'`): it is the third rung of the achievement
+toast's fail-soft mascot chain (`ach/<id>.webp` → `ach/<id>.png` → `present_<tier>.png`
+→ no mascot), documented in moonglade_gallery.py:10573 and tests/test_branding.py:530.
+A literal-filename grep missed the concatenation — the exact class of miss the
+config-isolation standing rule exists for. All 57 ach ids currently have art, so the
+rung only fires when an ach file is missing — which is a REAL case (the D: run copy is
+exactly such a partially-copied tree). Deleting them doesn't crash anything (the chain
+ends at "no mascot"), but it removes a live safety net, so the ruling goes back to the
+owner with the corrected facts instead of being executed on the bad ones.
