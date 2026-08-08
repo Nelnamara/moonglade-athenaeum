@@ -1,19 +1,17 @@
 #!/usr/bin/env node
-/* Bundles master-storyboard.jsx (+ its ./src/loom-core.js import) into a real,
- * pre-transpiled dist bundle -- the NEW, additional delivery path described in
- * the Phase 1 tooling pass (2026-07-16). The existing in-browser Babel-standalone
- * path (pixai_gallery.py's `loom()` route) is untouched and remains the default;
- * this bundle is opt-in until proven trustworthy.
+/* Bundles master-storyboard.jsx (+ its ./src/loom-core.js, ./src/loom-mutations.js and the
+ * shared ../gallery/src/art/artFilters.js imports) into a real, pre-transpiled dist bundle --
+ * the Loom's SOLE delivery path since the in-browser Babel-standalone transpile was retired
+ * (2026-08-08). Originally added as an opt-in alternative in the Phase 1 tooling pass
+ * (2026-07-16); once trustworthy, it replaced the Babel path outright.
  *
  * React/ReactDOM are NOT bundled -- they're already loaded as globals by
- * loom/vendor/{react,react-dom}.production.min.js (see LOOM_PAGE in
- * pixai_gallery.py). master-storyboard.jsx's `import React, {...} from "react"`
- * line exists only for editor/IDE convenience; the Flask route strips it with a
- * regex before inlining the JSX for Babel, and this script mirrors that exact
- * transform (strip the import line, then prepend the same
- * `const { useState, ... } = React;` destructure the HTML template injects)
- * so the esbuild bundle and the Babel-standalone fallback see IDENTICAL input.
- * Keep the regex and the destructured hook list in sync with pixai_gallery.py's
+ * loom/vendor/{react,react-dom}.production.min.js (see LOOM_PAGE_BUNDLE in
+ * moonglade_gallery.py). master-storyboard.jsx's `import React, {...} from "react"` line
+ * exists for editor/IDE convenience; this script strips it and prepends a
+ * `const { useState, ... } = React;` destructure DERIVED from that import's own hook list,
+ * so a hook used but not destructured can't ship a ReferenceError.
+ * Keep the regex and the destructured hook list in sync with moonglade_gallery.py's
  * LOOM_PAGE / loom() if either ever changes.
  */
 import { readFileSync, mkdirSync } from "node:fs";

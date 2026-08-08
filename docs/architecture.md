@@ -370,15 +370,19 @@ sits at a different trust tier, why the sync phase's progress UI departs from th
 handoff's fake timers, why Control Panel is a modal and not the page the handoff specifies)
 is in `docs/DECISIONS.md`.
 
-## Shared web components (`static/`)
+## Shared web components (`static/`) — being retired
 
-Seven framework-neutral shared components (the "Option-A cohesion migration") — of which
-FIVE are true custom elements and two (`mg-notify.js`, `mg-art-filters.js`) are plain
-window globals — live in `static/` as plain `mg-*.js` files: no build step, no shadow DOM,
-loaded via a plain `<script src>` tag, each self-injecting its own `<style>` that reads the shared
-`DESIGN_TOKENS_CSS` custom properties so it re-skins with the rest of the app. Both the
-vanilla gallery (`moonglade_gallery.py`) and the React Loom (`loom/master-storyboard.jsx`)
-mount the same files instead of each hand-duplicating the UI:
+**This whole layer is mid-removal** (the "no vanilla JS survives" campaign, 2026-08-08). These
+framework-neutral `static/mg-*.js` files load via a plain `<script src>` tag with no build
+step — the last vanilla front-end in the app — and are being folded into the React build one
+at a time until `static/` is empty (then master merge + v3.0). **Done so far:** the art-filter
+engine, moved to `gallery/src/art/artFilters.js` (a plain ES-module import now, no longer a
+`window.AF` global); and The Loom went **bundle-only** (its esbuild bundle is the sole
+delivery — the in-browser Babel transpile is retired — so it imports shared modules like a
+normal build). **Remaining (7):** the files below, each still `<script>`-loaded by both the
+React gallery shell and the Loom shell, ported in dependency order (picker-core+gallery-picker
+→ model-picker → upscale-panel → notify → generate-drawer → cost-badge). Each self-injects its
+own `<style>` reading `DESIGN_TOKENS_CSS` so it re-skins with the app:
 
 | File | Element / global | Role |
 |---|---|---|
@@ -387,7 +391,6 @@ mount the same files instead of each hand-duplicating the UI:
 | `mg-generate-drawer.js` | `<mg-generate-drawer>` | The full Generate/Edit/Video form (Multi-ref slots, cost line, submit+poll) |
 | `mg-cost-badge.js` | `<mg-cost-badge>` | The one renderer for "this costs N credits" / "a free card covers it" |
 | `mg-notify.js` | `Ach` / `Toast` / `Jobs` / `JobsCard` (plain globals, not a custom element) | Achievement-toast celebrations, the corner Toast utility, and the Job activity tracker |
-| `mg-art-filters.js` | `AF` (plain global) | Art filters: PixAI's own recipes kept verbatim, plus five derived from this app's skins. Applied locally on a canvas, so they are free and spend nothing |
 | `mg-upscale-panel.js` | `<mg-upscale-panel>` | The image-view upscale surface. Two distinct mechanisms, deliberately not conflated: `enlarge` (ESRGAN, a model choice) and `upscale` (Hires, denoising strength + steps). The ratio cap is computed from the source's own dimensions against the pixel ceiling, not fixed |
 
 `static/picker-core.js` is a sixth file worth knowing about but is not one of the five: it's

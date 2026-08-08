@@ -502,6 +502,662 @@ ${"=".repeat(48)}
     };
   }
 
+  // ../gallery/src/art/artFilters.js
+  var MgArtFilters = (function() {
+    "use strict";
+    var SOURCE_URL = "https://api.pixai.art/config/imageArtFilters";
+    var CAPTURED = "2026-07-25";
+    var DEFAULT_ANGLE_DEG = 180;
+    var FILTERS = [
+      {
+        id: "filter-v1-m1",
+        version: 1,
+        name: "Filter M1",
+        filters: [
+          {
+            name: "f1",
+            enabled: true,
+            blendMode: "darker-color",
+            blendOpacity: 0.9,
+            stops: [
+              { color: "rgba(215, 255, 223, 1)", position: 1 },
+              { color: "#ffffff", position: 0 }
+            ]
+          },
+          {
+            name: "f2",
+            enabled: true,
+            blendMode: "soft-light",
+            blendOpacity: 0.7,
+            stops: [
+              { color: "rgba(179, 250, 255, 1)", position: 0 },
+              { color: "rgba(117, 48, 227, 1)", position: 1 }
+            ]
+          }
+        ]
+      },
+      {
+        id: "filter-v1-m2",
+        version: 1,
+        name: "Filter M2",
+        filters: [
+          {
+            name: "f1",
+            enabled: true,
+            blendMode: "darker-color",
+            blendOpacity: 0.45,
+            stops: [
+              { color: "rgba(95, 78, 197, 1)", position: 0 },
+              { color: "rgba(255, 249, 210, 1)", position: 1 }
+            ]
+          },
+          {
+            name: "f2",
+            enabled: true,
+            blendMode: "color-burn",
+            blendOpacity: 0.7,
+            stops: [
+              { color: "rgba(255, 181, 0, 1)", position: 0 },
+              { color: "rgba(255, 128, 213, 1)", position: 1 }
+            ]
+          },
+          {
+            name: "f3",
+            enabled: true,
+            blendMode: "lighter-color",
+            blendOpacity: 0.4,
+            stops: [
+              { color: "rgba(163, 196, 223, 1)", position: 1 },
+              { color: "rgba(111, 145, 186, 1)", position: 0 }
+            ]
+          }
+        ]
+      },
+      {
+        id: "filter-v1-m3",
+        version: 1,
+        name: "Filter M3",
+        filters: [
+          {
+            name: "f1",
+            enabled: true,
+            blendMode: "plus-lighter",
+            blendOpacity: 0.39,
+            stops: [
+              { color: "rgba(0, 238, 236, 1)", position: 0 },
+              { color: "rgba(255, 203, 221, 1)", position: 1 }
+            ]
+          },
+          {
+            name: "f2",
+            enabled: true,
+            blendMode: "saturation",
+            blendOpacity: 0.43,
+            stops: [
+              { color: "rgba(68, 47, 93, 1)", position: 0 },
+              { color: "rgba(244, 157, 173, 1)", position: 1 }
+            ]
+          }
+        ]
+      },
+      {
+        id: "filter-v1-m4",
+        version: 1,
+        name: "Filter M4",
+        filters: [
+          {
+            name: "f1",
+            enabled: true,
+            blendMode: "soft-light",
+            blendOpacity: 0.54,
+            stops: [
+              { color: "rgba(255, 194, 161, 1)", position: 0 },
+              { color: "rgba(255, 177, 189, 1)", position: 1 }
+            ]
+          },
+          {
+            name: "f2",
+            enabled: true,
+            blendMode: "color-burn",
+            blendOpacity: 0.85,
+            stops: [
+              { color: "rgba(215, 214, 77, 1)", position: 0 },
+              { color: "rgba(254, 169, 191, 1)", position: 0.5 },
+              { color: "rgba(206, 255, 186, 1)", position: 1 }
+            ]
+          }
+        ],
+        image_parameters: { brightness: 0.04, contrast: 0.05, saturation: 0.1 }
+      },
+      {
+        id: "filter-v1-m5",
+        version: 1,
+        name: "Filter M5",
+        filters: [
+          {
+            name: "f1",
+            enabled: true,
+            blendMode: "darker-color",
+            blendOpacity: 0.22,
+            stops: [
+              { color: "rgba(255, 204, 206, 1)", position: 0 },
+              { color: "rgba(255, 218, 123, 1)", position: 1 }
+            ]
+          },
+          {
+            name: "f2",
+            enabled: true,
+            blendMode: "soft-light",
+            blendOpacity: 0.9,
+            stops: [
+              { color: "rgba(255, 154, 173, 1)", position: 0 },
+              { color: "rgba(255, 238, 255, 1)", position: 1 }
+            ]
+          }
+        ],
+        image_parameters: { brightness: 0.02, contrast: -0.26, saturation: 0.02 }
+      },
+      {
+        id: "filter-v1-m6",
+        version: 1,
+        name: "Filter M6",
+        filters: [
+          {
+            name: "f1",
+            enabled: true,
+            blendMode: "lighter-color",
+            blendOpacity: 0.4,
+            stops: [
+              { color: "#f4e4c1", position: 1 },
+              { color: "rgba(234, 118, 88, 1)", position: 0.6 },
+              { color: "rgba(0, 17, 49, 1)", position: 1 }
+            ]
+          },
+          {
+            name: "f2",
+            enabled: true,
+            blendMode: "screen",
+            blendOpacity: 0.16,
+            stops: [
+              { color: "rgba(250, 243, 98, 1)", position: 0 },
+              { color: "rgba(235, 41, 171, 1)", position: 0.6 },
+              { color: "rgba(0, 17, 49, 1)", position: 1 }
+            ]
+          }
+        ],
+        image_parameters: { brightness: 0, contrast: 0, saturation: 0.12 }
+      },
+      {
+        id: "filter-v1-m7",
+        version: 1,
+        name: "Filter M7",
+        filters: [
+          {
+            name: "f1",
+            enabled: true,
+            blendMode: "overlay",
+            blendOpacity: 0.81,
+            stops: [
+              { color: "rgba(179, 250, 255, 1)", position: 0 },
+              { color: "rgba(117, 48, 227, 1)", position: 1 }
+            ]
+          },
+          {
+            name: "f2",
+            enabled: true,
+            blendMode: "soft-light",
+            blendOpacity: 0.4,
+            stops: [
+              { color: "rgba(150, 197, 255, 1)", position: 0 },
+              { color: "#ffffff", position: 1 }
+            ]
+          }
+        ],
+        image_parameters: { brightness: 0.02, contrast: -0.06, saturation: 0 }
+      }
+    ];
+    var MOONGLADE_FILTERS = [
+      {
+        id: "mg-moonglade",
+        version: 1,
+        name: "Moonglade",
+        skin: "moonglade",
+        note: "The default skin. Lavender leads, emerald in the shadows.",
+        filters: [
+          {
+            name: "f1",
+            enabled: true,
+            blendMode: "soft-light",
+            blendOpacity: 0.6,
+            stops: [
+              { color: "#b692e6", position: 0 },
+              { color: "#4fc99a", position: 1 }
+            ]
+          },
+          {
+            name: "f2",
+            enabled: true,
+            blendMode: "screen",
+            blendOpacity: 0.2,
+            stops: [
+              { color: "#0c0a1c", position: 0 },
+              { color: "#3a3460", position: 1 }
+            ]
+          }
+        ]
+      },
+      {
+        id: "mg-nightfallen",
+        version: 1,
+        name: "Nightfallen",
+        skin: "nightfallen",
+        note: "Void-touched. Crushes the darks, keeps a violet bloom up top.",
+        filters: [
+          {
+            name: "f1",
+            enabled: true,
+            blendMode: "color-burn",
+            blendOpacity: 0.42,
+            stops: [
+              { color: "#241a3f", position: 0 },
+              { color: "#a678f0", position: 1 }
+            ]
+          },
+          {
+            name: "f2",
+            enabled: true,
+            blendMode: "soft-light",
+            blendOpacity: 0.55,
+            stops: [
+              { color: "#c9a6ff", position: 0 },
+              { color: "#080610", position: 1 }
+            ]
+          }
+        ]
+      },
+      {
+        id: "mg-moonlit",
+        version: 1,
+        name: "Moonlit Silver",
+        skin: "moonlit",
+        note: "Cold silver and glacier blue. The gentlest of the five -- good on portraits.",
+        filters: [
+          {
+            name: "f1",
+            enabled: true,
+            blendMode: "soft-light",
+            blendOpacity: 0.6,
+            stops: [
+              { color: "#bcd6f5", position: 0 },
+              { color: "#8fb8e8", position: 1 }
+            ]
+          },
+          {
+            name: "f2",
+            enabled: true,
+            blendMode: "screen",
+            blendOpacity: 0.18,
+            stops: [
+              { color: "#0b1018", position: 0 },
+              { color: "#334358", position: 1 }
+            ]
+          }
+        ]
+      },
+      {
+        id: "mg-ember",
+        version: 1,
+        name: "Embercourt",
+        skin: "ember",
+        note: "Warm venthyr gold. The only one of the five that pushes contrast up.",
+        filters: [
+          {
+            name: "f1",
+            enabled: true,
+            blendMode: "overlay",
+            blendOpacity: 0.48,
+            stops: [
+              { color: "#e8935f", position: 0 },
+              { color: "#f0b48f", position: 1 }
+            ]
+          },
+          {
+            name: "f2",
+            enabled: true,
+            blendMode: "color-burn",
+            blendOpacity: 0.32,
+            stops: [
+              { color: "#5a352c", position: 0 },
+              { color: "#160c0c", position: 1 }
+            ]
+          }
+        ]
+      },
+      {
+        id: "mg-verdant",
+        version: 1,
+        name: "Verdant Grove",
+        skin: "verdant",
+        note: "Deep moss. The strongest colour shift of the set.",
+        filters: [
+          {
+            name: "f1",
+            enabled: true,
+            blendMode: "soft-light",
+            blendOpacity: 0.6,
+            stops: [
+              { color: "#8fe8bf", position: 0 },
+              { color: "#5fd39a", position: 1 }
+            ]
+          },
+          {
+            name: "f2",
+            enabled: true,
+            blendMode: "color-burn",
+            blendOpacity: 0.38,
+            stops: [
+              { color: "#173026", position: 0 },
+              { color: "#2a5140", position: 1 }
+            ]
+          }
+        ]
+      }
+    ];
+    var GROUPS = [
+      { source: "moonglade", label: "Moonglade", filters: MOONGLADE_FILTERS },
+      { source: "pixai", label: "PixAI", filters: FILTERS }
+    ];
+    var ALL_FILTERS = GROUPS.reduce(function(acc, g) {
+      return acc.concat(g.filters);
+    }, []);
+    var BLEND_MODE_MAP = {
+      "darker-color": {
+        css: "darken",
+        canvas: "darken",
+        exact: false,
+        note: "Photoshop's Darker Color keeps whichever whole colour is darker; CSS/canvas darken takes the per-channel minimum, which can emit a colour present in neither input. Closest available -- differs where a gradient crosses the hue."
+      },
+      "lighter-color": {
+        css: "lighten",
+        canvas: "lighten",
+        exact: false,
+        note: "Photoshop's Lighter Color keeps whichever whole colour is lighter; CSS/canvas lighten takes the per-channel maximum. Same approximation as darker-color."
+      },
+      "soft-light": { css: "soft-light", canvas: "soft-light", exact: true },
+      "color-burn": { css: "color-burn", canvas: "color-burn", exact: true },
+      "screen": { css: "screen", canvas: "screen", exact: true },
+      "overlay": { css: "overlay", canvas: "overlay", exact: true },
+      "saturation": { css: "saturation", canvas: "saturation", exact: true },
+      "plus-lighter": {
+        css: "plus-lighter",
+        canvas: "lighter",
+        exact: true,
+        note: "Same additive (Porter-Duff 'plus') operator in both, only the spelling differs: canvas has no 'plus-lighter', it calls it 'lighter'."
+      }
+    };
+    function blendModeFor(mode, target) {
+      if (target !== "css" && target !== "canvas") {
+        throw new Error("mg-art-filters: blendModeFor target must be 'css' or 'canvas', got " + JSON.stringify(target));
+      }
+      var e = BLEND_MODE_MAP[mode];
+      return e ? e[target] : null;
+    }
+    var SAFE_COLOR = /^(#[0-9a-fA-F]{3,8}|rgba?\(\s*[\d.,%\s]+\s*\))$/;
+    function clamp01(n) {
+      return n < 0 ? 0 : n > 1 ? 1 : n;
+    }
+    function round4(n) {
+      return Math.round(n * 1e4) / 1e4;
+    }
+    function num(n) {
+      return String(round4(n));
+    }
+    function get(id) {
+      for (var i = 0; i < ALL_FILTERS.length; i++)
+        if (ALL_FILTERS[i].id === id) return ALL_FILTERS[i];
+      return null;
+    }
+    function list() {
+      return ALL_FILTERS.map(function(f) {
+        return f.id;
+      });
+    }
+    function groups() {
+      return GROUPS.map(function(g) {
+        return {
+          source: g.source,
+          label: g.label,
+          ids: g.filters.map(function(f) {
+            return f.id;
+          })
+        };
+      });
+    }
+    function resolve(idOrRecipe) {
+      if (idOrRecipe && typeof idOrRecipe === "object") return idOrRecipe;
+      var r = get(idOrRecipe);
+      if (!r) throw new Error("mg-art-filters: no such filter: " + idOrRecipe);
+      return r;
+    }
+    function normalizeLayers(idOrRecipe, opts) {
+      var recipe = resolve(idOrRecipe);
+      var o = opts || {};
+      var strength = o.strength == null ? 1 : Number(o.strength);
+      if (!isFinite(strength)) strength = 1;
+      var warnings = [];
+      var layers = [];
+      (recipe.filters || []).forEach(function(L) {
+        if (L.enabled === false) return;
+        var css = blendModeFor(L.blendMode, "css");
+        var canvas = blendModeFor(L.blendMode, "canvas");
+        if (!css || !canvas) {
+          warnings.push('dropped layer "' + (L.name || "?") + '" of ' + recipe.id + ': unmapped blend mode "' + L.blendMode + '"');
+          return;
+        }
+        var stops = (L.stops || []).filter(function(s) {
+          if (s && typeof s.color === "string" && SAFE_COLOR.test(s.color)) return true;
+          warnings.push('dropped an unrecognised stop colour in "' + (L.name || "?") + '" of ' + recipe.id + ": " + JSON.stringify(s && s.color));
+          return false;
+        }).map(function(s, i) {
+          return { color: s.color, position: clamp01(Number(s.position) || 0), _i: i };
+        });
+        stops.sort(function(a, b) {
+          return a.position - b.position || a._i - b._i;
+        });
+        stops.forEach(function(s) {
+          delete s._i;
+        });
+        layers.push({
+          name: L.name || "",
+          blendMode: L.blendMode,
+          css,
+          canvas,
+          opacity: round4(clamp01(Number(L.blendOpacity) * strength)),
+          stops
+        });
+      });
+      return { id: recipe.id, layers, warnings };
+    }
+    function gradientCss(layer, angle) {
+      var a = angle == null ? DEFAULT_ANGLE_DEG : angle;
+      var parts = layer.stops.map(function(s) {
+        return s.color + " " + num(s.position * 100) + "%";
+      });
+      return "linear-gradient(" + num(a) + "deg, " + parts.join(", ") + ")";
+    }
+    function gradientEndpoints(w, h, angle) {
+      var a = angle == null ? DEFAULT_ANGLE_DEG : angle;
+      var t = axisTrig(a);
+      var dx = t.s, dy = -t.c;
+      var len = Math.abs(w * t.s) + Math.abs(h * t.c);
+      var cx = w / 2, cy = h / 2, half = len / 2;
+      return { x0: cx - dx * half, y0: cy - dy * half, x1: cx + dx * half, y1: cy + dy * half };
+    }
+    function axisTrig(deg) {
+      var r = (Number(deg) % 360 + 360) % 360;
+      if (r === 0) return { s: 0, c: 1 };
+      if (r === 90) return { s: 1, c: 0 };
+      if (r === 180) return { s: 0, c: -1 };
+      if (r === 270) return { s: -1, c: 0 };
+      var rad = r * Math.PI / 180;
+      return { s: Math.sin(rad), c: Math.cos(rad) };
+    }
+    function imageAdjustCss(idOrRecipe) {
+      var p = resolve(idOrRecipe).image_parameters;
+      if (!p) return "";
+      var out = [];
+      if (p.brightness) out.push("brightness(" + num(1 + p.brightness) + ")");
+      if (p.contrast) out.push("contrast(" + num(1 + p.contrast) + ")");
+      if (p.saturation) out.push("saturate(" + num(1 + p.saturation) + ")");
+      return out.join(" ");
+    }
+    function swatchLayers(idOrRecipe) {
+      var layers = normalizeLayers(idOrRecipe).layers.map(function(L) {
+        return {
+          name: L.name,
+          blendMode: L.blendMode,
+          css: L.css,
+          canvas: L.canvas,
+          opacity: L.opacity,
+          stops: L.stops
+        };
+      });
+      if (layers.length) {
+        layers[0] = Object.assign({}, layers[0], { css: "normal", canvas: "source-over", opacity: 1 });
+      }
+      return layers;
+    }
+    var STYLE_ID = "mg-art-filters-style";
+    var CSS = [
+      ".mgaf-stage,.mgaf-swatch{position:relative;isolation:isolate;}",
+      ".mgaf-stage{display:inline-block;line-height:0;}",
+      ".mgaf-stage>[data-mgaf-layer],.mgaf-swatch>[data-mgaf-layer]{position:absolute;",
+      " inset:0;pointer-events:none;}",
+      ".mgaf-swatch{display:block;overflow:hidden;}"
+    ].join("");
+    function injectStyle() {
+      if (document.getElementById(STYLE_ID)) return;
+      var s = document.createElement("style");
+      s.id = STYLE_ID;
+      s.textContent = CSS;
+      (document.head || document.documentElement).appendChild(s);
+    }
+    function clearLayers(host) {
+      var old = host.querySelectorAll(":scope > [data-mgaf-layer]");
+      for (var i = 0; i < old.length; i++) old[i].parentNode.removeChild(old[i]);
+    }
+    function buildLayerDivs(host, layers, angle) {
+      layers.forEach(function(L) {
+        var d = document.createElement("div");
+        d.setAttribute("data-mgaf-layer", L.name || "");
+        d.style.backgroundImage = gradientCss(L, angle);
+        d.style.mixBlendMode = L.css;
+        d.style.opacity = String(L.opacity);
+        host.appendChild(d);
+      });
+    }
+    function renderSwatch(el, idOrRecipe, opts) {
+      injectStyle();
+      var o = opts || {};
+      el.classList.add("mgaf-swatch");
+      clearLayers(el);
+      buildLayerDivs(el, swatchLayers(idOrRecipe), o.angle);
+      return el;
+    }
+    function applyPreview(host, idOrRecipe, opts) {
+      injectStyle();
+      var o = opts || {};
+      var n = normalizeLayers(idOrRecipe, o);
+      var target = o.target || host.querySelector("img,canvas,video");
+      host.classList.add("mgaf-stage");
+      clearLayers(host);
+      if (target) target.style.filter = imageAdjustCss(idOrRecipe);
+      buildLayerDivs(host, n.layers, o.angle);
+      return n;
+    }
+    function clearPreview(host, opts) {
+      var o = opts || {};
+      var target = o.target || host.querySelector("img,canvas,video");
+      if (target) target.style.filter = "";
+      clearLayers(host);
+      host.classList.remove("mgaf-stage");
+      return host;
+    }
+    function composite(source, idOrRecipe, opts) {
+      var o = opts || {};
+      var n = normalizeLayers(idOrRecipe, o);
+      var w = o.width || source.naturalWidth || source.videoWidth || source.width;
+      var h = o.height || source.naturalHeight || source.videoHeight || source.height;
+      if (!w || !h) {
+        throw new Error("mg-art-filters: source has no intrinsic size yet -- wait for the image's load event, or pass {width, height}");
+      }
+      var canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      var ctx = canvas.getContext("2d");
+      var adjust = imageAdjustCss(idOrRecipe);
+      if (adjust) {
+        if ("filter" in ctx) ctx.filter = adjust;
+        else n.warnings.push("this canvas has no ctx.filter -- skipped " + adjust);
+      }
+      ctx.drawImage(source, 0, 0, w, h);
+      if ("filter" in ctx) ctx.filter = "none";
+      var g = gradientEndpoints(w, h, o.angle);
+      n.layers.forEach(function(L) {
+        var grad = ctx.createLinearGradient(g.x0, g.y0, g.x1, g.y1);
+        L.stops.forEach(function(s) {
+          grad.addColorStop(s.position, s.color);
+        });
+        ctx.globalCompositeOperation = L.canvas;
+        ctx.globalAlpha = L.opacity;
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+      });
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+      canvas.mgafWarnings = n.warnings;
+      return canvas;
+    }
+    function toDataURL(source, idOrRecipe, opts) {
+      var o = opts || {};
+      return composite(source, idOrRecipe, o).toDataURL(o.mime || "image/png", o.quality);
+    }
+    function toBlob(source, idOrRecipe, opts) {
+      var o = opts || {};
+      var canvas = composite(source, idOrRecipe, o);
+      return new Promise(function(resolve_, reject) {
+        canvas.toBlob(function(b) {
+          if (b) resolve_(b);
+          else reject(new Error("mg-art-filters: canvas.toBlob produced nothing"));
+        }, o.mime || "image/png", o.quality);
+      });
+    }
+    return {
+      SOURCE_URL,
+      CAPTURED,
+      DEFAULT_ANGLE_DEG,
+      FILTERS,
+      MOONGLADE_FILTERS,
+      BLEND_MODE_MAP,
+      list,
+      get,
+      groups,
+      blendModeFor,
+      normalizeLayers,
+      gradientCss,
+      gradientEndpoints,
+      imageAdjustCss,
+      swatchLayers,
+      renderSwatch,
+      applyPreview,
+      clearPreview,
+      composite,
+      toDataURL,
+      toBlob
+    };
+  })();
+  var artFilters_default = MgArtFilters;
+
   // master-storyboard.jsx
   var { useState, useEffect, useRef, useCallback, useMemo } = React;
   var LV_TINTS = [
@@ -2025,7 +2681,7 @@ ${"=".repeat(48)}
         clearTimeout(t);
       };
     }, [tab, editSub, active && active.c.id, active && active.c.openFrame && active.c.openFrame.mediaId, fixBoxes]);
-    const AF = typeof window !== "undefined" ? window.MgArtFilters : null;
+    const AF = artFilters_default;
     const [fcOpen, setFcOpen] = useState(false);
     const [fcActive, setFcActive] = useState(null);
     const [fcStrength, setFcStrength] = useState(1);
@@ -3798,7 +4454,7 @@ ${"=".repeat(48)}
     const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
     const frameSrc = (f) => f && f.thumbId ? thumbs[f.thumbId] : f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null;
     const cardThumb = (c) => frameSrc(c.openFrame) || (c.resultMid ? "/thumbs/" + c.resultMid + ".jpg" : null);
-    const AF = typeof window !== "undefined" ? window.MgArtFilters : null;
+    const AF = artFilters_default;
     const statusOf = (c) => {
       const gs = genState[c.id];
       const paused = gs && gs.phase === "paused";

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { askPicker } from "./PickerHost.jsx";
 import Flyout from "./Flyout.jsx";
 import ActionsMenu from "./ActionsMenu.jsx";
+import MgArtFilters from "../art/artFilters.js";
 import "../styles/librarybar.css";
 
 /* ============================================================================
@@ -323,7 +324,7 @@ const AF_W = 1180;
    leaving nothing to compare against. Same-origin and already cached, so the
    second one costs a cache hit, not a download.
 
-   These are NOT generations: window.MgArtFilters composites gradient layers
+   These are NOT generations: the art-filter engine composites gradient layers
    in the browser, so nothing is sent, nothing is spent, and it works
    offline. Only the two exits touch the server -- Save (POST
    /api/import-local, local library write) and Send to image gen (POST
@@ -332,7 +333,7 @@ const AF_W = 1180;
    lifted to the drawer) -- comparing a filter doesn't require committing to
    an edit source first. */
 export function ArtFiltersPanel({ open, onClose, drawerRef, onSendToEdit }) {
-  const AF = typeof window !== "undefined" ? window.MgArtFilters : null;
+  const AF = MgArtFilters;   // was window.MgArtFilters (static/mg-art-filters.js), now bundled
   const [source, setSource] = useState("");
   const [active, setActive] = useState(null);
   const [strength, setStrength] = useState(1);

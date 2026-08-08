@@ -118,7 +118,12 @@
    tainted and toDataURL/toBlob throw a SecurityError. Images served by this app's own
    gallery routes are same-origin and fine; a PixAI CDN URL dropped straight into an <img>
    is not, and needs crossOrigin="anonymous". */
-(function () {
+/* Ported from static/mg-art-filters.js into the React/Vite build (2026-08-08,
+   the vanilla static/ -> React campaign). The IIFE body is kept VERBATIM -- this
+   is an engine (gradient/canvas compositing behind the already-React FiltersPanel),
+   so it becomes an ES MODULE, not a component; only the boundary changed:
+   `window.MgArtFilters = {...}` is now a returned + default-exported const. */
+const MgArtFilters = (function () {
   'use strict';
 
   var SOURCE_URL = 'https://api.pixai.art/config/imageArtFilters';
@@ -605,7 +610,7 @@
     });
   }
 
-  window.MgArtFilters = {
+  return {
     SOURCE_URL: SOURCE_URL,
     CAPTURED: CAPTURED,
     DEFAULT_ANGLE_DEG: DEFAULT_ANGLE_DEG,
@@ -629,3 +634,5 @@
     toBlob: toBlob
   };
 })();
+
+export default MgArtFilters;

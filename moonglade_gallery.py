@@ -4214,8 +4214,8 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
 # ---------------------------------------------------------------------------
 
 # Design tokens: the SINGLE source of truth for the gallery's palette + achievement
-# skins, shared (via the __DESIGN_TOKENS__ marker + .replace(), same idiom as LOOM_PAGE's
-# __JSX__) by the React shells (NEXT_PAGE/LOGIN_PAGE) and LOOM_PAGE so every surface
+# skins, shared (via the __DESIGN_TOKENS__ marker + .replace()) by the React shells
+# (NEXT_PAGE/LOGIN_PAGE) and LOOM_PAGE_BUNDLE so every surface
 # re-skins together instead of the Loom carrying its own copy that silently drifts.
 DESIGN_TOKENS_CSS = r"""
   /* Z BANDS (decided 2026-08-01, gallery-era redesign): exactly three, nothing between --
@@ -4378,7 +4378,7 @@ _AUTH_401_GUARD_JS = r"""<script>/* Global 401 guard -- see _AUTH_401_GUARD_JS i
 
 
 # The Loom (Seedance video storyboard tool) is served at /loom. Its React source
-# lives in loom/master-storyboard.jsx; this page loads React+Babel+picker-core from
+# lives in loom/master-storyboard.jsx; this page loads React + picker-core from
 # locally-vendored files (loom/vendor/, served by /loom/vendor/<file>; zero network
 # calls to paint) and, per the tool's own integration notes, swaps window.storage onto
 # the gallery backend so a board persists server-side (shared across devices) instead
@@ -4457,7 +4457,6 @@ body { background: var(--base); margin: 0; font-family: system-ui, sans-serif; }
 </style>
 <script src="/loom/vendor/react.production.min.js"></script>
 <script src="/loom/vendor/react-dom.production.min.js"></script>
-__BABEL_LIB_TAG__
 <script src="/static/picker-core.js"></script>
 <script src="/static/mg-model-picker.js"></script>
 <script src="/static/mg-gallery-picker.js"></script>
@@ -4466,13 +4465,6 @@ __BABEL_LIB_TAG__
      all. Same pairing the gallery shell above documents at length. -->
 <script src="/static/mg-cost-badge.js"></script>
 <script src="/static/mg-generate-drawer.js"></script>
-<!-- LoomMobile's Filter compare screen (sixth increment, 2026-08-03) is the first real use of
-     PixAI's client-side art filters inside The Loom -- same real, offline, credit-free
-     library the Gallery's own GenerateDrawer Enhance tab already loads (see the gallery
-     shell's own NEXT_PAGE template, same file, for the identical pairing). Loaded here,
-     not just there: without it window.MgArtFilters is undefined on /loom and Filter compare
-     would render its own "did not load" fallback instead of the real swatch grid. -->
-<script src="/static/mg-art-filters.js"></script>
 <script src="/static/mg-notify.js"></script>
 __UPSCALE_CONST__
 </head><body>
@@ -4508,32 +4500,11 @@ __RUNTIME_SCRIPT_BLOCK__
 </div>
 </body></html>"""
 
-# Two delivery paths for the same master-storyboard.jsx, sharing everything except
-# the runtime-script block (Phase 1 tooling pass, 2026-07-16):
-#
-#   LOOM_PAGE        -- DEFAULT. Loads babel.min.js and transpiles master-storyboard.jsx
-#                       (+ loom/src/loom-core.js, inlined ahead of it) client-side, as
-#                       it always has. This is the trusted fallback; it is NOT being
-#                       removed or downgraded by the new path below.
-#   LOOM_PAGE_BUNDLE -- NEW, opt-in via /loom?bundle=1. Loads the pre-transpiled
-#                       loom/dist/master-storyboard.bundle.js (built by
-#                       `npm run build` in loom/, via esbuild) instead -- no Babel,
-#                       no client-side transpile. Only served if that file actually
-#                       exists on disk (see loom() below); otherwise /loom?bundle=1
-#                       silently falls back to LOOM_PAGE so a not-yet-built checkout
-#                       never breaks.
-LOOM_PAGE = (_LOOM_SHELL
-    .replace("__BABEL_LIB_TAG__", '<script src="/loom/vendor/babel.min.js"></script>')
-    .replace("__RUNTIME_SCRIPT_BLOCK__",
-             '<script type="text/babel" data-presets="react">\n'
-             'const { useState, useEffect, useRef, useCallback, useMemo } = React;\n'
-             '__JSX__\n'
-             'ReactDOM.createRoot(document.getElementById("root")).render(<App />);\n'
-             '</script>')
-    .replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS))
-
+# The Loom's ONE delivery path (bundle-only since the Babel-standalone retirement,
+# 2026-08-08): the pre-transpiled loom/dist/master-storyboard.bundle.js (built by
+# `npm run build` in loom/, via esbuild). A real module build -- shared modules are
+# plain imports, no client-side transpile, no inline-stripping.
 LOOM_PAGE_BUNDLE = (_LOOM_SHELL
-    .replace("__BABEL_LIB_TAG__", "")   # pre-transpiled bundle -- no Babel needed
     .replace("__RUNTIME_SCRIPT_BLOCK__",
              '<script src="/loom/dist/master-storyboard.bundle.js"></script>\n'
              '<script>ReactDOM.createRoot(document.getElementById("root"))'
@@ -5777,7 +5748,7 @@ def create_app(out_dir: Path):
         # by definition is not authenticated yet -- same public tier as
         # /branding/ and /manifest.webmanifest above (plain compiled code, no
         # user data, no catalog, no credential). LOGIN_PAGE below deliberately
-        # does NOT reference the 8 /static/mg-*.js custom-element scripts
+        # does NOT reference the 7 /static/mg-*.js custom-element scripts
         # next_gallery()'s NEXT_PAGE loads -- none of that (pickers, cost
         # badge, upscale panel) exists on the login page, so those stay
         # exactly as gated as they always were.
@@ -10286,7 +10257,6 @@ __UPSCALE_CONST__
 <script src="/static/mg-gallery-picker.js"></script>
 <script src="/static/mg-cost-badge.js"></script>
 <script src="/static/mg-generate-drawer.js"></script>
-<script src="/static/mg-art-filters.js"></script>
 <script src="/static/mg-upscale-panel.js"></script>
 <script src="/static/mg-notify.js"></script>
 <script type="module" src="/next/assets/app.js"></script>
@@ -10509,7 +10479,7 @@ __DESIGN_TOKENS__
 
     @app.route("/loom/vendor/<path:fname>")
     def loom_vendor(fname):
-        """Serve the Loom's vendored JS (React/ReactDOM/Babel UMD builds) from
+        """Serve the Loom's vendored JS (React/ReactDOM UMD builds) from
         loom/vendor/ so the page paints with zero network calls. Path-safe; absent
         files 404. Not gated by _is_authorized_request() -- these are static library
         files, not gallery data, and /loom itself already enforces authorization above."""
@@ -10527,11 +10497,10 @@ __DESIGN_TOKENS__
     @app.route("/loom/dist/<path:fname>")
     def loom_dist(fname):
         """Serve the esbuild-bundled Loom (loom/dist/, built by `npm run build` in
-        loom/) -- the NEW, opt-in delivery path (/loom?bundle=1). Same path-safety
-        pattern as loom_vendor(). Absent files 404; loom() below treats that as
-        'bundle not built yet' and falls back to the Babel-standalone page rather
-        than erroring. max_age=0 (unlike the vendor libs) since this output changes
-        every time the source is rebuilt."""
+        loom/) -- the Loom's SOLE delivery path since the Babel-standalone retirement
+        (2026-08-08). Same path-safety pattern as loom_vendor(). Absent files 404;
+        loom() below treats a missing bundle as 'not built yet' and says so (503).
+        max_age=0 (unlike the vendor libs) since this output changes every rebuild."""
         from flask import send_from_directory, abort
         ddir = (Path(__file__).resolve().parent / "loom" / "dist").resolve()
         try:
@@ -10548,65 +10517,19 @@ __DESIGN_TOKENS__
         """Serve the Seedance video-storyboard tool inside the gallery, persisted to the
         backend (window.storage swapped for /api/loom/*). Authorized only.
 
-        Two delivery paths (see LOOM_PAGE / LOOM_PAGE_BUNDLE above):
-        default is the in-browser Babel-standalone transpile (unchanged); passing
-        ?bundle=1 opts into the pre-built esbuild bundle IF loom/dist/ actually has
-        one, else it quietly falls back to the default so a fresh checkout that
-        hasn't run `npm run build` yet never breaks."""
-        import re as _re
+        Bundle-ONLY since 2026-08-08 (the vanilla static/ -> React campaign): serves the
+        pre-built esbuild bundle (loom/dist/master-storyboard.bundle.js, `npm run build` in
+        loom/). The old in-browser Babel-standalone transpile was retired here -- the bundle
+        is a real module build, so shared modules (loom-core, loom-mutations, the art-filter
+        engine, ...) are plain imports esbuild resolves, with no hand-inlining. A checkout
+        that hasn't built the bundle gets a clear message, not a silent fallback; the
+        committed bundle + the CI staleness guard keep it current."""
         loom_dir = Path(__file__).resolve().parent / "loom"
-        src = loom_dir / "master-storyboard.jsx"
-        try:
-            jsx = src.read_text(encoding="utf-8")
-        except OSError:
-            return "Loom source not found (loom/master-storyboard.jsx).", 404
-
-        wants_bundle = request.args.get("bundle") in ("1", "true", "yes")
         bundle_file = loom_dir / "dist" / "master-storyboard.bundle.js"
-        if wants_bundle and bundle_file.is_file():
-            return LOOM_PAGE_BUNDLE.replace("__UPSCALE_CONST__", _upscale_const_js())
-
-        # ---- Babel-standalone path (default + bundle-requested-but-not-built) ----
-        # loom/src/loom-core.js AND loom/src/loom-mutations.js (Phase 2, the
-        # composed-hooks extraction, 2026-07-16) are real ES modules
-        # master-storyboard.jsx imports from; this <script type="text/babel">
-        # block isn't a real module system, so inline both modules' source
-        # ahead of the JSX and strip `export` the same way "export default
-        # function App()" is already stripped below.
-        core_src = ""
-        try:
-            core_src = (loom_dir / "src" / "loom-core.js").read_text(encoding="utf-8")
-        except OSError:
-            pass
-        core_inline = _re.sub(r"(?m)^export const ", "const ", core_src)
-        # master-storyboard.jsx imports shotPayload aliased (`as buildShotPayload`)
-        # for its own local wrapper; provide that name once the real `import {...}`
-        # statement below is stripped out.
-        if core_inline:
-            core_inline += "\nconst buildShotPayload = shotPayload;\n"
-
-        mut_src = ""
-        try:
-            mut_src = (loom_dir / "src" / "loom-mutations.js").read_text(encoding="utf-8")
-        except OSError:
-            pass
-        mut_inline = _re.sub(r"(?m)^export const ", "const ", mut_src)
-        mut_inline = _re.sub(r"(?m)^export function ", "function ", mut_inline)
-
-        jsx = _re.sub(r"(?m)^\s*import\s+React.*$", "", jsx)          # React is a CDN global
-        jsx = _re.sub(r"import\s*\{.*?\}\s*from\s*[\"']\./src/loom-core\.js[\"'];?",
-                       "", jsx, count=1, flags=_re.S)                  # loom-core is inlined instead
-        jsx = _re.sub(r"import\s*\{.*?\}\s*from\s*[\"']\./src/loom-mutations\.js[\"'];?",
-                       "", jsx, count=1, flags=_re.S)                  # loom-mutations is inlined instead
-        # master-storyboard.jsx imports moveCardToAct aliased (`as mvCardToAct`)
-        # so the useShotMutations hook's own returned `moveCardToAct` doesn't
-        # collide with the pure reducer of the same name; provide that alias
-        # once the real `import {...}` statement above is stripped out.
-        if mut_inline:
-            mut_inline += "\nconst mvCardToAct = moveCardToAct;\n"
-        jsx = jsx.replace("export default function App()", "function App()")
-        return (LOOM_PAGE.replace("__JSX__", core_inline + "\n" + mut_inline + "\n" + jsx)
-                .replace("__UPSCALE_CONST__", _upscale_const_js()))
+        if not bundle_file.is_file():
+            return ("The Loom bundle is not built. Run `npm run build` in loom/ to "
+                    "generate loom/dist/master-storyboard.bundle.js."), 503
+        return LOOM_PAGE_BUNDLE.replace("__UPSCALE_CONST__", _upscale_const_js())
 
     @app.route("/api/loom/get")
     def loom_get():

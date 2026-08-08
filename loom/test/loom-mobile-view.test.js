@@ -362,15 +362,19 @@ describe("Fixer: local, verbatim copies of FixTab.jsx's own real editCore.js con
     assert.match(src, /width: Math\.round\(b\.w \* scale\), height: Math\.round\(b\.h \* scale\), tag: b\.tag,/);
   });
 
-  test("this file's only two real ES-module imports remain loom-core.js/loom-mutations.js -- no new cross-directory import was added for these constants", () => {
-    // Every LINE mentioning `from "../gallery/` must be a COMMENT (this file's own prose
-    // legitimately names that path -- FIX_COLORS's own header comment explains why such an
-    // import is deliberately absent, not present) -- not a real, live import statement,
-    // which a bare substring/regex check across the whole source can't distinguish.
-    const hits = src.split("\n").filter((line) => /from\s*["']\.\.\/gallery\//.test(line));
-    assert.ok(hits.length > 0, "expected at least one line to legitimately DISCUSS the forbidden import path in prose (sanity check the assertion is exercised)");
+  test("the Fixer constants stay LOCAL copies -- the only real cross-dir import is the shared art-filter engine", () => {
+    // Since the Loom went bundle-only (2026-08-08) real cross-directory imports from
+    // gallery/src are allowed, and the art-filter ENGINE is the one deliberate such import
+    // (gallery/src/art/artFilters.js). Every OTHER line mentioning `from "../gallery/` must
+    // be a COMMENT -- in particular FIX_COLORS's own header prose explaining why importing
+    // editCore.js's constants is deliberately absent -- never a live import that would
+    // couple those constants cross-dir instead of keeping the verbatim local copy.
+    const ENGINE_IMPORT = /import\s+MgArtFilters\s+from\s*["']\.\.\/gallery\/src\/art\/artFilters\.js["']/;
+    const hits = src.split("\n").filter((line) =>
+      /from\s*["']\.\.\/gallery\//.test(line) && !ENGINE_IMPORT.test(line));
+    assert.ok(hits.length > 0, "expected at least one line to legitimately DISCUSS a cross-dir gallery import in prose (sanity check the assertion is exercised)");
     for (const line of hits) {
-      assert.match(line.trim(), /^(\/\/|\*|\/\*)/, `expected only a comment to mention 'from "../gallery/', found a real line: "${line.trim()}"`);
+      assert.match(line.trim(), /^(\/\/|\*|\/\*)/, `expected only a comment (or the art-filter engine import) to mention 'from "../gallery/', found a real line: "${line.trim()}"`);
     }
   });
 });
@@ -845,9 +849,11 @@ describe("Credit safety: the drawer's own component-local poll vs. this incremen
 // trim's own `crop`). This is the last screen in the locked design -- Loom Mobile is now
 // complete, minus Fixer (see the "scope discipline" describe block above for why that stays
 // out).
-describe("Filter compare: reused from the real mg-art-filters.js library, not forked", () => {
-  test("AF is the real window.MgArtFilters, read fresh each render (no forked blend/gradient recipe)", () => {
-    assert.match(loomMobileSrc, /const AF = typeof window !== "undefined" \? window\.MgArtFilters : null;/);
+describe("Filter compare: reused from the real art-filter engine (imported), not forked", () => {
+  test("AF is the imported MgArtFilters engine -- not a forked blend/gradient recipe", () => {
+    // Since 2026-08-08 the engine is a bundled ES module (gallery/src/art/artFilters.js),
+    // imported at the top of master-storyboard.jsx, not read off a window global.
+    assert.match(loomMobileSrc, /const AF = MgArtFilters;/);
   });
 
   test("the swatch grid is built from the real AF.groups() -- not the design mockup's own hardcoded FILTER_SETS/GALLERY_POOL-style placeholder", () => {

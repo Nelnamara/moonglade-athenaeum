@@ -39,6 +39,11 @@ import {
   // over the aliased buildShotPayload/mvCardToAct imports).
   buildImgGenBody, resolveGenDims,
 } from "./src/loom-mutations.js";
+// PixAI's art-filter engine (gradient/canvas compositing, offline, free). Ported out of
+// static/mg-art-filters.js into the React build (2026-08-08, the vanilla static/ campaign);
+// now a plain import esbuild bundles, not a window global loaded by a <script> tag. The
+// Loom is bundle-only now, so this resolves the same way the gallery's FiltersPanel does.
+import MgArtFilters from "../gallery/src/art/artFilters.js";
 
 // The Loom.dc.html's own TINTS + tint formula (line ~681, ~760): 6 rotating per-shot
 // gradients so same-status shots stay visually distinguishable from each other, not just
@@ -242,18 +247,14 @@ const AUDIO_PALETTE = ["no music", "room tone", "ambient hum", "soft breathing",
 // gallery/src/components/FixTab.jsx's own real box-drawing canvas already uses (Loom Mobile's
 // own Fixer sub-screen, built 2026-08-03, ports that exact real technique -- see LoomMobile's
 // own Fixer comment for the full trace). Deliberately a LOCAL COPY, not a cross-directory
-// `import ... from "../gallery/src/gen/editCore.js"`: this file's only two real ES-module
-// imports are ./src/loom-core.js and ./src/loom-mutations.js, and moonglade_gallery.py's
-// loom() route only knows how to inline THOSE two ahead of the JSX for the default
-// Babel-standalone /loom delivery path (see loom() -- it regex-strips exactly those two
-// import lines and nothing else). A third import would survive that strip as a raw ES
-// `import` statement sitting inside a <script type="text/babel"> block, which is not a real
-// module system and would throw on load, breaking the DEFAULT (non-?bundle=1) Loom page
-// outright. Same convention this file already follows for modeSendsRefs/modeSendsLine/
-// liveTagText/liveTagTitle (LoomMobile's own comment: "neither is exported from
-// loom-core.js/loom-mutations.js... so every consumer keeps its own [copy]") -- a small,
-// verbatim, local copy is the established pattern here for values outside this file's two
-// DO-NOT-MODIFY pure-logic modules, not an oversight.
+// `import ... from "../gallery/src/gen/editCore.js"`: it stays a small, verbatim LOCAL copy.
+// (The Loom went BUNDLE-ONLY on 2026-08-08, so the old hard reason -- the retired
+// Babel-standalone /loom path could only inline ./src/loom-core.js and ./src/loom-mutations.js
+// and would choke on a third raw import -- is gone; esbuild now resolves real cross-directory
+// imports, which is exactly how the art-filter engine above is pulled from
+// ../gallery/src/art/artFilters.js. Converging these Fixer constants the same way is future
+// vanilla-campaign work; until then the local copy stays, same as modeSendsRefs/liveTagText
+// etc. keep their own copies for values outside this file's two DO-NOT-MODIFY pure modules.)
 const FIX_COLORS = { face: "#b692e6", hand: "#4fc99a" };
 const FIX_MIN_PX = 6;
 const FIX_MAX_BOXES = 20;   // clean_fix_boxes truncates at 20 server-side
@@ -1585,7 +1586,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // network call, no credit spend), same AF.groups()/AF.get()/AF.renderSwatch()/
   // AF.applyPreview()/AF.clearPreview() API LoomMobile already uses. Genuinely persists via
   // the same `patch` every other Generate field writes through -- no new endpoint.
-  const AF = typeof window !== "undefined" ? window.MgArtFilters : null;
+  const AF = MgArtFilters;   // was window.MgArtFilters (static/mg-art-filters.js), now bundled
   const [fcOpen, setFcOpen] = useState(false);
   const [fcActive, setFcActive] = useState(null);
   const [fcStrength, setFcStrength] = useState(1);
@@ -3786,7 +3787,7 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // every render sees the same object reference. See Filter compare's own comment (below,
   // with this component's other hooks) for why this screen uses it instead of a simplified
   // local recipe.
-  const AF = typeof window !== "undefined" ? window.MgArtFilters : null;
+  const AF = MgArtFilters;   // was window.MgArtFilters (static/mg-art-filters.js), now bundled
   // Single source of truth for "what status does this shot show right now", shared by BOTH
   // the reel segment's color and the board card's status pill -- computed once per entry
   // rather than twice, so the two can never silently disagree (the exact two-implementations-
