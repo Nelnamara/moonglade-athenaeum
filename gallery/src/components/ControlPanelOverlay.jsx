@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import "../styles/overlays.css";
 import "../styles/control-panel.css";
 import useControlPanel, { postJSON, DEDUP_STAGES } from "../hooks/useControlPanel.js";
+import GalleryPicker from "./GalleryPicker.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
 import AccountSubOverlay from "./AccountSubOverlay.jsx";
 
@@ -921,7 +922,6 @@ function BannerEditor({ summary, onSaved }) {
   // Live slider state: local while dragging (the preview must track the thumb with no
   // network in the loop), committed to /api/branding/slot/crop on release.
   const [t, setT] = useState(null);       // {zoom, cropX, cropY} or null = mirror server
-  const pickerRef = useRef(null);
 
   const cfg = BANNER_SLOTS[slotIdx];
   const data = (summary.branding.slots || {})[cfg.slot] || { assets: [], active: null };
@@ -930,17 +930,6 @@ function BannerEditor({ summary, onSaved }) {
   const shown = t || active || { zoom: 100, cropX: 50, cropY: 50 };
 
   useEffect(() => { setT(null); setMsg(""); }, [slotIdx, data.active]);
-
-  // Bridge the shared <mg-gallery-picker> (already loaded on this page for the classic
-  // surfaces) exactly the way the Loom binds it -- events, not attributes.
-  const bindPicker = (el) => {
-    pickerRef.current = el;
-    if (el && !el._mgBound) {
-      el._mgBound = true;
-      el.addEventListener("mg-pick", (e) => { setPicking(false); fromGallery(e.detail.media_id); });
-      el.addEventListener("mg-close", () => setPicking(false));
-    }
-  };
 
   const refresh = async (d) => { if (d && d.error) { setMsg("⚠ " + d.error); } else { setMsg(""); onSaved(); } };
   const upload = async (file) => {
@@ -1024,8 +1013,8 @@ function BannerEditor({ summary, onSaved }) {
           <input type="file" accept="image/*" disabled={busy} style={{ display: "none" }}
             onChange={(e) => { upload(e.target.files[0]); e.target.value = ""; }} />
         </label>
-        {/* Mounting IS opening for <mg-gallery-picker> (connectedCallback builds the
-            modal) -- same conditional-render pattern the Loom uses. */}
+        {/* Rendering IS opening for <GalleryPicker> (2026-08-08 React port of the
+            <mg-gallery-picker> web component -- same conditional-render pattern). */}
         <button type="button" className="mgcp-chip" disabled={busy} onClick={() => setPicking(true)}>
           🖼 From the gallery…
         </button>
@@ -1046,7 +1035,9 @@ function BannerEditor({ summary, onSaved }) {
         </div>
       )}
       {msg && <div className="mgcp-tilenote">{msg}</div>}
-      {picking && <mg-gallery-picker ref={bindPicker} default-type="image"></mg-gallery-picker>}
+      {picking && <GalleryPicker defaultType="image"
+        onPick={(m) => { setPicking(false); fromGallery(m.media_id); }}
+        onClose={() => setPicking(false)} />}
     </div>
   );
 }

@@ -48,9 +48,11 @@ def test_design_tokens_css_is_current():
 def test_every_kit_page_is_stamped_current_and_carries_its_card_marker():
     pages = KIT.kit_pages(REPO)
     names = {p.name for p in pages}
-    # The six component harnesses + the two foundation pages. A kit page announces itself
-    # by carrying the markers; this floor stops a rename from quietly dropping one.
-    assert {"mg-cost-badge.html", "mg-gallery-picker.html", "mg-generate-drawer.html",
+    # The FIVE component harnesses + the two foundation pages. (mg-gallery-picker's harness
+    # was removed with the vanilla element when the picker became the React GalleryPicker,
+    # 2026-08-08; its later Claude Design pass is flagged separately.) A kit page announces
+    # itself by carrying the markers; this floor stops a rename from quietly dropping one.
+    assert {"mg-cost-badge.html", "mg-generate-drawer.html",
             "mg-model-picker.html", "mg-notify.html", "mg-upscale-panel.html",
             "design-tokens.html", "design-skins.html"} <= names
 

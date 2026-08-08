@@ -44,6 +44,11 @@ import {
 // now a plain import esbuild bundles, not a window global loaded by a <script> tag. The
 // Loom is bundle-only now, so this resolves the same way the gallery's FiltersPanel does.
 import MgArtFilters from "../gallery/src/art/artFilters.js";
+// The shared gallery-image picker modal (React component, imports its own CSS). Ported out
+// of static/mg-gallery-picker.js (2026-08-08); the Loom's own GalleryPick was already
+// converged onto the shared picker in an earlier pass, so this just swaps the last
+// <mg-gallery-picker> web-component mount for the React component.
+import GalleryPicker from "../gallery/src/components/GalleryPicker.jsx";
 
 // The Loom.dc.html's own TINTS + tint formula (line ~681, ~760): 6 rotating per-shot
 // gradients so same-status shots stay visually distinguishable from each other, not just
@@ -6898,19 +6903,12 @@ export default function App() {
     try { return !localStorage.getItem("loom_guide_seen"); } catch (e) { return true; } });
   const [showCast, setShowCast] = useState(true);
   const openPick = useCallback((cb, kind, allowType) => { setPickKind(kind || "image"); setPickAllowType(!!allowType); setPickCb(() => cb); }, []);
-  // Bridge the shared <mg-gallery-picker> web component to React (mirrors bindPicker):
-  // pickCb doesn't change while the picker is mounted (only open->close via setPickCb),
-  // so the closure captured on mount stays correct for the whole picking session.
-  const bindGalleryPicker = useCallback((el) => {
-    if (el && !el._mgBound) {
-      el._mgBound = true;
-      el.addEventListener("mg-pick", (e) => {
-        const cb = pickCb; setPickCb(null);
-        if (cb) cb(e.detail.media_id, e.detail.thumb, e.detail.is_video, e.detail.duration, e.detail.is_nsfw);
-      });
-      el.addEventListener("mg-close", () => setPickCb(null));
-    }
-  }, [pickCb]);
+  // pickCb doesn't change while the picker is mounted (only open->close via setPickCb), so
+  // the onPick closure below stays correct for the whole picking session.
+  const onGalleryPick = (m) => {
+    const cb = pickCb; setPickCb(null);
+    if (cb) cb(m.media_id, m.thumb, m.is_video, m.duration, m.is_nsfw);
+  };
 
   const { genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel,
     imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults,
@@ -7146,12 +7144,13 @@ export default function App() {
             <button className="sb-btn ghost sm" style={{ alignSelf: "center" }} onClick={closeBundleMissing}>Close</button>
           </div>
         </div>)}
-      {/* [sheet] rides the Mobile-view toggle: the SAME picker element reshapes into the
-          Loom Mobile design's bottom sheet (see mg-gallery-picker.js's [sheet] block) --
-          the punch-list item was that mobile silently reused the desktop modal shape. */}
-      {pickCb && (pickAllowType
-        ? <mg-gallery-picker ref={bindGalleryPicker} default-type={pickKind} show-type sheet={mobileUI ? "" : undefined}></mg-gallery-picker>
-        : <mg-gallery-picker ref={bindGalleryPicker} default-type={pickKind} sheet={mobileUI ? "" : undefined}></mg-gallery-picker>)}
+      {/* sheet rides the Mobile-view toggle: the SAME picker reshapes into the Loom Mobile
+          design's bottom sheet (GalleryPicker's .sheet variant) -- the punch-list item was
+          that mobile silently reused the desktop modal shape. */}
+      {pickCb && (
+        <GalleryPicker defaultType={pickKind} showType={pickAllowType} sheet={mobileUI}
+          onPick={onGalleryPick} onClose={() => setPickCb(null)} />
+      )}
       {importOpen && <ImportCollection onClose={() => setImportOpen(false)} onImport={importCollection} />}
 
     </div>

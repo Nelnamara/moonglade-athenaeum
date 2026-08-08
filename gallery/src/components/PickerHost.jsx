@@ -1,9 +1,11 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
+import GalleryPicker from "./GalleryPicker.jsx";
 
-/* One gallery-image picker for the whole pilot, riding the shared
-   <mg-gallery-picker> web component (mount-to-open / unmount-to-close).
-   ask(opts) returns a promise resolving to the picked {media_id, thumb,
-   is_video, is_nsfw, prompt} or null on close. Also answers the video
+/* One gallery-image picker for the whole app, riding the shared <GalleryPicker> React
+   component (2026-08-08: was the <mg-gallery-picker> web component, mount-to-open /
+   unmount-to-close; the component is now a real React child instead of an imperatively
+   appended custom element). ask(opts) returns a promise resolving to the picked
+   {media_id, thumb, is_video, is_nsfw, prompt} or null on close. Also answers the video
    drawer's mg-pick-request document events (the classic host contract). */
 
 let _ask = null;
@@ -17,7 +19,6 @@ export function isPickerOpen() { return _open; }
 
 export default function PickerHost() {
   const [open, setOpen] = useState(null); // {type, resolve}
-  const hostRef = useRef(null);
 
   useEffect(() => {
     _ask = (opts = {}) => new Promise((resolve) => setOpen({ type: opts.type || "image", resolve }));
@@ -36,22 +37,11 @@ export default function PickerHost() {
 
   useEffect(() => { _open = !!open; }, [open]);
 
-  useEffect(() => {
-    if (!open || !hostRef.current) return;
-    const el = document.createElement("mg-gallery-picker");
-    el.setAttribute("default-type", open.type);
-    el.setAttribute("show-type", "");
-    const done = (m) => { const r = open.resolve; setOpen(null); r(m); };
-    el.addEventListener("mg-pick", (e) => done(e.detail));
-    el.addEventListener("mg-close", () => done(null));
-    hostRef.current.appendChild(el);
-    return () => { el.remove(); };
-  }, [open]);
-
   if (!open) return null;
+  // GalleryPicker IS the scrim (fixed inset-0, its own backdrop/Escape). One resolve path:
+  // onPick with the media, onClose with null -- both close the singleton.
+  const done = (m) => { const r = open.resolve; setOpen(null); r(m); };
   return (
-    <div className="lb" onClick={() => { const r = open.resolve; setOpen(null); r(null); }}>
-      <div className="pickwrap" onClick={(e) => e.stopPropagation()} ref={hostRef} />
-    </div>
+    <GalleryPicker defaultType={open.type} showType onPick={done} onClose={() => done(null)} />
   );
 }

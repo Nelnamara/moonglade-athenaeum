@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import "../styles/overlays.css";
 import "../styles/publish.css";
 import useScrollLock from "../hooks/useScrollLock.js";
+import GalleryPicker from "./GalleryPicker.jsx";
 
 /* Publish panel — Frontend Gallery.dc.html's ovPublish (markup 294-390, values
    2890-2937), built on the real publish pipeline (POST /api/myart/publish).
@@ -70,7 +71,6 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null);
   const [picking, setPicking] = useState(false);
-  const pickerRef = useRef(null);
   // The DC's inline "choose a different image" strip, on real recent library images.
   const [strip, setStrip] = useState([]);
   // ✦ suggest-a-title: PixAI's own image-to-prompt (free, read-only).
@@ -144,14 +144,6 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
     return () => { dead = true; clearTimeout(t); };
   }, [tagDraft]);
 
-  const bindPicker = (el) => {
-    pickerRef.current = el;
-    if (el && !el._mgBound) {
-      el._mgBound = true;
-      el.addEventListener("mg-pick", (e) => { setPicking(false); setMid(e.detail.media_id); });
-      el.addEventListener("mg-close", () => setPicking(false));
-    }
-  };
 
   const addTag = (raw) => {
     const t = String(raw || "").replace(/^#/, "").trim();
@@ -364,7 +356,9 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
           </div>
         </div>
       </div>
-      {picking && <mg-gallery-picker ref={bindPicker} default-type="image"></mg-gallery-picker>}
+      {picking && <GalleryPicker defaultType="image"
+        onPick={(m) => { setPicking(false); setMid(m.media_id); }}
+        onClose={() => setPicking(false)} />}
     </>
   );
 }

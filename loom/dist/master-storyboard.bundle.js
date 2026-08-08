@@ -1158,8 +1158,433 @@ ${"=".repeat(48)}
   })();
   var artFilters_default = MgArtFilters;
 
+  // scripts/react-global-shim.js
+  var React2 = window.React;
+  var react_global_shim_default = React2;
+  var useState = React2.useState;
+  var useEffect = React2.useEffect;
+  var useLayoutEffect = React2.useLayoutEffect;
+  var useRef = React2.useRef;
+  var useCallback = React2.useCallback;
+  var useMemo = React2.useMemo;
+  var useReducer = React2.useReducer;
+  var useContext = React2.useContext;
+  var useImperativeHandle = React2.useImperativeHandle;
+  var useDebugValue = React2.useDebugValue;
+  var useId = React2.useId;
+  var useTransition = React2.useTransition;
+  var useDeferredValue = React2.useDeferredValue;
+  var useSyncExternalStore = React2.useSyncExternalStore;
+  var useInsertionEffect = React2.useInsertionEffect;
+  var createElement = React2.createElement;
+  var cloneElement = React2.cloneElement;
+  var createContext = React2.createContext;
+  var forwardRef = React2.forwardRef;
+  var memo = React2.memo;
+  var lazy = React2.lazy;
+  var Suspense = React2.Suspense;
+  var Fragment = React2.Fragment;
+  var StrictMode = React2.StrictMode;
+  var Children = React2.Children;
+  var isValidElement = React2.isValidElement;
+  var createRef = React2.createRef;
+  var Component = React2.Component;
+  var PureComponent = React2.PureComponent;
+
+  // ../gallery/src/picker/pickerCore.js
+  var PickerCore = (function() {
+    "use strict";
+    function createPickerCore(opts) {
+      opts = opts || {};
+      var endpoint = opts.endpoint || "/api/gallery-images";
+      var collectionsEndpoint = opts.collectionsEndpoint || "/api/collections";
+      var pageSize = opts.pageSize || 60;
+      var debounceMs = opts.debounceMs == null ? 280 : opts.debounceMs;
+      var maxAutoFillPage = opts.maxAutoFillPage || 4;
+      var onResults = opts.onResults || function() {
+      };
+      var onCollections = opts.onCollections || function() {
+      };
+      var onError = opts.onError || function() {
+      };
+      var filters = Object.assign({
+        q: "",
+        collection: "",
+        source: "",
+        type: "",
+        rating_min: 0,
+        sort: "newest"
+      }, opts.defaultFilters || {});
+      var page = 1, loading = false, hasMore = false, debounceTimer = null, destroyed = false;
+      var loadSeq = 0;
+      function qs(p) {
+        var enc = encodeURIComponent;
+        return endpoint + "?limit=" + pageSize + "&page=" + p + "&q=" + enc(filters.q || "") + "&collection=" + enc(filters.collection || "") + "&source=" + enc(filters.source || "") + "&type=" + enc(filters.type || "") + "&rating_min=" + enc(filters.rating_min || 0) + "&sort=" + enc(filters.sort || "newest");
+      }
+      function fetchCollections() {
+        fetch(collectionsEndpoint).then(function(r) {
+          return r.json();
+        }).then(function(d) {
+          if (!destroyed) onCollections(d.collections || []);
+        }).catch(function(e) {
+          onError(e);
+        });
+      }
+      function load(append) {
+        if (loading && append) return;
+        loading = true;
+        var atPage = page;
+        var mine = ++loadSeq;
+        fetch(qs(atPage)).then(function(r) {
+          return r.json();
+        }).then(function(d) {
+          if (mine !== loadSeq) return;
+          loading = false;
+          if (destroyed) return;
+          var imgs = d.images || [];
+          hasMore = (d.page || atPage) * (d.limit || pageSize) < (d.total || 0);
+          onResults(imgs, { total: d.total || 0, append: !!append, hasMore, page: atPage });
+        }).catch(function(e) {
+          if (mine !== loadSeq) return;
+          loading = false;
+          onError(e);
+        });
+      }
+      function reload() {
+        page = 1;
+        load(false);
+      }
+      function setFilter(key, value) {
+        filters[key] = value;
+        page = 1;
+        load(false);
+      }
+      function setFilters(patch2) {
+        Object.assign(filters, patch2 || {});
+        page = 1;
+        load(false);
+      }
+      function setQuery(q, ms) {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(function() {
+          filters.q = q;
+          page = 1;
+          load(false);
+        }, ms == null ? debounceMs : ms);
+      }
+      function loadMore() {
+        if (hasMore && !loading) {
+          page++;
+          load(true);
+        }
+      }
+      function maybeFillPage(gridEl) {
+        if (hasMore && !loading && page < maxAutoFillPage && gridEl && gridEl.scrollHeight <= gridEl.clientHeight + 4) {
+          page++;
+          load(true);
+        }
+      }
+      function onScroll(gridEl, thresholdPx) {
+        if (!gridEl) return;
+        var t = thresholdPx == null ? 320 : thresholdPx;
+        if (hasMore && !loading && gridEl.scrollTop + gridEl.clientHeight > gridEl.scrollHeight - t) {
+          loadMore();
+        }
+      }
+      function destroy() {
+        destroyed = true;
+        clearTimeout(debounceTimer);
+      }
+      return {
+        setQuery,
+        setFilter,
+        setFilters,
+        reload,
+        loadMore,
+        maybeFillPage,
+        onScroll,
+        fetchCollections,
+        destroy,
+        getFilters: function() {
+          return Object.assign({}, filters);
+        },
+        getPage: function() {
+          return page;
+        },
+        hasMore: function() {
+          return hasMore;
+        }
+      };
+    }
+    return { create: createPickerCore };
+  })();
+  var pickerCore_default = PickerCore;
+
+  // ../gallery/src/components/GalleryPicker.jsx
+  var COPY_KEY = "pick-copyprompt";
+  var TILE_KEY = "mg-pk-tile";
+  function readTile() {
+    try {
+      return +localStorage.getItem(TILE_KEY) || 122;
+    } catch {
+      return 122;
+    }
+  }
+  function readCopy() {
+    try {
+      return localStorage.getItem(COPY_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+  function GalleryPicker({
+    defaultType = "image",
+    showType = false,
+    showSource = false,
+    showUpload = false,
+    showCopyPrompt = false,
+    sheet = false,
+    onPick,
+    onClose
+  }) {
+    const initType = defaultType === "video" ? "video" : defaultType === "all" ? "all" : "image";
+    const [images, setImages] = useState([]);
+    const [collections, setCollections] = useState([]);
+    const [total, setTotal] = useState(0);
+    const [empty, setEmpty] = useState(false);
+    const [closing, setClosing] = useState(false);
+    const [uploadMsg, setUploadMsg] = useState(null);
+    const [type, setType] = useState(initType);
+    const [collection, setCollection] = useState("");
+    const [source, setSource] = useState("");
+    const [rating, setRating] = useState(0);
+    const [sort, setSort] = useState("newest");
+    const [q, setQ] = useState("");
+    const [tile, setTile] = useState(readTile);
+    const [copyOn, setCopyOn] = useState(readCopy);
+    const coreRef = useRef(null);
+    const gridRef = useRef(null);
+    const qRef = useRef(null);
+    const fileRef = useRef(null);
+    const debounceRef = useRef(null);
+    const closingRef = useRef(false);
+    const fRef = useRef();
+    fRef.current = { q, collection, type, source, rating_min: rating, sort };
+    useEffect(() => {
+      const core = pickerCore_default.create({
+        defaultFilters: { type: initType, collection: "", source: "", rating_min: 0, sort: "newest" },
+        onResults: (imgs, meta) => {
+          setTotal(meta.total || 0);
+          if (meta.append) {
+            setImages((old) => old.concat(imgs));
+          } else {
+            setUploadMsg(null);
+            setImages(imgs);
+            setEmpty(!imgs.length);
+          }
+        },
+        onCollections: (colls) => setCollections(colls || []),
+        onError: () => {
+        }
+      });
+      coreRef.current = core;
+      core.fetchCollections();
+      core.setFilters({ q: "", collection: "", type: initType, source: "", rating_min: 0, sort: "newest" });
+      const t = setTimeout(() => qRef.current && qRef.current.focus(), 60);
+      return () => {
+        clearTimeout(t);
+        core.destroy();
+      };
+    }, []);
+    useEffect(() => {
+      if (coreRef.current) coreRef.current.maybeFillPage(gridRef.current);
+    }, [images]);
+    useEffect(() => {
+      try {
+        localStorage.setItem(TILE_KEY, String(tile));
+      } catch {
+      }
+    }, [tile]);
+    const schedule = useCallback(() => {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        if (coreRef.current) coreRef.current.setFilters(fRef.current);
+      }, 160);
+    }, []);
+    const toggleCopy = (checked) => {
+      setCopyOn(checked);
+      try {
+        localStorage.setItem(COPY_KEY, checked ? "1" : "0");
+      } catch {
+      }
+    };
+    const doClose = useCallback(() => {
+      if (closingRef.current) return;
+      closingRef.current = true;
+      setClosing(true);
+      setTimeout(() => onClose && onClose(), 340);
+    }, [onClose]);
+    useEffect(() => {
+      const onKey = (e) => {
+        if (e.key === "Escape") doClose();
+      };
+      window.addEventListener("keydown", onKey);
+      return () => window.removeEventListener("keydown", onKey);
+    }, [doClose]);
+    const pick = (m) => {
+      if (copyOn && m.prompt) {
+        try {
+          navigator.clipboard && navigator.clipboard.writeText(m.prompt);
+        } catch {
+        }
+      }
+      onPick && onPick({
+        media_id: m.media_id,
+        thumb: m.thumb,
+        prompt: m.prompt || "",
+        is_video: m.is_video === "1",
+        duration: m.duration || "",
+        is_nsfw: m.is_nsfw === "1"
+      });
+    };
+    const doUpload = () => {
+      const f = fileRef.current && fileRef.current.files[0];
+      if (!f) return;
+      setUploadMsg("Uploading " + f.name + "\u2026");
+      const fd = new FormData();
+      fd.append("file", f);
+      fetch("/api/upload", { method: "POST", body: fd }).then((r) => r.json()).then((d) => {
+        if (fileRef.current) fileRef.current.value = "";
+        if (d.error || !d.media_id) {
+          setUploadMsg("\u26A0 Upload failed: " + (d.error || "no media id"));
+          return;
+        }
+        setUploadMsg(null);
+        pick({ media_id: d.media_id, prompt: "", thumb: URL.createObjectURL(f) });
+      }).catch(() => {
+        if (fileRef.current) fileRef.current.value = "";
+        setUploadMsg("\u26A0 Upload failed (network).");
+      });
+    };
+    const cls = "mg-gallery-picker" + (sheet ? " sheet" : "") + (closing ? " mg-closing" : "");
+    return /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        className: cls,
+        style: { "--mg-pk-tile": tile + "px" },
+        onClick: (e) => {
+          if (e.target === e.currentTarget) doClose();
+        }
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-pk-box", role: "dialog", "aria-label": "Pick from your gallery" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-pk-head" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-pk-t" }, "Pick from your gallery"), /* @__PURE__ */ react_global_shim_default.createElement(
+        "input",
+        {
+          ref: qRef,
+          className: "mg-pk-q",
+          type: "text",
+          placeholder: "Search your images\u2026",
+          value: q,
+          onChange: (e) => {
+            setQ(e.target.value);
+            schedule();
+          }
+        }
+      ), /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          type: "button",
+          className: "mg-pk-x",
+          "data-tip": "Close (Esc)",
+          "aria-label": "Close (Esc)",
+          onClick: doClose
+        },
+        "\xD7"
+      )), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-pk-filters" }, /* @__PURE__ */ react_global_shim_default.createElement(
+        "select",
+        {
+          "data-f": "collection",
+          value: collection,
+          onChange: (e) => {
+            setCollection(e.target.value);
+            schedule();
+          }
+        },
+        /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "" }, "All collections"),
+        collections.map((c) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: c, value: c }, c))
+      ), showType && /* @__PURE__ */ react_global_shim_default.createElement("select", { "data-f": "type", value: type, onChange: (e) => {
+        setType(e.target.value);
+        schedule();
+      } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "all" }, "Image + video"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "image" }, "Images"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "video" }, "Videos")), showSource && /* @__PURE__ */ react_global_shim_default.createElement("select", { "data-f": "source", value: source, onChange: (e) => {
+        setSource(e.target.value);
+        schedule();
+      } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "" }, "Any source"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "api" }, "Generated (AI)"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "local" }, "Imported local")), /* @__PURE__ */ react_global_shim_default.createElement("select", { "data-f": "rating", value: rating, onChange: (e) => {
+        setRating(+e.target.value);
+        schedule();
+      } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "0" }, "Any rating"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "1" }, "\u2605+"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "2" }, "\u2605\u2605+"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "3" }, "\u2605\u2605\u2605+"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "4" }, "\u2605\u2605\u2605\u2605+"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "5" }, "\u2605\u2605\u2605\u2605\u2605")), /* @__PURE__ */ react_global_shim_default.createElement("select", { "data-f": "sort", value: sort, onChange: (e) => {
+        setSort(e.target.value);
+        schedule();
+      } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "newest" }, "Newest first"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "oldest" }, "Oldest first")), showUpload && /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          type: "button",
+          className: "mg-pk-upload",
+          onClick: () => fileRef.current && fileRef.current.click()
+        },
+        "\uFF0B Upload"
+      ), /* @__PURE__ */ react_global_shim_default.createElement(
+        "input",
+        {
+          ref: fileRef,
+          type: "file",
+          className: "mg-pk-file",
+          accept: "image/*",
+          style: { display: "none" },
+          onChange: doUpload
+        }
+      )), /* @__PURE__ */ react_global_shim_default.createElement("label", { className: "mg-pk-sizer" }, "Size", /* @__PURE__ */ react_global_shim_default.createElement(
+        "input",
+        {
+          type: "range",
+          min: "90",
+          max: "240",
+          step: "8",
+          title: "Thumbnail size",
+          value: tile,
+          onChange: (e) => setTile(+e.target.value)
+        }
+      )), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-pk-count" }, (total || 0).toLocaleString())), showCopyPrompt && /* @__PURE__ */ react_global_shim_default.createElement("label", { className: "mg-pk-copy" }, /* @__PURE__ */ react_global_shim_default.createElement(
+        "input",
+        {
+          type: "checkbox",
+          className: "mg-pk-copyck",
+          checked: copyOn,
+          onChange: (e) => toggleCopy(e.target.checked)
+        }
+      ), " Copy prompt on pick"), /* @__PURE__ */ react_global_shim_default.createElement(
+        "div",
+        {
+          className: "mg-pk-grid",
+          ref: gridRef,
+          onScroll: () => coreRef.current && coreRef.current.onScroll(gridRef.current, 280)
+        },
+        images.map((m, i) => /* @__PURE__ */ react_global_shim_default.createElement(
+          "div",
+          {
+            key: m.media_id + ":" + i,
+            className: "mg-pk-cell",
+            title: m.prompt || m.media_id,
+            "data-nsfw": m.is_nsfw === "1" ? "1" : void 0,
+            onClick: () => pick(m)
+          },
+          /* @__PURE__ */ react_global_shim_default.createElement("img", { loading: "lazy", decoding: "async", src: m.thumb, alt: "" }),
+          m.is_video === "1" && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-pk-vid" }, "\u25B6")
+        ))
+      ), (empty || uploadMsg) && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-pk-empty" }, uploadMsg || "No matches for these filters."))
+    );
+  }
+
   // master-storyboard.jsx
-  var { useState, useEffect, useRef, useCallback, useMemo } = React;
+  var { useState: useState2, useEffect: useEffect2, useRef: useRef2, useCallback: useCallback2, useMemo: useMemo2 } = React;
   var LV_TINTS = [
     "linear-gradient(150deg, #33236d 0%, #1b1733 100%)",
     "linear-gradient(150deg, #3a3460 0%, #17142b 100%)",
@@ -1415,7 +1840,7 @@ ${"=".repeat(48)}
   var elapsedLabel = (ms) => ms < 36e5 ? Math.round(ms / 6e4) + "m" : Math.round(ms / 36e4) / 10 + "h";
   var emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
   function useLocalToggle(key, defaultVal) {
-    const [val, setVal] = useState(() => {
+    const [val, setVal] = useState2(() => {
       try {
         const raw = window.localStorage.getItem(key);
         return raw === null ? defaultVal : raw === "1";
@@ -1423,7 +1848,7 @@ ${"=".repeat(48)}
         return defaultVal;
       }
     });
-    useEffect(() => {
+    useEffect2(() => {
       try {
         window.localStorage.setItem(key, val ? "1" : "0");
       } catch (e) {
@@ -2044,7 +2469,7 @@ ${"=".repeat(48)}
   };
   function ProjectSwitcher({ api }) {
     const { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject } = api;
-    useEffect(() => {
+    useEffect2(() => {
       if (!projMenu) return;
       const onKey = (ev) => {
         if (ev.key === "Escape") setProjMenu(false);
@@ -2067,8 +2492,8 @@ ${"=".repeat(48)}
     ), projMenu && /* @__PURE__ */ React.createElement("div", { className: "sb-projveil", onClick: () => setProjMenu(false) }), projMenu && /* @__PURE__ */ React.createElement("div", { className: "sb-projpop" }, /* @__PURE__ */ React.createElement("div", { className: "sb-projpoph" }, "Storyboards"), /* @__PURE__ */ React.createElement("div", { className: "sb-projlist" }, projList.map((pr) => /* @__PURE__ */ React.createElement("div", { key: pr.id, className: "sb-projitem" + (pr.id === activeId ? " on" : "") }, /* @__PURE__ */ React.createElement("button", { className: "sb-projopen", onClick: () => openProject(pr.id), title: "Open this storyboard" }, /* @__PURE__ */ React.createElement("b", null, pr.name || "Untitled"), /* @__PURE__ */ React.createElement("span", null, pr.shots, " shot", pr.shots === 1 ? "" : "s")), /* @__PURE__ */ React.createElement("button", { className: "sb-projx", title: "Delete", onClick: () => deleteProject(pr.id) }, "\u2715")))), /* @__PURE__ */ React.createElement("div", { className: "sb-projacts" }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: newProject }, "+ New"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: duplicateProject }, "\u29C9 Duplicate"))));
   }
   function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundling }) {
-    const [open, setOpen] = useState(false);
-    useEffect(() => {
+    const [open, setOpen] = useState2(false);
+    useEffect2(() => {
       if (!open) return;
       const onKey = (ev) => {
         if (ev.key === "Escape") setOpen(false);
@@ -2223,22 +2648,22 @@ ${"=".repeat(48)}
     draftAttachedInfo,
     setDraftAttachedInfo
   }) {
-    const [bannerOpen, setBannerOpen] = useState(true);
-    const [tab, setTab] = useState("Video");
-    const [acct, setAcct] = useState(null);
-    const [handoff, setHandoff] = useState("");
-    const [deepFocus, setDeepFocus] = useState(null);
-    const [dfPalFor, setDfPalFor] = useState(null);
-    const [pickerOpen, setPickerOpen] = useState(false);
-    const [pickerKind, setPickerKind] = useState("base");
-    const [leftTab, setLeftTab] = useState("cast");
-    const [leftCollapsed, setLeftCollapsed] = useState(false);
-    const [leftClosing, setLeftClosing] = useState(false);
-    const [density, setDensity] = useState("detailed");
-    const [rightCollapsed, setRightCollapsed] = useState(false);
-    const [rightClosing, setRightClosing] = useState(false);
-    const leftCloseTimer = useRef(null);
-    const rightCloseTimer = useRef(null);
+    const [bannerOpen, setBannerOpen] = useState2(true);
+    const [tab, setTab] = useState2("Video");
+    const [acct, setAcct] = useState2(null);
+    const [handoff, setHandoff] = useState2("");
+    const [deepFocus, setDeepFocus] = useState2(null);
+    const [dfPalFor, setDfPalFor] = useState2(null);
+    const [pickerOpen, setPickerOpen] = useState2(false);
+    const [pickerKind, setPickerKind] = useState2("base");
+    const [leftTab, setLeftTab] = useState2("cast");
+    const [leftCollapsed, setLeftCollapsed] = useState2(false);
+    const [leftClosing, setLeftClosing] = useState2(false);
+    const [density, setDensity] = useState2("detailed");
+    const [rightCollapsed, setRightCollapsed] = useState2(false);
+    const [rightClosing, setRightClosing] = useState2(false);
+    const leftCloseTimer = useRef2(null);
+    const rightCloseTimer = useRef2(null);
     const closeLeftPanel = () => {
       setLeftClosing(true);
       clearTimeout(leftCloseTimer.current);
@@ -2265,28 +2690,28 @@ ${"=".repeat(48)}
       setRightClosing(false);
       setRightCollapsed(false);
     };
-    useEffect(() => () => {
+    useEffect2(() => () => {
       clearTimeout(leftCloseTimer.current);
       clearTimeout(rightCloseTimer.current);
     }, []);
-    const [tlState, setTlState] = useState("slim");
-    const [tlDragH, setTlDragH] = useState(null);
-    const [palFor, setPalFor] = useState(null);
-    const [dzHover, setDzHover] = useState(false);
-    const [overrideClearedFlash, setOverrideClearedFlash] = useState(false);
-    const tlDrag = useRef({ dragging: false, startY: 0, startH: 0 });
-    useEffect(() => {
+    const [tlState, setTlState] = useState2("slim");
+    const [tlDragH, setTlDragH] = useState2(null);
+    const [palFor, setPalFor] = useState2(null);
+    const [dzHover, setDzHover] = useState2(false);
+    const [overrideClearedFlash, setOverrideClearedFlash] = useState2(false);
+    const tlDrag = useRef2({ dragging: false, startY: 0, startH: 0 });
+    useEffect2(() => {
       const prevOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
       return () => {
         document.body.style.overflow = prevOverflow;
       };
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {
       });
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       if (!deepFocus) return;
       const onKey = (ev) => {
         if (ev.key === "Escape") setDeepFocus(null);
@@ -2294,7 +2719,7 @@ ${"=".repeat(48)}
       window.addEventListener("keydown", onKey);
       return () => window.removeEventListener("keydown", onKey);
     }, [deepFocus]);
-    useEffect(() => {
+    useEffect2(() => {
       if (!pickerOpen) return;
       const onKey = (ev) => {
         if (ev.key === "Escape") setPickerOpen(false);
@@ -2302,18 +2727,18 @@ ${"=".repeat(48)}
       window.addEventListener("keydown", onKey);
       return () => window.removeEventListener("keydown", onKey);
     }, [pickerOpen]);
-    const [pickerMounted, setPickerMounted] = useState(false);
-    useEffect(() => {
+    const [pickerMounted, setPickerMounted] = useState2(false);
+    useEffect2(() => {
       if (pickerOpen) setPickerMounted(true);
     }, [pickerOpen]);
-    const imgModelSeqRef = useRef(0);
-    const loraRange = useMemo(() => {
+    const imgModelSeqRef = useRef2(0);
+    const loraRange = useMemo2(() => {
       const L = window.MG_LORA;
       const t = String(imgModel && imgModel.model_type || "").toUpperCase();
       if (!L) return [-2, 2];
       return L.ranges && L.ranges[t] || L.fallback || [-2, 2];
     }, [imgModel]);
-    useEffect(() => {
+    useEffect2(() => {
       setImgLoras((cur) => {
         let changed = false;
         const next = cur.map((l) => {
@@ -2324,9 +2749,9 @@ ${"=".repeat(48)}
         return changed ? next : cur;
       });
     }, [loraRange, setImgLoras]);
-    const basePickerElRef = useRef(null);
-    const loraPickerElRef = useRef(null);
-    const bindPicker = useCallback((el) => {
+    const basePickerElRef = useRef2(null);
+    const loraPickerElRef = useRef2(null);
+    const bindPicker = useCallback2((el) => {
       basePickerElRef.current = el;
       if (el && !el._mgBound) {
         el._mgBound = true;
@@ -2364,7 +2789,7 @@ ${"=".repeat(48)}
         });
       }
     }, [setImgModel, setImgAdv, setModelDefaults]);
-    const pickVersion = useCallback((vid) => {
+    const pickVersion = useCallback2((vid) => {
       if (!imgModel || !imgModel.versions) return;
       const v = imgModel.versions.find((x) => x.version_id === vid);
       if (!v) return;
@@ -2388,7 +2813,7 @@ ${"=".repeat(48)}
         }));
       }
     }, [imgModel, setImgModel, setImgAdv, setModelDefaults]);
-    const bindLoraPicker = useCallback((el) => {
+    const bindLoraPicker = useCallback2((el) => {
       loraPickerElRef.current = el;
       if (el && !el._mgBound) {
         el._mgBound = true;
@@ -2405,14 +2830,14 @@ ${"=".repeat(48)}
         });
       }
     }, [setImgLoras]);
-    useEffect(() => {
+    useEffect2(() => {
       if (!pickerMounted) return;
       const vis = pickerKind === "base" ? basePickerElRef.current : loraPickerElRef.current;
       if (vis && vis.ensureSearched) vis.ensureSearched();
     }, [pickerMounted, pickerKind]);
-    const imgCostRef = useRef(null);
-    const editCostRef = useRef(null);
-    const refCostRef = useRef(null);
+    const imgCostRef = useRef2(null);
+    const editCostRef = useRef2(null);
+    const refCostRef = useRef2(null);
     const priceInto = (ref, body) => {
       const badge = ref.current;
       if (!badge) return;
@@ -2423,16 +2848,16 @@ ${"=".repeat(48)}
         if (ref.current === badge) badge.setPrice(null);
       });
     };
-    const activeRef = useRef(null);
-    const projectRef = useRef(project);
+    const activeRef = useRef2(null);
+    const projectRef = useRef2(project);
     projectRef.current = project;
-    const thumbsRef = useRef(thumbs);
+    const thumbsRef = useRef2(thumbs);
     thumbsRef.current = thumbs;
-    const genDrawerRef = useRef(null);
-    const promptDirtyRef = useRef(false);
-    const genTargetRef = useRef(null);
-    const lastActiveIdRef = useRef(null);
-    const bindGenDrawer = useCallback((el) => {
+    const genDrawerRef = useRef2(null);
+    const promptDirtyRef = useRef2(false);
+    const genTargetRef = useRef2(null);
+    const lastActiveIdRef = useRef2(null);
+    const bindGenDrawer = useCallback2((el) => {
       genDrawerRef.current = el;
       if (el && !el._mgBound) {
         el._mgBound = true;
@@ -2573,17 +2998,17 @@ ${"=".repeat(48)}
     const routeTarget = sel || entries.find((e) => e.c.id === draftTarget) || null;
     const frameSrc = (f) => f && f.thumbId ? thumbs[f.thumbId] : f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null;
     activeRef.current = active;
-    const [editSub, setEditSub] = useState("edit");
-    const [fixTag, setFixTag] = useState("face");
-    const [fixBoxes, setFixBoxes] = useState([]);
-    const fixImgRef = useRef(null);
-    const fixCanvasRef = useRef(null);
-    const fixDragRef = useRef(null);
-    const [genFixPrice, setGenFixPrice] = useState({});
-    useEffect(() => {
+    const [editSub, setEditSub] = useState2("edit");
+    const [fixTag, setFixTag] = useState2("face");
+    const [fixBoxes, setFixBoxes] = useState2([]);
+    const fixImgRef = useRef2(null);
+    const fixCanvasRef = useRef2(null);
+    const fixDragRef = useRef2(null);
+    const [genFixPrice, setGenFixPrice] = useState2({});
+    useEffect2(() => {
       setFixBoxes([]);
     }, [active && active.c.id, active && active.c.openFrame && active.c.openFrame.mediaId]);
-    const fixPaint = useCallback(() => {
+    const fixPaint = useCallback2(() => {
       const cvs = fixCanvasRef.current, img = fixImgRef.current;
       if (!cvs || !img) return;
       const w = img.clientWidth, h = img.clientHeight;
@@ -2605,10 +3030,10 @@ ${"=".repeat(48)}
       fixBoxes.forEach(draw);
       if (fixDragRef.current) draw({ ...fixDragRef.current, tag: fixTag });
     }, [fixBoxes, fixTag]);
-    useEffect(() => {
+    useEffect2(() => {
       fixPaint();
     }, [fixPaint]);
-    useEffect(() => {
+    useEffect2(() => {
       const onResize = () => fixPaint();
       window.addEventListener("resize", onResize);
       return () => window.removeEventListener("resize", onResize);
@@ -2655,7 +3080,7 @@ ${"=".repeat(48)}
       }
       fixPaint();
     };
-    useEffect(() => {
+    useEffect2(() => {
       if (tab !== "Edit" || editSub !== "fixer" || !active) return;
       const id = active.c.id;
       const src = active.c.openFrame && active.c.openFrame.mediaId;
@@ -2682,12 +3107,12 @@ ${"=".repeat(48)}
       };
     }, [tab, editSub, active && active.c.id, active && active.c.openFrame && active.c.openFrame.mediaId, fixBoxes]);
     const AF = artFilters_default;
-    const [fcOpen, setFcOpen] = useState(false);
-    const [fcActive, setFcActive] = useState(null);
-    const [fcStrength, setFcStrength] = useState(1);
-    const [fcAngle, setFcAngle] = useState(180);
-    const fcStageRef = useRef(null);
-    const fcImgRef = useRef(null);
+    const [fcOpen, setFcOpen] = useState2(false);
+    const [fcActive, setFcActive] = useState2(null);
+    const [fcStrength, setFcStrength] = useState2(1);
+    const [fcAngle, setFcAngle] = useState2(180);
+    const fcStageRef = useRef2(null);
+    const fcImgRef = useRef2(null);
     const openFilterCompare = () => {
       if (!active) return;
       setFcActive(active.c.filter || null);
@@ -2704,7 +3129,7 @@ ${"=".repeat(48)}
       patch((cc) => ({ ...cc, filter: fcActive, filterStrength: fcStrength, filterAngle: fcAngle }));
       setFcOpen(false);
     };
-    useEffect(() => {
+    useEffect2(() => {
       if (!fcOpen || !AF || !fcStageRef.current) return;
       const host = fcStageRef.current;
       AF.clearPreview(host);
@@ -2716,7 +3141,7 @@ ${"=".repeat(48)}
     const editSrcMid = active.c.openFrame && active.c.openFrame.mediaId;
     const refMids = (project.assets || []).filter((a) => a.kind === "image" && a.mediaId).map((a) => a.mediaId);
     const refMidsKey = refMids.join(",");
-    useEffect(() => {
+    useEffect2(() => {
       const badge = imgCostRef.current;
       if (!badge) return;
       const prompt = (active.c.imgPrompt || "").trim();
@@ -2727,7 +3152,7 @@ ${"=".repeat(48)}
       const t = setTimeout(() => priceInto(imgCostRef, buildImgGenBody(imgModel, imgLoras, imgAdv, prompt)), 250);
       return () => clearTimeout(t);
     }, [imgModel, imgLoras, imgAdv, active.c.id, active.c.imgPrompt]);
-    useEffect(() => {
+    useEffect2(() => {
       const badge = editCostRef.current;
       if (!badge) return;
       const instruction = (active.c.editPrompt || "").trim();
@@ -2738,7 +3163,7 @@ ${"=".repeat(48)}
       const t = setTimeout(() => priceInto(editCostRef, { mode: "edit", source: editSrcMid, instruction, edit_model: "edit-pro" }), 250);
       return () => clearTimeout(t);
     }, [editSrcMid, active.c.id, active.c.editPrompt]);
-    useEffect(() => {
+    useEffect2(() => {
       const badge = refCostRef.current;
       if (!badge) return;
       const prompt = (active.c.refPrompt || "").trim();
@@ -2771,7 +3196,7 @@ ${"=".repeat(48)}
       }
       return `No picture resolved on ${code} \u2014 nothing to number`;
     };
-    useEffect(() => {
+    useEffect2(() => {
       const el = genDrawerRef.current;
       if (!el || tab !== "Video") return;
       if (lastActiveIdRef.current !== active.c.id) {
@@ -2866,7 +3291,7 @@ ${"=".repeat(48)}
       active.c.promptOverride,
       active.c.promptOverrideText
     ]);
-    useEffect(() => {
+    useEffect2(() => {
       const gs = genState[active.c.id];
       const stillBusy = active.c.status === "wip" && !(gs && gs.phase === "paused");
       const el = genDrawerRef.current;
@@ -4444,7 +4869,7 @@ ${"=".repeat(48)}
     setGenFixState,
     genFix
   }) {
-    useEffect(() => {
+    useEffect2(() => {
       const prevOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
       return () => {
@@ -4460,12 +4885,12 @@ ${"=".repeat(48)}
       const paused = gs && gs.phase === "paused";
       return paused ? "paused" : gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : c.status;
     };
-    const [dfOpen, setDfOpen] = useState(false);
-    const [dfHandoff, setDfHandoff] = useState("");
-    const [castSheetOpen, setCastSheetOpen] = useState(false);
-    const [castSheetTab, setCastSheetTab] = useState("cast");
-    const [castSheetClosing, setCastSheetClosing] = useState(false);
-    const castSheetCloseTimer = useRef(null);
+    const [dfOpen, setDfOpen] = useState2(false);
+    const [dfHandoff, setDfHandoff] = useState2("");
+    const [castSheetOpen, setCastSheetOpen] = useState2(false);
+    const [castSheetTab, setCastSheetTab] = useState2("cast");
+    const [castSheetClosing, setCastSheetClosing] = useState2(false);
+    const castSheetCloseTimer = useRef2(null);
     const closeCastSheet = () => {
       setCastSheetClosing(true);
       clearTimeout(castSheetCloseTimer.current);
@@ -4474,35 +4899,35 @@ ${"=".repeat(48)}
         setCastSheetClosing(false);
       }, 280);
     };
-    const [actionsOpen, setActionsOpen] = useState(false);
-    const [actionsClosing, setActionsClosing] = useState(false);
-    const actionsCloseTimer = useRef(null);
-    const [reviewOpen, setReviewOpen] = useState(false);
-    const [reviewPlaying, setReviewPlaying] = useState(false);
-    const [reviewCropping, setReviewCropping] = useState(false);
-    const [reviewDur, setReviewDur] = useState(0);
-    const [reviewCur, setReviewCur] = useState(0);
-    const reviewVidRef = useRef(null);
-    const reviewTrimTrackRef = useRef(null);
-    const reviewTrimDragRef = useRef(null);
-    const reviewCropDragRef = useRef(false);
-    const reviewScrubDragRef = useRef(false);
-    const [genOpen, setGenOpen] = useState(false);
-    const [genPalFor, setGenPalFor] = useState(null);
-    const [genOverrideFlash, setGenOverrideFlash] = useState(false);
-    const [genSubmitting, setGenSubmitting] = useState(false);
-    const [genPrice, setGenPrice] = useState({});
-    const [genTab, setGenTab] = useState("Video");
-    const [acct, setAcct] = useState(null);
-    useEffect(() => {
+    const [actionsOpen, setActionsOpen] = useState2(false);
+    const [actionsClosing, setActionsClosing] = useState2(false);
+    const actionsCloseTimer = useRef2(null);
+    const [reviewOpen, setReviewOpen] = useState2(false);
+    const [reviewPlaying, setReviewPlaying] = useState2(false);
+    const [reviewCropping, setReviewCropping] = useState2(false);
+    const [reviewDur, setReviewDur] = useState2(0);
+    const [reviewCur, setReviewCur] = useState2(0);
+    const reviewVidRef = useRef2(null);
+    const reviewTrimTrackRef = useRef2(null);
+    const reviewTrimDragRef = useRef2(null);
+    const reviewCropDragRef = useRef2(false);
+    const reviewScrubDragRef = useRef2(false);
+    const [genOpen, setGenOpen] = useState2(false);
+    const [genPalFor, setGenPalFor] = useState2(null);
+    const [genOverrideFlash, setGenOverrideFlash] = useState2(false);
+    const [genSubmitting, setGenSubmitting] = useState2(false);
+    const [genPrice, setGenPrice] = useState2({});
+    const [genTab, setGenTab] = useState2("Video");
+    const [acct, setAcct] = useState2(null);
+    useEffect2(() => {
       fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {
       });
     }, []);
-    const [pickerOpen, setPickerOpen] = useState(false);
-    const [pickerKind, setPickerKind] = useState("base");
-    const [pickerMounted, setPickerMounted] = useState(false);
-    const [pickerClosing, setPickerClosing] = useState(false);
-    const pickerCloseTimer = useRef(null);
+    const [pickerOpen, setPickerOpen] = useState2(false);
+    const [pickerKind, setPickerKind] = useState2("base");
+    const [pickerMounted, setPickerMounted] = useState2(false);
+    const [pickerClosing, setPickerClosing] = useState2(false);
+    const pickerCloseTimer = useRef2(null);
     const closePicker = () => {
       setPickerClosing(true);
       clearTimeout(pickerCloseTimer.current);
@@ -4511,10 +4936,10 @@ ${"=".repeat(48)}
         setPickerClosing(false);
       }, 280);
     };
-    useEffect(() => {
+    useEffect2(() => {
       if (pickerOpen) setPickerMounted(true);
     }, [pickerOpen]);
-    useEffect(() => {
+    useEffect2(() => {
       if (!pickerOpen) return;
       const onKey = (ev) => {
         if (ev.key === "Escape") closePicker();
@@ -4522,16 +4947,16 @@ ${"=".repeat(48)}
       window.addEventListener("keydown", onKey);
       return () => window.removeEventListener("keydown", onKey);
     }, [pickerOpen]);
-    const basePickerElRef = useRef(null);
-    const loraPickerElRef = useRef(null);
-    const imgModelSeqRef = useRef(0);
-    const loraRange = useMemo(() => {
+    const basePickerElRef = useRef2(null);
+    const loraPickerElRef = useRef2(null);
+    const imgModelSeqRef = useRef2(0);
+    const loraRange = useMemo2(() => {
       const L = window.MG_LORA;
       const t = String(imgModel && imgModel.model_type || "").toUpperCase();
       if (!L) return [-2, 2];
       return L.ranges && L.ranges[t] || L.fallback || [-2, 2];
     }, [imgModel]);
-    useEffect(() => {
+    useEffect2(() => {
       setImgLoras((cur) => {
         let changed = false;
         const next = cur.map((l) => {
@@ -4542,7 +4967,7 @@ ${"=".repeat(48)}
         return changed ? next : cur;
       });
     }, [loraRange, setImgLoras]);
-    const bindPicker = useCallback((el) => {
+    const bindPicker = useCallback2((el) => {
       basePickerElRef.current = el;
       if (el && !el._mgBound) {
         el._mgBound = true;
@@ -4580,7 +5005,7 @@ ${"=".repeat(48)}
         });
       }
     }, [setImgModel, setImgAdv, setModelDefaults]);
-    const pickVersion = useCallback((vid) => {
+    const pickVersion = useCallback2((vid) => {
       if (!imgModel || !imgModel.versions) return;
       const v = imgModel.versions.find((x) => x.version_id === vid);
       if (!v) return;
@@ -4604,7 +5029,7 @@ ${"=".repeat(48)}
         }));
       }
     }, [imgModel, setImgModel, setImgAdv, setModelDefaults]);
-    const bindLoraPicker = useCallback((el) => {
+    const bindLoraPicker = useCallback2((el) => {
       loraPickerElRef.current = el;
       if (el && !el._mgBound) {
         el._mgBound = true;
@@ -4621,7 +5046,7 @@ ${"=".repeat(48)}
         });
       }
     }, [setImgLoras]);
-    useEffect(() => {
+    useEffect2(() => {
       if (!pickerMounted) return;
       const vis = pickerKind === "base" ? basePickerElRef.current : loraPickerElRef.current;
       if (vis && vis.ensureSearched) vis.ensureSearched();
@@ -4648,9 +5073,9 @@ ${"=".repeat(48)}
       for (let i = 0; i < selIdx; i++) cum += durOf(entries[i].c) || 1;
       selFrac = (cum + (durOf(entries[selIdx].c) || 1) / 2) / total;
     }
-    const [scrubbing, setScrubbing] = useState(false);
-    const [scrubFrac, setScrubFrac] = useState(0);
-    const [scrubIdx, setScrubIdx] = useState(null);
+    const [scrubbing, setScrubbing] = useState2(false);
+    const [scrubFrac, setScrubFrac] = useState2(0);
+    const [scrubIdx, setScrubIdx] = useState2(null);
     const fracAt = (e) => {
       const r = e.currentTarget.getBoundingClientRect();
       return r.width ? Math.max(0, Math.min(0.9999, (e.clientX - r.left) / r.width)) : 0;
@@ -4756,7 +5181,7 @@ ${"=".repeat(48)}
     };
     const genTogglePal = (which) => setGenPalFor((p) => p === which ? null : which);
     const genAppendTo = (field, term) => dfPatch((cc) => ({ ...cc, [field]: cc[field] ? cc[field] + ", " + term : term }));
-    useEffect(() => {
+    useEffect2(() => {
       if (!genOpen || !dfLive) return;
       const id = dfLive.c.id;
       const payload = shotPayload(dfLive, project, imgSrc);
@@ -4814,10 +5239,10 @@ ${"=".repeat(48)}
     const editSrcMid = dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId;
     const refMids = (project.assets || []).filter((a) => a.kind === "image" && a.mediaId).map((a) => a.mediaId);
     const refMidsKey = refMids.join(",");
-    const [imgPrice, setImgPrice] = useState({});
-    const [editPrice, setEditPrice] = useState({});
-    const [refPrice, setRefPrice] = useState({});
-    useEffect(() => {
+    const [imgPrice, setImgPrice] = useState2({});
+    const [editPrice, setEditPrice] = useState2({});
+    const [refPrice, setRefPrice] = useState2({});
+    useEffect2(() => {
       if (!genOpen || genTab !== "Image" || !dfLive) return;
       const id = dfLive.c.id;
       const prompt = (dfLive.c.imgPrompt || "").trim();
@@ -4843,7 +5268,7 @@ ${"=".repeat(48)}
         clearTimeout(t);
       };
     }, [genOpen, genTab, dfLive && dfLive.c.id, dfLive && dfLive.c.imgPrompt, imgModel, imgLoras, imgAdv]);
-    useEffect(() => {
+    useEffect2(() => {
       if (!genOpen || genTab !== "Edit" || !dfLive) return;
       const id = dfLive.c.id;
       const instruction = (dfLive.c.editPrompt || "").trim();
@@ -4869,7 +5294,7 @@ ${"=".repeat(48)}
         clearTimeout(t);
       };
     }, [genOpen, genTab, dfLive && dfLive.c.id, dfLive && dfLive.c.editPrompt, editSrcMid]);
-    useEffect(() => {
+    useEffect2(() => {
       if (!genOpen || genTab !== "Reference" || !dfLive) return;
       const id = dfLive.c.id;
       const prompt = (dfLive.c.refPrompt || "").trim();
@@ -4907,17 +5332,17 @@ ${"=".repeat(48)}
       const tally = p && p.pr ? tallyPrices([p.pr]) : null;
       return tally ? costTooltip(tally) : "";
     };
-    const [editSub, setEditSub] = useState("edit");
-    const [fixTag, setFixTag] = useState("face");
-    const [fixBoxes, setFixBoxes] = useState([]);
-    const fixImgRef = useRef(null);
-    const fixCanvasRef = useRef(null);
-    const fixDragRef = useRef(null);
-    const [genFixPrice, setGenFixPrice] = useState({});
-    useEffect(() => {
+    const [editSub, setEditSub] = useState2("edit");
+    const [fixTag, setFixTag] = useState2("face");
+    const [fixBoxes, setFixBoxes] = useState2([]);
+    const fixImgRef = useRef2(null);
+    const fixCanvasRef = useRef2(null);
+    const fixDragRef = useRef2(null);
+    const [genFixPrice, setGenFixPrice] = useState2({});
+    useEffect2(() => {
       setFixBoxes([]);
     }, [dfLive && dfLive.c.id, dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId]);
-    const fixPaint = useCallback(() => {
+    const fixPaint = useCallback2(() => {
       const cvs = fixCanvasRef.current, img = fixImgRef.current;
       if (!cvs || !img) return;
       const w = img.clientWidth, h = img.clientHeight;
@@ -4939,10 +5364,10 @@ ${"=".repeat(48)}
       fixBoxes.forEach(draw);
       if (fixDragRef.current) draw({ ...fixDragRef.current, tag: fixTag });
     }, [fixBoxes, fixTag]);
-    useEffect(() => {
+    useEffect2(() => {
       fixPaint();
     }, [fixPaint]);
-    useEffect(() => {
+    useEffect2(() => {
       const onResize = () => fixPaint();
       window.addEventListener("resize", onResize);
       return () => window.removeEventListener("resize", onResize);
@@ -4993,7 +5418,7 @@ ${"=".repeat(48)}
       }
       fixPaint();
     };
-    useEffect(() => {
+    useEffect2(() => {
       if (!genOpen || genTab !== "Edit" || editSub !== "fixer" || !dfLive) return;
       const id = dfLive.c.id;
       const src = dfLive.c.openFrame && dfLive.c.openFrame.mediaId;
@@ -5019,12 +5444,12 @@ ${"=".repeat(48)}
         clearTimeout(t);
       };
     }, [genOpen, genTab, editSub, dfLive && dfLive.c.id, dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId, fixBoxes]);
-    const [fcOpen, setFcOpen] = useState(false);
-    const [fcActive, setFcActive] = useState(null);
-    const [fcStrength, setFcStrength] = useState(1);
-    const [fcAngle, setFcAngle] = useState(180);
-    const fcStageRef = useRef(null);
-    const fcImgRef = useRef(null);
+    const [fcOpen, setFcOpen] = useState2(false);
+    const [fcActive, setFcActive] = useState2(null);
+    const [fcStrength, setFcStrength] = useState2(1);
+    const [fcAngle, setFcAngle] = useState2(180);
+    const fcStageRef = useRef2(null);
+    const fcImgRef = useRef2(null);
     const openFilterCompare = () => {
       if (!dfLive) return;
       setFcActive(dfLive.c.filter || null);
@@ -5041,7 +5466,7 @@ ${"=".repeat(48)}
       dfPatch((cc) => ({ ...cc, filter: fcActive, filterStrength: fcStrength, filterAngle: fcAngle }));
       setFcOpen(false);
     };
-    useEffect(() => {
+    useEffect2(() => {
       if (!fcOpen || !AF || !fcStageRef.current) return;
       const host = fcStageRef.current;
       AF.clearPreview(host);
@@ -6180,15 +6605,15 @@ ${"=".repeat(48)}
     })());
   }
   function useProjectStore(setSelShot) {
-    const [project, setProject] = useState(null);
-    const [thumbs, setThumbs] = useState({});
-    const [busy, setBusy] = useState(false);
-    const [activeId, setActiveId] = useState(null);
-    const [projList, setProjList] = useState([]);
-    const [projMenu, setProjMenu] = useState(false);
-    const saveTimer = useRef(null);
-    const castImported = useRef(false);
-    const readProjList = useCallback(async () => {
+    const [project, setProject] = useState2(null);
+    const [thumbs, setThumbs] = useState2({});
+    const [busy, setBusy] = useState2(false);
+    const [activeId, setActiveId] = useState2(null);
+    const [projList, setProjList] = useState2([]);
+    const [projMenu, setProjMenu] = useState2(false);
+    const saveTimer = useRef2(null);
+    const castImported = useRef2(false);
+    const readProjList = useCallback2(async () => {
       if (!hasStore) return [];
       const keys = await sList(PPRE);
       const out = [];
@@ -6205,10 +6630,10 @@ ${"=".repeat(48)}
       setProjList(out);
       return out;
     }, []);
-    const flushSave = useCallback(async (id, p) => {
+    const flushSave = useCallback2(async (id, p) => {
       if (hasStore && id && p) await sSet(PPRE + id, JSON.stringify(p));
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       (async () => {
         if (!hasStore) {
           setProject(seedProject());
@@ -6246,7 +6671,7 @@ ${"=".repeat(48)}
         readProjList();
       })();
     }, []);
-    const openProject = useCallback(async (id) => {
+    const openProject = useCallback2(async (id) => {
       if (!id || id === activeId) {
         setProjMenu(false);
         return;
@@ -6265,7 +6690,7 @@ ${"=".repeat(48)}
       setSelShot(null);
       setProjMenu(false);
     }, [activeId, project, flushSave, setSelShot]);
-    const newProject = useCallback(async () => {
+    const newProject = useCallback2(async () => {
       await flushSave(activeId, project);
       const id = uid();
       const p = seedProject();
@@ -6278,7 +6703,7 @@ ${"=".repeat(48)}
       setProjMenu(false);
       readProjList();
     }, [activeId, project, flushSave, readProjList, setSelShot]);
-    const duplicateProject = useCallback(async () => {
+    const duplicateProject = useCallback2(async () => {
       await flushSave(activeId, project);
       const id = uid();
       const p = { ...project, name: (project.name || "Untitled") + " copy" };
@@ -6289,7 +6714,7 @@ ${"=".repeat(48)}
       setProjMenu(false);
       readProjList();
     }, [activeId, project, flushSave, readProjList]);
-    const deleteProject = useCallback(async (id) => {
+    const deleteProject = useCallback2(async (id) => {
       const list = await readProjList();
       if (list.length <= 1) {
         window.alert("This is your only storyboard \u2014 make another before deleting this one.");
@@ -6333,7 +6758,7 @@ ${"=".repeat(48)}
       setProjMenu(false);
     }, [activeId, readProjList, setSelShot]);
     const projectApi = { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject };
-    useEffect(() => {
+    useEffect2(() => {
       if (!project || castImported.current) return;
       castImported.current = true;
       const ids = parseCastIdsFromSearch(location.search).filter(isCatalogMediaId);
@@ -6355,7 +6780,7 @@ ${"=".repeat(48)}
       });
       history.replaceState(null, "", location.pathname);
     }, [project]);
-    useEffect(() => {
+    useEffect2(() => {
       if (!project || !hasStore || !activeId) return;
       setBusy(true);
       clearTimeout(saveTimer.current);
@@ -6365,7 +6790,7 @@ ${"=".repeat(48)}
       }, 600);
       return () => clearTimeout(saveTimer.current);
     }, [project, activeId]);
-    const storeThumb = useCallback(async (file) => {
+    const storeThumb = useCallback2(async (file) => {
       const data = await fileToThumb(file);
       const id = uid();
       setThumbs((t) => ({ ...t, [id]: data }));
@@ -6438,10 +6863,10 @@ Your currently-open board is left untouched.`)) return;
     };
   }
   function useShotMutations(project, setProject) {
-    const [open, setOpen] = useState({});
-    const setCard = useCallback((aId, cId, fn) => setProject((p) => patchCard(p, aId, cId, fn)), [setProject]);
-    const setAct = useCallback((aId, patch2) => setProject((p) => patchAct(p, aId, patch2)), [setProject]);
-    const setAssets = useCallback((fn) => setProject((p) => patchAssets(p, fn)), [setProject]);
+    const [open, setOpen] = useState2({});
+    const setCard = useCallback2((aId, cId, fn) => setProject((p) => patchCard(p, aId, cId, fn)), [setProject]);
+    const setAct = useCallback2((aId, patch2) => setProject((p) => patchAct(p, aId, patch2)), [setProject]);
+    const setAssets = useCallback2((fn) => setProject((p) => patchAssets(p, fn)), [setProject]);
     const setCardStatus = (cardId, patch2) => setProject((p) => patchCardById(p, cardId, patch2));
     const addCard = (aId) => {
       const c = newCard();
@@ -6508,12 +6933,12 @@ Your currently-open board is left untouched.`)) return;
     };
   }
   function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI }) {
-    const [genState, setGenState] = useState({});
-    const resumedRef = useRef({});
-    const [genImgState, setGenImgState] = useState({});
-    const [imgModel, setImgModel] = useState(null);
-    const [imgLoras, setImgLoras] = useState([]);
-    const [imgAdv, setImgAdv] = useState(() => ({
+    const [genState, setGenState] = useState2({});
+    const resumedRef = useRef2({});
+    const [genImgState, setGenImgState] = useState2({});
+    const [imgModel, setImgModel] = useState2(null);
+    const [imgLoras, setImgLoras] = useState2([]);
+    const [imgAdv, setImgAdv] = useState2(() => ({
       negative: "",
       steps: 25,
       cfg: 7,
@@ -6528,12 +6953,12 @@ Your currently-open board is left untouched.`)) return;
       highPriority: false,
       promptHelper: true
     }));
-    const [modelDefaults, setModelDefaults] = useState(null);
-    const [genEditState, setGenEditState] = useState({});
-    const [genRefState, setGenRefState] = useState({});
-    const [genFixState, setGenFixState] = useState({});
-    const [batching, setBatching] = useState(false);
-    const [batchTally, setBatchTally] = useState(null);
+    const [modelDefaults, setModelDefaults] = useState2(null);
+    const [genEditState, setGenEditState] = useState2({});
+    const [genRefState, setGenRefState] = useState2({});
+    const [genFixState, setGenFixState] = useState2({});
+    const [batching, setBatching] = useState2(false);
+    const [batchTally, setBatchTally] = useState2(null);
     const setBatchOutcome = (cardId, outcome) => setBatchTally((prev) => prev && prev.ids.has(cardId) ? { ...prev, outcomes: { ...prev.outcomes, [cardId]: outcome } } : prev);
     const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
     const shotPayload2 = (entry) => shotPayload(entry, project, imgSrc);
@@ -6681,7 +7106,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       });
       setTimeout(tick, 2500);
     };
-    useEffect(() => {
+    useEffect2(() => {
       if (!project) return;
       (project.acts || []).forEach((a) => (a.cards || []).forEach((c) => {
         if (c.status === "wip" && c.pendingTaskId && !resumedRef.current[c.pendingTaskId]) {
@@ -6924,9 +7349,9 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setBatching(false);
     };
     const PRICE_DEBOUNCE_MS = 600;
-    const [priceCache, setPriceCache] = useState({});
-    const priceInFlightRef = useRef({});
-    const ensurePriced = useCallback((entry, force) => {
+    const [priceCache, setPriceCache] = useState2({});
+    const priceInFlightRef = useRef2({});
+    const ensurePriced = useCallback2((entry, force) => {
       const payload = shotPayload2(entry);
       const fp = priceFingerprint(payload);
       const cached = priceCache[entry.c.id];
@@ -6945,19 +7370,19 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         setPriceCache((s) => ({ ...s, [entry.c.id]: { fp, pr, loading: false } }));
       });
     }, [project, priceCache]);
-    const { notDone, notDoneFp } = useMemo(() => {
+    const { notDone, notDoneFp } = useMemo2(() => {
       const boardEntries = project ? flat(project) : [];
       const nd = boardEntries.filter((e) => e.c.status !== "done");
       const fp = nd.map((e) => e.c.id + ":" + priceFingerprint(shotPayload2(e))).join("|");
       return { notDone: nd, notDoneFp: fp };
     }, [project]);
-    const priceDebounceRef = useRef(null);
-    useEffect(() => {
+    const priceDebounceRef = useRef2(null);
+    useEffect2(() => {
       clearTimeout(priceDebounceRef.current);
       priceDebounceRef.current = setTimeout(() => notDone.forEach((e) => ensurePriced(e)), PRICE_DEBOUNCE_MS);
       return () => clearTimeout(priceDebounceRef.current);
     }, [notDoneFp]);
-    const refreshEstimate = useCallback(() => notDone.forEach((e) => ensurePriced(e, true)), [notDone, ensurePriced]);
+    const refreshEstimate = useCallback2(() => notDone.forEach((e) => ensurePriced(e, true)), [notDone, ensurePriced]);
     const pending = notDone.filter((e) => {
       const r = priceCache[e.c.id];
       return !r || r.loading;
@@ -7009,9 +7434,9 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     };
   }
   function useExportPipeline(project, thumbs) {
-    const [seq, setSeq] = useState(null);
-    const [exp, setExp] = useState(null);
-    const exportPoll = useRef(null);
+    const [seq, setSeq] = useState2(null);
+    const [exp, setExp] = useState2(null);
+    const exportPoll = useRef2(null);
     const download = (text, name, type) => {
       const url = URL.createObjectURL(new Blob([text], { type }));
       const a = document.createElement("a");
@@ -7026,8 +7451,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       "text/plain"
     );
     const exportJSON = () => download(JSON.stringify({ project, thumbs }, null, 2), `${project.name.replace(/\s+/g, "_")}_backup.json`, "application/json");
-    const [bundling, setBundling] = useState(false);
-    const [bundleMissing, setBundleMissing] = useState(null);
+    const [bundling, setBundling] = useState2(false);
+    const [bundleMissing, setBundleMissing] = useState2(null);
     const exportBundle = async () => {
       setBundling(true);
       try {
@@ -7112,9 +7537,9 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     };
   }
   function App() {
-    const [selShot, setSelShot] = useState(null);
+    const [selShot, setSelShot] = useState2(null);
     const [mobileUI, setMobileUI] = useLocalToggle(MOBILE_UI_KEY, false);
-    const [draftCard, setDraftCard] = useState(() => ({
+    const [draftCard, setDraftCard] = useState2(() => ({
       id: "__draft__",
       mode: "R2V",
       duration: 5,
@@ -7139,8 +7564,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       promptOverride: false,
       promptOverrideText: ""
     }));
-    const [draftTarget, setDraftTarget] = useState("");
-    const [draftAttachedInfo, setDraftAttachedInfo] = useState(null);
+    const [draftTarget, setDraftTarget] = useState2("");
+    const [draftAttachedInfo, setDraftAttachedInfo] = useState2(null);
     const {
       project,
       setProject,
@@ -7175,35 +7600,29 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       delRef,
       splitShot
     } = useShotMutations(project, setProject);
-    const [pickCb, setPickCb] = useState(null);
-    const [pickKind, setPickKind] = useState("image");
-    const [pickAllowType, setPickAllowType] = useState(false);
-    const [importOpen, setImportOpen] = useState(false);
-    const [showHelp, setShowHelp] = useState(false);
-    const [showGuide, setShowGuide] = useState(() => {
+    const [pickCb, setPickCb] = useState2(null);
+    const [pickKind, setPickKind] = useState2("image");
+    const [pickAllowType, setPickAllowType] = useState2(false);
+    const [importOpen, setImportOpen] = useState2(false);
+    const [showHelp, setShowHelp] = useState2(false);
+    const [showGuide, setShowGuide] = useState2(() => {
       try {
         return !localStorage.getItem("loom_guide_seen");
       } catch (e) {
         return true;
       }
     });
-    const [showCast, setShowCast] = useState(true);
-    const openPick = useCallback((cb, kind, allowType) => {
+    const [showCast, setShowCast] = useState2(true);
+    const openPick = useCallback2((cb, kind, allowType) => {
       setPickKind(kind || "image");
       setPickAllowType(!!allowType);
       setPickCb(() => cb);
     }, []);
-    const bindGalleryPicker = useCallback((el) => {
-      if (el && !el._mgBound) {
-        el._mgBound = true;
-        el.addEventListener("mg-pick", (e) => {
-          const cb = pickCb;
-          setPickCb(null);
-          if (cb) cb(e.detail.media_id, e.detail.thumb, e.detail.is_video, e.detail.duration, e.detail.is_nsfw);
-        });
-        el.addEventListener("mg-close", () => setPickCb(null));
-      }
-    }, [pickCb]);
+    const onGalleryPick = (m) => {
+      const cb = pickCb;
+      setPickCb(null);
+      if (cb) cb(m.media_id, m.thumb, m.is_video, m.duration, m.is_nsfw);
+    };
     const {
       genState,
       setGenState,
@@ -7248,12 +7667,12 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       costEstimate,
       refreshEstimate
     } = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI });
-    const onVideoSubmit = useCallback((cardId, detail) => {
+    const onVideoSubmit = useCallback2((cardId, detail) => {
       setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering\u2026 (task " + String(detail.task_id).slice(-6) + ")" } }));
       setCardStatus(cardId, { status: "wip", pendingTaskId: detail.task_id, genStartedAt: Date.now() });
       if (window.Jobs && window.Jobs.register) window.Jobs.register(detail.task_id, "Rendered");
     }, [setGenState, setCardStatus]);
-    const onVideoResult = useCallback((cardId, detail) => {
+    const onVideoResult = useCallback2((cardId, detail) => {
       const mid = (detail.media_ids || [])[0];
       setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid, duration: detail.duration } }));
       setCardStatus(cardId, {
@@ -7266,23 +7685,23 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         ...detail.duration ? { actualDur: detail.duration } : {}
       });
     }, [setGenState, setCardStatus]);
-    const onVideoError = useCallback((cardId, detail) => {
+    const onVideoError = useCallback2((cardId, detail) => {
       setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: detail.error } }));
       setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
     }, [setGenState, setCardStatus]);
-    const onVideoSlow = useCallback((cardId, detail) => {
+    const onVideoSlow = useCallback2((cardId, detail) => {
       setGenState((s) => ({ ...s, [cardId]: {
         phase: detail.tier,
         msg: detail.tier === "stale" ? "Still going after " + elapsedLabel(detail.elapsed) + " \u2014 unusual. Check pixai.art, or keep waiting (task " + String(detail.task_id).slice(-6) + ")" : "Taking longer than expected (" + elapsedLabel(detail.elapsed) + ", task " + String(detail.task_id).slice(-6) + ")"
       } }));
     }, [setGenState]);
-    const onVideoPaused = useCallback((cardId, detail) => {
+    const onVideoPaused = useCallback2((cardId, detail) => {
       setGenState((s) => ({ ...s, [cardId]: {
         phase: "paused",
         msg: "Paused auto-checking with no result \u2014 click to check again, or check pixai.art (task " + String(detail.task_id).slice(-6) + ")"
       } }));
     }, [setGenState]);
-    useEffect(() => {
+    useEffect2(() => {
       const clearDraft = (s) => {
         if (!("__draft__" in s)) return s;
         const n = { ...s };
@@ -7480,24 +7899,33 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       if (e.target === e.currentTarget && exp.status !== "running") closeExport();
     } }, /* @__PURE__ */ React.createElement("div", { className: "sb-export-box" }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "sb-pick-t" }, "Export the cut"), exp.status !== "running" && /* @__PURE__ */ React.createElement("button", { className: "sb-pick-x", onClick: closeExport }, "\xD7")), exp.status === "running" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-bar" }, /* @__PURE__ */ React.createElement("i", { style: { width: (exp.progress || 0) + "%" } })), /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt" }, "Rendering\u2026 ", exp.progress || 0, "% \xB7 ", Math.round(exp.elapsed || 0), "s of cut"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: cancelExport }, "\u25A0 Stop")), exp.status === "done" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--green)" } }, "\u2713 Cut rendered."), exp.warning && /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--amber)" } }, "\u26A0 ", exp.warning), /* @__PURE__ */ React.createElement("a", { className: "sb-btn amber", href: "/api/loom/export-file", style: { alignSelf: "center", textDecoration: "none" } }, "\u21E9 Download mp4"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")), (exp.status === "failed" || exp.status === "cancelled") && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: exp.status === "failed" ? "var(--coral)" : "var(--ink2)" } }, exp.status === "failed" ? "\u26A0 " + (exp.error || "export failed") : "\u25A0 Export stopped."), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")))), bundleMissing && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
       if (e.target === e.currentTarget) closeBundleMissing();
-    } }, /* @__PURE__ */ React.createElement("div", { className: "sb-export-box" }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "sb-pick-t" }, "Bundle exported, ", bundleMissing.total, " file(s) left out"), /* @__PURE__ */ React.createElement("button", { className: "sb-pick-x", style: { marginLeft: "auto" }, onClick: closeBundleMissing }, "\xD7")), /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--coral)" } }, "\u26A0 No file on disk for these references \u2014 everything else exported normally."), bundleMissing.rows.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "sb-miss-list" }, bundleMissing.rows.map((row) => /* @__PURE__ */ React.createElement("div", { className: "sb-miss-row", key: row.mid }, row.where.length ? row.where.map((w, i) => /* @__PURE__ */ React.createElement("b", { key: i }, w)) : /* @__PURE__ */ React.createElement("i", null, "not referenced by any shot or cast entry in this project"), /* @__PURE__ */ React.createElement("span", { className: "sb-miss-id" }, row.mid)))), bundleMissing.hidden > 0 && /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--ink2)", fontSize: "12px" } }, bundleMissing.rows.length ? `+${bundleMissing.hidden} more, not listed here.` : `The server sent no id list.`, "The complete list, with the shot each id came from, is inside the zip:", /* @__PURE__ */ React.createElement("b", null, "project.json"), " \u2192 ", /* @__PURE__ */ React.createElement("b", null, "missing_media"), "."), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeBundleMissing }, "Close"))), pickCb && (pickAllowType ? /* @__PURE__ */ React.createElement("mg-gallery-picker", { ref: bindGalleryPicker, "default-type": pickKind, "show-type": true, sheet: mobileUI ? "" : void 0 }) : /* @__PURE__ */ React.createElement("mg-gallery-picker", { ref: bindGalleryPicker, "default-type": pickKind, sheet: mobileUI ? "" : void 0 })), importOpen && /* @__PURE__ */ React.createElement(ImportCollection, { onClose: () => setImportOpen(false), onImport: importCollection }));
+    } }, /* @__PURE__ */ React.createElement("div", { className: "sb-export-box" }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "sb-pick-t" }, "Bundle exported, ", bundleMissing.total, " file(s) left out"), /* @__PURE__ */ React.createElement("button", { className: "sb-pick-x", style: { marginLeft: "auto" }, onClick: closeBundleMissing }, "\xD7")), /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--coral)" } }, "\u26A0 No file on disk for these references \u2014 everything else exported normally."), bundleMissing.rows.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "sb-miss-list" }, bundleMissing.rows.map((row) => /* @__PURE__ */ React.createElement("div", { className: "sb-miss-row", key: row.mid }, row.where.length ? row.where.map((w, i) => /* @__PURE__ */ React.createElement("b", { key: i }, w)) : /* @__PURE__ */ React.createElement("i", null, "not referenced by any shot or cast entry in this project"), /* @__PURE__ */ React.createElement("span", { className: "sb-miss-id" }, row.mid)))), bundleMissing.hidden > 0 && /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--ink2)", fontSize: "12px" } }, bundleMissing.rows.length ? `+${bundleMissing.hidden} more, not listed here.` : `The server sent no id list.`, "The complete list, with the shot each id came from, is inside the zip:", /* @__PURE__ */ React.createElement("b", null, "project.json"), " \u2192 ", /* @__PURE__ */ React.createElement("b", null, "missing_media"), "."), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeBundleMissing }, "Close"))), pickCb && /* @__PURE__ */ React.createElement(
+      GalleryPicker,
+      {
+        defaultType: pickKind,
+        showType: pickAllowType,
+        sheet: mobileUI,
+        onPick: onGalleryPick,
+        onClose: () => setPickCb(null)
+      }
+    ), importOpen && /* @__PURE__ */ React.createElement(ImportCollection, { onClose: () => setImportOpen(false), onImport: importCollection }));
   }
   function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
-    const vidRef = useRef(null), trackRef = useRef(null);
-    const [dur, setDur] = useState(0);
-    const [range, setRange] = useState({ in: trimIn || 0, out: trimOut });
-    const [playing, setPlaying] = useState(false);
-    const [soundOn, setSoundOn] = useState(false);
-    const [cropping, setCropping] = useState(false);
-    const rangeRef = useRef(range);
+    const vidRef = useRef2(null), trackRef = useRef2(null);
+    const [dur, setDur] = useState2(0);
+    const [range, setRange] = useState2({ in: trimIn || 0, out: trimOut });
+    const [playing, setPlaying] = useState2(false);
+    const [soundOn, setSoundOn] = useState2(false);
+    const [cropping, setCropping] = useState2(false);
+    const rangeRef = useRef2(range);
     rangeRef.current = range;
-    const durRef = useRef(0);
+    const durRef = useRef2(0);
     durRef.current = dur;
-    const dragRef = useRef(null);
-    useEffect(() => {
+    const dragRef = useRef2(null);
+    useEffect2(() => {
       setRange({ in: trimIn || 0, out: trimOut });
     }, [trimIn, trimOut]);
-    useEffect(() => {
+    useEffect2(() => {
       const v = vidRef.current;
       if (v) v.muted = !(soundOn && playing);
     }, [soundOn, playing]);
@@ -7580,8 +8008,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       if (t > range.in + 0.15 && t < effOut - 0.15) onSplit(t);
       else alert("Move the playhead to where you want the cut first (not at either edge).");
     };
-    const cropRef = useRef(null);
-    const [cropDraft, setCropDraft] = useState(null);
+    const cropRef = useRef2(null);
+    const [cropDraft, setCropDraft] = useState2(null);
     const cropStart = (e) => {
       if (!cropping) return;
       e.preventDefault();
@@ -7679,15 +8107,15 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     ), /* @__PURE__ */ React.createElement("div", { className: "sb-trim-read" }, fT(range.in), " \u2192 ", fT(effOut), " \xB7 ", /* @__PURE__ */ React.createElement("b", null, fT(Math.max(0, effOut - range.in))), " kept", trimmed && /* @__PURE__ */ React.createElement("button", { className: "sb-trim-reset", onClick: () => onTrim(0, null) }, "reset"))));
   }
   function SequencePlayer({ clips, onClose }) {
-    const vRef = useRef(null);
-    const [i, setI] = useState(0);
-    const [muted, setMuted] = useState(true);
+    const vRef = useRef2(null);
+    const [i, setI] = useState2(0);
+    const [muted, setMuted] = useState2(true);
     const clip = clips[i];
-    useEffect(() => {
+    useEffect2(() => {
       const v = vRef.current;
       if (v) v.muted = muted;
     }, [muted, i]);
-    useEffect(() => {
+    useEffect2(() => {
       const v = vRef.current;
       if (!v || !clip) return;
       const seekPlay = () => {
@@ -7716,7 +8144,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         v.removeEventListener("ended", advance);
       };
     }, [i]);
-    useEffect(() => {
+    useEffect2(() => {
       const esc = (e) => {
         if (e.key === "Escape") onClose();
       };
@@ -7755,15 +8183,15 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     } }, "next \u25B6"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: onClose }, "\u2715 close"))));
   }
   function ImportCollection({ onImport, onClose }) {
-    const [colls, setColls] = useState([]);
-    const [sel, setSel] = useState("");
-    const [total, setTotal] = useState(0);
+    const [colls, setColls] = useState2([]);
+    const [sel, setSel] = useState2("");
+    const [total, setTotal] = useState2(0);
     const CAP = 48;
-    useEffect(() => {
+    useEffect2(() => {
       fetch("/api/collections").then((r) => r.json()).then((d) => setColls(d.collections || [])).catch(() => {
       });
     }, []);
-    useEffect(() => {
+    useEffect2(() => {
       if (!sel) {
         setTotal(0);
         return;
