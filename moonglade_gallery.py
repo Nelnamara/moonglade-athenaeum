@@ -15463,7 +15463,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     n = 0
                 cards += n
                 exp = (k.get("expires") or "")[:10]
-                cards_by.append({"name": k.get("name"), "count": n, "expires": exp})
+                # category (Model Card / Video Card) was fetched by list_kaisuukens all
+                # along but dropped before reaching cards_by, so the header tooltip and the
+                # new Account-detail modal's Cards tab couldn't tell the types apart. Default
+                # to "" (not None) so the JS `k.category ? ... : ""` check always compares a
+                # string. (Carried by hand from the card-coupon-ledger branch, 2026-08-07.)
+                cards_by.append({"name": k.get("name"), "count": n, "expires": exp,
+                                 "category": k.get("category") or ""})
                 if exp and n:
                     expiries.append(exp)
             card_expiry = min(expiries) if expiries else None
@@ -15503,7 +15509,16 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             local_tasks = distinct_task_count(db_path)
             coverage = (round(min(100.0, local_tasks / server_tasks * 100), 1)
                         if server_tasks else None)
+            # Paid/free credit split for the rail sub-line (Account-detail design, drift
+            # §37). A SUPPLEMENTARY read in its own guard: it must never break the core
+            # account response (credits/cards/coverage) if the split call fails -- a failure
+            # just leaves free/paid null, which the rail renders as an honest "split unknown".
+            try:
+                bal = core.credit_balance(session) or {}
+            except Exception:
+                bal = {}
             return jsonify({"credits": credits, "cards": cards,
+                            "credits_free": bal.get("free"), "credits_paid": bal.get("paid"),
                             "cards_by": cards_by, "card_expiry": card_expiry,
                             "claim_credits": claim_credits, "claim_ids": claim_ids,
                             "sub": {"end": (sub.get("endAt") or "")[:10],
@@ -15517,6 +15532,59 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                             # controls on an explicit False only, so an unreadable account
                             # never strips a paying member's options.
                             "is_member": core.account_is_member(me)})
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
+
+    # --- Account detail (cards · coupons · credit ledger) -------------------------------
+    # The web UI for the card-coupon-ledger branch's backend, wired into the Control Panel's
+    # "PixAI account" modal (Account-detail design, drift §37). All three are READ-ONLY
+    # account queries -- no mutation, no spend, no redeem -- and fail soft to {"error"}, 200
+    # exactly like /api/account, so the modal degrades gracefully when PixAI is unreachable.
+    def _acct_count(default, lo=1, hi=100):
+        try:
+            return max(lo, min(int(request.args.get("count") or default), hi))
+        except (TypeError, ValueError):
+            return default
+
+    @app.route("/api/account/card-history")
+    def api_account_card_history():
+        """Benefit-card (kaisuuken) usage. ?all=1 -> the lifetime type roster
+        (kaisuuken_type_catalog); otherwise the recent usage events (list_kaisuuken_logs,
+        forward-paginated via ?after=<cursor>). Read-only."""
+        try:
+            core, session = _gen_session()
+            if request.args.get("all") in ("1", "true", "yes"):
+                return jsonify(core.kaisuuken_type_catalog(session))
+            after = request.args.get("after") or None
+            return jsonify(core.list_kaisuuken_logs(session, first=_acct_count(20), after=after))
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
+
+    @app.route("/api/account/coupons")
+    def api_account_coupons():
+        """Coupons / Credit Boost. On-hand (available|locked) by default; ?history=1 swaps
+        to redeemed|expired. Informational only -- no redeem/apply here by design. Read-only,
+        forward-paginated via ?after=<cursor>."""
+        try:
+            core, session = _gen_session()
+            history = request.args.get("history") in ("1", "true", "yes")
+            statuses = core.COUPON_STATUSES_HISTORY if history else core.COUPON_STATUSES_ON_HAND
+            after = request.args.get("after") or None
+            return jsonify(core.list_extra_package_boosts(session, statuses=statuses,
+                                                          first=_acct_count(20), after=after))
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
+
+    @app.route("/api/account/credit-log")
+    def api_account_credit_log():
+        """Full credit movement history (purchase/gift/spend/refund). Newest-first;
+        BACKWARD-paginated via ?before=<cursor>. Optional ?reason=<type> filter. Read-only."""
+        try:
+            core, session = _gen_session()
+            before = request.args.get("before") or None
+            reason = request.args.get("reason") or None
+            return jsonify(core.list_credit_log(session, last=_acct_count(30),
+                                                before=before, reason=reason))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 

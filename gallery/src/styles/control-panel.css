@@ -31,10 +31,13 @@
 .mgcp-sidekick { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9.5px;
   letter-spacing: .2em; text-transform: uppercase; color: var(--overlay0); }
 .mgcp-sidehead { font-family: Georgia, serif; font-style: italic; font-size: 15px; margin: 6px 0 10px; }
-.mgcp-vital { display: flex; align-items: baseline; gap: 9px; padding: 6px 0; border-bottom: 1px dashed var(--surface0); }
+.mgcp-vital { display: flex; align-items: baseline; gap: 9px; padding: 6px 0; border-bottom: 1px dashed var(--surface0); flex-wrap: wrap; }
 .mgcp-vital b { font-family: Georgia, serif; font-weight: 400; font-size: 24px; line-height: 1; font-variant-numeric: tabular-nums; }
 .mgcp-vital span { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9.5px;
   letter-spacing: .14em; text-transform: uppercase; color: var(--overlay0); }
+/* Paid/free split under the Credits vital (Account-detail design, drift §37). */
+.mgcp-vitalsub { flex-basis: 100%; font-family: ui-monospace, Menlo, monospace; font-size: 10px;
+  color: var(--overlay0); margin-top: 2px; }
 .mgcp-mirror { display: flex; gap: 9px; align-items: flex-start; font-size: 12.5px; color: var(--subtext); margin-top: 8px; }
 .mgcp-mirrordot { width: 7px; height: 7px; border-radius: 50%; background: var(--emerald); flex: none; margin-top: 5px;
   animation: cpPulse 2.6s ease-in-out infinite; }

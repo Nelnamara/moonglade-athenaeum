@@ -7896,6 +7896,33 @@ def account_is_member(me):
     return bool(me.get("membership"))
 
 
+_CREDIT_BALANCE_QUERY = """
+query($userId: ID!) {
+  user(id: $userId) {
+    id
+    total
+    free
+    paid
+  }
+}
+"""
+
+
+def credit_balance(session):
+    """Read the account's credit balance broken down Paid vs Free via ad-hoc GraphQL
+    `user(id).{total,free,paid}` -- the site's own Membership & Credits page shows this
+    three-way split, where account_info()'s `quotaAmount` only ever surfaces the lump
+    total. Verified live 2026-08-02 (operation getUserQuota). Read-only; fails soft to
+    {"total": None, "free": None, "paid": None} on error, matching this module's other
+    account readers -- a caller must treat None as unknown, not zero."""
+    try:
+        data = gql_adhoc(session, _CREDIT_BALANCE_QUERY, {"userId": USER_ID}) or {}
+    except (PixAIError, requests.RequestException, ValueError):
+        return {"total": None, "free": None, "paid": None}
+    user = data.get("user") or {}
+    return {"total": user.get("total"), "free": user.get("free"), "paid": user.get("paid")}
+
+
 # PixAI's free-tier LoRAs-per-generation allowance. Their own generate panel prints it
 # verbatim beside the LoRA section as "Free: 0/3   Max: 15 (crowned)", measured 2026-07-28
 # on a lapsed account, and the owner independently confirmed 3 is his live cap. It is a
@@ -7957,6 +7984,10 @@ def run_account_info(args):
         credits = str(me.get("quotaAmount"))
     print("Account ID       : {}".format(me.get("id") or USER_ID))
     print("Credits (balance): {}".format(credits))
+    balance = credit_balance(session)
+    if balance["free"] is not None or balance["paid"] is not None:
+        print("  of which free  : {:,}".format(int(balance["free"] or 0)))
+        print("  of which paid  : {:,}".format(int(balance["paid"] or 0)))
     server_tasks = ((me.get("tasks") or {}).get("totalCount"))
     if server_tasks is not None:
         print("Lifetime tasks   : {:,}  (server's count of every generation you've made)".format(
@@ -7994,7 +8025,8 @@ def run_account_info(args):
             sub.get("provider", "-"), sub.get("status", "-"),
             renew, (sub.get("endAt") or "")[:10]))
     print("\n(Read-only. To buy credits or change your plan, use the browser.)")
-    return {"quota": me.get("quotaAmount"), "membership": mem.get("membershipId")}
+    return {"quota": me.get("quotaAmount"), "membership": mem.get("membershipId"),
+            "free_credits": balance["free"], "paid_credits": balance["paid"]}
 
 
 # --- Live event push (WebSocket) ------------------------------------------------
@@ -8347,6 +8379,233 @@ def list_kaisuukens(session):
     if rows is None:
         return []
     return [_normalize_kaisuuken(k) for k in rows]
+
+
+def list_kaisuuken_logs(session, first=50, after=None):
+    """Read the account's benefit-card USAGE history via GET /v2/kaisuuken/logs -- the
+    per-redemption ledger, distinct from the held-count summary /v2/kaisuukens/summary gives
+    (that one only has a live `count`; this one is the paper trail of every time a card was
+    actually spent). Verified live 2026-08-02 against the account's own history.
+
+    Each row: {record_id, template_name, category, task_type, task_id, action, credit_cost,
+    created_at}. `action` is "consumed" or "refunded" -- PixAI hands a card back (a NEW record,
+    same kaisuukenId, action=refunded) when the task it was attached to failed or was refused;
+    a single card can cycle consumed->refunded->consumed again across different tasks, so
+    record_id is not 1:1 with "one use". `credit_cost` is what the redemption would have cost
+    in credits had no card covered it -- useful for a "cards have saved you N credits" total,
+    never an actual charge (the whole point of the card is that it wasn't charged).
+
+    Cursor-paginated (Relay style): pass a previous call's `end_cursor` as `after` to page
+    forward; `has_next` says whether more exist. Read-only; fails soft on error (matching
+    list_kaisuukens()'s contract) since a glitched read should never block a display."""
+    try:
+        params = {"first": int(first)}
+        if after:
+            params["after"] = str(after)
+        data = _rest_get(session, "/kaisuuken/logs", params=params) or {}
+    except (PixAIError, requests.RequestException, ValueError):
+        return {"logs": [], "has_next": False, "end_cursor": None}
+    rows = data.get("data")
+    if rows is None:
+        return {"logs": [], "has_next": False, "end_cursor": None}
+    page = data.get("pageInfo") or {}
+    logs = [{
+        "record_id": r.get("id") or "",
+        "template_name": r.get("templateName") or "",
+        "category": r.get("categoryCode") or "",
+        "task_type": r.get("taskType") or "",
+        "task_id": str(r.get("taskId") or ""),
+        "action": r.get("action") or "",
+        "credit_cost": r.get("creditCost"),
+        "created_at": r.get("createdAt") or "",
+    } for r in rows]
+    return {"logs": logs, "has_next": bool(page.get("hasNextPage")), "end_cursor": page.get("endCursor")}
+
+
+def kaisuuken_type_catalog(session, max_pages=25):
+    """Page ALL the way back through list_kaisuuken_logs() to build a lifetime roster of
+    every benefit-card TEMPLATE this account has ever redeemed or been refunded -- the "what
+    types have I ever held" answer /v2/kaisuuken/summary can't give once a card type fully
+    expires out of current holdings (verified 2026-08-02: Reference Pro Only and Edit Pro
+    Only both fully cycled out of live holdings but still show up here going back ~a month).
+
+    Caveat: this only catches types actually USED (consumed or refunded) at least once -- a
+    card that expired untouched leaves no trace in this log, so it is a lower bound on
+    "every card type ever granted", not an exact one.
+
+    Capped at `max_pages` pages of 100 rows each as a politeness/safety bound -- an old
+    account could otherwise page indefinitely. Returns what it found plus whether the cap
+    was hit before the log ran out, so a caller can tell "that's everything" from "there's
+    more, ask for more pages"."""
+    catalog = {}
+    cursor, pages, hit_cap = None, 0, False
+    while pages < max_pages:
+        page = list_kaisuuken_logs(session, first=100, after=cursor)
+        for row in page["logs"]:
+            name = row["template_name"] or "(unknown)"
+            entry = catalog.setdefault(name, {
+                "category": row["category"], "task_type": row["task_type"],
+                "consumed": 0, "refunded": 0,
+                "first_seen": row["created_at"], "last_seen": row["created_at"]})
+            if row["action"] == "consumed":
+                entry["consumed"] += 1
+            elif row["action"] == "refunded":
+                entry["refunded"] += 1
+            ts = row["created_at"]
+            if ts and (not entry["first_seen"] or ts < entry["first_seen"]):
+                entry["first_seen"] = ts
+            if ts and (not entry["last_seen"] or ts > entry["last_seen"]):
+                entry["last_seen"] = ts
+        pages += 1
+        if not page["has_next"] or not page["logs"]:
+            break
+        cursor = page["end_cursor"]
+    else:
+        hit_cap = True
+    return {"templates": catalog, "pages_read": pages, "hit_page_cap": hit_cap}
+
+
+# --- Coupons ("Credit Boost", extra-package-boosts) ---------------------------
+# A reward type entirely SEPARATE from kaisuuken benefit cards, verified live 2026-08-02
+# (owner: "coupons are for monthly events, one is live now"). A coupon is a percentage
+# bonus applied to an "Extra Package" (credit-pack) purchase, not a free generation -- the
+# naming of its own endpoint (extra-package-boosts) confirms the mechanic. Lives on the
+# same oRPC /v2 REST surface as kaisuuken, but is its own resource, not a kaisuuken variant.
+
+#: The site's own "My Coupons" top list (what you currently HOLD) vs its "View coupon
+#: history" accordion (what's past) are the SAME endpoint, told apart only by `statuses` --
+#: both CONFIRMED via live network capture 2026-08-02, resolving what the first pass here
+#: left as an unconfirmed guess.
+COUPON_STATUSES_ON_HAND = ("available", "locked")
+COUPON_STATUSES_HISTORY = ("redeemed", "expired")
+
+
+def list_extra_package_boosts(session, statuses=COUPON_STATUSES_ON_HAND, first=50, after=None):
+    """Read the account's "Credit Boost" coupons via GET /v2/extra-package-boosts. Defaults
+    to what you currently HOLD (COUPON_STATUSES_ON_HAND) -- the primary ask ("list what we
+    have on hand", not just a spend history). Pass `statuses=COUPON_STATUSES_HISTORY` for
+    the past (redeemed + expired) view instead; both share this one endpoint.
+
+    Each row: {code, boost_percent, status, issued_by, note, locked_for_order_id,
+    available_since, available_until, created_at}. `locked_for_order_id` ties a redeemed
+    coupon to the specific purchase order it boosted -- the same link behind the credit log's
+    "Extra Package" rows carrying a matching reason tag (see the credit-ledger work).
+    Cursor-paginated (Relay style, same shape as list_kaisuuken_logs); read-only, fails soft
+    on error."""
+    try:
+        params = {"first": int(first)}
+        for i, s in enumerate(statuses):
+            params["status[{}]".format(i)] = s
+        if after:
+            params["after"] = str(after)
+        data = _rest_get(session, "/extra-package-boosts", params=params) or {}
+    except (PixAIError, requests.RequestException, ValueError):
+        return {"coupons": [], "has_next": False, "end_cursor": None}
+    rows = data.get("data")
+    if rows is None:
+        return {"coupons": [], "has_next": False, "end_cursor": None}
+    page = data.get("pageInfo") or {}
+    coupons = [{
+        "code": r.get("code") or "",
+        "boost_percent": r.get("boostRatePercentage"),
+        "status": r.get("status") or "",
+        "issued_by": r.get("issuedBy") or "",
+        "note": r.get("note") or "",
+        "locked_for_order_id": r.get("lockedForOrderId") or "",
+        "available_since": r.get("availableSince") or "",
+        "available_until": r.get("availableUntil") or "",
+        "created_at": r.get("createdAt") or "",
+    } for r in rows]
+    return {"coupons": coupons, "has_next": bool(page.get("hasNextPage")),
+            "end_cursor": page.get("endCursor")}
+
+
+# --- Credit Ledger (full spend/purchase/gift history) -------------------------
+# The REAL "spend history" behind the site's Membership & Credits -> Credit log table --
+# a much bigger surface than either kaisuuken_logs or extra_package_boosts, and NOT the
+# same endpoint as either: rides ad-hoc GraphQL (`user(id).quotaLogs`), not the /v2 REST
+# surface. Verified live 2026-08-02.
+
+_QUOTA_LOG_QUERY = """
+query($userId: ID!, $last: Int!, $before: String, $reason: String) {
+  user(id: $userId) {
+    id
+    quotaLogs(last: $last, before: $before, reason: $reason) {
+      pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
+      edges {
+        cursor
+        node { refId userId amount type extra createdAt updatedAt }
+      }
+    }
+  }
+}
+"""
+
+# `type` enum values CONFIRMED against real account data 2026-08-02 (one entry each,
+# sampled from a mixed page -- NOT exhaustive). PixAI's own filter dropdown offers ~25
+# distinct labels across 5 categories (Credits Spending / Purchased Credits / Earned
+# Rewards / Grants & Refunds / Special Rewards); only these four have a confirmed enum so
+# far. An unmapped type still comes through list_credit_log() (label falls back to the raw
+# enum string) -- this dict is a display nicety, not a gate.
+CREDIT_LOG_REASONS = {
+    "task_cost": "Generation Task",
+    "daily": "Daily Claim",
+    "event_gift": "Event Gift",
+    "extra_package": "Extra Package",
+}
+
+
+def list_credit_log(session, last=50, before=None, reason=None):
+    """Read the account's full credit transaction ledger via ad-hoc GraphQL
+    `user(id).quotaLogs` -- every credit gain AND loss (purchases, daily claims, event
+    gifts, generation spend, refunds, ...), not just generation cost. Distinct from
+    list_kaisuuken_logs()/list_extra_package_boosts(), which are their own narrower REST
+    endpoints for card/coupon-specific history.
+
+    Each row: {ref_id, amount, type, label, extra, created_at, updated_at}. `amount` is
+    signed (negative = spend, positive = gain). `type` is the raw enum (see
+    CREDIT_LOG_REASONS for the ones confirmed so far); `label` is the friendly name when
+    known, else the raw enum. `extra` is an opaque per-type payload -- e.g. the coupon-boost
+    "🎫 +15%" reason tag seen on an extra_package row in the site's own UI must live in
+    here, but no populated sample was captured to confirm its structure, so it is passed
+    through raw rather than parsed.
+
+    Backward-paginated (last/before over hasPreviousPage/startCursor), matching this
+    codebase's OWN established connection style for history listings (see
+    page_variables()) -- the opposite direction from kaisuuken/coupons' forward
+    first/after. Pass a previous call's `next_cursor` as `before` to page further into the
+    past. Optional `reason` filters server-side to one raw type, mirroring the site's own
+    per-category filter dropdown. Read-only; fails soft on error, matching every other
+    reader in this module."""
+    try:
+        variables = {"userId": USER_ID, "last": int(last)}
+        if before:
+            variables["before"] = str(before)
+        if reason:
+            variables["reason"] = str(reason)
+        data = gql_adhoc(session, _QUOTA_LOG_QUERY, variables) or {}
+    except (PixAIError, requests.RequestException, ValueError):
+        return {"entries": [], "has_more": False, "next_cursor": None}
+    quota_logs = (data.get("user") or {}).get("quotaLogs") or {}
+    edges = quota_logs.get("edges")
+    if edges is None:
+        return {"entries": [], "has_more": False, "next_cursor": None}
+    page = quota_logs.get("pageInfo") or {}
+    entries = []
+    for e in edges:
+        n = e.get("node") or {}
+        t = n.get("type") or ""
+        entries.append({
+            "ref_id": n.get("refId") or "",
+            "amount": n.get("amount"),
+            "type": t,
+            "label": CREDIT_LOG_REASONS.get(t, t),
+            "extra": n.get("extra"),
+            "created_at": n.get("createdAt") or "",
+            "updated_at": n.get("updatedAt") or "",
+        })
+    return {"entries": entries, "has_more": bool(page.get("hasPreviousPage")),
+            "next_cursor": page.get("startCursor")}
 
 
 def _target_model_id(parameters):
@@ -8804,6 +9063,95 @@ def run_cards(args):
     print("  Edit Pro card   -> --edit-image       (default model already matches)")
     print("  Reference Pro   -> --generate --model 1948514378441961474")
     return {"cards": len(cards), "total": total}
+
+
+def run_card_history(args):
+    """Print the account's benefit-card usage history (list_kaisuuken_logs) -- the paper
+    trail /v2/kaisuuken/summary can't show: every past redemption/refund, the task it was
+    attached to, and when. Read-only. Pass --card-history-all to page all the way back and
+    print the lifetime card-type catalog instead (kaisuuken_type_catalog) -- slower, several
+    requests, but answers "what card types have I ever held" once a type cycles out of
+    current holdings."""
+    session = _make_session(getattr(args, "token", None))
+    if getattr(args, "card_history_all", False):
+        result = kaisuuken_type_catalog(session)
+        templates = result["templates"]
+        if not templates:
+            print("No benefit-card history found (read-only; nothing was spent).")
+            return {"templates": 0}
+        print("Every benefit-card TYPE this account has ever used, across {} page(s){}:\n".format(
+            result["pages_read"],
+            " (stopped at the page cap -- there may be more)" if result["hit_page_cap"] else ""))
+        for name, info in sorted(templates.items(), key=lambda kv: kv[1]["last_seen"], reverse=True):
+            print("  {:<22} [{:<11}] consumed={:<3} refunded={:<3} last used {}".format(
+                name, info["category"] or "-", info["consumed"], info["refunded"],
+                str(info["last_seen"])[:10]))
+        return {"templates": len(templates)}
+    page = list_kaisuuken_logs(session, first=int(getattr(args, "card_history_count", 0) or 20))
+    logs = page["logs"]
+    if not logs:
+        print("No benefit-card history found (read-only; nothing was spent).")
+        return {"logs": 0}
+    print("Recent benefit-card usage (most recent first):\n")
+    for row in logs:
+        print("  {:<22} {:<9} task {:<20} {}".format(
+            row["template_name"], row["action"], row["task_id"],
+            str(row["created_at"])[:19].replace("T", " ")))
+    if page["has_next"]:
+        print("\n...more exist -- pass --card-history-all to page through the full history.")
+    return {"logs": len(logs)}
+
+
+def run_coupons(args):
+    """Print the account's "Credit Boost" coupons (list_extra_package_boosts) -- a reward
+    type separate from benefit cards: a percentage bonus on an Extra Package (credit-pack)
+    purchase, tied to promotional events. Defaults to what you currently HOLD (the primary
+    ask -- on-hand inventory, not just a spend history); pass --coupons-history for the past
+    (redeemed + expired) view instead. Read-only."""
+    session = _make_session(getattr(args, "token", None))
+    history = getattr(args, "coupons_history", False)
+    statuses = COUPON_STATUSES_HISTORY if history else COUPON_STATUSES_ON_HAND
+    page = list_extra_package_boosts(session, statuses=statuses)
+    coupons = page["coupons"]
+    if not coupons:
+        print("No {} coupons found (read-only; nothing was spent).".format(
+            "past" if history else "currently-held"))
+        return {"coupons": 0}
+    print("Credit Boost coupons ({}):\n".format(
+        "redeemed + expired history" if history else "currently held"))
+    for c in coupons:
+        print("  +{}%  {:<10} issued by {:<8} available {} -> {}".format(
+            c["boost_percent"], c["status"], c["issued_by"],
+            str(c["available_since"])[:10], str(c["available_until"])[:10]))
+    if page["has_next"]:
+        print("\n...more exist than shown here.")
+    return {"coupons": len(coupons)}
+
+
+def run_credit_log(args):
+    """Print the account's full credit transaction ledger (list_credit_log) -- the real
+    spend/purchase/gift history behind Membership & Credits -> Credit log, not just
+    generation cost. Read-only. Pass --credit-log-reason to filter to one raw type (see
+    CREDIT_LOG_REASONS for the ones with a confirmed friendly label) or --credit-log-before
+    <cursor> to page further into the past."""
+    session = _make_session(getattr(args, "token", None))
+    page = list_credit_log(session, last=int(getattr(args, "credit_log_count", 0) or 30),
+                            before=getattr(args, "credit_log_before", "") or None,
+                            reason=getattr(args, "credit_log_reason", "") or None)
+    entries = page["entries"]
+    if not entries:
+        print("No credit log entries found (read-only; nothing was spent).")
+        return {"entries": 0}
+    print("Credit log (most recent first):\n")
+    for e in entries:
+        amount = e["amount"] or 0
+        sign = "+" if amount >= 0 else ""
+        print("  {}{:<10,} {:<20} {}".format(
+            sign, amount, e["label"], str(e["created_at"])[:19].replace("T", " ")))
+    if page["has_more"]:
+        print("\n...more exist further back -- pass --credit-log-before {} to page.".format(
+            page["next_cursor"]))
+    return {"entries": len(entries)}
 
 
 def run_reconcile_deleted(args):
@@ -10340,6 +10688,33 @@ def main():
     ap.add_argument("--cards", action="store_true",
                     help="show your free-generation cards (kaisuuken) + their ids, then exit. "
                          "Read-only; pass an id to a run with --kaisuuken-id")
+    ap.add_argument("--card-history", action="store_true",
+                    help="show recent benefit-card usage (redemptions + refunds), then exit. "
+                         "Read-only. Pass --card-history-all for the full lifetime card-type "
+                         "catalog instead of a recent list")
+    ap.add_argument("--card-history-all", action="store_true",
+                    help="with --card-history, page all the way back and print every card "
+                         "TYPE ever used (several requests; read-only)")
+    ap.add_argument("--card-history-count", type=int, default=0, metavar="N",
+                    help="with --card-history, how many recent records to show (default 20)")
+    ap.add_argument("--coupons", action="store_true",
+                    help="show your currently-held Credit Boost coupons, then exit. "
+                         "Read-only -- a reward type separate from benefit cards. Pass "
+                         "--coupons-history for the redeemed + expired view instead")
+    ap.add_argument("--coupons-history", action="store_true",
+                    help="with --coupons, show the past (redeemed + expired) view instead "
+                         "of what you currently hold")
+    ap.add_argument("--credit-log", action="store_true",
+                    help="show your full credit transaction ledger (purchases, claims, "
+                         "gifts, generation spend, refunds), then exit. Read-only")
+    ap.add_argument("--credit-log-count", type=int, default=0, metavar="N",
+                    help="with --credit-log, how many recent entries to show (default 30)")
+    ap.add_argument("--credit-log-reason", default="", metavar="TYPE",
+                    help="with --credit-log, filter to one raw type (e.g. task_cost, daily, "
+                         "event_gift, extra_package -- see CREDIT_LOG_REASONS)")
+    ap.add_argument("--credit-log-before", default="", metavar="CURSOR",
+                    help="with --credit-log, page further into the past using a cursor "
+                         "printed by a previous --credit-log run")
     ap.add_argument("--contests", action="store_true",
                     help="list PixAI contests currently running (community + official), then "
                          "exit. Read-only. Add --all-contests to include ended ones")
@@ -10652,6 +11027,15 @@ def main():
             return
         if getattr(args, "cards", False):
             run_cards(args)
+            return
+        if getattr(args, "card_history", False) or getattr(args, "card_history_all", False):
+            run_card_history(args)
+            return
+        if getattr(args, "coupons", False) or getattr(args, "coupons_history", False):
+            run_coupons(args)
+            return
+        if getattr(args, "credit_log", False):
+            run_credit_log(args)
             return
         if getattr(args, "contests", False):
             run_contests(args)

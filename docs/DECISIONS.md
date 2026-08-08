@@ -5738,3 +5738,44 @@ was waiting on.
 **Tally:** 6 Shipped · 6 In Development · 15 Scope · 1 Hold. The In-Development cluster is
 the real active backlog; the two spend/card items collapse into the card-coupon-ledger
 React port.
+
+### Account detail ported to React — cards · coupons · credit ledger (+ a real broken-query finding)  ·  *2026-08-07*
+
+The card-coupon-ledger branch's backend (benefit-card usage, coupons, credit ledger,
+paid/free split) got its web UI, built to the same-day locked design (Control Panel.dc.html
+account-detail, drift §37, handoff-2026-08-07b — Claude Design answered the
+`request-account-detail.md` brief this session). This is a re-implementation onto
+design-final-pass, NOT a branch merge: the branch is 6 commits off master and its
+moonglade_gallery.py edits target the demolished classic frontend. The backend
+(moonglade_backup.py) cherry-picked clean (byte-identical anchors); the gallery UI is
+greenfield React.
+
+**Shipped:** `AccountSubOverlay.jsx` (clones the Trash/Users sub-overlay chrome per the
+design) launched from a new "PixAI account" Control Panel tile; balance strip + three tabs
+(Cards · Coupons · Credit ledger, owner-priority order). Rail gains a free-cards vital and a
+paid/free credit sub-line. Three new READ-ONLY routes (`/api/account/card-history`,
+`/api/account/coupons`, `/api/account/credit-log`) + `/api/account` extended with the
+per-card `category` (Model/Video Card) and the split. All fail-soft, zero spend/mutate.
+Backend + its tests (test_coupons, test_credit_log, test_kaisuuken, test_network additions)
+reapplied; full suite green.
+
+**Verified live** against the real account: the Cards tab renders richly — on-hand chips
+(9× Tsubaki.2 Model Card, 9× V4.0 Preview Video Card, …), the full lifetime roster (Edit
+Pro 30 used/10 refunded, Tsubaki.2 77/1, V4.0 Preview Lite 96/21, real first/last-seen
+dates), and usage history. Coupons + ledger render honest empty states (this account holds
+0 coupons; ledger empty). Rail free-cards vital + split sub-line render.
+
+**REAL BUG the port surfaced — the paid/free split query is malformed.** `credit_balance()`
+(from the branch) sends an ad-hoc GraphQL `user(id){ total free paid }`, but PixAI's schema
+rejects it: **`Cannot query field "total" on type "User"`** (probed live this session). Its
+docstring's "verified live 2026-08-02" claim was wrong — the card data works because it uses
+the REST `/v2/kaisuuken/*` surface, not this GraphQL query. `account_info` carries only
+`quotaAmount` (the lump total), no split. So the paid/free split has NO working source: the
+rail + balance-strip correctly show the design's own "— unknown" state, but it can never
+populate until the correct PixAI User-schema field names are captured (needs a live schema
+probe / owner input). The call is left wired + fail-soft so a one-line query correction lights
+it up later. The credit ledger returns a clean empty (valid `quotaLogs` field, no entries for
+this account) — plausibly genuine, re-check when an account with real quota history is
+available. **Cards + Coupons (the owner's priority surfaces) are fully real; only the credit
+split/ledger are the deferred/unverified half — matching the owner's own "ledger is least
+important, a byproduct" tagging.**

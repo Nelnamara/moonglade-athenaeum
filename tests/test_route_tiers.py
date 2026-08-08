@@ -233,6 +233,9 @@ ROUTE_TIERS = {
 
     # read-only API surface
     ("api_account", "GET"): LOGIN,
+    ("api_account_card_history", "GET"): LOGIN,
+    ("api_account_coupons", "GET"): LOGIN,
+    ("api_account_credit_log", "GET"): LOGIN,
     ("api_achievements", "GET"): LOGIN,
     ("api_artwork_views", "GET"): LOGIN,
     ("api_collections", "GET"): LOGIN,

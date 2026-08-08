@@ -3,6 +3,7 @@ import "../styles/overlays.css";
 import "../styles/control-panel.css";
 import useControlPanel, { postJSON, DEDUP_STAGES } from "../hooks/useControlPanel.js";
 import useScrollLock from "../hooks/useScrollLock.js";
+import AccountSubOverlay from "./AccountSubOverlay.jsx";
 
 /* Control Panel -- design spec: Control Panel.dc.html. Ported as a MODAL, per the owner's
    live 2026-08-02 correction ("Control panel is now ALSO modal. no separate pages anymore")
@@ -81,7 +82,7 @@ function ledgerResult(j) {
 export default function ControlPanelOverlay({ onClose, boot, account }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const [tab, setTab] = useState("maint");
-  const [subOverlay, setSubOverlay] = useState(null); // 'users' | 'trash'
+  const [subOverlay, setSubOverlay] = useState(null); // 'users' | 'trash' | 'account'
 
   // Control Panel.dc.html:240-243 -- the library-folder picker. The design's own
   // <input type="file" webkitdirectory> can't actually supply what /api/library-path
@@ -243,12 +244,26 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                 <div className="mgcp-sidehead">At a glance</div>
                 {[
                   ["images", summary.stats.images], ["videos", summary.stats.videos],
-                  ["collections", summary.stats.collections], ["credits", credits],
+                  ["collections", summary.stats.collections],
                 ].map(([label, num]) => (
                   <div className="mgcp-vital" key={label}>
                     <b>{typeof num === "number" ? num.toLocaleString() : num}</b><span>{label}</span>
                   </div>
                 ))}
+                {/* Credits vital gains the paid/free split sub-line (Account-detail design,
+                    drift §37); null split -> an honest "unknown", never a fake zero. And
+                    free cards is its own vital (owner priority: cards first). */}
+                <div className="mgcp-vital">
+                  <b>{credits}</b><span>credits</span>
+                  <div className="mgcp-vitalsub">
+                    {account && account.credits_paid != null && account.credits_free != null
+                      ? Number(account.credits_paid).toLocaleString() + " paid · " + Number(account.credits_free).toLocaleString() + " free"
+                      : "paid / free split — unknown"}
+                  </div>
+                </div>
+                <div className="mgcp-vital">
+                  <b>{cards != null ? cards.toLocaleString() : "—"}</b><span>free cards</span>
+                </div>
               </div>
 
               <div>
@@ -596,6 +611,17 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                       <button type="button" className="mgcp-smallchip">Manage…</button>
                     </div>
 
+                    {/* PixAI account (cards · coupons · credit ledger) -- named "PixAI
+                        account" to avoid colliding with the local-users "Accounts" tile
+                        above. Read-only launcher (Account-detail design, drift §37). */}
+                    <div className="mgcp-tile mgcp-tile3 click" onClick={() => setSubOverlay("account")}>
+                      <div className="mgcp-mkick">PixAI account</div>
+                      <div className="mgcp-tilesmall">
+                        {credits} credits{cards != null ? " · " + cards + " free cards on hand" : ""}
+                      </div>
+                      <button type="button" className="mgcp-smallchip">Open…</button>
+                    </div>
+
                     <div className="mgcp-tile mgcp-tile3">
                       <div className="mgcp-mkick">Catalog &amp; files</div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
@@ -667,6 +693,9 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
       )}
       {subOverlay === "trash" && (
         <TrashSubOverlay isLocal={isLocal} onClose={() => setSubOverlay(null)} />
+      )}
+      {subOverlay === "account" && (
+        <AccountSubOverlay onClose={() => setSubOverlay(null)} />
       )}
       {power && (
         <PowerModal mode={power} phase={powerPhase} error={powerErr} onClose={closePower} />
