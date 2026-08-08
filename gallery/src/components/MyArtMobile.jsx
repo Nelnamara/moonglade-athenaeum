@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { fmt } from "../hooks/useMyArt.js";
+import useSheet from "../hooks/useSheet.js";
 import MobileSheet from "./MobileSheet.jsx";
 import "../styles/control-mobile.css";
 import "../styles/create-mobile.css";
@@ -69,8 +70,8 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
   const [loras, setLoras] = useState(null);
   const [lorasErr, setLorasErr] = useState("");
 
-  const [sheet, setSheet] = useState(null);   // 'sort' | 'cardmenu' | 'cardtags' | 'bulkask' | null
-  const [closing, setClosing] = useState(false);
+  // 'sort' | 'cardmenu' | 'cardtags' | null -- shared timer-safe machine (hooks/useSheet.js)
+  const { sheet, closing, open: openSheet, close: closeSheet } = useSheet(280);
   const [menuId, setMenuId] = useState(null);
   const [tagsId, setTagsId] = useState(null);
   const [tagDraft, setTagDraft] = useState("");
@@ -79,11 +80,6 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  const closeSheet = () => {
-    setClosing(true);
-    setTimeout(() => { setSheet(null); setClosing(false); }, 280);
-  };
-  const openSheet = (name) => { setSheet(name); setClosing(false); };
 
   const load = () => fetch("/api/myart/items")
     .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))

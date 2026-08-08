@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import useSheet from "../hooks/useSheet.js";
 import MobileSheet from "./MobileSheet.jsx";
 import "../styles/publish.css";
 import "../styles/publish-mobile.css";
@@ -47,14 +48,13 @@ export default function PublishMobile({ mediaId, onClose, onPublished }) {
   const [priv, setPriv] = useState(false);
   const [hidePrompts, setHidePrompts] = useState(false);
 
-  const [sheet, setSheet] = useState(null);   // 'strip' | 'confirm' | null
-  const [closing, setClosing] = useState(false);
+  // 'confirm' | null -- shared timer-safe machine (hooks/useSheet.js)
+  const { sheet, closing, open: openSheet, close: closeSheet } = useSheet(280);
   const [ask, setAsk] = useState(null);
   const [done, setDone] = useState(null);
   const [busy, setBusy] = useState(false);
   const [sugs, setSugs] = useState(null);
 
-  const closeSheet = () => { setClosing(true); setTimeout(() => { setSheet(null); setClosing(false); }, 280); };
 
   useEffect(() => {
     if (!mid) return;
@@ -125,14 +125,17 @@ export default function PublishMobile({ mediaId, onClose, onPublished }) {
     try {
       const p = await post({});
       if (p.error) { setErr(p.error); setBusy(false); return; }
-      setAsk(p); setSheet("confirm"); setClosing(false);
+      setAsk(p); openSheet("confirm");
     } catch (e) { setErr(String(e.message || e)); } finally { setBusy(false); }
   };
   const confirm = async () => {
     setBusy(true); setErr("");
     try {
       const res = await post({ confirm: true });
-      if (res.error) { setErr(res.error); return; }
+      // Close the sheet on failure -- the error note renders in the main form,
+      // UNDER the sheet's scrim; leaving the sheet up showed the user nothing
+      // (desktop PublishOverlay collapses its ask the same way).
+      if (res.error) { setErr(res.error); closeSheet(); return; }
       setDone(res); closeSheet();
       if (onPublished) onPublished(mid);
     } catch (e) { setErr(String(e.message || e)); } finally { setBusy(false); }

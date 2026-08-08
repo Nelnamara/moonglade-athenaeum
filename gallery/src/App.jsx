@@ -143,10 +143,18 @@ export default function App({ boot }) {
     setContactSheetTarget({ ids: ids || [], collectionName: collectionName || "" });
     setOverlay("contactsheet");
   }, []);
-  // Esc closes the overlay FIRST (capture beats the drawer's own Esc ladder).
+  // Esc closes the overlay FIRST (capture beats the drawer's own Esc ladder) --
+  // EXCEPT where a layer on top owns its own Escape ladder: the Control Panel
+  // closes its Users/Trash sub-overlay first and deliberately refuses while the
+  // power modal is up, and an open gallery picker closes itself (its listener
+  // lives in the web component's connectedCallback). Capture-closing over those
+  // nuked the whole layer stack and made their handlers dead code. Found by the
+  // 2026-08-07 branch review.
   useEffect(() => {
     const onKey = (e) => {
       if (e.key !== "Escape" || !overlayRef.current) return;
+      if (overlayRef.current === "panel") return;   // panel runs its own ladder
+      if (isPickerOpen()) return;                   // picker dismisses itself
       e.stopPropagation();
       setOverlay(null);
     };

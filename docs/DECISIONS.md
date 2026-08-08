@@ -5572,6 +5572,68 @@ lower-confidence unverified findings banked in the workflow output (notable clus
 the three Mobile screens duplicate their desktop counterparts' state machines
 wholesale — a shared-hook refactor candidate, deliberately not rushed).
 
+### Branch-review fixes, round 2: 8 confirmed findings cleared  ·  *2026-08-07*
+
+Chipped through the confirmed list from the entry above (owner: "lets chip away"). All
+fixed against the real code, full suite green (1615; one full-suite-only flake noted
+below):
+
+- **`/api/login` test coverage** — the standout gap: the LIVE auth path since Aug 1 had
+  none. New `tests/test_api_login.py` (14 tests) ported from `test_web_auth.py`'s classic
+  coverage: JSON sign-in, wrong-password/unknown-user error-string PARITY (anti-
+  enumeration), the shared IP-lockout counter (proven shared with the classic form),
+  mode=create bootstrap (local+zero-accounts only; refused once an account exists;
+  refused from a LAN address), and verbatim error-text parity with classic for wrong-
+  password and lockout. **Found while porting + fixed:** `/api/login` never rotated
+  `session["csrf"]` on a failed POST — classic login() always does ("a consumed/known-bad
+  token must never stay silently resubmittable"). Added a `_fail()` helper that rotates
+  and returns the fresh token in the error payload; `LoginPage.jsx` + `useLogin.js` now
+  adopt `d.csrf` so a SPA (no hidden field to re-render) stays retryable after a failure.
+- **Duplicate-review keeper protection** — the guard was a raw-string `path == keep_path`
+  compare, so an aliased spelling of the keeper (`images//a.png`, `images\a.png`) slipped
+  into the remove list and could quarantine the keeper's only copy. Now compares
+  `_resolve_under()`-normalized paths (raw compare kept as a fallback for unresolvable
+  strings). `moonglade_gallery.py` ~15359.
+- **useControlPanel `postJSON` throw → stuck busy** — dozens of Panel actions await it
+  between setBusy(true/false) with no try/catch; a network error latched the control
+  forever (importTask's 'running' guard even blocked all future clicks). `postJSON` now
+  resolves `{error}` instead of rejecting, routing every failure through callers'
+  existing `d.error` branch.
+- **GenerateDrawer Edit-source nonce** — re-sending the SAME image to Edit after the user
+  cleared/swapped the source silently did nothing (a bare-string setState is a same-value
+  no-op, so EditTab's `[initialSource]` effect never re-fired). editSource is now
+  `{mid, n}` with a bumping counter, so every hand-off is a new object. Both entry points
+  (lightbox request + FiltersPanel send-to-edit) go through one `sendToEdit()`.
+- **App.jsx capture-Escape over layered overlays** — the capture-phase handler
+  `stopPropagation()`+closed the whole overlay before the Control Panel's own Escape
+  ladder (sub-overlay first, refuse during power modal) or an open gallery picker could
+  see the key. Now skips `overlay === "panel"` and `isPickerOpen()`, letting those layers
+  run their own handlers.
+- **MobileSheet timer-race** — the racy `{sheet, closing, 280ms timer}` trio was hand-
+  rolled (subtly wrong) in AppMobile/MyArtMobile/PublishMobile/TrainMobile while
+  GalleryMobile had the ONE correct version privately. Promoted it to `hooks/useSheet.js`
+  (clearTimeout on both open and close + unmount) and migrated all five callers; reopening
+  a sheet within the exit window no longer inherits a stale unmount timer. AppMobile's
+  220ms MobileScreen pair uses the same hook with `ms=220`.
+- **PublishMobile/TrainMobile confirm error hidden** — a confirm-step failure set `err`
+  but left the sheet open, and the error note renders in the form UNDER the sheet's scrim.
+  Both now `closeSheet()` on error so the failure is visible (matches desktop
+  PublishOverlay collapsing its ask).
+- **Dead files** — `Strip.jsx` + `ArtBand.jsx` deleted (imported by nothing; their markup
+  already folded into FiltersPanel/Banner, noted in those files' comments).
+
+**Owner-noted, NOT changed (deferred):** `/api/duplicates` re-hashing the whole library
+per request (real inefficiency, occasional page — cache when convenient), the price-quote
+debounce machinery copied 4×, and the mobile-duplicates-desktop cluster (both pay off
+naturally when those files are rewritten in the vanilla-JS retirement campaign, not worth
+a standalone churn now).
+
+**Full-suite flake, not a regression:** `test_med_backup_pacing.py`'s explicit-delay
+pacing test intermittently fails ONLY under full-suite parallel load (passes in isolation
+and in every touched-area run) — a real timing sensitivity in that test's wall-clock
+assertion under a loaded machine, worth making injectable-clock later, unrelated to any
+change here.
+
 ### Classic-UI demolition readiness — mapped, verdict: closer than it looks  ·  *2026-08-07*
 
 Same workflow, second half (3 mappers + synthesis, cross-checked against code). Full

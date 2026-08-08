@@ -26,8 +26,12 @@ export default function EditTab({ visible, initialSource }) {
 
   const set = (patch) => setS((old) => ({ ...old, ...patch }));
 
-  // an entry point (lightbox / context menu) can hand us a source
-  useEffect(() => { if (initialSource) set({ source: initialSource }); }, [initialSource]);
+  // An entry point (lightbox / filters panel) hands us {mid, n} -- a fresh object
+  // per hand-off, so re-sending the SAME image still re-applies after the user
+  // cleared or swapped the source (see GenerateDrawer's editSource comment).
+  useEffect(() => {
+    if (initialSource && initialSource.mid) set({ source: initialSource.mid });
+  }, [initialSource]);
 
   // presets load lazily, once, when the tab is first shown
   useEffect(() => {

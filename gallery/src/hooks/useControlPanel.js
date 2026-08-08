@@ -51,12 +51,22 @@ const POLL_MS = 1200;
 const PING_MS = 800;
 const PING_TRIES_MAX = 50;
 
+// Never throws: a network failure or non-JSON body resolves to {error} instead of
+// rejecting. Dozens of Panel actions await this between setBusy(true)/setBusy(false)
+// with no try/catch -- a rejection skipped the reset and latched that control busy
+// forever (importTask's 'running' guard even blocked all future clicks). Resolving
+// {error} routes every failure through the d.error branch callers already have.
+// Found by the 2026-08-07 branch review.
 export async function postJSON(url, body) {
-  const r = await fetch(url, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body || {}),
-  });
-  return r.json();
+  try {
+    const r = await fetch(url, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    return await r.json();
+  } catch (e) {
+    return { error: String((e && e.message) || e) };
+  }
 }
 
 // Ported verbatim from ControlPanelOverlay.jsx's own DEDUP_STAGES -- the Tend section's
