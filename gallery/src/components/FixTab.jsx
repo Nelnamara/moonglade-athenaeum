@@ -3,6 +3,7 @@ import { FIX_COLORS, FIX_MAX_BOXES, FIX_MIN_PX, scaleBoxes } from "../gen/editCo
 import { submitTask, useResultLines } from "../gen/submitTask.js";
 import { askPicker } from "./PickerHost.jsx";
 import { ResultLines } from "./EditTab.jsx";
+import CostBadge from "./CostBadge.jsx";
 
 /* The Fix tab: drag boxes over hands and faces, PixAI repairs what is inside
    them. Two things make this surface unlike every other:
@@ -22,7 +23,6 @@ export default function FixTab({ visible }) {
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
   const costRef = useRef(null);
-  const costHost = useRef(null);
   const drag = useRef(null);
   const busyRef = useRef(false);
   const seq = useRef(0);
@@ -73,23 +73,6 @@ export default function FixTab({ visible }) {
     clearTimeout(timer.current);
     timer.current = setTimeout(fireCost, 250);
   }, [fireCost]);
-
-  useEffect(() => {
-    if (!visible) return;
-    const host = costHost.current;
-    if (!host || host.firstChild) return;
-    if (window.customElements && window.customElements.get("mg-cost-badge")) {
-      const el = document.createElement("mg-cost-badge");
-      // no card-label: a Fix can never be card-covered
-      el.setAttribute("hint", "Drag a box over a hand or face to see the cost.");
-      host.appendChild(el);
-      costRef.current = el;
-      fireCost();
-    } else {
-      host.textContent = "⚠ Couldn't verify the cost — a Fix always spends credits.";
-      host.className = "gd-cost gd-costfail";
-    }
-  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- the canvas: draw, paint, resize ---- */
   const paint = useCallback(() => {
@@ -220,7 +203,10 @@ export default function FixTab({ visible }) {
       )}
 
       <div className="gd-go">
-        <span ref={costHost} className="gd-cost" />
+        {/* no cardLabel: a Fix can never be card-covered */}
+        <span className="gd-cost">
+          <CostBadge ref={costRef} hint="Drag a box over a hand or face to see the cost." />
+        </span>
         <span className="sp" />
         <button className="gen" disabled={!source || !boxes.length || busy}
           title={!source ? "Pick an image first"

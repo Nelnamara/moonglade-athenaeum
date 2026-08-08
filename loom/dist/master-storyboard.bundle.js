@@ -399,9 +399,9 @@ var LoomBundle = (() => {
     if (d.phase === "failed") return { phase: "failed", msg: friendlyGenErr(d.error || d.status || "failed") };
     return { phase: "pending" };
   }
-  function buildShotListText(project, fmt3, actLetter2, shotText2) {
+  function buildShotListText(project, fmt4, actLetter2, shotText2) {
     let out = `${project.name}
-Runtime target ${fmt3(project.target)}
+Runtime target ${fmt4(project.target)}
 `;
     if ((project.assets || []).length) {
       out += `
@@ -1953,6 +1953,160 @@ ${"=".repeat(48)}
     ));
   }
 
+  // ../gallery/src/components/CostBadge.jsx
+  function fmt2(n) {
+    return Number(n).toLocaleString();
+  }
+  var DEFAULT_HINT = "No cost yet \u2014 nothing to price.";
+  var ERR_TEXT = "Couldn't verify the cost \u2014 generating may spend credits.";
+  var ERR_TITLE = "Couldn't verify the cost or free-card coverage. Generating may spend credits.";
+  function expiryNote(v) {
+    if (v == null || v === "") return null;
+    let t;
+    if (typeof v === "number") t = v < 1e12 ? v * 1e3 : v;
+    else t = Date.parse(String(v));
+    if (!isFinite(t)) return null;
+    const days = Math.ceil((t - Date.now()) / 864e5);
+    const when = days < 0 ? "expired" : days === 0 ? "expires today" : days === 1 ? "expires tomorrow" : "expires in " + days + " days";
+    return { text: when, title: new Date(t).toLocaleString(), days };
+  }
+  function classify(resp) {
+    const d = resp && typeof resp === "object" ? resp : null;
+    if (!d) return { state: "error", note: "", msg: "", raw: null };
+    if (d.error) return { state: "error", note: "", msg: String(d.error), raw: d };
+    if (d.free) return { state: "free", note: "", msg: "", raw: d };
+    if (d.cost != null && isFinite(Number(d.cost))) return { state: "paid", note: "", msg: "", raw: d };
+    if (d.note) return { state: "idle", note: String(d.note), msg: "", raw: d };
+    return { state: "error", note: "", msg: "", raw: d };
+  }
+  function build(view, props) {
+    const { state, note, msg, raw } = view;
+    const d = raw || {};
+    const warn = (props.warn || "").trim();
+    const compact = !!props.compact;
+    let main = "", sub = null, title = "", val = "", lab = "", tip = "", dot = false;
+    if (state === "free") {
+      const card = d.card_name || (props.cardLabel || "").trim() || "a free card";
+      const leftN = d.cards != null && isFinite(Number(d.cards)) ? fmt2(d.cards) + " left" : "";
+      const savesN = d.cost != null && isFinite(Number(d.cost)) ? fmt2(d.cost) : "";
+      main = "\u{1F3AB} FREE \u2014 " + card + " covers this" + (leftN ? " (" + leftN + ")" : "") + (savesN ? " \xB7 saves ~" + savesN + " credits" : "");
+      sub = expiryNote(d.card_expires);
+      title = "A free card is applied automatically at submit \u2014 this generation spends 0 credits.";
+      val = "FREE";
+      lab = card + (leftN ? " \xB7 " + leftN : "");
+      tip = title + (savesN ? " Saves ~" + savesN + " credits." : "");
+      if (sub) {
+        tip += " Card " + sub.text + " \u2014 " + sub.title + ".";
+        dot = sub.days <= 7;
+      }
+    } else if (state === "paid") {
+      const n = Number(d.cost);
+      main = n === 0 ? "0 credits \u2014 this spends nothing" : (warn ? "\u26A0 " + warn + " \xB7 " : "") + "\u2248 " + fmt2(n) + " credits";
+      title = n === 0 ? "Priced at zero credits. No free card was involved." : "No free card covers this \u2014 generating spends credits.";
+      val = n === 0 ? "0" : (warn ? "\u26A0 " : "") + "\u2248 " + fmt2(n);
+      lab = n === 0 ? "credits \u2014 spends nothing" : "credits";
+      tip = n !== 0 && warn ? "\u26A0 " + warn + ". " + title : title;
+    } else if (state === "error") {
+      main = "\u26A0 " + (msg || ERR_TEXT);
+      title = ERR_TITLE;
+      tip = ERR_TITLE;
+    } else if (state === "checking") {
+      main = "Checking cost\u2026";
+    } else {
+      main = note || (props.hint || "").trim() || DEFAULT_HINT;
+    }
+    const text = main + (sub ? " \xB7 " + sub.text : "");
+    return { state, warn, compact, main, sub, title, val, lab, tip, dot, text, d };
+  }
+  function detailOf(m) {
+    const d = m.d || {};
+    return {
+      state: m.state,
+      settled: m.state === "free" || m.state === "paid",
+      cost: d.cost != null && isFinite(Number(d.cost)) ? Number(d.cost) : null,
+      free: m.state === "free",
+      cards: d.cards != null ? d.cards : null,
+      card_name: d.card_name != null ? d.card_name : null,
+      card_expires: d.card_expires != null ? d.card_expires : null,
+      text: m.text,
+      raw: m.raw
+    };
+  }
+  var IDLE = { state: "idle", note: "", msg: "", raw: null };
+  var CostBadge = forwardRef(function CostBadge2(props, ref) {
+    const { hint, warn, compact, cardLabel, onCost, id, className, style } = props;
+    const [view, setView] = useState(IDLE);
+    const viewRef = useRef(view);
+    const propsRef = useRef(props);
+    const mRef = useRef(null);
+    viewRef.current = view;
+    propsRef.current = props;
+    useImperativeHandle(ref, () => ({
+      setPrice(resp) {
+        setView(classify(resp));
+      },
+      clear(h) {
+        setView({ state: "idle", note: h ? String(h) : "", msg: "", raw: null });
+      },
+      setChecking() {
+        setView((v) => ({ ...v, state: "checking", msg: "" }));
+      },
+      get state() {
+        return viewRef.current.state || "idle";
+      },
+      get settled() {
+        return viewRef.current.state === "free" || viewRef.current.state === "paid";
+      },
+      get free() {
+        return viewRef.current.state === "free";
+      },
+      get cost() {
+        const c = viewRef.current.raw && viewRef.current.raw.cost;
+        return c != null && isFinite(Number(c)) ? Number(c) : null;
+      },
+      get text() {
+        return mRef.current ? mRef.current.text : "";
+      },
+      get price() {
+        return viewRef.current.raw;
+      },
+      set price(v) {
+        setView(classify(v));
+      }
+    }), []);
+    const mounted = useRef(false);
+    useEffect(() => {
+      if (!mounted.current) {
+        mounted.current = true;
+        return;
+      }
+      if (typeof propsRef.current.onCost === "function") {
+        propsRef.current.onCost(detailOf(build(viewRef.current, propsRef.current)));
+      }
+    }, [view]);
+    const m = build(view, { hint, warn, compact, cardLabel });
+    mRef.current = m;
+    const dataWarn = m.state === "paid" && m.warn ? "1" : void 0;
+    const nativeTitle = m.title && !(m.compact && m.tip) ? m.title : void 0;
+    const showChip = m.compact && m.val;
+    return /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        id,
+        className: "cost-badge" + (m.compact ? " compact" : "") + (className ? " " + className : ""),
+        "data-state": m.state,
+        "data-warn": dataWarn,
+        role: "status",
+        "aria-live": "polite",
+        title: nativeTitle,
+        style
+      },
+      showChip ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-val" }, m.val), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-div" }), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-lab" }, m.lab), m.sub ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub" }, m.sub.text) : null, m.dot ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-dot", "aria-hidden": "true" }, "!") : null) : m.state === "checking" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, m.main, m.sub ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.sub.title }, m.sub.text) : null),
+      m.compact && m.tip ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-tip", "aria-hidden": "true" }, m.tip) : null
+    );
+  });
+  var CostBadge_default = CostBadge;
+
   // master-storyboard.jsx
   var { useState: useState2, useEffect: useEffect2, useRef: useRef2, useCallback: useCallback2, useMemo: useMemo2 } = React;
   var LV_TINTS = [
@@ -2203,7 +2357,7 @@ ${"=".repeat(48)}
     }));
   };
   var uid = () => Math.random().toString(36).slice(2, 9);
-  var fmt2 = (s) => {
+  var fmt3 = (s) => {
     s = Math.max(0, Math.round(s || 0));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   };
@@ -4080,7 +4234,7 @@ ${"=".repeat(48)}
             checked: imgAdv.promptHelper,
             onChange: (ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))
           }
-        ), " Prompt helper"), /* @__PURE__ */ React.createElement("mg-cost-badge", { ref: imgCostRef, hint: "Pick a model and write a prompt to see the cost.", "card-label": "a card" }), /* @__PURE__ */ React.createElement(
+        ), " Prompt helper"), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: imgCostRef, hint: "Pick a model and write a prompt to see the cost.", cardLabel: "a card" }), /* @__PURE__ */ React.createElement(
           "button",
           {
             className: "lv-go",
@@ -4104,7 +4258,7 @@ ${"=".repeat(48)}
             placeholder: "e.g. make it night, add rain, warmer key light\u2026",
             onChange: (ev) => patch2((c) => ({ ...c, editPrompt: ev.target.value }))
           }
-        ), /* @__PURE__ */ React.createElement("mg-cost-badge", { ref: editCostRef, hint: "Add a source image and instruction to see the cost.", "card-label": "an Edit card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyE || !src, onClick: () => genEdit(active) }, busyE ? ge.msg || "editing\u2026" : "\u2726 Edit the open frame"), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, routeTarget || active, "cast", active.c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", ge.routed))), editSub === "fixer" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Source \u2014 ", sel ? "this shot's" : "the draft's", " open frame"), src ? /* @__PURE__ */ React.createElement("div", { className: "lv-fixwrap" }, /* @__PURE__ */ React.createElement("img", { ref: fixImgRef, src: "/full/" + encodeURIComponent(src), alt: "source", onLoad: fixPaint, draggable: false }), /* @__PURE__ */ React.createElement(
+        ), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: editCostRef, hint: "Add a source image and instruction to see the cost.", cardLabel: "an Edit card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyE || !src, onClick: () => genEdit(active) }, busyE ? ge.msg || "editing\u2026" : "\u2726 Edit the open frame"), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, routeTarget || active, "cast", active.c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", ge.routed))), editSub === "fixer" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Source \u2014 ", sel ? "this shot's" : "the draft's", " open frame"), src ? /* @__PURE__ */ React.createElement("div", { className: "lv-fixwrap" }, /* @__PURE__ */ React.createElement("img", { ref: fixImgRef, src: "/full/" + encodeURIComponent(src), alt: "source", onLoad: fixPaint, draggable: false }), /* @__PURE__ */ React.createElement(
           "canvas",
           {
             ref: fixCanvasRef,
@@ -4134,7 +4288,7 @@ ${"=".repeat(48)}
             placeholder: "compose a new still from the references\u2026",
             onChange: (ev) => patch2((c) => ({ ...c, refPrompt: ev.target.value }))
           }
-        ), /* @__PURE__ */ React.createElement("mg-cost-badge", { ref: refCostRef, hint: "Add references and a prompt to see the cost.", "card-label": "an Edit card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyR || !refs.length, onClick: () => genRef(active) }, busyR ? gr.msg || "generating\u2026" : "\u2726 Generate from references"), gr.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gr.msg), gr.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gr.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "cast" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, routeTarget || active, "cast", active.c.id) }, "cast")), gr.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gr.routed)));
+        ), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: refCostRef, hint: "Add references and a prompt to see the cost.", cardLabel: "an Edit card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyR || !refs.length, onClick: () => genRef(active) }, busyR ? gr.msg || "generating\u2026" : "\u2726 Generate from references"), gr.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gr.msg), gr.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gr.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "cast" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, routeTarget || active, "cast", active.c.id) }, "cast")), gr.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gr.routed)));
       } else tabBody = /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "The ", /* @__PURE__ */ React.createElement("b", null, tab), " tab renders the shot on PixAI.");
       gen = /* @__PURE__ */ React.createElement("div", { className: "lv-gen" }, /* @__PURE__ */ React.createElement("div", { className: "lv-genhead" }, sel ? /* @__PURE__ */ React.createElement(React.Fragment, null, "\u2699 ", sel.code, " \xB7 ", sel.c.title || "untitled") : /* @__PURE__ */ React.createElement(React.Fragment, null, "\u2728 Draft generation ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\u2014 generate freely, then route or attach it to a shot")), sel && /* @__PURE__ */ React.createElement(
         "button",
@@ -7780,7 +7934,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setTimeout(() => URL.revokeObjectURL(url), 1e3);
     };
     const exportAll = () => download(
-      buildShotListText(project, fmt2, actLetter, shotText),
+      buildShotListText(project, fmt3, actLetter, shotText),
       `${project.name.replace(/\s+/g, "_")}_shotlist.txt`,
       "text/plain"
     );

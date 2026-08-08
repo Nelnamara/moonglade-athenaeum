@@ -1,0 +1,162 @@
+/* cost-badge.css — the <CostBadge> box, ported VERBATIM from static/mg-cost-badge.js's
+   injected CSS array (the four hand-written cost sentences collapsed onto one honest
+   renderer). Two mechanical transforms only:
+     mg-cost-badge         -> .cost-badge          (element selector -> class)
+     mg-cost-badge[compact]-> .cost-badge.compact  (compact is a CLASS in React, not an attr)
+   data-state / data-warn stay attributes (React renders data-* fine). Box values
+   (padding/radius/font-size/border) are mg-generate-drawer's .mgd-cost verbatim, so a
+   drawer that swaps its cost div for this gets a pixel-identical bar. Colour grammar:
+   emerald = covered (nothing spent), amber = spends and the host flagged it pricey, red =
+   could not verify and generating may spend. */
+
+.cost-badge {
+  display: block;
+  margin: 12px 0 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--surface0, #211f3a);
+  border: 1px solid var(--surface1, #3a3460);
+  font: 12.5px/1.4 system-ui, sans-serif;
+  color: var(--text, #d6d2e2);
+}
+.cost-badge[data-state="idle"],
+.cost-badge[data-state="checking"] { color: var(--subtext, #9a93ab); }
+.cost-badge[data-state="free"] { border-color: var(--emerald, #4fc99a); color: var(--emerald, #4fc99a); }
+.cost-badge[data-state="paid"][data-warn] { border-color: var(--peach, #fab387); color: var(--peach, #fab387); }
+.cost-badge[data-state="error"] { border-color: var(--red, #f38ba8); color: var(--red, #f38ba8); }
+
+/* compact: the credits chip (gallery-era spec) — metallic violet pill face. z 1 at rest,
+   z 7 while its billing tip shows (top of the 0-7 component band; the tip itself is z 5 as
+   a child, never a new band). */
+.cost-badge.compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 6px 15px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  white-space: nowrap;
+  border: 1px solid rgba(255, 255, 255, .22);
+  position: relative;
+  z-index: 1;
+  background: linear-gradient(150deg, rgba(222, 214, 246, .32) 0%, rgba(122, 96, 178, .34) 46%, rgba(24, 18, 44, .66) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .42), inset 0 -2px 4px rgba(20, 12, 40, .45), 0 5px 14px rgba(0, 0, 0, .4);
+}
+.cost-badge.compact:hover { z-index: 7; }
+/* chip keeps the spec's white border/neutral ink in the settled states; the honesty
+   grammar survives in the value (emerald FREE) and the red/amber cases below */
+.cost-badge.compact[data-state="free"] { color: var(--text, #d6d2e2); }
+.cost-badge.compact[data-state="error"] { border-color: var(--red, #f38ba8); }
+.cost-badge.compact[data-warn] { border-color: var(--peach, #fab387); }
+.cost-badge.compact[data-warn] .mgc-lab { color: var(--peach, #fab387); }
+/* muted treatment while there is nothing settled to read */
+.cost-badge.compact[data-state="idle"],
+.cost-badge.compact[data-state="checking"] { filter: saturate(.6) brightness(.82); }
+
+/* value · divider · label — the chip's internal anatomy */
+.cost-badge .mgc-val {
+  font-size: 15.5px;
+  font-weight: 800;
+  letter-spacing: -.01em;
+  font-variant-numeric: tabular-nums;
+  color: #f2ecff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, .45);
+}
+.cost-badge[data-state="free"] .mgc-val { color: #dcffee; }
+.cost-badge .mgc-div { width: 1px; height: 12px; background: rgba(255, 255, 255, .2); flex: none; }
+.cost-badge .mgc-lab {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, .62);
+}
+/* gold "!" membership/expiry-warning dot */
+.cost-badge .mgc-dot {
+  box-sizing: border-box;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  color: #2a1f06;
+  border: 1px solid rgba(255, 255, 255, .4);
+  flex: none;
+  text-shadow: none;
+  background: linear-gradient(150deg, #ffe9a8 0%, #d4af37 52%, #8a6c18 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6);
+}
+/* gold-bordered billing tooltip: right-anchored child of the chip, drops below with a 4px
+   drift. pointer-events none so it never traps the cursor. */
+.cost-badge .mgc-tip {
+  box-sizing: border-box;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 5;
+  width: 212px;
+  background: rgba(9, 7, 22, .96);
+  border: 1px solid rgba(212, 175, 55, .45);
+  border-radius: 9px;
+  padding: 8px 11px;
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text, #d6d2e2);
+  text-shadow: none;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .62);
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity .18s cubic-bezier(.2, .9, .24, 1), transform .18s cubic-bezier(.2, .9, .24, 1);
+}
+.cost-badge.compact:hover .mgc-tip { opacity: 1; transform: translateY(0); }
+.cost-badge .mgc-sub { display: block; margin-top: 2px; font-size: 11px; color: var(--overlay0, #6a6088); }
+/* On one line in compact, so it needs its own separator — without the ::before the expiry
+   butts straight against the label with no space at all (caught in the harness 2026-07-21).
+   The block form gets its gap from the line break instead. No margin: the chip's own flex
+   `gap` already spaces the segments apart. */
+.cost-badge.compact .mgc-sub {
+  display: inline;
+  margin: 0;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, .62);
+}
+.cost-badge.compact .mgc-sub::before { content: "· "; }
+/* the eclipse pip, matching the drawer's own in-flight moon at badge scale */
+.cost-badge .mgc-pip {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--lavender, #b692e6);
+  position: relative;
+  overflow: hidden;
+  vertical-align: -1px;
+  margin-right: 6px;
+  box-shadow: 0 0 7px rgba(182, 146, 230, .7);
+}
+.cost-badge .mgc-pip::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--surface0, #211f3a);
+  animation: mgc-eclipse 2.6s ease-in-out infinite;
+}
+@keyframes mgc-eclipse {
+  0% { transform: translateX(-102%); }
+  50% { transform: translateX(0); }
+  100% { transform: translateX(102%); }
+}

@@ -326,8 +326,13 @@ def _fire_cost(src):
 
 def test_fix_surface_mounts_the_shared_cost_badge():
     src = _src("components/FixTab.jsx")
-    assert 'document.createElement("mg-cost-badge")' in src, (
-        "the Fix surface no longer mounts <mg-cost-badge> -- it would be the only spend "
+    # Ported 2026-08-08 (no-vanilla campaign step 4): the vanilla <mg-cost-badge> custom
+    # element became the shared React <CostBadge> (forwardRef, same setPrice/setChecking/clear
+    # via costRef). A Fix is the one spend surface a free card can NEVER cover, so it must
+    # still carry the shared cost renderer, not a bespoke one.
+    assert "import CostBadge from" in src
+    assert "<CostBadge ref={costRef}" in src, (
+        "the Fix surface no longer mounts <CostBadge> -- it would be the only spend "
         "surface without the shared cost renderer")
     assert "onClick={run}" in src   # and a submit button wired to run()
 

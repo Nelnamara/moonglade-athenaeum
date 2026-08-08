@@ -50,7 +50,7 @@ import useLibrary, { filterQueryString } from "./hooks/useLibrary.js";
      already closes the overlay BEFORE the dock (capture-phase handler).
    - GenerateDock refit: the .mgx-dock-host wrapper + open/closing classes are
      the motion hooks; toggleDock/openDock/closeDock are the host verbs; the
-     separator bar's #mg-sep-cost <mg-cost-badge> is its price chip.
+     separator bar's compact <CostBadge> is its (dormant) price chip.
    - Grid refit: receives `thumb` (SIZE slider) — also exposed as --thumb on
      <main>; shell.css maps it onto the existing .grid columns until then. */
 

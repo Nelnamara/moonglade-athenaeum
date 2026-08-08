@@ -50,8 +50,8 @@ import "../styles/create-mobile.css";
        useGenerate({ costRef }), lifted HERE for the identical reason useLibrary()
        was: a prompt/model/LoRA/frame/reference draft survives a Create <->
        Gallery/Control tab switch instead of resetting on remount. costRef is
-       created here too (an imperative DOM handle to the real <mg-cost-badge>
-       CreateMobile mounts, the same pattern GenerateDrawer.jsx uses);
+       created here too (an imperative handle to the <CostBadge> CreateMobile
+       mounts, the same pattern GenerateDrawer.jsx uses);
      - cmode (Create's own Image/Edit/Video segmented-control state) and
        VideoMode itself (the shared <mg-generate-drawer> mount) -- lifted HERE
        2026-08-03 for a credit-safety reason, not just consistency: VideoMode
@@ -87,7 +87,7 @@ import "../styles/create-mobile.css";
        reason useGenerate() is: a picked source/refs/instruction/model draft
        survives a Create <-> Gallery/Control tab switch instead of resetting on
        CreateMobile's remount. editCostRef is its own separate ref (a second,
-       dedicated <mg-cost-badge> handle) -- never shared with Image mode's
+       dedicated <CostBadge> handle) -- never shared with Image mode's
        costRef, matching editCore's own no-shared-debounce rule (see
        useEditGenerate.js's header comment). Fixer stays an honest sub-placeholder
        this increment (no touch-canvas box-drawing reference implementation

@@ -1493,11 +1493,15 @@ def test_cost_badge_ships_with_every_price_surface(tmp_path):
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                          created_at="2025-01-01T00:00:00")])
     # The classic page and its inline gen-cost/edit-cost badges died with the classic
-    # cut (2026-08-08); the React shell at "/" is the gallery surface now, and it must
-    # keep loading the definition its badges upgrade from.
+    # cut (2026-08-08); the React shell at "/" is the gallery surface now. As of the
+    # no-vanilla campaign step 4 the shell's (and the Loom's) OWN cost lines are the React
+    # <CostBadge>, NOT the custom element -- but both still mount two STILL-vanilla elements
+    # that embed <mg-cost-badge>: <mg-generate-drawer> (the Video tab / the Loom's gen
+    # drawer) and <mg-upscale-panel>. So the definition must keep loading until those two
+    # are ported (steps 5 + 7), at which point this script tag and this test both retire.
     html = cli.get("/").get_data(as_text=True)
-    assert '/static/mg-cost-badge.js' in html            # the React shell's badges
-    assert '/static/mg-cost-badge.js' in pg._LOOM_SHELL  # the Loom's drawer needs it too
+    assert '/static/mg-cost-badge.js' in html            # the vanilla drawer/upscale embedders
+    assert '/static/mg-cost-badge.js' in pg._LOOM_SHELL  # the Loom's vanilla drawer needs it too
 
 
 def test_toasts_anchored_top_right(tmp_path):

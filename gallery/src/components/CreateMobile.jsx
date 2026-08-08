@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ASPECTS, SIZES, STEPS_FALLBACK, MODES as GEN_MODES,
   dims, goGate, loraIncompat, loraRange, loraStep,
@@ -8,6 +8,7 @@ import ModelFlyout from "./ModelFlyout.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import { askPicker } from "./PickerHost.jsx";
 import { ResultLines } from "./EditTab.jsx";
+import CostBadge from "./CostBadge.jsx";
 import "../styles/create-mobile.css";
 
 /* The Create tab, Image mode (design spec: Moonglade Mobile.dc.html isCreate
@@ -34,10 +35,10 @@ import "../styles/create-mobile.css";
        AppMobile.jsx now also mounts (previously desktop-only; without it
        "+ ref" would silently resolve to null and the field would be a dead
        tap -- see this file's build report for the full disclosure);
-     - the cost quote -- the real <mg-cost-badge> custom element, fed by
-       useGenerate's real /api/price debounce (refreshPrice()), mounted the
-       exact same way GenerateDrawer.jsx mounts it (an imperative DOM handle
-       via costRef, never JSX);
+     - the cost quote -- the shared <CostBadge>, fed by useGenerate's real
+       /api/price debounce (refreshPrice()), mounted the exact same way
+       GenerateDrawer.jsx mounts it (JSX in the footer, driven imperatively
+       through costRef);
      - Generate itself -- the real goGate()/generate() pair, real busy
        state, and a real results feed (the same gd-results/gd-res classes
        GenerateDrawer already uses) so a failed submit shows a real error,
@@ -73,7 +74,7 @@ import "../styles/create-mobile.css";
        shows for Edit (design_handoff/.../Moonglade Mobile.dc.html lines
        109-184: Prompt / Model / Source, +the enhance-only filter grid this
        build never reaches);
-     - the cost quote -- Edit's OWN separate <mg-cost-badge> mount (editCostRef,
+     - the cost quote -- Edit's OWN separate <CostBadge> mount (editCostRef,
        never shared with Image's costRef -- see useEditGenerate.js's header
        comment for why sharing them would resurrect the classic's
        no-price-on-?edit= bug) fed by useEditGenerate's real /api/price
@@ -236,59 +237,28 @@ export default function CreateMobile({
   // ownership contract is deliberately identical to MobileSheet.jsx's).
   const [advOpen, setAdvOpen] = useState(false);
   const [advClosing, setAdvClosing] = useState(false);
-  const costHost = useRef(null);
-  const editCostHost = useRef(null);
 
   const loraCap = account && account.lora_cap != null ? account.lora_cap : null;
   const gate = goGate(s, loraCap);
   const m = s.model;
 
-  /* <mg-cost-badge> mount -- identical contract to GenerateDrawer.jsx's own
-     effect: an imperative DOM handle via costRef, no fetch of its own, real
-     text when the script never loaded rather than a blank space next to a
-     live spend button. Runs on every real mount (including a remount after
-     a tab switch away and back -- the previous element, if any, is simply
-     garbage; a fresh one primes with a fresh refreshPrice() call). */
+  /* Prime the Image cost chip when Image mode is (re)entered. <CostBadge>'s ref
+     is live at commit, so refreshPrice() here always hits a mounted badge --
+     useGenerate lives up in AppMobile and already fired against a null costRef
+     before this screen mounted, so this explicit prime is what shows the draft's
+     price on entry (via costRef, never JSX). */
   useEffect(() => {
-    const host = costHost.current;
-    if (!host || host.firstChild) return;
-    if (window.customElements && window.customElements.get("mg-cost-badge")) {
-      const el = document.createElement("mg-cost-badge");
-      host.appendChild(el);
-      costRef.current = el;
-      refreshPrice();
-    } else {
-      host.textContent = "⚠ Couldn't verify the cost — generating may spend credits.";
-      host.className = "gd-cost gd-costfail";
-    }
+    if (cmode === "image") refreshPrice();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [cmode]);
 
-  /* Edit's OWN <mg-cost-badge> mount -- same contract as Image's above, but
-     it CANNOT rely on an empty-deps one-shot effect the way Image's does:
-     Image's costHost span already exists on CreateMobile's very first render
-     because cmode defaults to "image" in AppMobile.jsx, so that branch is
-     already the one painted. Edit is never the default mode, so its span
-     does not exist yet on that first render, and a one-shot effect would
-     find editCostHost.current still null and never get another chance. This
-     effect re-checks whenever cmode/editSub change and relies on the
-     host.firstChild guard for idempotency, so it still fires exactly once --
-     the moment the user first lands on Edit's Edit sub-tab -- however many
-     renders happen before or after that. */
+  /* Prime Edit's OWN cost chip on entering the Edit/Edit sub-tab. Its <CostBadge>
+     only exists while that sub-tab is shown (Image is the default mode, so the
+     Edit badge is absent on first render); this fires the moment cmode/editSub
+     reach edit/edit, by which commit the badge's ref is live -- never shared with
+     Image's costRef (see useEditGenerate.js's header). */
   useEffect(() => {
-    if (cmode !== "edit" || editSub !== "edit") return;
-    const host = editCostHost.current;
-    if (!host || host.firstChild) return;
-    if (window.customElements && window.customElements.get("mg-cost-badge")) {
-      const el = document.createElement("mg-cost-badge");
-      el.setAttribute("hint", "Pick an image to edit to see the cost.");
-      host.appendChild(el);
-      editCostRef.current = el;
-      edit.refreshPrice();
-    } else {
-      host.textContent = "⚠ Couldn't verify the cost — editing may spend credits.";
-      host.className = "gd-cost gd-costfail";
-    }
+    if (cmode === "edit" && editSub === "edit") edit.refreshPrice();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmode, editSub]);
 
@@ -424,7 +394,9 @@ export default function CreateMobile({
                   ⚙ Advanced — resolution, quality, aspect
                 </button>
 
-                <span ref={editCostHost} className="gd-cost cm-cost" />
+                <span className="gd-cost cm-cost">
+                  <CostBadge ref={editCostRef} hint="Pick an image to edit to see the cost." />
+                </span>
 
                 {edit.gate && <div className="cm-gatenote">{edit.gate}</div>}
 
@@ -548,7 +520,9 @@ export default function CreateMobile({
               ⚙ Advanced — LoRA, size, tuning, negative
             </button>
 
-            <span ref={costHost} className="gd-cost cm-cost" />
+            <span className="gd-cost cm-cost">
+              <CostBadge ref={costRef} />
+            </span>
 
             {gate && <div className="cm-gatenote">{gate}</div>}
 

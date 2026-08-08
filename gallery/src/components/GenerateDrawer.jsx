@@ -4,6 +4,7 @@ import {
   ASPECTS, MODES, SIZES, dims, goGate, loraIncompat, loraRange, loraStep,
 } from "../gen/genCore.js";
 import ModelFlyout from "./ModelFlyout.jsx";
+import CostBadge from "./CostBadge.jsx";
 import EditTab from "./EditTab.jsx";
 import FixTab from "./FixTab.jsx";
 import FiltersPanel from "./FiltersPanel.jsx";
@@ -76,7 +77,6 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   // a new submission goes out. See prefillFromRun below + the composer chip.
   const [reuseFrom, setReuseFrom] = useState(null);   // {jobId, tag}
   const costRef = useRef(null);
-  const costHost = useRef(null);
   const drawerRef = useRef(null);
   const g = useGenerate({ costRef });
   const { s, set } = g;
@@ -205,24 +205,16 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   const promptMax = Math.max(2, Math.min(14, Math.floor((capH - chrome) / 25)));
   const promptRows = Math.max(2, Math.min(promptMax, promptLines + (promptFocus ? 1 : 0)));
 
-  /* <mg-cost-badge> is a web component; mount it once into the image tab's
-     host. If the script never loaded there is NO price surface, so say so in
-     plain text rather than leaving a blank space next to a live Generate
-     button. (Unchanged machinery.) */
+  /* Prime the cost chip on each Image-tab entry. The <CostBadge> lives in the
+     composer footer, which renders only while tab === "image", so it mounts and
+     unmounts with the tab; its ref is live at commit, and refreshPrice() re-prices
+     the current draft whenever the tab is (re)entered — the badge starts idle on
+     each remount, exactly as the old re-created element did. (Unchanged machinery;
+     g intentionally out of the deps so this fires on entry, not every keystroke.) */
   useEffect(() => {
-    if (!open || tab !== "image") return;
-    const host = costHost.current;
-    if (!host || host.firstChild) return;
-    if (window.customElements && window.customElements.get("mg-cost-badge")) {
-      const el = document.createElement("mg-cost-badge");
-      host.appendChild(el);
-      costRef.current = el;
-      g.refreshPrice();
-    } else {
-      host.textContent = "⚠ Couldn't verify the cost — generating may spend credits.";
-      host.className = "gd-cost gd-costfail";
-    }
-  }, [open, tab, g]);
+    if (open && tab === "image") g.refreshPrice();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, tab]);
 
   /* External entry points into the drawer (the lightbox's Edit / To Video
      buttons and the #edit/#video deep links -- classic's Gen.openEdit()/
@@ -806,7 +798,7 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
               )}
             </div>
             <div className="mgdock-gocol">
-              <span ref={costHost} className="gd-cost" />
+              <span className="gd-cost"><CostBadge ref={costRef} /></span>
               {account && account.credits != null && (
                 <span className="mgdock-subline">{Number(account.credits).toLocaleString()} credits</span>
               )}
