@@ -238,6 +238,9 @@ export function LibraryBar({
               onApply={applyAdvanced}
               onClose={() => setFlyOpen(false)}
               onPrintCollection={actions && actions.printCollection}
+              onSaveView={actions && actions.saveView}
+              onDeleteView={actions && actions.deleteView}
+              buildViewQuery={actions && actions.buildViewQuery}
             />
           )}
         </div>

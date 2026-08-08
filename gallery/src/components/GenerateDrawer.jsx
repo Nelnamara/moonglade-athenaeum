@@ -28,17 +28,6 @@ import "../styles/dock.css";
    on close would orphan an in-flight (already charged) video task from every
    surface, and a v4.0 15s render is ~210,000 credits. */
 
-/* Prompt snippets -- Frontend Gallery.dc.html:1340-1345's own [label, insert] pairs,
-   carried verbatim (they're the design's shipped content, not placeholder model data).
-   A chip appends its insert text to the prompt with the DC's exact comma-joining
-   (:2832): trailing comma trimmed, ", " added only when a prompt already exists. */
-const SNIPPETS = [
-  ["masterpiece, best quality", "masterpiece, best quality"],
-  ["moonlit grove", "moonlit grove, volumetric light"],
-  ["cinematic lighting", "cinematic lighting, rim light"],
-  ["detailed background", "highly detailed background"],
-];
-
 function VideoTab({ visible, prefillRequest }) {
   const host = useRef(null);
   const el = useRef(null);
@@ -94,6 +83,58 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   const { s, set } = g;
   const loraCap = account && account.lora_cap != null ? account.lora_cap : null;
   const gate = goGate(s, loraCap);
+
+  /* Prompt snippets manager -- the real per-account store (/api/snippets), replacing the
+     4 hardcoded demo chips. Ports classic's Snips popover: save-current / insert / delete
+     with one-level Undo (deliberately NOT a confirm -- an undo taxes only the mistake,
+     matching classic's own reasoning), server 200-cap. Lazy-loaded on first open; a write
+     failure surfaces inline rather than the classic's window.Toast (no global dependency
+     in React). */
+  const [snips, setSnips] = useState(null);        // null = not loaded yet
+  const [snipUndo, setSnipUndo] = useState(null);  // {text} of the last delete, one level
+  const [snipErr, setSnipErr] = useState("");
+  useEffect(() => {
+    if (!snippetsOpen || snips !== null) return;
+    let dead = false;
+    fetch("/api/snippets").then((r) => r.json())
+      .then((d) => { if (!dead) setSnips(Array.isArray(d.snippets) ? d.snippets : []); })
+      .catch(() => { if (!dead) setSnips([]); });
+    return () => { dead = true; };
+  }, [snippetsOpen, snips]);
+  const persistSnips = (list) => {
+    setSnips(list); setSnipErr("");
+    fetch("/api/snippets", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ snippets: list }) })
+      .then((r) => r.json())
+      .then((d) => { if (!d || d.error) setSnipErr((d && d.error) || "The server rejected the save."); })
+      .catch(() => setSnipErr("Network error — not saved."));
+  };
+  const snipTrunc = (t) => (String(t).length > 44 ? String(t).slice(0, 44) + "…" : t);
+  const saveCurrentSnip = () => {
+    const v = (s.prompt || "").trim();
+    if (!v || (snips || []).includes(v)) return;
+    persistSnips([v, ...(snips || [])].slice(0, 200));
+  };
+  const insertSnip = (sn) =>
+    // trim FIRST (matches the +words button and classic), so stray leading/trailing
+    // whitespace on the prompt never leaks a "text , snippet" stray space before the comma.
+    set({ prompt: (s.prompt.trim() ? s.prompt.trim().replace(/,\s*$/, "") + ", " : "") + sn });
+  const delSnip = (i) => {
+    const list = snips || [];
+    if (!list[i]) return;
+    setSnipUndo({ text: list[i], index: i });   // remember WHERE, to restore in place
+    persistSnips(list.filter((_, j) => j !== i));
+  };
+  const undoSnip = () => {
+    if (!snipUndo) return;
+    const list = snips || [];
+    if (!list.includes(snipUndo.text)) {
+      const next = list.slice();
+      next.splice(Math.min(snipUndo.index, next.length), 0, snipUndo.text);
+      persistSnips(next.slice(0, 200));
+    }
+    setSnipUndo(null);
+  };
 
   /* ---- REAL runs data: GET /api/jobs, generate-type only. The reel, the
      header label and the peek pill all derive from this one list. Refreshed
@@ -726,13 +767,33 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
                 onFocus={() => setPromptFocus(true)}
                 onBlur={() => setPromptFocus(false)} />
               {snippetsOpen && (
-                <div className="mgdock-sniprow">
-                  {SNIPPETS.map(([label, insert]) => (
-                    <button type="button" className="mgdock-snip" key={label}
-                      onClick={() => set({
-                        prompt: (s.prompt.trim() ? s.prompt.replace(/,\s*$/, "") + ", " : "") + insert,
-                      })}>{label}</button>
-                  ))}
+                <div className="mgdock-snippanel">
+                  <div className="mgdock-sniphead">
+                    <span>Snippets</span>
+                    <button type="button" className="mgdock-snipx" disabled={!s.prompt.trim()}
+                      onClick={saveCurrentSnip}>+ save current</button>
+                  </div>
+                  {snipUndo && (
+                    <div className="mgdock-snipundo">
+                      <span>Deleted "{snipTrunc(snipUndo.text)}"</span>
+                      <button type="button" className="mgdock-snipx" onClick={undoSnip}>Undo</button>
+                    </div>
+                  )}
+                  {snips === null ? (
+                    <div className="mgdock-snipempty">loading…</div>
+                  ) : snips.length === 0 ? (
+                    <div className="mgdock-snipempty">No saved snippets yet — build a prompt, then “+ save current”.</div>
+                  ) : (
+                    snips.map((sn, i) => (
+                      <div className="mgdock-snipitem" key={sn + " " + i}>
+                        <button type="button" className="mgdock-snipins" title="Insert into the prompt"
+                          onClick={() => insertSnip(sn)}>{sn}</button>
+                        <button type="button" className="mgdock-snipdel" title="Delete (Undo appears at the top)"
+                          onClick={() => delSnip(i)}>×</button>
+                      </div>
+                    ))
+                  )}
+                  {snipErr && <div className="mgdock-sniperr">⚠ {snipErr}</div>}
                 </div>
               )}
               {expanded && (

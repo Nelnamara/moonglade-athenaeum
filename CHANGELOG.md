@@ -14,6 +14,8 @@ git tags. Full prose notes for tagged versions live on
 > does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- Generate drawer: ★ Snippets is now a real per-account manager (save the current prompt, insert, delete with one-level Undo) instead of four fixed chips — your saved snippets sync across machines.
+- Advanced search: you can now **save** the current view as a named preset and delete saved views (loading them already worked), and a "⬇ Export view" link downloads exactly the filtered rows as CSV (the whole-catalog dump stays in the Control Panel).
 - Gallery header: hovering the credits chip now shows a full breakdown — the paid/free credit split plus your free cards broken out by type (with Model/Video Card labels and soonest expiry). The paid/free split is hidden while the grid privacy-blur is on, so your real balance isn't left sitting on screen.
 - Control Panel: a new "PixAI account" panel — your benefit cards (on-hand + lifetime usage), coupons, and the real credit ledger (daily claims, event gifts, spend…), opened from the Control Panel, all read-only. The rail gains a free-cards count and the real paid/free credit split.
 - Contests: each contest card now has a "☆ Shortlist" button — select images in the gallery, open Contests, and stage your picks into a collection named for that contest in one click (no files moved, no credits). Re-implemented on the new React Contests panel from the earlier classic-only version.
