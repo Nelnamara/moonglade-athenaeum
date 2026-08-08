@@ -56,7 +56,7 @@ const spanFor = (width, r) => Math.max(4, Math.round((width * r + GAP) / ROW_STE
 export default function Grid({
   items, total, loading, page, pages, goToPage,
   blur, thumb, selectMode, selected, toggleSelected, openLightbox, onRate,
-  onOpenDetails,
+  onOpenDetails, onContextMenu,
 }) {
   const go = (p) => {
     if (p < 1 || p > pages || p === page) return;
@@ -292,6 +292,13 @@ export default function Grid({
               /* shift held at press = range coming: stop the native text
                  selection before it starts */
               onMouseDown={(ev) => { if (ev.shiftKey) ev.preventDefault(); }}
+              /* right-click → the 5-action context menu (App owns it). preventDefault
+                 suppresses the browser's own menu. */
+              onContextMenu={(ev) => {
+                if (!onContextMenu) return;
+                ev.preventDefault();
+                onContextMenu(it.media_id, it.thumb, ev.clientX, ev.clientY);
+              }}
               /* plain click → Lightbox; shift = range, ctrl/⌘ = toggle (both
                  with Select OFF); Select ON = every click selects */
               onClick={(ev) => {

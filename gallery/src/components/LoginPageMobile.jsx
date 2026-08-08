@@ -40,7 +40,7 @@ import "../styles/login-mobile.css";
 
 export default function LoginPageMobile({ boot }) {
   const {
-    createMode,
+    createMode, lanFirstRun,
     user, setUser, pass, setPass,
     createUser, createPass, createConfirm,
     createSubmitted, usernameErr, matchErr,
@@ -71,6 +71,8 @@ export default function LoginPageMobile({ boot }) {
             <div className="lgnm-title">Moonglade Athenaeum</div>
             {createMode ? (
               <div className="lgnm-framing">You're setting up this server — this account will own it.</div>
+            ) : lanFirstRun ? (
+              <div className="lgnm-framing">Not set up yet</div>
             ) : (
               <div className={"lgnm-tagline" + (fl.fading ? " fading" : "")}
                 onClick={fl.reveal} title="Click for version info">
@@ -79,7 +81,15 @@ export default function LoginPageMobile({ boot }) {
             )}
           </div>
 
-          {!createMode && (
+          {lanFirstRun && (
+            <div className="lgnm-error" style={{ marginTop: 0 }}>
+              No account has been set up yet. Whoever runs this server needs to sign in from
+              the machine itself first — the first account can only be created there, not from
+              another device.
+            </div>
+          )}
+
+          {!createMode && !lanFirstRun && (
             <>
               <div className="lgnm-lbl" style={{ marginTop: 0 }}>USERNAME</div>
               <input className="lgnm-input" name="username" value={user} autoFocus autoComplete="username"

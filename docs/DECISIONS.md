@@ -5872,3 +5872,32 @@ handling is correct — `_filters_from_args`'s month_default covers it.
 (can't start it bare per the launcher rule), so the browser tap-through wasn't done. Build
 clean, js-syntax green, logic adversarially reviewed. Owner QA / a live pass is still owed
 before merge — see the mobile-style checklist for what to exercise.
+
+### Classic-cut prerequisites: grid context menu + the LAN-first-run login  ·  *2026-08-07*
+
+Two more classic-demolition blockers cleared on design-final-pass (owner directives).
+
+**Grid right-click context menu (owner picked "all five").** `GridContextMenu.jsx` +
+`context-menu.css`; Grid.jsx gains an `onContextMenu` per cell; App owns the target +
+actions. The five classic Ctx actions, all wired to existing React handlers: Edit
+(`requestEdit`), Send to Video (`requestVideo`), Find similar (a new App-level
+`SimilarModal` mount), Copy id (`navigator.clipboard`), Open details (`openDetails`).
+Self-placing/viewport-clamped, closes on outside-click/Escape/scroll/resize. **Verified
+live**: menu renders all 5 over a real thumbnail, Copy id grabs the real 18-char media_id,
+Find similar opens the SimilarModal, Open details opens DetailsView (?image= in the URL).
+
+**LAN-first-run login -- no design handoff needed, ~small code branch (owner's instinct
+was right).** The React `LoginPage` already did sign-in + local bootstrap-create; the ONLY
+state still falling back to classic `LOGIN_HTML` was `no_accounts AND not is_local` (a LAN
+device hitting a fresh install, which can't create the first account -- server-only).
+Fixed by: the `/login` GET now ALWAYS serves the React shell (dropped the
+`(not no_accounts or is_local)` gate) and the boot carries **`is_local`**; `LoginPage.jsx`
++ `useLogin.js` (mobile) add a third state `lanFirstRun = no_accounts && is_local === false`
+that shows the "no account set up yet -- do it from the server machine" message instead of
+a create form. The classic POST branch still renders `LOGIN_HTML` for a stale/replayed form
+POST -- that last reference dies WITH the cut. Two `test_web_auth.py` tests updated from
+"classic message in server HTML" to "React shell boot carries is_local:false" (the message
+is client-side now); the server-side non-local mode=create refusal is unchanged and still
+tested. Full suite gate for the auth change. NOTE: the LAN-no-accounts state itself can't be
+live-exercised without wiping accounts + a real remote request, so it rests on the unit
+tests; normal local sign-in verified live (boot is_local:true, signin mode).
