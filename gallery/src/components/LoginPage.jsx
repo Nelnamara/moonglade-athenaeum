@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import useFlavour from "../hooks/useFlavour.js";
 import "../styles/login.css";
 
@@ -126,12 +126,17 @@ export default function LoginPage({ boot }) {
 
   const busy = phase === "busy";
 
+  // The server rotates the CSRF token on every FAILED attempt (same contract as
+  // the classic form, which re-rendered with a fresh token) and hands the new
+  // one back in the error payload -- adopt it or every retry after one failure
+  // would die with "session expired".
+  const csrfRef = useRef(boot.csrf || "");
   const submitLogin = async (payload) => {
     let d;
     try {
       const r = await fetch("/api/login", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload, csrf: boot.csrf || "", next: boot.next || "" }),
+        body: JSON.stringify({ ...payload, csrf: csrfRef.current, next: boot.next || "" }),
       });
       d = await r.json();
     } catch {
@@ -139,6 +144,7 @@ export default function LoginPage({ boot }) {
       setError("Couldn't reach the server. Check your connection and try again.");
       return;
     }
+    if (d.csrf) csrfRef.current = d.csrf;
     if (d.error) {
       setPhase("idle");
       setError(d.error);

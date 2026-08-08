@@ -69,7 +69,15 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [promptFocus, setPromptFocus] = useState(false);
   const [snippetsOpen, setSnippetsOpen] = useState(false); // ★ Snippets chip row toggle
-  const [editSource, setEditSource] = useState("");
+  // {mid, n} -- the counter makes every hand-off a NEW object, so EditTab's
+  // [initialSource] effect re-fires even when the SAME image is sent twice
+  // (a bare string is a same-value setState -> React bails, the effect never
+  // re-runs, and a cleared source silently stays empty; App.jsx's request
+  // nonce protected the first hop but was dropped at this one). Found by the
+  // 2026-08-07 branch review.
+  const [editSource, setEditSource] = useState(null);
+  const editNonce = useRef(0);
+  const sendToEdit = (mid) => setEditSource({ mid, n: ++editNonce.current });
   const [videoPrefill, setVideoPrefill] = useState(null);
   const [flyOpen, setFlyOpen] = useState(false);
   const [flyKind, setFlyKind] = useState("base");
@@ -187,7 +195,7 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
     if (request.tab === "edit") {
       setTab("edit");
       setSub("edit");
-      setEditSource(request.mid);
+      sendToEdit(request.mid);
     } else if (request.tab === "video") {
       setTab("video");
       // A midless request is the #video deep link: land on the tab, prefill nothing.
@@ -766,7 +774,7 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
         deselectRef={deselectRef}
       />
       <FiltersPanel open={filtersOpen} onClose={() => setFiltersOpen(false)} drawerRef={drawerRef}
-        onSendToEdit={(mid) => { setEditSource(mid); setTab("edit"); setSub("edit"); }} />
+        onSendToEdit={(mid) => { sendToEdit(mid); setTab("edit"); setSub("edit"); }} />
     </>
   );
 }

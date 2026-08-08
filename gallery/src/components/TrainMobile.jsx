@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import useSheet from "../hooks/useSheet.js";
 import MobileSheet from "./MobileSheet.jsx";
 import "../styles/train.css";
 import "../styles/train-mobile.css";
@@ -45,15 +46,14 @@ export default function TrainMobile({ onClose }) {
   const [trigger, setTrigger] = useState("");
   const [category, setCategory] = useState("");
 
-  const [sheet, setSheet] = useState(null);   // 'confirm' | null
-  const [closing, setClosing] = useState(false);
+  // 'confirm' | null -- shared timer-safe machine (hooks/useSheet.js)
+  const { sheet, closing, open: openSheet, close: closeSheet } = useSheet(280);
   const [ask, setAsk] = useState(null);
   const [acceptCost, setAcceptCost] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [done, setDone] = useState(null);
 
-  const closeSheet = () => { setClosing(true); setTimeout(() => { setSheet(null); setClosing(false); }, 280); };
 
   useEffect(() => {
     fetch("/api/myart/items").then((r) => r.json()).then((d) => setCsrf(d.csrf || "")).catch(() => {});
@@ -99,7 +99,7 @@ export default function TrainMobile({ onClose }) {
         headers: { "Content-Type": "application/json" }, body: JSON.stringify(body()) });
       const p = await r.json();
       if (p.error) { setErr(p.error); return; }
-      setAsk(p); setAcceptCost(false); setSheet("confirm"); setClosing(false);
+      setAsk(p); setAcceptCost(false); openSheet("confirm");
     } catch (e) { setErr(String(e.message || e)); } finally { setBusy(false); }
   };
   const confirm = async () => {
@@ -110,7 +110,9 @@ export default function TrainMobile({ onClose }) {
         body: JSON.stringify({ ...body(), confirm: true,
                                ...(ask && !ask.is_free ? { accept_credit_cost: acceptCost } : {}) }) });
       const res = await r.json();
-      if (res.error) { setErr(res.error); return; }
+      // Same as PublishMobile: the error note lives under the sheet -- close it
+      // so the failure is actually visible instead of a silent button revert.
+      if (res.error) { setErr(res.error); closeSheet(); return; }
       setDone(res); closeSheet();
       if (typeof res.free_trainings_left === "number") setQuota(res.free_trainings_left);
     } catch (e) { setErr(String(e.message || e)); } finally { setBusy(false); }

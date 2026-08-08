@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import useLibrary from "../hooks/useLibrary.js";
+import useSheet from "../hooks/useSheet.js";
 import useFlavour from "../hooks/useFlavour.js";
 import useGenerate from "../gen/useGenerate.js";
 import useEditGenerate from "../gen/useEditGenerate.js";
@@ -267,14 +268,16 @@ export default function AppMobile({ boot }) {
   const [account, setAccount] = useState(null);
   const claimModal = useClaimModal(account, () => fetchAccount().then(setAccount));
   const [collections, setCollections] = useState(boot.collections || []);
-  const [sheet, setSheet] = useState(null); // 'loom' | 'menu' | null
-  const [closing, setClosing] = useState(false);
+  // 'loom' | 'menu' | null -- shared timer-safe state machine (hooks/useSheet.js,
+  // 2026-08-07 review fix: the hand-rolled pair let a reopen inside the 280ms exit
+  // window inherit a stale unmount timer and vanish).
+  const { sheet, closing, open: openSheet, close: closeSheet } = useSheet(280);
   // The Menu sheet's pushed-screen destination -- generalizes MobileScreen.jsx
   // the same way `sheet` above already generalizes MobileSheet.jsx (one
   // string key, one shared mount). null | 'myart' | 'publish' | 'train' |
-  // 'import' | 'contests' | 'health'. See header comment.
-  const [screen, setScreen] = useState(null);
-  const [screenClosing, setScreenClosing] = useState(false);
+  // 'import' | 'contests' | 'health'. See header comment. 220ms = MobileScreen's
+  // own CSS duration (vs the sheets' 280ms).
+  const { sheet: screen, closing: screenClosing, open: openScreenKey, close: closeScreenRaw } = useSheet(220);
   const fl = useFlavour(undefined, boot.build_stamp);
   const lib = useLibrary();
   const costRef = useRef(null);
@@ -300,7 +303,7 @@ export default function AppMobile({ boot }) {
   // the screen then starts with its own recent-image strip instead of a pre-chosen one.
   // Mirrors desktop App.jsx's publishFor/openPublish exactly.
   const [publishFor, setPublishFor] = useState("");
-  const openPublish = (mid) => { setPublishFor(mid || ""); setScreen("publish"); };
+  const openPublish = (mid) => { setPublishFor(mid || ""); openScreenKey("publish"); };
 
   // Lightbox Mobile (2026-08-03) -- mutually exclusive with detailsFor, see
   // header comment. openLightbox is only ever called from Details (its own
@@ -402,25 +405,22 @@ export default function AppMobile({ boot }) {
     if (c) setCollections(c);
   };
 
-  const closeSheet = () => {
-    setClosing(true);
-    setTimeout(() => { setSheet(null); setClosing(false); }, 280);
-  };
-
   // Menu row -> pushed screen. Both state changes fire in the SAME click,
   // matching design_handoff's own menuItems onClick (`{ sheet: null, screen:
   // 'X' }` in one setState) -- the sheet is yanked off instantly under the
-  // incoming screen, not animated through closeSheet()'s 280ms path (that
-  // path stays reserved for the scrim tap and "Not now", per the design
-  // research). Mirrors CreateMobile.jsx's closeAdv() timing exactly for the
-  // screen side -- 220ms, matching MobileScreen.jsx's own CSS duration.
+  // incoming screen via openSheet(null) (clears any pending exit timer too),
+  // not animated through closeSheet()'s 280ms path (that path stays reserved
+  // for the scrim tap and "Not now", per the design research).
   const openScreen = (key) => {
-    setSheet(null);
-    setScreen(key);
+    openSheet(null);
+    openScreenKey(key);
   };
+  // publishFor resets immediately, not after the exit animation: PublishMobile
+  // seeds its own internal mid from the prop at MOUNT only, so the mounted,
+  // exiting screen never re-reads it.
   const closeScreen = () => {
-    setScreenClosing(true);
-    setTimeout(() => { setScreen(null); setScreenClosing(false); setPublishFor(""); }, 220);
+    closeScreenRaw();
+    setPublishFor("");
   };
 
   // Health's tag/model/LoRA filter taps -- HealthMobile.jsx's own header
@@ -492,9 +492,9 @@ export default function AppMobile({ boot }) {
           <button type="button" className="glm-iconbtn glm-iconbtn-gold" title="Folio of Honors"
             onClick={openFolio}>🌙</button>
           <button type="button" className="glm-iconbtn glm-iconbtn-teal" title="The Loom — video storyboard"
-            onClick={() => setSheet("loom")}>▮</button>
+            onClick={() => openSheet("loom")}>▮</button>
           <button type="button" className="glm-iconbtn glm-iconbtn-lav" title="More"
-            onClick={() => setSheet("menu")}>☰</button>
+            onClick={() => openSheet("menu")}>☰</button>
         </div>
         <div className="glm-hero-stats">
           <span><b>{Number(stats.images || 0).toLocaleString()}</b> img</span>
@@ -570,14 +570,14 @@ export default function AppMobile({ boot }) {
         <MobileScreen open={!!screen} closing={screenClosing} onClose={closeScreen}
           title={screen ? SCREEN_TITLES[screen] : ""}>
           {screen === "myart" && (
-            <MyArtMobile onOpenPost={openDetails} onOpenTrain={() => setScreen("train")} />
+            <MyArtMobile onOpenPost={openDetails} onOpenTrain={() => openScreenKey("train")} />
           )}
           {screen === "health" && (
             <HealthMobile
               onModelFilter={(m) => filterFromHealth({ model: m })}
               onTagFilter={(t) => filterFromHealth({ tag: t })}
               onLoraFilter={(l) => filterFromHealth({ lora: l })}
-              onOpenImport={() => setScreen("import")}
+              onOpenImport={() => openScreenKey("import")}
               boot={boot}
               onDuplicatesResolved={afterDuplicatesResolved}
             />

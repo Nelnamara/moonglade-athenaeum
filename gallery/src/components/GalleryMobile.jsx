@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ADV_DEFAULTS } from "../hooks/useLibrary.js";
+import useSheet from "../hooks/useSheet.js";
 import GalleryGridMobile from "./GalleryGridMobile.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import ActionsMenu from "./ActionsMenu.jsx";
@@ -45,19 +46,9 @@ const SORT_OPTS = [
 ];
 const PER_PAGE_OPTS = [50, 100, 200];
 
-function useSheet() {
-  const [sheet, setSheet] = useState(null);
-  const [closing, setClosing] = useState(false);
-  const timer = useRef(null);
-  const open = (name) => { clearTimeout(timer.current); setClosing(false); setSheet(name); };
-  const close = () => {
-    setClosing(true);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => { setSheet(null); setClosing(false); }, 280);
-  };
-  useEffect(() => () => clearTimeout(timer.current), []);
-  return { sheet, closing, open, close };
-}
+/* useSheet moved to hooks/useSheet.js (2026-08-07) -- this file's private copy
+   was the ONE correct implementation of the MobileSheet timer dance, promoted
+   to shared so every other caller stops hand-rolling the racy version. */
 
 export default function GalleryMobile({
   boot, collections, refreshCollections,

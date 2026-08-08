@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import useFlavour from "./useFlavour.js";
 
 /* All of LoginPage.jsx's state/handlers/validation/API-call logic, mechanically
@@ -90,12 +90,16 @@ export default function useLogin(boot) {
 
   const busy = phase === "busy";
 
+  // Server rotates the CSRF token on every FAILED attempt and returns the fresh
+  // one in the error payload -- adopt it or retries after a failure would die
+  // with "session expired" (see LoginPage.jsx's identical comment).
+  const csrfRef = useRef(boot.csrf || "");
   const submitLogin = async (payload) => {
     let d;
     try {
       const r = await fetch("/api/login", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload, csrf: boot.csrf || "", next: boot.next || "" }),
+        body: JSON.stringify({ ...payload, csrf: csrfRef.current, next: boot.next || "" }),
       });
       d = await r.json();
     } catch {
@@ -103,6 +107,7 @@ export default function useLogin(boot) {
       setError("Couldn't reach the server. Check your connection and try again.");
       return;
     }
+    if (d.csrf) csrfRef.current = d.csrf;
     if (d.error) {
       setPhase("idle");
       setError(d.error);

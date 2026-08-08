@@ -14,6 +14,10 @@ git tags. Full prose notes for tagged versions live on
 > does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- Hardened sign-in: a failed login attempt now refreshes its security token so the next try always goes through (previously a second attempt after one failure could be rejected as "session expired"), and the whole login path now has real automated test coverage.
+- Fixed: the Control Panel could get stuck on a spinning button if a background action hit a network hiccup — actions now recover and show the error instead.
+- Fixed: re-sending the same image to the Edit tab after clearing it now reloads it (it silently did nothing before); Escape inside the Control Panel now closes just the top layer (a sub-panel or the picker) instead of the whole panel; and a failed Publish/Train confirmation on mobile now shows the error instead of hiding it behind the dialog.
+- Fixed: duplicate review can no longer be tricked into removing the copy you chose to keep via an alternate spelling of its path.
 - Fixed: mobile My Art's per-card Delete ran the irreversible PixAI delete on a single tap — it now asks first, through the same confirm sheet bulk delete uses. A mid-action network error can also no longer leave the screen stuck on "working…". Both caught by the 2026-08-07 branch review.
 - Fixed: `--backfill-lineage` no longer marks a task as "checked" when its lookup merely errored (rate limit, network blip) — errored tasks are retried on the next run instead of being silently excluded forever.
 - Mobile: My Art, Publish, and Train a LoRA are real now, replacing a stale placeholder list and two "no backend route" placeholders. Same real pipelines as desktop; the Train dataset picker groups your recent generations by task and adds each task's true image count (not a fixed guess), and a new ☁ Publish button on Image Details opens the mobile Publish flow.

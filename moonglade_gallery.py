@@ -12173,6 +12173,19 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         their error text."""
         body = request.get_json(silent=True) or {}
         import moonglade_backup as core
+
+        def _fail(error):
+            # Every failed POST rotates the session token, exactly like classic
+            # login()'s POST branch ("a consumed/known-bad token must never stay
+            # silently resubmittable" -- guarded there by test_web_auth.py's
+            # rotation test; this route's missing rotation was found by the
+            # 2026-08-07 /api/login test port). Unlike the classic form, which
+            # re-renders with the fresh token embedded, a SPA holds its token in
+            # JS -- so the fresh one rides back in the error payload for the
+            # login page to adopt on the next attempt.
+            session["csrf"] = secrets.token_hex(16)
+            return jsonify({"error": error, "csrf": session["csrf"]})
+
         next_url = _safe_next(str(body.get("next") or "")) or ""
         no_accounts = not core.list_web_users()
         bootstrap_mode = no_accounts and _is_local_request()
@@ -12181,11 +12194,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         locked_for = _login_seconds_locked(ip)
         if locked_for is not None:
             mins = max(1, (locked_for + 59) // 60)
-            return jsonify({"error": "Too many failed attempts from this address. "
-                                     "Try again in about {} minute{}.".format(
-                                         mins, "" if mins == 1 else "s")})
+            return _fail("Too many failed attempts from this address. "
+                         "Try again in about {} minute{}.".format(
+                             mins, "" if mins == 1 else "s"))
         if not _check_csrf(body):
-            return jsonify({"error": "Your session expired. Reload the page and try again."})
+            return _fail("Your session expired. Reload the page and try again.")
         if wants_create and not bootstrap_mode:
             # Same defense-in-depth as classic login()'s identical check: a
             # mode=create POST is only ever honored while bootstrap_mode is
@@ -12193,13 +12206,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             error = ("No account has been set up yet. Ask whoever runs this "
                     "server to sign in from the machine itself first.") if no_accounts \
                     else "Invalid username or password."
-            return jsonify({"error": error})
+            return _fail(error)
         relocked_for = _login_try_acquire(ip)
         if relocked_for is not None:
             mins = max(1, (relocked_for + 59) // 60)
-            return jsonify({"error": "Too many failed attempts from this address. "
-                                     "Try again in about {} minute{}.".format(
-                                         mins, "" if mins == 1 else "s")})
+            return _fail("Too many failed attempts from this address. "
+                         "Try again in about {} minute{}.".format(
+                             mins, "" if mins == 1 else "s"))
         if wants_create:
             # bootstrap_mode is guaranteed True here -- the guard above already
             # rejected wants_create whenever it's False.
@@ -12209,11 +12222,11 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             un_problem = core.username_problem(username)
             pw_problem = core.password_problem(password)
             if un_problem:
-                return jsonify({"error": un_problem})
+                return _fail(un_problem)
             if pw_problem:
-                return jsonify({"error": pw_problem})
+                return _fail(pw_problem)
             if password != confirm:
-                return jsonify({"error": "Passwords do not match."})
+                return _fail("Passwords do not match.")
             core.add_or_update_web_user(username, password)
             _login_clear(ip)
             _establish_session(username)
@@ -12234,7 +12247,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             mins = max(1, (just_locked + 59) // 60)
             error = ("Too many failed attempts from this address. "
                      "Try again in about {} minute{}.".format(mins, "" if mins == 1 else "s"))
-        return jsonify({"error": error})
+        return _fail(error)
 
     # Served by logout() in place of a redirect -- see its own comment for why a
     # real page (not a 3xx) is required to run the Cache Storage purge. Static, no
@@ -15350,14 +15363,26 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 continue
 
             keep_path_str = str(keep.get("path") or "")
+            # The keeper guard compares RESOLVED paths, not the raw client strings --
+            # 'images//a.png', 'images\\a.png' and './images/a.png' all name the same
+            # file as 'images/a.png', and a raw-string compare would let an aliased
+            # spelling of the keeper slip into the remove list (the validator can't
+            # catch it either: the keeper is byte-identical and same-media with
+            # itself by definition). Found by the 2026-08-07 branch review.
+            keep_resolved = _resolve_under(out_dir, keep_path_str)
             seen, remove_items = set(), []
             for item in (remove_raw if isinstance(remove_raw, list) else []):
                 if not isinstance(item, dict):
                     continue
                 mid = str(item.get("media_id") or "").strip()
                 path = str(item.get("path") or "").strip()
-                if not mid or not path or path == keep_path_str or path in seen:
+                if not mid or not path or path in seen:
                     continue
+                item_resolved = _resolve_under(out_dir, path)
+                if item_resolved is not None and item_resolved == keep_resolved:
+                    continue                      # the keeper itself, however spelled
+                if path == keep_path_str:
+                    continue                      # raw match still caught if unresolvable
                 seen.add(path)
                 remove_items.append({"media_id": mid, "path": path})
             if not remove_items:
