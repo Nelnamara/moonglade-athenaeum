@@ -1608,10 +1608,11 @@ _SKIN_UNLOCK_TEXT = {
 }
 
 # The 10 Evolution Ladder tracks each ladder achievement's 'track' field points at
-# (see ACHIEVEMENTS' 'track'/'rung'/'rungs_total' fields, sourced from
-# docs/achievements_roster_57.json's roster.tracks). Single source of truth for
-# ladder display names -- the Folio of Honors' carousel/ladder-grid groups by this,
-# not a second hand-maintained id->name map in the frontend.
+# (see ACHIEVEMENTS' 'track'/'rung'/'rungs_total' fields; the roster.tracks these came
+# from lived in the owner's off-repo achievements_roster_57.json, whose committed copy
+# was scrubbed 2026-07-27 -- the live roster is now the inline ACHIEVEMENTS list above).
+# Single source of truth for ladder display names -- the Folio of Honors' carousel/
+# ladder-grid groups by this, not a second hand-maintained id->name map in the frontend.
 LADDER_TRACKS = [
     {"id": "archive",     "name": "The Archive",           "metric": "images"},
     {"id": "loom",        "name": "The Loom",               "metric": "videos"},
