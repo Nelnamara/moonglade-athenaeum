@@ -164,7 +164,17 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
       "recoverable, and PixAI still has it — a later sync brings it back.")) return;
     setBusy(true);
     try {
-      await fetch("/delete/" + encodeURIComponent(mediaId), { method: "POST" });
+      // /api/delete-local (the JSON route the bulk actions already use), replacing the
+      // classic form route /delete/<id> -- which redirect-answered and whose response
+      // this caller never even read, so a failed delete looked identical to a success.
+      // Now a real error surfaces and onDeleted only fires when something was deleted.
+      // (Migration off classic leftovers, 2026-08-08; /delete/<id> dies with the cut.)
+      const d = await fetch("/api/delete-local", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ media_ids: [mediaId] }),
+      }).then((r) => r.json()).catch((e) => ({ error: String((e && e.message) || e) }));
+      if (!d || d.error) { window.alert((d && d.error) || "Could not remove it."); return; }
+      if (d.failed) { window.alert("The file could not be moved to the trash folder — nothing was deleted."); return; }
       onDeleted();
     } finally { setBusy(false); }
   };
