@@ -6116,3 +6116,49 @@ rather than being rushed. Until then static/mg-model-picker.js stays (the Loom s
 custom element; the gallery shell's now-unused script tag is harmless), so this commit is purely
 ADDITIVE and the app works on both surfaces. NEXT: convert both Loom surfaces to <ModelPicker>,
 remove the script tags, delete the file, reconcile the loom node-tests, then component 3 is done.
+
+### Placard identity — the "what sits at the top of the Details placard" research (recovered)  ·  *2026-08-08*
+
+The image-"renaming" research the owner remembered but that was NEVER checkpointed into the repo
+(a code/doc/transcript search found nothing; the owner later produced the artifact). Recorded
+here so it survives. It is about the DETAILS placard HEADLINE, not a rename feature: only ~17 of
+35,815 images carry a real `title`, so the rest fall through to the raw filename (the
+`title || filename || "Untitled"` rule in useImageDetails.js) -- which is what reads "rough".
+Artifact: https://claude.ai/code/artifact/5255447c-2ece-4dda-93f8-7effbbf83fd7 ("Placard identity
+— four directions"), rendered against REAL library rows. The test each direction had to pass: a
+sibling pair (same model/size/timestamp-to-the-second) must still be tellable apart, with NO
+prompt text and NO naming required from the owner. Four directions:
+
+- **A — The Accession Stamp  [OWNER'S PICK]**: no title slot; a small monospace stamp (local
+  date+time · model · "PLATE n OF m" of the batch · "find more"); a typed name, when you bother,
+  sits above it in the italic serif.
+- **B — Generation, and which output**: the batch is the unit -- italic-serif headline names the
+  generation, a line under it says which output you're looking at.
+- **C — The Accession Line**: smallest possible change (one string in the reveal animation);
+  refuses to invent anything.
+- **D — The Tombstone**: museum tombstone -- maker in the display face, then date + dimensions.
+
+NOT built. Tabled by the owner for now (raised as a "BTW" during the vanilla campaign). Related:
+the "Details View — Three Directions" composition decision above (that's LAYOUT; this is the
+HEADLINE that sits inside it).
+
+### Vanilla campaign 3/8 COMPLETE: model-picker Loom side landed  ·  *2026-08-08*
+
+The Loom half of the model-picker port (the gallery half shipped earlier this day). Both Loom
+surfaces -- App/LoomV2 and LoomMobile, structurally near-identical -- had their own
+bindPicker/bindLoraPicker ref-callbacks on `<mg-model-picker>` elements; each became a plain
+`<ModelPicker ...>` mount with onBasePick(row)/onLoraPick(model,selected) handlers (the handler
+LOGIC ported verbatim -- the spend-adjacent base-pick that resolves /api/model-version?all=1 and
+applies the model author's tuned preset is unchanged, just unwrapped from the ref callback). The
+LoRA-remove button dropped its deselect() call (controlled selection un-lights the card). Loom CSS
+`.lv-mpick-body`/`.lm-pick-body mg-model-picker` -> `.model-picker`; the ModelPicker `style` prop
+lets it mount as a direct flex child (host constrains height, grid scrolls). Both `<script>` tags
+removed, static/mg-model-picker.js + its orphaned design-kit harness deleted -> **static/ is down
+to 4**. Verified: mg-model-picker.js 404s; the Loom renders clean (zero app console errors -- only
+the usual Chrome-extension noise); ModelPicker + its 53 CSS rules + onBasePick/onLoraPick are all
+in the committed loom bundle. The gallery ModelPicker (the SAME component) was verified live end-
+to-end earlier (render, market chrome, 24 cards, base-pick applies); the Loom's deep shot-composer
+flow to visually open the picker wasn't driven, so that rests on the shared-component verification
++ the verbatim handler port. Loom node-tests + test_web_pick reconciled (the 6 mg-model-picker-*
+source tests retargeted to ModelPicker.jsx). Remaining 4: cost-badge, upscale-panel, notify,
+generate-drawer.

@@ -612,12 +612,17 @@ def test_gallery_model_preview_hover_is_debounced_not_instant():
     this only guards against a future edit reverting to raw, un-debounced wiring, wherever
     that wiring now lives."""
     # (The classic page that used to mount this component -- and the hand-rolled copy
-    # it replaced -- died with the classic cut, 2026-08-08. The debounce itself lives
-    # in the shared component, which the React shell and the Loom both load.)
-    picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-model-picker.js").read_text(encoding="utf-8")
-    assert "c.addEventListener('mouseenter', function () { self._schedulePreview(m, c); });" in picker_js
-    assert "_schedulePreview(m, anchor) {" in picker_js
-    assert "_cancelPreview() {" in picker_js
+    # it replaced -- died with the classic cut, 2026-08-08. The component itself was
+    # ported vanilla static/mg-model-picker.js -> React ModelPicker.jsx on 2026-08-08;
+    # the debounce moved with it near-verbatim, loaded by the React shell and the Loom.)
+    picker_jsx = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "components" / "ModelPicker.jsx").read_text(encoding="utf-8")
+    # a card's mouseenter routes through the SCHEDULER (not showPreview directly)...
+    assert "onMouseEnter={(e) => schedulePreview(m, e.currentTarget)}" in picker_jsx
+    assert "const schedulePreview = (m, anchorEl) => {" in picker_jsx
+    # ...which is a 130ms setTimeout, not an instant popup -- the whole point of the fix...
+    assert "setTimeout(() => showPreview(m, anchorEl), 130);" in picker_jsx
+    # ...and the timer is cancellable (the old _cancelPreview()) so a fast scan clears it.
+    assert "const hidePreview = () => { clearTimeout(previewTimerRef.current); setPreview(null); };" in picker_jsx
 
 
 def test_account_without_its_own_file_still_sees_legacy_shared_snippets(tmp_path):
@@ -1514,11 +1519,17 @@ def test_flyout_open_does_not_search_the_hidden_tab():
     competing with the real search for the same connection. setKind() must call
     ensureSearched() on whichever picker just became visible instead, so only ONE search
     fires on open."""
-    picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-model-picker.js").read_text(encoding="utf-8")
-    assert "this._searched = false;" in picker_js
-    assert "if (this.style.display !== 'none') { this._searched = true; this._search(); }" in picker_js
-    assert "ensureSearched() {" in picker_js
-    assert "if (this._searched && !this._stale) return;" in picker_js
+    # Ported to React ModelPicker.jsx (2026-08-08): the display:none + _searched/ensureSearched
+    # dance became a `visible` prop feeding one search effect. The contract is identical -- a
+    # not-visible instance never searches, and a plain re-reveal with unchanged filters doesn't
+    # re-fire (each instance remembers its own last search key).
+    picker_jsx = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "components" / "ModelPicker.jsx").read_text(encoding="utf-8")
+    # a hidden (not visible) instance bails before searching -- the old display!=='none' gate
+    assert "if (!visible) return;" in picker_jsx
+    # a re-reveal with the SAME search key short-circuits -- the old `_searched && !_stale` return
+    assert "if (key === lastKeyRef.current) return;" in picker_jsx
+    assert "lastKeyRef.current = key;" in picker_jsx
+    assert "doSearch();" in picker_jsx
     # (The classic page's own setKind() -> ensureSearched() call site died with the
     # classic cut, 2026-08-08; the component keeps the deferred-search contract.)
 
@@ -1533,15 +1544,21 @@ def test_picking_a_base_model_does_not_double_search_the_hidden_lora_picker():
 
     Two halves, both required: `_search()` must own the `_searched` flag (so ANY search
     counts), and a base-type change on a hidden instance must defer rather than search."""
-    picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-model-picker.js").read_text(encoding="utf-8")
-    # 1) _search() owns the flag -- not just the two call sites that knew about it
-    body = picker_js.split("    _search() {", 1)[1][:900]
-    assert "this._searched = true;" in body and "this._stale = false;" in body
+    # Ported to React ModelPicker.jsx (2026-08-08): baseType is a prop threaded into the search
+    # key (searchUrl), and the single search effect is what both the old `_search()` flag-owning
+    # and the hidden-instance deferral collapsed into.
+    picker_jsx = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "components" / "ModelPicker.jsx").read_text(encoding="utf-8")
+    # 1) the search effect records its own key before firing -- the React equal of `_search()`
+    #    owning `_searched`/`_stale`, so ANY search (not just two call sites) counts and a later
+    #    reveal with the same key won't repeat it.
+    eff = picker_jsx.split("if (!visible) return;", 1)[1][:400]
+    assert "const key = searchUrl();" in eff
+    assert "lastKeyRef.current = key;" in eff and "doSearch();" in eff
 
-    # 2) a hidden instance defers; a visible one still re-searches on the spot
-    assert ("if (this.style.display === 'none') { if (this._searched) this._stale = true; return; }"
-            in picker_js)
-    assert "this._stale = false;" in picker_js   # initialized, never undefined on first reveal
+    # 2) a hidden instance defers: a base pick changes baseType (part of the search key below),
+    #    but the effect bails at `!visible` and only fires once on the eventual reveal.
+    assert "if (!visible) return;" in picker_jsx
+    assert 'if (kind === "lora" && baseType) u += "&base_type=" + encodeURIComponent(baseType);' in picker_jsx
     # (The classic page's base-type feed into the LoRA picker died with the classic
     # cut, 2026-08-08; the deferral contract itself lives in the component above.)
 
@@ -1559,16 +1576,21 @@ def test_generate_drawer_blocks_submit_on_unresolved_lora():
     O12 (Phase 2): the LoRA pick/resolve lifecycle itself (the fetch that sets
     entry.failed) moved into <mg-model-picker>'s own _toggleMulti() -- the gallery's
     onLoraPick() only consumes the ALREADY-resolved-or-failed entry the component hands
-    it. So the failed-tracking assertions now check mg-model-picker.js; everything that
+    it. So the failed-tracking assertions now check ModelPicker.jsx; everything that
     still lives in moonglade_gallery.py (the Go-button gate, generate()'s submit-time guard,
     anyLoraUnresolved() itself) is unchanged and still checked against the gallery page."""
     # (The classic gallery's own Go-button gate / submit-time guard died with the
     # classic cut, 2026-08-08. The component's failed-state tracking below is the
-    # surviving half of this fix -- the entry.failed distinction every consumer of
-    # <mg-model-picker> builds its own gating on.)
-    picker_js = (Path(__file__).resolve().parents[1] / "static" / "mg-model-picker.js").read_text(encoding="utf-8")
-    assert "entry.failed = true;" in picker_js
-    assert "entry.failed = !entry.version_id;" in picker_js
+    # surviving half of this fix -- the `failed` distinction every consumer of the
+    # picker builds its own gating on. Ported to React ModelPicker.jsx (2026-08-08):
+    # _toggleMulti()'s resolve became toggleMulti()'s /api/model-version fetch, dispatching
+    # a filled-in entry via onToggle.)
+    picker_jsx = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "components" / "ModelPicker.jsx").read_text(encoding="utf-8")
+    # resolve SUCCESS path: failed iff no version_id came back (old `entry.failed = !entry.version_id;`)
+    assert "failed: !v.version_id," in picker_jsx
+    # resolve FAILURE (network catch) path: marked failed outright (old `entry.failed = true;`),
+    # so a permanently-unresolvable LoRA is never silently dropped from the payload.
+    assert "onToggle && onToggle({ ...entry, failed: true }, true);" in picker_jsx
 
 
 def test_price_no_longer_has_an_enhance_mode(tmp_path, monkeypatch):

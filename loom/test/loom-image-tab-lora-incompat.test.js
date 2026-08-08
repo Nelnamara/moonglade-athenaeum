@@ -146,19 +146,38 @@ describe("Image tab Advanced-panel capability gating (extra.compatibility, mirro
 });
 
 describe("Picker: don't search the hidden tab on open (owner report 2026-07-24, \"still slow\")", () => {
-  test("both picker elements are captured in refs the ensureSearched effect can reach later", () => {
-    assert.match(src, /const basePickerElRef = useRef\(null\);/);
-    assert.match(src, /const loraPickerElRef = useRef\(null\);/);
-    assert.match(src, /basePickerElRef\.current = el;\s*\n\s*if \(el && !el\._mgBound\) \{/,
-      "must be set unconditionally on every callback invocation, not only the first bind, " +
-      "or the ref goes stale across a remount");
-    assert.match(src, /loraPickerElRef\.current = el;\s*\n\s*if \(el && !el\._mgBound\) \{/);
+  test("both pickers mount together on first open, each gated visible by the active tab", () => {
+    // Ported (2026-08-08 vanilla static/ campaign): the old <mg-model-picker> custom element
+    // exposed an imperative ensureSearched() the host reached via basePickerElRef/loraPickerElRef
+    // to run the search only when a tab was actually shown. The port folds that dance INTO
+    // <ModelPicker>'s `visible` prop (gallery/src/components/ModelPicker.jsx), so the host no
+    // longer needs a ref to reach the picker -- it just tells each mount whether it's the shown
+    // tab. The host-side guarantee that survives: BOTH pickers are lazily mounted TOGETHER on
+    // first open and then left mounted (pickerMounted latches true), so a tab flip never remounts
+    // either one and loses its search+scroll state, and each carries a `visible` prop tied to
+    // pickerKind so only the shown tab ever searches.
+    assert.match(src, /const \[pickerMounted, setPickerMounted\] = useState\(false\);/);
+    assert.match(src, /useEffect\(\(\) => \{ if \(pickerOpen\) setPickerMounted\(true\); \}, \[pickerOpen\]\);/,
+      "both pickers mount on FIRST open then stay mounted -- a hidden tab kept in the tree, " +
+      "not remounted, is what preserves its own last search across a tab flip");
+    assert.match(src, /<ModelPicker kind="base" visible=\{pickerKind === "base"\}/,
+      "the base picker's visibility -- and therefore whether it searches -- is driven by the active tab");
+    assert.match(src, /<ModelPicker kind="lora" multi baseType=[^\n>]*visible=\{pickerKind === "lora"\}/,
+      "the LoRA picker likewise; only the shown tab is `visible`, so the hidden one never searches on open");
   });
 
-  test("an effect calls ensureSearched() on whichever picker is visible whenever the mounted tab changes", () => {
-    assert.match(src,
-      /useEffect\(\(\) => \{\s*\n\s*if \(!pickerMounted\) return;\s*\n\s*const vis = pickerKind === "base" \? basePickerElRef\.current : loraPickerElRef\.current;\s*\n\s*if \(vis && vis\.ensureSearched\) vis\.ensureSearched\(\);\s*\n\s*\}, \[pickerMounted, pickerKind\]\);/,
-      "must key on [pickerMounted, pickerKind] -- the hidden tab needs its OWN search the " +
-      "moment it's revealed, not just once on initial mount");
+  test("the visible picker searches on reveal but skips a plain re-reveal (ensureSearched's contract, now inside ModelPicker)", () => {
+    // The host used to own a useEffect keyed on [pickerMounted, pickerKind] that reached into
+    // whichever element was visible and called ensureSearched(). The port relocates that logic
+    // into <ModelPicker> itself, driven by the `visible` prop: an effect that runs the fresh-list
+    // search when the tab becomes visible, but bails when the search key is unchanged from the last
+    // one -- so a plain re-reveal doesn't re-fetch and each instance keeps its own last search.
+    // Same guarantee ("the hidden tab needs its OWN search the moment it's revealed, not just once
+    // on initial mount"), moved from the host into the component it now belongs to.
+    const mp = readFileSync(path.join(__dirname, "../../gallery/src/components/ModelPicker.jsx"), "utf8");
+    assert.match(mp,
+      /useEffect\(\(\) => \{\s*if \(!visible\) return;\s*const key = searchUrl\(\);\s*if \(key === lastKeyRef\.current\) return;\s*lastKeyRef\.current = key;\s*doSearch\(\);\s*\}, \[visible, searchUrl, doSearch\]\);/,
+      "must gate on `visible` and re-search only when the search key changed -- a reveal triggers " +
+      "a search, a plain re-reveal (same key) does not");
   });
 });

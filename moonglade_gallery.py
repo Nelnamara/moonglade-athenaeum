@@ -4457,7 +4457,6 @@ body { background: var(--base); margin: 0; font-family: system-ui, sans-serif; }
 </style>
 <script src="/loom/vendor/react.production.min.js"></script>
 <script src="/loom/vendor/react-dom.production.min.js"></script>
-<script src="/static/mg-model-picker.js"></script>
 <!-- Before the drawer, deliberately: <mg-generate-drawer>'s cost line IS <mg-cost-badge> as of
      the consolidation, so the Loom's Video tab needs this file for a shot's cost to render at
      all. Same pairing the gallery shell above documents at length. -->
@@ -5752,7 +5751,7 @@ def create_app(out_dir: Path):
         # by definition is not authenticated yet -- same public tier as
         # /branding/ and /manifest.webmanifest above (plain compiled code, no
         # user data, no catalog, no credential). LOGIN_PAGE below deliberately
-        # does NOT reference the 5 /static/mg-*.js custom-element scripts
+        # does NOT reference the 4 /static/mg-*.js custom-element scripts
         # next_gallery()'s NEXT_PAGE loads -- none of that (pickers, cost
         # badge, upscale panel) exists on the login page, so those stay
         # exactly as gated as they always were.
@@ -10256,7 +10255,6 @@ __DESIGN_TOKENS__
    /api/generate -- i.e. spend without consent. Jinja's tojson escapes < > &. #}
 <script>window.MG_BOOT = {{ boot|tojson }};</script>
 __UPSCALE_CONST__
-<script src="/static/mg-model-picker.js"></script>
 <script src="/static/mg-cost-badge.js"></script>
 <script src="/static/mg-generate-drawer.js"></script>
 <script src="/static/mg-upscale-panel.js"></script>
