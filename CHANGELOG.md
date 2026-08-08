@@ -14,6 +14,7 @@ git tags. Full prose notes for tagged versions live on
 > does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- Gallery header: hovering the credits chip now shows a full breakdown — the paid/free credit split plus your free cards broken out by type (with Model/Video Card labels and soonest expiry). The paid/free split is hidden while the grid privacy-blur is on, so your real balance isn't left sitting on screen.
 - Control Panel: a new "PixAI account" panel — your benefit cards (on-hand + lifetime usage), coupons, and the real credit ledger (daily claims, event gifts, spend…), opened from the Control Panel, all read-only. The rail gains a free-cards count and the real paid/free credit split.
 - Contests: each contest card now has a "☆ Shortlist" button — select images in the gallery, open Contests, and stage your picks into a collection named for that contest in one click (no files moved, no credits). Re-implemented on the new React Contests panel from the earlier classic-only version.
 - Hardened sign-in: a failed login attempt now refreshes its security token so the next try always goes through (previously a second attempt after one failure could be rejected as "session expired"), and the whole login path now has real automated test coverage.
