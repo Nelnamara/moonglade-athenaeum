@@ -6010,3 +6010,43 @@ renders desktop (fallback can't fire, coarse=false); the primary narrow path is 
 code. NOTE the other half — the `no-cache` headers from the same day's Details fix mean a
 phone that cached an OLD (pre-mobile) bundle in Chrome/Firefox now revalidates on reload;
 one hard reload picks up both fixes.
+
+### Vanilla campaign 1/8: art-filters ported + the Loom went bundle-only  ·  *2026-08-08*
+
+First component of the "no vanilla JS survives" campaign (owner directive), plus the
+architectural change that makes the rest of it trivial. Owner picked "switch Loom to its
+real build."
+
+**The Loom is BUNDLE-ONLY now.** It used to serve two ways: an in-browser Babel-standalone
+transpile (default) that hand-inlined shared modules by string-stripping their `export`, and
+an opt-in esbuild bundle (`?bundle=1`). Six of the eight vanilla components ride the Loom
+shell, so wiring each into the Babel inline-strip path 6× was real recurring plumbing that
+kept a legacy delivery alive. Instead: `loom()` now serves the pre-built bundle
+unconditionally (503 with a "run npm run build" message if it's missing, never a silent
+fallback); LOOM_PAGE (the Babel template), the inline-strip code, the `?bundle=1` gate, the
+`__BABEL_LIB_TAG__` machinery, and the 3.1 MB vendored `loom/vendor/babel.min.js` are all
+deleted. Shared modules are now plain imports esbuild resolves. Verified live: default /loom
+renders via the bundle, no Babel, LoomBundle global present, no console errors.
+
+**art-filters: engine -> ES module.** `static/mg-art-filters.js` (631 lines, PixAI's 7
+offline art filters + our 5, gradient/canvas compositing) was a `window.MgArtFilters` global
+loaded by both shells' `<script>` tags. It's an ENGINE behind already-React UI (FiltersPanel),
+so it becomes `gallery/src/art/artFilters.js` -- a behavior-preserving move (the IIFE body is
+verbatim; only the boundary changed, `window.MgArtFilters = {...}` -> a returned +
+`export default`ed const). FiltersPanel imports it; the Loom's LoomMobile Filter compare
+imports it too (`../gallery/src/art/artFilters.js`, esbuild-resolved -- the first cross-tree
+shared import, now that the Loom is bundle-only). Both `<script>` tags removed, the file
+deleted -- static/ is down to 7 files. `window.MgArtFilters` is gone (confirmed undefined
+live). Tests reconciled: the loom node-test now imports the real ES module instead of
+eval-hacking the IIFE; test_enhance reads the new path; the loom preamble test is bundle-only;
+mg-generate-drawer-parity dropped its moonglade_gallery.py third-copy check (that classic
+inline surface died in the 2026-08-08 cut -- a loom-suite casualty the pytest-only cut
+reconciliation had missed); loom-mobile-view's AF-binding + cross-dir-import guards updated.
+Full loom node suite 714/714. NOTE the FIX_COLORS/editCore.js constants are still a local
+Loom copy -- converging those is future campaign work (the old Babel-path reason they HAD to
+be local is now gone).
+
+**Campaign order remaining (7):** picker-core+gallery-picker -> model-picker -> upscale-panel
+-> notify -> generate-drawer -> cost-badge (last, its spend-safety lifecycle gets a real
+redesign). Each still `<script>`-loaded in the shells; port each to a React component,
+delete its tag + file, until static/ is empty -> then master merge + v3.0.

@@ -25,26 +25,9 @@ if (!match) {
 }
 const localFriendlyGenErr = new Function("return (" + match[0] + ")")();
 
-// moonglade_gallery.py's Gen IIFE (the Image tab's own inline <script>) is a THIRD hand-copy,
-// same reason as the drawer's -- see its own duplication-risk comment right above
-// renderResultInto(). Extracted the same way: pull the function's source as text out of
-// the Python file (it's a plain JS function embedded in a Python string, no Python syntax
-// inside it) and turn it into a live function.
-const gallerySrc = readFileSync(path.join(__dirname, "../../moonglade_gallery.py"), "utf8");
-const galleryMatch = gallerySrc.match(/function friendlyGenErr\(raw\)\{[\s\S]*?\n  \}/);
-if (!galleryMatch) {
-  throw new Error(
-    "moonglade_gallery.py's local friendlyGenErr(raw) was not found by this test's regex -- " +
-    "its signature or indentation changed. Update this test's extraction pattern to match, " +
-    "don't just delete the test."
-  );
-}
-// The Python source escapes JS's own backslash-u unicode escapes as \\uXXXX (so the
-// PYTHON string literal contains a real backslash before "u"); collapsing that to a
-// single backslash here is what makes the extracted text valid standalone JS again.
-const localFriendlyGenErrPy = new Function(
-  "return (" + galleryMatch[0].replace(/\\\\u/g, "\\u") + ")"
-)();
+// (There used to be a THIRD hand-copy in moonglade_gallery.py's classic Image-tab inline
+// <script>, checked here too; that whole classic surface was removed in the 2026-08-08
+// classic cut, so only the drawer's copy remains to keep in parity with the real one.)
 
 const CASES = [
   "INSUFFICIENT_BALANCE", "insufficient balance for this task", "40300010",
@@ -59,14 +42,6 @@ describe("mg-generate-drawer.js's local friendlyGenErr stays in parity with loom
   CASES.forEach((c) => {
     test(`matches real friendlyGenErr for input ${JSON.stringify(c)}`, () => {
       assert.equal(localFriendlyGenErr(c), friendlyGenErr(c));
-    });
-  });
-});
-
-describe("moonglade_gallery.py's local friendlyGenErr (Gen IIFE) stays in parity with loom-mutations.js's real one", () => {
-  CASES.forEach((c) => {
-    test(`matches real friendlyGenErr for input ${JSON.stringify(c)}`, () => {
-      assert.equal(localFriendlyGenErrPy(c), friendlyGenErr(c));
     });
   });
 });

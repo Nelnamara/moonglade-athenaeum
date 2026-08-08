@@ -130,7 +130,7 @@ import "../styles/create-mobile.css";
    in the server. The two things still named "Enhance" in current code are
    NOT that dead surface -- desktop's Edit-tab "Enhance" sub-tab
    (GenerateDrawer.jsx) is the free, client-side Art Filters panel
-   (window.MgArtFilters/static/mg-art-filters.js: nothing generated, nothing
+   (the art-filter engine, gallery/src/art/artFilters.js: nothing generated, nothing
    spent, works offline), and Image mode's "Enhance Details" booster chip
    (genCore.js's MG_HIRES) is an ordinary field of the Image payload (PixAI's
    own hires-fix pass), not a separate dispatch. Neither is built here: this
