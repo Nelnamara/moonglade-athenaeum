@@ -25,7 +25,7 @@ import useClaimModal from "./hooks/useClaimModal.js";
 import "./styles/shell.css";
 import {
   fetchAccount, fetchCollections,
-  postForm, downloadZipForm, resolveVideoIds,
+  postJSON, downloadZipForm, resolveVideoIds,
 } from "./api.js";
 import useLibrary, { filterQueryString } from "./hooks/useLibrary.js";
 
@@ -387,7 +387,9 @@ export default function App({ boot }) {
       const name = window.prompt(
         "Add " + selIds.length + " image(s) to which collection? (a name; files are NOT moved)");
       if (name === null || !name.trim()) return;
-      await postForm("/collection-add", { back: "/next", name: name.trim() }, selIds);
+      const d = await postJSON("/api/collection",
+        { action: "add", collection: name.trim(), media_ids: selIds });
+      if (d.error) { window.alert(d.error); return; }
       afterMutation();
     },
     removeCollection: async (name) => {
@@ -395,7 +397,9 @@ export default function App({ boot }) {
       if (!window.confirm(
         "Remove " + selIds.length + " item(s) from the collection “" + name + "”?\n\n" +
         "Only the collection label is removed — no files are deleted and nothing leaves your PixAI account.")) return;
-      await postForm("/collection-remove", { back: "/next", name }, selIds);
+      const d = await postJSON("/api/collection",
+        { action: "remove", collection: name, media_ids: selIds });
+      if (d.error) { window.alert(d.error); return; }
       afterMutation();
     },
     sendCast: async () => {
@@ -441,14 +445,17 @@ export default function App({ boot }) {
       if (repl === null) return;
       if (!window.confirm('Replace "' + find + '" with "' + repl + '" across ' +
         selIds.length + " prompt(s)? This edits catalog.db.")) return;
-      await postForm("/bulk-replace-prompt", { back: "/next", find, replace: repl }, selIds);
+      const d = await postJSON("/api/replace-prompts",
+        { find, replace: repl, media_ids: selIds });
+      if (d.error) { window.alert(d.error); return; }
       afterMutation();
     },
     deleteLocal: async () => {
       if (!window.confirm(
         "Remove " + selIds.length + " image" + (selIds.length !== 1 ? "s" : "") +
         " from the local catalog? Files move to the _deleted/ folder (recoverable); the cloud task is untouched.")) return;
-      await postForm("/delete-bulk", { back: "/next" }, selIds);
+      const d = await postJSON("/api/delete-local", { media_ids: selIds });
+      if (d.error) { window.alert(d.error); return; }
       afterMutation();
     },
     deleteCloud: async (ids) => {
@@ -456,7 +463,8 @@ export default function App({ boot }) {
       // it does not replace the guard.
       const typed = window.prompt("This permanently deletes from PixAI. Type DELETE to confirm:");
       if (typed !== "DELETE") { window.alert("Cancelled."); return; }
-      await postForm("/delete-tasks-bulk", { back: "/next" }, ids);
+      const d = await postJSON("/api/delete-tasks", { media_ids: ids });
+      if (d.error) { window.alert(d.error); return; }
       afterMutation();
     },
   };
@@ -477,7 +485,9 @@ export default function App({ boot }) {
     const suggested = "Contest: " + (contest.title || "(untitled)") + ends;
     const name = window.prompt("Add " + selIds.length + " image(s) to which collection?", suggested);
     if (name === null || !name.trim()) return;
-    await postForm("/collection-add", { back: "/next", name: name.trim() }, selIds);
+    const d = await postJSON("/api/collection",
+      { action: "add", collection: name.trim(), media_ids: selIds });
+    if (d.error) { window.alert(d.error); return; }
     afterMutation();
   };
 

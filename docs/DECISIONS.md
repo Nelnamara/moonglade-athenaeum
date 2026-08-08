@@ -5901,3 +5901,28 @@ is client-side now); the server-side non-local mode=create refusal is unchanged 
 tested. Full suite gate for the auth change. NOTE: the LAN-no-accounts state itself can't be
 live-exercised without wiping accounts + a real remote request, so it rests on the unit
 tests; normal local sign-in verified live (boot is_local:true, signin mode).
+
+### Desktop form-route switchover: classic form POSTs → JSON twins  ·  *2026-08-07*
+
+The last demolition prerequisite before the cut. App.jsx's six desktop bulk actions POSTed
+the classic redirect-answering form routes (`/collection-add`, `/collection-remove`,
+`/bulk-replace-prompt`, `/delete-bulk`, `/delete-tasks-bulk`) via `postForm`; they now call
+the JSON twins mobile's ActionsMenu already uses: `/api/collection` {action, collection,
+media_ids}, `/api/replace-prompts` {find, replace, media_ids}, `/api/delete-local`
+{media_ids}, `/api/delete-tasks` {media_ids} (after the unchanged typed-DELETE gate). New
+`postJSON()` in api.js (fail-soft to {error}); the six handlers branch on d.error and
+alert, else afterMutation(). `useImageDetails.js` was already on `/api/delete-image` (no
+change). So the five classic form routes now have ZERO React callers and die with the cut.
+**Verified live**: `/api/collection` add+remove round-trips a label on a real image (applied,
+then cleaned up); `/api/replace-prompts` no-op returns 0-changed cleanly. delete-local/
+delete-tasks not exercised live (recoverable-but-real / irreversible) -- identical postJSON
+pattern + mobile-proven shapes.
+
+**Cut scope REVISED (owner, 2026-08-07):** the cut removes only the big, unambiguously-dead
+classic PAGES (`/classic`, `/health`, `/panel`, `/duplicates`, their inline templates) that
+have React replacements. **KEEP** `/sw.js` + `/img/` (the service worker is dead in React
+anyway -- only classic registered it; installability = manifest+icons, untouched -- and the
+owner wasn't sure, so it stays) and **KEEP** `/logout` GET (logging out is the React POST
+button, unaffected; the GET is harmless and the owner was unsure). Small, harmless, no
+confusion. So all cut prereqs are now done: 3 ports, context menu, LAN-login, form-route
+switchover -- the cut is the delete pass, remaining routes/templates only.
