@@ -21,6 +21,53 @@ export const ADV_DEFAULTS = {
   batch: "",
 };
 
+/* Serialize the CURRENT applied view (q + media + shelf + adv) into a query string.
+   Two callers need it, and they disagree on ONE thing -- the date format:
+
+   - dateStyle "library" (default): `from`/`to` as "YYYY-MM". This is what
+     /api/next/library reads AND what Flyout's parsePresetQuery() reads back, so a
+     saved-view preset round-trips through it losslessly.
+   - dateStyle "export": `from_year`/`from_month` (+ `to_*`). The CSV route parses its
+     filters through _filters_from_args(), whose date helper keys off `<prefix>_year`/
+     `<prefix>_month` -- NOT `from`/`to`. Appending a library-format string to /export-csv
+     would silently DROP the date filter. This split is the whole reason this is a shared
+     helper and not an inline join. */
+export function filterQueryString({ applied, media, shelf, adv, perPage }, dateStyle = "library") {
+  const a = adv || {};
+  const p = new URLSearchParams();
+  const add = (k, v) => { if (v) p.set(k, String(v)); };
+  add("q", (applied || "").trim());
+  add("media", media);
+  add("collection", shelf);
+  if (a.sort && a.sort !== "newest") add("sort", a.sort);
+  if (a.ratingMin) add("rating_min", a.ratingMin);
+  add("model", a.model);
+  add("lora", a.lora);
+  add("source", a.source);
+  add("tag", a.tag);
+  if (a.publishedOnly) add("published", "1");
+  // batch rides the EXPORT only, never a saved view: it's a transient Details "View batch"
+  // drill-down, and parsePresetQuery neither restores nor clears it -- a saved view pinned
+  // to a stale batch id would load the wrong/empty set, or leave a stale batch active. It
+  // IS a real current filter worth exporting, though. (Found by the 2026-08-07 port review.)
+  if (a.batch && dateStyle === "export") add("batch", a.batch);
+  // per_page is a VIEW setting, not a filter: parsePresetQuery restores it, but the CSV
+  // export ignores it (it dumps every matching row), so it only rides the library style.
+  if (perPage && dateStyle !== "export") add("per_page", perPage);
+  const ym = (val, prefix) => {
+    if (!val) return;
+    if (dateStyle === "export") {
+      const [y, m] = String(val).split("-");
+      if (y) { p.set(prefix + "_year", y); if (m) p.set(prefix + "_month", m); }
+    } else {
+      p.set(prefix, val);   // "YYYY-MM", read verbatim by parsePresetQuery / next_library
+    }
+  };
+  ym(a.dateFrom, "from");
+  ym(a.dateTo, "to");
+  return p.toString();
+}
+
 export default function useLibrary() {
   // filters
   const [media, setMedia] = useState("");

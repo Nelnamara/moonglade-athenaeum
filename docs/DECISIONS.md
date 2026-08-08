@@ -5830,3 +5830,45 @@ tried `freeCredit`/`paidCredit` and every other variant but never those two exac
 Generate/Bonus/BP wallet chips are a separate UI grouping). The rail sub-line and the modal
 balance strip now show the real split. Both the ledger AND the split are fully live; the
 whole account-detail port is real end-to-end. (Coupons still 0 on-hand — genuine for now.)
+
+### Three classic-UI ports to React: snippets · saved-views write · filtered CSV  ·  *2026-08-07*
+
+Three of the classic-demolition "port-first" items built on design-final-pass so classic
+loses three more reasons to exist. All reuse EXISTING backend routes (no new backend):
+
+- **Prompt snippets manager** (`GenerateDrawer.jsx`): the ★ Snippets row is now the real
+  per-account store (`/api/snippets`), replacing 4 hardcoded chips. Save-current / insert /
+  delete + one-level Undo, server 200-cap. Ported classic's `Snips` popover behaviors.
+- **Saved-views WRITE** (`Flyout.jsx` + `App.jsx` + `FiltersPanel.jsx`): the read side
+  already worked; now you can save the current view as a named preset and delete presets
+  (`POST /api/view-presets`). Query is library-format so `parsePresetQuery` round-trips it.
+- **Filtered CSV export** (`Flyout.jsx`): a "⬇ Export view" link carries the current filter
+  to `/export-csv`; the Control Panel's whole-catalog dump is untouched.
+
+Shared `filterQueryString()` in `useLibrary.js` serializes the view, with a deliberate
+date-format split: **library** style (`from`/`to` as `YYYY-MM`, read by next_library +
+parsePresetQuery) vs **export** style (`from_year`/`from_month`, the only shape
+`_filters_from_args` reads — a library-format string would silently DROP the date filter).
+
+**Adversarial review (3-agent workflow) found 4 real bugs, all fixed before commit:**
+1. HIGH — `batch` serialize/parse asymmetry: `filterQueryString` wrote `batch` but
+   `parsePresetQuery` never read it and `applyAdvanced` only merges present keys, so a saved
+   view could pin to a stale batch id (whole-library on reload) or leave an active batch
+   stuck when loading another view. Fixed: batch rides EXPORT only (a real live filter),
+   never a saved view; `parsePresetQuery` now always returns `batch: ""` so loading ANY view
+   clears an active drill-down.
+2. NORMAL — Save serialized App's APPLIED adv, not the flyout's uncommitted DRAFT, so
+   setting a filter and hitting Save without Apply saved the old state. Fixed: Save AND
+   Export now serialize the draft (`buildViewQuery(draftAdv, style)`), matching what the
+   flyout shows.
+3. NORMAL — `insertSnip` dropped the `.trim()` the +words button/classic have, leaking a
+   stray space before the comma ("text , snippet"). Fixed.
+4. NIT — Undo re-inserted a deleted snippet at the front, not its original index. Fixed
+   (stores the index).
+The one REFUTED finding (year-only `To` date over-exporting) confirmed the export date
+handling is correct — `_filters_from_args`'s month_default covers it.
+
+**Live UI verification PENDING:** the dev server (localhost:5057) was down at commit time
+(can't start it bare per the launcher rule), so the browser tap-through wasn't done. Build
+clean, js-syntax green, logic adversarially reviewed. Owner QA / a live pass is still owed
+before merge — see the mobile-style checklist for what to exercise.

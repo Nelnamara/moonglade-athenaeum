@@ -25,7 +25,7 @@ import {
   fetchAccount, fetchCollections,
   postForm, downloadZipForm, resolveVideoIds,
 } from "./api.js";
-import useLibrary from "./hooks/useLibrary.js";
+import useLibrary, { filterQueryString } from "./hooks/useLibrary.js";
 
 /* ============================ THE APP SHELL =================================
    Redesigned per the Frontend Gallery DC (design_handoff_moonglade_suite):
@@ -413,6 +413,23 @@ export default function App({ boot }) {
     // view rather than an explicit selection; falls back to /api/contact-
     // sheet's own "Recent" default when not viewing a collection.
     printCollection: () => openContactSheet(null, shelf),
+    // Saved-views WRITE + filtered CSV export both serialize the view the FLYOUT shows.
+    // The flyout drafts the advanced filters locally and only commits them on Apply, so
+    // Save/Export must serialize the DRAFT adv (passed in), NOT App's committed `adv` --
+    // otherwise setting a filter and hitting Save without Apply silently saves the old
+    // state (2026-08-07 port review). q/media/shelf/perPage aren't drafted in the flyout,
+    // so those come from App's applied state. `style`: "library" (round-trips via
+    // parsePresetQuery) or "export" (from_year/from_month, what _filters_from_args reads).
+    buildViewQuery: (draftAdv, style) =>
+      filterQueryString({ applied, media, shelf, adv: draftAdv || adv, perPage }, style),
+    saveView: (name, query) => fetch("/api/view-presets", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, query }),
+    }).then((r) => r.json()),
+    deleteView: (name) => fetch("/api/view-presets", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ delete: name }),
+    }).then((r) => r.json()),
     downloadZip: () => downloadZipForm(selIds),
     replacePrompt: async () => {
       const find = window.prompt(

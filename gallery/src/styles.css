@@ -290,6 +290,26 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
   border-top: 1px solid var(--surface0); }
 .flyft .apply { border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 28%, transparent); color: #fff; }
+.flyft a.card { text-decoration: none; display: inline-flex; align-items: center; }
+
+/* Saved-views WRITE UI (load chips + delete + save-current). */
+.flysaved-body { display: flex; flex-direction: column; gap: 6px; }
+.flysaved-empty { font-size: 10px; color: var(--overlay0); }
+.flysaved-list { display: flex; flex-wrap: wrap; gap: 5px; }
+.flysaved-chip { display: inline-flex; align-items: stretch; border: 1px solid var(--surface1);
+  border-radius: 7px; overflow: hidden; background: var(--base); }
+.flysaved-load { font-size: 10.5px; color: var(--text); background: transparent; border: none;
+  padding: 4px 8px; cursor: pointer; font-family: inherit; max-width: 160px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.flysaved-load:hover { color: var(--accent); }
+.flysaved-del { font-size: 12px; color: var(--overlay0); background: transparent;
+  border: none; border-left: 1px solid var(--surface1); padding: 0 7px; cursor: pointer; font-family: inherit; }
+.flysaved-del:hover { color: var(--red, #f38ba8); }
+.flysaved-save { display: flex; gap: 6px; }
+.flysaved-save input { flex: 1 1 auto; background: var(--base); border: 1px solid var(--surface1);
+  border-radius: 6px; color: var(--text); font-size: 11px; padding: 6px 8px; min-width: 0; }
+.flysaved-save .card { flex: none; }
+.flysaved-msg { font-size: 9.5px; color: var(--red, #f38ba8); }
 
 /* ---- the Actions menu + the cloud-delete blast radius ---- */
 .am-wrap { position: relative; display: inline-flex; }

@@ -30,6 +30,10 @@ export function parsePresetQuery(qs) {
     ratingMin: Number(g("rating_min")) || 0, model: g("model"), lora: g("lora"),
     dateFrom: g("from"), dateTo: g("to"), source: g("source"), tag: g("tag"),
     publishedOnly: g("published") === "1",
+    // Always reset batch: saved views never carry a batch drill-down, so loading ANY view
+    // must clear an active one -- applyAdvanced only touches keys present in the patch, so
+    // omitting batch here would leave a stale Details "View batch" filter stuck on.
+    batch: "",
     perPage: [50, 100, 200].includes(Number(g("per_page"))) ? Number(g("per_page")) : null,
   };
 }
@@ -56,13 +60,37 @@ function MonthPicker({ value, onChange, years, label }) {
   );
 }
 
-export default function Flyout({ boot, current, onApply, onClose, onPrintCollection }) {
+export default function Flyout({ boot, current, onApply, onClose, onPrintCollection,
+    onSaveView, onDeleteView, buildViewQuery }) {
   const [d, setD] = useState(current);          // draft
   const [presets, setPresets] = useState([]);
+  const [saveName, setSaveName] = useState("");
+  const [saveMsg, setSaveMsg] = useState("");
   useEffect(() => { setD(current); }, [current]);
   useEffect(() => { fetchPresets().then(setPresets); }, []);
   const set = (k) => (e) =>
     setD({ ...d, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+
+  // Saved-views WRITE: save the current APPLIED view (App builds the query — this UI just
+  // names it) / delete one, then refetch the account-scoped list. Read side unchanged.
+  const refreshPresets = () => fetchPresets().then(setPresets);
+  const saveView = async () => {
+    const name = saveName.trim();
+    if (!name || !onSaveView || !buildViewQuery) return;
+    if (presets.some((p) => p.name === name) &&
+        !window.confirm('A saved view named "' + name + '" exists — overwrite it?')) return;
+    // Serialize the DRAFT the flyout shows (d), not App's committed adv -- see App's actions.
+    const res = await onSaveView(name, "?" + buildViewQuery(d, "library"))
+      .catch(() => ({ error: "Network error — not saved." }));
+    if (res && res.error) { setSaveMsg(res.error); return; }
+    setSaveName(""); setSaveMsg(""); refreshPresets();
+  };
+  const exportHref = buildViewQuery ? "/export-csv?" + buildViewQuery(d, "export") : null;
+  const deleteView = async (name) => {
+    if (!onDeleteView) return;
+    await onDeleteView(name).catch(() => {});
+    refreshPresets();
+  };
 
   return (
     <div className="fly" role="dialog" aria-label="Advanced search">
@@ -116,17 +144,31 @@ export default function Flyout({ boot, current, onApply, onClose, onPrintCollect
             Published only
           </label>
         </div>
-        <div className="flyrow"><label>Saved views</label>
-          <select
-            value=""
-            onChange={(e) => {
-              const p = presets.find((x) => x.name === e.target.value);
-              if (p && p.query) onApply(parsePresetQuery(p.query));
-            }}
-          >
-            <option value="">{presets.length ? "Saved views…" : "No saved views yet"}</option>
-            {presets.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
-          </select>
+        <div className="flyrow full flysaved">
+          <label>Saved views</label>
+          <div className="flysaved-body">
+            {presets.length === 0 ? (
+              <div className="flysaved-empty">No saved views yet.</div>
+            ) : (
+              <div className="flysaved-list">
+                {presets.map((p) => (
+                  <span className="flysaved-chip" key={p.name}>
+                    <button type="button" className="flysaved-load" title="Load this view"
+                      onClick={() => p.query && onApply(parsePresetQuery(p.query))}>{p.name}</button>
+                    <button type="button" className="flysaved-del" title="Delete this saved view"
+                      onClick={() => deleteView(p.name)}>×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flysaved-save">
+              <input value={saveName} placeholder="Save the current view as…"
+                onChange={(e) => { setSaveName(e.target.value); setSaveMsg(""); }}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveView(); } }} />
+              <button type="button" className="card" disabled={!saveName.trim()} onClick={saveView}>Save</button>
+            </div>
+            {saveMsg && <div className="flysaved-msg">⚠ {saveMsg}</div>}
+          </div>
         </div>
       </div>
       <div className="flyft">
@@ -144,6 +186,12 @@ export default function Flyout({ boot, current, onApply, onClose, onPrintCollect
             title="Print a contact sheet of the current view">
             🖶 Contact sheet
           </button>
+        )}
+        {exportHref && (
+          <a className="card" href={exportHref} download
+            title="Download exactly this filtered view as CSV (the whole-catalog dump stays in the Control Panel)">
+            ⬇ Export view
+          </a>
         )}
         <span className="sp" />
         <button className="card apply" onClick={() => onApply(d)}>Apply</button>
