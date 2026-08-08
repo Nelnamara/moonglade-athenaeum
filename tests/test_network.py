@@ -1002,6 +1002,44 @@ def test_run_account_info_reports_real_reason(mocker, capsys):
     core.run_account_info(SimpleNamespace(token=None))
     assert "temporary" in capsys.readouterr().out.lower()
 
+
+# ---- credit_balance: ad-hoc GraphQL user(id).{total,free,paid} ----
+
+def test_credit_balance_normalizes_real_shape(mocker):
+    mocker.patch.object(core, "gql_adhoc", return_value={
+        "user": {"id": "42", "total": 3691340, "free": 33000, "paid": 3658340}})
+    result = core.credit_balance(mocker.MagicMock())
+    assert result == {"total": 3691340, "free": 33000, "paid": 3658340}
+
+
+def test_credit_balance_fails_soft(mocker):
+    mocker.patch.object(core, "gql_adhoc", side_effect=core.PixAIError("boom"))
+    assert core.credit_balance(mocker.MagicMock()) == {
+        "total": None, "free": None, "paid": None}
+
+
+def test_run_account_info_shows_free_paid_breakdown(mocker, capsys):
+    """The dashboard's "Credits (balance)" line used to be the only number shown -- it now
+    also breaks the balance into free vs paid, the same split the site's own Membership &
+    Credits page shows and quotaAmount alone can't."""
+    from types import SimpleNamespace
+
+    def fake_gql(session, query, variables=None):
+        # _ACCOUNT_QUERY is the only one of the two with quotaAmount -- credit_balance's
+        # own query has NO 'me' field at all, and _ACCOUNT_QUERY's own totalCount would
+        # false-match a naive "total" substring check, hence keying off quotaAmount instead.
+        if "quotaAmount" in query:
+            return {"me": {"id": "42", "quotaAmount": 3691340}}
+        return {"user": {"id": "42", "total": 3691340, "free": 33000, "paid": 3658340}}
+
+    mocker.patch.object(core, "_make_session", lambda *a, **k: object())
+    mocker.patch.object(core, "gql_adhoc", side_effect=fake_gql)
+    res = core.run_account_info(SimpleNamespace(token=None))
+    out = capsys.readouterr().out
+    assert "of which free" in out and "33,000" in out
+    assert "of which paid" in out and "3,658,340" in out
+    assert res["free_credits"] == 33000 and res["paid_credits"] == 3658340
+
 def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker):
     """getTaskById returns the task's top-level paidCredit for HISTORICAL tasks (the
     same persisted response our full-meta path replays -- verified against a real

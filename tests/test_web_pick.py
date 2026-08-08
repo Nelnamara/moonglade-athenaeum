@@ -2273,14 +2273,16 @@ def test_import_task_leaves_a_dismissed_orphan_alone(tmp_path, monkeypatch):
 
 
 def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch):
-    """The header balance surface exposes per-card breakdown + soonest expiry, claimable
-    free credits, and the subscription cliff — the data the chip/badge/warnings render."""
+    """The header balance surface exposes per-card breakdown (name + type/category) + soonest
+    expiry, claimable free credits, and the subscription cliff — the data the chip/badge/
+    warnings render. Category was fetched by list_kaisuukens all along but used to be dropped
+    before reaching cards_by, so the tooltip could never say "Model Card" vs "Video Card"."""
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "account_info", lambda s: {
         "quotaAmount": 140, "subscription": {"endAt": "2026-07-27T00:00:00Z", "cancelAtPeriodEnd": True}})
     monkeypatch.setattr(core, "list_kaisuukens", lambda s: [
-        {"name": "Edit Pro Only", "count": 17, "expires": "2026-07-17T20:11:09Z"},
-        {"name": "Reference Pro Only", "count": 5, "expires": "2026-07-17T20:11:09Z"}])
+        {"name": "Edit Pro Only", "count": 17, "expires": "2026-07-17T20:11:09Z", "category": "Model Card"},
+        {"name": "Reference Pro Only", "count": 5, "expires": "2026-07-17T20:11:09Z", "category": "Model Card"}])
     monkeypatch.setattr(core, "list_claims", lambda s: [
         {"id": "pixai-daily-credits", "amount": 30000, "canClaim": True},
         {"id": "agent-daily-stamina", "amount": 20, "canClaim": True}])
@@ -2288,8 +2290,24 @@ def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch):
     d = cli.get("/api/account").get_json()
     assert d["credits"] == 140 and d["cards"] == 22
     assert d["card_expiry"] == "2026-07-17" and len(d["cards_by"]) == 2
+    assert d["cards_by"][0]["category"] == "Model Card"
     assert d["claim_credits"] == 30000 and "pixai-daily-credits" in d["claim_ids"]
     assert d["sub"]["end"] == "2026-07-27" and d["sub"]["cancel"] is True
+
+
+def test_account_cards_by_category_defaults_empty_when_absent(tmp_path, monkeypatch):
+    """A kaisuuken row with no category (e.g. an older PixAI response shape, or the CLI's
+    own list_kaisuukens() before this field existed) must not blow up the route -- category
+    defaults to '' rather than None, so the JS tooltip's `k.category ? ... : ''` check is
+    always comparing against a string, never null."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 140})
+    monkeypatch.setattr(core, "list_kaisuukens", lambda s: [
+        {"name": "Legacy Card", "count": 1, "expires": ""}])
+    monkeypatch.setattr(core, "list_claims", lambda s: [])
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    d = cli.get("/api/account").get_json()
+    assert d["cards_by"][0]["category"] == ""
 
 
 def test_account_endpoint_still_serves_credits_after_the_roles_removal(tmp_path, monkeypatch):
