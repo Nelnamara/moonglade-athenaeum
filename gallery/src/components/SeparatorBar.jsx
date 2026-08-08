@@ -1,5 +1,6 @@
-import React, { useEffect, useRef } from "react";
+import React, { useState } from "react";
 import NavSpine from "./NavSpine.jsx";
+import CostBadge from "./CostBadge.jsx";
 import "../styles/shell.css";
 
 /* The separator bar (DC "Frontend Gallery", §3 of the build map): nav pills ·
@@ -10,11 +11,11 @@ import "../styles/shell.css";
    (sepBottom) is what the advanced-panel and dock workstreams anchor to
    (advanced panel top = sepBottom + 10; dock max-height caps at sepBottom).
 
-   COST-CHIP CONTRACT: this bar mounts the shared <mg-cost-badge compact>
-   element with id "mg-sep-cost", hidden until its first mg-cost push (its idle
-   hint would otherwise be permanent noise). The GenerateDock workstream can
-   point a costRef at document.getElementById("mg-sep-cost") — the element is
-   never unmounted. The ACCOUNT balance chip beside it is this component's own
+   COST-CHIP CONTRACT: this bar mounts the shared <CostBadge compact>, hidden
+   until its first onCost push (its idle hint would otherwise be permanent
+   noise). It is dormant today — nothing drives it, so it stays hidden; a future
+   GenerateDock refit can forward a ref to it to show the desktop price here. The
+   ACCOUNT balance chip beside it is this component's own
    markup, fed live from /api/account (credits/cards are real, not the DC's
    hardcoded 46,200/13). */
 
@@ -40,21 +41,9 @@ export default function SeparatorBar({
   onOverlay,
   onClaim, claiming,
 }) {
-  /* <mg-cost-badge> is a web component; mount once, never unmount (same
-     discipline as the drawer's price badge). Any mg-cost push reveals it. */
-  const costHost = useRef(null);
-  useEffect(() => {
-    const host = costHost.current;
-    if (!host || host.firstChild) return;
-    if (!(window.customElements && window.customElements.get("mg-cost-badge"))) return;
-    const el = document.createElement("mg-cost-badge");
-    el.setAttribute("compact", "");
-    el.id = "mg-sep-cost";
-    host.appendChild(el);
-    const show = () => host.classList.add("has");
-    el.addEventListener("mg-cost", show);
-    return () => el.removeEventListener("mg-cost", show);
-  }, []);
+  /* The shared compact price chip. Hidden until its first onCost push reveals it
+     (its idle hint would be permanent noise); mounted always, never unmounted. */
+  const [hasCost, setHasCost] = useState(false);
 
   const credits = account && account.credits != null
     ? Number(account.credits).toLocaleString() : "—";
@@ -128,8 +117,10 @@ export default function SeparatorBar({
           <div className="mgx-acttxt">{actText}</div>
         </div>
 
-        {/* shared price chip host (hidden until the dock pushes a price) */}
-        <span ref={costHost} className="mgx-costslot" />
+        {/* shared price chip (hidden until the dock pushes a price) */}
+        <span className={"mgx-costslot" + (hasCost ? " has" : "")}>
+          <CostBadge compact onCost={() => setHasCost(true)} />
+        </span>
 
         {/* account credits chip: gold billing tooltip drops below, right-anchored */}
         <button type="button" className="mgx-cred"

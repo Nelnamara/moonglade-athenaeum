@@ -5,6 +5,7 @@ import {
 } from "../gen/editCore.js";
 import { submitTask, useResultLines } from "../gen/submitTask.js";
 import { askPicker } from "./PickerHost.jsx";
+import CostBadge from "./CostBadge.jsx";
 
 /* The Edit tab: Edit Pro / Reference Pro against /api/edit, with the toolbox
    preset bank. @image1 is the image being edited; extra references number from
@@ -16,7 +17,6 @@ export default function EditTab({ visible, initialSource }) {
   const [busy, setBusy] = useState(false);
   const [lines, openLine] = useResultLines();
   const costRef = useRef(null);
-  const costHost = useRef(null);
   const busyRef = useRef(false);
   const seq = useRef(0);
   const timer = useRef(0);
@@ -60,22 +60,6 @@ export default function EditTab({ visible, initialSource }) {
     clearTimeout(timer.current);
     timer.current = setTimeout(fireCost, 250);
   }, [fireCost]);
-
-  useEffect(() => {
-    if (!visible) return;
-    const host = costHost.current;
-    if (!host || host.firstChild) return;
-    if (window.customElements && window.customElements.get("mg-cost-badge")) {
-      const el = document.createElement("mg-cost-badge");
-      el.setAttribute("hint", "Pick an image to edit to see the cost.");
-      host.appendChild(el);
-      costRef.current = el;
-      fireCost();
-    } else {
-      host.textContent = "⚠ Couldn't verify the cost — editing may spend credits.";
-      host.className = "gd-cost gd-costfail";
-    }
-  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pickSource = async () => {
     const m = await askPicker({ type: "image" });
@@ -204,7 +188,9 @@ export default function EditTab({ visible, initialSource }) {
       </div>
 
       <div className="gd-go">
-        <span ref={costHost} className="gd-cost" />
+        <span className="gd-cost">
+          <CostBadge ref={costRef} hint="Pick an image to edit to see the cost." />
+        </span>
         <span className="sp" />
         <button className="gen" disabled={!!gate || busy} title={gate || "Submit the edit"}
           onClick={run}>&#10022; Edit</button>

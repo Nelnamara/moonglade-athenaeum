@@ -50,6 +50,7 @@ import MgArtFilters from "../gallery/src/art/artFilters.js";
 // <mg-gallery-picker> web-component mount for the React component.
 import GalleryPicker from "../gallery/src/components/GalleryPicker.jsx";
 import ModelPicker from "../gallery/src/components/ModelPicker.jsx";
+import CostBadge from "../gallery/src/components/CostBadge.jsx";
 
 // The Loom.dc.html's own TINTS + tint formula (line ~681, ~760): 6 rotating per-shot
 // gradients so same-status shots stay visually distinguishable from each other, not just
@@ -1172,7 +1173,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     });
   }, [setImgLoras]);
   // D-12 increments 2-4: read-only cost badges for the Image/Edit/Reference tabs -- refs to
-  // the <mg-cost-badge> custom elements (imperative setChecking/setPrice/clear API, the same
+  // the <CostBadge> components (imperative setChecking/setPrice/clear API via ref, the same
   // component the Gallery's Generate and Edit tabs use). Kept ALONGSIDE -- not instead of --
   // confirmSpend's window.confirm at submit time below: these three tabs' confirm dialog IS
   // the fail-closed guardrail that got built after they used to lie about cost (see
@@ -2356,7 +2357,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <label className="lv-ck">
             <input type="checkbox" checked={imgAdv.promptHelper}
               onChange={(ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))} /> Prompt helper</label>
-          <mg-cost-badge ref={imgCostRef} hint="Pick a model and write a prompt to see the cost." card-label="a card"></mg-cost-badge>
+          <CostBadge ref={imgCostRef} hint="Pick a model and write a prompt to see the cost." cardLabel="a card" />
           {/* Gate on what genImage() itself refuses without -- a model and a prompt. It rejects
               both outright ("pick a model first" / "enter an image prompt"), so a live button
               made the tab's very FIRST click, before any model is picked, a dead end that only
@@ -2413,7 +2414,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               <label className="lv-lab">Edit instruction</label>
               <textarea className="lv-ta" value={active.c.editPrompt || ""} placeholder="e.g. make it night, add rain, warmer key light…"
                 onChange={(ev) => patch((c) => ({ ...c, editPrompt: ev.target.value }))} />
-              <mg-cost-badge ref={editCostRef} hint="Add a source image and instruction to see the cost." card-label="an Edit card"></mg-cost-badge>
+              <CostBadge ref={editCostRef} hint="Add a source image and instruction to see the cost." cardLabel="an Edit card" />
               <button className="lv-go" disabled={busyE || !src} onClick={() => genEdit(active)}>{busyE ? (ge.msg || "editing…") : "✦ Edit the open frame"}</button>
               {ge.phase === "error" && <div className="lv-gerr">{ge.msg}</div>}
               {ge.mid && (
@@ -2497,7 +2498,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <label className="lv-lab">Prompt</label>
           <textarea className="lv-ta" value={active.c.refPrompt || ""} placeholder="compose a new still from the references…"
             onChange={(ev) => patch((c) => ({ ...c, refPrompt: ev.target.value }))} />
-          <mg-cost-badge ref={refCostRef} hint="Add references and a prompt to see the cost." card-label="an Edit card"></mg-cost-badge>
+          <CostBadge ref={refCostRef} hint="Add references and a prompt to see the cost." cardLabel="an Edit card" />
           <button className="lv-go" disabled={busyR || !refs.length} onClick={() => genRef(active)}>{busyR ? (gr.msg || "generating…") : "✦ Generate from references"}</button>
           {gr.phase === "error" && <div className="lv-gerr">{gr.msg}</div>}
           {gr.mid && (
@@ -4204,9 +4205,9 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // (buildImgGenBody for Image; the same {mode:"edit", source, instruction, edit_model}/
   // {..., sources} shapes for Edit/Reference), just rendered as a plain text line via the
   // same tallyPrices/formatCostEstimate/costTooltip pure helpers the Video tab's own genPrice
-  // already uses above, instead of binding a <mg-cost-badge> custom element -- a
-  // presentational choice (this screen has no other custom-element bindings besides the
-  // model/LoRA pickers), not a pricing fork: the real cost gate is still confirmSpend's own
+  // already uses above, instead of mounting a <CostBadge> like LoomV2's Deep Focus tabs do --
+  // a presentational choice (this screen renders cost as a plain text line), not a pricing
+  // fork: the real cost gate is still confirmSpend's own
   // window.confirm inside genImage/genEdit/genRef, fired UNMODIFIED on submit below.
   const [imgPrice, setImgPrice] = useState({});
   const [editPrice, setEditPrice] = useState({});

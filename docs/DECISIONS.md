@@ -117,6 +117,8 @@ The shared cost-badge component's `compact` attribute and its `mg-cost` event ha
 
 **Why.** Both are declared public API of a deliberately host-agnostic component. `compact` was built for the not-yet-wired cost-to-finish pill, and `mg-cost` is precisely the DOM-level signal that would carry a price update across the no-build-global vs. esbuild-module wall where the Option-A consolidation stopped. A future pass wiring the cost-to-finish pill or continuing that consolidation needs exactly this surface.
 
+**Update 2026-08-08 (React port, campaign 4/8):** still true, just renamed. The vanilla `<mg-cost-badge>` became `CostBadge.jsx`; `compact` is now the `compact` PROP (rendered by SeparatorBar's chip) and the `mg-cost` DOM event became the `onCost` PROP (SeparatorBar's reveal hook). Both remain DORMANT — SeparatorBar mounts the compact chip but nothing drives it yet, exactly the not-yet-wired cost-to-finish pill this entry reserved. Keep both; a future GenerateDock refit forwards a ref to that chip to show the desktop price there.
+
 ### One activity feed for every job source, logged fail-soft  ·  *2026-07-24*
 
 All Job Tracker sources log to the same out_dir/jobs.jsonl activity feed: Control Panel actions, bulk cloud-delete, and a bare CLI run from a terminal (--sync, --update, --generate, --generate-video, plain download), each with a cli-<uuid> id mirroring panel-/bulkdel-. A panel-spawned subprocess logs exactly once, no duplicate entry.
@@ -6162,3 +6164,45 @@ flow to visually open the picker wasn't driven, so that rests on the shared-comp
 + the verbatim handler port. Loom node-tests + test_web_pick reconciled (the 6 mg-model-picker-*
 source tests retargeted to ModelPicker.jsx). Remaining 4: cost-badge, upscale-panel, notify,
 generate-drawer.
+
+### Vanilla campaign 4/8: cost-badge -> React CostBadge (the file lingers by design)  ·  *2026-08-08*
+
+static/mg-cost-badge.js's `<mg-cost-badge>` -- the one honest renderer of "this costs N credits"
+/ "a free card covers it", a five-state machine (idle/checking/free/paid/error) whose whole reason
+to exist is that a displayed "free"/"0" must ONLY mean a settled zero-cost result, never "not
+priced yet" and never "the check failed" -- became `gallery/src/components/CostBadge.jsx`: a
+`forwardRef` + `useImperativeHandle` component so every existing `costRef.current.setPrice/
+setChecking/clear` call site keeps working VERBATIM (the drivers -- useGenerate/useEditGenerate/
+EditTab.fireCost/FixTab.fireCost and the Loom's priceInto -- were not touched). The only new seam
+is an `onCost` prop carrying the old bubbling `mg-cost` detail (the separator's dormant chip
+reveals on it). `classify()` and `build()` are the verbatim setPrice-branch + render logic;
+cost-badge.css is the injected CSS array, `mg-cost-badge` -> `.cost-badge`, the one real transform
+being `[compact]` attribute -> `.compact` class.
+
+Consumers rewired to `<CostBadge>` -- SIX gallery mounts (GenerateDrawer image tab, EditTab, FixTab,
+CreateMobile image + edit, SeparatorBar compact chip) + THREE Loom mounts (App/LoomV2's Image/Edit/
+Reference Deep Focus tabs; LoomMobile prices without the element). Each `document.createElement(
+"mg-cost-badge")` mount effect + its dead "script didn't load" fallback is gone; the badge now
+mounts as JSX inside the SAME wrapper span, so layout is byte-identical. Priming (the reason those
+effects called refreshPrice/fireCost) now rides the surface's own debounce/entry effect, which
+finds the ref live at commit.
+
+**The file is deliberately NOT deleted -- static/ stays at 4.** The two still-vanilla embedders
+hard-depend on the custom element: mg-generate-drawer.js embeds `<mg-cost-badge>` in its markup
+(and hard-errors if it's undefined), and mg-upscale-panel.js does `document.createElement(
+"mg-cost-badge")`. So the element stays registered until BOTH are ported (upscale = step 5, drawer
+= step 7); mg-cost-badge.js is deleted with the drawer, when static/ finally empties. This is the
+inherent shape of a leaf that the two heaviest components embed -- it's why the scoped order put
+cost-badge before them. During the window the frozen vanilla file and CostBadge.jsx coexist; a
+targeted test (loom/test/cost-badge.test.js) pins CostBadge's honesty invariants so the two can't
+drift on the classification logic.
+
+Verified LIVE (his Chrome, localhost:5057): picking Tsubaki.2 in the Gallery's Generate dock drove
+the CostBadge idle -> free through the imperative handle -- rendered "🎫 FREE — Tsubaki.2 Only
+covers this (12 left) · saves ~1,700 credits · expires in 4 days" in emerald with the correct
+native title, wording pixel-identical to the element it replaces. The vanilla element stays
+registered (1 live instance -- the Video tab's `<mg-generate-drawer>` embeds it) and the Loom
+mounts clean (forwardRef/useImperativeHandle resolve via the react global shim -- a crash there
+would be at bundle-eval, before render; it didn't). Tests: loom 721 (new cost-badge.test.js +
+loom-cost-badges reconciled to `<CostBadge>`), full Python suite green. Remaining 3: upscale-panel,
+notify, generate-drawer (the last two, plus deleting mg-cost-badge.js, empty static/).
