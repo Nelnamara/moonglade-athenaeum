@@ -5926,3 +5926,27 @@ owner wasn't sure, so it stays) and **KEEP** `/logout` GET (logging out is the R
 button, unaffected; the GET is harmless and the owner was unsure). Small, harmless, no
 confusion. So all cut prereqs are now done: 3 ports, context menu, LAN-login, form-route
 switchover -- the cut is the delete pass, remaining routes/templates only.
+
+### Details takeover really takes over now: stacking-context trap + two adjacent bugs  ·  *2026-08-08*
+
+Owner reported the Image Details full-window takeover (0f5f6f6) "still being overridden by
+the banner" with a screenshot. Three real bugs found and fixed while running it down:
+
+1. **The takeover was trapped in a stacking context.** `.mgx-main` is `position:relative;
+   z-index:1` (Phase 2 scaffold, uncommented) -- that CAPS any child at layer 1 regardless
+   of its own z-index, so `.detail-wrap`'s fixed inset-0 **z-40** painted UNDER the sticky
+   header's **z-7** banner. Found via a live DOM stacking-context walk (the first walk
+   missed it -- it only checked transform/filter/etc., not position+z-index). Fix: DetailsView
+   is now **portaled to document.body** (ContactSheetOverlay's exact precedent/lesson,
+   2026-08-02) rather than de-z-indexing .mgx-main, whose layering balance is uncommented
+   and not worth disturbing. Verified live: takeover covers the viewport, banner underneath.
+2. **Asset caching could serve days-stale bundles** (found while chasing #1 -- the first,
+   wrong theory, but a real defect): `/next/assets/*` and `/static/*` responses carried no
+   Cache-Control, so browsers HEURISTICALLY cached app.css/app.js/mg-*.js across rebuilds
+   with no URL change -- one more mechanism behind the recurring "verify harness lied /
+   stale bundle" incidents. Both families now send `Cache-Control: no-cache` (revalidate;
+   ETag/Last-Modified make it a cheap 304 on localhost/LAN). Thumbs/media stay freely
+   cacheable. Verified live on both.
+3. **"Back to gallery" was a dead click**: `navClick(null)` called preventDefault then
+   returned WITHOUT onClose() -- only Escape ever closed the takeover. Fixed; verified the
+   full round trip live (open -> Back closes -> grid -> context-menu reopens -> Escape).

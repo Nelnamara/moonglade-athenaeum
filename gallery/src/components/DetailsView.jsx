@@ -209,7 +209,10 @@ export default function DetailsView({
 
   const navHref = (mid) => "/next?image=" + encodeURIComponent(mid || "");
   const navClick = (mid) => (e) => {
-    if (!mid) { e.preventDefault(); return; }
+    // mid=null is the "Back to gallery" link: close the takeover. (This used to
+    // preventDefault and then just RETURN -- a dead click; only Escape closed.
+    // Found live 2026-08-08 while verifying the portal fix.)
+    if (!mid) { e.preventDefault(); onClose(); return; }
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
     e.preventDefault();
     onNavigate(mid);

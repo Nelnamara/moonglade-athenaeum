@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import Banner from "./components/Banner.jsx";
 import SeparatorBar from "./components/SeparatorBar.jsx";
 import { LibraryBar } from "./components/FiltersPanel.jsx";
@@ -601,18 +601,26 @@ export default function App({ boot }) {
 
       <main ref={mainRef} className="mgx-main" style={{ "--thumb": thumb + "px" }}>
         {detailsFor ? (
-          <DetailsView
-            mediaId={detailsFor} onClose={closeDetails} onNavigate={openDetails}
-            onRate={rate} onEdit={requestEdit} onPublish={openPublish}
-            onDeleted={() => { closeDetails(); load(1, true); }}
-            onFilterByModel={filterByModel} onFilterByBatch={filterByBatch}
-            advParams={detailsAdvParams}
-            items={items}
-            onOpenLightbox={(mid) => {
-              const i = items.findIndex((it) => it.media_id === mid);
-              if (i >= 0) setLbIndex(i);
-            }}
-          />
+          /* PORTALED to document.body -- NOT rendered inline in <main>. .mgx-main is
+             position:relative + z-index:1, which creates a stacking context that CAPS
+             any child at layer 1 no matter its own z-index -- so .detail-wrap's fixed
+             inset-0 z-40 takeover painted UNDER the sticky header's z-7 banner (the
+             "details overridden by the banner" bug, owner-reported 2026-08-08; a DOM
+             stacking-context walk found the trap). Same lesson/fix as
+             ContactSheetOverlay's portal (docs/DECISIONS.md, 2026-08-02). */
+          createPortal(
+            <DetailsView
+              mediaId={detailsFor} onClose={closeDetails} onNavigate={openDetails}
+              onRate={rate} onEdit={requestEdit} onPublish={openPublish}
+              onDeleted={() => { closeDetails(); load(1, true); }}
+              onFilterByModel={filterByModel} onFilterByBatch={filterByBatch}
+              advParams={detailsAdvParams}
+              items={items}
+              onOpenLightbox={(mid) => {
+                const i = items.findIndex((it) => it.media_id === mid);
+                if (i >= 0) setLbIndex(i);
+              }}
+            />, document.body)
         ) : (
           <Grid
             items={items} total={total} loading={loading}
