@@ -4297,7 +4297,7 @@ def _upscale_const_js():
 
     * the five upscaler names, which PixAI matches LITERALLY -- mixed underscores, spaces
       and plus signs and all ("R-ESRGAN 4x+ Anime6B") -- so a typo is a rejected submit;
-    * UPSCALE_PIXEL_CEILING, so <mg-upscale-panel> can derive the same dynamic ratio cap
+    * UPSCALE_PIXEL_CEILING, so <UpscalePanel> can derive the same dynamic ratio cap
       the server clamps to WITHOUT a second hand port of max_upscale_ratio. The Generate
       drawer still carries its own ported copy (documented, and pinned against the Python
       by tests/test_upscale_boosters.py); this exists so the new surface does not add a
@@ -10257,7 +10257,6 @@ __DESIGN_TOKENS__
 __UPSCALE_CONST__
 <script src="/static/mg-cost-badge.js"></script>
 <script src="/static/mg-generate-drawer.js"></script>
-<script src="/static/mg-upscale-panel.js"></script>
 <script src="/static/mg-notify.js"></script>
 <script type="module" src="/next/assets/app.js"></script>
 </body></html>"""

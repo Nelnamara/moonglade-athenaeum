@@ -624,7 +624,7 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
 /* ---- lightbox ----
    z-index 315, NOT the classic's 300: the pilot's own drawer sits at 310 (its
    flyouts 305/306), and the lightbox must still cover an open drawer -- but
-   <mg-upscale-panel>'s flyout mode hardcodes z-index:320 internally (that
+   <UpscalePanel>'s flyout mode hardcodes z-index:320 internally (that
    number clears the CLASSIC lightbox's 300; it does not know this pilot's
    ladder exists), so this stays the one value that satisfies both: above 310,
    below 320. */

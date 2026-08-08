@@ -102,7 +102,19 @@ def test_generate_edit_fix_all_still_route_through_the_shared_submit_task():
     assert 'submitTask("/api/fix"' in _src("gallery/src/components/FixTab.jsx")
     # No surface owns a bespoke fetch to a spend route -- the ONLY fetch of these
     # routes is submitTask's own fetch(route).
+    #
+    # ONE deliberate exception: UpscalePanel.jsx (2026-08-08 port of static/mg-upscale-panel.js).
+    # The image-view upscale is a one-shot MODAL that closes on success and shows its own inline
+    # error, so it does not fit submitTask's openLine/result-line contract. It posts the SAME
+    # /api/generate (server-side READ_ONLY / free-card / job-tracker guards all apply) and carries
+    # its OWN equivalents of the client guarantees this test protects: a busyRef double-submit
+    # latch, a canSubmit spend-gate, and a single no-retry fetch. The vanilla did exactly this;
+    # it was invisible here only because it lived in static/ (this test globs gallery/src). If a
+    # future pass wants the shared path anyway, route it through submitTask and drop this skip.
     bespoke = re.compile(r'fetch\(\s*["\']/api/(?:generate|edit|fix)["\']')
+    exempt = {(_ROOT / "gallery" / "src" / "components" / "UpscalePanel.jsx").resolve()}
     for f in (_ROOT / "gallery" / "src").rglob("*.js*"):
+        if f.resolve() in exempt:
+            continue
         assert not bespoke.search(f.read_text(encoding="utf-8")), (
             "bespoke spend-route fetch outside submitTask: " + str(f))

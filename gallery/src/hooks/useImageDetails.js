@@ -13,31 +13,23 @@ import { useCallback, useEffect, useRef, useState } from "react";
    reimplementation of its own.
 
    A byte-for-byte lift of DetailsView.jsx's own state/effects/handlers, NOT a
-   rewrite -- with two small, deliberate corrections made while moving it,
-   both about the shared <mg-upscale-panel> mount (see inline comments below):
+   rewrite -- with two small, deliberate corrections, both about the shared
+   upscale panel (see inline comments below). As of the 2026-08-08 no-vanilla
+   campaign the panel is the React <UpscalePanel inline ref={upEl}> that each
+   consumer renders directly (no createElement mount); this hook owns the upEl
+   handle + upscaleOpen state and drives .open()/.close() exactly as it drove
+   the vanilla element's ref. The two corrections still stand:
 
-   1. THE HOST DIV BUG: DetailsView.jsx rendered `<div ref={upHost} />` only
-      when `upscaleOpen` was true (`{!focusMode && upscaleOpen && <div
-      ref={upHost} />}`), but the mount effect that creates the
-      <mg-upscale-panel> element runs exactly ONCE, right after the FIRST
-      commit -- which happens while upscaleOpen is still false, so the div
-      doesn't exist yet, upHost.current is null, and the effect bails for
-      good. Every later click just flips React state; the custom element is
-      never created and the panel never opens. Lightbox.jsx (the other
-      consumer of the identical mount pattern) never had this bug -- its own
-      `<div ref={upHost} .../>` is unconditional, and the custom element's own
-      CSS (`mg-upscale-panel{display:none}` / `[open]{display:block}`) is
-      what actually hides it, not conditional React mounting. This hook
-      follows Lightbox's proven shape: callers render the host div
-      unconditionally.
-   2. STALE-CONTENT-ON-NAVIGATE: Lightbox explicitly closes the upscale panel
-      whenever the pictured media_id changes (`useEffect(() => closeUpscale(),
-      [mid])` + an unmount cleanup) so the flyout never outlives the picture
-      it was opened for. DetailsView.jsx's reset effect flipped `upscaleOpen`
-      back to false on navigate but never told the actual custom element to
-      close, so Prev/Next while Upscale was open left it visibly open, still
-      bound to the OLD image, while the toggle button's own highlight had
-      already reset. Folded in below to match Lightbox's real behavior. */
+   1. RENDER THE PANEL UNCONDITIONALLY: DetailsView once rendered the host only
+      when `upscaleOpen` was true, so the (old) once-after-first-commit mount
+      effect had nothing to attach to and the panel never opened. Both consumers
+      now render <UpscalePanel> unconditionally -- its own CSS
+      (`.upscale-panel{display:none}` / `.open{display:block}`) hides it, not
+      conditional React mounting -- matching Lightbox's proven shape.
+   2. CLOSE-ON-NAVIGATE: the panel must never outlive the picture it was opened
+      for. The reset effect below (and the unmount cleanup) call
+      `upEl.current.close()` on every media_id change, so Prev/Next while Upscale
+      is open closes it rather than leaving it bound to the OLD image. */
 
 export default function useImageDetails({ mediaId, advParams, onRate, onDeleted }) {
   const [state, setState] = useState({ loading: true, data: null, error: "" });
@@ -51,7 +43,6 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
   const [saveStatus, setSaveStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [upscaleOpen, setUpscaleOpen] = useState(false);
-  const upHost = useRef(null);
   const upEl = useRef(null);
   const seq = useRef(0);
 
@@ -102,24 +93,9 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
       .catch(() => setViews(null));
   }, [row]);
 
-  // Mount once the real host div exists -- see header comment, correction 1.
-  // Correction 1 fixed the div's own render condition (unconditional on
-  // upscaleOpen), but ImageDetailsMobile.jsx (unlike Lightbox.jsx) still has
-  // an early-return for state.loading/error before its main JSX -- so on a
-  // real network fetch (never on a stubbed/instant one, which is exactly why
-  // this survived one review pass) this effect's FIRST run lands while the
-  // component is still rendering the loading branch, upHost.current is null,
-  // the effect bails, and a `[]` deps array meant it never got a second try.
-  // Depending on `row` re-fires once the loaded branch actually paints; the
-  // firstChild guard still makes every run after the first a no-op.
-  useEffect(() => {
-    if (!upHost.current || upHost.current.firstChild) return;
-    if (!window.customElements || !window.customElements.get("mg-upscale-panel")) return;
-    const el = document.createElement("mg-upscale-panel");
-    el.setAttribute("inline", "");
-    upHost.current.appendChild(el);
-    upEl.current = el;
-  }, [row]);
+  // The panel is now the React <UpscalePanel inline ref={upEl}> the two consumers (DetailsView,
+  // ImageDetailsMobile) render directly -- no createElement mount here. upEl.current is its
+  // imperative handle (open/close), driven below exactly as the vanilla element's ref was.
   const toggleUpscale = () => {
     const willOpen = !upscaleOpen;
     setUpscaleOpen(willOpen);
@@ -224,7 +200,7 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
     suggestions, suggestBusy, suggestErr, runSuggest,
     views,
     busy, deleteLocal, deleteCloud,
-    upscaleOpen, upHost, toggleUpscale,
+    upscaleOpen, upEl, toggleUpscale,
     handleRate,
   };
 }

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
 import SimilarModal from "./SimilarModal.jsx";
+import UpscalePanel from "./UpscalePanel.jsx";
 import "../styles/lightbox.css";
 import useScrollLock from "../hooks/useScrollLock.js";
 
@@ -52,7 +53,6 @@ export default function Lightbox({
   const [promptClosing, setPromptClosing] = useState(false);
   const [dragDX, setDragDX] = useState(0);
   const [, bumpDetail] = useState(0); // re-render tick when a detail row lands
-  const upHost = useRef(null);
   const upEl = useRef(null);
   const closingRef = useRef(false);
   const promptT = useRef(null);
@@ -61,19 +61,11 @@ export default function Lightbox({
   const touch = useRef({ x0: 0, dx: 0, live: false });
   const stripRef = useRef(null);
 
-  useEffect(() => {
-    if (!upHost.current || upHost.current.firstChild) return;
-    if (!window.customElements || !window.customElements.get("mg-upscale-panel")) return;
-    const el = document.createElement("mg-upscale-panel");
-    upHost.current.appendChild(el);
-    upEl.current = el;
-  }, []);
-
   const closeUpscale = useCallback(() => { if (upEl.current) upEl.current.close(); }, []);
   // "open" for the Esc chain means genuinely open -- a panel 340ms into its own
-  // exit fade still carries [open], and re-closing it would only extend the fade.
+  // exit fade still reports isOpen(), and re-closing it would only extend the fade.
   const upscaleOpen = () =>
-    !!(upEl.current && upEl.current.hasAttribute("open") && !upEl.current.hasAttribute("closing"));
+    !!(upEl.current && upEl.current.isOpen() && !upEl.current.isClosing());
 
   /* Stepping past either end of the CURRENT page rolls to the adjacent page and
      lands on its near edge -- classic's lbStep() does this via a real page nav
@@ -375,7 +367,9 @@ export default function Lightbox({
         </div>
       </div>
 
-      <div ref={upHost} onClick={(e) => e.stopPropagation()} />
+      {/* flyout mode (no inline): a fixed top-layer modal. The wrapper stops a click inside
+          it from reaching the stage's click-to-close; the panel's own scrim closes it. */}
+      <div onClick={(e) => e.stopPropagation()}><UpscalePanel ref={upEl} /></div>
       <SimilarModal mediaId={similarFor} onClose={() => setSimilarFor(null)} onOpenDetails={onOpenDetails} />
     </div>
   );

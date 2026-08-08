@@ -139,9 +139,9 @@
 .lbm-hint { font-size: 9px; color: var(--overlay0); text-align: center; padding: 0 12px; }
 
 /* ---- Upscale bottom sheet -- deliberately mirrors ImageDetailsMobile.jsx's
-   own idm-sheet-scrim/idm-sheet-slab exactly (the real shared <mg-upscale-
-   panel>'s host div must stay permanently in the DOM -- see that file's own
-   header comment / useImageDetails.js's correction 1). ---- */
+   own idm-sheet-scrim/idm-sheet-slab exactly (the shared React <UpscalePanel>
+   stays rendered across opens/closes, its .open class driving visibility -- see
+   that file's own header comment / useImageDetails.js's correction 1). ---- */
 .lbm-sheet-scrim { position: fixed; inset: 0; z-index: 65; background: rgba(4,3,10,.66);
   opacity: 0; pointer-events: none; transition: opacity .24s ease; }
 .lbm-sheet-scrim.open { opacity: 1; pointer-events: auto; }
@@ -158,7 +158,7 @@
 .lbm-sheet-x { margin-left: auto; width: 26px; height: 26px; display: grid; place-items: center;
   border-radius: 7px; border: 1px solid var(--surface1); background: var(--surface0);
   color: var(--subtext); font-size: 12px; cursor: pointer; font-family: inherit; }
-mg-upscale-panel[inline] { margin-top: 0 !important; }
+.upscale-panel.inline { margin-top: 0 !important; }
 
 @media (prefers-reduced-motion: reduce) {
   .lbm-root, .lbm-root.closing { animation-duration: .01s; }

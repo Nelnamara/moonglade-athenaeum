@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
 import useImageDetails from "../hooks/useImageDetails.js";
 import SimilarModal from "./SimilarModal.jsx";
+import UpscalePanel from "./UpscalePanel.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
 
 /* Motion: the reveal choreography locked 2026-07-30 (docs/DECISIONS.md, artifact
@@ -155,7 +156,7 @@ export default function DetailsView({
     suggestions, suggestBusy, suggestErr, runSuggest,
     views,
     busy, deleteLocal, deleteCloud,
-    upscaleOpen, upHost, toggleUpscale,
+    upscaleOpen, upEl, toggleUpscale,
     handleRate,
   } = useImageDetails({ mediaId, advParams, onRate, onDeleted });
 
@@ -442,15 +443,12 @@ export default function DetailsView({
         )}
       </div>
 
-      {/* Unconditional mount -- see useImageDetails.js's header comment
-          (correction 1): the custom element's own [open]/no-attribute CSS is
-          what shows/hides it, not conditional React mounting. Mounting this
-          only when upscaleOpen is true left the mount effect (which runs
-          once, right after the first commit while upscaleOpen was still
-          false) with nothing to attach to, so the panel never actually
-          opened -- fixed here to match Lightbox.jsx's own, already-working
-          unconditional host div. */}
-      <div ref={upHost} />
+      {/* Unconditional render -- see useImageDetails.js's header comment
+          (correction 1): <UpscalePanel>'s own .open/.inline CSS shows/hides it,
+          not conditional React mounting. The hook drives upEl.current.open()/
+          .close(); rendering it only when upscaleOpen is true would leave the
+          handle null when toggleUpscale first fires. */}
+      <UpscalePanel ref={upEl} inline />
 
       {!focusMode && suggestions && (
         <div id="suggest-box">

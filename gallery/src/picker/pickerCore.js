@@ -63,7 +63,7 @@ const PickerCore = (function () {
       // false) must always win: the old `if (loading) return` dropped it outright, and
       // the scroll-triggered page-2 fetch it lost to then appended the OLD filter's
       // results into the grid anyway. `loadSeq` is the same superseded-response token
-      // <mg-upscale-panel>'s _price() uses -- a fetch that a newer load has replaced
+      // <UpscalePanel>'s doPrice() uses -- a fetch that a newer load has replaced
       // resolves into a no-op instead of clobbering the grid (and leaves `loading`
       // alone, because the load that replaced it owns that flag now).
       if (loading && append) return;
