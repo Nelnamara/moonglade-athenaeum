@@ -6206,3 +6206,51 @@ mounts clean (forwardRef/useImperativeHandle resolve via the react global shim -
 would be at bundle-eval, before render; it didn't). Tests: loom 721 (new cost-badge.test.js +
 loom-cost-badges reconciled to `<CostBadge>`), full Python suite green. Remaining 3: upscale-panel,
 notify, generate-drawer (the last two, plus deleting mg-cost-badge.js, empty static/).
+
+### Vanilla campaign 5/8: upscale-panel -> React UpscalePanel (+ repairs a step-3 regression)  ·  *2026-08-08*
+
+static/mg-upscale-panel.js's `<mg-upscale-panel>` -- PixAI's image-view Upscale (invoked on a
+picture that ALREADY exists), a SPEND surface -- became `gallery/src/components/UpscalePanel.jsx`,
+a `forwardRef` + `useImperativeHandle` component preserving the consumers' contract VERBATIM:
+`upEl.current.open(mediaIdOrRow)` / `.close()`, plus `isOpen()`/`isClosing()` replacing the desktop
+Lightbox's `.hasAttribute("open")`/`("closing")` reads. It embeds the shared React CostBadge (its
+cost line) AND ModelPicker (the model override). The spend path is ported EXACTLY: the only
+`POST /api/generate` is behind `canSubmit` (= `(src.model_id || fallbackVersion()) && !is_video &&
+!ratioDisabled`), a busyRef latch + Go-disabled + the flyout's `.closing{pointer-events:none}`
+double-click guard; there is deliberately no `/api/upscale` and no client confirm/READ_ONLY (those
+live server-side on the shared endpoint). The dynamic ratio cap (`maxRatio`/`outDims`, floor-to-8),
+the two methods (enlarge/ESRGAN vs upscale/Hires) and the custom animated upscaler dropdown all
+port verbatim; `window.MG_UPSCALE` is still injected and read (never a second hand-port). The
+scaler dropdown's two global listeners (Esc-capture + document-click) are now a `useEffect` that
+adds them only while open and cleans up -- closing the vanilla's leak risk.
+
+**REGRESSION REPAIRED:** the vanilla did `createElement('mg-model-picker')` gated on
+`customElements.get('mg-model-picker')`, which has returned undefined since that element was ported
+to React ModelPicker + deleted (step 3) -- so the "Choose a model" override (shown only for images
+with NO recorded model) hit "picker not loaded" since 3/8. Upscale itself always worked (it falls
+back to core's UPSCALE_FALLBACK_VERSION_ID); only the override was degraded. UpscalePanel wires the
+React ModelPicker, fixing it.
+
+Consumers: 5 host renders across 3 old createElement sites -> now `<UpscalePanel>` JSX. The shared
+`useImageDetails.js` hook stopped createElement-mounting (a hook can't render JSX); it now owns the
+`upEl` handle + `toggleUpscale`, and DetailsView.jsx + ImageDetailsMobile.jsx each render
+`<UpscalePanel ref={upEl} inline />` unconditionally. Lightbox.jsx renders the bare flyout
+(`<UpscalePanel ref={upEl} />`, no inline) inside a stopPropagation wrapper; LightboxMobile.jsx
+renders it inline in its sheet. The two mobile CSS overrides retargeted `mg-upscale-panel[inline]`
+-> `.upscale-panel.inline`.
+
+**Gallery-only** (the Loom never mounted it), so it has NO vanilla embedders of its own -> the file
+IS deleted this step: static/mg-upscale-panel.js + its design-kit harness gone, the one `<script>`
+tag removed, `__UPSCALE_CONST__` kept. **static/ is down to 3** (mg-generate-drawer.js,
+mg-cost-badge.js, mg-notify.js). mg-cost-badge.js's lingering reason is now JUST the drawer.
+
+Verified LIVE (his Chrome, localhost:5057): the flyout opens on a 1440×2560 image, prefills its
+model ("Edit Pro · from this image"), shows the served upscaler (R-ESRGAN 4x+ Anime6B), correctly
+DISABLES Go with "already at PixAI's ceiling for Upscale/Hires" (the spend gate); switching
+Upscale<->Hires toggles the upscaler dropdown <-> denoise controls; the cost badge stays idle when
+the ratio is disabled (the vanilla's exact `_price` guard); one Escape closes the panel and NOT the
+Lightbox (the isOpen()/isClosing() Esc chain). Vanilla element unregistered, zero React console
+errors. **No generation was submitted** (hands-off). Tests: the 6 test_upscale_boosters source-read
+tests retargeted to UpscalePanel.jsx/CostBadge.jsx (quote forms + slice markers adjusted), the
+design-kit harness set dropped mg-upscale-panel.html, the cost-badge "two embedders" notes now say
+one. Gallery build clean, loom 721, full Python green. Remaining 2: notify, generate-drawer.

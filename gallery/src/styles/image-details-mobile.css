@@ -139,15 +139,14 @@
 
 /* ---- Upscale bottom sheet -- deliberately NOT MobileSheet.jsx. MobileSheet
    unmounts its children (`if (!open) return null`) whenever the sheet closes,
-   but <div ref={upHost}/> must stay PERMANENTLY in the DOM for the shared
-   <mg-upscale-panel> custom element to keep existing across opens/closes --
-   see useImageDetails.js's header comment (correction 1) for the exact bug
-   that produces (the desktop Details page's own Upscale button was silently
-   dead until that fix, from this identical "host div gets unmounted"
-   shape). So this sheet's scrim/slab are ALWAYS mounted, one level below
+   but <UpscalePanel> must stay rendered across opens/closes -- its own .open
+   class, not conditional React mounting, drives visibility (see
+   useImageDetails.js's header comment, correction 1, for the exact bug the
+   conditional shape produced: the desktop Details Upscale button was silently
+   dead). So this sheet's scrim/slab are ALWAYS mounted, one level below
    .idm-root's own overlay, and only a CSS class toggles them open/closed --
-   the same "never remove from DOM, animate via an attribute/class" law
-   mg-upscale-panel.js's own CSS already follows for itself.
+   the same "never remove from DOM, animate via a class" law upscale-panel.css
+   already follows for itself.
    The "see all similar" sheet below has no such constraint (plain React
    content, nothing persistent to protect) and uses the real, shared
    MobileSheet.jsx component instead -- see ImageDetailsMobile.jsx. */
@@ -167,7 +166,7 @@
 .idm-sheet-x { margin-left: auto; width: 26px; height: 26px; display: grid; place-items: center;
   border-radius: 7px; border: 1px solid var(--surface1); background: var(--surface0);
   color: var(--subtext); font-size: 12px; cursor: pointer; font-family: inherit; }
-mg-upscale-panel[inline] { margin-top: 0 !important; }
+.upscale-panel.inline { margin-top: 0 !important; }
 @media (prefers-reduced-motion: reduce) {
   .idm-sheet-scrim, .idm-sheet-slab { transition: none; }
 }

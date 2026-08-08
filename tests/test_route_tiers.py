@@ -229,7 +229,7 @@ ROUTE_TIERS = {
     # api_duplicates_resolve/api_duplicates_undo below).
     ("api_duplicates", "GET"): LOGIN,
     ("api_gallery_images", "GET"): LOGIN,
-    # Read-only single-row lookup for <mg-upscale-panel>. LOGIN, same as its sibling
+    # Read-only single-row lookup for <UpscalePanel>. LOGIN, same as its sibling
     # above and for the same reason: it reads only the local catalog and returns what
     # the gallery already serves openly, so a LOCALHOST gate would add no protection
     # while breaking the panel for the owner browsing over his own LAN. The spend is

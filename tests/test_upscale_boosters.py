@@ -278,7 +278,7 @@ def test_drawer_offers_hires_as_a_booster_and_not_the_enlarge_method():
     settings-free chip (PixAI's Add Booster menu offers add-or-remove and nothing
     else; owner, verifying live: "It just adds a chip. you can only remove it."), and
     the ESRGAN `enlarge` method is not offered at all: there is no source image here.
-    The ratio/denoise controls live on <mg-upscale-panel>, where a real picture exists.
+    The ratio/denoise controls live on <UpscalePanel>, where a real picture exists.
     """
     root = pathlib.Path(__file__).resolve().parent.parent
     jsx = (root / "gallery" / "src" / "components" / "CreateMobile.jsx").read_text(encoding="utf-8")
@@ -366,28 +366,26 @@ def test_image_meta_flags_a_locally_imported_file(tmp_path):
     assert d["local_import"] is True and d["model_id"] == ""
 
 
-def test_upscale_lives_on_the_image_view_on_both_surfaces(tmp_path):
+def test_upscale_lives_on_the_image_view_on_both_surfaces():
     """PixAI invokes Upscale on a picture that already exists, so it belongs where you look
     at one. Since the classic cut those surfaces are the React Lightbox (a flyout off one
-    icon) and the Details view (an inline panel) -- BOTH mounting the same shared
-    <mg-upscale-panel> custom element, never a second drifting copy of its controls.
+    icon) and the Details view (an inline panel) -- BOTH mounting the same shared React
+    <UpscalePanel> component (2026-08-08 no-vanilla port of <mg-upscale-panel>), never a
+    second drifting copy of its controls.
     """
-    save_catalog(tmp_path / "catalog.db",
-                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    shell = login_client(tmp_path).get("/").get_data(as_text=True)
-    # The React shell must actually load the component both surfaces mount -- and the
-    # panel's price line IS <mg-cost-badge>, which would silently render as an unknown
-    # element without its script.
-    assert "/static/mg-upscale-panel.js" in shell
-    assert "/static/mg-cost-badge.js" in shell
-
     root = pathlib.Path(__file__).resolve().parent.parent
     lbx = (root / "gallery" / "src" / "components" / "Lightbox.jsx").read_text(encoding="utf-8")
-    assert 'createElement("mg-upscale-panel")' in lbx, "the lightbox no longer mounts the panel"
+    assert "import UpscalePanel" in lbx and "<UpscalePanel ref={upEl}" in lbx, \
+        "the lightbox no longer mounts the panel"
     assert "upEl.current.open(it.media_id)" in lbx, "one icon opens the flyout for THIS picture"
-    # The Details surfaces mount it through the ONE shared hook (desktop + mobile).
+    # The Details surfaces drive it through the ONE shared hook (desktop + mobile): the hook
+    # owns the upEl handle + toggleUpscale, and each Details view renders <UpscalePanel ref={upEl}>.
     hook = (root / "gallery" / "src" / "hooks" / "useImageDetails.js").read_text(encoding="utf-8")
-    assert 'createElement("mg-upscale-panel")' in hook, "the details hook no longer mounts the panel"
+    assert "upEl" in hook and "toggleUpscale" in hook, "the details hook no longer drives the panel"
+    for fname in ("DetailsView.jsx", "ImageDetailsMobile.jsx"):
+        v = (root / "gallery" / "src" / "components" / fname).read_text(encoding="utf-8")
+        assert "import UpscalePanel" in v and "<UpscalePanel ref={upEl}" in v, \
+            fname + " no longer renders the shared panel"
     det = (root / "gallery" / "src" / "components" / "DetailsView.jsx").read_text(encoding="utf-8")
     assert "toggleUpscale" in det and "Upscale" in det, "the details view lost its Upscale control"
 
@@ -419,28 +417,27 @@ def test_the_upscale_panel_reuses_the_generate_routes(tmp_path):
     read-only guard, the free-card check and the job-tracker registration to be forgotten.
     """
     root = pathlib.Path(__file__).resolve().parent.parent
-    js = (root / "static" / "mg-upscale-panel.js").read_text(encoding="utf-8")
-    assert "'/api/price'" in js and "'/api/generate'" in js
-    # The QUOTED form, i.e. an actual fetch target -- the file's own header names
-    # /api/upscale in prose while explaining why it does not exist.
-    assert "'/api/upscale'" not in js and '"/api/upscale"' not in js
-    assert "ref_media_id" in js and "ref_strength" in js, "an image-view upscale is i2i"
+    src = (root / "gallery" / "src" / "components" / "UpscalePanel.jsx").read_text(encoding="utf-8")
+    # The QUOTED form (double quotes in the React source), i.e. an actual fetch target -- the
+    # component's own doc names /api/upscale in prose while explaining why it does not exist.
+    assert '"/api/price"' in src and '"/api/generate"' in src
+    assert "'/api/upscale'" not in src and '"/api/upscale"' not in src
+    assert "ref_media_id" in src and "ref_strength" in src, "an image-view upscale is i2i"
     # The ceilings come from the server (core.UPSCALE_PIXEL_CEILING via window.MG_UPSCALE),
     # not a second hand port. A drifted copy would offer a ratio the server then silently
     # clamps, with nothing on screen to say the number changed.
-    assert "window.MG_UPSCALE" in js
-    assert "2048" not in js, "the pixel ceilings must come from the server, not be retyped"
+    assert "window.MG_UPSCALE" in src
+    assert "2048" not in src, "the pixel ceilings must come from the server, not be retyped"
     for name in core.ENLARGE_MODELS:
-        assert name not in js, name + " is retyped in the component instead of served"
-    # <mg-cost-badge>'s real API is setChecking()/setPrice(). An invented one (.loading()/
-    # .show()) is silently a no-op on a custom element -- the panel renders, the price line
-    # simply never updates, and nothing anywhere reports a problem.
-    badge = (root / "static" / "mg-cost-badge.js").read_text(encoding="utf-8")
+        assert name not in src, name + " is retyped in the component instead of served"
+    # CostBadge's real handle is setChecking()/setPrice(). An invented one (.loading()/.show())
+    # is silently a no-op -- the panel renders, the price line never updates, nothing reports it.
+    badge = (root / "gallery" / "src" / "components" / "CostBadge.jsx").read_text(encoding="utf-8")
     for meth in ("setChecking", "setPrice"):
-        assert meth + "(" in js, "the panel must call the badge's " + meth
+        assert meth + "(" in src, "the panel must call the badge's " + meth
         assert meth + "(" in badge, meth + " is not actually on the badge"
     # Scoped to the badge handle -- Toast.show() is a real, different API on this page.
-    assert "_cost.show(" not in js and "_cost.loading(" not in js, (
+    assert "costRef.current.show(" not in src and "costRef.current.loading(" not in src, (
         "those are not badge methods; calling them fails silently")
 
 
@@ -558,7 +555,7 @@ def test_drawer_no_longer_carries_the_ratio_cap_port():
     inferred from PixAI's image-view DIALOG maxima, and a real booster task submitted
     upscale 1.5 on a 1400x784 source (2100x1176 -- over that inferred ceiling) and
     completed (task 2039053268124647852, 2026-07-28). The port still belongs to
-    <mg-upscale-panel>, which has a real slider and a real source picture; that copy is
+    <UpscalePanel>, which has a real slider and a real source picture; that copy is
     covered by test_upscale_panel_ratio_cap_agrees_with_python. The React Create surface
     must not grow the port back either: it has no ratio UI, so it has no use for the
     ceiling table at all.
@@ -650,16 +647,19 @@ def test_upscale_works_without_a_recorded_model(monkeypatch, tmp_path):
 def test_upscale_panel_offers_the_fallback_instead_of_blocking():
     """The panel must not dead-disable Go when the catalog has no model, and the constant
     must be SERVED rather than retyped into the component."""
-    src = pathlib.Path("static/mg-upscale-panel.js").read_text(encoding="utf-8")
-    paint = src[src.index("_paintModel()"):src.index("_openPicker()")]
-    assert "this._go.disabled = true;" not in paint, \
-        "the no-model branch must not leave Go permanently dead"
+    root = pathlib.Path(__file__).resolve().parent.parent
+    src = (root / "gallery" / "src" / "components" / "UpscalePanel.jsx").read_text(encoding="utf-8")
+    # Go's disabled derives from canSubmit, which accepts the served fallback version -- so a
+    # no-model image stays submittable, never dead-disabled.
+    assert "(src && src.model_id) || fallbackVersion()" in src, \
+        "the no-model case must still submit via the fallback, not dead-disable Go"
+    assert "disabled={!canSubmit || busy}" in src
     assert core.UPSCALE_FALLBACK_VERSION_ID not in src, \
         "the id must come from window.MG_UPSCALE, not a second copy in the component"
     assert "fallbackVersion()" in src
 
 
-def test_upscale_sends_the_images_model_as_a_version_id(monkeypatch, tmp_path):
+def test_upscale_sends_the_images_model_as_a_version_id():
     """The catalog's model_id is the task's submitted `modelId`, which IS a model VERSION
     id -- so an upscale must send it as version_id.
 
@@ -667,12 +667,12 @@ def test_upscale_sends_the_images_model_as_a_version_id(monkeypatch, tmp_path):
     and came back "pick a model first" on a picture whose model the panel was displaying
     on screen. Only a model chosen in the PICKER is a real model id.
     """
-    src = pathlib.Path("static/mg-upscale-panel.js").read_text(encoding="utf-8")
-    i = src.index("_payload()")
-    body = src[i:src.index("_price()", i)]
-    assert "model_id: s.model_picked ? (s.model_id || '') : ''" in body, \
+    root = pathlib.Path(__file__).resolve().parent.parent
+    src = (root / "gallery" / "src" / "components" / "UpscalePanel.jsx").read_text(encoding="utf-8")
+    body = src[src.index("const payload = ()"):src.index("const doPrice = ()")]
+    assert 'model_id: s.model_picked ? (s.model_id || "") : ""' in body, \
         "only a PICKED model may travel as model_id"
-    assert "version_id: s.model_picked ? '' : (s.model_id || fallbackVersion())" in body, \
+    assert 'version_id: s.model_picked ? "" : (s.model_id || fallbackVersion())' in body, \
         "the image's own model id is a version id and must travel as version_id"
 
 

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import useImageDetails from "../hooks/useImageDetails.js";
+import UpscalePanel from "./UpscalePanel.jsx";
 import "../styles/gallery-mobile.css";
 import "../styles/image-details-mobile.css";
 
@@ -9,7 +10,7 @@ import "../styles/image-details-mobile.css";
    (design_handoff_moonglade_suite/), the mobile port of DetailsView.jsx ("the
    layer deeper", owner 2026-07-30). Reuses useImageDetails.js -- the EXACT
    same /api/next/detail/<mid> fetch, rating mirror, engagement fetch, copy/
-   suggest/save/delete actions and shared <mg-upscale-panel> mount as
+   suggest/save/delete actions and shared <UpscalePanel> mount as
    DetailsView.jsx -- so there is ONE fetch, ONE set of action handlers, ONE
    Upscale mount contract for both surfaces, never a second drifting copy.
 
@@ -79,11 +80,11 @@ import "../styles/image-details-mobile.css";
        via a `key={row.media_id}` remount, matching Lightbox.jsx's own
        `key={it.media_id}` convention for the identical purpose, rather than
        porting playReveal()'s Web Animations timeline verbatim.
-     - Upscale panel body: the REAL shared <mg-upscale-panel> custom element,
+     - Upscale panel body: the REAL shared <UpscalePanel> component (inline),
        not the design mock's bespoke inline-styled markup -- so a few details
-       genuinely differ from the pixel mock (a native <select> for the
-       upscaler choice, tooltip-based method hints) exactly the way
-       Lightbox.jsx's own flyout already differs from any per-screen mock,
+       genuinely differ from the pixel mock (the custom animated upscaler
+       dropdown, tooltip-based method hints) exactly the way Lightbox.jsx's own
+       flyout already differs from any per-screen mock,
        because it is a REUSED shared component, not rebuilt per screen. */
 
 export function useSimilar(mediaId) {
@@ -132,7 +133,7 @@ export default function ImageDetailsMobile({
     suggestions, suggestBusy, suggestErr, runSuggest,
     views,
     busy, deleteLocal,
-    upscaleOpen, upHost, toggleUpscale,
+    upscaleOpen, upEl, toggleUpscale,
     handleRate,
   } = useImageDetails({ mediaId, advParams, onRate, onDeleted });
 
@@ -414,7 +415,7 @@ export default function ImageDetailsMobile({
           <span className="idm-sheet-title">⇱ Upscale</span>
           <button type="button" className="idm-sheet-x" onClick={toggleUpscale} aria-label="Close">×</button>
         </div>
-        <div ref={upHost} />
+        <UpscalePanel ref={upEl} inline />
       </div>
 
       {/* "see all N similar" -- the exact same fetched images, no second

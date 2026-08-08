@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
+import UpscalePanel from "./UpscalePanel.jsx";
 import "../styles/lightbox-mobile.css";
 
 /* Lightbox Mobile -- design spec: "Lightbox Mobile.dc.html" (design_handoff_
@@ -59,42 +60,22 @@ import "../styles/lightbox-mobile.css";
    "functionally fine for a mock but... the crude mechanism it is." Same
    visible dwell/restart behavior, a real implementation instead of a poll.
 
-   UPSCALE -- the REAL shared <mg-upscale-panel> custom element, mounted
-   "inline" inside this component's own bottom-sheet chrome -- the same host-
-   div-always-in-the-DOM contract ImageDetailsMobile.jsx uses (useImageDetails.
-   js's header comment, correction 1), NOT desktop Lightbox's own bare non-
-   inline flyout mount (that variant anchors position:fixed top-right, the
-   wrong shape for a mobile bottom sheet). The Esc-chain below checks the
-   plain `sheetOpen` React boolean (matching ImageDetailsMobile.jsx's simpler
-   inline-mount convention), not desktop Lightbox's extra hasAttribute
-   ("closing") nuance -- that nuance exists only for desktop's own bare-flyout
-   exit-fade timing and doesn't apply to this "class toggles a CSS transition,
-   host div never unmounts" sheet shape.
+   UPSCALE -- the shared React <UpscalePanel inline>, rendered inside this
+   component's own bottom-sheet chrome (the same unconditional-render contract
+   ImageDetailsMobile.jsx uses -- useImageDetails.js's header, correction 1),
+   NOT desktop Lightbox's bare non-inline flyout (position:fixed top-right, the
+   wrong shape for a mobile sheet). The Esc-chain below checks the plain
+   `sheetOpen` React boolean, not desktop Lightbox's isOpen()/isClosing() nuance
+   -- that exists only for the bare-flyout exit-fade timing and doesn't apply to
+   this "class toggles a CSS transition" sheet shape.
 
-   MOUNT-EFFECT / EARLY-RETURN RISK -- checked explicitly, per this build's
-   brief. This component's only early return is `if (!it) return null` (it =
-   items[index]), and on first mount `it` is always defined: AppMobile.jsx
-   only ever opens this from a media_id already resolved to a valid index in
-   the already-loaded `items` array, so there is no async/loading gap at
-   mount, unlike ImageDetailsMobile.jsx's real bug (a state.loading branch
-   that paints before a real fetch resolves). BUT unlike desktop Lightbox.jsx
-   -- which keys its identical mount effect on `[]` -- this one deliberately
-   keys on `[mid]` instead: `step()`'s own cross-page-boundary crossing
-   (loadPage replacing the shared items array) can, for one transient render,
-   leave `index` pointing past the freshly-loaded (possibly shorter) array
-   before the follow-up setIndex(0) commits -- `it` briefly reads undefined,
-   this component's early return fires for that one render, and REACT TEARS
-   DOWN THE HOST DIV since it was this component's only output. A `[]`-keyed
-   effect would never recreate the panel in the fresh div that reappears once
-   `it` is valid again (identical failure shape to the bug already found
-   twice this session). Keying on `[mid]` instead means the very next valid
-   render (a real navigation always changes `mid`) re-runs the mount effect,
-   finds the newly (re)created empty host div, and recreates the panel --
-   the `firstChild` guard still makes every other run a no-op. (This same
-   latent risk plausibly also affects desktop Lightbox.jsx's `[]`-keyed
-   version of this effect during its own identical page-crossing step() --
-   flagged separately, not fixed here, since that file is already shipped and
-   out of this build's scope.)
+   (Historical note, 2026-08-08 no-vanilla port: this used to createElement the
+   vanilla <mg-upscale-panel> in a `[mid]`-keyed mount effect, keyed on mid --
+   not `[]` -- specifically so it would recreate the host div torn down when
+   step()'s page-boundary crossing left `index` past a shorter freshly-loaded
+   array for one transient `if (!it) return null` render. That whole concern is
+   gone: <UpscalePanel> is now plain JSX, so React remounts it automatically the
+   moment `it` is valid again -- no mount effect, no host-div-teardown race.)
 
    EDIT / TO VIDEO / SIMILAR -- the design file's own mock ships these three
    as literal no-op `onClick:()=>{}` stubs. Left as honest, disclosing toasts
@@ -122,7 +103,6 @@ export default function LightboxMobile({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [, bumpDetail] = useState(0); // re-render tick when a lazy detail row lands
 
-  const upHost = useRef(null);
   const upEl = useRef(null);
   const closingRef = useRef(false);
   const detailCache = useRef(new Map()); // media_id -> {negative_prompt, loras}
@@ -220,17 +200,6 @@ export default function LightboxMobile({
   // The upscale panel must never outlive the picture it was opened for.
   useEffect(() => { closeUpscale(); }, [mid]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { if (upEl.current) upEl.current.close(); }, []);
-
-  // Mount once the host div exists -- keyed on `mid`, not `[]`: see header
-  // comment (MOUNT-EFFECT / EARLY-RETURN RISK) for exactly why.
-  useEffect(() => {
-    if (!upHost.current || upHost.current.firstChild) return;
-    if (!window.customElements || !window.customElements.get("mg-upscale-panel")) return;
-    const el = document.createElement("mg-upscale-panel");
-    el.setAttribute("inline", "");
-    upHost.current.appendChild(el);
-    upEl.current = el;
-  }, [mid]);
 
   // keep the active filmstrip thumb in view as the index moves
   useEffect(() => {
@@ -380,7 +349,7 @@ export default function LightboxMobile({
           <span className="lbm-sheet-title">⇱ Upscale</span>
           <button type="button" className="lbm-sheet-x" onClick={toggleUpscale} aria-label="Close">×</button>
         </div>
-        <div ref={upHost} />
+        <UpscalePanel ref={upEl} inline />
       </div>
     </div>
   );
