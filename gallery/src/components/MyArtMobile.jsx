@@ -12,8 +12,12 @@ import "../styles/myart-mobile.css";
    block (the design's own answer to FOR_CLAUDE_DESIGN_mobile-2026-08-06.md): the old flat
    ranked-text list is gone, replaced with the same tabbed card gallery desktop's
    MyArtOverlay.jsx already ships, adapted for touch. Real data throughout -- GET
-   /api/myart/items (the exact route desktop uses), the same preview-then-confirm
-   /api/myart/publish pipeline for every mutation (per-card AND bulk), same CSRF source.
+   /api/myart/items (the exact route desktop uses), mutations via /api/myart/publish
+   (same CSRF source). Anything IRREVERSIBLE (delete, per-card or bulk) always goes
+   through a confirm sheet before confirm:true is sent; reversible per-card edits
+   (visibility, tags) apply directly, matching the sheet-tap-is-the-intent touch
+   pattern. (2026-08-07 review fix: per-card delete originally fired confirm:true on
+   one tap -- an irreversible PixAI delete with no confirm step.)
 
    Touch adaptations from the design's own demo-data shortcuts, disclosed here (the
    mechanism the design specifies is real; only its filler numbers are placeholder):
@@ -152,12 +156,18 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
   });
 
   // One real mutation call, used by both the card-menu sheet and bulk actions.
+  // Never throws: a network error / non-JSON response resolves to {error} so every
+  // caller's setBusy(false) is reached (a throw here used to latch busy=true forever).
   const mutate = async (action, mediaId, extra) => {
-    const r = await fetch("/api/myart/publish", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, media_id: mediaId, csrf, confirm: true, ...extra }),
-    });
-    return r.json();
+    try {
+      const r = await fetch("/api/myart/publish", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, media_id: mediaId, csrf, confirm: true, ...extra }),
+      });
+      return await r.json();
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
   };
 
   const cardTogglePublish = async () => {
@@ -168,13 +178,15 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
     if (res.error) { setErr(res.error); return; }
     closeSheet(); await load();
   };
-  const cardDelete = async () => {
+  // Delete is irreversible on PixAI, so the card-menu row NEVER fires it directly --
+  // it routes into the same confirm sheet bulk uses, carrying an explicit mids list.
+  // The 300ms delay lets the card-menu sheet finish its exit animation first (the
+  // sheets share the `closing` flag, so opening one mid-close renders it backwards).
+  const askCardDelete = () => {
     if (!menuItem) return;
-    setBusy(true); setErr("");
-    const res = await mutate("delete", menuItem.media_id, {});
-    setBusy(false);
-    if (res.error) { setErr(res.error); return; }
-    closeSheet(); await load();
+    const mid = menuItem.media_id;
+    closeSheet();
+    setTimeout(() => setBulkAsk({ action: "delete", extra: {}, count: 1, mids: [mid] }), 300);
   };
   const saveTags = async (newTags) => {
     if (!tagsItem) return;
@@ -188,12 +200,14 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
   const askBulk = (action, extra) => { setBulkAsk({ action, extra, count: selected.size }); };
   const confirmBulk = async () => {
     if (!bulkAsk) return;
+    const mids = bulkAsk.mids || Array.from(selected);
     setBusy(true); let ok = 0, fail = 0;
-    for (const mid of selected) {
+    for (const mid of mids) {
       const res = await mutate(bulkAsk.action, mid, bulkAsk.extra);
       if (res.error) fail++; else ok++;
     }
-    setBusy(false); setBulkAsk(null); setSelected(new Set());
+    setBusy(false); setBulkAsk(null);
+    if (!bulkAsk.mids) setSelected(new Set());
     await load();
   };
 
@@ -364,7 +378,7 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
           onClick={() => { setTagsId(menuId); setTagDraft(""); openSheet("cardtags"); }}>
           <span>✎</span>Edit tags
         </button>
-        <button type="button" className="myam-sheetrow dgr" disabled={busy} onClick={cardDelete}>
+        <button type="button" className="myam-sheetrow dgr" disabled={busy} onClick={askCardDelete}>
           <span>🗑</span>Delete
         </button>
       </MobileSheet>

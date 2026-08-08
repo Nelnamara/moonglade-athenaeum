@@ -14,6 +14,8 @@ git tags. Full prose notes for tagged versions live on
 > does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- Fixed: mobile My Art's per-card Delete ran the irreversible PixAI delete on a single tap — it now asks first, through the same confirm sheet bulk delete uses. A mid-action network error can also no longer leave the screen stuck on "working…". Both caught by the 2026-08-07 branch review.
+- Fixed: `--backfill-lineage` no longer marks a task as "checked" when its lookup merely errored (rate limit, network blip) — errored tasks are retried on the next run instead of being silently excluded forever.
 - Mobile: My Art, Publish, and Train a LoRA are real now, replacing a stale placeholder list and two "no backend route" placeholders. Same real pipelines as desktop; the Train dataset picker groups your recent generations by task and adds each task's true image count (not a fixed guess), and a new ☁ Publish button on Image Details opens the mobile Publish flow.
 - Fixed: publish/re-tag could silently attach the wrong PixAI tag on an ambiguous partial match, and confirming a cleared title could silently republish the old one. Both caught by ultrareview.
 - My Art: bulk Manage (multi-select publish/unpublish/delete, one confirm for the whole batch) and a real Models & LoRAs tab showing your own published LoRAs.
