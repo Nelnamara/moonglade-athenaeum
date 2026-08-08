@@ -14,7 +14,7 @@ git tags. Full prose notes for tagged versions live on
 > does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
-- Control Panel: a new "PixAI account" panel — your benefit cards (on-hand + lifetime usage), coupons, and credit ledger, opened from the Control Panel, all read-only. The rail also gains a free-cards count. The credit ledger shows your real transaction history (daily claims, event gifts, spend…). The paid/free credit split reads "unknown" for now — PixAI has no such field; it only exposes a per-wallet breakdown (Generate/Bonus/BP) whose codes still need capturing.
+- Control Panel: a new "PixAI account" panel — your benefit cards (on-hand + lifetime usage), coupons, and the real credit ledger (daily claims, event gifts, spend…), opened from the Control Panel, all read-only. The rail gains a free-cards count and the real paid/free credit split.
 - Contests: each contest card now has a "☆ Shortlist" button — select images in the gallery, open Contests, and stage your picks into a collection named for that contest in one click (no files moved, no credits). Re-implemented on the new React Contests panel from the earlier classic-only version.
 - Hardened sign-in: a failed login attempt now refreshes its security token so the next try always goes through (previously a second attempt after one failure could be rejected as "session expired"), and the whole login path now has real automated test coverage.
 - Fixed: the Control Panel could get stuck on a spinning button if a background action hit a network hiccup — actions now recover and show the error instead.

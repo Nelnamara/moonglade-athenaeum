@@ -7900,32 +7900,33 @@ _CREDIT_BALANCE_QUERY = """
 query {
   me {
     id
-    quotaAmount
+    total: quotaAmount
+    free: quotaAmount(currency: "free")
+    paid: quotaAmount(currency: "paid")
   }
 }
 """
 
 
 def credit_balance(session):
-    """Read the account's credit balance. Returns {"total", "free", "paid"} where free/paid
-    are the Paid-vs-Free split -- but see the note: that split has NO working API source.
+    """Read the account's credit balance split Paid vs Free -- the same three numbers the
+    site's own Membership & Credits page shows, where account_info()'s `quotaAmount` only
+    ever surfaces the lump total. Returns {"total", "free", "paid"} (ints, or None on error).
 
-    ** 2026-08-07: the original query `user(id).{total,free,paid}` was WRONG -- PixAI rejects
-    it outright ("Cannot query field \"total\" on type \"User\"", confirmed live). Those
-    fields do not exist. The docstring's "verified live 2026-08-02" claim was simply false.
-    Probing the real schema: `me` exposes only `quotaAmount` (the lump total, currency-null);
-    there is no paid/free field anywhere on User/me. A per-CURRENCY breakdown DOES exist via
-    `me { quotaAmount(currency: $c) }` (the site's own "Generate / Bonus / BP" wallets), but
-    the exact currency-code strings are not captured (every guess returns null, and PixAI
-    disables introspection). So this returns the real TOTAL and leaves free/paid None
-    (honest "unknown"); the split can't populate until the currency codes are captured. **
-    Read-only; fails soft to all-None on error."""
+    ** The mechanism, learned the hard way (2026-08-07): the split is `me { quotaAmount,
+    quotaAmount(currency: "free"), quotaAmount(currency: "paid") }` -- aliased fields on
+    `me`, with the currency codes being the bare strings "free"/"paid". The ORIGINAL query
+    `user(id).{total,free,paid}` was invalid (PixAI: "Cannot query field total on type
+    User") and always failed; a long probe missed the codes because `freeCredit`/`paidCredit`
+    etc. all return null and introspection is disabled. The exact query was finally recovered
+    from the site's own bundled operation AST (owner-supplied currency dump). Verified live:
+    free 219,951 + paid 3,533,040 = total 3,752,991. ** Read-only; fails soft to all-None."""
     try:
         data = gql_adhoc(session, _CREDIT_BALANCE_QUERY, {}) or {}
     except (PixAIError, requests.RequestException, ValueError):
         return {"total": None, "free": None, "paid": None}
     me = data.get("me") or {}
-    return {"total": me.get("quotaAmount"), "free": None, "paid": None}
+    return {"total": me.get("total"), "free": me.get("free"), "paid": me.get("paid")}
 
 
 # PixAI's free-tier LoRAs-per-generation allowance. Their own generate panel prints it

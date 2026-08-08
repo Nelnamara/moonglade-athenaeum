@@ -1003,16 +1003,15 @@ def test_run_account_info_reports_real_reason(mocker, capsys):
     assert "temporary" in capsys.readouterr().out.lower()
 
 
-# ---- credit_balance: me.quotaAmount total; paid/free split has NO API source ----
+# ---- credit_balance: me { quotaAmount, quotaAmount(currency:"free"/"paid") } split ----
 
-def test_credit_balance_returns_total_and_null_split(mocker):
-    # 2026-08-07: the paid/free split does not exist on the User/me schema (the old
-    # user(id).{total,free,paid} query was rejected outright). credit_balance now reads
-    # me.quotaAmount for the real TOTAL and leaves the split None (honest unknown).
+def test_credit_balance_returns_the_free_paid_split(mocker):
+    # The real split: aliased quotaAmount fields on `me` with currency "free"/"paid"
+    # (recovered from the site's own operation AST, verified live 2026-08-07).
     mocker.patch.object(core, "gql_adhoc", return_value={
-        "me": {"id": "42", "quotaAmount": 3691340}})
+        "me": {"id": "42", "total": 3752991, "free": 219951, "paid": 3533040}})
     result = core.credit_balance(mocker.MagicMock())
-    assert result == {"total": 3691340, "free": None, "paid": None}
+    assert result == {"total": 3752991, "free": 219951, "paid": 3533040}
 
 
 def test_credit_balance_fails_soft(mocker):
@@ -1021,20 +1020,24 @@ def test_credit_balance_fails_soft(mocker):
         "total": None, "free": None, "paid": None}
 
 
-def test_run_account_info_omits_split_when_unavailable(mocker, capsys):
-    """The paid/free split has no working API source (see credit_balance), so the dashboard
-    shows the total but must NOT print the split lines -- run_account_info guards on the
-    split being non-None, so an all-None balance simply omits them rather than printing
-    a fake 0."""
+def test_run_account_info_shows_free_paid_breakdown(mocker, capsys):
+    """The dashboard's "Credits (balance)" line breaks the balance into free vs paid, the
+    same split the site's own Membership & Credits page shows and quotaAmount alone can't."""
     from types import SimpleNamespace
 
+    def fake_gql(session, query, variables=None):
+        # account_info's query has tasks.totalCount; credit_balance's has the aliased split.
+        if "total: quotaAmount" in query:
+            return {"me": {"id": "42", "total": 3752991, "free": 219951, "paid": 3533040}}
+        return {"me": {"id": "42", "quotaAmount": 3752991}}
+
     mocker.patch.object(core, "_make_session", lambda *a, **k: object())
-    mocker.patch.object(core, "gql_adhoc",
-                        return_value={"me": {"id": "42", "quotaAmount": 3691340}})
+    mocker.patch.object(core, "gql_adhoc", side_effect=fake_gql)
     res = core.run_account_info(SimpleNamespace(token=None))
     out = capsys.readouterr().out
-    assert "of which free" not in out and "of which paid" not in out
-    assert res["free_credits"] is None and res["paid_credits"] is None
+    assert "of which free" in out and "219,951" in out
+    assert "of which paid" in out and "3,533,040" in out
+    assert res["free_credits"] == 219951 and res["paid_credits"] == 3533040
 
 def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker):
     """getTaskById returns the task's top-level paidCredit for HISTORICAL tasks (the

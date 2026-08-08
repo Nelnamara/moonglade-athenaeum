@@ -5816,3 +5816,17 @@ breakdown (Generate/Bonus/BP), which is more accurate than the design mock's inv
 "paid vs free" anyway. Coupons ride REST `/v2/extra-package-boosts` and returned 0 on-hand
 (plausibly genuine — the account holds none right now; re-check against
 `pixai.art/en/@nelnamara/assets/coupons` when it has some).
+
+### Account detail: the paid/free split is SOLVED — currency codes are "free"/"paid"  ·  *2026-08-07 (resolved)*
+
+The split's currency codes (the one open item from the probe entry above) were recovered
+from the site's own bundled GraphQL operation AST (owner-supplied "currency dump.js"). The
+real query is aliased fields on `me`:
+`me { total: quotaAmount, free: quotaAmount(currency: "free"), paid: quotaAmount(currency:
+"paid") }` — the codes are the bare strings **"free"** and **"paid"** (the earlier probe
+tried `freeCredit`/`paidCredit` and every other variant but never those two exact strings).
+`credit_balance` now uses this; verified live: free 219,951 + paid 3,533,040 = total
+3,752,991. So the design's original "paid vs free" split was right after all (the
+Generate/Bonus/BP wallet chips are a separate UI grouping). The rail sub-line and the modal
+balance strip now show the real split. Both the ledger AND the split are fully live; the
+whole account-detail port is real end-to-end. (Coupons still 0 on-hand — genuine for now.)
