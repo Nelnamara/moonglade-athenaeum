@@ -32,11 +32,6 @@ const NAV = [
   // design and this pill's former href:"/panel" full-page nav. ControlPanelOverlay.jsx.
   { label: "Panel", tip: "Control Panel — maintenance jobs, accounts, branding",
     overlay: "panel", gear: true },
-  // Transitional, NOT in the DC: one honest door to every surface that hasn't
-  // ported yet (My Art, Publish, Import...), instead of six dead pills or six
-  // silent bounces. Dies with /classic at demolition. Owner-disclosed addition.
-  { label: "Classic", tip: "The old interface — retires when the port completes",
-    href: "/classic" },
   { label: "Log Out", tip: "End this session", logout: true },
 ];
 

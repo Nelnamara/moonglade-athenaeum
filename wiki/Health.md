@@ -1,6 +1,6 @@
 # Collection Health
 
-The **`/health`** page is your analytics dashboard over `catalog.db`:
+The **Health** overlay (the ♡ Health pill in the gallery header) is your analytics dashboard over `catalog.db`:
 
 - Storage used, **Full-meta %** and **Model known %**, missing files, uncataloged files,
   total likes.
@@ -17,14 +17,14 @@ The **`/health`** page is your analytics dashboard over `catalog.db`:
 - A prompt word-cloud.
 
 Reach it from the gallery header (**♡ Health**) or
-`http://127.0.0.1:5000/health`.
+the ♡ Health pill in the gallery header.
 
 ## Uncataloged files
 
 **Uncataloged** counts media files that physically exist in your backup folder but have
 no row in `catalog.db` at all — the mirror image of "missing files" (a catalog row with
 no file). This happens when files land on disk outside the normal backup flow. When the
-count is nonzero, `/health` shows a note pointing at the fix: the gallery's **↑ Import**
+count is nonzero, Health shows a note pointing at the fix: the gallery's **↑ Import**
 button, or `python moonglade_backup.py --import-local` from the CLI — both catalog
 any not-yet-known file it finds (see [Backing Up → Importing your own media](Backing-Up)).
 
@@ -37,8 +37,7 @@ something was missing.
 
 ## Duplicates review
 
-**`/duplicates`** shows cross-folder duplicate copies side-by-side before you dedup
-(linked from `/health`). For the filesystem-level audit/dedup tooling, see
+**Duplicate Review** (opened from Health's Duplicates tile) shows cross-folder duplicate copies side-by-side before you dedup. For the filesystem-level audit/dedup tooling, see
 [Backing Up → Duplicate audit](Backing-Up).
 
 ## Thumbnails & health accuracy

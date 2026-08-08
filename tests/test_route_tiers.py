@@ -60,7 +60,7 @@ LOCALHOST = "LOCALHOST"  # a logged-in session AND a loopback remote_addr
 # The two refusal shapes the front door emits (see _enforce_front_door()). Routes
 # whose historical contract is JSON get a parseable 401; everything else gets a
 # redirect to the login page.
-_JSON_GATE_PREFIXES = ("/api/", "/rate/", "/edit-prompt/")
+_JSON_GATE_PREFIXES = ("/api/",)
 _AUTH_REQUIRED_BODY = {"error": "authentication required"}
 _REDIRECT_CODES = (301, 302, 303, 307, 308)
 
@@ -88,9 +88,6 @@ _REDIRECT_CODES = (301, 302, 303, 307, 308)
 ROUTE_TIERS = {
     # -- the login surface: the only genuinely public tier -------------------
     ("login", "GET"): PUBLIC,
-    ("login", "POST"): PUBLIC,
-    ("logout", "GET"): PUBLIC,        # local sign-out only -- writes no server state
-    ("logout", "POST"): PUBLIC,       # + the global revoke, gated on the session csrf
     # JSON siblings (2026-08-02, the React Login page) -- an unauthenticated
     # caller is exactly who needs to reach api_login; api_logout must stay
     # reachable by an already-dead cookie for the same reason logout() does.
@@ -117,7 +114,6 @@ ROUTE_TIERS = {
     # exactly as /panel does. POST rewrites config.json too, so it matches save-key above.
     ("api_library_path", "GET"): LOGIN,
     ("api_library_path", "POST"): LOCALHOST,
-    ("delete_tasks_bulk", "POST"): LOCALHOST,       # irreversible cloud deletion
     # JSON twin of delete_tasks_bulk (the React gallery's fetch() version). SAME
     # tier for the SAME reason: it destroys on the owner's real cloud account.
     # Being /api/-prefixed it refuses with the standard 403 JSON, not the form
@@ -137,18 +133,13 @@ ROUTE_TIERS = {
     ("api_trash_empty", "POST"): LOCALHOST,           # irreversible local file deletion (2026-07-24)
 
     # -- LOGIN: any authorized session ---------------------------------------
-    ("index", "GET"): LOGIN,
-    ("detail", "GET"): LOGIN,
-    ("health", "GET"): LOGIN,
     # JSON twin of the health page (the React HealthOverlay's data) -- same tier
     # for the same reason: collection metrics for any signed-in session.
     ("api_health", "GET"): LOGIN,
-    ("panel", "GET"): LOGIN,
     # JSON twin of /panel's own aggregation, for the React Control Panel overlay --
     # same tier, same data, out_dir/destructive-action visibility already narrowed
     # inside the handler itself for a non-local caller (matching /panel's own rule).
     ("api_panel_summary", "GET"): LOGIN,
-    ("duplicates", "GET"): LOGIN,
     ("loom", "GET"): LOGIN,
     ("contact_sheet", "GET"): LOGIN,
     # JSON twin of /contact-sheet (the React ContactSheetOverlay's data) -- same tier,
@@ -160,8 +151,6 @@ ROUTE_TIERS = {
     # a self-inflicted redirect. /sw.js is the same CLASS of asset but is NOT bundled in
     # with it: serving the worker script is a separate question from what the worker
     # caches, and the cache-survives-sign-out concern has to be settled on its own.
-    ("manifest", "GET"): PUBLIC,
-    ("service_worker", "GET"): LOGIN,
     # Flask's own static endpoint is NOT special-cased away here on purpose.
     # `if rule.endpoint == "static": continue` is the single most common way a
     # catch-all route test grows a hole; /static/ is gated by the front door
@@ -170,7 +159,6 @@ ROUTE_TIERS = {
 
     # raw asset / media routes
     ("thumb", "GET"): LOGIN,
-    ("serve_image", "GET"): LOGIN,
     ("full_image", "GET"): LOGIN,
     ("video_file", "GET"): LOGIN,
     ("badge_thumb", "GET"): LOGIN,
@@ -188,11 +176,6 @@ ROUTE_TIERS = {
     # library mutation (local only in effect, but LAN-authorized by design)
     ("rate", "POST"): LOGIN,
     ("edit_prompt", "POST"): LOGIN,
-    ("delete_one", "POST"): LOGIN,
-    ("delete_bulk", "POST"): LOGIN,
-    ("bulk_replace", "POST"): LOGIN,
-    ("collection_add", "POST"): LOGIN,
-    ("collection_remove", "POST"): LOGIN,
     # JSON twins of the redirect-page bulk actions above (the React gallery's
     # fetch() versions). Each takes the SAME tier as the page route it mirrors:
     # local quarantine, collection labels and prompt find/replace are reversible
@@ -360,17 +343,13 @@ ROUTE_TIERS = {
 # door intercepting it unless the expectation is spelled out per route.
 PUBLIC_EXPECTED_STATUS = {
     ("login", "GET"): {200},
-    ("login", "POST"): {200},      # re-renders the form (no csrf) -- never a redirect
     # a 200 page now, not a redirect -- it has to run script client-side to purge
     # Cache Storage before navigating on to /login, which a 3xx can't do (see
     # test_session_revocation.py's test_logout_purges_cache_storage_client_side)
-    ("logout", "GET"): {200},
-    ("logout", "POST"): {200},     # anonymous: nothing to revoke, so no csrf is demanded
     ("api_login", "POST"): {200},   # success {"ok":true} or {"error":...} -- never a redirect
     ("api_logout", "POST"): {200},  # anonymous: authorized is False, csrf is never checked
     ("next_assets", "GET"): {404}, # missing bundle file 404s; it must never redirect to /login
     ("branding", "GET"): {404},    # missing art 404s; it must never redirect to /login
-    ("manifest", "GET"): {200},    # a constant body -- anonymous callers get the real thing
 }
 
 # A few routes only reach their localhost gate with a meaningful payload.
@@ -385,7 +364,6 @@ PROBE_BODIES = {
 # blob would be a dead end in the browser flow it belongs to. Declared, not
 # guessed -- and asserted just as strictly.
 LOCALHOST_REFUSAL_IS_REDIRECT = {
-    ("delete_tasks_bulk", "POST"): "localhost-only",   # substring required in Location
 }
 
 # One dummy per converter TYPE, so a future /api/thing/<int:n> needs no edit here.
@@ -516,14 +494,13 @@ def _login(app, username="tier-probe", password="a-real-test-password-1"):
     core.add_or_update_web_user(username, password)
     cli = app.test_client()
     html = cli.get("/login").get_data(as_text=True)
-    # Either the classic hidden input (bootstrap_mode) or the React shell's
-    # window.MG_BOOT JSON blob (the common case: a real account already
-    # exists, so GET /login now serves LoginPage.jsx -- 2026-08-02).
-    m = re.search(r'name="csrf" value="([^"]+)"|"csrf":\s*"([^"]+)"', html)
-    assert m, "login page did not render a csrf token (classic hidden field or MG_BOOT)"
-    r = cli.post("/login", data={"username": username, "password": password,
-                                 "csrf": m.group(1) or m.group(2)})
-    assert r.status_code in _REDIRECT_CODES, "probe login failed to authenticate"
+    # The React shell's window.MG_BOOT JSON blob (the ONLY login page since the
+    # classic cut, 2026-08-08); sign-in is the JSON POST the real app makes.
+    m = re.search(r'"csrf":\s*"([^"]+)"', html)
+    assert m, "login page did not render a csrf token in MG_BOOT"
+    d = cli.post("/api/login", json={"username": username, "password": password,
+                                     "csrf": m.group(1)}).get_json()
+    assert d and d.get("ok"), "probe login failed to authenticate: {!r}".format(d)
     return cli
 
 
@@ -795,167 +772,9 @@ def test_panel_status_is_not_blanket_localhost_gated(app):
             "localhost-gated instead of having only its one leaky field fixed.".format(field))
 
 
-def test_panel_withholds_the_server_install_path_from_lan(app, tmp_path):
-    """`/panel` stays LOGIN-tier -- same reasoning as api_panel_status above -- but must
-    not hand a LAN caller the absolute host filesystem path (`out_dir`, e.g.
-    'D:\\\\Moonglade Athenaeum\\\\pixai_backup'). It renders as plain HTML ("library at
-    <code>{{ out_dir }}</code>"), unconditionally, to every LOGIN caller regardless of
-    _is_local_request() -- found by the 2026-07-21 audit as S2, the same shape as the
-    api_panel_status leak: a route whose TIER is correct but whose BODY mixes in host
-    detail that tier does not justify.
-
-    Deliberately narrower than that fix, though: usernames on this same page (S2's other
-    half) are NOT touched here. Reading the roster stays LOGIN-tier on purpose, even
-    though WRITING to it no longer is (api_users_add/_remove were tightened 2026-07-22 --
-    see their own docstrings): seeing a fellow account's username is a different, much
-    smaller question than adding or removing one, and it is not the kind of fact this
-    route needs to hide. A host filesystem path is a different kind of fact entirely: it
-    identifies the SERVER's machine, not a peer account.
-    """
-    cli = _login(app)
-    resp = cli.get("/panel", environ_overrides={"REMOTE_ADDR": LAN})
-    assert resp.status_code == 200
-    html = resp.get_data(as_text=True)
-    assert str(tmp_path) not in html, (
-        "the real out_dir path reached a LAN caller's rendered /panel page")
-    assert "local to the server" in html
 
 
-def test_panel_shows_the_real_path_to_localhost(app, tmp_path):
-    """The companion to the test above: the owner sitting at the server must still see
-    the real path -- it's useful, it's their own machine, and there is nothing to
-    withhold from loopback. Without this test, a future 'just always redact it' change
-    would pass the LAN test above while quietly breaking the one caller who actually
-    needs this information."""
-    cli = _login(app)
-    html = cli.get("/panel").get_data(as_text=True)   # loopback REMOTE_ADDR by default
-    assert str(tmp_path) in html, (
-        "the owner's own /panel no longer shows the real library path")
 
 
-# ---------------------------------------------------------------------------
-# 7. Control-level disclosure: three owner-only CONTROLS must not just error, they
-# must not even RENDER for a LOGIN-tier LAN session (docs/AUDIT_2026-07-21.md P3 and
-# the reachability-lens finding under section 5 -- "which LOCALHOST-gated controls are
-# rendered to every LOGIN session?"). Before this fix, all three rendered normally for
-# any authorized session and only 403'd server-side after a browser confirm dialog --
-# never a security hole (every target route already carried its own correct
-# `_is_local_request()` check), but a dead-end UX wart. FIXED 2026-07-24: the owner's
-# explicit call was to gate visibility on the real check, not just relabel the gap.
-# ---------------------------------------------------------------------------
-
-def test_index_withholds_the_import_button_from_a_lan_session(app):
-    """The header's "^ Import" button used to render for ANY logged-in session, local
-    or LAN, because its visibility only checked the blanket `is_local` flag (hardcoded
-    True for every authorized request reaching index() -- see that route's comment).
-    Its real target, /api/import-local, is actually LOCALHOST-tier (it writes files
-    onto the server's own machine) -- so a LAN session saw a working-looking Import
-    button that always 403'd on click. The button is now nested behind `is_true_local`,
-    the real _is_local_request() result -- the same value `can_delete_cloud` ("Delete
-    from PixAI") already used."""
-    cli = _login(app)
-    html = cli.get("/classic", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
-    assert 'onclick="ImportUI.open()"' not in html, (
-        "a LAN session's rendered index page still contains the Import button, which "
-        "posts to the LOCALHOST-only /api/import-local and would 403 on click")
-    # Sibling LOGIN-tier owner controls must still render for LAN -- this fixes ONE
-    # control's visibility, not a blanket lockout of the whole owner section.
-    assert "Gen.open()" in html and 'href="/loom"' in html
 
 
-def test_index_shows_the_import_button_to_localhost(app):
-    """The companion to the test above: the owner sitting at the server must still see
-    a working Import button. Without this test, a future 'just always hide it' change
-    would pass the LAN test while quietly breaking the one caller who can actually use
-    it."""
-    cli = _login(app)
-    html = cli.get("/classic").get_data(as_text=True)   # loopback REMOTE_ADDR by default
-    assert 'onclick="ImportUI.open()"' in html, (
-        "the owner's own index page no longer shows the Import button")
-
-
-def test_panel_withholds_set_launcher_icon_and_destructive_buttons_from_lan(app):
-    """"Set launcher icon" and every destructive Maintenance action (Organize, Dedup,
-    Rebuild thumbnails, ...) used to render for any LOGIN-tier session -- their real
-    targets (/api/branding/shortcut, and /api/panel/run's `spec["destructive"]` branch)
-    are correctly LOCALHOST-gated server-side, but nothing hid the buttons themselves,
-    so a LAN session saw working-looking controls that 403'd after a browser confirm
-    dialog. Both now key off `panel_is_local`, the same flag the Users tab's Add/Remove
-    UI already used (2026-07-22)."""
-    cli = _login(app)
-    html = cli.get("/panel", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
-    assert 'onclick="setLauncher()"' not in html, (
-        "a LAN session's rendered /panel still contains the Set launcher icon button, "
-        "which posts to the LOCALHOST-only /api/branding/shortcut and would 403")
-    actions_json = html.split("var ACTIONS = ", 1)[1].split(";", 1)[0]
-    for destructive in ("organize", "undo-organize", "dedup-apply", "dedup-delete",
-                       "restore-orphans", "rebuild-thumbs"):
-        assert '"action": "{}"'.format(destructive) not in actions_json, (
-            "a LAN session's Maintenance ACTIONS payload still includes the "
-            "destructive action {!r}, which posts to the LOCALHOST-only "
-            "/api/panel/run and would 403 after a confirm dialog".format(destructive))
-    # Safe actions are UNCHANGED: this fix is scoped to destructive-button visibility,
-    # not a blanket Maintenance-tab lockout -- a LAN account may still run any of them
-    # (see test_panel_status_is_not_blanket_localhost_gated above for the sibling
-    # principle on the polling side).
-    assert '"action": "sync"' in actions_json
-    # The scheduler dropdown's own source (ALL_ACTIONS) is deliberately untouched by
-    # this fix: loadSchedule() already excludes every destructive action from the
-    # dropdown for everyone, local or LAN, so there was never anything to hide there.
-    all_actions_json = html.split("var ALL_ACTIONS = ", 1)[1].split(";", 1)[0]
-    assert '"action": "organize"' in all_actions_json
-
-
-def test_index_tells_a_lan_session_it_is_being_served_as_one(app):
-    """The other half of hiding LOCALHOST-tier controls: SAY SO. Hiding Import and
-    "Delete from PixAI" from a LAN session (the two tests above) fixes a dead-end
-    click but creates a silent one -- the same owner, same account, same browser, sees
-    a different set of buttons depending only on whether the address bar says
-    `localhost` or the machine's LAN IP, with nothing on the page naming the
-    difference. A whole day was spent browsing via the LAN IP without noticing, with
-    the app looking simply broken.
-
-    The chip keys off `is_true_local` -- the real `_is_local_request()` result index()
-    already computes for the Import button and `can_delete_cloud` -- NOT a second
-    notion of trust, and it gates nothing: it is a label for a decision the tier
-    helpers have already made."""
-    cli = _login(app)
-    html = cli.get("/classic", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
-    assert 'id="lan-chip"' in html, (
-        "a LAN session's index page has no indicator that it is being served as a "
-        "remote caller -- the LOCALHOST-tier controls just silently vanish")
-    chip = html.split('id="lan-chip"', 1)[1].split("</span>", 1)[0]
-    # The chip must name the controls it explains, or it is decoration: "why is this
-    # button missing" has to answer itself without a trip to the docs.
-    assert "Import" in chip and "Delete from PixAI" in chip, (
-        "the LAN chip does not name the controls that are hidden, so it does not "
-        "actually answer 'why is this button missing'")
-
-
-def test_index_does_not_flag_the_owners_own_local_session(app):
-    """The companion: at the keyboard on the server, every LOCALHOST control is
-    present, so there is nothing to explain and the header stays clean. Without this
-    test an unconditional chip would pass the LAN test above while nagging the one
-    caller it has no news for."""
-    cli = _login(app)
-    html = cli.get("/classic").get_data(as_text=True)   # loopback REMOTE_ADDR by default
-    assert 'id="lan-chip"' not in html, (
-        "the owner's own local index page shows the LAN-session chip, which has "
-        "nothing to tell them -- every local-only control is right there")
-
-
-def test_panel_shows_set_launcher_icon_and_destructive_buttons_to_localhost(app):
-    """The companion to the test above: the owner sitting at the server must still see
-    a working Set-launcher-icon button and every destructive Maintenance action.
-    Without this test, a future 'just always hide it' change would pass the LAN test
-    above while quietly breaking the one caller who can actually use these."""
-    cli = _login(app)
-    html = cli.get("/panel").get_data(as_text=True)   # loopback REMOTE_ADDR by default
-    assert 'onclick="setLauncher()"' in html, (
-        "the owner's own /panel no longer shows the Set launcher icon button")
-    actions_json = html.split("var ACTIONS = ", 1)[1].split(";", 1)[0]
-    for destructive in ("organize", "undo-organize", "dedup-apply", "dedup-delete",
-                       "restore-orphans", "rebuild-thumbs"):
-        assert '"action": "{}"'.format(destructive) in actions_json, (
-            "the owner's own Maintenance ACTIONS payload is missing the destructive "
-            "action {!r}".format(destructive))

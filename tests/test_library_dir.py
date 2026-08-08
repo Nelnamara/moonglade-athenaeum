@@ -113,14 +113,13 @@ def test_a_file_is_refused_and_nothing_is_written(tmp_path):
     assert d.get("error")
 
 
-def test_the_folder_setting_never_offers_to_move_anything(tmp_path):
+def test_the_folder_setting_never_offers_to_move_anything():
     """The one hard promise: changing this points the app somewhere else and leaves the old
-    folder untouched. There is deliberately no migrate/copy option to get wrong, and the
-    Panel says so in as many words."""
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a.png",
-                                         created_at="2025-01-01T00:00:00")])
-    html = cli.get("/panel").get_data(as_text=True)
-    assert "nothing is moved" in html.lower()
+    folder untouched. There is deliberately no migrate/copy option to get wrong.
+
+    (The classic /panel page that stated this in copy is gone with the classic UI; the
+    enforcement half -- the handler source must never touch files -- is what matters and
+    stays pinned here.)"""
     src = (ROOT / "moonglade_gallery.py").read_text(encoding="utf-8")
     body = src[src.index("def api_library_path("):]
     body = body[:body.index("@app.route(\"/api/server/restart\"")]

@@ -150,7 +150,7 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
   const savePrompt = async () => {
     setSaveStatus("Saving…");
     try {
-      const d = await fetch("/edit-prompt/" + encodeURIComponent(mediaId), {
+      const d = await fetch("/api/edit-prompt/" + encodeURIComponent(mediaId), {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: promptText }),
       }).then((r) => r.json());

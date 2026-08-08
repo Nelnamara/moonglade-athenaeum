@@ -5,20 +5,14 @@ CLI does, as background jobs with a live log and a progress bar, so routine upke
 needs a terminal. It also holds your login accounts, branding, and Stop / Restart for the
 server itself.
 
-**Two ways to reach it, same real jobs underneath:**
-- On the current gallery (the default at `http://localhost:5000`), **⚙ Panel** opens the
-  Panel as an **overlay on top of the gallery**, not a separate page — click it again or
-  `Esc` to close. Its two tabs are **Maintenance** and **Branding**; **Accounts** and
-  **Trash** are their own tiles inside Maintenance, each opening as a further overlay on
-  top of the Panel itself. The job scheduler and the *(full re-walk)*/Advanced sync
-  variants described below are on classic's page only (see next bullet) — not yet ported.
-- On **Classic** (linked from the gallery header; retiring once the port above is
-  complete), the Panel is still the full **`/panel`** page this article otherwise
-  describes, with its own **Maintenance** and **Users** tabs and the scheduler.
+**⚙ Panel** opens the Panel as an **overlay on top of the gallery**, not a separate
+page — click it again or `Esc` to close. Its two tabs are **Maintenance** and
+**Branding**; **Accounts**, **Trash**, and **PixAI account** (your cards, coupons and
+credit ledger) are their own tiles inside Maintenance, each opening as a further overlay
+on top of the Panel itself. The auto-sync schedule lives in the job console's **Ledger**
+view. (The old separate `/panel` page retired with the classic interface, 2026-08-08.)
 
-Like every page in the gallery, it needs a login (see [Setup](Setup)). Everything below —
-which jobs exist, what's destructive vs. safe, who can run what — is identical on both;
-only the Panel's own shape (page vs. overlay, Users tab vs. Accounts tile) differs.
+Like every page in the gallery, it needs a login (see [Setup](Setup)).
 
 ## Library at a glance
 

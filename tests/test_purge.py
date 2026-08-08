@@ -1,7 +1,9 @@
 """The destructive local-purge path — previously untested, and the scariest code in
 the app (it deletes files). Covers purge_media_local (quarantine vs hard-delete) and
-the gallery /delete-tasks-bulk route (cloud delete is mocked; we assert local side
-effects + that the cloud call fires task-level)."""
+the gallery /api/delete-tasks route (cloud delete is mocked; we assert local side
+effects + that the cloud call fires task-level). The classic /delete-tasks-bulk form
+route died in the 2026-08-08 classic cut; the JSON twin runs the same
+_start_bulk_delete engine, so the behavior pinned here is unchanged."""
 import pytest
 
 import moonglade_gallery as g
@@ -122,8 +124,10 @@ def test_delete_tasks_bulk_route_quarantines_and_calls_cloud(tmp_path, monkeypat
     monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: calls.append(tid))
 
     client = login_client(tmp_path)
-    r = client.post("/delete-tasks-bulk", data={"media_ids": ["100", "200"], "back": "/"})
-    assert "bulkdel=started" in r.headers["Location"]            # async now: kicks off + reports to the card
+    r = client.post("/api/delete-tasks", json={"media_ids": ["100", "200"]})
+    body = r.get_json()
+    assert r.status_code == 200 and body["ok"] is True and body["job_id"]  # async: kicks off + reports to the card
+    assert body["tasks"] == 1 and body["local_only"] == 1        # one task + one local-only import
 
     import time
     for _ in range(200):                                         # wait for the background delete thread
@@ -136,7 +140,7 @@ def test_delete_tasks_bulk_route_quarantines_and_calls_cloud(tmp_path, monkeypat
     # selecting 100 purges its WHOLE task (100 + 101); 200 is a local-only import
     for name in ("100.png", "101.png", "200.png"):
         assert (deleted / name).exists()
-    assert {r["media_id"] for r in load_catalog(db)} == set()    # all three rows cleared
+    assert {row["media_id"] for row in load_catalog(db)} == set()    # all three rows cleared
 
 
 def test_bulk_delete_keeps_going_when_one_local_purge_fails(tmp_path, monkeypatch):
@@ -166,7 +170,7 @@ def test_bulk_delete_keeps_going_when_one_local_purge_fails(tmp_path, monkeypatc
     monkeypatch.setattr(g.Path, "replace", _one_bad_file)
 
     client = login_client(tmp_path)
-    client.post("/delete-tasks-bulk", data={"media_ids": ["300", "400"], "back": "/"})
+    client.post("/api/delete-tasks", json={"media_ids": ["300", "400"]})
 
     job = None
     for _ in range(200):
@@ -193,7 +197,7 @@ def test_bulk_delete_async_logs_a_job_that_completes(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: None)
 
     client = login_client(tmp_path)
-    client.post("/delete-tasks-bulk", data={"media_ids": ["a1"], "back": "/"})
+    client.post("/api/delete-tasks", json={"media_ids": ["a1"]})
 
     job = None
     for _ in range(200):
@@ -328,29 +332,14 @@ def test_delete_preview_refuses_an_authenticated_lan_session(tmp_path):
     assert r.status_code == 403
 
 
-def test_cloud_delete_confirm_renders_the_preview_and_keeps_the_typed_gate(tmp_path):
-    """The dialog is the whole point of the endpoint above, so pin the wiring: the
-    gallery must actually fetch the preview, and the typed DELETE gate must survive
-    the change -- making a consequence visible is not a reason to loosen the guard in
-    front of it."""
-    _seed(tmp_path, [_row(media_id="1", task_id="T", filename="1.png")], {})
-    html = login_client(tmp_path).get("/classic").get_data(as_text=True)
-    assert "/api/delete-preview" in html, (
-        "the gallery never asks for the blast radius, so the confirm cannot show it")
-    assert "cd-modal" in html
-    assert "Type DELETE to confirm" in html, (
-        "the typed DELETE gate vanished from the cloud-delete flow")
-
-
 def test_bulk_delete_cloud_is_localhost_only(tmp_path, monkeypatch):
     """A LAN request must NOT be able to delete from the owner's PixAI account.
 
-    Before the global front-door hook existed, this route's own defense-in-depth
-    check redirected back to the gallery with a `delerr` banner; now the global
-    hook (_enforce_front_door(), see moonglade_gallery.py) denies the request before
-    this route's body ever runs, redirecting to /login instead -- the
-    security-relevant invariants below (nothing fired, nothing deleted) are
-    unchanged."""
+    An unauthenticated request never reaches the route body at all: the global
+    front-door hook (_enforce_front_door(), see moonglade_gallery.py) denies it
+    first, answering 401 on the /api/ JSON tier -- the security-relevant
+    invariants below (nothing fired, nothing deleted) are unchanged from when
+    this covered the classic /delete-tasks-bulk form route."""
     import time
     import moonglade_backup as core
     db = _seed(tmp_path, [_row(media_id="z1", task_id="TZ", filename="z1.png")], {"z1.png": b"x"})
@@ -359,26 +348,26 @@ def test_bulk_delete_cloud_is_localhost_only(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: fired.append(tid))
 
     client = create_app(tmp_path).test_client()
-    r = client.post("/delete-tasks-bulk", data={"media_ids": ["z1"], "back": "/"},
+    r = client.post("/api/delete-tasks", json={"media_ids": ["z1"]},
                     environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r.status_code in (301, 302, 303, 307, 308)
-    assert "/login" in r.headers["Location"]        # refused before the handler ran, not a delete
+    assert r.status_code == 401                     # refused before the handler ran, not a delete
     time.sleep(0.1)                                  # give any wrongly-spawned thread a beat
     assert fired == []                               # nothing deleted from the cloud
     assert {x["media_id"] for x in load_catalog(db)} == {"z1"}   # row intact
 
 
 def test_bulk_delete_cloud_refuses_authenticated_lan_session(tmp_path, monkeypatch):
-    """A logged-in LAN account must NOT be able to trigger /delete-tasks-bulk --
+    """A logged-in LAN account must NOT be able to trigger /api/delete-tasks --
     same trust tier as /api/branding/shortcut and destructive Panel actions: this
     destroys on the owner's real PixAI account, irreversibly. A LAN login unlocks
     browsing and spending the owner's credits, not deleting the owner's cloud
-    generations. Regression test: this route's own _is_local_request() re-check
-    was dropped during the LAN-auth conversion pass (0fd8cee) and never replaced
-    -- the global front-door hook alone let ANY logged-in LAN session through,
-    unlike its siblings test_panel.py::test_destructive_action_refuses_authenticated_lan_session
+    generations. Regression test: the classic route's own _is_local_request()
+    re-check was dropped during the LAN-auth conversion pass (0fd8cee) and never
+    replaced -- the global front-door hook alone let ANY logged-in LAN session
+    through, unlike its siblings test_panel.py::test_destructive_action_refuses_authenticated_lan_session
     and test_branding.py::test_shortcut_refuses_authenticated_lan_session, which
-    already covered this shape. Flagged by adversarial review and fixed 2026-07-19."""
+    already covered this shape. Flagged by adversarial review and fixed 2026-07-19;
+    ported to the surviving JSON route when the classic form route died 2026-08-08."""
     import time
     import moonglade_backup as core
     db = _seed(tmp_path, [_row(media_id="z2", task_id="TZ2", filename="z2.png")], {"z2.png": b"x"})
@@ -391,16 +380,17 @@ def test_bulk_delete_cloud_refuses_authenticated_lan_session(tmp_path, monkeypat
     # Prove the session really is authenticated (it can reach an ordinary
     # authorized-LAN route) before proving it still can't reach this one.
     assert client.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
-    r = client.post("/delete-tasks-bulk", data={"media_ids": ["z2"], "back": "/"},
+    r = client.post("/api/delete-tasks", json={"media_ids": ["z2"]},
                     environ_overrides={"REMOTE_ADDR": LAN})
-    assert r.status_code in (301, 302, 303, 307, 308)
-    assert "delerr=" in r.headers["Location"]        # refused by the route itself (delerr banner),
-    assert "/login" not in r.headers["Location"]     # NOT the front door (would be a /login redirect)
+    assert r.status_code == 403                       # refused by the route itself (its own
+    assert "localhost" in (r.get_json() or {}).get("error", "")  # _is_local_request re-check),
+    # NOT the front door (that would be a 401 "authentication required")
     time.sleep(0.1)                                   # give any wrongly-spawned thread a beat
     assert fired == []                                # nothing deleted from the cloud
     assert {x["media_id"] for x in load_catalog(db)} == {"z2"}   # row intact
 
     # The same account, from the actual local machine, still works (this isn't
     # broken for the owner -- just not exposed to remote LAN sessions).
-    r2 = client.post("/delete-tasks-bulk", data={"media_ids": ["z2"], "back": "/"})
-    assert "bulkdel=started" in r2.headers["Location"]
+    r2 = client.post("/api/delete-tasks", json={"media_ids": ["z2"]})
+    body2 = r2.get_json()
+    assert r2.status_code == 200 and body2["ok"] is True and body2["job_id"]

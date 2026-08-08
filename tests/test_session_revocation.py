@@ -11,7 +11,7 @@ all three. See moonglade_backup._next_sess_epoch()'s docstring for the design.
       matters because remove-and-re-add is precisely the recovery an owner performs
       after a suspected cookie theft: the recovery step handed the cookie back.
 
-  D2  /logout is public (the front door never runs on it) and app.secret_key
+  D2  /api/logout is public (the front door never runs on it) and app.secret_key
       persists, so an already-revoked cookie still DESERIALIZES. Without an auth
       check it stayed a valid "log this identity out" token forever -- replayed in
       a loop it kicked the real user off the instant they signed back in.
@@ -19,19 +19,27 @@ all three. See moonglade_backup._next_sess_epoch()'s docstring for the design.
   D3  bump_web_user_session_epoch was the one AUTH_USERS writer doing its
       read-modify-write outside _accounts_lock -- a lost update in both directions.
 
+Since the classic cut (2026-08-08) the ONLY sign-out surface is POST /api/logout
+(JSON {csrf}, default GLOBAL revoke, scope:"this-device" opts down to a local
+sign-out); the classic /logout route -- GET page and form POST both -- is gone,
+and sign-in is POST /api/login. Every test here runs against those surviving
+routes; the D4 tests that pinned the classic GET's behavior are ported to pin
+the equivalent invariants (a GET writes nothing; a refused logout signals no
+success) on /api/logout itself.
+
 THE REPLAY TRAP, which bit an earlier proof-of-concept and is worth reading before
 touching anything here: _is_authorized_request() calls session.clear() on the stale
-path, and logout() calls it unconditionally. Flask's test client PERSISTS the
+path, and api_logout() calls it unconditionally. Flask's test client PERSISTS the
 resulting session-clearing Set-Cookie, so a client reused across replays stops
 sending the stolen value after the first hit and the test passes for the WRONG
 reason. Every replay below therefore uses a FRESH client seeded with the raw saved
 cookie string.
 """
-import re
 import threading
 
 import moonglade_backup as core
 from moonglade_gallery import create_app
+from tests.conftest import _do_login, extract_login_csrf
 
 LAN = "203.0.113.5"
 
@@ -40,22 +48,14 @@ def _client(tmp_path):
     return create_app(tmp_path)
 
 
-def _csrf(html):
-    # Either the classic hidden input (bootstrap_mode) or the React shell's
-    # window.MG_BOOT JSON blob (the common case: a real account already
-    # exists, so GET /login now serves LoginPage.jsx -- 2026-08-02).
-    m = re.search(r'name="csrf" value="([^"]+)"|"csrf":\s*"([^"]+)"', html)
-    assert m, "login page did not render a csrf token (classic hidden field or MG_BOOT)"
-    return m.group(1) or m.group(2)
-
-
 def _login(app, username="alice", password="hunter2"):
-    cli = app.test_client()
-    html = cli.get("/login").get_data(as_text=True)
-    r = cli.post("/login", data={"username": username, "password": password,
-                                 "csrf": _csrf(html)})
-    assert r.status_code in (301, 302, 303, 307, 308), "login helper failed to authenticate"
-    return cli
+    """Sign an already-created account in the way the React shell does: GET /login
+    for the MG_BOOT csrf, then POST /api/login (JSON). Deliberately NOT conftest's
+    login_existing_client: that helper re-runs add_or_update_web_user, which MINTS
+    a fresh epoch and would therefore revoke every session this file logged in
+    earlier -- several tests below hold two live sessions for the same account on
+    purpose. _do_login is the pure sign-in half."""
+    return _do_login(app.test_client(), username, password)
 
 
 def _steal(cli):
@@ -72,27 +72,27 @@ def _replay(app, stolen, path="/api/jobs"):
 
 
 def _logout(cli, **extra):
-    """Sign out the way the header's form does: a POST carrying this session's csrf
-    token. Since the CSRF-able-GET fix, /logout's GET is a LOCAL sign-out only (it
-    clears this client's cookie and writes nothing server-side), so every test in
-    this file that is about REVOCATION has to use the POST or it asserts nothing.
-    The token comes from the live session rather than a scraped page because
-    _establish_session mints a FRESH one at login -- the token on the login page is
-    already stale by the time the client is authenticated."""
+    """Sign out the way the React header does: POST /api/logout carrying this
+    session's csrf token as JSON. No scope field means GLOBAL revoke; pass
+    scope="this-device" for the local-only sign-out. The token comes from the
+    live session rather than a scraped page because _establish_session mints a
+    FRESH one at login -- the token on the login page is already stale by the
+    time the client is authenticated."""
     with cli.session_transaction() as sess:
         token = sess.get("csrf", "")
-    return cli.post("/logout", data=dict({"csrf": token}, **extra))
+    return cli.post("/api/logout", json=dict({"csrf": token}, **extra))
 
 
 def _replay_logout(app, stolen, token):
-    """Replay a stolen cookie at /logout the way an attacker actually would: a POST
-    carrying the csrf token that was baked into that same cookie. Flask's session
-    cookie is signed but NOT encrypted, so a thief holding the cookie also holds its
-    token -- the csrf field is no defence against this and was never meant to be.
-    The _is_authorized_request() check inside logout() is (defect D2 above)."""
+    """Replay a stolen cookie at /api/logout the way an attacker actually would: a
+    POST carrying the csrf token that was baked into that same cookie. Flask's
+    session cookie is signed but NOT encrypted, so a thief holding the cookie also
+    holds its token -- the csrf field is no defence against this and was never
+    meant to be. The _is_authorized_request() check inside api_logout() is
+    (defect D2 above)."""
     cli = app.test_client()                 # FRESH client -- see the trap above
     cli.set_cookie("session", stolen)       # raw saved value, not a live cookie
-    return cli.post("/logout", data={"csrf": token},
+    return cli.post("/api/logout", json={"csrf": token},
                     environ_overrides={"REMOTE_ADDR": LAN})
 
 
@@ -114,8 +114,9 @@ def test_recreated_account_does_not_resurrect_an_old_cookie(tmp_path):
 
 def test_recreated_account_via_panel_api_does_not_resurrect(tmp_path):
     """The same defect through add_web_user_if_new -- the path the Panel's Users
-    tab actually uses. Fixing only the CLI writer leaves this fully live through
-    the UI, and a suite covering just the other one looks entirely green."""
+    API (/api/users/add) actually uses. Fixing only the CLI writer leaves this
+    fully live through the UI, and a suite covering just the other one looks
+    entirely green."""
     # The account must be CREATED through add_web_user_if_new, not just re-created
     # through it. Seeding with add_or_update_web_user instead makes this test
     # decorative: that writer mints a high ticket, so the stolen cookie carries a
@@ -193,8 +194,8 @@ def test_epochs_are_unique_across_accounts(tmp_path):
 # --- D2: a revoked cookie must not retain the power to revoke ---------------
 
 def test_dead_cookie_cannot_bump_epoch_via_logout(tmp_path):
-    """Replaying a dead cookie at /logout must do nothing. The second half is the
-    user-visible harm: without the fix the attacker kicks the victim off every
+    """Replaying a dead cookie at /api/logout must do nothing. The second half is
+    the user-visible harm: without the fix the attacker kicks the victim off every
     time they sign back in, recoverable only by rotating AUTH_SECRET_KEY."""
     core.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
@@ -234,106 +235,85 @@ def test_logout_still_revokes_every_outstanding_cookie(tmp_path):
 
 
 def test_anonymous_logout_is_still_a_noop(tmp_path):
-    """A genuinely anonymous GET /logout stays a harmless response that touches no
-    server state -- it must not mint, bump, or rewrite anything. It's a 200 page
-    now, not a redirect (see test_logout_purges_cache_storage_client_side), but the
-    purge must fire even here -- unconditional, same reasoning as the cookie clear
-    it always did: whoever hits /logout should leave with a clean local cache."""
+    """A genuinely anonymous POST /api/logout stays a harmless response that
+    touches no server state -- it must not mint, bump, or rewrite anything.
+    /api/logout is deliberately public (an already-dead cookie still deserves a
+    clean local sign-out), which is exactly why this pin matters: public +
+    state-writing is the D2 shape all over again. Ported from the classic GET
+    /logout version of this test when that route died in the classic cut; the
+    cache-purge-script assertions died with the classic page (React now purges
+    Cache Storage itself in JS on a successful sign-out response)."""
     core.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     before_epoch = core.get_web_user_session_epoch("alice")
     before_bytes = core._config_path().read_bytes()
-    r = app.test_client().get("/logout")
+    r = app.test_client().post("/api/logout", json={})
     assert r.status_code == 200
-    assert "caches.delete" in r.get_data(as_text=True)
+    assert (r.get_json() or {}).get("ok") is True
     assert core.get_web_user_session_epoch("alice") == before_epoch
     assert core._config_path().read_bytes() == before_bytes
 
 
 # --- D4: a GET must never write server state --------------------------------
 
-def test_get_logout_signs_out_only_this_browser(tmp_path):
-    """THE CSRF-able-GET fix. /logout's GET used to bump sess_epoch, so any page that
-    got the owner to follow a cross-site link -- or any link-prefetcher walking the
-    header -- signed them out on every device. SESSION_COOKIE_SAMESITE="Lax" blocks
-    the <img src=".../logout"> version of that (a cross-site subresource carries no
-    cookie) but deliberately still sends the cookie on a top-level GET navigation.
+def test_get_logout_is_refused_and_writes_nothing(tmp_path):
+    """THE CSRF-able-GET invariant, on the route that survived the classic cut.
+    The classic /logout GET used to bump sess_epoch, so any page that got the
+    owner to follow a cross-site link -- or any link-prefetcher walking the
+    header -- signed them out on every device; that route is gone, and
+    /api/logout is POST-only. This pins the surviving shape: a GET at the
+    sign-out endpoint is refused outright (405), signs NOBODY out anywhere --
+    not even locally -- and writes nothing server-side.
 
-    A GET must now clear THIS client's cookie and write nothing server-side.
-
-    Bite: restore the bump on the GET path and both of the last two assertions fail."""
+    Bite: add methods=["GET", "POST"] back onto api_logout (the classic
+    regression) and the refusal assertion fails immediately."""
     core.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     victim = _login(app)
     other = _login(app)                       # the owner's phone, still signed in
     before_epoch = core.get_web_user_session_epoch("alice")
 
-    r = victim.get("/logout")
-    assert r.status_code == 200
-    assert victim.get("/api/jobs").status_code == 401     # this browser IS signed out
+    r = victim.get("/api/logout")
+    assert r.status_code == 405
+    assert victim.get("/api/jobs").status_code == 200, \
+        "a refused GET must not half-sign-out even the browser that sent it"
     assert other.get("/api/jobs").status_code == 200, \
-        "a GET /logout must not sign the user out on their other devices"
+        "a GET must not sign the user out on their other devices"
     assert core.get_web_user_session_epoch("alice") == before_epoch
 
 
-def test_logout_purges_cache_storage_client_side(tmp_path):
-    """A redirect can't run script, so a bare redirect() can never clear Cache
-    Storage -- the browser-side cache /sw.js fills under /img/ and /full/, which
-    outlives sign-out because nothing else purges it (docs/AUDIT_2026-07-21.md's
-    Cache-Storage-survives-sign-out item). /logout must instead serve a real page
-    that deletes every cache before navigating on to /login -- proven here for
-    both the GET and the real, CSRF-carrying POST path, since either one is a
-    genuine completed sign-out.
-
-    Bite: revert to redirect(url_for('login')) and both assertions fail --
-    there is no HTML body to search for the purge script in."""
-    core.add_or_update_web_user("alice", "hunter2")
-    app = _client(tmp_path)
-
-    r_get = app.test_client().get("/logout")
-    body_get = r_get.get_data(as_text=True)
-    assert "caches.keys()" in body_get and "caches.delete" in body_get
-    assert "/login" in body_get, "must still land the browser on /login, same as the old redirect did"
-    # A plain, always-visible <a href="/login"> is the escape hatch for a browser
-    # whose extension/CSP blocks the inline <script> specifically -- <noscript>
-    # alone only engages when scripting is off ENTIRELY, so it does not cover that
-    # case. Without this link, that reader is stranded with no purge and no way on.
-    assert 'href="/login"' in body_get, \
-        "no visible fallback link -- a page whose script gets blocked (but not scripting overall) strands the reader"
-
-    victim = _login(app)
-    r_post = _logout(victim)   # the real POST path, csrf token + all
-    body_post = r_post.get_data(as_text=True)
-    assert r_post.status_code == 200
-    assert "caches.delete" in body_post
-
-
-def test_refused_logout_does_not_purge_the_cache(tmp_path):
+def test_refused_logout_does_not_signal_success(tmp_path):
     """A bad-CSRF POST leaves the session INTACT (see
-    test_post_logout_without_a_valid_csrf_token_revokes_nothing) -- it must not
-    purge the browser's cache either, since nothing about the sign-out actually
-    happened. Purging here would be a false "you're signed out" signal to a user
-    who is, in fact, still signed in."""
+    test_post_logout_without_a_valid_csrf_token_revokes_nothing) -- and its
+    response must not read as a success either. React keys its client-side
+    Cache Storage purge + navigate-to-/login on a successful sign-out response;
+    an ok-shaped body here would be a false "you're signed out" signal to a user
+    who is, in fact, still signed in. (Ported from the classic-page version,
+    which asserted the purge <script> was absent from the refusal's HTML --
+    /api/logout has no HTML, so the JSON contract is the surviving surface.)"""
     core.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     victim = _login(app)
-    r = victim.post("/logout", data={"csrf": "forged-token-not-in-session"})
+    r = victim.post("/api/logout", json={"csrf": "forged-token-not-in-session"})
     assert r.status_code == 400
-    assert "caches.delete" not in r.get_data(as_text=True)
+    d = r.get_json() or {}
+    assert d.get("ok") is not True
+    assert d.get("error")
 
 
 def test_post_logout_without_a_valid_csrf_token_revokes_nothing(tmp_path):
-    """The POST carries the same session-bound token /login's form and the Panel's
-    Users tab carry. A bad one is a loud 400 that leaves the session INTACT -- not a
-    quiet downgrade to a local sign-out, which is how the global revoke would
-    silently disappear if the header form ever stopped emitting the field."""
+    """The POST carries the same session-bound token /api/login's flow and the
+    Panel's Users API carry. A bad one is a loud 400 that leaves the session
+    INTACT -- not a quiet downgrade to a local sign-out, which is how the global
+    revoke would silently disappear if the header's logout handler ever stopped
+    sending the field."""
     core.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     victim = _login(app)
     other = _login(app)
     before_epoch = core.get_web_user_session_epoch("alice")
 
-    r = victim.post("/logout", data={"csrf": "forged-token-not-in-session"})
+    r = victim.post("/api/logout", json={"csrf": "forged-token-not-in-session"})
     assert r.status_code == 400
     assert core.get_web_user_session_epoch("alice") == before_epoch
     assert victim.get("/api/jobs").status_code == 200, \
@@ -465,20 +445,28 @@ def test_the_failure_that_locks_you_out_says_so(tmp_path):
 
     The previous crawl never saw this because it stopped at four attempts.
 
-    Five attempts remain genuinely available; only the message changes."""
+    Five attempts remain genuinely available; only the message changes. Ported to
+    POST /api/login (the one sign-in path since the classic cut): the first token
+    comes from GET /login's MG_BOOT blob, and each failed attempt's payload carries
+    the ROTATED replacement token the SPA is expected to adopt -- reusing it here
+    both drives the loop and exercises that rotation contract."""
     core.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     cli = app.test_client()
+    csrf = extract_login_csrf(cli.get("/login").get_data(as_text=True))
+    assert csrf, "login page did not render a csrf token in MG_BOOT"
     seen = []
     for _ in range(5):
-        html = cli.get("/login").get_data(as_text=True)
-        r = cli.post("/login", data={"username": "alice", "password": "wrong",
-                                     "csrf": _csrf(html)})
-        seen.append(r.get_data(as_text=True))
+        d = cli.post("/api/login",
+                     json={"username": "alice", "password": "wrong",
+                           "csrf": csrf}).get_json()
+        assert d is not None
+        seen.append(str(d.get("error") or ""))
+        csrf = d.get("csrf") or csrf        # adopt the rotated token, like the SPA
     # first four: the ordinary message, and NOT a lockout claim
-    for body in seen[:4]:
-        assert "Invalid username or password" in body
-        assert "Too many failed attempts" not in body
+    for msg in seen[:4]:
+        assert "Invalid username or password" in msg
+        assert "Too many failed attempts" not in msg
     # the fifth is the one that locks -- it must say so rather than lying
     assert "Too many failed attempts" in seen[4], (
         "the attempt that triggered the lockout still reported a plain bad password")
