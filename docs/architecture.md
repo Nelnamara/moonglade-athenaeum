@@ -1,6 +1,6 @@
 # Architecture
 
-Moonglade Athenaeum is four Python modules around one SQLite catalog.
+Moonglade Athenaeum is four core Python modules around one SQLite catalog (plus `moonglade_logging.py`, the rotating-file logger documented in its own subsection below — five files in total).
 
 ```
 moonglade_backup.py   CLI engine: download, organize, generate, sync, delete, reconcile
@@ -373,9 +373,10 @@ is in `docs/DECISIONS.md`.
 
 ## Shared web components (`static/`)
 
-Seven framework-neutral custom elements (the "Option-A cohesion migration") live in
-`static/` as plain `mg-*.js` globals — no build step, no shadow DOM, loaded via a plain
-`<script src>` tag, each self-injecting its own `<style>` that reads the shared
+Seven framework-neutral shared components (the "Option-A cohesion migration") — of which
+FIVE are true custom elements and two (`mg-notify.js`, `mg-art-filters.js`) are plain
+window globals — live in `static/` as plain `mg-*.js` files: no build step, no shadow DOM,
+loaded via a plain `<script src>` tag, each self-injecting its own `<style>` that reads the shared
 `DESIGN_TOKENS_CSS` custom properties so it re-skins with the rest of the app. Both the
 vanilla gallery (`moonglade_gallery.py`) and the React Loom (`loom/master-storyboard.jsx`)
 mount the same files instead of each hand-duplicating the UI:

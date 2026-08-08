@@ -81,9 +81,11 @@ The reported leak of uncensored/"spicy" roast lines was deliberately not patched
 
 ### Two persona buckets of the archived 2026-07-16 sweep have never been reconciled  ·  *2026-07-22*
 
-Only ONE of the three persona buckets in `docs/archive/SWEEP_2026-07-16.md` ("PixAI power user + community member") was ever checked against current code and its live items recovered. The other two — Loom video creator, and gallery curator, roughly 18 more bullets — have never had that check and are still sitting in an archived file that project rules define as "historical record, never current fact."
+Only ONE of the three persona buckets in `SWEEP_2026-07-16.md` ("PixAI power user + community member") was ever checked against current code and its live items recovered. The other two — Loom video creator, and gallery curator, roughly 18 more bullets — have never had that check.
 
-**Why.** This is the exact failure the archive rule causes and that the audit-board reconciliation already had to fix once: live, unactioned requests become contractually invisible by being archived with work still in them. The pointer to WHICH buckets remain unmined is the only thing that makes them recoverable; without it, those ~18 items are lost silently rather than deliberately.
+**⚠ UPDATE 2026-08-07 (doc-parity audit + owner status check):** the file `docs/archive/SWEEP_2026-07-16.md` no longer exists — the whole `docs/archive/` tree was deleted 2026-07-27 (`64ecc21`). The sweep is NOT lost: it survives in three places — (1) the owner's Desktop `Moonglade MD archive/SWEEP_2026-07-16.md`, (2) git history via `git show 64ecc21^:docs/archive/SWEEP_2026-07-16.md`, (3) an interactive tagging artifact where the **owner tagged all 28 items** (Shipped / In Development / Scope / Hold) on 2026-08-02. The all-three-buckets tagging IS done; what remains genuinely open is **where those 28 tagged decisions reconcile durably** — they live only in the artifact + memory, never written to the repo. Recommended home: a `## Feature-request ledger` section in THIS file (DECISIONS.md is the sole tracker; ROADMAP.md was pruned and does not exist). Awaiting the owner's pick of destination before writing them in.
+
+**Why (historical).** This was the exact failure the archive rule causes: live, unactioned requests become contractually invisible by being archived with work still in them. The pointer to which buckets remained unmined kept them recoverable — and they were recovered.
 
 ### "Earned rewards" display is LIVE — correction, not a TBD  ·  *2026-07-23*
 
@@ -391,7 +393,7 @@ Read the CLI-only list before filing a "no Panel button" item. The board has twi
 
 The state doc describes only what is true right now. When something stops being true, DELETE the line — "never strike it through, never mark it SUPERSEDED, never write 'was X, now Y', never append a correction beside the thing it corrects." There is no "shipped recently" or "landed on <date>" section. Never write a number a command can answer (test counts, commits-ahead, version strings) — name the command instead. Absolute dates only (2026-07-17), never "today"/"last week". A commit SHA is allowed as an *identifier* riding a present-tense fact, never as the subject of a change-story; prefer symbol names over line numbers. What shipped → CHANGELOG. How a decision was reached → git history + frozen copies in docs/archive/. How it works → architecture doc. Rules → CLAUDE.md.
 
-**Why.** "a list of recent changes only ever grows, and that append-only growth is the exact failure this file exists to avoid." Its predecessor (docs/ROADMAP_LOOM_ACHIEVEMENTS.md, now frozen in docs/archive/) died holding 40 stale claims precisely because it was an append-only journal.
+**Why.** "a list of recent changes only ever grows, and that append-only growth is the exact failure this file exists to avoid." Its predecessor (docs/ROADMAP_LOOM_ACHIEVEMENTS.md, since deleted with the whole `docs/archive/` tree 2026-07-27; a copy survives on the owner's Desktop `Moonglade MD archive/`) died holding 40 stale claims precisely because it was an append-only journal.
 
 ### The default download speed is unpaced — `--delay` reaches the parallel stage only when typed
 
@@ -399,11 +401,11 @@ The state doc describes only what is true right now. When something stops being 
 
 **Why.** The finding (`M07`) was that the wiki documented `--delay` as applying to downloads and on the default path it did not. Making it always-on at the shipped `0.4` capped the whole pool at one image per 0.4s regardless of worker count — it made `--workers` decorative, made the Panel's own workers selector decorative, and turned a 17,000-image first backup from roughly 35 minutes into nearly two hours. That is a silent 3–6x regression on the tool's single most common command, traded for a throttling problem that has never once been reported. The mismatch was mostly a documentation defect, so the wiki was corrected and the flag made to work when it is actually asked for.
 
-### The live audit backlog must NOT be archived until it is empty
+### OBSOLETE: the live audit backlog rule (its file and the archive are both gone)
 
-`docs/AUDIT_2026-07-21.md` is the live backlog and must not be moved to `docs/archive/` while it still has work in it. It supersedes older per-defect bullets for anything it covers.
+~~`docs/AUDIT_2026-07-21.md` is the live backlog and must not be moved to `docs/archive/` while it still has work in it.~~ **Obsolete (2026-08-07 doc-parity audit):** both `docs/AUDIT_2026-07-21.md` AND the entire `docs/archive/` tree were deleted 2026-07-27 (`64ecc21`) on purpose — DECISIONS.md is now the sole tracker and does not archive itself. Kept only so an old reference to the audit backlog resolves to "deleted, folded into DECISIONS.md," not a dead hunt.
 
-**Why.** This is the exact mechanism by which an earlier sweep doc lost three sections of live content: it was archived with work still in it, and the project contract makes `docs/archive/` "historical record, never current fact" — so roughly twenty real work items became contractually invisible until an audit went looking for them.
+**Why (historical, still true as a principle).** This was the exact mechanism by which an earlier sweep doc lost three sections of live content: it was archived with work still in it. The lesson stands — don't archive a doc with live work in it — even though the specific files are gone.
 
 ### The pure-stdlib cascade test is not a substitute for a rendering test
 
@@ -486,11 +488,11 @@ The shared generate drawer cannot import from loom-mutations.js (an ES module) a
 
 **Why.** The component is framework-neutral and mounted by two different hosts; requiring a build step would break that. A duplicated-with-parity-test copy is the accepted cost of the constraint, not an oversight.
 
-### OPEN OWNER CALL: /api/task-status conflates a local blip with a real PixAI failure  ·  *2026-07-18*
+### RESOLVED: /api/task-status conflated a local blip with a real PixAI failure  ·  *2026-07-18, resolved since*
 
-Flagged, deliberately not acted on: /api/task-status's exception handler returns HTTP 200 {phase:"failed"} for a transient local blip, which is indistinguishable from a genuine PixAI failure to either poll loop. Changing that endpoint's error shape is an owner decision that was never made.
+~~Flagged, deliberately not acted on: /api/task-status's exception handler returns HTTP 200 {phase:"failed"} for a transient local blip, which is indistinguishable from a genuine PixAI failure to either poll loop.~~ **Resolved in code (confirmed 2026-08-07 doc-parity audit):** the transient `except Exception` branch now returns `{"phase":"running","status":"checking…"}` (non-terminal), NOT `"failed"` — genuine code defects are split out to get the authoritative `"failed"`. So a local blip no longer reads as a real PixAI failure to the pollers. See the "audit fail-open fix" comment at the exception handler in `moonglade_gallery.py` (grep `checking…` / `audit fail-open`).
 
-**Why.** Left open on purpose rather than changed unilaterally — altering the error shape changes what every poller treats as terminal.
+**Why (historical).** Was left open rather than changed unilaterally because altering the error shape changes what every poller treats as terminal; the eventual fix made the transient branch non-terminal without touching the genuine-failure path.
 
 ### The multi-hour give-up tiers were never clocked in real time  ·  *2026-07-18*
 
@@ -1152,7 +1154,7 @@ this text is why.
 
 ### Moonglade Model Deck (mirror)  ·  *2026-07-11*
 
-https://claude.ai/code/artifact/9f16f42d-2541-4dd9-935a-0f9d0f39c7c4 — the model research deck. MIRROR — docs/archive/MODEL_DECK_2026-07-11.md is truth (and is frozen, dated external research to re-verify before relying on).
+https://claude.ai/code/artifact/9f16f42d-2541-4dd9-935a-0f9d0f39c7c4 — the model research deck. MIRROR — the original MODEL_DECK_2026-07-11.md was deleted from the repo with `docs/archive/` (2026-07-27); the surviving copy is on the owner's Desktop `Moonglade MD archive/MODEL_DECK_2026-07-11.md` (and in git history). Dated external research — re-verify before relying on.
 
 **Why.** Keeps one truth for model research and flags it as time-sensitive external data rather than settled fact.
 
@@ -1244,7 +1246,7 @@ From the same task dump: their website sends width/height (1536x864), a channel 
 
 ### Badge Prompts v2 (parked mirror)
 
-https://claude.ai/code/artifact/771f84d9-cacb-4f5c-8300-9c8575fb8431 — the badge prompt system. PARKED mirror; the live home is docs/ART.md §5, with the original in docs/archive/badge_generation_prompts_2026-07-16.md.
+https://claude.ai/code/artifact/771f84d9-cacb-4f5c-8300-9c8575fb8431 — the badge prompt system. PARKED mirror; the live home is docs/ART.md §5. The original badge_generation_prompts_2026-07-16.md was deleted with `docs/archive/` (2026-07-27); a copy survives on the owner's Desktop `Moonglade MD archive/`.
 
 **Why.** Prevents the parked artifact being edited as if it were the live prompt bank.
 
@@ -3092,7 +3094,7 @@ Reachable read-only community data already scouted and never folded into the pla
 
 ### Model lanes for badge/ornament art  ·  *2026-07-11*
 
-Model strategy is banked in the frozen docs/archive/MODEL_DECK_2026-07-11.md and must be re-verified before being relied on (it is dated external research). Krea2 on Maestro is the local quality lane for ornate frame/ornament work. The badge benchmark is PixAI Tsubaki.2 v1 with detailed prose and NO LoRA — the Hoardsmith dragon, task 2031115782282256404.
+Model strategy is banked in MODEL_DECK_2026-07-11.md (deleted from the repo with `docs/archive/` 2026-07-27; copy on the owner's Desktop `Moonglade MD archive/` + git history) and must be re-verified before being relied on (it is dated external research). Krea2 on Maestro is the local quality lane for ornate frame/ornament work. The badge benchmark is PixAI Tsubaki.2 v1 with detailed prose and NO LoRA — the Hoardsmith dragon, task 2031115782282256404.
 
 **Why.** Gives a reproducible benchmark (a specific real task, a specific model+no-LoRA recipe) so badge art quality is judged against something concrete instead of re-litigated per session. The deck is external research with a shelf life, hence the re-verify caveat.
 
@@ -5579,7 +5581,7 @@ fixed against the real code, full suite green (1615; one full-suite-only flake n
 below):
 
 - **`/api/login` test coverage** — the standout gap: the LIVE auth path since Aug 1 had
-  none. New `tests/test_api_login.py` (14 tests) ported from `test_web_auth.py`'s classic
+  none. New `tests/test_api_login.py` ported from `test_web_auth.py`'s classic
   coverage: JSON sign-in, wrong-password/unknown-user error-string PARITY (anti-
   enumeration), the shared IP-lockout counter (proven shared with the classic form),
   mode=create bootstrap (local+zero-accounts only; refused once an account exists;

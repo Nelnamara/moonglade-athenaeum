@@ -6,11 +6,13 @@ Two owner-approved standards this project holds every build to:
 - **Part 2 — Design Workflow.** The pixel-source-of-truth rule: no user-visible design build
   proceeds from prose alone.
 
-This file **is** the standard — the sole live copy. It replaces two standalone files
-(`docs/CURATION_STANDARD.md`, `docs/DESIGN_WORKFLOW.md`), now frozen in `docs/archive/`
-(2026-07-17): a merge into one file was recommended a day earlier and left undone, and in that
-gap the standalone `DESIGN_WORKFLOW.md` visibly drifted from the corrected text living here —
-the exact failure this file exists to prevent. Edit here; there is no second copy to keep in sync.
+This file **is** the standard — the sole live copy. It replaced two standalone files
+(`docs/CURATION_STANDARD.md`, `docs/DESIGN_WORKFLOW.md`), which were frozen 2026-07-17 and then
+deleted outright with the whole `docs/archive/` tree on 2026-07-27 (copies survive on the owner's
+Desktop `Moonglade MD archive/`): a merge into one file was recommended a day earlier and left
+undone, and in that gap the standalone `DESIGN_WORKFLOW.md` visibly drifted from the corrected
+text living here — the exact failure this file exists to prevent. Edit here; there is no second
+copy to keep in sync.
 
 ---
 
