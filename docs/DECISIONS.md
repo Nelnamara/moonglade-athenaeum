@@ -5993,3 +5993,20 @@ the 8 `static/mg-*.js` components, React-rewritten in dependency order: art-filt
 gallery-picker(+absorb picker-core) → model-picker + upscale-panel → notify →
 generate-drawer + cost-badge last (its never-unmount spend-safety lifecycle gets a real
 redesign, not a transliteration); each lands in BOTH gallery/src and the Loom.
+
+### Mobile build missed on iOS Chrome/Firefox — useIsMobile hardened  ·  *2026-08-08*
+
+Owner: mobile UI shows on iPhone Safari but NOT iPhone Chrome/Firefox (desktop build
+instead). All three are WebKit on iOS but different UA shells (CriOS/FxiOS); on those shells
+the layout viewport can report desktop-wide on first load(s), so useIsMobile's pure
+`(max-width: 430px)` query misses a real phone. Fix: keep the max-width query as the primary
+signal (unchanged — it's why Safari works) and ADD a fallback — a coarse-pointer device in
+PORTRAIT whose physical `screen.width <= 430` (independent of the layout-viewport quirk) is
+mobile. Both extra clauses are load-bearing against desktop false-positives: a mouse laptop
+is never `(pointer: coarse)`, a tablet's screen.width is > 430. Landscape stays desktop, as
+before. The hook now recomputes the whole decision on resize + orientationchange (the
+fallback depends on orientation), not just the breakpoint. Verified live: desktop width still
+renders desktop (fallback can't fire, coarse=false); the primary narrow path is unchanged
+code. NOTE the other half — the `no-cache` headers from the same day's Details fix mean a
+phone that cached an OLD (pre-mobile) bundle in Chrome/Firefox now revalidates on reload;
+one hard reload picks up both fixes.
