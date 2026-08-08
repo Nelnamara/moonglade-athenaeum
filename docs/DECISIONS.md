@@ -5517,5 +5517,13 @@ A literal-filename grep missed the concatenation — the exact class of miss the
 config-isolation standing rule exists for. All 57 ach ids currently have art, so the
 rung only fires when an ach file is missing — which is a REAL case (the D: run copy is
 exactly such a partially-copied tree). Deleting them doesn't crash anything (the chain
-ends at "no mascot"), but it removes a live safety net, so the ruling goes back to the
+ends at "no mascot"), but it removes a live safety net, so the ruling went back to the
 owner with the corrected facts instead of being executed on the bad ones.
+
+**Re-ruled with corrected facts, same day: DELETE — executed.** Owner: *"Delete them.
+We don't need a fallback anymore. we can mark that code as deprecated once the bundling
+and transition is complete."* All four present_* files removed from the C: dev tree
+(D: run copy notify-only, as with frames/). The mg-notify.js chain rung itself stays in
+code untouched for now — it fail-softs through the 404 to "no mascot" — and gets marked
+deprecated as part of the bundle-transition work, per the owner's sequencing, not
+before.
