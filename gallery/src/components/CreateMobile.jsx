@@ -238,7 +238,6 @@ export default function CreateMobile({
   const [advClosing, setAdvClosing] = useState(false);
   const costHost = useRef(null);
   const editCostHost = useRef(null);
-  const deselectRef = useRef(null);
 
   const loraCap = account && account.lora_cap != null ? account.lora_cap : null;
   const gate = goGate(s, loraCap);
@@ -305,8 +304,8 @@ export default function CreateMobile({
   }, [addLora, removeLora]);
 
   const removeLoraChip = (modelId) => {
+    // Controlled selection: removing from state un-lights the picker card automatically.
     removeLora(modelId);
-    if (deselectRef.current) deselectRef.current(modelId);
   };
 
   const openModelSheet = (kind) => { setFlyKind(kind); setFlyOpen(true); };
@@ -594,9 +593,9 @@ export default function CreateMobile({
         <ModelFlyout
           open={flyOpen} kind={flyKind} setKind={setFlyKind}
           baseType={m ? m.model_type : ""}
+          value={m} selected={s.loras}
           onBasePick={onBasePick} onLoraPick={onLoraPick}
           onClose={() => setFlyOpen(false)}
-          deselectRef={deselectRef}
         />
       </div>
     </div>
