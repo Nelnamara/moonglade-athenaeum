@@ -15,26 +15,30 @@ def _node(ref_id="r-1", amount=-2100, type_="task_cost", extra=None,
 
 
 def _resp(nodes, has_previous=False, start_cursor=None):
-    return {"user": {"id": "u-1", "quotaLogs": {
+    # `me.quotaLogs`, NOT user(id).quotaLogs -- quotaLogs is private, only on `me`
+    # (2026-08-07 fix; the user(id) form always returned empty against the real account).
+    return {"me": {"id": "u-1", "quotaLogs": {
         "pageInfo": {"hasNextPage": False, "hasPreviousPage": has_previous,
                      "startCursor": start_cursor, "endCursor": None},
         "edges": [{"cursor": "c-{}".format(i), "node": n} for i, n in enumerate(nodes)],
     }}}
 
 
-# ---- list_credit_log: ad-hoc GraphQL user(id).quotaLogs, soft-fail ----
+# ---- list_credit_log: ad-hoc GraphQL me.quotaLogs, soft-fail ----
 
-def test_list_credit_log_normalizes_real_shape_and_uses_user_id(monkeypatch):
-    monkeypatch.setattr(core, "USER_ID", "u-1")
+def test_list_credit_log_normalizes_real_shape_via_me(monkeypatch):
     seen = {}
 
     def fake_gql(session, query, variables=None):
         seen["variables"] = variables
+        seen["query"] = query
         return _resp([_node()])
 
     monkeypatch.setattr(core, "gql_adhoc", fake_gql)
     result = core.list_credit_log(object(), last=30)
-    assert seen["variables"] == {"userId": "u-1", "last": 30}
+    # No userId is sent -- the query is on `me`, and it must be (private field).
+    assert seen["variables"] == {"last": 30}
+    assert "me {" in seen["query"] and "user(id" not in seen["query"]
     row = result["entries"][0]
     assert row["ref_id"] == "r-1" and row["amount"] == -2100
     assert row["type"] == "task_cost" and row["label"] == "Generation Task"
@@ -48,8 +52,7 @@ def test_list_credit_log_unmapped_type_falls_back_to_raw(monkeypatch):
     assert row["type"] == "mio2_gem_exchange" and row["label"] == "mio2_gem_exchange"
 
 
-def test_list_credit_log_passes_reason_and_before(monkeypatch):
-    monkeypatch.setattr(core, "USER_ID", "u-1")
+def test_list_credit_log_passes_before_and_ignores_reason(monkeypatch):
     seen = {}
 
     def fake_gql(session, query, variables=None):
@@ -57,9 +60,10 @@ def test_list_credit_log_passes_reason_and_before(monkeypatch):
         return _resp([])
 
     monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+    # `reason` is accepted by the signature but NOT sent -- the `me` connection doesn't
+    # offer it (2026-08-07). `before` still pages backward.
     core.list_credit_log(object(), last=10, before="cursor-past", reason="task_cost")
-    assert seen["variables"] == {
-        "userId": "u-1", "last": 10, "before": "cursor-past", "reason": "task_cost"}
+    assert seen["variables"] == {"last": 10, "before": "cursor-past"}
 
 
 def test_list_credit_log_backward_pagination_reads_previous_and_start_cursor(monkeypatch):

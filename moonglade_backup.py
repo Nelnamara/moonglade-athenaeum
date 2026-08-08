@@ -7897,30 +7897,35 @@ def account_is_member(me):
 
 
 _CREDIT_BALANCE_QUERY = """
-query($userId: ID!) {
-  user(id: $userId) {
+query {
+  me {
     id
-    total
-    free
-    paid
+    quotaAmount
   }
 }
 """
 
 
 def credit_balance(session):
-    """Read the account's credit balance broken down Paid vs Free via ad-hoc GraphQL
-    `user(id).{total,free,paid}` -- the site's own Membership & Credits page shows this
-    three-way split, where account_info()'s `quotaAmount` only ever surfaces the lump
-    total. Verified live 2026-08-02 (operation getUserQuota). Read-only; fails soft to
-    {"total": None, "free": None, "paid": None} on error, matching this module's other
-    account readers -- a caller must treat None as unknown, not zero."""
+    """Read the account's credit balance. Returns {"total", "free", "paid"} where free/paid
+    are the Paid-vs-Free split -- but see the note: that split has NO working API source.
+
+    ** 2026-08-07: the original query `user(id).{total,free,paid}` was WRONG -- PixAI rejects
+    it outright ("Cannot query field \"total\" on type \"User\"", confirmed live). Those
+    fields do not exist. The docstring's "verified live 2026-08-02" claim was simply false.
+    Probing the real schema: `me` exposes only `quotaAmount` (the lump total, currency-null);
+    there is no paid/free field anywhere on User/me. A per-CURRENCY breakdown DOES exist via
+    `me { quotaAmount(currency: $c) }` (the site's own "Generate / Bonus / BP" wallets), but
+    the exact currency-code strings are not captured (every guess returns null, and PixAI
+    disables introspection). So this returns the real TOTAL and leaves free/paid None
+    (honest "unknown"); the split can't populate until the currency codes are captured. **
+    Read-only; fails soft to all-None on error."""
     try:
-        data = gql_adhoc(session, _CREDIT_BALANCE_QUERY, {"userId": USER_ID}) or {}
+        data = gql_adhoc(session, _CREDIT_BALANCE_QUERY, {}) or {}
     except (PixAIError, requests.RequestException, ValueError):
         return {"total": None, "free": None, "paid": None}
-    user = data.get("user") or {}
-    return {"total": user.get("total"), "free": user.get("free"), "paid": user.get("paid")}
+    me = data.get("me") or {}
+    return {"total": me.get("quotaAmount"), "free": None, "paid": None}
 
 
 # PixAI's free-tier LoRAs-per-generation allowance. Their own generate panel prints it
@@ -8523,14 +8528,22 @@ def list_extra_package_boosts(session, statuses=COUPON_STATUSES_ON_HAND, first=5
 # --- Credit Ledger (full spend/purchase/gift history) -------------------------
 # The REAL "spend history" behind the site's Membership & Credits -> Credit log table --
 # a much bigger surface than either kaisuuken_logs or extra_package_boosts, and NOT the
-# same endpoint as either: rides ad-hoc GraphQL (`user(id).quotaLogs`), not the /v2 REST
-# surface. Verified live 2026-08-02.
-
+# same endpoint as either: rides ad-hoc GraphQL `me.quotaLogs`, not the /v2 REST surface.
+#
+# ** 2026-08-07 fix: query `me`, NOT `user(id: $userId)`. ** The original used
+# `user(id).quotaLogs` and always came back EMPTY -- quotaLogs is private financial data
+# that PixAI exposes ONLY on `me`, never on the public `user(id)` type, even for your own
+# id (no error, just an empty connection -- which is why the "verified live 2026-08-02"
+# claim slipped through). Confirmed live against the real account 2026-08-07: `me.quotaLogs`
+# returns the real ledger (daily claims, event gifts, spend...) with working backward
+# pagination; `user(id).quotaLogs` returns nothing. The `reason`/`logReason` server-side
+# filter is dropped -- it isn't offered on the `me` connection and nothing in the app sends
+# it (the modal has no reason filter); re-add via a probed arg name if a filter UI is built.
 _QUOTA_LOG_QUERY = """
-query($userId: ID!, $last: Int!, $before: String, $reason: String) {
-  user(id: $userId) {
+query($last: Int!, $before: String) {
+  me {
     id
-    quotaLogs(last: $last, before: $before, reason: $reason) {
+    quotaLogs(last: $last, before: $before) {
       pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
       edges {
         cursor
@@ -8578,15 +8591,17 @@ def list_credit_log(session, last=50, before=None, reason=None):
     per-category filter dropdown. Read-only; fails soft on error, matching every other
     reader in this module."""
     try:
-        variables = {"userId": USER_ID, "last": int(last)}
+        variables = {"last": int(last)}
         if before:
             variables["before"] = str(before)
-        if reason:
-            variables["reason"] = str(reason)
+        # `reason` is accepted for API compatibility but no longer sent -- the `me`
+        # connection doesn't take it (see _QUOTA_LOG_QUERY's note). Kept as a param so the
+        # route/CLI signatures don't change; a filter UI would need a probed arg name.
+        _ = reason
         data = gql_adhoc(session, _QUOTA_LOG_QUERY, variables) or {}
     except (PixAIError, requests.RequestException, ValueError):
         return {"entries": [], "has_more": False, "next_cursor": None}
-    quota_logs = (data.get("user") or {}).get("quotaLogs") or {}
+    quota_logs = (data.get("me") or {}).get("quotaLogs") or {}
     edges = quota_logs.get("edges")
     if edges is None:
         return {"entries": [], "has_more": False, "next_cursor": None}

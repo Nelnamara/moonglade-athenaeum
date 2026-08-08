@@ -1003,13 +1003,16 @@ def test_run_account_info_reports_real_reason(mocker, capsys):
     assert "temporary" in capsys.readouterr().out.lower()
 
 
-# ---- credit_balance: ad-hoc GraphQL user(id).{total,free,paid} ----
+# ---- credit_balance: me.quotaAmount total; paid/free split has NO API source ----
 
-def test_credit_balance_normalizes_real_shape(mocker):
+def test_credit_balance_returns_total_and_null_split(mocker):
+    # 2026-08-07: the paid/free split does not exist on the User/me schema (the old
+    # user(id).{total,free,paid} query was rejected outright). credit_balance now reads
+    # me.quotaAmount for the real TOTAL and leaves the split None (honest unknown).
     mocker.patch.object(core, "gql_adhoc", return_value={
-        "user": {"id": "42", "total": 3691340, "free": 33000, "paid": 3658340}})
+        "me": {"id": "42", "quotaAmount": 3691340}})
     result = core.credit_balance(mocker.MagicMock())
-    assert result == {"total": 3691340, "free": 33000, "paid": 3658340}
+    assert result == {"total": 3691340, "free": None, "paid": None}
 
 
 def test_credit_balance_fails_soft(mocker):
@@ -1018,27 +1021,20 @@ def test_credit_balance_fails_soft(mocker):
         "total": None, "free": None, "paid": None}
 
 
-def test_run_account_info_shows_free_paid_breakdown(mocker, capsys):
-    """The dashboard's "Credits (balance)" line used to be the only number shown -- it now
-    also breaks the balance into free vs paid, the same split the site's own Membership &
-    Credits page shows and quotaAmount alone can't."""
+def test_run_account_info_omits_split_when_unavailable(mocker, capsys):
+    """The paid/free split has no working API source (see credit_balance), so the dashboard
+    shows the total but must NOT print the split lines -- run_account_info guards on the
+    split being non-None, so an all-None balance simply omits them rather than printing
+    a fake 0."""
     from types import SimpleNamespace
 
-    def fake_gql(session, query, variables=None):
-        # _ACCOUNT_QUERY is the only one of the two with quotaAmount -- credit_balance's
-        # own query has NO 'me' field at all, and _ACCOUNT_QUERY's own totalCount would
-        # false-match a naive "total" substring check, hence keying off quotaAmount instead.
-        if "quotaAmount" in query:
-            return {"me": {"id": "42", "quotaAmount": 3691340}}
-        return {"user": {"id": "42", "total": 3691340, "free": 33000, "paid": 3658340}}
-
     mocker.patch.object(core, "_make_session", lambda *a, **k: object())
-    mocker.patch.object(core, "gql_adhoc", side_effect=fake_gql)
+    mocker.patch.object(core, "gql_adhoc",
+                        return_value={"me": {"id": "42", "quotaAmount": 3691340}})
     res = core.run_account_info(SimpleNamespace(token=None))
     out = capsys.readouterr().out
-    assert "of which free" in out and "33,000" in out
-    assert "of which paid" in out and "3,658,340" in out
-    assert res["free_credits"] == 33000 and res["paid_credits"] == 3658340
+    assert "of which free" not in out and "of which paid" not in out
+    assert res["free_credits"] is None and res["paid_credits"] is None
 
 def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker):
     """getTaskById returns the task's top-level paidCredit for HISTORICAL tasks (the

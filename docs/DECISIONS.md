@@ -5779,3 +5779,40 @@ this account) — plausibly genuine, re-check when an account with real quota hi
 available. **Cards + Coupons (the owner's priority surfaces) are fully real; only the credit
 split/ledger are the deferred/unverified half — matching the owner's own "ledger is least
 important, a byproduct" tagging.**
+
+### Account detail: live PixAI probes — ledger FIXED, split has no API source  ·  *2026-08-07 (probe follow-up)*
+
+Followed up the "credit split query is broken" finding above with live GraphQL probes
+against the real account (authenticated page-context calls on pixai.art, read-only). Two
+outcomes:
+
+**Credit ledger — FIXED (was a real bug, now returns real data).** The branch queried
+`user(id: $userId).quotaLogs` and always got an empty connection. Root cause probed live:
+**`quotaLogs` is private and only exposed on `me`, never on the public `user(id)` type**
+(even for your own id — returns an empty connection, no error, which is exactly why it
+looked "verified"). Switched `_QUOTA_LOG_QUERY` to `me { quotaLogs(last, before) }`;
+confirmed live it returns the real ledger (Daily Claim 30,000 · Event Gift 1,000/5,000 ·
+… with working backward pagination, `has_more: true`). The `me` connection offers no
+`reason`/`logReason` arg, so the server-side reason filter was dropped (nothing sends it;
+the modal has no reason UI). `refId` IS a valid node field (probed) — not the bug. The
+route + modal Ledger tab now populate. Node type enums seen live: `daily`, `event_gift`
+(both already in CREDIT_LOG_REASONS).
+
+**Paid/free split — confirmed NO API source; can't be built as designed.** Probed the
+schema every way available: `me` exposes ONLY `quotaAmount` (the lump total, currency-null
+= real). There is NO `total`/`free`/`paid`/`credits`/`quota`/`wallet`/`balance` field on
+`User`/`me` (each `Cannot query field … on type "User"`; introspection is disabled).
+`credit_balance`'s original `user(id){total free paid}` was rejected outright. A per-
+CURRENCY breakdown DOES exist — the site's own "Generate / Bonus / BP" wallets ride
+`me { quotaAmount(currency: $c) }` — but every guessed currency code (`generate`, `bonus`,
+`bp`, `credit`, `bonusCredit`, …) returns null, the SPA caches the wallet so the real code
+never re-fires to network capture, and introspection is off. So `credit_balance` was
+rewritten to a VALID `me { quotaAmount }` (real total, `free`/`paid` = None) — it no longer
+sends a guaranteed-erroring query, and the rail/modal honestly show "paid / free split —
+unknown". **To finish the split, ONE thing is needed: the exact currency-code string(s)
+PixAI passes to `getMeWithQuotaForCurrency` — grab it from the site's DevTools Network on
+the Membership/Credits page.** With those, the "split" becomes the real per-wallet
+breakdown (Generate/Bonus/BP), which is more accurate than the design mock's invented
+"paid vs free" anyway. Coupons ride REST `/v2/extra-package-boosts` and returned 0 on-hand
+(plausibly genuine — the account holds none right now; re-check against
+`pixai.art/en/@nelnamara/assets/coupons` when it has some).
