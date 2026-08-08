@@ -71,7 +71,10 @@ export function onMascotError(e) {
 }
 
 export default function useLogin(boot) {
-  const mode = boot.no_accounts ? "create" : "signin";
+  // lanFirstRun: no account yet AND a remote/LAN device (can't bootstrap -- server-only).
+  // Shows a message instead of a create form it can't use (2026-08-07). See LoginPage.jsx.
+  const lanFirstRun = boot.no_accounts && boot.is_local === false;
+  const mode = lanFirstRun ? "lanfirst" : boot.no_accounts ? "create" : "signin";
   const createMode = mode === "create";
 
   const [user, setUser] = useState("");
@@ -166,7 +169,7 @@ export default function useLogin(boot) {
   const guessOk = lenOk && !passwordWeak(createPass);
 
   return {
-    mode, createMode,
+    mode, createMode, lanFirstRun,
     user, setUser, pass, setPass,
     createUser, createPass, createConfirm,
     createSubmitted, usernameErr, matchErr,

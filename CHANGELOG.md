@@ -14,6 +14,8 @@ git tags. Full prose notes for tagged versions live on
 > does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- Gallery grid: right-click a thumbnail for a quick menu — Edit, Send to Video, Find similar, Copy id, Open details.
+- Login: the React sign-in page now covers every first-run case, including a device that reaches the app over the network before any account exists (it shows a "set this up on the server machine first" message instead of a form it can't use). The old server-rendered login page is no longer needed for that case.
 - Generate drawer: ★ Snippets is now a real per-account manager (save the current prompt, insert, delete with one-level Undo) instead of four fixed chips — your saved snippets sync across machines.
 - Advanced search: you can now **save** the current view as a named preset and delete saved views (loading them already worked), and a "⬇ Export view" link downloads exactly the filtered rows as CSV (the whole-catalog dump stays in the Control Panel).
 - Gallery header: hovering the credits chip now shows a full breakdown — the paid/free credit split plus your free cards broken out by type (with Model/Video Card labels and soonest expiry). The paid/free split is hidden while the grid privacy-blur is on, so your real balance isn't left sitting on screen.

@@ -107,8 +107,14 @@ function onMascotError(e) {
 }
 
 export default function LoginPage({ boot }) {
-  const mode = boot.no_accounts ? "create" : "signin";
-  const createMode = mode === "create";
+  // Three states, decided server-side and read from boot:
+  //  - signin: an account exists.
+  //  - create: no account yet AND this IS the machine running the server (bootstrap).
+  //  - lanFirstRun: no account yet AND a REMOTE/LAN device -- it can't create the first
+  //    account (server-only, enforced), so show a message instead of a form it can't use.
+  //    This is the state that used to fall back to the classic LOGIN_HTML page (2026-08-07).
+  const lanFirstRun = boot.no_accounts && boot.is_local === false;
+  const createMode = boot.no_accounts && !lanFirstRun;
 
   const [user, setUser] = useState("");
   const [pass, setPass] = useState("");
@@ -211,6 +217,8 @@ export default function LoginPage({ boot }) {
             <div className="lgn-title">Moonglade Athenaeum</div>
             {createMode ? (
               <div className="lgn-framing">You're setting up this server — this account will own it.</div>
+            ) : lanFirstRun ? (
+              <div className="lgn-framing">Not set up yet</div>
             ) : (
               <div className={"lgn-tagline" + (fl.fading ? " fading" : "")}
                 onClick={fl.reveal} title="Click for version info">
@@ -219,7 +227,17 @@ export default function LoginPage({ boot }) {
             )}
           </div>
 
-          {!createMode && (
+          {lanFirstRun && (
+            <div className="lgn-fieldin">
+              <div className="lgn-error" style={{ marginTop: 0 }}>
+                No account has been set up yet. Whoever runs this server needs to sign in
+                from the machine itself first — the first account can only be created there,
+                not from another device.
+              </div>
+            </div>
+          )}
+
+          {!createMode && !lanFirstRun && (
             <>
               <div className="lgn-lbl">USERNAME</div>
               <input className="lgn-input" name="username" value={user} autoFocus autoComplete="username"

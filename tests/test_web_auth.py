@@ -231,23 +231,23 @@ def test_login_page_no_accounts_flag_flips_once_a_real_account_exists(tmp_path):
 
 
 def test_login_page_shows_safe_message_for_lan_request_when_no_accounts(tmp_path):
-    """The exact same zero-accounts state, but requested from a LAN address, must
-    NEVER show (or accept) the bootstrap form -- only a plain message with no CLI
-    mention and no way to submit credentials. This is the race-condition guard's
-    visible half; test_lan_direct_post_cannot_create_first_account below is the
-    server-side enforcement half."""
+    """The exact same zero-accounts state, but requested from a LAN address, must NEVER
+    offer the bootstrap form. As of 2026-08-07 the React shell serves this state too: the
+    boot carries no_accounts:true AND is_local:false, which LoginPage.jsx reads to render
+    the "no account set up yet -- do it from the server machine" message (client-side)
+    instead of a create form a remote caller could never use. --add-web-user must never
+    leak. The server-side enforcement half is test_lan_direct_post_cannot_create_first_account."""
     cli = _client(tmp_path).test_client()
     html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
     assert "--add-web-user" not in html
-    assert 'name="username"' not in html and 'name="password"' not in html
-    assert "No account has been set up yet" in html
-    normalized = " ".join(html.lower().split())
-    assert "create the first account from the server machine" in normalized
-    # Once an account exists, a LAN request goes right back to the ordinary form.
+    assert _is_react_login_shell(html)
+    assert _boot_field(html, "no_accounts") is True
+    assert _boot_field(html, "is_local") is False   # -> LoginPage shows the safe message
+    # Once an account exists, a LAN request goes to the ordinary sign-in shell.
     core.add_or_update_web_user("alice", "hunter2")
     html2 = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
     assert _is_react_login_shell(html2)
-    assert "No account has been set up yet" not in html2
+    assert _boot_field(html2, "no_accounts") is False
 
 
 def test_bootstrap_treats_empty_or_missing_remote_addr_as_not_local(tmp_path):
@@ -262,15 +262,16 @@ def test_bootstrap_treats_empty_or_missing_remote_addr_as_not_local(tmp_path):
     cli = _client(tmp_path).test_client()
     for blank in ("", None):
         html = cli.get("/login", environ_overrides={"REMOTE_ADDR": blank}).get_data(as_text=True)
-        # The "no accounts, non-local" state renders NO form at all (see
-        # LOGIN_HTML's {% elif no_accounts %} branch) -- so there is no
-        # hidden csrf input to scrape; pull the one GET already stashed in
-        # the session instead, same as test_lan_direct_post_cannot_create_first_account.
-        assert 'name="mode" value="create"' not in html
-        assert 'name="username"' not in html   # no ordinary sign-in form either
-        assert "No account has been set up yet" in html
+        # A blank remote_addr in the zero-accounts state must fail CLOSED: the React shell's
+        # boot carries is_local:false (so LoginPage shows the safe message, never a create
+        # form), same as a real LAN address. GET renders the React shell now (2026-08-07).
+        assert _is_react_login_shell(html)
+        assert _boot_field(html, "no_accounts") is True
+        assert _boot_field(html, "is_local") is False
         with cli.session_transaction() as sess:
             csrf = sess["csrf"]
+        # And a hand-crafted mode=create POST under the same blank/non-local condition is
+        # still refused server-side (the classic POST branch renders the refusal message).
         r = cli.post("/login", environ_overrides={"REMOTE_ADDR": blank},
                      data={"username": "mallory", "password": "pw123456",
                            "confirm": "pw123456", "mode": "create", "csrf": csrf})

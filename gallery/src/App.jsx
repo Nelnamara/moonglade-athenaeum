@@ -4,6 +4,8 @@ import Banner from "./components/Banner.jsx";
 import SeparatorBar from "./components/SeparatorBar.jsx";
 import { LibraryBar } from "./components/FiltersPanel.jsx";
 import Grid from "./components/Grid.jsx";
+import GridContextMenu from "./components/GridContextMenu.jsx";
+import SimilarModal from "./components/SimilarModal.jsx";
 import Lightbox from "./components/Lightbox.jsx";
 import DetailsView from "./components/DetailsView.jsx";
 import HealthOverlay from "./components/HealthOverlay.jsx";
@@ -507,6 +509,18 @@ export default function App({ boot }) {
     setGenRequest({ tab: "video", mid, thumb, nonce: Math.random() });
   };
 
+  // Grid right-click context menu (the 5 classic actions; owner picked all five).
+  const [ctxMenu, setCtxMenu] = useState(null);     // {mid, thumb, x, y} | null
+  const [similarFor, setSimilarFor] = useState(null); // media_id | null
+  const openContextMenu = (mid, thumb, x, y) => setCtxMenu({ mid, thumb, x, y });
+  const ctxActions = {
+    onEdit: requestEdit,
+    onVideo: requestVideo,
+    onSimilar: (mid) => setSimilarFor(mid),
+    onCopyId: (mid) => { try { navigator.clipboard.writeText(String(mid)); } catch { /* no-op */ } },
+    onDetails: openDetails,
+  };
+
   const dockActive = dockOpen && !dockClosing;
 
   /* BUG FIX 2026-08-04: this object was previously an inline literal at
@@ -599,9 +613,18 @@ export default function App({ boot }) {
             selectMode={selectMode} selected={selected} toggleSelected={toggleSelected}
             openLightbox={setLbIndex}
             onRate={rate}
+            onContextMenu={openContextMenu}
           />
         )}
       </main>
+
+      {ctxMenu && (
+        <GridContextMenu target={ctxMenu} actions={ctxActions} onClose={() => setCtxMenu(null)} />
+      )}
+      {similarFor && (
+        <SimilarModal mediaId={similarFor} onClose={() => setSimilarFor(null)}
+          onOpenDetails={(mid) => { setSimilarFor(null); openDetails(mid); }} />
+      )}
 
       {/* the DC's veil: keeps the column bottom legible under the (future) dock */}
       <div className="mgx-veil" aria-hidden="true" />

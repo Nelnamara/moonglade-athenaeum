@@ -12108,35 +12108,24 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # session has none, so the visible form's token stays valid
             # across any number of these background hits.
             session.setdefault("csrf", secrets.token_hex(16))
-        if request.method == "GET" and (not no_accounts or is_local):
-            # The React Login page (2026-08-02) now covers BOTH real states:
-            # a normal returning-user visit (an account already exists), and
-            # -- as of the account-creation design landing -- the local
-            # first-run bootstrap visit too (LoginPage.jsx's create-mode
-            # toggle, built against design_handoff's updated Login.dc.html).
-            # Same shell/bundle "/" serves (next_gallery()'s NEXT_PAGE), with
-            # a boot payload that says "not authenticated yet" instead of
-            # gallery data -- App.jsx mounts LoginPage.jsx and nothing else
-            # when it sees authenticated:false. The real submit goes to
-            # POST /api/login (below, mode=create included), not this
-            # route's own POST branch above, which stays completely
-            # unchanged and un-reachable through THIS page now -- left in
-            # place because a bad-CSRF/locked-out POST landing here anyway
-            # (a stale tab, a replayed request) must keep failing exactly
-            # the same way, not 404.
-            #
-            # The condition is `not no_accounts or is_local`, i.e. "React
-            # UNLESS (no_accounts AND not is_local)" -- that one remaining
-            # state (a LAN device hitting a fresh, not-yet-set-up install)
-            # still has no design (a sign-in OR create form there would be
-            # functional nonsense: no account exists, and a remote caller
-            # can never bootstrap one) and keeps the classic "no account has
-            # been set up yet" safety message below.
+        if request.method == "GET":
+            # The React Login page covers ALL three real states now (2026-08-07): a normal
+            # returning-user sign-in (an account exists), the LOCAL first-run bootstrap
+            # (create-mode), AND -- the piece that used to fall back to classic LOGIN_HTML --
+            # a LAN device hitting a fresh, not-yet-set-up install. LoginPage.jsx reads the
+            # `is_local` flag below: when no accounts exist AND the request is not local, it
+            # shows the "no account set up yet -- do it from the machine running the server"
+            # message instead of a create form the remote caller could never use (the server
+            # refuses a non-local mode=create anyway; this just stops offering it). So GET
+            # ALWAYS serves the React shell now -- the classic LOGIN_HTML is reached only by a
+            # stale/replayed classic FORM POST (below), and dies entirely with the classic cut.
+            # The real submit goes to POST /api/login (mode=create included), never this route.
             brand = brand_context(out_dir)
             boot = {
                 "authenticated": False,
                 "csrf": session["csrf"],
                 "no_accounts": no_accounts,
+                "is_local": is_local,
                 "next": next_url,
                 "build_stamp": build_stamp,
                 "mark_url": brand.get("mark_url") or "/branding/logo.png",
