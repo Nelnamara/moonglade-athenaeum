@@ -83,7 +83,7 @@ The reported leak of uncensored/"spicy" roast lines was deliberately not patched
 
 Only ONE of the three persona buckets in `SWEEP_2026-07-16.md` ("PixAI power user + community member") was ever checked against current code and its live items recovered. The other two — Loom video creator, and gallery curator, roughly 18 more bullets — have never had that check.
 
-**⚠ UPDATE 2026-08-07 (doc-parity audit + owner status check):** the file `docs/archive/SWEEP_2026-07-16.md` no longer exists — the whole `docs/archive/` tree was deleted 2026-07-27 (`64ecc21`). The sweep is NOT lost: it survives in three places — (1) the owner's Desktop `Moonglade MD archive/SWEEP_2026-07-16.md`, (2) git history via `git show 64ecc21^:docs/archive/SWEEP_2026-07-16.md`, (3) an interactive tagging artifact where the **owner tagged all 28 items** (Shipped / In Development / Scope / Hold) on 2026-08-02. The all-three-buckets tagging IS done; what remains genuinely open is **where those 28 tagged decisions reconcile durably** — they live only in the artifact + memory, never written to the repo. Recommended home: a `## Feature-request ledger` section in THIS file (DECISIONS.md is the sole tracker; ROADMAP.md was pruned and does not exist). Awaiting the owner's pick of destination before writing them in.
+**⚠ UPDATE 2026-08-07 (doc-parity audit + owner status check):** the file `docs/archive/SWEEP_2026-07-16.md` no longer exists — the whole `docs/archive/` tree was deleted 2026-07-27 (`64ecc21`). The sweep is NOT lost: it survives in three places — (1) the owner's Desktop `Moonglade MD archive/SWEEP_2026-07-16.md`, (2) git history via `git show 64ecc21^:docs/archive/SWEEP_2026-07-16.md`, (3) an interactive tagging artifact where the **owner tagged all 28 items** (Shipped / In Development / Scope / Hold) on 2026-08-02. The all-three-buckets tagging IS done. **RESOLVED 2026-08-07:** the owner chose to write the 28 tagged decisions into this file — see the "Feature-request ledger" entry at the end of DECISIONS.md. No longer a loose thread.
 
 **Why (historical).** This was the exact failure the archive rule causes: live, unactioned requests become contractually invisible by being archived with work still in them. The pointer to which buckets remained unmined kept them recoverable — and they were recovered.
 
@@ -5677,3 +5677,64 @@ until/unless the Loom folds into the main React app.
 switchover to JSON twins (small) → 2) the three ports + owner calls → 3) THE CUT
 (routes + templates, full-suite phase gate) → 4) LAN-bootstrap login design, then
 LOGIN_HTML dies → 5) vanilla campaign, art-filters first, generate-drawer last.
+
+### Feature-request ledger — the 2026-07-16 persona sweep, owner-tagged  ·  *durable home written 2026-08-07*
+
+The 28 grounded feature requests from `SWEEP_2026-07-16.md` (8-finder sweep across three
+personas), each owner-tagged on 2026-08-02, now written into the tracker per the owner's
+2026-08-07 call. Source file survives on the owner's Desktop `Moonglade MD archive/` + git
+history (`git show 64ecc21^:docs/archive/SWEEP_2026-07-16.md`). Tags: **Shipped** (done) ·
+**In Development** (partial/in flight) · **Scope** (wanted, not yet scoped/built) · **Hold**
+(parked, owner's call). This is the durable reconciliation the sweep-tracking entry above
+was waiting on.
+
+**Daily Loom video creator (9)**
+- Persist task_id on the card — **Shipped**.
+- Trim-aware frame handoff — **Shipped** (owner first tagged Scope; corrected 2026-08-02
+  after reading `/api/loom/handoff`'s real code — it already sends/uses `trim_out` as the
+  ask wanted; no build needed).
+- Takes / per-shot generation history — **Scope** (may reuse the React Runs Reel / runs tray).
+- Draft-quality blocking pass — **Scope** (a video model selector already exists in the
+  generate drawer — related, not this).
+- Project spend ledger + cost-to-finish — **In Development** (see the card-coupon-ledger
+  branch's credit ledger, backend/CLI done; the Loom-project roll-up itself is unbuilt).
+- Project "Look" block — **Scope**.
+- Re-anchor warnings on the reel — **Scope**.
+- Music bed under Play sequence — **Scope**.
+- Editor handoff export (per-shot trims + CSV/EDL) — **Scope**.
+
+**31k-image gallery curator (9)**
+- Sibling warning on "Delete from PixAI" — **Shipped** (plus single-media-id delete now).
+- Trash browser for `_deleted/` — **Shipped**.
+- Near-duplicate clusters — **In Development** (Duplicate Review's near-dup tier shipped;
+  the cluster-review page is the unbuilt half).
+- Stack by batch — **In Development**.
+- Triage Deck (full-screen 1-at-a-time review queue: rate/collect/delete, resumable) —
+  **Hold** (owner reviewed the full description in-chat and held it deliberately).
+- Smart collections (saved queries as live collections) — **Scope**.
+- Search operators (`seed:` `aes:>` `ar:` …) — **Scope**.
+- Collections manager (rename/merge/delete) — **Scope**.
+- Archive integrity job — **Scope** (flagged: should account for the catalog's new tables).
+
+**PixAI power user + community (10)**
+- Model/LoRA favorites + recents in the picker — **Shipped**.
+- CONTRIBUTING.md + CI — **Shipped** (may need updating).
+- Credit ledger — **In Development** (card-coupon-ledger branch: backend/CLI done, React
+  port scoped 2026-08-07 — see the port plan; web UI is the remaining piece).
+- Card-utilization digest — **In Development** (same branch: benefit-card usage history +
+  on-hand inventory done backend/CLI; React port pending).
+- Remix from the lightbox (load full recipe into Generate) — **In Development** (owner's
+  call; overrides an earlier "no code found" note).
+- First-run wizard — **In Development** ("being updated with UI" — SetupWizard/Mobile shipped).
+- Contest workbench — **Scope**, but the **staging half shipped 2026-08-07**: the "☆
+  Shortlist" button (stage gallery picks into a contest-named collection) is now on the
+  React Contests overlay. The deadline/shortlist "workbench" beyond that stays Scope; the
+  2026-08-02 exploration concluded the two literally-asked pieces were the whole of it.
+- Prompt-matrix queue runs — **Scope**.
+- Metadata recovery for hand-made folders — **Scope**.
+- READ_ONLY flag + one-page spend/delete contract — **Scope** (owner wants to revisit,
+  tied to bundling into the SQLite assets — see the asset-bundle re-scope).
+
+**Tally:** 6 Shipped · 6 In Development · 15 Scope · 1 Hold. The In-Development cluster is
+the real active backlog; the two spend/card items collapse into the card-coupon-ledger
+React port.
