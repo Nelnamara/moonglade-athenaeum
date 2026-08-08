@@ -23,6 +23,21 @@ export async function postForm(action, fields, idList) {
   return r.ok;
 }
 
+// JSON POST to an /api/ route. Fail-soft to {error} (never throws) so callers can branch
+// on d.error uniformly. Replaces the classic redirect-answering form routes with their
+// JSON twins for the desktop grid actions (2026-08-07).
+export async function postJSON(url, body) {
+  try {
+    const r = await fetch(url, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    return await r.json();
+  } catch (e) {
+    return { error: String((e && e.message) || e) };
+  }
+}
+
 // ZIP download goes through a real form submit so the browser owns the download.
 export function downloadZipForm(idList) {
   const f = document.createElement("form");
