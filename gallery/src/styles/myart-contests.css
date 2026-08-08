@@ -221,6 +221,17 @@ button.mgma2-toolbtn.danger { color: var(--red, #f38ba8); border-color: rgba(243
   background: rgba(33,31,58,.5); cursor: pointer; transition: border-color .2s;
   display: block; font-family: inherit; text-align: left; padding: 0; width: 100%; }
 .mgct-card:hover { border-color: var(--accent); }
+
+/* Shortlist -- the card is a <button>, so the "☆ Shortlist" control is a SIBLING
+   overlaid on it (a button inside a button is invalid HTML), positioned in the card's
+   own relative wrapper. */
+.mgct-cardwrap { position: relative; }
+.mgct-shortlist { position: absolute; top: 8px; right: 8px; z-index: 2;
+  font-size: 10.5px; font-weight: 600; padding: 4px 9px; border-radius: 999px;
+  border: 1px solid var(--surface1); background: rgba(12,10,28,.78); color: var(--subtext);
+  cursor: pointer; font-family: inherit; backdrop-filter: blur(3px); transition: border-color .15s, color .15s; }
+.mgct-shortlist:hover { border-color: var(--lavender); color: var(--text); }
+.mgct-shortlist:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
 .mgct-card .mgct-title { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mgct-card .mgct-body { padding: 9px 12px 11px; gap: 6px; }
 .mgct-empty { font-size: 11.5px; color: var(--subtext); padding: 20px 0; }

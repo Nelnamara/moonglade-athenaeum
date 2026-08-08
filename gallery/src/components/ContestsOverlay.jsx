@@ -28,7 +28,7 @@ import useScrollLock from "../hooks/useScrollLock.js";
    logic -- see that hook's own header comment. This file is refactored to
    CONSUME it rather than hold a second, drifting copy of the same fetch. */
 
-export default function ContestsOverlay({ onClose }) {
+export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 0 }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const { d, err, contests, official, community, featured, restOfficial, openContest, dateRange, daysLeft } = useContests();
   // Frontend Gallery.dc.html:2434 -- every card's date field is a combined
@@ -38,6 +38,19 @@ export default function ContestsOverlay({ onClose }) {
     const left = daysLeft(row);
     return left ? dateRange(row) + " · " + left : dateRange(row);
   };
+
+  // "☆ Shortlist" -- re-implemented from the classic contest-shortlist branch onto the
+  // React overlay. Rendered as a SIBLING overlaid on the card, not nested inside it: the
+  // cards are <button>s and a button-in-a-button is invalid HTML. stopPropagation keeps a
+  // Shortlist click from also firing the card's openContest (which opens pixai.art). The
+  // count in the label is the live gallery selection App hands down.
+  const shortlistBtn = (c) => onShortlist ? (
+    <button type="button" className="mgct-shortlist"
+      title="Add your selected gallery images to a collection for this contest"
+      onClick={(e) => { e.stopPropagation(); e.preventDefault(); onShortlist(c); }}>
+      ☆ Shortlist{selectedCount ? " (" + selectedCount + ")" : ""}
+    </button>
+  ) : null;
 
   return (
     <>
@@ -68,26 +81,29 @@ export default function ContestsOverlay({ onClose }) {
                   {/* Gallery-era correction (handoff-2026-08-06 §5): one FULL-WIDTH 3:1
                       banner, title/pills/dates OVERLAID along the bottom over a gradient
                       scrim -- no separate body block below the image anymore. */}
-                  <button type="button" className="mgct-official" onClick={() => openContest(featured)}>
-                    <div className="mgct-cover official">
-                      {featured.cover_url ? <img src={featured.cover_url} alt="" /> : null}
-                      <div className="mgct-scrim" />
-                      <div className="mgct-overlaid">
-                        <div className="mgct-title big">{featured.title}</div>
-                        <div className="mgct-tags">
-                          {featured.prize_amount > 0 && (
-                            <span className="mgct-prize strong">♦ {fmt(featured.prize_amount)} CR</span>
-                          )}
-                          {featured.vote_type ? (
-                            <span className={"mgct-votepick" + (featured.vote_type === "user_vote" ? " user" : "")}>
-                              {featured.vote_type === "user_vote" ? "USER VOTE" : "CREATOR PICK"}
-                            </span>
-                          ) : null}
-                          <span className="mgct-dates dim">{dateWithLeft(featured)}</span>
+                  <div className="mgct-cardwrap official">
+                    <button type="button" className="mgct-official" onClick={() => openContest(featured)}>
+                      <div className="mgct-cover official">
+                        {featured.cover_url ? <img src={featured.cover_url} alt="" /> : null}
+                        <div className="mgct-scrim" />
+                        <div className="mgct-overlaid">
+                          <div className="mgct-title big">{featured.title}</div>
+                          <div className="mgct-tags">
+                            {featured.prize_amount > 0 && (
+                              <span className="mgct-prize strong">♦ {fmt(featured.prize_amount)} CR</span>
+                            )}
+                            {featured.vote_type ? (
+                              <span className={"mgct-votepick" + (featured.vote_type === "user_vote" ? " user" : "")}>
+                                {featured.vote_type === "user_vote" ? "USER VOTE" : "CREATOR PICK"}
+                              </span>
+                            ) : null}
+                            <span className="mgct-dates dim">{dateWithLeft(featured)}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </button>
+                    </button>
+                    {shortlistBtn(featured)}
+                  </div>
                 </>
               )}
 
@@ -97,33 +113,39 @@ export default function ContestsOverlay({ onClose }) {
               {(community.length > 0 || restOfficial.length > 0) && (
                 <div className="mgct-grid">
                   {restOfficial.map((c) => (
-                    <button type="button" className="mgct-card" key={c.id} onClick={() => openContest(c)}>
-                      <div className="mgct-cover">{c.cover_url ? <img src={c.cover_url} alt="" /> : null}</div>
-                      <div className="mgct-body">
-                        <div className="mgct-title">{c.title}</div>
-                        <div className="mgct-tags">
-                          {c.prize_amount > 0 && <span className="mgct-prize">♦ {fmt(c.prize_amount)} CR</span>}
+                    <div className="mgct-cardwrap" key={c.id}>
+                      <button type="button" className="mgct-card" onClick={() => openContest(c)}>
+                        <div className="mgct-cover">{c.cover_url ? <img src={c.cover_url} alt="" /> : null}</div>
+                        <div className="mgct-body">
+                          <div className="mgct-title">{c.title}</div>
+                          <div className="mgct-tags">
+                            {c.prize_amount > 0 && <span className="mgct-prize">♦ {fmt(c.prize_amount)} CR</span>}
+                          </div>
+                          <div className="mgct-dates">{dateWithLeft(c)}</div>
                         </div>
-                        <div className="mgct-dates">{dateWithLeft(c)}</div>
-                      </div>
-                    </button>
+                      </button>
+                      {shortlistBtn(c)}
+                    </div>
                   ))}
                   {community.map((c) => (
-                    <button type="button" className="mgct-card" key={c.id} onClick={() => openContest(c)}>
-                      <div className="mgct-cover">{c.cover_url ? <img src={c.cover_url} alt="" /> : null}</div>
-                      <div className="mgct-body">
-                        <div className="mgct-title">{c.title}</div>
-                        <div className="mgct-tags">
-                          {c.prize_amount > 0 && <span className="mgct-prize">♦ {fmt(c.prize_amount)} CR</span>}
-                          {c.vote_type ? (
-                            <span className={"mgct-votepick" + (c.vote_type === "user_vote" ? " user" : "")}>
-                              {c.vote_type === "user_vote" ? "USER VOTE" : "CREATOR PICK"}
-                            </span>
-                          ) : null}
+                    <div className="mgct-cardwrap" key={c.id}>
+                      <button type="button" className="mgct-card" onClick={() => openContest(c)}>
+                        <div className="mgct-cover">{c.cover_url ? <img src={c.cover_url} alt="" /> : null}</div>
+                        <div className="mgct-body">
+                          <div className="mgct-title">{c.title}</div>
+                          <div className="mgct-tags">
+                            {c.prize_amount > 0 && <span className="mgct-prize">♦ {fmt(c.prize_amount)} CR</span>}
+                            {c.vote_type ? (
+                              <span className={"mgct-votepick" + (c.vote_type === "user_vote" ? " user" : "")}>
+                                {c.vote_type === "user_vote" ? "USER VOTE" : "CREATOR PICK"}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="mgct-dates">{dateWithLeft(c)}</div>
                         </div>
-                        <div className="mgct-dates">{dateWithLeft(c)}</div>
-                      </div>
-                    </button>
+                      </button>
+                      {shortlistBtn(c)}
+                    </div>
                   ))}
                 </div>
               )}

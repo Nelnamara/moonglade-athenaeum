@@ -14,6 +14,7 @@ git tags. Full prose notes for tagged versions live on
 > does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- Contests: each contest card now has a "☆ Shortlist" button — select images in the gallery, open Contests, and stage your picks into a collection named for that contest in one click (no files moved, no credits). Re-implemented on the new React Contests panel from the earlier classic-only version.
 - Hardened sign-in: a failed login attempt now refreshes its security token so the next try always goes through (previously a second attempt after one failure could be rejected as "session expired"), and the whole login path now has real automated test coverage.
 - Fixed: the Control Panel could get stuck on a spinning button if a background action hit a network hiccup — actions now recover and show the error instead.
 - Fixed: re-sending the same image to the Edit tab after clearing it now reloads it (it silently did nothing before); Escape inside the Control Panel now closes just the top layer (a sub-panel or the picker) instead of the whole panel; and a failed Publish/Train confirmation on mobile now shows the error instead of hiding it behind the dialog.

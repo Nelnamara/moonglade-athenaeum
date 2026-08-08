@@ -442,6 +442,26 @@ export default function App({ boot }) {
     },
   };
 
+  // Contest "☆ Shortlist" -- re-implements the classic contest-shortlist branch
+  // (2026-08-02) on the React Contests overlay: stage the gallery's current
+  // selection into a collection named for the contest. Reuses the exact same
+  // /collection-add plumbing addCollection uses, just with the name pre-filled
+  // from the contest's title + end date. No new backend (same as the classic
+  // version -- zero new surface).
+  const shortlistContest = async (contest) => {
+    if (!selIds.length) {
+      window.alert("Select one or more images in the gallery first (check the boxes), "
+        + "then open Contests and click Shortlist.");
+      return;
+    }
+    const ends = contest.end_at ? " (ends " + String(contest.end_at).slice(0, 10) + ")" : "";
+    const suggested = "Contest: " + (contest.title || "(untitled)") + ends;
+    const name = window.prompt("Add " + selIds.length + " image(s) to which collection?", suggested);
+    if (name === null || !name.trim()) return;
+    await postForm("/collection-add", { back: "/next", name: name.trim() }, selIds);
+    afterMutation();
+  };
+
   const rate = async (mid, value) => {
     // optimistic; the server clamps 0-5 and answers the stored value
     setItems((old) => old.map((it) => (it.media_id === mid ? { ...it, rating: value } : it)));
@@ -614,7 +634,8 @@ export default function App({ boot }) {
         />
       )}
       {overlay === "contests" && (
-        <ContestsOverlay onClose={() => setOverlay(null)} />
+        <ContestsOverlay onClose={() => setOverlay(null)}
+          onShortlist={shortlistContest} selectedCount={selected.size} />
       )}
       {overlay === "train" && (
         <TrainOverlay onClose={() => setOverlay(null)} />
