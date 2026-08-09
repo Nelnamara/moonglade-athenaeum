@@ -15,6 +15,7 @@ git tags. Full prose notes for tagged versions live on
 > commits reached master as part of **v2.0.0**, which does). There is **no v1.7.x** (1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- Fresh art for the narrator, the Setup Wizard's three later slides (now animated), and the job-tracker spinner.
 
 ## [3.0.0] - 2026-08-09 — One app, front to back: the classic interface retired, the whole front end unified into a single build, and the shared video Generate drawer ported
 - Under the hood: **the migration to a single app build is complete.** Every loose front-end script has now been folded in — the art-filters engine, the image picker, the model/LoRA picker, the cost badge (the "this costs N credits / a free card covers it" line), the image-view Upscale panel, the whole notifications system (the corner toasts, the Activity job tracker, and the achievement celebrations), and finally the shared video Generate form (the Video tab and The Loom's video drawer, the biggest and most cost-sensitive of them). No loose scripts remain. Also switched The Loom to its real pre-built bundle instead of transpiling itself in the browser — faster to load, drops a 3 MB dependency. No visible change to any of it.
