@@ -157,15 +157,15 @@ describe("Footage tab: 'Browse library' imports a REAL placeable shot, not a Cas
     // per-shot "Generate video" click today -- generateShot has exactly one caller
     // (batchGenerate), whose `todo` filter already excludes status:"done" (which
     // importedFootagePatch always sets) before generateShot is ever reached, and the
-    // per-shot Video-tab button lives entirely inside <mg-generate-drawer>'s OWN
-    // _generate()/_hasAnyRef() (static/mg-generate-drawer.js), a separate, pre-existing
-    // guard. Live-clicked against a real imported shot in a running server: no
-    // /api/loom/generate request fired, the drawer showed its own existing
+    // per-shot Video-tab button lives entirely inside <VideoDrawer>'s OWN doGenerate() /
+    // hasAnyRef() (gallery/src/components/VideoDrawer.jsx, no-vanilla port 2026-08-08), a
+    // separate, pre-existing guard. Live-clicked against a real imported shot in a running
+    // server: no /api/loom/generate request fired, the drawer showed its own existing
     // "Pick a source image first." with no crash and the footage untouched -- confirming
     // (b) from the brief ("already naturally a no-op/safe, investigate don't assume")
     // without needing a new imported-specific message on the operative path.
-    assert.match(readFileSync(path.join(__dirname, "../../static/mg-generate-drawer.js"), "utf8"),
-      /_hasAnyRef\(p\)/,
+    assert.match(readFileSync(path.join(__dirname, "../../gallery/src/components/VideoDrawer.jsx"), "utf8"),
+      /if \(!hasAnyRef\(p\)\)/,
       "the per-shot drawer's own no-reference guard (the thing that actually runs when the " +
       "owner clicks 'Generate video' on an imported shot) must still exist");
     // generateShot's own message stays as a defensive fallback (its docstring-equivalent

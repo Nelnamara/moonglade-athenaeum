@@ -92,14 +92,14 @@ describe("Image tab's Model/LoRA picker is a floating overlay, not inline (probl
       "display-toggle-not-unmount pattern as the base picker");
   });
 
-  test("the overlay lives alongside <mg-generate-drawer>, so it survives Image/Edit/Reference/Video tab switches", () => {
+  test("the overlay lives alongside <VideoDrawer>, so it survives Image/Edit/Reference/Video tab switches", () => {
     // Both must be siblings inside the SAME always-rendered .lv-gen block (only unmounted
     // when the whole right rail collapses) -- not nested inside the tab-conditional tabBody,
     // or switching tabs while the picker is open would silently blow away its state.
-    const genDrawerIdx = src.indexOf('<mg-generate-drawer ref={bindGenDrawer}');
+    const genDrawerIdx = src.indexOf('<VideoDrawer ref={bindGenDrawer}');
     const veilIdx = src.indexOf('className={"lv-mpick-veil"');
     assert.ok(genDrawerIdx > 0 && veilIdx > genDrawerIdx,
-      "the picker overlay must be declared after <mg-generate-drawer> inside the same " +
+      "the picker overlay must be declared after <VideoDrawer> inside the same " +
       "always-mounted block, not inside one of the tab-specific branches above it");
   });
 });

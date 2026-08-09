@@ -209,10 +209,9 @@ import "../styles/create-mobile.css";
    on a phone width). No Model row and no Negative prompt in Edit's screen --
    both disclosed above and in the CORRECTED NOTE paragraph.
 
-   Video mode needs no Advanced screen: re-confirmed directly in
-   static/mg-generate-drawer.js (quality/channel/camera controls are built
-   entirely in the component's own innerHTML template and wired via its own
-   internal querySelector refs) that the shared drawer is fully self-contained,
+   Video mode needs no Advanced screen: re-confirmed directly in the React
+   <VideoDrawer> (gallery/src/components/VideoDrawer.jsx -- quality/channel/camera
+   controls are part of the component's own render) that the shared drawer is fully self-contained,
    and CreateMobile.jsx/VideoMode.jsx render no "Advanced" row at all for
    cmode === "video" (VideoMode paints in AppMobile.jsx's own .cm-videowrap
    slot, entirely outside this file's Advanced-row markup) -- so there was

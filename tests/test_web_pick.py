@@ -156,10 +156,15 @@ def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces():
     picker_css = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "styles" / "gallery-picker.css").read_text(encoding="utf-8")
     assert 'body.privacy-blur .mg-gallery-picker .mg-pk-cell[data-nsfw="1"] img' in picker_css
 
-    drawer_js = (Path(__file__).resolve().parents[1] / "static" / "mg-generate-drawer.js").read_text(encoding="utf-8")
-    assert drawer_js.count("box.setAttribute('data-nsfw', '1');") == 3   # _renderSlots, _renderEndSlot, _renderVidSlots
-    assert "respond: function (media_id, thumb, is_nsfw)" in drawer_js
-    assert 'body.privacy-blur mg-generate-drawer .mgd-slot[data-nsfw="1"] img' in drawer_js
+    # The video drawer is the React <VideoDrawer> since 2026-08-08 (no-vanilla port); its slot
+    # nsfw handling moved with it -- one shared slotBox() sets data-nsfw, the pick-request's
+    # respond() still forwards is_nsfw, and the privacy-blur CSS moved to gen-drawer.css
+    # (element selector -> .gen-drawer class).
+    drawer_jsx = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "components" / "VideoDrawer.jsx").read_text(encoding="utf-8")
+    assert 'data-nsfw={item && item.is_nsfw ? "1" : undefined}' in drawer_jsx
+    assert "respond: (media_id, thumb, is_nsfw) =>" in drawer_jsx
+    drawer_css = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "styles" / "gen-drawer.css").read_text(encoding="utf-8")
+    assert 'body.privacy-blur .gen-drawer .mgd-slot[data-nsfw="1"] img' in drawer_css
 
     loom_jsx = (Path(__file__).resolve().parents[1] / "loom" / "master-storyboard.jsx").read_text(encoding="utf-8")
     # onGalleryPick (the React onPick prop) forwards the media fields as m.* now -- was the
@@ -1457,51 +1462,28 @@ def test_css_cascade_resolver_can_actually_fail(tmp_path):
 
 def test_video_v40_full_cost_warning():
     """The Video form hard-warns when the pricier v4.0 full model is picked (14k/s vs Lite's
-    5.5k -- a 15s clip is 210k credits), so it's never a silent surprise. Since the drawer
-    swap the Video form IS the shared <mg-generate-drawer> component, so the warning lives in
-    that file (mgd-cost.warn), not the gallery's own inline HTML."""
+    5.5k -- a 15s clip is 210k credits), so it's never a silent surprise. Since the no-vanilla
+    port (2026-08-08) the Video form IS the React <VideoDrawer>: the RED override lives in
+    gen-drawer.css (retargeted onto the React <CostBadge>'s .cost-badge) and the warn text is set
+    in the component's costNow()."""
     import pathlib
-    src = (pathlib.Path(__file__).resolve().parent.parent
-           / "static" / "mg-generate-drawer.js").read_text(encoding="utf-8")
-    assert ('mg-generate-drawer mg-cost-badge[data-state="paid"][data-warn]'
-            '{border-color:var(--red,#f38ba8);color:var(--red,#f38ba8);}') in src   # still RED
-    # The specific warning text, not a bare "2.5" -- that also matches two unrelated
-    # font-size:12.5px CSS rules elsewhere in this same file, so the old check passed
-    # even with the real warning deleted.
-    assert "V4.0 full — ~2.5× Lite" in src        # the ~2.5x-Lite warning text
+    root = pathlib.Path(__file__).resolve().parent.parent
+    css = (root / "gallery" / "src" / "styles" / "gen-drawer.css").read_text(encoding="utf-8")
+    assert ('.gen-drawer .cost-badge[data-state="paid"][data-warn]'
+            '{border-color:var(--red,#f38ba8);color:var(--red,#f38ba8);}') in css   # still RED
+    # The specific warning text, not a bare "2.5" -- that also matches unrelated font-size:12.5px
+    # CSS rules, so a looser check could pass even with the real warning deleted.
+    jsx = (root / "gallery" / "src" / "components" / "VideoDrawer.jsx").read_text(encoding="utf-8")
+    assert "V4.0 full — ~2.5× Lite" in jsx        # the ~2.5x-Lite warning text
 
 
-def test_cost_badge_ships_with_every_price_surface(tmp_path):
-    """Every <mg-cost-badge> element MUST ship on a page that also loads
-    static/mg-cost-badge.js. A custom element whose definition never loads is an inert
-    <div>: setChecking()/setPrice() throw, the cost line freezes on its idle hint, and
-    the Go button beside it still spends. That failure is silent and it is on the spend
-    path, so the pairing gets a test rather than a convention -- the same reasoning that
-    put the drawer's own script tag under test above.
-
-    Scope: this checks the <mg-cost-badge>/script pairing, not "every surface that
-    renders a live cost" -- the Loom has two OTHER live-cost surfaces that are
-    genuinely not badges, so this test's mechanism (a custom-element/script pairing
-    check) has nothing to pair for them: the "Generate all" aggregate estimate
-    (the .lv-cost-pill button, master-storyboard.jsx) and the per-shot spend-gate
-    confirm() dialogs (the fail-closed cost gate ahead of a submit). Both print cost as
-    plain text/JS strings with no custom element to upgrade, so a missing script tag
-    can't silently break them the way it breaks a badge (audit: tests-that-dont-bite,
-    doc-lie, 2026-07-21 -- the docstring used to claim "every surface", which this
-    test's own assertions never covered)."""
-    import moonglade_gallery as pg
-    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
-                                         created_at="2025-01-01T00:00:00")])
-    # The classic page and its inline gen-cost/edit-cost badges died with the classic
-    # cut (2026-08-08); the React shell at "/" is the gallery surface now. As of the
-    # no-vanilla campaign (steps 4-5) the shell's (and the Loom's) OWN cost lines are the React
-    # <CostBadge>, NOT the custom element -- but both still mount ONE STILL-vanilla element that
-    # embeds <mg-cost-badge>: <mg-generate-drawer> (the Video tab / the Loom's gen drawer;
-    # mg-upscale-panel was ported + deleted in step 5). So the definition must keep loading until
-    # the drawer is ported (step 7), at which point this script tag and this test both retire.
-    html = cli.get("/").get_data(as_text=True)
-    assert '/static/mg-cost-badge.js' in html            # the vanilla drawer still embeds it
-    assert '/static/mg-cost-badge.js' in pg._LOOM_SHELL  # the Loom's vanilla drawer needs it too
+# test_cost_badge_ships_with_every_price_surface RETIRED 2026-08-08 (no-vanilla port, step 7).
+# Its invariant -- "a <mg-cost-badge> custom element's definition script (mg-cost-badge.js) must
+# load on every page that mounts one, or the cost line silently inerts on the spend path" -- no
+# longer has a subject: the last embedder (<mg-generate-drawer>) became the React <VideoDrawer>,
+# which embeds the React <CostBadge>, bundled into app.js / master-storyboard.bundle.js. There is
+# no separate definition script that can fail to load, so there is nothing to pair. The test's own
+# docstring named this retirement ("this script tag and this test both retire").
 
 
 def test_toasts_anchored_top_right(tmp_path):

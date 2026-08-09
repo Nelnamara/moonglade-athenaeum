@@ -196,7 +196,7 @@ def test_contributing_md_does_not_harden_the_false_single_matcher_claim():
 # ---------------------------------------------------------------------------
 
 def test_generating_wiki_documents_the_video_model_roster_and_duration_gating():
-    """Verified directly against static/mg-generate-drawer.js's MODELS/MODEL_VMODES/
+    """Verified directly against gallery/src/gen/videoDrawerCore.js's MODELS/MODEL_VMODES/
     MODEL_MAXDUR tables: seven selectable video engines, a 6s duration that's real but
     was never mentioned anywhere user-facing, two models (V3.0 Flash, V2.7) that no free
     card ever covers, and per-model gating of which Shot modes are offered."""

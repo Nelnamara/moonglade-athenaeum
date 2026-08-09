@@ -4456,11 +4456,9 @@ body { background: var(--base); margin: 0; font-family: system-ui, sans-serif; }
 </style>
 <script src="/loom/vendor/react.production.min.js"></script>
 <script src="/loom/vendor/react-dom.production.min.js"></script>
-<!-- Before the drawer, deliberately: <mg-generate-drawer>'s cost line IS <mg-cost-badge> as of
-     the consolidation, so the Loom's Video tab needs this file for a shot's cost to render at
-     all. Same pairing the gallery shell above documents at length. -->
-<script src="/static/mg-cost-badge.js"></script>
-<script src="/static/mg-generate-drawer.js"></script>
+<!-- The video Generate drawer and its cost badge are the React <VideoDrawer> / <CostBadge>,
+     bundled into master-storyboard.bundle.js as of the 2026-08-08 no-vanilla port -- no static
+     script tags. -->
 __UPSCALE_CONST__
 </head><body>
 <div id="root"></div>
@@ -10207,12 +10205,13 @@ def create_app(out_dir: Path):
     # Auth: covered by the global _enforce_front_door() hook like every route.
     _NEXT_DIST = Path(__file__).resolve().parent / "gallery" / "dist"
 
-    # The two remaining shared web components ride along as plain scripts in the
-    # CLASSIC include order (cost-badge before the drawer -- the drawer's cost
-    # line IS <mg-cost-badge>). The notify system (toasts/tracker/celebrations)
-    # is in the React bundle as of the 2026-08-08 no-vanilla port -- no script
-    # tag, no anchors. __UPSCALE_CONST__ serves MG_LORA / MG_UPSCALE from their
-    # one Python source, same idiom as the classic pages.
+    # No vanilla web components ride along anymore: the video Generate drawer and
+    # its cost badge became the React <VideoDrawer>/<CostBadge> in the 2026-08-08
+    # no-vanilla port (the last of static/mg-*.js), joining the notify system
+    # (toasts/tracker/celebrations) already in the React bundle -- so this shell
+    # carries no <script src="/static/mg-*.js"> tags and no anchors.
+    # __UPSCALE_CONST__ serves MG_LORA / MG_UPSCALE from their one Python source,
+    # same idiom as the classic pages.
     NEXT_PAGE = """<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10248,8 +10247,6 @@ __DESIGN_TOKENS__
    /api/generate -- i.e. spend without consent. Jinja's tojson escapes < > &. #}
 <script>window.MG_BOOT = {{ boot|tojson }};</script>
 __UPSCALE_CONST__
-<script src="/static/mg-cost-badge.js"></script>
-<script src="/static/mg-generate-drawer.js"></script>
 <script type="module" src="/next/assets/app.js"></script>
 </body></html>"""
 

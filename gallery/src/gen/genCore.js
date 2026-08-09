@@ -127,10 +127,10 @@ export function buildPayload(s) {
 }
 
 /* The classic's curated error guidance (moonglade_gallery.py friendlyGenErr).
-   This is the FOURTH hand-maintained copy -- the others live in the classic Gen
-   IIFE, static/mg-generate-drawer.js and loom/src/loom-mutations.js. Keep the
-   wording in step with them; loom/test/mg-generate-drawer-parity.test.js
-   watches the drawer copy. */
+   This is the THIRD hand-maintained copy -- the others live in
+   gallery/src/gen/videoDrawerCore.js (the video drawer's copy) and
+   loom/src/loom-mutations.js. Keep the wording in step with them;
+   loom/test/mg-generate-drawer-parity.test.js watches the videoDrawerCore copy. */
 export function friendlyGenErr(raw) {
   const e = String(raw || "");
   const add = (hint) => e + " — " + hint;

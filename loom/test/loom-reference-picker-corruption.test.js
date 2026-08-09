@@ -16,8 +16,8 @@ import { shotText, shotPayload, shotImageRefs, positionTag, pickTarget, flat } f
         nextTag/maxTagNum -- e.g. a cast member added 4th is "@image4" forever, project-wide,
         regardless of which shots actually use them). shotText() used to cite THIS tag
         verbatim in its "Keep consistent"/"Other references" lines.
-     2. The Multi-Reference drawer's OWN numbering (static/mg-generate-drawer.js's
-        _refMap()/_renderSlots()) -- it has zero concept of a global tag namespace and always
+     2. The Multi-Reference drawer's OWN numbering (the React <VideoDrawer>'s refMap(), in
+        gallery/src/components/VideoDrawer.jsx) -- it has zero concept of a global tag namespace and always
         labels whatever lands in its image bank "@image1", "@image2", ... purely by ARRAY
         POSITION, in the exact order shotPayload()/buildShotPayload() hands it.
    These only agree when a shot happens to use every cast member from @image1 up with no
@@ -39,7 +39,7 @@ import { shotText, shotPayload, shotImageRefs, positionTag, pickTarget, flat } f
    proves the underlying DATA MISMATCH shotText()/shotPayload() must never produce again:
    whatever @imageN the composed prompt names for a picture must always be the exact same
    @imageN position that picture lands at in shotPayload()'s own sorted image list -- the
-   one thing static/mg-generate-drawer.js's positional numbering can never disagree with,
+   one thing the React <VideoDrawer>'s positional numbering can never disagree with,
    because it IS that same order. */
 
 function makeProject() {

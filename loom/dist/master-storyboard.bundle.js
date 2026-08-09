@@ -2107,6 +2107,789 @@ ${"=".repeat(48)}
   });
   var CostBadge_default = CostBadge;
 
+  // ../gallery/src/gen/videoDrawerCore.js
+  var MODELS = [
+    { value: "v4.0", label: "V4.0 Preview", caps: ["multi-ref", "audio", "15s", "top quality", "~2.5\xD7 cost"] },
+    { value: "v4.0.1", label: "V4.0 Lite Preview", caps: ["multi-ref", "audio", "15s", "end-frame"] },
+    { value: "v3.2", label: "V3.2", caps: ["audio", "prompt-following"] },
+    { value: "v3.0.2", label: "V3.0 Lite", caps: ["complex motion", "cheap"] },
+    { value: "v3.0", label: "V3.0 (High Consistency)", caps: ["high-consistency", "action presets", "start/end"] },
+    { value: "v3.0.1", label: "V3.0 Flash", caps: ["multi-shot", "hires", "fastest", "no card"] },
+    { value: "v2.7", label: "V2.7 (High Dynamics)", caps: ["camera moves", "dynamic", "no card"] }
+  ];
+  var MODEL_VMODES = {
+    "v4.0": ["i2v", "flf", "r2v"],
+    "v4.0.1": ["i2v", "flf", "r2v"],
+    "v3.2": ["i2v", "flf"],
+    "v3.0.2": ["i2v", "flf"],
+    "v3.0": ["i2v", "flf"],
+    "v3.0.1": ["i2v"],
+    "v2.7": ["i2v"]
+  };
+  var MODEL_MAXDUR = { "v4.0": 15, "v4.0.1": 15 };
+  var MODE_LBL = { i2v: "Start Frame", flf: "Start Frame", r2v: "Image references" };
+  var MODE_PH = {
+    i2v: "Describe the motion \u2014 \u2018slow cinematic pan right, gentle waves\u2026\u2019",
+    flf: "Describe the transition from start frame to end frame\u2026",
+    r2v: "Type @image1 / @video1 / @audio1 to cite a ref \u2014 it becomes a chip \u2014 \u2018the girl from @image1 dances to @audio1\u2026\u2019"
+  };
+  var CHANNEL_CAP = {
+    normal: "Please keep creations SFW",
+    enhanced: "\u{1F451} Enhanced \u2014 for professional creators"
+  };
+  var DURATIONS = [5, 6, 10, 15];
+  function snapDuration(d) {
+    d = Number(d);
+    if (!isFinite(d)) return 5;
+    return DURATIONS.reduce((best, v) => Math.abs(v - d) < Math.abs(best - d) ? v : best);
+  }
+  function joinAnd(parts) {
+    if (parts.length < 2) return parts[0] || "";
+    return parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1];
+  }
+  function refItem(r) {
+    const mid = String(r.media_id || r.mid);
+    return { media_id: mid, thumb: r.thumb || "/thumbs/" + mid + ".jpg", is_nsfw: !!r.is_nsfw };
+  }
+  function primaryBank(s) {
+    return s.mode === "r2v" ? s.imgSlots : s.slots;
+  }
+  function setPrimaryBank(s, arr) {
+    if (s.mode === "r2v") s.imgSlots = arr;
+    else s.slots = arr;
+  }
+  function heldRefsNotice(s, m) {
+    const imgs = s.imgSlots.filter((x) => x && x.media_id).length;
+    const vids = s.vidSlots.filter((x) => x && x.media_id).length;
+    const held = [];
+    if (imgs) held.push(imgs + (imgs === 1 ? " image ref" : " image refs"));
+    if (vids) held.push(vids + (vids === 1 ? " video ref" : " video refs"));
+    if (s.audSlot && s.audSlot.media_id) held.push("the audio ref");
+    if (!held.length) return "";
+    return "Still held for Multi-Reference: " + joinAnd(held) + ". Nothing was deleted \u2014 " + (m === "flf" ? "First & Last Frames" : "First Frame") + " has nowhere to show that. Switch back to Multi-Reference, on a model that offers it, and it is all still there.";
+  }
+  function applyMode(s, m, userDriven) {
+    const from = s.mode;
+    s.mode = m;
+    if (m === "i2v") s.slots = [s.slots[0] || null];
+    else if (m === "flf") s.slots = [s.slots[0] || null, s.slots[1] || null];
+    else if (!s.imgSlots.length) s.imgSlots = [null];
+    s.modeNote = userDriven && from === "r2v" && m !== "r2v" ? heldRefsNotice(s, m) : "";
+  }
+  function applyModelGating(s, userDriven) {
+    const allowed = MODEL_VMODES[s.model] || ["i2v", "flf", "r2v"];
+    if (allowed.indexOf(s.mode) === -1) {
+      applyMode(s, allowed[0], userDriven);
+      return;
+    }
+    const maxDur = MODEL_MAXDUR[s.model] || 10;
+    if (s.duration > maxDur) s.duration = maxDur;
+  }
+  function applySetRefs(s, refs) {
+    if (!Array.isArray(refs)) return;
+    refs = refs.slice(0, 6);
+    if (refs.length > 1) applyMode(s, "r2v");
+    const slots = refs.map(refItem);
+    if (refs.length > 1) setPrimaryBank(s, slots);
+    else if (s.mode === "r2v") setPrimaryBank(s, [slots[0] || null]);
+    else s.slots[0] = slots[0] || null;
+  }
+  function applyPrefill(s, o) {
+    o = o || {};
+    s.modeNote = "";
+    if (o.mode && MODE_LBL[String(o.mode).toLowerCase()]) applyMode(s, String(o.mode).toLowerCase());
+    if (o.video_model != null) s.model = o.video_model;
+    if (o.duration != null) s.duration = snapDuration(o.duration);
+    if (o.quality != null) s.quality = o.quality;
+    if (o.is_private != null) s.channel = o.is_private ? "enhanced" : "normal";
+    if (o.audio != null) s.audioGen = !!o.audio;
+    if (o.audio_language != null) s.audioLanguage = o.audio_language;
+    if (o.negative != null) s.negative = o.negative;
+    const imgList = Array.isArray(o.images) ? o.images : Array.isArray(o.refs) ? o.refs : null;
+    if (imgList && s.mode === "flf" && imgList.length <= 2) {
+      const flfSlots = imgList.map((r) => r ? refItem(r) : null);
+      s.slots = [flfSlots[0] || null, flfSlots[1] || null];
+    } else {
+      if (o.refs) applySetRefs(s, o.refs);
+      if (o.images) applySetRefs(s, o.images);
+    }
+    if (Array.isArray(o.video_refs)) s.vidSlots = o.video_refs.slice(0, 3).map(refItem);
+    if (o.audio_ref !== void 0) s.audSlot = o.audio_ref ? { media_id: String(o.audio_ref.media_id), filename: o.audio_ref.filename || "audio ref" } : null;
+    applyModelGating(s);
+    return { setPrompt: o.prompt != null ? o.prompt : null };
+  }
+  function buildPayload(s, promptText) {
+    const images = primaryBank(s).filter((x) => x && x.media_id).map((x) => x.media_id);
+    const video_refs = s.mode === "r2v" ? s.vidSlots.filter((x) => x && x.media_id).map((x) => x.media_id) : [];
+    const audio_refs = s.mode === "r2v" && s.audSlot && s.audSlot.media_id ? [s.audSlot.media_id] : [];
+    return {
+      mode: s.mode.toUpperCase(),
+      prompt: promptText || "",
+      negative: (s.negative || "").trim(),
+      images,
+      video_refs,
+      audio_refs,
+      duration: +s.duration,
+      audio: s.audioGen,
+      video_model: s.model,
+      camera_movement: s.mode !== "r2v" ? s.camera : "",
+      quality: s.quality,
+      audio_language: s.audioLanguage,
+      is_private: s.channel === "enhanced"
+    };
+  }
+  function hasAnyRef(p) {
+    return !!(p.images.length || p.video_refs.length || p.audio_refs.length);
+  }
+  function flfMissingStart(s) {
+    return s.mode === "flf" && !(s.slots[0] && s.slots[0].media_id) && !!(s.slots[1] && s.slots[1].media_id);
+  }
+  function friendlyGenErr2(raw) {
+    const s = String(raw || "");
+    if (!s) return "generation failed";
+    let hint = "";
+    if (/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s)) {
+      hint = "Out of balance for this model \u2014 no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.";
+    } else if (/maxLength|too long|exceeds maximum/i.test(s)) {
+      hint = "That prompt is too long for video \u2014 PixAI allows 2000 characters. Trim it and resubmit; nothing was created or charged.";
+    } else if (/image contains (sensitive|nsfw|prohibited)|NSFW_DETECTED|40300032/i.test(s)) {
+      hint = "PixAI refused the SOURCE IMAGE on content grounds, not the prompt \u2014 rewriting the text will not help. Try a different frame.";
+    } else if (/moderat|content.?polic|flagged|nsfw/i.test(s) || /prohibit|sensitive|not.?allowed|violat/i.test(s) && /content|prompt|polic|guideline|term|image/i.test(s)) {
+      hint = "PixAI's content filter blocked this generation \u2014 that's decided on PixAI's side, not here.";
+    } else if (/inferenceProfile|i2vPro[./]mode|unknown mode/i.test(s)) {
+      hint = "That quality setting isn't available for this model \u2014 try a different Mode.";
+    }
+    return hint ? hint + " (PixAI said: " + s.slice(0, 160) + ")" : s;
+  }
+
+  // ../gallery/src/components/VideoDrawer.jsx
+  var lineSeq = 0;
+  var VideoDrawer = forwardRef(function VideoDrawer2(props, ref) {
+    const { loomCtx, style, className } = props;
+    const st = useRef({
+      mode: "i2v",
+      slots: [null],
+      // i2v/flf primary bank ([0]=start, [1]=end for flf)
+      imgSlots: [null],
+      // r2v image bank (max 6)
+      vidSlots: [],
+      // r2v video bank (max 3)
+      audSlot: null,
+      // {media_id, filename} | null
+      model: "v4.0.1",
+      duration: 5,
+      camera: "unset",
+      quality: "professional",
+      channel: "normal",
+      audioGen: false,
+      audioLanguage: "english",
+      negative: "",
+      modeNote: "",
+      rendering: false,
+      hostBusy: false
+    });
+    const [, force] = useState(0);
+    const rerender = useCallback(() => force((n) => n + 1), []);
+    const [results, setResults] = useState([]);
+    const [warn, setWarnState] = useState("");
+    const setWarn = useCallback((w) => setWarnState(w), []);
+    const ceRef = useRef(null);
+    const previewRef = useRef(null);
+    const audFileRef = useRef(null);
+    const costRef = useRef(null);
+    const rootRef = useRef(null);
+    const costSeq = useRef(0);
+    const costTimer = useRef(0);
+    const chipTimer = useRef(0);
+    const previewTimer = useRef(0);
+    const dirty = useRef(false);
+    const pollTimers = useRef([]);
+    const connected = useRef(true);
+    const emit3 = useCallback((name, detail) => {
+      const n = rootRef.current;
+      if (n) n.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, detail: detail || {} }));
+    }, []);
+    useEffect(() => () => {
+      connected.current = false;
+      clearTimeout(costTimer.current);
+      clearTimeout(chipTimer.current);
+      clearTimeout(previewTimer.current);
+      pollTimers.current.forEach((t) => clearTimeout(t));
+      pollTimers.current = [];
+    }, []);
+    const primary = () => primaryBank(st.current);
+    const setPrimary = (arr) => setPrimaryBank(st.current, arr);
+    const syncPlaceholder = () => {
+      if (ceRef.current) ceRef.current.setAttribute("data-placeholder", MODE_PH[st.current.mode]);
+    };
+    const setMode = (m, userDriven) => {
+      applyMode(st.current, m, userDriven);
+      syncPlaceholder();
+      rerender();
+      debCost();
+    };
+    const userSetMode = (m) => {
+      setMode(m, true);
+      emit3("mg-mode-commit", { vmode: m });
+    };
+    const applyModelGating2 = (userDriven) => {
+      applyModelGating(st.current, userDriven);
+      syncPlaceholder();
+      rerender();
+    };
+    const refMap = () => {
+      const s2 = st.current, map = {};
+      let n = 0;
+      primary().forEach((x) => {
+        if (x && x.media_id) {
+          n++;
+          map["@image" + n] = { thumb: x.thumb, mid: x.media_id, kind: "image" };
+        }
+      });
+      if (s2.mode === "r2v") {
+        let vn = 0;
+        s2.vidSlots.forEach((x) => {
+          if (x && x.media_id) {
+            vn++;
+            map["@video" + vn] = { thumb: x.thumb, mid: x.media_id, kind: "video" };
+          }
+        });
+        if (s2.audSlot && s2.audSlot.media_id) map["@audio1"] = { mid: s2.audSlot.media_id, kind: "audio" };
+      }
+      return map;
+    };
+    const esc2 = (s2) => (s2 == null ? "" : String(s2)).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+    const makeChip = (tag, info) => {
+      const c = document.createElement("span");
+      c.className = "mgd-chip";
+      c.contentEditable = "false";
+      c.setAttribute("data-ref", tag);
+      const lead = info && info.thumb ? '<img src="' + esc2(info.thumb) + '" alt="">' : info && info.kind === "audio" ? "\u266A " : "";
+      c.innerHTML = lead + tag;
+      if (info && info.mid && info.kind !== "audio") {
+        c.onmouseenter = () => showPreview(info.mid, c);
+        c.onmouseleave = () => hidePreview();
+      }
+      return c;
+    };
+    const chipify = (final) => {
+      const ce = ceRef.current;
+      if (!ce) return;
+      const map = refMap(), sel = window.getSelection();
+      const walker = document.createTreeWalker(ce, NodeFilter.SHOW_TEXT), nodes = [];
+      let tn;
+      while (tn = walker.nextNode()) nodes.push(tn);
+      const re = /@(?:image|video|audio)\d+/g;
+      nodes.forEach((node) => {
+        const t = node.nodeValue, found = [];
+        let m;
+        re.lastIndex = 0;
+        while ((m = re.exec(t)) !== null) {
+          if (!map[m[0]]) continue;
+          if (!final && m.index + m[0].length === t.length) continue;
+          found.push({ i: m.index, tag: m[0] });
+        }
+        if (!found.length) return;
+        const caretHere = sel.rangeCount && sel.getRangeAt(0).startContainer === node;
+        const frag = document.createDocumentFragment();
+        let pos = 0;
+        found.forEach((f) => {
+          if (f.i > pos) frag.appendChild(document.createTextNode(t.slice(pos, f.i)));
+          frag.appendChild(makeChip(f.tag, map[f.tag]));
+          pos = f.i + f.tag.length;
+        });
+        const tail = document.createTextNode(t.slice(pos));
+        frag.appendChild(tail);
+        node.parentNode.replaceChild(frag, node);
+        if (caretHere) {
+          const r = document.createRange();
+          r.setStart(tail, tail.length);
+          r.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(r);
+        }
+      });
+    };
+    const promptText = () => {
+      const ce = ceRef.current;
+      if (!ce) return "";
+      let out = "";
+      (function walk(n) {
+        n.childNodes.forEach((c) => {
+          if (c.nodeType === 3) out += c.nodeValue;
+          else if (c.classList && c.classList.contains("mgd-chip")) out += c.getAttribute("data-ref");
+          else if (c.nodeName === "BR") out += "\n";
+          else walk(c);
+        });
+      })(ce);
+      return out.replace(/ /g, " ").trim();
+    };
+    const promptSet = (v) => {
+      if (ceRef.current) {
+        ceRef.current.textContent = v || "";
+        chipify(true);
+      }
+      debCost();
+      dirty.current = false;
+    };
+    const emitCommitIfDirty = () => {
+      if (!dirty.current) return;
+      dirty.current = false;
+      emit3("mg-prompt-commit", { text: promptText() });
+    };
+    const onCeInput = useCallback(() => {
+      dirty.current = true;
+      emit3("mg-dirty", {});
+      clearTimeout(chipTimer.current);
+      chipTimer.current = setTimeout(() => {
+        chipify(false);
+        debCost();
+        emitCommitIfDirty();
+      }, 300);
+    }, []);
+    const onCeBlur = useCallback(
+      () => {
+        chipify(true);
+        emitCommitIfDirty();
+      },
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      []
+    );
+    const showPreview = (mid, anchor) => {
+      const p = previewRef.current, rootEl = rootRef.current;
+      if (rootEl) {
+        const entry = (rootEl.getAnimations ? rootEl.getAnimations() : []).filter((a) => a.animationName === "mgdDockIn" && a.playState === "running")[0];
+        if (entry) {
+          entry.finished.then(() => {
+            if (anchor.isConnected && anchor.matches(":hover")) showPreview(mid, anchor);
+          }).catch(() => {
+          });
+          return;
+        }
+      }
+      if (!p || !mid || !/^(?:\d+|local_[0-9a-f]{12})$/.test(mid)) return;
+      clearTimeout(previewTimer.current);
+      p.innerHTML = '<img src="/thumbs/' + esc2(mid) + '.jpg" alt="">';
+      p.classList.add("open");
+      p.setAttribute("aria-hidden", "false");
+      const r = anchor.getBoundingClientRect(), w = 300, gap = 12;
+      let x = r.right + gap;
+      if (x + w > window.innerWidth - 8) x = Math.max(8, r.left - w - gap);
+      const y = Math.max(8, Math.min(r.top - 10, window.innerHeight - 380));
+      p.style.left = x + "px";
+      p.style.top = y + "px";
+      requestAnimationFrame(() => p.classList.add("in"));
+    };
+    const hidePreview = () => {
+      const p = previewRef.current;
+      if (!p) return;
+      p.classList.remove("in");
+      p.setAttribute("aria-hidden", "true");
+      clearTimeout(previewTimer.current);
+      previewTimer.current = setTimeout(() => p.classList.remove("open"), 180);
+    };
+    const requestPick = (bank, i) => {
+      emit3("mg-pick-request", {
+        slot: i,
+        bank,
+        mode: st.current.mode,
+        kind: bank === "vid" ? "video" : "image",
+        respond: (media_id, thumb, is_nsfw) => {
+          if (!media_id) return;
+          const item = refItem({ media_id, thumb, is_nsfw });
+          if (bank === "vid") {
+            st.current.vidSlots[i] = item;
+          } else {
+            const arr = primary();
+            arr[i] = item;
+            setPrimary(arr);
+          }
+          rerender();
+          debCost();
+        }
+      });
+    };
+    const uploadAudio = (file) => {
+      if (file.size > 15 * 1024 * 1024) {
+        renderError("Audio file too large \u2014 PixAI allows up to 15MB.");
+        return;
+      }
+      st.current.audSlot = { uploading: file.name };
+      rerender();
+      const fd = new FormData();
+      fd.append("file", file);
+      fetch("/api/upload", { method: "POST", body: fd }).then((r) => r.json()).then((d) => {
+        if (d.error || !d.media_id) {
+          renderError(d.error || "audio upload failed");
+          st.current.audSlot = null;
+          rerender();
+          return;
+        }
+        st.current.audSlot = { media_id: String(d.media_id), filename: file.name };
+        rerender();
+        debCost();
+      }).catch(() => {
+        renderError("audio upload failed (network)");
+        st.current.audSlot = null;
+        rerender();
+      });
+    };
+    const payload = () => buildPayload(st.current, promptText());
+    const flfMissingStart2 = () => flfMissingStart(st.current);
+    const debCost = () => {
+      clearTimeout(costTimer.current);
+      costTimer.current = setTimeout(costNow, 250);
+    };
+    const costNow = () => {
+      const cost = costRef.current;
+      if (!cost) return;
+      const s2 = st.current, p = payload();
+      const idleHint = s2.mode === "r2v" ? "Pick at least one reference to see the cost." : "Pick a source image to see the cost.";
+      if (!hasAnyRef(p)) {
+        setWarn("");
+        cost.clear(idleHint);
+        return;
+      }
+      if (flfMissingStart2()) {
+        setWarn("");
+        cost.clear("Pick a Start Frame \u2014 the End Frame alone can\u2019t drive First & Last.");
+        return;
+      }
+      setWarn(p.video_model === "v4.0" ? "V4.0 full \u2014 ~2.5\xD7 Lite" : "");
+      cost.setChecking();
+      const mine = ++costSeq.current;
+      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) }).then((r) => r.json()).then((d) => {
+        if (mine === costSeq.current && costRef.current) costRef.current.setPrice(d);
+      }).catch(() => {
+        if (mine === costSeq.current && costRef.current) costRef.current.setPrice(null);
+      });
+    };
+    const pushLine = (line) => {
+      const id = ++lineSeq;
+      setResults((rs) => rs.concat([{ id, ...line }]));
+      return id;
+    };
+    const updateLine = (id, patch2) => setResults((rs) => rs.map((l) => l.id === id ? { ...l, ...patch2 } : l));
+    const doGenerate = () => {
+      const s2 = st.current, p = payload();
+      if (!hasAnyRef(p)) {
+        pushLine({ kind: "error", text: s2.mode === "r2v" ? "Pick at least one reference first." : "Pick a source image first." });
+        return;
+      }
+      if (flfMissingStart2()) {
+        pushLine({ kind: "error", text: "Pick a Start Frame first \u2014 the End Frame alone can\u2019t drive First & Last." });
+        return;
+      }
+      const id = pushLine({ kind: "status", moon: true, text: "Submitting\u2026" });
+      st.current.rendering = true;
+      rerender();
+      const unlock = () => {
+        st.current.rendering = false;
+        rerender();
+      };
+      fetch("/api/loom/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) }).then((r) => r.json()).then((d) => {
+        unlock();
+        if (d.error || !d.task_id) {
+          updateLine(id, { kind: "error", text: friendlyGenErr2(d.error || "submit failed"), moon: false });
+          return;
+        }
+        emit3("mg-submit", { task_id: d.task_id, payload: p });
+        updateLine(id, { kind: "status", moon: true, text: "Queued \u2014 running\u2026" });
+        poll2(d.task_id, id);
+      }).catch(() => {
+        unlock();
+        updateLine(id, { kind: "error", text: "network error", moon: false });
+      });
+    };
+    const poll2 = (taskId, lineId) => {
+      const startedAt = Date.now();
+      const SLOW_AT = 20 * 60 * 1e3, SLOW_MS = 20 * 1e3;
+      const STALE_AT = 90 * 60 * 1e3, STALE_MS = 3 * 60 * 1e3;
+      const CEILING = 6 * 60 * 60 * 1e3;
+      let timer2 = null;
+      const schedule2 = (fn, ms) => {
+        const i = pollTimers.current.indexOf(timer2);
+        if (i >= 0) pollTimers.current.splice(i, 1);
+        timer2 = setTimeout(fn, ms);
+        pollTimers.current.push(timer2);
+      };
+      const label = (ms) => ms < 36e5 ? Math.round(ms / 6e4) + "m" : Math.round(ms / 36e4) / 10 + "h";
+      const short = String(taskId).slice(-6);
+      const pause = () => {
+        updateLine(lineId, {
+          kind: "plain",
+          text: "Paused auto-checking after " + label(CEILING) + " with no result \u2014 check pixai.art, or reopen this shot to check again (task " + short + ")"
+        });
+        emit3("mg-paused", { task_id: taskId });
+      };
+      const tick = () => {
+        fetch("/api/task-status?task_id=" + encodeURIComponent(taskId)).then((r) => r.json()).then((d) => {
+          if (!connected.current) return;
+          const elapsed = Date.now() - startedAt;
+          if (d.phase === "done") {
+            updateLine(lineId, { kind: "result", mediaIds: d.media_ids || [], cost: d.paid_credit });
+            emit3("mg-result", { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit });
+          } else if (d.phase === "failed") {
+            const msg = friendlyGenErr2(d.error || "task " + (d.status || "failed"));
+            updateLine(lineId, { kind: "error", text: msg, moon: false });
+            emit3("mg-error", { error: msg });
+          } else if (elapsed > CEILING) {
+            pause();
+          } else if (elapsed > STALE_AT) {
+            updateLine(lineId, { kind: "status", moon: true, amber: true, text: "Still going after " + label(elapsed) + " \u2014 unusual. Check pixai.art, or keep waiting (task " + short + ")" });
+            emit3("mg-slow", { tier: "stale", elapsed, task_id: taskId });
+            schedule2(tick, STALE_MS);
+          } else if (elapsed > SLOW_AT) {
+            updateLine(lineId, { kind: "status", moon: true, amber: true, text: "Taking longer than expected (" + label(elapsed) + ", task " + short + ")" });
+            emit3("mg-slow", { tier: "slow", elapsed, task_id: taskId });
+            schedule2(tick, SLOW_MS);
+          } else {
+            updateLine(lineId, { kind: "status", moon: true, text: "Rendering under the eclipse\u2026 (task " + short + ")" });
+            schedule2(tick, 2e3);
+          }
+        }).catch(() => {
+          if (!connected.current) return;
+          const elapsed = Date.now() - startedAt;
+          if (elapsed > CEILING) {
+            pause();
+            return;
+          }
+          schedule2(tick, elapsed > STALE_AT ? STALE_MS : elapsed > SLOW_AT ? SLOW_MS : 2e3);
+        });
+      };
+      schedule2(tick, 2e3);
+    };
+    const renderError = (msg) => {
+      pushLine({ kind: "error", text: msg });
+      emit3("mg-error", { error: msg });
+    };
+    const setRefs = (refs) => {
+      applySetRefs(st.current, refs);
+      syncPlaceholder();
+      rerender();
+      debCost();
+    };
+    const prefill = (o) => {
+      const r = applyPrefill(st.current, o);
+      syncPlaceholder();
+      if (r.setPrompt != null) promptSet(r.setPrompt);
+      rerender();
+      debCost();
+    };
+    const flushPromptEdit = () => {
+      clearTimeout(chipTimer.current);
+      chipify(true);
+      if (!dirty.current) return null;
+      dirty.current = false;
+      return promptText();
+    };
+    const setBusy = (isBusy) => {
+      if (st.current.rendering) return;
+      st.current.hostBusy = !!isBusy;
+      rerender();
+    };
+    useImperativeHandle(ref, () => {
+      const node = rootRef.current;
+      if (node && !node._mgWired) {
+        node._mgWired = true;
+        node.prefill = prefill;
+        node.setRefs = setRefs;
+        node.flushPromptEdit = flushPromptEdit;
+        node.setBusy = setBusy;
+        node.payload = payload;
+        Object.defineProperty(node, "mode", { configurable: true, get: () => st.current.mode });
+      }
+      return node;
+    }, []);
+    const s = st.current;
+    const allowedModes = MODEL_VMODES[s.model] || ["i2v", "flf", "r2v"];
+    const maxDur = MODEL_MAXDUR[s.model] || 10;
+    const chosenModel = MODELS.find((m) => m.value === s.model);
+    const isR2v = s.mode === "r2v";
+    const canGo = !s.hostBusy && !s.rendering;
+    const SEG = [["i2v", "First Frame"], ["flf", "First & Last Frames"], ["r2v", "Multi-Reference"]];
+    const slotBox = (item, i, bank, placeholder, tag) => /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        key: bank + i,
+        className: "mgd-slot" + (bank === "vid" ? " dashed" : "") + (item ? "" : ""),
+        "data-nsfw": item && item.is_nsfw ? "1" : void 0,
+        style: item && bank === "vid" ? { borderStyle: "solid" } : void 0,
+        onClick: () => requestPick(bank, i),
+        onMouseEnter: item ? (e) => showPreview(item.media_id, e.currentTarget) : void 0,
+        onMouseLeave: item ? () => hidePreview() : void 0
+      },
+      item ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("img", { src: item.thumb, alt: "" }), bank === "vid" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-vidbadge" }, "\u25B6") : null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-slot-tag" }, tag), /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          type: "button",
+          className: "mgd-vs-x",
+          onClick: (e) => {
+            e.stopPropagation();
+            hidePreview();
+            const cur = st.current;
+            if (bank === "vid") {
+              cur.vidSlots.splice(i, 1);
+              if (!cur.vidSlots.length) cur.vidSlots = [null];
+            } else if (cur.mode === "r2v") {
+              let arr = cur.imgSlots;
+              arr.splice(i, 1);
+              if (!arr.length) arr = [null];
+              cur.imgSlots = arr;
+            } else cur.slots[i] = null;
+            rerender();
+            debCost();
+          }
+        },
+        "\xD7"
+      )) : placeholder
+    );
+    const primArr = primary();
+    const mainArr = s.mode === "flf" ? [primArr[0]] : primArr;
+    let refN = 0;
+    const primSlots = mainArr.map((item, i) => {
+      let tag = "";
+      if (item) {
+        refN++;
+        tag = s.mode === "flf" ? "start" : "@image" + refN;
+      }
+      const ph = s.mode === "flf" || s.mode === "i2v" ? "+ start" : "+ pick";
+      return slotBox(item, i, "primary", ph, tag);
+    });
+    let vidN = 0;
+    const vidArr = s.vidSlots.length ? s.vidSlots : [null];
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: rootRef, className: "gen-drawer" + (className ? " " + className : ""), style, "data-loom-ctx": loomCtx ? "" : void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "tablist" }, SEG.map(([v, lbl]) => allowedModes.indexOf(v) === -1 ? null : /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", className: s.mode === v ? "on" : "", onClick: () => userSetMode(v) }, lbl))), s.modeNote ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-modenote" }, s.modeNote) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl mgd-slots-lbl" }, MODE_LBL[s.mode]), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slots mgd-imgslots" }, primSlots, s.mode === "r2v" && primArr.length < 6 ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-slot-add", onClick: () => {
+      st.current.imgSlots.push(null);
+      rerender();
+    } }, "+ add") : null), s.mode === "flf" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "End Frame ", /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-note" }, "(Optional)")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slots" }, slotBox(s.slots[1], 1, "primary", "+ end", "end"))) : null, isR2v ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Video references ", /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-note" }, "\xB7 up to 3 \xB7 2\u201315s each, 15s total")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slots" }, vidArr.map((item, i) => {
+      let tag = "";
+      if (item) {
+        vidN++;
+        tag = "@video" + vidN;
+      }
+      return slotBox(item, i, "vid", "+ video", tag);
+    }), s.vidSlots.length < 3 ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-slot-add", onClick: () => {
+      st.current.vidSlots.push(null);
+      rerender();
+    } }, "+ add") : null), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Audio reference ", /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-note" }, "\xB7 WAV \u226415MB")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-audiorow" }, s.audSlot && s.audSlot.uploading ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-note" }, "Uploading ", s.audSlot.uploading, "\u2026") : s.audSlot ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-audiochip" }, "\u266A @audio1 \xB7 ", s.audSlot.filename, " ", /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", onClick: () => {
+      st.current.audSlot = null;
+      rerender();
+      debCost();
+    } }, "\xD7")) : /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-audioadd", onClick: () => audFileRef.current && audFileRef.current.click() }, "+ Audio"))) : null, /* @__PURE__ */ react_global_shim_default.createElement(
+      "input",
+      {
+        ref: audFileRef,
+        type: "file",
+        className: "mgd-audiofile",
+        accept: "audio/*",
+        style: { display: "none" },
+        onChange: (e) => {
+          const f = e.target.files[0];
+          e.target.value = "";
+          if (f) uploadAudio(f);
+        }
+      }
+    ), /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        ref: ceRef,
+        className: "mgd-ce",
+        contentEditable: true,
+        suppressContentEditableWarning: true,
+        "data-placeholder": MODE_PH[s.mode],
+        onInput: onCeInput,
+        onBlur: onCeBlur
+      }
+    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Negative prompt"), /* @__PURE__ */ react_global_shim_default.createElement(
+      "textarea",
+      {
+        className: "mgd-neg",
+        placeholder: "blurry, extra fingers, watermark",
+        value: s.negative,
+        onChange: (e) => {
+          st.current.negative = e.target.value;
+          rerender();
+          debCost();
+        }
+      }
+    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-row" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "grow" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Model"), /* @__PURE__ */ react_global_shim_default.createElement(
+      "select",
+      {
+        className: "mgd-sel mgd-model",
+        value: s.model,
+        onChange: (e) => {
+          st.current.model = e.target.value;
+          applyModelGating2(true);
+          debCost();
+        }
+      },
+      MODELS.map((m) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: m.value, value: m.value }, m.label))
+    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-caps mgd-modelcaps" }, (chosenModel ? chosenModel.caps : []).map((t) => /* @__PURE__ */ react_global_shim_default.createElement("span", { key: t, className: "mgd-cap hot" }, t)))), /* @__PURE__ */ react_global_shim_default.createElement("div", null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Duration (s)"), /* @__PURE__ */ react_global_shim_default.createElement(
+      "select",
+      {
+        className: "mgd-sel mgd-dur",
+        value: String(s.duration),
+        onChange: (e) => {
+          st.current.duration = +e.target.value;
+          rerender();
+          debCost();
+          emit3("mg-duration-commit", { duration: +e.target.value });
+        }
+      },
+      [5, 6, 10, 15].map((d) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: d, value: d, disabled: d > maxDur, hidden: d > maxDur }, d))
+    ))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-row" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-cam-wrap" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Camera"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-cam", value: s.camera, onChange: (e) => {
+      st.current.camera = e.target.value;
+      rerender();
+    } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "unset" }, "Unset"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "horizontal" }, "Side-to-side move"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "vertical-pan" }, "Vertical Pan"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "zoom" }, "Zoom in or out"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "pan" }, "Camera sweep"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "tilt" }, "Tilt up or down"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "roll" }, "Camera spin"))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-quality-wrap" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Basic / Professional"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-quality", value: s.quality, onChange: (e) => {
+      st.current.quality = e.target.value;
+      rerender();
+    } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "basic" }, "Basic"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "professional" }, "Professional"))), /* @__PURE__ */ react_global_shim_default.createElement("div", null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Channel"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-channel", value: s.channel, onChange: (e) => {
+      st.current.channel = e.target.value;
+      rerender();
+      debCost();
+    } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "normal" }, "Normal"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "enhanced" }, "Enhanced")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-caps mgd-chancap" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-cap" + (s.channel === "enhanced" ? " crown" : "") }, CHANNEL_CAP[s.channel])))), /* @__PURE__ */ react_global_shim_default.createElement("label", { className: "mgd-check" }, /* @__PURE__ */ react_global_shim_default.createElement(
+      "input",
+      {
+        type: "checkbox",
+        className: "mgd-audio",
+        checked: s.audioGen,
+        onChange: (e) => {
+          st.current.audioGen = e.target.checked;
+          rerender();
+          debCost();
+          emit3("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage });
+        }
+      }
+    ), " ", "Generate audio ", /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-note" }, "(spoken lines in the prompt become voiceover)")), s.audioGen ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lang-wrap", style: { marginTop: 4 } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Audio language"), /* @__PURE__ */ react_global_shim_default.createElement(
+      "select",
+      {
+        className: "mgd-sel mgd-lang",
+        value: s.audioLanguage,
+        onChange: (e) => {
+          st.current.audioLanguage = e.target.value;
+          rerender();
+          debCost();
+          emit3("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value });
+        }
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "english" }, "English"),
+      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "japanese" }, "Japanese"),
+      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "chinese" }, "Chinese"),
+      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "korean" }, "Korean"),
+      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "none" }, "SE only (no dialogue)")
+    )) : null, /* @__PURE__ */ react_global_shim_default.createElement(
+      CostBadge_default,
+      {
+        ref: costRef,
+        className: "mgd-cost",
+        warn,
+        cardLabel: "a video card",
+        hint: "Pick a source image to see the cost."
+      }
+    ), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-go", disabled: !canGo, onClick: doGenerate }, s.rendering ? "Rendering\u2026" : "Generate video"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-result" + (results.length ? " has" : "") }, results.map((l) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: l.id, className: "mgd-result-line" }, l.kind === "result" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { style: { color: "var(--emerald,#4fc99a)", fontSize: 12, marginBottom: 6 } }, "\u2713 Rendered \u2014 ", l.cost === 0 ? "free (card used)" : Number(l.cost || 0).toLocaleString() + " credits", ". Added to your gallery."), (l.mediaIds || []).map((mid) => /* @__PURE__ */ react_global_shim_default.createElement("a", { key: mid, href: "/next?image=" + encodeURIComponent(mid) }, /* @__PURE__ */ react_global_shim_default.createElement("img", { src: "/thumbs/" + encodeURIComponent(mid) + ".jpg", alt: "result", loading: "lazy" })))) : l.kind === "error" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--red,#f38ba8)", fontSize: 12 } }, l.text) : l.kind === "plain" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--subtext,#9a93ab)", fontSize: 12 } }, l.text) : /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: l.amber ? "var(--amber,#f9d38c)" : "var(--subtext,#9a93ab)", fontSize: 12 } }, l.moon ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-moon" }) : null, l.text)))), /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: previewRef, className: "mgd-preview", "aria-hidden": "true" }));
+  });
+  var VideoDrawer_default = VideoDrawer;
+
   // ../gallery/src/notify/toastStore.js
   var seq = 0;
   var toasts = [];
@@ -5136,7 +5919,7 @@ ${"=".repeat(48)}
           openPick,
           onPatch: (p) => patchFrame("closeFrame", p)
         }
-      ))), acct && /* @__PURE__ */ React.createElement("div", { className: "lv-bal" }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { className: "lv-balclaim" }, " \xB7 +", acct.claim_credits, " claimable") : null), tabBody, /* @__PURE__ */ React.createElement("mg-generate-drawer", { ref: bindGenDrawer, "data-loom-ctx": "", style: { display: tab === "Video" ? "" : "none" } }), videoTrailer, /* @__PURE__ */ React.createElement(
+      ))), acct && /* @__PURE__ */ React.createElement("div", { className: "lv-bal" }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { className: "lv-balclaim" }, " \xB7 +", acct.claim_credits, " claimable") : null), tabBody, /* @__PURE__ */ React.createElement(VideoDrawer_default, { ref: bindGenDrawer, loomCtx: true, style: { display: tab === "Video" ? "" : "none" } }), videoTrailer, /* @__PURE__ */ React.createElement(
         "div",
         {
           className: "lv-mpick-veil" + (pickerOpen ? " open" : ""),
