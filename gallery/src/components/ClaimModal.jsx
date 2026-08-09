@@ -26,7 +26,7 @@ export default function ClaimModal({ credits, exiting, claiming, error, onClaim,
                 const tried = Number(img.dataset.fb || 0);
                 // webp -> still png -> the general narrator, same fallback-ladder
                 // shape LoginPage.jsx's MASCOT_FALLBACKS already establishes.
-                const ladder = ["/branding/mascots/nel_redeem.png", "/branding/mascots/gen_nel.png"];
+                const ladder = ["/branding/mascots/nel_redeem.png", "/branding/mascots/nel_narrator.png"];
                 if (tried < ladder.length) { img.dataset.fb = String(tried + 1); img.src = ladder[tried]; }
                 else img.style.display = "none";
               }} />

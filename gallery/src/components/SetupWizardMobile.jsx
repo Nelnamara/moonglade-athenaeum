@@ -152,7 +152,7 @@ export default function SetupWizardMobile({ boot }) {
           <div className="wzm-syncwrap">
             <div className="wzm-syncmascotbox">
               <div className="wzm-synchalo" />
-              <img className="wzm-syncmascotimg" src="/branding/mascots/gen_nel.png" alt="" />
+              <img className="wzm-syncmascotimg" src="/branding/mascots/nel_narrator.png" alt="" />
             </div>
             <div className="wzm-synchead">{label}</div>
             <div className="wzm-synctrack">

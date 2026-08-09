@@ -23,11 +23,11 @@ import { useEffect, useRef, useState } from "react";
 export const SLIDES = [
   { mascot: "/branding/login_nel.webp", head: "Welcome to the Athenaeum",
     body: "A library built to hold everything PixAI ever helped you make — every spark, kept against the Void." },
-  { mascot: "/branding/mascots/nel_carl.png", head: "Your whole collection, kept",
+  { mascot: "/branding/mascots/nel_setup2.webp", head: "Your whole collection, kept",
     body: "Browse, search and sort every image and video you've conjured — rated, tagged, and never lost to the scroll." },
-  { mascot: "/branding/mascots/nel_micdrop.png", head: "Weave shots into a story",
+  { mascot: "/branding/mascots/nel_setup3.webp", head: "Weave shots into a story",
     body: "The Loom strings your stills into continuous motion — frame handed off to frame, shot to shot, scene to scene." },
-  { mascot: "/branding/mascots/gen_nel.png", head: "One composer, every craft",
+  { mascot: "/branding/mascots/nel_setup4.webp", head: "One composer, every craft",
     body: "Image, Edit and Video, side by side — model, LoRAs and cost always in plain sight before you spend a credit." },
 ];
 export const KEY_STEPS = [

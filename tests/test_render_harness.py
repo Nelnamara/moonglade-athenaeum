@@ -670,7 +670,7 @@ _PIXEL_PNG = base64.b64decode(
 def _open_tray_with_queued_job(page, path):
     page.route("**/api/jobs", lambda route: route.fulfill(
         status=200, content_type="application/json", body=json.dumps(_QUEUED_JOB)))
-    page.route("**/branding/gen_nel.png", lambda route: route.fulfill(
+    page.route("**/branding/nel_spinner.png", lambda route: route.fulfill(
         status=200, content_type="image/png", body=_PIXEL_PNG))
     page.goto(path, wait_until="domcontentloaded")
     # The fab is what a user clicks. 2026-08-08 port note: the vanilla's
