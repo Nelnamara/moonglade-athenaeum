@@ -24,7 +24,9 @@ JS) were deleted, and every guard that DROVE a classic page went with them -- th
 numbered defects above were classic-flyout/drawer layout bugs and are historical context
 now, not live subjects. What remains here targets the two surviving hosts: the React
 shell at "/" (which still ships the pre-paint skin script, the design tokens with every
-skin, and the shared mg-notify.js Activity tray) and the Loom at /loom.
+skin, and the shared Activity tray -- since the 2026-08-08 React port that tray is
+gallery/src/notify/ActivityTray.jsx + gallery/src/styles/notify.css, bundled into BOTH
+hosts, not static/mg-notify.js, which is deleted) and the Loom at /loom.
 
 Design, and why
 ---------------
@@ -327,8 +329,9 @@ def _dismiss_any_achievement_toast(page):
     account add -- can organically cross a NEW achievement threshold mid-test (telemetry
     counters, day/session flags), firing a fresh one the pre-seed can't have predicted.
     `.ach-m2` is a deliberate full-screen, click-or-timeout-to-dismiss overlay (by design,
-    not a bug -- see mg-notify.js's own `_play()`), so left alone it blocks every click
-    under it for its real 4.2-6.4s hold. A no-op when nothing is showing.
+    not a bug -- see `_play()` in gallery/src/notify/ach.js, the 2026-08-08 React-port home
+    of the celebration engine), so left alone it blocks every click under it for its real
+    4.2-6.4s hold. A no-op when nothing is showing.
     """
     toast = page.locator(".ach-m2")
     if toast.count():
@@ -560,13 +563,15 @@ def test_saved_skin_is_applied_before_the_body_exists(logged_in_page):
     before `<body>` is even parsed, therefore before any paint.
 
     Since the classic cut this measures the React shell at "/" -- NEXT_PAGE carries the
-    same pre-paint inline script in `<head>`, and mg-notify.js (loaded on "/" too) still
-    does the post-load syncSkin() reconcile this test's seeding dance exists for.
+    same pre-paint inline script in `<head>`, and (2026-08-08 port note) the post-load
+    syncSkin() reconcile this test's seeding dance exists for now lives in
+    gallery/src/notify/ach.js, bundled into "/" -- same behaviour, new home.
     """
     page = logged_in_page(**DESKTOP)
     _visit(page, "/")
     # THE RACE THIS TEST FIRST TRIPPED ON, and a live example of why nothing here sleeps:
-    # static/mg-notify.js's syncSkin() reconciles the pre-paint guess against the server
+    # syncSkin() (gallery/src/notify/ach.js since the 2026-08-08 React port; check() runs
+    # it from installNotify()) reconciles the pre-paint guess against the server
     # ("server is source of truth") after /api/achievements resolves, and writes the result
     # to localStorage. Seeding 'ember' before that lands gets it overwritten with the
     # server's default, the reloaded page then has nothing to apply, and this test fails
@@ -612,7 +617,8 @@ def test_saved_skin_is_applied_before_the_body_exists(logged_in_page):
 # status for ~60 minutes and used to draw the same spinning mascot as real work.
 #
 # Asserted the only way that can see it: read the mascot's COMPUTED animationName. Asserting
-# the CSS text (`.jt-spin.jt-queued .jt-nel{animation:none}`) proves nothing about whether
+# the CSS text (`.jt-spin.jt-queued .jt-nel{animation:none}` -- since the 2026-08-08 React
+# port it lives in gallery/src/styles/notify.css, verbatim) proves nothing about whether
 # the class reaches the element or wins the cascade -- and the Loom overrides #jobs-tray CSS
 # in its own <style>, which is precisely the shape of edit that could break one host and not
 # the other (the tray's font-family already drifted that way once, 2026-07-21).
@@ -651,10 +657,12 @@ _QUEUED_JOB = {"jobs": [{
 }]}
 
 
-# row() writes `<img class="jt-nel" ... onerror="this.remove()">`, so on a throwaway catalog
-# with no branding/ directory the mascot DELETES ITSELF and there is no element left to read
-# an animationName off (this test's first run died exactly there). A real install has the
-# file; served here as a 1x1 transparent PNG so the measured DOM matches a real one.
+# The tray row renders `<img class="jt-nel" ...>` with an onError handler that REMOVES the
+# element (ActivityTray.jsx's Row since the 2026-08-08 React port -- same self-delete the
+# vanilla row() had), so on a throwaway catalog with no branding/ directory the mascot
+# DELETES ITSELF and there is no element left to read an animationName off (this test's
+# first run died exactly there). A real install has the file; served here as a 1x1
+# transparent PNG so the measured DOM matches a real one.
 _PIXEL_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4zwAAAgIBAG4/xUwAAAAASUVORK5CYII=")
 
@@ -665,7 +673,11 @@ def _open_tray_with_queued_job(page, path):
     page.route("**/branding/gen_nel.png", lambda route: route.fulfill(
         status=200, content_type="image/png", body=_PIXEL_PNG))
     page.goto(path, wait_until="domcontentloaded")
-    # The fab is what a user clicks; JobsCard.applyState() reveals it on DOMContentLoaded.
+    # The fab is what a user clicks. 2026-08-08 port note: the vanilla's
+    # JobsCard.applyState() reveal-on-DOMContentLoaded is now ActivityTray.jsx rendering
+    # #jobs-fab with class "show" whenever the tray is closed (installNotify() ->
+    # jobsStore.start() has already run by the time the bundle mounts) -- same selector,
+    # same first observable state.
     page.wait_for_selector("#jobs-fab.show")
     page.click("#jobs-fab")
     page.wait_for_selector("#jobs-tray.open #jobs-tray .jt-item, #jobs-tray.open .jt-item")
@@ -673,9 +685,13 @@ def _open_tray_with_queued_job(page, path):
 
 
 def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
-    """The gallery and the Loom load ONE static/mg-notify.js, so the queued state must be
-    measurably identical on both -- that is the claim, and this measures it rather than
-    inferring it from the file being shared.
+    """The gallery and the Loom render ONE shared tray source -- since the 2026-08-08 React
+    port that is gallery/src/notify/ActivityTray.jsx + gallery/src/styles/notify.css, built
+    into TWO separate bundles (Vite's app.css for "/", esbuild's
+    master-storyboard.bundle.css for /loom) -- so the queued state must be measurably
+    identical on both. That is the claim, and this measures it rather than inferring it
+    from the source being shared: two build pipelines is exactly how one host's bundle
+    could go stale while the other moves on.
 
     Measured as shipped at 1280x900, on `/` and on `/loom?bundle=1` alike: the icon carries
     `jt-queued`, the mascot's and ring's computed animationName are both `none` (a rendering

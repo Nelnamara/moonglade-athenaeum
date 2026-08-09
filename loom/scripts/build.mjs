@@ -78,6 +78,10 @@ async function main() {
     globalName: "LoomBundle",     // -> window.LoomBundle.default is the App component
     jsx: "transform",             // classic runtime: React.createElement(...), matches
                                    // the Babel-standalone path (data-presets="react")
+    // Absolute /branding/* urls in shared CSS (notify.css's gift-box icon) are RUNTIME
+    // routes the Flask server serves -- leave them as-is instead of trying to bundle the
+    // file (Vite does the same by default for absolute paths).
+    external: ["/branding/*", "/thumbs/*"],
     target: ["es2020"],
     outfile,
     logLevel: "info",

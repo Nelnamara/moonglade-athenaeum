@@ -51,6 +51,13 @@ import MgArtFilters from "../gallery/src/art/artFilters.js";
 import GalleryPicker from "../gallery/src/components/GalleryPicker.jsx";
 import ModelPicker from "../gallery/src/components/ModelPicker.jsx";
 import CostBadge from "../gallery/src/components/CostBadge.jsx";
+import { installNotify, NotifyRoot } from "../gallery/src/notify/index.jsx";
+
+// The shared notify system (toasts · Activity tray · achievement celebrations · the Jobs
+// poller) -- the SAME modules the gallery bundle carries, so window.Toast/Jobs/JobsCard keep
+// working for every guarded call site in this file. Installed at module scope (the old
+// mg-notify.js <script> ran at parse time; the bundle evaluating is the equivalent moment).
+installNotify();
 
 // The Loom.dc.html's own TINTS + tint formula (line ~681, ~760): 6 rotating per-shot
 // gradients so same-status shots stay visually distinguishable from each other, not just
@@ -6230,12 +6237,12 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       const startedAt = Date.now();
       setCardStatus(c.id, { pendingTaskId: d.task_id, genStartedAt: startedAt });
       pollShot(c.id, d.task_id, startedAt);
-      // Registers this generation in the shared Job Tracker (static/mg-notify.js) so it shows
-      // up in the activity card no matter which surface is watching -- register-ONLY (no
+      // Registers this generation in the shared Job Tracker (gallery/src/notify/jobs.js) so it
+      // shows up in the activity card no matter which surface is watching -- register-ONLY (no
       // poll loop of its own), since pollShot above already owns real completion handling;
       // Jobs.track()'s own polling would be redundant for a submission this file already
-      // tracks. window.Jobs is guaranteed loaded here (mg-notify.js is always included in the
-      // Loom's own shell), unlike a host-agnostic shared component that can't assume it.
+      // tracks. window.Jobs is guaranteed loaded here (installNotify() runs at this bundle's
+      // own module scope), unlike a host-agnostic shared component that can't assume it.
       if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, entry.code + " · " + (c.title || "untitled"));
       return { ok: true, taskId: d.task_id };
     } catch {
@@ -6307,22 +6314,22 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
         // SequencePlayer on it forever (it never reaches the advance threshold).
         setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...(cls.duration ? { actualDur: cls.duration } : {}) });
         setBatchOutcome(cardId, "done");
-        // Nudge the shared Activity tracker (static/mg-notify.js's JobsCard) the INSTANT
+        // Nudge the shared Activity tracker (the notify module's JobsCard) the INSTANT
         // this shot's own poll -- the live, real-time signal the per-shot badge above
         // already trusts -- learns the task is done, exactly like the gallery's own
-        // Jobs.poll() does on its done branch (mg-notify.js). Without this the tray was
-        // only ever as fresh as ITS OWN independent, unsynchronized ~2.5-7s poll cycle
+        // Jobs poller does on its done branch (gallery/src/notify/jobs.js). Without this the
+        // tray was only ever as fresh as ITS OWN independent, unsynchronized ~2.5-7s poll cycle
         // (register() above is register-ONLY, no poll of its own -- see that comment), a
         // second, unsynchronized hop that let the two surfaces visibly disagree about the
         // same task and made the tray read as frozen when that hop lagged. window.JobsCard
-        // is guaranteed loaded here for the same reason window.Jobs is (mg-notify.js
-        // always ships in the Loom's shell).
+        // is guaranteed loaded here for the same reason window.Jobs is (installNotify() at
+        // this bundle's module scope).
         if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
       } else if (cls.phase === "failed") {
         setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
         setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
         setBatchOutcome(cardId, "failed");
-        // Same nudge as the done branch above, mirroring mg-notify.js's Jobs.poll() on its
+        // Same nudge as the done branch above, mirroring the notify Jobs poller on its
         // own failed branch -- a failed shot must not leave the tray stuck on stale
         // "running" until its own independent cycle happens to catch up.
         if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
@@ -6412,8 +6419,8 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     const startedAt = Date.now();
     const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
       const cls = classifyTaskStatus(d);
-      // The two JobsCard.refresh() nudges below mirror pollShot's (and mg-notify.js's own
-      // Jobs.poll()): the /api/task-status response that reports done/failed is the very call
+      // The two JobsCard.refresh() nudges below mirror pollShot's (and the notify Jobs
+      // poller's own): the /api/task-status response that reports done/failed is the very call
       // that made the server write the authoritative terminal job event, so refreshing right
       // here cannot race it. Without them a row registered by genImage/genEdit/genRef would sit
       // on stale "running" until the tray's own independent ~2.5-7s cycle happened to catch up --
@@ -6459,7 +6466,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
         body: JSON.stringify(body) });
       const d = await r.json();
       if (d.error || !d.task_id) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
-      // Register this submission in the shared Job Tracker (static/mg-notify.js -> /api/jobs)
+      // Register this submission in the shared Job Tracker (notify/jobs.js -> /api/jobs)
       // the moment the server accepts it. This path -- and genEdit/genRef, via runGen below --
       // never did, so a generation launched from the Loom's Image/Edit/Reference tabs was
       // invisible in BOTH Activity trays (the Loom's and the gallery's): they render from the
@@ -6887,7 +6894,7 @@ export default function App() {
     // still-pending drawer-submitted shot would resume with no persisted start time, silently
     // re-arming a full 6h give-up budget on every reload (found while implementing).
     setCardStatus(cardId, { status: "wip", pendingTaskId: detail.task_id, genStartedAt: Date.now() });
-    // Registers with the shared Job Tracker (static/mg-notify.js), mirroring generateShot's
+    // Registers with the shared Job Tracker (notify/jobs.js), mirroring generateShot's
     // own registration -- deliberately done HERE (the Loom's own host code), not inside
     // mg-generate-drawer.js itself, so the shared drawer component stays genuinely
     // host-agnostic (its own documented contract) rather than assuming window.Jobs exists.
@@ -6986,6 +6993,7 @@ export default function App() {
   return (
     <div className="sb-root">
       <style>{STYLES}</style>
+      <NotifyRoot />
       {mobileUI ? (
         <V2Boundary><LoomMobile
           project={project} entries={entries} thumbs={thumbs} genState={genState}

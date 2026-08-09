@@ -1230,7 +1230,7 @@ ${"=".repeat(48)}
           onError(e);
         });
       }
-      function load(append) {
+      function load2(append) {
         if (loading && append) return;
         loading = true;
         var atPage = page;
@@ -1252,36 +1252,36 @@ ${"=".repeat(48)}
       }
       function reload() {
         page = 1;
-        load(false);
+        load2(false);
       }
       function setFilter(key, value) {
         filters[key] = value;
         page = 1;
-        load(false);
+        load2(false);
       }
       function setFilters(patch2) {
         Object.assign(filters, patch2 || {});
         page = 1;
-        load(false);
+        load2(false);
       }
       function setQuery(q, ms) {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(function() {
           filters.q = q;
           page = 1;
-          load(false);
+          load2(false);
         }, ms == null ? debounceMs : ms);
       }
       function loadMore() {
         if (hasMore && !loading) {
           page++;
-          load(true);
+          load2(true);
         }
       }
       function maybeFillPage(gridEl) {
         if (hasMore && !loading && page < maxAutoFillPage && gridEl && gridEl.scrollHeight <= gridEl.clientHeight + 4) {
           page++;
-          load(true);
+          load2(true);
         }
       }
       function onScroll(gridEl, thresholdPx) {
@@ -1405,7 +1405,7 @@ ${"=".repeat(48)}
       } catch {
       }
     }, [tile]);
-    const schedule = useCallback(() => {
+    const schedule2 = useCallback(() => {
       clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         if (coreRef.current) coreRef.current.setFilters(fRef.current);
@@ -1486,7 +1486,7 @@ ${"=".repeat(48)}
           value: q,
           onChange: (e) => {
             setQ(e.target.value);
-            schedule();
+            schedule2();
           }
         }
       ), /* @__PURE__ */ react_global_shim_default.createElement(
@@ -1506,23 +1506,23 @@ ${"=".repeat(48)}
           value: collection,
           onChange: (e) => {
             setCollection(e.target.value);
-            schedule();
+            schedule2();
           }
         },
         /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "" }, "All collections"),
         collections.map((c) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: c, value: c }, c))
       ), showType && /* @__PURE__ */ react_global_shim_default.createElement("select", { "data-f": "type", value: type, onChange: (e) => {
         setType(e.target.value);
-        schedule();
+        schedule2();
       } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "all" }, "Image + video"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "image" }, "Images"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "video" }, "Videos")), showSource && /* @__PURE__ */ react_global_shim_default.createElement("select", { "data-f": "source", value: source, onChange: (e) => {
         setSource(e.target.value);
-        schedule();
+        schedule2();
       } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "" }, "Any source"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "api" }, "Generated (AI)"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "local" }, "Imported local")), /* @__PURE__ */ react_global_shim_default.createElement("select", { "data-f": "rating", value: rating, onChange: (e) => {
         setRating(+e.target.value);
-        schedule();
+        schedule2();
       } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "0" }, "Any rating"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "1" }, "\u2605+"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "2" }, "\u2605\u2605+"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "3" }, "\u2605\u2605\u2605+"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "4" }, "\u2605\u2605\u2605\u2605+"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "5" }, "\u2605\u2605\u2605\u2605\u2605")), /* @__PURE__ */ react_global_shim_default.createElement("select", { "data-f": "sort", value: sort, onChange: (e) => {
         setSort(e.target.value);
-        schedule();
+        schedule2();
       } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "newest" }, "Newest first"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "oldest" }, "Oldest first")), showUpload && /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(
         "button",
         {
@@ -2107,8 +2107,812 @@ ${"=".repeat(48)}
   });
   var CostBadge_default = CostBadge;
 
+  // ../gallery/src/notify/toastStore.js
+  var seq = 0;
+  var toasts = [];
+  var subs = /* @__PURE__ */ new Set();
+  function emit() {
+    subs.forEach((fn) => fn(toasts));
+  }
+  function subscribe(fn) {
+    subs.add(fn);
+    fn(toasts);
+    return () => subs.delete(fn);
+  }
+  function dismiss(id) {
+    const t = toasts.find((x) => x.id === id);
+    if (!t || t.out) return;
+    t.out = true;
+    toasts = toasts.slice();
+    emit();
+    setTimeout(() => {
+      toasts = toasts.filter((x) => x.id !== id);
+      emit();
+    }, 340);
+  }
+  function show(o) {
+    o = o || {};
+    const kind = o.kind || "";
+    const icon = o.icon || (kind === "ok" ? "\u2713" : kind === "err" ? "\u26A0" : kind === "unlock" ? "\u{1F3C6}" : "\u25C9");
+    const id = ++seq;
+    toasts = toasts.concat([{
+      id,
+      kind,
+      icon,
+      title: o.title || "",
+      msg: o.msg || "",
+      thumb: o.thumb || "",
+      sticky: !!o.sticky,
+      out: false
+    }]);
+    emit();
+    const remove = () => dismiss(id);
+    if (!o.sticky) setTimeout(remove, o.ttl || 5200);
+    return remove;
+  }
+
+  // ../gallery/src/notify/jobsStore.js
+  var LSK = "mg_jobs_open";
+  var jobs = [];
+  var open = false;
+  var started = false;
+  var timer = null;
+  var seeded = false;
+  var last = {};
+  var subs2 = /* @__PURE__ */ new Set();
+  function emit2() {
+    subs2.forEach((fn) => fn({ jobs, open }));
+  }
+  function subscribe2(fn) {
+    subs2.add(fn);
+    fn({ jobs, open });
+    return () => subs2.delete(fn);
+  }
+  function runningCount() {
+    return jobs.filter((j) => (j.status || "running") === "running").length;
+  }
+  function readOpen() {
+    try {
+      return localStorage.getItem(LSK) === "1";
+    } catch {
+      return false;
+    }
+  }
+  function setOpen(v) {
+    try {
+      localStorage.setItem(LSK, v ? "1" : "0");
+    } catch {
+    }
+    open = !!v;
+    emit2();
+  }
+  function openTray() {
+    setOpen(true);
+    refresh();
+  }
+  function closeTray() {
+    setOpen(false);
+  }
+  var TERMINAL = { done: 1, failed: 1, done_with_errors: 1, stale: 1 };
+  function toastTransitions(rows) {
+    rows.forEach((j) => {
+      const st = j.status || "running";
+      const prev = last[j.job_id];
+      if (seeded && !TERMINAL[prev] && TERMINAL[st]) {
+        if (st === "done") {
+          const mid = (j.media_ids || [])[0] || "";
+          show({
+            kind: "ok",
+            title: (j.label || "Generation") + " \u2014 done",
+            msg: "Added to your gallery.",
+            thumb: mid ? "/thumbs/" + encodeURIComponent(mid) + ".jpg" : null
+          });
+        } else if (st === "done_with_errors") {
+          show({
+            kind: "err",
+            sticky: true,
+            title: (j.label || "Job") + " finished with errors",
+            msg: j.error || "Some files failed \u2014 see the activity card."
+          });
+        } else if (st === "stale") {
+          show({
+            kind: "err",
+            sticky: true,
+            title: (j.label || "Job") + " \u2014 stalled",
+            msg: j.error || "See the activity card."
+          });
+        } else {
+          show({
+            kind: "err",
+            sticky: true,
+            title: (j.label || "Job") + " failed",
+            msg: j.error || "See the activity card."
+          });
+        }
+      }
+      last[j.job_id] = st;
+    });
+    seeded = true;
+  }
+  function refresh() {
+    return fetch("/api/jobs").then((r) => r.json()).then((d) => {
+      const rows = d && d.jobs || [];
+      toastTransitions(rows);
+      jobs = rows;
+      emit2();
+    }).catch(() => {
+    });
+  }
+  function schedule() {
+    if (timer) clearTimeout(timer);
+    const busy = runningCount() > 0;
+    timer = setTimeout(() => {
+      if (document.hidden) {
+        schedule();
+        return;
+      }
+      refresh().then(schedule);
+    }, busy ? 2500 : 7e3);
+  }
+  function dismiss2(id) {
+    fetch("/api/jobs/dismiss", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: id })
+    }).then(() => {
+      delete last[id];
+      refresh();
+    }).catch(() => {
+    });
+  }
+  function clearFinished() {
+    fetch("/api/jobs/dismiss", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ finished: true })
+    }).then(refresh).catch(() => {
+    });
+  }
+  function start() {
+    if (started) return;
+    started = true;
+    open = readOpen();
+    emit2();
+    refresh().then(schedule);
+  }
+
+  // ../gallery/src/notify/jobs.js
+  var seen = {};
+  function register(id, label, count) {
+    if (!id || seen[id]) return;
+    seen[id] = true;
+    fetch("/api/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: id, type: "generate", label: label || "Generation", status: "running", count })
+    }).catch(() => {
+    });
+    refresh();
+  }
+  function track(id, label, cb, count) {
+    if (!id || seen[id]) return;
+    register(id, label, count);
+    poll(id, cb);
+  }
+  var POLL_CEILING_MS = 6 * 60 * 60 * 1e3;
+  function poll(id, cb, startedAt) {
+    const t0 = startedAt || Date.now();
+    function again(ms) {
+      if (Date.now() - t0 > POLL_CEILING_MS) {
+        if (cb) cb("stalled", {
+          phase: "stalled",
+          error: "Stopped checking after 6h \u2014 the task may still be running. Reload to resume watching, or check it on pixai.art."
+        });
+        refresh();
+        return;
+      }
+      setTimeout(() => poll(id, cb, t0), ms);
+    }
+    fetch("/api/task-status?task_id=" + encodeURIComponent(id)).then((r) => r.json()).then((d) => {
+      if (d.phase === "done") {
+        if (cb) cb("done", d);
+        refresh();
+      } else if (d.phase === "failed") {
+        if (cb) cb("failed", d);
+        refresh();
+      } else {
+        if (cb) cb("running", d);
+        again(3e3);
+      }
+    }).catch(() => again(4e3));
+  }
+
+  // ../gallery/src/notify/ach.js
+  var data = null;
+  function unleashed() {
+    try {
+      return localStorage.getItem("unleash") === "1";
+    } catch {
+      return false;
+    }
+  }
+  function skinName(d, id) {
+    const s = ((d || {}).skins || []).filter((x) => x.id === id)[0];
+    return s ? s.name : id;
+  }
+  function applySkin(id) {
+    if (id && id !== "moonglade") document.documentElement.setAttribute("data-skin", id);
+    else document.documentElement.removeAttribute("data-skin");
+    try {
+      localStorage.setItem("skin", id || "moonglade");
+    } catch {
+    }
+  }
+  function syncSkin(d) {
+    const srv = d.skin || "moonglade";
+    let cur = null;
+    try {
+      cur = localStorage.getItem("skin");
+    } catch {
+    }
+    if (srv !== cur) applySkin(srv);
+  }
+  function load(mark) {
+    fetch("/api/achievements" + (mark ? "?mark=1" : "")).then((r) => r.json()).then((d) => {
+      data = d;
+      if (mark) toastNew(d);
+      syncSkin(d);
+    }).catch(() => {
+    });
+  }
+  function toastNew(d) {
+    const newly = (d.newly || []).map((id) => (d.achievements || []).filter((a) => a.id === id)[0]).filter(Boolean);
+    if (newly.length > 3) {
+      showToast({
+        icon: "\u{1F3C6}",
+        name: newly.length + " achievements unlocked",
+        desc: "Your catalog just earned a stack of achievements. Open \u{1F3C6} to review them."
+      });
+      return;
+    }
+    newly.forEach((a) => celebrate(a));
+  }
+  var _q = [];
+  var _playing = false;
+  var _actx = null;
+  var _sfx = {};
+  function _chime(tier) {
+    const key = tier || "common";
+    if (_sfx[key] === 0) {
+      _synth(tier);
+      return;
+    }
+    try {
+      const au = new Audio("/branding/sfx/ach_" + key + ".ogg");
+      au.volume = 0.7;
+      au.play().then(() => {
+        _sfx[key] = 1;
+      }).catch(() => {
+        _sfx[key] = 0;
+        _synth(tier);
+      });
+    } catch {
+      _sfx[key] = 0;
+      _synth(tier);
+    }
+  }
+  function _synth(tier) {
+    try {
+      _actx = _actx || new (window.AudioContext || window.webkitAudioContext)();
+      if (_actx.state === "suspended") _actx.resume();
+    } catch {
+      return;
+    }
+    const seq2 = {
+      common: [523, 660],
+      rare: [523, 660, 784],
+      epic: [523, 660, 784, 988],
+      legendary: [392, 523, 660, 784, 1047],
+      feat: [392, 466, 622, 932]
+    }[tier] || [660];
+    const t = _actx.currentTime + 0.02;
+    seq2.forEach((f, i) => {
+      const o = _actx.createOscillator(), g = _actx.createGain();
+      o.type = "triangle";
+      o.frequency.value = f;
+      o.connect(g);
+      g.connect(_actx.destination);
+      const s = t + i * 0.1;
+      g.gain.setValueAtTime(1e-4, s);
+      g.gain.linearRampToValueAtTime(0.15, s + 0.02);
+      g.gain.exponentialRampToValueAtTime(1e-4, s + 0.5);
+      o.start(s);
+      o.stop(s + 0.55);
+    });
+    if (tier === "legendary" || tier === "feat") {
+      const lo = _actx.createOscillator(), lg = _actx.createGain();
+      lo.type = "sine";
+      lo.frequency.value = tier === "feat" ? 78 : 98;
+      lo.connect(lg);
+      lg.connect(_actx.destination);
+      lg.gain.setValueAtTime(1e-4, t);
+      lg.gain.linearRampToValueAtTime(0.28, t + 0.02);
+      lg.gain.exponentialRampToValueAtTime(1e-4, t + 1.2);
+      lo.start(t);
+      lo.stop(t + 1.3);
+    }
+  }
+  function esc(s) {
+    return (s == null ? "" : String(s)).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  }
+  function _mkMoment(a, opts) {
+    opts = opts || {};
+    const tier = a.tier || "common";
+    const m = document.createElement("div");
+    m.className = "ach-m2";
+    const stage = document.createElement("div");
+    stage.className = "tstage";
+    const tw = document.createElement("div");
+    tw.className = "tw t-" + tier;
+    const line = opts.line != null ? opts.line : unleashed() && a.roast_nsfw ? a.roast_nsfw : a.roast || a.desc || "";
+    let rwd = "";
+    if (a.skin) rwd = "Unlocks skin: " + skinName(data || { skins: [] }, a.skin);
+    else if (a.banner_reward) rwd = "Unlocks a banner";
+    const toastHTML = '<div class="toast"><div class="cap"></div><div class="tbody"><div class="u">' + esc(opts.eyebrow || "New Achievement") + '</div><div class="n">' + esc(a.name) + '</div><div class="r">' + esc(line) + "</div>" + (opts.pill === false ? "" : '<span class="tier-pill">' + esc(tier) + "</span>") + (a.points && opts.pill !== false ? '<span class="pts-pill">+' + (Number(a.points) || 0) + "</span>" : "") + (rwd ? '<span class="rwd"><i class="giftbox"></i>' + esc(rwd) + "</span>" : "") + '</div><div class="flash"></div></div>';
+    tw.innerHTML = '<div class="mglow"></div>' + toastHTML;
+    stage.appendChild(tw);
+    m.appendChild(stage);
+    const cap = tw.querySelector(".cap");
+    if (opts.badge === false) {
+      const e2 = document.createElement("div");
+      e2.className = "badge emoji";
+      e2.textContent = a.icon || "\u{1F3C6}";
+      cap.appendChild(e2);
+    } else {
+      const b = document.createElement("img");
+      b.className = "badge";
+      b.onerror = function() {
+        const e = document.createElement("div");
+        e.className = "badge emoji";
+        e.textContent = a.icon || "\u{1F3C6}";
+        if (this.parentNode) this.parentNode.replaceChild(e, this);
+      };
+      b.src = "/branding/badges/" + encodeURIComponent(a.id) + ".png";
+      cap.appendChild(b);
+      const ring = document.createElement("div");
+      ring.className = "ring";
+      cap.appendChild(ring);
+      if (tier === "legendary") {
+        const halo = document.createElement("div");
+        halo.className = "m2-halo";
+        cap.appendChild(halo);
+        const moteWrap = document.createElement("div");
+        moteWrap.className = "m2-motewrap";
+        [0, 72, 144, 216, 288].forEach((deg, i) => {
+          const r = 50, rad = deg * Math.PI / 180;
+          const x = 50 + r * Math.cos(rad), y = 50 + r * Math.sin(rad), sz = i % 2 ? 5 : 7;
+          const mt = document.createElement("span");
+          mt.className = "m2-mote";
+          mt.style.left = x.toFixed(1) + "%";
+          mt.style.top = y.toFixed(1) + "%";
+          mt.style.width = sz + "px";
+          mt.style.height = sz + "px";
+          moteWrap.appendChild(mt);
+        });
+        cap.appendChild(moteWrap);
+      } else if (tier === "feat") {
+        const flame = document.createElement("div");
+        flame.className = "m2-flameglow";
+        cap.appendChild(flame);
+        cap.appendChild(document.createElement("div")).className = "m2-runeA";
+        cap.appendChild(document.createElement("div")).className = "m2-runeB";
+        for (let wi = 0; wi < 8; wi++) {
+          const sway = (wi % 2 ? 1 : -1) * (10 + wi * 3);
+          const rot = (wi % 2 ? 1 : -1) * (8 + wi * 2);
+          const sz = 10 + wi % 3 * 4;
+          const wisp = document.createElement("div");
+          wisp.className = "m2-wisp";
+          wisp.style.left = 16 + wi * 9 + "%";
+          wisp.style.width = sz + "px";
+          wisp.style.height = sz + "px";
+          wisp.style.setProperty("--sway", sway + "px");
+          wisp.style.setProperty("--rot", rot + "deg");
+          wisp.style.animationDuration = (1.1 + wi % 4 * 0.15).toFixed(2) + "s";
+          wisp.style.animationDelay = (1.4 + wi * 0.12).toFixed(2) + "s";
+          cap.appendChild(wisp);
+        }
+      }
+    }
+    if (opts.mascot !== false) {
+      const mfall = tier === "feat" ? "legendary" : tier;
+      const nel = document.createElement("img");
+      nel.className = "mascot";
+      const chain = [
+        "/branding/mascots/ach/" + encodeURIComponent(a.id) + ".webp",
+        "/branding/mascots/ach/" + encodeURIComponent(a.id) + ".png",
+        "/branding/mascots/present_" + mfall + ".png"
+      ];
+      let ci = 0;
+      nel.onerror = function() {
+        ci++;
+        if (ci < chain.length) this.src = chain[ci];
+        else this.remove();
+      };
+      nel.onload = function() {
+        try {
+          _seatMascot(this);
+        } catch {
+        }
+      };
+      nel.src = chain[0];
+      tw.insertBefore(nel, tw.querySelector(".toast"));
+    }
+    return { m, tw };
+  }
+  function _seatMascot(img) {
+    const W = 48, H = 64, c = document.createElement("canvas");
+    c.width = W;
+    c.height = H;
+    const x = c.getContext("2d");
+    x.drawImage(img, 0, 0, W, H);
+    const d = x.getImageData(0, 0, W, H).data;
+    let top = -1, bot = -1, r, q;
+    for (r = 0; r < H && top < 0; r++) {
+      for (q = 3; q < W * 4; q += 16) {
+        if (d[r * W * 4 + q] > 24) {
+          top = r;
+          break;
+        }
+      }
+    }
+    for (r = H - 1; r >= 0 && bot < 0; r--) {
+      for (q = 3; q < W * 4; q += 16) {
+        if (d[r * W * 4 + q] > 24) {
+          bot = r;
+          break;
+        }
+      }
+    }
+    if (top < 0 || bot <= top) return;
+    const opFrac = (bot - top + 1) / H, topFrac = top / H;
+    const BAND = 158, TARGET = 150;
+    const h = Math.max(140, Math.min(260, TARGET / opFrac));
+    img.style.height = h + "px";
+    img.style.top = (BAND - h * topFrac - 0.75 * (h * opFrac)).toFixed(1) + "px";
+  }
+  function _fanfare(m, tier) {
+    const glyphs = ["\u2726", "\u2727", "\u2B50"];
+    let i, s, cn;
+    for (i = 0; i < 46; i++) {
+      s = document.createElement("div");
+      s.className = "ee-star";
+      s.textContent = glyphs[i % 3];
+      s.style.left = Math.random() * 100 + "vw";
+      s.style.color = tier === "feat" ? "var(--ruby)" : "var(--gold)";
+      s.style.fontSize = 12 + Math.random() * 22 + "px";
+      s.style.animationDuration = 2.4 + Math.random() * 2.4 + "s";
+      s.style.animationDelay = Math.random() * 1.4 + "s";
+      m.appendChild(s);
+    }
+    const cols = tier === "feat" ? ["#e0355e", "#8a93a2", "#a11238", "#d6d2e2", "#4a515c"] : ["#b692e6", "#d4af37", "#4fc99a", "#c4a6f0", "#ffffff"];
+    for (i = 0; i < 84; i++) {
+      cn = document.createElement("i");
+      cn.className = "m2-conf";
+      cn.style.background = cols[i % cols.length];
+      cn.style.left = Math.random() * 100 + "vw";
+      cn.style.animationDuration = 1.8 + Math.random() * 1.8 + "s";
+      cn.style.animationDelay = 0.2 + Math.random() * 0.9 + "s";
+      m.appendChild(cn);
+    }
+  }
+  function _play(built, hold, after) {
+    const m = built.m, tw = built.tw;
+    document.body.appendChild(m);
+    void m.offsetWidth;
+    m.classList.add("go");
+    tw.classList.add("go");
+    const done = () => {
+      if (m._d) return;
+      m._d = true;
+      m.classList.add("out");
+      setTimeout(() => {
+        if (m.parentNode) m.remove();
+        if (after) after();
+      }, 500);
+    };
+    m._t = setTimeout(done, hold);
+    m.addEventListener("click", () => {
+      clearTimeout(m._t);
+      done();
+    });
+  }
+  var HOLD = { common: 4200, rare: 4800, epic: 5400, legendary: 6400, feat: 6400 };
+  function celebrate(a) {
+    if (a) {
+      _q.push(a);
+      if (!_playing) _next();
+    }
+  }
+  function _next() {
+    if (!_q.length) {
+      _playing = false;
+      return;
+    }
+    _playing = true;
+    const a = _q.shift(), tier = a.tier || "common";
+    _chime(tier);
+    const built = _mkMoment(a, {});
+    if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
+    _play(built, HOLD[tier] || 4600, _next);
+  }
+  function showToast(a) {
+    _play(_mkMoment(
+      { name: a.name, tier: "legendary", icon: a.icon || "\u{1F3C6}", id: "" },
+      { badge: false, mascot: false, pill: false, eyebrow: "Achievement Unlocked", line: a.desc || "" }
+    ), 6500, null);
+  }
+  function check() {
+    load(true);
+  }
+  function replay(a, opts) {
+    if (!a || !a.id) return {};
+    opts = opts || {};
+    const tier = a.tier || "common";
+    _chime(tier);
+    const built = _mkMoment(a, { eyebrow: "Achievement \xB7 Replay", line: opts.line });
+    if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
+    _play(built, HOLD[tier] || 4600, null);
+    const rEl = built.tw.querySelector(".toast .tbody .r");
+    return {
+      setText(text) {
+        if (rEl) rEl.textContent = text;
+      },
+      setGlitching(on) {
+        if (rEl) rEl.classList.toggle("glitch", !!on);
+      },
+      setSettledNsfw(on) {
+        if (rEl) rEl.classList.toggle("settled-nsfw", !!on);
+      },
+      dismiss() {
+        if (built.m && built.m.parentNode) built.m.click();
+      }
+    };
+  }
+
+  // scripts/react-dom-global-shim.js
+  var ReactDOM = window.ReactDOM;
+  var createPortal = ReactDOM.createPortal;
+  var flushSync = ReactDOM.flushSync;
+  var createRoot = ReactDOM.createRoot;
+  var hydrateRoot = ReactDOM.hydrateRoot;
+  var render = ReactDOM.render;
+  var unmountComponentAtNode = ReactDOM.unmountComponentAtNode;
+  var findDOMNode = ReactDOM.findDOMNode;
+
+  // ../gallery/src/notify/ToastHost.jsx
+  function ToastHost() {
+    const [toasts2, setToasts] = useState([]);
+    useEffect(() => subscribe(setToasts), []);
+    return createPortal(
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { id: "mg-toasts", "aria-live": "polite" }, toasts2.map((t) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: t.id, className: "mg-toast" + (t.kind ? " " + t.kind : "") + (t.out ? " out" : "") }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mt-ic" }, t.icon), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-main" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-title" }, t.title), t.msg ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-msg" }, t.msg) : null), t.thumb ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mt-thumb", style: { backgroundImage: "url('" + t.thumb.replace(/'/g, "%27") + "')" } }) : null, /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "mt-x", "aria-label": "Dismiss", onClick: () => dismiss(t.id) }, "\xD7")))),
+      document.body
+    );
+  }
+
+  // ../gallery/src/notify/format.js
+  function ago(ts) {
+    const s = Math.max(0, Math.floor(Date.now() / 1e3 - (ts || 0)));
+    if (s < 60) return "just now";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    if (s < 86400) return Math.floor(s / 3600) + "h ago";
+    return Math.floor(s / 86400) + "d ago";
+  }
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  function pad2(n) {
+    return (n < 10 ? "0" : "") + n;
+  }
+  function fmtClock(ts) {
+    if (!ts) return "\u2014";
+    const d = new Date(ts * 1e3);
+    const h = d.getHours(), ap = h >= 12 ? "PM" : "AM", h12 = h % 12 || 12;
+    return MONTHS[d.getMonth()] + " " + d.getDate() + ", " + h12 + ":" + pad2(d.getMinutes()) + " " + ap;
+  }
+  function fmtDuration(s) {
+    s = Math.max(0, Math.floor(s || 0));
+    if (s < 60) return s + "s";
+    if (s < 3600) return Math.floor(s / 60) + "m " + s % 60 + "s";
+    if (s < 86400) return Math.floor(s / 3600) + "h " + Math.floor(s % 3600 / 60) + "m";
+    return Math.floor(s / 86400) + "d " + Math.floor(s % 86400 / 3600) + "h";
+  }
+  var KIND_LABEL = {
+    cli: "Terminal",
+    panel: "Control Panel",
+    generate: "Generate",
+    delete: "Delete",
+    import: "Import"
+  };
+  function kindLabel(t) {
+    return KIND_LABEL[t] || t || "Job";
+  }
+  var LABEL_ING = {
+    Generated: "Generating",
+    Edited: "Editing",
+    Rendered: "Rendering",
+    Fixed: "Fixing",
+    Upscaled: "Upscaling",
+    Imported: "Importing",
+    Uploaded: "Uploading"
+  };
+  function labelFor(j, terminal) {
+    const l = j.label || "Generation";
+    return terminal ? l : LABEL_ING[l] || l;
+  }
+  function groupThousands(n) {
+    const s = String(Math.round(Math.abs(n)));
+    let grp = "", i = 0;
+    for (let k = s.length - 1; k >= 0; k--) {
+      grp = s.charAt(k) + grp;
+      if (++i % 3 === 0 && k > 0) grp = "," + grp;
+    }
+    return grp;
+  }
+
+  // ../gallery/src/notify/ActivityTray.jsx
+  function Row({ j, onDismiss, onOpenDetail }) {
+    const st = j.status || "running";
+    const queued = st === "running" && j.started === false;
+    const fin = st === "done" || st === "failed" || st === "done_with_errors" || st === "stale";
+    const mid = (j.media_ids || [])[0] || "";
+    const pct = st === "running" && j.total ? Math.min(100, Math.round((j.done || 0) / j.total * 100)) : null;
+    const showErr = (st === "failed" || st === "done_with_errors" || st === "stale") && j.error;
+    const cls = st === "failed" ? " st-failed" : st === "done_with_errors" || st === "stale" ? " st-warn" : "";
+    const icon = st === "done" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-ok jt-glyph" }, "\u2713"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "jt-nel", src: "/branding/mascots/trk_done.png", alt: "", onError: (e) => e.currentTarget.remove() })) : st === "done_with_errors" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-warn jt-glyph" }, "\u26A0"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "jt-nel", src: "/branding/mascots/trk_done.png", alt: "", onError: (e) => e.currentTarget.remove() })) : st === "failed" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-err jt-glyph" }, "\u26A0"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "jt-nel", src: "/branding/mascots/trk_fail.png", alt: "", onError: (e) => e.currentTarget.remove() })) : st === "stale" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-warn jt-glyph" }, "?"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "jt-nel", src: "/branding/mascots/trk_fail.png", alt: "", onError: (e) => e.currentTarget.remove() })) : /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-spin" + (queued ? " jt-queued" : "") }, /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "jt-nel", src: "/branding/gen_nel.png", alt: "", onError: (e) => e.currentTarget.remove() }), /* @__PURE__ */ react_global_shim_default.createElement("i", { className: "gen-ring" }));
+    const stopTracking = (e) => {
+      e.stopPropagation();
+      if (!fin && !window.confirm(
+        "Stop tracking this job?\n\nThis does NOT cancel it on PixAI or touch your credits -- it only stops your local Job Tracker from watching it. If it was actually still generating, the finished image will still land in your library later; it just will not be tracked here anymore."
+      )) return;
+      onDismiss(j.job_id);
+    };
+    return /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        className: "jt-item" + cls,
+        tabIndex: 0,
+        role: "button",
+        "aria-haspopup": "true",
+        onClick: (e) => onOpenDetail(j.job_id, e.currentTarget),
+        onKeyDown: (e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          onOpenDetail(j.job_id, e.currentTarget);
+        }
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-ic" }, icon),
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-main" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-lab" }, labelFor(j, fin)), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-sub" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-kind" }, kindLabel(j.type)), queued ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-phase", title: "PixAI has accepted this generation and no worker has picked it up yet \u2014 it has not started rendering." }, "queued") : null, queued && typeof j.eta_seconds === "number" && isFinite(j.eta_seconds) ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-eta", title: "The queue wait PixAI predicted for this model when the job was accepted. An estimate of the WAIT, not a countdown, and not progress \u2014 PixAI reports no progress on a running task." }, "est. ", fmtDuration(j.eta_seconds), " wait") : null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-when" }, ago(j.ts))), pct != null ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-bar" }, /* @__PURE__ */ react_global_shim_default.createElement("i", { style: { width: pct + "%" } })) : null, showErr ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-errmsg" }, j.error) : null),
+      st === "done" && mid ? /* @__PURE__ */ react_global_shim_default.createElement("a", { className: "jt-thumb", href: "/next?image=" + encodeURIComponent(mid), onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ react_global_shim_default.createElement("img", { src: "/thumbs/" + encodeURIComponent(mid) + ".jpg", alt: "" })) : null,
+      fin ? /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "jt-x", title: "Dismiss", onClick: stopTracking }, "\xD7") : /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "jt-x jt-forcex", title: "Stop tracking this job -- does not cancel it on PixAI", onClick: stopTracking }, "Stop tracking")
+    );
+  }
+  function Detail({ job, anchor, onClose }) {
+    const [, tick] = useState(0);
+    const [copied, setCopied] = useState(false);
+    const running = (job.status || "running") === "running";
+    const startedAt = job.started_at || job.ts || 0;
+    useEffect(() => {
+      if (!running) return void 0;
+      const t = setInterval(() => tick((n) => n + 1), 1e3);
+      return () => clearInterval(t);
+    }, [running]);
+    useEffect(() => {
+      const onDoc = (e) => {
+        const inDetail = e.target.closest && e.target.closest("#jt-detail");
+        const inTray = e.target.closest && e.target.closest("#jobs-tray");
+        if (!inDetail && !inTray) onClose();
+      };
+      const onKey = (e) => {
+        if (e.key === "Escape") onClose();
+      };
+      document.addEventListener("click", onDoc);
+      document.addEventListener("keydown", onKey);
+      return () => {
+        document.removeEventListener("click", onDoc);
+        document.removeEventListener("keydown", onKey);
+      };
+    }, [onClose]);
+    const r = anchor.getBoundingClientRect();
+    const w = 264, gap = 10;
+    let x = r.right + gap;
+    if (x + w > window.innerWidth - 8) x = Math.max(8, r.left - w - gap);
+    const y = Math.max(8, Math.min(r.top, window.innerHeight - 140));
+    const spent = (running ? Date.now() / 1e3 : job.ts || startedAt) - startedAt;
+    const copy = () => {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(job.job_id || "").catch(() => {
+          });
+        }
+      } catch {
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    };
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { id: "jt-detail", className: "open", "aria-hidden": "false", style: { left: x, top: y } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jd-row" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-k" }, "Task ID"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-v jd-id" }, job.job_id || ""), /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "jd-copy" + (copied ? " copied" : ""), title: "Copy task ID", onClick: copy }, copied ? "copied!" : "copy")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jd-row" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-k" }, "Time Sent"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-v" }, fmtClock(startedAt))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jd-row" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-k" }, "Time Spent"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-v" }, fmtDuration(spent), running ? " so far" : "")), typeof job.eta_seconds === "number" && isFinite(job.eta_seconds) ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jd-row" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-k" }, "Est. wait"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-v" }, fmtDuration(job.eta_seconds), " (PixAI, when queued)")) : null, typeof job.paid_credit === "number" && isFinite(job.paid_credit) ? (
+      // typeof+isFinite, not truthiness: a card-covered gen genuinely costs 0 and must render
+      // "0 credits", while an unknown cost shows NO row at all.
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jd-row" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-k" }, "Cost"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-v" }, groupThousands(job.paid_credit), " credits"))
+    ) : null);
+  }
+  function ActivityTray() {
+    const [state, setState] = useState({ jobs: [], open: false });
+    const [detailId, setDetailId] = useState(null);
+    const anchorRef = useRef(null);
+    useEffect(() => subscribe2(setState), []);
+    const closeDetail = useCallback(() => {
+      setDetailId(null);
+      anchorRef.current = null;
+    }, []);
+    const toggleDetail = useCallback((jid, anchorEl) => {
+      setDetailId((cur) => {
+        if (cur === jid) {
+          anchorRef.current = null;
+          return null;
+        }
+        anchorRef.current = anchorEl;
+        return jid;
+      });
+    }, []);
+    const { jobs: jobs2, open: open2 } = state;
+    const running = runningCount();
+    const detailJob = detailId ? jobs2.find((j) => j.job_id === detailId) : null;
+    useEffect(() => {
+      if (detailId && !detailJob) closeDetail();
+    }, [detailId, detailJob, closeDetail]);
+    return createPortal(
+      /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(
+        "div",
+        {
+          id: "jobs-fab",
+          className: (open2 ? "" : "show") + (running > 0 ? " busy" : ""),
+          title: "Activity",
+          onClick: () => openTray()
+        },
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jf-dot" }),
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { id: "jobs-fab-badge", className: "jf-badge" }, running || ""),
+        /* @__PURE__ */ react_global_shim_default.createElement("span", null, "Activity")
+      ), /* @__PURE__ */ react_global_shim_default.createElement("div", { id: "jobs-tray", className: open2 ? "open" : "", "aria-label": "Job activity" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-head" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-title" }, "\u25C9 Activity", jobs2.length ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-count" }, jobs2.length) : null), /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "jt-hbtn", title: "Clear finished", onClick: () => clearFinished() }, "clear"), /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "jt-hbtn", title: "Collapse", onClick: () => {
+        closeTray();
+        closeDetail();
+      } }, "\u2013")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-body" }, !jobs2.length ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-empty" }, /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "jt-empty-nel", src: "/branding/mascots/trk_empty.png", alt: "", onError: (e) => e.currentTarget.remove() }), /* @__PURE__ */ react_global_shim_default.createElement("div", null, "The archive is quiet.", /* @__PURE__ */ react_global_shim_default.createElement("br", null), "Generations and syncs will appear here.")) : jobs2.map((j) => /* @__PURE__ */ react_global_shim_default.createElement(Row, { key: j.job_id, j, onDismiss: dismiss2, onOpenDetail: toggleDetail })))), detailJob && anchorRef.current ? /* @__PURE__ */ react_global_shim_default.createElement(Detail, { job: detailJob, anchor: anchorRef.current, onClose: closeDetail }) : null),
+      document.body
+    );
+  }
+
+  // ../gallery/src/notify/index.jsx
+  var installed = false;
+  function installNotify() {
+    if (installed) return;
+    installed = true;
+    window.Toast = { show };
+    window.Jobs = { track, register };
+    window.JobsCard = {
+      open: openTray,
+      close: closeTray,
+      refresh,
+      dismiss: dismiss2,
+      clearFinished
+    };
+    window.Ach = { check, replay };
+    start();
+    check();
+  }
+  function NotifyRoot() {
+    return /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(ToastHost, null), /* @__PURE__ */ react_global_shim_default.createElement(ActivityTray, null));
+  }
+
   // master-storyboard.jsx
   var { useState: useState2, useEffect: useEffect2, useRef: useRef2, useCallback: useCallback2, useMemo: useMemo2 } = React;
+  installNotify();
   var LV_TINTS = [
     "linear-gradient(150deg, #33236d 0%, #1b1733 100%)",
     "linear-gradient(150deg, #3a3460 0%, #17142b 100%)",
@@ -3016,34 +3820,34 @@ ${"=".repeat(48)}
     ), projMenu && /* @__PURE__ */ React.createElement("div", { className: "sb-projveil", onClick: () => setProjMenu(false) }), projMenu && /* @__PURE__ */ React.createElement("div", { className: "sb-projpop" }, /* @__PURE__ */ React.createElement("div", { className: "sb-projpoph" }, "Storyboards"), /* @__PURE__ */ React.createElement("div", { className: "sb-projlist" }, projList.map((pr) => /* @__PURE__ */ React.createElement("div", { key: pr.id, className: "sb-projitem" + (pr.id === activeId ? " on" : "") }, /* @__PURE__ */ React.createElement("button", { className: "sb-projopen", onClick: () => openProject(pr.id), title: "Open this storyboard" }, /* @__PURE__ */ React.createElement("b", null, pr.name || "Untitled"), /* @__PURE__ */ React.createElement("span", null, pr.shots, " shot", pr.shots === 1 ? "" : "s")), /* @__PURE__ */ React.createElement("button", { className: "sb-projx", title: "Delete", onClick: () => deleteProject(pr.id) }, "\u2715")))), /* @__PURE__ */ React.createElement("div", { className: "sb-projacts" }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: newProject }, "+ New"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: duplicateProject }, "\u29C9 Duplicate"))));
   }
   function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundling }) {
-    const [open, setOpen] = useState2(false);
+    const [open2, setOpen2] = useState2(false);
     useEffect2(() => {
-      if (!open) return;
+      if (!open2) return;
       const onKey = (ev) => {
-        if (ev.key === "Escape") setOpen(false);
+        if (ev.key === "Escape") setOpen2(false);
       };
       window.addEventListener("keydown", onKey);
       return () => window.removeEventListener("keydown", onKey);
-    }, [open]);
+    }, [open2]);
     return /* @__PURE__ */ React.createElement("div", { className: "sb-projwrap" }, /* @__PURE__ */ React.createElement(
       "button",
       {
         className: "sb-projbtn",
-        onClick: () => setOpen((v) => !v),
+        onClick: () => setOpen2((v) => !v),
         title: "Export or restore this project",
         "aria-label": "Export"
       },
       "Export \u25BE"
-    ), open && /* @__PURE__ */ React.createElement("div", { className: "sb-projveil", onClick: () => setOpen(false) }), open && /* @__PURE__ */ React.createElement("div", { className: "sb-projpop" }, /* @__PURE__ */ React.createElement("div", { className: "sb-projpoph" }, "Export"), /* @__PURE__ */ React.createElement("button", { className: "sb-exportitem", onClick: () => {
+    ), open2 && /* @__PURE__ */ React.createElement("div", { className: "sb-projveil", onClick: () => setOpen2(false) }), open2 && /* @__PURE__ */ React.createElement("div", { className: "sb-projpop" }, /* @__PURE__ */ React.createElement("div", { className: "sb-projpoph" }, "Export"), /* @__PURE__ */ React.createElement("button", { className: "sb-exportitem", onClick: () => {
       exportAll();
-      setOpen(false);
+      setOpen2(false);
     } }, "Shot list ", /* @__PURE__ */ React.createElement("small", null, ".txt")), /* @__PURE__ */ React.createElement(
       "button",
       {
         className: "sb-exportitem",
         onClick: () => {
           exportJSON();
-          setOpen(false);
+          setOpen2(false);
         },
         title: "Project + any locally-added assets, referencing your own catalog by media id -- the quiet default for your own home \u21C4 work use"
       },
@@ -3056,7 +3860,7 @@ ${"=".repeat(48)}
         disabled: bundling,
         onClick: () => {
           exportBundle();
-          setOpen(false);
+          setOpen2(false);
         },
         title: "Everything in the lightweight backup, plus the actual media files -- for sharing with someone who doesn't share your catalog"
       },
@@ -3077,7 +3881,7 @@ ${"=".repeat(48)}
           style: { display: "none" },
           onChange: (e) => {
             importBackup(e.target.files[0]);
-            setOpen(false);
+            setOpen2(false);
           }
         }
       )
@@ -7279,10 +8083,10 @@ ${"=".repeat(48)}
       return () => clearTimeout(saveTimer.current);
     }, [project, activeId]);
     const storeThumb = useCallback2(async (file) => {
-      const data = await fileToThumb(file);
+      const data2 = await fileToThumb(file);
       const id = uid();
-      setThumbs((t) => ({ ...t, [id]: data }));
-      if (hasStore) await sSet(TPRE + id, data);
+      setThumbs((t) => ({ ...t, [id]: data2 }));
+      if (hasStore) await sSet(TPRE + id, data2);
       return id;
     }, []);
     const _adoptBackup = async (d) => {
@@ -7351,7 +8155,7 @@ Your currently-open board is left untouched.`)) return;
     };
   }
   function useShotMutations(project, setProject) {
-    const [open, setOpen] = useState2({});
+    const [open2, setOpen2] = useState2({});
     const setCard = useCallback2((aId, cId, fn) => setProject((p) => patchCard(p, aId, cId, fn)), [setProject]);
     const setAct = useCallback2((aId, patch2) => setProject((p) => patchAct(p, aId, patch2)), [setProject]);
     const setAssets = useCallback2((fn) => setProject((p) => patchAssets(p, fn)), [setProject]);
@@ -7359,7 +8163,7 @@ Your currently-open board is left untouched.`)) return;
     const addCard = (aId) => {
       const c = newCard();
       setProject((p) => appendCardToAct(p, aId, c));
-      setOpen((o) => ({ ...o, [c.id]: true }));
+      setOpen2((o) => ({ ...o, [c.id]: true }));
     };
     const importFootage = (mediaId, duration) => {
       const c = newCard(importedFootagePatch(mediaId, duration));
@@ -7399,8 +8203,8 @@ Your currently-open board is left untouched.`)) return;
     const delRef = (aId, cId, ref) => setProject((p) => removeRef(p, aId, cId, ref.id));
     const splitShot = (entry, t) => setProject((p) => splitCardAt(p, entry.a.id, entry.c.id, t, uid()));
     return {
-      open,
-      setOpen,
+      open: open2,
+      setOpen: setOpen2,
       setCard,
       setAct,
       setAssets,
@@ -7545,14 +8349,14 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     const POLL_SLOW_MS = 20 * 1e3;
     const POLL_STALE_AT_MS = 90 * 60 * 1e3;
     const POLL_STALE_MS = 3 * 60 * 1e3;
-    const POLL_CEILING_MS = 6 * 60 * 60 * 1e3;
+    const POLL_CEILING_MS2 = 6 * 60 * 60 * 1e3;
     const pollShot = (cardId, tid, existingStartedAt) => {
       setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering\u2026 (task " + String(tid).slice(-6) + ")" } }));
       const startedAt = existingStartedAt || Date.now();
       const pause = () => {
         setGenState((s) => ({ ...s, [cardId]: {
           phase: "paused",
-          msg: "Paused auto-checking after " + elapsedLabel(POLL_CEILING_MS) + " with no result \u2014 click to check again, or check the task on pixai.art (task " + String(tid).slice(-6) + ")"
+          msg: "Paused auto-checking after " + elapsedLabel(POLL_CEILING_MS2) + " with no result \u2014 click to check again, or check the task on pixai.art (task " + String(tid).slice(-6) + ")"
         } }));
         setBatchOutcome(cardId, "stale");
       };
@@ -7569,7 +8373,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
           setBatchOutcome(cardId, "failed");
           if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
-        } else if (elapsed > POLL_CEILING_MS) {
+        } else if (elapsed > POLL_CEILING_MS2) {
           pause();
         } else if (elapsed > POLL_STALE_AT_MS) {
           setGenState((s) => ({ ...s, [cardId]: {
@@ -7586,7 +8390,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         } else setTimeout(tick, 4e3);
       }).catch(() => {
         const elapsed = Date.now() - startedAt;
-        if (elapsed > POLL_CEILING_MS) {
+        if (elapsed > POLL_CEILING_MS2) {
           pause();
           return;
         }
@@ -7631,10 +8435,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         } else again(4e3);
       }).catch(() => again(5e3));
       const again = (ms) => {
-        if (Date.now() - startedAt > POLL_CEILING_MS) {
+        if (Date.now() - startedAt > POLL_CEILING_MS2) {
           setState((s) => ({ ...s, [cardId]: {
             phase: "error",
-            msg: "Stopped checking after " + elapsedLabel(POLL_CEILING_MS) + " \u2014 the task may still be running; check it on pixai.art (task " + String(tid).slice(-6) + ")"
+            msg: "Stopped checking after " + elapsedLabel(POLL_CEILING_MS2) + " \u2014 the task may still be running; check it on pixai.art (task " + String(tid).slice(-6) + ")"
           } }));
           return;
         }
@@ -7693,7 +8497,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     const runGen = async (setState, cardId, endpoint, body, priceBody, label, jobLabel) => {
       if (priceBody && !await confirmSpend(priceBody, label)) return;
       setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting\u2026" } }));
-      const poll = (tid) => pollTaskWithCeiling(tid, setState, cardId);
+      const poll2 = (tid) => pollTaskWithCeiling(tid, setState, cardId);
       try {
         const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         const d = await r.json();
@@ -7703,7 +8507,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         }
         if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, jobLabel);
         setState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Generating\u2026" } }));
-        poll(d.task_id);
+        poll2(d.task_id);
       } catch {
         setState((s) => ({ ...s, [cardId]: { phase: "error", msg: "network error" } }));
       }
@@ -7922,7 +8726,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     };
   }
   function useExportPipeline(project, thumbs) {
-    const [seq, setSeq] = useState2(null);
+    const [seq2, setSeq] = useState2(null);
     const [exp, setExp] = useState2(null);
     const exportPoll = useRef2(null);
     const download = (text, name, type) => {
@@ -8009,7 +8813,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     };
     const closeSequence = () => setSeq(null);
     return {
-      seq,
+      seq: seq2,
       exp,
       playSequence,
       exportCut,
@@ -8068,8 +8872,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       activeId
     } = useProjectStore(setSelShot);
     const {
-      open,
-      setOpen,
+      open: open2,
+      setOpen: setOpen2,
       setCard,
       setAct,
       setAssets,
@@ -8203,7 +9007,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setGenFixState(clearDraft);
     }, [activeId]);
     const {
-      seq,
+      seq: seq2,
       exp,
       playSequence,
       exportCut,
@@ -8243,7 +9047,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     const anyDone = entries.some((e) => e.c.resultMid);
     const { total, scale, over } = reelStats(entries, project.target);
     const done = entries.filter((x) => x.c.status === "done").length;
-    return /* @__PURE__ */ React.createElement("div", { className: "sb-root" }, /* @__PURE__ */ React.createElement("style", null, STYLES), mobileUI ? /* @__PURE__ */ React.createElement(V2Boundary, null, /* @__PURE__ */ React.createElement(
+    return /* @__PURE__ */ React.createElement("div", { className: "sb-root" }, /* @__PURE__ */ React.createElement("style", null, STYLES), /* @__PURE__ */ React.createElement(NotifyRoot, null), mobileUI ? /* @__PURE__ */ React.createElement(V2Boundary, null, /* @__PURE__ */ React.createElement(
       LoomMobile,
       {
         project,
@@ -8383,7 +9187,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         draftAttachedInfo,
         setDraftAttachedInfo
       }
-    )), seq && /* @__PURE__ */ React.createElement(SequencePlayer, { clips: seq, onClose: closeSequence }), exp && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
+    )), seq2 && /* @__PURE__ */ React.createElement(SequencePlayer, { clips: seq2, onClose: closeSequence }), exp && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
       if (e.target === e.currentTarget && exp.status !== "running") closeExport();
     } }, /* @__PURE__ */ React.createElement("div", { className: "sb-export-box" }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "sb-pick-t" }, "Export the cut"), exp.status !== "running" && /* @__PURE__ */ React.createElement("button", { className: "sb-pick-x", onClick: closeExport }, "\xD7")), exp.status === "running" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-bar" }, /* @__PURE__ */ React.createElement("i", { style: { width: (exp.progress || 0) + "%" } })), /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt" }, "Rendering\u2026 ", exp.progress || 0, "% \xB7 ", Math.round(exp.elapsed || 0), "s of cut"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: cancelExport }, "\u25A0 Stop")), exp.status === "done" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--green)" } }, "\u2713 Cut rendered."), exp.warning && /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--amber)" } }, "\u26A0 ", exp.warning), /* @__PURE__ */ React.createElement("a", { className: "sb-btn amber", href: "/api/loom/export-file", style: { alignSelf: "center", textDecoration: "none" } }, "\u21E9 Download mp4"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")), (exp.status === "failed" || exp.status === "cancelled") && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: exp.status === "failed" ? "var(--coral)" : "var(--ink2)" } }, exp.status === "failed" ? "\u26A0 " + (exp.error || "export failed") : "\u25A0 Export stopped."), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")))), bundleMissing && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
       if (e.target === e.currentTarget) closeBundleMissing();
@@ -8633,11 +9437,11 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       };
     }, [i]);
     useEffect2(() => {
-      const esc = (e) => {
+      const esc2 = (e) => {
         if (e.key === "Escape") onClose();
       };
-      window.addEventListener("keydown", esc);
-      return () => window.removeEventListener("keydown", esc);
+      window.addEventListener("keydown", esc2);
+      return () => window.removeEventListener("keydown", esc2);
     }, []);
     if (!clip) return null;
     return /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
