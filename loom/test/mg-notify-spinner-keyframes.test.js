@@ -37,13 +37,17 @@ describe("notify.css owns every keyframe it animates", () => {
       "lacks extra CSS (the Loom shell) the tracker spinner is frozen");
   });
 
-  test("the .jt-spin rules still animate gen-spin", () => {
-    // The mascot and the ring are the two visible 'this job is alive' signals; both
-    // must stay wired to the keyframe the previous test proves exists.
-    assert.match(src, /\.jt-spin\s+\.jt-nel\s*\{[^}]*animation:\s*gen-spin/,
-      ".jt-spin .jt-nel no longer animates gen-spin -- the mascot spinner is frozen");
+  test("the ring still animates gen-spin, and the portrait never does", () => {
+    // Only the ring is the 'this job is alive' signal now (fixed 2026-08-09, owner: "spins
+    // weirdly offset") -- it must stay wired to the keyframe the previous test proves exists.
+    // The portrait (.jt-nel) must NOT: object-position:60% 32% crops it off-center to frame
+    // the face, and rotating that asymmetric crop as a rigid unit made the face itself tumble
+    // through every orientation as the icon turned. A regression here is exactly that bug.
     assert.match(src, /\.jt-spin\s+\.gen-ring\s*\{[^}]*animation:\s*gen-spin/,
       ".jt-spin .gen-ring no longer animates gen-spin -- the ring spinner is frozen");
+    assert.doesNotMatch(src, /\.jt-spin\s+\.jt-nel\s*\{[^}]*animation:/,
+      ".jt-spin .jt-nel has an animation again -- the portrait must stay still, only the " +
+      "ring turns (see the 2026-08-09 fix note above this rule in notify.css)");
   });
 
   test("every animation name it uses is defined in its own stylesheet", () => {

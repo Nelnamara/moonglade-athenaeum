@@ -62,7 +62,7 @@ export default function SimilarModal({ mediaId, onClose, onOpenDetails }) {
           <div className="similar-grid">
             {state.images.map((it) => (
               <a key={it.media_id} className="scard"
-                href={"/next?image=" + encodeURIComponent(it.media_id)}
+                href={"/?image=" + encodeURIComponent(it.media_id)}
                 onClick={(e) => {
                   if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
                   e.preventDefault();

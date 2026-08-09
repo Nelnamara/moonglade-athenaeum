@@ -694,7 +694,12 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
                   ✓ Rendered — {l.cost === 0 ? "free (card used)" : (Number(l.cost || 0).toLocaleString() + " credits")}. Added to your gallery.
                 </div>
                 {(l.mediaIds || []).map((mid) => (
-                  <a key={mid} href={"/next?image=" + encodeURIComponent(mid)}>
+                  <a key={mid} href={"/?image=" + encodeURIComponent(mid)}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                      e.preventDefault();
+                      document.dispatchEvent(new CustomEvent("mg-open-details", { bubbles: true, composed: true, detail: { mid } }));
+                    }}>
                     <img src={"/thumbs/" + encodeURIComponent(mid) + ".jpg"} alt="result" loading="lazy" />
                   </a>
                 ))}
