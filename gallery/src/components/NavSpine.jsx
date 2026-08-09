@@ -77,10 +77,13 @@ export default function NavSpine({ boot, onOverlay }) {
         if (it.localOnly && !boot.is_true_local) return null;
         if (it.logout && !boot.user) return null;
         const tip = it.tip + (it.soon ? " — overlay ports next" : "");
-        // A soon:true click used to call onOverlay() anyway -- App.jsx's overlay switch has
-        // no case for "publish"/"train", so it set dead state and produced silent nothing.
+        // A soon:true click used to call onOverlay() anyway -- if App.jsx's overlay switch
+        // has no case for the flagged key, that sets dead state and produces silent nothing.
         // Real, visible feedback instead (same window.Toast every other real toast in this
-        // app already uses), before ever touching onOverlay.
+        // app already uses), before ever touching onOverlay. (As of 2026-08-08 every NAV
+        // entry above has shipped -- Publish and Train included, both have real App.jsx
+        // cases now -- so no item currently sets soon:true; this branch stays wired for
+        // whichever overlay lands next without one.)
         const go = () => {
           if (it.soon) {
             if (window.Toast) window.Toast.show({ kind: "ok", title: it.label, msg: it.label + " — coming soon." });

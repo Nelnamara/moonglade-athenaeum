@@ -104,10 +104,10 @@ import "../styles/create-mobile.css";
        `gen` state -- unrelated to Create's draft-generation surface entirely.
 
    What's an HONEST placeholder, not a shortcut on anything above:
-     - Create's own Video mode (its segmented control's third leg) and Edit's
-       own Fixer sub-tab render a soon-state note -- see CreateMobile.jsx's
-       own header comment for the full disclosure of what's deferred there
-       and why.
+     - Edit's own Fixer sub-tab renders a soon-state note -- see
+       CreateMobile.jsx's own header comment for the full disclosure of what's
+       deferred there and why. (Create's own Video mode is NOT a placeholder --
+       it shipped for real the same day, see the VideoMode paragraph above.)
 
    FOLIO MOBILE (2026-08-03) -- the hero's gold "🌙 Folio of Honors" icon now
    opens the real FolioMobile.jsx full-page destination instead of the

@@ -28,10 +28,13 @@ const boot = window.MG_BOOT || {};
 // desktop and mobile presentations on resize/orientation change, not just at
 // first paint (a live cross-breakpoint resize genuinely remounts whichever
 // side wasn't showing, on every surface this file mounts -- nothing new here).
-// AppMobile.jsx (2026-08-02) is Gallery-tab-only for now -- Create/Control
-// render honest placeholders inside it (see its own header comment) -- so
-// adding it here does not change App.jsx's own behavior at all: App only ever
-// mounts when isMobile is false, exactly as before this change.
+// AppMobile.jsx (2026-08-02 initial cut was Gallery-tab-only; Create tab landed
+// 2026-08-03, Control tab landed 2026-08-03 too) now mounts real, fully wired
+// Gallery/Create/Control tabs -- see its own header comment for the full
+// "what's real" account (the only remaining sub-placeholders are inside
+// Create: Edit's Fixer sub-tab). Adding it here does not change App.jsx's own
+// behavior at all: App only ever mounts when isMobile is false, exactly as
+// before this change.
 // The notify system (toasts · Activity tray · achievement celebrations · the spend-critical
 // Jobs poller) -- installed for every AUTHENTICATED render, matching the old shell rule that
 // LOGIN_PAGE never loaded mg-notify.js. installNotify() publishes the window.Toast/Jobs/
