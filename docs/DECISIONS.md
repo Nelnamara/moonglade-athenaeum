@@ -6633,3 +6633,23 @@ to the existing Restart chip (`ControlPanelOverlay.jsx:288-297`) -- wants a mock
 code per the project's own mock-before-code rule; can ride the same workshop pass as the
 job-tracker chrome redesign, or stay separate, owner's preference. (3) the cross-LAN
 stale-tab nudge noted above -- in scope for v1 or deferred.
+
+### Job-tracker chrome workshop sent (P5)  ·  *2026-08-09*
+
+Owner: *"We should workshop an idea and send to Claude design."* Built and sent a first-pass
+workshop, not a locked mockup: [Job Tracker — Chrome
+Workshop](https://claude.ai/code/artifact/f679e577-5c20-4b5a-8f3b-97d56dff8137). Diagnosis
+grounded in the real CSS, not eyeballed -- `#jobs-tray` is up to 560x600px, anchored
+bottom-left on every host, with no mobile-specific handling at all (it floats on top of
+`TabBarMobile`'s in-flow 3-icon bar, `.glm-nav`) and only a one-off `bottom:88px !important`
+patch in the Loom (`moonglade_gallery.py:4419`, added 2026-07-24 for one specific collision,
+not the footprint itself). Three directions offered: **A** dock as a fixed-height strip
+(smallest change, detail becomes a popover); **B** relocate to an uncontested top corner
+everywhere (cleanest rule, costs a real bottom-sheet build on mobile); **C** retire the
+floating layer entirely and surface state inside chrome each host already has (most complete
+fix, most host-specific work -- three integrations instead of one shared component). Owner
+picks/mixes on the page itself (local-only, a "Copy decision" export matching the Post-v3.0
+console's pattern); once picked, next step is a real pixel pass through Claude Design (the
+"Moonglade Athenaeum" design-system project, [[Moonglade Design Kit]]) via the existing
+`tools/export_design_kit.py` + `/design-sync` pipeline -- nothing in the workshop itself is
+final art. Not yet picked as of this entry.
