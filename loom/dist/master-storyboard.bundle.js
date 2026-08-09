@@ -2173,15 +2173,15 @@ ${"=".repeat(48)}
     s.mode = m;
     if (m === "i2v") s.slots = [s.slots[0] || null];
     else if (m === "flf") s.slots = [s.slots[0] || null, s.slots[1] || null];
-    else if (!s.imgSlots.length) s.imgSlots = [null];
+    else {
+      if (!s.imgSlots.length) s.imgSlots = [null];
+      if (!s.vidSlots.length) s.vidSlots = [null];
+    }
     s.modeNote = userDriven && from === "r2v" && m !== "r2v" ? heldRefsNotice(s, m) : "";
   }
   function applyModelGating(s, userDriven) {
     const allowed = MODEL_VMODES[s.model] || ["i2v", "flf", "r2v"];
-    if (allowed.indexOf(s.mode) === -1) {
-      applyMode(s, allowed[0], userDriven);
-      return;
-    }
+    if (allowed.indexOf(s.mode) === -1) applyMode(s, allowed[0], userDriven);
     const maxDur = MODEL_MAXDUR[s.model] || 10;
     if (s.duration > maxDur) s.duration = maxDur;
   }
@@ -2298,6 +2298,11 @@ ${"=".repeat(48)}
     const audFileRef = useRef(null);
     const costRef = useRef(null);
     const rootRef = useRef(null);
+    const liveNode = useRef(null);
+    const setRoot = useCallback((n) => {
+      rootRef.current = n;
+      if (n) liveNode.current = n;
+    }, []);
     const costSeq = useRef(0);
     const costTimer = useRef(0);
     const chipTimer = useRef(0);
@@ -2306,7 +2311,7 @@ ${"=".repeat(48)}
     const pollTimers = useRef([]);
     const connected = useRef(true);
     const emit3 = useCallback((name, detail) => {
-      const n = rootRef.current;
+      const n = liveNode.current;
       if (n) n.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, detail: detail || {} }));
     }, []);
     useEffect(() => () => {
@@ -2590,7 +2595,9 @@ ${"=".repeat(48)}
       fetch("/api/loom/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) }).then((r) => r.json()).then((d) => {
         unlock();
         if (d.error || !d.task_id) {
-          updateLine(id, { kind: "error", text: friendlyGenErr2(d.error || "submit failed"), moon: false });
+          const msg = friendlyGenErr2(d.error || "submit failed");
+          updateLine(id, { kind: "error", text: msg, moon: false });
+          emit3("mg-error", { error: msg });
           return;
         }
         emit3("mg-submit", { task_id: d.task_id, payload: p });
@@ -2599,6 +2606,7 @@ ${"=".repeat(48)}
       }).catch(() => {
         unlock();
         updateLine(id, { kind: "error", text: "network error", moon: false });
+        emit3("mg-error", { error: "network error" });
       });
     };
     const poll2 = (taskId, lineId) => {
@@ -2758,7 +2766,7 @@ ${"=".repeat(48)}
     });
     let vidN = 0;
     const vidArr = s.vidSlots.length ? s.vidSlots : [null];
-    return /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: rootRef, className: "gen-drawer" + (className ? " " + className : ""), style, "data-loom-ctx": loomCtx ? "" : void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "tablist" }, SEG.map(([v, lbl]) => allowedModes.indexOf(v) === -1 ? null : /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", className: s.mode === v ? "on" : "", onClick: () => userSetMode(v) }, lbl))), s.modeNote ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-modenote" }, s.modeNote) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl mgd-slots-lbl" }, MODE_LBL[s.mode]), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slots mgd-imgslots" }, primSlots, s.mode === "r2v" && primArr.length < 6 ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-slot-add", onClick: () => {
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: setRoot, className: "gen-drawer" + (className ? " " + className : ""), style, "data-loom-ctx": loomCtx ? "" : void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "tablist" }, SEG.map(([v, lbl]) => allowedModes.indexOf(v) === -1 ? null : /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", className: s.mode === v ? "on" : "", onClick: () => userSetMode(v) }, lbl))), s.modeNote ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-modenote" }, s.modeNote) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl mgd-slots-lbl" }, MODE_LBL[s.mode]), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slots mgd-imgslots" }, primSlots, s.mode === "r2v" && primArr.length < 6 ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-slot-add", onClick: () => {
       st.current.imgSlots.push(null);
       rerender();
     } }, "+ add") : null), s.mode === "flf" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "End Frame ", /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-note" }, "(Optional)")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slots" }, slotBox(s.slots[1], 1, "primary", "+ end", "end"))) : null, isR2v ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Video references ", /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-note" }, "\xB7 up to 3 \xB7 2\u201315s each, 15s total")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slots" }, vidArr.map((item, i) => {
@@ -2769,7 +2777,9 @@ ${"=".repeat(48)}
       }
       return slotBox(item, i, "vid", "+ video", tag);
     }), s.vidSlots.length < 3 ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-slot-add", onClick: () => {
-      st.current.vidSlots.push(null);
+      const cur = st.current;
+      if (!cur.vidSlots.length) cur.vidSlots = [null, null];
+      else cur.vidSlots.push(null);
       rerender();
     } }, "+ add") : null), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Audio reference ", /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-note" }, "\xB7 WAV \u226415MB")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-audiorow" }, s.audSlot && s.audSlot.uploading ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-note" }, "Uploading ", s.audSlot.uploading, "\u2026") : s.audSlot ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-audiochip" }, "\u266A @audio1 \xB7 ", s.audSlot.filename, " ", /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", onClick: () => {
       st.current.audSlot = null;

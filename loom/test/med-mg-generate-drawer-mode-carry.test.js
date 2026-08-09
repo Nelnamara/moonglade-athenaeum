@@ -196,6 +196,55 @@ describe("the model-gating path itself -- the way M27 was actually hit", () => {
   });
 });
 
+// Adversarial-review fixes (2026-08-08, commit after 134dcb9). See the review ledger.
+describe("model gating clamps duration even when it ALSO switches an unsupported mode (review #1)", () => {
+  test("v4.0/r2v/15s -> pick v3.0 (i2v-only, 10s cap): mode drops to i2v AND duration clamps to 10", () => {
+    const d = drawer({ model: "v4.0", mode: "r2v", duration: 15, imgSlots: [ref(101)] });
+    d.model = "v3.0";
+    applyModelGating(d, true);
+    assert.equal(d.mode, "i2v", "r2v isn't supported by v3.0, so the mode must switch");
+    assert.equal(d.duration, 10,
+      "the over-cap duration must STILL clamp to the new model's cap -- an early return after the " +
+      "mode switch used to skip this and ship duration:15 to a 10s engine in the priced/submitted payload");
+  });
+  test("flf/15s (v4.0 pair) -> pick v2.7 (i2v-only, 10s cap) clamps too", () => {
+    const d = drawer({ model: "v4.0", mode: "flf", duration: 15, slots: [ref(101), null] });
+    d.model = "v2.7";
+    applyModelGating(d, true);
+    assert.equal(d.mode, "i2v");
+    assert.equal(d.duration, 10);
+  });
+  test("a supported-mode model change still clamps duration (the plain fall-through path)", () => {
+    const d = drawer({ model: "v4.0", mode: "i2v", duration: 15 });
+    d.model = "v3.2";   // i2v IS allowed; only the cap changes 15 -> 10
+    applyModelGating(d, true);
+    assert.equal(d.mode, "i2v");
+    assert.equal(d.duration, 10);
+  });
+});
+
+describe("entering Multi-Reference normalizes the video bank so the first +add works (review #4)", () => {
+  test("applyMode('r2v') with an empty video bank seeds vidSlots to [null], like imgSlots", () => {
+    const d = drawer({ mode: "i2v", vidSlots: [] });
+    applyMode(d, "r2v", true);
+    assert.deepEqual(d.vidSlots, [null],
+      "an empty vidSlots must normalize to one empty slot on entering r2v -- else the render " +
+      "fabricates a slot the backing array lacks and the first '+ add' click is a no-op");
+  });
+  test("a non-empty video bank is left untouched on entering r2v", () => {
+    const d = drawer({ mode: "i2v", vidSlots: [ref(201)] });
+    applyMode(d, "r2v", true);
+    assert.deepEqual(d.vidSlots, [ref(201)]);
+  });
+  test("the video '+ add' handler also seeds two when the backing bank is empty (covers the prefill path)", () => {
+    // The prefill path can set vidSlots=[] AFTER applyMode (host video_refs:[]), so the handler
+    // itself must handle the empty case, matching the vanilla's render-time normalization.
+    const drawerSrc = readFileSync(path.join(__dirname, "../../gallery/src/components/VideoDrawer.jsx"), "utf8");
+    assert.match(drawerSrc, /if \(!cur\.vidSlots\.length\) cur\.vidSlots = \[null, null\]; else cur\.vidSlots\.push\(null\);/,
+      "the video '+ add' onClick must seed [null, null] when the bank is empty, not a bare push");
+  });
+});
+
 describe("the notice path writes no slot, and only a user gesture can commit a mode", () => {
   test("heldRefsNotice is a pure read -- it writes no priced slot", () => {
     const d = drawer({ imgSlots: [ref(101), ref(102)], slots: [null] });

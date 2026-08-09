@@ -110,7 +110,14 @@ export function applyMode(s, m, userDriven) {
   s.mode = m;
   if (m === "i2v") s.slots = [s.slots[0] || null];
   else if (m === "flf") s.slots = [s.slots[0] || null, s.slots[1] || null];
-  else if (!s.imgSlots.length) s.imgSlots = [null];
+  else {
+    // r2v: ensure each bank carries at least its one empty slot, matching the vanilla's
+    // _renderSlots/_renderVidSlots normalization. Without normalizing vidSlots here the render's
+    // `vidSlots.length ? vidSlots : [null]` fallback fabricates a slot the backing array doesn't
+    // have, so a first "+ add" click just re-derives the same single slot (a no-op).
+    if (!s.imgSlots.length) s.imgSlots = [null];
+    if (!s.vidSlots.length) s.vidSlots = [null];
+  }
   s.modeNote = (userDriven && from === "r2v" && m !== "r2v") ? heldRefsNotice(s, m) : "";
 }
 
@@ -118,7 +125,12 @@ export function applyMode(s, m, userDriven) {
 // duration to the model's cap. `userDriven` only forwards to applyMode's notice gate.
 export function applyModelGating(s, userDriven) {
   const allowed = MODEL_VMODES[s.model] || ["i2v", "flf", "r2v"];
-  if (allowed.indexOf(s.mode) === -1) { applyMode(s, allowed[0], userDriven); return; }
+  if (allowed.indexOf(s.mode) === -1) applyMode(s, allowed[0], userDriven);
+  // Clamp duration to the model's cap UNCONDITIONALLY -- the vanilla _applyModelGating fell
+  // through to this after the mode switch. An earlier `return` right after applyMode() skipped it,
+  // so switching from a V4.0/15s state to a 10s-cap engine (its mode ALSO unsupported, e.g.
+  // r2v->i2v) left duration:15 in the priced + submitted payload. That is a real spend-path
+  // divergence (the MODEL_MAXDUR comment cites ~84,000 credits for a V2.7 15s clip).
   const maxDur = MODEL_MAXDUR[s.model] || 10;
   if (s.duration > maxDur) s.duration = maxDur;
 }
