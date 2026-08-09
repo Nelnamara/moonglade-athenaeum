@@ -6653,3 +6653,58 @@ console's pattern); once picked, next step is a real pixel pass through Claude D
 "Moonglade Athenaeum" design-system project, [[Moonglade Design Kit]]) via the existing
 `tools/export_design_kit.py` + `/design-sync` pipeline -- nothing in the workshop itself is
 final art. Not yet picked as of this entry.
+
+### P3 asset-bundling scoping, begun -- and `full-toolbox` is a THIRD dead achievement  ·  *2026-08-09*
+
+Owner's three answers on the open scoping questions: (1) container format -- **already
+decided**, see below, correcting his own "I'm almost certain this was documented" instinct
+half-right; (2) adoption from existing installs -- **owner will run a final stray-file audit
+himself** (assign each stray to an achievement/function, remove, or leave as placeholder)
+before the bundle imports anything; (3) PWA-icon build step -- **folds into the same bundle
+mechanism**, no separate handling.
+
+**Container format was already decided, a real schema was not.** `:775-779` (2026-07-27,
+owner verbatim: *"sqlite is the no-brainer. it already houses our catalog."*) -- SQLite over
+zipapp, one file shipped with the app (not rows in the user's `catalog.db`), shape as ranked:
+*"one file, a table of (path, bytes, sha256, mtime), hash-indexed random access, transactional
+updates, no extraction step."* That sentence is the entire design surface on record -- no
+column types, no keying/versioning scheme, no contents inventory. Confirmed via full repo +
+git-history sweep (no abandoned branch or commit ever drafted more). This IS "P3's own schema
+design" the auto-updater scoping note above said still needs doing -- starts from that one
+sentence, not from scratch.
+
+**New finding, not previously documented anywhere: `full-toolbox` ("The Full Toolbox," rare,
+requires edit+enhance+fix each used once, `moonglade_gallery.py:1347-1356`) is ALSO
+permanently unearnable**, same root cause as the two already-known dead achievements
+(`first-enhance`, `enhance-adept`) -- `/api/enhance` is gone, so nothing ever adds `"enhance"`
+to the `tools` telemetry set (only `/api/edit`:10036 and `/api/fix`:10070 write to it), and
+the set can never reach the required 3 distinct values. `full-toolbox` has no `banner_reward`
+key, so it sits in Completionist's required pool too (`:2366-2371`) -- **Completionist has at
+least three dead required achievements, not two.** The 2026-07-26 "all 36 metrics checked"
+claim (`:3529-3533`) predates this and should not be trusted for `full-toolbox` specifically.
+This changes the D3 pool-fix math and needs folding into whatever D3/D4 decide.
+
+**"The bonus mark slot" -- the literal phrase does not exist anywhere in the repo.** Best-guess
+candidates, neither confirmed: (a) `mark_12` (Gem Tome) is still shipped in
+`branding/marks/marks.json` despite a 2026-07-23 owner ruling to remove it (`:3271-3275`,
+"owner dislikes it") that was never executed; (b) Moonlit Silver's reward-bundle theme has a
+banner picked but no mark ever assigned (`:3339`, "no mark picked yet"). If neither is what
+was meant, the term needs a plain-language re-ask rather than another guess.
+
+**Skin banners: specced once, never built, not an oversight.** `docs/ART.md:135` -- *"'One
+banner per skin' was specced but never built; there is exactly one banner slot (#1), shared by
+every skin."* The slot schema (`BRANDING_SLOTS`, `:1713`) has zero skin dimension anywhere;
+per-skin selection was explicitly deferred to ride the asset-bundling work (owner, 2026-08-05,
+`:1703-1705`).
+
+**Wiki spoiler leak (D1) is live right now, not just theoretical.** `wiki/Folio-of-Honors.md`
+still prints the skin-unlock threshold table and `wiki/Control-Panel.md` still names the
+Branding tab -- both due the same scrub the changelog already got. Scoped into P2 (docs
+audit), which has not run.
+
+**P0/P1/P2 status, asked directly: none have run.** Only the art track (A1-A3) and this
+session's P4 scope + P5 workshop have had any real motion. Concretely still undone from P0:
+the wiki scrub above, `design-final-pass` branch still exists (`git branch -a` confirms),
+`_cli_job_finish`'s unredacted `str(error)` at `moonglade_backup.py:1061` is unfixed, and the
+four stale comments from the pre-v3.0 sweep are untouched. P1 (test-suite audit) and P2
+(DECISIONS.md condensing + branch graveyard + doc refresh) have not been started at all.
