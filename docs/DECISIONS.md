@@ -6418,10 +6418,82 @@ follow-up commit:
 Each fix carries a regression test (loom 725/725, pytest green). The 1 refuted finding (an M27
 dispatch-guard claim) was a false alarm -- the ported test does still pin it.
 
-**NOT yet live-verified in a browser** -- builds + both full test suites + the adversarial review
-are the verification so far (the spend-critical logic is behaviorally unit-tested). A live Video-tab
-walkthrough (render, the @-chip contenteditable, cost pricing on a picked ref -- WITHOUT ever
-clicking Generate, per the hands-off spend rule) is the natural next check before the master merge.
+**LIVE-QA VERIFIED (2026-08-09, owner-authorized drive on D:/5757 -- real account, real 35,874-image
+library, 300k credit budget, in-catalog norms).** The whole ported VideoDrawer + every other ported
+React component were exercised on the live server; the running server was confirmed on THIS fix commit
+(Control Panel footer `v2.5.0 · b8096a5`; bundles byte-identical to a fresh build). Results:
+- Gallery drawer: render, mode switching, model gating + the **duration clamp (fix #1) confirmed live**
+  (V4.0/15s -> V3.0 dropped to 10s), the **@image1 contenteditable chip confirmed live** (the riskiest
+  React piece), cost badge idle/paid(~55k)/FREE states, the no-ref Generate refusal firing ZERO network
+  calls, and **fix #4 (video "+add") confirmed live**.
+- **Full video generation end-to-end (VG-7): submit -> rendered -> landed in the gallery (315->316
+  videos), playable, carrying its exact prompt -- for 0 credits** (a free "V4.0 Lite" card auto-applied;
+  cards 31->30; the ledger's usage history records the card consumption for the task). The 300k budget
+  was left entirely untouched.
+- Loom: bundle loads, the drawer mounts, **loomCtx hides the duplicate Camera/quality (VL-1)**, and the
+  shot prefill lands (VL-2).
+- Other ported components: ModelPicker, GalleryPicker, CostBadge, UpscalePanel, the notify job-tracker,
+  the gallery grid/right-click/lightbox, the Control Panel + PixAI account/cards/ledger -- all render +
+  work on real data. No regressions surfaced anywhere.
+- Not exercised (prior React work, not this port): mobile viewport, fresh-install/first-run, CSV export.
 
-**v3.0 GATE:** static/ is empty of JS -> the no-vanilla campaign is complete -> `design-final-pass`
-is ready for the master merge + v3.0 tag, pending the owner's live test.
+**v3.0 GATE MET:** static/ is empty of JS, the no-vanilla campaign is complete, both suites are green,
+the adversarial review's findings are fixed, and the port is live-QA-verified end-to-end. `design-final-
+pass` is ready for the master merge + v3.0 tag, pending the owner's explicit word to cut.
+
+### Pre-v3.0 due-diligence sweep -- MERGE-READY, zero blockers  ·  *2026-08-09*
+
+A 6-agent workflow swept the whole repo before the cut (code TODO/FIXME markers, skipped/xfail tests,
+open items in this doc + design_handoff/gap-audit.md, CHANGELOG/release consistency, and an exhaustive
+"dark hidden document" grep of every .md). **Verdict: merge-ready, ZERO hard blockers.** 61 raw findings
+collapsed to ~4 cheap should-fix cleanups + ~15 already-tracked deferrals. **No hidden backlog exists**
+(private/ and design_handoff/ are git-ignored -- 0 tracked files); **all test skips are legitimate
+environment gates.** Nothing in the SHIPPING CODE is broken -- the v3.0 cut is a set of deliberate
+release actions, not bug fixes.
+
+**SHOULD-FIX (all non-blocking, owner's call whether pre- or post-cut):**
+- **Completionist / "Master of the Athenaeum" is permanently unearnable** -- its required pool includes
+  two dead Enhance achievements (first-enhance, enhance-adept; moonglade_gallery.py:1262-1273/1394-1405,
+  pool logic :2366-2371) whose metrics can never increment (Enhance never dispatches for an API-key
+  client). Owner-acknowledged (DECISIONS.md:1035-1041) and tangled with the still-open 57-vs-60 roster
+  call (:208-211). Fix = drop the two dead achievements from the required pool, OR an explicit owner
+  decision to ship the top of the ladder unreachable in v3.0. **This is the one user-facing item to
+  decide.**
+- CHANGELOG maintenance note drifted ("Releases through v2.2.0" -> actually v2.5.0). **FIXED this pass**
+  (rewritten drift-proof to point at `gh release list`).
+- Three stale/misleading code comments (NavSpine.jsx dead `soon` branch; main.jsx:31-34 + AppMobile.jsx:
+  106-110 still call mobile Create/Video a placeholder though both real tabs now mount). Comment-only,
+  zero runtime impact.
+- moonglade_backup.py:991-998 `_cli_job_finish` writes `str(error)` UN-redacted, so an authenticated LAN
+  device could see a host path in a failed CLI-job error served by /api/jobs. Pre-existing, auth-gated,
+  low. Fix = route CLI-job error text through `_redact_host_paths` too.
+
+**CUT SEQUENCE (one commit, on the owner's word -- NOT done yet):** (1) bump the sole version literal
+`moonglade_backup.__version__` 2.5.0 -> 3.0.0 (renders to banner + Panel footer via _build_stamp;
+package.json 0.1.0 are private build workspaces, do NOT bump). (2) Rename CHANGELOG `## [Unreleased]`
+-> `## [3.0.0] - <date>` + a fresh empty `[Unreleased]` (coupled to the version by
+test_version_matches_changelog). (3) **Before the rename, hand-reconcile the ~2117-line [Unreleased]
+block** -- it currently self-contradicts (Publish "live" vs "coming-soon"; banners "display" vs "don't")
+because later bullets superseded earlier ones; collapse the superseded ones so the dated note is
+coherent. (4) full suite green (spend/auth/schema always full). (5) merge --no-ff, tag v3.0.0, publish a
+freshly-written GitHub Release note.
+
+### Easter eggs are DISCOVERED, never announced -- and the top post-v3.0 todos  ·  *2026-08-09*
+
+**HARD RULE (owner, reiterated + frustrated):** easter eggs and the features they unlock are
+DISCOVERED by the user, never announced. They get **ZERO mention in any public artifact** -- the
+public `CHANGELOG.md`, GitHub Release notes, `docs/`, `wiki/`, published Artifacts, or commit
+messages. **The Branding tab is gated by the "Under the Hood" hidden achievement, so it is OMITTED
+ENTIRELY from anything public** (not hinted, not genericized -- left out). Also externally-forbidden:
+the "Under the Hood" trigger, the "Triggered" feat + its trigger, real achievement progress numbers,
+the roster count (57/60), specific achievement/feat names, and how-to-earn thresholds. The v3.0
+changelog + Release were scrubbed to this bar. Internal documentation lives ONLY in git-ignored
+`private/EASTER_EGGS.md` (the canonical internal record); the owner holds the full canonical set.
+
+**TOP TODOs after v3.0 (owner-named, in order):**
+1. **Document the easter eggs internally** so they're maintained + never leaked -- started in
+   `private/EASTER_EGGS.md`; keep it current as new eggs ship.
+2. **The asset-bundling project** -- move default branding/mascot assets into a SQLite asset bundle
+   so they ship OUTSIDE the git-ignored `branding/` folder. This unblocks the "Under the Hood"
+   trigger working from a clean install, and lets the packaged app carry its defaults. Previously
+   deferred (DECISIONS.md:983-997, 3487-3511); now the priority item after the v3.0 cut.

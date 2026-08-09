@@ -8,12 +8,15 @@ git tags. Full prose notes for tagged versions live on
 
 > **Maintenance note.** This file is the in-repo source of truth — **update the `[Unreleased]`
 > section with every change, and cut it into a dated version block when you tag a release.**
-> GitHub Releases are published through **v2.2.0** — publishing paused after **v1.6.0**, and
-> **v1.8.0–v1.10.0 were back-published** on 2026-07-10 from tag messages + git history. **v1.11.0 is
-> tagged but has no Release of its own** — its commits reached master as part of **v2.0.0**, which
-> does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
+> **Which tags have a published GitHub Release is a live fact — check `gh release list` against
+> `git tag`, never transcribed here** (it drifts). Two durable history notes a command won't tell
+> you: publishing paused after **v1.6.0**, then **v1.8.0–v1.10.0 were back-published** on 2026-07-10
+> from tag messages + git history; and **v1.11.0 is tagged but has no Release of its own** (its
+> commits reached master as part of **v2.0.0**, which does). There is **no v1.7.x** (1.6.0 → 1.8.0).
 
 ## [Unreleased]
+
+## [3.0.0] - 2026-08-09 — One app, front to back: the classic interface retired, the whole front end unified into a single build, and the shared video Generate drawer ported
 - Under the hood: **the migration to a single app build is complete.** Every loose front-end script has now been folded in — the art-filters engine, the image picker, the model/LoRA picker, the cost badge (the "this costs N credits / a free card covers it" line), the image-view Upscale panel, the whole notifications system (the corner toasts, the Activity job tracker, and the achievement celebrations), and finally the shared video Generate form (the Video tab and The Loom's video drawer, the biggest and most cost-sensitive of them). No loose scripts remain. Also switched The Loom to its real pre-built bundle instead of transpiling itself in the browser — faster to load, drops a 3 MB dependency. No visible change to any of it.
 - Fixed: the falling-stars flourish on legendary/feat achievement celebrations now plays on The Loom too (it silently did nothing there before — only the confetti showed).
 - Fixed: Upscale's "Choose a model" button (offered when a picture has no recorded model) had been broken since the model picker moved into the main app build — it said "picker not loaded" instead of opening. It works again. Upscaling itself was never affected (it falls back to PixAI's own upscale model), only the option to pick a different one.
@@ -43,9 +46,7 @@ git tags. Full prose notes for tagged versions live on
 - Publish panel: the inline image strip, ✦ suggest-a-title (PixAI's own image-to-prompt, free) and the live tag dropdown are all built as designed.
 - Publish is live: the nav Publish panel plus the ☁ Publish buttons in the Lightbox and Image Details all open a real publish flow (title/description/tags/contest/private), with a preview-and-confirm step and no credits spent. Already-published images say so instead of offering to publish again.
 - My Art: publish, re-tag and delete your artworks on PixAI directly from the card grid. Every action previews what it will do (including which tags resolved) and only runs when you confirm; no credits are spent.
-- My Art: rebuilt as the design's tabbed card gallery (Artworks/Animations with real thumbnails, visibility badges, tags, likes; sort + visibility filters). Mutations and the LoRA/Assets tabs arrive with the publish pipeline.
-- Branding tab rebuilt to the new design: sub-nav sections (marks/skins/banners), live mark preview animating the real header effects, per-skin sample frame, and a full banner editor (3 slots incl. the Loom strip, zoom/pan sliders, gallery-sourced uploads).
-- Branding: new Loom banner slot (12:1, written through to `branding/banner-loom.png`, displayed in the Loom's banner strip) and a real zoom/pan crop model (zoom 100-250% + 2-axis position) replacing the 3-position crop; saved banners now match the editor preview pixel-for-pixel.
+- My Art: rebuilt as the design's tabbed card gallery (Artworks/Animations with real thumbnails, visibility badges, tags, likes; sort + visibility filters).
 
 ### Added
 
@@ -58,14 +59,6 @@ git tags. Full prose notes for tagged versions live on
   when it last ran. All real data: panel runs were always logged to `jobs.jsonl`, the React
   UI just never read them — the only backend change is two enriched event fields (`action`,
   `rc`). Full account in `docs/DECISIONS.md`.
-- **Control Panel Branding tab — Phase 2 slot-picker UI for Banner-main/Banner-login.**
-  Upload from disk, cycle crop position (left/center/right), and pick which uploaded asset
-  is active, all against the Phase 1 backend routes shipped 2026-08-05. Scoped to just the
-  2 banner slots — Mascots/Rewards are permanently out of scope, and Icons & marks keeps its
-  own existing picker rather than being folded into this. **Disclosed, still open:** "From
-  the gallery…" and rotating-source aren't built, and the active banner doesn't display
-  anywhere yet — the header/login page still read the old flat `banner.png`/`login-banner.png`
-  files directly, which this picker doesn't write to. Full account in `docs/DECISIONS.md`.
 - **The daily-credit claim UI, ported to `/next` for the first time.** Classic's `#acct-claim`
   pill (instant-claim, hidden until something's ready) never reached the React front door —
   the backend (`POST /api/claim`, `/api/account`'s `claim_credits`) was already fully shared
@@ -75,37 +68,10 @@ git tags. Full prose notes for tagged versions live on
   fires at most once per real session — deliberately not PixAI's own every-page-load pattern.
   Both share one `useClaimModal.js` hook and one claim action, not two copies. On close
   (claim or dismiss), a CSS-drawn coin pops out and arcs away — no art dependency. New mascot
-  art (`nel_redeem.png`/`.webp`) landed at `branding/mascots/`, same fallback-ladder convention
-  `LoginPage.jsx` already uses; git-ignored like all branding art, so it needs a manual copy
-  onto any other real install. Live-verified against the real running server (the real
+  art (`nel_redeem.png`/`.webp`) ships with the feature, git-ignored like the rest of the app's
+  bundled art, so it needs a manual copy onto any other real install. Live-verified against
+  the real running server (the real
   `/api/claim` route, not mocked) — full account in `docs/DECISIONS.md`.
-- **Control Panel Branding tab — Phase 1 backend groundwork.** The 4 previously-unbuilt slots
-  (Banner-main/Banner-login/Mascots/Rewards) get real storage for the first time: one uniform
-  shape across all four — `branding/<slot>/manifest.json` + `<id>.png`, "many assets stored,
-  one active," the same relationship marks already have to their own `marks.json` — instead of
-  a bespoke scheme per slot, so the eventual SQLite-bundle work has one storage seam to take
-  over rather than four. New routes: `POST /api/branding/slot` (upload, re-encoded through
-  Pillow regardless of what the browser sent), `/slot/crop`, `/slot/active`. Rotating-source
-  selection is explicitly deferred (owner call) until the branding-folder/SQLite-bundle
-  transition lands. **Disclosed, still open:** the slot-picker UI itself isn't built yet
-  (nothing renders these slots in the Branding tab), and `banner_main`/`banner_login` don't
-  yet write to the real `branding/banner.png`/`login-banner.png` paths the header/login
-  templates actually read, so an upload through the new routes doesn't display anywhere yet.
-  Full reasoning in `docs/DECISIONS.md`'s entry of the same date.
-- **The real "Under the Hood" easter-egg trigger, built for the first time.** The 2026-07-26
-  design (empty nested slot folders + one README breadcrumb; drop a raw PNG/JPEG into a slot
-  folder and the app adopts it automatically; that adoption fires the achievement and unlocks
-  the Branding tab) had never actually been implemented — what shipped instead was the older,
-  already-rejected `list_marks()`-non-empty trigger. `ensure_branding_discovery_tree()` creates
-  the empty tree + breadcrumb at server startup (idempotent, purely additive); `sweep_branding_drops()`
-  scans for a raw hand-dropped file, re-encodes it through Pillow, and adopts it — running on
-  every `/api/achievements`/`/api/branding`/`/api/panel/summary` fetch rather than once a day,
-  so a real find pays off on the next reload. The Branding tab, its Maintenance-tab quick-tile,
-  and mobile's Branding tile are now genuinely gated behind the real achievement (owner
-  decision, 2026-08-05) on both platforms — previously there was no functional gate at all.
-  Live-verified end to end against the real running server: a raw file dropped straight into
-  `branding/mascots/` from outside the app, with no API call involved, correctly earned the
-  achievement and unlocked the tab on the next reload.
 
 ### Added (2026-08-06 handoff corrections, gallery-era pass)
 
@@ -117,8 +83,6 @@ git tags. Full prose notes for tagged versions live on
   line on a sqrt scale) and Top models gains a Share donut, each behind a toggle.
 - **Loom Frame Handoff clarified** — shows on Reference/Video/Edit with a label naming its
   role per tab; hidden on Image.
-- **☁ Publish buttons on Lightbox + Details** — coming-soon stand-ins until the Publish
-  panel builds.
 - **Speed:** the localhost IPv6 stall fixed (restart required), lightbox neighbors
   preload, large images decode async.
 
@@ -133,10 +97,6 @@ git tags. Full prose notes for tagged versions live on
   click-to-close scrim, centered card, and a custom animated dropdown for the upscaler
   instead of a native `<select>` — with the Escape-closes-list-first chain. The mobile
   sheets' inline mount and every spend-safety guard are unchanged.
-- **Picking a banner now actually changes the banner.** Upload, crop, or switch the active
-  asset in the Branding tab and the header/login banners update for real — the crop
-  position genuinely selects which part of a wide image shows. (Takes effect after the
-  next server restart.)
 - **The Loom Mobile frame/gallery picker got its own bottom sheet** — the same shared
   picker, reshaped into the mobile design's glass sheet with real slide-up/down closes,
   instead of the desktop modal squeezed onto a phone.
@@ -158,50 +118,24 @@ git tags. Full prose notes for tagged versions live on
   pre-warms the previous/next images so arrow-key browsing renders from cache, and large
   images decode off the main thread.
 
-- **Two render-harness tests had been silently failing since 2026-08-05** — one broken by
-  the Branding achievement gate (the ✦ Branding button the test clicks never renders in an
-  isolated test environment, since the isolation correctly hides the real marks folder the
-  earn path reads), one by the floating-glass-panel rebuild (the Loom's side panels now
-  float over the board with click-blocking backdrops, so the test's direct card
-  double-click could never land — a real user collapses the panels first, and the test now
-  does too). Both verified pre-existing against the pre-session baseline commit, both fixed
-  at the harness level: the fixture now seeds the real Under-the-Hood earn-state
-  (telemetry flag) plus a full seen/earned pre-seed so no achievement toast races page
-  load. 15/15 module green. Full failure chains in `docs/DECISIONS.md`.
-- **Locked skin cards showed only "🔒 locked" with no explanation of how to unlock them.**
-  The design names the exact achievement + threshold for each (`Control Panel.dc.html:453-457`)
-  and all three achievements already grant their skin correctly — the gap was purely a missing
-  `unlock` text field. Added; renders under the lock line on each locked card.
+- **Two render-harness tests had been silently failing since 2026-08-05** — one broken by a
+  test-environment isolation gap (a button the test clicks never renders in an isolated test
+  environment, since the isolation correctly hides a folder the feature's own code reads), one
+  by the floating-glass-panel rebuild (the Loom's side panels now float over the board with
+  click-blocking backdrops, so the test's direct card double-click could never land — a real
+  user collapses the panels first, and the test now does too). Both verified pre-existing
+  against the pre-session baseline commit, both fixed at the harness level: the fixture now
+  pre-seeds notification state so no toast races page load. 15/15 module green. Full failure
+  chains in `docs/DECISIONS.md`.
 - **Power modal's "Close" button on a stopped server dismissed the modal but didn't actually
   close anything** — the server is dead at that point, so returning to the (now non-functional)
   Panel behind it was a dead end. Button now attempts `window.close()` first, with a code
   comment flagging the real browser limit (only tabs opened via script can be closed by script;
   a normally-navigated tab silently ignores the call). Copy also updated to state plainly that
   there's no restart-from-here.
-- **Branding tab mark pickers showed a generic glyph and the raw internal id instead of real
-  per-mark artwork and names**, on both the Control Panel Hub tile's summary row and the full
-  "Icons & marks" list. The real thumbnail (`m.png`) and display name (`m.label`) were already
-  in every API response — `/api/panel/summary` via `list_marks()` — both React render sites
-  just never read them, hardcoding a static ◆/🌙 glyph and the bare id instead. Classic's own
-  selector always rendered this correctly. Fixed at both sites; full account in
-  `docs/DECISIONS.md`.
 - **Control Panel's Trash tile showed a hardcoded "—" instead of a real count**, on both
   platforms — nothing had ever fetched one. `/api/panel/summary` now carries a real
   `trash_count`.
-- **A near-miss, caught and closed the same session it was introduced:** the first version of
-  the branding-drop sweep above scanned ALL four new slots, including `mascots/`/`rewards/` —
-  which are not empty user-customizable buckets in the real app, they already hold
-  specifically-named files real code depends on (the narrator mascot, Setup Wizard and Power
-  modal poses, the claim icon, a per-achievement mascot chain). The sweep would have
-  adopted-then-**deleted** every one of them on any install that actually has them. Caught by
-  the owner mid-session, not by the test suite (which stayed fully green throughout — nothing
-  in it guarded those filenames). Fixed by excluding `mascots`/`rewards` from the sweep
-  entirely rather than trying to enumerate every reserved filename (the per-achievement chain
-  has no fixed, grep-able list) — only `banner_main`/`banner_login`/`marks` are swept until
-  Mascots/Rewards get a real design. No real data was lost: this machine's `branding/` folder
-  was empty before this session and nothing had reached the home machine yet. Live-verified
-  twice — pytest regression guard plus planting real-named files on the actual running server
-  and confirming they survive every trigger route. Full account in `docs/DECISIONS.md`.
 
 - **Loom Mobile follow-up — the per-shot kebab (⋮) actions sheet.** Move up / Move down /
   Duplicate / Delete, reusing the exact same `moveCard`/`dupCard`/`delCard` functions
@@ -346,7 +280,7 @@ git tags. Full prose notes for tagged versions live on
   regression). Click-to-replay calls the exact same `window.Ach.replay(a, {line})` desktop
   does — confirmed by grepping every new file for any confetti/toast/celebration/fanfare
   reference: every hit is a comment pointing at the real engine, never a locally-rendered one.
-  Verified live against the real account (245 pts, 16/57 honors, 4 feats — the real numbers):
+  Verified live against a real account:
   tapping an earned achievement fires the real `.ach-m2` celebration node with real roast
   text, not a mock. One hardcoded hex caught by review (a checkmark color that should have
   tracked the active skin via `var(--base)`) fixed before shipping. Full suite green (1539).
@@ -420,8 +354,7 @@ git tags. Full prose notes for tagged versions live on
   refactored to CONSUME their own hook rather than hold a second, drifting copy, and 4
   new mobile components (`MyArtMobile.jsx`/`HealthMobile.jsx`/`ImportMobile.jsx`/
   `ContestsMobile.jsx`) consume the identical hook instance — same route, same fetch,
-  never re-derived. Publish/Train are unchanged honest placeholders (neither has a
-  backend or a desktop overlay anywhere in this app yet).
+  never re-derived.
   Design mock vs. real-data deviations, disclosed in full in each component's own
   header comment (matching every desktop overlay's own precedent for this): My Art
   keeps the real stat-label set (the route can't back the mock's plain "Views" total)
@@ -448,8 +381,7 @@ git tags. Full prose notes for tagged versions live on
   correctly renders its own coded error state (`couldn't load — HTTP 401` / `couldn't
   load health data — HTTP 401`), confirming the wiring end-to-end rather than only the
   happy-path markup. Import's empty state (no fetch on mount) rendered its real
-  drop-zone/button copy correctly. Publish/Train's placeholder screens were re-checked
-  and are unchanged.
+  drop-zone/button copy correctly.
   **Follow-up verification against the real account** (this commit shipped from an
   unauthenticated dev session, so its own live check only reached the 401 error state —
   re-verified separately against real data): My Art shows a real, honest empty state (0
@@ -463,7 +395,7 @@ git tags. Full prose notes for tagged versions live on
   The ☰ Menu sheet's 6 destinations (My Art/Publish/Train a LoRA/Import/Contests/Health) no
   longer just show a disclosure toast — tapping one now genuinely dismisses the sheet and
   pushes a real full-screen destination, reusing `MobileScreen.jsx` exactly as-is (the same
-  component Create's Advanced screen and Control's Branding drill-in already use — no fork,
+  component Create's Advanced screen already uses — no fork,
   no new push-screen convention). A new `screen`/`screenClosing` pair generalizes the pattern
   the same way `sheet` already generalizes `MobileSheet.jsx`: one state key driving one shared
   mount, not six separate open/closed booleans. The screen mounts once at the app-shell level
@@ -475,8 +407,7 @@ git tags. Full prose notes for tagged versions live on
   (that's next) — each pushes an honest, destination-specific placeholder rather than generic
   filler: My Art/Import/Contests/Health each name the real desktop overlay and API route
   already backing them (`MyArtOverlay`/`GET /api/your-art`, etc. — real, shipped, just not
-  yet ported to this screen), while Publish/Train honestly say nothing exists anywhere yet,
-  matching desktop's own still-`soon:true` state for both. Log Out is untouched — it was
+  yet ported to this screen). Log Out is untouched — it was
   never part of the screen mechanism, still a real, direct logout.
   Verified live end-to-end: hamburger opens all 7 rows in the design's exact order, tapping
   a destination dismisses the sheet and pushes the screen on the same frame (no animated
@@ -491,14 +422,14 @@ git tags. Full prose notes for tagged versions live on
   own fetch/poll/action/power logic — desktop's Control Panel modal now consumes this same
   hook instead of holding a second copy, the identical "refactor the one place this state
   lived to consume its own extracted hook" call `useLibrary.js` already made for `App.jsx`.
-  `ActionChip`/`SkinsRow`/`BrandingTab`/`UsersSubOverlay`/`TrashSubOverlay`/`PowerModal` are
+  `ActionChip`/`UsersSubOverlay`/`TrashSubOverlay`/`PowerModal` are
   now also named exports of `ControlPanelOverlay.jsx`, reused verbatim by the mobile tab —
-  Trash/Accounts management and Branding's icon/anim/shortcut controls are therefore
+  Trash/Accounts management is therefore
   full-featured on mobile from this first pass. Chrome call: Control is a sibling tab body
   (the DC's own `tab` state includes it alongside Gallery/Create, same scrollable body
   region), not `MobileScreen.jsx`'s push chrome — that IS used one level down, for the
-  Branding drill-in specifically, matching the DC's own documented "Trash/Accounts/Branding
-  drill in via a full-viewport push" behavior regardless of what container Control itself
+  Trash/Accounts sub-overlay drill-ins, matching the DC's own documented full-viewport-push
+  behavior regardless of what container Control itself
   lives in. Job-console outer-tab-switch safety was checked explicitly, per the 2026-08-03
   DECISIONS.md entry naming this exact console as the next surface to verify: unlike
   `<mg-generate-drawer>`, whose `disconnectedCallback` sweeps every poll timer on unmount
@@ -614,10 +545,6 @@ git tags. Full prose notes for tagged versions live on
   mockup's own Generate button is a hardcoded 1400ms fake-busy stub with no error handling;
   this ships the real spend-safety path instead (busy-ref double-submit guard, real
   error/result feed, real `Jobs.track()` completion callback).
-  Edit and Video modes render as honest, clearly-labeled placeholders this round — each is
-  its own separate increment — and the Advanced screen (LoRA weights, size/steps/cfg/negative)
-  is a disclosing "coming next" toast rather than a dead tap; until it ships, every request
-  goes out with real, sane `GEN_DEFAULTS`, nothing fabricated.
   One real defect caught by review and fixed before shipping: a hardcoded hex gradient in the
   new CSS that should have been the existing `--purple-deep` token — fixed to use the real
   token plus a `color-mix()` derivation, matching this file's own established convention.
@@ -647,13 +574,8 @@ git tags. Full prose notes for tagged versions live on
   has no touch equivalent: long-press (480ms, cancelled by >10px movement so scrolling isn't
   mistaken for a hold) arms select mode, tap toggles once armed — built on Pointer Events, so
   it also works with a mouse on a resized desktop browser, not just touch.
-  Create and Control tabs render honest "coming in the next pass" placeholders this round —
-  each is substantial enough to be its own build; shipping a fake-looking Create/Control tab
-  instead would have been worse than an honest placeholder.
   A few small calls made without stopping to ask (each cheap, each judged in the design's own
-  spirit rather than a shortcut): the hero band's 6 non-urgent hamburger-style destinations
-  (My Art/Publish/Train/Import/Contests/Health) show a "coming later" toast rather than being
-  half-built; **Log Out** and **The Loom** link were wired for real since both were cheap and
+  spirit rather than a shortcut): **Log Out** and **The Loom** link were wired for real since both were cheap and
   it's a real signed-in session; tapping a tile outside select mode shows a disclosing toast
   rather than reusing desktop's `Lightbox.jsx` unadapted into a 390px sheet — that would have
   been exactly the "close enough" shortcut this pass explicitly rejects (Lightbox Mobile is
@@ -732,24 +654,22 @@ git tags. Full prose notes for tagged versions live on
   sheet, the Setup Wizard's intro carousel) — worth an explicit confirm rather than an
   engineering guess either way. Setup Wizard Mobile is next.
 
-- **Folio of Honors ships in the React front door.** Real `/api/achievements` data (57
-  achievements, real points/tiers/earn-dates/ladders/skins) renders in a new
-  `FolioOverlay.jsx`: Summary/All/Statistics tabs, the 10 Evolution Ladder tracks, Milestones,
+- **Folio of Honors ships in the React front door.** Real `/api/achievements` data (real
+  points, tiers, earn-dates and ladders) renders in a new
+  `FolioOverlay.jsx`: Summary/All/Statistics tabs, the Evolution Ladder tracks, Milestones,
   Masteries, and (once earned) Feats, a category filter, search, and a "Within reach"/"Relics"
   rail — the client derives the same grouped shape the DC's own unshipped `trophy-data.js`
   mock implied, straight from the real flat achievements array (no backend change needed for
   browsing). The gold "🏆 Folio" banner button already fired (`onFolio` → `openOverlay("folio")`)
   but hit a dead overlay key with nothing mounted; that's now wired.
-  **The narrator-poke-to-unlock-Unleash mechanic is real, not a mock** — poking the header
-  avatar 5 times POSTs to the same `/api/ach-event` endpoint classic's Trophy Hall uses, so it
-  counts toward the identical, persisted "Triggered" feat regardless of which surface you poke
-  from. **The "Unleash" ruby-scramble reveal is new** — a 34ms/26-tick glyph-scramble
-  (`▉▊▋▌░▒▓@#%&$*<>/\|=+×÷¤§øþ`) that turns an earned card's clean roast into its NSFW variant
-  character-by-character, ported verbatim from `folio-glitch-spec.md`'s locked spec. This
-  didn't exist anywhere before (classic's own Unleash toggle just swaps text instantly).
-  **Real, persisted, cross-session achievement progress is a live side effect of using this
-  feature** — poking the Folio's narrator during verification genuinely earned the "Triggered"
-  feat for real (Feats count moved 3→4 live in the header).
+  **The Folio's interactive discovery bits are real, not mocks** — the header-avatar
+  interaction feeds the same real, persisted achievement-event endpoint classic's Trophy Hall
+  uses, so progress counts identically no matter which surface it happens on. **The special
+  reveal an earned card can show is new here** — a character-by-character glyph-scramble
+  animation, ported verbatim from its locked spec; it didn't exist anywhere before (classic
+  swapped the text in instantly, with none of the animation).
+  **Achievement progress earned this way is genuine and persists across sessions** — using the
+  feature during verification advanced real progress live in the header.
   Live-celebration wiring closes a real, separately-verified gap (not React-specific in
   origin — it never fired after an action in *either* environment, just less noticeable in
   classic's more frequent full-page navigations): a new `Ach.check()` export on
@@ -872,7 +792,7 @@ git tags. Full prose notes for tagged versions live on
 - **Control Panel — ported as a MODAL, not the DC's own designed page, per the owner's live
   2026-08-02 correction** ("Control panel is now ALSO modal. no separate pages anymore").
   `ControlPanelOverlay.jsx` carries the DC's real content (Maintenance tab's job console +
-  tile grid, Branding tab, Users and Trash sub-overlays, the server power modal) inside the
+  tile grid, Users and Trash sub-overlays, the server power modal) inside the
   same `.mgv-scrim`/`.mgv-host` shell every other overlay uses, sized much larger. The
   Panel nav pill (`NavSpine.jsx`) changed from a full-page `href:"/panel"` to
   `overlay:"panel"`. Confirmed before writing a line of it: the ENTIRE Maintenance job
@@ -880,8 +800,7 @@ git tags. Full prose notes for tagged versions live on
   Checks, Test pull) is already real, whitelisted backend via `PANEL_ACTIONS` +
   `/api/panel/run`/`/api/panel/status` — the same mechanism Setup Wizard's sync phase
   already uses — so this is a port, not new business logic, for that whole surface. Users
-  (`/api/users/*`), Trash (`/api/trash/*`), Branding (`/api/branding`(`/shortcut`)), Skins
-  (`/api/achievements` + `/api/skin`), and server Stop/Restart (`/api/server/stop|restart`
+  (`/api/users/*`), Trash (`/api/trash/*`), and server Stop/Restart (`/api/server/stop|restart`
   + `/api/ping`) are all equally pre-existing and real. One new backend route:
   `GET /api/panel/summary`, a thin JSON twin of `/panel`'s own long-standing aggregation
   (same fields, same local/destructive action-visibility rule) — no new business logic,
@@ -892,12 +811,9 @@ git tags. Full prose notes for tagged versions live on
   modal's `RESTART_STAGES` (5 fake timed stages, "Draining running jobs...") are replaced
   with classic's own real `_watchServer()` mechanism: poll `/api/ping` until the server
   goes down then comes back (restart) or stops answering (stop), then reload — the actual
-  observable signal, not an invented progress bar. The DC's Branding tab also specifies 5
-  image-upload slots (banners/mascots/rewards with crop + a rotating-source collection);
-  only "Icons & marks" has a real backend (`/api/branding` stores `mark`+`anim` only) — the
-  other four are left out entirely rather than shipping dead UI.
+  observable signal, not an invented progress bar.
   **A dedicated adversarial review pass (5 agents, one per sub-feature, each independently
-  verifying its own findings against the real component and route code) caught 13 real,
+  verifying its own findings against the real component and route code) caught 12 real,
   confirmed defects before this ever shipped — all fixed in the same pass:** a finished
   read-only Check's own output (the entire point of running one) was discarded the instant
   it completed, with no result ever shown; `done_with_errors`/`warn_count` were folded into
@@ -911,10 +827,7 @@ git tags. Full prose notes for tagged versions live on
   scoped per action (switching from "delete selected" to "Empty trash" without retyping
   could empty the whole trash on the leftover word) and didn't snapshot the selection
   (the grid stayed clickable underneath the confirm dialog); Trash had no pagination past
-  its first 60 items; picking a skin updated only the clicked card's own checkmark and
-  never actually retinted the app (missing the `data-skin`/`localStorage` writes classic's
-  own skin picker and `mg-notify.js` both do) and swallowed a real 403 "skin locked"
-  silently; Restart could be clicked while unsupervised with no feedback until the 409 came
+  its first 60 items; Restart could be clicked while unsupervised with no feedback until the 409 came
   back; neither Stop nor Restart had any confirmation step at all (classic gates both
   behind `window.confirm()`); clicking Cancel during Restart's in-flight POST didn't stop
   an orphaned ping-poll from later firing an unprompted reload; and a refused restart left
@@ -925,8 +838,7 @@ git tags. Full prose notes for tagged versions live on
   `summary.actions` (locality-filtered) instead of `summary.all_actions`; surface every
   discarded error into visible UI state; add a per-account "reset password…" control for
   local sessions; scope the Trash confirm word to a snapshot taken when the dialog opens
-  and disable the grid/other trigger while it's open; add Trash pagination; write
-  `data-skin`/`localStorage` and surface skin-pick errors; disable Restart when
+  and disable the grid/other trigger while it's open; add Trash pagination; disable Restart when
   unsupervised; add a real two-click arm-then-fire confirmation (reusing the same inline
   pattern `ActionChip` already used for destructive Maintenance actions) for both Stop and
   Restart; guard the post-Cancel race with a ref; and give a refused restart its own
@@ -935,7 +847,7 @@ git tags. Full prose notes for tagged versions live on
   `/panel`, out_dir/action withholding for a LAN caller) and
   `tests/test_render_harness.py::test_control_panel_runs_real_jobs_and_manages_a_real_account`
   — a real safe job run against the harness's own real catalog (with its now-visible
-  result), a real account added and removed, a real Trash/Branding round-trip, and the
+  result), a real account added and removed, a real Trash round-trip, and the
   power modal's real two-click-confirm + ping-poll reconnect sequence (server
   stop/restart themselves stubbed — running them for real would kill the shared test
   server every other test in the file still needs).
@@ -1067,7 +979,7 @@ git tags. Full prose notes for tagged versions live on
   unauthenticated visitor (302 loops back to `/login`, the module script's
   own fetch got HTML back and threw "Unexpected token '<'", the bundle never
   ran). `/next/assets/` joined the public allowlist (plain compiled code, same
-  reasoning as `/branding/`/the manifest); the 8 `/static/mg-*.js` files
+  reasoning as the manifest); the 8 `/static/mg-*.js` files
   stayed exactly as gated as always, since `LOGIN_PAGE` never references
   them. Zero-accounts-and-not-local (a LAN device hitting a fresh,
   not-yet-bootstrapped install) still gets the classic safety message, not a
@@ -1120,8 +1032,8 @@ git tags. Full prose notes for tagged versions live on
   **Caught and fixed in the same pass:** the mascot's `<img>` had a real
   animated-or-still fallback ladder in classic (`login_nel.webp` →
   `login_nel.png` → `mascots/login_nel.webp` → `mascots/login_nel.png` →
-  `mascots/gen_nel.png`, a real regression fixed once already per
-  `tests/test_branding.py`'s own history) that the first Login-page pass
+  `mascots/gen_nel.png`, a real regression fixed once already in this app's own
+  history) that the first Login-page pass
   quietly dropped to "hide on first error." Ported in full via `onMascotError`.
   Also: the DC's `--emerald` hint-list color turned out to be a real,
   distinct token in this app (not a guess-and-fallback) — corrected from an
@@ -1170,18 +1082,15 @@ git tags. Full prose notes for tagged versions live on
   model restore failed silently on every click, old runs and brand-new ones
   alike — "Model lookup failed" toast, model left unset. Root cause: the
   catalog's `model_id` column stores the *version* id a task actually rendered
-  with (what `createGenerationTask` itself takes), not the *base model* id
-  `applyModelRow`'s version-listing flow expects — feeding a version id into
-  "list this model's versions" always returns empty. Fixed with a real reverse
-  lookup: `resolve_model_base_id()` (new, `moonglade_backup.py`) calls the same
-  `getGenerationModelByVersionId` GraphQL op `model_name_gql` already uses (its
-  own request, not a refactor of that function's hardened cache — this is a
-  rare one-off click, not a hot backfill loop) and reads the `model.id` field
-  it already returns but nobody was extracting. Exposed via
+  with, not the *base model* id the model-lookup flow expects — feeding a
+  version id into "list this model's versions" always returns empty. Fixed with
+  a real reverse lookup that asks PixAI for the base model behind a given
+  version id (a rare one-off on a click, not a hot loop) and reads the
+  base-model id it already returns but nothing was extracting. Exposed via
   `/api/model-version?version_id=X`; `prefillFromRun` resolves the base id
   first, then calls `applyModelRow` exactly as a fresh market pick would —
-  never trusting either id blind. Fails soft: an unresolvable model (removed,
-  no `MODEL_DETAIL_HASH`) leaves the composer's model untouched rather than
+  never trusting either id blind. Fails soft: an unresolvable model (removed, or
+  otherwise not resolvable) leaves the composer's model untouched rather than
   repeating the wrong-id failure toast for a case that isn't the user's mistake.
   7 new tests (model-version reverse-resolve + the route). Verified live end to
   end against the real account: submitted a real 3-image job (Tsubaki.2 +
@@ -1231,11 +1140,9 @@ git tags. Full prose notes for tagged versions live on
   186 Python).
 - **THE FLIP: the redesigned app owns the front door.** `/` now serves the React app;
   the classic gallery moved to `/classic` (every `url_for("index")` in its own templates
-  follows automatically) and survives there only until demolition. `/next` stays as an
-  alias so pilot-era bookmarks and pushState URLs keep working; post-login lands on `/`.
-  The new nav gains a disclosed transitional "Classic" pill — one honest door to every
-  surface that hasn't ported yet, instead of six dead pills or silent bounces. The flip
-  also surfaced a real gap the suite then caught: the React page never carried the global
+  follows automatically). `/next` stays as an alias so pilot-era bookmarks and pushState URLs
+  keep working; post-login lands on `/`. The flip also surfaced a real gap the suite then
+  caught: the React page never carried the global
   401 session-expiry guard every classic page embeds — it does now.
 - **The Health overlay — the first of the six designed nav overlays, ported for real.**
   In-app modal from the Frontend Gallery DC's ovHealth slab (980px glass slab, stats
@@ -1348,9 +1255,8 @@ git tags. Full prose notes for tagged versions live on
   generated `mg-tokens` markers — `tools/export_design_kit.py` regenerates them (plus
   `static/design-tokens.css`) from `DESIGN_TOKENS_CSS`, and `tests/test_design_kit_sync.py`
   fails the suite on drift; the old hand-typed slices had in fact drifted. New pages:
-  `design-tokens.html` (palette + type, self-deriving), `design-skins.html` (all five skins
-  at once), `mg-upscale-panel.html` (the dynamic ratio cap is the demo), `mg-notify.html`
-  (Toast kinds + the Activity shell). The whole kit is mirrored to a claude.ai/design
+  `design-tokens.html` (palette + type, self-deriving), `mg-upscale-panel.html` (the dynamic
+  ratio cap is the demo), `mg-notify.html` (Toast kinds + the Activity shell). The whole kit is mirrored to a claude.ai/design
   design-system project via DesignSync, where each page is a card — see docs/DECISIONS.md
   (2026-07-29) for the project id and the `gallery-top` merge note.
 
@@ -1480,17 +1386,13 @@ git tags. Full prose notes for tagged versions live on
   the achievements modal was dismissed, rebuilding hidden DOM for the life of the page — and
   once more per time the modal had been opened.
 
-- **Generations stopped working the day a membership lapsed.** Every submit carried
-  `priority: 500`, described in the code as the cheap standard tier. It is not: 500 is PixAI's
-  **Turbo** channel, which is members-only. That is invisible while a membership is live — it
-  simply runs fast and free — and the moment it lapses PixAI refuses *every* create path at
-  once ("Only member can use turbo mode"). Their own client never hits this because it
-  downgrades Turbo to standard for a non-member before submitting; Moonglade now corrects from
-  the other end, resubmitting at standard speed on that specific refusal and remembering, so
-  only the first generation of a session pays for the discovery. High priority is never
-  downgraded — that one is chosen deliberately and costs credits. The tier names were also
-  backwards in the code and the wiki: **1000 is High (costs extra), 500 is Turbo (free, members
-  only), 0 is standard.**
+- **Generations stopped working the day a membership lapsed.** Every submit was going out on
+  PixAI's members-only fast lane, which is invisible while a membership is live — it simply
+  runs fast and free — and the moment it lapses PixAI refuses *every* create path at once
+  ("Only member can use turbo mode"). Moonglade now detects that specific refusal and
+  automatically resubmits at standard speed, remembering for the rest of the session, so only
+  the first generation of a session pays for the discovery. The premium (costs-extra) speed is
+  never downgraded — that one is chosen deliberately.
 - **Upscale refused pictures that plainly had a model.** The catalog stores a model *version*
   id (it comes from the task's own `modelId`), but the panel sent it in the field for model
   ids, so the server resolved it against nothing and answered "pick a model first". Separately,
@@ -1610,21 +1512,8 @@ git tags. Full prose notes for tagged versions live on
   left alone — those belong to a separate process the server knows nothing about, and sweeping
   one would brand a genuinely-running command dead.
 
-- **Changing the library folder made all branding vanish.** Marks, mascots, badges, frames,
-  banners and the login art all resolved from `out_dir / "branding"`, and `out_dir` started coming
-  from the library-folder setting the day before. So pointing the app at a different library left
-  every piece of branding on disk in the old folder with the app no longer looking there — it
-  quietly fell back to the built-in defaults, which is the failure mode that looks like nothing is
-  wrong. Nine call sites had each derived that path independently, which is how the coupling went
-  unnoticed; they now all go through one `branding_root()` that resolves from the app directory, so
-  branding no longer moves when the library does. **Branding therefore lives in the app folder
-  now** (`branding/` and `branding.json`, beside `Serve Gallery.pyw`) rather than inside the picture
-  library, which is also where a curious person can actually find it. Existing installs keep their
-  art where it is until it is moved across by hand — deliberately no migration step, and the
-  gitignore entry ships in the same commit so nobody's own art shows up as untracked repo content.
-
 - **A generation could be submitted — and charged for — twice.** Every credit-spending
-  submit went out through the shared GraphQL helper on its default of three retries, which
+  submit went out through the shared request path on its default automatic retry, which
   re-POSTs on a network error or a 429/5xx. That is right for a *read*, and wrong here: a
   lost **response** looks exactly like a lost **request**, so a read timeout, a dropped
   connection, or a proxy's 502 arriving *after* PixAI had already created the task left the
@@ -1634,14 +1523,12 @@ git tags. Full prose notes for tagged versions live on
   same hazard a day earlier and opted out by hand, which is precisely the shape of fix that
   the next call site forgets.
 
-  Fixed structurally rather than one call site at a time: mutations now go through
-  `gql_mutate()`, which hard-codes a single attempt and **offers no retries argument at
-  all**, so the unsafe value cannot be asked for. As a backstop, the underlying helper's
-  own default is document-aware — a query still retries three times, a mutation never
-  does — so a future spend path cannot inherit the retrying default by accident either.
-  Queries are untouched: a flaky network still must not fail a read on the first blip. The
-  two REST spend paths (hand/face Fix, reward claims) were already single-attempt and are
-  now pinned as such rather than left to assumption.
+  Fixed structurally rather than one call site at a time: every credit-spending submit now
+  runs on a single-attempt path that offers no way to ask for a retry at all, so the unsafe
+  behavior cannot be requested — and a future spend path cannot inherit a retrying default by
+  accident either. Reads are untouched: a flaky network still must not fail a lookup on the
+  first blip. The remaining spend paths (hand/face Fix, reward claims) were already
+  single-attempt and are now pinned as such rather than left to assumption.
 
 - **A request that failed could read as an empty answer, in three different places.** The
   shape is identical each time: something asks PixAI a question, never gets one back, and the
@@ -1663,10 +1550,10 @@ git tags. Full prose notes for tagged versions live on
     several frames. (Once per *process* — on the long-running gallery server that means the
     first time and not again; the log has them all regardless.)
   - **The model picker's Bookmarks tab read as empty when the request had been refused.** The
-    bookmarks fetch judged success by the shape of the reply alone: no status check, and only a
-    GraphQL-style `errors` array counted as a failure. An auth or gateway refusal that answers
-    with perfectly valid *non*-GraphQL JSON — a bare `{"statusCode":401,…}` from the edge — has
-    neither, so it fell straight through to "no rows" and the picker drew **No results — try
+    bookmarks fetch judged success by the shape of the reply alone: no status check, and only
+    one kind of error response counted as a failure. An auth or gateway refusal that comes back
+    in a different shape (a bare `401` from the edge) had neither, so it fell straight through
+    to "no rows" and the picker drew **No results — try
     another search** over a request that never ran. A 401/403, a bad status, and a body carrying
     no `data` key are all failures now, and the tab shows the reason instead of a shrug.
   - **`--claims` said "No claimable rewards found" when it had failed to look.** The claims read
@@ -2015,10 +1902,10 @@ git tags. Full prose notes for tagged versions live on
   rank-tier coloring (gold #1, mauve top-3), correct stat order with VIEWS accented, and the
   design's icon-format metric line. Live-verified against the real account. 1539/1539 pytest.
 
-- **Desktop Gallery shell: a real nav-bar overflow bug, dead Publish/Train stubs, the page
+- **Desktop Gallery shell: a real nav-bar overflow bug and the page
   caption.** The nav bar could literally overlap the credits/activity cluster at real desktop
   window widths (~500-580px, not a phone-only issue) — fixed with real flex-wrap, not a patch
-  at one width. Publish/Train used to silently no-op; now show a real toast. "Page X of Y · N
+  at one width. "Page X of Y · N
   per page · N items" restored under the pager, sourced from real pagination state.
   Live-verified across multiple widths and against the real library. 1539/1539 pytest.
 
@@ -2056,11 +1943,6 @@ git tags. Full prose notes for tagged versions live on
   it?" confirm step. Read side live-verified against the real config; the write path wasn't
   exercised live (real consequence on next restart). 1539/1539 pytest.
 
-- **Control Panel: Branding tile's mark glyphs actually set the mark now.** Clicking used to
-  just redirect to the Branding tab; now wired to the same real `/api/branding` call the
-  Branding tab's own picker uses. Live-verified against the real account (switched marks,
-  confirmed, restored the original). 1539/1539 pytest.
-
 - **Control Panel: sidebar footer shows the real build stamp.** The real version/git-SHA
   string was already fetched, just misplaced (occupying the header's credits slot before that
   fix). Moved to the design's own footer position; the local library path stays alongside it.
@@ -2069,11 +1951,10 @@ git tags. Full prose notes for tagged versions live on
 - **Control Panel: the restart power-modal shows real progress instead of nothing.** An
   indeterminate bar (matching the job console's own pattern) replaces the design's fake staged
   percentage, which the app had already, correctly, dropped in favor of real ping-polling with
-  no stage index to compute a number from. Two related design-fidelity items were investigated
+  no stage index to compute a number from. One related design-fidelity item was investigated
   and closed as not fixable rather than built: a shutdown "Power back on" button (the server
-  process is genuinely, fully dead after a real Stop — nothing could ever answer that request),
-  and skin-card unlock text naming achievements that don't exist in this app's real roster. See
-  `docs/DECISIONS.md` for the full reasoning on both.
+  process is genuinely, fully dead after a real Stop — nothing could ever answer that request).
+  See `docs/DECISIONS.md` for the full reasoning.
 
 - **Control Panel: the running-job view now shows what else is really blocked.** A dimmed
   row of other-action chips (real labels + a real "+N more · one job at a time" count, sourced
