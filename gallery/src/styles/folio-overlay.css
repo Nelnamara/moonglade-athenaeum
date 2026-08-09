@@ -53,7 +53,7 @@
 .mgfo-nar-avatar {
   position: relative; width: 24px; height: 24px; border-radius: 50%; flex: none; cursor: pointer;
   border: 1px solid rgba(255, 255, 255, .16);
-  background: url('/branding/mascots/gen_nel.png') 58% 10% / 250% no-repeat, var(--surface0);
+  background: url('/branding/mascots/nel_narrator.png') 58% 10% / 250% no-repeat, var(--surface0);
   transition: border-color .15s, transform .1s;
 }
 .mgfo-nar-avatar:hover { border-color: var(--red); }
