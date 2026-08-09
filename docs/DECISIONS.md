@@ -6784,3 +6784,57 @@ basic agents as needed"), each reviewed against its actual diff before committin
 
 P0 is now fully done. P1 (test-suite audit) and P2 (docs condensing + branch graveyard + doc
 refresh) have still not been started.
+
+### Job-tracker chrome (P5) implemented -- floating tray retired on all 3 hosts  ·  *2026-08-09*
+
+**Branch `claude-design-tracker-branding-2026-08-09`, pushed, NOT merged -- awaiting owner
+review/test, per the standing branch-before-master rule.** Full real implementation of the
+Claude Design handoff (`handoff-2026-08-09-job-tracker.md`, drift item 39), not just the
+chrome -- wired to real data throughout.
+
+**The real-data gap flagged before building was resolved as scoped:** the design's own mock
+wired the new control to `state.runs` (the Generate composer's own run history only). The
+real app's `/api/jobs` covers more than generation runs -- Panel-triggered maintenance jobs
+(sync/organize/dedup), task imports, and deletions all ride the same log today. Wired to the
+real, existing `jobsStore.js` (unchanged) instead -- same real data every host already had,
+new chrome around it. Owner confirmed this reading directly: "Claude Design had no way of
+knowing what the tracker traffic flows on, we obviously know what to properly wire in."
+
+**What shipped, per host:**
+- Gallery: `SeparatorBar.jsx`'s dead ambient `.mgx-act` cluster (a static dot+text, no click
+  handler -- itself downstream of the `running` prop App.jsx's own comment already flags as
+  a stopgap for "the RunsReel workstream" to replace later, untouched here) becomes the real
+  trigger + anchored dropdown.
+- The Loom: same control added to `master-storyboard.jsx`'s own toolbar. Confirmed by tracing
+  the actual JSX nesting (not assumed) that it sits INSIDE `.lv-overlay` now, a normal DOM
+  descendant, not portaled to `document.body` like the old `#jobs-fab` -- so it needs NONE of
+  the old 401/402 `!important` z-index reconciliation; Deep Focus's veil covers it correctly
+  by ordinary stacking, the same way it covers everything else in that subtree. The whole bug
+  class the old FAB needed fixing (`test_deep_focus_veil_wins_over_the_corner_fabs`) cannot
+  recur, so that pytest test was retired rather than kept asserting on a dead selector.
+- Mobile: new header icon + live-badge dot, opens the existing bottom-sheet system as a new
+  "activity" sheet, reusing `useSheet`/`MobileSheet` verbatim.
+
+**New shared pieces** (`gallery/src/notify/`): `ActivityChip.jsx` (trigger, stacked progress
+rings -- indeterminate spin for a real generation job since PixAI reports no progress, a real
+conic-gradient percent for a Panel job that DOES carry `total`/`done`), `ActivityPanel.jsx`
+(dropdown body), `ActivityRow.jsx` (one row -- the old floating `#jt-detail` popover is gone;
+detail expands INLINE under the row on click instead), `useActivity.js` (the jobsStore-backed
+state + this app's "everything animates closed, deferred unmount" rule). `ActivityTray.jsx`
+deleted.
+
+**MODEL row from the design's own mockup deliberately omitted**: no real generation job
+record carries model/base info today (`notify/jobs.js`'s `register()` only ever POSTs
+`{job_id, type, label, status, count}`) -- inventing one would fabricate data never sent, the
+exact thing this app's Cost/ETA rows already refuse to do. Wiring real per-job model tracking
+is a separate, later enhancement, not silently faked here.
+
+**Two real bugs caught fixing the test suite, not left passing-but-wrong:** `.mgx-act-wrap`
+was missing `position:relative` (the dropdown would have anchored against a much larger
+ancestor and pinned to the far right of the whole page instead of tucking under the chip --
+caught by a cross-host equality assertion, not eyeballed); and a Playwright geometry test
+raced the panel's own 220ms open animation (a settled `transform:none` serializes as
+`matrix(1, 0, 0, 1, 0, 0)`, not the literal string `"none"` -- `_open_tray_with_queued_job`
+now polls for either form before any test reads geometry off the panel).
+
+Full suite green: 1528 pytest, 724 loom.
