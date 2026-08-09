@@ -6708,3 +6708,50 @@ the wiki scrub above, `design-final-pass` branch still exists (`git branch -a` c
 `_cli_job_finish`'s unredacted `str(error)` at `moonglade_backup.py:1061` is unfixed, and the
 four stale comments from the pre-v3.0 sweep are untouched. P1 (test-suite audit) and P2
 (DECISIONS.md condensing + branch graveyard + doc refresh) have not been started at all.
+
+### D4 metric redesign proposed -- and the Branding tab handoff sent to Claude Design  ·  *2026-08-09*
+
+**D4 (Enhance chain), proposed shape, owner-supplied ability list.** Owner gave 9 real,
+already-shipped abilities to draw from (Edit Pro/Reference Pro, Fixer, Art Filters, regenerate
+w/ a different model, reuse a seed, send to video, reference-image generation, Upscale/Hi-res
+enhance, boosters). None overlap an existing achievement metric except Fixer (already 1 of
+`full-toolbox`'s old 3 legs); `master-of-the-loom` already owns video-mode mastery, so send-
+to-video and reference-image generation were dropped to avoid duplicating it. Owner then asked
+to dial the pool to 5, calling the 9 "just thoughts/suggestions." Proposed 5 (not yet ruled
+on): Edit Pro/Reference Pro, Fixer, Art Filters, regenerate-different-model, Upscale/Hi-res
+enhance -- with Upscale/Hi-res enhance and "boosters (Hi-res, Custom Prompts)" flagged as a
+possible same-capability duplicate, unresolved. Shape: one shared distinct-count metric off
+this pool at three thresholds -- `first-enhance` (common) = 1, `full-toolbox` (rare) = 3,
+`enhance-adept` (epic) = 5 -- keeping all three existing ids/tiers (no D2 roster impact), and
+likely leaving D3/Completionist needing no pool surgery once D4 lands. **Not yet locked** --
+pending the Hi-res/boosters overlap call.
+
+**The branding unlock chain, corrected (supersedes the version in the P3/D3/D4 report above):**
+- `hoardsmith` -> Moonlit Silver skin + **Moonwell Eclipse mark** (moves off Nightfallen, which
+  no longer needs a fixed mark now that its own reward is a slot, not an asset)
+- `reel-director` -> Embercourt skin + **a banner, art ready**
+- `menagerie` -> Verdant Grove skin + Vine Crescent mark (still currently free in code, meant
+  to be gated once P3's backend work happens)
+- `the-great-library` -> Nightfallen skin + **a banner, art ready** + **a Custom Mark upload
+  slot** in the Branding tab -- a genuine upload (owner confirmed), same spirit as Under the
+  Hood's own drop-in mechanic, surfaced as a real control instead of a folder drop
+- Free tier is Moonglade (default) ONLY now -- Nightfallen is no longer free
+- Gem Tome: **being remade, not removed** -- supersedes the 2026-07-23 "owner dislikes it,
+  remove" ruling, which never executed and is now moot
+- Gating sequencing, owner's call: **wait for P3** -- none of this is built in code today
+  (marks/skins/banners are all free-for-all); design against the gated end-state anyway so the
+  UI is ready when the backend catches up
+
+**Branding tab handoff sent to Claude Design**, same workshop batch as the job-tracker chrome
+(owner's call): `panel/branding-tab-spec.html` written into the "Moonglade Athenaeum" design-
+system project (`b43ffcd7-...`, via DesignSync), matching the existing
+`panel/account-detail-spec.html` format/tokens. Covers two real gaps found while scoping:
+(1) banner slots can already hold multiple uploaded assets with one marked active (routes
+shipped 2026-08-05: `add_slot_asset`/`set_slot_crop`/`set_slot_active`) but no picker UI was
+ever built for choosing between them -- spec asks for the SAME interaction pattern the Marks
+section's thumbnail-grid picker already uses (`ControlPanelOverlay.jsx:810+`,
+`.mgcp-marksbig`), not a new one; (2) the Custom Mark upload slot, net new. Both design
+questions genuinely left open for Claude Design: locked-vs-hidden treatment for an unearned
+banner/mark, and upload constraints on the custom mark. **Owner confirms both the tracker and
+branding build are now underway in Claude Design** as of this entry -- next step on this side
+is picking up whatever comes back.
