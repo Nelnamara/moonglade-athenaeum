@@ -6755,3 +6755,32 @@ questions genuinely left open for Claude Design: locked-vs-hidden treatment for 
 banner/mark, and upload constraints on the custom mark. **Owner confirms both the tracker and
 branding build are now underway in Claude Design** as of this entry -- next step on this side
 is picking up whatever comes back.
+
+### P0 hygiene done; `/next` + spinner branch merged; `design-final-pass` deleted  ·  *2026-08-09*
+
+**Merged** `next-and-spinner-fix-2026-08-09` into master (`--no-ff`) -- the `/next` full-page-
+reload fix and both spinner bugs (face-tumble crop, ellipse ring). Full suite green post-merge
+(725/725 loom, 1529/1529 pytest, one pacing-test flake from concurrent background-agent load,
+confirmed clean in isolation). **Deleted** `design-final-pass` (0 commits ahead of master,
+confirmed before deleting) locally and on origin.
+
+**P0 quick hygiene, all three remaining items done, run via parallel agents (owner: "run
+basic agents as needed"), each reviewed against its actual diff before committing:**
+- Wiki spoiler scrub: `Control-Panel.md`'s two "Branding" mentions removed, matched to the
+  actual v3.0 changelog scrub's precedent commit (`03bb940`) rather than re-deriving scope --
+  reworded "two tabs are Maintenance and Branding" down to "tab is Maintenance" rather than
+  leaving a dangling tab-count hint. `Folio-of-Honors.md` needed no edit -- verified it never
+  mentioned Under the Hood to begin with.
+- Four stale comments fixed, comment-only: NavSpine's `soon` branch is live scaffolding for
+  the next unshipped overlay, not dead code (branch left alone, comment's specific over-claim
+  corrected); `main.jsx` + `AppMobile.jsx` both still called mobile Create/Video placeholders
+  after they shipped for real 2026-08-03 -- only Edit's Fixer sub-tab is still an honest one.
+- `_cli_job_finish`'s unredacted `str(error)` (`moonglade_backup.py:1061`) fixed. Found that
+  `_redact_host_paths` is a closure nested inside `create_app`, not a module-level name --
+  unimportable from `moonglade_backup.py`. Added `_redact_host_paths_cli(out_dir, msg)` as a
+  module-level twin (`moonglade_gallery.py:4605`) with the identical algorithm (same candidate
+  list, same split-then-escape-then-rejoin technique), documented as an intentional one-copy
+  duplicate rather than two independently-maintained redactors.
+
+P0 is now fully done. P1 (test-suite audit) and P2 (docs condensing + branch graveyard + doc
+refresh) have still not been started.
