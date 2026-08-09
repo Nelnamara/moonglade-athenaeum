@@ -2,15 +2,15 @@
 
 Reached from **⚙ Panel** in the gallery header. It runs the same maintenance commands the
 CLI does, as background jobs with a live log and a progress bar, so routine upkeep never
-needs a terminal. It also holds your login accounts, branding, and Stop / Restart for the
+needs a terminal. It also holds your login accounts and Stop / Restart for the
 server itself.
 
 **⚙ Panel** opens the Panel as an **overlay on top of the gallery**, not a separate
-page — click it again or `Esc` to close. Its two tabs are **Maintenance** and
-**Branding**; **Accounts**, **Trash**, and **PixAI account** (your cards, coupons and
-credit ledger) are their own tiles inside Maintenance, each opening as a further overlay
-on top of the Panel itself. The auto-sync schedule lives in the job console's **Ledger**
-view. (The old separate `/panel` page retired with the classic interface, 2026-08-08.)
+page — click it again or `Esc` to close. Its tab is **Maintenance**; **Accounts**,
+**Trash**, and **PixAI account** (your cards, coupons and credit ledger) are their own
+tiles inside Maintenance, each opening as a further overlay on top of the Panel itself.
+The auto-sync schedule lives in the job console's **Ledger** view. (The old separate
+`/panel` page retired with the classic interface, 2026-08-08.)
 
 Like every page in the gallery, it needs a login (see [Setup](Setup)).
 
