@@ -694,9 +694,13 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
     could go stale while the other moves on.
 
     Measured as shipped at 1280x900, on `/` and on `/loom?bundle=1` alike: the icon carries
-    `jt-queued`, the mascot's and ring's computed animationName are both `none` (a rendering
-    job reads `gen-spin`), the phase pill reads "queued" uppercased, and the estimate chip
-    reads "est. 27s wait".
+    `jt-queued`, the ring's computed animationName is `none` (a rendering job reads
+    `gen-spin`), the phase pill reads "queued" uppercased, and the estimate chip reads
+    "est. 27s wait". The mascot's own animationName is checked too but is ALWAYS `none`,
+    queued or not -- since the 2026-08-09 fix (owner: "spins weirdly offset") the portrait
+    never animates by design (object-position:60% 32% crops it off-center to frame the face;
+    rotating that asymmetric crop as a rigid unit made the face itself tumble through every
+    orientation), so the ring alone is the real discriminator now.
     """
     seen = {}
     for host, path in (("gallery", "/"), ("loom", "/loom?bundle=1")):
@@ -708,11 +712,13 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
         assert m["hasQueuedClass"], (
             "{}: the queued row's icon has no jt-queued modifier".format(host))
         assert m["mascotAnimation"] == "none", (
-            "{}: the mascot is still animating ({!r}) on a job PixAI has not started -- "
-            "motion is what reads as work in progress".format(host, m["mascotAnimation"]))
+            "{}: the mascot has an animationName again ({!r}) -- it must never spin (an "
+            "asymmetric object-position crop tumbles the face when rotated as a rigid unit, "
+            "the 2026-08-09 bug); this should hold true regardless of queued/running state, "
+            "not just here".format(host, m["mascotAnimation"]))
         assert m["ringAnimation"] == "none", (
-            "{}: the progress ring is still spinning ({!r})".format(
-                host, m["ringAnimation"]))
+            "{}: the progress ring is still spinning ({!r}) on a job PixAI has not started -- "
+            "motion is what reads as work in progress".format(host, m["ringAnimation"]))
         assert m["pillText"] == "queued", (
             "{}: phase pill reads {!r}".format(host, m["pillText"]))
         assert m["pillTransform"] == "uppercase", (
@@ -723,17 +729,15 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
         assert m["iconVisible"] and m["rowWidth"] > 200, (
             "{}: the queued row did not lay out ({!r})".format(host, m))
 
-        # --- phase 2, per host: prove the measurement discriminates. Dropping the modifier
-        # is the pre-fix state exactly (one spinner for queued and rendering alike); if the
-        # animation stays `none` without it, the assertions above are vacuous.
+        # --- phase 2, per host: prove the RING measurement discriminates (the mascot's own
+        # animationName can't -- it's always "none", queued or not, since the 2026-08-09 fix).
+        # Dropping the modifier is the pre-fix state exactly (one spinner for queued and
+        # rendering alike); if the ring's animation stays `none` without it, the assertion
+        # above proves nothing.
         page.evaluate("() => document.querySelector('#jobs-tray .jt-spin')"
                       ".classList.remove('jt-queued')")
         _settle(page)
         reverted = page.evaluate(_TRAY_QUEUED_JS)
-        assert reverted["mascotAnimation"] == "gen-spin", (
-            "{}: removing jt-queued left the mascot's animationName at {!r} -- the "
-            "'none' assertion above proves nothing".format(
-                host, reverted["mascotAnimation"]))
         assert reverted["ringAnimation"] == "gen-spin", (
             "{}: removing jt-queued left the ring at {!r}".format(
                 host, reverted["ringAnimation"]))

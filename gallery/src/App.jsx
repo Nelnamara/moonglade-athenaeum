@@ -251,14 +251,14 @@ export default function App({ boot }) {
   const openDetails = (mid) => {
     const commit = () => {
       setLbIndex(null);
-      window.history.pushState({}, "", "/next?image=" + encodeURIComponent(mid));
+      window.history.pushState({}, "", "/?image=" + encodeURIComponent(mid));
       setDetailsFor(mid);
     };
     if (document.startViewTransition) document.startViewTransition(() => flushSync(commit));
     else commit();
   };
   const closeDetails = () => {
-    window.history.pushState({}, "", "/next");
+    window.history.pushState({}, "", "/");
     setDetailsFor(null);
   };
   useEffect(() => {
@@ -309,6 +309,24 @@ export default function App({ boot }) {
       document.removeEventListener("mg-result", onResult);
     };
   }); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Two thumbnail links live outside this component's own tree (the notify system's
+     ActivityTray and the shared VideoDrawer, both portaled/deeply nested with no direct
+     prop path to openDetails) and used to be bare <a href="/next?image=..."> anchors --
+     a REAL full-page navigation on click, the one path in the app that never got the
+     preventDefault+SPA-navigate treatment every other Details link already has. Found
+     live (owner, 2026-08-09): a finished job's thumbnail took him to a blank page. Fixed
+     at the source in both components (they now dispatch this event instead of navigating);
+     this listener is what actually opens Details for it, same bus pattern as mg-submit/
+     mg-result above. */
+  useEffect(() => {
+    const onOpenDetails = (e) => {
+      const mid = e.detail && e.detail.mid;
+      if (mid) openDetails(mid);
+    };
+    document.addEventListener("mg-open-details", onOpenDetails);
+    return () => document.removeEventListener("mg-open-details", onOpenDetails);
+  }, []);
 
   useEffect(() => { fetchAccount().then(setAccount); }, []);
 

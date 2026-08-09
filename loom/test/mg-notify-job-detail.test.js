@@ -231,8 +231,16 @@ describe("job detail popover is wired into the Row, click/keyboard handling, and
   test("clicking a row toggles the popover, but a thumbnail-link click is left alone", () => {
     // Vanilla: the tray's delegated click listener bailed on e.target.closest('.jt-thumb').
     // React: the thumbnail anchor stops propagation itself, so the Row's onClick never fires.
-    assert.match(traySrc, /className="jt-thumb" href=\{[^}]*\} onClick=\{\(e\) => e\.stopPropagation\(\)\}/,
-      "a click on the result thumbnail must not also toggle the detail popover (it should just navigate)");
+    // 2026-08-09: the thumbnail no longer does a real /next?image= page navigation either (it
+    // was the one bare <a> in the app with no preventDefault -- a genuine full-page reload on
+    // click, found live when it landed on a blank page). It now stops propagation AND, for a
+    // plain click, dispatches mg-open-details for App.jsx's own listener to open in-app --
+    // same "in-app or fall through to a real new tab" contract every other Details link
+    // already has, and the one thing that must never regress here is the stopPropagation.
+    assert.match(traySrc, /className="jt-thumb" href=\{[^}]*\}\s*\n\s*onClick=\{\(e\) => \{\s*\n\s*e\.stopPropagation\(\);/,
+      "a click on the result thumbnail must not also toggle the detail popover");
+    assert.match(traySrc, /document\.dispatchEvent\(new CustomEvent\("mg-open-details", \{ bubbles: true, composed: true, detail: \{ mid \} \}\)\);/,
+      "the thumbnail no longer opens Details in-app -- likely reverted to a real page navigation");
     // ...and "toggle" is real: re-clicking the open row's id closes it.
     const toggleBlock = extract(/const toggleDetail = useCallback\(\(jid, anchorEl\) => \{[\s\S]*?\}, \[\]\);/,
       "toggleDetail");
