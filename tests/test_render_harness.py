@@ -1177,3 +1177,34 @@ def test_setup_wizard_onboards_a_genuinely_fresh_install(
     finally:
         ctx.close()
 
+
+
+def test_tracker_spin_ring_renders_as_a_true_circle_not_an_ellipse(logged_in_page):
+    """A second, independent bug hiding behind the 2026-08-09 face-tumble fix above: owner
+    caught it on a SECOND recording after that fix shipped, still "wonky". `.jt-spin` is a
+    flex CHILD of `.jt-ic` (34px wide) but declares `width:48px` with no shrink override --
+    a flex item's default flex-shrink:1 compresses its WIDTH to fit the 34px parent while its
+    explicit HEIGHT:48px is untouched (flexbox only resizes the main axis), measured live via
+    getBoundingClientRect at 34x48 before the fix. `.gen-ring`'s `inset:2px` on that non-square
+    box made it an ELLIPSE, and animating an ellipse's rotation visibly bulges/narrows as it
+    turns -- exactly the "wonky, offset" look, independent of which crop the portrait itself
+    carries. Fix: flex-shrink:0 on .jt-spin. Asserted as real rendered geometry (not CSS text
+    presence) because that is exactly the kind of mismatch a shrink-eligible flex child creates
+    invisibly -- the declared width:48px in the stylesheet was never the lie, the cascade was.
+    """
+    page = logged_in_page(**DESKTOP)
+    _open_tray_with_queued_job(page, "/")
+    page.evaluate("() => document.querySelector('#jobs-tray .jt-spin').classList.remove('jt-queued')")
+    _settle(page)
+    geo = page.evaluate("""() => {
+        const spin = document.querySelector('#jobs-tray .jt-spin');
+        const ring = spin.querySelector('.gen-ring');
+        const r = el => { const b = el.getBoundingClientRect(); return {w: b.width, h: b.height}; };
+        return {spin: r(spin), ring: r(ring)};
+    }""")
+    assert abs(geo["spin"]["w"] - geo["spin"]["h"]) < 0.5, (
+        ".jt-spin is not square ({!r}) -- a flex child of the 34px-wide .jt-ic shrinking its "
+        "own declared 48px width again".format(geo["spin"]))
+    assert abs(geo["ring"]["w"] - geo["ring"]["h"]) < 0.5, (
+        ".gen-ring is not square ({!r}) -- it renders an ellipse, which bulges/narrows as it "
+        "rotates instead of spinning cleanly".format(geo["ring"]))
