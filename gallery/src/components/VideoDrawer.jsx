@@ -84,6 +84,15 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   const audFileRef = useRef(null);
   const costRef = useRef(null);
   const rootRef = useRef(null);
+  // liveNode retains the root node even AFTER React unmounts it (React nulls rootRef on unmount).
+  // A /api/loom/generate submit that resolves after the drawer unmounts (e.g. the Loom's Mobile-
+  // view toggle flipped mid-render) must still dispatch its spend-tracking mg-submit: the host
+  // bound that listener with addEventListener directly on the node, and addEventListener listeners
+  // fire on a detached node. That dispatch is what persists pendingTaskId so an already-charged
+  // render is recoverable on reload -- the vanilla dispatched off its retained element for exactly
+  // this reason; nulling on unmount turned a recoverable case into a silent ~210k-credit loss.
+  const liveNode = useRef(null);
+  const setRoot = useCallback((n) => { rootRef.current = n; if (n) liveNode.current = n; }, []);
 
   const costSeq = useRef(0);
   const costTimer = useRef(0);
@@ -98,7 +107,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // addEventListener) caught them. Preserved verbatim -- this stays a drop-in: emit() dispatches
   // the same events off the root node, so every existing listener keeps working with no rewrite.
   const emit = useCallback((name, detail) => {
-    const n = rootRef.current;
+    const n = liveNode.current;   // retained across unmount (see setRoot) so a post-unmount submit still fires
     if (n) n.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, detail: detail || {} }));
   }, []);
   useEffect(() => () => {
@@ -343,12 +352,21 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       .then((r) => r.json())
       .then((d) => {
         unlock();   // the server answered -- free the button for the NEXT submission
-        if (d.error || !d.task_id) { updateLine(id, { kind: "error", text: friendlyGenErr(d.error || "submit failed"), moon: false }); return; }
+        // A submit-time failure (server rejection or !task_id) must also emit mg-error, exactly as
+        // the vanilla's _renderErrorInto did -- otherwise the Loom's onVideoError never runs and a
+        // rejected shot shows no error badge on the board when the Video tab is collapsed. (No
+        // credits are spent on a failed submit, so this is a status regression, not a spend one.)
+        if (d.error || !d.task_id) {
+          const msg = friendlyGenErr(d.error || "submit failed");
+          updateLine(id, { kind: "error", text: msg, moon: false });
+          emit("mg-error", { error: msg });
+          return;
+        }
         emit("mg-submit", { task_id: d.task_id, payload: p });
         updateLine(id, { kind: "status", moon: true, text: "Queued — running…" });
         poll(d.task_id, id);
       })
-      .catch(() => { unlock(); updateLine(id, { kind: "error", text: "network error", moon: false }); });
+      .catch(() => { unlock(); updateLine(id, { kind: "error", text: "network error", moon: false }); emit("mg-error", { error: "network error" }); });
   };
 
   // Three thresholds mirror the Loom's own pollShot tiers (POLL_SLOW_AT_MS/STALE_AT/CEILING) --
@@ -521,7 +539,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   const vidArr = (s.vidSlots.length ? s.vidSlots : [null]);
 
   return (
-    <div ref={rootRef} className={"gen-drawer" + (className ? " " + className : "")} style={style} data-loom-ctx={loomCtx ? "" : undefined}>
+    <div ref={setRoot} className={"gen-drawer" + (className ? " " + className : "")} style={style} data-loom-ctx={loomCtx ? "" : undefined}>
       <div className="mgd-seg" role="tablist">
         {SEG.map(([v, lbl]) => (
           allowedModes.indexOf(v) === -1 ? null : (
@@ -556,7 +574,14 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
               return slotBox(item, i, "vid", "+ video", tag);
             })}
             {s.vidSlots.length < 3 ? (
-              <button type="button" className="mgd-slot-add" onClick={() => { st.current.vidSlots.push(null); rerender(); }}>+ add</button>
+              <button type="button" className="mgd-slot-add" onClick={() => {
+                // When the backing bank is empty the render shows ONE fabricated slot (vidArr's
+                // `|| [null]` fallback), so a plain push([null]) would re-derive that same single
+                // slot -- a no-op first click. Seed two so the first click genuinely adds a slot.
+                const cur = st.current;
+                if (!cur.vidSlots.length) cur.vidSlots = [null, null]; else cur.vidSlots.push(null);
+                rerender();
+              }}>+ add</button>
             ) : null}
           </div>
           <div className="mgd-lbl">Audio reference <span className="mgd-note">· WAV ≤15MB</span></div>

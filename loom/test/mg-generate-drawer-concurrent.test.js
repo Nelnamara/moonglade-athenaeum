@@ -60,6 +60,20 @@ describe("<VideoDrawer> gives each submission its own result line", () => {
       "concurrent submissions need their own line -- the result list must be appended, never " +
       "replaced wholesale, or a second submission would wipe the first task's still-live status");
   });
+
+  test("poll() renders each status/result into its OWN line via updateLine(lineId, …), never the whole strip", () => {
+    // The core concurrency guard (restored after the 2026-08-08 port dropped it): a submission's
+    // poll status/result must target ONLY its own line by id, never a wholesale rewrite of the
+    // shared result list that would erase a SECOND concurrent submission's still-live status.
+    const body = pollBody();
+    assert.match(body, /updateLine\(lineId,/,
+      "poll() must patch its own submission's line by id, not the whole strip");
+    assert.doesNotMatch(body, /setResults\(\s*\[/,
+      "poll() must not replace the whole result list with a fresh array");
+    assert.match(src, /const updateLine = \(id, patch\) => setResults\(\(rs\) => rs\.map\(/,
+      "updateLine must map-patch the matching line by id (rs.map, id===id ? {...l,...patch} : l), " +
+      "not overwrite the strip -- a wholesale setResults([...]) here is the exact concurrent-wipe regression");
+  });
 });
 
 describe("<VideoDrawer> tracks concurrent poll loops independently", () => {
@@ -76,5 +90,31 @@ describe("<VideoDrawer> tracks concurrent poll loops independently", () => {
     assert.match(src, /pollTimers\.current\.forEach\(\(t\) => clearTimeout\(t\)\)/,
       "the unmount cleanup must clear every outstanding poll timeout -- with concurrent submissions " +
       "clearing only the most recent would leave every other task's poll loop running after unmount");
+  });
+});
+
+// Adversarial-review fixes (2026-08-08, commit after 134dcb9).
+describe("<VideoDrawer> never orphans a paid submit when it unmounts mid-round-trip (review #2)", () => {
+  test("emit() dispatches off a node ref that SURVIVES unmount, not the React-nulled rootRef", () => {
+    assert.match(src, /const liveNode = useRef\(null\);/, "a retained node ref must exist");
+    assert.match(src, /const setRoot = useCallback\(\(n\) => \{ rootRef\.current = n; if \(n\) liveNode\.current = n; \}, \[\]\);/,
+      "setRoot must stash the node into liveNode and never null it");
+    const emitIdx = src.indexOf("const emit = useCallback");
+    const emitBody = src.slice(emitIdx, src.indexOf("}, []);", emitIdx));
+    assert.match(emitBody, /const n = liveNode\.current;/,
+      "emit must dispatch off the retained liveNode -- rootRef is nulled on unmount, and a submit " +
+      "resolving after unmount would then drop the spend-tracking mg-submit and orphan a charged render");
+    assert.match(src, /<div ref=\{setRoot\}/, "the root div must use the setRoot callback ref");
+  });
+});
+
+describe("<VideoDrawer> reports submit-time failures to the host (review #3)", () => {
+  test("doGenerate emits mg-error on a server rejection AND on a network error", () => {
+    const genIdx = src.indexOf("const doGenerate =");
+    const genBody = src.slice(genIdx, src.indexOf("\n  };", genIdx));
+    assert.match(genBody, /updateLine\(id, \{ kind: "error", text: msg, moon: false \}\);\s*\n\s*emit\("mg-error", \{ error: msg \}\);/,
+      "the submit-rejection branch must emit mg-error (matching the vanilla _renderErrorInto)");
+    assert.match(genBody, /updateLine\(id, \{ kind: "error", text: "network error", moon: false \}\); emit\("mg-error", \{ error: "network error" \}\);/,
+      "the submit .catch must emit mg-error");
   });
 });

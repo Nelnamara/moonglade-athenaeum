@@ -6394,10 +6394,34 @@ VideoDrawer.jsx/gen-drawer.css; test_cost_badge_ships_with_every_price_surface r
 element left to pair a script to); test_design_kit_sync's kit-page floor dropped the two deleted
 harnesses. Both bundles rebuilt + committed.
 
-**NOT yet live-verified in a browser** -- builds + both full test suites are the verification so
-far (the spend-critical logic is behaviorally unit-tested). A live Video-tab walkthrough (render,
-the @-chip contenteditable, cost pricing on a picked ref -- WITHOUT ever clicking Generate, per the
-hands-off spend rule) is the natural next check before the master merge.
+**ADVERSARIAL PRE-MERGE REVIEW (2026-08-08, 6-dimension workflow + verify pass, 12 agents).** Run
+against commit 134dcb9 BEFORE any live spend. 5 confirmed findings (1 refuted), all fixed in the
+follow-up commit:
+- **#1 HIGH (spend):** `applyModelGating`'s early `return` after the mode switch skipped the
+  duration clamp -- switching from a V4.0/15s state to a 10s-cap engine (mode ALSO unsupported,
+  e.g. r2v->i2v) left duration:15 in the priced + submitted payload. The vanilla fell through and
+  always clamped. Fix: drop the early return (videoDrawerCore.js applyModelGating).
+- **#2 HIGH (spend):** unmount mid-submit orphaned a paid render -- `emit("mg-submit")` no-op'd on
+  the React-nulled rootRef, so pendingTaskId was never persisted and a ~210k-credit task was lost
+  even on reload (trigger: flip the Loom's Mobile-view / close the overlay during the submit
+  round-trip). The vanilla dispatched off its retained element. Fix: a `liveNode` ref (set via a
+  setRoot callback ref, never nulled) that emit() dispatches off, so a post-unmount submit still
+  fires to the host's addEventListener listener (fires on a detached node) and persists pendingTaskId.
+- **#3 MED (status):** submit-time rejection / network error didn't emit mg-error, so the Loom
+  board card showed no error badge (no spend impact -- a failed submit spends nothing). Fix: emit
+  mg-error in both doGenerate failure paths (matches the vanilla _renderErrorInto).
+- **#4 LOW (UX):** the video-ref "+ add" first click was a no-op (backing vidSlots [] vs the
+  render's fabricated [null]). Fix: normalize vidSlots on entering r2v (applyMode) AND seed
+  [null,null] in the "+ add" handler when the bank is empty (covers the host video_refs:[] prefill).
+- **#5 LOW (test):** the concurrent test dropped the "poll renders into its OWN line" tripwire
+  (shipped code was correct; the guard was gone). Fix: restored it.
+Each fix carries a regression test (loom 725/725, pytest green). The 1 refuted finding (an M27
+dispatch-guard claim) was a false alarm -- the ported test does still pin it.
+
+**NOT yet live-verified in a browser** -- builds + both full test suites + the adversarial review
+are the verification so far (the spend-critical logic is behaviorally unit-tested). A live Video-tab
+walkthrough (render, the @-chip contenteditable, cost pricing on a picked ref -- WITHOUT ever
+clicking Generate, per the hands-off spend rule) is the natural next check before the master merge.
 
 **v3.0 GATE:** static/ is empty of JS -> the no-vanilla campaign is complete -> `design-final-pass`
 is ready for the master merge + v3.0 tag, pending the owner's live test.
