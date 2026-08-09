@@ -1,44 +1,61 @@
-"""Control Panel "Users" tab: list/add/remove gallery web-login accounts from the
-browser instead of the CLI (see moonglade_gallery.py's panel()/api_users_add()/
-api_users_remove(), and moonglade_backup.py's list_web_users/
+"""Users management: list/add/remove gallery web-login accounts from the browser
+instead of the CLI (see moonglade_gallery.py's api_panel_summary()/api_users_add()/
+api_users_remove()/api_users_password(), and moonglade_backup.py's list_web_users/
 add_or_update_web_user/remove_web_user). Companion to tests/test_web_auth.py's
-bootstrap-form tests -- this file covers the OTHER half of browser-first account
+bootstrap tests -- this file covers the OTHER half of browser-first account
 management: managing accounts once you're already past the front door.
-"""
-import re
 
+Since the classic cut (2026-08-08) the /panel PAGE is gone: the surviving surface
+is the React Control Panel overlay (gallery/src/components/ControlPanelOverlay.jsx's
+UsersSubOverlay) driven by /api/panel/summary + the /api/users/* JSON routes, which
+all survived unchanged. The session CSRF token is fetched off /api/panel/summary's
+JSON (the field the React overlay itself uses) instead of scraped from the dead
+page's inline `var CSRF = "..."`.
+"""
 import moonglade_backup as core
 from moonglade_gallery import create_app
 
-from tests.conftest import login_client, login_test_client
+from tests.conftest import login_client
 
 LAN = "203.0.113.5"      # TEST-NET-3 -- the "some other device on the LAN" stand-in,
                          # same address tests/test_route_tiers.py uses.
 
 
-def _panel_csrf(html):
-    m = re.search(r'var CSRF = "([^"]+)";', html)
-    assert m, "panel page did not embed a CSRF token"
-    return m.group(1)
+def _session_csrf(cli):
+    """The logged-in session's CSRF token, via /api/panel/summary -- the JSON twin
+    that replaced scraping it off the deleted /panel page (classic cut, 2026-08-08).
+    Same token the React UsersSubOverlay posts back as `summary.csrf`."""
+    r = cli.get("/api/panel/summary")
+    assert r.status_code == 200, "summary not reachable for a logged-in session"
+    d = r.get_json()
+    assert d and d.get("csrf"), "summary did not include a csrf token"
+    return d["csrf"]
 
 
-def test_users_tab_lists_existing_accounts(tmp_path):
+def test_summary_lists_existing_accounts_without_hashes(tmp_path):
+    """Ported from the classic /panel Users-tab render (dead page): the account
+    LIST now reaches the browser as /api/panel/summary's web_users, and the
+    original's real invariant -- usernames only, never a password hash leaking
+    into what the browser receives -- holds for the JSON payload the same way it
+    had to hold for the rendered HTML."""
     core.add_or_update_web_user("archivist", "pw-a")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
-    html = cli.get("/panel").get_data(as_text=True)
-    assert 'data-tab="users"' in html          # the new tab button is present
-    assert 'data-username="archivist"' in html
-    assert 'data-username="tester"' in html
-    # Only usernames -- never a password hash leaking into the rendered page.
+    r = cli.get("/api/panel/summary")
+    assert r.status_code == 200
+    d = r.get_json()
+    names = {u["username"] for u in d["web_users"]}
+    assert {"archivist", "tester"} <= names
+    # Only usernames -- never a password hash leaking into the payload.
+    raw = r.get_data(as_text=True)
     cfg = core._load_config()
+    assert cfg.get("AUTH_USERS"), "expected real accounts in the isolated config"
     for u in cfg.get("AUTH_USERS", []):
-        assert u["password_hash"] not in html
+        assert u["password_hash"] not in raw
 
 
 def test_add_user_end_to_end_real_post_real_hash(tmp_path):
     cli = login_client(tmp_path)
-    html = cli.get("/panel").get_data(as_text=True)
-    csrf = _panel_csrf(html)
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/add", json={
         "username": "newperson", "password": "hunter2222", "confirm": "hunter2222",
         "csrf": csrf})
@@ -55,8 +72,7 @@ def test_add_user_end_to_end_real_post_real_hash(tmp_path):
 
 def test_add_user_rejects_duplicate_username(tmp_path):
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
-    html = cli.get("/panel").get_data(as_text=True)
-    csrf = _panel_csrf(html)
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/add", json={
         "username": "tester", "password": "brand-new-pw", "confirm": "brand-new-pw",
         "csrf": csrf})
@@ -68,8 +84,7 @@ def test_add_user_rejects_duplicate_username(tmp_path):
 
 def test_add_user_validates_password_length_and_confirm(tmp_path):
     cli = login_client(tmp_path)
-    html = cli.get("/panel").get_data(as_text=True)
-    csrf = _panel_csrf(html)
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/add", json={
         "username": "short", "password": "ab", "confirm": "ab", "csrf": csrf})
     assert "at least 8 characters" in r.get_json()["error"]
@@ -99,7 +114,7 @@ def test_add_user_rejects_overlong_username(tmp_path):
     """The 300-char-username row-break bug: a name past the cap is refused with a friendly
     message, and nothing is written."""
     cli = login_client(tmp_path)
-    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    csrf = _session_csrf(cli)
     long_name = "z" * (core.MAX_WEB_USERNAME_LEN + 50)
     r = cli.post("/api/users/add", json={
         "username": long_name, "password": "a-valid-password", "confirm": "a-valid-password",
@@ -123,20 +138,35 @@ def test_writers_reject_overlong_username_as_a_backstop(tmp_path):
     assert core.add_web_user_if_new("y" * core.MAX_WEB_USERNAME_LEN, "a-valid-password") is True
 
 
-def test_username_inputs_carry_a_maxlength(tmp_path):
+def test_username_inputs_carry_a_maxlength():
     """Client-side belt to the server's braces: the account-creation and login username
-    fields cap input at the same 64, so the UI can't even submit an over-long name."""
-    cli = login_client(tmp_path)
-    panel = cli.get("/panel").get_data(as_text=True)
-    assert 'id="new-username"' in panel and 'maxlength="64"' in panel
-    # login page from a FRESH unauthenticated client -- an authed GET /login may redirect
-    login = create_app(tmp_path).test_client().get("/login").get_data(as_text=True)
-    assert 'name="username"' in login and 'maxlength="64"' in login
+    fields cap input at the same 64, so the UI can't even submit an over-long name.
+
+    Both halves are now JSX "source-presence assertions" (the pattern
+    loom/test/loom-image-job-register.test.js established for JSX this suite has no
+    browser harness to render -- tests/test_render_harness.py exists but is
+    Playwright-only and skips without a chromium binary; this check must not skip):
+    the login half checks LoginPage.jsx as before, and the classic /panel HTML half
+    (the dead page's id="new-username" input) is ported to its surviving successor,
+    ControlPanelOverlay.jsx's UsersSubOverlay add-user username input."""
+    import pathlib
+    src = pathlib.Path("gallery/src/components/LoginPage.jsx").read_text(encoding="utf-8")
+    assert 'name="username"' in src and "maxLength={64}" in src
+    # The Users overlay's add-user username input -- the classic panel input's
+    # replacement -- must carry the same cap.
+    cp = pathlib.Path("gallery/src/components/ControlPanelOverlay.jsx").read_text(encoding="utf-8")
+    import re
+    # Whole self-closing tag: `[^>]*` alone would stop at the `>` inside an
+    # onChange arrow function, hiding an attribute written after it.
+    m = re.search(r'<input[^>]*placeholder="username".*?/>', cp, re.S)
+    assert m, "UsersSubOverlay no longer renders an add-user username input"
+    assert "maxLength={64}" in m.group(0), (
+        "UsersSubOverlay's add-user username input lost the maxLength=64 client-side cap "
+        "the classic panel's id=new-username input carried")
 
 
 def test_add_user_requires_valid_csrf(tmp_path):
-    cli = login_client(tmp_path)
-    cli.get("/panel")  # establishes the session; deliberately ignore its real csrf
+    cli = login_client(tmp_path)   # login minted the session csrf; deliberately ignore it
     r = cli.post("/api/users/add", json={
         "username": "newperson", "password": "hunter2222", "confirm": "hunter2222",
         "csrf": "forged-token-not-in-session"})
@@ -152,7 +182,7 @@ def test_add_user_refuses_a_lan_session(tmp_path):
     is api_users_remove refusing a LAN session that tries to remove anyone but
     itself -- see test_remove_user_refuses_a_lan_session_removing_someone_else."""
     cli = login_client(tmp_path)
-    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/add", environ_overrides={"REMOTE_ADDR": LAN}, json={
         "username": "intruder", "password": "hunter2222", "confirm": "hunter2222",
         "csrf": csrf})
@@ -164,8 +194,7 @@ def test_add_user_refuses_a_lan_session(tmp_path):
 def test_remove_user_end_to_end(tmp_path):
     core.add_or_update_web_user("doomed", "pw-doomed")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
-    html = cli.get("/panel").get_data(as_text=True)
-    csrf = _panel_csrf(html)
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/remove", json={"username": "doomed", "csrf": csrf})
     assert r.status_code == 200
     assert r.get_json()["ok"] is True
@@ -175,7 +204,6 @@ def test_remove_user_end_to_end(tmp_path):
 def test_remove_user_requires_valid_csrf(tmp_path):
     core.add_or_update_web_user("doomed", "pw-doomed")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
-    cli.get("/panel")
     r = cli.post("/api/users/remove", json={"username": "doomed", "csrf": "bogus"})
     assert r.status_code == 400
     assert "expired" in r.get_json()["error"].lower()
@@ -185,8 +213,7 @@ def test_remove_user_requires_valid_csrf(tmp_path):
 
 def test_remove_last_account_is_refused(tmp_path):
     cli = login_client(tmp_path, username="onlyone", password="a-real-test-password-1")
-    html = cli.get("/panel").get_data(as_text=True)
-    csrf = _panel_csrf(html)
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/remove", json={"username": "onlyone", "csrf": csrf})
     assert r.status_code == 400
     assert "last remaining account" in r.get_json()["error"]
@@ -199,7 +226,7 @@ def test_remove_user_refuses_a_lan_session_removing_someone_else(tmp_path):
     left," which let a borrowed-tablet guest evict the owner specifically."""
     core.add_or_update_web_user("victim", "pw-victim-account")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
-    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/remove", environ_overrides={"REMOTE_ADDR": LAN},
                  json={"username": "victim", "csrf": csrf})
     assert r.status_code == 403
@@ -213,7 +240,7 @@ def test_remove_user_allows_a_lan_session_removing_itself(tmp_path):
     not -- a deliberate scoping choice for this fix."""
     core.add_or_update_web_user("other", "pw-other-account")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
-    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/remove", environ_overrides={"REMOTE_ADDR": LAN},
                  json={"username": "tester", "csrf": csrf})
     assert r.status_code == 200
@@ -228,19 +255,24 @@ def test_lan_self_removal_kills_the_callers_own_session_immediately(tmp_path):
     the caller can't keep acting as a user that no longer exists."""
     core.add_or_update_web_user("other", "pw-other-account")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
-    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/remove", environ_overrides={"REMOTE_ADDR": LAN},
                  json={"username": "tester", "csrf": csrf})
     assert r.status_code == 200
-    r2 = cli.get("/panel")
-    assert r2.status_code in (301, 302, 303, 307, 308)   # bounced to /login, not served
+    # The dead /panel page can no longer be the probe; the front door treats any
+    # page GET the same way, so the app shell at / stands in: bounced to /login,
+    # not served.
+    r2 = cli.get("/")
+    assert r2.status_code in (301, 302, 303, 307, 308)
+    # And the JSON tier agrees: the summary the Panel overlay would fetch is a 401.
+    assert cli.get("/api/panel/summary").status_code == 401
 
 
 def test_remove_last_account_is_refused_even_as_lan_self_removal(tmp_path):
     """The last-account guard applies to LAN self-removal too -- self-removal
     being allowed for a LAN session doesn't bypass "never leave zero accounts.\""""
     cli = login_client(tmp_path, username="onlyone", password="a-real-test-password-1")
-    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/remove", environ_overrides={"REMOTE_ADDR": LAN},
                  json={"username": "onlyone", "csrf": csrf})
     assert r.status_code == 400
@@ -250,8 +282,7 @@ def test_remove_last_account_is_refused_even_as_lan_self_removal(tmp_path):
 
 def test_remove_nonexistent_user_404s(tmp_path):
     cli = login_client(tmp_path)
-    html = cli.get("/panel").get_data(as_text=True)
-    csrf = _panel_csrf(html)
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/remove", json={"username": "ghost", "csrf": csrf})
     assert r.status_code == 404
 
@@ -274,8 +305,7 @@ def test_concurrent_remove_of_two_different_accounts_cannot_empty_the_list(tmp_p
     core.add_or_update_web_user("bob", "pw-bob-account")
     cli = login_client(tmp_path, username="alice", password="a-real-test-password-1")
     assert {u["username"] for u in core.list_web_users()} == {"alice", "bob"}
-    html = cli.get("/panel").get_data(as_text=True)
-    csrf = _panel_csrf(html)
+    csrf = _session_csrf(cli)
 
     real_save = core._save_config
 
@@ -318,63 +348,17 @@ def test_users_endpoints_require_login(tmp_path):
     assert r2.status_code == 401
 
 
-def _row_html(html, username):
-    """Slice out one <div class="u-row">...</div> block. Safe as non-greedy .*?
-    because a row never nests another <div> inside it (just a <span> and maybe a
-    <button>) -- the first </div> reached IS the row's own closing tag."""
-    m = re.search(r'<div class="u-row" data-username="{}">.*?</div>'.format(re.escape(username)),
-                  html, re.S)
-    assert m, "no row rendered for username {!r}".format(username)
-    return m.group(0)
+# ---------------------------------------------------------------------------
+# The classic /panel page's Users-tab RENDER tests (add-user form hidden/shown by
+# address, per-row Remove-button visibility, the self-vs-other confirm-dialog JS)
+# died with the template in the classic cut (2026-08-08): their subject was the
+# deleted page's inline HTML/JS, not the surviving routes. The ENFORCEMENT they
+# shadowed lives on above (test_add_user_refuses_a_lan_session,
+# test_remove_user_refuses_a_lan_session_removing_someone_else,
+# test_remove_user_allows_a_lan_session_removing_itself); the replacement UI is
+# React (ControlPanelOverlay.jsx's UsersSubOverlay), outside this suite's reach.
+# ---------------------------------------------------------------------------
 
-
-def test_add_user_form_hidden_for_a_lan_session(tmp_path):
-    """Would-always-fail controls are hidden rather than shown-then-403'd -- the
-    server-side gate in api_users_add is what actually enforces this; this test
-    is about not walking a LAN user into a dead-end confirm dialog."""
-    cli = login_client(tmp_path)
-    html = cli.get("/panel", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
-    assert 'id="add-user-form"' not in html
-    assert "Only the machine running the gallery can add new accounts" in html
-
-
-def test_add_user_form_shown_for_a_local_session(tmp_path):
-    cli = login_client(tmp_path)
-    html = cli.get("/panel").get_data(as_text=True)   # loopback by default
-    assert 'id="add-user-form"' in html
-    assert "restricted to the machine running the gallery" in html
-
-
-def test_remove_button_hidden_on_other_rows_for_a_lan_session(tmp_path):
-    """A LAN session can still remove its OWN row (see
-    test_remove_user_allows_a_lan_session_removing_itself) -- only OTHER rows'
-    Remove buttons are withheld, matching what api_users_remove will actually
-    accept from that same session."""
-    core.add_or_update_web_user("other", "pw-other-account")
-    cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
-    html = cli.get("/panel", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
-    assert "removeUser(this)" in _row_html(html, "tester")
-    assert "removeUser(this)" not in _row_html(html, "other")
-
-
-def test_remove_button_shown_on_every_row_for_a_local_session(tmp_path):
-    core.add_or_update_web_user("other", "pw-other-account")
-    cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
-    html = cli.get("/panel").get_data(as_text=True)   # loopback by default
-    assert "removeUser(this)" in _row_html(html, "tester")
-    assert "removeUser(this)" in _row_html(html, "other")
-
-
-def test_remove_user_js_distinguishes_self_from_other(tmp_path):
-    """The confirm-dialog wording (and the redirect-to-/login after success) only
-    make sense read as "you" for a self-removal -- checked as the exact source
-    strings, not a vague substring, since generic wording like "signed out" would
-    still be present even if this branch were reverted."""
-    cli = login_client(tmp_path)
-    html = cli.get("/panel").get_data(as_text=True)
-    assert "var isSelf = !!row.querySelector('.u-you');" in html
-    assert "You will be signed out immediately, on every device." in html
-    assert "if(isSelf){ location.href='/login'; return; }" in html
 
 # ---------------------------------------------------------------------------
 # /api/users/password -- the last CLI-only account operation.
@@ -395,7 +379,7 @@ def test_remove_user_js_distinguishes_self_from_other(tmp_path):
 def test_lan_session_changes_its_own_password_with_the_current_one(tmp_path):
     """The everyday case: a signed-in user rotating their own password remotely."""
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
-    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/password", environ_overrides={"REMOTE_ADDR": LAN},
                  json={"current_password": "a-real-test-password-1",
                        "new_password": "a-brand-new-password-2", "csrf": csrf})
@@ -409,7 +393,7 @@ def test_lan_session_cannot_change_its_own_password_without_the_current_one(tmp_
     without the old password it cannot replace the password, so a borrowed device
     cannot lock the owner out of his own account."""
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
-    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/password", environ_overrides={"REMOTE_ADDR": LAN},
                  json={"new_password": "attacker-chosen-pw-9", "csrf": csrf})
     assert r.status_code == 400
@@ -427,7 +411,7 @@ def test_lan_session_cannot_change_anyone_elses_password(tmp_path):
     exactly as api_users_remove does, so a LAN caller can never aim this at the owner."""
     core.add_or_update_web_user("victim", "pw-victim-account")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
-    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/password", environ_overrides={"REMOTE_ADDR": LAN},
                  json={"username": "victim", "current_password": "pw-victim-account",
                        "new_password": "stolen-account-pw-3", "csrf": csrf})
@@ -441,7 +425,7 @@ def test_local_session_resets_another_account_without_its_password(tmp_path):
     can reset a forgotten password without knowing the old one."""
     core.add_or_update_web_user("forgetful", "the-password-nobody-recalls")
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
-    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/password",
                  json={"username": "forgetful", "new_password": "a-fresh-start-pw-4",
                        "csrf": csrf})
@@ -454,7 +438,7 @@ def test_local_session_resets_its_own_password_without_the_current_one(tmp_path)
     sitting there can edit config.json directly -- and would leave the owner's OWN
     forgotten password unrecoverable, which is the case the item is about."""
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
-    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/password",
                  json={"new_password": "recovered-locally-pw-5", "csrf": csrf})
     assert r.status_code == 200, r.get_json()
@@ -467,12 +451,13 @@ def test_changing_your_own_password_keeps_you_signed_in_here(tmp_path):
     caller's own epoch, so the browser in front of you survives and the Panel still
     loads immediately afterwards."""
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
-    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/password", environ_overrides={"REMOTE_ADDR": LAN},
                  json={"current_password": "a-real-test-password-1",
                        "new_password": "still-here-after-pw-6", "csrf": csrf})
     assert r.status_code == 200
-    assert cli.get("/panel").status_code == 200
+    # The Panel's own summary fetch still 200s -- the session in front of you survived.
+    assert cli.get("/api/panel/summary").status_code == 200
 
 
 def test_password_reset_refuses_an_unknown_account(tmp_path):
@@ -480,7 +465,7 @@ def test_password_reset_refuses_an_unknown_account(tmp_path):
     REFUSES a name that does not exist rather than minting it. A reset for a
     non-existent user is a typo to report, not an invitation."""
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
-    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/password",
                  json={"username": "ghost", "new_password": "should-not-exist-7",
                        "csrf": csrf})
@@ -492,7 +477,7 @@ def test_password_reset_reuses_the_add_user_password_policy(tmp_path):
     """One policy, one place. A password too weak to REGISTER must be too weak to SET,
     or the Users tab would enforce a rule this route quietly undercuts."""
     cli = login_client(tmp_path, username="tester", password="a-real-test-password-1")
-    csrf = _panel_csrf(cli.get("/panel").get_data(as_text=True))
+    csrf = _session_csrf(cli)
     r = cli.post("/api/users/password",
                  json={"new_password": "x", "csrf": csrf})
     assert r.status_code == 400

@@ -64,10 +64,11 @@ def test_the_enhance_command_is_gone_from_the_cli(monkeypatch, capsys):
 def test_the_local_filter_module_ships_with_the_recipes_baked_in():
     """The replacement has to work with no connection -- offline is a property of the whole
     app, not a nicety -- so the 7 recipes are baked into the module rather than fetched, and it
-    makes no request of any kind. static/mg-art-filters.js's own behaviour is exercised for
-    real in loom/test/mg-art-filters.test.js; this pins the Python-side fact that the file the
-    page loads exists and is self-contained."""
-    js = (ROOT / "static" / "mg-art-filters.js").read_text(encoding="utf-8")
+    makes no request of any kind. The engine's behaviour is exercised for real in
+    loom/test/mg-art-filters.test.js; this pins the Python-side fact that the module the
+    React build imports exists and is self-contained. (Ported out of static/mg-art-filters.js
+    into gallery/src/art/artFilters.js on 2026-08-08, the vanilla static/ -> React campaign.)"""
+    js = (ROOT / "gallery" / "src" / "art" / "artFilters.js").read_text(encoding="utf-8")
     assert "api.pixai.art/config/imageArtFilters" in js      # names where the data came from
     for fid in ("filter-v1-m1", "filter-v1-m4", "filter-v1-m7"):
         assert fid in js, fid + " is not baked in"

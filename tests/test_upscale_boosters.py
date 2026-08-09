@@ -268,34 +268,29 @@ def test_web_both_methods_at_once_is_a_note_not_a_traceback(monkeypatch, tmp_pat
     assert d["cost"] is None and "mutually exclusive" in (d.get("note") or "")
 
 
-def test_drawer_offers_hires_as_a_booster_and_not_the_enlarge_method(tmp_path):
+def test_drawer_offers_hires_as_a_booster_and_not_the_enlarge_method():
     """PixAI runs Upscale/Hires from the IMAGE VIEW, on a picture that already exists. The
     only upscale that belongs in the generation panel is their `Enhance Details (HiRes)`
     BOOSTER, beside Face Fix and Quality Tag.
 
-    So the drawer keeps the Hires controls (ratio + denoising) as that chip's disclosure and
-    must NOT offer the ESRGAN `enlarge` method at all: there is no source image here, which
-    is exactly why the old three-way segment showed a ratio cap and an output size derived
-    from the size the generation was about to be rather than from a real picture.
+    Since the classic cut (2026-08-08) the drawer is the React Create surface
+    (gallery/src) -- same rules, restated against it: the Hires booster is a
+    settings-free chip (PixAI's Add Booster menu offers add-or-remove and nothing
+    else; owner, verifying live: "It just adds a chip. you can only remove it."), and
+    the ESRGAN `enlarge` method is not offered at all: there is no source image here.
+    The ratio/denoise controls live on <UpscalePanel>, where a real picture exists.
     """
-    save_catalog(tmp_path / "catalog.db",
-                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
-    for probe in ('id="gen-hires"', 'id="gen-facefix"', 'id="gen-qtag"'):
-        assert probe in html, probe
-    # The enlarge method and its dropdown left the drawer with the segment.
-    for gone in ('id="gen-up-seg"', 'id="gen-up-model"', 'id="gu-enlarge"', 'id="gu-off"',
-                 "Gen.setUpscale("):
-        assert gone not in html, gone + " is still in the generation panel"
-    # REBUILT 2026-07-28: the chip carries NO settings, matching PixAI, whose Add Booster
-    # menu offers add-or-remove and nothing else (owner, verifying live: "It just adds a
-    # chip. you can only remove it."). The ratio/denoise controls that used to hang off
-    # this chip were the IMAGE-VIEW tool's surface bolted onto a booster that has none;
-    # they still live on <mg-upscale-panel>, where a real source picture exists.
-    for gone in ('id="gen-up-ctl"', 'id="gen-up-ratio"', 'id="gen-up-dims"',
-                 'id="gen-up-denoise"', 'id="gen-up-denoise-str"', 'id="gen-up-denoise-steps"',
-                 "Gen.upRatio(", "Gen.upDenoise("):
-        assert gone not in html, gone + " survived the booster rebuild"
+    root = pathlib.Path(__file__).resolve().parent.parent
+    jsx = (root / "gallery" / "src" / "components" / "CreateMobile.jsx").read_text(encoding="utf-8")
+    for chip in ("Face Fix", "Quality Tag", "Enhance Details"):
+        assert chip in jsx, chip + " chip is missing from the Create surface"
+    core_js = (root / "gallery" / "src" / "gen" / "genCore.js").read_text(encoding="utf-8")
+    # The chip carries NO settings: the payload takes PixAI's own captured constants,
+    # not values off ratio/denoise controls that no longer exist in the drawer.
+    assert "upscale: hires ? MG_HIRES.ratio : null" in core_js
+    # The enlarge method (and its upscaler dropdown) never entered this surface.
+    for src, name in ((core_js, "genCore.js"), (jsx, "CreateMobile.jsx")):
+        assert "enlarge" not in src, "the enlarge method is offered in " + name
 
 
 def test_upscale_constants_reach_the_client_from_core(tmp_path):
@@ -306,7 +301,9 @@ def test_upscale_constants_reach_the_client_from_core(tmp_path):
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli = login_client(tmp_path)
-    for path in ("/", "/image/1"):
+    # Since the classic cut the marker is substituted into NEXT_PAGE ("/") and the
+    # Loom shells -- the surfaces with upscale UI -- not INDEX/DETAIL.
+    for path in ("/", "/loom"):
         html = cli.get(path).get_data(as_text=True)
         assert "__UPSCALE_CONST__" not in html, path + " left the raw marker on the page"
         blob = html.split("window.MG_UPSCALE=", 1)
@@ -321,18 +318,16 @@ def test_upscale_constants_reach_the_client_from_core(tmp_path):
             assert name in html, name
 
 
-def test_the_other_base_html_pages_do_not_leak_the_marker(tmp_path):
-    """__UPSCALE_CONST__ is substituted into INDEX_HTML and DETAIL_HTML only. Four more
-    templates derive from the same BASE_HTML, and a marker placed there instead would render
-    as literal text on every one of them."""
-    save_catalog(tmp_path / "catalog.db",
-                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    cli = login_client(tmp_path)
-    for path in ("/health", "/panel", "/dupes"):
-        r = cli.get(path)
-        if r.status_code != 200:
-            continue
-        assert "__UPSCALE_CONST__" not in r.get_data(as_text=True), path
+def test_the_login_shell_does_not_leak_the_marker(tmp_path):
+    """__UPSCALE_CONST__ is substituted into NEXT_PAGE and the Loom shells only. The login
+    shell is the one other full page a browser renders (deliberately its own, smaller
+    template), and the marker placed in a shared head instead would render as literal text
+    to every anonymous visitor. (Was the /health//panel//dupes BASE_HTML check before the
+    classic cut deleted those pages.)"""
+    from moonglade_gallery import create_app
+    r = create_app(tmp_path).test_client().get("/login")
+    assert r.status_code == 200
+    assert "__UPSCALE_CONST__" not in r.get_data(as_text=True)
 
 
 def test_image_meta_route_serves_what_an_upscale_needs_and_no_host_path(tmp_path):
@@ -371,49 +366,47 @@ def test_image_meta_flags_a_locally_imported_file(tmp_path):
     assert d["local_import"] is True and d["model_id"] == ""
 
 
-def test_upscale_lives_on_the_image_view_on_both_surfaces(tmp_path):
+def test_upscale_lives_on_the_image_view_on_both_surfaces():
     """PixAI invokes Upscale on a picture that already exists, so it belongs where you look
-    at one: the detail page as a full panel, and the lightbox as a flyout off one icon.
-
-    The flyout must be a SIBLING of #lightbox, not a child -- `.lb` is a flex overlay that
-    centres its children, so a panel inside it would be laid out as another centred item
-    instead of floating over the picture.
+    at one. Since the classic cut those surfaces are the React Lightbox (a flyout off one
+    icon) and the Details view (an inline panel) -- BOTH mounting the same shared React
+    <UpscalePanel> component (2026-08-08 no-vanilla port of <mg-upscale-panel>), never a
+    second drifting copy of its controls.
     """
-    save_catalog(tmp_path / "catalog.db",
-                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    cli = login_client(tmp_path)
-
-    index = cli.get("/").get_data(as_text=True)
-    assert 'id="lb-upscale"' in index and "lbUpscale()" in index
-    assert '<mg-upscale-panel id="up-flyout">' in index
-    assert "/static/mg-upscale-panel.js" in index
-    lb_at = index.index('<div id="lightbox"')
-    lb_end = index.index("</div>", index.index('id="lb-next"') if 'id="lb-next"' in index
-                         else index.index("lbStep(1)"))
-    assert index.index('<mg-upscale-panel id="up-flyout">') > lb_end, (
-        "the flyout is inside #lightbox, whose flex centring would lay it out as another "
-        "centred item rather than floating over the picture")
-
-    detail = cli.get("/image/1").get_data(as_text=True)
-    assert 'id="upscale-btn"' in detail and "toggleUpscale()" in detail
-    assert '<mg-upscale-panel id="up-panel" inline>' in detail
-    # The panel's price line IS <mg-cost-badge>, and the detail page loaded no components
-    # before this, so the badge would silently render as an unknown element without it.
-    assert "/static/mg-cost-badge.js" in detail
-    assert "/static/mg-upscale-panel.js" in detail
+    root = pathlib.Path(__file__).resolve().parent.parent
+    lbx = (root / "gallery" / "src" / "components" / "Lightbox.jsx").read_text(encoding="utf-8")
+    assert "import UpscalePanel" in lbx and "<UpscalePanel ref={upEl}" in lbx, \
+        "the lightbox no longer mounts the panel"
+    assert "upEl.current.open(it.media_id)" in lbx, "one icon opens the flyout for THIS picture"
+    # The Details surfaces drive it through the ONE shared hook (desktop + mobile): the hook
+    # owns the upEl handle + toggleUpscale, and each Details view renders <UpscalePanel ref={upEl}>.
+    hook = (root / "gallery" / "src" / "hooks" / "useImageDetails.js").read_text(encoding="utf-8")
+    assert "upEl" in hook and "toggleUpscale" in hook, "the details hook no longer drives the panel"
+    for fname in ("DetailsView.jsx", "ImageDetailsMobile.jsx"):
+        v = (root / "gallery" / "src" / "components" / fname).read_text(encoding="utf-8")
+        assert "import UpscalePanel" in v and "<UpscalePanel ref={upEl}" in v, \
+            fname + " no longer renders the shared panel"
+    det = (root / "gallery" / "src" / "components" / "DetailsView.jsx").read_text(encoding="utf-8")
+    assert "toggleUpscale" in det and "Upscale" in det, "the details view lost its Upscale control"
 
 
-def test_the_upscale_flyout_never_outlives_the_picture_it_was_opened_for(tmp_path):
+def test_the_upscale_flyout_never_outlives_the_picture_it_was_opened_for():
     """It is bound to ONE media_id. Stepping to the next image or closing the overlay must
     close it, or a half-configured panel is left pointed at a picture you have moved off --
-    the same class of bug as the filters panel's toggle-used-as-close."""
-    save_catalog(tmp_path / "catalog.db",
-                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
-    for fn in ("function closeLightbox()", "function lbStep(d)"):
-        body = html[html.index(fn):]
-        body = body[:body.index("\nfunction ", 5)]
-        assert "lbUpscaleClose()" in body, fn + " leaves the upscale flyout open"
+    the same class of bug as the filters panel's toggle-used-as-close. Since the classic
+    cut the lightbox is React (desktop + mobile), so the rule is pinned against both."""
+    root = pathlib.Path(__file__).resolve().parent.parent
+    for fname in ("Lightbox.jsx", "LightboxMobile.jsx"):
+        src = (root / "gallery" / "src" / "components" / fname).read_text(encoding="utf-8")
+        step = src[src.index("const step = useCallback"):]
+        step = step[:step.index("}, [")]
+        assert "closeUpscale()" in step, fname + ": stepping leaves the upscale flyout open"
+        close = src[src.index("const close = useCallback"):]
+        close = close[:close.index("}, [")]
+        assert "upEl.current.close()" in close, fname + ": closing the overlay leaves the flyout open"
+        # ...and a media_id change by ANY path (filmstrip jump, swipe) closes it too.
+        assert "useEffect(() => { closeUpscale(); }, [mid])" in src, \
+            fname + ": the flyout outlives a picture change"
 
 
 def test_the_upscale_panel_reuses_the_generate_routes(tmp_path):
@@ -424,48 +417,51 @@ def test_the_upscale_panel_reuses_the_generate_routes(tmp_path):
     read-only guard, the free-card check and the job-tracker registration to be forgotten.
     """
     root = pathlib.Path(__file__).resolve().parent.parent
-    js = (root / "static" / "mg-upscale-panel.js").read_text(encoding="utf-8")
-    assert "'/api/price'" in js and "'/api/generate'" in js
-    # The QUOTED form, i.e. an actual fetch target -- the file's own header names
-    # /api/upscale in prose while explaining why it does not exist.
-    assert "'/api/upscale'" not in js and '"/api/upscale"' not in js
-    assert "ref_media_id" in js and "ref_strength" in js, "an image-view upscale is i2i"
+    src = (root / "gallery" / "src" / "components" / "UpscalePanel.jsx").read_text(encoding="utf-8")
+    # The QUOTED form (double quotes in the React source), i.e. an actual fetch target -- the
+    # component's own doc names /api/upscale in prose while explaining why it does not exist.
+    assert '"/api/price"' in src and '"/api/generate"' in src
+    assert "'/api/upscale'" not in src and '"/api/upscale"' not in src
+    assert "ref_media_id" in src and "ref_strength" in src, "an image-view upscale is i2i"
     # The ceilings come from the server (core.UPSCALE_PIXEL_CEILING via window.MG_UPSCALE),
     # not a second hand port. A drifted copy would offer a ratio the server then silently
     # clamps, with nothing on screen to say the number changed.
-    assert "window.MG_UPSCALE" in js
-    assert "2048" not in js, "the pixel ceilings must come from the server, not be retyped"
+    assert "window.MG_UPSCALE" in src
+    assert "2048" not in src, "the pixel ceilings must come from the server, not be retyped"
     for name in core.ENLARGE_MODELS:
-        assert name not in js, name + " is retyped in the component instead of served"
-    # <mg-cost-badge>'s real API is setChecking()/setPrice(). An invented one (.loading()/
-    # .show()) is silently a no-op on a custom element -- the panel renders, the price line
-    # simply never updates, and nothing anywhere reports a problem.
-    badge = (root / "static" / "mg-cost-badge.js").read_text(encoding="utf-8")
+        assert name not in src, name + " is retyped in the component instead of served"
+    # CostBadge's real handle is setChecking()/setPrice(). An invented one (.loading()/.show())
+    # is silently a no-op -- the panel renders, the price line never updates, nothing reports it.
+    badge = (root / "gallery" / "src" / "components" / "CostBadge.jsx").read_text(encoding="utf-8")
     for meth in ("setChecking", "setPrice"):
-        assert meth + "(" in js, "the panel must call the badge's " + meth
+        assert meth + "(" in src, "the panel must call the badge's " + meth
         assert meth + "(" in badge, meth + " is not actually on the badge"
     # Scoped to the badge handle -- Toast.show() is a real, different API on this page.
-    assert "_cost.show(" not in js and "_cost.loading(" not in js, (
+    assert "costRef.current.show(" not in src and "costRef.current.loading(" not in src, (
         "those are not badge methods; calling them fails silently")
 
 
-def test_lora_weight_spans_pixais_real_range_on_every_surface(tmp_path):
+def test_lora_weight_spans_pixais_real_range_on_every_surface():
     """PixAI's Advanced panel bounds LoRA weight at -2..2, step 0.1, and NEGATIVE weights are
     legal there -- a LoRA at a negative weight subtracts its influence.
 
     Ours was a number spinner clamped at 0, so half of their range was unreachable: this was
     a capability gap hiding behind a widget choice, not only a styling preference. Both
-    surfaces must agree, because both submit through the same builder.
+    surfaces must agree, because both submit through the same builder. Since the classic
+    cut the gallery surface is the React Create screen (gallery/src).
     """
     root = pathlib.Path(__file__).resolve().parent.parent
-    save_catalog(tmp_path / "catalog.db",
-                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
-    assert 'type="range" step="0.1"' in html
-    assert 'step="0.05" min="0" max="2"' not in html, "the old 0..2 spinner survives"
-    # The bounds are per ARCHITECTURE, not baked into the markup -- see the range test below.
-    assert "function loraRange(" in html and "window.MG_LORA" in html
-    assert "reclampLoras" in html, "switching base model must re-clamp attached LoRAs"
+    jsx = (root / "gallery" / "src" / "components" / "CreateMobile.jsx").read_text(encoding="utf-8")
+    # A range slider whose bounds come per ARCHITECTURE from the served table, and whose
+    # step is served too -- nothing baked into the markup.
+    assert 'type="range"' in jsx and "loraStep()" in jsx
+    assert "min={loraLo} max={loraHi}" in jsx, "the LoRA slider bounds are not per-architecture"
+    assert 'min="0"' not in jsx, "a 0-floored spinner survives; negative weights are legal on SD"
+    core_js = (root / "gallery" / "src" / "gen" / "genCore.js").read_text(encoding="utf-8")
+    assert "export function loraRange" in core_js and "window.MG_LORA" in core_js
+    use = (root / "gallery" / "src" / "gen" / "useGenerate.js").read_text(encoding="utf-8")
+    assert use.count("clampLoras(old.loras, model.model_type)") >= 2, \
+        "switching base model AND switching version must both re-clamp attached LoRAs"
 
     # The Loom's Image tab shares the model, so it must share the control.
     jsx = (root / "loom" / "master-storyboard.jsx").read_text(encoding="utf-8")
@@ -553,35 +549,45 @@ def test_core_clamps_the_lora_weight_to_pixais_bounds():
     assert {e["versionId"]: e["weight"] for e in lst} == m, "the two shapes disagree"
 
 
-def test_drawer_no_longer_carries_the_ratio_cap_port(tmp_path):
+def test_drawer_no_longer_carries_the_ratio_cap_port():
     """The drawer's hand port of max_upscale_ratio existed ONLY to drive its ratio slider,
     and the slider is gone. It was also the wrong rule for this surface: the ceiling was
     inferred from PixAI's image-view DIALOG maxima, and a real booster task submitted
     upscale 1.5 on a 1400x784 source (2100x1176 -- over that inferred ceiling) and
     completed (task 2039053268124647852, 2026-07-28). The port still belongs to
-    <mg-upscale-panel>, which has a real slider and a real source picture; that copy is
-    covered by test_upscale_panel_ratio_cap_agrees_with_python.
+    <UpscalePanel>, which has a real slider and a real source picture; that copy is
+    covered by test_upscale_panel_ratio_cap_agrees_with_python. The React Create surface
+    must not grow the port back either: it has no ratio UI, so it has no use for the
+    ceiling table at all.
     """
-    save_catalog(tmp_path / "catalog.db",
-                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
-    for gone in ("var upCeil=", "function upMax(", "function syncUpscale("):
-        assert gone not in html, gone + " is still in the generation panel"
+    root = pathlib.Path(__file__).resolve().parent.parent
+    for fname in ("gen/genCore.js", "gen/useGenerate.js", "components/CreateMobile.jsx"):
+        src = (root / "gallery" / "src" / fname).read_text(encoding="utf-8")
+        for gone in ("upCeil", "upMax(", "syncUpscale(", "MG_UPSCALE"):
+            assert gone not in src, gone + " is in the generation surface (" + fname + ")"
 
 
-def test_drawer_sends_pixais_own_booster_values(tmp_path):
+def test_drawer_sends_pixais_own_booster_values():
     """Captured, not chosen. PixAI's Enhance Details booster exposes no controls, so their
     SERVER picks the values -- read off a real task (2039053268124647852, 2026-07-28):
     upscale 1.5, upscaleDenoisingStrength 0.6, and upscaleDenoisingSteps 32 alongside
     samplingSteps 32, i.e. the denoise steps MIRROR the generation's own steps rather than
-    being a constant. Our old hardcoded 26 was a number nobody chose.
+    being a constant. Our old hardcoded 26 was a number nobody chose. The builder is
+    genCore.js's buildPayload since the classic cut -- one function feeding BOTH
+    /api/price and /api/generate.
     """
-    save_catalog(tmp_path / "catalog.db",
-                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
-    assert "var MG_HIRES={ratio:1.5, denoise:0.6}" in html, "PixAI's captured values are gone"
-    assert "upscale_denoise_steps: boosters.hires ? (+el('gen-steps').value||25) : null" in html,         "denoise steps must mirror the generation's sampling steps, not a constant"
-    assert "upscale:upR" in html
+    root = pathlib.Path(__file__).resolve().parent.parent
+    src = (root / "gallery" / "src" / "gen" / "genCore.js").read_text(encoding="utf-8")
+    assert "export const MG_HIRES = { ratio: 1.5, denoise: 0.6 }" in src, \
+        "PixAI's captured values are gone"
+    assert "upscale: hires ? MG_HIRES.ratio : null" in src
+    assert "upscale_denoise: hires ? MG_HIRES.denoise : null" in src
+    # The denoise steps mirror the generation's own sampling steps (with the classic's
+    # ||25 fallback applied to BOTH), not a constant.
+    assert "upscale_denoise_steps: hires ? eff : null" in src, \
+        "denoise steps must mirror the generation's sampling steps, not a constant"
+    assert 'const eff = s.steps === "" ? STEPS_FALLBACK : Number(s.steps)' in src
+    assert "export const STEPS_FALLBACK = 25" in src
 
 def test_model_type_filter_mapping_is_measured_not_guessed():
     """Their Model Type filter maps a label to a GenerationModelType, and the ones that matter
@@ -641,16 +647,19 @@ def test_upscale_works_without_a_recorded_model(monkeypatch, tmp_path):
 def test_upscale_panel_offers_the_fallback_instead_of_blocking():
     """The panel must not dead-disable Go when the catalog has no model, and the constant
     must be SERVED rather than retyped into the component."""
-    src = pathlib.Path("static/mg-upscale-panel.js").read_text(encoding="utf-8")
-    paint = src[src.index("_paintModel()"):src.index("_openPicker()")]
-    assert "this._go.disabled = true;" not in paint, \
-        "the no-model branch must not leave Go permanently dead"
+    root = pathlib.Path(__file__).resolve().parent.parent
+    src = (root / "gallery" / "src" / "components" / "UpscalePanel.jsx").read_text(encoding="utf-8")
+    # Go's disabled derives from canSubmit, which accepts the served fallback version -- so a
+    # no-model image stays submittable, never dead-disabled.
+    assert "(src && src.model_id) || fallbackVersion()" in src, \
+        "the no-model case must still submit via the fallback, not dead-disable Go"
+    assert "disabled={!canSubmit || busy}" in src
     assert core.UPSCALE_FALLBACK_VERSION_ID not in src, \
         "the id must come from window.MG_UPSCALE, not a second copy in the component"
     assert "fallbackVersion()" in src
 
 
-def test_upscale_sends_the_images_model_as_a_version_id(monkeypatch, tmp_path):
+def test_upscale_sends_the_images_model_as_a_version_id():
     """The catalog's model_id is the task's submitted `modelId`, which IS a model VERSION
     id -- so an upscale must send it as version_id.
 
@@ -658,12 +667,12 @@ def test_upscale_sends_the_images_model_as_a_version_id(monkeypatch, tmp_path):
     and came back "pick a model first" on a picture whose model the panel was displaying
     on screen. Only a model chosen in the PICKER is a real model id.
     """
-    src = pathlib.Path("static/mg-upscale-panel.js").read_text(encoding="utf-8")
-    i = src.index("_payload()")
-    body = src[i:src.index("_price()", i)]
-    assert "model_id: s.model_picked ? (s.model_id || '') : ''" in body, \
+    root = pathlib.Path(__file__).resolve().parent.parent
+    src = (root / "gallery" / "src" / "components" / "UpscalePanel.jsx").read_text(encoding="utf-8")
+    body = src[src.index("const payload = ()"):src.index("const doPrice = ()")]
+    assert 'model_id: s.model_picked ? (s.model_id || "") : ""' in body, \
         "only a PICKED model may travel as model_id"
-    assert "version_id: s.model_picked ? '' : (s.model_id || fallbackVersion())" in body, \
+    assert 'version_id: s.model_picked ? "" : (s.model_id || fallbackVersion())' in body, \
         "the image's own model id is a version id and must travel as version_id"
 
 
@@ -687,7 +696,7 @@ def test_generate_rejects_a_version_id_sent_as_a_model_id(monkeypatch, tmp_path)
 
 # --- per-model booster gating ------------------------------------------------
 
-def test_enhance_details_is_gated_on_the_model_declaring_upscale_support(tmp_path):
+def test_enhance_details_is_gated_on_the_model_declaring_upscale_support():
     """PixAI's own Add Booster menu omits Enhance Details on a DiT model (measured
     2026-07-28 on Tsubaki.2, whose extra.compatibility carries `upscale:false`), and offers
     it on SDXL. Our drawer used to show all three boosters on every model, so it would send
@@ -696,33 +705,48 @@ def test_enhance_details_is_gated_on_the_model_declaring_upscale_support(tmp_pat
 
     The gate reads the same field PixAI does, through the existing capability path, and
     fails OPEN: only an explicit false disables anything, so a never-probed model is
-    unchanged.
+    unchanged. Since the classic cut it lives in the React gen hook/builder.
     """
-    save_catalog(tmp_path / "catalog.db",
-                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
-
-    assert "function gateBooster(" in html, "the booster gate is gone"
-    # Wired into the one place capability data is applied, off PixAI's own field.
-    assert "gateBooster('hires', compat.upscale," in html, \
+    root = pathlib.Path(__file__).resolve().parent.parent
+    use = (root / "gallery" / "src" / "gen" / "useGenerate.js").read_text(encoding="utf-8")
+    # PixAI's own field, read through the one capability accessor...
+    assert 'compat_upscale: cget(v, "upscale")' in use, \
         "Enhance Details must gate on compatibility.upscale, not on an architecture guess"
-    # Fails open exactly like gateField: an explicit false and nothing else.
-    gate = html.split("function gateBooster(")[1].split("function applyCapabilityGating(")[0]
-    assert "honored===false" in gate, "the booster gate must fail OPEN on unknown data"
+    # ...which fails OPEN: absent key -> undefined -> unknown, and every gate below
+    # compares `=== false`, so only an explicit false disables anything.
+    assert "return key in c ? c[key] : undefined" in use, \
+        "the capability accessor must fail OPEN on unknown data"
     # A booster armed before the model changed underneath it must be disarmed, or the
-    # payload would still carry a ratio the new model cannot use.
-    assert "boosters[k]=false" in gate, "switching to an incompatible model must disarm it"
+    # payload would still carry a ratio the new model cannot use -- on BOTH paths a
+    # version can change (model pick and manual version switch).
+    assert use.count("model.compat_upscale === false") >= 2, \
+        "switching to an incompatible model/version must disarm the armed chip"
+    assert use.count("hires: false") >= 2
+    core_js = (root / "gallery" / "src" / "gen" / "genCore.js").read_text(encoding="utf-8")
+    # Belt-and-braces at the payload itself, same explicit-false-only rule.
+    assert "s.boosters.hires && !(s.model && s.model.compat_upscale === false)" in core_js
+    jsx = (root / "gallery" / "src" / "components" / "CreateMobile.jsx").read_text(encoding="utf-8")
+    assert "disabled={m && m.compat_upscale === false}" in jsx, \
+        "the Enhance Details chip itself must disable on an explicit upscale:false"
 
 
-def test_booster_gate_does_not_touch_quality_tag_or_face_fix(tmp_path):
+def test_booster_gate_does_not_touch_quality_tag_or_face_fix():
     """Quality Tag is a MEMBERSHIP question (PixAI crowns it) and Face Fix has no
     compatibility key at all -- neither is decided by extra.compatibility, so neither is
     gated here. Pinned so a later pass doesn't quietly extend the capability gate over a
     product decision the owner has not made.
     """
-    save_catalog(tmp_path / "catalog.db",
-                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
-    body = html.split("function applyCapabilityGating(")[1].split("function ")[0]
-    assert "gateBooster('qtag'" not in body, "Quality Tag gating is an owner decision"
-    assert "gateBooster('facefix'" not in body, "Face Fix has no compatibility flag to gate on"
+    root = pathlib.Path(__file__).resolve().parent.parent
+    jsx = (root / "gallery" / "src" / "components" / "CreateMobile.jsx").read_text(encoding="utf-8")
+    row = jsx.split('<div className="cm-lbl">Boosters</div>')[1].split("Prompt helper")[0]
+    chips = row.split("<button")
+    face = next(c for c in chips if "Face Fix" in c)
+    qual = next(c for c in chips if "Quality Tag" in c)
+    assert "disabled" not in face and "compat" not in face, \
+        "Face Fix has no compatibility flag to gate on"
+    assert "disabled" not in qual and "compat" not in qual, \
+        "Quality Tag gating is an owner decision"
+    # ...and the disarm-on-model-change patch touches hires only.
+    use = (root / "gallery" / "src" / "gen" / "useGenerate.js").read_text(encoding="utf-8")
+    assert "face: false" not in use and "quality: false" not in use, \
+        "the capability gate must not disarm Face Fix or Quality Tag"

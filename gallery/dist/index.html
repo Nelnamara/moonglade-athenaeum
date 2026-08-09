@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<!-- DEV entry only (npm run dev). Production is served by moonglade_gallery.py's
+     /next route, which injects window.MG_BOOT server-side. Dev fakes a minimal boot
+     and the Vite proxy supplies real /api data from the running server. -->
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Moonglade Athenaeum — next (dev)</title>
+  <!-- PWA installability (2026-08-02). Dev-only paths: Vite serves gallery/public/
+       at root ("/") in dev regardless of the "/next/assets/" build base -- the
+       production paths (NEXT_PAGE/LOGIN_PAGE in moonglade_gallery.py) point at
+       /next/assets/... instead, where the same public/ files land after
+       `npm run build`. No service worker registration -- not in scope. -->
+  <link rel="manifest" href="/next/assets/manifest.json">
+  <meta name="theme-color" content="#0a0818">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Moonglade">
+  <link rel="apple-touch-icon" href="/next/assets/icon-180.png">
+  <script type="module" crossorigin src="/next/assets/app.js"></script>
+  <link rel="stylesheet" crossorigin href="/next/assets/app.css">
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    window.MG_BOOT = window.MG_BOOT || {
+      dev: true,
+      stats: { images: 0, videos: 0, collections: 0 },
+      collections: [],
+      user: "dev",
+      is_local: true,
+      is_true_local: true,
+      csrf: "",
+      build_stamp: "dev",
+      band: { height: 340, crop: 30 },
+    };
+  </script>
+</body>
+</html>

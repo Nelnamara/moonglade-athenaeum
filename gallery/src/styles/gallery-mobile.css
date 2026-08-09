@@ -1,0 +1,292 @@
+/* ============================================================================
+   Gallery / Create / Control — mobile shell (design spec: Moonglade Mobile.dc.html).
+   Shared by AppMobile.jsx (hero + tab bar + Loom/Menu sheets), GalleryMobile.jsx
+   (search/media/sort/actions toolbar + sheets), GalleryGridMobile.jsx (the
+   2-column tile grid) and MobileSheet.jsx (the shared bottom-sheet chrome).
+   ONE stylesheet for the whole surface, same call SetupWizardMobile.jsx made for
+   its own multi-phase surface (setup-wizard-mobile.css) — everything here is one
+   product, imported wherever a piece of it is used (Vite dedupes the module).
+
+   Every color is a DESIGN_TOKENS_CSS var() (moonglade_gallery.py) — no literal
+   hex standing in for a token that exists, matching login-mobile.css's own
+   documented rule. Sizes/paddings/radii are the DC's own literal numbers
+   (metal()/metalGlow() ported near-verbatim from its <script> — see the two
+   functions below); glm- prefix throughout, nothing in styles.css/shell.css is
+   touched.
+
+   THIS IS A REAL VIEWPORT, not the DC's fixed 390×844 iOS-frame simulation:
+   .glm-stage is position:fixed inset:0 (an app shell with a scrollable middle,
+   not a page that scrolls as a whole) rather than the DC's literal height:844px
+   box, and .glm-nav's bottom padding uses env(safe-area-inset-bottom) instead of
+   the DC's hardcoded 22px guess at a home-indicator gutter. */
+
+@keyframes glmMetal { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+@keyframes glmHalo { 0%, 100% { opacity: .3; transform: scale(.9); } 50% { opacity: .8; transform: scale(1.08); } }
+@keyframes glmSheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes glmSheetDown { from { transform: translateY(0); } to { transform: translateY(100%); } }
+@keyframes glmFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes glmFadeOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes glmRise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+@keyframes glmPress { from { transform: scale(1); } to { transform: scale(.96); } }
+@keyframes glmScreenIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes glmScreenOut { from { transform: translateX(0); } to { transform: translateX(100%); } }
+
+.glm-stage { position: fixed; inset: 0; display: flex; flex-direction: column;
+  background: var(--base); color: var(--text); overflow: hidden;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+/* ---- hero (persistent chrome above every tab, DC lines 45-62) ---- */
+.glm-hero { position: relative; flex: none; height: 172px; overflow: hidden; }
+.glm-hero-bg { position: absolute; inset: 0;
+  background: radial-gradient(120% 140% at 18% 0%, color-mix(in oklab, var(--accent) 26%, #0b0820) 0%, #0b0820 62%, #070512 100%); }
+.glm-hero-scrim { position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(to top, var(--base) 6%, transparent 64%); }
+.glm-hero-icons { position: absolute; right: 11px; top: 12px; z-index: 3; display: flex; gap: 8px; }
+.glm-iconbtn { width: 31px; height: 31px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 13px; cursor: pointer; border: 1px solid rgba(255,255,255,.4);
+  background-size: 220% 100%; animation: glmMetal 7s ease-in-out infinite;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.65), inset 0 -2px 3px rgba(5,3,8,.5),
+    0 6px 16px -2px rgba(0,0,0,.55); }
+.glm-iconbtn-gold { color: color-mix(in oklab, var(--gold) 30%, #0a0704);
+  background: linear-gradient(115deg, color-mix(in oklab, var(--gold) 55%, #050308) 0%, var(--gold) 20%,
+    color-mix(in oklab, var(--gold) 24%, #fff) 36%, var(--gold) 52%,
+    color-mix(in oklab, var(--gold) 68%, #050308) 70%, color-mix(in oklab, var(--gold) 38%, #fff) 86%,
+    color-mix(in oklab, var(--gold) 55%, #050308) 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.65), inset 0 -2px 3px rgba(5,3,8,.5),
+    0 6px 16px -2px rgba(0,0,0,.55), 0 0 16px -3px color-mix(in oklab, var(--gold) 65%, transparent); }
+.glm-iconbtn-teal { color: color-mix(in oklab, var(--loomc) 30%, #04100f);
+  background: linear-gradient(115deg, color-mix(in oklab, var(--loomc) 55%, #050308) 0%, var(--loomc) 20%,
+    color-mix(in oklab, var(--loomc) 24%, #fff) 36%, var(--loomc) 52%,
+    color-mix(in oklab, var(--loomc) 68%, #050308) 70%, color-mix(in oklab, var(--loomc) 38%, #fff) 86%,
+    color-mix(in oklab, var(--loomc) 55%, #050308) 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.65), inset 0 -2px 3px rgba(5,3,8,.5),
+    0 6px 16px -2px rgba(0,0,0,.55), 0 0 16px -3px color-mix(in oklab, var(--loomc) 65%, transparent); }
+.glm-iconbtn-lav { color: color-mix(in oklab, var(--lavender) 30%, #0a0714);
+  background: linear-gradient(115deg, color-mix(in oklab, var(--lavender) 55%, #050308) 0%, var(--lavender) 20%,
+    color-mix(in oklab, var(--lavender) 24%, #fff) 36%, var(--lavender) 52%,
+    color-mix(in oklab, var(--lavender) 68%, #050308) 70%, color-mix(in oklab, var(--lavender) 38%, #fff) 86%,
+    color-mix(in oklab, var(--lavender) 55%, #050308) 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.65), inset 0 -2px 3px rgba(5,3,8,.5),
+    0 6px 16px -2px rgba(0,0,0,.55), 0 0 16px -3px color-mix(in oklab, var(--lavender) 65%, transparent); }
+.glm-hero-stats { position: absolute; right: 11px; top: 57px; z-index: 2; display: flex; gap: 10px;
+  font-size: 9.5px; color: var(--subtext); text-shadow: 0 1px 6px rgba(0,0,0,.9); }
+.glm-hero-brand { position: absolute; left: 12px; bottom: 9px; z-index: 2;
+  display: flex; align-items: flex-end; gap: 8px; max-width: calc(100% - 90px); }
+.glm-hero-mark { flex: none; width: 30px; height: 30px; border-radius: 7px; overflow: hidden;
+  display: grid; place-items: center; font-size: 15px; color: var(--lavender);
+  background: color-mix(in srgb, var(--lavender) 22%, rgba(8,6,16,.6));
+  border: 1px solid color-mix(in srgb, var(--lavender) 42%, transparent); }
+.glm-hero-mark img { width: 100%; height: 100%; object-fit: cover; }
+.glm-hero-brandtext { min-width: 0; max-width: 195px; }
+.glm-hero-name { font-family: Georgia, "Times New Roman", serif; font-size: 15px; font-weight: 700;
+  line-height: 1.05; text-shadow: 0 2px 9px rgba(0,0,0,.8);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.glm-hero-flavour { font-size: 9px; font-style: italic; color: var(--subtext); cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: opacity .5s ease; opacity: 1; animation: glmRise .5s ease both; }
+.glm-hero-flavour.fading { opacity: 0; }
+.glm-hero-credits { position: absolute; right: 11px; bottom: 11px; z-index: 2; text-decoration: none;
+  font-size: 10.5px; padding: 3px 9px; border-radius: 12px; cursor: pointer; color: var(--gold);
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(0,0,0,.16)),
+    color-mix(in srgb, var(--surface0) 88%, #000);
+  border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 0 16px -5px color-mix(in srgb, var(--gold) 65%, transparent); }
+
+/* claim pill -- classic's #acct-claim ported, mobile placement. Stacks above
+   the credits pill rather than beside it (hero real estate is tight); same
+   "always there, quiet" role claim-modal.css's ClaimModal is additive to. */
+@keyframes glmClaimPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(79,201,154,.45); } 50% { box-shadow: 0 0 0 6px rgba(79,201,154,0); } }
+button.glm-hero-claim { position: absolute; right: 11px; bottom: 40px; z-index: 2;
+  display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700;
+  padding: 4px 10px; border-radius: 12px; cursor: pointer; font-family: inherit;
+  border: 1px solid var(--emerald); background: rgba(79,201,154,.16); color: var(--emerald);
+  animation: glmClaimPulse 2.6s ease-in-out infinite; white-space: nowrap; }
+button.glm-hero-claim:disabled { opacity: .7; animation: none; }
+
+/* ---- body / tab content ---- */
+.glm-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  position: relative; }
+.glm-tab { min-height: 100%; }
+
+/* ---- tab bar (DC navStyle/navTabs, lines 275-283 & 1080-1086) ---- */
+.glm-nav { flex: none; display: flex; border-top: 1px solid var(--surface1); background: var(--base);
+  padding: 4px 0 max(14px, env(safe-area-inset-bottom)); }
+.glm-navitem { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 7px 0 2px; cursor: pointer; background: none; border: none; color: var(--overlay0);
+  font-family: inherit; }
+.glm-navitem.on { color: var(--lavender); }
+.glm-navicon { font-size: 16px; }
+.glm-navlabel { font-size: 8.5px; letter-spacing: .09em; text-transform: uppercase; }
+.glm-navdot { width: 16px; height: 2px; border-radius: 1px; background: var(--lavender); margin-top: 1px; }
+
+/* ---- generic metal chip/button (DC's metal(on) function, ported verbatim) ---- */
+.glm-metal { font-size: 11px; font-weight: 600; white-space: nowrap; padding: 6px 12px;
+  border-radius: 14px; cursor: pointer; font-family: inherit; color: var(--text);
+  background: linear-gradient(180deg, rgba(255,255,255,.11), rgba(0,0,0,.16)),
+    color-mix(in srgb, var(--surface0) 88%, #000);
+  border: 1px solid rgba(255,255,255,.14);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.15), 0 1px 2px rgba(0,0,0,.45); }
+.glm-metal.on { color: #fff;
+  background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(0,0,0,.14)),
+    color-mix(in srgb, var(--lavender) 32%, var(--surface0));
+  border: 1px solid color-mix(in srgb, var(--lavender) 62%, transparent); }
+.glm-metal:disabled { opacity: .5; cursor: default; }
+
+/* ---- Gallery tab toolbar (DC barStyle/bar2Style/mediaPills, lines 66-88 & 912-929) ---- */
+.glm-bar { display: flex; align-items: center; gap: 6px; padding: 8px 11px;
+  border-bottom: 1px solid var(--surface1); position: sticky; top: 0; z-index: 5; background: var(--base); }
+.glm-search { flex: 1; position: relative; min-width: 0; display: flex; align-items: center; }
+.glm-search-icon { position: absolute; left: 9px; color: var(--overlay0); font-size: 11px; cursor: pointer; }
+.glm-search input { width: 100%; box-sizing: border-box; border-radius: 15px; padding: 7px 62px 7px 28px;
+  font-size: 12px; color: var(--text); outline: none; font-family: inherit;
+  background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.12)), var(--mantle);
+  border: 1px solid rgba(255,255,255,.13); }
+.glm-search-adv { position: absolute; right: 4px; font-size: 9.5px; padding: 3px 8px; border-radius: 11px;
+  color: var(--lavender); cursor: pointer; border: 1px solid color-mix(in srgb, var(--lavender) 45%, transparent);
+  background: color-mix(in srgb, var(--lavender) 20%, var(--surface0)); font-family: inherit; }
+.glm-bar2 { display: flex; align-items: center; gap: 6px; padding: 6px 11px 9px; flex-wrap: nowrap;
+  overflow-x: auto; }
+.glm-pill-accent { color: #fff;
+  background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(0,0,0,.14)),
+    color-mix(in srgb, var(--lavender) 32%, var(--surface0));
+  border: 1px solid color-mix(in srgb, var(--lavender) 62%, transparent); }
+.glm-pill-auto { margin-left: auto; }
+.glm-selcount { font-size: 10.5px; color: var(--subtext); margin-left: auto; white-space: nowrap; }
+.glm-selcount b { color: var(--text); }
+
+/* ---- grid (DC gridStyle/colStyle/colOffStyle/capStyle, lines 89-106 & 930-934) ---- */
+.glm-grid { padding: 9px; display: grid; grid-template-columns: 1fr 1fr; gap: 7px; align-items: start; }
+.glm-grid.loading { opacity: .6; }
+.glm-col { display: flex; flex-direction: column; gap: 7px; }
+.glm-col-off { margin-top: 22px; }
+.glm-tile { position: relative; margin: 0; border-radius: 8px; overflow: hidden; cursor: pointer;
+  background: var(--surface0); touch-action: pan-y; -webkit-touch-callout: none; user-select: none; }
+.glm-tile.pressing { animation: glmPress .48s ease forwards; }
+.glm-tile-img { display: block; width: 100%; height: 100%; object-fit: cover; -webkit-touch-callout: none; }
+.glm-tile-vid { position: absolute; right: 6px; top: 6px; font-size: 10px; color: #fff;
+  background: rgba(0,0,0,.55); border-radius: 50%; width: 18px; height: 18px; display: grid; place-items: center; }
+.glm-tile-chk { position: absolute; left: 5px; top: 5px; width: 17px; height: 17px; border-radius: 50%;
+  border: 2px solid #fff; background: rgba(0,0,0,.35); color: #fff; font-size: 10px; font-weight: 700;
+  display: grid; place-items: center; line-height: 1; }
+.glm-tile-chk.on { background: var(--lavender); }
+.glm-tile-cap { position: absolute; inset: auto 0 0 0; padding: 14px 7px 5px; font-size: 9.5px; color: #fff;
+  background: linear-gradient(to top, rgba(0,0,0,.78), transparent); line-height: 1.25; display: flex;
+  flex-direction: column; gap: 1px; }
+.glm-tile-model { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.glm-tile-date { color: rgba(255,255,255,.7); font-size: 8.5px; }
+.glm-empty { padding: 40px 20px; text-align: center; font-size: 12px; color: var(--overlay0); }
+
+/* ---- pager (not in the DC — the mockup shows no pagination UI at all, but real
+   pagination stays on mobile for the same reason the desktop grid keeps it
+   (owner: "why have a per page setting" — see Grid.jsx's own header comment).
+   Built from the same metal-pill language as everything else so it reads as
+   the same product even though its exact pixels aren't the DC's. ---- */
+.glm-pager { display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 4px 13px 20px; }
+.glm-pager-info { font-size: 10px; color: var(--overlay0); text-align: center; }
+
+/* ---- sheets (DC sheetScrimStyle/sheetBoxStyle, lines 285-331 & 1088-1102) ---- */
+.glm-scrim { position: fixed; inset: 0; z-index: 30; background: rgba(4,3,10,.66);
+  animation: glmFade .24s ease both; }
+.glm-scrim.closing { animation: glmFadeOut .28s ease both; }
+.glm-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 31; max-height: 82vh;
+  overflow-y: auto; -webkit-overflow-scrolling: touch; background: var(--mantle);
+  border-radius: 16px 16px 0 0; border-top: 1px solid var(--lavender);
+  padding: 12px 13px max(22px, env(safe-area-inset-bottom));
+  animation: glmSheetUp .28s cubic-bezier(.2,.9,.24,1) both; }
+.glm-sheet.closing { animation: glmSheetDown .28s cubic-bezier(.4,0,.2,1) both; }
+.glm-sheet-title { font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--lavender); margin-bottom: 10px; }
+
+/* ---- Advanced Search sheet fields (DC legendStyle/f2Style/selectSmStyle, 1094-1101) ---- */
+.glm-legend { margin: 4px 0 12px; padding: 8px 9px; background: var(--base);
+  border: 1px solid var(--surface0); border-radius: 8px; }
+.glm-legend-cap { font-size: 8.5px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--overlay0); margin-bottom: 4px; }
+.glm-legend-line { color: var(--subtext); font-size: 11px; line-height: 1.6; }
+.glm-legend code { font-family: ui-monospace, monospace; font-size: 11px; color: var(--lavender); }
+.glm-field2 { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-bottom: 4px; }
+.glm-field { display: flex; flex-direction: column; gap: 3px; }
+.glm-field > span { font-size: 9.5px; color: var(--overlay0); }
+.glm-field select, .glm-field input { width: 100%; box-sizing: border-box; border-radius: 9px;
+  padding: 7px 9px; font-size: 11.5px; color: var(--text); background: var(--base);
+  border: 1px solid var(--surface1); font-family: inherit; }
+
+.glm-sheet-actions { display: flex; gap: 8px; margin-top: 10px; }
+.glm-widebtn { flex: 1; text-align: center; display: block; font-size: 11px; }
+.glm-primary { flex: 1; text-align: center; text-decoration: none; border-radius: 14px; padding: 8px 14px;
+  font-size: 12px; font-weight: 700; color: #1a0f2e; cursor: pointer; font-family: inherit; border: none;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--lavender) 92%, #fff), var(--lavender) 52%,
+    color-mix(in srgb, var(--lavender) 76%, #000));
+  box-shadow: 0 0 20px -5px color-mix(in srgb, var(--lavender) 75%, transparent); }
+.glm-primary-loom { color: #06201f;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--loomc) 92%, #fff), var(--loomc) 52%,
+    color-mix(in srgb, var(--loomc) 74%, #000));
+  box-shadow: 0 0 20px -5px color-mix(in srgb, var(--loomc) 78%, transparent); }
+
+/* ---- Sort sheet (DC sortOpts, line 1103) ---- */
+.glm-sheet-list { display: flex; flex-direction: column; gap: 6px; }
+.glm-sheetopt { width: 100%; box-sizing: border-box; text-align: center; }
+
+/* ---- Actions sheet host (ActionsMenu.jsx mounted as-is) ---- */
+.glm-actions-host .mgl-actbtn { width: 100%; box-sizing: border-box; justify-content: center;
+  padding: 10px 14px; font-size: 12.5px; border-radius: 12px; }
+
+/* ---- Loom sheet (DC isLoomSheet, lines 315-322) ---- */
+.glm-loom-note { font-size: 11.5px; line-height: 1.55; color: var(--overlay0); margin: 0 0 11px; }
+.glm-loom-note b { color: var(--text); }
+
+/* ---- Menu sheet (DC menuItems, lines 324-329 & 899-907) ----
+   The 6 non-Log-Out destinations (My Art / Publish / Train / Import / Contests /
+   Health) are each their OWN separate mobile design file or a Control-tab-owned
+   surface, not part of this Gallery-tab increment (Moonglade Mobile.dc.html's
+   own `screenIs*` cases for these live in the Control/Menu part of the design,
+   explicitly out of scope per this increment's brief). They render `soon`-dimmed
+   with a disclosing tooltip, same convention NavSpine.jsx already uses for its
+   own not-yet-ported destinations — not a dead tap, an honest one. Log Out is
+   real (NavSpine.jsx's own POST /api/logout + cache-purge, ported verbatim). */
+.glm-menu-list { display: flex; flex-direction: column; }
+.glm-menu-item { display: flex; align-items: center; gap: 4px; padding: 12px 6px;
+  border-bottom: 1px dashed var(--surface1); font-size: 13px; cursor: pointer;
+  background: none; border-left: none; border-right: none; border-top: none; color: var(--text);
+  text-align: left; font-family: inherit; width: 100%; }
+.glm-menu-icon { display: inline-block; width: 22px; flex: none; }
+
+/* ---- full-screen push chrome (MobileScreen.jsx) -- the shared "screen"
+   primitive, alongside .glm-sheet's shared "sheet" primitive above. Absolutely
+   positioned inset:0 within the nearest positioned ancestor -- CreateMobile.jsx
+   mounts it as a sibling of .cm-pad inside .glm-tab (unpositioned), so it
+   resolves against .glm-body (position:relative, already sized to exactly the
+   hero-to-navbar gap) the SAME way .cm-videowrap already does (create-
+   mobile.css) -- covering the Create tab's own content area, not the DC's
+   literal whole-844px-frame assumption (the hero/credits chip and the bottom
+   tab bar stay visible/reachable underneath, matching this file's own "real
+   viewport, not the DC's iOS-frame sim" rule stated up top). z-index 32 sits
+   above .glm-sheet/.glm-scrim (30/31) and below .cm-modelwrap .mfly (331, so
+   the model/LoRA flyout -- reachable from the main composer, not duplicated
+   inside Advanced -- still layers correctly if opened while a screen is up). */
+.glm-screen { position: absolute; inset: 0; z-index: 32; background: var(--base);
+  display: flex; flex-direction: column;
+  animation: glmScreenIn .22s ease both; }
+.glm-screen.closing { animation: glmScreenOut .22s ease both; }
+.glm-screen-head { flex: none; display: flex; align-items: center; gap: 8px;
+  padding: 12px 13px; border-bottom: 1px solid var(--surface1); }
+.glm-screen-back { flex: none; width: 26px; height: 26px; display: grid; place-items: center;
+  font-size: 20px; line-height: 1; color: var(--overlay0); background: none; border: none;
+  cursor: pointer; padding: 0; font-family: inherit; }
+.glm-screen-title { font-family: Georgia, "Times New Roman", serif; font-size: 15px; color: var(--text); }
+.glm-screen-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 13px; }
+
+/* ---- Create/Control placeholders (this increment's honest soon-state, matching
+   the app's existing soon conventions rather than inventing a new one) ---- */
+.glm-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; gap: 10px; padding: 60px 28px; min-height: calc(100% - 120px); }
+.glm-placeholder-icon { font-size: 34px; color: var(--lavender); opacity: .7; }
+.glm-placeholder-title { font-family: Georgia, "Times New Roman", serif; font-size: 18px; color: var(--text); }
+.glm-placeholder-note { font-size: 12px; line-height: 1.6; color: var(--subtext); max-width: 260px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .glm-iconbtn, .glm-hero-flavour, .glm-scrim, .glm-sheet, .glm-tile.pressing, .glm-screen { animation: none; }
+}

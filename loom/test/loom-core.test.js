@@ -432,6 +432,21 @@ describe("shotPayload", () => {
     assert.equal(p2.audio_language, "none");
   });
 
+  test("carries the shot's Channel (is_private) onto the payload -- Normal by default, Enhanced when set", () => {
+    // 2026-08-06 owner correction: the Normal/Enhanced channel is the REAL field
+    // mg-generate-drawer has always submitted and the server's shared
+    // build_shot_video_params has always accepted on this route -- the Loom client
+    // just never sent it (an earlier audit wrongly recorded the field as nonexistent).
+    const base = { cast: [], openFrame: { thumbId: "t", source: "", desc: "", tag: "@image8" } };
+    const normal = makeCard(base);
+    const proj1 = makeProject([{ id: "a1", name: "Act", cards: [normal] }]);
+    assert.equal(shotPayload(flat(proj1)[0], proj1, fakeImgSrc).is_private, false,
+      "absent isPrivate must read as the drawer's own Normal default");
+    const enhanced = makeCard({ ...base, isPrivate: true });
+    const proj2 = makeProject([{ id: "a1", name: "Act", cards: [enhanced] }]);
+    assert.equal(shotPayload(flat(proj2)[0], proj2, fakeImgSrc).is_private, true);
+  });
+
   test("FLF shot with two UNTAGGED frames gets DISTINCT fallback tags (never the same one)", () => {
     const card = makeCard({
       mode: "FLF",

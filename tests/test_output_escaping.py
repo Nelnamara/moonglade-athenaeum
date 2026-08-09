@@ -1,14 +1,17 @@
-"""Server-rendered pages must never concatenate server- or user-provided free text into
-innerHTML unescaped. An upstream exception string (the API handlers return str(e)[:200]) or
-a job label reflected raw into innerHTML is an injection sink -- the value is not markup and
-must not be parsed as markup.
+"""Server-rendered output must never concatenate server- or user-provided free text into
+HTML unescaped. A reflected query value or a catalog field rendered raw is an injection
+sink -- the value is not markup and must not be parsed as markup.
 
-These are the CI-safe regression guards: they fetch the actual served bytes and pin the
-escaper (or textContent) at each sink, so a future edit that drops it fails here. The
-belt-and-suspenders proof that a crafted payload does NOT execute is a Playwright pass, which
-can't run in CI (no browser); it lives in the verification harness instead.
+History (classic cut, 2026-08-08): the original tests here pinned the escH2 escaper on the
+classic Control Panel and detail pages. Those templates (and escH2 with them) were deleted
+when the classic UI was cut -- the React shell renders those surfaces now. What SURVIVES is
+/contact-sheet: the print view is assembled with str.format(), NOT render_template_string,
+so it gets NONE of Jinja's autoescaping -- every catalog/query value interpolated into it
+is escaped by hand with markupsafe.escape. These are the CI-safe regression guards for that
+surface: they fetch the actual served bytes with a crafted payload and pin that it comes
+back as inert entities, so a future edit that drops an escape() call fails here.
 """
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade_gallery import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client
 
 
@@ -22,42 +25,54 @@ def _seed(tmp_path, **kw):
                        created_at="2025-01-01T00:00:00", **kw)])
 
 
-def test_panel_escapes_job_error_and_label(tmp_path):
-    """The Control Panel's job-status line renders d.error and d.label from the server.
-    Both must go through escH2 (the page's HTML escaper), not raw concatenation."""
+def test_contact_sheet_neutralises_reflected_collection_name(tmp_path):
+    """?collection= is reflected into the sheet's <title> and header bar. The page is
+    str.format()-built (no autoescaping), so a crafted collection name must come back
+    as entities -- visible text -- never as live markup in the logged-in session."""
     _seed(tmp_path)
-    html = login_client(tmp_path).get("/panel").get_data(as_text=True)
+    payload = "<script>alert(1)</script><img src=x onerror=alert(2)>"
+    html = login_client(tmp_path).get(
+        "/contact-sheet", query_string={"collection": payload}
+    ).get_data(as_text=True)
 
-    # The escaper is applied at every dynamic sink...
-    assert "escH2(d.error)" in html
-    assert "escH2(d.label" in html
-    # ...and the exact raw concatenations that used to be here are gone. `+d.error+`
-    # (a bare +, not the `(d.error)` escH2 wraps it in) is the tell of an unescaped sink.
-    assert "+d.error+'</span>'" not in html
-    assert "running: '+d.label+'" not in html
-    assert "'\\u2713 '+(d.label||'job')+'" not in html   # done-line label, now escH2-wrapped
-
-
-def test_detail_suggest_prompt_error_is_text_not_html(tmp_path):
-    """The image detail page's "Suggest prompt" error path builds a TEXT node -- the page
-    has no escaper in scope, so it must not use innerHTML for the server's error string."""
-    _seed(tmp_path)
-    html = login_client(tmp_path).get("/image/55").get_data(as_text=True)
-
-    assert "em.textContent = d.error" in html
-    # the old raw innerHTML sink must be gone
-    assert "(d.error || 'No suggestion returned.') + '</span>'" not in html
+    # the raw payload must not appear anywhere in the served bytes...
+    assert "<script>alert(1)</script>" not in html
+    assert "<img src=x onerror=alert(2)>" not in html
+    # ...only its escaped, inert form does
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
 
 
-def test_a_crafted_error_would_be_neutralised_as_literal_text(tmp_path):
-    """Documents the property the guards above defend, without a browser: escH2 turns the
-    markup-significant characters of a crafted payload into entities, so it can only ever
-    render as visible text, never as a live <img onerror> / <script>."""
-    import re
-    _seed(tmp_path)
-    html = login_client(tmp_path).get("/panel").get_data(as_text=True)
-    m = re.search(r"function escH2\(s\)\{(.+?)\}", html)
-    assert m, "escH2 escaper not found on the panel page"
-    body = m.group(1)
-    for pair in ("&/g,'&amp;'", "</g,'&lt;'", ">/g,'&gt;'", '"/g,\'&quot;\''):
-        assert pair in body, "escH2 no longer escapes {}".format(pair)
+def test_contact_sheet_escapes_media_id_in_attributes(tmp_path):
+    """media_id is interpolated into single-quoted src='...' attributes on the grid
+    (/thumbs/) and photo (/full/) formats. markupsafe.escape covers ' and " -- which
+    these attributes depend on -- so a hostile catalog value can't break out of the
+    attribute and plant an onerror handler."""
+    evil = "55' onerror='alert(1)"
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id=evil, filename="a_55.png",
+                       created_at="2025-01-01T00:00:00")])
+    cli = login_client(tmp_path)
+
+    for fmt in ("letter", "photo"):
+        html = cli.get("/contact-sheet",
+                       query_string={"ids": evil, "format": fmt}
+                       ).get_data(as_text=True)
+        # the quote must never survive raw inside the attribute...
+        assert "' onerror='" not in html, "unescaped attribute breakout ({})".format(fmt)
+        # ...it is entity-escaped in place, keeping the whole value inside src='...'
+        assert "55&#39; onerror=&#39;alert(1)" in html, \
+            "escaped media_id missing from served bytes ({})".format(fmt)
+
+
+def test_contact_sheet_escapes_caption_date(tmp_path):
+    """The grid captions render created_at[:10] from the catalog. Ten characters is
+    still enough for markup-significant text -- pin that it goes through escape()."""
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="55", filename="a_55.png",
+                       created_at="<b>&\"'x</b>ignored")])
+    html = login_client(tmp_path).get(
+        "/contact-sheet", query_string={"ids": "55", "captions": "1"}
+    ).get_data(as_text=True)
+
+    assert "<div class='cap'><b>" not in html          # raw sink gone
+    assert "&lt;b&gt;&amp;&#34;&#39;x" in html         # entity-escaped caption

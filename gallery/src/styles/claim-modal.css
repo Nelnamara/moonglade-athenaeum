@@ -1,0 +1,76 @@
+/* Daily-claim popup -- see useClaimModal.js's own header comment for the full
+   cadence/dismiss reasoning and ClaimModal.jsx for the shell it styles.
+   Own namespace (mgclaim-*): app-wide overlay, not a Control-Panel one, so it
+   doesn't belong in control-panel.css even though PowerModal there is its
+   closest structural relative. z-index band (360/361) sits ABOVE every
+   existing overlay (Control Panel's own power modal tops out at 341) --
+   this can appear at boot alongside anything else already open. */
+
+@keyframes mgclaimPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(79,201,154,.45); } 50% { box-shadow: 0 0 0 9px rgba(79,201,154,0); } }
+@keyframes mgclaimCardIn { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes mgclaimFadeOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes mgclaimCardOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-6px) scale(.97); } }
+/* The 1-up: pops from the mascot's hands, arcs up with a spin, shrinks away.
+   Duration must match useClaimModal.js's EXIT_MS (480ms). */
+@keyframes mgclaimCoinJump {
+  0%   { transform: translate(-50%, 0) scale(.5) rotate(0deg); opacity: 0; }
+  18%  { transform: translate(-50%, -22px) scale(1.2) rotate(90deg); opacity: 1; }
+  45%  { transform: translate(-50%, -52px) scale(1) rotate(200deg); opacity: 1; }
+  100% { transform: translate(-50%, -128px) scale(.35) rotate(360deg); opacity: 0; }
+}
+
+.mgclaim-scrim { position: fixed; inset: 0; z-index: 360; background: rgba(5,4,13,.7);
+  -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px);
+  animation: mgclaimFadeOut .2s ease reverse both; cursor: pointer; }
+.mgclaim-scrim.exiting { animation: mgclaimFadeOut .3s ease both; }
+
+.mgclaim-host { position: fixed; inset: 0; z-index: 361; display: grid; place-items: center;
+  padding: 24px; pointer-events: none; }
+
+.mgclaim-card { pointer-events: auto; width: min(360px, calc(100vw - 48px)); box-sizing: border-box;
+  text-align: center; padding: 30px 28px 24px; border-radius: 18px;
+  border: 1px solid rgba(79,201,154,.35);
+  background: linear-gradient(150deg, rgba(18,32,28,.97) 0%, rgba(10,16,14,.98) 55%, rgba(14,11,32,.98) 100%);
+  box-shadow: 0 34px 90px -16px rgba(0,0,0,.78), 0 0 40px rgba(79,201,154,.12);
+  animation: mgclaimCardIn .34s cubic-bezier(.2,.9,.24,1) both; position: relative; }
+.mgclaim-card.exiting { animation: mgclaimCardOut .32s ease both; }
+
+.mgclaim-x { position: absolute; top: 12px; right: 12px; width: 26px; height: 26px;
+  display: grid; place-items: center; border-radius: 8px; border: 1px solid var(--surface1);
+  background: rgba(33,31,58,.6); color: var(--subtext); font-size: 13px; cursor: pointer; }
+.mgclaim-x:hover { color: var(--text); border-color: var(--emerald); }
+
+.mgclaim-mascotwrap { position: relative; width: 120px; height: 120px; margin: 4px auto 12px; }
+.mgclaim-halo { position: absolute; inset: -14px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(79,201,154,.4), transparent 68%);
+  animation: mgclaimPulse 2.4s ease-in-out infinite; }
+.mgclaim-mascot { position: relative; width: 100%; height: 100%; object-fit: contain;
+  display: block; filter: drop-shadow(0 8px 18px rgba(0,0,0,.4)); }
+
+/* CSS-drawn coin -- no art dependency; swap to a background-image sprite
+   later without touching the animation itself. */
+.mgclaim-coin { position: absolute; left: 50%; bottom: 30%; width: 34px; height: 34px;
+  margin-left: -17px; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle at 34% 30%, #fff3c4 0%, #d4af37 42%, #a9791a 100%);
+  border: 1.5px solid #fff3c4; box-shadow: inset 0 0 0 2px rgba(169,121,26,.6), 0 4px 10px rgba(0,0,0,.4);
+  animation: mgclaimCoinJump .48s cubic-bezier(.25,.65,.35,1) both; }
+
+.mgclaim-title { font-family: Georgia, "Times New Roman", serif; font-style: italic;
+  font-size: 18px; color: var(--text); margin-bottom: 4px; }
+.mgclaim-amount { font-family: Georgia, serif; font-weight: 400; font-size: 34px;
+  line-height: 1.1; color: var(--emerald); font-variant-numeric: tabular-nums; margin-bottom: 6px; }
+.mgclaim-line { font-size: 12px; color: var(--subtext); line-height: 1.5; margin-bottom: 18px; }
+.mgclaim-err { font-size: 12px; color: var(--red); margin-bottom: 12px; }
+
+button.mgclaim-primary { display: inline-block; width: 100%; font-size: 13px; font-weight: 700;
+  padding: 11px 22px; border-radius: 10px; cursor: pointer; border: 1px solid rgba(79,201,154,.5);
+  background: var(--emerald); color: #0a1f16; font-family: inherit;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 6px 16px rgba(79,201,154,.22); }
+button.mgclaim-primary:hover:not(:disabled) { filter: brightness(1.06); }
+button.mgclaim-primary:disabled { opacity: .65; cursor: default; }
+.mgclaim-hint { font-size: 10.5px; color: var(--overlay0); margin-top: 11px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mgclaim-scrim, .mgclaim-card, .mgclaim-halo, .mgclaim-coin { animation: none; }
+  .mgclaim-scrim.exiting, .mgclaim-card.exiting { opacity: 0; }
+}

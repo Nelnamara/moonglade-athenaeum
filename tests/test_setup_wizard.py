@@ -12,23 +12,18 @@ as verified because the real cached key answered instead. This suite locks in th
 build a session from the submitted key alone, and never write to disk until that call
 actually succeeds."""
 import json
+import re
 
 import pytest
 
 import moonglade_backup as core
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade_gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
 
 
 def _row(**kw):
     return {f: "" for f in CATALOG_FIELDS} | kw
-
-
-def _client(tmp_path, rows=()):
-    if rows:
-        save_catalog(tmp_path / "catalog.db", list(rows))
-    return create_app(tmp_path).test_client()
 
 
 def _authed_client(tmp_path, rows=()):
@@ -174,38 +169,53 @@ class TestSaveKeyEndpoint:
         assert "<host-path>" in body
 
 
-class TestWizardBannerGating:
-    def test_needs_key_banner_when_no_key_configured(self, tmp_path):
-        cli = _authed_client(tmp_path)
-        html = cli.get("/").get_data(as_text=True)
-        assert 'id="setup-wizard"' in html
-        assert "Paste your PixAI API key" in html
-        assert "Run your first sync" not in html
+def _boot(cli):
+    """Parse the window.MG_BOOT JSON blob out of the React shell GET / serves. The
+    boot script is written with Jinja's |tojson, which escapes `<` -- so the first
+    `;</script>` after the assignment is guaranteed to be the real end of the blob."""
+    html = cli.get("/").get_data(as_text=True)
+    m = re.search(r"window\.MG_BOOT = (.+?);</script>", html)
+    assert m, "GET / did not render a window.MG_BOOT boot blob"
+    return json.loads(m.group(1))
 
-    def test_catalog_empty_banner_when_key_present_but_no_rows(self, tmp_path):
+
+class TestWizardBootGating:
+    """PORTED from the /classic server-rendered banner (cut 2026-08-08 with
+    INDEX_HTML): the banner itself is a React surface now, but the SERVER still owns
+    the gating -- next_gallery() computes needs_key/catalog_empty from a FRESH
+    config.json read (never the module-cached core._cfg, same as classic's index()
+    did, so a key pasted via the wizard flips the state on the very next load) and
+    ships them in window.MG_BOOT. These tests lock in that computation.
+
+    The old test_no_banner_for_lan_requests_even_with_no_key is deliberately NOT
+    ported: the cut removed the LAN suppression on purpose -- a signed-in LAN
+    session sees the same boot flags an owner does, and the localhost-only
+    enforcement lives where the writes happen (/api/setup/save-key, covered by
+    test_localhost_only above; anonymous LAN refusal is the front-door suite's,
+    tests/test_web_auth.py)."""
+
+    def test_needs_key_when_no_key_configured(self, tmp_path):
+        boot = _boot(_authed_client(tmp_path))
+        assert boot["needs_key"] is True
+        assert boot["catalog_empty"] is False
+
+    def test_catalog_empty_when_key_present_but_no_rows(self, tmp_path):
         cli = _authed_client(tmp_path)  # zero rows
         cfg_path = tmp_path / "config.json"
         cfg = json.loads(cfg_path.read_text())
         cfg["PIXAI_API_KEY"] = "sk-x"
         cfg_path.write_text(json.dumps(cfg))
-        html = cli.get("/").get_data(as_text=True)
-        assert "Run your first sync" in html
-        assert "Paste your PixAI API key" not in html
+        boot = _boot(cli)
+        assert boot["needs_key"] is False
+        assert boot["catalog_empty"] is True
 
-    def test_no_banner_once_catalog_has_rows(self, tmp_path):
+    def test_no_wizard_state_once_catalog_has_rows(self, tmp_path):
         cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                              created_at="2025-01-01T00:00:00")])
         cfg_path = tmp_path / "config.json"
         cfg = json.loads(cfg_path.read_text())
         cfg["PIXAI_API_KEY"] = "sk-x"
         cfg_path.write_text(json.dumps(cfg))
-        html = cli.get("/").get_data(as_text=True)
-        assert 'id="setup-wizard"' not in html
-
-    def test_no_banner_for_lan_requests_even_with_no_key(self, tmp_path, monkeypatch):
-        """The wizard is an owner-only action (writes credentials, triggers a sync) --
-        a LAN browser must never be invited to paste a key into someone else's machine."""
-        monkeypatch.setattr(core, "_load_config", lambda: {})
-        cli = _client(tmp_path)
-        html = cli.get("/", environ_overrides={"REMOTE_ADDR": "192.168.1.50"}).get_data(as_text=True)
-        assert 'id="setup-wizard"' not in html
+        boot = _boot(cli)
+        assert boot["needs_key"] is False
+        assert boot["catalog_empty"] is False

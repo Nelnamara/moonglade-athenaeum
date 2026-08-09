@@ -128,7 +128,7 @@ suite. Five ship in total:
 A card tells you up front if it unlocks one (**★ unlocks … skin**), and unlocking all
 five earns **Skin-Changer**.
 
-Skins are applied from the **Control Panel** (`/panel` → **🎨 Skins**), not from the
+Skins are applied from the **Control Panel** (⚙ Panel → **🎨 Skins**), not from the
 Hall — all the cosmetics live together. Your choice is saved server-side, so it follows
 you to every device and every page of the suite. Picking a locked skin is refused by the
 server, so there's nothing to cheat.

@@ -7,6 +7,11 @@
 <title>Moonglade tokens — palette &amp; type</title>
 <style>
   /* mg-tokens:begin -- generated from moonglade_gallery.DESIGN_TOKENS_CSS by tools/export_design_kit.py; hand-edits between these markers are overwritten */
+  /* Z BANDS (decided 2026-08-01, gallery-era redesign): exactly three, nothing between --
+     components 0-7 · overlays/modals 300-500 · ambient/celebration 510-520 (the layer that
+     must paint over any modal: achievement moment 520, its confetti sheet 517 behind it).
+     The legacy 200s cluster and the stray 99 live only in classic surfaces, which retire
+     with the React conversion -- do not add new values outside the three bands. */
   :root {
     /* Palette sampled from two reference images:
        731004762264180451.webp — teal "magic glow", green gems, rare gold trim.
@@ -17,6 +22,11 @@
     --subtext: #9a93ab; --lavender:#b692e6; --mauve:   #c4a6f0;
     --red:     #f38ba8; --peach:   #fab387; --green:   #46d488;
     --blue:    #47cbc3; --sapphire:#3a8a93;
+    /* --loomc is the Loom's fixed-meaning cyan (hue law: cyan means the Loom in every
+       skin). Same value as --blue on purpose: the UI Kit v2 designs reference the hue
+       by this name, and the semantic name must exist in the pipeline or var(--loomc)
+       falls back silently at handoff. --blue stays for existing usages. */
+    --loomc:   #47cbc3;
     /* Moonglade Athenaeum palette: lavender leads, emerald is the "magic"
        highlight (Nelnamara's gems), gold filigree is rare. */
     --accent:  #b692e6; --accent-soft:#4fc99a; --gold: #d4af37; --emerald:#4fc99a;

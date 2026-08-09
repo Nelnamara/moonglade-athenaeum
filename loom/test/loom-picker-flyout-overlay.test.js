@@ -75,26 +75,31 @@ describe("Image tab's Model/LoRA picker is a floating overlay, not inline (probl
     assert.match(src, /const \[pickerMounted, setPickerMounted\] = useState\(false\);/);
     assert.match(src, /useEffect\(\(\) => \{ if \(pickerOpen\) setPickerMounted\(true\); \}, \[pickerOpen\]\);/);
     assert.match(src, /\{pickerMounted && \(/,
-      "the two <mg-model-picker> mounts must be gated on the lazy-mount flag, not always rendered");
+      "the two <ModelPicker> mounts must be gated on the lazy-mount flag, not always rendered");
   });
 
-  test("both <mg-model-picker> instances render inside .lv-mpick-body, kind toggled via CSS display not unmount", () => {
-    assert.match(src, /<mg-model-picker ref=\{bindPicker\} kind="base"\s*\n\s*style=\{\{ display: pickerKind === "base" \? "flex" : "none" \}\}><\/mg-model-picker>/,
+  test("both <ModelPicker> instances render inside .lv-mpick-body, kind toggled via CSS display not unmount", () => {
+    // Ported from the vanilla <mg-model-picker ref={bindPicker/bindLoraPicker}> mounts to the
+    // React <ModelPicker> component: the ref-callback binding is gone (controlled component --
+    // the host passes value/onPick for the single base picker and selected/onToggle for the
+    // multi LoRA picker), the observed `base-type` attribute is now the `baseType` prop, but
+    // the display-toggle-not-unmount contract this test exists to pin survives verbatim.
+    assert.match(src, /<ModelPicker kind="base" visible=\{pickerKind === "base"\} value=\{imgModel\} onPick=\{onBasePick\}\s*\n\s*style=\{\{ display: pickerKind === "base" \? "flex" : "none" \}\} \/>/,
       "the base picker must stay mounted and only be display:none'd when LoRAs is active -- " +
       "unmounting on every segment switch would lose its search results/scroll each time");
-    assert.match(src, /<mg-model-picker ref=\{bindLoraPicker\} kind="lora" multi base-type=\{\(imgModel && imgModel\.model_type\) \|\| ""\}\s*\n\s*style=\{\{ display: pickerKind === "lora" \? "flex" : "none" \}\}><\/mg-model-picker>/,
-      "the LoRA picker must carry base-type (problem 3 wiring) and use the same " +
+    assert.match(src, /<ModelPicker kind="lora" multi baseType=\{\(imgModel && imgModel\.model_type\) \|\| ""\} visible=\{pickerKind === "lora"\} selected=\{imgLoras\} onToggle=\{onLoraPick\}\s*\n\s*style=\{\{ display: pickerKind === "lora" \? "flex" : "none" \}\} \/>/,
+      "the LoRA picker must carry baseType (problem 3 wiring) and use the same " +
       "display-toggle-not-unmount pattern as the base picker");
   });
 
-  test("the overlay lives alongside <mg-generate-drawer>, so it survives Image/Edit/Reference/Video tab switches", () => {
+  test("the overlay lives alongside <VideoDrawer>, so it survives Image/Edit/Reference/Video tab switches", () => {
     // Both must be siblings inside the SAME always-rendered .lv-gen block (only unmounted
     // when the whole right rail collapses) -- not nested inside the tab-conditional tabBody,
     // or switching tabs while the picker is open would silently blow away its state.
-    const genDrawerIdx = src.indexOf('<mg-generate-drawer ref={bindGenDrawer}');
+    const genDrawerIdx = src.indexOf('<VideoDrawer ref={bindGenDrawer}');
     const veilIdx = src.indexOf('className={"lv-mpick-veil"');
     assert.ok(genDrawerIdx > 0 && veilIdx > genDrawerIdx,
-      "the picker overlay must be declared after <mg-generate-drawer> inside the same " +
+      "the picker overlay must be declared after <VideoDrawer> inside the same " +
       "always-mounted block, not inside one of the tab-specific branches above it");
   });
 });

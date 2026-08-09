@@ -4,33 +4,19 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-// static/mg-art-filters.js is a plain global IIFE with no build step (same shape as
-// mg-cost-badge.js / mg-model-picker.js), so it cannot be `import`ed here. Unlike those
-// two, though, almost all of its interesting behaviour lives in PURE functions -- the
-// recipe data, the blend-mode mapping, the layer/stop normalizer, the gradient strings --
-// so instead of the source-presence-only pattern this whole file loads the module FOR REAL
-// through `new Function` against a fake `window`, and calls the exported API. Only the
-// canvas/DOM half (which needs a real 2d context and a real layout) falls back to
-// source-presence assertions at the bottom.
+// The art-filter engine is now a real ES module in the React build
+// (gallery/src/art/artFilters.js, ported out of static/mg-art-filters.js on 2026-08-08),
+// so this test imports it FOR REAL and calls the exported API. Almost all of its
+// interesting behaviour lives in PURE functions -- the recipe data, the blend-mode
+// mapping, the layer/stop normalizer, the gradient strings -- and importing it in Node
+// (no window/document) is itself the guard that it touches no browser globals at load
+// time. The canvas/DOM half falls back to source-presence assertions (`src`) at the bottom.
+import AF from "../../gallery/src/art/artFilters.js";
+
+assert.ok(AF, "the module must default-export the art-filter engine");
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SRC_PATH = path.join(__dirname, "../../static/mg-art-filters.js");
-const src = readFileSync(SRC_PATH, "utf8");
-
-// A stub `document` is enough because the module must not touch the DOM at load time --
-// it only reaches for document.createElement inside the render/composite calls. If a
-// future edit moves a style injection to load time, this stub will throw and say so.
-function load() {
-  const win = {};
-  const doc = {
-    createElement() { throw new Error("mg-art-filters.js must not touch the DOM at load time"); },
-    getElementById() { return null; },
-  };
-  new Function("window", "document", src)(win, doc);
-  assert.ok(win.MgArtFilters, "the IIFE must export window.MgArtFilters");
-  return win.MgArtFilters;
-}
-
-const AF = load();
+const src = readFileSync(path.join(__dirname, "../../gallery/src/art/artFilters.js"), "utf8");
 
 // Every value CSS mix-blend-mode accepts (CSS Compositing 1 + 2). A mapping outside this
 // list is a typo that would silently render as `normal` in the browser.
@@ -479,8 +465,8 @@ describe("renderer wiring (source-presence: needs a real canvas/layout to exerci
     assert.match(src, /toBlob/);
   });
 
-  test("the module is a plain global with no build step, like its sibling components", () => {
-    assert.match(src, /window\.MgArtFilters = /);
-    assert.doesNotMatch(src, /^\s*(export|import)\s/m);
+  test("the module is a dependency-free ES module (default-exported)", () => {
+    assert.match(src, /export default MgArtFilters;/, "must default-export the engine");
+    assert.doesNotMatch(src, /^\s*import\s/m, "the engine has no dependencies to import");
   });
 });

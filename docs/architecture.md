@@ -1,6 +1,6 @@
 # Architecture
 
-Moonglade Athenaeum is four Python modules around one SQLite catalog.
+Moonglade Athenaeum is four core Python modules around one SQLite catalog (plus `moonglade_logging.py`, the rotating-file logger documented in its own subsection below — five files in total).
 
 ```
 moonglade_backup.py   CLI engine: download, organize, generate, sync, delete, reconcile
@@ -334,29 +334,67 @@ asserts it against a live request, so it is the authority when prose and code di
   banner marks. `/api/branding/shortcut` (the Desktop `.lnk` writer, LOCALHOST-only because
   it shells out to the host machine) is the actual localhost-gated route in this group.
 
-## Shared web components (`static/`)
+## The React front door (`gallery/`)
 
-Seven framework-neutral custom elements (the "Option-A cohesion migration") live in
-`static/` as plain `mg-*.js` globals — no build step, no shadow DOM, loaded via a plain
-`<script src>` tag, each self-injecting its own `<style>` that reads the shared
-`DESIGN_TOKENS_CSS` custom properties so it re-skins with the rest of the app. Both the
-vanilla gallery (`moonglade_gallery.py`) and the React Loom (`loom/master-storyboard.jsx`)
-mount the same files instead of each hand-duplicating the UI:
+Since the 2026-08-01 flip, `/` and `/next` serve a React SPA (source in `gallery/src/`,
+built by Vite to `gallery/dist/`, `npm run build` from `gallery/`). **The classic Jinja
+gallery was cut entirely on 2026-08-08** — every classic page route (`/classic`,
+`/image/<id>`, `/health`, `/panel`, `/duplicates`, `/logout`, the form-POST routes, the
+service worker) and all seven inline templates are gone; the React app is the ONLY UI.
+`main.jsx` reads a `window.MG_BOOT` payload the server inlines and branches to exactly
+one top-level view:
+
+- `boot.authenticated === false` → `LoginPage.jsx` — real `POST /api/login` JSON auth
+  (GET `/login` always serves the React shell; `boot.no_accounts` + `boot.is_local` pick
+  sign-in vs local bootstrap-create vs the LAN-first-run safety message).
+- `boot.needs_key || boot.catalog_empty` → `SetupWizard.jsx` — a 4-phase first-run flow
+  (intro → key entry → sync → ready) over `/api/setup/save-key` and the same
+  `/api/panel/run{action:'sync'}` + `/api/panel/status` polling the Control Panel uses.
+  `needs_key`/`catalog_empty` are computed in `next_gallery()` off a fresh
+  `config.json` read (never the module-cached `core._cfg`).
+- otherwise → `App.jsx`, the real gallery grid. Its `NavSpine.jsx` `NAV` array drives a
+  set of floating overlays mounted at App's "OVERLAY MOUNT POINT" (each a real port of a
+  `Frontend Gallery.dc.html` / `Control Panel.dc.html` design-handoff slab, not a fresh
+  design): `HealthOverlay`, `MyArtOverlay`, `ContestsOverlay`, `ImportOverlay` (real
+  `/api/import-local`, ported from classic's own `ImportUI`), and `ControlPanelOverlay`
+  (Maintenance job console via `/api/panel/run`+`/api/panel/status`, Branding,
+  Users/Trash/PixAI-account as nested sub-overlays, and a server Stop/Restart modal —
+  launched as a modal from the nav pill). `GET /api/panel/summary` is its JSON
+  aggregation route.
+
+Every handoff surface is built now (Publish, Train, Folio, Duplicate Review, Contact
+Sheet, and all the mobile-width surfaces shipped across 2026-08-02..08-07); the one
+still-vanilla layer is `static/mg-*.js` below, whose React rewrite is the next campaign.
+Dated build history for each shipped piece is in `CHANGELOG.md`; the reasoning behind specific calls (why Users' add/remove
+sits at a different trust tier, why the sync phase's progress UI departs from the design
+handoff's fake timers, why Control Panel is a modal and not the page the handoff specifies)
+is in `docs/DECISIONS.md`.
+
+## Shared web components (`static/`) — being retired
+
+**This whole layer is mid-removal** (the "no vanilla JS survives" campaign, 2026-08-08). These
+framework-neutral `static/mg-*.js` files load via a plain `<script src>` tag with no build
+step — the last vanilla front-end in the app — and are being folded into the React build one
+at a time until `static/` is empty (then master merge + v3.0). **Done so far:** the art-filter
+engine (`gallery/src/art/artFilters.js`); the image picker (`GalleryPicker.jsx` + `pickerCore.js`,
+which absorbed the old `picker-core.js` engine); and The Loom went **bundle-only** (its esbuild
+bundle is the sole delivery — the in-browser Babel transpile is retired — so it imports shared
+modules like a normal build, with `react`/`react-dom` aliased to the runtime globals and a
+sibling `master-storyboard.bundle.css` for their CSS). **Remaining (2):** the files below, still
+`<script>`-loaded by the React gallery shell (and the Loom shell). Already React under
+`gallery/src/`: the model/LoRA picker (`ModelPicker.jsx`), the image-view upscale surface
+(`UpscalePanel.jsx` — embeds `ModelPicker`/`CostBadge`, posts the same `/api/price`+`/api/generate`
+as the drawer; there is deliberately no `/api/upscale`), and the whole notify system
+(`gallery/src/notify/` — the corner toasts, the Activity job tracker, the achievement
+celebrations, and the spend-critical `Jobs` poller; it publishes the `window.Toast/Jobs/JobsCard/
+Ach` compat surface both bundles' call sites use). `mg-cost-badge.js` now lingers only because
+`mg-generate-drawer.js` still embeds it. Each remaining file self-injects its own `<style>`
+reading `DESIGN_TOKENS_CSS` so it re-skins with the app:
 
 | File | Element / global | Role |
 |---|---|---|
-| `mg-model-picker.js` | `<mg-model-picker>` | Model/LoRA picker: search box + cover cards + hover preview card. With the opt-in `market` attribute it also renders the browse chrome: a **source** row (Market / Bookmarked / Mine — Mine is LoRA-only), sort, nine category chips, and Posted-at / Source / License dropdowns. Filters are hidden **and not sent** on the bookmark source, which honours only a keyword and the architecture filter |
-| `mg-gallery-picker.js` | `<mg-gallery-picker>` | Whole-catalog image picker modal (search, Collection/Source/Rating/Sort filters, infinite scroll); wraps `picker-core.js` |
 | `mg-generate-drawer.js` | `<mg-generate-drawer>` | The full Generate/Edit/Video form (Multi-ref slots, cost line, submit+poll) |
-| `mg-cost-badge.js` | `<mg-cost-badge>` | The one renderer for "this costs N credits" / "a free card covers it" |
-| `mg-notify.js` | `Ach` / `Toast` / `Jobs` / `JobsCard` (plain globals, not a custom element) | Achievement-toast celebrations, the corner Toast utility, and the Job activity tracker |
-| `mg-art-filters.js` | `AF` (plain global) | Art filters: PixAI's own recipes kept verbatim, plus five derived from this app's skins. Applied locally on a canvas, so they are free and spend nothing |
-| `mg-upscale-panel.js` | `<mg-upscale-panel>` | The image-view upscale surface. Two distinct mechanisms, deliberately not conflated: `enlarge` (ESRGAN, a model choice) and `upscale` (Hires, denoising strength + steps). The ratio cap is computed from the source's own dimensions against the pixel ceiling, not fixed |
-
-`static/picker-core.js` is a sixth file worth knowing about but is not one of the five: it's
-the framework-agnostic browse/filter/paginate/infinite-scroll logic that `mg-gallery-picker`
-wraps (and that the Loom's own `GalleryPick` also shares) — no DOM, no custom element, just
-the shared engine underneath.
+| `mg-cost-badge.js` | `<mg-cost-badge>` | The one renderer for "this costs N credits" / "a free card covers it" (the React `CostBadge.jsx` is what every React surface uses; this file serves only the still-vanilla drawer) |
 
 ## Testing
 

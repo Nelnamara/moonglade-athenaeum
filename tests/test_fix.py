@@ -6,6 +6,7 @@ PixAI creates from it is an ordinary taskKind=chat generation whose `chat` block
 `fixer` sub-block. Every test below turns on that one fact: the REST body is what we send,
 the chat/fixer task is what comes back, and all three gaps (boilerplate filenames, blank
 metadata, no cost preview) came from treating the returned task like a normal generation."""
+import pathlib
 from types import SimpleNamespace
 
 import pytest
@@ -295,117 +296,135 @@ def test_price_route_fix_without_a_box_is_a_note_not_a_price(tmp_path, monkeypat
 
 
 # ---------------------------------------------------------------------------
-# 3b. The Fix sub-tab's own badge + confirm
+# 3b. The Fix surface's own badge + confirm
+#
+# The classic template (and its inline fixCost()/editCost()) was cut; the shipped Fix
+# surface is now gallery/src/components/FixTab.jsx, with the desktop Edit counterpart in
+# EditTab.jsx and the mobile Edit hook in gen/useEditGenerate.js. The contracts below are
+# the SAME ones the classic tests pinned -- ported to the React sources, which is how this
+# suite already reads shipped front-end behavior (see test_branding.py's LoginPage.jsx
+# assertions).
 # ---------------------------------------------------------------------------
 
-def _fix_fn(tmp_path):
-    save_catalog(tmp_path / "catalog.db",
-                 [_row(media_id="700", filename="a_700.png",
-                       created_at="2026-07-25T00:00:00")])
-    html = login_client(tmp_path).get("/").get_data(as_text=True)
-    i = html.index("function fix(){")
-    return html, html[i:html.index("function openEdit(", i)]
+_GALLERY_SRC = pathlib.Path(__file__).resolve().parent.parent / "gallery" / "src"
 
 
-def test_fix_sub_tab_mounts_the_shared_cost_badge(tmp_path):
-    html, _ = _fix_fn(tmp_path)
-    sub = html[html.index('id="edit-sub-fix"'):html.index('id="gen-mode-video"')]
-    assert "<mg-cost-badge id=\"fix-cost\"" in sub, (
-        "the Fix sub-tab has no <mg-cost-badge> -- it is the only spend surface left "
-        "without the shared cost renderer")
-    assert 'id="fix-go"' in sub
+def _src(rel):
+    return (_GALLERY_SRC / rel).read_text(encoding="utf-8")
 
 
-def test_fix_cost_asks_the_server_and_hardcodes_nothing(tmp_path):
-    html, _ = _fix_fn(tmp_path)
-    i = html.index("function fixCost()")
-    body = html[i:html.index("function ", i + 10)]
-    assert "/api/price" in body and "mode:'fix'" in body
+def _fire_cost(src):
+    """A component's fireCost helper, INCLUDING its .then()/.catch() handlers.
+
+    Every cost helper is a `useCallback` whose closing is the deps array -- `}, [...]` --
+    and that token never appears inside the body (the fetch chain closes with plain `})`),
+    so slicing to the first `}, [` after the declaration captures the whole helper without
+    truncating the stale-response guard this file asserts on."""
+    i = src.index("const fireCost = useCallback(")
+    return src[i:src.index("}, [", i)]
+
+
+def test_fix_surface_mounts_the_shared_cost_badge():
+    src = _src("components/FixTab.jsx")
+    # Ported 2026-08-08 (no-vanilla campaign step 4): the vanilla <mg-cost-badge> custom
+    # element became the shared React <CostBadge> (forwardRef, same setPrice/setChecking/clear
+    # via costRef). A Fix is the one spend surface a free card can NEVER cover, so it must
+    # still carry the shared cost renderer, not a bespoke one.
+    assert "import CostBadge from" in src
+    assert "<CostBadge ref={costRef}" in src, (
+        "the Fix surface no longer mounts <CostBadge> -- it would be the only spend "
+        "surface without the shared cost renderer")
+    assert "onClick={run}" in src   # and a submit button wired to run()
+
+
+def test_fix_cost_asks_the_server_and_hardcodes_nothing():
+    body = _fire_cost(_src("components/FixTab.jsx"))
+    assert "/api/price" in body and 'mode: "fix"' in body
     assert "8000" not in body and "8,000" not in body, (
         "the badge hardcodes the measured price instead of calling /api/price -- it would "
         "go silently wrong the moment PixAI reprices a Fix")
 
 
-def test_fix_confirm_still_gates_the_submit_and_no_longer_denies_a_price(tmp_path):
-    _, fix_fn = _fix_fn(tmp_path)
-    assert "window.confirm(" in fix_fn
-    assert fix_fn.index("window.confirm(") < fix_fn.index("runTask('/api/fix'")
-    assert "no cost preview is available" not in fix_fn, (
+def test_fix_confirm_still_gates_the_submit_and_no_longer_denies_a_price():
+    src = _src("components/FixTab.jsx")
+    assert "window.confirm(" in src
+    assert src.index("window.confirm(") < src.index('submitTask("/api/fix"')
+    # the confirm quotes the settled figure, not a blanket cannot-be-priced denial
+    assert "costVal.current" in src[:src.index("window.confirm(")]
+    assert "no cost preview is available" not in src, (
         "the confirm still tells the owner a Fix cannot be priced -- it can, and the "
         "badge beside the button is showing the number")
 
 
-def test_badge_and_submit_send_the_same_boxes(tmp_path):
+def test_badge_and_submit_send_the_same_boxes():
     """The badge has to quote the request the button sends. Both go through the one
-    canvas-to-original-pixel scaler; two copies of that arithmetic is how a price stops
-    matching the thing being priced."""
-    html, fix_fn = _fix_fn(tmp_path)
-    i = html.index("function fixBoxesScaled()")
-    assert "naturalWidth" in html[i:html.index("function ", i + 10)]
-    assert "runTask('/api/fix', {source:src, boxes:fixBoxesScaled()}" in fix_fn
-    assert "boxes:fixBoxesScaled()" in html[html.index("function fixCost()"):]
+    display-to-original-pixel scaler (editCore.js's scaleBoxes); two copies of that
+    arithmetic is how a price stops matching the thing being priced."""
+    core_src = _src("gen/editCore.js")
+    i = core_src.index("export function scaleBoxes(")
+    assert "naturalWidth" in core_src[i:i + 400]
+    src = _src("components/FixTab.jsx")
+    assert src.count("scaleBoxes(boxes, imgRef.current)") == 2, (
+        "the price body and the submit body no longer share the one scaleBoxes call each "
+        "-- the badge would price a request the server never receives")
 
 
-def _fn_body(html, name):
-    """A named helper's whole body, INCLUDING its .then() handlers.
+# Every surviving cost helper, with the seq-variable name each one owns. FixTab and
+# EditTab are the desktop fix/edit pair the classic's fixCost/editCost became; the mobile
+# Edit hook was written to the identical contract (its own header says so) and shares
+# the pin.
+_COST_HELPERS = (
+    ("components/FixTab.jsx", "seq.current"),
+    ("components/EditTab.jsx", "seq.current"),
+    ("gen/useEditGenerate.js", "seq.current"),
+)
 
-    Slicing to the next `function ` is wrong here and quietly truncates: these helpers
-    contain `function(r){...}` / `function(d){...}` callbacks inside their fetch chain, so
-    that cuts the body off before the stale-response guard this file asserts on. Cut at the
-    next TOP-LEVEL declaration instead -- two-space indent, which is what this template uses."""
-    i = html.index("function %s()" % name)
-    j = html.index("\n  function ", i + 10)
-    return html[i:j]
 
+def test_cost_helpers_invalidate_in_flight_requests_before_bailing_out():
+    """Found in code review 2026-07-25, and it affected BOTH classic cost helpers.
 
-def test_cost_helpers_invalidate_in_flight_requests_before_bailing_out(tmp_path):
-    """Found in code review 2026-07-25, and it affects BOTH cost helpers.
+    Each guards against a stale response with a sequence number: `mine = ++seq`, then the
+    handler drops its result if `mine !== seq`. In the classic, the early-return path -- no
+    source, or no boxes -- sat BEFORE that bump, so: request goes out for a real selection;
+    the user hits Clear (or changes the source); the helper re-runs, takes the early
+    return, and leaves the sequence untouched; the in-flight response then arrives, still
+    matches, passes the guard, and paints a price for boxes that no longer exist. The
+    badge shows a confident number for a request nobody made.
 
-    Each guards against a stale response with a sequence number: `var mine=++seq`, then the
-    handler drops its result if `mine !== seq`. But the early-return path -- no source, or no
-    boxes -- sat BEFORE that bump:
+    The bump has to happen BEFORE any return, so bailing out is itself an invalidation.
+    The React helpers were written fixed; this pins them fixed.
 
-        if(!editSrc() || !fixBoxes.length){ cost.clear(); return; }   // no bump
-        cost.setChecking();
-        var mine=++fixSeq;                                            // too late
-
-    So: request goes out for a real selection; the user hits Clear (or changes the source);
-    the helper re-runs, takes the early return, and leaves the sequence untouched; the
-    in-flight response then arrives, still matches, passes the guard, and paints a price for
-    boxes that no longer exist. The badge shows a confident number for a request nobody made.
-
-    The bump has to happen BEFORE any return, so bailing out is itself an invalidation. The
-    review flagged this in fixCost only -- editCost is older code and outside that diff -- but
-    they were written to share a contract and they shared the defect, so both are pinned here.
-
-    Bite: move either `++seq` back below its early return and this fails by name."""
-    html, _ = _fix_fn(tmp_path)
-    for name, seq in (("fixCost", "fixSeq"), ("editCost", "editSeq")):
-        body = _fn_body(html, name)
+    Bite: move any `++seq.current` back below its early return and this fails by name."""
+    for rel, seq in _COST_HELPERS:
+        body = _fire_cost(_src(rel))
         bump = body.index("++" + seq)
-        # The BAIL-OUT return specifically -- the one that clears the badge because there is
-        # nothing to price. (The `if(!cost) return;` element guard above it is a different
-        # thing: no fetch was ever made, so there is nothing to invalidate.)
-        bail = body.index("cost.clear()")
+        # The BAIL-OUT return specifically -- the one that clears the badge because there
+        # is nothing to price.
+        bail = body.index("badge.clear()")
         assert bump < bail, (
-            "{}() bails out at char {} before bumping {} at char {} -- an in-flight response "
-            "stays valid and repaints a stale price after the user has cleared or changed "
-            "the selection".format(name, bail, seq, bump))
+            "{}'s fireCost bails out at char {} before bumping the sequence at char {} -- "
+            "an in-flight response stays valid and repaints a stale price after the user "
+            "has cleared or changed the selection".format(rel, bail, bump))
 
 
-def test_cost_helpers_still_drop_a_superseded_response(tmp_path):
+def test_cost_helpers_still_drop_a_superseded_response():
     """The other half of the contract, so the fix above can't be 'achieved' by deleting the
     guard: a response whose sequence no longer matches must still be discarded."""
-    html, _ = _fix_fn(tmp_path)
-    for name, seq in (("fixCost", "fixSeq"), ("editCost", "editSeq")):
-        body = _fn_body(html, name)
-        # Two equivalent phrasings are in use and both are correct -- fixCost writes
-        # `if(mine!==fixSeq) return;` and editCost writes `if(mine===editSeq) act();`. Accept
-        # either; what matters is that the settled sequence is consulted before painting.
-        # Each helper owns its OWN sequence: editCost used to share `costSeq` with the
-        # Generate tab's debouncedCost(), so an '?edit=' deep link cancelled the Generate
-        # tab's first price check before it ever fired.
+    for rel, seq in _COST_HELPERS:
+        src = _src(rel)
+        body = _fire_cost(src)
+        # Two equivalent phrasings are in use and both are correct -- FixTab writes
+        # `if (mine !== seq.current) return;` and EditTab writes
+        # `if (mine === seq.current && ...)`. Accept either; what matters is that the
+        # settled sequence is consulted before painting.
         flat = body.replace(" ", "")
         assert ("mine!==" + seq) in flat or ("mine===" + seq) in flat, (
-            "{}() no longer consults {} before painting, so a superseded response would "
-            "repaint over a newer one".format(name, seq))
+            "{}'s fireCost no longer consults its sequence before painting, so a "
+            "superseded response would repaint over a newer one".format(rel))
+        # Each helper owns its OWN sequence ref (the classic's editCost once shared
+        # `costSeq` with the Generate tab's debouncedCost(), so an '?edit=' deep link
+        # cancelled the Generate tab's first price check before it ever fired). Here
+        # ownership is structural -- each module declares its own ref -- but pin the
+        # declaration so a future 'share the ref' refactor fails by name.
+        assert "const seq = useRef(0)" in src, (
+            "{} no longer declares its own sequence ref".format(rel))

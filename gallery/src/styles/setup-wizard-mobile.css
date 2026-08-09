@@ -1,0 +1,158 @@
+/* Setup Wizard — mobile presentation (design spec: Setup Wizard Mobile.dc.html).
+   Rendered by SetupWizardMobile.jsx, mounted in place of SetupWizard.jsx/
+   setup-wizard.css whenever useIsMobile() is true (see main.jsx). Sizing/spacing
+   below is the mobile design comp's own numbers (a genuinely smaller layout, not a
+   scaled copy of setup-wizard.css's desktop card -- same call login-mobile.css's own
+   header comment already made for Login's two sibling files, see
+   SetupWizardMobile.jsx's header for why this pass follows the same precedent).
+   Keyframe names kept as this file's own wzm* prefix (file-scoped, no collision with
+   setup-wizard.css's wz*-prefixed equivalents or shell.css's global mgMetal, even
+   though several are the identical animation -- same convention login-mobile.css
+   already set with lgnm* vs login.css's lgn*). */
+
+@keyframes wzmRise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes wzmFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes wzmSpin { to { transform: rotate(360deg); } }
+@keyframes wzmHalo { 0%, 100% { opacity: .3; transform: scale(.92); } 50% { opacity: .75; transform: scale(1.06); } }
+@keyframes wzmPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(182,146,230,.45); } 50% { box-shadow: 0 0 0 7px rgba(182,146,230,0); } }
+@keyframes wzmMetal { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+@keyframes wzmSyncIndeterminate { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
+
+.wzm-stage { position: relative; min-height: 100dvh; overflow-y: auto; overflow-x: hidden;
+  box-sizing: border-box; display: grid; place-items: center; padding: 40px 20px;
+  background: #05040d; }
+.wzm-wash { position: absolute; filter: blur(24px); pointer-events: none; }
+.wzm-wash-a { width: 90vw; height: 26vh; left: -20vw; top: -6vh;
+  background: radial-gradient(closest-side, rgba(100,58,172,.18), transparent 70%); }
+.wzm-wash-b { width: 80vw; height: 22vh; right: -18vw; bottom: -4vh;
+  background: radial-gradient(closest-side, rgba(58,52,96,.22), transparent 70%); }
+
+.wzm-card { position: relative; z-index: 1; width: min(320px, calc(100vw - 40px));
+  border-radius: 16px; border: 1px solid rgba(255,255,255,.07);
+  background: linear-gradient(180deg, rgba(25,21,48,.97) 0%, rgba(13,10,28,.99) 100%);
+  box-shadow: 0 24px 70px rgba(0,0,0,.65), 0 0 70px rgba(100,58,172,.14);
+  padding: 20px 20px 20px; box-sizing: border-box;
+  animation: wzmRise .5s cubic-bezier(.2,.9,.24,1) both; }
+
+.wzm-toprow { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; min-height: 14px; }
+.wzm-kicker { font-size: 8.5px; font-weight: 700; letter-spacing: .2em; color: var(--overlay0); }
+.wzm-skip { margin-left: auto; font-size: 10.5px; font-weight: 600; color: var(--lavender);
+  cursor: pointer; background: none; border: none; font-family: inherit; padding: 0; }
+.wzm-skip:hover { color: var(--mauve); }
+
+/* ---- intro: 4-slide carousel (dots are a pure position indicator -- no onClick
+   anywhere, matching the confirmed tap-only pattern; navigation is Back/Next only) ---- */
+.wzm-dots { display: flex; gap: 5px; justify-content: center; margin-bottom: 16px; }
+.wzm-dot { height: 6px; border-radius: 3px; background: var(--surface1); transition: all .25s ease; }
+.wzm-dot.on { background: var(--lavender); }
+.wzm-slidewrap { text-align: center; padding: 2px 2px 6px; animation: wzmFade .35s ease both; }
+.wzm-mascotbox { height: 96px; margin-bottom: 4px; background-size: contain; background-position: center;
+  background-repeat: no-repeat; filter: drop-shadow(0 10px 24px rgba(0,0,0,.5)); }
+.wzm-slidehead { font-family: Georgia, "Times New Roman", serif; font-size: 18px; color: #efecf8;
+  margin-bottom: 8px; }
+.wzm-slidebody { font-size: 12px; line-height: 1.55; color: var(--subtext); }
+.wzm-navrow { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
+.wzm-back { font-size: 11.5px; font-weight: 600; color: var(--subtext); cursor: pointer;
+  padding: 9px 4px; background: none; border: none; font-family: inherit; }
+.wzm-back:hover { color: var(--text); }
+.wzm-backghost { width: 36px; }
+.wzm-fill { flex: 1 1 auto; }
+.wzm-metal { border: 1px solid rgba(255,255,255,.3);
+  color: color-mix(in oklab, var(--accent) 26%, #08040f);
+  text-shadow: 0 1px 0 rgba(255,255,255,.4);
+  background: linear-gradient(100deg,
+    color-mix(in oklab, var(--accent) 50%, #06030d) 0%, var(--accent) 18%,
+    color-mix(in oklab, var(--accent) 22%, #ffffff) 34%, var(--accent) 50%,
+    color-mix(in oklab, var(--accent) 74%, #06030d) 68%, var(--mauve) 84%,
+    color-mix(in oklab, var(--accent) 50%, #06030d) 100%);
+  background-size: 220% 100%; animation: wzmMetal 7s ease-in-out infinite;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.6), inset 0 -2px 4px rgba(10,5,20,.45),
+    0 6px 16px rgba(0,0,0,.45); }
+.wzm-next { font-size: 12.5px; font-weight: 700; padding: 10px 16px; border-radius: 10px;
+  cursor: pointer; font-family: inherit; }
+
+/* ---- key entry ---- */
+.wzm-stepkicker { font-size: 8.5px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase;
+  color: var(--lavender); margin-bottom: 7px; }
+.wzm-stephead { font-family: Georgia, serif; font-size: 16px; color: #efecf8; margin-bottom: 13px; }
+.wzm-stepslist { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.wzm-steprow { display: flex; align-items: flex-start; gap: 8px; }
+.wzm-stepnum { flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--surface0);
+  border: 1px solid var(--surface1); color: var(--lavender); font-size: 9.5px; font-weight: 700;
+  display: grid; place-items: center; margin-top: 1px; }
+.wzm-steptext { font-size: 11.5px; line-height: 1.45; color: var(--text); }
+.wzm-openbtn { display: block; width: 100%; text-align: center; font-size: 11px; font-weight: 700;
+  color: var(--lavender); padding: 9px; border-radius: 10px; cursor: pointer;
+  background: color-mix(in srgb, var(--lavender) 14%, var(--surface0));
+  border: 1px solid color-mix(in srgb, var(--lavender) 40%, transparent); margin-bottom: 4px;
+  font-family: inherit; }
+.wzm-openbtn:hover { background: color-mix(in srgb, var(--lavender) 22%, var(--surface0)); }
+
+.wzm-divider { height: 1px; background: var(--surface1); margin: 15px 0 13px; }
+.wzm-fieldlbl { font-size: 9.5px; font-weight: 700; letter-spacing: .14em; color: var(--overlay0);
+  padding-bottom: 5px; }
+.wzm-keyrow { display: flex; gap: 7px; }
+.wzm-keyinput { flex: 1 1 auto; min-width: 0; box-sizing: border-box; background: rgba(7,5,16,.9);
+  color: var(--text); border: 1px solid var(--surface1); border-radius: 9px; padding: 10px 11px;
+  font-size: 12px; outline: none; font-family: inherit; }
+.wzm-keyinput:focus { border-color: rgba(182,146,230,.55); }
+.wzm-keyinput:disabled { opacity: .6; }
+.wzm-eyebtn { flex: none; font-size: 10px; color: var(--subtext); cursor: pointer; padding: 10px 11px;
+  border: 1px solid var(--surface1); border-radius: 9px; background: none; font-family: inherit; }
+.wzm-eyebtn:hover { color: var(--text); }
+.wzm-errnote { font-size: 10.5px; color: var(--red); background: rgba(243,139,168,.08);
+  border: 1px solid rgba(243,139,168,.32); border-radius: 8px; padding: 7px 9px; margin-top: 8px; }
+.wzm-authbtn { margin-top: 13px; width: 100%; display: flex; align-items: center; justify-content: center;
+  gap: 8px; padding: 11px; border-radius: 10px; font-size: 12.5px; font-weight: 800;
+  cursor: pointer; font-family: inherit; }
+.wzm-authbtn.disabled { cursor: default; filter: saturate(.6) brightness(.82); }
+.wzm-spin { width: 13px; height: 13px; border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(20,16,42,0), rgba(20,16,42,.85));
+  animation: wzmSpin 1.2s linear infinite; flex: none; }
+.wzm-footnote { text-align: center; font-size: 9.5px; color: rgba(214,210,226,.34); padding-top: 12px; }
+
+/* ---- sync ---- */
+.wzm-syncwrap { text-align: center; padding: 6px 2px 2px; }
+.wzm-syncmascotbox { position: relative; width: 76px; height: 76px; margin: 0 auto 12px; }
+.wzm-synchalo { position: absolute; inset: -12px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(182,146,230,.5), transparent 66%);
+  animation: wzmHalo 1.8s ease-in-out infinite; }
+.wzm-syncmascotimg { position: relative; z-index: 2; width: 100%; height: 100%; object-fit: contain;
+  animation: wzmSpin 2.4s cubic-bezier(.6,.1,.4,.9) infinite; }
+.wzm-synchead { font-family: Georgia, serif; font-size: 15px; color: #efecf8; margin-bottom: 14px;
+  min-height: 20px; }
+.wzm-synctrack { height: 5px; border-radius: 3px; background: var(--surface0); overflow: hidden;
+  margin-bottom: 15px; }
+.wzm-syncbar { display: block; height: 100%; background: var(--lavender); transition: width .4s ease; }
+.wzm-syncbar.indeterminate { width: 40% !important; animation: wzmSyncIndeterminate 1.3s ease-in-out infinite; }
+.wzm-revealrow { display: flex; justify-content: center; gap: 16px; min-height: 36px; }
+.wzm-reveal { display: flex; flex-direction: column; align-items: center; gap: 2px;
+  animation: wzmRise .4s cubic-bezier(.2,.9,.24,1) both; }
+.wzm-reveal-v { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text); }
+.wzm-reveal-k { font-size: 8.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--overlay0); }
+.wzm-syncerr { font-size: 10.5px; color: var(--red); background: rgba(243,139,168,.08);
+  border: 1px solid rgba(243,139,168,.32); border-radius: 8px; padding: 8px 10px; margin-top: 4px;
+  text-align: left; }
+.wzm-retrybtn { margin-top: 13px; font-size: 11.5px; font-weight: 700; padding: 9px 18px;
+  border-radius: 10px; cursor: pointer; font-family: inherit; }
+
+/* ---- ready (no separate decorative glow layer -- the Mobile design's own markup
+   renders only the mark/head/body/button, unlike desktop's extra .wz-readyglow blob) ---- */
+.wzm-readywrap { text-align: center; padding: 8px 2px 2px;
+  animation: wzmRise .4s cubic-bezier(.2,.9,.24,1) both; }
+.wzm-readymark { font-size: 28px; color: var(--gold); margin: 0 auto 6px;
+  animation: wzmPulse 2.4s ease-in-out infinite; border-radius: 50%; display: grid; place-items: center;
+  width: 52px; height: 52px; }
+.wzm-readyhead { font-family: Georgia, serif; font-size: 20px; color: #efecf8; margin-bottom: 7px; }
+.wzm-readybody { font-size: 11.5px; color: var(--subtext); margin-bottom: 17px; }
+.wzm-enterbtn { display: inline-block; font-size: 12.5px; font-weight: 700;
+  padding: 11px 18px; border-radius: 10px; cursor: pointer; font-family: inherit; }
+
+.wzm-lore { text-align: center; font-size: 8.5px; font-weight: 700; letter-spacing: .26em;
+  text-transform: uppercase; color: rgba(214,210,226,.3); margin-top: 16px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .wzm-card, .wzm-slidewrap, .wzm-synchalo, .wzm-syncmascotimg, .wzm-readywrap, .wzm-readymark,
+  .wzm-metal, .wzm-spin, .wzm-reveal, .wzm-syncbar.indeterminate {
+    animation: none; }
+}

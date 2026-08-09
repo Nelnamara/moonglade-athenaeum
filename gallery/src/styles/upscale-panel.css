@@ -1,0 +1,117 @@
+/* upscale-panel.css -- the <UpscalePanel> box, ported VERBATIM from static/mg-upscale-panel.js's
+   injected CSS array. Transforms: mg-upscale-panel -> .upscale-panel; the [inline]/[open]/[closing]
+   ATTRIBUTES become .inline/.open/.closing CLASSES (React renders them as classes). The `.mgu-*`
+   inner classes are unchanged. Colour + geometry are the DC's Image Details modal verbatim. */
+
+.upscale-panel { display: none; }
+.upscale-panel.open { display: block; }
+/* The DC's centered modal (Image Details.dc.html:143-146): a fixed full-viewport layer whose
+   ::before is the blurred scrim, card grid-centered. z-index must clear the lightbox's own 300,
+   or the modal opens BEHIND the picture it is about to upscale. */
+.upscale-panel:not(.inline).open { display: grid; }
+.upscale-panel:not(.inline) {
+  position: fixed; inset: 0; z-index: 320;
+  place-items: center; padding: 20px; box-sizing: border-box;
+}
+.upscale-panel:not(.inline)::before {
+  content: ""; position: absolute; inset: 0;
+  background: rgba(5, 4, 13, .55); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.upscale-panel.inline { margin-top: 14px; }
+/* Card faces. Non-inline wears the DC modal's own slab; the inline mount (the mobile sheets) keeps
+   the glass face on the host, its card div a plain passthrough. */
+.upscale-panel:not(.inline) .mgu-card {
+  position: relative; z-index: 1; box-sizing: border-box;
+  width: min(430px, calc(100vw - 40px)); max-height: 92vh; overflow-y: auto;
+  border-radius: 16px; border: 1px solid var(--surface1);
+  background: linear-gradient(180deg, rgba(18, 14, 42, .99) 0%, rgba(10, 8, 24, .99) 100%);
+  box-shadow: 0 34px 100px rgba(0, 0, 0, .78);
+}
+.upscale-panel.inline {
+  border-radius: 16px; border: 1px solid rgba(182, 146, 230, .32);
+  background: linear-gradient(120deg, rgba(24, 18, 54, .92), rgba(14, 11, 32, .95));
+  -webkit-backdrop-filter: blur(18px) saturate(1.12); backdrop-filter: blur(18px) saturate(1.12);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .55), 0 0 34px rgba(182, 146, 230, .14);
+}
+/* Overlay law: both directions animate. Close is a .closing class plus a 340ms deferred drop of
+   .open -- without the deferral the display:none flip lands first and the exit keyframes are never
+   seen. The modal fades its scrim while the card rises/sinks; the inline mount fade-rises as one. */
+@keyframes mguFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes mguFadeOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes mguRise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes mguSink { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(6px); } }
+.upscale-panel:not(.inline).open { animation: mguFade .24s ease both; }
+.upscale-panel:not(.inline).open .mgu-card { animation: mguRise .28s cubic-bezier(.2, .9, .24, 1) both; }
+/* pointer-events:none while closing: the fade window is 340ms of a still-mounted, still-.open panel,
+   and .mgu-go re-enables before close() on the submit path -- without this, a second click during
+   the exit fade lands on a live Go and pays for a SECOND generation. The instant close used to be
+   this guard; the animation is not allowed to un-guard a spend path. */
+.upscale-panel:not(.inline).closing { animation: mguFadeOut .34s cubic-bezier(.4, 0, .2, 1) forwards; pointer-events: none; }
+.upscale-panel:not(.inline).closing .mgu-card { animation: mguSink .34s cubic-bezier(.4, 0, .2, 1) forwards; }
+.upscale-panel.inline.open { animation: mguRise .22s cubic-bezier(.2, .9, .24, 1); }
+.upscale-panel.inline.closing { animation: mguSink .34s cubic-bezier(.4, 0, .2, 1) forwards; pointer-events: none; }
+.mgu-body { padding: 12px 14px 14px; }
+.mgu-head { display: flex; align-items: center; gap: 8px; padding: 11px 14px 0; font-weight: 600; }
+.mgu-head .x { margin-left: auto; background: none; border: none; color: var(--subtext); font-size: 18px; cursor: pointer; line-height: 1; }
+.mgu-lbl { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--subtext); margin: 11px 0 4px; }
+.mgu-seg { display: flex; gap: 6px; }
+.mgu-seg button {
+  flex: 1; padding: 6px 8px; font-size: 12px; border-radius: 7px; cursor: pointer;
+  background: var(--surface0); color: var(--subtext); border: 1px solid var(--surface1);
+  position: relative; z-index: 1; transition: background .18s, border-color .18s, color .18s;
+}
+.mgu-seg button.on { background: var(--surface1); color: var(--text); border-color: var(--overlay0); }
+/* Tooltip law: the segment sits at the top with the body below, so the tip pops DOWN, centered on
+   its button. Multi-line face (212px, wrapping). While a tip shows, its trigger rises to z 7 and the
+   tip rides at z 5 as its child. No native title: on touch, tapping a method prints the same hint. */
+.mgu-seg button:hover, .mgu-seg button:focus-visible { z-index: 7; }
+.mgu-tip {
+  position: absolute; z-index: 5; top: calc(100% + 8px); left: 50%; width: 212px;
+  transform: translate(-50%, -4px); opacity: 0; pointer-events: none; text-align: left;
+  background: rgba(9, 7, 22, .96); border: 1px solid rgba(182, 146, 230, .4); border-radius: 8px;
+  padding: 8px 11px; font-size: 10.5px; font-weight: 500; line-height: 1.5; color: var(--text);
+  white-space: normal; box-shadow: 0 10px 26px rgba(0, 0, 0, .6);
+  transition: opacity .18s cubic-bezier(.2, .9, .24, 1), transform .18s cubic-bezier(.2, .9, .24, 1);
+}
+.mgu-seg button:hover .mgu-tip, .mgu-seg button:focus-visible .mgu-tip { opacity: 1; transform: translate(-50%, 0); }
+.mgu-sel { width: 100%; padding: 6px 8px; border-radius: 7px; background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); font-size: 12px; }
+/* The upscaler's custom animated dropdown (Image Details.dc.html:164-174, :301-306) -- replaces the
+   native <select>; both desktop modal and Image Details Mobile specify this shape. */
+.mgu-scalerwrap { position: relative; }
+.mgu-scalerbox {
+  display: flex; align-items: center; gap: 7px; box-sizing: border-box; width: 100%;
+  background: rgba(12, 10, 28, .8); color: var(--text); border: 1px solid var(--surface1);
+  border-radius: 9px; padding: 8px 11px; font-size: 12px; cursor: pointer; text-align: left; font-family: inherit;
+}
+.mgu-scalerbox[aria-expanded="true"] { border-color: rgba(182, 146, 230, .6); }
+.mgu-scalerbox .mgu-caret { margin-left: auto; font-size: 8px; color: var(--overlay0); }
+.mgu-scalerlist {
+  position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 5px); padding: 4px;
+  border-radius: 10px; border: 1px solid rgba(182, 146, 230, .4); background: rgba(9, 7, 22, .98);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .65); animation: mguRise .18s cubic-bezier(.2, .9, .25, 1) both;
+}
+.mgu-scaleropt { padding: 7px 10px; border-radius: 7px; font-size: 12px; cursor: pointer; color: var(--subtext); }
+.mgu-scaleropt:hover { background: rgba(182, 146, 230, .12); color: var(--text); }
+.mgu-scaleropt.on { background: rgba(182, 146, 230, .22); color: var(--text); }
+.mgu-note { font-size: 11px; color: var(--subtext); margin-top: 4px; }
+.mgu-note.bad { color: var(--red); }
+.mgu-val { color: var(--lavender); }
+.mgu-dim { color: var(--overlay0); text-transform: none; }
+/* The primary action wears the skin-aware metallic accent (spec accentMetal). Disabled/submitting is
+   the spec's muted state: the sheen keeps drifting, just desaturated, so "waiting" reads differently
+   from a flat dead control. mgMetal is the shared 7s drift; redefining it is harmless. */
+@keyframes mgMetal { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+.mgu-go {
+  width: 100%; margin-top: 11px; padding: 12px; border-radius: 10px; cursor: pointer;
+  font-weight: 800; font-size: 14px; letter-spacing: .03em; white-space: nowrap;
+  color: color-mix(in oklab, var(--accent) 26%, #08040f); text-shadow: 0 1px 0 rgba(255, 255, 255, .45);
+  border: 1px solid rgba(255, 255, 255, .34);
+  background: linear-gradient(100deg, color-mix(in oklab, var(--accent) 50%, #06030d) 0%,
+    var(--accent) 18%, color-mix(in oklab, var(--accent) 22%, #ffffff) 34%, var(--accent) 50%,
+    color-mix(in oklab, var(--accent) 74%, #06030d) 68%, var(--mauve) 84%,
+    color-mix(in oklab, var(--accent) 50%, #06030d) 100%);
+  background-size: 220% 100%; animation: mgMetal 7s ease-in-out infinite;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .72), inset 0 -3px 5px rgba(40, 20, 70, .5), 0 10px 26px rgba(0, 0, 0, .5);
+}
+.mgu-go[disabled] { filter: saturate(.6) brightness(.82); cursor: not-allowed; }
+.upscale-panel input[type=range] { width: 100%; }

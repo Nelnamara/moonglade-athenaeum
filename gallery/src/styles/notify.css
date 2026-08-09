@@ -1,0 +1,195 @@
+/* notify.css -- the notify system's styles, ported VERBATIM from static/mg-notify.js's injected
+   MG_CSS array (no-vanilla campaign, component 6). Live surfaces only: the corner toasts
+   (#mg-toasts), the Activity FAB/tray/detail popover (#jobs-fab/#jobs-tray/#jt-detail), and the
+   achievement celebration (.ach-m2). The dead #ach-modal "Trophy Hall" rules (.ach-modal/.hall-*,
+   no skeleton on any served page -- the React Folio replaced it) were not carried forward.
+
+   IDs kept as ids on purpose: the Loom shell's !important overrides (#jobs-fab{z-index:401} etc,
+   moonglade_gallery.py) and contact-sheet-overlay.css's hide rule target them, and both must
+   keep working against the React-rendered elements.
+
+   Explicit font-family on #jobs-fab / #jobs-tray / #jt-detail / #mg-toasts / .ach-m2 is
+   LOAD-BEARING, not belt-and-braces: the two hosts do not agree on the inherited font (the Loom
+   shell's body sets none), and a shared surface that changes type per host was the original bug
+   (owner spotted it comparing screenshots, 2026-07-21).
+
+   z-index contract (raised to clear the Loom's own full-screen overlays): celebrations
+   .ach-m2=520, toasts #mg-toasts=510, tray 234/235, detail popover 236. */
+
+/* ---- achievement celebration (the locked 335ef4e7 toast-v2 moment) ---- */
+.ach-m2{position:fixed;inset:0;z-index:520;display:flex;align-items:center;justify-content:center;background:rgba(8,6,16,.78);opacity:0;transition:opacity .35s;padding:20px;font-family:system-ui,sans-serif;}
+.ach-m2.go{opacity:1;}
+.ach-m2.out{opacity:0;transition:opacity .5s;}
+.ach-m2 .tstage{width:min(680px,94vw);}
+.ach-m2 .tw{position:relative;padding-top:158px;cursor:pointer;}
+.ach-m2 .t-common{--tc:#9fbad6;--tcl:#dbe8f5;--tcd:#5f7c9e;}
+.ach-m2 .t-rare{--tc:#7fb0f4;--tcl:#d2e4ff;--tcd:#4a72b8;}
+.ach-m2 .t-epic{--tc:#c69cff;--tcl:#ead9ff;--tcd:#8a5cc4;}
+.ach-m2 .t-legendary{--tc:#e8cb7c;--tcl:#fff4d1;--tcd:#b3924a;}
+.ach-m2 .t-feat{--tc:var(--ruby,#e0355e);--tcl:#f6b8c9;--tcd:var(--ruby-deep,#a11238);}
+.ach-m2 .mglow{position:absolute;top:6px;right:0;width:250px;height:190px;z-index:1;pointer-events:none;background:radial-gradient(ellipse at 60% 55%,var(--tc),transparent 66%);filter:blur(22px);opacity:0;}
+.ach-m2 .tw.go .mglow{animation:m2gfade .7s ease 1.3s forwards;}
+@keyframes m2gfade{to{opacity:.55;}}
+.ach-m2 .tw.go.t-feat .mglow{animation:m2gfade .7s ease 1.3s forwards, m2ember 2.2s ease-in-out 2.1s infinite;}
+@keyframes m2ember{0%,100%{opacity:.55;}18%{opacity:.38;}34%{opacity:.6;}52%{opacity:.42;}71%{opacity:.62;}86%{opacity:.47;}}
+.ach-m2 .mascot{position:absolute;top:0;right:26px;height:206px;z-index:2;transform-origin:bottom center;filter:drop-shadow(0 12px 16px rgba(0,0,0,.55));opacity:0;transform:translateY(96px) scale(.9);}
+.ach-m2 .tw.go .mascot{animation:m2pop .66s cubic-bezier(.16,.86,.28,1.32) 1.32s forwards;}
+@keyframes m2pop{0%{opacity:0;transform:translateY(96px) scale(.9);}62%{opacity:1;transform:translateY(-10px) scale(1.03);}100%{opacity:1;transform:translateY(0) scale(1);}}
+.ach-m2 .toast{position:relative;z-index:3;background:linear-gradient(180deg,rgba(42,36,63,.94),rgba(24,21,38,.97));backdrop-filter:blur(8px);border:1px solid #37314f;border-radius:16px;padding:17px 20px 16px;display:flex;gap:16px;align-items:center;box-shadow:0 24px 54px -18px rgba(0,0,0,.72);opacity:0;transform:translateY(14px);}
+.ach-m2 .tw.go .toast{animation:m2rise .5s ease forwards;}
+@keyframes m2rise{to{opacity:1;transform:none;}}
+.ach-m2 .toast::before{content:"";position:absolute;left:0;right:0;top:0;height:6px;border-radius:16px 16px 0 0;background:linear-gradient(90deg,transparent,var(--tc) 22%,var(--tcl) 50%,var(--tc) 78%,transparent);box-shadow:0 0 20px 2px var(--tc);opacity:.95;}
+.ach-m2 .t-feat .toast::before{background:linear-gradient(90deg,transparent,var(--gunmetal,#8a93a2) 22%,#c7ccd6 50%,var(--gunmetal,#8a93a2) 78%,transparent);}
+.ach-m2 .cap{position:relative;flex:0 0 auto;width:118px;align-self:stretch;display:flex;align-items:center;justify-content:center;margin:-17px 16px -16px -20px;border-radius:16px 0 0 16px;border-right:1px solid rgba(255,255,255,.09);background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(0,0,0,.14));box-shadow:inset 0 0 30px -6px var(--tc);}
+.ach-m2 .t-feat .cap{box-shadow:inset 0 0 30px -6px var(--tc),inset 0 0 0 1px rgba(224,53,94,.4);}
+.ach-m2 .badge{width:100px;height:100px;object-fit:contain;filter:drop-shadow(0 5px 12px rgba(0,0,0,.5));opacity:0;transform:translateX(255px) scale(.82);}
+.ach-m2 .badge.emoji{display:flex;align-items:center;justify-content:center;font-size:64px;line-height:1;}
+.ach-m2 .tw.go .badge{animation:m2sweep .62s cubic-bezier(.15,.82,.28,1.24) .15s forwards, m2bding .5s ease .74s;}
+@keyframes m2sweep{0%{opacity:0;transform:translateX(255px) scale(.82);}70%{opacity:1;transform:translateX(-11px) scale(1.06);}100%{opacity:1;transform:translateX(0) scale(1);}}
+@keyframes m2bding{0%{filter:drop-shadow(0 5px 12px rgba(0,0,0,.5)) brightness(1);}26%{filter:drop-shadow(0 0 14px var(--tc)) brightness(1.65);}100%{filter:drop-shadow(0 5px 12px rgba(0,0,0,.5)) brightness(1);}}
+.ach-m2 .ring{position:absolute;width:96px;height:96px;border-radius:50%;border:3px solid var(--tc);opacity:0;transform:scale(.4);pointer-events:none;}
+.ach-m2 .tw.go .ring{animation:m2ring .6s ease-out .76s;}
+@keyframes m2ring{0%{opacity:0;transform:scale(.4);}22%{opacity:.85;}100%{opacity:0;transform:scale(1.75);}}
+.ach-m2 .m2-halo{position:absolute;top:50%;left:50%;width:208px;height:208px;margin:-104px 0 0 -104px;border-radius:50%;pointer-events:none;z-index:0;background:radial-gradient(circle,transparent 55%,rgba(255,244,209,.42) 64%,rgba(255,244,209,.14) 73%,transparent 82%);filter:blur(2px);animation:m2halopulse 3.2s ease-in-out infinite;}
+@keyframes m2halopulse{0%,100%{opacity:.55;transform:scale(1);}50%{opacity:.85;transform:scale(1.06);}}
+.ach-m2 .m2-motewrap{position:absolute;top:50%;left:50%;width:182px;height:182px;margin:-91px 0 0 -91px;z-index:0;pointer-events:none;animation:m2sunburstspin 24s linear infinite;}
+@keyframes m2sunburstspin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+.ach-m2 .m2-mote{position:absolute;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle,#fff4d1,#e8cb7c 60%,transparent 76%);box-shadow:0 0 7px 1px rgba(232,203,124,.85);}
+.ach-m2 .m2-flameglow{position:absolute;inset:-16px;border-radius:50%;pointer-events:none;z-index:0;background:radial-gradient(circle,rgba(255,120,60,.55),rgba(224,53,94,.4) 45%,transparent 72%);filter:blur(8px);animation:m2flameflicker 1.3s ease-in-out infinite;}
+@keyframes m2flameflicker{0%,100%{opacity:.55;transform:scale(1);}18%{opacity:.9;transform:scale(1.06);}34%{opacity:.4;transform:scale(.95);}52%{opacity:.95;transform:scale(1.1);}68%{opacity:.5;transform:scale(.98);}84%{opacity:.8;transform:scale(1.04);}}
+.ach-m2 .m2-runeA{position:absolute;top:50%;left:50%;width:148px;height:148px;margin:-74px 0 0 -74px;border-radius:50%;border:1.5px dashed rgba(224,53,94,.6);pointer-events:none;z-index:0;animation:m2runespinA 9s linear infinite;}
+@keyframes m2runespinA{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+.ach-m2 .m2-runeB{position:absolute;top:50%;left:50%;width:164px;height:164px;margin:-82px 0 0 -82px;border-radius:50%;border:1px dotted rgba(138,147,162,.55);pointer-events:none;z-index:0;animation:m2runespinB 14s linear infinite;}
+@keyframes m2runespinB{from{transform:rotate(360deg);}to{transform:rotate(0deg);}}
+.ach-m2 .m2-wisp{position:absolute;bottom:-2px;border-radius:50%;background:radial-gradient(circle,rgba(255,178,90,.95),rgba(255,90,50,.8) 40%,rgba(224,53,94,.55) 65%,transparent 78%);filter:blur(1.5px);pointer-events:none;animation-name:m2flamewisp;animation-timing-function:ease-in;animation-iteration-count:infinite;}
+@keyframes m2flamewisp{0%{opacity:0;transform:translate(0,0) scale(.5) rotate(0deg);}18%{opacity:.95;}55%{opacity:.9;transform:translate(var(--sway,10px),-50px) scale(1.2) rotate(var(--rot,10deg));}100%{opacity:0;transform:translate(calc(var(--sway,10px) * 1.7),-104px) scale(.25) rotate(var(--rot,10deg));}}
+@media (prefers-reduced-motion: reduce){ .ach-m2 .m2-halo,.ach-m2 .m2-motewrap,.ach-m2 .m2-flameglow,.ach-m2 .m2-runeA,.ach-m2 .m2-runeB,.ach-m2 .m2-wisp{animation:none!important;} }
+.ach-m2 .tbody{min-width:0;flex:1;}
+.ach-m2 .tbody .u{font:700 10px/1 sans-serif;letter-spacing:.22em;text-transform:uppercase;color:var(--tc);opacity:0;}
+.ach-m2 .tw.go .tbody .u{animation:m2fade .4s ease .86s forwards;}
+.ach-m2 .tbody .n{font:700 22px/1.08 Georgia,serif;margin:3px 0 5px;opacity:0;color:var(--text);}
+.ach-m2 .tw.go .tbody .n{animation:m2fade .42s ease .98s forwards;}
+.ach-m2 .tw.go.t-legendary .tbody .n{background:linear-gradient(100deg,#b3924a,#fff4d1 45%,#e8cb7c 55%,#b3924a);background-size:220% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:m2fade .42s ease .98s forwards, m2shimmertext 3.2s ease-in-out 1.4s infinite;}
+@keyframes m2shimmertext{0%{background-position:0% 0;}50%{background-position:100% 0;}100%{background-position:0% 0;}}
+.ach-m2 .tw.go.t-feat .tbody .n{animation:m2fade .42s ease .98s forwards, m2embertext 1.4s ease-in-out 1.4s infinite;}
+@keyframes m2embertext{0%,100%{color:#ff6a3d;text-shadow:0 0 14px rgba(255,90,40,.75),0 0 4px rgba(255,200,140,.6);}50%{color:#fff0e0;text-shadow:0 0 24px rgba(255,60,60,1),0 0 8px rgba(255,255,255,.85);}}
+@media (prefers-reduced-motion: reduce){ .ach-m2 .tbody .n{animation:none!important;background:none!important;-webkit-text-fill-color:unset!important;color:var(--text)!important;} }
+.ach-m2 .tbody .r{font-size:13px;line-height:1.5;font-style:italic;opacity:0;margin-top:1px;background:linear-gradient(90deg,#b3a2dc 0%,#b3a2dc 43%,#efe6ff 50%,#b3a2dc 57%,#b3a2dc 100%);background-size:235% 100%;background-position:118% 0;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;filter:drop-shadow(0 0 5px rgba(198,180,255,.22));}
+.ach-m2 .tw.go .tbody .r{animation:m2fade .46s ease 1.1s forwards, m2readalong 4.8s ease-in-out 1.6s infinite;}
+@keyframes m2readalong{0%{background-position:118% 0;}52%{background-position:-18% 0;}100%{background-position:-18% 0;}}
+@keyframes m2fade{from{opacity:0;transform:translateY(5px);}to{opacity:1;transform:none;}}
+.ach-m2 .tbody .r.glitch{font-family:ui-monospace,Menlo,monospace;letter-spacing:.01em;background:none;-webkit-text-fill-color:unset;color:var(--red,#f38ba8);text-shadow:0 0 10px rgba(243,139,168,.55);animation:m2fade .46s ease 1.1s forwards!important;}
+.ach-m2 .tbody .r.settled-nsfw{background:none;-webkit-text-fill-color:unset;color:var(--red,#f38ba8);animation:m2fade .46s ease 1.1s forwards!important;}
+.ach-m2 .tier-pill{position:relative;display:inline-block;margin-top:8px;font:800 9px/1 sans-serif;letter-spacing:.09em;text-transform:uppercase;color:#241c10;padding:3px 11px;border-radius:999px;overflow:hidden;background:linear-gradient(180deg,var(--tcl),var(--tc) 46%,var(--tcd));border:1px solid var(--tcl);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 0 11px -1px var(--tc);text-shadow:0 1px 0 rgba(255,255,255,.35);opacity:0;}
+.ach-m2 .t-feat .tier-pill{background:linear-gradient(180deg,#c7ccd6,var(--gunmetal,#8a93a2) 46%,var(--gunmetal-deep,#4a515c));border-color:#c7ccd6;color:#171a20;box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 0 11px -1px var(--tc);}
+.ach-m2 .tw.go .tier-pill{animation:m2fade .4s ease 1.22s forwards;}
+.ach-m2 .tier-pill::after{content:"";position:absolute;top:0;left:-60%;width:45%;height:100%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.75),transparent);transform:skewX(-18deg);}
+.ach-m2 .tw.go .tier-pill::after{animation:m2sheen 2.6s ease-in-out 1.6s infinite;}
+@keyframes m2sheen{0%{left:-60%;}30%{left:130%;}100%{left:130%;}}
+.ach-m2 .rwd{display:inline-block;margin:8px 0 0 8px;font-size:11px;color:var(--gold);border:1px solid #6b5330;background:rgba(230,200,120,.1);border-radius:7px;padding:3px 9px;opacity:0;}
+.ach-m2 .tw.go .rwd{animation:m2fade .4s ease 1.34s forwards;}
+/* Confetti sheet sits BEHIND the card: .ach-m2 is its own stacking context, so "behind" is
+   local z 1 -- under the toast (z 3) and mascot (z 2), above the veil. */
+.m2-conf{position:fixed;top:-3vh;width:7px;height:14px;border-radius:2px;z-index:1;pointer-events:none;animation:m2conffall linear forwards;}
+@keyframes m2conffall{to{transform:translateY(112vh) rotate(720deg);opacity:.5;}}
+.ach-m2 .flash{position:absolute;inset:0;border-radius:16px;pointer-events:none;opacity:0;background:radial-gradient(circle at 74% -4%,rgba(255,242,206,.9),transparent 58%);}
+.ach-m2 .t-feat .flash{background:radial-gradient(circle at 74% -4%,rgba(255,214,226,.9),transparent 58%);}
+.ach-m2 .tw.go.t-legendary .flash,.ach-m2 .tw.go.t-feat .flash{animation:m2flash .9s ease-out 1.3s;}
+@keyframes m2flash{0%{opacity:0;}20%{opacity:.92;}100%{opacity:0;}}
+@media (prefers-reduced-motion: reduce){ .ach-m2 *{animation:none!important;} .ach-m2 .toast,.ach-m2 .badge,.ach-m2 .mascot,.ach-m2 .mglow,.ach-m2 .tbody .u,.ach-m2 .tbody .n,.ach-m2 .tbody .r,.ach-m2 .tier-pill{opacity:1!important;transform:none!important;} }
+.ach-m2 .rwd .giftbox{display:inline-block;height:15px;width:15px;background:url(/branding/rewards/gift.png) center/contain no-repeat;vertical-align:-3px;margin-right:5px;}
+.ach-m2 .pts-pill{display:inline-block;margin:8px 0 0 8px;font:800 9px/1 sans-serif;letter-spacing:.06em;color:var(--gold,#e0c268);border:1px solid #6b5330;background:rgba(230,200,120,.12);border-radius:999px;padding:3px 9px;vertical-align:middle;opacity:0;}
+.ach-m2 .tw.go .pts-pill{animation:m2fade .4s ease 1.26s forwards;}
+@media (prefers-reduced-motion: reduce){ .ach-m2 .pts-pill{opacity:1!important;} }
+/* The legendary/feat star-rain. The vanilla relied on the HOST page defining .ee-star (it lives
+   in the gallery's styles.css), so the rain silently no-opped on the Loom -- scoped here under
+   .ach-m2 it works on both hosts without colliding with the gallery's own global rule. */
+.ach-m2 .ee-star{position:fixed;top:-40px;z-index:2;pointer-events:none;color:var(--lavender,var(--accent));text-shadow:0 0 14px rgba(182,146,230,.9),0 0 30px rgba(182,146,230,.5);animation:ee-fall-m2 linear forwards;}
+@keyframes ee-fall-m2{to{transform:translateY(112vh) rotate(540deg);opacity:.05;}}
+
+/* ---- Jobs card: the activity tracker (bottom-left, always openable) ---- */
+#jobs-fab{position:fixed;left:14px;bottom:14px;z-index:234;display:none;align-items:center;gap:7px;background:var(--mantle);border:1px solid var(--surface1);border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.45);color:var(--subtext);cursor:pointer;padding:7px 13px 7px 10px;font-family:system-ui,sans-serif;font-size:11.5px;letter-spacing:.02em;transition:border-color .18s,color .18s;}
+#jobs-fab.show{display:inline-flex;}
+#jobs-fab:hover{border-color:var(--lavender);color:var(--text);}
+#jobs-fab .jf-dot{width:8px;height:8px;border-radius:50%;background:var(--overlay0);flex:none;}
+#jobs-fab.busy .jf-dot{background:var(--lavender);box-shadow:0 0 9px rgba(182,146,230,.8);animation:jf-pulse 1.6s ease-in-out infinite;}
+#jobs-fab .jf-badge{background:var(--lavender);color:var(--base);border-radius:999px;font-size:10px;font-weight:700;padding:1px 6px;min-width:15px;text-align:center;display:none;}
+#jobs-fab.busy .jf-badge{display:inline-block;}
+@keyframes jf-pulse{0%,100%{opacity:.5;}50%{opacity:1;}}
+#jobs-tray{position:fixed;left:14px;bottom:14px;z-index:235;width:366px;min-width:260px;max-width:min(560px, calc(100vw - 28px));max-height:min(74vh,600px);display:none;flex-direction:column;overflow:hidden;resize:both;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.55);font-family:system-ui,sans-serif;}
+#jobs-tray.open{display:flex;}
+#jobs-tray .jt-head{display:flex;align-items:center;gap:6px;padding:9px 11px;border-bottom:1px solid var(--surface0);background:linear-gradient(180deg,var(--surface0),transparent);}
+#jobs-tray .jt-title{font-size:11px;text-transform:uppercase;letter-spacing:.11em;color:var(--lavender);font-weight:700;flex:1;display:flex;align-items:center;gap:7px;}
+#jobs-tray .jt-count{color:var(--overlay0);font-weight:600;letter-spacing:.03em;}
+#jobs-tray .jt-hbtn{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:11px;padding:3px 7px;border-radius:6px;}
+#jobs-tray .jt-hbtn:hover{color:var(--text);background:var(--surface1);}
+#jobs-tray .jt-body{overflow:auto;padding:6px;flex:1;}
+.jt-empty{color:var(--overlay0);font-size:12px;text-align:center;padding:30px 16px;line-height:1.55;}
+.jt-item{display:flex;align-items:flex-start;gap:9px;font-size:12px;color:var(--text);padding:8px;border-radius:8px;}
+.jt-item + .jt-item{margin-top:1px;}
+.jt-item:hover{background:var(--surface0);}
+.jt-item.st-failed{background:rgba(243,139,168,.09);}
+.jt-item.st-warn{background:rgba(250,179,135,.09);}
+.jt-ic{flex:none;width:34px;height:34px;display:flex;align-items:center;justify-content:center;margin-top:1px;position:relative;}
+.jt-glyph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}
+.jt-ok{color:var(--emerald);font-size:15px;} .jt-err{color:var(--red);font-size:15px;} .jt-warn{color:var(--peach);font-size:15px;}
+.jt-nel{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;}
+.jt-spin{position:relative;width:48px;height:48px;}
+.jt-spin .jt-nel{inset:6px;width:36px;height:36px;border-radius:50%;object-fit:cover;object-position:60% 32%;animation:gen-spin 1.6s linear infinite;}
+.jt-spin .gen-ring{position:absolute;inset:2px;border-radius:50%;border:2px solid rgba(182,146,230,.22);border-top-color:var(--lavender);animation:gen-spin .8s linear infinite;}
+/* OWN the keyframes both rules above animate -- host-neutral by design: this file must define
+   every animation it references (the Loom shell carries no gallery page CSS). */
+@keyframes gen-spin{to{transform:rotate(360deg);}}
+/* QUEUED: the SAME .jt-spin element with its two animations stopped -- motion is the thing that
+   reads as "work is happening", and for a queued job that is the entire lie being told. */
+.jt-spin.jt-queued .jt-nel{animation:none;opacity:.62;}
+.jt-spin.jt-queued .gen-ring{animation:none;border-color:var(--surface1);border-top-color:var(--overlay0);}
+.jt-empty-nel{width:104px;height:104px;object-fit:contain;margin:0 auto 8px;display:block;opacity:.92;}
+.jt-main{flex:1;min-width:0;}
+.jt-lab{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.jt-sub{font-size:10.5px;margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;}
+.jt-sub .jt-when{color:var(--overlay0);} .jt-sub .jt-kind{color:var(--subtext);text-transform:capitalize;}
+.jt-sub .jt-phase{color:var(--overlay0);border:1px solid var(--surface1);border-radius:999px;padding:0 6px;font-size:9.5px;line-height:15px;letter-spacing:.07em;text-transform:uppercase;}
+.jt-sub .jt-eta{color:var(--overlay0);}
+.jt-errmsg{color:var(--red);font-size:10.5px;margin-top:3px;white-space:normal;}
+.jt-bar{height:4px;border-radius:3px;background:var(--surface1);margin-top:6px;overflow:hidden;}
+.jt-bar i{display:block;height:100%;background:var(--lavender);border-radius:3px;transition:width .3s;}
+.jt-thumb{flex:none;} .jt-thumb img{width:30px;height:30px;border-radius:5px;object-fit:cover;display:block;}
+.jt-x{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:14px;padding:0 2px;flex:none;line-height:1;}
+.jt-x:hover{color:var(--red);}
+/* Force-dismiss: a quiet TEXT link, not the bold × a finished job gets -- a heavier, less
+   routine action (a confirm() gates it). */
+.jt-forcex{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:9.5px;padding:0 2px;flex:none;align-self:flex-start;text-decoration:underline;text-decoration-color:transparent;white-space:nowrap;}
+.jt-forcex:hover{color:var(--red);text-decoration-color:var(--red);}
+.jt-item{cursor:pointer;}
+/* ---- job detail popover: a small secondary card, not a modal (owner field-report 2026-07-23:
+   stuck generations with no way to recover their task id). Fixed so it escapes the tray's
+   overflow and floats beside the clicked row. ---- */
+#jt-detail{position:fixed;z-index:236;width:264px;background:var(--mantle);border:1px solid var(--surface1);border-radius:10px;box-shadow:0 14px 36px rgba(0,0,0,.5);padding:10px 12px;font-family:system-ui,sans-serif;font-size:12px;color:var(--text);display:none;}
+#jt-detail.open{display:block;}
+#jt-detail .jd-row{display:flex;align-items:center;gap:8px;padding:4px 0;}
+#jt-detail .jd-row+.jd-row{border-top:1px solid var(--surface0);}
+#jt-detail .jd-k{color:var(--overlay0);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;flex:none;width:78px;}
+#jt-detail .jd-v{flex:1;min-width:0;color:var(--text);word-break:break-all;}
+#jt-detail .jd-id{font-variant-numeric:tabular-nums;font-size:11px;}
+#jt-detail .jd-copy{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:13px;padding:2px 4px;flex:none;line-height:1;border-radius:5px;}
+#jt-detail .jd-copy:hover{color:var(--lavender);background:var(--surface0);}
+#jt-detail .jd-copy.copied{color:var(--emerald);}
+
+/* ---- Toasts: small, corner-stacked, reusable ---- */
+#mg-toasts{position:fixed;right:16px;top:64px;z-index:510;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;font-family:system-ui,sans-serif;}
+.mg-toast{pointer-events:auto;min-width:214px;max-width:340px;display:flex;align-items:flex-start;gap:10px;background:var(--mantle);border:1px solid var(--surface1);border-left:3px solid var(--lavender);border-radius:10px;padding:11px 13px;box-shadow:0 10px 30px rgba(0,0,0,.5);animation:mg-toast-in .4s cubic-bezier(.2,.9,.24,1);}
+.mg-toast.out{animation:mg-toast-out .34s cubic-bezier(.4,0,.2,1) forwards;}
+.mg-toast.ok{border-left-color:var(--emerald);} .mg-toast.err{border-left-color:var(--red);} .mg-toast.unlock{border-left-color:var(--gold);}
+.mg-toast .mt-ic{flex:none;font-size:15px;margin-top:1px;color:var(--lavender);}
+.mg-toast.ok .mt-ic{color:var(--emerald);} .mg-toast.err .mt-ic{color:var(--red);} .mg-toast.unlock .mt-ic{color:var(--gold);}
+.mg-toast .mt-main{flex:1;min-width:0;}
+.mg-toast .mt-title{font-size:12.5px;color:var(--text);font-weight:600;}
+.mg-toast .mt-msg{font-size:11px;color:var(--subtext);margin-top:2px;white-space:normal;}
+/* Thumb is a background-image span, not <img src> -- the design-spec toast icon rule. */
+.mg-toast .mt-thumb{width:34px;height:34px;border-radius:6px;background-position:center;background-size:cover;background-repeat:no-repeat;flex:none;}
+.mg-toast .mt-x{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:14px;padding:0 1px;flex:none;line-height:1;}
+.mg-toast .mt-x:hover{color:var(--text);}
+@keyframes mg-toast-in{from{opacity:0;transform:translateY(-12px);}to{opacity:1;transform:translateY(0);}}
+@keyframes mg-toast-out{to{opacity:0;transform:translateX(20px);}}
+@media (prefers-reduced-motion: reduce){ #jobs-fab.busy .jf-dot{animation:none;} .mg-toast,.mg-toast.out{animation:none;} }

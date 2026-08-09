@@ -39,6 +39,40 @@ import {
   // over the aliased buildShotPayload/mvCardToAct imports).
   buildImgGenBody, resolveGenDims,
 } from "./src/loom-mutations.js";
+// PixAI's art-filter engine (gradient/canvas compositing, offline, free). Ported out of
+// static/mg-art-filters.js into the React build (2026-08-08, the vanilla static/ campaign);
+// now a plain import esbuild bundles, not a window global loaded by a <script> tag. The
+// Loom is bundle-only now, so this resolves the same way the gallery's FiltersPanel does.
+import MgArtFilters from "../gallery/src/art/artFilters.js";
+// The shared gallery-image picker modal (React component, imports its own CSS). Ported out
+// of static/mg-gallery-picker.js (2026-08-08); the Loom's own GalleryPick was already
+// converged onto the shared picker in an earlier pass, so this just swaps the last
+// <mg-gallery-picker> web-component mount for the React component.
+import GalleryPicker from "../gallery/src/components/GalleryPicker.jsx";
+import ModelPicker from "../gallery/src/components/ModelPicker.jsx";
+import CostBadge from "../gallery/src/components/CostBadge.jsx";
+import VideoDrawer from "../gallery/src/components/VideoDrawer.jsx";
+import { installNotify, NotifyRoot } from "../gallery/src/notify/index.jsx";
+
+// The shared notify system (toasts · Activity tray · achievement celebrations · the Jobs
+// poller) -- the SAME modules the gallery bundle carries, so window.Toast/Jobs/JobsCard keep
+// working for every guarded call site in this file. Installed at module scope (the old
+// mg-notify.js <script> ran at parse time; the bundle evaluating is the equivalent moment).
+installNotify();
+
+// The Loom.dc.html's own TINTS + tint formula (line ~681, ~760): 6 rotating per-shot
+// gradients so same-status shots stay visually distinguishable from each other, not just
+// from other statuses. `(ai*3+ci) % TINTS.length` is the design's real assignment rule --
+// ai/ci already exist on every flat() entry (loom-core.js:118), so this needs no change to
+// that pure-logic file, just reading fields it already provides.
+const LV_TINTS = [
+  "linear-gradient(150deg, #33236d 0%, #1b1733 100%)",
+  "linear-gradient(150deg, #3a3460 0%, #17142b 100%)",
+  "linear-gradient(150deg, #643aac 0%, #241f5b 100%)",
+  "linear-gradient(150deg, #2a4a58 0%, #171f38 100%)",
+  "linear-gradient(150deg, #4a3a6e 0%, #1f1a36 100%)",
+  "linear-gradient(150deg, #3a2b63 0%, #191338 100%)",
+];
 
 /* =========================================================================
    THE EDIT BAY v2 — reusable Seedance 2.0 storyboard with continuity chaining
@@ -223,12 +257,60 @@ const LIGHTING_PALETTE = ["golden hour", "blue hour", "low-key", "high-key", "wa
 const AUDIO_PALETTE = ["no music", "room tone", "ambient hum", "soft breathing", "whispered dialogue",
   "distant music", "rain", "heartbeat", "beat sync", "diegetic only", "muffled", "rustling fabric"];
 
+// Fix (face/hand touch-up repair) constants -- ported VERBATIM from the real, already-shipped
+// gallery/src/gen/editCore.js's FIX_COLORS/FIX_MIN_PX/FIX_MAX_BOXES/scaleBoxes, which
+// gallery/src/components/FixTab.jsx's own real box-drawing canvas already uses (Loom Mobile's
+// own Fixer sub-screen, built 2026-08-03, ports that exact real technique -- see LoomMobile's
+// own Fixer comment for the full trace). Deliberately a LOCAL COPY, not a cross-directory
+// `import ... from "../gallery/src/gen/editCore.js"`: it stays a small, verbatim LOCAL copy.
+// (The Loom went BUNDLE-ONLY on 2026-08-08, so the old hard reason -- the retired
+// Babel-standalone /loom path could only inline ./src/loom-core.js and ./src/loom-mutations.js
+// and would choke on a third raw import -- is gone; esbuild now resolves real cross-directory
+// imports, which is exactly how the art-filter engine above is pulled from
+// ../gallery/src/art/artFilters.js. Converging these Fixer constants the same way is future
+// vanilla-campaign work; until then the local copy stays, same as modeSendsRefs/liveTagText
+// etc. keep their own copies for values outside this file's two DO-NOT-MODIFY pure modules.)
+const FIX_COLORS = { face: "#b692e6", hand: "#4fc99a" };
+const FIX_MIN_PX = 6;
+const FIX_MAX_BOXES = 20;   // clean_fix_boxes truncates at 20 server-side
+// boxes arrive as {x,y,w,h,tag} in DISPLAY pixels (the canvas's own coordinate space); the
+// wire wants {x,y,width,height,tag} in ORIGINAL-image pixels. Scale comes from the rendered
+// <img> -- naturalWidth/clientWidth -- exactly like editCore.js's scaleBoxes; the server does
+// NOT rescale, so getting this wrong repairs the wrong part of the picture.
+const scaleFixBoxes = (boxes, imgEl) => {
+  const scale = imgEl && imgEl.clientWidth ? (imgEl.naturalWidth / imgEl.clientWidth) : 1;
+  return boxes.map((b) => ({
+    x: Math.round(b.x * scale), y: Math.round(b.y * scale),
+    width: Math.round(b.w * scale), height: Math.round(b.h * scale), tag: b.tag,
+  }));
+};
+
 const uid = () => Math.random().toString(36).slice(2, 9);
 const fmt = (s) => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 // Module scope (not a local inside useGenerationPipeline) because both pollShot (inside that
 // hook) and onVideoSlow/onVideoPaused (inside App(), a different function entirely) need it.
 const elapsedLabel = (ms) => ms < 3600000 ? Math.round(ms / 60000) + "m" : (Math.round(ms / 360000) / 10) + "h";
 const emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
+// A durable, manual owner-preference toggle backed by localStorage -- NOT window.storage
+// (the sGet/sSet/sList/sDel family above, which is the async, server-backed project store):
+// this is a per-browser UI-chrome preference (which SKIN of the Loom to show), not project
+// data, so it has no business round-tripping through the server or living in a storyboard's
+// own JSON. There is no existing hook in this file for that -- the main gallery only ever
+// auto-detects viewport width for its own mobile layout, it never persists a manual override
+// -- so this is a small, real, new one (used by App()'s "📱 Mobile view" switch), not a
+// borrowed one. Reads localStorage exactly once, in the lazy useState initializer, and
+// writes it back only when the value actually changes.
+function useLocalToggle(key, defaultVal) {
+  const [val, setVal] = useState(() => {
+    try { const raw = window.localStorage.getItem(key); return raw === null ? defaultVal : raw === "1"; }
+    catch (e) { return defaultVal; }
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem(key, val ? "1" : "0"); } catch (e) {}
+  }, [key, val]);
+  return [val, setVal];
+}
+const MOBILE_UI_KEY = "mg_loom_mobile_ui";   // "📱 Mobile view" toggle -- see useLocalToggle above
 // CONNECT, CONTINUITY_PHRASE, actLetter, maxTagNum/nextTag, frameLinked, and
 // connectMeta now live in ./src/loom-core.js (imported above) -- Phase 1
 // tooling pass, 2026-07-16. continuityLinked (same module) added 2026-07-23 to
@@ -346,6 +428,18 @@ const V2_STYLES = `
    Focus and its nested flyouts, which are otherwise contained inside .lv-overlay's own
    stacking context and can never out-rank a root-level sibling on their own. */
 .lv-overlay.lv-overlay-df{z-index:450;}
+/* The Loom.dc.html:36-45's hero banner -- radial-gradient art layer + hide/show toggle. */
+.lv-banner{position:relative;width:100%;height:160px;overflow:hidden;background:var(--base);
+  flex:none;border-bottom:1px solid var(--surface1);}
+.lv-banner-art{position:absolute;inset:0;
+  background:radial-gradient(120% 140% at 18% 0%, color-mix(in oklab, var(--accent) 26%, #0b0820) 0%, #0b0820 62%, #070512 100%);}
+.lv-banner-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+.lv-banner-hide{position:absolute;top:10px;right:12px;font-size:10px;font-weight:700;letter-spacing:.04em;
+  color:#fff;background:rgba(6,4,14,.55);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.25);
+  border-radius:999px;padding:5px 11px;cursor:pointer;font-family:inherit;}
+.lv-banner-show{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--subtext);
+  background:var(--surface1);border:1px solid var(--surface1);border-radius:7px;padding:7px 11px;
+  cursor:pointer;white-space:nowrap;font-family:inherit;}
 .lv-top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
 .lv-eyebrow{font:700 11px/1 system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);}
 .lv-note{color:var(--subtext);font-size:12px;}
@@ -370,26 +464,54 @@ const V2_STYLES = `
 .lv-override-badge{color:var(--amber);font-style:normal;font-weight:600;}
 .lv-overrideflash{font-size:11px;color:var(--amber);background:rgba(0,0,0,.15);border-radius:5px;padding:3px 7px;margin-top:2px;animation:lv-flash-fade 1.6s ease-out forwards;}
 @keyframes lv-flash-fade{0%{opacity:1;}70%{opacity:1;}100%{opacity:0;}}
-/* Fixed 4-region shell: top Timeline drawer (below), then a row of left card /
-   board column / right drawer -- nothing free-floating, nothing draggable. */
-.lv-shell{flex:1;display:flex;min-height:0;overflow:hidden;}
-.lv-side{flex:none;background:var(--surface0);display:flex;flex-direction:column;min-height:0;
-  transition:width .18s ease;overflow-x:hidden;}
-.lv-side.left{width:280px;border-right:1px solid var(--surface1);}
-.lv-side.left.wide{width:560px;}
-.lv-side.right{width:560px;border-left:1px solid var(--surface1);}
-.lv-side.collapsed{width:52px;}
+/* Board fills the shell's full width always; Cast/Generate float over it as glass
+   panels (The Loom.dc.html's leftPanelStyle/rightPanelStyle/leftBackdropStyle),
+   collapsing to a permanent 58px icon rail -- not the old 3-column flex share
+   this replaced (2026-08-04 structural-fidelity fix, see docs/DECISIONS.md).
+   .lv-shell is position:relative so the floating panel + backdrop below
+   resolve their position:absolute against the WHOLE shell (board + rails),
+   exactly like the design's own equivalent wrapper. */
+.lv-shell{flex:1;display:flex;min-height:0;overflow:hidden;position:relative;}
+.lv-rail{flex:none;width:58px;box-sizing:border-box;display:flex;flex-direction:column;
+  align-items:center;gap:7px;padding:10px 0;margin:10px 4px;border-radius:14px;
+  border:1px solid rgba(182,146,230,.32);
+  background:linear-gradient(120deg,rgba(24,18,54,.92) 0%,rgba(14,11,32,.95) 100%);
+  backdrop-filter:blur(18px) saturate(1.12);
+  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px rgba(182,146,230,.14);}
+.lv-boardcol{flex:1;min-width:0;overflow:auto;background:var(--base);}
+
+.lv-backdrop{position:absolute;inset:0;z-index:40;background:rgba(5,4,13,.62);
+  backdrop-filter:blur(7px);animation:lvFadeIn .32s ease both;}
+.lv-backdrop.closing{animation:lvFadeOut .34s ease both;}
+.lv-panel{position:absolute;top:20px;bottom:20px;z-index:41;box-sizing:border-box;
+  display:flex;flex-direction:column;min-height:0;border-radius:16px;
+  border:1px solid rgba(182,146,230,.32);
+  background:linear-gradient(120deg,rgba(24,18,54,.92) 0%,rgba(14,11,32,.95) 100%);
+  backdrop-filter:blur(18px) saturate(1.12);
+  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px rgba(182,146,230,.14);overflow:hidden;}
+.lv-panel.left{left:20px;width:clamp(220px,21vw,292px);
+  animation:lvSlideL .4s cubic-bezier(.18,1.02,.26,1) both;}
+.lv-panel.left.wide{width:min(572px,37vw);}
+.lv-panel.left.closing{animation:lvSlideOutL .34s cubic-bezier(.4,0,.2,1) both;}
+.lv-panel.right{right:20px;width:clamp(332px,35vw,572px);
+  animation:lvSlideR .4s cubic-bezier(.18,1.02,.26,1) both;}
+.lv-panel.right.closing{animation:lvSlideOutR .34s cubic-bezier(.4,0,.2,1) both;}
+@keyframes lvFadeIn{from{opacity:0;}to{opacity:1;}}
+@keyframes lvFadeOut{from{opacity:1;}to{opacity:0;}}
+@keyframes lvSlideL{from{opacity:0;transform:translateX(-34px) scale(.985);}60%{opacity:1;}to{opacity:1;transform:none;}}
+@keyframes lvSlideOutL{from{opacity:1;transform:none;}to{opacity:0;transform:translateX(-34px) scale(.985);}}
+@keyframes lvSlideR{from{opacity:0;transform:translateX(34px) scale(.985);}60%{opacity:1;}to{opacity:1;transform:none;}}
+@keyframes lvSlideOutR{from{opacity:1;transform:none;}to{opacity:0;transform:translateX(34px) scale(.985);}}
+
 .lv-sidehead{flex:none;display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--surface1);}
 .lv-sidetabs{flex:1;min-width:0;margin-bottom:0;}
 .lv-col{width:22px;height:20px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);
   border-radius:5px;cursor:pointer;font-size:11px;flex:0 0 auto;}
 .lv-col:hover{color:var(--accent);}
-.lv-railicons{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 0;width:100%;overflow:auto;}
 .lv-railbtn{width:38px;height:38px;border:1px solid var(--surface1);background:var(--base);color:var(--subtext);
   border-radius:8px;cursor:pointer;font-size:17px;line-height:1;flex:0 0 auto;}
 .lv-railbtn:hover{border-color:var(--accent);color:var(--accent);}
 .lv-railbtn.on{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--base));}
-.lv-boardcol{flex:1;min-width:0;overflow:auto;background:var(--base);}
 /* Timeline: genuinely fixed to the banner, full width, never draggable -- unlike every
    other region. Three states (hidden/slim/full) driven by tlState + a live drag height;
    the preview sits ABOVE the scrubber, only rendered once mostly expanded. */
@@ -455,9 +577,16 @@ const V2_STYLES = `
    rather than inventing a new color. */
 .lv-st.imported{margin-left:0;color:var(--subtext);background:var(--base);}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
-.lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;}
-.lv-seg.todo{background:var(--surface1);}.lv-seg.wip{background:var(--amber);}.lv-seg.done{background:var(--green);}.lv-seg.error{background:var(--coral);}
+.lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;
+  display:flex;align-items:flex-end;padding:4px 6px;box-sizing:border-box;overflow:hidden;}
 .lv-seg.sel{outline:2px solid var(--accent);outline-offset:-2px;z-index:2;}
+.lv-segcode{font-size:9px;font-weight:700;color:rgba(6,4,14,.55);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;pointer-events:none;}
+.lv-segbar{position:absolute;left:0;right:0;bottom:0;height:4px;}
+.lv-segbar.todo{background:rgba(255,255,255,.25);}
+.lv-segbar.wip{background:#f2c14a;}
+.lv-segbar.done{background:var(--green,#4fc99a);}
+.lv-segbar.error{background:var(--coral,#f38ba8);}
 .lv-target{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);opacity:.7;}
 .lv-tlinfo{font-size:11px;color:var(--text);}
 .lv-dim{color:var(--subtext);font-style:italic;}
@@ -466,6 +595,7 @@ const V2_STYLES = `
 .lv-unbind{margin-left:auto;flex:none;font:600 10px/1 system-ui;background:var(--surface1);border:1px solid var(--surface1);
   color:var(--subtext);border-radius:6px;padding:4px 8px;cursor:pointer;}
 .lv-unbind:hover{border-color:var(--accent);color:var(--accent);}
+.lv-fhlabel{font-size:9.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--overlay0);margin-bottom:6px;}
 .lv-framehandoff{display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1);}
 .lv-framehandoff .sb-frame{flex:1 1 0;min-width:0;}
 /* The @tag input (.sb-tagin) is 90px in classic Loom's own wide layout -- too wide for
@@ -622,7 +752,7 @@ const V2_STYLES = `
 /* D-11: LoRA chips in the Image tab -- mirrors the Gallery's own .lora-chip shape
    (moonglade_gallery.py) at the Loom's smaller scale/token set, not a copy-paste of it. */
 /* picker-parity-round2 (2026-07-24): this used to be a show/hide toggle that expanded the
-   LoRA <mg-model-picker> INLINE into this ~280px rail column -- the owner's exact complaint
+   LoRA <ModelPicker> INLINE into this ~280px rail column -- the owner's exact complaint
    ("cramped mess... does not have a flyout like the gallery"). It now opens the SAME
    .lv-mpick-veil overlay the Model row's own trigger does (see below), just pre-selected to
    the LoRAs segment -- reuses .lv-chip's chrome unchanged, only what the click DOES changed. */
@@ -642,7 +772,7 @@ const V2_STYLES = `
 .lv-lchip .lv-lrm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:13px;padding:0 2px;line-height:1;}
 .lv-lchip .lv-lrm:hover{color:var(--coral);}
 /* picker-parity-round2 (problem 2): the Image tab's model/LoRA picker used to render
-   <mg-model-picker> INLINE in this ~280px rail (cramped: results, a toggle button, a
+   <ModelPicker> INLINE in this ~280px rail (cramped: results, a toggle button, a
    SECOND search box, more results, all stacked). Now a trigger row (mirrors
    moonglade_gallery.py's own #gen-selrow) that opens a floating overlay -- .lv-mpick-veil below
    -- matching the Gallery's #model-flyout presentation: ONE picker experience, not a
@@ -674,10 +804,50 @@ const V2_STYLES = `
 .lv-mpick-seg button{flex:1;padding:6px 0;border-radius:7px;background:transparent;border:1px solid var(--line);color:var(--ink2);cursor:pointer;font-size:12px;}
 .lv-mpick-seg button.on{background:var(--panel2);color:var(--ink);border-color:var(--amber);font-weight:600;}
 .lv-mpick-body{padding:10px 14px 14px;display:flex;flex-direction:column;min-height:0;flex:1;}
-.lv-mpick-body mg-model-picker{flex:1;min-height:0;}
+.lv-mpick-body .model-picker{flex:1;min-height:0;}
 .lv-bal{font-size:10.5px;color:var(--text);padding:5px 0 3px;border-bottom:1px solid var(--surface1);margin-bottom:9px;letter-spacing:.02em;opacity:.85;}
 .lv-balclaim{color:var(--accent);}
 .lv-editsrc{max-width:100%;max-height:120px;border-radius:8px;border:1px solid var(--surface1);margin:4px 0;display:block}
+/* Fixer canvas wrapper -- same values as LoomMobile's own .lm-fixwrap/.lm-fixhint/.lm-fixwarn
+   (Loom Mobile.dc.html's fixHintStyle/fixWarnStyle), desktop naming only. */
+.lv-fixwrap{position:relative;border-radius:8px;overflow:hidden;background:var(--base);
+  border:1px solid var(--surface1);margin-top:4px;max-width:100%;}
+.lv-fixwrap img{width:100%;max-height:280px;object-fit:contain;display:block;background:#000;}
+.lv-fixwrap canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair;}
+.lv-fixhint{font-size:10.5px;line-height:1.5;color:var(--subtext);margin:10px 0 6px;}
+.lv-fixwarn{font-size:10px;line-height:1.45;color:var(--peach);background:rgba(232,147,95,.08);
+  border:1px solid rgba(232,147,95,.3);border-radius:8px;padding:7px 9px;margin-top:8px;}
+.lv-openfilters{display:block;width:100%;box-sizing:border-box;text-align:center;padding:10px;
+  border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--surface1);
+  background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);margin:6px 0;}
+.lv-openfilters:hover{border-color:var(--accent);}
+/* Filter compare modal -- The Loom.dc.html's own filterCompareOpen, literal values (fixed
+   veil + centered card, 920px cap, 3-column grid: preview/preview/filters+sliders). */
+.lv-fc-veil{position:fixed;inset:0;z-index:47;background:rgba(5,4,13,.72);backdrop-filter:blur(7px);}
+.lv-fc-host{position:fixed;inset:0;z-index:48;display:grid;place-items:center;pointer-events:none;padding:20px;}
+.lv-fc-card{pointer-events:auto;box-sizing:border-box;width:min(920px,calc(100vw - 40px));
+  max-height:92vh;overflow-y:auto;border-radius:16px;border:1px solid var(--surface1);
+  background:var(--surface0);box-shadow:0 34px 80px -18px rgba(0,0,0,.75);padding:16px 20px 20px;}
+.lv-fc-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.lv-fc-title{font-size:15px;font-weight:800;}
+.lv-fc-grid{display:grid;grid-template-columns:1fr 1fr 200px;gap:16px;align-items:start;}
+.lv-fc-previewcol{min-width:0;}
+.lv-fc-previewbox{position:relative;width:100%;aspect-ratio:1;border-radius:10px;overflow:hidden;
+  background:var(--base);border:1px solid var(--surface1);}
+.lv-fc-stage{position:relative;width:100%;height:100%;}
+.lv-fc-img{width:100%;height:100%;object-fit:cover;display:block;}
+.lv-fc-side{display:flex;flex-direction:column;gap:10px;}
+.lv-fc-grouplabel{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--overlay0);margin-bottom:5px;}
+.lv-fc-swatchgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;}
+.lv-fc-tile{position:relative;display:flex;flex-direction:column;gap:3px;cursor:pointer;
+  border-radius:8px;padding:3px;border:1px solid transparent;background:none;}
+.lv-fc-tile.on{border-color:var(--accent);}
+.lv-fc-swatch{width:100%;aspect-ratio:1;border-radius:6px;background:var(--surface1);}
+.lv-fc-name{font-size:8.5px;text-align:center;padding:2px 1px;color:var(--subtext);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lv-fc-range{width:100%;height:3px;cursor:pointer;}
+.lv-fc-btnrow{display:flex;gap:6px;}
 .lv-refstrip{display:flex;gap:5px;flex-wrap:wrap;margin:4px 0 2px}
 .lv-refstrip img{width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--surface1)}
 .lv-imgresult{margin-top:10px;border:1px solid var(--surface1);border-radius:8px;padding:8px;}
@@ -789,7 +959,20 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
   );
 }
 
-function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally }) {
+function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, genFixState, setGenFixState, genFix, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally,
+  // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
+  // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
+  // this file already keys genState/genImgState/etc). LIFTED to App() (mobile-board-view
+  // pass, 2026-08-03) so a still-in-progress draft survives toggling to Mobile view and back
+  // -- before this, the draft lived only in LoomV2's own component state, so unmounting it
+  // (which is exactly what picking Mobile view does) silently discarded whatever the owner
+  // had half-typed into Generate. Every reference below is unchanged from when these were
+  // local useState calls -- only the declaration moved, so LoomV2's own behavior is identical.
+  mobileUI, setMobileUI, draftCard, setDraftCard, draftTarget, setDraftTarget, draftAttachedInfo, setDraftAttachedInfo }) {
+  // The Loom.dc.html:33-45's collapsible hero banner -- entirely missing before this.
+  // Design's own state (line 743, `bannerOpen: true`) is plain in-memory, not persisted, so
+  // this matches exactly rather than adding localStorage this feature never had in spec.
+  const [bannerOpen, setBannerOpen] = useState(true);
   const [tab, setTab] = useState("Video");
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
@@ -800,7 +983,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // as deepFocus itself; the IIFE below only reads/writes it via closure.
   const [dfPalFor, setDfPalFor] = useState(null);     // which term-palette is open in Deep Focus, or null
   // picker-parity-round2 (problem 2): replaces the old loraOpen boolean (D-11), which just
-  // toggled the LoRA <mg-model-picker> INLINE into this rail -- the owner's exact complaint.
+  // toggled the LoRA <ModelPicker> INLINE into this rail -- the owner's exact complaint.
   // pickerOpen/pickerKind instead drive the floating .lv-mpick-veil overlay (mirrors
   // moonglade_gallery.py's #model-flyout open state + Models/LoRAs segment), opened via either
   // the Model row's trigger (kind="base") or "+ add LoRA" (kind="lora").
@@ -808,8 +991,28 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const [pickerKind, setPickerKind] = useState("base");
   const [leftTab, setLeftTab] = useState("cast");        // 'cast' | 'footage'
   const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [leftClosing, setLeftClosing] = useState(false);  // true for 340ms while the panel plays its slide-out, matching The Loom.dc.html's own leftClosing/lvSlideOutL
   const [density, setDensity] = useState("detailed");    // 'simple' | 'detailed' -- Cast tab only
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [rightClosing, setRightClosing] = useState(false);
+  const leftCloseTimer = useRef(null);
+  const rightCloseTimer = useRef(null);
+  // Panels float over the board now (design's leftPanelStyle/rightPanelStyle), so closing
+  // needs the same two-step the design uses: play the .34s slide-out, THEN actually collapse --
+  // an instant collapse would cut the exit animation off after one frame.
+  const closeLeftPanel = () => {
+    setLeftClosing(true);
+    clearTimeout(leftCloseTimer.current);
+    leftCloseTimer.current = setTimeout(() => { setLeftCollapsed(true); setLeftClosing(false); }, 340);
+  };
+  const closeRightPanel = () => {
+    setRightClosing(true);
+    clearTimeout(rightCloseTimer.current);
+    rightCloseTimer.current = setTimeout(() => { setRightCollapsed(true); setRightClosing(false); }, 340);
+  };
+  const openLeftPanel = () => { clearTimeout(leftCloseTimer.current); setLeftClosing(false); setLeftCollapsed(false); };
+  const openRightPanel = () => { clearTimeout(rightCloseTimer.current); setRightClosing(false); setRightCollapsed(false); };
+  useEffect(() => () => { clearTimeout(leftCloseTimer.current); clearTimeout(rightCloseTimer.current); }, []);
   const [tlState, setTlState] = useState("slim");        // 'hidden' | 'slim' | 'full'
   const [tlDragH, setTlDragH] = useState(null);          // live px height while dragging the handle, else null
   const [palFor, setPalFor] = useState(null);            // which field's "+ terms" popover is open, or null
@@ -818,16 +1021,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // Draft generation: the Generate drawer works with no shot selected, exactly like the
   // main gallery's own drawer -- a "card" that lives in component state instead of the
   // project, generation-state dicts keyed by its "__draft__" id right alongside real shots'.
-  const [draftCard, setDraftCard] = useState(() => ({
-    id: "__draft__", mode: "R2V", duration: 5, connect: "new", title: "", prompt: "",
-    camera: "", lighting: "", transIn: "", transOut: "", audioCue: "", notes: "",
-    audioGen: false, audioLanguage: "english",
-    imgPrompt: "", editPrompt: "", refPrompt: "",
-    cast: [], refs: [], openFrame: {}, closeFrame: {},
-    promptOverride: false, promptOverrideText: "",
-  }));
-  const [draftTarget, setDraftTarget] = useState("");              // shot id chosen to route/attach a draft result into
-  const [draftAttachedInfo, setDraftAttachedInfo] = useState(null); // {mid, code} once a draft video is attached to a shot
+  // draftCard/draftTarget/draftAttachedInfo are now App()-level props (see this function's
+  // own signature comment) -- lifted, not removed; every use below is unchanged.
   const tlDrag = useRef({ dragging: false, startY: 0, startH: 0 });
   // The overlay is position:fixed, so it never visibly moves -- but classic Loom's own
   // page underneath is a normal tall document, and without this, its body/html scrollbar
@@ -854,14 +1049,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [pickerOpen]);
-  // picker-parity-round2: lazy-mount both <mg-model-picker> instances on FIRST open (mirrors
+  // picker-parity-round2: lazy-mount both <ModelPicker> instances on FIRST open (mirrors
   // moonglade_gallery.py's ensurePickers() -- "only fetch on first open", not an always-mounted
   // base+LoRA fetch on every Loom load just because the right rail happens to be expanded).
   // Once true, stays true -- the pickers then persist (hidden via .lv-mpick-veil's own
   // display:none/.open) so a close/reopen never loses either one's search/scroll state.
   const [pickerMounted, setPickerMounted] = useState(false);
   useEffect(() => { if (pickerOpen) setPickerMounted(true); }, [pickerOpen]);
-  // Bridge the shared <mg-model-picker> web component to React: a ref callback (React
+  // Bridge the shared <ModelPicker> web component to React: a ref callback (React
   // doesn't route custom events through JSX props) that binds the 'mg-pick' listener once.
   // imgModelSeqRef guards the /api/model-version fetch below the same way the Gallery's own
   // selectCard() guards its identical fetch with a local selSeq/mySeq pair: a fast second
@@ -890,73 +1085,62 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       return changed ? next : cur;
     });
   }, [loraRange, setImgLoras]);
-  // Persist the two <mg-model-picker> DOM elements outside the ref-callback closures
-  // (bindPicker/bindLoraPicker below only run on mount/unmount) so the ensureSearched()
-  // effect further down can reach whichever one just became visible on a tab switch.
-  const basePickerElRef = useRef(null);
-  const loraPickerElRef = useRef(null);
-  const bindPicker = useCallback((el) => {
-    basePickerElRef.current = el;
-    if (el && !el._mgBound) {
-      el._mgBound = true;
-      el.addEventListener("mg-pick", (e) => {
-        // Owner report 2026-07-24: picking a model left the overlay open, forcing a
-        // manual close -- close it the instant a base model is picked (single-select:
-        // one choice ends the browsing task), mirroring moonglade_gallery.py's onBasePick.
-        // LoRA picking (the other <mg-model-picker> mount, kind="lora" multi) is
-        // deliberately left open -- see the "+ add LoRA" toggle below.
-        setPickerOpen(false);
-        const m = { model_id: e.detail.model_id, title: e.detail.title, preview_url: e.detail.preview_url || "" };
-        setImgModel(m);
-        setModelDefaults(null);
-        // L536 + D-11: resolve model_type (so the LoRA compat warning has a real base to
-        // compare against -- the Loom never fetched this at all before) and prefill the
-        // model author's own tuned preset (negative/steps/cfg), mirroring
-        // moonglade_gallery.py's Gen.applyModelDefaults() exactly: only for fields the model
-        // actually has data for, and it OVERWRITES whatever's currently in imgAdv, same as
-        // the Gallery's own (deliberate, already-shipped) behavior on every base-model pick.
-        // picker-parity-round2 (problem 4/5): ?all=1 replaces the old single-version fetch --
-        // ONE request either way (same endpoint), but now returns every published release
-        // (versions[0] is the same "latest" the old fetch always resolved) so the version
-        // picker + sampling_method + capabilities the app was resolving and discarding can
-        // finally be shown, mirroring moonglade_gallery.py's onBasePick/applyVersion exactly.
-        const mySeq = ++imgModelSeqRef.current;
-        fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1")
-          .then((r) => r.json())
-          .then((d) => {
-            if (mySeq !== imgModelSeqRef.current) return;   // a newer pick superseded this fetch
-            const versions = (d && d.versions) || [], v = versions[0] || {};
-            // Owner report 2026-07-24: the version dropdown never appeared on the Loom for a
-            // model confirmed (same model, same account) to show one on the Gallery. Root
-            // cause: this updater ALSO required cur.model_id===m.model_id on top of the
-            // mySeq check above -- redundant for the "newer pick superseded this one" case
-            // mySeq already covers, but a real liability for anything else that can touch
-            // imgModel while this fetch is in flight (a shot switch, a project reload) --
-            // any of those silently drops the whole versions/compatibility/restrictions
-            // payload with no error, no retry, nothing visibly wrong. The Gallery's own
-            // onBasePick has never done a model_id re-check here, only the sequence guard --
-            // matching it exactly rather than carrying an extra condition that was never
-            // proven necessary and demonstrably breaks the one thing it must never break.
-            setImgModel((cur) => cur ? {
-              ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
-              sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
-              compatibility: v.compatibility || {}, restrictions: v.restrictions || {},
-              versions,
-            } : cur);
-            const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
-            setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
-            if (has) {
-              setImgAdv((cur) => ({
-                ...cur,
-                negative: v.negative_prompt || cur.negative,
-                steps: v.sampling_steps || cur.steps,
-                cfg: v.cfg_scale || cur.cfg,
-              }));
-            }
-          })
-          .catch(() => {});
-      });
-    }
+  const onBasePick = useCallback((row) => {
+    // Owner report 2026-07-24: picking a model left the overlay open, forcing a
+    // manual close -- close it the instant a base model is picked (single-select:
+    // one choice ends the browsing task), mirroring moonglade_gallery.py's onBasePick.
+    // LoRA picking (the other <ModelPicker> mount, kind="lora" multi) is
+    // deliberately left open -- see the "+ add LoRA" toggle below.
+    setPickerOpen(false);
+    const m = { model_id: row.model_id, title: row.title, preview_url: row.preview_url || "" };
+    setImgModel(m);
+    setModelDefaults(null);
+    // L536 + D-11: resolve model_type (so the LoRA compat warning has a real base to
+    // compare against -- the Loom never fetched this at all before) and prefill the
+    // model author's own tuned preset (negative/steps/cfg), mirroring
+    // moonglade_gallery.py's Gen.applyModelDefaults() exactly: only for fields the model
+    // actually has data for, and it OVERWRITES whatever's currently in imgAdv, same as
+    // the Gallery's own (deliberate, already-shipped) behavior on every base-model pick.
+    // picker-parity-round2 (problem 4/5): ?all=1 replaces the old single-version fetch --
+    // ONE request either way (same endpoint), but now returns every published release
+    // (versions[0] is the same "latest" the old fetch always resolved) so the version
+    // picker + sampling_method + capabilities the app was resolving and discarding can
+    // finally be shown, mirroring moonglade_gallery.py's onBasePick/applyVersion exactly.
+    const mySeq = ++imgModelSeqRef.current;
+    fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1")
+      .then((r) => r.json())
+      .then((d) => {
+        if (mySeq !== imgModelSeqRef.current) return;   // a newer pick superseded this fetch
+        const versions = (d && d.versions) || [], v = versions[0] || {};
+        // Owner report 2026-07-24: the version dropdown never appeared on the Loom for a
+        // model confirmed (same model, same account) to show one on the Gallery. Root
+        // cause: this updater ALSO required cur.model_id===m.model_id on top of the
+        // mySeq check above -- redundant for the "newer pick superseded this one" case
+        // mySeq already covers, but a real liability for anything else that can touch
+        // imgModel while this fetch is in flight (a shot switch, a project reload) --
+        // any of those silently drops the whole versions/compatibility/restrictions
+        // payload with no error, no retry, nothing visibly wrong. The Gallery's own
+        // onBasePick has never done a model_id re-check here, only the sequence guard --
+        // matching it exactly rather than carrying an extra condition that was never
+        // proven necessary and demonstrably breaks the one thing it must never break.
+        setImgModel((cur) => cur ? {
+          ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
+          sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
+          compatibility: v.compatibility || {}, restrictions: v.restrictions || {},
+          versions,
+        } : cur);
+        const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+        setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
+        if (has) {
+          setImgAdv((cur) => ({
+            ...cur,
+            negative: v.negative_prompt || cur.negative,
+            steps: v.sampling_steps || cur.steps,
+            cfg: v.cfg_scale || cur.cfg,
+          }));
+        }
+      })
+      .catch(() => {});
   }, [setImgModel, setImgAdv, setModelDefaults]);
   // problem 4: PixAI's own model/LoRA cards offer a version selector; resolve_version_meta
   // always silently took the newest release. imgModel.versions (populated by bindPicker's
@@ -988,36 +1172,16 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // detail shape is { model, selected } (not the raw row bindPicker above expects) --
   // upsert-by-model_id on selected=true (covers both the initial pending entry and the
   // later resolved-version_id update, same entry re-dispatched), remove on selected=false.
-  const bindLoraPicker = useCallback((el) => {
-    loraPickerElRef.current = el;
-    if (el && !el._mgBound) {
-      el._mgBound = true;
-      el.addEventListener("mg-pick", (e) => {
-        const { model, selected } = e.detail;
-        setImgLoras((cur) => {
-          const i = cur.findIndex((l) => l.model_id === model.model_id);
-          if (!selected) return i < 0 ? cur : cur.filter((l) => l.model_id !== model.model_id);
-          if (i < 0) return [...cur, model];
-          const next = cur.slice(); next[i] = model; return next;
-        });
-      });
-    }
+  const onLoraPick = useCallback((model, selected) => {
+    setImgLoras((cur) => {
+      const i = cur.findIndex((l) => l.model_id === model.model_id);
+      if (!selected) return i < 0 ? cur : cur.filter((l) => l.model_id !== model.model_id);
+      if (i < 0) return [...cur, model];
+      const next = cur.slice(); next[i] = model; return next;
+    });
   }, [setImgLoras]);
-  // Owner report 2026-07-24 ("still slow"): both pickers mount together on first open
-  // (pickerMounted, so switching tabs never re-fetches -- "each keeps its OWN
-  // last-searched results independently"), but mg-model-picker.js now defers its own
-  // browse-on-open search when it starts hidden (see that file's connectedCallback
-  // comment) -- something has to call ensureSearched() on whichever one just became
-  // visible, or the hidden tab would just never search at all, forever. ensureSearched()
-  // is a no-op after the first real call, so this firing on every pickerKind change costs
-  // nothing once both have searched once.
-  useEffect(() => {
-    if (!pickerMounted) return;
-    const vis = pickerKind === "base" ? basePickerElRef.current : loraPickerElRef.current;
-    if (vis && vis.ensureSearched) vis.ensureSearched();
-  }, [pickerMounted, pickerKind]);
   // D-12 increments 2-4: read-only cost badges for the Image/Edit/Reference tabs -- refs to
-  // the <mg-cost-badge> custom elements (imperative setChecking/setPrice/clear API, the same
+  // the <CostBadge> components (imperative setChecking/setPrice/clear API via ref, the same
   // component the Gallery's Generate and Edit tabs use). Kept ALONGSIDE -- not instead of --
   // confirmSpend's window.confirm at submit time below: these three tabs' confirm dialog IS
   // the fail-closed guardrail that got built after they used to lie about cost (see
@@ -1296,6 +1460,144 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const routeTarget = sel || entries.find((e) => e.c.id === draftTarget) || null;
   const frameSrc = (f) => (f && f.thumbId ? thumbs[f.thumbId] : (f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null));
   activeRef.current = active;
+
+  // ---- Fixer -- desktop port of LoomMobile's own seventh increment (2026-08-03), itself a
+  // verbatim port of gallery/src/components/FixTab.jsx's real, already-shipped box-drawing
+  // (same FIX_COLORS/FIX_MIN_PX/FIX_MAX_BOXES/scaleFixBoxes module-scope constants, same
+  // paint()/onDown/onMove/onUp math). The real submit path (genFixState/setGenFixState/
+  // genFix) already existed on useGenerationPipeline's own return value and was already
+  // computed every render in App() -- it just wasn't threaded into this component's props before
+  // this fix (2026-08-04, closing the design-fidelity punch list's "Edit tab has no Fixer or
+  // Enhance sub-tabs at all" item). No new backend, no new pipeline -- purely wiring +
+  // this tab's own canvas UI, same as LoomMobile already proved out.
+  const [editSub, setEditSub] = useState("edit");   // 'edit' | 'fixer' | 'enhance'
+  const [fixTag, setFixTag] = useState("face");
+  const [fixBoxes, setFixBoxes] = useState([]);
+  const fixImgRef = useRef(null);
+  const fixCanvasRef = useRef(null);
+  const fixDragRef = useRef(null);
+  const [genFixPrice, setGenFixPrice] = useState({});
+  useEffect(() => {
+    setFixBoxes([]);
+  }, [active && active.c.id, active && active.c.openFrame && active.c.openFrame.mediaId]);
+  const fixPaint = useCallback(() => {
+    const cvs = fixCanvasRef.current, img = fixImgRef.current;
+    if (!cvs || !img) return;
+    const w = img.clientWidth, h = img.clientHeight;
+    if (!w || !h) return;
+    if (cvs.width !== w || cvs.height !== h) { cvs.width = w; cvs.height = h; }
+    const ctx = cvs.getContext("2d");
+    ctx.clearRect(0, 0, w, h);
+    const draw = (b) => {
+      ctx.strokeStyle = FIX_COLORS[b.tag] || FIX_COLORS.face;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(b.x, b.y, b.w, b.h);
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.font = "11px system-ui";
+      ctx.fillText(b.tag, b.x + 3, b.y + 13);
+    };
+    fixBoxes.forEach(draw);
+    if (fixDragRef.current) draw({ ...fixDragRef.current, tag: fixTag });
+  }, [fixBoxes, fixTag]);
+  useEffect(() => { fixPaint(); }, [fixPaint]);
+  useEffect(() => {
+    const onResize = () => fixPaint();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [fixPaint]);
+  const fixRel = (e) => {
+    const r = fixCanvasRef.current.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+  const fixDown = (e) => {
+    if (e.button !== 0 || !(active && active.c.openFrame && active.c.openFrame.mediaId)) return;
+    const p = fixRel(e);
+    fixDragRef.current = { x: p.x, y: p.y, w: 0, h: 0, ox: p.x, oy: p.y };
+    e.preventDefault();
+  };
+  const fixMove = (e) => {
+    if (!fixDragRef.current) return;
+    const p = fixRel(e);
+    const d = fixDragRef.current;
+    fixDragRef.current = {
+      ...d,
+      x: Math.min(d.ox, p.x), y: Math.min(d.oy, p.y),
+      w: Math.abs(p.x - d.ox), h: Math.abs(p.y - d.oy),
+    };
+    fixPaint();
+  };
+  const fixUp = () => {
+    const d = fixDragRef.current;
+    fixDragRef.current = null;
+    if (!d) return;
+    if (d.w > FIX_MIN_PX && d.h > FIX_MIN_PX) {
+      if (fixBoxes.length >= FIX_MAX_BOXES) {
+        if (window.Toast) {
+          window.Toast.show({
+            kind: "err", title: "That's the limit",
+            msg: "A Fix carries at most " + FIX_MAX_BOXES + " boxes — the rest would be dropped server-side.",
+          });
+        }
+      } else {
+        setFixBoxes((old) => old.concat([{ x: d.x, y: d.y, w: d.w, h: d.h, tag: fixTag }]));
+      }
+    }
+    fixPaint();
+  };
+  // Debounced, read-only /api/price preview -- same shape as LoomMobile's own, mode:"fix"
+  // always comes back free:false server-side (a Fix can never be card-covered), matching
+  // FixTab.jsx's own cost badge.
+  useEffect(() => {
+    if (tab !== "Edit" || editSub !== "fixer" || !active) return;
+    const id = active.c.id;
+    const src = active.c.openFrame && active.c.openFrame.mediaId;
+    if (!src || !fixBoxes.length) { setGenFixPrice((s) => ({ ...s, [id]: null })); return; }
+    setGenFixPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
+    let live = true;
+    const t = setTimeout(() => {
+      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) }) })
+        .then((r) => r.json()).then((pr) => { if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr } })); })
+        .catch(() => { if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr: null } })); });
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, editSub, active && active.c.id, active && active.c.openFrame && active.c.openFrame.mediaId, fixBoxes]);
+
+  // ---- Filter compare -- desktop port of LoomMobile's own sixth increment (2026-08-03).
+  // Real, shared, offline art-filter library (static/mg-art-filters.js) -- PixAI's own 7
+  // gradient-overlay recipes plus this app's own 5, composited entirely client-side (no
+  // network call, no credit spend), same AF.groups()/AF.get()/AF.renderSwatch()/
+  // AF.applyPreview()/AF.clearPreview() API LoomMobile already uses. Genuinely persists via
+  // the same `patch` every other Generate field writes through -- no new endpoint.
+  const AF = MgArtFilters;   // was window.MgArtFilters (static/mg-art-filters.js), now bundled
+  const [fcOpen, setFcOpen] = useState(false);
+  const [fcActive, setFcActive] = useState(null);
+  const [fcStrength, setFcStrength] = useState(1);
+  const [fcAngle, setFcAngle] = useState(180);
+  const fcStageRef = useRef(null);
+  const fcImgRef = useRef(null);
+  const openFilterCompare = () => {
+    if (!active) return;
+    setFcActive(active.c.filter || null);
+    setFcStrength(active.c.filterStrength != null ? active.c.filterStrength : 1);
+    setFcAngle(active.c.filterAngle != null ? active.c.filterAngle : 180);
+    setFcOpen(true);
+  };
+  const closeFilterCompare = () => setFcOpen(false);
+  const fcClear = () => { setFcActive(null); patch((cc) => ({ ...cc, filter: null })); };
+  const fcSave = () => {
+    patch((cc) => ({ ...cc, filter: fcActive, filterStrength: fcStrength, filterAngle: fcAngle }));
+    setFcOpen(false);
+  };
+  useEffect(() => {
+    if (!fcOpen || !AF || !fcStageRef.current) return;
+    const host = fcStageRef.current;
+    AF.clearPreview(host);
+    if (fcActive) AF.applyPreview(host, fcActive, { strength: fcStrength, angle: fcAngle });
+    return () => { AF.clearPreview(host); };
+  }, [fcOpen, fcActive, fcStrength, fcAngle, AF]);
+
   // D-12 increments 2-4: debounced read-only price checks feeding the three badges declared
   // above. Each depends only on primitives (never the whole active.c / project.assets object),
   // so an unrelated re-render -- a poll tick, another tab's state -- doesn't reset the
@@ -1682,8 +1984,28 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         )}
         <div className="lv-tlreelzone">
           <div className="lv-reel">
-            {entries.map((x, i) => (<div key={i} className={"lv-seg " + x.c.status + (x.c.id === selShot ? " sel" : "")}
-              style={{ width: `${(durOf(x.c) / scale) * 100}%` }} title={`${x.code} ${x.c.title || ""}`} onClick={() => setSelShot(x.c.id)} />))}
+            {/* The Loom.dc.html:906-914 -- per-shot tint (LV_TINTS, distinct from status
+                color), the diagonal-stripe texture overlay, the shot's code+duration as
+                VISIBLE text (not just the title tooltip, which stays too), and a separate
+                thin status bar under the tint instead of the status color filling the
+                whole segment. Duration-proportional width, selected outline, and the
+                drag-resize grip (elsewhere in this file) are unchanged -- those already
+                matched or exceeded the design. */}
+            {entries.map((x, i) => {
+              const tint = LV_TINTS[(x.ai * 3 + x.ci) % LV_TINTS.length];
+              return (
+                <div key={i} className={"lv-seg" + (x.c.id === selShot ? " sel" : "")}
+                  style={{
+                    width: `${(durOf(x.c) / scale) * 100}%`,
+                    backgroundImage: `repeating-linear-gradient(90deg, rgba(0,0,0,.32) 0px, rgba(0,0,0,.32) 1px, transparent 1px, transparent 25px), ${tint}`,
+                    backgroundSize: "25px 100%, 25px 100%", backgroundRepeat: "repeat-x, repeat-x",
+                  }}
+                  title={`${x.code} ${x.c.title || ""}`} onClick={() => setSelShot(x.c.id)}>
+                  <span className="lv-segcode">{x.code} · {durOf(x.c)}s</span>
+                  <span className={"lv-segbar " + x.c.status} />
+                </div>
+              );
+            })}
             <div className="lv-target" style={{ left: `${(project.target / scale) * 100}%` }} />
           </div>
           <div className="lv-tlinfo">{sel
@@ -1844,7 +2166,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             <span className="lv-selname">{imgModel ? imgModel.title : "none — browse models"}</span>
             <span className="lv-dim lv-selhint">☰ browse</span>
           </button>
-          {/* problem 5: sampling_method/capabilities were resolved by bindPicker above and
+          {/* problem 5: sampling_method/capabilities were resolved by onBasePick above and
               discarded -- read-only surfacing (not a submit field, see the Gallery's own
               identical applyModelDefaults() comment for why sampling_method stays display-only). */}
           {imgModel && (imgModel.sampling_method || (imgModel.capabilities || []).length > 0) && (
@@ -1893,19 +2215,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                         setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x)); }} />
                     <b>{(+l.weight).toFixed(1)}</b>
                   </span>
-                  {/* deselect() as well as dropping it here: the picker keeps its own copy
-                      of what's picked and never saw this removal, so the card stayed lit,
-                      clicking it again read as a remove rather than a re-add, and a version
-                      resolve still in flight re-dispatched the LoRA straight back in. */}
+                  {/* Controlled selection: dropping the LoRA from state un-lights the picker card too. */}
                   <button type="button" className="lv-lrm" title="Remove"
                     onClick={() => {
-                      const p = loraPickerElRef.current;
-                      if (p && p.deselect) p.deselect(l.model_id);
                       setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id));
                     }}>×</button>
                   {/* Per-LoRA version selection: only when this LoRA actually has more than one
                       published release (l.versions, resolved alongside version_id itself by
-                      mg-model-picker.js's ?all=1 fetch -- see bindLoraPicker above). Mirrors
+                      the model picker's ?all=1 fetch -- see onLoraPick above). Mirrors
                       the base model's own #gen-version/.lv-versel switcher exactly, just
                       applied to this one chip's entry instead of the single imgModel. No new
                       network call -- the full version list is already on the entry. */}
@@ -2048,7 +2365,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <label className="lv-ck">
             <input type="checkbox" checked={imgAdv.promptHelper}
               onChange={(ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))} /> Prompt helper</label>
-          <mg-cost-badge ref={imgCostRef} hint="Pick a model and write a prompt to see the cost." card-label="a card"></mg-cost-badge>
+          <CostBadge ref={imgCostRef} hint="Pick a model and write a prompt to see the cost." cardLabel="a card" />
           {/* Gate on what genImage() itself refuses without -- a model and a prompt. It rejects
               both outright ("pick a model first" / "enter an image prompt"), so a live button
               made the tab's very FIRST click, before any model is picked, a dead end that only
@@ -2081,27 +2398,99 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       const ge = genEditState[active.c.id] || {};
       const busyE = ge.phase === "submitting" || ge.phase === "running";
       const src = active.c.openFrame && active.c.openFrame.mediaId;
+      const gf = genFixState[active.c.id] || {};
+      const busyF = gf.phase === "submitting" || gf.phase === "running";
+      const fixPriceEntry = genFixPrice[active.c.id];
       tabBody = (
         <div>
-          <label className="lv-lab">Source — {sel ? "this shot's" : "the draft's"} open frame</label>
-          {src ? <img className="lv-editsrc" src={"/thumbs/" + src + ".jpg"} alt="source" />
-               : <div className="lv-ph">No open-frame image yet — {sel ? <>route one from the <b>Image</b> tab, or </> : null}pick it into the open frame above.</div>}
-          <label className="lv-lab">Edit instruction</label>
-          <textarea className="lv-ta" value={active.c.editPrompt || ""} placeholder="e.g. make it night, add rain, warmer key light…"
-            onChange={(ev) => patch((c) => ({ ...c, editPrompt: ev.target.value }))} />
-          <mg-cost-badge ref={editCostRef} hint="Add a source image and instruction to see the cost." card-label="an Edit card"></mg-cost-badge>
-          <button className="lv-go" disabled={busyE || !src} onClick={() => genEdit(active)}>{busyE ? (ge.msg || "editing…") : "✦ Edit the open frame"}</button>
-          {ge.phase === "error" && <div className="lv-gerr">{ge.msg}</div>}
-          {ge.mid && (
-            <div className="lv-imgresult">
-              <img src={"/thumbs/" + ge.mid + ".jpg"} alt="result" />
-              <div className="lv-route"><span className="lv-dim">route &#8594;</span>
-                <button className={"lv-routebtn" + (ge.routed === "open" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "open", active.c.id)}>open frame</button>
-                <button className={"lv-routebtn" + (ge.routed === "close" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "close", active.c.id)}>close frame</button>
-                <button className={"lv-routebtn" + (ge.routed === "cast" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, routeTarget || active, "cast", active.c.id)}>cast</button>
+          {/* Edit/Fixer/Enhance sub-strip -- The Loom.dc.html's editSubChips, ported from
+              LoomMobile's own already-shipped Edit/Fixer/Enhance strip verbatim (same three
+              sub-screens, same underlying real pipelines). Closes the design-fidelity punch
+              list's "Edit tab has no Fixer or Enhance sub-tabs at all (desktop-only gap)"
+              item -- 2026-08-04. */}
+          <div className="lv-tabs" style={{ marginBottom: 9 }}>
+            <span className={"lv-tab" + (editSub === "edit" ? " on" : "")} onClick={() => setEditSub("edit")}>Edit</span>
+            <span className={"lv-tab" + (editSub === "fixer" ? " on" : "")} onClick={() => setEditSub("fixer")}>Fixer</span>
+            <span className={"lv-tab" + (editSub === "enhance" ? " on" : "")} onClick={() => setEditSub("enhance")}>Enhance</span>
+          </div>
+
+          {editSub === "edit" && (
+            <>
+              <label className="lv-lab">Source — {sel ? "this shot's" : "the draft's"} open frame</label>
+              {src ? <img className="lv-editsrc" src={"/thumbs/" + src + ".jpg"} alt="source" />
+                   : <div className="lv-ph">No open-frame image yet — {sel ? <>route one from the <b>Image</b> tab, or </> : null}pick it into the open frame above.</div>}
+              <label className="lv-lab">Edit instruction</label>
+              <textarea className="lv-ta" value={active.c.editPrompt || ""} placeholder="e.g. make it night, add rain, warmer key light…"
+                onChange={(ev) => patch((c) => ({ ...c, editPrompt: ev.target.value }))} />
+              <CostBadge ref={editCostRef} hint="Add a source image and instruction to see the cost." cardLabel="an Edit card" />
+              <button className="lv-go" disabled={busyE || !src} onClick={() => genEdit(active)}>{busyE ? (ge.msg || "editing…") : "✦ Edit the open frame"}</button>
+              {ge.phase === "error" && <div className="lv-gerr">{ge.msg}</div>}
+              {ge.mid && (
+                <div className="lv-imgresult">
+                  <img src={"/thumbs/" + ge.mid + ".jpg"} alt="result" />
+                  <div className="lv-route"><span className="lv-dim">route &#8594;</span>
+                    <button className={"lv-routebtn" + (ge.routed === "open" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "open", active.c.id)}>open frame</button>
+                    <button className={"lv-routebtn" + (ge.routed === "close" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "close", active.c.id)}>close frame</button>
+                    <button className={"lv-routebtn" + (ge.routed === "cast" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, routeTarget || active, "cast", active.c.id)}>cast</button>
+                  </div>
+                  {ge.routed && <div className="lv-ok2">&#10003; sent to {ge.routed}</div>}
+                </div>)}
+            </>
+          )}
+
+          {editSub === "fixer" && (
+            <>
+              <label className="lv-lab">Source — {sel ? "this shot's" : "the draft's"} open frame</label>
+              {src ? (
+                <div className="lv-fixwrap">
+                  <img ref={fixImgRef} src={"/full/" + encodeURIComponent(src)} alt="source" onLoad={fixPaint} draggable={false} />
+                  <canvas ref={fixCanvasRef}
+                    onPointerDown={fixDown} onPointerMove={fixMove} onPointerUp={fixUp} onPointerLeave={fixUp} />
+                </div>
+              ) : <div className="lv-ph">No open-frame image yet — {sel ? <>route one from the <b>Image</b> tab, or </> : null}pick it into the open frame above.</div>}
+              {src && (
+                <>
+                  <div className="lv-tabs" style={{ marginTop: 8 }}>
+                    <span className={"lv-tab" + (fixTag !== "hand" ? " on" : "")} onClick={() => setFixTag("face")}>Face</span>
+                    <span className={"lv-tab" + (fixTag === "hand" ? " on" : "")} onClick={() => setFixTag("hand")}>Hand</span>
+                    <button className="lv-mini2" disabled={!fixBoxes.length} onClick={() => setFixBoxes([])}>Clear{fixBoxes.length ? " " + fixBoxes.length : ""}</button>
+                  </div>
+                  <div className="lv-fixhint">Drag a box over the hand or face on the source.</div>
+                </>
+              )}
+              <div className="lv-fixwarn">A fix can't be card-covered — it always spends, and always asks first.</div>
+              <div className="lv-dim" style={{ padding: "4px 2px" }}>
+                {fixPriceEntry && fixPriceEntry.loading ? "checking…"
+                  : fixPriceEntry && fixPriceEntry.pr && typeof fixPriceEntry.pr.cost === "number" ? "≈ " + Number(fixPriceEntry.pr.cost).toLocaleString() + " credits — never card-covered"
+                  : !src ? "Pick a source image first."
+                  : !fixBoxes.length ? "Drag at least one box to see the cost."
+                  : "Couldn't verify the cost — a Fix always spends credits."}
               </div>
-              {ge.routed && <div className="lv-ok2">&#10003; sent to {ge.routed}</div>}
-            </div>)}
+              <button className="lv-go" disabled={busyF || !src || !fixBoxes.length}
+                onClick={() => genFix(active, scaleFixBoxes(fixBoxes, fixImgRef.current))}>
+                {busyF ? (gf.msg || "fixing…") : "✦ Fix " + fixTag}
+              </button>
+              {gf.phase === "error" && <div className="lv-gerr">{gf.msg}</div>}
+              {gf.mid && (
+                <div className="lv-imgresult">
+                  <img src={"/thumbs/" + gf.mid + ".jpg"} alt="result" />
+                  <div className="lv-route"><span className="lv-dim">route &#8594;</span>
+                    <button className={"lv-routebtn" + (gf.routed === "open" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeGen(genFixState, setGenFixState, routeTarget, "open", active.c.id)}>open frame</button>
+                    <button className={"lv-routebtn" + (gf.routed === "close" ? " on" : "")} disabled={!routeTarget} onClick={() => routeTarget && routeGen(genFixState, setGenFixState, routeTarget, "close", active.c.id)}>close frame</button>
+                    <button className={"lv-routebtn" + (gf.routed === "cast" ? " on" : "")} onClick={() => routeGen(genFixState, setGenFixState, routeTarget || active, "cast", active.c.id)}>cast</button>
+                  </div>
+                  {gf.routed && <div className="lv-ok2">&#10003; sent to {gf.routed}</div>}
+                </div>)}
+            </>
+          )}
+
+          {editSub === "enhance" && (
+            <>
+              <label className="lv-lab">Art filters · free, no generation</label>
+              <button className="lv-openfilters" onClick={openFilterCompare}>&#9680; Open filters</button>
+              <div className="lv-dim" style={{ padding: "6px 2px" }}>Gradient overlays, not AI — applied right in the browser: <b style={{ color: "var(--text)" }}>no credits, no request, works offline</b>.</div>
+            </>
+          )}
         </div>
       );
     }
@@ -2117,7 +2506,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <label className="lv-lab">Prompt</label>
           <textarea className="lv-ta" value={active.c.refPrompt || ""} placeholder="compose a new still from the references…"
             onChange={(ev) => patch((c) => ({ ...c, refPrompt: ev.target.value }))} />
-          <mg-cost-badge ref={refCostRef} hint="Add references and a prompt to see the cost." card-label="an Edit card"></mg-cost-badge>
+          <CostBadge ref={refCostRef} hint="Add references and a prompt to see the cost." cardLabel="an Edit card" />
           <button className="lv-go" disabled={busyR || !refs.length} onClick={() => genRef(active)}>{busyR ? (gr.msg || "generating…") : "✦ Generate from references"}</button>
           {gr.phase === "error" && <div className="lv-gerr">{gr.msg}</div>}
           {gr.mid && (
@@ -2150,18 +2539,31 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             </select>
           </div>
         )}
-        <div className="lv-framehandoff">
-          <FrameSlot which="open" frame={active.c.openFrame} liveTag={positionTag(active, project, imgSrc, "openFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
-            onPatch={(p) => patchFrame("openFrame", p)}
-            extraBtn={prevEntry ? <button className="sb-btn ghost sm" onClick={inheritPrev} disabled={handoff === "wip"}
-                title={prevEntry.c.resultMid ? `Splice in ${prevEntry.code}'s generated clip's last frame` : `Copy ${prevEntry.code}'s closing frame here`}>
-                {handoff === "wip" ? "✂ splicing…" : handoff === "err" ? "✂ splice failed — retry"
-                  : prevEntry.c.resultMid ? `✂ splice ${prevEntry.code}'s last frame` : `↳ inherit ${prevEntry.code} close`}</button>
-              : <span className="sb-hint">{sel ? "first shot — no previous frame" : "draft — no shot sequence to inherit from"}</span>} />
-          <div className="sb-conn-mid">&#8594;</div>
-          <FrameSlot which="close" frame={active.c.closeFrame} liveTag={positionTag(active, project, imgSrc, "closeFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
-            onPatch={(p) => patchFrame("closeFrame", p)} />
-        </div>
+        {/* Gallery-era correction (handoff-2026-08-06 / The Loom.dc.html:399-427): the
+            shared Frame Handoff block shows on the THREE tabs that consume it —
+            Reference (still composition), Video (its Continuity/weave modes read these
+            frames), Edit (reads openFrame as its source) — with a contextual label
+            naming which role it plays. Hidden on Image, the one tab that doesn't use
+            it. This is the re-scope the owner sent back 2026-08-04: shared
+            infrastructure, never Reference-only. */}
+        {(tab === "Reference" || tab === "Video" || tab === "Edit") && (
+          <>
+            <div className="lv-fhlabel">FRAME HANDOFF — {
+              tab === "Video" ? "drives this shot’s motion" : tab === "Edit" ? "edit source" : "still composition"}</div>
+            <div className="lv-framehandoff">
+              <FrameSlot which="open" frame={active.c.openFrame} liveTag={positionTag(active, project, imgSrc, "openFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                onPatch={(p) => patchFrame("openFrame", p)}
+                extraBtn={prevEntry ? <button className="sb-btn ghost sm" onClick={inheritPrev} disabled={handoff === "wip"}
+                    title={prevEntry.c.resultMid ? `Splice in ${prevEntry.code}'s generated clip's last frame` : `Copy ${prevEntry.code}'s closing frame here`}>
+                    {handoff === "wip" ? "✂ splicing…" : handoff === "err" ? "✂ splice failed — retry"
+                      : prevEntry.c.resultMid ? `✂ splice ${prevEntry.code}'s last frame` : `↳ inherit ${prevEntry.code} close`}</button>
+                  : <span className="sb-hint">{sel ? "first shot — no previous frame" : "draft — no shot sequence to inherit from"}</span>} />
+              <div className="sb-conn-mid">&#8594;</div>
+              <FrameSlot which="close" frame={active.c.closeFrame} liveTag={positionTag(active, project, imgSrc, "closeFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                onPatch={(p) => patchFrame("closeFrame", p)} />
+            </div>
+          </>
+        )}
         {/* The Image/Edit/Reference/Video tab strip lives in the rail's .lv-sidehead
             (like the left rail's Cast/Footage tabs), so `gen` must NOT render its own --
             an identical strip here stacked a duplicate directly below the header one
@@ -2176,12 +2578,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             render can't unmount the element and kill its in-flight poll -- CSS-hidden
             instead, exactly like every other tab's content stays out of the DOM flow
             without losing its live state. See the videoTrailer comment above. */}
-        {/* data-loom-ctx tells the shared drawer's own CSS (static/mg-generate-drawer.js) to
-            hide its Camera + Basic/Professional controls -- this host already owns both (the
-            shot Camera field above, the top-strip Draft toggle) via its own state. Without
-            this attribute the drawer renders its own copies alongside the Loom's, showing two
-            Camera controls and two quality controls for the same setting. */}
-        <mg-generate-drawer ref={bindGenDrawer} data-loom-ctx="" style={{ display: tab === "Video" ? "" : "none" }}></mg-generate-drawer>
+        {/* loomCtx tells the shared drawer's own CSS (gen-drawer.css) to hide its Camera +
+            Basic/Professional controls -- this host already owns both (the shot Camera field
+            above, the top-strip Draft toggle) via its own state. Without it the drawer renders
+            its own copies alongside the Loom's, showing two Camera controls and two quality
+            controls for the same setting. VideoDrawer's ref resolves to its root DOM node, so
+            bindGenDrawer's addEventListener/prefill/setBusy calls are unchanged from the vanilla
+            <mg-generate-drawer> custom element this replaced (no-vanilla port, 2026-08-08). */}
+        <VideoDrawer ref={bindGenDrawer} loomCtx style={{ display: tab === "Video" ? "" : "none" }} />
         {videoTrailer}
         {/* picker-parity-round2 (problem 2): the Model/LoRA picker overlay -- a floating
             panel, not squeezed inline into this rail (the owner's exact complaint). Lazy-
@@ -2208,10 +2612,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             <div className="lv-mpick-body">
               {pickerMounted && (
                 <>
-                  <mg-model-picker ref={bindPicker} kind="base"
-                    style={{ display: pickerKind === "base" ? "flex" : "none" }}></mg-model-picker>
-                  <mg-model-picker ref={bindLoraPicker} kind="lora" multi base-type={(imgModel && imgModel.model_type) || ""}
-                    style={{ display: pickerKind === "lora" ? "flex" : "none" }}></mg-model-picker>
+                  <ModelPicker kind="base" visible={pickerKind === "base"} value={imgModel} onPick={onBasePick}
+                    style={{ display: pickerKind === "base" ? "flex" : "none" }} />
+                  <ModelPicker kind="lora" multi baseType={(imgModel && imgModel.model_type) || ""} visible={pickerKind === "lora"} selected={imgLoras} onToggle={onLoraPick}
+                    style={{ display: pickerKind === "lora" ? "flex" : "none" }} />
                 </>
               )}
             </div>
@@ -2441,13 +2845,44 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   return (
     <div className={"lv-overlay" + (deepFocus ? " lv-overlay-df" : "")}>
       <style>{V2_STYLES}</style>
+      {/* The Loom.dc.html:36-45 -- the hero banner. Radial-gradient art layer, real
+          hide/show toggle. Entirely missing before this fix. */}
+      {bannerOpen ? (
+        <div className="lv-banner">
+          <div className="lv-banner-art" />
+          {/* The real Branding-slot flat (banner_loom -> /branding/banner-loom.png,
+              written through by the Control Panel's banner editor). Layers OVER the
+              design's gradient; onError removes itself so a fresh install with no
+              upload shows the gradient exactly as the DC draws it. */}
+          <img className="lv-banner-img" src="/branding/banner-loom.png" alt=""
+            onError={(e) => e.currentTarget.remove()} />
+          <button type="button" className="lv-banner-hide" title="Hide banner"
+            onClick={() => setBannerOpen(false)}>⌄ Hide banner</button>
+        </div>
+      ) : null}
       <div className="lv-top">
+        {!bannerOpen && (
+          <button type="button" className="lv-banner-show" title="Show banner"
+            onClick={() => setBannerOpen(true)}>🖼 Banner</button>
+        )}
         <span className="lv-eyebrow">The Loom · V2</span>
         <span className="lv-note">Click a shot → it binds to Generate.</span>
         <ProjectSwitcher api={projectApi} />
         <label className={"lv-draft" + (project.draft ? " on" : "")}
           title="Draft mode renders every shot at the cheaper 'basic' quality — block out the animatic, then turn Draft off and re-generate the keepers at pro quality">
           <input type="checkbox" checked={!!project.draft} onChange={(e) => setDraft(e.target.checked)} />⚡ Draft</label>
+        {/* Manual, owner-preference switch to the phone-sized board/reel view (LoomMobile,
+            below useProjectStore) -- unlike everything else in this bar, this is a NEW pattern
+            for the Loom: the main gallery only ever auto-detects viewport width for its own
+            mobile layout, there is no existing "durable manual UI-mode toggle" hook anywhere
+            in this file to reuse. Persisted (useLocalToggle, MOBILE_UI_KEY) so the choice
+            survives a reload; reuses .lv-draft's own checkbox-chip visual pattern rather than
+            inventing a new one. draftCard/draftTarget/draftAttachedInfo are lifted to App() --
+            see this component's own prop-list comment -- specifically so flipping this switch
+            mid-draft never loses it. */}
+        <label className={"lv-draft" + (mobileUI ? " on" : "")}
+          title="Switch to a phone-sized board/reel view — desktop chrome (panels, drawers) hides; your project and any in-progress draft are unaffected">
+          <input type="checkbox" checked={!!mobileUI} onChange={(e) => setMobileUI(e.target.checked)} />📱 Mobile view</label>
         <button onClick={() => {
           // Flush+locally-patch BEFORE calling batchGenerate -- do not trust that a hand-
           // edit committed via blur (the button stealing focus fires the drawer's blur
@@ -2518,44 +2953,130 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       })()}
       {timelineDrawer}
       <div className="lv-shell">
-        <div className={"lv-side left" + (leftCollapsed ? " collapsed" : "") + (!leftCollapsed && leftTab === "cast" && density === "detailed" ? " wide" : "")}>
-          <div className="lv-sidehead">
-            {!leftCollapsed && (
-              <div className="lv-tabs lv-sidetabs">
-                <span className={"lv-tab " + (leftTab === "cast" ? "on" : "")} onClick={() => setLeftTab("cast")}>Cast &amp; assets</span>
-                <span className={"lv-tab " + (leftTab === "footage" ? "on" : "")} onClick={() => setLeftTab("footage")}>Footage</span>
-              </div>
-            )}
-            <button className="lv-col" onClick={() => setLeftCollapsed((v) => !v)} title="collapse">{leftCollapsed ? "▸" : "◂"}</button>
-          </div>
-          {leftCollapsed ? (
-            <div className="lv-railicons">
-              <button className={"lv-railbtn" + (leftTab === "cast" ? " on" : "")} title="Cast & assets" onClick={() => { setLeftTab("cast"); setLeftCollapsed(false); }}>&#128100;</button>
-              <button className={"lv-railbtn" + (leftTab === "footage" ? " on" : "")} title="Footage" onClick={() => { setLeftTab("footage"); setLeftCollapsed(false); }}>&#127916;</button>
-            </div>
-          ) : (
-            <div className="lv-cast">{leftTab === "cast" ? castList : footageList}</div>
-          )}
+        <div className="lv-rail">
+          <button className={"lv-railbtn" + (!leftCollapsed && leftTab === "cast" ? " on" : "")} title="Cast & assets"
+            onClick={() => { setLeftTab("cast"); openLeftPanel(); }}>&#128100;</button>
+          <button className={"lv-railbtn" + (!leftCollapsed && leftTab === "footage" ? " on" : "")} title="Footage"
+            onClick={() => { setLeftTab("footage"); openLeftPanel(); }}>&#127916;</button>
         </div>
+
+        {(!leftCollapsed || leftClosing) && (
+          <>
+            <div className={"lv-backdrop" + (leftClosing ? " closing" : "")} onClick={closeLeftPanel} />
+            <div className={"lv-panel left" + (leftClosing ? " closing" : "") + (leftTab === "cast" && density === "detailed" ? " wide" : "")}>
+              <div className="lv-sidehead">
+                <div className="lv-tabs lv-sidetabs">
+                  <span className={"lv-tab " + (leftTab === "cast" ? "on" : "")} onClick={() => setLeftTab("cast")}>Cast &amp; assets</span>
+                  <span className={"lv-tab " + (leftTab === "footage" ? "on" : "")} onClick={() => setLeftTab("footage")}>Footage</span>
+                </div>
+                <button className="lv-col" onClick={closeLeftPanel} title="collapse">&#8249;</button>
+              </div>
+              <div className="lv-cast">{leftTab === "cast" ? castList : footageList}</div>
+            </div>
+          </>
+        )}
 
         <div className="lv-boardcol">{board}</div>
 
-        <div className={"lv-side right" + (rightCollapsed ? " collapsed" : "")}>
-          <div className="lv-sidehead">
-            <button className="lv-col" onClick={() => setRightCollapsed((v) => !v)} title="collapse">{rightCollapsed ? "◂" : "▸"}</button>
-            {!rightCollapsed && (
-              <div className="lv-tabs lv-sidetabs">{["Image", "Edit", "Reference", "Video"].map((t) => (
-                <span key={t} className={"lv-tab " + (t === tab ? "on" : "")} onClick={() => setTab(t)}>{t}</span>))}</div>
-            )}
-          </div>
-          {rightCollapsed ? (
-            <div className="lv-railicons">
-              {GEN_ICONS.map(([t, ic]) => (<button key={t} className={"lv-railbtn" + (t === tab ? " on" : "")} title={t}
-                onClick={() => { setTab(t); setRightCollapsed(false); }}>{ic}</button>))}
+        {(!rightCollapsed || rightClosing) && (
+          <>
+            <div className={"lv-backdrop" + (rightClosing ? " closing" : "")} onClick={closeRightPanel} />
+            <div className={"lv-panel right" + (rightClosing ? " closing" : "")}>
+              <div className="lv-sidehead">
+                <button className="lv-col" onClick={closeRightPanel} title="collapse">&#8250;</button>
+                <div className="lv-tabs lv-sidetabs">{["Image", "Edit", "Reference", "Video"].map((t) => (
+                  <span key={t} className={"lv-tab " + (t === tab ? "on" : "")} onClick={() => setTab(t)}>{t}</span>))}</div>
+              </div>
+              {gen}
             </div>
-          ) : gen}
+          </>
+        )}
+
+        <div className="lv-rail">
+          {GEN_ICONS.map(([t, ic]) => (<button key={t} className={"lv-railbtn" + (!rightCollapsed && t === tab ? " on" : "")} title={t}
+            onClick={() => { setTab(t); openRightPanel(); }}>{ic}</button>))}
         </div>
       </div>
+      {/* ---- Filter compare -- The Loom.dc.html's own filterCompareOpen modal (a centered
+          card, unlike LoomMobile's full-page screen -- desktop's real design spec, not a
+          reused mobile layout). Opens from Generate's Edit tab -> Enhance sub-tab. */}
+      {fcOpen && active && (() => {
+        const c = active.c;
+        const fcSrc = frameSrc(c.openFrame);
+        const fcGroups = AF ? AF.groups() : [];
+        const activeRec = fcActive && AF ? (AF.get(fcActive) || {}) : null;
+        const activeName = activeRec ? (activeRec.name || fcActive) : null;
+        return (
+          <>
+            <div className="lv-fc-veil" onClick={closeFilterCompare} />
+            <div className="lv-fc-host">
+              <div className="lv-fc-card">
+                <div className="lv-fc-head">
+                  <div className="lv-fc-title">&#9680; Art filters</div>
+                  <span className="lv-dim" style={{ flex: "1 1 auto" }} />
+                  <button type="button" className="lv-col" onClick={closeFilterCompare} title="Close">&#10005;</button>
+                </div>
+                {!AF ? (
+                  <div className="lv-ph">The art-filter library did not load on this page.</div>
+                ) : (
+                  <div className="lv-fc-grid">
+                    <div className="lv-fc-previewcol">
+                      <div className="lv-fc-previewbox">
+                        {fcSrc ? <img className="lv-fc-img" src={fcSrc} alt="original" /> : <div className="lv-ph">No open-frame image yet</div>}
+                      </div>
+                      <div className="lv-dim" style={{ textAlign: "center", paddingTop: 6 }}>Original</div>
+                    </div>
+                    <div className="lv-fc-previewcol">
+                      <div className="lv-fc-previewbox">
+                        <div className="lv-fc-stage" ref={fcStageRef}>
+                          {fcSrc ? <img ref={fcImgRef} className="lv-fc-img" src={fcSrc} alt="preview" /> : <div className="lv-ph">No open-frame image yet</div>}
+                        </div>
+                      </div>
+                      <div className="lv-dim" style={{ textAlign: "center", paddingTop: 6 }}>Preview &middot; <b style={{ color: "var(--text)" }}>{activeName || "no filter"}</b></div>
+                    </div>
+                    <div className="lv-fc-side">
+                      {fcGroups.map((g) => (
+                        <div key={g.source}>
+                          <div className="lv-fc-grouplabel">{g.label}</div>
+                          <div className="lv-fc-swatchgrid">
+                            {g.ids.map((id) => {
+                              const rec = AF.get(id) || {};
+                              return (
+                                <button type="button" key={id} className={"lv-fc-tile" + (fcActive === id ? " on" : "")}
+                                  onClick={() => setFcActive((cur) => (cur === id ? null : id))}
+                                  title={(rec.name || id) + " · free, applied in your browser" + (rec.note ? " — " + rec.note : "")}>
+                                  <div className="lv-fc-swatch"
+                                    ref={(el) => { if (el && !el._mgafPainted) { AF.renderSwatch(el, id); el._mgafPainted = true; } }} />
+                                  <div className="lv-fc-name">{(rec.name || id).replace("Filter ", "")}</div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                      <div>
+                        <div className="lv-lab" style={{ margin: "4px 0" }}>Strength <b style={{ color: "var(--text)" }}>{Number(fcStrength).toFixed(2)}</b></div>
+                        <input type="range" min="0" max="1" step="0.05" className="lv-fc-range"
+                          value={fcStrength} onChange={(ev) => setFcStrength(parseFloat(ev.target.value))} />
+                      </div>
+                      <div>
+                        <div className="lv-lab" style={{ margin: "4px 0" }}>Angle <b style={{ color: "var(--text)" }}>{fcAngle}&deg;</b></div>
+                        <input type="range" min="0" max="360" step="1" className="lv-fc-range"
+                          value={fcAngle} onChange={(ev) => setFcAngle(parseInt(ev.target.value, 10))} />
+                      </div>
+                      <div className="lv-fc-btnrow">
+                        <button type="button" className="lv-mini2" onClick={fcClear}>No filter</button>
+                        <button type="button" className="lv-go" style={{ padding: "9px 0" }} onClick={fcSave}>Save</button>
+                      </div>
+                      <div className="lv-dim" style={{ textAlign: "center" }}>{activeName || "No filter"} &middot; nothing sent, nothing spent</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        );
+      })()}
       {deepFocus && (() => {
         // deepFocus itself is a one-time snapshot captured at double-click time -- setCard's
         // patches are immutable, so deepFocus.c never updates. Render from the LIVE entry
@@ -2683,6 +3204,2591 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                 <button className="sb-btn amber sm" onClick={() => copyShot(live)}>Copy shot</button>
               </div>
               <button className="lv-go" onClick={() => { setSelShot(c.id); setDeepFocus(null); }}>Select in Generate &rarr;</button>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+/* =========================================================================
+   LOOM MOBILE -- first increment (2026-08-03). A phone-sized ALTERNATIVE to
+   LoomV2, chosen by the "📱 Mobile view" toggle in LoomV2's own .lv-top bar
+   (persisted via useLocalToggle/MOBILE_UI_KEY, see App()). Kept INLINE here
+   rather than split into its own loom/src/loom-mobile.jsx file: unlike
+   loom-core.js/loom-mutations.js (deliberately React-free, DOM-free, pure --
+   see loom-core.js's own header -- so they can be `node --test`ed directly and
+   so the Flask /loom route's Babel-standalone fallback can inline them ahead
+   of the JSX by stripping their `export` keywords), LoomMobile IS a React
+   component -- exactly the same category as LoomV2/ProjectSwitcher/ExportMenu/
+   ShotPreview/SequencePlayer/ImportCollection/FrameSlot, every one of which
+   already lives inline in this one file rather than as a separate module.
+   A separate file would also need moonglade_gallery.py's loom() route taught
+   to inline a THIRD file for the default (non-bundle) Babel path -- that
+   route's inliner is hardcoded to exactly loom-core.js + loom-mutations.js
+   (see its own comments), and a raw `import` surviving into that
+   data-presets="react"-only <script type="text/babel"> blob is a hard
+   SyntaxError in every browser (no ESM transform is loaded there) -- i.e. a
+   third module would silently break the DEFAULT /loom page for every desktop
+   user, not just anyone who opts into Mobile view. Matching the codebase's
+   real, established convention (components inline, pure logic in src/) avoids
+   that risk entirely and needs no Python change.
+
+   Scope of THIS increment, per the locked design source (design_handoff/
+   design_handoff_moonglade_suite/"Loom Mobile.dc.html", read in full before
+   writing a line here): the top bar (back-link / title / Draft toggle), the
+   horizontal reel/timeline scrub bar (pointer-drag, fraction-of-width math,
+   floating preview card -- genuinely new for this codebase; LoomV2's own
+   .lv-reel below is click-a-fixed-width-segment only, no drag, no preview),
+   and the act-grouped shot board (add-shot/add-act). Deliberately NOT built
+   yet (next increments): shot detail (Deep Focus's mobile equivalent), the
+   Cast & assets sheet, Generate, Review & trim, Filter compare -- tapping a
+   shot card this increment does the smallest real, honest thing available
+   without any of those: it SELECTS the shot (setSelShot), matching the exact
+   "Click a shot → it binds to Generate" contract LoomV2's own .lv-note
+   already documents for the desktop board.
+   ========================================================================= */
+const LOOM_MOBILE_STYLES = `
+.lm-root{position:fixed;inset:0;z-index:400;background:var(--mantle);color:var(--text);
+  display:flex;flex-direction:column;font-family:system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
+.lm-top{flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:max(10px,env(safe-area-inset-top)) 16px 8px;}
+.lm-back{font:700 11.5px/1 system-ui;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--subtext);text-decoration:none;white-space:nowrap;background:none;border:none;cursor:pointer;padding:0;}
+.lm-back:hover{color:var(--text);}
+.lm-fill{flex:1 1 auto;}
+.lm-title{font:700 11px/1 system-ui;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--subtext);white-space:nowrap;}
+.lm-chip{display:inline-flex;align-items:center;gap:4px;font:600 10px/1 system-ui;
+  color:var(--subtext);cursor:pointer;padding:6px 10px;border-radius:999px;
+  border:1px solid var(--surface1);background:none;user-select:none;white-space:nowrap;}
+.lm-chip:hover{border-color:var(--accent);color:var(--accent);}
+.lm-chip.on{color:var(--gold);border-color:var(--gold);background:color-mix(in srgb,var(--gold) 15%,transparent);
+  box-shadow:0 0 10px rgba(212,175,55,.35);}
+.lm-chip input{margin:0;cursor:pointer;}
+.lm-reelwrap{flex:none;padding:4px 16px 10px;position:relative;}
+.lm-reelbar{display:flex;gap:3px;height:18px;border-radius:4px;cursor:pointer;touch-action:none;}
+.lm-seg{border-radius:3px;height:100%;}
+.lm-seg.todo{background:var(--surface1);}
+.lm-seg.wip{background:var(--accent);}
+.lm-seg.done{background:var(--emerald);}
+.lm-seg.error{background:var(--red);}
+.lm-seg.paused{background:var(--peach);}
+.lm-seg.sel{outline:2px solid var(--text);outline-offset:-2px;}
+.lm-tick{position:absolute;top:6px;bottom:12px;width:1px;background:rgba(255,255,255,.35);pointer-events:none;}
+.lm-handle{position:absolute;top:13px;width:14px;height:14px;border-radius:50%;
+  background:var(--accent);border:2px solid var(--text);transform:translate(-50%,-50%);
+  box-shadow:0 1px 4px rgba(0,0,0,.5);pointer-events:none;}
+.lm-scrubline{position:absolute;top:6px;bottom:12px;width:2px;background:var(--accent);
+  box-shadow:0 0 6px color-mix(in srgb,var(--accent) 70%,transparent);pointer-events:none;}
+.lm-preview{position:absolute;top:100%;margin-top:8px;z-index:10;display:flex;align-items:center;
+  gap:8px;padding:7px 10px;border-radius:10px;background:var(--surface0);border:1px solid var(--surface1);
+  box-shadow:0 10px 26px -8px rgba(0,0,0,.6);pointer-events:none;width:172px;box-sizing:border-box;}
+.lm-prevthumb{width:34px;height:34px;border-radius:7px;flex:none;background-size:cover;
+  background-position:center;background-color:var(--base);}
+.lm-prevcol{min-width:0;display:flex;flex-direction:column;gap:2px;}
+.lm-prevcode{font-family:ui-monospace,monospace;font-size:9px;color:var(--overlay0);}
+.lm-prevtitle{font-size:11px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-prevmeta{font-size:9px;color:var(--subtext);}
+.lm-body{flex:1 1 auto;overflow-y:auto;padding:0 16px 30px;-webkit-overflow-scrolling:touch;}
+.lm-acthead{display:flex;align-items:baseline;gap:8px;padding:14px 0 8px;}
+.lm-actname{font-family:Georgia,serif;font-style:italic;font-size:14px;color:var(--text);}
+.lm-actcount{font-size:10px;color:var(--overlay0);}
+.lm-addshot{font-size:10.5px;font-weight:700;color:var(--accent);cursor:pointer;background:none;border:none;padding:0;}
+.lm-cardrow{position:relative;display:flex;align-items:center;gap:6px;margin-bottom:7px;}
+.lm-card{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:10px;padding:8px 10px;
+  border-radius:11px;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;
+  text-align:left;font:inherit;color:inherit;}
+.lm-card:hover,.lm-card:focus-visible{border-color:var(--accent);}
+.lm-card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
+.lm-thumb{width:48px;height:48px;border-radius:9px;flex:none;background-size:cover;
+  background-position:center;background-color:var(--surface1);display:grid;place-items:center;
+  font:700 9px/1 system-ui;color:var(--subtext);}
+.lm-textcol{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:4px;}
+.lm-titlerow{display:flex;align-items:baseline;gap:6px;min-width:0;}
+.lm-code{font-family:ui-monospace,monospace;font-size:9.5px;color:var(--overlay0);flex:none;}
+.lm-cardtitle{font-size:12.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-pillrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.lm-modepill{font-size:9px;font-weight:700;padding:2px 6px;border-radius:5px;
+  background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent);flex:none;}
+.lm-durpill{font-size:9.5px;color:var(--subtext);flex:none;}
+.lm-stpill{font-size:9px;font-weight:700;text-transform:uppercase;flex:none;}
+.lm-stpill.done{color:var(--emerald);}
+.lm-stpill.wip{color:var(--accent);}
+.lm-stpill.todo{color:var(--overlay0);}
+.lm-stpill.paused{color:var(--peach);}
+.lm-stpill.error{color:var(--red);}
+.lm-warn{font-size:9px;color:var(--peach);}
+.lm-addact{text-align:center;font-size:11px;font-weight:700;color:var(--accent);padding:12px;
+  border:1px dashed var(--surface1);border-radius:11px;cursor:pointer;margin-top:6px;background:none;width:100%;}
+.lm-empty{text-align:center;color:var(--overlay0);font-size:11px;font-style:italic;padding:10px 6px;}
+
+/* ---- Shot Detail (mobile Deep Focus) -- second increment, 2026-08-03 ---- */
+@keyframes lmRise{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+@keyframes lmSheetUp{from{transform:translateY(100%);}to{transform:translateY(0);}}
+/* Loom Mobile.dc.html:18-21 -- the design's other 4 sheet/button animations, absent
+   until 2026-08-06 (every sheet close was an instant unmount; primary buttons were
+   flat). Close timing per the DC's own styles: sheet lmSheetDown .28s
+   cubic-bezier(.4,0,.2,1) both, scrim lmFadeOut .28s / lmFadeIn .24s. */
+@keyframes lmMetal{0%{background-position:0% 50%;}50%{background-position:100% 50%;}100%{background-position:0% 50%;}}
+@keyframes lmSheetDown{from{transform:translateY(0);}to{transform:translateY(100%);}}
+@keyframes lmFadeIn{from{opacity:0;}to{opacity:1;}}
+@keyframes lmFadeOut{from{opacity:1;}to{opacity:0;}}
+.lm-df{position:absolute;inset:0;z-index:20;background:var(--mantle);display:flex;flex-direction:column;
+  animation:lmRise .22s ease both;}
+.lm-df-top{flex:none;display:flex;align-items:center;gap:8px;
+  padding:max(14px,env(safe-area-inset-top)) 16px 10px;}
+.lm-df-title{flex:1 1 auto;min-width:0;background:transparent;border:none;
+  border-bottom:1px solid var(--surface1);color:var(--text);font:600 14px/1.2 system-ui;padding:4px 0;}
+.lm-df-title:focus{outline:none;border-bottom-color:var(--accent);}
+.lm-df-st{flex:none;border-radius:5px;cursor:pointer;background:var(--base);border:1px solid var(--surface1);
+  padding:4px 8px;}
+.lm-df-cast{flex:none;font:700 11px/1 system-ui;padding:6px 9px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--surface1);background:var(--base);color:var(--subtext);white-space:nowrap;}
+.lm-df-close{flex:none;width:28px;height:28px;display:flex;align-items:center;justify-content:center;
+  border-radius:8px;border:1px solid var(--surface1);color:var(--subtext);cursor:pointer;background:none;
+  font-size:13px;padding:0;}
+.lm-df-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px 30px;-webkit-overflow-scrolling:touch;}
+.lm-microlab{display:block;font:700 9px/1 system-ui;text-transform:uppercase;color:var(--subtext);
+  margin:10px 0 5px;}
+.lm-hint{font-size:9.5px;color:var(--overlay0);padding:5px 2px 0;}
+.lm-modechips{display:flex;gap:5px;}
+.lm-modechip{flex:1;text-align:center;padding:8px 4px;border-radius:8px;font:700 11px/1 system-ui;
+  cursor:pointer;border:1px solid var(--surface1);color:var(--subtext);background:none;}
+.lm-modechip.on{background:color-mix(in srgb,var(--accent) 20%,transparent);border-color:var(--accent);
+  color:var(--accent);}
+.lm-row2{display:flex;gap:10px;margin:10px 0 4px;}
+.lm-col{flex:1;min-width:0;}
+.lm-in{width:100%;box-sizing:border-box;background:var(--base);border:1px solid var(--surface1);
+  border-radius:8px;padding:8px 10px;color:var(--text);font:12.5px/1.3 system-ui;}
+.lm-ta{width:100%;box-sizing:border-box;background:var(--base);border:1px solid var(--surface1);
+  border-radius:9px;padding:10px;color:var(--text);font:12.5px/1.45 system-ui;resize:vertical;
+  min-height:66px;}
+.lm-check{display:flex;align-items:center;gap:7px;cursor:pointer;padding:8px 0 0;font-size:11px;
+  color:var(--subtext);}
+.lm-frow{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;}
+.lm-fcol{flex:1 1 150px;min-width:150px;}
+.lm-inheritbtn{margin-top:6px;display:inline-block;font-size:9.5px;font-weight:600;color:var(--accent);
+  background:var(--surface1);border:none;border-radius:6px;padding:5px 8px;cursor:pointer;}
+.lm-copybtn{display:inline-block;margin-top:18px;font:700 11px/1 system-ui;padding:8px 16px;
+  border-radius:8px;cursor:pointer;border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);
+  background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent);}
+
+/* Other references & @tags rows -- mirrors LoomV2's own sb-ref shape at mobile scale. */
+.lm-refrow{display:flex;gap:10px;align-items:flex-start;background:var(--surface0);
+  border:1px solid var(--surface1);border-radius:9px;padding:10px;margin-bottom:8px;}
+.lm-refprev{width:52px;height:40px;border-radius:6px;border:1px solid var(--surface1);background:var(--base);
+  flex:none;display:flex;align-items:center;justify-content:center;font-size:16px;overflow:hidden;
+  cursor:pointer;}
+.lm-refprev img{width:100%;height:100%;object-fit:cover;}
+.lm-refbody{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:6px;}
+.lm-reftoprow{display:flex;gap:7px;align-items:center;flex-wrap:wrap;}
+.lm-reftag{font-family:ui-monospace,monospace;font-size:11px;color:var(--loomc,#47cbc3);background:var(--base);
+  border:1px solid var(--surface1);border-radius:5px;padding:5px 6px;width:70px;}
+.lm-refkind{font-size:9.5px;color:var(--subtext);}
+.lm-refx{margin-left:auto;background:none;border:none;color:var(--subtext);font-size:14px;cursor:pointer;
+  padding:0 2px;}
+.lm-addrefrow{display:flex;gap:7px;flex-wrap:wrap;margin-top:4px;}
+.lm-addrefbtn{font:700 10.5px/1 system-ui;padding:6px 11px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--surface1);background:var(--surface1);color:var(--text);}
+
+/* ---- Cast & assets sheet (bottom sheet, opened from Shot Detail's 👥 button) ---- */
+.lm-scrim{position:absolute;inset:0;z-index:30;background:rgba(3,2,8,.6);
+  animation:lmFadeIn .24s ease both;}
+.lm-scrim.closing{animation:lmFadeOut .28s ease both;}
+.lm-sheet{position:absolute;left:0;right:0;bottom:0;z-index:31;background:var(--mantle);
+  border-radius:18px 18px 0 0;border:1px solid var(--surface1);border-bottom:none;
+  padding:12px 18px max(20px,env(safe-area-inset-bottom));max-height:75%;overflow-y:auto;
+  animation:lmSheetUp .26s cubic-bezier(.2,.9,.24,1);}
+.lm-sheet.closing{animation:lmSheetDown .28s cubic-bezier(.4,0,.2,1) both;}
+.lm-sheethandle{width:36px;height:4px;border-radius:3px;background:rgba(255,255,255,.18);margin:0 auto 10px;}
+.lm-tabsrow{display:flex;gap:4px;padding:3px;border-radius:9px;background:rgba(12,10,28,.6);
+  border:1px solid var(--surface1);margin-bottom:10px;}
+.lm-tabbtn{flex:1;text-align:center;padding:7px 4px;border-radius:7px;font:700 11px/1 system-ui;
+  cursor:pointer;background:none;border:none;color:var(--subtext);}
+.lm-tabbtn.on{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent);}
+.lm-budget{font-size:10.5px;color:var(--subtext);margin:4px 0 10px;}
+.lm-budget-over{color:var(--peach);font-weight:700;}
+.lm-i2vnote{font-size:10.5px;font-style:italic;color:var(--peach);margin:4px 0 10px;line-height:1.4;}
+.lm-castrow{display:flex;align-items:center;gap:9px;padding:9px 4px;
+  border:none;border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer;background:none;
+  width:100%;text-align:left;font:inherit;color:inherit;}
+.lm-castbox{width:14px;height:14px;border-radius:4px;border:1px solid var(--surface1);flex:none;}
+.lm-castbox.on{background:var(--accent);border-color:var(--accent);}
+.lm-castthumb{width:30px;height:30px;border-radius:7px;flex:none;background-size:cover;
+  background-position:center;background-color:var(--surface1);display:flex;align-items:center;
+  justify-content:center;font-size:13px;}
+.lm-castcol{flex:1 1 auto;min-width:0;}
+.lm-castname{font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-casttag{font-size:9.5px;font-family:ui-monospace,monospace;color:var(--loomc,#47cbc3);}
+.lm-castmissing{font:700 9px/1 system-ui;color:var(--red);text-transform:uppercase;flex:none;}
+.lm-castlive{flex:none;font:11px/1.3 ui-monospace,monospace;color:var(--loomc,#47cbc3);background:var(--base);
+  border:1px dashed var(--overlay0);border-radius:6px;padding:5px 6px;}
+.lm-castlive.oob{color:var(--peach);border-color:var(--peach);font-size:9px;}
+.lm-castlock{font-size:11px;flex:none;}
+.lm-castaddrow{display:flex;gap:8px;margin-top:10px;}
+.lm-footagegrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px;}
+.lm-fclip{border-radius:8px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--base);}
+.lm-fclip img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;}
+.lm-fclipmeta{display:flex;justify-content:space-between;padding:5px 7px;font-size:9.5px;color:var(--subtext);}
+.lm-sheetclose{margin-top:12px;text-align:center;padding:11px;border-radius:11px;
+  border:1px solid var(--surface1);font:700 12.5px/1 system-ui;color:var(--subtext);cursor:pointer;
+  background:none;width:100%;}
+
+/* ---- Generate (third increment, 2026-08-03) -- opened from Shot Detail's own
+   "Select in Generate →" button, matching the locked design's genOpen full-screen page. ---- */
+.lm-gen{position:absolute;inset:0;z-index:25;background:var(--mantle);display:flex;flex-direction:column;
+  animation:lmRise .22s ease both;}
+.lm-gen-top{flex:none;display:flex;align-items:center;gap:8px;
+  padding:max(14px,env(safe-area-inset-top)) 16px 10px;}
+.lm-gen-back{flex:none;font:700 11.5px/1 system-ui;letter-spacing:.04em;color:var(--subtext);
+  background:none;border:none;cursor:pointer;padding:0;white-space:nowrap;}
+.lm-gen-back:hover{color:var(--text);}
+.lm-gen-title{flex:1 1 auto;min-width:0;font:600 13px/1.2 system-ui;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-gen-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px 30px;-webkit-overflow-scrolling:touch;}
+.lm-genbtn{display:block;width:100%;box-sizing:border-box;margin-top:12px;
+  border:1px solid rgba(255,255,255,.3);
+  color:color-mix(in oklab,var(--accent) 26%,#08040f);
+  text-shadow:0 1px 0 rgba(255,255,255,.4);
+  background:linear-gradient(100deg,color-mix(in oklab,var(--accent) 50%,#06030d) 0%,var(--accent) 18%,color-mix(in oklab,var(--accent) 22%,#ffffff) 34%,var(--accent) 50%,color-mix(in oklab,var(--accent) 74%,#06030d) 68%,var(--mauve) 84%,color-mix(in oklab,var(--accent) 50%,#06030d) 100%);
+  background-size:220% 100%;animation:lmMetal 7s ease-in-out infinite;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.6),inset 0 -2px 4px rgba(10,5,20,.45),0 6px 16px rgba(0,0,0,.45);
+  border-radius:9px;padding:11px;font:800 12.5px/1 system-ui;cursor:pointer;
+  text-align:center;}
+.lm-genbtn:hover{filter:brightness(1.08);}
+.lm-genbtn:disabled{opacity:.5;cursor:default;animation:none;}
+@media (prefers-reduced-motion:reduce){.lm-genbtn{animation:none;}}
+.lm-genexisting{display:block;width:100%;box-sizing:border-box;margin-top:7px;background:transparent;
+  color:var(--subtext);border:1px solid var(--surface1);border-radius:8px;padding:9px;font:600 11px/1 system-ui;
+  cursor:pointer;text-align:center;}
+.lm-genexisting:hover{border-color:var(--accent);color:var(--accent);}
+.lm-genexisting:disabled{opacity:.5;cursor:default;}
+.lm-gentermbtn{font-size:9px;text-transform:none;letter-spacing:0;color:var(--accent);background:none;
+  border:none;cursor:pointer;text-decoration:underline;text-underline-offset:2px;margin-left:6px;}
+.lm-gentermpal{display:flex;flex-wrap:wrap;gap:4px;margin:5px 0 8px;padding:7px;background:var(--surface0);
+  border-radius:7px;}
+.lm-gentermgrp{width:100%;display:flex;flex-wrap:wrap;gap:4px;align-items:center;}
+.lm-gentermgrpt{width:100%;font-size:8px;letter-spacing:.05em;text-transform:uppercase;color:var(--overlay0);
+  margin-top:4px;}
+.lm-genchip{font-family:ui-monospace,monospace;font-size:10px;color:var(--subtext);background:var(--base);
+  border:1px solid var(--surface1);border-radius:5px;padding:3px 7px;cursor:pointer;}
+.lm-genchip:hover{border-color:var(--accent);color:var(--accent);}
+.lm-genrefline{font-size:10.5px;color:var(--subtext);margin:8px 0 2px;line-height:1.5;}
+.lm-genframerow{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;}
+.lm-genframecol{flex:1 1 130px;min-width:130px;}
+.lm-genframe{height:90px;border-radius:8px;border:1px solid var(--surface1);background:var(--base);
+  overflow:hidden;display:flex;align-items:center;justify-content:center;color:var(--overlay0);
+  font-size:10.5px;position:relative;}
+.lm-genframe img{width:100%;height:100%;object-fit:cover;}
+.lm-genframetag{position:absolute;left:5px;bottom:5px;font-family:ui-monospace,monospace;font-size:9px;
+  color:#fff;background:rgba(0,0,0,.55);padding:1px 5px;border-radius:5px;}
+.lm-genpreview{font-size:10.5px;font-style:italic;color:var(--subtext);background:var(--base);
+  border:1px dashed var(--surface1);border-radius:8px;padding:8px 10px;line-height:1.5;margin:6px 0 8px;
+  white-space:pre-wrap;}
+.lm-genoverride{font-size:11px;color:var(--gold);margin-top:4px;}
+.lm-genflash{font-size:10.5px;color:var(--gold);background:rgba(0,0,0,.15);border-radius:5px;padding:4px 7px;
+  margin-top:4px;}
+/* Video tab's static model row + capability badges -- Loom Mobile.dc.html:854/856-857/930's
+   own literal values (engineThumb gradient, caps chip chrome). */
+.lm-genmodelrow{display:flex;align-items:center;padding:8px 10px;border-radius:8px;
+  background:var(--base);border:1px solid var(--surface1);font:600 12px/1.2 system-ui;color:var(--text);}
+.lm-genmodelthumb{width:26px;height:26px;border-radius:6px;flex:none;
+  background:linear-gradient(150deg,#643aac 0%,#241f5b 100%);margin-right:8px;}
+.lm-gencaps{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0;}
+.lm-gencap{font:600 9px/1.2 system-ui;padding:3px 7px;border-radius:5px;
+  border:1px solid var(--surface1);background:rgba(33,31,58,.6);color:var(--subtext);}
+.lm-gencost{display:flex;flex-direction:column;gap:2px;margin-top:14px;}
+.lm-gencosttext{font-size:12px;font-weight:700;color:var(--emerald);}
+.lm-gensel{width:100%;box-sizing:border-box;background:var(--base);border:1px solid var(--surface1);
+  border-radius:8px;padding:8px 10px;color:var(--text);font:12.5px/1.3 system-ui;margin-top:6px;}
+
+/* ---- Image/Edit/Reference tabs -- fourth increment (2026-08-03), added to the SAME
+   Generate screen the third increment built. Reuses lm-in/lm-ta/lm-check/lm-row2/lm-col/
+   lm-genbtn/lm-microlab/lm-hint/lm-genframe/lm-gencost*/lm-gensel unchanged; the classes
+   below are the ones this increment's new fields genuinely need and nothing existing
+   already covers. ---- */
+.lm-bal{font-size:10.5px;color:var(--text);padding:6px 0;border-top:1px solid var(--surface1);
+  border-bottom:1px solid var(--surface1);opacity:.85;}
+.lm-selrow{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;padding:8px 10px;
+  border-radius:8px;background:var(--base);border:1px solid var(--surface1);color:var(--text);
+  cursor:pointer;font:12.5px/1.3 system-ui;text-align:left;}
+.lm-selthumb{width:26px;height:26px;border-radius:6px;object-fit:cover;flex:none;}
+.lm-selname{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-selhint{flex:none;font-size:10px;color:var(--subtext);}
+.lm-caps{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;}
+.lm-cap{font-size:9.5px;padding:2px 8px;border-radius:10px;background:var(--base);
+  border:1px solid var(--surface1);color:var(--subtext);}
+.lm-cap.method{color:var(--gold);border-color:var(--gold);}
+.lm-loras{display:flex;flex-direction:column;gap:5px;margin:8px 0 4px;}
+.lm-lchip{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:6px 8px;border-radius:7px;
+  background:var(--surface0);border:1px solid var(--surface1);font-size:10.5px;color:var(--text);}
+.lm-lchip.failed{border-color:var(--red);}
+.lm-lnm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-lchip.failed .lm-lnm{color:var(--red);}
+.lm-lw{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
+.lm-lw input[type=range]{width:78px;}
+.lm-lw b{min-width:28px;text-align:right;font-size:11px;font-weight:600;color:var(--gold);
+  font-variant-numeric:tabular-nums;}
+.lm-lrm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:14px;padding:0 2px;}
+.lm-lrm:hover{color:var(--red);}
+.lm-lorver{flex:1 1 100%;background:var(--base);border:1px solid var(--surface1);border-radius:5px;
+  color:var(--text);font-size:10px;padding:4px 6px;}
+.lm-mini2-btn{font-size:10px;color:var(--accent);background:none;border:none;cursor:pointer;
+  text-decoration:underline;text-underline-offset:2px;padding:6px 0 0;display:block;}
+.lm-gerr{font-size:10.5px;color:var(--red);margin-top:6px;}
+.lm-imgresult{margin-top:10px;border:1px solid var(--surface1);border-radius:9px;padding:8px;}
+.lm-imgresult>img{width:100%;border-radius:7px;display:block;}
+.lm-route{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+.lm-routebtn{font:600 10px/1 system-ui;padding:6px 9px;border-radius:6px;border:1px solid var(--surface1);
+  background:var(--surface1);color:var(--subtext);cursor:pointer;}
+.lm-routebtn.on{background:color-mix(in srgb,var(--accent) 22%,transparent);border-color:var(--accent);
+  color:var(--accent);}
+.lm-ok2{font-size:10px;color:var(--accent);margin-top:6px;}
+.lm-refstrip{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 2px;}
+.lm-refstrip img{width:44px;height:44px;object-fit:cover;border-radius:7px;border:1px solid var(--surface1);}
+
+/* ---- Fixer (face/hand touch-up repair) -- closes the last disclosed gap in Loom Mobile's
+   original 6-increment plan (2026-08-03). Lives inside Generate's Edit tab, alongside the
+   Edit/Enhance sub-strip (now Edit/Fixer/Enhance -- see LoomMobile's own comment). The
+   canvas overlay is a real, working port of gallery/src/components/FixTab.jsx's own
+   .gd-fixwrap: an <img> in normal flow (sets the wrapper's real rendered height) with a
+   same-sized <canvas> absolutely positioned on top, so canvas pixel coordinates and the
+   image's own displayed pixels are the SAME coordinate space -- exactly what
+   scaleFixBoxes() needs to convert them to original-image pixels afterward. .lm-fixhint/
+   .lm-fixwarn colors/sizes are copied verbatim from the locked design's own real
+   fixHintStyle/fixWarnStyle strings (Loom Mobile.dc.html's data-dc-script), not
+   re-guessed. Face/Hand tag chips reuse .lm-modechips/.lm-modechip (the same chip visual
+   language MODES/CONNECT already use in the Video tab) rather than inventing a second
+   chip style. */
+.lm-fixwrap{position:relative;border-radius:8px;overflow:hidden;background:var(--base);
+  border:1px solid var(--surface1);margin-top:4px;}
+.lm-fixwrap img{width:100%;display:block;}
+.lm-fixwrap canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair;}
+.lm-fixhint{font-size:10.5px;line-height:1.5;color:var(--subtext);margin:12px 0 8px;}
+.lm-fixwarn{font-size:10px;line-height:1.45;color:var(--peach);background:rgba(232,147,95,.08);
+  border:1px solid rgba(232,147,95,.3);border-radius:8px;padding:7px 9px;margin-top:10px;}
+
+/* Model/LoRA picker sheet -- a near-full-screen mobile sheet (unlike the half-height Cast
+   sheet: <ModelPicker>'s search+grid genuinely needs the room), wrapping the SAME real
+   custom element LoomV2's floating .lv-mpick-veil overlay uses. */
+.lm-pick-sheet{position:absolute;left:0;right:0;bottom:0;top:6%;z-index:32;background:var(--mantle);
+  border-radius:18px 18px 0 0;border:1px solid var(--surface1);border-bottom:none;
+  padding:12px 16px max(14px,env(safe-area-inset-bottom));display:flex;flex-direction:column;min-height:0;
+  animation:lmSheetUp .26s cubic-bezier(.2,.9,.24,1);}
+.lm-pick-sheet.closing{animation:lmSheetDown .28s cubic-bezier(.4,0,.2,1) both;}
+.lm-pick-head{flex:none;display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.lm-pick-t{flex:1 1 auto;font-size:14px;font-weight:600;color:var(--text);}
+.lm-pick-body{flex:1;min-height:0;display:flex;flex-direction:column;}
+.lm-pick-body .model-picker{flex:1;min-height:0;}
+
+/* ---- Review & trim (fifth increment, 2026-08-03) -- opened from the board's own ▶ badge
+   on a finished shot, matching the locked design's reviewOpen/cropping/playing full-screen
+   page. Reuses .lm-gen-top/.lm-gen-back/.lm-gen-title/.lm-df-close/.lm-df-body/.lm-microlab/
+   .lm-hint/.lm-addrefbtn unchanged -- the classes below are only the ones this screen's own
+   preview/transport/scrub/trim/crop chrome genuinely needs. */
+.lm-reviewbadge{position:absolute;top:8px;left:10px;width:48px;height:48px;z-index:2;
+  display:flex;align-items:center;justify-content:center;font-size:15px;color:#fff;
+  background:rgba(0,0,0,.28);border:none;border-radius:9px;cursor:pointer;padding:0;}
+.lm-review{position:absolute;inset:0;z-index:22;background:var(--mantle);display:flex;
+  flex-direction:column;animation:lmRise .22s ease both;}
+.lm-review-previewwrap{position:relative;width:100%;aspect-ratio:16/9;border-radius:10px;
+  overflow:hidden;background:var(--base);margin-top:4px;}
+.lm-review-video{width:100%;height:100%;object-fit:contain;background:var(--base);display:block;}
+.lm-review-croprect{position:absolute;border:2px solid #fff;box-shadow:0 0 0 999px rgba(0,0,0,.45);
+  cursor:grab;touch-action:none;}
+.lm-review-crophandle{position:absolute;right:-3px;bottom:-3px;width:12px;height:12px;
+  border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5);}
+.lm-review-playbtn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:52px;height:52px;border-radius:50%;border:none;background:rgba(0,0,0,.4);color:#fff;
+  font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.lm-review-transport{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:10px;}
+.lm-review-transportbtn{width:40px;height:40px;border-radius:50%;border:1px solid var(--surface1);
+  background:var(--surface0);color:var(--text);font-size:15px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;padding:0;}
+.lm-review-transportbtn:hover{border-color:var(--accent);color:var(--accent);}
+.lm-review-scrubtrack{position:relative;height:6px;border-radius:3px;background:var(--surface1);
+  cursor:pointer;touch-action:none;margin:2px 0 4px;}
+.lm-review-scrubfill{position:absolute;top:0;left:0;height:100%;border-radius:3px;background:var(--accent);
+  pointer-events:none;}
+.lm-review-scrubhandle{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;
+  background:var(--accent);border:2px solid var(--text);transform:translate(-50%,-50%);
+  box-shadow:0 1px 4px rgba(0,0,0,.5);pointer-events:none;}
+.lm-review-trimtrack{position:relative;height:18px;border-radius:5px;background:var(--surface1);
+  margin:2px 0 4px;}
+.lm-review-trimrange{position:absolute;top:50%;transform:translateY(-50%);height:5px;border-radius:3px;
+  background:var(--accent);pointer-events:none;}
+.lm-review-trimhandle{position:absolute;top:50%;width:18px;height:18px;border-radius:5px;
+  background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5);transform:translate(-50%,-50%);
+  cursor:ew-resize;touch-action:none;}
+.lm-review-trimreadout{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--subtext);
+  margin-top:2px;}
+.lm-review-actionsrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+.lm-review-cropbtn{font:700 10.5px/1 system-ui;padding:6px 12px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--surface1);background:var(--surface1);color:var(--text);}
+.lm-review-cropbtn.on{background:color-mix(in srgb,var(--accent) 22%,transparent);
+  border-color:var(--accent);color:var(--accent);}
+
+/* ---- Filter compare -- sixth and FINAL increment (2026-08-03), the locked design's own
+   "Art filters" screen (filterCompareOpen/fcSkinFilters/fcPixaiFilters/fcStrength/fcAngle).
+   Reuses .lm-gen-top/.lm-gen-back/.lm-gen-title/.lm-fill/.lm-df-close (top bar),
+   .lm-tabsrow/.lm-tabbtn (Edit/Enhance sub-strip -- same classes the Cast sheet's own
+   Cast/Footage strip and the model picker's Models/LoRAs strip already use), .lm-df-body/
+   .lm-microlab/.lm-hint/.lm-empty (body chrome) unchanged. Everything below is only what
+   this screen's own preview/swatch-grid/slider chrome genuinely needs. */
+.lm-openfiltersbtn{display:block;width:100%;box-sizing:border-box;text-align:center;padding:12px;
+  border-radius:9px;font:700 12px/1 system-ui;cursor:pointer;border:1px solid var(--surface1);
+  background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);margin-top:8px;}
+.lm-fc{position:absolute;inset:0;z-index:26;background:var(--mantle);display:flex;
+  flex-direction:column;animation:lmRise .22s ease both;}
+.lm-fc-previewrow{display:flex;gap:8px;margin:4px 0 16px;}
+.lm-fc-previewcol{flex:1;min-width:0;}
+.lm-fc-previewbox{position:relative;width:100%;aspect-ratio:1;border-radius:10px;
+  overflow:hidden;background:var(--base);border:1px solid var(--surface1);
+  display:flex;align-items:center;justify-content:center;}
+/* .mgaf-stage (mg-art-filters.js's own injected stylesheet) already supplies
+   position:relative + isolation:isolate -- the load-bearing line for mix-blend-mode -- the
+   moment AF.applyPreview() touches this element; width/height:100% is this screen's own
+   layout need on top of that, not a replacement for it. */
+.lm-fc-stage{position:relative;width:100%;height:100%;}
+.lm-fc-img{width:100%;height:100%;object-fit:cover;display:block;}
+.lm-fc-previewcap{font-size:10px;color:var(--subtext);text-align:center;padding-top:6px;}
+.lm-fc-grouplabel{font:700 9px/1 system-ui;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--overlay0);margin:0 0 6px;}
+.lm-fc-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;}
+.lm-fc-tile{display:flex;flex-direction:column;gap:3px;cursor:pointer;border-radius:9px;
+  padding:3px;border:1px solid transparent;background:none;font:inherit;}
+.lm-fc-tile.on{border-color:var(--accent);}
+/* Fallback paint only -- AF.renderSwatch() overwrites this with the filter's own real
+   gradient layers (via .mgaf-swatch, injected by mg-art-filters.js itself) the instant its
+   ref callback fires. */
+.lm-fc-swatch{width:100%;aspect-ratio:1;border-radius:7px;background:var(--surface1);}
+.lm-fc-name{font-size:8.5px;text-align:center;padding:3px 1px 0;color:var(--subtext);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lm-fc-sliderwrap{margin-bottom:14px;}
+.lm-fc-sliderlab{font:700 9px/1 system-ui;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--overlay0);margin-bottom:5px;}
+.lm-fc-range{width:100%;height:3px;cursor:pointer;}
+.lm-fc-btnrow{display:flex;gap:8px;margin-bottom:10px;}
+.lm-fc-btn{flex:1;text-align:center;padding:11px;border-radius:9px;font:700 11.5px/1 system-ui;
+  cursor:pointer;border:1px solid var(--surface1);background:rgba(33,31,58,.6);color:var(--text);}
+.lm-fc-btn.primary{border-color:rgba(255,255,255,.3);background:var(--accent);color:var(--base);}
+.lm-fc-spendnote{font-size:10px;color:var(--overlay0);text-align:center;}
+
+/* ---- Kebab actions sheet (completeness pass, 2026-08-03) -- the locked design's own
+   card.onKebab/actionsOpen/actMoveUp/actMoveDown/actDuplicate/actDelete (Loom Mobile.dc.html),
+   the one board-card affordance never wired into this view before now. Reuses .lm-scrim/
+   .lm-sheet/.lm-sheethandle/.lm-sheetclose verbatim -- the Cast & assets sheet's own bottom-
+   sheet convention -- only the row styling below (matching the design's own actionRowStyle/
+   actionRowDangerStyle) is new. */
+.lm-kebab{flex:none;width:30px;height:30px;display:flex;align-items:center;justify-content:center;
+  font-size:16px;color:var(--overlay0);cursor:pointer;background:none;border:none;padding:0;}
+.lm-actionrow{display:block;width:100%;text-align:left;padding:12px 4px;font:13px/1.3 system-ui;
+  color:var(--text);border:none;border-bottom:1px solid rgba(255,255,255,.06);background:none;cursor:pointer;}
+.lm-actionrow.danger{color:var(--red);border-bottom:none;}
+`;
+
+function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, addCard, addAct, setDraft,
+  mobileUI, setMobileUI,
+  // Second increment (2026-08-03): Shot Detail (Deep Focus's mobile equivalent), the
+  // Cast & assets sheet, and the Frame picker all need to actually MUTATE the project and
+  // reach the real gallery picker -- setCard/setAssets/addRef/setRef/delRef (useShotMutations),
+  // storeThumb (useProjectStore), and openPick/copyShot (App() itself) are the same real
+  // functions LoomV2 already uses for its own Deep Focus/Cast&Assets/FrameSlot; threaded
+  // straight through, nothing new invented.
+  setCard, setAssets, addRef, setRef, delRef, storeThumb, openPick, copyShot,
+  // Fifth increment (2026-08-03): Review & trim's own "✂ Split at playhead" needs the exact
+  // same real splitCardAt-backed mutator LoomV2's own ShotPreview.onSplit already calls
+  // (useShotMutations) -- not a re-derivation of the split logic.
+  splitShot,
+  // Completeness-pass addition (2026-08-03): the per-shot-card kebab (⋮) actions sheet
+  // (Move up / Move down / Duplicate / Delete) was fully specified in the locked design
+  // (Loom Mobile.dc.html: onKebab/actionsOpen/actMoveUp/actMoveDown/actDuplicate/actDelete)
+  // but never wired into this component -- moveCard/dupCard/delCard are the EXACT same real
+  // mutators LoomV2's own board-card buttons already call (useShotMutations, App()), threaded
+  // through for the first time here rather than re-derived. delCard's real window.confirm
+  // gate is preserved verbatim at its one call site below, not dropped for mobile.
+  moveCard, dupCard, delCard,
+  // Not read by earlier increments' Generate-less screens -- lifted to App() (see LoomV2's own
+  // prop-list comment) and threaded through here so a still-in-progress draft already
+  // survives toggling between this view and LoomV2.
+  draftCard, setDraftCard, draftTarget, setDraftTarget, draftAttachedInfo, setDraftAttachedInfo,
+  // Third increment (2026-08-03): Generate. Real, unmodified functions from
+  // useGenerationPipeline -- generateShot (real submit: its own price-check + confirm +
+  // /api/loom/generate + pollShot registration, the SAME function batchGenerate's per-card
+  // loop already calls), priceShot (the SAME read-only /api/price check confirmSpend/
+  // batchGenerate already use for a preview), and useExistingVideo (attach an
+  // already-rendered gallery video as the finished clip, no generation, no spend -- already
+  // wired to LoomV2's own board). No new submit call, no new pricing math, no forked spend
+  // path: this screen is a new VIEW onto the exact same pipeline LoomV2 already drives.
+  generateShot, priceShot, useExistingVideo,
+  // Fourth increment (2026-08-03): Image/Edit/Reference/Video, mirroring LoomV2's own
+  // right-rail GEN_ICONS strip (its "Video" tab is what the third increment above already
+  // built, using generateShot/priceShot rather than <mg-generate-drawer> -- see this
+  // increment's report for why that stays the right call here too). Every one of these is
+  // the SAME hook-level state/function LoomV2 already reads/calls for its Image/Edit/
+  // Reference tabs -- genImage/genEdit/genRef (and their genImgState/genEditState/
+  // genRefState) are plain fetch+setTimeout closures living in useGenerationPipeline, not
+  // tied to any DOM element's lifecycle, so (unlike the drawer) they already survive the
+  // Mobile-view toggle with no fix needed -- confirmed by reading pollImg/
+  // pollTaskWithCeiling, not assumed. No forked submit logic, no reinvented pricing, no new
+  // endpoints: this screen calls the exact same functions LoomV2's Image/Edit/Reference
+  // tab bodies call.
+  genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv,
+  modelDefaults, setModelDefaults, genImage, routeImg,
+  genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen,
+  // Fixer -- seventh increment (2026-08-03). Same real hook-level state/function shape as
+  // genEditState/genEdit above (useGenerationPipeline): genFixState is a plain cardId->
+  // {phase,msg,mid,routed} dict, genFix is the real confirm-gated submit through the real
+  // /api/fix endpoint. Threaded through for the first time here -- desktop's LoomV2 has no
+  // Fixer tab of its own (out of this increment's scope), so only LoomMobile receives it.
+  genFixState, setGenFixState, genFix }) {
+  // The overlay is position:fixed and covers the whole viewport, but the classic page
+  // underneath is a normal tall document -- same reasoning, same fix, as LoomV2's own
+  // identical effect (see its comment): without this, a touch/wheel scroll that isn't
+  // captured by .lm-body (already at its own scroll limit) bubbles up and scrolls THAT.
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prevOverflow; };
+  }, []);
+
+  // imgSrc/frameSrc mirror LoomV2's own private copies exactly (see LoomV2's imgSrc comment)
+  // -- each consumer in this file closes over its OWN `thumbs` prop rather than sharing one
+  // implementation, which is the established pattern here, not an oversight.
+  const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId]
+    : (source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null);
+  const frameSrc = (f) => (f && f.thumbId ? thumbs[f.thumbId] : (f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null));
+  const cardThumb = (c) => frameSrc(c.openFrame) || (c.resultMid ? "/thumbs/" + c.resultMid + ".jpg" : null);
+  // Real, shared, offline art-filter library (static/mg-art-filters.js) -- PixAI's own 7
+  // gradient-overlay recipes plus this app's own 5, composited entirely client-side (no
+  // network call, no credit spend). Read fresh each render rather than memoized: it is a
+  // load-once global singleton (script tag in _LOOM_SHELL, loaded before this bundle), so
+  // every render sees the same object reference. See Filter compare's own comment (below,
+  // with this component's other hooks) for why this screen uses it instead of a simplified
+  // local recipe.
+  const AF = MgArtFilters;   // was window.MgArtFilters (static/mg-art-filters.js), now bundled
+  // Single source of truth for "what status does this shot show right now", shared by BOTH
+  // the reel segment's color and the board card's status pill -- computed once per entry
+  // rather than twice, so the two can never silently disagree (the exact two-implementations-
+  // of-one-idea drift this codebase's own loom-core.js header spends its whole first comment
+  // warning against). "paused" mirrors LoomV2's own board-card logic verbatim: a live
+  // genState phase of "paused" means auto-checking genuinely stopped; any other in-flight
+  // phase still just reads as the ordinary "wip" look, and only a settled state falls back to
+  // the shot's own persisted c.status.
+  const statusOf = (c) => {
+    const gs = genState[c.id];
+    const paused = gs && gs.phase === "paused";
+    return paused ? "paused" : (gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : c.status);
+  };
+
+  // ---- Shot Detail (mobile Deep Focus) + Cast & assets sheet -- second increment
+  // (2026-08-03), per the locked design (design_handoff/design_handoff_moonglade_suite/
+  // "Loom Mobile.dc.html"). Tapping a board card (below) now opens this full-screen editor
+  // for that shot, on top of setSelShot's own "binds to Generate" contract from increment 1
+  // -- selecting a shot and opening its detail are the same tap, not two separate actions.
+  const [dfOpen, setDfOpen] = useState(false);
+  // Splice-in-last-frame state for the opening frame's "inherit previous close" button --
+  // mirrors LoomV2's own local `handoff` state (see its FrameSlot extraBtn) exactly:
+  // '' | 'wip' | 'err'.
+  const [dfHandoff, setDfHandoff] = useState("");
+  const [castSheetOpen, setCastSheetOpen] = useState(false);
+  const [castSheetTab, setCastSheetTab] = useState("cast");   // 'cast' | 'footage'
+  // Sheet-close choreography -- Loom Mobile.dc.html's own *Closing states (lmSheetDown
+  // .28s + lmFadeOut on the scrim), absent until 2026-08-06: every close was an instant
+  // unmount. Same closing-state + ref-held-timer pattern LoomV2's closeLeftPanel/
+  // closeRightPanel already establish (340ms there, the DC's own 280ms here).
+  const [castSheetClosing, setCastSheetClosing] = useState(false);
+  const castSheetCloseTimer = useRef(null);
+  const closeCastSheet = () => {
+    setCastSheetClosing(true);
+    clearTimeout(castSheetCloseTimer.current);
+    castSheetCloseTimer.current = setTimeout(() => { setCastSheetOpen(false); setCastSheetClosing(false); }, 280);
+  };
+
+  // ---- Kebab actions sheet (completeness pass, 2026-08-03) -- the locked design's own
+  // per-card ⋮ menu (Loom Mobile.dc.html: onKebab/actionsOpen/actMoveUp/actMoveDown/
+  // actDuplicate/actDelete), disclosed as a real, unbuilt gap left after the six increments
+  // above. Purely local, ephemeral "is this sheet showing" state, same category as
+  // dfOpen/castSheetOpen/reviewOpen -- which shot it targets reuses selShot (see actionsLive
+  // below), not a second locally-tracked id like the design's own `actionsFor`.
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [actionsClosing, setActionsClosing] = useState(false);
+  const actionsCloseTimer = useRef(null);
+
+  // ---- Review & trim -- fifth increment (2026-08-03), per the locked design's own
+  // reviewFor/cropping/playing state (Loom Mobile.dc.html). Opens from the board's own ▶
+  // badge on a finished shot -- purely local, ephemeral UI state (no spend, no polling),
+  // same credit-safety category as dfOpen/genOpen/castSheetOpen above. Declared here (up
+  // with this component's other early state), NOT down by `return` -- reviewLive (below,
+  // near dfLive/finishedShots) reads reviewOpen before render, and hooks can't be
+  // forward-referenced.
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewPlaying, setReviewPlaying] = useState(false);
+  const [reviewCropping, setReviewCropping] = useState(false);
+  // Real native playback state off the real <video> element (mirrors ShotPreview's own
+  // component-local `dur`/`playing` state exactly) -- NOT the design's synthetic
+  // setInterval-driven reviewFrac, which only existed because the mockup's "video" is a
+  // plain colored div with nothing to actually play.
+  const [reviewDur, setReviewDur] = useState(0);
+  const [reviewCur, setReviewCur] = useState(0);
+  const reviewVidRef = useRef(null);
+  const reviewTrimTrackRef = useRef(null);
+  const reviewTrimDragRef = useRef(null);   // "in" | "out" | null
+  const reviewCropDragRef = useRef(false);
+  const reviewScrubDragRef = useRef(false);
+
+  // ---- Generate -- third increment (2026-08-03), per the locked design's own "genOpen"
+  // full-screen page opened from Shot Detail's "Select in Generate →" button. On DESKTOP
+  // this is not a separate screen at all -- LoomV2's right rail (Video tab + the always-
+  // mounted <mg-generate-drawer>) sits beside the board permanently, bound to whichever shot
+  // is selected. Mobile has no persistent rail, so this screen is the honest mobile
+  // equivalent of "go look at Generate for this shot" -- genOpen is purely a LOCAL, ephemeral
+  // "is this screen showing" flag, same category as dfOpen/castSheetOpen above. It carries
+  // NO generation state of its own on purpose (see the credit-safety note on the Generate
+  // block below for exactly why).
+  const [genOpen, setGenOpen] = useState(false);
+  const [genPalFor, setGenPalFor] = useState(null);        // which term palette is open, or null
+  const [genOverrideFlash, setGenOverrideFlash] = useState(false);
+  const [genSubmitting, setGenSubmitting] = useState(false);
+  // Read-only cost PREVIEW cache for whichever shot Generate is currently open on --
+  // { loading, pr, noInput } for entry.c.id, or null before the first check. This is
+  // strictly informational: the real spend gate is generateShot's OWN internal priceShot +
+  // window.confirm (called unmodified below, exactly like every other real submit path in
+  // this file), never re-implemented here. Debounced the same way LoomV2's own imgCostRef/
+  // editCostRef/refCostRef effects are (see LoomV2's priceInto comment) so a fast run of
+  // keystrokes in Camera/Lighting/Prompt doesn't fire a price check per keystroke.
+  const [genPrice, setGenPrice] = useState({});   // cardId -> {loading, pr, noInput}
+
+  // ---- Image / Edit / Reference / Video tab strip -- fourth increment (2026-08-03),
+  // mirroring LoomV2's own GEN_ICONS rail (Image/Edit/Reference/Video) inside this SAME
+  // Generate screen. "Video" is this screen's pre-existing content (third increment,
+  // unchanged below) -- genTab defaults to "Video" to match LoomV2's own default tab.
+  const [genTab, setGenTab] = useState("Video");
+  // Credit balance line -- purely a read-only display (matches LoomV2's identical
+  // component-local `acct` state and its own component-local fetch effect below), never
+  // gates a submit. Duplicating this one fetch per view (rather than lifting it) is the
+  // established pattern in this file for non-spend UI chrome (pickerOpen/pickerMounted are
+  // the same kind of per-view local state) -- losing it on a toggle just means one more
+  // free /api/account read next time this screen opens, not a credit-safety concern.
+  const [acct, setAcct] = useState(null);
+  useEffect(() => { fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {}); }, []);
+
+  // ---- Model/LoRA picker overlay for the Image tab -- a mobile sheet wrapping the SAME
+  // real <ModelPicker> custom element LoomV2's own floating .lv-mpick-veil uses, bound
+  // the same way (bindPicker/bindLoraPicker below are close-to-verbatim ports of LoomV2's
+  // own, adapted only for this screen's local naming -- imgModel/imgLoras/imgAdv/
+  // modelDefaults themselves are the SAME hook-level state LoomV2 reads/writes, passed down
+  // as props, so picking a model here is visible on LoomV2 immediately and vice versa).
+  // Component-local by design, same reasoning as LoomV2's own identical state: picking a
+  // model/LoRA spends nothing, so losing this overlay's own open/search state on a Mobile
+  // toggle is a cosmetic inconvenience, never a credit-safety concern -- unlike the video
+  // drawer's poll, there is no in-flight spend riding on this element's mount lifetime.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerKind, setPickerKind] = useState("base");
+  const [pickerMounted, setPickerMounted] = useState(false);
+  // Slide-out close (see closeCastSheet's comment). The picker stays MOUNTED through and
+  // after the close (the display-toggle contract above) -- the closing class only drives
+  // the 280ms lmSheetDown before display flips to none.
+  const [pickerClosing, setPickerClosing] = useState(false);
+  const pickerCloseTimer = useRef(null);
+  const closePicker = () => {
+    setPickerClosing(true);
+    clearTimeout(pickerCloseTimer.current);
+    pickerCloseTimer.current = setTimeout(() => { setPickerOpen(false); setPickerClosing(false); }, 280);
+  };
+  useEffect(() => { if (pickerOpen) setPickerMounted(true); }, [pickerOpen]);
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onKey = (ev) => { if (ev.key === "Escape") closePicker(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pickerOpen]);
+  const imgModelSeqRef = useRef(0);
+  // LoRA weight bounds for the current base model's architecture -- verbatim copy of
+  // LoomV2's own loraRange memo (same shared window.MG_LORA table, same fallback).
+  const loraRange = useMemo(() => {
+    const L = window.MG_LORA;
+    const t = String((imgModel && imgModel.model_type) || "").toUpperCase();
+    if (!L) return [-2, 2];
+    return (L.ranges && L.ranges[t]) || L.fallback || [-2, 2];
+  }, [imgModel]);
+  useEffect(() => {
+    setImgLoras((cur) => {
+      let changed = false;
+      const next = cur.map((l) => {
+        const w = Math.max(loraRange[0], Math.min(loraRange[1], +l.weight));
+        if (w !== l.weight) changed = true;
+        return w === l.weight ? l : { ...l, weight: w };
+      });
+      return changed ? next : cur;
+    });
+  }, [loraRange, setImgLoras]);
+  const onBasePick = useCallback((row) => {
+    closePicker();
+    const m = { model_id: row.model_id, title: row.title, preview_url: row.preview_url || "" };
+    setImgModel(m);
+    setModelDefaults(null);
+    const mySeq = ++imgModelSeqRef.current;
+    fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1")
+      .then((r) => r.json())
+      .then((d) => {
+        if (mySeq !== imgModelSeqRef.current) return;
+        const versions = (d && d.versions) || [], v = versions[0] || {};
+        setImgModel((cur) => cur ? {
+          ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
+          sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
+          compatibility: v.compatibility || {}, restrictions: v.restrictions || {},
+          versions,
+        } : cur);
+        const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+        setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
+        if (has) {
+          setImgAdv((cur) => ({
+            ...cur,
+            negative: v.negative_prompt || cur.negative,
+            steps: v.sampling_steps || cur.steps,
+            cfg: v.cfg_scale || cur.cfg,
+          }));
+        }
+      })
+      .catch(() => {});
+  }, [setImgModel, setImgAdv, setModelDefaults]);
+  const pickVersion = useCallback((vid) => {
+    if (!imgModel || !imgModel.versions) return;
+    const v = imgModel.versions.find((x) => x.version_id === vid);
+    if (!v) return;
+    setImgModel((cur) => ({
+      ...cur, version_id: v.version_id || "", model_type: v.model_type || "",
+      sampling_method: v.sampling_method || "", capabilities: v.capabilities || [],
+      compatibility: v.compatibility || {}, restrictions: v.restrictions || {},
+    }));
+    const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
+    setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
+    if (has) {
+      setImgAdv((a) => ({
+        ...a,
+        negative: v.negative_prompt || a.negative,
+        steps: v.sampling_steps || a.steps,
+        cfg: v.cfg_scale || a.cfg,
+      }));
+    }
+  }, [imgModel, setImgModel, setImgAdv, setModelDefaults]);
+  const onLoraPick = useCallback((model, selected) => {
+    setImgLoras((cur) => {
+      const i = cur.findIndex((l) => l.model_id === model.model_id);
+      if (!selected) return i < 0 ? cur : cur.filter((l) => l.model_id !== model.model_id);
+      if (i < 0) return [...cur, model];
+      const next = cur.slice(); next[i] = model; return next;
+    });
+  }, [setImgLoras]);
+
+  // ---- mode families for the Cast & assets sheet + ref live-tag badges. Copied verbatim
+  // from LoomV2's own local copies -- neither is exported from loom-core.js/loom-mutations.js
+  // (this file's own DO-NOT-MODIFY pure-logic layer), so every consumer keeps its own, the
+  // same convention LoomV2 already follows rather than exporting a third shared module just
+  // for four small closures. See LoomV2's identical comment (above its own copies) for the
+  // full reasoning: which modes actually SEND the cast/ref image bank with a generation
+  // (R2V/V2V) vs. cite it in the composed prompt only (FLF/I2V, which attach just their
+  // frame(s)) -- the locked mobile design's own Cast sheet mockup only special-cases I2V and
+  // hardcodes "4" reference slots; both are wrong for an FLF shot and for the real, mode-aware
+  // 6-minus-attached-frames budget refBudget() (loom-core.js) computes, so this matches
+  // LoomV2's real, already-correct behavior instead of reproducing the mockup's simplification
+  // (disclosed in the increment's own report).
+  const modeSendsRefs = (m) => usesCloseFrame(m) && m !== "FLF";
+  const modeSendsLine = (m) => (m === "FLF"
+    ? "First & Last sends the start & end frames only — cast & refs here are for continuity/notes, not references"
+    : "I2V sends the opening frame only — cast here is for continuity/notes, not references");
+  const liveTagText = (liveTag, pastBudget, mode) =>
+    liveTag || (pastBudget ? (modeSendsRefs(mode) ? "not sent" : "not cited") : "—");
+  const liveTagTitle = (liveTag, pastBudget, mode, code) => {
+    const framesOnly = mode === "FLF" ? "First & Last sends only the start/end frames" : "I2V sends only the opening frame";
+    if (liveTag) {
+      return modeSendsRefs(mode)
+        ? `Live slot in ${code} — numbered by position; this is what the composed prompt and the generator actually send`
+        : `${code}'s composed-prompt citation — numbered by position. ${framesOnly}, so this picture is not attached to the generation`;
+    }
+    if (pastBudget) {
+      return modeSendsRefs(mode)
+        ? `Past the reference limit for ${code} (6 images minus attached frames) — not sent`
+        : `Past the citation limit for ${code} — left out of the composed prompt. ${framesOnly} either way`;
+    }
+    return `No picture resolved on ${code} — nothing to number`;
+  };
+
+  const total = entries.reduce((s, x) => s + durOf(x.c), 0);
+  const tickFrac = total > 0 ? Math.min(1, (project.target || 0) / total) : 0;
+  // Where the reel's selection handle sits when NOT actively being dragged: the currently
+  // selected shot's own cumulative-duration midpoint, so tapping a board card (or nothing
+  // ever having been scrubbed yet) still shows an honest, live position -- never a stale
+  // handle stuck wherever the last drag happened to end.
+  const selIdx = entries.findIndex((x) => x.c.id === selShot);
+  let selFrac = null;
+  if (selIdx >= 0 && total > 0) {
+    let cum = 0;
+    for (let i = 0; i < selIdx; i++) cum += durOf(entries[i].c) || 1;
+    selFrac = (cum + (durOf(entries[selIdx].c) || 1) / 2) / total;
+  }
+
+  // ---- reel pointer-drag scrub: fraction-of-width -> cumulative-duration index ----
+  // Genuinely new interaction for this codebase (LoomV2's own .lv-reel a few hundred lines up
+  // is click-a-fixed-width-segment only -- no drag, no floating preview). No gesture library:
+  // setPointerCapture + a plain clientX/getBoundingClientRect fraction, matching the design's
+  // own hand-rolled pattern (Loom Mobile.dc.html's scrubFn/scrubStart/scrubMove/scrubEnd)
+  // exactly rather than reinventing the math a different way.
+  const [scrubbing, setScrubbing] = useState(false);
+  const [scrubFrac, setScrubFrac] = useState(0);
+  const [scrubIdx, setScrubIdx] = useState(null);
+  const fracAt = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    return r.width ? Math.max(0, Math.min(0.9999, (e.clientX - r.left) / r.width)) : 0;
+  };
+  const idxAtFrac = (frac) => {
+    if (!entries.length || !total) return null;
+    const t = frac * total;
+    let cum = 0;
+    for (let i = 0; i < entries.length; i++) { cum += durOf(entries[i].c) || 1; if (t < cum) return i; }
+    return entries.length - 1;
+  };
+  const scrubTo = (e) => {
+    const frac = fracAt(e);
+    setScrubbing(true); setScrubFrac(frac); setScrubIdx(idxAtFrac(frac));
+  };
+  const onReelDown = (e) => {
+    if (!entries.length) return;
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+    scrubTo(e);
+  };
+  const onReelMove = (e) => { if (scrubbing) scrubTo(e); };
+  // Release selects the shot the drag landed on -- the reel's own "click a shot" contract
+  // (LoomV2's .lv-reel does this on a plain click; here it's the natural end of a drag).
+  const onReelUp = () => { setScrubbing(false); if (scrubIdx != null && entries[scrubIdx]) setSelShot(entries[scrubIdx].c.id); };
+  // Cancel-without-selecting if the pointer leaves the bar mid-drag. setPointerCapture means
+  // onReelUp already fires reliably even if released outside the element's bounds -- this is
+  // the same defensive belt-and-suspenders handler the design itself carries (scrubCancel),
+  // not load-bearing for the common case.
+  const onReelLeave = () => setScrubbing(false);
+
+  const handleFrac = scrubbing ? scrubFrac : selFrac;
+  const scrubEntry = scrubIdx != null ? entries[scrubIdx] : null;
+  const posStyle = (frac) => ({ left: `calc(16px + (100% - 32px) * ${frac})` });
+
+  // Re-derived from `entries` every render (never from a stale snapshot captured at tap
+  // time) -- same reasoning as LoomV2's own `deepFocus` -> `live` lookup: setCard's patches
+  // are immutable, so a captured entry object would never show a later edit. If the shot
+  // vanished out from under an open Shot Detail (deleted elsewhere), close it the same
+  // inline way LoomV2 already does for its own veil -- a documented React bail-out (setting
+  // this component's own state during its own render), not a bug.
+  const dfLive = dfOpen ? entries.find((x) => x.c.id === selShot) : null;
+  if (dfOpen && !dfLive) { setDfOpen(false); }
+  const dfSelIdx = dfLive ? entries.findIndex((x) => x.c.id === dfLive.c.id) : -1;
+  const dfPrevEntry = dfSelIdx > 0 ? entries[dfSelIdx - 1] : null;
+  const dfPatch = (fn) => dfLive && setCard(dfLive.a.id, dfLive.c.id, fn);
+  const dfPatchFrame = (key, fp) => dfPatch((cc) => ({ ...cc, [key]: { ...cc[key], ...fp } }));
+  // Frame handoff -- identical mechanic to LoomV2's own inheritPrev (same /api/loom/handoff
+  // splice-the-last-frame-off-a-rendered-clip endpoint, same closeFrame-copy fallback for a
+  // previous shot that hasn't rendered yet), reimplemented here only because that function is
+  // a private closure inside LoomV2's own component body, not something this file exports.
+  const dfInheritPrev = () => {
+    if (!dfPrevEntry) return;
+    const rmid = dfPrevEntry.c.resultMid;
+    if (rmid) {
+      setDfHandoff("wip");
+      fetch("/api/loom/handoff", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ video_media_id: rmid, trim_out: dfPrevEntry.c.trimOut }) })
+        .then((r) => r.json()).then((d) => {
+          if (d.error || !d.frame_media_id) { setDfHandoff("err"); return; }
+          setDfHandoff("");
+          dfPatchFrame("openFrame", { mediaId: d.frame_media_id, thumbId: "", source: "",
+            desc: "handed off from " + (dfPrevEntry.code || "prev shot") });
+        }).catch(() => setDfHandoff("err"));
+    } else {
+      dfPatchFrame("openFrame", { ...dfPrevEntry.c.closeFrame });
+    }
+  };
+  // "Finished shots" (Cast sheet's Footage tab): tapping a rendered shot from elsewhere in
+  // THIS project appends it as a real @videoN reference on the open shot -- the same shape
+  // addRef("video") + a hand-typed source already produce, just pre-filled with a real
+  // resultMid instead of leaving the source blank for the owner to type one in. Deliberately
+  // NOT loom-core.js's pickVideoTarget/shotVideoRefs (the Multi-Reference drawer's slot-
+  // REPLACE machinery) -- a footage tap always APPENDS a brand-new ref, never replaces an
+  // existing numbered slot, so nextTag (addRef's own tag convention in useShotMutations) is
+  // the correct, simpler tool, not a re-derivation of a different real mechanism.
+  const dfPickFootage = (mid, code) => {
+    if (!dfLive) return;
+    const tag = nextTag(dfLive.c.refs.filter((r) => r.kind === "video"), "@video");
+    const newRef = { ...buildNewRef("video", uid()), tag, source: String(mid), role: "footage from " + code };
+    setCard(dfLive.a.id, dfLive.c.id, (c) => ({ ...c, refs: [...c.refs, newRef] }));
+  };
+  const castBudget = dfLive ? refBudget(dfLive, project, imgSrc) : null;
+  const finishedShots = entries.filter((e) => e.c.resultMid);
+
+  // ---- Review & trim's own "which shot" lookup -- reuses selShot/entries.find() exactly
+  // like dfLive/genOpen's target already do, rather than a second id-tracking field (the
+  // design's own local `reviewFor`). Same live-lookup safety: a shot deleted out from under
+  // an open Review closes it instead of rendering stale data (identical to dfLive's guard
+  // a few lines above).
+  const reviewLive = reviewOpen ? entries.find((x) => x.c.id === selShot) : null;
+  if (reviewOpen && !reviewLive) { setReviewOpen(false); }
+  const reviewPatch = (fn) => reviewLive && setCard(reviewLive.a.id, reviewLive.c.id, fn);
+  const closeReview = () => { setReviewOpen(false); setReviewPlaying(false); setReviewCropping(false); };
+
+  // ---- Kebab actions sheet's own "which shot" lookup -- same live-lookup safety pattern as
+  // dfLive/reviewLive above: a shot deleted out from under an open sheet closes it instead of
+  // acting on stale data. `.a`/`.ci`/`.code` all come straight off flat()'s own entry shape
+  // (loom-core.js), the same fields LoomV2's real per-card buttons already index by
+  // (act.id/e.ci/e.code) -- nothing new derived here.
+  const actionsLive = actionsOpen ? entries.find((x) => x.c.id === selShot) : null;
+  if (actionsOpen && !actionsLive) { setActionsOpen(false); }
+  // Slide-out close (see closeCastSheet's comment): actionsOpen stays true through the
+  // 280ms lmSheetDown window, so actionsLive above keeps resolving while it plays.
+  const closeActions = () => {
+    setActionsClosing(true);
+    clearTimeout(actionsCloseTimer.current);
+    actionsCloseTimer.current = setTimeout(() => { setActionsOpen(false); setActionsClosing(false); }, 280);
+  };
+
+  // ---- Generate screen helpers (third increment, 2026-08-03) ----
+  const genTogglePal = (which) => setGenPalFor((p) => (p === which ? null : which));
+  const genAppendTo = (field, term) => dfPatch((cc) => ({ ...cc, [field]: cc[field] ? cc[field] + ", " + term : term }));
+  // Debounced, read-only price PREVIEW for whichever shot Generate is open on -- the exact
+  // real /api/price check (via priceShot) every other cost display in this file already
+  // uses, just kept per-shot here since this component has no priceCache of its own (that
+  // cache is private to useGenerationPipeline, and this screen only ever needs ONE shot's
+  // price at a time, not the whole board's). Skipped entirely for a shot with nothing
+  // attachable yet (payload.hasInput false) -- pricing an unsendable shot is meaningless,
+  // and generateShot's own real submit already refuses it outright regardless of this.
+  //
+  // Purely informational: the real spend gate is generateShot's OWN internal priceShot +
+  // window.confirm, called UNMODIFIED by genSubmit below -- this cache never gates the
+  // Generate button itself, it only decides what the cost LINE displays before that.
+  useEffect(() => {
+    if (!genOpen || !dfLive) return;
+    const id = dfLive.c.id;
+    const payload = buildShotPayload(dfLive, project, imgSrc);
+    if (!payload.hasInput) { setGenPrice((s) => ({ ...s, [id]: { loading: false, pr: null, noInput: true } })); return; }
+    setGenPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true, noInput: false } }));
+    let live = true;
+    const t = setTimeout(() => {
+      priceShot(dfLive).then((pr) => { if (live) setGenPrice((s) => ({ ...s, [id]: { loading: false, pr, noInput: false } })); });
+    }, 300);
+    return () => { live = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [genOpen, dfLive && dfLive.c.id, dfLive && dfLive.c.mode, dfLive && dfLive.c.duration,
+      dfLive && dfLive.c.connect, dfLive && dfLive.c.audioGen, dfLive && dfLive.c.audioLanguage,
+      dfLive && dfLive.c.prompt, dfLive && dfLive.c.promptOverride, dfLive && dfLive.c.promptOverrideText,
+      dfLive && JSON.stringify(dfLive.c.cast), dfLive && JSON.stringify(dfLive.c.refs), project.draft, project.assets,
+      dfLive && (dfLive.c.openFrame || {}).mediaId, dfLive && (dfLive.c.openFrame || {}).thumbId, dfLive && (dfLive.c.openFrame || {}).source,
+      dfLive && (dfLive.c.closeFrame || {}).mediaId, dfLive && (dfLive.c.closeFrame || {}).thumbId, dfLive && (dfLive.c.closeFrame || {}).source]);
+  // The real submit: generateShot is called EXACTLY as batchGenerate's own per-card loop
+  // calls it (minus skipConfirm -- this is a single, deliberate, owner-initiated tap, not a
+  // pre-confirmed batch run, so generateShot's own internal priceShot+window.confirm gate
+  // fires for real here, same as it would for any other single real submit in this file).
+  // No new endpoint, no new price math, no new confirm dialog of this screen's own -- see
+  // the increment's report for the full credit-safety trace.
+  const genSubmit = async () => {
+    if (!dfLive || genSubmitting) return;
+    setGenSubmitting(true);
+    let r;
+    try { r = await generateShot(dfLive); } finally { setGenSubmitting(false); }
+    // Only a CONFIRMED, successful submit returns to the board -- a cancelled confirm or a
+    // submit-time failure leaves this screen open exactly as it was, so the owner can see
+    // why (generateShot's own genState error write) or adjust and retry, instead of being
+    // silently dumped back to Shot Detail with no visible outcome.
+    if (r && r.ok) { setGenOpen(false); setDfOpen(false); }
+  };
+
+  // ---- Image / Edit / Reference tab bodies -- fourth increment (2026-08-03). genImage/
+  // genEdit/genRef below are called EXACTLY as LoomV2's own Image/Edit/Reference tabs call
+  // them (useGenerationPipeline) -- same confirmSpend fail-closed gate inside each, same
+  // genImgState/genEditState/genRefState, same Job Tracker registration, same
+  // pollTaskWithCeiling poll. No forked submit logic, no reinvented pricing, no new
+  // endpoints. Unlike the Video tab (generateShot/priceShot, third increment), these three
+  // never touch <mg-generate-drawer> at all -- LoomV2's OWN Image/Edit/Reference tabs don't
+  // either, only its Video tab does, so this is genuine parity, not a workaround.
+  const editSrcMid = dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId;
+  const refMids = (project.assets || []).filter((a) => a.kind === "image" && a.mediaId).map((a) => a.mediaId);
+  const refMidsKey = refMids.join(",");
+  // Debounced, read-only /api/price PREVIEWS for the Image/Edit/Reference tabs -- the SAME
+  // endpoint + body shapes LoomV2's own imgCostRef/editCostRef/refCostRef effects price
+  // (buildImgGenBody for Image; the same {mode:"edit", source, instruction, edit_model}/
+  // {..., sources} shapes for Edit/Reference), just rendered as a plain text line via the
+  // same tallyPrices/formatCostEstimate/costTooltip pure helpers the Video tab's own genPrice
+  // already uses above, instead of mounting a <CostBadge> like LoomV2's Deep Focus tabs do --
+  // a presentational choice (this screen renders cost as a plain text line), not a pricing
+  // fork: the real cost gate is still confirmSpend's own
+  // window.confirm inside genImage/genEdit/genRef, fired UNMODIFIED on submit below.
+  const [imgPrice, setImgPrice] = useState({});
+  const [editPrice, setEditPrice] = useState({});
+  const [refPrice, setRefPrice] = useState({});
+  useEffect(() => {
+    if (!genOpen || genTab !== "Image" || !dfLive) return;
+    const id = dfLive.c.id;
+    const prompt = (dfLive.c.imgPrompt || "").trim();
+    if (!imgModel || !prompt || anyLoraUnresolved(imgLoras)) { setImgPrice((s) => ({ ...s, [id]: null })); return; }
+    setImgPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
+    let live = true;
+    const t = setTimeout(() => {
+      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildImgGenBody(imgModel, imgLoras, imgAdv, prompt)) })
+        .then((r) => r.json()).then((pr) => { if (live) setImgPrice((s) => ({ ...s, [id]: { loading: false, pr } })); })
+        .catch(() => { if (live) setImgPrice((s) => ({ ...s, [id]: { loading: false, pr: null } })); });
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [genOpen, genTab, dfLive && dfLive.c.id, dfLive && dfLive.c.imgPrompt, imgModel, imgLoras, imgAdv]);
+  useEffect(() => {
+    if (!genOpen || genTab !== "Edit" || !dfLive) return;
+    const id = dfLive.c.id;
+    const instruction = (dfLive.c.editPrompt || "").trim();
+    if (!editSrcMid || !instruction) { setEditPrice((s) => ({ ...s, [id]: null })); return; }
+    setEditPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
+    let live = true;
+    const t = setTimeout(() => {
+      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "edit", source: editSrcMid, instruction, edit_model: "edit-pro" }) })
+        .then((r) => r.json()).then((pr) => { if (live) setEditPrice((s) => ({ ...s, [id]: { loading: false, pr } })); })
+        .catch(() => { if (live) setEditPrice((s) => ({ ...s, [id]: { loading: false, pr: null } })); });
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+  }, [genOpen, genTab, dfLive && dfLive.c.id, dfLive && dfLive.c.editPrompt, editSrcMid]);
+  useEffect(() => {
+    if (!genOpen || genTab !== "Reference" || !dfLive) return;
+    const id = dfLive.c.id;
+    const prompt = (dfLive.c.refPrompt || "").trim();
+    if (!refMids.length || !prompt) { setRefPrice((s) => ({ ...s, [id]: null })); return; }
+    setRefPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
+    let live = true;
+    const t = setTimeout(() => {
+      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "edit", source: refMids[0], sources: refMids, instruction: prompt, edit_model: "reference-pro" }) })
+        .then((r) => r.json()).then((pr) => { if (live) setRefPrice((s) => ({ ...s, [id]: { loading: false, pr } })); })
+        .catch(() => { if (live) setRefPrice((s) => ({ ...s, [id]: { loading: false, pr: null } })); });
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [genOpen, genTab, dfLive && dfLive.c.id, dfLive && dfLive.c.refPrompt, refMidsKey]);
+  const priceLine = (priceState, id, noInputMsg) => {
+    const p = priceState[id];
+    if (!p) return noInputMsg;
+    if (p.loading) return "checking…";
+    const tally = p.pr ? tallyPrices([p.pr]) : null;
+    return tally ? formatCostEstimate(tally) : "—";
+  };
+  const priceTitle = (priceState, id) => {
+    const p = priceState[id];
+    const tally = p && p.pr ? tallyPrices([p.pr]) : null;
+    return tally ? costTooltip(tally) : "";
+  };
+
+  // ---- Fixer -- the seventh and FINAL increment (2026-08-03), closing the one disclosed gap
+  // left after the six increments below + the kebab-actions-sheet follow-up. A prior
+  // increment's own report deferred it, claiming Fixer's touch box-drawing had "zero
+  // reference implementation anywhere in this codebase" -- that claim was WRONG and has
+  // since been corrected: gallery/src/components/FixTab.jsx is the real, already-shipped
+  // Fixer for regular Gallery images, and its box-drawing already uses the exact same real
+  // technique (Pointer Events + getBoundingClientRect + DISPLAY-to-ORIGINAL-pixel scaling)
+  // already used successfully for the reel scrub (increment 1) and the trim handles/crop
+  // rectangle (increment 5) in THIS component. This screen ports FixTab.jsx's real, working
+  // approach verbatim -- same FIX_COLORS/FIX_MIN_PX/FIX_MAX_BOXES/scaleFixBoxes (this file's
+  // own local copy of editCore.js's constants, see that comment for why it's a copy and not
+  // an import), same paint()/onDown/onMove/onUp box math, same confirm-gated real submit
+  // through the real /api/fix endpoint (genFix, useGenerationPipeline) -- not a re-derived
+  // or lighter-weight version. Declared here, ahead of the Filter-compare block below, so
+  // every one of its own real /api/price calls (the debounced preview effect at the end of
+  // this block) stays OUT of that block's own "no fetch anywhere past this point" contract --
+  // Filter compare is genuinely free/offline and must stay that way; Fixer is a real, billed
+  // surface and must not be mistaken for part of it just because they share one sub-strip.
+  const [editSub, setEditSub] = useState("edit");   // 'edit' | 'fixer' | 'enhance' -- also read by Filter compare below (reached via the Enhance chip)
+  // Fixer's own box-drawing state -- 'face' | 'hand' (fixTag, matches the design's own
+  // fixKind default) and the boxes themselves, {x,y,w,h,tag} in DISPLAY pixels (the canvas's
+  // own coordinate space), scaled to ORIGINAL-image pixels only at submit/price time via
+  // scaleFixBoxes -- same DISPLAY-vs-ORIGINAL split FixTab.jsx's own header comment
+  // documents. Boxes reset whenever the source image changes (a new shot selected, or this
+  // shot's open frame replaced) -- a box drawn against one picture's pixel grid is meaningless
+  // (and potentially misleading) against a different one, so nothing here lets a stale box
+  // silently ride along onto a picture it was never drawn on.
+  const [fixTag, setFixTag] = useState("face");
+  const [fixBoxes, setFixBoxes] = useState([]);
+  const fixImgRef = useRef(null);
+  const fixCanvasRef = useRef(null);
+  const fixDragRef = useRef(null);
+  const [genFixPrice, setGenFixPrice] = useState({});   // cardId -> {loading, pr} -- read-only preview, see the other three price effects above
+  useEffect(() => {
+    setFixBoxes([]);
+  }, [dfLive && dfLive.c.id, dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId]);
+  // ---- the canvas: draw, paint, resize -- verbatim port of FixTab.jsx's own paint()/onDown/
+  // onMove/onUp, adapted only for this component's fixBoxes/fixTag/fixDragRef naming. Canvas
+  // dimensions track the rendered <img>'s own clientWidth/clientHeight every paint (matching
+  // FixTab.jsx exactly), so a box drawn here lives in the SAME pixel space the image is
+  // actually displayed in -- scaleFixBoxes() is what converts that to original-image pixels
+  // before it ever reaches the server.
+  const fixPaint = useCallback(() => {
+    const cvs = fixCanvasRef.current, img = fixImgRef.current;
+    if (!cvs || !img) return;
+    const w = img.clientWidth, h = img.clientHeight;
+    if (!w || !h) return;
+    if (cvs.width !== w || cvs.height !== h) { cvs.width = w; cvs.height = h; }
+    const ctx = cvs.getContext("2d");
+    ctx.clearRect(0, 0, w, h);
+    const draw = (b) => {
+      ctx.strokeStyle = FIX_COLORS[b.tag] || FIX_COLORS.face;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(b.x, b.y, b.w, b.h);
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.font = "11px system-ui";
+      ctx.fillText(b.tag, b.x + 3, b.y + 13);
+    };
+    fixBoxes.forEach(draw);
+    if (fixDragRef.current) draw({ ...fixDragRef.current, tag: fixTag });
+  }, [fixBoxes, fixTag]);
+  useEffect(() => { fixPaint(); }, [fixPaint]);
+  useEffect(() => {
+    const onResize = () => fixPaint();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [fixPaint]);
+  const fixRel = (e) => {
+    const r = fixCanvasRef.current.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+  // setPointerCapture on down -- NOT in FixTab.jsx (a desktop-mouse surface, where
+  // onPointerLeave alone is enough), but the SAME real mobile convention every other
+  // pointer-drag gesture in THIS component already uses (reel scrub's onReelDown, Review &
+  // trim's cropDragStart/trimInStart/trimOutStart/scrubStart, all above) -- a touch drag that
+  // leaves the canvas's own bounds needs capture to keep receiving move/up events, which a
+  // mouse drag on desktop does not. onPointerLeave is kept alongside it anyway, matching
+  // FixTab.jsx's own four-handler set exactly, as a harmless defensive fallback.
+  const fixDown = (e) => {
+    if (e.button !== 0 || !(dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId)) return;
+    const p = fixRel(e);
+    fixDragRef.current = { x: p.x, y: p.y, w: 0, h: 0, ox: p.x, oy: p.y };
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+  };
+  const fixMove = (e) => {
+    if (!fixDragRef.current) return;
+    const p = fixRel(e);
+    const d = fixDragRef.current;
+    fixDragRef.current = {
+      ...d,
+      x: Math.min(d.ox, p.x), y: Math.min(d.oy, p.y),
+      w: Math.abs(p.x - d.ox), h: Math.abs(p.y - d.oy),
+    };
+    fixPaint();
+  };
+  const fixUp = () => {
+    const d = fixDragRef.current;
+    fixDragRef.current = null;
+    if (!d) return;
+    // FixTab.jsx's own minimum: a stray tap is not a box.
+    if (d.w > FIX_MIN_PX && d.h > FIX_MIN_PX) {
+      if (fixBoxes.length >= FIX_MAX_BOXES) {
+        if (window.Toast) {
+          window.Toast.show({
+            kind: "err", title: "That's the limit",
+            msg: "A Fix carries at most " + FIX_MAX_BOXES + " boxes — the rest would be dropped server-side.",
+          });
+        }
+      } else {
+        setFixBoxes((old) => old.concat([{ x: d.x, y: d.y, w: d.w, h: d.h, tag: fixTag }]));
+      }
+    }
+    fixPaint();
+  };
+  // Debounced, read-only /api/price PREVIEW for the Fixer sub-tab -- same shape/convention
+  // as imgPrice/editPrice/refPrice above (this screen's OWN informational cache, distinct
+  // from genFix's own fresh, must-be-current price check right before its real confirm
+  // dialog). mode:"fix" always comes back free:false (server-forced -- see
+  // moonglade_gallery.py's _params_and_nocard), so this line can never show "free", matching
+  // FixTab.jsx's own cost badge, which never offers a card-label for the same reason.
+  useEffect(() => {
+    if (!genOpen || genTab !== "Edit" || editSub !== "fixer" || !dfLive) return;
+    const id = dfLive.c.id;
+    const src = dfLive.c.openFrame && dfLive.c.openFrame.mediaId;
+    if (!src || !fixBoxes.length) { setGenFixPrice((s) => ({ ...s, [id]: null })); return; }
+    setGenFixPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
+    let live = true;
+    const t = setTimeout(() => {
+      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) }) })
+        .then((r) => r.json()).then((pr) => { if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr } })); })
+        .catch(() => { if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr: null } })); });
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [genOpen, genTab, editSub, dfLive && dfLive.c.id, dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId, fixBoxes]);
+
+  // ---- Filter compare -- sixth and FINAL increment (2026-08-03), per the locked design's
+  // own filterCompareOpen/fcStrength/fcAngle state (Loom Mobile.dc.html: search
+  // "filterCompareOpen", "fcSkinFilters", "fcPixaiFilters", "fcStrength", "fcAngle",
+  // "fcClear", "fcSaveLibrary", "FILTER_SETS" -- its own internal screen title is "Art
+  // filters"). Reached from the SAME place the design puts it: Generate's Edit tab gets its
+  // own Edit/Fixer/Enhance sub-strip above (editSub), and Enhance's "Open filters" button
+  // opens this screen -- confirmed against the design (editSubChips: Edit/Fixer/Enhance,
+  // editSubIsEnhance's own openFilterCompare button) AND independently against the real,
+  // already-shipped gallery/src/components/GenerateDrawer.jsx, which carries the EXACT SAME
+  // real, current Edit/Fixer/Enhance sub-tab strip (its own mgdock-subtabs; "Enhance" /
+  // "Art filters — free, in your browser") wired to gallery/src/components/FiltersPanel.jsx's
+  // ArtFiltersPanel. Two independent real sources agreeing is why this is placement, not a
+  // guess.
+  //
+  // filter/filterStrength/filterAngle are NOT in newCard() -- same "optional field, sensible
+  // fallback" convention Review & trim's own `c.crop || {...}` already established in this
+  // file (crop isn't in newCard() either): nothing needed to change in the card's base
+  // shape, a shot simply has no filter until one is genuinely Saved (below).
+  const [fcOpen, setFcOpen] = useState(false);
+  const [fcActive, setFcActive] = useState(null);     // candidate filter id, or null
+  const [fcStrength, setFcStrength] = useState(1);
+  const [fcAngle, setFcAngle] = useState(180);
+  const fcStageRef = useRef(null);
+  const fcImgRef = useRef(null);
+
+  // Opening seeds the candidate from whatever is ALREADY SAVED on the real card, so
+  // reopening shows the persisted choice rather than a blank slate. Reuses dfLive directly
+  // (no separate "which shot" id) -- this can only ever be called from the Enhance sub-tab
+  // inside Generate, which only renders while genOpen && dfOpen are both true, so dfLive is
+  // already guaranteed live at the point this fires (same reasoning genOpen's own JSX
+  // already relies on, unlike reviewOpen's separate entries.find() -- Review opens straight
+  // off the board with no dfOpen underneath it to guarantee a live shot).
+  const openFilterCompare = () => {
+    if (!dfLive) return;
+    setFcActive(dfLive.c.filter || null);
+    setFcStrength(dfLive.c.filterStrength != null ? dfLive.c.filterStrength : 1);
+    setFcAngle(dfLive.c.filterAngle != null ? dfLive.c.filterAngle : 180);
+    setFcOpen(true);
+  };
+  // A plain cancel: closes without writing anything. This is the one place this screen's
+  // real behavior can't match the design's own closeFilterCompare verbatim -- the mock never
+  // actually persisted filter/filterStrength/filterAngle anywhere else, so its
+  // closeFilterCompare and fcSaveLibrary do the literal same thing (setState + close). Here
+  // Save genuinely writes to the card (below) and Close/back genuinely does not, so an
+  // unsaved filter pick can be backed out of just by closing. Disclosed adaptation, not a
+  // silent difference.
+  const closeFilterCompare = () => setFcOpen(false);
+  // "No filter" -- genuinely, immediately removes any SAVED filter (not just the
+  // in-progress candidate), matching the task's own "should genuinely remove it": a clear is
+  // a real, one-tap undo, not a pending edit that would be lost by tapping Close instead of
+  // Save.
+  const fcClear = () => { setFcActive(null); dfPatch((cc) => ({ ...cc, filter: null })); };
+  // Save -- genuinely persists the candidate onto the real card via the SAME dfPatch/setCard
+  // mutation every other Shot Detail/Generate field already writes through. No new endpoint,
+  // no network call, no spend: filter/filterStrength/filterAngle become plain card fields,
+  // read back by openFilterCompare (above) and the preview effect (below) like any other.
+  const fcSave = () => {
+    dfPatch((cc) => ({ ...cc, filter: fcActive, filterStrength: fcStrength, filterAngle: fcAngle }));
+    setFcOpen(false);
+  };
+  // Live preview -- genuinely composites via the real AF.applyPreview/clearPreview (CSS
+  // overlay divs + mix-blend-mode, exactly mg-art-filters.js's own documented approach), not
+  // a fake color swatch. Re-runs on every strength/angle change so both sliders visibly
+  // affect the SAME real overlay while dragging.
+  useEffect(() => {
+    if (!fcOpen || !AF || !fcStageRef.current) return;
+    const host = fcStageRef.current;
+    AF.clearPreview(host);
+    if (fcActive) AF.applyPreview(host, fcActive, { strength: fcStrength, angle: fcAngle });
+    return () => { AF.clearPreview(host); };
+  }, [fcOpen, fcActive, fcStrength, fcAngle, AF]);
+
+  return (
+    <div className="lm-root">
+      <style>{LOOM_MOBILE_STYLES}</style>
+      <div className="lm-top">
+        <a className="lm-back" href="/">&larr; Gallery</a>
+        <span className="lm-fill" />
+        <span className="lm-title">&#9642; The Loom</span>
+        <span className="lm-fill" />
+        <label className={"lm-chip" + (project.draft ? " on" : "")}
+          title="Draft mode renders every shot at the cheaper 'basic' quality — block out the animatic, then turn Draft off and re-generate the keepers at pro quality">
+          <input type="checkbox" checked={!!project.draft} onChange={(e) => setDraft(e.target.checked)} />&#9889; Draft</label>
+        {/* Not in the locked design (which only shows back-link/title/Draft here) -- added
+            because the design's own mobile screen has no return path to LoomV2 at all, and
+            without one this toggle would be a one-way trap: flip to Mobile view and the
+            .lv-top bar that carries the ONLY other instance of this switch stops rendering.
+            A real, bidirectional owner-preference switch needs an exit on both sides. */}
+        <button type="button" className="lm-chip" onClick={() => setMobileUI(false)}
+          title="Switch back to the full desktop-style Loom">&#128421; Desktop</button>
+      </div>
+
+      <div className="lm-reelwrap">
+        <div className="lm-reelbar"
+          onPointerDown={onReelDown} onPointerMove={onReelMove} onPointerUp={onReelUp} onPointerLeave={onReelLeave}>
+          {entries.map((x) => (
+            <div key={x.c.id} className={"lm-seg " + statusOf(x.c) + (x.c.id === selShot ? " sel" : "")}
+              style={{ flex: `${durOf(x.c) || 1} 1 0` }} />
+          ))}
+        </div>
+        {total > 0 && <div className="lm-tick" style={posStyle(tickFrac)} />}
+        {scrubbing && <div className="lm-scrubline" style={posStyle(scrubFrac)} />}
+        {handleFrac != null && <div className="lm-handle" style={posStyle(handleFrac)} />}
+        {scrubbing && scrubEntry && (
+          <div className="lm-preview" style={{ left: `clamp(8px, calc(${(scrubFrac * 100).toFixed(3)}% - 86px), calc(100% - 8px - 172px))` }}>
+            <div className="lm-prevthumb" style={cardThumb(scrubEntry.c) ? { backgroundImage: `url(${cardThumb(scrubEntry.c)})` } : undefined} />
+            <div className="lm-prevcol">
+              <div className="lm-prevcode">{scrubEntry.code}</div>
+              <div className="lm-prevtitle">{scrubEntry.c.title || "untitled"}</div>
+              <div className="lm-prevmeta">{scrubEntry.c.mode} &middot; {durOf(scrubEntry.c)}s</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="lm-body">
+        {project.acts.map((act, ai) => {
+          const items = entries.filter((e) => e.ai === ai);
+          return (
+            <div key={act.id}>
+              <div className="lm-acthead">
+                <span className="lm-actname">{act.name}</span>
+                <span className="lm-actcount">{items.length} shot{items.length === 1 ? "" : "s"}</span>
+                <span className="lm-fill" />
+                <button type="button" className="lm-addshot" onClick={() => addCard(act.id)}>+ Shot</button>
+              </div>
+              {items.map((e) => {
+                const st = statusOf(e.c);
+                const gs = genState[e.c.id];
+                const miss = castMissingImages(e, project, imgSrc);
+                const thumb = cardThumb(e.c);
+                // canReview mirrors the locked design's own `canReview: c.st === 'done'`
+                // (Loom Mobile.dc.html), narrowed to also require a real resultMid -- "done"
+                // and "has a real rendered clip to review" are supposed to always coincide
+                // (every status:"done" write in this file also writes resultMid in the same
+                // patch), but this stays a real, defensive AND rather than trusting that
+                // invariant silently. Reuses `st` (statusOf(e.c)), already computed above for
+                // the status pill -- one statusOf() call, not a second copy.
+                const canReview = st === "done" && !!e.c.resultMid;
+                return (
+                  <div key={e.c.id} className="lm-cardrow">
+                    <button type="button" className={"lm-card" + (e.c.id === selShot ? " sel" : "")}
+                      onClick={() => { setSelShot(e.c.id); setDfOpen(true); }}
+                      title="Open this shot — it binds to Generate">
+                      <div className="lm-thumb" style={thumb ? { backgroundImage: `url(${thumb})` } : undefined}>
+                        {!thumb && e.c.mode}
+                      </div>
+                      <div className="lm-textcol">
+                        <div className="lm-titlerow">
+                          <span className="lm-code">{e.code}</span>
+                          <span className="lm-cardtitle">{e.c.title || "untitled"}</span>
+                        </div>
+                        <div className="lm-pillrow">
+                          <span className="lm-modepill">{e.c.mode}</span>
+                          <span className="lm-durpill">{durOf(e.c)}s</span>
+                          <span className={"lm-stpill " + st}>{gs && gs.msg ? gs.msg : st}</span>
+                          {miss.length > 0 && (
+                            <span className="lm-warn" title={`No picture on this shot for ${miss.join(", ")} — they are cast here but cannot be referenced, so they are left out of the prompt.`}>
+                              &#9888; {miss.length === 1 ? `${miss[0]}: no image` : `${miss.length} cast: no image`}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                    {/* Review & trim's own board affordance -- the locked design's ▶ badge,
+                        overlaid on the thumbnail as a SIBLING of .lm-card (never nested inside
+                        it: .lm-card is a real <button>, and a <button> inside a <button> is
+                        invalid HTML/nesting) rather than the design's own plain-div-inside-
+                        plain-div layering, which had no such constraint. Positioned via
+                        .lm-cardrow{position:relative} + absolute placement so tapping the
+                        thumbnail specifically opens Review while the rest of the card still
+                        opens Shot Detail via the real button beneath it. */}
+                    {canReview && (
+                      <button type="button" className="lm-reviewbadge"
+                        title="Review & trim this shot's rendered clip"
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          setSelShot(e.c.id); setReviewOpen(true);
+                          setReviewCropping(false); setReviewPlaying(false);
+                          setReviewDur(0); setReviewCur(0);
+                        }}>▶</button>
+                    )}
+                    {/* Kebab actions sheet (completeness pass, 2026-08-03) -- the locked
+                        design's own card.onKebab (Loom Mobile.dc.html), never wired into this
+                        board before now. A plain flex sibling in .lm-cardrow, NOT absolutely
+                        overlaid like the ▶ badge above -- the design's own kebabStyle is an
+                        ordinary in-flow flex item at the end of the row, not a positioned
+                        overlay, and .lm-cardrow's existing display:flex already lays it out
+                        that way with no extra CSS needed. Also a real sibling <button>, for
+                        the same "no <button> inside .lm-card" reason as the ▶ badge. */}
+                    <button type="button" className="lm-kebab" title="More actions for this shot"
+                      onClick={(ev) => { ev.stopPropagation(); setSelShot(e.c.id); setActionsOpen(true); }}>&#8942;</button>
+                  </div>
+                );
+              })}
+              {!items.length && <div className="lm-empty">No shots yet — tap + Shot.</div>}
+            </div>
+          );
+        })}
+        <button type="button" className="lm-addact" onClick={addAct}>+ New act</button>
+        {!project.acts.length && <div className="lm-empty">No acts yet — add one below.</div>}
+      </div>
+
+      {/* Kebab actions sheet (completeness pass, 2026-08-03) -- Move up / Move down /
+          Duplicate / Delete / Cancel, per the locked design's own actionsOpen/actMoveUp/
+          actMoveDown/actDuplicate/actDelete (Loom Mobile.dc.html). A top-level conditional
+          (like dfOpen/reviewOpen/genOpen below), not nested inside the board map above --
+          it can open from ANY card, board-wide, same as the design's own single shared sheet.
+          moveCard/dupCard/delCard are the exact same real mutators LoomV2's own board-card
+          buttons call (useShotMutations) -- no forked move/duplicate/delete logic. */}
+      {actionsOpen && actionsLive && (
+        <>
+          <div className={"lm-scrim" + (actionsClosing ? " closing" : "")} onClick={closeActions} />
+          <div className={"lm-sheet" + (actionsClosing ? " closing" : "")}>
+            <div className="lm-sheethandle" />
+            <button type="button" className="lm-actionrow"
+              onClick={() => { moveCard(actionsLive.a.id, actionsLive.ci, -1); closeActions(); }}>&#8593; Move up</button>
+            <button type="button" className="lm-actionrow"
+              onClick={() => { moveCard(actionsLive.a.id, actionsLive.ci, 1); closeActions(); }}>&#8595; Move down</button>
+            <button type="button" className="lm-actionrow"
+              onClick={() => { dupCard(actionsLive.a.id, actionsLive.c); closeActions(); }}>&#10697; Duplicate</button>
+            {/* Confirmed, exactly like LoomV2's own real ✕ button -- same window.confirm gate,
+                same message text, ported unmodified rather than dropped for mobile. Only
+                closes the sheet once the delete actually happens; cancelling the confirm
+                leaves the sheet open with nothing changed. */}
+            <button type="button" className="lm-actionrow danger"
+              onClick={() => {
+                if (!window.confirm(`Delete shot ${actionsLive.code}${actionsLive.c.title ? ` — "${actionsLive.c.title}"` : ""}? This can't be undone.`)) return;
+                delCard(actionsLive.a.id, actionsLive.c);
+                closeActions();
+              }}>&#128465; Delete</button>
+            <button type="button" className="lm-sheetclose" onClick={closeActions}>Cancel</button>
+          </div>
+        </>
+      )}
+
+      {dfOpen && dfLive && (() => {
+        const c = dfLive.c;
+        return (
+          <div className="lm-df">
+            <div className="lm-df-top">
+              <button type="button" className={"lm-df-st lm-stpill " + statusOf(c)}
+                title={`Status: ${statusOf(c)} — tap to cycle`}
+                onClick={() => dfPatch((cc) => ({ ...cc, status: cc.status === "todo" ? "wip" : cc.status === "wip" ? "done" : "todo" }))}>
+                {statusOf(c)}
+              </button>
+              <span className="lm-code">{dfLive.code}</span>
+              <input className="lm-df-title" value={c.title || ""} placeholder="untitled"
+                onChange={(ev) => dfPatch((cc) => ({ ...cc, title: ev.target.value }))} />
+              <button type="button" className="lm-df-cast" onClick={() => setCastSheetOpen(true)}
+                title="Cast & assets bound to this shot">
+                &#128101; {(c.cast || []).length}
+              </button>
+              <button type="button" className="lm-df-close" title="Close" onClick={() => setDfOpen(false)}>&#10005;</button>
+            </div>
+            <div className="lm-df-body">
+              <span className="lm-microlab">Mode</span>
+              <div className="lm-modechips">
+                {MODES.map((m) => (
+                  <button type="button" key={m} className={"lm-modechip" + (m === c.mode ? " on" : "")}
+                    onClick={() => dfPatch((cc) => setShotMode(cc, m))}>{m}</button>
+                ))}
+              </div>
+              <div className="lm-row2">
+                <div className="lm-col">
+                  <span className="lm-microlab">Duration (s)</span>
+                  <input className="lm-in" type="number" min="1" value={c.duration}
+                    onChange={(ev) => dfPatch((cc) => ({ ...cc, duration: Number(ev.target.value) || 1 }))} />
+                </div>
+                <div className="lm-col">
+                  <span className="lm-microlab">Discreet</span>
+                  <label className="lm-check">
+                    <input type="checkbox" checked={!!c.discreet}
+                      onChange={(ev) => dfPatch((cc) => ({ ...cc, discreet: ev.target.checked }))} />blur previews</label>
+                </div>
+              </div>
+              <span className="lm-microlab">Prompt</span>
+              <textarea className="lm-ta" value={c.prompt || ""} placeholder="what happens in this shot"
+                onChange={(ev) => dfPatch((cc) => ({ ...clearPromptOverride(cc), prompt: ev.target.value }))} />
+              <div className="lm-hint">the shot's base prompt &mdash; Camera, Lighting and cast are woven in on top when it generates</div>
+
+              <div className="lm-frow">
+                <div className="lm-fcol">
+                  <FrameSlot which="open" frame={c.openFrame} liveTag={positionTag(dfLive, project, imgSrc, "openFrame")}
+                    discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                    onPatch={(p) => dfPatchFrame("openFrame", p)}
+                    extraBtn={dfPrevEntry ? (
+                      <button type="button" className="lm-inheritbtn" onClick={dfInheritPrev} disabled={dfHandoff === "wip"}>
+                        {dfHandoff === "wip" ? "✂ splicing…" : dfHandoff === "err" ? "✂ splice failed — retry"
+                          : dfPrevEntry.c.resultMid ? `✂ splice ${dfPrevEntry.code}'s last frame` : `↳ inherit ${dfPrevEntry.code} close`}
+                      </button>
+                    ) : null} />
+                </div>
+                <div className="lm-fcol">
+                  <FrameSlot which="close" frame={c.closeFrame} liveTag={positionTag(dfLive, project, imgSrc, "closeFrame")}
+                    discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                    onPatch={(p) => dfPatchFrame("closeFrame", p)} />
+                </div>
+              </div>
+
+              <span className="lm-microlab" style={{ marginTop: 16 }}>Other references &amp; @tags</span>
+              {c.refs.map((r) => {
+                const preview = r.thumbId ? thumbs[r.thumbId] : (r.kind === "image" && r.source.startsWith("http") ? r.source : null);
+                // Image refs only -- @videoN/@audioN are their own namespaces, never
+                // renumbered by position (see loom-core.js's shotText video-ref comment and
+                // LoomV2's identical rule on its own ref rows).
+                const refLiveTag = r.kind === "image" ? positionTag(dfLive, project, imgSrc, r.id) : null;
+                const refPastBudget = r.kind === "image" && !refLiveTag && !!resolvedImage(r, imgSrc);
+                return (
+                  <div className="lm-refrow" key={r.id}>
+                    {r.kind === "image" ? (
+                      <label className="lm-refprev" title="Attach image">
+                        {preview ? <img src={preview} alt={r.tag} /> : "＋"}
+                        <input type="file" accept="image/*" style={{ display: "none" }}
+                          onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const id = await storeThumb(f); setRef(dfLive.a.id, c.id, r.id, { thumbId: id, source: r.source || f.name }); }} />
+                      </label>
+                    ) : <div className="lm-refprev">{r.kind === "video" ? "🎞" : "♪"}</div>}
+                    <div className="lm-refbody">
+                      <div className="lm-reftoprow">
+                        <input className="lm-reftag" value={r.tag} onChange={(e) => setRef(dfLive.a.id, c.id, r.id, { tag: e.target.value })} />
+                        {r.kind === "image" && (
+                          <span className={"lm-castlive" + (refPastBudget ? " oob" : "")}
+                            title={liveTagTitle(refLiveTag, refPastBudget, c.mode, dfLive.code)}>
+                            {liveTagText(refLiveTag, refPastBudget, c.mode)}
+                          </span>
+                        )}
+                        <span className="lm-refkind">{r.kind}</span>
+                        <button type="button" className="lm-refx" onClick={() => delRef(dfLive.a.id, c.id, r)}>&#10005;</button>
+                      </div>
+                      <input className="lm-in" placeholder="what to use it for (motion / camera / mood…)" value={r.role}
+                        onChange={(e) => setRef(dfLive.a.id, c.id, r.id, { role: e.target.value })} />
+                      <input className="lm-in" placeholder="file name or URL" value={r.source}
+                        onChange={(e) => setRef(dfLive.a.id, c.id, r.id, { source: e.target.value })} />
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="lm-addrefrow">
+                <button type="button" className="lm-addrefbtn" onClick={() => addRef(dfLive.a.id, c, "image")}>+ Image</button>
+                <button type="button" className="lm-addrefbtn" onClick={() => addRef(dfLive.a.id, c, "video")}>+ Video</button>
+                <button type="button" className="lm-addrefbtn" onClick={() => addRef(dfLive.a.id, c, "audio")}>+ Audio</button>
+              </div>
+
+              <span className="lm-microlab">Music / audio cue</span>
+              <input className="lm-in" value={c.audioCue} placeholder="track, beat sync, room tone…"
+                onChange={(ev) => dfPatch((cc) => ({ ...cc, audioCue: ev.target.value }))} />
+
+              <span className="lm-microlab">Notes</span>
+              <textarea className="lm-ta" value={c.notes} placeholder="blocking, continuity reminders…"
+                onChange={(ev) => dfPatch((cc) => ({ ...cc, notes: ev.target.value }))} />
+
+              <button type="button" className="lm-copybtn" onClick={() => copyShot(dfLive)}>Copy shot</button>
+              <button type="button" className="lm-genbtn" onClick={() => setGenOpen(true)}>Select in Generate &rarr;</button>
+            </div>
+
+            {castSheetOpen && (
+              <>
+                <div className={"lm-scrim" + (castSheetClosing ? " closing" : "")} onClick={closeCastSheet} />
+                <div className={"lm-sheet" + (castSheetClosing ? " closing" : "")}>
+                  <div className="lm-sheethandle" />
+                  <div className="lm-tabsrow">
+                    <button type="button" className={"lm-tabbtn" + (castSheetTab === "cast" ? " on" : "")}
+                      onClick={() => setCastSheetTab("cast")}>Cast &amp; assets</button>
+                    <button type="button" className={"lm-tabbtn" + (castSheetTab === "footage" ? " on" : "")}
+                      onClick={() => setCastSheetTab("footage")}>Footage</button>
+                  </div>
+                  {castSheetTab === "cast" ? (
+                    <>
+                      {!modeSendsRefs(c.mode) ? (
+                        <div className="lm-i2vnote">{modeSendsLine(c.mode)}</div>
+                      ) : castBudget ? (
+                        <div className="lm-budget">
+                          <span className={castBudget.used > castBudget.budget ? "lm-budget-over" : undefined}>
+                            {castBudget.used} of {castBudget.budget} reference slot{castBudget.budget === 1 ? "" : "s"} used
+                          </span>
+                          {castBudget.frames ? <span> &middot; {castBudget.frames} of 6 held by attached frame{castBudget.frames === 1 ? "" : "s"}</span> : null}
+                        </div>
+                      ) : null}
+                      {(project.assets || []).map((as) => {
+                        const inShot = (c.cast || []).includes(as.id);
+                        const src = frameSrc(as);
+                        const missing = as.kind === "image" && !resolvedImage(as, imgSrc);
+                        const liveTag = inShot && as.kind === "image" ? positionTag(dfLive, project, imgSrc, as.id) : null;
+                        const pastBudget = inShot && as.kind === "image" && !liveTag && !!resolvedImage(as, imgSrc);
+                        return (
+                          <button type="button" key={as.id} className="lm-castrow"
+                            onClick={() => dfPatch((cc) => ({ ...cc, cast: (cc.cast || []).includes(as.id) ? cc.cast.filter((x) => x !== as.id) : [...(cc.cast || []), as.id] }))}>
+                            <span className={"lm-castbox" + (inShot ? " on" : "")} />
+                            <div className="lm-castthumb" style={src ? { backgroundImage: `url(${src})` } : undefined}>
+                              {!src && (as.kind === "audio" ? "♪" : as.kind === "video" ? "🎞" : "🖼")}
+                            </div>
+                            <div className="lm-castcol">
+                              <div className="lm-castname">{as.name || as.kind}</div>
+                              <div className="lm-casttag">{as.tag}</div>
+                            </div>
+                            {missing && <span className="lm-castmissing">missing</span>}
+                            {liveTag || pastBudget ? (
+                              <span className={"lm-castlive" + (pastBudget ? " oob" : "")}>{liveTagText(liveTag, pastBudget, c.mode)}</span>
+                            ) : null}
+                            {!!as.lock && <span className="lm-castlock" title="Lock appearance">&#128274;</span>}
+                          </button>
+                        );
+                      })}
+                      {!(project.assets || []).length && <div className="lm-empty">No cast yet.</div>}
+                      <div className="lm-castaddrow">
+                        <button type="button" className="lm-addrefbtn"
+                          onClick={() => setAssets((a) => [...a, { id: uid(), name: "New reference", kind: "image", tag: nextTag(a, "@image"), thumbId: "", source: "", lock: false }])}>
+                          + Image ref</button>
+                        <button type="button" className="lm-addrefbtn"
+                          onClick={() => setAssets((a) => [...a, { id: uid(), name: "New audio", kind: "audio", tag: nextTag(a, "@audio"), thumbId: "", source: "", lock: false }])}>
+                          + Audio ref</button>
+                      </div>
+                    </>
+                  ) : (
+                    finishedShots.length ? (
+                      <div className="lm-footagegrid">
+                        {finishedShots.map((e) => (
+                          <div key={e.c.id} className="lm-fclip" onClick={() => { dfPickFootage(e.c.resultMid, e.code); closeCastSheet(); }}>
+                            <img src={"/thumbs/" + e.c.resultMid + ".jpg"} alt="" />
+                            <div className="lm-fclipmeta"><b>{e.code}</b><span>{durOf(e.c)}s</span></div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : <div className="lm-empty">no rendered shots yet</div>
+                  )}
+                  <button type="button" className="lm-sheetclose" onClick={closeCastSheet}>Done</button>
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ---- Generate -- third increment (2026-08-03). Real submit, real cost preview, real
+          generation-state tracking; see the increment's own report for the full credit-safety
+          trace (why toggling Mobile view, closing this screen, closing Shot Detail, and
+          navigating the board can never orphan an in-flight generation here). Deliberately a
+          SEPARATE top-level conditional from the dfOpen block above, not nested inside it --
+          genOpen/dfOpen are independent booleans (closing Generate returns to Shot Detail;
+          closing Shot Detail's own ✕ closes both), matching the locked design's own
+          openGenerate/closeGenerate/backToShot split. */}
+      {genOpen && dfLive && (() => {
+        const c = dfLive.c;
+        const gp = genPrice[c.id] || {};
+        // tallyPrices/formatCostEstimate/costTooltip (loom-core.js) reused VERBATIM on a
+        // one-element array -- the exact same aggregate math every other price display in
+        // this file already trusts, not a new formatter invented for this screen.
+        const tally = gp.pr ? tallyPrices([gp.pr]) : null;
+        const costText = gp.noInput ? "attach a frame or cast image first"
+          : gp.loading ? "checking…"
+          : tally ? formatCostEstimate(tally) : "—";
+        const costTitle = tally ? costTooltip(tally) : "";
+        // genBusy mirrors LoomV2's own `busy` guard on its "Use an existing video instead"
+        // button exactly (see LoomV2's gen block) -- "paused" does NOT count as busy (the
+        // auto-poll has genuinely stopped, so a manual attach/re-submit isn't racing a live
+        // network call).
+        const gsSelf = genState[c.id];
+        const genBusy = !!(gsSelf && gsSelf.phase && gsSelf.phase !== "done" && gsSelf.phase !== "error" && gsSelf.phase !== "paused");
+        // usesCloseFrame (loom-core.js): I2V consumes only the opening frame; FLF/R2V/V2V
+        // all reserve a closing-frame slot when one resolves -- the SAME predicate
+        // shotImageRefs()/the Cast sheet's own modeSendsRefs already gate on, not a second,
+        // independently-guessed mode table.
+        const showClose = usesCloseFrame(c.mode);
+        return (
+          <div className="lm-gen">
+            <div className="lm-gen-top">
+              <button type="button" className="lm-gen-back" onClick={() => setGenOpen(false)}>&lsaquo; {dfLive.code}</button>
+              <span className="lm-gen-title">{c.title || "untitled"}</span>
+              <button type="button" className="lm-df-close" title="Close" onClick={() => { setGenOpen(false); setDfOpen(false); }}>&#10005;</button>
+            </div>
+            {/* Image/Edit/Reference/Video tab strip -- fourth increment. Mirrors LoomV2's own
+                GEN_ICONS rail (same four tabs, same order, same "Video" default); reuses the
+                Cast & assets sheet's own .lm-tabsrow/.lm-tabbtn chrome rather than inventing a
+                new segmented-control style for a second time in this file. */}
+            <div className="lm-tabsrow" style={{ margin: "0 16px 8px" }}>
+              {["Image", "Edit", "Reference", "Video"].map((t) => (
+                <button type="button" key={t} className={"lm-tabbtn" + (genTab === t ? " on" : "")}
+                  onClick={() => setGenTab(t)}>{t}</button>
+              ))}
+            </div>
+            {acct && (
+              <div className="lm-bal" style={{ margin: "0 16px 8px" }}>
+                &#9889; {acct.credits == null ? "—" : acct.credits} credits &middot; {acct.cards || 0} card{acct.cards === 1 ? "" : "s"}
+                {acct.claim_credits ? <span style={{ color: "var(--gold)" }}> &middot; +{acct.claim_credits} claimable</span> : null}
+              </div>
+            )}
+            <div className="lm-gen-body">
+            {genTab === "Image" && (() => {
+              const gi = genImgState[c.id] || {};
+              const busyI = gi.phase === "submitting" || gi.phase === "running";
+              const compat = (imgModel && imgModel.compatibility) || {};
+              const restr = (imgModel && imgModel.restrictions) || {};
+              const negOff = compat.negativePrompt === false;
+              const stepsOff = compat.samplingSteps === false;
+              const cfgOff = compat.cfgScale === false;
+              const stepsB = restr.samplingSteps || {};
+              const cfgB = restr.cfgScale || {};
+              const offTitle = "This model doesn’t use this setting";
+              return (
+                <>
+                  <span className="lm-microlab">Model</span>
+                  <button type="button" className="lm-selrow" onClick={() => { setPickerKind("base"); setPickerOpen(true); }}>
+                    {imgModel && imgModel.preview_url ? <img className="lm-selthumb" src={imgModel.preview_url} alt="" /> : null}
+                    <span className="lm-selname">{imgModel ? imgModel.title : "none — browse models"}</span>
+                    <span className="lm-selhint">&#9776; browse</span>
+                  </button>
+                  {imgModel && (imgModel.sampling_method || (imgModel.capabilities || []).length > 0) && (
+                    <div className="lm-caps">
+                      {imgModel.sampling_method ? <span className="lm-cap method">{imgModel.sampling_method}</span> : null}
+                      {(imgModel.capabilities || []).map((cp) => <span key={cp} className="lm-cap">{cp}</span>)}
+                    </div>
+                  )}
+                  {imgModel && imgModel.versions && imgModel.versions.length > 1 && (
+                    <select className="lm-gensel" value={imgModel.version_id || ""} onChange={(ev) => pickVersion(ev.target.value)}
+                      title="This model's published releases -- PixAI defaults to the latest; pick another to generate against it instead" aria-label="Model version">
+                      {imgModel.versions.map((v) => <option key={v.version_id} value={v.version_id}>{v.label || v.version_id}</option>)}
+                    </select>
+                  )}
+                  {imgLoras.length > 0 && (
+                    <div className="lm-loras">
+                      {imgLoras.map((l) => {
+                        const incompat = loraIncompat(imgModel && imgModel.model_type, l.lora_base_type);
+                        return (
+                          <div key={l.model_id} className={"lm-lchip" + ((l.failed || incompat) ? " failed" : "")}>
+                            <span className="lm-lnm" title={incompat ? l.title + " — needs a different base architecture than the one selected; remove it or switch the base" : l.title}>
+                              {l.title}{!l.version_id ? (l.failed ? " ⚠" : " ⏳") : (incompat ? " ⚠" : "")}
+                            </span>
+                            <span className="lm-lw">
+                              <input type="range" step="0.1" min={loraRange[0]} max={loraRange[1]} value={l.weight}
+                                title={"Weight — " + loraRange[0] + " to " + loraRange[1] + " for this base model"}
+                                onChange={(ev) => { const w = Math.max(loraRange[0], Math.min(loraRange[1], +ev.target.value || 0));
+                                  setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x)); }} />
+                              <b>{(+l.weight).toFixed(1)}</b>
+                            </span>
+                            <button type="button" className="lm-lrm" title="Remove"
+                              onClick={() => {
+                                setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id));
+                              }}>&times;</button>
+                            {l.versions && l.versions.length > 1 && (
+                              <select className="lm-lorver" value={l.version_id || ""}
+                                onChange={(ev) => {
+                                  const vid = ev.target.value;
+                                  const v = l.versions.find((x) => x.version_id === vid);
+                                  if (!v) return;
+                                  setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id
+                                    ? { ...x, version_id: v.version_id || "", lora_base_type: v.lora_base_model_type || "",
+                                        trigger_words: v.trigger_words || "", failed: !v.version_id }
+                                    : x));
+                                }}>
+                                {l.versions.map((v) => <option key={v.version_id} value={v.version_id}>{v.label || v.version_id}</option>)}
+                              </select>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <button type="button" className="lm-addrefbtn" style={{ marginTop: 6 }}
+                    onClick={() => { setPickerKind("lora"); setPickerOpen(true); }}>+ add LoRA</button>
+                  {acct && acct.lora_cap != null && (
+                    <span className="lm-hint" style={{ marginLeft: 8 }}>{imgLoras.length} / {acct.lora_cap} LoRAs</span>
+                  )}
+                  <span className="lm-microlab" style={{ marginTop: 12 }}>Image prompt</span>
+                  <textarea className="lm-ta" value={c.imgPrompt || ""} placeholder="describe the reference still (subject, pose, composition, light)…"
+                    onChange={(ev) => dfPatch((cc) => ({ ...cc, imgPrompt: ev.target.value }))} />
+                  <button type="button" className="lm-mini2-btn" onClick={() => dfPatch((cc) => ({ ...cc, imgPrompt: [cc.title, cc.prompt, (cc.openFrame && cc.openFrame.desc) || "", cc.lighting || ""].filter(Boolean).join(", ") }))}>
+                    &#8615; seed from shot description</button>
+                  <details style={{ marginTop: 10 }}>
+                    <summary className="lm-hint" style={{ cursor: "pointer" }}>Advanced</summary>
+                    <textarea className="lm-ta" style={{ marginTop: 6 }} value={imgAdv.negative}
+                      placeholder="lowres, text, watermark…" disabled={negOff} title={negOff ? offTitle : ""}
+                      onChange={(ev) => setImgAdv((a) => ({ ...a, negative: ev.target.value }))} />
+                    <div className="lm-row2">
+                      <div className="lm-col"><span className="lm-microlab">Steps</span>
+                        <input className="lm-in" type="number" min={stepsB.min != null ? stepsB.min : 1} max={stepsB.max != null ? stepsB.max : 150} step="1"
+                          value={imgAdv.steps} disabled={stepsOff} title={stepsOff ? offTitle : ""}
+                          onChange={(ev) => setImgAdv((a) => ({ ...a, steps: +ev.target.value || 25 }))} /></div>
+                      <div className="lm-col"><span className="lm-microlab">CFG scale</span>
+                        <input className="lm-in" type="number" min={cfgB.min != null ? cfgB.min : 1} max={cfgB.max != null ? cfgB.max : 30} step="0.5"
+                          value={imgAdv.cfg} disabled={cfgOff} title={cfgOff ? offTitle : ""}
+                          onChange={(ev) => setImgAdv((a) => ({ ...a, cfg: +ev.target.value || 7 }))} /></div>
+                    </div>
+                    {modelDefaults && (
+                      <div className="lm-hint" style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span>&#10003; using this model's tuned preset</span>
+                        <button type="button" className="lm-mini2-btn" onClick={() => setImgAdv((a) => ({ ...a,
+                          negative: modelDefaults.negative_prompt || a.negative,
+                          steps: modelDefaults.sampling_steps || a.steps,
+                          cfg: modelDefaults.cfg_scale || a.cfg }))}>&#8630; reset</button>
+                      </div>
+                    )}
+                  </details>
+                  <span className="lm-microlab" style={{ marginTop: 12 }}>Aspect</span>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                    {[[1, 1, "1:1"], [3, 4, "3:4"], [4, 3, "4:3"], [2, 3, "2:3"], [3, 2, "3:2"],
+                      [9, 16, "9:16"], [16, 9, "16:9"], [3, 1, "3:1"]].map(([rw, rh, label]) => (
+                      <button type="button" key={label}
+                        className={"lm-modechip" + (imgAdv.aspectW === rw && imgAdv.aspectH === rh ? " on" : "")}
+                        style={{ flex: "0 0 auto", padding: "6px 10px" }}
+                        onClick={() => setImgAdv((a) => ({ ...a, aspectW: rw, aspectH: rh }))}>{label}</button>
+                    ))}
+                  </div>
+                  <div className="lm-row2">
+                    <div className="lm-col"><span className="lm-microlab">Size &middot; long edge</span>
+                      <select className="lm-gensel" style={{ marginTop: 0 }} value={imgAdv.size}
+                        onChange={(ev) => setImgAdv((a) => ({ ...a, size: +ev.target.value }))}>
+                        <option value="768">S &middot; 768</option><option value="1024">M &middot; 1024</option>
+                        <option value="1536">L &middot; 1536</option><option value="2048">XL &middot; 2048</option>
+                      </select></div>
+                    <div className="lm-col"><span className="lm-microlab">Custom W&times;H</span>
+                      <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                        <input className="lm-in" type="number" min="64" max="4096" step="8" placeholder="W" value={imgAdv.customW}
+                          onChange={(ev) => setImgAdv((a) => ({ ...a, customW: ev.target.value }))} />
+                        <span className="lm-hint">&times;</span>
+                        <input className="lm-in" type="number" min="64" max="4096" step="8" placeholder="H" value={imgAdv.customH}
+                          onChange={(ev) => setImgAdv((a) => ({ ...a, customH: ev.target.value }))} />
+                      </div></div>
+                  </div>
+                  <div className="lm-hint">{(() => { const d = resolveGenDims(imgAdv); return "→ " + d.w + " × " + d.h + (d.custom ? " · custom" : " px"); })()}</div>
+                  <div className="lm-row2">
+                    <div className="lm-col"><span className="lm-microlab">Mode</span>
+                      <select className="lm-gensel" style={{ marginTop: 0 }} value={imgAdv.mode}
+                        onChange={(ev) => setImgAdv((a) => ({ ...a, mode: ev.target.value }))}>
+                        <option value="auto">Auto</option><option value="lite">Lite</option>
+                        <option value="standard">Standard</option><option value="pro">Pro</option><option value="ultra">Ultra</option>
+                      </select></div>
+                    <div className="lm-col"><span className="lm-microlab">Count</span>
+                      <select className="lm-gensel" style={{ marginTop: 0 }} value={imgAdv.count}
+                        onChange={(ev) => setImgAdv((a) => ({ ...a, count: +ev.target.value }))}>
+                        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+                      </select></div>
+                  </div>
+                  <span className="lm-microlab">Seed &middot; blank = random</span>
+                  <input className="lm-in" type="number" placeholder="random" value={imgAdv.seed}
+                    onChange={(ev) => setImgAdv((a) => ({ ...a, seed: ev.target.value }))} />
+                  <label className="lm-check" title="This IS the site's Turbo tier (priority=1000): a faster runner. Costs more credits when paid, but a matching free card covers it.">
+                    <input type="checkbox" checked={imgAdv.highPriority}
+                      onChange={(ev) => setImgAdv((a) => ({ ...a, highPriority: ev.target.checked }))} /> High priority &middot; Turbo (faster)</label>
+                  <label className="lm-check">
+                    <input type="checkbox" checked={imgAdv.promptHelper}
+                      onChange={(ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))} /> Prompt helper</label>
+                  <div className="lm-gencost">
+                    <span className="lm-gencosttext" title={priceTitle(imgPrice, c.id)}>{priceLine(imgPrice, c.id, "Pick a model and write a prompt to see the cost.")}</span>
+                  </div>
+                  <button type="button" className="lm-genbtn"
+                    disabled={busyI || !imgModel || !(c.imgPrompt || "").trim() || anyLoraUnresolved(imgLoras) || imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) || overLoraCap(imgLoras, acct && acct.lora_cap)}
+                    onClick={() => genImage(dfLive)}>
+                    {busyI ? (gi.msg || "generating…")
+                      : anyLoraUnresolved(imgLoras) ? "waiting on LoRA…"
+                      : imgLoras.some((l) => loraIncompat(imgModel && imgModel.model_type, l.lora_base_type)) ? "incompatible LoRA — remove or switch base"
+                      : overLoraCap(imgLoras, acct && acct.lora_cap) ? "remove " + (imgLoras.length - acct.lora_cap) + " LoRA" + ((imgLoras.length - acct.lora_cap) === 1 ? "" : "s") + " to continue"
+                      : "✦ Generate reference image"}
+                  </button>
+                  {gi.phase === "error" && <div className="lm-gerr">{gi.msg}</div>}
+                  {gi.mid && (
+                    <div className="lm-imgresult">
+                      <img src={"/thumbs/" + gi.mid + ".jpg"} alt="result" />
+                      <div className="lm-route">
+                        <button type="button" className={"lm-routebtn" + (gi.routed === "open" ? " on" : "")} onClick={() => routeImg(dfLive, "open", c.id)}>open frame</button>
+                        <button type="button" className={"lm-routebtn" + (gi.routed === "close" ? " on" : "")} onClick={() => routeImg(dfLive, "close", c.id)}>close frame</button>
+                        <button type="button" className={"lm-routebtn" + (gi.routed === "cast" ? " on" : "")} onClick={() => routeImg(dfLive, "cast", c.id)}>cast</button>
+                      </div>
+                      {gi.routed && <div className="lm-ok2">&#10003; sent to {gi.routed} — it now feeds this shot's video gen</div>}
+                    </div>)}
+                </>
+              );
+            })()}
+            {genTab === "Edit" && (() => {
+              const ge = genEditState[c.id] || {};
+              const busyE = ge.phase === "submitting" || ge.phase === "running";
+              const src = c.openFrame && c.openFrame.mediaId;
+              const gf = genFixState[c.id] || {};
+              const busyF = gf.phase === "submitting" || gf.phase === "running";
+              return (
+                <>
+                  {/* Edit/Fixer/Enhance sub-strip -- matches the locked design's own
+                      editSubChips verbatim AND the real, already-shipped
+                      GenerateDrawer.jsx's identical mgdock-subtabs (its own real
+                      Edit/Fixer/Enhance strip, wired to FixTab.jsx and FiltersPanel.jsx).
+                      Reuses .lm-tabsrow/.lm-tabbtn verbatim -- the same classes the Cast
+                      sheet's own Cast/Footage strip and the model picker's Models/LoRAs
+                      strip already use, not a new sub-tab visual language. */}
+                  <div className="lm-tabsrow" style={{ marginBottom: 10 }}>
+                    <button type="button" className={"lm-tabbtn" + (editSub === "edit" ? " on" : "")}
+                      onClick={() => setEditSub("edit")}>Edit</button>
+                    <button type="button" className={"lm-tabbtn" + (editSub === "fixer" ? " on" : "")}
+                      onClick={() => setEditSub("fixer")}>Fixer</button>
+                    <button type="button" className={"lm-tabbtn" + (editSub === "enhance" ? " on" : "")}
+                      onClick={() => setEditSub("enhance")}>Enhance</button>
+                  </div>
+                  {editSub === "edit" && (<>
+                  <span className="lm-microlab">Source — this shot's open frame</span>
+                  {src ? (
+                    <div className="lm-genframe" style={{ height: 120, maxWidth: 220 }}>
+                      <img src={"/thumbs/" + src + ".jpg"} alt="source" />
+                    </div>
+                  ) : <div className="lm-empty">No open-frame image yet — route one from the <b>Image</b> tab, or pick it into the open frame on Shot Detail.</div>}
+                  <span className="lm-microlab" style={{ marginTop: 12 }}>Edit instruction</span>
+                  <textarea className="lm-ta" value={c.editPrompt || ""} placeholder="e.g. make it night, add rain, warmer key light…"
+                    onChange={(ev) => dfPatch((cc) => ({ ...cc, editPrompt: ev.target.value }))} />
+                  <div className="lm-gencost">
+                    <span className="lm-gencosttext" title={priceTitle(editPrice, c.id)}>{priceLine(editPrice, c.id, "Add a source image and instruction to see the cost.")}</span>
+                  </div>
+                  <button type="button" className="lm-genbtn" disabled={busyE || !src} onClick={() => genEdit(dfLive)}>
+                    {busyE ? (ge.msg || "editing…") : "✦ Edit the open frame"}
+                  </button>
+                  {ge.phase === "error" && <div className="lm-gerr">{ge.msg}</div>}
+                  {ge.mid && (
+                    <div className="lm-imgresult">
+                      <img src={"/thumbs/" + ge.mid + ".jpg"} alt="result" />
+                      <div className="lm-route">
+                        <button type="button" className={"lm-routebtn" + (ge.routed === "open" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, dfLive, "open", c.id)}>open frame</button>
+                        <button type="button" className={"lm-routebtn" + (ge.routed === "close" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, dfLive, "close", c.id)}>close frame</button>
+                        <button type="button" className={"lm-routebtn" + (ge.routed === "cast" ? " on" : "")} onClick={() => routeGen(genEditState, setGenEditState, dfLive, "cast", c.id)}>cast</button>
+                      </div>
+                      {ge.routed && <div className="lm-ok2">&#10003; sent to {ge.routed}</div>}
+                    </div>)}
+                  </>)}
+                  {editSub === "fixer" && (<>
+                  {/* Fixer -- real box-drawing canvas over this shot's real open frame,
+                      real /api/price preview, real confirm-gated submit through the real
+                      /api/fix endpoint (genFix, useGenerationPipeline). See this
+                      component's own Fixer state block (declared with editSub/fixTag/
+                      fixBoxes above) for the full port trace against FixTab.jsx. */}
+                  <span className="lm-microlab">Source — this shot's open frame</span>
+                  {src ? (
+                    <div className="lm-fixwrap">
+                      <img ref={fixImgRef} src={"/thumbs/" + src + ".jpg"} alt="source"
+                        draggable={false} onLoad={fixPaint} />
+                      <canvas ref={fixCanvasRef}
+                        onPointerDown={fixDown} onPointerMove={fixMove}
+                        onPointerUp={fixUp} onPointerLeave={fixUp} />
+                    </div>
+                  ) : <div className="lm-empty">No open-frame image yet — route one from the <b>Image</b> tab, or pick it into the open frame on Shot Detail.</div>}
+                  {src && <div className="lm-fixhint">Drag a box over the hand or face on the source.</div>}
+                  <div className="lm-modechips">
+                    {["face", "hand"].map((t) => (
+                      <button type="button" key={t} className={"lm-modechip" + (fixTag === t ? " on" : "")}
+                        style={fixTag === t ? { borderColor: FIX_COLORS[t], color: FIX_COLORS[t] } : null}
+                        onClick={() => setFixTag(t)}>{t === "face" ? "Face" : "Hand"}</button>
+                    ))}
+                  </div>
+                  {fixBoxes.length > 0 && (
+                    <button type="button" className="lm-addrefbtn" style={{ marginTop: 8 }}
+                      onClick={() => setFixBoxes([])}>
+                      Clear {fixBoxes.length} box{fixBoxes.length === 1 ? "" : "es"}
+                    </button>
+                  )}
+                  <div className="lm-fixwarn">A fix can't be card-covered — it always spends, and always asks first.</div>
+                  <div className="lm-gencost">
+                    <span className="lm-gencosttext" title={priceTitle(genFixPrice, c.id)}>{priceLine(genFixPrice, c.id, "Drag a box over a hand or face to see the cost.")}</span>
+                  </div>
+                  <button type="button" className="lm-genbtn" disabled={busyF || !src || !fixBoxes.length}
+                    title={!src ? "This shot has no open-frame image yet" : !fixBoxes.length ? "Drag at least one box" : "Submit the repair — always spends"}
+                    onClick={() => genFix(dfLive, scaleFixBoxes(fixBoxes, fixImgRef.current))}>
+                    {busyF ? (gf.msg || "fixing…") : "✦ Fix " + fixTag}
+                  </button>
+                  {gf.phase === "error" && <div className="lm-gerr">{gf.msg}</div>}
+                  {gf.mid && (
+                    <div className="lm-imgresult">
+                      <img src={"/thumbs/" + gf.mid + ".jpg"} alt="result" />
+                      <div className="lm-route">
+                        <button type="button" className={"lm-routebtn" + (gf.routed === "open" ? " on" : "")} onClick={() => routeGen(genFixState, setGenFixState, dfLive, "open", c.id)}>open frame</button>
+                        <button type="button" className={"lm-routebtn" + (gf.routed === "close" ? " on" : "")} onClick={() => routeGen(genFixState, setGenFixState, dfLive, "close", c.id)}>close frame</button>
+                        <button type="button" className={"lm-routebtn" + (gf.routed === "cast" ? " on" : "")} onClick={() => routeGen(genFixState, setGenFixState, dfLive, "cast", c.id)}>cast</button>
+                      </div>
+                      {gf.routed && <div className="lm-ok2">&#10003; sent to {gf.routed}</div>}
+                    </div>)}
+                  </>)}
+                  {editSub === "enhance" && (
+                    <>
+                      <span className="lm-microlab">Art filters &middot; free, no generation</span>
+                      <button type="button" className="lm-openfiltersbtn" onClick={openFilterCompare}>&#9673; Open filters</button>
+                      <div className="lm-hint" style={{ marginTop: 8 }}>Gradient overlays, not AI — applied right in the browser: no credits, no request, works offline.</div>
+                    </>
+                  )}
+                </>
+              );
+            })()}
+            {genTab === "Reference" && (() => {
+              const gr = genRefState[c.id] || {};
+              const busyR = gr.phase === "submitting" || gr.phase === "running";
+              const refs = (project.assets || []).filter((a) => a.kind === "image" && a.mediaId);
+              return (
+                <>
+                  {/* Opening/Closing frame pair -- Loom Mobile.dc.html's onRefTab block shows
+                      this same pair (with the same dfHasPrev/dfInheritPrev "inherit prev
+                      close" affordance) at the top of the Reference tab, not just inside Deep
+                      Focus's own body. Real gap, closed 2026-08-04 (session 2) by reusing the
+                      exact same FrameSlot calls Deep Focus's body already makes above --
+                      same component, same props shape, not a second implementation. */}
+                  <div className="lm-frow">
+                    <div className="lm-fcol">
+                      <FrameSlot which="open" frame={c.openFrame} liveTag={positionTag(dfLive, project, imgSrc, "openFrame")}
+                        discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                        onPatch={(p) => dfPatchFrame("openFrame", p)}
+                        extraBtn={dfPrevEntry ? (
+                          <button type="button" className="lm-inheritbtn" onClick={dfInheritPrev} disabled={dfHandoff === "wip"}>
+                            {dfHandoff === "wip" ? "✂ splicing…" : dfHandoff === "err" ? "✂ splice failed — retry"
+                              : dfPrevEntry.c.resultMid ? `✂ splice ${dfPrevEntry.code}'s last frame` : `↳ inherit ${dfPrevEntry.code} close`}
+                          </button>
+                        ) : null} />
+                    </div>
+                    <div className="lm-fcol">
+                      <FrameSlot which="close" frame={c.closeFrame} liveTag={positionTag(dfLive, project, imgSrc, "closeFrame")}
+                        discreet={c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+                        onPatch={(p) => dfPatchFrame("closeFrame", p)} />
+                    </div>
+                  </div>
+                  <span className="lm-microlab">References — cast @image members ({refs.length})</span>
+                  {refs.length ? (
+                    <div className="lm-refstrip">{refs.map((a) => (<img key={a.id} src={"/thumbs/" + a.mediaId + ".jpg"} title={a.tag} alt="" />))}</div>
+                  ) : <div className="lm-empty">No cast @image references with a gallery image yet — add some via the Cast &amp; assets sheet.</div>}
+                  <span className="lm-microlab" style={{ marginTop: 12 }}>Prompt</span>
+                  <textarea className="lm-ta" value={c.refPrompt || ""} placeholder="compose a new still from the references…"
+                    onChange={(ev) => dfPatch((cc) => ({ ...cc, refPrompt: ev.target.value }))} />
+                  <div className="lm-gencost">
+                    <span className="lm-gencosttext" title={priceTitle(refPrice, c.id)}>{priceLine(refPrice, c.id, "Add references and a prompt to see the cost.")}</span>
+                  </div>
+                  <button type="button" className="lm-genbtn" disabled={busyR || !refs.length} onClick={() => genRef(dfLive)}>
+                    {busyR ? (gr.msg || "generating…") : "✦ Generate from references"}
+                  </button>
+                  {gr.phase === "error" && <div className="lm-gerr">{gr.msg}</div>}
+                  {gr.mid && (
+                    <div className="lm-imgresult">
+                      <img src={"/thumbs/" + gr.mid + ".jpg"} alt="result" />
+                      <div className="lm-route">
+                        <button type="button" className={"lm-routebtn" + (gr.routed === "open" ? " on" : "")} onClick={() => routeGen(genRefState, setGenRefState, dfLive, "open", c.id)}>open frame</button>
+                        <button type="button" className={"lm-routebtn" + (gr.routed === "close" ? " on" : "")} onClick={() => routeGen(genRefState, setGenRefState, dfLive, "close", c.id)}>close frame</button>
+                        <button type="button" className={"lm-routebtn" + (gr.routed === "cast" ? " on" : "")} onClick={() => routeGen(genRefState, setGenRefState, dfLive, "cast", c.id)}>cast</button>
+                      </div>
+                      {gr.routed && <div className="lm-ok2">&#10003; sent to {gr.routed}</div>}
+                    </div>)}
+                </>
+              );
+            })()}
+            {genTab === "Video" && (<>
+              <span className="lm-microlab">Mode</span>
+              <div className="lm-modechips">
+                {MODES.map((m) => (
+                  <button type="button" key={m} className={"lm-modechip" + (m === c.mode ? " on" : "")}
+                    onClick={() => dfPatch((cc) => setShotMode(cc, m))}>{m}</button>
+                ))}
+              </div>
+
+              <span className="lm-microlab">Continuity</span>
+              <div className="lm-modechips">
+                {Object.keys(CONNECT).map((k) => (
+                  <button type="button" key={k} className={"lm-modechip" + (k === (c.connect || "new") ? " on" : "")}
+                    title={CONNECT[k].hint} onClick={() => dfPatch((cc) => setShotConnect(cc, k))}>{CONNECT[k].label}</button>
+                ))}
+              </div>
+
+              <span className="lm-microlab">Prompt</span>
+              <textarea className="lm-ta" value={c.prompt || ""} placeholder="Describe the motion…"
+                onChange={(ev) => {
+                  // Same rule as LoomV2's own Prompt field / Shot Detail's copy: typing here
+                  // always means "auto-compose, using this text" -- clears an active override
+                  // immediately, flashing a brief, self-clearing notice since that is silent-
+                  // until-you-notice otherwise (see LoomV2's identical overrideClearedFlash).
+                  if (c.promptOverride) { setGenOverrideFlash(true); setTimeout(() => setGenOverrideFlash(false), 1600); }
+                  dfPatch((cc) => ({ ...clearPromptOverride(cc), prompt: ev.target.value }));
+                }} />
+              <div className="lm-hint">motion only — camera, lighting and cast weave in on top</div>
+              {c.promptOverride && <div className="lm-genoverride">&#9998; override active — Camera/Lighting/cast not woven in</div>}
+              {genOverrideFlash && <div className="lm-genflash">override cleared — back to auto-compose</div>}
+
+              <span className="lm-microlab" style={{ marginTop: 12 }}>Camera <button type="button" className="lm-gentermbtn" onClick={() => genTogglePal("camera")}>+ terms</button></span>
+              <input className="lm-in" value={c.camera || ""} placeholder="e.g. slow push in, shallow DoF"
+                onChange={(ev) => dfPatch((cc) => ({ ...cc, camera: ev.target.value }))} />
+              {genPalFor === "camera" && (
+                <div className="lm-gentermpal">{Object.entries(CAM_PALETTE).map(([grp, items]) => (
+                  <div key={grp} className="lm-gentermgrp">
+                    <div className="lm-gentermgrpt">{grp}</div>
+                    {items.map((t) => (<span key={t} className="lm-genchip" onClick={() => genAppendTo("camera", t)}>{t}</span>))}
+                  </div>
+                ))}</div>
+              )}
+
+              <span className="lm-microlab">Lighting <button type="button" className="lm-gentermbtn" onClick={() => genTogglePal("lighting")}>+ terms</button></span>
+              <input className="lm-in" value={c.lighting || ""} placeholder="e.g. moonlit, soft haze"
+                onChange={(ev) => dfPatch((cc) => ({ ...cc, lighting: ev.target.value }))} />
+              {genPalFor === "lighting" && (
+                <div className="lm-gentermpal">{LIGHTING_PALETTE.map((t) => (<span key={t} className="lm-genchip" onClick={() => genAppendTo("lighting", t)}>{t}</span>))}</div>
+              )}
+
+              <div className="lm-row2">
+                <div className="lm-col">
+                  <span className="lm-microlab">Transition in <button type="button" className="lm-gentermbtn" onClick={() => genTogglePal("transIn")}>+ terms</button></span>
+                  <input className="lm-in" value={c.transIn || ""} placeholder="cut, dissolve"
+                    onChange={(ev) => dfPatch((cc) => ({ ...cc, transIn: ev.target.value }))} />
+                  {genPalFor === "transIn" && (
+                    <div className="lm-gentermpal">{TRANS_PALETTE.map((t) => (<span key={t} className="lm-genchip" onClick={() => dfPatch((cc) => ({ ...cc, transIn: t }))}>{t}</span>))}</div>
+                  )}
+                </div>
+                <div className="lm-col">
+                  <span className="lm-microlab">Transition out <button type="button" className="lm-gentermbtn" onClick={() => genTogglePal("transOut")}>+ terms</button></span>
+                  <input className="lm-in" value={c.transOut || ""} placeholder="cut, dissolve"
+                    onChange={(ev) => dfPatch((cc) => ({ ...cc, transOut: ev.target.value }))} />
+                  {genPalFor === "transOut" && (
+                    <div className="lm-gentermpal">{TRANS_PALETTE.map((t) => (<span key={t} className="lm-genchip" onClick={() => dfPatch((cc) => ({ ...cc, transOut: t }))}>{t}</span>))}</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Mode-aware weave summary -- shares modeSendsLine/modeSendsRefs with the Cast
+                  sheet above so the two surfaces cannot silently disagree about which modes
+                  actually send the cast/ref bank vs. cite it in the prompt only. */}
+              <div className="lm-genrefline">
+                {(c.cast || []).length} cast &middot; {(c.refs || []).length} refs
+                {!modeSendsRefs(c.mode) && <><br />{modeSendsLine(c.mode)}</>}
+              </div>
+
+              <span className="lm-microlab" style={{ marginTop: 12 }}>{showClose ? "Start / end frame" : "Start frame"}</span>
+              <div className="lm-genframerow">
+                <div className="lm-genframecol">
+                  <div className="lm-genframe">
+                    {frameSrc(c.openFrame) ? <img src={frameSrc(c.openFrame)} alt="opening frame" /> : "no frame"}
+                    <span className="lm-genframetag">{positionTag(dfLive, project, imgSrc, "openFrame") || "—"}</span>
+                  </div>
+                </div>
+                {showClose && (
+                  <div className="lm-genframecol">
+                    <div className="lm-genframe">
+                      {frameSrc(c.closeFrame) ? <img src={frameSrc(c.closeFrame)} alt="closing frame" /> : "no frame"}
+                      <span className="lm-genframetag">{positionTag(dfLive, project, imgSrc, "closeFrame") || "—"}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="lm-hint">frames are attached on Shot Detail — this is a preview only</div>
+
+              <span className="lm-microlab" style={{ marginTop: 12 }}>What will be sent</span>
+              {/* shotText(), the REAL composed-prompt assembler (loom-core.js) -- not a fake
+                  mockup string. Shows the owner the exact text about to be submitted, honoring
+                  an active promptOverride verbatim, before they ever tap Generate. */}
+              <div className="lm-genpreview">{shotText(dfLive, project, imgSrc)}</div>
+
+              {/* The Video tab's two sanctioned cosmetic pieces (owner correction 2026-08-04:
+                  of the design's 5 missing elements, only these two are safe to add --
+                  negative prompt/channel have no real submit field, weave-mode may be
+                  redundant). Loom Mobile.dc.html:408 (the static "PixAI Motion v2" model
+                  row, non-interactive there too) and :411 (the capability badges). The
+                  design pairs the model row with Duration -- that control already lives on
+                  Shot Detail here, so no duplicate is invented alongside the label. */}
+              <span className="lm-microlab" style={{ marginTop: 12 }}>Model</span>
+              <div className="lm-genmodelrow"><span className="lm-genmodelthumb" />PixAI Motion v2</div>
+              <div className="lm-gencaps">
+                {["15s", "multi-ref", "audio", "end-frame"].map((cap) => (
+                  <span key={cap} className="lm-gencap">{cap}</span>
+                ))}
+              </div>
+
+              {/* Channel -- Loom Mobile.dc.html:412-414's rowGroup, restored 2026-08-06 after
+                  an owner correction: this is the REAL Normal/Enhanced channel the desktop
+                  drawer has always had (mg-generate-drawer's own select, submitting
+                  is_private), NOT a design invention -- the earlier audit's "no channel
+                  field exists" claim was wrong. Same control shape as the drawer, same
+                  mapping (enhanced -> is_private), stored per-shot so shotPayload carries
+                  it into both the price preview and the real submit. */}
+              <div className="lm-row2">
+                <div className="lm-col">
+                  <span className="lm-microlab">Channel</span>
+                  <select className="lm-gensel" value={c.isPrivate ? "enhanced" : "normal"}
+                    onChange={(ev) => dfPatch((cc) => ({ ...cc, isPrivate: ev.target.value === "enhanced" }))}>
+                    <option value="normal">Normal</option>
+                    <option value="enhanced">👑 Enhanced</option>
+                  </select>
+                </div>
+                <div className="lm-col">
+                  <div className="lm-hint" style={{ marginTop: 22 }}>Please keep creations SFW</div>
+                </div>
+              </div>
+
+              {/* generate_audio / audio_language -- REAL fields the card shape has always
+                  carried (see newCard()'s own audioGen/audioLanguage comment), but with no UI
+                  anywhere on mobile until now. The 5-value enum matches static/mg-generate-
+                  drawer.js's own real <select> exactly (english/japanese/chinese/korean/none),
+                  not an invented list. */}
+              <label className="lm-check" style={{ marginTop: 6 }}>
+                <input type="checkbox" checked={!!c.audioGen}
+                  onChange={(ev) => dfPatch((cc) => ({ ...cc, audioGen: ev.target.checked }))} />
+                Generate audio (spoken lines become voiceover)
+              </label>
+              {c.audioGen && (
+                <select className="lm-gensel" value={c.audioLanguage || "english"}
+                  onChange={(ev) => dfPatch((cc) => ({ ...cc, audioLanguage: ev.target.value }))}>
+                  <option value="english">English</option>
+                  <option value="japanese">Japanese</option>
+                  <option value="chinese">Chinese</option>
+                  <option value="korean">Korean</option>
+                  <option value="none">SE only (no dialogue)</option>
+                </select>
+              )}
+
+              <div className="lm-gencost">
+                <span className="lm-gencosttext" title={costTitle}>{costText}</span>
+                <span className="lm-hint">uploads are free &middot; one job at a time</span>
+              </div>
+
+              {/* generateShot -- the SAME real function batchGenerate's own per-card loop
+                  calls (useGenerationPipeline), called here UNMODIFIED and without
+                  skipConfirm: its own internal priceShot + window.confirm fires for real on
+                  this tap, exactly as it would for any other single, owner-initiated real
+                  submit in this file. No new endpoint, no new price math, no new confirm
+                  dialog belongs to this screen. */}
+              <button type="button" className="lm-genbtn" disabled={genBusy || genSubmitting || gp.noInput} onClick={genSubmit}>
+                {genBusy ? "already rendering…" : genSubmitting ? "submitting…" : "Generate video"}
+              </button>
+              {/* useExistingVideo -- the SAME real, already-shipped attach-without-generating
+                  path LoomV2's own board already offers (no spend, no PixAI task). */}
+              <button type="button" className="lm-genexisting" disabled={genBusy}
+                onClick={() => useExistingVideo(dfLive)}>Use an existing video instead</button>
+            </>)}
+            </div>
+            {/* Model/LoRA picker -- a full-screen mobile sheet wrapping the SAME real
+                <ModelPicker> element LoomV2's own floating overlay uses. Lazy-mounted on
+                first open (pickerMounted), then left mounted for the rest of the session --
+                same "CSS-hide instead of unmount" contract as LoomV2's .lv-mpick-veil, so a
+                close/reopen never loses either picker's own search/scroll state. */}
+            {pickerMounted && (
+              <>
+                <div className={"lm-scrim" + (pickerClosing ? " closing" : "")}
+                  style={{ display: pickerOpen || pickerClosing ? "block" : "none" }} onClick={closePicker} />
+                <div className={"lm-pick-sheet" + (pickerClosing ? " closing" : "")}
+                  style={{ display: pickerOpen || pickerClosing ? "flex" : "none" }}>
+                  <div className="lm-sheethandle" />
+                  <div className="lm-pick-head">
+                    <span className="lm-pick-t">Models &amp; LoRAs</span>
+                    <button type="button" className="lm-df-close" onClick={closePicker} aria-label="Close">&#10005;</button>
+                  </div>
+                  <div className="lm-tabsrow">
+                    <button type="button" className={"lm-tabbtn" + (pickerKind === "base" ? " on" : "")} onClick={() => setPickerKind("base")}>Models</button>
+                    <button type="button" className={"lm-tabbtn" + (pickerKind === "lora" ? " on" : "")} onClick={() => setPickerKind("lora")}>LoRAs</button>
+                  </div>
+                  <div className="lm-pick-body">
+                    <ModelPicker kind="base" visible={pickerKind === "base"} value={imgModel} onPick={onBasePick}
+                      style={{ display: pickerKind === "base" ? "flex" : "none" }} />
+                    <ModelPicker kind="lora" multi baseType={(imgModel && imgModel.model_type) || ""} visible={pickerKind === "lora"} selected={imgLoras} onToggle={onLoraPick}
+                      style={{ display: pickerKind === "lora" ? "flex" : "none" }} />
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ---- Review & trim -- fifth increment (2026-08-03), per the locked design's own
+          reviewFor/cropping/playing state (Loom Mobile.dc.html: search "reviewFor",
+          "_trimInMove"/"_trimOutMove"/"_cropDragMove"). Opens from the board's own real ▶
+          badge above (canReview) -- a SEPARATE top-level conditional from dfOpen/genOpen,
+          matching the design's own layout: Review opens directly off the board, never
+          nested inside Shot Detail. reviewLive/reviewPatch/closeReview are declared up with
+          this component's other hooks (Rules of Hooks -- nothing stateful may live inside
+          this IIFE). See this increment's own report for the full trace of which numbers
+          below are copied verbatim from the design's real math (the 0.05 trim min-gap, the
+          0.68 crop max, the 0.15 crop-box-half-width offset) and which one deliberate unit
+          adaptation was necessary (trimIn/trimOut are stored in ABSOLUTE SECONDS everywhere
+          else in this codebase -- ShotPreview, splitCardAt, buildDuplicateCard,
+          importedFootagePatch -- never the design's own 0..1 fraction-of-duration model, so
+          the fraction math below converts to seconds at the moment it patches the card,
+          not before). */}
+      {reviewOpen && reviewLive && (() => {
+        const c = reviewLive.c;
+        // Real native duration once the <video> below reports it (onLoadedMetadata); before
+        // that (or if it never fires -- a bad/missing file), fall back to the shot's own
+        // planned/actual duration field so the trim track never divides by zero.
+        const dur = reviewDur || durOf(c) || 0;
+        const trimIn = c.trimIn || 0;
+        const trimOut = c.trimOut != null ? c.trimOut : dur;
+        const pctOf = (s) => (dur ? Math.max(0, Math.min(100, (s / dur) * 100)) : 0);
+        const fmtT = (s) => (s || 0).toFixed(1) + "s";
+        const crop = c.crop || { x: 0.35, y: 0.35, w: 0.3, h: 0.3 };   // design's own fallback (reviewC.cropX != null ? ... : 0.35)
+
+        // ---- trim handle drag -- real getBoundingClientRect fraction math off the STATIC
+        // track (reviewTrimTrackRef), the same real pattern increment 1's reel scrub and
+        // desktop's own already-shipped ShotPreview.secAt() both use. Deliberately NOT
+        // sourced off the handle element itself the way the design's own _trimInMove/
+        // _trimOutMove read `e.currentTarget.getBoundingClientRect()`: the design binds
+        // those pointer handlers to the 18px handle div, which re-centers to the new trim
+        // position on every render, so that rect is a moving ~18px-wide target and the drag
+        // cannot work as real fraction-of-track math in a real browser -- confirmed by
+        // reading the design's own implementation, not assumed. The CLAMP FORMULAS are
+        // copied verbatim from the design's real math: outFrac - 0.05 / inFrac + 0.05 (the
+        // minimum-gap clamp), expressed here as a fraction of the real clip's native
+        // duration before being multiplied back into the seconds this codebase's trimIn/
+        // trimOut fields actually store.
+        const trimFrac = (e) => {
+          const r = reviewTrimTrackRef.current.getBoundingClientRect();
+          return r.width ? Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) : 0;
+        };
+        const trimInStart = (e) => {
+          try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+          reviewTrimDragRef.current = "in"; trimInMove(e);
+        };
+        const trimInMove = (e) => {
+          if (reviewTrimDragRef.current !== "in" || !dur) return;
+          const outFrac = trimOut / dur;
+          const newFrac = Math.max(0, Math.min(trimFrac(e), outFrac - 0.05));
+          const t = newFrac * dur;
+          reviewPatch((cc) => ({ ...cc, trimIn: t }));
+          const v = reviewVidRef.current; if (v) v.currentTime = t;
+          setReviewCur(t);
+        };
+        const trimInEnd = () => { reviewTrimDragRef.current = null; };
+        const trimOutStart = (e) => {
+          try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+          reviewTrimDragRef.current = "out"; trimOutMove(e);
+        };
+        const trimOutMove = (e) => {
+          if (reviewTrimDragRef.current !== "out" || !dur) return;
+          const inFrac = trimIn / dur;
+          const newFrac = Math.min(1, Math.max(trimFrac(e), inFrac + 0.05));
+          const t = newFrac * dur;
+          reviewPatch((cc) => ({ ...cc, trimOut: t }));
+          const v = reviewVidRef.current; if (v) v.currentTime = t;
+          setReviewCur(t);
+        };
+        const trimOutEnd = () => { reviewTrimDragRef.current = null; };
+
+        // ---- playhead scrub track -- same real fraction-of-width pattern, applied straight
+        // to the real <video>'s currentTime (seconds), matching the design's own separate
+        // "Scrub" track (playheadDragStart/Move/End), not ShotPreview's different hover-
+        // over-the-frame scrub gesture (that one belongs to desktop's own crop-draw UI).
+        const scrubFrac = (e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          return r.width ? Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) : 0;
+        };
+        const scrubTo = (e) => {
+          if (!dur) return;
+          const t = scrubFrac(e) * dur;
+          const v = reviewVidRef.current; if (v) v.currentTime = t;
+          setReviewCur(t);
+        };
+        const scrubStart = (e) => {
+          try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+          reviewScrubDragRef.current = true;
+          scrubTo(e);
+        };
+        const scrubMove = (e) => { if (reviewScrubDragRef.current) scrubTo(e); };
+        const scrubEnd = () => { reviewScrubDragRef.current = false; };
+
+        // ---- crop rectangle drag -- verbatim port of the design's own _cropFrac/
+        // _cropDragMove math: fraction is read off the STATIC preview-wrap container
+        // (e.currentTarget.parentElement), never the moving crop-rect div itself, exactly
+        // like the design already does (this one has no self-recentering bug the trim
+        // handles have, so it needed no mechanical fix -- only the port). A fixed-size
+        // (30%x30%) box you drag to reposition, matching the design's own mobile-specific
+        // crop UX exactly -- deliberately NOT desktop's ShotPreview.cropStart (which draws
+        // an arbitrary new rectangle every time); the two are different, purpose-built UIs
+        // for two different form factors, per the locked design.
+        const cropFrac = (e) => {
+          const r = e.currentTarget.parentElement.getBoundingClientRect();
+          const x = e.clientX - r.left, y = e.clientY - r.top;
+          return { x: Math.max(0, Math.min(1, x / r.width)), y: Math.max(0, Math.min(1, y / r.height)) };
+        };
+        const cropDragStart = (e) => {
+          try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+          reviewCropDragRef.current = true;
+        };
+        const cropDragMove = (e) => {
+          if (!reviewCropDragRef.current) return;
+          const f = cropFrac(e);
+          reviewPatch((cc) => ({ ...cc, crop: {
+            x: Math.max(0, Math.min(f.x - 0.15, 0.68)),
+            y: Math.max(0, Math.min(f.y - 0.15, 0.68)),
+            w: 0.3, h: 0.3,
+          } }));
+        };
+        const cropDragEnd = () => { reviewCropDragRef.current = false; };
+
+        // ---- playback -- a real <video>, real play()/pause()/timeupdate. Loops within the
+        // kept [trimIn, trimOut) range while playing, matching the design's own _togglePlay
+        // intent (its setInterval wraps back to inF on reaching outF and keeps going) --
+        // unlike desktop's ShotPreview, which pauses at the trim-out point instead. Driven
+        // by real playback events here, not a synthetic timer, because there is a real
+        // video to play.
+        const togglePlay = () => {
+          const v = reviewVidRef.current; if (!v) return;
+          if (reviewPlaying) { v.pause(); setReviewPlaying(false); return; }
+          if (v.currentTime < trimIn || v.currentTime >= trimOut) v.currentTime = trimIn;
+          v.play().catch(() => {});
+          setReviewPlaying(true);
+        };
+        const onReviewTimeUpdate = (e) => {
+          const cur = e.currentTarget.currentTime;
+          setReviewCur(cur);
+          if (reviewPlaying && trimOut > trimIn && cur >= trimOut - 0.02) {
+            e.currentTarget.currentTime = trimIn;
+          }
+        };
+        // Nudge back/forward -- the SAME real, already-shipped ±0.25s step ShotPreview's own
+        // seek() uses ("framing a split or crop"), not the design's synthetic 0.04-of-total-
+        // duration nudge (which only made sense against its own fake, interval-driven
+        // reviewFrac). Disclosed adaptation: same purpose, reusing this codebase's real,
+        // working number instead of inventing a new proportional one.
+        const nudge = (delta) => {
+          const v = reviewVidRef.current; if (!v || !dur) return;
+          if (reviewPlaying) { v.pause(); setReviewPlaying(false); }
+          const t = Math.max(0, Math.min(dur, v.currentTime + delta));
+          v.currentTime = t; setReviewCur(t);
+        };
+
+        // ---- split -- the REAL splitCardAt-backed mutator (splitShot, threaded in as a
+        // prop, exactly matching desktop's <ShotPreview onSplit={(t) => splitShot(sel, t)}>
+        // call). Same 0.15s edge guard and the SAME message text as ShotPreview's own
+        // doSplit, reused verbatim rather than inventing new copy. Matches the design's own
+        // _doSplit, which also closes Review on a successful split (`reviewFor: null`).
+        const doSplit = () => {
+          const v = reviewVidRef.current; if (!v) return;
+          const t = v.currentTime;
+          if (t > trimIn + 0.15 && t < trimOut - 0.15) { splitShot(reviewLive, t); closeReview(); }
+          else alert("Move the playhead to where you want the cut first (not at either edge).");
+        };
+
+        return (
+          <div className="lm-review">
+            <div className="lm-gen-top">
+              <button type="button" className="lm-gen-back" onClick={closeReview}>&lsaquo; {reviewLive.code}</button>
+              <span className="lm-gen-title">Review &amp; trim</span>
+              <span className="lm-fill" />
+              <button type="button" className="lm-df-close" title="Close" onClick={closeReview}>&#10005;</button>
+            </div>
+            <div className="lm-df-body">
+              <div className="lm-review-previewwrap">
+                <video key={c.id} ref={reviewVidRef} className="lm-review-video"
+                  src={"/video-file/" + c.resultMid} playsInline preload="metadata"
+                  onLoadedMetadata={(ev) => setReviewDur(ev.currentTarget.duration || 0)}
+                  onTimeUpdate={onReviewTimeUpdate}
+                  onEnded={() => setReviewPlaying(false)} />
+                {reviewCropping && (
+                  <div className="lm-review-croprect"
+                    style={{ left: crop.x * 100 + "%", top: crop.y * 100 + "%", width: crop.w * 100 + "%", height: crop.h * 100 + "%" }}
+                    onPointerDown={cropDragStart} onPointerMove={cropDragMove} onPointerUp={cropDragEnd}>
+                    <div className="lm-review-crophandle" />
+                  </div>
+                )}
+                <button type="button" className="lm-review-playbtn" onClick={togglePlay}>
+                  {reviewPlaying ? "⏸" : "▶"}
+                </button>
+              </div>
+
+              <div className="lm-review-transport">
+                <button type="button" className="lm-review-transportbtn" onClick={() => nudge(-0.25)}>⏪</button>
+                <button type="button" className="lm-review-transportbtn" onClick={togglePlay}>{reviewPlaying ? "⏸" : "▶"}</button>
+                <button type="button" className="lm-review-transportbtn" onClick={() => nudge(0.25)}>⏩</button>
+              </div>
+
+              <span className="lm-microlab">Scrub</span>
+              <div className="lm-review-scrubtrack"
+                onPointerDown={scrubStart} onPointerMove={scrubMove} onPointerUp={scrubEnd}>
+                <div className="lm-review-scrubfill" style={{ width: pctOf(reviewCur) + "%" }} />
+                <div className="lm-review-scrubhandle" style={{ left: pctOf(reviewCur) + "%" }} />
+              </div>
+
+              <span className="lm-microlab">Trim <span className="lm-hint" style={{ display: "inline", padding: 0 }}>drag the in/out handles</span></span>
+              <div className="lm-review-trimtrack" ref={reviewTrimTrackRef}>
+                <div className="lm-review-trimrange" style={{ left: pctOf(trimIn) + "%", right: (100 - pctOf(trimOut)) + "%" }} />
+                <div className="lm-review-trimhandle" style={{ left: pctOf(trimIn) + "%" }}
+                  onPointerDown={trimInStart} onPointerMove={trimInMove} onPointerUp={trimInEnd} />
+                <div className="lm-review-trimhandle" style={{ left: pctOf(trimOut) + "%" }}
+                  onPointerDown={trimOutStart} onPointerMove={trimOutMove} onPointerUp={trimOutEnd} />
+              </div>
+              <div className="lm-review-trimreadout">{fmtT(trimIn)} &rarr; {fmtT(trimOut)}</div>
+
+              <div className="lm-review-actionsrow">
+                <button type="button" className="lm-addrefbtn" style={{ whiteSpace: "nowrap" }} onClick={doSplit}>&#9986; Split at playhead</button>
+                <button type="button" className={"lm-review-cropbtn" + (reviewCropping ? " on" : "")}
+                  onClick={() => setReviewCropping((v) => !v)}>&#9974; {reviewCropping ? "Done" : "Crop"}</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ---- Filter compare -- sixth and FINAL increment (2026-08-03), the locked design's
+          own "Art filters" screen (Loom Mobile.dc.html: search "filterCompareOpen",
+          "fcSkinFilters", "fcPixaiFilters", "fcStrength", "fcAngle", "fcClear",
+          "fcSaveLibrary", "FILTER_SETS"). Opens from Generate's Edit tab -> Enhance sub-tab
+          (openFilterCompare, declared with this component's other hooks above). Reuses
+          dfLive directly rather than a second entries.find() lookup -- see openFilterCompare's
+          own comment for why that's safe here specifically (unlike reviewOpen). */}
+      {fcOpen && dfLive && (() => {
+        const c = dfLive.c;
+        const fcSrc = frameSrc(c.openFrame);
+        const fcGroups = AF ? AF.groups() : [];
+        const activeRec = fcActive && AF ? (AF.get(fcActive) || {}) : null;
+        const activeName = activeRec ? (activeRec.name || fcActive) : null;
+        return (
+          <div className="lm-fc" key={c.id}>
+            <div className="lm-gen-top">
+              <button type="button" className="lm-gen-back" onClick={closeFilterCompare}>&lsaquo; {dfLive.code}</button>
+              <span className="lm-gen-title">Art filters</span>
+              <span className="lm-fill" />
+              <button type="button" className="lm-df-close" title="Close" onClick={closeFilterCompare}>&#10005;</button>
+            </div>
+            <div className="lm-df-body">
+              {!AF ? (
+                <div className="lm-empty">The art-filter library did not load on this page.</div>
+              ) : (
+                <>
+                  {/* Original vs. Preview -- a REAL image (this shot's real open frame) both
+                      times, never a fake color swatch. The right box is a live AF.applyPreview
+                      compositing (CSS gradient overlay divs + mix-blend-mode, per
+                      mg-art-filters.js's own documented approach) driven by the effect
+                      declared with this component's other hooks -- nothing here paints the
+                      overlay itself. */}
+                  <div className="lm-fc-previewrow">
+                    <div className="lm-fc-previewcol">
+                      <div className="lm-fc-previewbox">
+                        {fcSrc ? <img className="lm-fc-img" src={fcSrc} alt="original" />
+                          : <div className="lm-empty">No open-frame image yet</div>}
+                      </div>
+                      <div className="lm-fc-previewcap">Original</div>
+                    </div>
+                    <div className="lm-fc-previewcol">
+                      <div className="lm-fc-previewbox">
+                        <div className="lm-fc-stage" ref={fcStageRef}>
+                          {fcSrc ? <img ref={fcImgRef} className="lm-fc-img" src={fcSrc} alt="preview" />
+                            : <div className="lm-empty">No open-frame image yet</div>}
+                        </div>
+                      </div>
+                      <div className="lm-fc-previewcap">Preview &middot; <b>{activeName || "no filter"}</b></div>
+                    </div>
+                  </div>
+
+                  {/* Swatch grids -- AF.groups() IS the real "Moonglade" (5, ours) / "PixAI"
+                      (7, verbatim) split; nothing here hardcodes a count or a group label.
+                      Each tile paints via the real AF.renderSwatch (the same gradient/blend
+                      math the tile's own filter would apply as a preview), not a
+                      hand-rolled two-color CSS gradient. */}
+                  {fcGroups.map((g) => (
+                    <div key={g.source}>
+                      <div className="lm-fc-grouplabel">{g.label}</div>
+                      <div className="lm-fc-grid">
+                        {g.ids.map((id) => {
+                          const rec = AF.get(id) || {};
+                          return (
+                            <button type="button" key={id} className={"lm-fc-tile" + (fcActive === id ? " on" : "")}
+                              onClick={() => setFcActive((cur) => (cur === id ? null : id))}
+                              title={(rec.name || id) + " · free, applied in your browser" + (rec.note ? " — " + rec.note : "")}>
+                              <div className="lm-fc-swatch"
+                                ref={(el) => { if (el && !el._mgafPainted) { AF.renderSwatch(el, id); el._mgafPainted = true; } }} />
+                              <div className="lm-fc-name">{(rec.name || id).replace("Filter ", "")}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+
+                  <div className="lm-fc-sliderwrap">
+                    <div className="lm-fc-sliderlab">Strength — {Number(fcStrength).toFixed(2)}</div>
+                    <input type="range" min="0" max="1" step="0.05" className="lm-fc-range"
+                      value={fcStrength} onChange={(ev) => setFcStrength(parseFloat(ev.target.value))} />
+                  </div>
+                  <div className="lm-fc-sliderwrap">
+                    <div className="lm-fc-sliderlab">Angle — {fcAngle}&deg;</div>
+                    <input type="range" min="0" max="360" step="1" className="lm-fc-range"
+                      value={fcAngle} onChange={(ev) => setFcAngle(parseInt(ev.target.value, 10))} />
+                  </div>
+                  <div className="lm-fc-btnrow">
+                    <button type="button" className="lm-fc-btn" onClick={fcClear}>No filter</button>
+                    <button type="button" className="lm-fc-btn primary" onClick={fcSave}>Save</button>
+                  </div>
+                  <div className="lm-fc-spendnote">{activeName || "No filter"} &middot; nothing sent, nothing spent</div>
+                </>
+              )}
             </div>
           </div>
         );
@@ -2967,7 +6073,10 @@ function useShotMutations(project, setProject) {
 }
 
 // ---- 3. useGenerationPipeline: generate/poll/route across all four modes ----
-function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId }) {
+// mobileUI (mobile-generate-rail pass, 2026-08-03): NOT used for its value, only as a second
+// dependency on the resume effect below -- see that effect's own comment for why the
+// Mobile-view toggle needs to trigger the identical resume it already runs on project load.
+function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI }) {
   const [genState, setGenState] = useState({});         // cardId -> {phase, msg, mid} (video)
   const resumedRef = useRef({});    // taskId -> true: shots whose interrupted poll we've re-attached this session
   const [genImgState, setGenImgState] = useState({});   // shotId -> {phase,msg,mid,routed} (in-Loom image ref-gen)
@@ -2996,6 +6105,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   const [modelDefaults, setModelDefaults] = useState(null);
   const [genEditState, setGenEditState] = useState({});  // shotId -> {phase,msg,mid,routed} (in-Loom instruct-edit)
   const [genRefState, setGenRefState] = useState({});    // shotId -> {...} (multi-reference gen)
+  const [genFixState, setGenFixState] = useState({});     // shotId -> {...} (in-Loom face/hand fix -- seventh increment, 2026-08-03)
   const [batching, setBatching] = useState(false);
   // batchTally: { total, submitted, ids: Set, outcomes: {[cardId]: "done"|"failed"|"stale"} }
   // for the CURRENTLY OPEN batch run, or null between runs. Distinct from tallyPrices()'s
@@ -3072,9 +6182,9 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       // it in practice. generateShot has exactly one caller, batchGenerate, whose own
       // `todo` filter already excludes status:"done" -- importedFootagePatch always sets
       // that -- so an imported card never reaches here via "Generate all" either. The real
-      // per-shot "Generate video" click lives entirely in <mg-generate-drawer>'s own
-      // _generate() (static/mg-generate-drawer.js), a SEPARATE, pre-existing guard
-      // (_hasAnyRef) with its own message ("Pick a source image first."/"Pick at least one
+      // per-shot "Generate video" click lives entirely in <VideoDrawer>'s own
+      // doGenerate() (gallery/src/components/VideoDrawer.jsx), a SEPARATE, pre-existing guard
+      // (hasAnyRef) with its own message ("Pick a source image first."/"Pick at least one
       // reference first.") -- live-verified: clicking it on an imported shot fires no
       // fetch, spends nothing, and leaves the footage untouched. This message stays as a
       // defensive fallback in case a future refactor ever re-routes per-shot generation
@@ -3130,12 +6240,12 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       const startedAt = Date.now();
       setCardStatus(c.id, { pendingTaskId: d.task_id, genStartedAt: startedAt });
       pollShot(c.id, d.task_id, startedAt);
-      // Registers this generation in the shared Job Tracker (static/mg-notify.js) so it shows
-      // up in the activity card no matter which surface is watching -- register-ONLY (no
+      // Registers this generation in the shared Job Tracker (gallery/src/notify/jobs.js) so it
+      // shows up in the activity card no matter which surface is watching -- register-ONLY (no
       // poll loop of its own), since pollShot above already owns real completion handling;
       // Jobs.track()'s own polling would be redundant for a submission this file already
-      // tracks. window.Jobs is guaranteed loaded here (mg-notify.js is always included in the
-      // Loom's own shell), unlike a host-agnostic shared component that can't assume it.
+      // tracks. window.Jobs is guaranteed loaded here (installNotify() runs at this bundle's
+      // own module scope), unlike a host-agnostic shared component that can't assume it.
       if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, entry.code + " · " + (c.title || "untitled"));
       return { ok: true, taskId: d.task_id };
     } catch {
@@ -3207,22 +6317,22 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
         // SequencePlayer on it forever (it never reaches the advance threshold).
         setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...(cls.duration ? { actualDur: cls.duration } : {}) });
         setBatchOutcome(cardId, "done");
-        // Nudge the shared Activity tracker (static/mg-notify.js's JobsCard) the INSTANT
+        // Nudge the shared Activity tracker (the notify module's JobsCard) the INSTANT
         // this shot's own poll -- the live, real-time signal the per-shot badge above
         // already trusts -- learns the task is done, exactly like the gallery's own
-        // Jobs.poll() does on its done branch (mg-notify.js). Without this the tray was
-        // only ever as fresh as ITS OWN independent, unsynchronized ~2.5-7s poll cycle
+        // Jobs poller does on its done branch (gallery/src/notify/jobs.js). Without this the
+        // tray was only ever as fresh as ITS OWN independent, unsynchronized ~2.5-7s poll cycle
         // (register() above is register-ONLY, no poll of its own -- see that comment), a
         // second, unsynchronized hop that let the two surfaces visibly disagree about the
         // same task and made the tray read as frozen when that hop lagged. window.JobsCard
-        // is guaranteed loaded here for the same reason window.Jobs is (mg-notify.js
-        // always ships in the Loom's shell).
+        // is guaranteed loaded here for the same reason window.Jobs is (installNotify() at
+        // this bundle's module scope).
         if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
       } else if (cls.phase === "failed") {
         setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
         setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
         setBatchOutcome(cardId, "failed");
-        // Same nudge as the done branch above, mirroring mg-notify.js's Jobs.poll() on its
+        // Same nudge as the done branch above, mirroring the notify Jobs poller on its
         // own failed branch -- a failed shot must not leave the tray stuck on stale
         // "running" until its own independent cycle happens to catch up.
         if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
@@ -3249,6 +6359,28 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   // project load (activeId change), re-attach a poll so the finished clip lands on the
   // card. Deduped per task id so flipping projects back and forth mid-render doesn't
   // stack loops; a resumed poll clears pendingTaskId itself on done/fail.
+  //
+  // mobileUI ALSO in the dependency array (mobile-generate-rail pass, 2026-08-03 --
+  // credit-safety finding): the desktop rail's Video tab submits through <mg-generate-
+  // drawer>, whose OWN poll is genuinely component-local (mg-generate-drawer.js's
+  // disconnectedCallback clears every _pollTimers entry -- confirmed by reading that
+  // file). LoomV2 -- and any <mg-generate-drawer> mounted inside it -- unmounts
+  // completely the instant the "📱 Mobile view" toggle flips (the same class of gap
+  // increment 3 built generateShot/pollShot specifically to route around for a shot's
+  // own clip). Unlike the drawer's documented 6h-ceiling pause, an unmount fires NO
+  // 'mg-paused' event -- genState silently freezes on "Rendering…" with nothing left
+  // polling, recoverable today only via a full page reload (which re-fires this same
+  // effect from a fresh activeId). Re-running the identical, already-idempotent scan on
+  // every mobileUI flip closes that gap immediately: any card left "wip"+pendingTaskId
+  // by a just-unmounted drawer gets a fresh, hook-level pollShot() the instant the
+  // toggle fires, regardless of whether LoomV2 or LoomMobile is the one now unmounting.
+  // resumedRef dedupes by taskId (not by trigger reason), so this is a genuine no-op for
+  // every task already resumed or still actively polling -- no double-poll risk, and
+  // none of Image/Edit/Reference's OWN generation needs this at all: genImage/genEdit/
+  // genRef's polls (pollImg/pollTaskWithCeiling, below) are plain setTimeout chains
+  // living in this hook, never a DOM element's lifecycle, so they already survive the
+  // toggle with no fix required -- verified by reading their implementations, not
+  // assumed. See this increment's own report for the injected-state verification.
   useEffect(() => {
     if (!project) return;   // project is null until the store loads the first board
     (project.acts || []).forEach((a) => (a.cards || []).forEach((c) => {
@@ -3257,7 +6389,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
         pollShot(c.id, c.pendingTaskId, c.genStartedAt);
       }
     }));
-  }, [activeId]);   // eslint-disable-line
+  }, [activeId, mobileUI]);   // eslint-disable-line
   // Attach an already-produced video straight onto a shot as its finished clip -- no
   // generation involved. /api/loom/export already treats every resultMid as just "a video
   // file to trim+concat," so this writes the exact same shape pollShot does on completion.
@@ -3290,8 +6422,8 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     const startedAt = Date.now();
     const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
       const cls = classifyTaskStatus(d);
-      // The two JobsCard.refresh() nudges below mirror pollShot's (and mg-notify.js's own
-      // Jobs.poll()): the /api/task-status response that reports done/failed is the very call
+      // The two JobsCard.refresh() nudges below mirror pollShot's (and the notify Jobs
+      // poller's own): the /api/task-status response that reports done/failed is the very call
       // that made the server write the authoritative terminal job event, so refreshing right
       // here cannot race it. Without them a row registered by genImage/genEdit/genRef would sit
       // on stale "running" until the tray's own independent ~2.5-7s cycle happened to catch up --
@@ -3337,7 +6469,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
         body: JSON.stringify(body) });
       const d = await r.json();
       if (d.error || !d.task_id) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } })); return; }
-      // Register this submission in the shared Job Tracker (static/mg-notify.js -> /api/jobs)
+      // Register this submission in the shared Job Tracker (notify/jobs.js -> /api/jobs)
       // the moment the server accepts it. This path -- and genEdit/genRef, via runGen below --
       // never did, so a generation launched from the Loom's Image/Edit/Reference tabs was
       // invisible in BOTH Activity trays (the Loom's and the gallery's): they render from the
@@ -3427,6 +6559,58 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       // The reference COUNT is the one fact this path is about (and the one its own confirm
       // already surfaces), so it rides in the row rather than being lost to "Reference".
       "Reference ×" + refs.length + " · " + entry.code + " · " + (c.title || "untitled"));
+  };
+  // ---- In-Loom Fix (face/hand touch-up repair) -- closes the last disclosed gap in Loom
+  // Mobile's original 6-increment plan (2026-08-03). Ported from the real, already-shipped
+  // gallery/src/components/FixTab.jsx -- SAME real endpoint (/api/fix), SAME real body shape
+  // ({source, boxes}, boxes already scaled to ORIGINAL-image pixels by the caller -- see
+  // LoomMobile's own scaleFixBoxes/genFix call site), SAME real /api/price mode:"fix" check,
+  // SAME real confirm wording FixTab.jsx's own run() uses. Reuses runGen -- the exact submit/
+  // poll/register/route machinery genEdit/genRef already share -- for the actual POST, poll,
+  // and Job Tracker registration; only the CONFIRM step is bespoke, because a Fix's spend
+  // gate is genuinely different from confirmSpend's generic one: a Fix can NEVER be
+  // free-card-covered (the /v2/task/fixer endpoint has no kaisuukenId field at all -- see
+  // moonglade_gallery.py's _params_and_nocard, mode=="fix" branch, which forces no_card=True
+  // for exactly this reason, and FixTab.jsx's own header comment), so confirmSpend's generic
+  // "No free card covers it" wording -- which implies one COULD have -- would misdescribe
+  // every single Fix. `scaledBoxes` arrives already converted to ORIGINAL-image pixels by the
+  // caller -- this function never touches DISPLAY-pixel coordinates or a DOM element, matching
+  // every other real submit function in this hook (genEdit/genRef take already-resolved
+  // ids/text, never DOM refs).
+  const genFix = async (entry, scaledBoxes) => {
+    const c = entry.c;
+    const src = c.openFrame && c.openFrame.mediaId;
+    if (!src) { setGenFixState((s) => ({ ...s, [c.id]: { phase: "error", msg: "the open frame needs a gallery image first (route one from the Image tab, or pick it into the frame)" } })); return; }
+    if (!scaledBoxes || !scaledBoxes.length) { setGenFixState((s) => ({ ...s, [c.id]: { phase: "error", msg: "drag a box over a hand or face first" } })); return; }
+    // One fresh /api/price check, right here, right before the confirm -- there is no
+    // debounced cost cache to go stale against in THIS hook (unlike FixTab.jsx's own
+    // colocated cost badge, which has to flush a pending debounce and await it before
+    // reading its own costVal ref), so there is nothing to flush; this fetch already IS the
+    // fresh read the moment the owner taps Fix. mode:"fix" always comes back free:false
+    // (server-forced -- see _params_and_nocard), so `cost` is the only field this confirm
+    // ever needs.
+    let pr = null;
+    try {
+      const r = await fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "fix", source: src, boxes: scaledBoxes }) });
+      pr = await r.json();
+    } catch { pr = null; }
+    const priced = pr && typeof pr.cost === "number" ? pr.cost : null;
+    // Wording ported VERBATIM from FixTab.jsx's own run() -- "ALWAYS spends" / "never
+    // covered by a free card" -- not confirmSpend's generic phrasing, which this Fix gate
+    // deliberately does not call.
+    const quote = priced == null
+      ? "The price could not be verified, and a Fix ALWAYS spends credits (no free card can ever cover it)."
+      : "This will spend " + Number(priced).toLocaleString() + " credits — a Fix is never covered by a free card.";
+    if (!window.confirm(
+      "Repair " + scaledBoxes.length + " area" + (scaledBoxes.length === 1 ? "" : "s") + "?\n\n" + quote
+    )) return;
+    // priceBody is null: runGen's own confirmSpend gate exists for the OTHER two drawer tabs
+    // (which CAN be free-card-covered) -- this submit already ran its own, Fix-correct
+    // confirm above, so passing null here skips a SECOND, wrongly-worded confirm rather than
+    // stacking one on top of it.
+    runGen(setGenFixState, c.id, "/api/fix", { source: src, boxes: scaledBoxes }, null, "",
+      "Fix · " + entry.code + " · " + (c.title || "untitled"));
   };
   // Batch-generate the whole board: fire every not-done shot in sequence, staggered so
   // the submits don't collide. Each shot manages its own status/poll via generateShot.
@@ -3536,9 +6720,14 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel,
     imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults,
     genEditState, setGenEditState,
-    genRefState, setGenRefState, batching, batchTally,
-    generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
-    costEstimate, refreshEstimate,
+    genRefState, setGenRefState, genFixState, setGenFixState, batching, batchTally,
+    // priceShot exposed (mobile-generate-screen pass, 2026-08-03): the SAME read-only
+    // /api/price check generateShot/confirmSpend/batchGenerate already use internally --
+    // Loom Mobile's own Generate screen needs a per-shot cost PREVIEW to show before the
+    // owner ever taps the real submit button, and this is that exact function, not a new
+    // fetch/pricing implementation. It was already defined here; only its exposure is new.
+    generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, genFix, routeGen, batchGenerate,
+    costEstimate, refreshEstimate, priceShot,
   };
 }
 
@@ -3630,6 +6819,28 @@ function useExportPipeline(project, thumbs) {
 
 export default function App() {
   const [selShot, setSelShot] = useState(null);   // V2 selected-shot: card.id or null
+  // "📱 Mobile view" -- a manual, owner-preference switch between LoomV2 (desktop-style
+  // shell) and LoomMobile (phone-sized board/reel), persisted via useLocalToggle so it
+  // survives a reload. The toggle itself lives in LoomV2's own .lv-top bar (and, so it's
+  // never a one-way trap, a small reciprocal one in LoomMobile's own top bar).
+  const [mobileUI, setMobileUI] = useLocalToggle(MOBILE_UI_KEY, false);
+  // draftCard/draftTarget/draftAttachedInfo -- LIFTED up from LoomV2's own component state
+  // (mobile-board-view pass, 2026-08-03) so an in-progress Generate-drawer draft (no shot
+  // selected yet, keyed "__draft__" the same way genState/genImgState/etc already are)
+  // survives toggling between LoomV2 and LoomMobile instead of being discarded the moment
+  // whichever one owned it unmounts. Passed down to BOTH below; LoomV2's own behavior is
+  // unchanged -- every reference to these three inside LoomV2 is identical to when they were
+  // its own useState calls, only the declaration moved.
+  const [draftCard, setDraftCard] = useState(() => ({
+    id: "__draft__", mode: "R2V", duration: 5, connect: "new", title: "", prompt: "",
+    camera: "", lighting: "", transIn: "", transOut: "", audioCue: "", notes: "",
+    audioGen: false, audioLanguage: "english",
+    imgPrompt: "", editPrompt: "", refPrompt: "",
+    cast: [], refs: [], openFrame: {}, closeFrame: {},
+    promptOverride: false, promptOverrideText: "",
+  }));
+  const [draftTarget, setDraftTarget] = useState("");              // shot id chosen to route/attach a draft result into
+  const [draftAttachedInfo, setDraftAttachedInfo] = useState(null); // {mid, code} once a draft video is attached to a shot
   const { project, setProject, thumbs, storeThumb, busy,
     projList, projMenu, setProjMenu, projectApi, importBackup, activeId } = useProjectStore(setSelShot);
 
@@ -3646,27 +6857,33 @@ export default function App() {
     try { return !localStorage.getItem("loom_guide_seen"); } catch (e) { return true; } });
   const [showCast, setShowCast] = useState(true);
   const openPick = useCallback((cb, kind, allowType) => { setPickKind(kind || "image"); setPickAllowType(!!allowType); setPickCb(() => cb); }, []);
-  // Bridge the shared <mg-gallery-picker> web component to React (mirrors bindPicker):
-  // pickCb doesn't change while the picker is mounted (only open->close via setPickCb),
-  // so the closure captured on mount stays correct for the whole picking session.
-  const bindGalleryPicker = useCallback((el) => {
-    if (el && !el._mgBound) {
-      el._mgBound = true;
-      el.addEventListener("mg-pick", (e) => {
-        const cb = pickCb; setPickCb(null);
-        if (cb) cb(e.detail.media_id, e.detail.thumb, e.detail.is_video, e.detail.duration, e.detail.is_nsfw);
-      });
-      el.addEventListener("mg-close", () => setPickCb(null));
-    }
-  }, [pickCb]);
+  // pickCb doesn't change while the picker is mounted (only open->close via setPickCb), so
+  // the onPick closure below stays correct for the whole picking session.
+  const onGalleryPick = (m) => {
+    const cb = pickCb; setPickCb(null);
+    if (cb) cb(m.media_id, m.thumb, m.is_video, m.duration, m.is_nsfw);
+  };
 
   const { genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel,
     imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults,
     genEditState, setGenEditState,
-    genRefState, setGenRefState, batching, batchTally,
-    pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, routeGen, batchGenerate,
+    genRefState, setGenRefState,
+    // genFixState/setGenFixState/genFix -- seventh increment (2026-08-03), the real Fixer
+    // submit path (useGenerationPipeline's own genFix). Only LoomMobile receives it below --
+    // desktop's LoomV2 has no Fixer tab (out of this increment's scope).
+    genFixState, setGenFixState, batching, batchTally,
+    // generateShot/priceShot newly destructured here (mobile-generate-screen pass,
+    // 2026-08-03) -- both already existed on the hook's return value, generateShot simply
+    // had no consumer above batchGenerate's own internal call until Loom Mobile's Generate
+    // screen needed the exact same real per-shot submit + price-preview functions LoomV2's
+    // batch path already uses. Nothing about either function changes; only who else gets a
+    // reference to them.
+    generateShot, priceShot,
+    pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, genFix, routeGen, batchGenerate,
     costEstimate, refreshEstimate }
-    = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId });
+    // mobileUI passed in (mobile-generate-rail pass, 2026-08-03) so the resume-on-reload
+    // effect can also fire on the Mobile-view toggle -- see that effect's own comment.
+    = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI });
   // <mg-generate-drawer> owns its own submit/poll now (Loom-mount build, 2026-07-18); these
   // mirror exactly what generateShot/pollShot already write for every OTHER path, so the
   // board card's live status badge, tab-close resume (pendingTaskId), and the finished clip
@@ -3680,7 +6897,7 @@ export default function App() {
     // still-pending drawer-submitted shot would resume with no persisted start time, silently
     // re-arming a full 6h give-up budget on every reload (found while implementing).
     setCardStatus(cardId, { status: "wip", pendingTaskId: detail.task_id, genStartedAt: Date.now() });
-    // Registers with the shared Job Tracker (static/mg-notify.js), mirroring generateShot's
+    // Registers with the shared Job Tracker (notify/jobs.js), mirroring generateShot's
     // own registration -- deliberately done HERE (the Loom's own host code), not inside
     // mg-generate-drawer.js itself, so the shared drawer component stays genuinely
     // host-agnostic (its own documented contract) rather than assuming window.Jobs exists.
@@ -3729,9 +6946,13 @@ export default function App() {
   // resurfaces in project B's drawer (still-live thumbnail + a working attach button that
   // writes into whichever shot in B you pick) the moment you switch projects, since nothing
   // else ever clears these four dicts. Reset all of them whenever the active project changes.
+  // genFixState included for the same hygiene even though nothing currently drives it via
+  // "__draft__" (LoomMobile's Fixer always operates on a real, bound dfLive shot -- draft
+  // mode is desktop-only and out of this increment's scope) -- a genuine no-op today, kept
+  // symmetric with its three siblings rather than a silent exception to this comment's own rule.
   useEffect(() => {
     const clearDraft = (s) => { if (!("__draft__" in s)) return s; const n = { ...s }; delete n.__draft__; return n; };
-    setGenState(clearDraft); setGenImgState(clearDraft); setGenEditState(clearDraft); setGenRefState(clearDraft);
+    setGenState(clearDraft); setGenImgState(clearDraft); setGenEditState(clearDraft); setGenRefState(clearDraft); setGenFixState(clearDraft);
   }, [activeId]);
 
   const { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
@@ -3775,25 +6996,49 @@ export default function App() {
   return (
     <div className="sb-root">
       <style>{STYLES}</style>
-      <V2Boundary><LoomV2
-        project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}
-        selShot={selShot} setSelShot={setSelShot} useExistingVideo={useExistingVideo} genState={genState}
-        thumbs={thumbs} openPick={openPick} storeThumb={storeThumb}
-        setAct={setAct} addCard={addCard} importFootage={importFootage} dupCard={dupCard} delCard={delCard} moveCard={moveCard}
-        moveCardToAct={moveCardToAct} addAct={addAct} delAct={delAct} moveAct={moveAct}
-        genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel}
-        imgLoras={imgLoras} setImgLoras={setImgLoras} imgAdv={imgAdv} setImgAdv={setImgAdv}
-        modelDefaults={modelDefaults} setModelDefaults={setModelDefaults}
-        genImage={genImage} routeImg={routeImg}
-        genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState} genEdit={genEdit} genRef={genRef} routeGen={routeGen}
-        projectApi={projectApi} playSequence={playSequence} exportCut={exportCut}
-        batching={batching} batchGenerate={batchGenerate} batchTally={batchTally}
-        addRef={addRef} setRef={setRef} delRef={delRef}
-        exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle} bundling={bundling}
-        importBackup={importBackup} setImportOpen={setImportOpen} copyShot={copyShot} setLook={setLook} setDraft={setDraft} splitShot={splitShot}
-        onVideoSubmit={onVideoSubmit} onVideoResult={onVideoResult} onVideoError={onVideoError}
-        onVideoSlow={onVideoSlow} onVideoPaused={onVideoPaused} pollShot={pollShot}
-        costEstimate={costEstimate} refreshEstimate={refreshEstimate} /></V2Boundary>
+      <NotifyRoot />
+      {mobileUI ? (
+        <V2Boundary><LoomMobile
+          project={project} entries={entries} thumbs={thumbs} genState={genState}
+          selShot={selShot} setSelShot={setSelShot} addCard={addCard} addAct={addAct} setDraft={setDraft}
+          setCard={setCard} setAssets={setAssets} addRef={addRef} setRef={setRef} delRef={delRef}
+          storeThumb={storeThumb} openPick={openPick} copyShot={copyShot} splitShot={splitShot}
+          moveCard={moveCard} dupCard={dupCard} delCard={delCard}
+          mobileUI={mobileUI} setMobileUI={setMobileUI}
+          draftCard={draftCard} setDraftCard={setDraftCard} draftTarget={draftTarget} setDraftTarget={setDraftTarget}
+          draftAttachedInfo={draftAttachedInfo} setDraftAttachedInfo={setDraftAttachedInfo}
+          generateShot={generateShot} priceShot={priceShot} useExistingVideo={useExistingVideo}
+          genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel}
+          imgLoras={imgLoras} setImgLoras={setImgLoras} imgAdv={imgAdv} setImgAdv={setImgAdv}
+          modelDefaults={modelDefaults} setModelDefaults={setModelDefaults} genImage={genImage} routeImg={routeImg}
+          genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState}
+          genEdit={genEdit} genRef={genRef} routeGen={routeGen}
+          genFixState={genFixState} setGenFixState={setGenFixState} genFix={genFix} /></V2Boundary>
+      ) : (
+        <V2Boundary><LoomV2
+          project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}
+          selShot={selShot} setSelShot={setSelShot} useExistingVideo={useExistingVideo} genState={genState}
+          thumbs={thumbs} openPick={openPick} storeThumb={storeThumb}
+          setAct={setAct} addCard={addCard} importFootage={importFootage} dupCard={dupCard} delCard={delCard} moveCard={moveCard}
+          moveCardToAct={moveCardToAct} addAct={addAct} delAct={delAct} moveAct={moveAct}
+          genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel}
+          imgLoras={imgLoras} setImgLoras={setImgLoras} imgAdv={imgAdv} setImgAdv={setImgAdv}
+          modelDefaults={modelDefaults} setModelDefaults={setModelDefaults}
+          genImage={genImage} routeImg={routeImg}
+          genEditState={genEditState} setGenEditState={setGenEditState} genRefState={genRefState} setGenRefState={setGenRefState} genEdit={genEdit} genRef={genRef} routeGen={routeGen}
+          genFixState={genFixState} setGenFixState={setGenFixState} genFix={genFix}
+          projectApi={projectApi} playSequence={playSequence} exportCut={exportCut}
+          batching={batching} batchGenerate={batchGenerate} batchTally={batchTally}
+          addRef={addRef} setRef={setRef} delRef={delRef}
+          exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle} bundling={bundling}
+          importBackup={importBackup} setImportOpen={setImportOpen} copyShot={copyShot} setLook={setLook} setDraft={setDraft} splitShot={splitShot}
+          onVideoSubmit={onVideoSubmit} onVideoResult={onVideoResult} onVideoError={onVideoError}
+          onVideoSlow={onVideoSlow} onVideoPaused={onVideoPaused} pollShot={pollShot}
+          costEstimate={costEstimate} refreshEstimate={refreshEstimate}
+          mobileUI={mobileUI} setMobileUI={setMobileUI}
+          draftCard={draftCard} setDraftCard={setDraftCard} draftTarget={draftTarget} setDraftTarget={setDraftTarget}
+          draftAttachedInfo={draftAttachedInfo} setDraftAttachedInfo={setDraftAttachedInfo} /></V2Boundary>
+      )}
       {seq && <SequencePlayer clips={seq} onClose={closeSequence} />}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
@@ -3854,9 +7099,13 @@ export default function App() {
             <button className="sb-btn ghost sm" style={{ alignSelf: "center" }} onClick={closeBundleMissing}>Close</button>
           </div>
         </div>)}
-      {pickCb && (pickAllowType
-        ? <mg-gallery-picker ref={bindGalleryPicker} default-type={pickKind} show-type></mg-gallery-picker>
-        : <mg-gallery-picker ref={bindGalleryPicker} default-type={pickKind}></mg-gallery-picker>)}
+      {/* sheet rides the Mobile-view toggle: the SAME picker reshapes into the Loom Mobile
+          design's bottom sheet (GalleryPicker's .sheet variant) -- the punch-list item was
+          that mobile silently reused the desktop modal shape. */}
+      {pickCb && (
+        <GalleryPicker defaultType={pickKind} showType={pickAllowType} sheet={mobileUI}
+          onPick={onGalleryPick} onClose={() => setPickCb(null)} />
+      )}
       {importOpen && <ImportCollection onClose={() => setImportOpen(false)} onImport={importCollection} />}
 
     </div>

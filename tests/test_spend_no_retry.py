@@ -37,7 +37,13 @@ import moonglade_backup as core
 # makes forgetting loud instead of silent.
 SPEND_PATHS = ("submit_generation", "run_generate", "run_generate_video",
                "run_reference_video", "run_edit_image", "upload_media",
-               "delete_batch_media_gql")
+               "delete_batch_media_gql",
+               # LoRA training: spends real credits once the free-training quota is
+               # gone, and a re-POST would start a SECOND training (2026-08-06).
+               "submit_training",
+               # Artwork mutations: no credits, but they change the public account and
+               # a retry would publish twice / delete something already gone.
+               "publish_artwork_from_task", "update_artwork", "delete_artwork")
 
 # A real call, not a mention: the comments in these functions name gql_adhoc on purpose
 # ("gql_mutate, never gql_adhoc") and must not trip the check.

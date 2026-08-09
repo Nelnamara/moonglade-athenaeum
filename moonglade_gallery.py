@@ -63,6 +63,11 @@ CATALOG_FIELDS = [
     "loras",
     # Extra reproduction params from getTaskById (full-meta)
     "negative_prompt", "clip_skip",
+    # LINEAGE (2026-08-06): the source image a derived gen was made from + the kind of
+    # derivation ("edit"/"upscale"/"video"). Blank for originals. See source_media_of_task.
+    # lineage_checked is the persisted "confirmed original, don't re-fetch" marker for
+    # --backfill-lineage -- see that command's docstring for why it's a real column.
+    "source_media_id", "derive_kind", "lineage_checked",
     # Image-to-video tasks (--sync-videos): is_video='1', poster_media_id is the
     # still-frame media id (its image is the gallery poster), duration in seconds.
     "is_video", "poster_media_id", "video_duration",
@@ -84,12 +89,21 @@ CATALOG_FIELDS = [
     # totals must count once per task_id. '0' is a real value (free card / daily-free
     # gen); '' means never captured -- never conflate the two.
     "paid_credit",
+    # Perceptual difference-hash (dHash, compute_dhash()) of the image, IMAGE ROWS ONLY
+    # (blank for videos and for images not yet processed). 16 hex chars = 64 bits.
+    # Populated by `--backfill-phash`, not at pull/collect time -- backfilled on demand
+    # like blurhash/paid_credit above. Powers the near_duplicate tier in
+    # GET /api/duplicates (near_duplicate_groups()): a Hamming-distance comparison finds
+    # "upscaled or recompressed version of the same image" pairs that byte-hashing (Class
+    # B, identical_file) misses because the bytes differ.
+    "phash",
 ]
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
 THUMB_SIZE = (768, 768)
 THUMB_QUALITY = 90
 PAGE_SIZE = 100
+DHASH_SIZE = 8  # compute_dhash()'s hash dimension: 8x8 -> 64-bit hash, 16 hex chars
 
 
 _CREATE_TABLE = """
@@ -102,6 +116,9 @@ CREATE TABLE IF NOT EXISTS catalog (
     width           TEXT,
     height          TEXT,
     prompt_preview  TEXT,
+    source_media_id TEXT DEFAULT '',
+    derive_kind     TEXT DEFAULT '',
+    lineage_checked TEXT DEFAULT '',
     status          TEXT,
     created_at      TEXT,
     prompt_full     TEXT,
@@ -132,7 +149,8 @@ CREATE TABLE IF NOT EXISTS catalog (
     collections     TEXT DEFAULT '',
     blurhash        TEXT DEFAULT '',
     nsfw_scores     TEXT DEFAULT '',
-    paid_credit     TEXT DEFAULT ''
+    paid_credit     TEXT DEFAULT '',
+    phash           TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
@@ -192,6 +210,20 @@ _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN blurhash TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN nsfw_scores TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN paid_credit TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN phash TEXT DEFAULT ''",
+    # LINEAGE (2026-08-06): the SOURCE image a derived generation was made from, and the
+    # kind of derivation ("edit"/"upscale"/"video"). Empty for original txt2img rows.
+    # Populated from task params (source_media_of_task); batch siblings need no column
+    # (they share task_id already). Indexed so "what did this image spawn" is a fast lookup.
+    "ALTER TABLE catalog ADD COLUMN source_media_id TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN derive_kind TEXT DEFAULT ''",
+    "CREATE INDEX IF NOT EXISTS idx_source_media_id ON catalog(source_media_id)",
+    # A real txt2img original legitimately has an EMPTY source_media_id forever, which
+    # makes "blank" ambiguous with "never checked" -- this is the persisted "checked, found
+    # nothing" marker --backfill-lineage needs so it doesn't re-fetch every original task on
+    # every single run (an in-memory-only marker was tried first and silently discarded by
+    # save_catalog, since it isn't a real column -- caught before it shipped).
+    "ALTER TABLE catalog ADD COLUMN lineage_checked TEXT DEFAULT ''",
 ]
 
 def _connect(db_path):
@@ -1566,11 +1598,21 @@ SKINS = [
 ]
 _SKIN_IDS = {s["id"] for s in SKINS}
 
+# Real unlock text per locked skin, matching Control Panel.dc.html:453-457 exactly --
+# each name/threshold names the real achievement that actually grants it (hoardsmith/
+# reel-director/menagerie, see their 'skin' field above). Free skins carry no entry.
+_SKIN_UNLOCK_TEXT = {
+    "moonlit": "Unlock: Hoardsmith (10,000 images)",
+    "ember":   "Unlock: Reel Director (50 videos)",
+    "verdant": "Unlock: Menagerie (25 distinct models)",
+}
+
 # The 10 Evolution Ladder tracks each ladder achievement's 'track' field points at
-# (see ACHIEVEMENTS' 'track'/'rung'/'rungs_total' fields, sourced from
-# docs/achievements_roster_57.json's roster.tracks). Single source of truth for
-# ladder display names -- the Folio of Honors' carousel/ladder-grid groups by this,
-# not a second hand-maintained id->name map in the frontend.
+# (see ACHIEVEMENTS' 'track'/'rung'/'rungs_total' fields; the roster.tracks these came
+# from lived in the owner's off-repo achievements_roster_57.json, whose committed copy
+# was scrubbed 2026-07-27 -- the live roster is now the inline ACHIEVEMENTS list above).
+# Single source of truth for ladder display names -- the Folio of Honors' carousel/
+# ladder-grid groups by this, not a second hand-maintained id->name map in the frontend.
 LADDER_TRACKS = [
     {"id": "archive",     "name": "The Archive",           "metric": "images"},
     {"id": "loom",        "name": "The Loom",               "metric": "videos"},
@@ -1650,6 +1692,456 @@ def list_marks(out_dir):
                         "png": "/branding/marks/%s.png" % mid,
                         "ico": (mdir / (mid + ".ico")).exists()})
     return out
+
+
+# The 4 Branding-tab slots Control Panel.dc.html specs beyond Icons & marks
+# (banner-main/banner-login/mascots/rewards) -- none had any backend at all
+# before this. Deliberately ONE shape for all four (manifest.json + <id>.png
+# per slot, same "many stored, one exists-checked" contract list_marks() above
+# already established) rather than a bespoke single-file slot vs. a bespoke
+# multi-file slot: the F1/F2 SQLite-bundle work only has to learn ONE storage
+# shape to take over, not four. Rotating-source selection (Banner-main's own
+# "pick FROM a collection" mechanic) is explicitly deferred until that bundle
+# work lands (owner call, 2026-08-05) -- for now every slot is just "the
+# uploaded assets, one of which is active", identical to how marks/mark
+# already relate, so that later mechanic has real asset ids to pick FROM
+# instead of a schema migration first.
+# banner_loom (12:1 workspace strip) added 2026-08-06 with the Branding-tab rebuild
+# (Control Panel.dc.html SLOTS index 5: "Banner - Loom", 1920x160). It joins the two
+# 4:1 banners as a real, written-through slot; mascots/rewards stay excluded from the
+# sweep (see _SWEEPABLE_SLOTS + the mascots-in-branding correction 2026-08-06).
+BRANDING_SLOTS = ("banner_main", "banner_login", "mascots", "rewards", "banner_loom")
+
+
+def _slot_dir(slot):
+    return branding_root() / slot
+
+
+def _asset_transform(it):
+    """Normalize one manifest item's crop transform to the design's zoom/cropX/cropY
+    model (Control Panel.dc.html:953 -- object-position cropX% cropY% + scale(zoom/100)).
+    Back-compat: an item written under the OLD left/center/right crop model (pre
+    2026-08-06) maps to the equivalent pan -- left->cropX 0, center->50, right->100 --
+    at zoom 100, cropY 50, so an existing install's banners keep displaying unchanged
+    until re-tuned."""
+    if not isinstance(it, dict):
+        it = {}
+    if "zoom" in it or "cropX" in it or "cropY" in it:
+        z = it.get("zoom", 100); cx = it.get("cropX", 50); cy = it.get("cropY", 50)
+    else:
+        legacy = {"left": 0, "right": 100}.get(it.get("crop") or "center", 50)
+        z, cx, cy = 100, legacy, 50
+    try:
+        z = max(100, min(int(z), 250))
+        cx = max(0, min(int(cx), 100))
+        cy = max(0, min(int(cy), 100))
+    except (TypeError, ValueError):
+        z, cx, cy = 100, 50, 50
+    return {"zoom": z, "cropX": cx, "cropY": cy}
+
+
+def list_slot_assets(out_dir, slot):
+    """Uploaded assets for one Branding slot: branding/<slot>/manifest.json
+    entries whose .png actually exists. Empty on a fresh install / until that
+    slot's first real upload, exactly like list_marks() above. Each asset carries
+    its zoom/cropX/cropY transform (normalized, legacy crop migrated)."""
+    if slot not in BRANDING_SLOTS:
+        return []
+    sdir = _slot_dir(slot)
+    try:
+        data = json.loads((sdir / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, dict):
+        return []          # corrupt manifest degrades to "no assets", never a 500
+    out = []
+    for it in data.get("items") or []:
+        if not isinstance(it, dict):
+            continue
+        iid = str(it.get("id") or "")
+        if iid and (sdir / (iid + ".png")).exists():
+            out.append({"id": iid, **_asset_transform(it),
+                        "png": "/branding/%s/%s.png" % (slot, iid)})
+    return out
+
+
+def _slot_active_path(out_dir):
+    # Sibling of branding.json/branding/, same machine-local git-ignored tree --
+    # kept in its OWN file rather than folded into branding.json so that file's
+    # existing read-modify-write cycle (load_branding/save_branding, mark+anim
+    # only) can never clobber slot-active state it doesn't know about.
+    return branding_root().parent / "branding_slots.json"
+
+
+def load_slot_active(out_dir):
+    """Which uploaded asset (by id) is the ACTIVE one per slot -- the same
+    relationship branding.json's own "mark" field already has to list_marks():
+    many stored, one worn. Self-heals exactly like load_branding() does for
+    "mark": a recorded active id that no longer exists on disk (deleted file,
+    corrupt manifest) falls back to the first real asset, or None."""
+    active = {}
+    try:
+        raw = json.loads(_slot_active_path(out_dir).read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            active = {k: str(v) for k, v in raw.items() if k in BRANDING_SLOTS and v}
+    except (OSError, ValueError):
+        pass
+    for slot in BRANDING_SLOTS:
+        have = {a["id"] for a in list_slot_assets(out_dir, slot)}
+        if active.get(slot) not in have:
+            active[slot] = next(iter(have), None)
+    return active
+
+
+def save_slot_active(out_dir, active):
+    _slot_active_path(out_dir).write_text(
+        json.dumps({k: v for k, v in active.items() if v}, indent=2), encoding="utf-8")
+
+
+def add_slot_asset(out_dir, slot, png_bytes, zoom=100, cropx=50, cropy=50):
+    """Save a new upload into one Branding slot and make it the active one.
+    Returns the new asset dict, or None for an unknown slot. Caller (the
+    /api/branding/slot route) is responsible for making sure png_bytes is a
+    real PNG before this is called -- this function just persists it. New
+    uploads start at the neutral transform (zoom 100, centered) -- the
+    equivalent of the design's own defaults."""
+    if slot not in BRANDING_SLOTS:
+        return None
+    sdir = _slot_dir(slot)
+    sdir.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads((sdir / "manifest.json").read_text(encoding="utf-8"))
+        items = list(data.get("items") or []) if isinstance(data, dict) else []
+    except (OSError, ValueError):
+        items = []
+    new_id = secrets.token_hex(4)
+    (sdir / (new_id + ".png")).write_bytes(png_bytes)
+    t = _asset_transform({"zoom": zoom, "cropX": cropx, "cropY": cropy})
+    items.append({"id": new_id, **t})
+    (sdir / "manifest.json").write_text(json.dumps({"items": items}, indent=2), encoding="utf-8")
+    active = load_slot_active(out_dir)
+    active[slot] = new_id
+    save_slot_active(out_dir, active)
+    _write_banner_flat(out_dir, slot)   # the new upload is now active -> display it
+    return {"id": new_id, **t, "png": "/branding/%s/%s.png" % (slot, new_id)}
+
+
+def set_slot_crop(out_dir, slot, item_id, zoom=None, cropx=None, cropy=None):
+    """Update one already-uploaded asset's zoom/cropX/cropY transform (Control
+    Panel.dc.html's three banner sliders -- zoom 100-250, cropX/cropY 0-100).
+    Any field left None keeps its stored value. False for an unknown slot/item,
+    never a 500. Widened 2026-08-06 from the old 3-value left/center/right crop."""
+    if slot not in BRANDING_SLOTS:
+        return False
+    sdir = _slot_dir(slot)
+    try:
+        data = json.loads((sdir / "manifest.json").read_text(encoding="utf-8"))
+        items = data.get("items") if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return False
+    if not isinstance(items, list):
+        return False
+    found = False
+    for it in items:
+        if isinstance(it, dict) and str(it.get("id")) == str(item_id):
+            cur = _asset_transform(it)
+            merged = {
+                "zoom": cur["zoom"] if zoom is None else zoom,
+                "cropX": cur["cropX"] if cropx is None else cropx,
+                "cropY": cur["cropY"] if cropy is None else cropy,
+            }
+            norm = _asset_transform(merged)
+            it.pop("crop", None)          # drop the legacy field once re-tuned
+            it.update(norm)
+            found = True
+    if not found:
+        return False
+    (sdir / "manifest.json").write_text(json.dumps({"items": items}, indent=2), encoding="utf-8")
+    if load_slot_active(out_dir).get(slot) == str(item_id):
+        _write_banner_flat(out_dir, slot)   # the transform is baked into the displayed flat
+    return True
+
+
+def set_slot_active(out_dir, slot, item_id):
+    """Mark an already-uploaded asset as the active one for its slot. False for
+    an unknown slot or an item_id that isn't a real asset in it -- there is no
+    "clear to none" here on purpose: the design never models deselecting a slot
+    back to empty, only picking among what's uploaded, and load_slot_active()'s
+    own self-heal (falling back to the first real asset when nothing is
+    recorded) would silently undo a stored None anyway, since the two cases
+    look identical on disk."""
+    if slot not in BRANDING_SLOTS:
+        return False
+    if not item_id or item_id not in {a["id"] for a in list_slot_assets(out_dir, slot)}:
+        return False
+    active = load_slot_active(out_dir)
+    active[slot] = item_id
+    save_slot_active(out_dir, active)
+    _write_banner_flat(out_dir, slot)
+    return True
+
+
+def branding_slots_payload(out_dir):
+    """The Branding tab's full slot state -- assets + which one is active, per
+    slot -- in the one shape both /api/branding and /api/panel/summary hand to
+    the React BrandingTab. A single function so both routes can never disagree
+    about what a slot looks like."""
+    active = load_slot_active(out_dir)
+    return {slot: {"assets": list_slot_assets(out_dir, slot), "active": active.get(slot)}
+            for slot in BRANDING_SLOTS}
+
+
+# "Under the Hood" intended flow (docs/DECISIONS.md, 2026-07-26, owner-confirmed
+# 2026-08-05): a fresh install ships the branding slot folders EMPTY, with a
+# single README breadcrumb the only hint. A curious user drops a raw PNG/JPEG
+# directly into one of them; the app ADOPTS it into that slot on its own --
+# no marks.json to hand-author, no upload UI. That adoption is what fires the
+# hidden feat and unlocks the Control Panel Branding tab. The earn path can
+# never be "use the Branding tab's own upload API" -- that tab sits BEHIND
+# this exact unlock -- so this has to work by scanning raw filesystem drops,
+# not by extending the authenticated upload routes above.
+_BRANDING_README = "Maybe something goes in here.\n"
+_BRANDING_DISCOVERY_SLOTS = BRANDING_SLOTS + ("marks",)
+
+
+def ensure_branding_discovery_tree():
+    """Create the empty, nested slot folders + the one breadcrumb README, so
+    there is actually something for a tinkerer to find. Idempotent and additive
+    only -- never touches a folder or file that already exists, so it is safe
+    to call on every server start regardless of what's already on disk (the
+    owner's own real branding/, a returning install with real uploads, ...).
+    Called once at app startup (create_app), not per-request."""
+    root = branding_root()
+    for slot in _BRANDING_DISCOVERY_SLOTS:
+        (root / slot).mkdir(parents=True, exist_ok=True)
+    readme = root / "README.txt"
+    if not readme.exists():
+        try:
+            readme.write_text(_BRANDING_README, encoding="utf-8")
+        except OSError:
+            pass
+
+
+def _adopt_dropped_file(path):
+    """Re-encode a raw dropped image (PNG/JPEG/anything Pillow can read) into
+    real PNG bytes, or None if it isn't a readable image at all -- the same
+    defense-in-depth the authenticated upload route above applies, just
+    against a file that arrived by hand instead of by POST."""
+    try:
+        from PIL import Image
+        import io
+        im = Image.open(path)
+        im.load()
+        buf = io.BytesIO()
+        im.convert("RGBA").save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
+def _adopt_mark(out_dir, raw_stem, png_bytes):
+    """Register a raw dropped file into marks.json + write its .png, then make
+    it the active mark -- the marks-folder half of sweep_branding_drops()'s
+    auto-adopt (marks predate BRANDING_SLOTS and keep their own established
+    list_marks()/marks.json shape rather than being folded into the newer
+    per-slot manifest convention)."""
+    mdir = branding_root() / "marks"
+    mid = re.sub(r"[^a-z0-9_-]+", "-", raw_stem.lower()).strip("-")[:40] or "custom"
+    have = {m["id"] for m in list_marks(out_dir)}
+    if mid in have:
+        mid = (mid + "-" + secrets.token_hex(3))[:40]
+    try:
+        data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
+        marks = list(data.get("marks") or []) if isinstance(data, dict) else []
+    except (OSError, ValueError):
+        marks = []
+    marks.append({"id": mid, "label": mid.replace("-", " "), "kind": "tile"})
+    (mdir / "marks.json").write_text(json.dumps({"marks": marks}, indent=2), encoding="utf-8")
+    (mdir / (mid + ".png")).write_bytes(png_bytes)
+    cfg = load_branding(out_dir)
+    cfg["mark"] = mid
+    save_branding(out_dir, cfg)
+
+
+# SAFETY, 2026-08-05: mascots/ and rewards/ are NOT empty user-customizable
+# buckets -- they already hold a family of specifically-named, role-bound
+# files real shipped code reads by exact filename (the narrator/login/power-
+# modal mascots, the claim icon, and a per-achievement ach/<id>.png chain that
+# has no fixed, enumerable list). The original version of this sweep had no
+# awareness of that and would have adopted-then-DELETED every one of those
+# files the first time it ran against an install that actually has them --
+# caught before it ever ran against real assets, but only just. Until
+# mascots/rewards get a real design (named-role overrides, most likely, not
+# a manifest-of-many-pick-one-active gallery like the other two slots), the
+# sweep only ever touches the two slots that map cleanly onto a real,
+# already-established single flat file: banner_main -> branding/banner.png
+# and banner_login -> branding/login-banner.png (WIRED to write those exact
+# paths as of 2026-08-06 -- see _write_banner_flat below; owner call: "Yes,
+# seems obvious").
+_SWEEPABLE_SLOTS = ("banner_main", "banner_login", "banner_loom")
+
+# The flat files the header/login/Loom templates read directly (the header's
+# <img src="/branding/banner.png">, the login page's login-banner.png, and the
+# Loom's workspace strip). The slot system stores MANY assets; these flats are
+# the ONE the app displays -- so every path that changes which asset is active
+# (upload, pick-active, re-crop the active one, a raw drop the sweep adopts)
+# re-renders its slot's flat.
+_BANNER_FLAT = {"banner_main": "banner.png", "banner_login": "login-banner.png",
+                "banner_loom": "banner-loom.png"}
+# The output aspect each banner flat is cropped to (width / height). banner_loom
+# is the 12:1 workspace strip added with the Branding-tab rebuild.
+_BANNER_RATIO = {"banner_main": 4.0, "banner_login": 4.0, "banner_loom": 12.0}
+# Canonical output pixel size per slot (the DC's own spec strings: 1920x480,
+# 1920x160). The saved flat is resized to this so downstream CSS never upsamples
+# an oddly-sized source.
+_BANNER_OUT = {"banner_main": (1920, 480), "banner_login": (1920, 480),
+               "banner_loom": (1920, 160)}
+
+
+def _banner_window(w, h, target_ar, zoom, cropx, cropy):
+    """The source-pixel crop box that reproduces the design's live preview EXACTLY
+    (Control Panel.dc.html:953): an object-fit:cover image with
+    `object-position: cropX% cropY%`, `transform: scale(zoom/100)`,
+    `transform-origin: cropX% cropY%`. WYSIWYG matters here -- the owner tunes the
+    sliders watching that preview, so the flat must match it, not merely approximate.
+
+    Derivation: model a display frame of the target aspect, replicate the CSS
+    (cover-fit, then object-position, then the scale about the crop-origin), and map
+    the frame's four corners back into source-pixel space; their bounding rectangle
+    is the visible window. Returns (left, top, right, bottom) clamped to the source.
+    """
+    z = max(1.0, zoom / 100.0)
+    px, py = cropx / 100.0, cropy / 100.0
+    # A frame of the target aspect, sized in the source's own units (height = h) so
+    # the cover math stays in familiar pixels; only the ratio matters.
+    FH = float(h)
+    FW = target_ar * FH
+    sc = max(FW / w, FH / h)                      # object-fit: cover
+    disp_w, disp_h = w * sc, h * sc
+    over_x, over_y = disp_w - FW, disp_h - FH     # >= 0
+    img_l, img_t = -px * over_x, -py * over_y     # object-position placement
+    ox, oy = px * FW, py * FH                     # transform-origin in frame coords
+
+    def src(fx, fy):
+        # undo scale(z) about (ox,oy), then undo cover placement -> source px
+        qx = ox + (fx - ox) / z
+        qy = oy + (fy - oy) / z
+        return (qx - img_l) / sc, (qy - img_t) / sc
+
+    corners = [src(0, 0), src(FW, 0), src(0, FH), src(FW, FH)]
+    xs = [c[0] for c in corners]; ys = [c[1] for c in corners]
+    l, t, r, b = min(xs), min(ys), max(xs), max(ys)
+    # clamp into the source, then re-fit the exact target aspect inside the clamp so
+    # the saved file's aspect is precise even at an edge-panned extreme.
+    l, t = max(0.0, l), max(0.0, t)
+    r, b = min(float(w), r), min(float(h), b)
+    cw, ch = r - l, b - t
+    if cw <= 0 or ch <= 0:
+        return (0, 0, w, h)
+    if cw / ch > target_ar:                       # too wide -> trim width, keep centre
+        nw = ch * target_ar; l += (cw - nw) / 2; r = l + nw
+    else:                                         # too tall -> trim height
+        nh = cw / target_ar; t += (ch - nh) / 2; b = t + nh
+    # Size-preserving integer rounding: round the origin, derive the far edge from the
+    # SIZE (min 1px). Rounding all four edges independently can collapse a sub-pixel-
+    # tall box to zero height (round(1.5)=2 and round(2.5)=2 under banker's rounding),
+    # which made Pillow produce an empty crop for small sources.
+    li, ti = int(round(l)), int(round(t))
+    wi = max(1, int(round(r - l))); hi = max(1, int(round(b - t)))
+    li = max(0, min(li, w - wi)); ti = max(0, min(ti, h - hi))
+    return (li, ti, li + wi, ti + hi)
+
+
+def _write_banner_flat(out_dir, slot):
+    """Render a banner slot's ACTIVE asset over its real flat file, baking the
+    stored zoom/cropX/cropY transform in via _banner_window (the design's own
+    preview math). That is what makes the banner sliders REAL -- the transform
+    was stored metadata nothing rendered before. Fails soft (False), never a
+    500: a banner that fails to render leaves the previous flat in place, which
+    still displays -- strictly better than a broken header image."""
+    name = _BANNER_FLAT.get(slot)
+    if not name:
+        return False
+    active_id = load_slot_active(out_dir).get(slot)
+    a = next((x for x in list_slot_assets(out_dir, slot) if x["id"] == active_id), None)
+    if not a:
+        return False
+    try:
+        from PIL import Image
+        im = Image.open(_slot_dir(slot) / (a["id"] + ".png"))
+        im.load()
+        w, hh = im.size
+        ar = _BANNER_RATIO.get(slot, 4.0)
+        box = _banner_window(w, hh, ar, a.get("zoom", 100), a.get("cropX", 50), a.get("cropY", 50))
+        crop = im.crop(box)
+        ow, oh = _BANNER_OUT.get(slot, (1920, int(round(1920 / ar))))
+        crop = crop.resize((ow, oh), Image.LANCZOS)
+        crop.save(branding_root() / name, format="PNG")
+        return True
+    except Exception:
+        return False
+
+
+def sweep_branding_drops(out_dir):
+    """Scan the SWEEPABLE branding slot folders (_SWEEPABLE_SLOTS + marks) for
+    a raw file that arrived by hand and isn't already a known asset, adopt
+    each one found, and fire the 'Under the Hood' hidden feat if anything was
+    adopted. Runs on every /api/achievements fetch rather than
+    sweep_telemetry()'s once-a-day cadence -- a real find deserves to pay off
+    on the next reload, not up to a day later. Cheap: a handful of small
+    directory listings, matching list_marks()/list_quarantined()'s own "stays
+    cheap" precedent. Returns True if anything was adopted this call."""
+    adopted = False
+    for slot in _SWEEPABLE_SLOTS:
+        sdir = _slot_dir(slot)
+        if not sdir.is_dir():
+            continue
+        known = {a["id"] for a in list_slot_assets(out_dir, slot)}
+        try:
+            entries = sorted(sdir.iterdir())
+        except OSError:
+            continue
+        for p in entries:
+            if not p.is_file() or p.name == "manifest.json" or p.stem in known:
+                continue
+            png_bytes = _adopt_dropped_file(p)
+            if png_bytes is None:
+                continue
+            # Delete the raw drop BEFORE writing the adopted copy, not after: the
+            # adopted asset's own filename can legitimately collide with the raw
+            # drop's path (add_slot_asset uses a random id, but a stem-derived id
+            # elsewhere -- see _adopt_mark below -- routinely does), and deleting
+            # afterward would then remove the file it just wrote instead of the
+            # original. png_bytes is already read into memory, so the source file
+            # is safe to remove first regardless of what gets written next.
+            try:
+                p.unlink()
+            except OSError:
+                pass
+            add_slot_asset(out_dir, slot, png_bytes)   # neutral transform (zoom 100, centered)
+            adopted = True
+    mdir = branding_root() / "marks"
+    if mdir.is_dir():
+        known = {m["id"] for m in list_marks(out_dir)}
+        try:
+            entries = sorted(mdir.iterdir())
+        except OSError:
+            entries = []
+        for p in entries:
+            if not p.is_file() or p.name == "marks.json" or p.suffix.lower() == ".ico" or p.stem in known:
+                continue
+            png_bytes = _adopt_dropped_file(p)
+            if png_bytes is None:
+                continue
+            try:              # delete first -- see the identical note above
+                p.unlink()
+            except OSError:
+                pass
+            _adopt_mark(out_dir, p.stem, png_bytes)
+            adopted = True
+    if adopted:
+        telem_flag("branding_custom_file", out_dir=out_dir)
+    return adopted
 
 
 def load_branding(out_dir):
@@ -1878,7 +2370,8 @@ def compute_achievements(metrics, seen=(), sets=None):
         comp["current"] = 1 if done == len(pool) else 0
         comp["earned"] = done == len(pool)
     skins = [{"id": s["id"], "name": s["name"], "desc": s["desc"],
-              "earned": bool(s.get("free")) or s["id"] in earned_skins}
+              "earned": bool(s.get("free")) or s["id"] in earned_skins,
+              "unlock": _SKIN_UNLOCK_TEXT.get(s["id"])}
              for s in SKINS]
     newly = [a["id"] for a in achs if a["earned"] and a["id"] not in seen]
     earned_points = sum(x["points"] for x in achs if x["earned"])
@@ -2330,12 +2823,6 @@ def collection_health(out_dir, db_path):
     # no-op, whereas dropping the exclusion would sweep a legacy folder into a scan.
     branding_dir = out_dir / "branding"
 
-    def _under(p, parent):
-        try:
-            p.relative_to(parent); return True
-        except ValueError:
-            return False
-
     per_bucket = Counter()
     total_files = 0
     total_bytes = 0
@@ -2347,13 +2834,38 @@ def collection_health(out_dir, db_path):
     mid_sizes = defaultdict(list)  # media_id -> [sizes] to estimate reclaimable
     _video_exts = {".mp4", ".webm", ".mov", ".mkv", ".m4v"}
 
-    for p in out_dir.rglob("*"):
+    # The walk is the panel's cost at scale (owner report 2026-08-06: "VERY slow" at
+    # 35k images). The old rglob walked EVERY file -- including the entire gallery/
+    # thumbnail tree, only to exclude each one by path-prefix afterward -- and then
+    # paid a separate stat() per kept file. This scandir recursion (a) PRUNES the
+    # excluded subtrees (gallery/, _duplicates/, the deleted dir, legacy branding/)
+    # so their thousands of entries are never enumerated at all, and (b) reads
+    # is_file/size straight off the DirEntry, which on Windows comes from the
+    # directory read itself -- no per-file syscall. Same results, same exclusions,
+    # guarded by tests/test_gallery_filters.py's existing health tests.
+    import os as _os
+    _pruned = {str(gallery_dir), str(quarantine_dir), str(deleted_dir), str(branding_dir)}
+
+    def _walk(dirpath):
+        try:
+            with _os.scandir(dirpath) as entries:
+                for e in entries:
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            if e.path not in _pruned:
+                                yield from _walk(e.path)
+                        elif e.is_file(follow_symlinks=False):
+                            yield e
+                    except OSError:
+                        continue
+        except OSError:
+            return
+
+    for e in _walk(str(out_dir)):
+        p = Path(e.path)
         ext = p.suffix.lower()
         is_img = ext in _IMAGE_EXTS
-        if (not is_img and ext not in _video_exts) or not p.is_file():
-            continue
-        if (p.name.endswith(".part") or _under(p, gallery_dir) or _under(p, quarantine_dir)
-                or _under(p, deleted_dir) or _under(p, branding_dir)):
+        if (not is_img and ext not in _video_exts) or p.name.endswith(".part"):
             continue
         rel = p.relative_to(out_dir)
         on_disk_rels.add(str(rel).replace("\\", "/"))
@@ -2369,7 +2881,7 @@ def collection_health(out_dir, db_path):
         else:
             bucket = "other"
         try:
-            sz = p.stat().st_size
+            sz = e.stat(follow_symlinks=False).st_size   # from the DirEntry -- no extra syscall on Windows
         except OSError:
             continue
         total_files += 1
@@ -2550,6 +3062,152 @@ def duplicate_groups(out_dir, limit=300):
             if len(groups) >= limit:
                 break
     return groups
+
+
+def same_seed_groups(db_path, limit=1000):
+    """Class-C duplicates (2026-08-02, docs/DECISIONS.md): catalog rows sharing the
+    same non-blank (seed, prompt_full) pair -- almost certainly the same generation
+    re-rolled or resubmitted. A cheap SQL GROUP BY, not a new detection algorithm; no
+    filesystem access, no hashing. Returns [{seed, prompt_hash, media_ids:[...]}],
+    most-duplicated first, capped at `limit` groups. `prompt_hash` is a short digest
+    of the grouped prompt_full (NOT the seed's own identity) so callers get a stable,
+    compact per-group key without echoing the full prompt text into an id string."""
+    import hashlib
+    con = _connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT seed, prompt_full, GROUP_CONCAT(media_id) AS ids, COUNT(*) AS n "
+            "FROM catalog "
+            "WHERE COALESCE(seed,'') != '' AND COALESCE(prompt_full,'') != '' "
+            "GROUP BY seed, prompt_full "
+            "HAVING COUNT(*) > 1 "
+            "ORDER BY n DESC "
+            "LIMIT ?",
+            (limit,),
+        ).fetchall()
+        out = []
+        for r in rows:
+            phash = hashlib.sha1((r["prompt_full"] or "").encode("utf-8", "ignore")).hexdigest()[:10]
+            out.append({"seed": r["seed"], "prompt_hash": phash,
+                        "media_ids": [m for m in (r["ids"] or "").split(",") if m]})
+        return out
+    finally:
+        con.close()
+
+
+# Hamming distance threshold (out of 64 bits) below which two dHashes count as a
+# near-duplicate pair. 10/64 (~84% bit agreement) is the commonly-cited rule of thumb
+# for 64-bit perceptual hashes -- comfortably wide enough to catch recompression/
+# upscaling noise (measured well under 10 in practice: see tests/test_phash.py) while
+# staying far from the ~32/64 (50%) two UNRELATED images land near.
+NEAR_DUP_HAMMING_THRESHOLD = 10
+
+
+def near_duplicate_groups(db_path, threshold=NEAR_DUP_HAMMING_THRESHOLD, hash_size=DHASH_SIZE):
+    """Class-D duplicates (the perceptual-hash follow-up named in the original
+    api_duplicates() docstring/DECISIONS.md): catalog rows whose dHash `phash` column
+    (compute_dhash(), populated by `--backfill-phash`) is within `threshold` Hamming-
+    distance bits of another row's -- catches an upscaled or recompressed copy of the
+    same image, which Class B (identical_file, a byte hash) cannot, because the bytes
+    genuinely differ. Image rows only (is_video='1' rows and blank-phash rows are
+    skipped -- a row with no phash yet is "unknown", never treated as "no match").
+
+    NOT a naive O(n^2) pairwise scan across the whole library (mirrors Class B's
+    same-size-bucket trick in audit_collection()): the 64-bit hash is split into 4
+    non-overlapping 16-bit bands, and rows are grouped by (band_index, band_value).
+    Only rows that land in the SAME band bucket are ever Hamming-compared. This is a
+    standard LSH ("banding") trick -- any pair within `threshold` bits of each other is
+    near-certain to still agree exactly on at least one 16-bit band (a handful of
+    scattered bit flips is very unlikely to touch all 4 bands at once), so real near-
+    duplicates are still found; only far-apart pairs that would fail the threshold check
+    anyway are skipped from ever being compared. Comparisons are deduped (a pair sharing
+    2+ bands is only Hamming-checked once).
+
+    Matching pairs are merged with union-find so a visual chain (A near B, B near C)
+    lands in ONE group even if A and C individually exceed `threshold` -- same "keeper
+    emerges from the group" shape the other three tiers already return, not a flat pair
+    list.
+
+    Returns [{media_ids:[...], closeness_pct}], most-similar-group first. closeness_pct
+    is this tier's one deliberate departure from the other three (which carry no
+    percentage/confidence by design, per DECISIONS.md) -- it is not invented: for each
+    final group it takes the WORST (largest) pairwise Hamming distance among that
+    group's own members (recomputed exactly now that the group is small, not estimated
+    from the banding pass) and reports 100 * (1 - worst_distance / total_bits), i.e. "the
+    two least-alike members in this group still agree on at least this share of the
+    hash" -- a conservative, real number derived from the actual bits, never a fabricated
+    confidence score."""
+    from collections import defaultdict
+    con = _connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT media_id, phash FROM catalog "
+            "WHERE COALESCE(phash,'') != '' AND COALESCE(is_video,'') != '1'"
+        ).fetchall()
+    finally:
+        con.close()
+
+    total_bits = hash_size * hash_size
+    n_bands = 4
+    band_bits = total_bits // n_bands
+    band_mask = (1 << band_bits) - 1
+
+    ints = {}
+    for r in rows:
+        try:
+            ints[str(r["media_id"])] = int(r["phash"], 16)
+        except (TypeError, ValueError):
+            continue          # a corrupt/non-hex phash value -- skip rather than crash
+
+    by_band = [defaultdict(list) for _ in range(n_bands)]
+    for mid, v in ints.items():
+        for b in range(n_bands):
+            by_band[b][(v >> (b * band_bits)) & band_mask].append(mid)
+
+    parent = {mid: mid for mid in ints}
+
+    def _find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def _union(a, c):
+        ra, rc = _find(a), _find(c)
+        if ra != rc:
+            parent[ra] = rc
+
+    compared = set()
+    for band in by_band:
+        for mids in band.values():
+            if len(mids) < 2:
+                continue
+            for i in range(len(mids)):
+                for j in range(i + 1, len(mids)):
+                    a, c = mids[i], mids[j]
+                    key = (a, c) if a < c else (c, a)
+                    if key in compared:
+                        continue
+                    compared.add(key)
+                    dist = bin(ints[a] ^ ints[c]).count("1")
+                    if dist <= threshold:
+                        _union(a, c)
+
+    grouped = defaultdict(set)
+    for mid in ints:
+        grouped[_find(mid)].add(mid)
+
+    out = []
+    for mids in grouped.values():
+        if len(mids) < 2:
+            continue
+        mids = sorted(mids)
+        worst = max(bin(ints[mids[i]] ^ ints[mids[j]]).count("1")
+                    for i in range(len(mids)) for j in range(i + 1, len(mids)))
+        out.append({"media_ids": mids,
+                    "closeness_pct": round(100 * (1 - worst / total_bits), 1)})
+    out.sort(key=lambda g: -g["closeness_pct"])
+    return out
 
 
 def media_id_of(path):
@@ -2740,6 +3398,45 @@ def purge_media_local(out_dir, thumb_dir, db_path, media_id, filename, quarantin
             pass
     delete_from_catalog(db_path, media_id)
     return moved
+
+
+def compute_dhash(img_path, hash_size=DHASH_SIZE):
+    """Perceptual difference-hash (dHash) of an image, Pillow-only (no numpy/scipy
+    dependency -- this codebase already ships Pillow for thumbnails, so no new
+    dependency was added for this).
+
+    Algorithm (well-known, ~15 lines): shrink to (hash_size+1) x hash_size, convert to
+    grayscale, then for each row encode whether pixel[i] is brighter than pixel[i+1] as
+    one bit. That is `hash_size * hash_size` bits total (64 for the default size=8),
+    returned as a lowercase hex string. Unlike a byte/SHA hash (Class B, identical_file),
+    a dHash is ROBUST to recompression and resizing -- the exact "upscaled or
+    recompressed version of the same image" case byte-hashing misses, because shrinking
+    to 8x8 washes out compression artifacts and interpolation noise while preserving the
+    image's coarse gradient structure. Two dHashes of visually similar images differ in
+    only a handful of the 64 bits (measured via Hamming distance -- see
+    near_duplicate_groups() below); two unrelated images typically differ in ~32 (half),
+    since the bits approach random relative to each other.
+
+    Returns a 16-char hex string, or None if the image can't be opened/decoded (Pillow
+    missing, corrupt file, unsupported format) -- callers must treat None as "unknown",
+    never as a hash that happens to be empty."""
+    if Image is None:
+        return None
+    try:
+        with Image.open(img_path) as im:
+            im = im.convert("L").resize((hash_size + 1, hash_size), Image.LANCZOS)
+            pixels = list(im.getdata())
+    except Exception:
+        return None
+    width = hash_size + 1
+    bits = 0
+    for row in range(hash_size):
+        offset = row * width
+        for col in range(hash_size):
+            bits <<= 1
+            if pixels[offset + col] > pixels[offset + col + 1]:
+                bits |= 1
+    return "{:0{width}x}".format(bits, width=hash_size * hash_size // 4)
 
 
 def make_thumbnail(img_path, thumb_path):
@@ -3070,6 +3767,341 @@ def empty_trash(out_dir, thumb_dir):
     return removed
 
 
+# ---------------------------------------------------------------------------
+# Duplicate Review -- resolve/undo (the destructive half of GET /api/duplicates
+# above, which stays read-only). Mirrors the trash panel's own shape immediately
+# above -- a moved file plus a JSON sidecar recording enough to undo it -- rather
+# than inventing a new pattern, but keyed by the file's OWN quarantine location,
+# not media_id: a same_media group can quarantine more than one copy of the SAME
+# media_id in a single resolve, so media_id alone is not a unique key here the
+# way it is for trash (purge_media_local never has two files under one media_id
+# to quarantine at once -- the live catalog holds exactly one file per media_id).
+# The original path is recorded EXPLICITLY and undo restores to that EXACT
+# location -- unlike trash's restore, which only ever remembered a bare filename
+# and always restores into a flat images/ folder -- because cmd_dedup's own
+# quarantine (moonglade_backup.py's cmd_dedup, ~3889-3903) preserves the source's
+# real subfolder structure under _duplicates/, and this feature's undo is
+# specified to put a file back exactly where it came from.
+# ---------------------------------------------------------------------------
+DUPLICATES_DIRNAME = "_duplicates"    # matches cmd_dedup()'s own quarantine_root name
+
+
+def _quarantine_meta_path(dest):
+    """Sidecar path for one quarantined duplicate's undo record, living beside
+    the moved file itself (same 'metadata rides next to the file' idea as
+    trash's _trash_meta_path above)."""
+    return dest.with_name(dest.name + ".undo.json")
+
+
+def _resolve_under(out_dir, rel_path):
+    """A client-submitted relative path, turned into a real absolute Path
+    strictly inside out_dir -- or None if it's blank, absolute, or escapes via
+    '..'/a symlink. Every client-supplied path this feature touches goes
+    through this before it is ever stat'd or moved."""
+    rel_path = str(rel_path or "").replace("\\", "/").strip("/")
+    if not rel_path:
+        return None
+    out_dir = Path(out_dir).resolve()
+    candidate = (out_dir / rel_path).resolve()
+    return candidate if _is_under(candidate, out_dir) else None
+
+
+def _reconcile_one_row_after_move(out_dir, db_path, media_id, row):
+    """Targeted, single-row version of moonglade_backup.reconcile_catalog_with_disk
+    -- point media_id's catalog row at whatever copy is still actually on disk,
+    without rescanning/rewriting the whole catalog (that function's own approach,
+    fine for a batch CLI run, is wasteful for a single synchronous HTTP request).
+    Used when a duplicate quarantine or undo changes what's on disk for a
+    media_id whose row is being KEPT (e.g. a same_media loser's row, still
+    pointing at a keeper that survives elsewhere). No-op if nothing changed, and
+    a no-op if the media_id has no surviving file at all (that case is the
+    caller's row-delete branch instead, not this function's job)."""
+    import moonglade_backup as core
+    matches = find_files_for_media_id(out_dir, media_id)
+    if not matches:
+        return
+    survivor = matches[0]
+    rel_surv = survivor.relative_to(out_dir)
+    bucket = core._bucket_of(rel_surv)
+    new_batch = (rel_surv.parts[1] if bucket == "batches" and len(rel_surv.parts) > 2
+                else ("" if bucket != "batches" else row.get("batch", "")))
+    if row.get("filename") != survivor.name or row.get("batch", "") != new_batch:
+        row = dict(row)
+        row["filename"] = survivor.name
+        row["batch"] = new_batch
+        save_catalog(db_path, [row])
+
+
+def quarantine_duplicate_file(out_dir, thumb_dir, db_path, media_id, rel_path, group_id):
+    """Move ONE duplicate loser out of the live tree into out_dir/_duplicates/,
+    mirroring cmd_dedup()'s DEFAULT (--apply without --dedup-delete) behavior at
+    moonglade_backup.py's cmd_dedup (~3889-3903) -- quarantine, never hard-delete,
+    same collision-suffix rule (dest already exists -> "_dup" inserted before the
+    extension). Called once per file by the /api/duplicates/resolve route, which
+    has already re-verified the (group_id, media_id, path) triple names a real
+    duplicate pair (see _validate_duplicate_pair) -- this function trusts that
+    and only handles the mechanics: the move, the catalog reconciliation, and
+    the undo sidecar. --dedup-delete's hard-delete behavior is not reachable
+    through this function under any argument.
+
+    _check_read_only() fires FIRST, before any path is even resolved -- the same
+    position submit_generation/submit_fixer/delete_task_gql/claim_reward give it
+    (moonglade_backup.py's own contract for every account/filesystem mutation
+    this app makes). READ_ONLY in config.json refuses this the same way it
+    refuses those.
+
+    Catalog handling depends on whether media_id has ANY other live copy left
+    after the move (find_files_for_media_id, which already excludes
+    _duplicates/_deleted -- invariant 6):
+      * no survivor  -> same situation as a trash purge: the row is removed
+        (delete_from_catalog) and a FULL snapshot goes into the sidecar so
+        undo can reinsert it, exactly like purge_media_local/
+        restore_quarantined_media above.
+      * a survivor exists (e.g. the keeper of a same_media group, still on disk
+        under the SAME media_id) -> the row must NOT be deleted -- the media_id
+        is still alive. Only a targeted filename/batch reconcile runs
+        (_reconcile_one_row_after_move), the same fix
+        reconcile_catalog_with_disk applies after a CLI --dedup, just scoped to
+        this one row instead of a full rescan.
+
+    Returns {"ok": True, "media_id", "original_path", "quarantine_path", "size",
+    "row_deleted"} or {"ok": False, "error": "..."} -- never raises."""
+    import moonglade_backup as core
+    try:
+        core._check_read_only("quarantine a duplicate file (Duplicate Review resolve)")
+    except core.PixAIError as e:
+        return {"ok": False, "error": str(e)}
+
+    # .resolve() to match exactly what _resolve_under() resolved `src` against below --
+    # otherwise a caller passing an out_dir that differs from its own .resolve() (a
+    # symlink, a trailing slash) makes src.relative_to(out_dir) raise ValueError even
+    # though src is genuinely inside it.
+    out_dir = Path(out_dir).resolve()
+    src = _resolve_under(out_dir, rel_path)
+    if src is None:
+        return {"ok": False, "error": "invalid path"}
+    quarantine_root = out_dir / DUPLICATES_DIRNAME
+    deleted_root = out_dir / DELETED_DIRNAME
+    if _is_under(src, quarantine_root) or _is_under(src, deleted_root):
+        return {"ok": False, "error": "already quarantined"}
+    if not src.is_file():
+        return {"ok": False, "error": "file not found: {}".format(rel_path)}
+
+    rel = src.relative_to(out_dir)
+    try:
+        size = src.stat().st_size
+    except OSError:
+        size = 0
+    row_before = get_row(db_path, media_id) if media_id else None
+
+    dest = quarantine_root / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():                                   # don't clobber an earlier quarantine
+        dest = dest.with_name(dest.stem + "_dup" + dest.suffix)
+    try:
+        src.replace(dest)                                # atomic move, same volume
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+
+    row_deleted = False
+    if row_before:
+        survivors = find_files_for_media_id(out_dir, media_id)
+        if not survivors:
+            delete_from_catalog(db_path, media_id)
+            row_deleted = True
+            tp = Path(thumb_dir) / "{}.jpg".format(media_id)
+            if tp.exists():
+                try:
+                    tp.unlink()
+                except OSError:
+                    pass
+        else:
+            _reconcile_one_row_after_move(out_dir, db_path, media_id, row_before)
+
+    rel_dest = str(dest.relative_to(out_dir)).replace("\\", "/")
+    rel_orig = str(rel).replace("\\", "/")
+    import time
+    sidecar = {
+        "media_id": str(media_id),
+        "original_path": rel_orig,
+        "quarantine_path": rel_dest,
+        "group_id": group_id,
+        "quarantined_at": time.time(),
+        "row_deleted": row_deleted,
+        "catalog_row": row_before if row_deleted else None,
+    }
+    try:
+        _quarantine_meta_path(dest).write_text(json.dumps(sidecar), encoding="utf-8")
+    except OSError:
+        pass    # best-effort, same fail-soft contract as trash's own snapshot write
+
+    return {"ok": True, "media_id": str(media_id), "original_path": rel_orig,
+            "quarantine_path": rel_dest, "size": size, "row_deleted": row_deleted}
+
+
+def restore_quarantined_duplicate(out_dir, thumb_dir, db_path, quarantine_path):
+    """Reverse ONE quarantine_duplicate_file() call: move the file back to its
+    EXACT original recorded location (not a generic default folder -- unlike
+    trash's restore_quarantined_media, this tier's undo is specified to put a
+    file back exactly where it came from) and restore whatever the catalog
+    snapshot says.
+
+    Fails honestly -- never a silent no-op, never a write to some OTHER
+    location -- when:
+      * no sidecar/file exists for quarantine_path (missing/stale record, or it
+        was never a real quarantined duplicate to begin with)
+      * the original location is occupied by a DIFFERENT file that showed up
+        there since (a re-download, a re-organize, a fresh import)
+
+    Same _check_read_only() gate, in the same first-statement position, as
+    quarantine_duplicate_file().
+
+    Returns {"ok": True, "media_id", "restored_path"} or
+    {"ok": False, "error": "..."} -- never raises."""
+    import moonglade_backup as core
+    try:
+        core._check_read_only("undo a duplicate quarantine (Duplicate Review undo)")
+    except core.PixAIError as e:
+        return {"ok": False, "error": str(e)}
+
+    out_dir = Path(out_dir).resolve()   # match _resolve_under()'s own resolution -- see
+                                        # quarantine_duplicate_file()'s identical comment
+    quarantine_root = out_dir / DUPLICATES_DIRNAME
+    src = _resolve_under(out_dir, quarantine_path)
+    if src is None or not _is_under(src, quarantine_root):
+        return {"ok": False, "error": "not a quarantined-duplicate path"}
+    meta_path = _quarantine_meta_path(src)
+    if not src.is_file() or not meta_path.exists():
+        return {"ok": False, "error": "no undo record for this file "
+                                      "(missing, already restored, or stale)"}
+    try:
+        sidecar = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"ok": False, "error": "undo record is unreadable/corrupt"}
+
+    original_path = str(sidecar.get("original_path") or "")
+    dest = _resolve_under(out_dir, original_path)
+    if dest is None:
+        return {"ok": False, "error": "recorded original path is invalid"}
+    if dest.exists():
+        return {"ok": False, "error": "original location is occupied by another "
+                                      "file now -- refusing to overwrite it"}
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        src.replace(dest)
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+
+    media_id = str(sidecar.get("media_id") or "")
+    if sidecar.get("row_deleted") and sidecar.get("catalog_row"):
+        save_catalog(db_path, [sidecar["catalog_row"]])
+    elif media_id:
+        row = get_row(db_path, media_id)
+        if row:
+            _reconcile_one_row_after_move(out_dir, db_path, media_id, row)
+
+    try:
+        meta_path.unlink()
+    except OSError:
+        pass
+
+    return {"ok": True, "media_id": media_id,
+            "restored_path": str(dest.relative_to(out_dir)).replace("\\", "/")}
+
+
+def _validate_duplicate_pair(out_dir, db_path, match_type, keep, remove):
+    """Re-verify, at request time, that `keep` and every item in `remove`
+    genuinely form the duplicate relationship match_type claims -- never trust
+    the client's group_id/keep/remove alone; a client could otherwise pair a
+    real duplicate's catalog metadata with an unrelated file path and use this
+    route to quarantine anything. Cheap and TARGETED (touches only the specific
+    files/rows named, never a full-library rescan) rather than recomputing GET
+    /api/duplicates' whole detection pass. Returns (True, "") or
+    (False, "<reason>") -- the whole group is refused together on failure,
+    since a partially-verified group is not a safe partial resolve.
+
+    near_duplicate is checked as a direct keep<->remove pairwise Hamming
+    distance, not full group membership: near_duplicate_groups() can chain a
+    group together transitively (A near B, B near C, but A and C individually
+    over threshold) via union-find. A remove item that is only transitively
+    linked to the chosen keeper is refused here as a known, documented
+    simplification -- resolving it means picking a keeper it IS directly close
+    to, not a gap in the detection logic."""
+    import moonglade_backup as core
+    out_dir = Path(out_dir)
+
+    def _real(entry):
+        """Resolve+validate one {media_id, path} member: a real file, strictly
+        inside out_dir, whose OWN filename encodes the claimed media_id."""
+        if not isinstance(entry, dict):
+            return None
+        mid = str(entry.get("media_id") or "").strip()
+        path = _resolve_under(out_dir, entry.get("path"))
+        if not mid or path is None or not path.is_file():
+            return None
+        if media_id_of(path) != mid:
+            return None
+        return mid, path
+
+    k = _real(keep)
+    if k is None:
+        return False, "keeper does not resolve to a real file"
+    keep_mid, keep_path = k
+
+    checked = []
+    for item in remove:
+        r = _real(item)
+        if r is None:
+            return False, "a remove item does not resolve to a real file"
+        checked.append(r)
+    if not checked:
+        return False, "nothing to remove"
+
+    if match_type == "same_media":
+        if any(mid != keep_mid for mid, _ in checked):
+            return False, "same_media resolve must keep and remove copies of the SAME media_id"
+        return True, ""
+
+    if match_type == "identical_file":
+        for mid, path in checked:
+            if not core._same_bytes(keep_path, path):
+                return False, "keeper and {} are no longer byte-identical".format(mid)
+        return True, ""
+
+    if match_type == "same_seed":
+        keep_row = get_row(db_path, keep_mid)
+        if not keep_row or not keep_row.get("seed") or not keep_row.get("prompt_full"):
+            return False, "keeper has no seed/prompt to match against"
+        for mid, _ in checked:
+            row = get_row(db_path, mid)
+            if not row or row.get("seed") != keep_row.get("seed") \
+                    or row.get("prompt_full") != keep_row.get("prompt_full"):
+                return False, "{} no longer shares (seed, prompt) with the keeper".format(mid)
+        return True, ""
+
+    if match_type == "near_duplicate":
+        keep_row = get_row(db_path, keep_mid)
+        keep_phash = (keep_row or {}).get("phash") or ""
+        try:
+            keep_bits = int(keep_phash, 16)
+        except ValueError:
+            return False, "keeper has no usable phash"
+        for mid, _ in checked:
+            row = get_row(db_path, mid)
+            phash = (row or {}).get("phash") or ""
+            try:
+                dist = bin(keep_bits ^ int(phash, 16)).count("1")
+            except ValueError:
+                return False, "{} has no usable phash".format(mid)
+            if dist > NEAR_DUP_HAMMING_THRESHOLD:
+                return False, ("{} is no longer within the near-duplicate threshold "
+                              "of the keeper").format(mid)
+        return True, ""
+
+    return False, "unknown group type '{}'".format(match_type)
+
+
 def probe_has_audio(path, timeout=15):
     """True if the media file has at least one audio stream (ffprobe). Fails soft to
     False (never raises) -- a probe failure means the Loom export treats the clip as
@@ -3182,10 +4214,15 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
 # ---------------------------------------------------------------------------
 
 # Design tokens: the SINGLE source of truth for the gallery's palette + achievement
-# skins, shared (via the __DESIGN_TOKENS__ marker + .replace(), same idiom as LOOM_PAGE's
-# __JSX__) by BASE_HTML and LOOM_PAGE so both surfaces re-skin together instead of the
-# Loom carrying its own copy that silently drifts from this one.
+# skins, shared (via the __DESIGN_TOKENS__ marker + .replace()) by the React shells
+# (NEXT_PAGE/LOGIN_PAGE) and LOOM_PAGE_BUNDLE so every surface
+# re-skins together instead of the Loom carrying its own copy that silently drifts.
 DESIGN_TOKENS_CSS = r"""
+  /* Z BANDS (decided 2026-08-01, gallery-era redesign): exactly three, nothing between --
+     components 0-7 · overlays/modals 300-500 · ambient/celebration 510-520 (the layer that
+     must paint over any modal: achievement moment 520, its confetti sheet 517 behind it).
+     The legacy 200s cluster and the stray 99 live only in classic surfaces, which retire
+     with the React conversion -- do not add new values outside the three bands. */
   :root {
     /* Palette sampled from two reference images:
        731004762264180451.webp — teal "magic glow", green gems, rare gold trim.
@@ -3196,6 +4233,11 @@ DESIGN_TOKENS_CSS = r"""
     --subtext: #9a93ab; --lavender:#b692e6; --mauve:   #c4a6f0;
     --red:     #f38ba8; --peach:   #fab387; --green:   #46d488;
     --blue:    #47cbc3; --sapphire:#3a8a93;
+    /* --loomc is the Loom's fixed-meaning cyan (hue law: cyan means the Loom in every
+       skin). Same value as --blue on purpose: the UI Kit v2 designs reference the hue
+       by this name, and the semantic name must exist in the pipeline or var(--loomc)
+       falls back silently at handoff. --blue stays for existing usages. */
+    --loomc:   #47cbc3;
     /* Moonglade Athenaeum palette: lavender leads, emerald is the "magic"
        highlight (Nelnamara's gems), gold filigree is rare. */
     --accent:  #b692e6; --accent-soft:#4fc99a; --gold: #d4af37; --emerald:#4fc99a;
@@ -3255,15 +4297,15 @@ def _upscale_const_js():
 
     * the five upscaler names, which PixAI matches LITERALLY -- mixed underscores, spaces
       and plus signs and all ("R-ESRGAN 4x+ Anime6B") -- so a typo is a rejected submit;
-    * UPSCALE_PIXEL_CEILING, so <mg-upscale-panel> can derive the same dynamic ratio cap
+    * UPSCALE_PIXEL_CEILING, so <UpscalePanel> can derive the same dynamic ratio cap
       the server clamps to WITHOUT a second hand port of max_upscale_ratio. The Generate
       drawer still carries its own ported copy (documented, and pinned against the Python
       by tests/test_upscale_boosters.py); this exists so the new surface does not add a
       third place for those numbers to drift.
 
-    Substituted into INDEX_HTML and DETAIL_HTML only -- the two pages with upscale UI --
-    rather than into BASE_HTML, which four other templates also derive from and which
-    would leave the raw marker visible on /login, /health, /dupes and /panel.
+    Substituted into NEXT_PAGE and the Loom shells (the surfaces with upscale UI)
+    since the classic cut (2026-08-08) removed the INDEX/DETAIL pages it was
+    originally built for.
     """
     import moonglade_backup as core
     return ("<script>window.MG_UPSCALE={};window.MG_LORA={};</script>".format(
@@ -3290,7 +4332,7 @@ def _upscale_const_js():
 
 
 # ---------------------------------------------------------------------------
-# Global 401 guard, injected into EVERY page head (BASE_HTML and _LOOM_SHELL).
+# Global 401 guard, injected into EVERY page head (the React shells and _LOOM_SHELL).
 #
 # Why an interceptor and not a helper at each call site: there are ~90 fetch()
 # calls across moonglade_gallery.py's inline JS, static/*.js and the Loom bundle, and
@@ -3336,7 +4378,7 @@ _AUTH_401_GUARD_JS = r"""<script>/* Global 401 guard -- see _AUTH_401_GUARD_JS i
 
 
 # The Loom (Seedance video storyboard tool) is served at /loom. Its React source
-# lives in loom/master-storyboard.jsx; this page loads React+Babel+picker-core from
+# lives in loom/master-storyboard.jsx; this page loads React + picker-core from
 # locally-vendored files (loom/vendor/, served by /loom/vendor/<file>; zero network
 # calls to paint) and, per the tool's own integration notes, swaps window.storage onto
 # the gallery backend so a board persists server-side (shared across devices) instead
@@ -3353,45 +4395,45 @@ __DESIGN_TOKENS__
 /* font-family here, not just in .sb-root: anything mounted OUTSIDE #root inherits from
    body, and this shell deliberately mounts things there -- the Activity chip and tray, the
    toast stack, the ? FAB. Without it they fell back to the browser default font while the
-   gallery's BASE_HTML gave them system-ui, so the same components looked different on the
-   two pages. mg-notify now also states its own family (it is host-neutral and shouldn't
-   depend on this), but the shell should not be handing anything an unstyled baseline. */
+   gallery shell gave them system-ui, so the same components looked different on the
+   two pages. notify.css now also states its own family (host-neutral by design), but the
+   shell should not be handing anything an unstyled baseline. */
 body { background: var(--base); margin: 0; font-family: system-ui, sans-serif; }
-/* The shared Job Tracker (static/mg-notify.js) defaults #jobs-fab/#jobs-tray to
-   bottom:14px;left:14px -- fine on the gallery's own layout, but in the Loom the left Cast
-   panel's own "+ add from gallery"/"Import collection" buttons live at the BOTTOM of that
-   same scrollable rail. Confirmed via live measurement 2026-07-18: an open (even empty) tray
-   overlaps the top ~13px of those buttons once the panel is scrolled to its end -- worse with
-   real jobs in the tray (it grows up to 600px tall). Shifted up just enough to clear that
-   fixed ~70px control strip. No selector scoping needed -- this whole <style> block only ever
-   ships inside _LOOM_SHELL, never the gallery's own page, so it's already Loom-exclusive by
-   virtue of which page includes it (#jobs-fab/#jobs-tray are siblings of #root in this shell's
-   body, not descendants of anything React renders, so a .sb-root-scoped selector couldn't
-   have matched them anyway -- confirmed by testing that exact approach first and finding it
-   silently did nothing). Repositioning left<->right instead of shifting up was considered and
+/* The shared Job Tracker (the React <ActivityTray>, styled by notify.css in the bundle's
+   stylesheet) defaults #jobs-fab/#jobs-tray to bottom:14px;left:14px -- fine on the gallery's
+   own layout, but in the Loom the left Cast panel's own "+ add from gallery"/"Import
+   collection" buttons live at the BOTTOM of that same scrollable rail. Confirmed via live
+   measurement 2026-07-18: an open (even empty) tray overlaps the top ~13px of those buttons
+   once the panel is scrolled to its end -- worse with real jobs in the tray (it grows up to
+   600px tall). Shifted up just enough to clear that fixed ~70px control strip. No selector
+   scoping needed -- this whole <style> block only ever ships inside _LOOM_SHELL, never the
+   gallery's own page, so it's already Loom-exclusive by virtue of which page includes it
+   (the tray portals to document.body, siblings of #root, so a .sb-root-scoped selector
+   couldn't match them). Repositioning left<->right instead of shifting up was considered and
    rejected -- the Generate drawer panel on the right is equally wide (560px) and would risk
    the identical collision with ITS OWN bottom controls instead of solving anything.
-   !important is deliberate, not laziness: mg-notify.js injects its own <style> via JS at
-   script-load time, which lands LATER in the cascade than this static block regardless of
-   source order (confirmed live -- a plain same-specificity override here was silently losing
-   the tie-break), so !important is the only way to reliably win without depending on load
-   timing that could shift later. */
+   !important is deliberate, not laziness: the bundle's stylesheet <link> is injected at the
+   END of the page (LOOM_PAGE_BUNDLE's runtime block), landing LATER in the cascade than this
+   static <style> -- a plain same-specificity override here silently loses the tie-break, so
+   !important is the only way to reliably win without depending on load order. */
 #jobs-fab, #jobs-tray { bottom: 88px !important; }
 /* Lift the Activity chip (and the ? help FAB below, inline) above LoomV2's center view.
    .lv-overlay (master-storyboard.jsx: position:fixed; inset:0; z-index:400; background:
    var(--base) -- opaque) buries them: neither #root nor its .sb-root child forms a stacking
    context, so that 400 competes in the ROOT context directly against these body-level FABs
-   (mg-notify.js gives them 234/235) and wins. 401/402 floats them over the board while staying
+   (notify.css gives them 234/235) and wins. 401/402 floats them over the board while staying
    UNDER the modal/celebration tier that must keep covering them -- .sb-seq / .sb-pick-ov and the
-   frame picker <mg-gallery-picker> (all 500), #mg-toasts (510), .ach-m2 / .m2-conf (520/521).
+   frame picker <mg-gallery-picker> (all 500), #mg-toasts (510), .ach-m2 (520; its confetti
+   sheet sits INSIDE at local z 1, behind the card -- the old 521-in-front was a bug).
    Loom-only: this block ships only in _LOOM_SHELL, so the gallery's own #jobs-fab keeps 234.
-   !important for the same mg-notify.js cascade-timing reason as the bottom rule above.
+   !important for the same bundle-stylesheet cascade-timing reason as the bottom rule above.
    FIXED 2026-07-24 (was a known residual): Deep Focus's .lv-df-veil (450) and its nested
    flyouts render INSIDE .lv-overlay, so from the root they were part of the single 400 atom
    and these corner FABs painted over them. A DOM hoist wasn't needed after all --
    master-storyboard.jsx now toggles a `.lv-overlay-df` class onto .lv-overlay itself while
    Deep Focus is open (z-index 450, matching the veil's own intended value), which lifts the
-   whole atom back above these FABs in the root context for as long as Deep Focus stays open. */
+   whole atom back above these FABs in the root context for as long as Deep Focus stays open.
+   !important for the same bundle-stylesheet cascade-timing reason as the bottom rule above. */
 #jobs-fab  { z-index: 401 !important; }
 #jobs-tray { z-index: 402 !important; }
 
@@ -3414,21 +4456,15 @@ body { background: var(--base); margin: 0; font-family: system-ui, sans-serif; }
 </style>
 <script src="/loom/vendor/react.production.min.js"></script>
 <script src="/loom/vendor/react-dom.production.min.js"></script>
-__BABEL_LIB_TAG__
-<script src="/static/picker-core.js"></script>
-<script src="/static/mg-model-picker.js"></script>
-<script src="/static/mg-gallery-picker.js"></script>
-<!-- Before the drawer, deliberately: <mg-generate-drawer>'s cost line IS <mg-cost-badge> as of
-     the consolidation, so the Loom's Video tab needs this file for a shot's cost to render at
-     all. Same pairing the gallery shell above documents at length. -->
-<script src="/static/mg-cost-badge.js"></script>
-<script src="/static/mg-generate-drawer.js"></script>
-<script src="/static/mg-notify.js"></script>
+<!-- The video Generate drawer and its cost badge are the React <VideoDrawer> / <CostBadge>,
+     bundled into master-storyboard.bundle.js as of the 2026-08-08 no-vanilla port -- no static
+     script tags. -->
 __UPSCALE_CONST__
 </head><body>
 <div id="root"></div>
-<div id="jobs-fab" onclick="JobsCard.open()" title="Activity"><span class="jf-dot"></span><span class="jf-badge" id="jobs-fab-badge"></span><span>Activity</span></div>
-<div id="jobs-tray" aria-label="Job activity"></div>
+<!-- The #jobs-fab/#jobs-tray anchors lived here until the 2026-08-08 no-vanilla port; the
+     React <ActivityTray> (bundled, portaled to body) now renders them with the same ids, so
+     the shell's z-index/bottom overrides above still apply. -->
 <script>
 window.storage = {
   get:function(k){ return fetch('/api/loom/get?key='+encodeURIComponent(k)).then(function(r){return r.json();}).then(function(d){ return (d&&d.value!=null)?{value:d.value}:null; }); },
@@ -3458,33 +4494,18 @@ __RUNTIME_SCRIPT_BLOCK__
 </div>
 </body></html>"""
 
-# Two delivery paths for the same master-storyboard.jsx, sharing everything except
-# the runtime-script block (Phase 1 tooling pass, 2026-07-16):
-#
-#   LOOM_PAGE        -- DEFAULT. Loads babel.min.js and transpiles master-storyboard.jsx
-#                       (+ loom/src/loom-core.js, inlined ahead of it) client-side, as
-#                       it always has. This is the trusted fallback; it is NOT being
-#                       removed or downgraded by the new path below.
-#   LOOM_PAGE_BUNDLE -- NEW, opt-in via /loom?bundle=1. Loads the pre-transpiled
-#                       loom/dist/master-storyboard.bundle.js (built by
-#                       `npm run build` in loom/, via esbuild) instead -- no Babel,
-#                       no client-side transpile. Only served if that file actually
-#                       exists on disk (see loom() below); otherwise /loom?bundle=1
-#                       silently falls back to LOOM_PAGE so a not-yet-built checkout
-#                       never breaks.
-LOOM_PAGE = (_LOOM_SHELL
-    .replace("__BABEL_LIB_TAG__", '<script src="/loom/vendor/babel.min.js"></script>')
-    .replace("__RUNTIME_SCRIPT_BLOCK__",
-             '<script type="text/babel" data-presets="react">\n'
-             'const { useState, useEffect, useRef, useCallback, useMemo } = React;\n'
-             '__JSX__\n'
-             'ReactDOM.createRoot(document.getElementById("root")).render(<App />);\n'
-             '</script>')
-    .replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS))
-
+# The Loom's ONE delivery path (bundle-only since the Babel-standalone retirement,
+# 2026-08-08): the pre-transpiled loom/dist/master-storyboard.bundle.js (built by
+# `npm run build` in loom/, via esbuild). A real module build -- shared modules are
+# plain imports, no client-side transpile, no inline-stripping.
 LOOM_PAGE_BUNDLE = (_LOOM_SHELL
-    .replace("__BABEL_LIB_TAG__", "")   # pre-transpiled bundle -- no Babel needed
     .replace("__RUNTIME_SCRIPT_BLOCK__",
+             # The CSS esbuild emits for the shared React components master-storyboard.jsx
+             # imports (gallery-picker.css today; grows as the vanilla campaign moves more
+             # components into the bundle). Only these on-demand modals need it, so loading
+             # it here (not the <head>) is fine -- no first-paint FOUC. Absent => harmless
+             # 404 until the bundle is built.
+             '<link rel="stylesheet" href="/loom/dist/master-storyboard.bundle.css">\n'
              '<script src="/loom/dist/master-storyboard.bundle.js"></script>\n'
              '<script>ReactDOM.createRoot(document.getElementById("root"))'
              '.render(React.createElement(LoomBundle.default));</script>')
@@ -3632,6 +4653,7 @@ def create_app(out_dir: Path):
     backfill_batches(out_dir, db_path)
     thumb_dir = out_dir / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
+    ensure_branding_discovery_tree()   # "Under the Hood" needs empty folders to find
 
     # Redacts THIS MACHINE's own filesystem paths out of an exception message before
     # it's stored or served to any LOGIN-tier caller (any signed-in LAN account, not
@@ -3778,6 +4800,13 @@ def create_app(out_dir: Path):
         "rebuild-similar": {"args": ["--rebuild-similar"],
                             "label": "Rebuild the Similar index (slow, needs pixeltable)",
                             "destructive": False},
+        # Same trust class as sync-similar/rebuild-similar just above: computes and writes
+        # a catalog column only (phash), no image files touched, so not destructive despite
+        # being a real disk-scanning/CPU pass. Feeds the near_duplicate tier of
+        # GET /api/duplicates (near_duplicate_groups(), this module).
+        "backfill-phash": {"args": ["--backfill-phash"],
+                           "label": "Backfill perceptual hashes (near-duplicate detection)",
+                           "destructive": False},
         # --- Advanced sync (web parity step 2): the sync variants the bare "Sync now"
         # (an INCREMENTAL --sync, i.e. --update --full-meta) can't do. Each is its own
         # whitelisted KEY, exactly like audit-full/dedup-delete -- never argv the client
@@ -3892,8 +4921,13 @@ def create_app(out_dir: Path):
             _panel_job["progress"] = None                # clear the bar when the job ends
             _panel_job["proc"] = None
         if jid:                                          # cancelled/done both close the card row cleanly
+            # rc rides the terminal event for the same reason `action` rides the start
+            # one: the ledger's result column shows the design's own "… · rc 0" format
+            # (Control Panel.dc.html:106/517), and until now a successful run's exit
+            # code was simply never written anywhere.
             _log_job(jid, status=("failed" if status == "failed" else
                                   "done_with_errors" if status == "done_with_errors" else "done"),
+                     rc=rc,
                      error=("exited {}".format(rc) if status == "failed" else
                            "{} file(s) failed to download".format(warn_n) if status == "done_with_errors"
                            else None))
@@ -3955,7 +4989,11 @@ def create_app(out_dir: Path):
             raise
         with _panel_lock:
             _panel_job["proc"] = proc
-        _log_job(job_id, status="running", type="panel", label=spec["label"])
+        # `action` rides the start event so the reconstructed job carries the machine
+        # key alongside the display label -- the Panel's run-history ledger needs it
+        # for per-action last-run lookups and its "run again" control. Merge semantics
+        # (_reconstruct_jobs' cur.update) keep it through every later event.
+        _log_job(job_id, status="running", type="panel", label=spec["label"], action=action)
         threading.Thread(target=_panel_reader, args=(proc,), daemon=True).start()
         return True
 
@@ -4136,7 +5174,8 @@ def create_app(out_dir: Path):
         carrying no media_ids, and nothing ever revisited it (the orphan sweep only
         re-checks jobs stuck at 'running'; this one was already 'done'). Its four images
         were downloaded and catalogued perfectly -- no data was lost -- but the Activity
-        card rendered blank forever, because static/mg-notify.js builds its thumbnail from
+        card rendered blank forever, because the tray (gallery/src/notify/ActivityTray.jsx,
+        formerly static/mg-notify.js) builds its thumbnail from
         `(j.media_ids||[])[0]`. _watch_mirror had the answer in hand the whole time
         (_collect_single_flight returns {media_ids, saved, is_video}) and discarded it.
         Now whichever writer wins the race, the media ids get recorded.
@@ -4195,8 +5234,17 @@ def create_app(out_dir: Path):
         would overwrite a perfectly good done+media_ids event in read_jobs()'s
         last-event-wins merge. The authoritative failure writers stay /api/task-status and
         the orphan sweep; a mirror problem is recorded where it belongs, in
-        _watch_status['last_error'] (surfaced by /api/watch/status and the Panel)."""
+        _watch_status['last_error'] (surfaced by /api/watch/status and the Panel) --
+        and ALSO in the persistent log (added 2026-08-05): last_error alone is
+        in-memory-only, gone on restart and invisible to anyone reading moonglade.log
+        after the fact. Found live: a task stuck failing every catch-up sweep for
+        hours produced nothing but repeated "N finished task(s) were never mirrored"
+        warnings in the log -- true, but silent about WHY, because the actual
+        exception only ever reached last_error. A restart cleared the symptom (fresh
+        process, fresh attempt) without anyone learning the cause."""
+        import logging as _logging
         import moonglade_backup as core
+        _log = _logging.getLogger(__name__)
         try:
             session = core._make_session(None)
             got = _collect_single_flight(core, session, tid)
@@ -4205,6 +5253,8 @@ def create_app(out_dir: Path):
         except Exception as e:
             with _watch_lock:
                 _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
+            _log.warning("live mirror: failed to mirror task %s: %s: %s",
+                         tid, type(e).__name__, _redact_host_paths(str(e))[:200])
             return
         # Outside the except above ON PURPOSE: _log_mirrored_media swallows its own
         # failures, and keeping it out of that handler makes it structurally impossible for
@@ -4338,6 +5388,20 @@ def create_app(out_dir: Path):
             _log.warning("live mirror: catch-up after %s failed: %s: %s",
                          reason, type(e).__name__, _redact_host_paths(str(e))[:200])
 
+    def _periodic_catchup():
+        """Backstop for _watch_catchup's other two triggers (startup, reconnect), both of
+        which fire off a WS lifecycle event -- so a connection that stays nominally
+        "subscribed" for a long stretch never gets a fresh sweep. Found live: PixAI's
+        personalEvents push simply did not fire for an app-submitted generation (a
+        website-submitted one, same session, did) -- no error, no disconnect, nothing to
+        react to, so reconnect-triggered catch-up alone left it undiscovered. This loop
+        just calls the same rate-limited, bounded _watch_catchup on a fixed clock, so
+        discovery never depends entirely on the socket's own reconnect cadence."""
+        import time as _time
+        while True:
+            _time.sleep(WATCH_CATCHUP_MIN_GAP)
+            _watch_catchup("periodic")
+
     def _watch_loop():
         import asyncio
         import logging as _logging
@@ -4359,6 +5423,7 @@ def create_app(out_dir: Path):
         # The app was closed until now, so by definition the mirror saw nothing in that window.
         # Off-thread: this does network I/O and must not delay the first subscribe.
         threading.Thread(target=_watch_catchup, args=("startup",), daemon=True).start()
+        threading.Thread(target=_periodic_catchup, daemon=True).start()
         backoff = 5
         while True:
             try:
@@ -4444,6377 +5509,7 @@ def create_app(out_dir: Path):
         threading.Thread(target=_watch_loop, daemon=True).start()
 
     # ------------------------------------------------------------------
-    # Template
-    # ------------------------------------------------------------------
-    BASE_HTML = r"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
-<meta name="theme-color" content="#0c0a1c">
-<title>Moonglade Athenaeum</title>
-<link rel="icon" type="image/png" href="/branding/favicon.png">
-<link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23cba6f7'/%3E%3Cpath d='M9 22V10h6a4 4 0 0 1 0 8h-3' stroke='%231e1e2e' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='11' r='2.2' fill='%23d4af37'/%3E%3C/svg%3E">
-<script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){});});}</script>
-<script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + r"""
-<style>
-__DESIGN_TOKENS__
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--base); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; }
-
-  /* Header */
-  header { background: var(--mantle); padding: 12px 20px; display: flex; align-items: center; gap: 14px; border-bottom: 1px solid var(--surface0); position: sticky; top: 0; z-index: 100; overflow: hidden; }
-  #brand-banner { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .16; z-index: 0; pointer-events: none; -webkit-mask-image: linear-gradient(90deg, #000 0%, transparent 62%); mask-image: linear-gradient(90deg, #000 0%, transparent 62%); }
-  /* Collapsing banner, JITTER-FREE: a tall header that SLIDES up on scroll via a
-     sticky negative-top -- the browser scrolls it away natively, nothing resizes,
-     so there is zero per-scroll layout thrash (the old JS height-on-scroll caused
-     the jank). At rest you see the full art band; scroll and it pins showing only
-     the bottom --bnr-slim (the nav bar). Pure CSS. Tunables: --bnr-hero (open
-     height) and object-position (which horizontal slice of the art shows). */
-  header.bannered { --bnr-hero: clamp(150px, 22vw, 300px); --bnr-slim: 62px;
-    height: var(--bnr-hero); top: calc(var(--bnr-slim) - var(--bnr-hero));
-    align-items: flex-end; padding: 0 20px 11px; }
-  header.bannered #brand-banner { opacity: 1; -webkit-mask-image: none; mask-image: none;
-    object-fit: cover; object-position: center 32%; }
-  header.bannered::after { content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
-    background: linear-gradient(180deg, rgba(17,17,27,.04) 30%, rgba(17,17,27,.4) 62%, rgba(17,17,27,.9) 88%); }
-  header > * { position: relative; z-index: 1; }
-  .brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-  .brand-txt { display: flex; flex-direction: column; line-height: 1; }
-  .brand .mark { width: 42px; height: 42px; border-radius: 10px; background: var(--accent); display: flex; align-items: center; justify-content: center; color: var(--base); font-weight: 700; font-size: 23px; position: relative; overflow: hidden; box-shadow: 0 0 0 rgba(182,146,230,0); animation: mark-glow 5.5s ease-in-out infinite; flex-shrink: 0; }
-  .brand .mark::after { content: ''; position: absolute; top: 7px; right: 7px; width: 5px; height: 5px; border-radius: 50%; background: var(--gold); z-index: 2; }
-  .brand .mark::before { content: ''; position: absolute; inset: 0; border-radius: 7px; background: var(--mantle); transform: translateX(-108%); animation: mark-eclipse 5.5s ease-in-out infinite; }
-  /* When a real logo image is present it replaces the "M" tile: box + animation off. */
-  .brand .mark .mark-m { position: relative; z-index: 4; }
-  .brand .mark .mark-logo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; z-index: 5; }
-  /* Custom logo present: the tile disappears but the MAGIC stays. The glow becomes a
-     drop-shadow that hugs the art's alpha shape; the eclipse ::before becomes a glint band
-     sweeping INSIDE the art (masked to the logo's own alpha, so it never spills past the
-     silhouette); the gold-dot ::after becomes a twinkling star. Dumbledore's got style. */
-  .brand .mark:has(.mark-logo) { background: transparent; box-shadow: none; animation: none; overflow: visible; }
-  .brand .mark:has(.mark-logo) .mark-m { display: none; }
-  .brand .mark:has(.mark-logo) .mark-logo { animation: logo-glow 5.5s ease-in-out infinite; }
-  .brand .mark:has(.mark-logo)::before { content: ''; position: absolute; inset: 0; border-radius: 0; transform: none;
-    background: linear-gradient(115deg, transparent 32%, rgba(255,255,255,.6) 47%, rgba(182,146,230,.4) 53%, transparent 68%);
-    background-size: 260% 100%; background-position: 200% 0; background-repeat: no-repeat;
-    -webkit-mask: url('{{ mark_url|default("/branding/logo.png", true) }}') center / contain no-repeat; mask: url('{{ mark_url|default("/branding/logo.png", true) }}') center / contain no-repeat;
-    animation: logo-glint 5.5s ease-in-out infinite; z-index: 6; pointer-events: none; }
-  .brand .mark:has(.mark-logo)::after { content: '\2726'; width: auto; height: auto; top: -7px; right: -8px;
-    background: none; border-radius: 0; color: var(--gold); font-size: 11px; line-height: 1;
-    text-shadow: 0 0 6px rgba(212,175,55,.9); animation: logo-twinkle 5.5s ease-in-out infinite; z-index: 7; }
-  @keyframes mark-eclipse { 0%,100% { transform: translateX(-108%); } 46%,54% { transform: translateX(0); } }
-  @keyframes mark-glow { 0%,100% { box-shadow: 0 0 10px rgba(182,146,230,.55); } 50% { box-shadow: 0 0 3px rgba(182,146,230,.2); } }
-  @keyframes logo-glow { 0%,100% { filter: drop-shadow(0 0 7px rgba(182,146,230,.65)); } 50% { filter: drop-shadow(0 0 2px rgba(182,146,230,.18)); } }
-  @keyframes logo-glint { 0%, 58% { background-position: 200% 0; } 78%, 100% { background-position: -100% 0; } }
-  @keyframes logo-twinkle { 0%, 40%, 100% { opacity: 0; transform: scale(.5) rotate(0deg); }
-    55% { opacity: 1; transform: scale(1.15) rotate(18deg); } 70% { opacity: .25; transform: scale(.8) rotate(36deg); } }
-  /* --- Banner-mark animations (Panel > Branding). 'classic' keeps the legacy
-     glow+glint+twinkle above; any other choice mutes those and drives its own
-     effect off the img and the freed-up ::before/::after layers. Per-anim rules
-     use !important to outrank the mute rules regardless of specificity. --- */
-  .brand .mark.mk-tile .mark-logo { border-radius: 10px; }
-  .brand .mark:not(.anim-classic):has(.mark-logo) .mark-logo { animation: none; }
-  .brand .mark:not(.anim-classic):has(.mark-logo)::before { animation: none; background: none; -webkit-mask: none; mask: none; }
-  .brand .mark:not(.anim-classic):has(.mark-logo)::after { animation: none; opacity: 0; }
-  .brand .mark.anim-shine::before { background: linear-gradient(115deg, transparent 32%, rgba(255,255,255,.6) 47%, rgba(182,146,230,.4) 53%, transparent 68%) !important; background-size: 260% 100% !important; background-position: 200% 0 !important; background-repeat: no-repeat !important; -webkit-mask: url('{{ mark_url|default("/branding/logo.png", true) }}') center / contain no-repeat !important; mask: url('{{ mark_url|default("/branding/logo.png", true) }}') center / contain no-repeat !important; animation: logo-glint 2.2s linear infinite !important; }
-  .brand .mark.anim-aurora::before { background: linear-gradient(115deg, transparent 26%, rgba(148,226,213,.6) 45%, rgba(182,146,230,.65) 55%, transparent 74%) !important; background-size: 260% 100% !important; background-position: 200% 0 !important; background-repeat: no-repeat !important; -webkit-mask: url('{{ mark_url|default("/branding/logo.png", true) }}') center / contain no-repeat !important; mask: url('{{ mark_url|default("/branding/logo.png", true) }}') center / contain no-repeat !important; animation: logo-glint 3s linear infinite !important; }
-  .brand .mark.anim-glow .mark-logo { animation: mk-glow 2.6s ease-in-out infinite !important; }
-  .brand .mark.anim-glow::before { inset: -14%; border-radius: 50%; background: radial-gradient(circle, rgba(148,226,213,.5), rgba(148,226,213,0) 62%) !important; animation: mk-bloom 2.6s ease-in-out infinite !important; z-index: 3; }
-  .brand .mark.anim-twinkle::after { content: '\2726'; width: auto; height: auto; top: -7px; right: -8px; background: none; border-radius: 0; color: var(--gold); font-size: 11px; line-height: 1; text-shadow: -32px 28px 0 rgba(212,175,55,.7), 0 0 6px rgba(212,175,55,.9); animation: mk-tw 1.7s ease-in-out infinite !important; z-index: 7; }
-  .brand .mark.anim-shoot::after { content: ''; width: 15px; height: 2px; top: 2px; right: auto; left: -4px; border-radius: 2px; background: linear-gradient(90deg, rgba(255,255,255,0), #fff); box-shadow: 0 0 7px 1px rgba(207,232,255,.9); animation: mk-shoot 2.7s ease-in-out infinite !important; z-index: 7; }
-  .brand .mark.anim-halo::before { inset: -12%; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0 68%, rgba(148,226,213,.9) 84%, transparent 100%) !important; -webkit-mask: radial-gradient(circle, transparent 58%, #000 62%, #000 74%, transparent 78%) !important; mask: radial-gradient(circle, transparent 58%, #000 62%, #000 74%, transparent 78%) !important; animation: mk-orbit 3.2s linear infinite !important; z-index: 6; }
-  .brand .mark.anim-eclipse::before { inset: 4%; border-radius: 50%; background: radial-gradient(circle at 50% 46%, #10101a 60%, rgba(16,16,26,0) 70%) !important; box-shadow: 0 0 10px 2px rgba(120,90,200,.45); opacity: .92; animation: mk-ecl 4s ease-in-out infinite !important; z-index: 6; }
-  .brand .mark.anim-ripple::before { inset: 10%; border-radius: 50%; border: 1.5px solid rgba(148,226,213,.85); box-shadow: 0 0 8px rgba(148,226,213,.5); animation: mk-ripple 2s ease-out infinite !important; z-index: 6; }
-  .brand .mark.anim-mist::before { inset: -20%; filter: blur(3px); mix-blend-mode: screen; background: radial-gradient(circle at 32% 38%, rgba(90,230,180,.5), transparent 46%), radial-gradient(circle at 68% 62%, rgba(150,110,240,.5), transparent 46%) !important; animation: mk-mist 6s ease-in-out infinite !important; z-index: 3; }
-  .brand .mark.anim-prism .mark-logo { animation: mk-prism 6s linear infinite !important; }
-  .brand .mark.anim-breathe .mark-logo { animation: mk-breathe 2.8s ease-in-out infinite !important; }
-  .brand .mark.anim-tilt .mark-logo { animation: mk-tilt 4.2s ease-in-out infinite !important; }
-  .brand .mark.anim-float .mark-logo { animation: mk-float 3s ease-in-out infinite !important; }
-  .brand .mark.anim-orbit .mark-logo { animation: mk-orbit 9s linear infinite !important; }
-  @keyframes mk-glow { 0%,100% { filter: brightness(1) drop-shadow(0 0 2px rgba(148,226,213,.2)); } 50% { filter: brightness(1.15) drop-shadow(0 0 9px rgba(148,226,213,.8)); } }
-  @keyframes mk-bloom { 0%,100% { opacity: .1; transform: scale(.85); } 50% { opacity: .8; transform: scale(1.05); } }
-  @keyframes mk-tw { 0%,100% { opacity: 0; transform: scale(.3) rotate(0deg); } 50% { opacity: 1; transform: scale(1.1) rotate(20deg); } }
-  @keyframes mk-shoot { 0% { opacity: 0; transform: translate(-8px,-4px) rotate(28deg); } 12% { opacity: 1; } 45% { opacity: 0; transform: translate(46px,26px) rotate(28deg); } 100% { opacity: 0; } }
-  @keyframes mk-ecl { 0% { transform: translateX(-92%); } 50% { transform: translateX(0); } 100% { transform: translateX(92%); } }
-  @keyframes mk-ripple { 0% { opacity: .85; transform: scale(.35); } 100% { opacity: 0; transform: scale(1.5); } }
-  @keyframes mk-mist { 0%,100% { transform: translate(-6%,2%); } 50% { transform: translate(6%,-4%); } }
-  @keyframes mk-prism { to { filter: hue-rotate(360deg); } }
-  @keyframes mk-breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.07); } }
-  @keyframes mk-tilt { 0%,100% { transform: perspective(300px) rotateY(-10deg); } 50% { transform: perspective(300px) rotateY(10deg); } }
-  @keyframes mk-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
-  @keyframes mk-orbit { to { transform: rotate(360deg); } }
-  header h1 { font-size: 18px; color: var(--text); flex-shrink: 0; font-weight: 600; border-bottom: 2px solid var(--gold); padding-bottom: 1px; line-height: 1.1; }
-  .tagline { font-size: 10.5px; color: var(--overlay0); font-style: italic; margin-top: 3px; transition: opacity .5s; letter-spacing: .02em; }
-  .ver-badge { font-size: 10px; font-weight: 500; color: var(--overlay0); font-family: ui-monospace, monospace; border: 1px solid var(--surface1); border-radius: 5px; padding: 1px 6px; vertical-align: middle; margin-left: 4px; letter-spacing: 0; }
-  .header-stats { color: var(--subtext); font-size: 12px; } .header-stats b { color: var(--text); }
-  .gen-live { color: var(--lavender); margin-left: 8px; display:inline-flex; align-items:center; }
-  .gen-nel-wrap{position:relative;display:inline-block;width:34px;height:34px;margin-right:6px;vertical-align:middle;flex:none;}
-  .gen-nel{position:absolute;inset:5px;width:24px;height:24px;border-radius:50%;object-fit:cover;object-position:60% 32%;animation:gen-spin 1.6s linear infinite;}
-  .gen-ring{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(182,146,230,.22);border-top-color:var(--lavender);animation:gen-spin .8s linear infinite;}
-  @keyframes gen-spin{to{transform:rotate(360deg);}}
-  .cover-badge { margin-left: 8px; font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--surface1); cursor: default; }
-  .cover-badge b { font-variant-numeric: tabular-nums; }
-  .cover-badge.full { color: var(--emerald); border-color: var(--emerald); }
-  .cover-badge.high { color: var(--lavender); border-color: var(--surface1); }
-  .cover-badge.low  { color: var(--peach); border-color: var(--peach); }
-  @media (prefers-reduced-motion: reduce) {
-    .brand .mark { animation: none; } .brand .mark::before { animation: none; transform: translateX(-108%); }
-    .brand .mark:has(.mark-logo) .mark-logo { animation: none; filter: drop-shadow(0 0 6px rgba(182,146,230,.45)); }
-    .brand .mark:has(.mark-logo)::before { animation: none; background-position: 200% 0; }
-    .brand .mark:has(.mark-logo)::after { animation: none; opacity: .8; transform: none; }
-    /* class-tripled to outrank every per-anim !important rule's specificity */
-    .brand .mark.mark.mark .mark-logo, .brand .mark.mark.mark::before, .brand .mark.mark.mark::after { animation: none !important; }
-    .tagline { transition: none; }
-  }
-
-  /* Filters */
-  .filters { background: var(--mantle); padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-bottom: 1px solid var(--surface0); }
-  .filters input, .filters select { background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); border-radius: 6px; padding: 5px 10px; font-size: 13px; }
-  .filters input { width: 280px; }
-  .filters .f-grow { flex: 0 1 440px; min-width: 200px; } .filters .f-grow input { width: 100%; }
-  .filters .filter-actions { margin-left: auto; align-self: flex-end; display: flex; gap: 6px; }
-  .filters-adv { border-top: 1px dashed var(--surface1); }
-  .filters input:focus, .filters select:focus { outline: none; border-color: var(--accent-soft); box-shadow: 0 0 0 2px rgba(79,201,154,.25); }
-  .filters label { color: var(--subtext); font-size: 12px; }
-  .filter-toggle { display: none; }
-  /* ---- BASE rules for the header nav, the LAN badge and the setup wizard ----
-     These eleven were sitting INSIDE the @media (max-width: 680px) block below,
-     so they applied ONLY on narrow viewports and were entirely absent on desktop
-     -- exactly inverted. The indentation gave it away: the media query's own
-     rules are at 4 spaces, this block was at 2, and .filter-toggle resumed at 4.
-     Real consequences, all confirmed by rendering the page at both widths:
-       - the first-run setup wizard (the FIRST thing a new user sees) had no
-         card, no gold rule, and raw white browser inputs on a near-black page
-       - the Panel's Add-user form rendered the same three raw white inputs
-       - .setup-msg.err lost `color: var(--red)`, so "Invalid username or
-         password" and the rate-limit lockout notice rendered in ordinary body
-         text, visually identical to the instructions above them
-       - .setup-row input's `flex: 1 1 320px` is a HORIZONTAL basis; in a
-         column-direction container it becomes a 320px HEIGHT, so inputs
-         rendered ~8x too tall on phones
-     Found by a browser crawl that looked at screenshots. No test caught it:
-     every response was a correct 200 and no console error ever fired. */
-  .head-nav { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-  .lan-note { font-size: 11.5px; color: var(--overlay0); font-style: italic; padding: 5px 10px; border: 1px dashed var(--surface1); border-radius: 7px; }
-  .setup-wizard { margin: 10px 14px 0; }
-  .setup-step { background: var(--surface0); border: 1px solid var(--surface1); border-left: 3px solid var(--gold); border-radius: 10px; padding: 14px 18px; color: var(--text); font-size: 13.5px; line-height: 1.5; }
-  .setup-step a { color: var(--accent); }
-  .setup-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
-  .setup-row input { flex: 1 1 320px; min-width: 220px; background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); border-radius: 6px; padding: 7px 10px; font-size: 13px; }
-  .setup-row input:focus { outline: none; border-color: var(--accent); }
-  .setup-msg { display: inline-block; margin-top: 8px; font-size: 12.5px; }
-  .setup-msg.err { color: var(--red); }
-  .setup-msg.ok { color: var(--green); }
-  /* Mobile: collapse the filter bar behind a toggle so the grid leads. */
-  @media (max-width: 680px) {
-    header h1 { font-size: 16px; }
-    header.bannered { padding: 0 14px 10px; }
-    header .back-link { font-size: 12px; }
-    /* A column-direction container turns .setup-row input's 320px flex-basis
-       into a height. Reset the basis here so narrow viewports stack normally. */
-    .setup-row { flex-direction: column; align-items: stretch; }
-    .setup-row input { flex: 0 0 auto; min-width: 0; width: 100%; box-sizing: border-box; }
-    .filter-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 8px 12px 0; }
-    .filters { display: none; flex-direction: column; align-items: stretch; padding: 10px 12px; }
-    .filters.open { display: flex; }
-    .filters > div { width: 100%; }
-    .filters input, .filters select { width: 100% !important; box-sizing: border-box; }
-    .grid { padding: 10px 12px; gap: 8px; }
-    .chips { padding: 8px 12px 0; }
-    .filters input, .filters select { font-size: 16px; }  /* >=16px stops iOS zoom-on-focus */
-  }
-  /* ---- Portrait phones (<=480px): the mobile pass. Layers on top of the 680px rules. ---- */
-  @media (max-width: 480px) {
-    /* HEADER stays ONE row so the collapsing-banner's slim pinned band still shows the nav.
-       Free width (shrink brand, drop tagline + stats) and turn .head-nav into a swipe strip. */
-    .brand { flex-shrink: 1; min-width: 0; }
-    header h1 { font-size: 15px; }
-    .brand .mark { width: 34px; height: 34px; font-size: 18px; }
-    .tagline { display: none; }
-    .header-stats { display: none; }
-    .head-nav { flex: 1 1 auto; min-width: 0; margin-left: 8px; flex-wrap: nowrap;
-      justify-content: flex-start; overflow-x: auto; -webkit-overflow-scrolling: touch;
-      scrollbar-width: none; gap: 8px; }
-    .head-nav::-webkit-scrollbar { display: none; }
-    .head-nav > * { flex: 0 0 auto; }
-    .head-nav .btn, .acct-chip, .acct-claim { min-height: 40px; display: inline-flex; align-items: center; }
-    /* The Loom used to be hidden here on the theory that a dense multi-panel tool was not
-       viable on a phone. REVERSED 2026-07-27 (owner): V2 is the live surface and is usable
-       out of the box in landscape, so hiding its only entry point just made the feature
-       unreachable from a phone. It stays in the nav at every width. */
-
-    /* GRID: force a comfortable 2-up; ignore a too-large saved --thumb (else 1 giant column / overflow). */
-    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px; padding: 10px 10px; }
-    .card .cb-wrap { top: 0; left: 0; padding: 8px; }
-    .card .cb-wrap input[type=checkbox] { width: 26px; height: 26px; }
-    .card .sbadge { top: 8px; left: 46px; }
-    .card .stars { padding: 6px 8px 8px; gap: 8px; }
-    .card .stars button { font-size: 20px; padding: 2px; }
-    .card .meta .date { font-size: 11px; }
-
-    /* FILTERS + BULK-BAR: full-width actions, tidy stacked bulk-bar, 44px touch targets. */
-    .filters .filter-actions { margin-left: 0; width: 100%; flex-wrap: wrap; gap: 8px; }
-    .filters .filter-actions .btn { flex: 1 1 30%; min-height: 44px; justify-content: center; }
-    .bulk-bar { padding: 8px 12px; gap: 8px; }
-    .bulk-bar .bulk-grp { flex-wrap: wrap; }
-    .bulk-bar .bulk-grp + .bulk-grp:not(.bulk-view), .bulk-bar .bulk-actions { border-left: none; padding-left: 0; }
-    .bulk-bar .bulk-view { margin-left: 0; width: 100%; }
-    .bulk-bar .btn, .bulk-bar #preset-select { min-height: 44px; padding: 10px 14px; font-size: 14px; }
-    .bulk-bar .bulk-grp .btn { flex: 1 1 auto; }
-    .bulk-bar .actions-menu { left: 8px; right: 8px; min-width: 0; }
-    .bulk-tip { display: none; }
-
-    /* LIGHTBOX: arrows off the image, touch-sized controls.
-       The Generate DRAWER's own portrait rules used to sit here too, and were DEAD --
-       they lost the cascade to the drawer's base rules, which live in a LATER <style>
-       block. They now live at the end of that same stylesheet, immediately after the
-       rules they override; search for "the drawer's own mobile pass" for the full
-       writeup. Do not move drawer/flyout overrides back up into this block. */
-    #lb-img, #lb-video { max-width: 100vw; max-height: 74vh; }
-    .lb-nav { top: auto; bottom: 12px; transform: none; min-width: 48px; min-height: 48px; padding: 0;
-      display: flex; align-items: center; justify-content: center; font-size: 24px; }
-    .lb-prev { left: 12px; } .lb-next { right: 12px; }
-    .lb-bar { flex-wrap: wrap; padding: 8px 10px; }
-    #lb-caption { max-width: 100%; order: 3; flex-basis: 100%; font-size: 11px; }
-    .lb-actions .btn { min-height: 40px; padding: 8px 12px; }
-
-    /* FILTERS as a bottom sheet: on a phone the inline expand swallows most of the
-       viewport, so small screens get a slide-up sheet instead. Reuses the existing
-       toggleFilters() + .open class unchanged -- only what .open MEANS visually changes. */
-    .filters { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 220;
-      max-height: 78vh; overflow-y: auto; background: var(--mantle); border-top: 1px solid var(--surface1);
-      border-radius: 16px 16px 0 0; box-shadow: 0 -14px 40px rgba(0,0,0,.5);
-      transform: translateY(100%); visibility: hidden; transition: transform .25s ease, visibility 0s linear .25s; }
-    .filters.open { transform: translateY(0); visibility: visible; transition: transform .25s ease; }
-    .filter-scrim { position: fixed; inset: 0; z-index: 219; background: rgba(0,0,0,.55);
-      opacity: 0; pointer-events: none; transition: opacity .25s ease; }
-    .filters.open ~ .filter-scrim { opacity: 1; pointer-events: auto; }
-  }
-  /* Tablet: keep the filter bar visible but let wide text inputs shrink so the
-     row wraps tidily instead of running off-screen. */
-  @media (min-width: 681px) and (max-width: 1024px) {
-    .filters input { width: 180px; }
-    .filters { padding: 10px 14px; }
-    .grid { padding: 12px 14px; }
-  }
-  /* Frosted glow pills ("Moonlight, tinted"): pill-shaped frosted glass with a
-     soft per-destination hue (--btn-hue). Generate stays the solid-lavender hero. */
-  .btn { background: rgba(255,255,255,.06); color: var(--text); border: 1px solid rgba(182,146,230,.30); border-radius: 999px; padding: 6px 15px; cursor: pointer; font-size: 13px; line-height: 1.2; box-shadow: inset 0 1px 0 rgba(255,255,255,.13), 0 0 9px var(--btn-hue, rgba(182,146,230,.14)); transition: border-color .14s, box-shadow .14s, background .14s, transform .09s; }
-  a.btn { text-decoration: none; display: inline-flex; align-items: center; gap: 5px; color: var(--text); }
-  .btn:hover { background: rgba(182,146,230,.15); border-color: var(--lavender); transform: translateY(-1px); box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 4px 12px -4px rgba(0,0,0,.5), 0 0 14px var(--btn-hue, rgba(182,146,230,.35)); text-decoration: none; }
-  .btn:active { transform: translateY(1px); }
-  .btn:focus-visible { outline: 2px solid var(--lavender); outline-offset: 1px; }
-  .b-loom    { --btn-hue: rgba(148,226,213,.30); }
-  .b-ach     { --btn-hue: rgba(212,175,55,.32); }
-  .b-contest { --btn-hue: rgba(224,192,106,.30); }
-  .b-art     { --btn-hue: rgba(203,166,247,.32); }
-  .b-panel   { --btn-hue: rgba(180,190,254,.32); }
-  .b-health  { --btn-hue: rgba(245,194,231,.30); }
-  .btn-danger { background: var(--red); color: var(--base); border-color: var(--red); font-weight: 600; }
-  .btn-danger:hover { opacity: 0.9; background: var(--red); box-shadow: 0 3px 10px -3px rgba(243,139,168,.5); }
-  .btn-primary { background: linear-gradient(180deg, #c4a6f0 0%, var(--lavender) 100%); color: var(--base); border-color: var(--lavender); font-weight: 600; }
-  .btn-primary:hover { background: linear-gradient(180deg, #c4a6f0 0%, var(--lavender) 100%); box-shadow: 0 0 0 1px rgba(182,146,230,.5), 0 4px 14px -4px rgba(182,146,230,.7); }
-  /* All dropdowns share the button look: dark, rounded, custom lavender-grey caret.
-     .pick-filters select (the gallery-picker modal's collection/source/rating/sort
-     dropdowns) had NO styling at all until it joined this list -- the other half of the
-     same native-select-styling-split audit row that gave .gen-sel's <select>s their arrow
-     back, just above; there was never a comment anywhere suggesting either gap was
-     deliberate. */
-  .filters select, #preset-select, select.p-sel, .pick-filters select { -webkit-appearance: none; appearance: none;
-    background-color: var(--surface0);
-    background-image: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="10" height="6"%3E%3Cpath d="M0 0l5 6 5-6z" fill="%239a93ab"/%3E%3C/svg%3E');
-    background-repeat: no-repeat; background-position: right 10px center;
-    border: 1px solid var(--surface1); border-radius: 7px; color: var(--text);
-    padding: 6px 28px 6px 12px; font-size: 13px; cursor: pointer; font-family: inherit; }
-  .filters select:hover, #preset-select:hover, select.p-sel:hover, .pick-filters select:hover { border-color: var(--lavender); }
-
-  /* Active-filter chips */
-  .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 20px 0; align-items: center; }
-  .chips .chips-label { color: var(--overlay0); font-size: 12px; }
-  .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--surface0); border: 1px solid var(--surface1); border-left: 3px solid var(--gold); border-radius: 4px; padding: 3px 8px; font-size: 12px; color: var(--text); }
-  .chip .k { color: var(--subtext); }
-  .chip a { color: var(--overlay0); text-decoration: none; font-weight: 700; padding-left: 2px; }
-  .chip a:hover { color: var(--red); }
-  .chips .clear-all { color: var(--accent-soft); font-size: 12px; text-decoration: none; }
-  .chips .clear-all:hover { text-decoration: underline; }
-
-  /* Bulk toolbar */
-  .bulk-bar { background: var(--surface0); padding: 8px 20px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--surface1); min-height: 40px; flex-wrap: wrap; position: sticky; top: var(--bulk-top, 52px); z-index: 99; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
-  .bulk-grp { display: flex; align-items: center; gap: 6px; }
-  .bulk-grp + .bulk-grp:not(.bulk-view), .bulk-actions { border-left: 1px solid var(--surface1); padding-left: 10px; }
-  .bulk-view { margin-left: auto; }
-  .sel-count { color: var(--subtext); font-size: 13px; padding: 0 2px; } .sel-count b { color: var(--text); font-variant-numeric: tabular-nums; }
-  .bulk-actions { position: relative; }
-  .actions-menu { position: absolute; top: calc(100% + 6px); left: 10px; z-index: 130; background: var(--mantle); border: 1px solid var(--surface1); border-radius: 9px; box-shadow: 0 14px 34px rgba(0,0,0,.5); min-width: 210px; padding: 5px; display: none; }
-  .actions-menu.open { display: block; }
-  .actions-menu button { display: block; width: 100%; text-align: left; background: none; border: none; color: var(--text); font-size: 13px; padding: 8px 11px; border-radius: 6px; cursor: pointer; font-family: inherit; }
-  .actions-menu button:hover { background: var(--surface0); }
-  .actions-menu .am-div { height: 1px; background: var(--surface1); margin: 5px 6px; }
-  .actions-menu .am-danger { color: var(--red); }
-  .actions-menu .am-danger:hover { background: rgba(243,139,168,.13); }
-  .bulk-tip { padding: 5px 20px; font-size: 12px; color: var(--overlay0); background: var(--surface0); border-bottom: 1px solid var(--surface1); }
-  /* Select mode: cards capture the drag (no scroll-hijack mid-card) and never open the lightbox. */
-  .select-mode .grid .card { touch-action: none; cursor: copy; }
-  .select-mode .grid .card .cover { cursor: copy; }
-  #select-mode-btn.active { background: var(--accent); color: #1e1e2e; font-weight: 600; }
-  body.select-mode .bulk-bar::after { content: "Select mode: tap to toggle · drag across images to paint"; color: var(--accent); font-size: 12px; flex-basis: 100%; }
-  .bulk-bar span { color: var(--subtext); font-size: 13px; }
-  #sel-count { color: var(--gold); font-weight: 600; }
-
-  /* Thumbnail loading skeleton */
-  @keyframes shimmer { 0% { background-position: -200px 0; } 100% { background-position: 200px 0; } }
-  .card img { background-image: linear-gradient(90deg, var(--surface0) 0px, var(--surface1) 100px, var(--surface0) 200px); background-size: 400px 100%; animation: shimmer 1.2s infinite linear; }
-  .card img.loaded { animation: none; background: var(--surface0); }
-
-  /* Empty state */
-  .empty { text-align: center; padding: 64px 20px; color: var(--subtext); }
-  .empty .big { font-size: 40px; margin-bottom: 8px; color: var(--overlay0); }
-  .empty a { color: var(--accent-soft); text-decoration: none; }
-  .empty a:hover { text-decoration: underline; }
-
-  /* Grid */
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--thumb, 200px), 1fr)); gap: 12px; padding: 16px 20px; }
-  /* Clearance for the persistent Activity chip (#jobs-fab, static/mg-notify.js): it's
-     position:fixed at left:14px;bottom:14px, and JobsCard.applyState() shows it via .show
-     whenever the tray is CLOSED -- which is the default (mg_jobs_open unset), so on every
-     ordinary page load it sits on top of the grid's bottom-left corner with no clearance at
-     all, permanently eating clicks for whatever card scrolls under it -- not just while a
-     job is actually running (audit row: "the dead zone is permanent, not intermittent").
-     No page-side rule ever gave the grid room for it (unlike the Loom shell just above,
-     which budgets the same 56px-ish FAB footprint + breathing room for its OWN #eb-help-btn
-     via #root .lv-gen{padding-bottom:64px}). This is the last `.grid` rule in the sheet
-     (deliberately -- see the mobile/portrait overrides above it), so it applies at every
-     breakpoint without touching their own padding/gap values. The FAB keeps showing (that
-     part is an intentional persistent entry point, not the bug); the grid just stops
-     rendering content underneath it. */
-  .grid { padding-bottom: 64px; }
-  .card { background: var(--mantle); border-radius: 8px; overflow: hidden; border: 2px solid transparent; transition: border-color .15s; position: relative; cursor: pointer; }
-  .card:hover { border-color: var(--surface1); }
-  .card.selected { border-color: var(--purple-bright); box-shadow: 0 0 0 1px var(--purple-bright); }
-  .card.kbd-focus { border-color: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-soft); }
-
-  /* Lightbox */
-  .lb { display: none; position: fixed; inset: 0; z-index: 300; background: rgba(8,6,18,.92);
-        flex-direction: column; align-items: center; justify-content: center; }
-  .lb.open { display: flex; }
-  .lb-bar { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center;
-            justify-content: space-between; gap: 12px; padding: 10px 16px; background: rgba(10,8,24,.6); }
-  #lb-caption { color: var(--subtext); font-size: 12px; overflow: hidden; text-overflow: ellipsis;
-                white-space: nowrap; max-width: 60%; }
-  .lb-actions { display: flex; gap: 8px; flex-shrink: 0; }
-  #lb-img { max-width: 94vw; max-height: 86vh; object-fit: contain; border-radius: 6px; }
-  #lb-video { max-width: 94vw; max-height: 86vh; border-radius: 6px; background: #000; }
-  .lb-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(10,8,24,.5);
-            color: var(--text); border: 1px solid var(--surface1); border-radius: 8px; font-size: 28px;
-            line-height: 1; padding: 10px 16px; cursor: pointer; }
-  .lb-nav:hover { background: var(--surface0); }
-  .lb-prev { left: 14px; } .lb-next { right: 14px; }
-  @media (max-width: 680px) { .lb-nav { padding: 8px 12px; font-size: 22px; } #lb-caption { max-width: 40%; } }
-  .card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--surface0); }
-  /* Panoramic sources (progress-bar/frame textures, letterboxed banners...) lose almost all
-     their content to a square center-crop -- show those uncropped instead, letterboxed. */
-  .card img.wide-thumb { object-fit: contain; }
-  .card .no-thumb { width: 100%; aspect-ratio: 1; background: var(--surface0); display: flex; align-items: center; justify-content: center; color: var(--overlay0); font-size: 11px; }
-  .card .meta { padding: 6px 8px; }
-  .card .meta .title { font-size: 12px; color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .card .meta .model { font-size: 11px; color: var(--mauve); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .card .meta .date  { font-size: 10px; color: var(--overlay0); }
-  /* Privacy blur (opt-in toggle): blur every thumbnail until hover. Useful on
-     LAN / mobile / over-the-shoulder. NSFW-flagged cards (data-nsfw="1") blur
-     more heavily when the flag is known. Audit 2026-07-21 S5 originally added a
-     .pick-cell branch here for the old #pick-modal's own grid; O13 (Phase 2) replaced
-     that grid with <mg-gallery-picker>, which carries its OWN privacy-blur rule for
-     .mg-pk-cell (mg-gallery-picker.js's injected <style>) -- so .pick-cell would only
-     ever match a class this page no longer produces. Dropped rather than left as a
-     rule matching nothing; #gen-ref-slot (the Generate tab's own reference-image slot,
-     unrelated to the picker grid) still needs its branch here. */
-  body.privacy-blur .card img, body.privacy-blur #gen-ref-slot img { filter: blur(16px); transition: filter .12s; }
-  body.privacy-blur .card[data-nsfw="1"] img, body.privacy-blur #gen-ref-slot[data-nsfw="1"] img { filter: blur(28px); }
-  body.privacy-blur .card:hover img, body.privacy-blur #gen-ref-slot:hover img { filter: none; }
-  .card .cb-wrap { position: absolute; top: 6px; left: 6px; }
-  /* --accent, not --lavender: the two are the same colour in the default skin, so this
-     read as correct, but a skin that retints --accent (nightfallen: #a678f0 vs a
-     --lavender of #c9a6ff) left these grid checkboxes on the old skin's purple. The
-     :root accent-color would already cover this -- the rule is kept only for the
-     18px sizing -- so it must not pin a colour that drifts from the active skin. */
-  .card .cb-wrap input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
-  .card a.cover { position: absolute; inset: 0; z-index: 1; }
-  .card .cb-wrap { z-index: 2; }
-  .card .vbadge { position: absolute; top: 6px; right: 6px; z-index: 2; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; line-height: 1; padding: 4px 7px; border-radius: 20px; pointer-events: none; }
-  .card .sbadge { position: absolute; top: 6px; left: 30px; z-index: 2; font-size: 10px; font-weight: 600; line-height: 1; padding: 3px 6px; border-radius: 4px; pointer-events: none; letter-spacing: .03em; }
-  .card .sbadge.gen { background: var(--mauve, #cba6f7); color: #1e1e2e; }
-  .card .sbadge.loc { background: var(--teal, #94e2d5); color: #1e1e2e; }
-
-  /* Pagination */
-  .pagination { display: flex; justify-content: center; gap: 6px; padding: 20px; flex-wrap: wrap; }
-  .pagination a, .pagination span { padding: 6px 12px; border-radius: 6px; font-size: 13px; text-decoration: none; }
-  .pagination a { background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); }
-  .pagination a:hover { background: var(--surface1); }
-  .pagination span.current { background: var(--lavender); color: var(--base); font-weight: 600; border: 1px solid var(--lavender); }
-  .pagination span.ellipsis { color: var(--overlay0); }
-
-  /* Detail */
-  .detail-wrap { max-width: 1100px; margin: 0 auto; padding: 20px; }
-  .detail-img { text-align: center; margin-bottom: 20px; }
-  .detail-img img { max-width: 100%; max-height: 70vh; border-radius: 8px; }
-  .detail-meta { background: var(--mantle); border-radius: 8px; padding: 16px; display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; }
-  .detail-meta .lbl { color: var(--subtext); font-size: 12px; text-align: right; padding-top: 2px; }
-  .detail-meta .val { color: var(--text); font-size: 13px; word-break: break-word; }
-  .detail-meta .val.prompt { font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
-  .detail-actions { margin-top: 16px; display: flex; gap: 10px; }
-  .focus-btn { font-size: 12px; padding: 3px 10px; cursor: pointer; background: var(--surface0); border: 1px solid var(--surface1); border-radius: 4px; color: var(--text); }
-  .focus-btn:hover { background: var(--surface1); }
-  .focus-mode .detail-meta,
-  .focus-mode .detail-stars,
-  .focus-mode .detail-actions { display: none; }
-  .focus-mode { max-width: 100% !important; padding: 8px !important; display: flex; flex-direction: column; align-items: center; }
-  .focus-mode .detail-nav { width: 100%; max-width: 900px; }
-  .focus-mode .detail-img { width: 100%; display: flex; justify-content: center; }
-  .focus-mode .detail-img img { max-height: 90vh; max-width: 95vw; width: auto; height: auto; }
-  @media print {
-    @page { size: letter; margin: 12mm; }
-    header, .detail-nav, .detail-actions, .detail-stars, #suggest-box, #lightbox { display: none !important; }
-    body, .detail-wrap { background: #fff !important; color: #000 !important; }
-    .detail-wrap { max-width: 100% !important; padding: 0 !important; }
-    .detail-img img { max-width: 100%; max-height: 78vh; width: auto; height: auto; display: block; margin: 0 auto; }
-    .detail-meta { background: #fff !important; border: none !important; margin-top: 8mm; grid-template-columns: 130px 1fr; }
-    .detail-meta .lbl { color: #555 !important; } .detail-meta .val { color: #000 !important; }
-  }
-  .back-link { display: inline-block; color: var(--blue); text-decoration: none; font-size: 13px; }
-  .back-link:hover { text-decoration: underline; }
-  .detail-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-  .nav-arrow { color: var(--blue); text-decoration: none; font-size: 13px; padding: 4px 10px; border: 1px solid var(--surface1); border-radius: 4px; }
-  .nav-arrow:hover { background: var(--surface1); text-decoration: none; }
-  .nav-disabled { color: var(--overlay0); font-size: 13px; padding: 4px 10px; border: 1px solid var(--surface0); border-radius: 4px; cursor: default; }
-
-  /* Modal */
-  .modal-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 200; align-items: center; justify-content: center; }
-  .modal-bg.open { display: flex; }
-  .modal { background: var(--mantle); border: 1px solid var(--surface1); border-radius: 10px; padding: 24px; max-width: 400px; width: 90%; }
-  .modal h2 { font-size: 16px; margin-bottom: 10px; color: var(--red); }
-  .modal p { color: var(--subtext); font-size: 13px; margin-bottom: 18px; line-height: 1.5; }
-  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
-
-  /* Empty */
-  .empty { text-align: center; padding: 60px 20px; color: var(--overlay0); }
-
-  /* Stars */
-  .stars { display: flex; gap: 2px; }
-  .stars button { background: none; border: none; cursor: pointer; font-size: 14px; padding: 0; line-height: 1; color: var(--overlay0); }
-  .stars button.on { color: #f9e2af; }
-  .stars button:hover { color: #f9e2af; opacity: 0.7; }
-  /* The no-Toast half of ratingFailed() -- see it for why the detail page needs one.
-     Same specificity as `.stars button.on` and declared after it on purpose, so a
-     failed write repaints red over a previously-filled star instead of losing the tie. */
-  .stars.rate-fail button { color: var(--red); }
-  .card .stars { padding: 3px 6px 5px; }
-  .detail-stars { margin-top: 12px; display: flex; align-items: center; gap: 8px; }
-  .detail-stars .stars button { font-size: 22px; }
-  .detail-stars .rating-label { color: var(--subtext); font-size: 12px; }
-</style>
-<script>
-function closeModal() { document.getElementById('del-modal').classList.remove('open'); }
-function confirmDelete(url, msg) {
-  document.getElementById('del-modal-msg').textContent = msg;
-  document.getElementById('del-modal-form').action = url;
-  document.getElementById('del-modal').classList.add('open');
-}
-function setRating(mediaId, value) {
-  // RESOLVES to the rating the server actually stored, REJECTS on anything else. That
-  // contract is the whole point: buildStars keeps its own copy of "the current rating"
-  // and the two silently disagreeing is not cosmetic. This chain used to end at
-  // `if (data.ok) updateStars(...)` with no else and no .catch, so a POST that never
-  // came back -- dropped connection, a 5xx whose HTML body makes r.json() throw --
-  // simply fell off the end: the stars stayed unfilled while the closure had already
-  // advanced to 4. The user's obvious move, clicking the same star again to retry, then
-  // read (rating === star) as "already 4, so this means clear" and submitted a 0.
-  // Clicking the 4th star twice through one failed write set the image to unrated.
-  //
-  // It reports and does not paint -- which is why it no longer takes the stars element.
-  // The repaint lives in buildStars because only the closure there knows whether THIS
-  // response is still the newest one; painting from in here meant a slow first response
-  // could repaint over a fast second one's result with no way for the caller to stop it.
-  return fetch('/rate/' + mediaId, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({rating: value})
-  }).then(function(r) { return r.json(); }).then(function(data) {
-    if (!data || !data.ok) throw new Error((data && data.error) || 'The server rejected it.');
-    return data.rating;
-  });
-}
-function updateStars(el, rating) {
-  el.querySelectorAll('button').forEach(function(btn, i) {
-    btn.classList.toggle('on', i < rating);
-  });
-  var lbl = el.parentElement.querySelector('.rating-label');
-  if (lbl) lbl.textContent = rating > 0 ? rating + ' / 5' : 'unrated';
-}
-function ratingFailed(el, msg) {
-  // Toast (static/mg-notify.js) is this app's notice channel and is used wherever it is
-  // loaded -- but the gallery loads that script and the DETAIL page does not, and the
-  // detail page carries the largest star widget on the site. A Toast-only report would
-  // therefore stay silent on precisely the surface where one click is the entire
-  // interaction, which is the failure this whole fix is about. So fall back to the widget
-  // itself: flash it red and hang the reason off its tooltip. Not alert() -- a modal that
-  // steals focus mid-browse for a rating write is worse than the bug.
-  if (window.Toast) { Toast.show({kind: 'err', title: 'Rating not saved', msg: msg}); return; }
-  // Borrowed, then given back. The .stars container carries no title today, so clearing it
-  // outright looked free -- but it is a shared attribute on an element this function does
-  // not own, and the first tooltip anyone hangs there would be silently eaten four seconds
-  // after an unrelated failed write. Saved only on the way IN (not on a repeat while the
-  // flash is still up, which would save this function's own message) and restored by a
-  // single restarted timer, so two failures four seconds apart can't leave one stuck.
-  if (!el.classList.contains('rate-fail')) el._ratePriorTitle = el.title;
-  el.classList.add('rate-fail');
-  el.title = 'Rating not saved — ' + msg;
-  clearTimeout(el._rateTimer);
-  el._rateTimer = setTimeout(function() {
-    el.classList.remove('rate-fail');
-    el.title = el._ratePriorTitle || '';
-  }, 4000);
-}
-function buildStars(mediaId, rating, containerEl) {
-  // TWO values, deliberately, because one cannot answer both questions this widget asks.
-  //
-  //   confirmed -- the last rating the SERVER said it stored. It is what a failure rolls
-  //                back to, and the only thing safe to repaint from.
-  //   asked     -- what the user's clicks have asked for, including writes still in the
-  //                air. It is what "is this star already lit?" must be answered from, or
-  //                the click-again-to-unrate gesture stops working mid-flight.
-  //
-  // Collapsing them is what produced the finding and then its own regression, in turn.
-  // The original code advanced ONE variable optimistically and never rolled it back, so a
-  // failed write left the closure at 4 while the stars showed 0 and the retry click read
-  // (rating === star) as "clear it" -- clicking star 4 twice through one failure set the
-  // image to unrated. The first repair stopped advancing anything until the server
-  // answered, which fixed that and broke the opposite case: two fast clicks on star 4 both
-  // computed from the same un-advanced 0 and both POSTed 4, so a deliberate double-click
-  // to unrate did nothing until the round trip landed. Optimistic for the gesture,
-  // confirmed for the paint, and a rollback joining them, is the shape that serves both.
-  //
-  // `seq` exists because responses can land out of order: only the newest click may move
-  // `confirmed` or repaint, so a slow first response can no longer overwrite a fast
-  // second one's result. (The stale one's own updateStars inside setRating is why that
-  // repaint moved out to here.)
-  var confirmed = rating, asked = rating, seq = 0;
-  for (var i = 1; i <= 5; i++) {
-    (function(star) {
-      var btn = document.createElement('button');
-      btn.textContent = '★';
-      if (star <= rating) btn.classList.add('on');
-      btn.addEventListener('click', function(e) {
-        e.preventDefault(); e.stopPropagation();
-        var newVal = (asked === star) ? 0 : star;
-        asked = newVal;
-        var mine = ++seq;
-        setRating(mediaId, newVal).then(function(stored) {
-          if (mine !== seq) return;          // a newer click already owns this widget
-          confirmed = asked = stored;
-          updateStars(containerEl, stored);
-        }).catch(function(err) {
-          if (mine !== seq) return;
-          // The rollback that makes the optimistic `asked` safe: the write did not land,
-          // so the gesture goes back to what the database actually holds and the stars are
-          // repainted from it. Without this, `asked` would stay advanced past a failure --
-          // which IS the original finding, one variable over.
-          asked = confirmed;
-          updateStars(containerEl, confirmed);
-          ratingFailed(containerEl, (err && err.message) || 'Network error.');
-        });
-      });
-      containerEl.appendChild(btn);
-    })(i);
-  }
-}
-document.addEventListener('DOMContentLoaded', function() {
-  var modal = document.getElementById('del-modal');
-  if (modal) modal.addEventListener('click', function(e) { if (e.target === this) closeModal(); });
-  document.querySelectorAll('.stars[data-mid]').forEach(function(el) {
-    buildStars(el.dataset.mid, parseInt(el.dataset.rating) || 0, el);
-  });
-});
-</script>
-</head>
-<body>
-{% block body %}{% endblock %}
-
-<div class="modal-bg" id="del-modal">
-  <div class="modal">
-    <h2>Confirm Delete</h2>
-    <p id="del-modal-msg">Are you sure?</p>
-    <div class="modal-actions">
-      <button class="btn" onclick="closeModal()">Cancel</button>
-      <form id="del-modal-form" method="post" style="display:inline">
-        <button type="submit" class="btn btn-danger">Delete</button>
-      </form>
-    </div>
-  </div>
-</div>
-<div class="modal-bg" id="export-modal">
-  <div class="modal">
-    <h2 style="color:var(--text);">Download <span id="export-n"></span></h2>
-    <p>Files download exactly as PixAI delivered them by default. Converting or embedding
-       happens <b>only in this download</b> &mdash; your archive and catalog are never changed.</p>
-    <div style="display:flex;flex-direction:column;gap:13px;margin-bottom:18px;">
-      <label style="display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--overlay0);text-transform:uppercase;letter-spacing:.05em;">Format
-        <select id="export-fmt" class="gen-sel" style="text-transform:none;letter-spacing:0;">
-          <option value="original" selected>Original &mdash; no re-compression</option>
-          <option value="png">PNG</option>
-          <option value="jpeg">JPEG</option>
-        </select></label>
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);cursor:pointer;">
-        <input type="checkbox" id="export-embed"> Embed prompt &amp; ids into each file
-        <span style="color:var(--overlay0);font-size:11px;">(PNG/JPEG)</span></label>
-    </div>
-    <div class="modal-actions">
-      <button class="btn" onclick="document.getElementById('export-modal').classList.remove('open')">Cancel</button>
-      <button class="btn btn-primary" onclick="doExportDownload()">&#8681; Download</button>
-    </div>
-  </div>
-</div>
-<div class="modal-bg" id="import-modal">
-  <div class="modal imp-modal">
-    <h2 style="color:var(--text);margin-bottom:4px;">Import into your library</h2>
-    <p style="margin-bottom:14px;">Bring local files into the catalog &mdash; copied into <b style="color:var(--text)">imported/</b> and tagged <b style="color:var(--text)">Imported (local)</b>. Nothing is uploaded to PixAI; this is your library, not a generation reference.</p>
-    <div id="imp-drop" class="imp-drop" onclick="ImportUI.browse()">
-      <div class="imp-ico">&#8593;</div>
-      <div class="imp-big">Drop images, a folder, or a .zip here</div>
-      <div class="imp-sub">or <span class="imp-link">browse files</span> &middot; <span class="imp-link" onclick="event.stopPropagation();ImportUI.browseFolder()">a folder</span></div>
-    </div>
-    <div id="imp-preview" style="display:none;">
-      <div class="imp-sum" id="imp-sum"></div>
-      <div id="imp-body"></div>
-      <label class="imp-orow"><span class="imp-lbl">Add to collection</span>
-        <select id="imp-collection" class="gen-sel" style="flex:1;" onchange="ImportUI.onCollectionChange()">
-          <option value="">&mdash; none &mdash;</option>
-          {% for c in collections %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
-          <option value="__new__">&#65291; New collection&hellip;</option>
-        </select></label>
-      {# A collection is just a name applied to rows (add_to_collection), so an unseen name
-         creates one -- this row is purely the way in, which the dropdown alone never gave.
-         Reuses .gen-sel: it is a box style (background/border/radius/padding/font), not a
-         select-specific one, so it dresses the input identically with no new CSS. #}
-      <label class="imp-orow" id="imp-newcoll-row" style="display:none;">
-        <span class="imp-lbl">New collection</span>
-        <input id="imp-newcoll" class="gen-sel" style="flex:1;" maxlength="120"
-               placeholder="name it &mdash; it&rsquo;s created when the import lands"></label>
-    </div>
-    <div id="imp-result" class="imp-result" style="display:none;"></div>
-    <div class="modal-actions" style="margin-top:16px;">
-      <button class="btn" onclick="ImportUI.close()">Cancel</button>
-      <button class="btn btn-primary" id="imp-go" onclick="ImportUI.doImport()" style="display:none;">&#8593; Import</button>
-    </div>
-    <input type="file" id="imp-file" multiple accept="image/*,video/*,.zip" style="display:none" onchange="ImportUI.onPick(this.files)">
-    <input type="file" id="imp-folder" webkitdirectory style="display:none" onchange="ImportUI.onPick(this.files)">
-  </div>
-</div>
-<style>
-  .imp-modal{max-width:560px;width:92%;}
-  .imp-drop{border:2px dashed var(--surface1);border-radius:12px;padding:38px 20px;text-align:center;background:var(--surface0);cursor:pointer;transition:border-color .15s,background .15s;}
-  .imp-drop.hot{border-color:var(--lavender);background:color-mix(in srgb,var(--lavender) 8%,var(--surface0));}
-  .imp-ico{font-size:30px;color:var(--lavender);line-height:1;}
-  .imp-big{font-size:14px;font-weight:600;margin:10px 0 3px;color:var(--text);}
-  .imp-sub{font-size:12.5px;color:var(--subtext);}
-  .imp-link{color:var(--lavender);text-decoration:underline;cursor:pointer;}
-  .imp-sum{font-size:12.5px;color:var(--subtext);margin-bottom:10px;}
-  .imp-sum b{color:var(--text);}
-  .imp-list{display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto;padding-right:2px;}
-  .imp-row{display:flex;align-items:center;gap:9px;background:var(--surface0);border:1px solid var(--surface1);border-radius:8px;padding:6px 8px;}
-  .imp-thumb{width:38px;height:38px;border-radius:5px;flex:none;background:var(--surface1);display:grid;place-items:center;font-size:15px;color:var(--subtext);overflow:hidden;}
-  .imp-thumb img{width:100%;height:100%;object-fit:cover;}
-  .imp-nm{flex:1;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);}
-  .imp-sz{font-size:10.5px;color:var(--subtext);flex:none;}
-  .imp-x{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:15px;line-height:1;flex:none;padding:0 2px;}
-  .imp-x:hover{color:var(--red);}
-  .imp-cap{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--gold);background:color-mix(in srgb,var(--gold) 8%,transparent);border:1px solid var(--gold);border-radius:8px;padding:6px 9px;margin-bottom:9px;line-height:1.4;}
-  .imp-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:5px;}
-  .imp-tg{aspect-ratio:1;border-radius:5px;overflow:hidden;background:var(--surface1);display:grid;place-items:center;font-size:13px;color:var(--subtext);}
-  .imp-tg img{width:100%;height:100%;object-fit:cover;}
-  .imp-more{aspect-ratio:1;border-radius:5px;border:1px dashed var(--surface1);background:var(--surface0);display:grid;place-items:center;text-align:center;color:var(--subtext);font-size:10px;font-weight:600;line-height:1.1;}
-  .imp-orow{display:flex;align-items:center;gap:9px;margin-top:13px;}
-  .imp-lbl{font-size:11px;color:var(--overlay0);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;}
-  .imp-result{margin-top:12px;font-size:12.5px;padding:9px 11px;border-radius:8px;background:var(--surface0);border:1px solid var(--surface1);color:var(--text);line-height:1.5;}
-  .imp-result.ok{border-color:var(--emerald);}
-  .imp-result.err{border-color:var(--red);color:var(--red);}
-  .ee-star{position:fixed;top:-40px;z-index:400;pointer-events:none;color:var(--lavender);text-shadow:0 0 14px rgba(182,146,230,.9),0 0 30px rgba(182,146,230,.5);animation:ee-fall linear forwards;}
-  @keyframes ee-fall{to{transform:translateY(112vh) rotate(540deg);opacity:.05;}}
-  .ee-toast{position:fixed;left:50%;top:15%;transform:translate(-50%,-50%);z-index:402;background:var(--mantle);border:1px solid var(--lavender);border-radius:14px;padding:16px 30px;font-size:19px;color:var(--text);text-align:center;box-shadow:0 0 70px rgba(182,146,230,.55);pointer-events:none;animation:ee-toast 6s ease forwards;}
-  @keyframes ee-toast{0%{opacity:0;transform:translate(-50%,-50%) scale(.85);}10%{opacity:1;transform:translate(-50%,-50%) scale(1);}82%{opacity:1;}100%{opacity:0;}}
-  .ee-scrim{position:fixed;inset:0;z-index:399;background:radial-gradient(circle at 50% 60%,rgba(6,5,14,.32),rgba(6,5,14,.84));pointer-events:none;animation:ee-scrim 6s ease forwards;}
-  @keyframes ee-scrim{0%{opacity:0;}10%{opacity:1;}82%{opacity:1;}100%{opacity:0;}}
-  .ee-nel{position:fixed;left:50%;bottom:0;transform:translateX(-50%);transform-origin:bottom center;z-index:400;max-height:80vh;max-width:94vw;pointer-events:none;filter:drop-shadow(0 10px 34px rgba(0,0,0,.55)) drop-shadow(0 0 30px rgba(182,146,230,.4));animation:ee-nel 6s cubic-bezier(.18,.9,.2,1.05) forwards;}
-  @keyframes ee-nel{0%{opacity:0;transform:translateX(-50%) translateY(30px) scale(.86);}12%{opacity:1;transform:translateX(-50%) translateY(0) scale(1.02);}18%{transform:translateX(-50%) translateY(0) scale(1);}84%{opacity:1;}100%{opacity:0;}}
-</style>
-<script>
-(function(){
-  var seq=[38,38,40,40,37,39,37,39,66,65], pos=0, busy=false;
-  document.addEventListener('keydown', function(e){
-    pos = (e.keyCode===seq[pos]) ? pos+1 : (e.keyCode===seq[0] ? 1 : 0);
-    if(pos!==seq.length) return;
-    pos=0; if(busy) return; busy=true;
-    try{ fetch('/api/ach-event',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({event:'konami'})}); }catch(err){}   // The Konami Code feat
-    var g=['✦','✧','★','✪','✺'];
-    for(var i=0;i<46;i++){ var s=document.createElement('div'); s.className='ee-star';
-      s.textContent=g[i%g.length];
-      s.style.left=(Math.random()*100)+'vw';
-      s.style.fontSize=(13+Math.random()*24)+'px';
-      s.style.animationDuration=(2.2+Math.random()*2.6)+'s';
-      s.style.animationDelay=(Math.random()*1.8)+'s';
-      document.body.appendChild(s); }
-    var scrim=document.createElement('div'); scrim.className='ee-scrim'; document.body.appendChild(scrim);
-    var nel=document.createElement('img'); nel.className='ee-nel'; nel.src='/branding/ee_nelstarfall.png';
-    nel.onerror=function(){ this.remove(); };   // asset missing -> egg still runs, text-only
-    document.body.appendChild(nel);
-    var t=document.createElement('div'); t.className='ee-toast';
-    t.innerHTML='✺ Elune-adore, Nelnamara ✺<div style="font-size:12.5px;color:var(--subtext);margin-top:7px;">The Athenaeum casts Starfall. Moonfire spam remains a lifestyle.</div>';
-    document.body.appendChild(t);
-    var cast,loop;   // real WoW Starfall sfx (local); silent if absent or autoplay-blocked
-    try{ cast=new Audio('/branding/ee_starfall_cast.ogg'); cast.volume=0.7; cast.play().catch(function(){}); }catch(e){}
-    try{ loop=new Audio('/branding/ee_starfall_loop.ogg'); loop.loop=true; loop.volume=0.35; loop.play().catch(function(){}); }catch(e){}
-    setTimeout(function(){ document.querySelectorAll('.ee-star,.ee-toast,.ee-nel,.ee-scrim').forEach(function(n){n.remove();});
-      try{ if(loop){loop.pause();} }catch(e){} try{ if(cast){cast.pause();} }catch(e){} busy=false; }, 7000);
-  });
-})();
-</script>
-</body>
-</html>
-""".replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS)
-
-    INDEX_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
-{% macro date_select(prefix, value, years) %}
-  {% set yr = value[:4] %}{% set mo = value[5:7] %}
-  <select name="{{ prefix }}_year" style="width:78px">
-    <option value="">Year</option>
-    {% for y in years %}
-    <option value="{{ y }}" {% if value and y|string == yr %}selected{% endif %}>{{ y }}</option>
-    {% endfor %}
-  </select>
-  {# 70px, not 64: at 64 the "Mon" placeholder collided with the native dropdown
-     arrow and rendered as "Mo|" -- measured intrinsic width is 69px. The year
-     select beside it is 78px against a 71px intrinsic, so it was never affected. #}
-  <select name="{{ prefix }}_month" style="width:70px">
-    <option value="">Mon</option>
-    {% for mnum in range(1, 13) %}
-    {% set mm = '%02d'|format(mnum) %}
-    <option value="{{ mm }}" {% if mm == mo %}selected{% endif %}>{{ mm }}</option>
-    {% endfor %}
-  </select>
-{% endmacro %}
-<header{% if has_banner %} class="bannered"{% endif %}>
-  <img id="brand-banner" src="/branding/banner.png" alt="" onerror="this.remove()">
-  <div class="brand">
-    <span class="mark anim-{{ mark_anim|default('classic', true) }}{% if mark_kind == 'tile' %} mk-tile{% endif %}"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span>
-    <div class="brand-txt">
-      <h1>Moonglade Athenaeum <span class="ver-badge" title="Running build (git short SHA). If this doesn't change after a pull, the server wasn't restarted.">{{ build_stamp }}</span></h1>
-      <span id="tagline" class="tagline">a library against the Void</span>
-    </div>
-  </div>
-  <span class="header-stats">
-    <b>{{ '{:,}'.format(stats.images) }}</b> images{% if stats.videos %} &middot; <b>{{ '{:,}'.format(stats.videos) }}</b> videos{% endif %}{% if stats.collections %} &middot; <b>{{ stats.collections }}</b> collections{% endif %}
-    <span id="cover-badge" class="cover-badge" style="display:none;"></span>
-    <span id="gen-live" class="gen-live" style="display:none;"></span>
-  </span>
-  <div class="head-nav">
-    {# Owner-level surfaces (generation, The Loom, Panel, balance) are gated to
-       _is_authorized_request() -- a logged-in session ONLY, no localhost bypass
-       (see /login and that function's docstring). Hide them for anyone else and
-       show a small read-only note instead of dead buttons. Browse/curate +
-       community stay available to everyone.
-       Import needs MORE than that: /api/import-local (below) is actually
-       LOCALHOST-tier, because it writes files onto the server's own machine, so
-       it re-checks _is_local_request() itself. The button is therefore nested
-       behind its own `is_true_local` check -- the real, un-hardcoded
-       _is_local_request() result computed in index() below, the same value
-       `can_delete_cloud` already uses for "Delete from PixAI" -- instead of the
-       blanket `is_local` flag every other button in this block uses. FIXED
-       2026-07-24 (the 2026-07-21 audit P3/S5-3, previously a documented but
-       un-fixed gap): a signed-in, non-local LAN session no longer sees a
-       working-looking Import button that always 403'd on click. #}
-    {% if is_local %}
-    <a id="acct-chip" class="acct-chip" href="{{ url_for('panel') }}" title="Your PixAI balance — open the Control Panel" style="display:none;"></a>
-    <button type="button" id="acct-claim" class="acct-claim" onclick="Acct.claim()" title="Claim your free daily credits" style="display:none;"></button>
-    <button type="button" class="btn btn-primary" onclick="Gen.open()">&#10022; Generate</button>
-    {% if is_true_local %}
-    <button type="button" class="btn" onclick="ImportUI.open()" title="Import local files (images, a folder, or a .zip) into your library">&#8593; Import</button>
-    {% endif %}
-    <a class="btn b-loom" href="/loom" title="The Loom — video storyboard, where shots are woven into a sequence">&#9648; The Loom</a>
-    {% endif %}
-    <button type="button" class="btn b-ach" onclick="Ach.open()" title="Achievements &amp; skins">&#127942;</button>
-    <button type="button" class="btn b-contest" onclick="Contests.open()" title="Live PixAI contests &mdash; the Oasis was never a 1-player game">&#127941; Contests</button>
-    <button type="button" class="btn b-art" onclick="YourArt.open()" title="How your published art is doing &mdash; views, likes, comments">&#128200; My Art</button>
-    {% if is_local %}
-    <a class="btn b-panel" href="{{ url_for('panel') }}" title="Maintenance jobs, logs, settings">&#9881; Panel</a>
-    {% endif %}
-    {# The LAN indicator, in the slot the old (unreachable) "read-only LAN view" note
-       used to occupy. It branches on `is_true_local`, NOT `is_local`: `is_local` is
-       hardcoded True at index()'s render call, so anything hung off its `{% else %}`
-       could never render -- and the note that used to live there was wrong anyway,
-       since a signed-in LAN session is not read-only (it browses, generates, and
-       drives the Loom and the Panel exactly like the owner at the keyboard).
-       What genuinely differs is the LOCALHOST tier: Import, "Delete from PixAI",
-       "Set launcher icon" and the file-moving Panel jobs are hidden for a remote
-       caller (see the head-nav comment above, and _is_local_request()). Nothing on
-       the page said so, so the same owner in the same browser saw a different set of
-       buttons depending only on whether the address bar said `localhost` or the
-       machine's LAN IP -- which reads as the app being broken, not as a tier. This
-       is a LABEL for a decision the tier helpers already made: it introduces no new
-       notion of trust, and every route keeps its own gate. #}
-    {% if not is_true_local %}
-    <span class="lan-note" id="lan-chip" title="You reached this gallery across the network, so the controls restricted to the machine running it are hidden: &#8593; Import, Delete from PixAI, Set launcher icon, and the destructive Panel jobs (Organize, Dedup, Rebuild thumbnails). Everything else — browsing, Generate, The Loom, the Panel — works normally here. Open the gallery on that machine's own localhost address to get the rest.">&#127760; LAN session &middot; local-only tools hidden</span>
-    {% endif %}
-    <a class="btn b-health" href="{{ url_for('health') }}" title="Collection health dashboard">&#9825; Health</a>
-    {% if logged_in_user %}
-    {# A POST form, not an <a href>: /logout revokes every outstanding session for
-       this account, and a bare GET that writes server state is reachable by any
-       cross-site link, window.open or link-prefetcher -- SESSION_COOKIE_SAMESITE=
-       "Lax" blocks a cross-site subresource but still sends the cookie on a
-       top-level GET navigation. Same hidden-csrf-field convention /login's form
-       uses. No styling needed: `* { margin: 0; padding: 0 }` (the reset near the
-       top of BASE_HTML) means the form adds nothing, `.head-nav > *` already gives
-       it the same flex treatment as its sibling buttons, and the .btn inside it is
-       a plain <button class="btn"> exactly like Generate/Import/Contests. #}
-    <form method="post" action="{{ url_for('logout') }}">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <button type="submit" class="btn" title="Signed in as {{ logged_in_user }} — sign out (on every device)">&#128274; Sign out</button>
-    </form>
-    {% endif %}
-  </div>
-</header>
-
-{% if needs_key %}
-<div class="setup-wizard" id="setup-wizard">
-  <div class="setup-step">
-    <b>Welcome to Moonglade Athenaeum.</b> Paste your PixAI API key to get started —
-    <a href="https://platform.pixai.art" target="_blank" rel="noopener">generate one at platform.pixai.art</a>
-    (free, lifetime up to ~2 years). Nothing else is required; your account id and everything
-    else is resolved from it.
-    <div class="setup-row">
-      <input type="password" id="setup-key-input" placeholder="Your PixAI API key"
-             autocomplete="off" onkeydown="if(event.key==='Enter')Setup.saveKey()">
-      <button type="button" class="btn btn-primary" onclick="Setup.saveKey()">Connect</button>
-    </div>
-    <span id="setup-key-msg" class="setup-msg"></span>
-  </div>
-</div>
-{% elif catalog_empty %}
-<div class="setup-wizard" id="setup-wizard">
-  <div class="setup-step">
-    <b>You're connected.</b> Run your first sync to pull your PixAI generation history into
-    this gallery — full resolution, searchable, yours to keep.
-    <div class="setup-row">
-      <button type="button" class="btn btn-primary" onclick="Setup.firstSync()">&#8635; Sync now</button>
-    </div>
-    <span id="setup-sync-msg" class="setup-msg"></span>
-  </div>
-</div>
-{% endif %}
-
-<button type="button" class="filter-toggle btn" onclick="toggleFilters()"
-        aria-expanded="false">Filters &#9662;</button>
-<form method="get" action="/" id="filter-form">
-{% set adv_active = model_filter or lora_filter or date_from or date_to or batch_filter or rating_min or art_tag or source_filter or published_only %}
-<div class="filters">
-  <div class="f-grow">
-    <label>Search prompt / task or media id</label><br>
-    <input type="text" name="q" value="{{ q }}" placeholder="words, night* wildcard, an id, or model:tsubaki…"
-           title="Multiple words are ANDed. Use * (any) and ? (one char), e.g. night* elf. Also matches task id / media id. Field operators: model: lora: tag: title: sampler: negative: batch: status: filename: collection: source: seed: task: media: — plus numbers (rating:>=3, width:>1000, aes:>6, likes:>0, steps: cfg: duration:), created:2026-07 dates, and video:/published:/nsfw: 1 or 0. Quote spaces: model:&quot;Ether Real&quot;.">
-  </div>
-  <div>
-    <label>Media</label><br>
-    <select name="media">
-      <option value="" {% if not media_type %}selected{% endif %}>All</option>
-      <option value="image" {% if media_type=='image' %}selected{% endif %}>Images</option>
-      <option value="video" {% if media_type=='video' %}selected{% endif %}>Videos</option>
-    </select>
-  </div>
-  <div>
-    <label>Collection</label><br>
-    <select name="collection">
-      <option value="">All</option>
-      {% for c in collections %}
-      <option value="{{ c }}" {% if collection==c %}selected{% endif %}>{{ c }}</option>
-      {% endfor %}
-    </select>
-    {# Shown only while a collection is active. type=button so it never submits the filter
-       form; the name rides a data attribute (HTML-escaped, decoded via dataset) so a
-       collection name with quotes can't break the handler. #}
-    {% if collection %}
-    <button type="button" class="btn" style="margin-top:6px;font-size:12px;padding:5px 10px;"
-      data-coll="{{ collection }}" onclick="downloadCollection(this.dataset.coll)"
-      title="Download every item in this collection as a ZIP (optional convert/embed)">&#8681; Download collection</button>
-    <button type="button" class="btn" style="margin-top:6px;font-size:12px;padding:5px 10px;"
-      data-coll="{{ collection }}" onclick="contactSheetCollection(this.dataset.coll)"
-      title="Open a printable contact sheet for every item in this collection">&#128424; Contact sheet</button>
-    {% endif %}
-  </div>
-  <div>
-    <label>Sort</label><br>
-    <select name="sort">
-      <option value="newest"      {% if sort=='newest' %}selected{% endif %}>Newest first</option>
-      <option value="oldest"      {% if sort=='oldest' %}selected{% endif %}>Oldest first</option>
-      <option value="rating_desc" {% if sort=='rating_desc' %}selected{% endif %}>Rating ↓</option>
-      <option value="rating_asc"  {% if sort=='rating_asc' %}selected{% endif %}>Rating ↑</option>
-      <option value="model"       {% if sort=='model' %}selected{% endif %}>Model name</option>
-      <option value="pixels"      {% if sort=='pixels' %}selected{% endif %}>Resolution ↓</option>
-      <option value="aspect"      {% if sort=='aspect' %}selected{% endif %}>Aspect (wide→tall)</option>
-      <option value="aes_desc"    {% if sort=='aes_desc' %}selected{% endif %}>Aesthetic score ↓</option>
-      <option value="aes_asc"     {% if sort=='aes_asc' %}selected{% endif %}>Aesthetic score ↑</option>
-      <option value="likes"       {% if sort=='likes' %}selected{% endif %}>Most liked</option>
-      <option value="width"       {% if sort=='width' %}selected{% endif %}>Width ↓</option>
-      <option value="height"      {% if sort=='height' %}selected{% endif %}>Height ↓</option>
-    </select>
-  </div>
-  <div>
-    <label>Thumb size</label><br>
-    <input type="range" id="thumb-size" min="120" max="320" step="20" value="200"
-           title="Thumbnail size" style="width:110px;vertical-align:middle">
-  </div>
-  <div>
-    <label>Per page</label><br>
-    <select name="per_page">
-      {% for n in per_page_opts %}
-      <option value="{{ n }}" {% if n == per_page %}selected{% endif %}>{{ n }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="filter-actions">
-    <button type="submit" class="btn btn-primary">Filter</button>
-    <a href="/" class="btn">Reset</a>
-    <button type="button" class="btn" id="adv-toggle" onclick="toggleAdvanced()"
-      aria-expanded="{{ 'true' if adv_active else 'false' }}">{{ 'Less ▴' if adv_active else 'More ▾' }}</button>
-  </div>
-</div>
-<div class="filter-scrim" onclick="toggleFilters()"></div>
-<div class="filters filters-adv" id="filters-adv" {% if not adv_active %}style="display:none;"{% endif %}>
-  <div>
-    <label>Model</label><br>
-    <input type="text" name="model" value="{{ model_filter }}" list="models-list"
-           placeholder="All models — type to search" autocomplete="off" style="width:200px">
-    <datalist id="models-list">
-      {% for m in models %}<option value="{{ m }}">{% endfor %}
-    </datalist>
-  </div>
-  <div>
-    <label>LoRA</label><br>
-    <input type="text" name="lora" value="{{ lora_filter }}" placeholder="lora name…" style="width:140px">
-  </div>
-  <div>
-    <label>From</label><br>
-    {{ date_select('from', date_from, years) }}
-  </div>
-  <div>
-    <label>To</label><br>
-    {{ date_select('to', date_to, years) }}
-  </div>
-  {% if batches %}
-  <div>
-    <label>Batch</label><br>
-    <input type="text" name="batch" value="{{ batch_filter }}" list="batches-list"
-           placeholder="All batches — type to search" autocomplete="off" style="width:200px">
-    <datalist id="batches-list">
-      {% for b in batches %}<option value="{{ b }}">{% endfor %}
-    </datalist>
-  </div>
-  {% endif %}
-  <div>
-    <label>Min rating</label><br>
-    <select name="rating_min">
-      <option value="0" {% if rating_min==0 %}selected{% endif %}>Any</option>
-      {% for r in [1,2,3,4,5] %}
-      <option value="{{ r }}" {% if rating_min==r %}selected{% endif %}>{{ '★' * r }}+</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div>
-    <label>Tag / contest</label><br>
-    <input type="text" name="tag" value="{{ art_tag }}" placeholder="published tag…" style="width:140px">
-  </div>
-  <div>
-    <label>Source</label><br>
-    <select name="source">
-      <option value="" {% if not source_filter %}selected{% endif %}>All</option>
-      <option value="online" {% if source_filter=='online' %}selected{% endif %}>PixAI history</option>
-      <option value="api" {% if source_filter=='api' %}selected{% endif %}>Generated</option>
-      <option value="local" {% if source_filter=='local' %}selected{% endif %}>Imported</option>
-      <option value="deleted" {% if source_filter=='deleted' %}selected{% endif %}>Deleted on PixAI</option>
-    </select>
-  </div>
-  <div>
-    <label>&nbsp;</label><br>
-    <label style="color:var(--text);font-size:13px;display:inline-flex;align-items:center;gap:6px;">
-      <input type="checkbox" name="published" value="1" {% if published_only %}checked{% endif %}
-             style="width:auto;"> Published only
-    </label>
-  </div>
-</div>
-</form>
-
-{% if chips %}
-<div class="chips">
-  <span class="chips-label">Active:</span>
-  {% for c in chips %}
-  <span class="chip"><span class="k">{{ c.k }}:</span> {{ c.v }}
-    <a href="{{ c.url }}" title="Remove this filter">×</a></span>
-  {% endfor %}
-  <a class="clear-all" href="{{ url_for('index') }}">Clear all</a>
-  <a class="clear-all" href="{{ url_for('export_csv_download') }}?{{ request.query_string.decode('utf-8', 'replace') }}" download
-    title="Export exactly these filtered rows to CSV -- the whole-catalog dump stays on the Control Panel">&#11015; Export this view (CSV)</a>
-</div>
-{% endif %}
-
-{% if request.args.get('replaced') %}
-<div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--green);border-radius:4px;color:var(--text);font-size:13px;">
-  Replaced text in {{ request.args.get('replaced') }} prompt(s).</div>
-{% endif %}
-{% if request.args.get('collected') %}
-<div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--emerald, #4fc99a);border-radius:4px;color:var(--text);font-size:13px;">
-  Added {{ request.args.get('collected') }} image(s) to the collection.</div>
-{% endif %}
-{% if request.args.get('uncollected') %}
-<div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--emerald, #4fc99a);border-radius:4px;color:var(--text);font-size:13px;">
-  Removed {{ request.args.get('uncollected') }} item(s) from the collection. Files are untouched.</div>
-{% endif %}
-{% if request.args.get('deleted') %}
-<div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--red);border-radius:4px;color:var(--text);font-size:13px;">
-  Deleted {{ request.args.get('deleted') }} task(s) from PixAI · {{ request.args.get('removed') }} local file(s) purged{% if request.args.get('failed') and request.args.get('failed') != '0' %} · <span style="color:var(--red);">{{ request.args.get('failed') }} failed</span>{% endif %}.</div>
-{% endif %}
-{% if request.args.get('delerr') %}
-<div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--red);border-radius:4px;color:var(--text);font-size:13px;">
-  Delete error: {{ request.args.get('delerr') }}</div>
-{% endif %}
-{% if request.args.get('bulkdel') == 'started' %}
-<div style="margin:8px 20px 0;padding:8px 12px;background:var(--mantle);border-left:3px solid var(--lavender);border-radius:4px;color:var(--text);font-size:13px;">
-  <span class="gen-moon"></span> Deleting {{ request.args.get('n') }} item(s) from PixAI&hellip; watch the Activity card. This page refreshes when it finishes.</div>
-<script>
-// The delete runs in the background (Activity card shows progress). Poll the job log and,
-// once the delete job finishes, reload the grid so it stops showing rows that were purged.
-(function(){
-  var tries=0;
-  function reloadClean(){
-    var p=new URLSearchParams(location.search); p.delete('bulkdel'); p.delete('n');
-    var qs=p.toString();
-    location.replace(location.pathname + (qs ? ('?'+qs) : ''));
-  }
-  function chk(){
-    tries++;
-    fetch('/api/jobs').then(function(r){return r.json();}).then(function(d){
-      var j=((d&&d.jobs)||[]).filter(function(x){return x.type==='delete';})[0];
-      if(j && (j.status==='done' || j.status==='failed')){ reloadClean(); return; }
-      if(tries<150){ setTimeout(chk, 800); }
-    }).catch(function(){ if(tries<150){ setTimeout(chk, 1500); } });
-  }
-  setTimeout(chk, 800);
-})();
-</script>
-{% endif %}
-
-<div class="bulk-bar">
-  <!-- Selection -->
-  <div class="bulk-grp">
-    <button class="btn" onclick="selectAll()">Select all</button>
-    <button class="btn" onclick="clearAll()">Clear</button>
-    <button class="btn" id="select-mode-btn" onclick="toggleSelectMode()" title="Select mode: tap an image to toggle it, or drag across images to paint a selection. No lightbox opens. Great for touch/tablet.">Select</button>
-    <span class="sel-count"><b id="sel-count">0</b> selected</span>
-  </div>
-  <!-- Actions on the selection (only shown when something is selected) -->
-  <div class="bulk-actions" id="bulk-actions" style="display:none;">
-    <button class="btn btn-primary" id="actions-btn" onclick="toggleActionsMenu(event)">Actions <span id="act-n"></span> &#9662;</button>
-    <div class="actions-menu" id="actions-menu">
-      <button onclick="bulkAddCollection();closeActionsMenu()">&#43; Add to collection</button>
-      {# Only meaningful while a collection filter is active -- "remove from WHICH one?"
-         has no answer otherwise. Same conditional shape as the "Download collection"
-         button in the filter bar, and the name rides a data attribute (HTML-escaped,
-         read back via dataset) so a name with quotes can't break the handler. #}
-      {% if collection %}
-      <button data-coll="{{ collection }}" onclick="bulkRemoveCollection(this.dataset.coll);closeActionsMenu()"
-              title="Take the selected items out of this collection (a label only -- no files are deleted)">&#8722; Remove from &ldquo;{{ collection }}&rdquo;</button>
-      {% endif %}
-      <button onclick="bulkSendVideo();closeActionsMenu()">&#9654; Send to Video</button>
-      <button onclick="bulkSendCast();closeActionsMenu()">&#9648; Send to The Loom (cast)</button>
-      <button onclick="bulkContactSheet();closeActionsMenu()">&#128424; Print sheet</button>
-      <button onclick="downloadZip();closeActionsMenu()">&#8681; Download ZIP</button>
-      <button onclick="bulkReplacePrompt();closeActionsMenu()">Find / replace in prompts</button>
-      <div class="am-div"></div>
-      <button class="am-danger" onclick="confirmBulkDelete();closeActionsMenu()" title="Remove from this local catalog only (keeps the cloud task)">Delete locally</button>
-      {% if can_delete_cloud %}
-      <button class="am-danger" onclick="confirmBulkDeleteCloud();closeActionsMenu()" title="Delete the whole TASK from your PixAI account AND locally (irreversible)">Delete from PixAI</button>
-      {% endif %}
-    </div>
-  </div>
-  <!-- View controls (right) -->
-  <div class="bulk-grp bulk-view">
-    <button class="btn" id="blur-btn" onclick="toggleBlur()" title="Privacy blur: blur all thumbnails until you hover">Privacy blur</button>
-    <select id="preset-select" onchange="loadPreset(this.value)" style="font-size:13px;"
-            title="Saved views"><option value="">Saved views…</option></select>
-    <button class="btn" onclick="deletePreset()" title="Delete the selected saved view"
-            style="padding:6px 10px;">&#10005;</button>
-    <button class="btn" onclick="savePreset()" title="Save current filters as a named view">Save view</button>
-  </div>
-</div>
-<div class="bulk-tip">tip: click an image to open the lightbox &middot; arrow keys to browse &middot; F for slideshow</div>
-
-<form id="bulk-form" method="post" action="/delete-bulk">
-  <input type="hidden" name="back" value="{{ request.url }}">
-  <div class="grid">
-    {% for row in rows %}
-    <div class="card" id="card-{{ row.media_id }}" data-mid="{{ row.media_id }}"
-         data-prompt="{{ (row.title or row.prompt_preview or '')|e }}"
-         {% if row.is_video == '1' %}data-video="1"{% endif %}
-         {% if row.is_nsfw == '1' %}data-nsfw="1"{% endif %}>
-      <div class="cb-wrap">
-        <input type="checkbox" name="media_ids" value="{{ row.media_id }}"
-               onchange="onCheck()" onclick="event.stopPropagation()">
-      </div>
-      <a class="cover" href="{{ url_for('detail', media_id=row.media_id, back=current_url) }}"
-         data-idx="{{ loop.index0 }}" onclick="return openLightbox(event, {{ loop.index0 }})"></a>
-      {% if row._has_thumb %}
-      <img src="{{ url_for('thumb', media_id=row._thumb_mid) }}" loading="lazy"
-           decoding="async" onload="this.classList.add('loaded');var r=this.naturalWidth/(this.naturalHeight||1);if(r>2.2||r<0.45)this.classList.add('wide-thumb')"
-           alt="{{ row.prompt_preview[:60] }}">
-      {% else %}
-      <div class="no-thumb">no preview</div>
-      {% endif %}
-      {% if row.is_video == '1' %}<div class="vbadge" title="Video">▶</div>{% endif %}
-      {% if row.source == 'api' %}<div class="sbadge gen" title="Generated via PixAI">AI</div>
-      {% elif row.source == 'local' %}<div class="sbadge loc" title="Imported local file">local</div>{% endif %}
-      <div class="meta">
-        {% if row.title %}<div class="title" title="{{ row.title }}">{{ row.title }}</div>{% endif %}
-        <div class="model">{{ row.model_name or row.model_id or '—' }}</div>
-        <div class="date">{{ row.created_at[:10] if row.created_at else '' }}{% if row.liked_count and row.liked_count not in ('0','') %} · ♥ {{ row.liked_count }}{% endif %}</div>
-      </div>
-      <div class="stars" id="stars-{{ row.media_id }}"
-           data-mid="{{ row.media_id }}" data-rating="{{ row.rating or 0 }}"></div>
-    </div>
-    {% endfor %}
-  </div>
-</form>
-
-<div id="lightbox" class="lb" onclick="if(event.target===this)closeLightbox()">
-  <div class="lb-bar">
-    <span id="lb-caption"></span>
-    <span class="lb-actions">
-      <button class="btn" onclick="lbEdit()" title="Open in the Edit tab">✎ Edit</button>
-      <button class="btn" onclick="lbVideo()" title="Send to the Video tab as a reference">▶ To Video</button>
-      <button class="btn" onclick="lbSimilar()" title="Find visually similar images">✧ Similar</button>
-      <button class="btn" id="lb-upscale" onclick="lbUpscale()"
-              title="Upscale this image (PixAI Upscale or Hires)">⇱ Upscale</button>
-      <a id="lb-details" class="btn" href="#">Details</a>
-      <button class="btn" id="lb-play" onclick="toggleSlideshow()">▶ Slideshow</button>
-      <button class="btn" onclick="closeLightbox()">✕ Close</button>
-    </span>
-  </div>
-  <button class="lb-nav lb-prev" onclick="lbStep(-1)" aria-label="Previous">&#8249;</button>
-  <img id="lb-img" alt="">
-  <video id="lb-video" controls loop playsinline style="display:none"></video>
-  <button class="lb-nav lb-next" onclick="lbStep(1)" aria-label="Next">&#8250;</button>
-</div>
-<mg-upscale-panel id="up-flyout"></mg-upscale-panel>
-__UPSCALE_CONST__
-
-{% if not rows %}
-<div class="empty">
-  <div class="big">⌕</div>
-  <div>No images match your filters.</div>
-  {% if chips %}<div style="margin-top:8px;font-size:13px;">Try <a href="{{ url_for('index') }}">clearing all filters</a> or widening the date range.</div>{% endif %}
-</div>
-{% endif %}
-
-<div class="pagination">
-  {% if page > 1 %}
-  <a href="{{ page_url(1) }}">« First</a>
-  <a id="pg-prev" href="{{ page_url(page - 1) }}">‹ Prev</a>
-  {% endif %}
-  {% for p in page_range %}
-    {% if p == '…' %}
-    <span class="ellipsis">…</span>
-    {% elif p == page %}
-    <span class="current">{{ p }}</span>
-    {% else %}
-    <a href="{{ page_url(p) }}">{{ p }}</a>
-    {% endif %}
-  {% endfor %}
-  {% if page < total_pages %}
-  <a id="pg-next" href="{{ page_url(page + 1) }}">Next ›</a>
-  <a href="{{ page_url(total_pages) }}">Last »</a>
-  {% endif %}
-</div>
-
-<script>
-function toggleFilters() {
-  var f = document.querySelector('.filters');
-  var btn = document.querySelector('.filter-toggle');
-  var open = f.classList.toggle('open');
-  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-}
-function toggleAdvanced() {
-  var a = document.getElementById('filters-adv');
-  var btn = document.getElementById('adv-toggle');
-  var open = a.style.display === 'none';
-  a.style.display = open ? '' : 'none';
-  btn.innerHTML = open ? 'Less \\u25b2' : 'More \\u25be';
-  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-}
-function applyBlur() {
-  var on = localStorage.getItem('gallery_privacy_blur') === '1';
-  document.body.classList.toggle('privacy-blur', on);
-  var b = document.getElementById('blur-btn');
-  if (b) b.textContent = on ? 'Unblur' : 'Privacy blur';
-}
-function toggleBlur() {
-  var on = localStorage.getItem('gallery_privacy_blur') === '1';
-  localStorage.setItem('gallery_privacy_blur', on ? '' : '1');
-  applyBlur();
-}
-// Saved views live SERVER-SIDE (/api/view-presets -> out_dir/view_presets/<account>.json)
-// so a view saved at the desktop exists on the tablet. Scoped to YOUR account, not the
-// install: a saved view is a stored search, not a theme. localStorage ('gallery_presets')
-// is only read once as the legacy store: any set found there is merged up (existing names
-// win) and then cleared.
-var viewPresets = {};
-function legacyPresetsGet() { try { return JSON.parse(localStorage.getItem('gallery_presets') || '{}'); } catch(e) { return {}; } }
-function renderPresets() {
-  var s = document.getElementById('preset-select'); if (!s) return;
-  s.innerHTML = '<option value="">Saved views…</option>';
-  Object.keys(viewPresets).sort().forEach(function(n){ var o = document.createElement('option'); o.value = n; o.textContent = n; s.appendChild(o); });
-}
-function refreshPresets() {
-  fetch('/api/view-presets').then(function(r){ return r.json(); }).then(function(d) {
-    viewPresets = (d && d.presets) || {};
-    var legacy = legacyPresetsGet();
-    if (Object.keys(legacy).length) {
-      fetch('/api/view-presets', { method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({merge: legacy}) })
-        .then(function(r){ return r.json(); }).then(function(d2) {
-          if (d2 && d2.presets) viewPresets = d2.presets;
-          try { localStorage.removeItem('gallery_presets'); } catch(e) {}
-          renderPresets();
-        }).catch(function(){});
-    }
-    renderPresets();
-  }).catch(function(){ renderPresets(); });
-}
-function savePreset() {
-  var n = prompt('Name this view (the current filters):'); if (!n) return;
-  fetch('/api/view-presets', { method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({name: n, query: location.search || '?'}) })
-    .then(function(r){ return r.json(); }).then(function(d) {
-      // Used to silently no-op on a server rejection (e.g. a >4096-char query string) --
-      // the prompt() just closed and nothing else ever happened. Same fix shape as Snips.persist().
-      if (d && d.presets) { viewPresets = d.presets; renderPresets(); }
-      else if (window.Toast) Toast.show({kind:'err', title:'View not saved', msg:(d&&d.error)||'The server rejected the save.'});
-    }).catch(function(){ if (window.Toast) Toast.show({kind:'err', title:'View not saved', msg:'Network error.'}); });
-}
-function deletePreset() {
-  // The server has always supported POST {delete: name} (/api/view-presets), but no UI ever
-  // called it -- a saved view could be created but never removed. This is the missing
-  // control, wired to the select's own current value (the "select's reserved delete
-  // affordance" the server route's docstring already anticipated).
-  var s = document.getElementById('preset-select');
-  var n = s && s.value;
-  if (!n) return;
-  if (!confirm('Delete the saved view "' + n + '"?')) return;
-  fetch('/api/view-presets', { method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({delete: n}) })
-    .then(function(r){ return r.json(); }).then(function(d) {
-      if (d && d.presets) { viewPresets = d.presets; renderPresets(); }
-      else if (window.Toast) Toast.show({kind:'err', title:'Delete failed', msg:(d&&d.error)||'The server rejected the delete.'});
-    }).catch(function(){ if (window.Toast) Toast.show({kind:'err', title:'Delete failed', msg:'Network error.'}); });
-}
-function loadPreset(n) {
-  if (!n) return;
-  if (viewPresets[n] !== undefined) location.href = '/' + viewPresets[n];
-}
-(function(){
-  // On mobile, auto-open the filter bar if any filter is active so the user sees
-  // what's applied; otherwise keep it collapsed to give the grid the screen.
-  if (window.matchMedia('(max-width: 680px)').matches &&
-      document.querySelector('.chips')) {
-    var f = document.querySelector('.filters');
-    if (f) f.classList.add('open');
-  }
-  var grid = document.querySelector('.grid');
-  var slider = document.getElementById('thumb-size');
-  if (grid && slider) {
-    var saved = localStorage.getItem('gallery_thumb');
-    if (saved) { slider.value = saved; grid.style.setProperty('--thumb', saved + 'px'); }
-    slider.addEventListener('input', function(){
-      grid.style.setProperty('--thumb', slider.value + 'px');
-      localStorage.setItem('gallery_thumb', slider.value);
-    });
-  }
-})();
-/* ---- Cross-page selection (persisted in localStorage) ---- */
-function selGet() { try { return new Set(JSON.parse(localStorage.getItem('gallery_sel') || '[]')); } catch(e) { return new Set(); } }
-function selSave(s) { localStorage.setItem('gallery_sel', JSON.stringify([...s])); }
-// A fresh browser session starts with a CLEAN selection. Selection persists across the
-// gallery's full-page-reload pagination (that's the one reason it lives in localStorage),
-// but a new tab/session must not inherit a stale selection from a previous visit.
-// sessionStorage is wiped when the tab closes, so its absence marks a new session.
-(function(){ try { if(!sessionStorage.getItem('gallery_sel_session')){ localStorage.removeItem('gallery_sel'); sessionStorage.setItem('gallery_sel_session','1'); } } catch(e) {} })();
-function refreshSelUI() {
-  var sel = selGet();
-  document.querySelectorAll('input[name=media_ids]').forEach(function(cb){
-    var on = sel.has(cb.value);
-    cb.checked = on;
-    cb.closest('.card').classList.toggle('selected', on);
-  });
-  document.getElementById('sel-count').textContent = sel.size;
-  // One "Actions" button holds every selection action; it appears only when
-  // something's selected (replaces the old row of individually-toggled buttons).
-  var ba = document.getElementById('bulk-actions');
-  if (ba) ba.style.display = sel.size ? '' : 'none';
-  var an = document.getElementById('act-n');
-  if (an) an.textContent = sel.size ? '(' + sel.size + ')' : '';
-  if (!sel.size) closeActionsMenu();
-}
-function toggleActionsMenu(e) {
-  if (e) e.stopPropagation();
-  document.getElementById('actions-menu').classList.toggle('open');
-}
-function closeActionsMenu() {
-  var m = document.getElementById('actions-menu');
-  if (m) m.classList.remove('open');
-}
-document.addEventListener('click', function(e) {
-  var w = document.getElementById('bulk-actions');
-  if (w && !w.contains(e.target)) closeActionsMenu();
-});
-function bulkContactSheet() {
-  var ids = Array.from(selGet());
-  if (!ids.length) return;
-  window.open('/contact-sheet?ids=' + encodeURIComponent(ids.join(',')), '_blank');
-}
-// Which of these selected ids are videos? The selection is a list of media_ids in
-// localStorage; it is NOT the cards on screen. So `#card-<mid>` can only answer for what
-// this page happens to be rendering -- filter or paginate away from a selected video and the
-// test finds nothing, and the video rides on into an images-only destination. A card that IS
-// rendered answers for free; only the ids this page cannot see cost a lookup.
-// One helper, not one per caller: both image-only bulk actions had this same hole, and a
-// second copy is just the next place for the two to drift apart.
-function selectedVideoIds(ids){
-  var vids = new Set(), unseen = [];
-  ids.forEach(function(mid){
-    var card = document.getElementById('card-'+mid);
-    if (!card) { unseen.push(mid); return; }
-    if (card.getAttribute('data-video') === '1') vids.add(mid);
-  });
-  return Promise.all(unseen.map(function(mid){
-    return fetch('/api/image-meta/'+encodeURIComponent(mid))
-      .then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(d){ if (d && d.is_video) vids.add(mid); })
-      .catch(function(){});   // unanswerable id: send it as this always has, decide nothing new
-  })).then(function(){ return vids; });
-}
-function bulkSendCast() {
-  var ids = [...selGet()];
-  if (!ids.length) return;
-  selectedVideoIds(ids).then(function(vids){
-    var keep = ids.filter(function(mid){ return !vids.has(mid); });   // cast is images
-    if (!keep.length) return;
-    localStorage.removeItem('gallery_sel');   // selection is consumed into the Loom cast
-    window.location.href = '/loom?cast=' + encodeURIComponent(keep.join(','));
-  });
-}
-function onCheck() {
-  var sel = selGet();
-  document.querySelectorAll('input[name=media_ids]').forEach(function(cb){
-    if (cb.checked) sel.add(cb.value); else sel.delete(cb.value);
-  });
-  selSave(sel); refreshSelUI();
-}
-function selectAll() {
-  var sel = selGet();
-  document.querySelectorAll('input[name=media_ids]').forEach(function(cb){ sel.add(cb.value); });
-  selSave(sel); refreshSelUI();
-}
-function clearAll() { selSave(new Set()); refreshSelUI(); }
-/* ---- Select mode + drag-paint multi-select (mouse + touch via Pointer Events) ---- */
-var selectMode = localStorage.getItem('gallery_selmode') === '1';
-function applySelectMode() {
-  document.body.classList.toggle('select-mode', selectMode);
-  var b = document.getElementById('select-mode-btn');
-  if (b) { b.classList.toggle('active', selectMode); b.textContent = selectMode ? 'Select: ON' : 'Select'; }
-}
-function toggleSelectMode() {
-  selectMode = !selectMode;
-  localStorage.setItem('gallery_selmode', selectMode ? '1' : '');
-  applySelectMode();
-}
-(function() {
-  var painting = false, paintVal = true, paintSet = null, lastCard = null;
-  function cardAt(x, y) { var el = document.elementFromPoint(x, y); return el ? el.closest('.card') : null; }
-  function paint(card) {
-    if (!card || card === lastCard || !paintSet) return;
-    lastCard = card;
-    var mid = card.dataset.mid;
-    if (paintVal) paintSet.add(mid); else paintSet.delete(mid);
-    card.classList.toggle('selected', paintVal);
-    var cb = card.querySelector('input[name=media_ids]'); if (cb) cb.checked = paintVal;
-    var c = document.getElementById('sel-count'); if (c) c.textContent = paintSet.size;
-  }
-  document.addEventListener('pointerdown', function(e) {
-    if (!selectMode || !e.target.closest) return;
-    // PRIMARY BUTTON ONLY. Right-click opens the image context menu, and an unfiltered
-    // pointerdown ALSO toggled that card in the persisted cross-page selection on the way --
-    // the same selection "Delete from PixAI" later acts on, so one stray right-click could
-    // quietly enrol an image in an irreversible cloud delete. Pointer Events report the
-    // button, so this is a read, not a guess: touch and pen contacts are button 0 too and
-    // paint exactly as before.
-    if (e.button !== 0) return;
-    var card = e.target.closest('.card');
-    if (!card || e.target.closest('.cb-wrap')) return;   // empty space scrolls; checkbox handles itself
-    painting = true; lastCard = null;
-    paintSet = selGet();
-    paintVal = !paintSet.has(card.dataset.mid);           // first card sets paint direction
-    paint(card);
-    e.preventDefault();
-  });
-  document.addEventListener('pointermove', function(e) {
-    if (!painting) return;
-    paint(cardAt(e.clientX, e.clientY));
-    e.preventDefault();
-  });
-  function endPaint() {
-    if (!painting) return;
-    painting = false;
-    if (paintSet) { selSave(paintSet); refreshSelUI(); }
-    paintSet = null; lastCard = null;
-  }
-  document.addEventListener('pointerup', endPaint);
-  document.addEventListener('pointercancel', endPaint);
-  // Swallow the click so the lightbox / detail link never fires in select mode (images and videos).
-  document.addEventListener('click', function(e) {
-    if (!selectMode || !e.target.closest) return;
-    var card = e.target.closest('.card');
-    if (!card || e.target.closest('.cb-wrap')) return;
-    e.preventDefault(); e.stopPropagation();
-  }, true);
-})();
-// The export dialog serves two entry points. _exportColl holds a collection name when the
-// download is "this whole collection", or null for a curated selection. Each opener sets it.
-var _exportColl = null;
-function downloadZip() {
-  // Curated SELECTION -> dialog -> doExportDownload() POSTs the picked media_ids.
-  var sel = [...selGet()];
-  if (!sel.length) return;
-  _exportColl = null;
-  document.getElementById('export-n').textContent = sel.length + ' item' + (sel.length===1?'':'s');
-  document.getElementById('export-modal').classList.add('open');
-}
-function downloadCollection(name) {
-  // Whole COLLECTION -> dialog -> doExportDownload() POSTs collection=<name>; the server
-  // resolves its full membership (every item, across pages), not the rendered checkboxes.
-  if (!name) return;
-  _exportColl = name;
-  document.getElementById('export-n').textContent = 'collection “' + name + '”';
-  document.getElementById('export-modal').classList.add('open');
-}
-function contactSheetCollection(name) {
-  // Whole COLLECTION's ZIP-download twin (downloadCollection above): open the print-ready
-  // contact sheet for every item in the collection, same as bulkContactSheet() does for a
-  // curated selection (ids=) but with collection= -- the server resolves full membership.
-  if (!name) return;
-  window.open('/contact-sheet?collection=' + encodeURIComponent(name), '_blank');
-}
-function doExportDownload() {
-  var fmt = document.getElementById('export-fmt').value;
-  var embed = document.getElementById('export-embed').checked;
-  var f = document.createElement('form');
-  f.method = 'post'; f.action = '/export-zip';
-  if (_exportColl) {
-    var ic = document.createElement('input'); ic.type='hidden'; ic.name='collection'; ic.value=_exportColl; f.appendChild(ic);
-  } else {
-    var sel = [...selGet()];
-    if (!sel.length) return;
-    sel.forEach(function(mid){
-      var i = document.createElement('input');
-      i.type = 'hidden'; i.name = 'media_ids'; i.value = mid; f.appendChild(i);
-    });
-  }
-  document.getElementById('export-modal').classList.remove('open');
-  var ff = document.createElement('input'); ff.type='hidden'; ff.name='fmt'; ff.value=fmt; f.appendChild(ff);
-  if (embed) { var fe = document.createElement('input'); fe.type='hidden'; fe.name='embed'; fe.value='1'; f.appendChild(fe); }
-  document.body.appendChild(f); f.submit(); f.remove();
-}
-// --- Web import: drop local files -> POST /api/import-local (localhost-only route) ------------
-var ImportUI = (function(){
-  var CAP = 24;                 // preview is capped; the IMPORT itself is never capped
-  // Sentinel for the "＋ New collection…" option. Double-underscored so it cannot collide
-  // with a real collection name, and it is never sent to the server -- chosenCollection()
-  // resolves it to the typed name (or refuses) before the request is built.
-  var NEW_COLL = '__new__';
-  var files = [];               // File[]
-  var urls = [];                // objectURLs pending revoke
-  var IMG = /[.](png|jpe?g|webp|gif|bmp|avif)$/i, VID = /[.](mp4|webm|mov|m4v)$/i, ZIP = /[.]zip$/i;
-  function el(id){ return document.getElementById(id); }
-  function kind(f){ var n=f.name||''; return ZIP.test(n)?'zip':VID.test(n)?'video':IMG.test(n)?'image':'other'; }
-  function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
-  function fmtSize(b){ if(b<1024)return b+' B'; if(b<1048576)return (b/1024).toFixed(0)+' KB'; if(b<1073741824)return (b/1048576).toFixed(1)+' MB'; return (b/1073741824).toFixed(2)+' GB'; }
-  function revoke(){ urls.forEach(function(u){ URL.revokeObjectURL(u); }); urls=[]; }
-  function reset(){ files=[]; revoke();
-    el('imp-drop').style.display=''; el('imp-preview').style.display='none';
-    el('imp-result').style.display='none'; el('imp-go').style.display='none';
-    var fi=el('imp-file'), fo=el('imp-folder'); if(fi)fi.value=''; if(fo)fo.value='';
-    // The collection choice is per-import, not sticky: reset() runs on both open() and
-    // close(), so a name typed for one batch can't silently ride along on the next.
-    var cs=el('imp-collection'), cn=el('imp-newcoll'), cr=el('imp-newcoll-row');
-    if(cs)cs.value=''; if(cn)cn.value=''; if(cr)cr.style.display='none'; }
-  function open(){ reset(); el('import-modal').classList.add('open'); }
-  function close(){ el('import-modal').classList.remove('open'); reset(); }
-  function browse(){ el('imp-file').click(); }
-  function browseFolder(){ el('imp-folder').click(); }
-  function onPick(list){ add(list); }
-  function add(list){
-    for(var i=0;i<list.length;i++){ var f=list[i];
-      if(kind(f)==='other') continue;                                  // skip non-media
-      if(files.some(function(x){ return x.name===f.name && x.size===f.size; })) continue;   // de-dupe
-      files.push(f);
-    }
-    render();
-  }
-  function remove(i){ files.splice(i,1); render(); }
-  function render(){
-    if(!files.length){ reset(); return; }
-    el('imp-drop').style.display='none'; el('imp-preview').style.display=''; el('imp-go').style.display='';
-    var nI=0,nV=0,nZ=0,bytes=0;
-    files.forEach(function(f){ var k=kind(f); if(k==='image')nI++; else if(k==='video')nV++; else if(k==='zip')nZ++; bytes+=f.size; });
-    var parts=[]; if(nI)parts.push(nI+' image'+(nI!==1?'s':'')); if(nV)parts.push(nV+' video'+(nV!==1?'s':'')); if(nZ)parts.push(nZ+' zip'+(nZ!==1?'s':''));
-    el('imp-sum').innerHTML='<b>'+files.length+' file'+(files.length!==1?'s':'')+'</b> &middot; '+parts.join(' &middot; ')+' &middot; '+fmtSize(bytes);
-    el('imp-go').textContent='↑ Import '+files.length+' file'+(files.length!==1?'s':'');
-    revoke();
-    var body=el('imp-body'), h, i;
-    if(files.length<=CAP){                                             // few -> reviewable list
-      h='<div class="imp-list">';
-      files.forEach(function(f,idx){
-        var badge=kind(f)==='video'?'▶':kind(f)==='zip'?'📦':'';
-        h+='<div class="imp-row" data-i="'+idx+'"><span class="imp-thumb">'+badge+'</span><span class="imp-nm">'+esc(f.name)+'</span><span class="imp-sz">'+fmtSize(f.size)+'</span><button class="imp-x" title="remove" onclick="ImportUI.remove('+idx+')">×</button></div>';
-      });
-      h+='</div>'; body.innerHTML=h;
-      files.forEach(function(f,idx){ if(kind(f)!=='image')return; var u=URL.createObjectURL(f); urls.push(u);
-        var row=body.querySelector('.imp-row[data-i="'+idx+'"]'); if(row){ var t=row.querySelector('.imp-thumb'); if(t)t.innerHTML='<img src="'+u+'">'; } });
-    } else {                                                           // many -> capped grid, all still import
-      h='<div class="imp-cap">ⓘ Preview capped at '+CAP+' &mdash; <b>all '+files.length+' will import</b> (only the preview is capped).</div><div class="imp-grid">';
-      for(i=0;i<CAP-1;i++){ var k=kind(files[i]); h+='<div class="imp-tg" data-i="'+i+'">'+(k==='video'?'▶':k==='zip'?'📦':'')+'</div>'; }
-      h+='<div class="imp-more">+'+(files.length-(CAP-1))+'<br>more</div></div>'; body.innerHTML=h;
-      for(i=0;i<CAP-1;i++){ if(kind(files[i])!=='image')continue; var u=URL.createObjectURL(files[i]); urls.push(u);
-        var cell=body.querySelector('.imp-tg[data-i="'+i+'"]'); if(cell)cell.innerHTML='<img src="'+u+'">'; }
-    }
-  }
-  function onCollectionChange(){
-    var isNew=el('imp-collection').value===NEW_COLL;
-    el('imp-newcoll-row').style.display=isNew?'':'none';
-    if(isNew) el('imp-newcoll').focus();
-  }
-  // Resolve the dropdown to a real collection name, or '' for none. Returns null when the
-  // user picked "New collection…" and left it blank -- doImport treats that as "not ready"
-  // rather than silently importing uncollected, which is the failure you'd only notice
-  // later, looking for files that went somewhere else.
-  function chosenCollection(){
-    var sel=el('imp-collection').value;
-    if(sel!==NEW_COLL) return sel;
-    var name=(el('imp-newcoll').value||'').trim();
-    return name || null;
-  }
-  function doImport(){
-    if(!files.length) return;
-    var coll=chosenCollection();
-    if(coll===null){ el('imp-newcoll').focus(); el('imp-newcoll').placeholder='give the collection a name first'; return; }
-    var go=el('imp-go'); go.disabled=true; go.textContent='Importing…';
-    var fd=new FormData();
-    files.forEach(function(f){ fd.append('files', f, f.name); });        // basename; server ignores any path
-    if(coll) fd.append('collection', coll);
-    // No CSRF token: same as the app's other fetch-based mutating APIs (/api/generate,
-    // /api/loom/generate, /api/delete) -- protected by SESSION_COOKIE_SAMESITE=Lax + the
-    // global front-door auth gate, and here additionally by the route's localhost-only check.
-    fetch('/api/import-local',{method:'POST',body:fd})
-      .then(function(r){ return r.json().then(function(j){ return {ok:r.ok,j:j}; }); })
-      .then(function(o){
-        go.disabled=false; go.textContent='↑ Import';
-        var res=el('imp-result'); res.style.display='';
-        if(!o.ok || o.j.error){ res.className='imp-result err'; res.textContent='⚠ '+((o.j&&o.j.error)||('import failed ('+o.ok+')')); return; }
-        var d=o.j;
-        res.className='imp-result ok';
-        res.innerHTML='✓ Imported <b>'+d.imported+'</b> file'+(d.imported!==1?'s':'')
-          +(d.skipped?' &middot; '+d.skipped+' skipped (already in library)':'')
-          +(d.collection?' &middot; added to “'+esc(d.collection)+'”':'')
-          +'. <a href="/" style="color:var(--lavender);font-weight:600;">Reload gallery →</a>';
-        el('imp-preview').style.display='none'; el('imp-go').style.display='none';
-      })
-      .catch(function(){ go.disabled=false; go.textContent='↑ Import';
-        var res=el('imp-result'); res.style.display=''; res.className='imp-result err'; res.textContent='⚠ network error'; });
-  }
-  document.addEventListener('DOMContentLoaded',function(){
-    var dz=el('imp-drop'); if(!dz) return;
-    ['dragenter','dragover'].forEach(function(e){ dz.addEventListener(e,function(ev){ ev.preventDefault(); dz.classList.add('hot'); }); });
-    dz.addEventListener('dragleave',function(ev){ ev.preventDefault(); dz.classList.remove('hot'); });
-    dz.addEventListener('drop',function(ev){ ev.preventDefault(); dz.classList.remove('hot');
-      if(ev.dataTransfer && ev.dataTransfer.files) add(ev.dataTransfer.files); });
-  });
-  return {open:open, close:close, browse:browse, browseFolder:browseFolder, onPick:onPick, remove:remove, doImport:doImport, onCollectionChange:onCollectionChange};
-})();
-function bulkReplacePrompt() {
-  var sel = [...selGet()];
-  if (!sel.length) return;
-  var find = prompt('Find this text in the prompts of ' + sel.length + ' selected image(s):');
-  if (find === null || find === '') return;
-  var repl = prompt('Replace "' + find + '" with: (leave blank to delete it)');
-  if (repl === null) return;
-  if (!confirm('Replace "' + find + '" with "' + repl + '" across ' + sel.length + ' prompt(s)? This edits catalog.db.')) return;
-  var f = document.createElement('form');
-  f.method = 'post'; f.action = '/bulk-replace-prompt';
-  function add(n, v){ var i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; f.appendChild(i); }
-  // Drop the one-shot banner param before it becomes `back` -- replacing twice in a
-  // row would otherwise stack ?replaced=8&replaced=2 and the banner (which reads the
-  // FIRST value) would keep reporting the stale count.
-  var back = new URL(location.href); back.searchParams.delete('replaced');
-  add('back', back.pathname + back.search); add('find', find); add('replace', repl);
-  sel.forEach(function(mid){ add('media_ids', mid); });
-  localStorage.removeItem('gallery_sel');   // consume the selection after the edit commits
-  document.body.appendChild(f); f.submit();
-}
-function bulkAddCollection() {
-  var sel = [...selGet()];
-  if (!sel.length) { alert('Select one or more images/videos first (check the boxes, or "Select All (page)"), then click + Add to Collection.'); return; }
-  var name = prompt('Add ' + sel.length + ' image(s) to which collection? (a name; files are NOT moved)');
-  if (name === null || !name.trim()) return;
-  var f = document.createElement('form');
-  f.method = 'post'; f.action = '/collection-add';
-  function add(n, v){ var i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; f.appendChild(i); }
-  // Same one-shot strip bulkRemoveCollection does: without it a second Add stacks
-  // ?collected=5&collected=1 and the banner (first value wins) shows the stale count.
-  var back = new URL(location.href); back.searchParams.delete('collected');
-  add('back', back.pathname + back.search); add('name', name.trim());
-  sel.forEach(function(mid){ add('media_ids', mid); });
-  localStorage.removeItem('gallery_sel');   // consume the selection so the NEXT collection starts fresh
-  document.body.appendChild(f); f.submit();
-}
-// Mirror of bulkAddCollection for the other direction. The collection is NOT prompted for:
-// this button only exists while a collection filter is active, so the target is the one the
-// grid is already showing -- passed in from the button's data attribute.
-function bulkRemoveCollection(name) {
-  var sel = [...selGet()];
-  if (!sel.length) { alert('Select one or more images/videos first (check the boxes, or "Select all"), then use Remove from collection.'); return; }
-  if (!name) return;
-  if (!confirm('Remove ' + sel.length + ' item(s) from the collection \\u201c' + name + '\\u201d?\\n\\n'
-    + 'Only the collection label is removed \\u2014 no files are deleted and nothing leaves your PixAI account.')) return;
-  var f = document.createElement('form');
-  f.method = 'post'; f.action = '/collection-remove';
-  function add(n, v){ var i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; f.appendChild(i); }
-  // Strip the one-shot banner param before it becomes `back`: removing twice in a row
-  // would otherwise stack ?uncollected=3&uncollected=1 and the banner (which reads the
-  // FIRST value) would report the stale count.
-  var back = new URL(location.href); back.searchParams.delete('uncollected');
-  add('back', back.pathname + back.search); add('name', name);
-  sel.forEach(function(mid){ add('media_ids', mid); });
-  localStorage.removeItem('gallery_sel');   // consume the selection: those rows are about to leave this view
-  document.body.appendChild(f); f.submit();
-}
-function confirmBulkDelete() {
-  var ids = [...selGet()];
-  if (!ids.length) return;
-  confirmDelete('/delete-bulk', 'Remove ' + ids.length + ' image' + (ids.length !== 1 ? 's' : '') + ' from the local catalog? Files move to the _deleted/ folder (recoverable); the cloud task is untouched.');
-  document.getElementById('del-modal-form').onsubmit = function() {
-    var bf = document.getElementById('bulk-form');
-    // ensure all cross-page selections are submitted, not just this page's
-    ids.forEach(function(mid){
-      if (!bf.querySelector('input[name=media_ids][value="' + mid + '"]')) {
-        var i = document.createElement('input');
-        i.type = 'hidden'; i.name = 'media_ids'; i.value = mid; bf.appendChild(i);
-      }
-    });
-    localStorage.removeItem('gallery_sel');
-    bf.submit(); return false;
-  };
-  document.getElementById('del-modal-form').action = '#';
-}
-/* ---- "Delete from PixAI": show the blast radius, then the typed gate ------------
-   Deleting on PixAI is TASK-level: selecting one image of a batch deletes the whole
-   batch, cloud AND local. This flow used to say that in prose and stop there, so the
-   one irreversible action in the app was also the only one whose real scope the user
-   could not see -- the siblings about to go were never counted, named or shown.
-   /api/delete-preview resolves the selection through the SAME helper
-   /delete-tasks-bulk itself uses, and this dialog renders what it came back with.
-   The typed DELETE prompt behind Continue is unchanged: this makes a consequence
-   visible, it does not replace a guard. */
-var CloudDel = (function(){
-  var ids = [], busy = false;
-  function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
-  function n(v, one, many){ return v + ' ' + (v === 1 ? one : many); }
-  function close(){ document.getElementById('cloud-del-modal').classList.remove('open'); }
-  function strip(items){
-    var s = '<div class="cd-strip">';
-    items.forEach(function(m){
-      s += '<div class="cd-thumb' + (m.selected ? ' on' : '') + '" title="' + esc(m.media_id)
-         + (m.selected ? ' (you selected this)' : ' (comes with the batch)') + '">'
-         + (m.thumb ? '<img src="/thumbs/' + encodeURIComponent(m.thumb) + '.jpg" alt="" loading="lazy">'
-                    : '<span class="cd-noimg">' + esc(m.media_id) + '</span>')
-         + (m.is_video ? '<span class="cd-vid">&#9654;</span>' : '') + '</div>';
-    });
-    return s + '</div>';
-  }
-  function open(sel, d){
-    ids = sel;
-    var t = d.totals, body = '';
-    // Two genuinely different sentences, not one with holes punched in it: a selection
-    // of nothing but local imports deletes NOTHING on PixAI, and saying "across 0
-    // tasks will be deleted from your PixAI account" about it would be a lie.
-    var head = t.tasks === 0
-      ? '<b>' + n(t.media, 'file', 'files') + '</b> will be removed from your backup. None of them is '
-        + 'on PixAI (local imports), so nothing is deleted from your account.'
-      : '<b>' + n(t.media, 'file', 'files') + '</b> across <b>' + n(t.tasks, 'task', 'tasks')
-        + '</b> will be deleted from your PixAI account <b>and</b> from your backup.';
-    if (t.tasks > 0 && t.unselected > 0) {
-      head += ' You picked ' + n(t.selected, 'file', 'files') + '; the other '
-            + (t.unselected === 1 ? '1 comes with its batch.'
-                                  : t.unselected + ' come with their batches.');
-    }
-    // Don't let the headline count imply an import is going to be deleted from PixAI:
-    // it has no task there at all, and only its local copy moves.
-    if (t.tasks > 0 && t.local_only > 0) {
-      head += t.local_only === 1
-        ? ' One is a local import with no PixAI task &mdash; that one only leaves your backup.'
-        : ' ' + t.local_only + ' are local imports with no PixAI task &mdash; those only leave '
-          + 'your backup.';
-    }
-    document.getElementById('cd-summary').innerHTML = head;
-    d.tasks.forEach(function(tk){
-      body += '<div class="cd-task"><div class="cd-tlbl">whole batch'
-            + '<span class="cd-tid">task ' + esc(tk.task_id) + '</span>'
-            + '<span>' + n(tk.media.length, 'file', 'files') + '</span></div>'
-            + strip(tk.media) + '</div>';
-    });
-    if (d.local_only.length) {
-      body += '<div class="cd-task"><div class="cd-tlbl">no PixAI task &middot; removed locally only'
-            + '<span>' + n(t.local_only, 'file', 'files') + '</span></div>'
-            + strip(d.local_only) + '</div>';
-    }
-    if (d.truncated) {
-      body += '<div class="cd-more">Not every batch is shown above &mdash; the counts in the '
-            + 'first line cover the whole selection.</div>';
-    }
-    document.getElementById('cd-tasks').innerHTML = body;
-    document.getElementById('cloud-del-modal').classList.add('open');
-  }
-  // Fail-soft: an unreachable preview (server restarting, offline tab) must not turn the
-  // button into a dead click NOR silently drop the warning -- fall back to the prose-only
-  // confirm this dialog replaced, and say that the detail is missing rather than implying
-  // the selection is all that goes.
-  function blind(sel){
-    ids = sel;
-    if (!confirm('Delete ' + sel.length + ' selected file(s) from your PixAI account AND locally?\\n\\n'
-      + 'The preview of exactly what that takes could not be loaded, so: this deletes the whole '
-      + 'TASK behind each selection (every image in the batch, including ones you did not '
-      + 'select), from the cloud AND your backup. It is IRREVERSIBLE.')) return;
-    proceed();
-  }
-  function proceed(){
-    close();
-    var typed = prompt('This permanently deletes from PixAI. Type DELETE to confirm:');
-    if (typed !== 'DELETE') { alert('Cancelled.'); return; }
-    var f = document.createElement('form');
-    f.method = 'post'; f.action = '/delete-tasks-bulk';
-    function add(k, v){ var i=document.createElement('input'); i.type='hidden'; i.name=k; i.value=v; f.appendChild(i); }
-    add('back', location.href);
-    ids.forEach(function(mid){ add('media_ids', mid); });
-    localStorage.removeItem('gallery_sel');
-    document.body.appendChild(f); f.submit();
-  }
-  function ask(){
-    var sel = [...selGet()];
-    if (!sel.length || busy) return;
-    busy = true;
-    fetch('/api/delete-preview', {method:'POST', headers:{'Content-Type':'application/json'},
-                                  body: JSON.stringify({media_ids: sel})})
-      .then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(d){ busy = false; if (d && d.totals) { open(sel, d); } else { blind(sel); } })
-      .catch(function(){ busy = false; blind(sel); });
-  }
-  return {ask:ask, close:close, proceed:proceed};
-})();
-function confirmBulkDeleteCloud() { CloudDel.ask(); }
-
-/* ---- Lightbox + keyboard navigation ---- */
-var lbCards = [], lbIdx = -1, lbTimer = null, lbZoom = false;
-function lbUrl(mid) { return '/full/' + mid; }
-function openLightbox(ev, idx) {
-  if (ev) { if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return true; ev.preventDefault(); }
-  lbCards = Array.from(document.querySelectorAll('.card'));
-  if (!lbCards.length) return false;
-  lbIdx = idx;
-  lbShow();
-  document.getElementById('lightbox').classList.add('open');
-  return false;
-}
-function lbShow() {
-  var card = lbCards[lbIdx]; if (!card) return;
-  var mid = card.dataset.mid;
-  var im = document.getElementById('lb-img');
-  var vid = document.getElementById('lb-video');
-  lbZoom = false; im.style.transform = '';      // reset zoom on navigate
-  if (card.dataset.video === '1') {
-    im.style.display = 'none'; im.removeAttribute('src');
-    vid.style.display = '';
-    vid.onerror = function(){                   // surface the real reason on mobile (MediaError code)
-      var c = (vid.error && vid.error.code) || '?';
-      document.getElementById('lb-caption').textContent =
-        "Video won't play (error " + c + ") — open Details to download it.";
-    };
-    vid.src = '/video-file/' + mid;
-    vid.load();                                // iOS Safari requires load() after a src change
-    // NOTE: do NOT set currentTime here — seeking before metadata loads throws on iOS.
-    vid.play().catch(function(){});            // autoplay may be blocked; controls still work
-  } else {
-    vid.onerror = null;
-    vid.pause(); vid.removeAttribute('src'); vid.load(); vid.style.display = 'none';
-    im.style.display = '';
-    im.src = lbUrl(mid);
-  }
-  document.getElementById('lb-caption').textContent =
-    (lbIdx + 1) + ' / ' + lbCards.length + '   ' + (card.dataset.prompt || '');
-  document.getElementById('lb-details').href = '/image/' + mid + '?back=' + encodeURIComponent(location.href);
-}
-function lbNavUrl(href, where) {
-  return href + (href.indexOf('?') >= 0 ? '&' : '?') + 'lbopen=' + where;
-}
-function lbStep(d) {
-  if (!lbCards.length) return;
-  lbUpscaleClose();          // ditto: never leave it pointed at the picture you moved off
-  var ni = lbIdx + d;
-  if (ni >= lbCards.length) {           // past the last card -> next page (open at its first)
-    var nx = document.getElementById('pg-next');
-    if (nx) { saveScrollPos(); location.href = lbNavUrl(nx.href, 'first'); return; }
-    ni = 0;                              // last page: wrap within the page
-  } else if (ni < 0) {                   // before the first card -> previous page (open at its last)
-    var pv = document.getElementById('pg-prev');
-    if (pv) { saveScrollPos(); location.href = lbNavUrl(pv.href, 'last'); return; }
-    ni = lbCards.length - 1;             // first page: wrap within the page
-  }
-  lbIdx = ni; lbShow();
-}
-function closeLightbox() {
-  lbUpscaleClose();          // the flyout is bound to this picture; it must not outlive it
-  document.getElementById('lightbox').classList.remove('open');
-  var vid = document.getElementById('lb-video');
-  if (vid) { vid.pause(); vid.removeAttribute('src'); vid.load(); }
-  stopSlideshow();
-}
-function toggleSlideshow() { lbTimer ? stopSlideshow() : startSlideshow(); }
-function startSlideshow() {
-  lbTimer = setInterval(function(){ lbStep(1); }, 3000);
-  document.getElementById('lb-play').textContent = '❚❚ Pause';
-}
-function stopSlideshow() {
-  if (lbTimer) { clearInterval(lbTimer); lbTimer = null; }
-  var b = document.getElementById('lb-play'); if (b) b.textContent = '▶ Slideshow';
-}
-var kbdIdx = -1;
-function kbdFocus(i) {
-  var cards = document.querySelectorAll('.card'); if (!cards.length) return;
-  if (kbdIdx >= 0 && cards[kbdIdx]) cards[kbdIdx].classList.remove('kbd-focus');
-  kbdIdx = Math.max(0, Math.min(i, cards.length - 1));
-  cards[kbdIdx].classList.add('kbd-focus');
-  cards[kbdIdx].scrollIntoView({block: 'nearest'});
-}
-function gridCols() {
-  var g = document.querySelector('.grid'); if (!g) return 1;
-  return getComputedStyle(g).gridTemplateColumns.split(' ').length;
-}
-document.addEventListener('keydown', function(e) {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-  var open = document.getElementById('lightbox').classList.contains('open');
-  if (open) {
-    if (e.key === 'ArrowRight') { lbStep(1); }
-    else if (e.key === 'ArrowLeft') { lbStep(-1); }
-    else if (e.key === 'Escape') { closeLightbox(); }
-    else if (e.key === 'f' || e.key === 'F' || e.key === ' ') { e.preventDefault(); toggleSlideshow(); }
-    return;
-  }
-  var cols = gridCols();
-  if (e.key === 'ArrowRight') { kbdFocus(kbdIdx + 1); }
-  else if (e.key === 'ArrowLeft') { kbdFocus(kbdIdx - 1); }
-  else if (e.key === 'ArrowDown') { e.preventDefault(); kbdFocus(kbdIdx < 0 ? 0 : kbdIdx + cols); }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); kbdFocus(kbdIdx - cols); }
-  else if (e.key === 'Enter' && kbdIdx >= 0) { openLightbox(null, kbdIdx); }
-});
-/* ---- Preserve scroll + re-sync selection across back / detail navigation ---- */
-if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
-function _scrollKey(){ return 'scroll:' + location.pathname + location.search; }
-function saveScrollPos(){ try { sessionStorage.setItem(_scrollKey(), String(window.scrollY)); } catch(e){} }
-function restoreScrollPos(){
-  try {
-    var y = sessionStorage.getItem(_scrollKey());
-    if (y === null) return;
-    var n = parseInt(y, 10) || 0;
-    window.scrollTo(0, n);
-    // thumbnails can shift layout as they load; re-apply once everything's in
-    window.addEventListener('load', function(){ window.scrollTo(0, n); }, {once:true});
-  } catch(e){}
-}
-window.addEventListener('beforeunload', saveScrollPos);
-window.addEventListener('pagehide', saveScrollPos);
-// pageshow fires on back/forward-cache restores (DOMContentLoaded does not),
-// so this is what actually re-checks the boxes after a browser Back.
-window.addEventListener('pageshow', function(){ refreshSelUI(); restoreScrollPos(); });
-document.addEventListener('DOMContentLoaded', function(){
-  refreshSelUI(); applyBlur(); refreshPresets(); restoreScrollPos(); applySelectMode();
-  // Keep the bulk action bar stuck just below the sticky header. A collapsing
-  // banner header (.bannered) PINS at its slim height (--bnr-slim), not its full
-  // DOM height -- using offsetHeight there parks the bar mid-screen once scrolled.
-  (function() {
-    var h = document.querySelector('header');
-    function setTop() {
-      if (!h) return;
-      var top = h.offsetHeight;
-      if (h.classList.contains('bannered')) {
-        var slim = parseInt(getComputedStyle(h).getPropertyValue('--bnr-slim'), 10);
-        if (slim) top = slim;
-      }
-      document.documentElement.style.setProperty('--bulk-top', top + 'px');
-    }
-    setTop(); window.addEventListener('resize', setTop);
-  })();
-  // Cross-page lightbox: arriving with ?lbopen=first|last auto-opens the overlay so
-  // arrow-key browsing rolls over page boundaries seamlessly.
-  (function() {
-    var m = location.search.match(/[?&]lbopen=(first|last)/);
-    if (!m) return;
-    var cards = document.querySelectorAll('.card');
-    if (!cards.length) return;
-    try { var u = new URL(location.href); u.searchParams.delete('lbopen'); history.replaceState(null, '', u); } catch(e) {}
-    openLightbox(null, m[1] === 'last' ? cards.length - 1 : 0);
-  })();
-  // Lightbox touch: swipe left/right to navigate, double-tap to zoom 2x.
-  var im = document.getElementById('lb-img');
-  if (im) {
-    var x0 = null, lastTap = 0;
-    im.addEventListener('touchstart', function(e){
-      if (e.touches.length === 1) x0 = e.touches[0].clientX;
-    }, {passive: true});
-    im.addEventListener('touchend', function(e){
-      var now = Date.now();
-      if (now - lastTap < 300) {            // double-tap zoom
-        lbZoom = !lbZoom;
-        im.style.transform = lbZoom ? 'scale(2)' : '';
-        lastTap = 0; x0 = null; return;
-      }
-      lastTap = now;
-      if (x0 !== null && !lbZoom) {         // horizontal swipe = navigate
-        var dx = e.changedTouches[0].clientX - x0;
-        if (Math.abs(dx) > 50) lbStep(dx < 0 ? 1 : -1);
-      }
-      x0 = null;
-    }, {passive: true});
-  }
-});
-</script>
-
-<style>
-  #gen-scrim{position:fixed;inset:0;background:rgba(6,4,16,.55);z-index:200;opacity:0;visibility:hidden;transition:opacity .18s;}
-  #gen-scrim.open{opacity:1;visibility:visible;}
-  #gen-drawer{position:fixed;top:0;right:0;height:100%;width:420px;max-width:94vw;background:var(--mantle);border-left:1px solid var(--surface1);z-index:201;transform:translateX(100%);transition:transform .2s ease,width .2s ease;display:flex;flex-direction:column;}
-  #gen-drawer.open{transform:none;}
-  #gen-drawer.wide{width:600px;}
-  #gen-drawer.dock-left{right:auto;left:0;border-left:none;border-right:1px solid var(--surface1);transform:translateX(-100%);}
-  #gen-drawer.dock-top{right:auto;left:0;top:0;bottom:auto;width:100%;max-width:100vw;height:auto;max-height:64vh;border:none;border-bottom:1px solid var(--surface1);transform:translateY(-100%);}
-  #gen-drawer.dock-bottom{right:auto;left:0;top:auto;bottom:0;width:100%;max-width:100vw;height:auto;max-height:64vh;border:none;border-top:1px solid var(--surface1);transform:translateY(100%);}
-  /* Open-while-docked: two classes beat the single-class dock rule so the on-screen
-     transform wins (else a docked+open drawer keeps its off-screen transform -> vanishes). */
-  #gen-drawer.open.dock-left,#gen-drawer.open.dock-top,#gen-drawer.open.dock-bottom{transform:none;}
-  #gen-drawer.dock-top.wide,#gen-drawer.dock-bottom.wide{width:100%;}
-  #gen-drawer.dock-top .gen-body,#gen-drawer.dock-bottom .gen-body{width:100%;max-width:940px;margin:0 auto;}
-  .dock-ctl{margin-left:auto;display:flex;gap:3px;}
-  .dock-ctl button{background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);border-radius:5px;width:22px;height:22px;font-size:10px;line-height:1;cursor:pointer;padding:0;}
-  .dock-ctl button:hover{color:var(--text);}
-  .dock-ctl button.on{color:var(--lavender);border-color:var(--lavender);}
-  .gen-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--surface0);}
-  .gen-head .spark{color:var(--lavender);font-size:18px;}
-  .gen-head .t{font-size:15px;font-weight:600;color:var(--text);}
-  .gen-head .x{margin-left:4px;background:none;border:none;color:var(--subtext);font-size:22px;cursor:pointer;line-height:1;padding:0 4px;}
-  .gen-head .x:hover{color:var(--red);}
-  .gen-body{padding:12px 14px;overflow-y:auto;flex:1;}
-  .gen-seg{display:flex;gap:6px;margin-bottom:10px;}
-  .gen-seg button{flex:1;padding:6px 0;font-size:12px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
-  .gen-seg button.on{background:var(--lavender);color:var(--base);border-color:var(--lavender);font-weight:600;}
-  .gen-search{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:7px 10px;font-size:13px;margin-bottom:10px;}
-  .gen-search:focus{outline:none;border-color:var(--accent-soft);box-shadow:0 0 0 2px rgba(79,201,154,.25);}
-  /* O12: .mkt-sort/.mkt-cats/.gen-grid/.gen-card/.gen-empty are gone -- the flyout's search/
-     grid/hover-preview/market UI is <mg-model-picker> now (static/mg-model-picker.js), which
-     injects its own .mg-mktsort/.mg-mktcats/.mg-grid/.mg-card/.mg-empty via its own <style>. */
-  .gen-form{border-top:1px dashed var(--surface1);margin-top:12px;padding-top:10px;}
-  .gen-lbl{color:var(--overlay0);font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px;}
-  .gen-ta{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:7px 9px;font-size:13px;font-family:inherit;resize:vertical;}
-  .gen-ta:focus,.gen-sel:focus{outline:none;border-color:var(--accent-soft);box-shadow:0 0 0 2px rgba(79,201,154,.25);}
-  .cap-off{opacity:.4;cursor:not-allowed;}
-  #gen-selname{color:var(--lavender);font-size:12.5px;margin-bottom:8px;}
-  .gen-aspects{display:flex;gap:5px;flex-wrap:wrap;}
-  .gen-aspects button{padding:4px 9px;font-size:11px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
-  .gen-aspects button.on{background:var(--surface1);color:var(--text);border-color:var(--overlay0);}
-  .gen-row{display:flex;gap:8px;}
-  .gen-sel{width:100%;background-color:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:6px 8px;font-size:12.5px;}
-  .gen-sel:hover{border-color:var(--lavender);}
-  /* Same custom-arrow treatment as .filters select/#preset-select/select.p-sel (native
-     select styling split, audit row: three selectors got appearance:none + the lavender
-     caret, .gen-sel's <select>s and the Picker's own selects never did -- no rationale
-     anywhere for the split, just an oversight, so made consistent here instead of documented
-     as intentional. `select.gen-sel`, not bare `.gen-sel`: the class is shared with several
-     plain text/number <input>s in the same drawer (gen-seed, gen-cw/ch, imp-newcoll) that
-     must NOT grow a dropdown arrow or the wider right padding a caret needs. */
-  select.gen-sel{-webkit-appearance:none;appearance:none;cursor:pointer;
-    background-image:url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="10" height="6"%3E%3Cpath d="M0 0l5 6 5-6z" fill="%239a93ab"/%3E%3C/svg%3E');
-    background-repeat:no-repeat;background-position:right 8px center;padding-right:24px;}
-  .gen-check{display:flex;align-items:center;gap:7px;color:var(--subtext);font-size:12px;margin-top:8px;cursor:pointer;}
-  /* The two lines that used .gen-cost (Generate + Edit) are <mg-cost-badge> now, which brings
-     its own box -- padding/radius/border/font were lifted from this rule verbatim when the
-     component was written, so the swap is pixel-identical apart from the badge's explicit
-     line-height 1.4 (this rule inherited the page's `normal`). .gen-cost.warn was already
-     dead: nothing in this file ever set it. Deleted rather than left as an unused rule --
-     stale copies of the cost styling are the exact drift the consolidation exists to end. */
-  .gen-go{width:100%;padding:9px 0;border:none;border-radius:6px;background:var(--lavender);color:var(--base);font-size:13.5px;font-weight:600;cursor:pointer;}
-  .gen-go:hover{opacity:.9;} .gen-go:disabled{opacity:.4;cursor:not-allowed;}
-  .gen-moon{display:inline-block;width:15px;height:15px;border-radius:50%;background:var(--lavender);position:relative;overflow:hidden;vertical-align:-3px;margin-right:7px;box-shadow:0 0 9px rgba(182,146,230,.75);}
-  .gen-moon::after{content:'';position:absolute;inset:0;border-radius:50%;background:var(--mantle);animation:gen-eclipse 2.6s ease-in-out infinite;}
-  @keyframes gen-eclipse{0%{transform:translateX(-102%);}50%{transform:translateX(0);}100%{transform:translateX(102%);}}
-  .gen-result{margin-top:12px;} .gen-result img{width:100%;border-radius:10px;display:block;margin-bottom:6px;}
-  .gen-result a{color:var(--accent-soft);font-size:12px;text-decoration:none;}
-  /* Concurrent generations (2026-07-23): each submission gets its OWN line inside the
-     result strip instead of one shared div that a later submission's status update would
-     overwrite. A hairline separator between entries is the only visual change from before
-     when only one submission is ever in flight. */
-  .gen-result-line{margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1);}
-  .gen-result-line:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none;}
-  /* The Enhance sub-tab's shelf/list/card rules (#enh-list, .enh-item, .enh-shelf, .enh-sec,
-     .enh-card) went with the panelplugin controls they styled -- see the sub-tab's own comment
-     for why that surface cannot work. .enh-note is the pane's explanatory copy, shaped like
-     .lora-trig below (the drawer's other inline explanation) minus its accent tint. */
-  .enh-note{font-size:11.5px;line-height:1.5;padding:9px 11px;border-radius:7px;background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);}
-  .enh-note b{color:var(--text);}
-  .fix-tags{display:flex;gap:5px;margin-bottom:6px;}
-  .fix-tags button{padding:4px 10px;font-size:11px;border-radius:6px;background:var(--surface0);color:var(--subtext);border:1px solid var(--surface1);cursor:pointer;}
-  .fix-tags button.on{background:var(--surface1);color:var(--text);border-color:var(--overlay0);}
-  #fix-wrap{position:relative;display:inline-block;max-width:100%;line-height:0;}
-  #fix-img{max-width:100%;display:block;border-radius:8px;}
-  #fix-canvas{position:absolute;top:0;left:0;cursor:crosshair;touch-action:none;}
-  #gen-loras{display:flex;flex-direction:column;gap:5px;}
-  .lora-cap{color:var(--subtext);font-weight:400;text-transform:none;letter-spacing:0;}
-  .lora-cap.over{color:var(--red);font-weight:600;}
-  #gen-lora-note{display:flex;flex-direction:column;gap:5px;}
-  #gen-lora-note:empty{display:none;}
-  .lora-warn{font-size:11px;line-height:1.4;padding:6px 9px;border-radius:6px;background:rgba(243,139,168,.09);border:1px solid var(--red);color:var(--red);}
-  .lora-warn b{color:var(--peach);}
-  .lora-trig{font-size:11px;line-height:1.4;padding:6px 9px;border-radius:6px;background:rgba(79,201,154,.09);border:1px solid var(--emerald);color:var(--text);display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-  .lora-trig code{background:var(--surface1);border-radius:4px;padding:1px 5px;font-size:10.5px;color:var(--accent-soft);}
-  .lora-trig button{margin-left:auto;background:var(--emerald);color:var(--base);border:none;border-radius:5px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;}
-  .lora-trig button.done{background:var(--surface1);color:var(--subtext);cursor:default;}
-  .lora-chip.incompat{border-color:var(--red);}
-  .lora-chip.incompat .nm{color:var(--red);}
-  .lora-chip{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:5px 8px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);font-size:12px;color:var(--text);}
-  .lora-chip img{width:24px;height:24px;border-radius:4px;object-fit:cover;flex:0 0 auto;}
-  .lora-chip .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .lora-chip input{width:58px;background:var(--surface1);border:1px solid var(--overlay0);border-radius:4px;color:var(--text);font-size:11.5px;padding:2px 4px;}
-  /* The weight control: a slider plus its own value. `.lora-chip input` above still
-     exists for anything else in a chip, and these out-specify it for the range. */
-  .lora-chip .lw{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
-  .lora-chip .lw input[type=range]{width:92px;padding:0;background:none;border:none;}
-  .lora-chip .lw b{min-width:32px;text-align:right;font-size:11px;font-weight:600;
-    color:var(--lavender);font-variant-numeric:tabular-nums;}
-  .lora-chip .rm{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:14px;padding:0 2px;}
-  .lora-chip select.ver{flex:1 1 100%;margin-top:1px;background:var(--surface1);border:1px solid var(--overlay0);border-radius:4px;color:var(--text);font-size:10.5px;padding:2px 4px;}
-  .lora-chip .rm:hover{color:var(--red);}
-  #lora-add{width:100%;margin-top:5px;padding:5px 0;font-size:11.5px;border-radius:6px;background:transparent;color:var(--subtext);border:1px dashed var(--surface1);cursor:pointer;}
-  #lora-add:hover{color:var(--text);border-color:var(--overlay0);}
-  #gen-selrow{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border-radius:6px;background:var(--surface0);border:1px solid var(--surface1);color:var(--text);cursor:pointer;font-size:12.5px;text-align:left;}
-  #gen-selrow:hover{border-color:var(--overlay0);}
-  #gen-selthumb{width:30px;height:30px;border-radius:6px;object-fit:cover;flex:0 0 auto;}
-  #gen-selrow .hint{margin-left:auto;color:var(--overlay0);font-size:11px;flex:0 0 auto;}
-  /* picker-parity-round2 (2026-07-24, problem 4/5): resolve_version_meta() already fetches
-     a version's OTHER releases + the author's own sampling_method/capabilities -- this was
-     being resolved and thrown away. #gen-selmeta surfaces both: a real version picker
-     (PixAI's own model/LoRA cards have one; ours had none) and read-only capability tags. */
-  #gen-selmeta{display:none;flex-direction:column;gap:6px;margin-top:6px;}
-  #gen-selmeta.show{display:flex;}
-  #gen-version{width:100%;background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);font-size:11.5px;padding:5px 7px;}
-  #gen-caps{display:flex;flex-wrap:wrap;gap:5px;}
-  #gen-caps .cap{font-size:9.5px;padding:2px 8px;border-radius:10px;background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);}
-  #model-flyout{position:absolute;top:0;right:100%;height:100%;width:372px;max-width:92vw;background:var(--mantle);border:1px solid var(--surface1);border-right:none;display:none;flex-direction:column;box-shadow:-14px 0 34px rgba(0,0,0,.4);}
-  #model-flyout.open{display:flex;}
-  #model-flyout .x{margin-left:auto;}
-  #gen-drawer.dock-left #model-flyout{right:auto;left:100%;border-right:1px solid var(--surface1);border-left:none;box-shadow:14px 0 34px rgba(0,0,0,.4);}
-  /* Top/bottom docks are thin full-width bars -- an edge-popped flyout gets clipped.
-     Render the model browser as a centered overlay instead so it's never obscured. */
-  #gen-drawer.dock-top #model-flyout,#gen-drawer.dock-bottom #model-flyout{position:fixed;top:50%;left:50%;right:auto;bottom:auto;transform:translate(-50%,-50%);width:540px;max-width:92vw;height:auto;max-height:82vh;border:1px solid var(--surface1);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.6);}
-  /* picker-parity-round2 (2026-07-24): owner's live test found the flyout showing only ~2
-     rows of cards then a large dead area filling the rest of the panel -- .gen-body was
-     BOTH the outer overflow:auto scroll container AND <mg-model-picker>'s own .mg-grid had
-     an independent fixed max-height:320px (see mg-model-picker.js), so on any flyout taller
-     than ~380px .gen-body's real extra height just sat there empty below the capped grid.
-     Fix: hand the real height all the way down so the GRID is the one scrolling region,
-     matching every other picker in the app. Scoped to #model-flyout only -- #gen-drawer's
-     own .gen-body (the main Generate form, a plain tall scrolling form) is untouched. */
-  #model-flyout .gen-body{overflow:hidden;display:flex;flex-direction:column;min-height:0;}
-  #model-flyout #gen-picker-host{flex:1;min-height:0;display:flex;flex-direction:column;}
-  #model-flyout mg-model-picker{flex:1;min-height:0;}
-  /* ---- Art filters flyout (Edit > Enhance) --------------------------------------------
-     Same chrome as #model-flyout above (--mantle box, .gen-head/.gen-body, one heavy shadow)
-     but placed the way #model-preview is: position:fixed with left/top written by JS, the
-     rule mg-model-picker's _place() uses -- prefer the side with room, then clamp to the
-     viewport. #model-flyout's pure-CSS `right:100%` edge pop cannot carry this panel: it is
-     side-by-side, so it is far wider than the 372px flyout that rule was written for, and at
-     that width running off the left edge stops being hypothetical on a laptop.
-
-     It is a TOP-LEVEL element, deliberately not a child of #gen-drawer. The drawer carries
-     `transform: translateX(...)`, and a transform makes its box the containing block for
-     position:fixed descendants -- so viewport coordinates from getBoundingClientRect() would
-     be re-interpreted relative to the drawer and the panel would land off-screen. That is also
-     why #model-flyout, which IS inside the drawer, has to use position:absolute. */
-  #filters-flyout{position:fixed;z-index:222;display:none;flex-direction:column;
-    background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;
-    box-shadow:0 22px 60px rgba(0,0,0,.6);overflow:hidden;}
-  #filters-flyout.open{display:flex;}
-  #filters-flyout .gen-head{padding:11px 13px 0;}
-  #filters-flyout .gen-head .x{margin-left:auto;}
-  #filters-flyout .gen-body{padding:11px 13px 13px;overflow:auto;min-height:0;}
-  /* Three columns: ORIGINAL, PREVIEW, then the palette rail. Judging a filter is a
-     comparison, and the panel could not host one while it showed a single image -- you had to
-     toggle No filter back and forth and hold the difference in your head. `flex-wrap` still
-     carries the narrow case, degrading to a stack rather than squeezing all three to unusable.
-
-     The two image columns take an EXPLICIT flex-basis, never `auto`: with `auto` a column's
-     base size is the image's max-content width -- its INTRINSIC width, 900px for a typical
-     generation, because `max-width:100%` on the img can't resolve against a container the img
-     is itself sizing. The hypothetical sizes then exceed the panel, flex-wrap breaks the line,
-     and the rail ends up under the pictures at every panel width. (Measured on the old
-     two-column build: a 604px image in a 647px panel wrapped; from a 0 basis the same image
-     rendered 375px wide, beside the controls.) A 250px basis keeps that fix and additionally
-     decides the wrap POINT -- 250+250+236+gaps, so the columns drop only when there is
-     genuinely no room for three. min-width:0 lets them shrink below the basis before wrapping,
-     which a flex item does not do by default. */
-  #filters-flyout .af-wrap{display:flex;gap:14px;align-items:stretch;flex-wrap:wrap;}
-  #filters-flyout .af-col{flex:1 1 250px;min-width:0;display:flex;flex-direction:column;}
-  #filters-flyout .af-rail{flex:0 0 236px;}
-  /* `align-items:stretch` + `flex:1` on the frame is what fills the panel. The rail is the
-     tall column -- twelve swatches, two sliders and the action group -- while a landscape
-     source is wide and short, so with `flex-start` the pictures sat in the top corner above
-     several hundred px of nothing. Stretching makes the frames two equal boxes that own the
-     height, with the picture centred inside; the leftover room reads as matting rather than
-     as a layout that failed to fill. It also lines the captions up with each other when the
-     two pictures differ in height, and a comparison that jitters is worse than none.
-
-     The picture is centred by the frame, NOT letterboxed by the image: #af-img keeps
-     width/height:auto so #af-stage stays exactly its box (see below) -- `object-fit:contain`
-     here would keep the element at full frame size and the overlay gradients, which know
-     nothing about object-fit, would paint across the matting too. */
-  #filters-flyout .af-frame{flex:1;display:flex;align-items:center;justify-content:center;
-    background:var(--crust);border:1px solid var(--surface0);border-radius:10px;
-    padding:6px;min-height:120px;}
-  #filters-flyout .af-cap{font-size:11px;color:var(--subtext);text-align:center;margin-top:6px;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  #filters-flyout .af-cap b{color:var(--text);font-weight:600;}
-  #filters-flyout .af-grp{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;
-    color:var(--overlay0);margin:11px 0 5px;display:flex;align-items:center;gap:6px;}
-  #filters-flyout .af-grp:first-child{margin-top:0;}
-  #filters-flyout .af-grp::after{content:"";flex:1;height:1px;background:var(--surface0);}
-  #filters-flyout .af-acts{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:11px;}
-  #filters-flyout .af-acts .gen-go{width:100%;padding:7px 4px;font-size:11.5px;}
-  #filters-flyout .af-acts .gen-go[disabled]{opacity:.45;cursor:not-allowed;}
-  /* The stage is MgArtFilters' preview host: it stacks overlay divs at `inset:0` over the
-     <img>, so its box has to be the image's box EXACTLY -- inline-block + line-height:0 + a
-     block img, the same pairing #fix-wrap needs to keep its canvas registered with the photo.
-     Deliberately NOT `width:100%` + `object-fit:contain`: that keeps the element's box at the
-     full column width and letterboxes the picture inside it, and the overlays -- which know
-     nothing about object-fit -- would then paint the filter's gradient across the bars too. */
-  #af-stage{position:relative;display:inline-block;line-height:0;border-radius:9px;
-    overflow:hidden;}
-  #af-img,#af-orig{display:block;max-width:100%;max-height:52vh;width:auto;height:auto;}
-  .af-tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
-  .af-tile{cursor:pointer;background:none;border:none;padding:0;display:block;}
-  .af-tile .sw{width:100%;aspect-ratio:1;border-radius:7px;border:2px solid var(--surface1);}
-  .af-tile.on .sw{border-color:var(--lavender);box-shadow:0 0 9px rgba(182,146,230,.6);}
-  .af-tile .cap{font-size:9.5px;color:var(--subtext);text-align:center;margin-top:2px;
-    line-height:1.25;overflow-wrap:anywhere;}
-  .af-tile.on .cap{color:var(--text);}
-  #af-msg{font-size:11px;color:var(--subtext);margin-top:7px;min-height:14px;}
-  #af-msg.bad{color:var(--red);}
-  /* O13: #pick-scrim/#pick-modal/.pick-filters and their CSS are gone -- <mg-gallery-picker>
-     (static/mg-gallery-picker.js) brings its own complete self-contained overlay/box/filter
-     chrome, injected client-side. #similar-modal below is UNRELATED (Similar.js, not Picker)
-     and still uses the shared .pick-head/.pick-empty rules further down, kept as-is. */
-  #similar-scrim{position:fixed;inset:0;background:rgba(6,4,16,.6);z-index:210;display:none;}
-  #similar-scrim.open{display:block;}
-  #similar-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:900px;max-width:94vw;height:84vh;max-height:84vh;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;z-index:211;display:none;flex-direction:column;padding:14px;}
-  #similar-modal.open{display:flex;}
-  /* Bulletproof fixed-tile grid (same pattern as #pick-grid) -- the aspect-ratio .card
-     pattern collapses to slivers inside this flex modal, which is why it didn't scroll. */
-  #similar-modal #similar-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));grid-auto-rows:150px;gap:10px;overflow-y:auto;flex:1;min-height:0;align-content:start;padding:4px;}
-  #similar-modal #similar-grid .card{grid-row:span 1;}
-  #similar-modal #similar-grid .card img{width:100%;height:100%;aspect-ratio:auto;object-fit:contain;background:var(--crust);}
-  #similar-modal #similar-grid .card .meta{position:absolute;left:0;right:0;bottom:0;margin:0;padding:2px 6px;background:linear-gradient(transparent,rgba(0,0,0,.72));pointer-events:none;}
-  .pick-head{display:flex;align-items:center;margin-bottom:10px;}
-  .pick-head .t{font-size:15px;font-weight:600;color:var(--text);}
-  .pick-head .x{margin-left:auto;background:none;border:none;color:var(--subtext);font-size:22px;cursor:pointer;}
-  /* .pick-head/.pick-empty above are shared with #similar-modal (Similar.js) and stay live.
-     #pick-grid/.pick-cell/#pick-up/#pick-more below were exclusively the old #pick-modal's
-     own grid/upload/load-more chrome -- gone with it (O13); <mg-gallery-picker> has its own
-     .mg-pk-grid/.mg-pk-cell/.mg-pk-upload (infinite-scroll, no separate load-more button). */
-  .pick-empty{color:var(--subtext);font-size:12px;padding:24px;text-align:center;}
-  #model-preview{position:fixed;z-index:220;width:300px;max-width:80vw;background:var(--mantle);border:1px solid var(--surface1);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.55);display:none;overflow:hidden;pointer-events:none;}
-  #model-preview.open{display:block;}
-  #model-preview img{width:100%;max-height:340px;object-fit:cover;display:block;background:var(--surface1);}
-  #model-preview img.blur{filter:blur(18px);}
-  #model-preview .mp-meta{padding:9px 11px;}
-  #model-preview .mp-nm{font-size:13px;font-weight:600;color:var(--text);}
-  #model-preview .mp-sub{display:flex;gap:8px;font-size:11px;margin-top:3px;color:var(--subtext);}
-  #model-preview .mp-sub .ty{color:var(--emerald);}
-  #model-preview .mp-desc{font-size:11px;color:var(--subtext);margin-top:5px;line-height:1.45;max-height:88px;overflow:hidden;}
-  #model-preview .mp-badges{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;}
-  #model-preview .mp-badges .bdg{font-size:10px;font-weight:600;letter-spacing:.02em;border-radius:5px;padding:1px 7px;background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);text-transform:uppercase;}
-  #model-preview .mp-badges .bdg.base{color:#c9b8ff;border-color:#4a3f78;}
-  #model-preview .mp-badges .bdg.official{color:#0f1017;background:linear-gradient(180deg,#ffd27a,#e6a94b);border-color:#e6a94b;}
-
-  /* ---- Portrait phones (<=480px): the drawer's own mobile pass. ----
-     These rules USED to live up in the gallery's main <style> block, inside the shared
-     @media (max-width: 480px). They were entirely DEAD there. Every one of them leans on
-     the bare #gen-drawer / #model-flyout / .dock-ctl button / .gen-head .x selector, and
-     that media block sits EARLIER in the document than THIS stylesheet -- so at equal
-     specificity the base rules just above won on document order. A media query adds no
-     specificity; being inside one buys an override nothing.
-
-     Measured in a real browser at 375x812 before the move:
-       - the open drawer in its DEFAULT dock (the right-hand one) was 352.5px wide
-         (94vw from the base rule, not the 100%/100vw asked for here) -- a 22.5px dead
-         gutter down the side of what is supposed to be a full-width sheet
-       - the model flyout kept `transform: translate(-50%,-50%)` from here (the base rule
-         sets no transform, so nothing contested it) while `position`/`top`/`right` lost
-         to the base rule -- landing it at rect y = -332.9px, i.e. half the panel above
-         the top of the viewport and unreachable
-       - .dock-ctl button stayed 22px and .gen-head .x stayed 22px, so the touch targets
-         this block exists to enlarge never grew
-     The `.wide` and `.dock-left` drawer variants LOOKED correct throughout, which is why
-     this survived: their compound selectors out-specify the bare base rule, so only the
-     plain default dock was visibly broken.
-
-     Keeping them HERE, immediately after the rules they override, is the actual fix
-     rather than a specificity trick: the override can no longer be separated from its
-     base by an edit elsewhere in the file, and IF this CSS is ever moved as a unit the
-     base rules and their responsive overrides travel together. (Extraction to a real
-     .css file was tried and DISCARDED -- the 2026-07-21 audit T5-CSS -- so that is
-     a property worth having, not a plan.) Do not move these back up into the shared
-     mobile block. */
-  @media (max-width: 480px) {
-    #gen-drawer,#gen-drawer.wide,#gen-drawer.dock-left{width:100%;max-width:100vw;}
-    #model-flyout,#gen-drawer.dock-left #model-flyout,
-    #gen-drawer.dock-top #model-flyout,#gen-drawer.dock-bottom #model-flyout{
-      position:fixed;top:50%;left:50%;right:auto;bottom:auto;transform:translate(-50%,-50%);
-      width:94vw;max-width:94vw;max-height:82vh;
-      border:1px solid var(--surface1);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.6);}
-    .gen-row{flex-wrap:wrap;} .gen-row > *{flex:1 1 100%;}
-    .dock-ctl button{width:34px;height:34px;}
-    .gen-head .x{font-size:28px;min-width:40px;}
-  }
-</style>
-<div id="gen-scrim" onclick="Gen.close()"></div>
-<aside id="gen-drawer" aria-hidden="true" aria-label="Generate">
-  <div class="gen-head">
-    <span class="spark">&#10022;</span><span class="t">Generate</span>
-    <span class="dock-ctl">
-      <button type="button" data-dock="left" onclick="Gen.setDock('left')" title="Dock left">&#9612;</button>
-      <button type="button" data-dock="top" onclick="Gen.setDock('top')" title="Dock top">&#9600;</button>
-      <button type="button" data-dock="bottom" onclick="Gen.setDock('bottom')" title="Dock bottom">&#9604;</button>
-      <button type="button" data-dock="right" class="on" onclick="Gen.setDock('right')" title="Dock right">&#9616;</button>
-    </span>
-    <button class="x" onclick="Gen.close()" aria-label="Close">&times;</button>
-  </div>
-  <div class="gen-body">
-    <div class="gen-seg" id="gen-mode-seg" style="margin-bottom:12px;">
-      <button id="gm-generate" class="on" onclick="Gen.setMode('generate')">Image</button>
-      <button id="gm-edit" onclick="Gen.setMode('edit')">Edit</button>
-      <button id="gm-video" onclick="Gen.setMode('video')">Video</button>
-    </div>
-    <div id="gen-mode-generate">
-    <div class="gen-lbl" style="margin-top:0;">Model</div>
-    <button type="button" id="gen-selrow" onclick="Gen.toggleFlyout()"
-            onmouseenter="Gen.previewSelected(event)" onmouseleave="Gen.hidePreview()">
-      <img id="gen-selthumb" alt="" style="display:none;">
-      <span id="gen-selname">none &mdash; browse models</span>
-      <span class="hint">&#9666; browse</span>
-    </button>
-    <div id="gen-selmeta">
-      <select id="gen-version" onclick="event.stopPropagation()" onchange="Gen.pickVersion(this.value)"
-              title="This model's published releases -- PixAI defaults to the latest; pick another to generate against it instead" aria-label="Model version"></select>
-      <div id="gen-caps"></div>
-    </div>
-    <div class="gen-lbl">LoRAs <span id="gen-lora-cap" class="lora-cap"></span></div>
-    <div id="gen-loras"></div>
-    <div id="gen-lora-note"></div>
-    <button type="button" id="lora-add" onclick="Gen.openLoraBrowser()">+ Add LoRA</button>
-    <div class="gen-lbl">Reference image <span style="text-transform:none;color:var(--subtext);">&middot; optional &middot; guides the result (img2img)</span></div>
-    <div style="display:flex;gap:10px;align-items:center;">
-      <div id="gen-ref-slot" onclick="Gen.refPick()" title="Pick a reference image from your gallery"
-           style="position:relative;width:58px;height:58px;flex:0 0 auto;border-radius:8px;border:1px dashed var(--surface1);background:var(--surface0);cursor:pointer;display:grid;place-items:center;color:var(--subtext);font-size:10.5px;overflow:hidden;">+ ref</div>
-      <div id="gen-ref-ctl" style="flex:1;display:none;">
-        <div class="gen-lbl" style="margin-top:0;">Strength <span id="gen-ref-sval" style="color:var(--lavender);">0.55</span>
-          <span style="text-transform:none;color:var(--overlay0);">&middot; higher = closer to the reference</span></div>
-        <input type="range" id="gen-ref-strength" min="0.1" max="1" step="0.05" value="0.55" style="width:100%;"
-               oninput="Gen.refStrength(this.value)">
-      </div>
-    </div>
-    <div class="gen-form" style="border-top:none;margin-top:0;padding-top:0;">
-      <div style="display:flex;justify-content:flex-end;margin-top:8px;">
-        <button type="button" class="snip-btn" onclick="Snips.open(this, {get:function(){return document.getElementById('gen-prompt').value;}, set:function(v){document.getElementById('gen-prompt').value=v;document.getElementById('gen-prompt').focus();Gen.refreshCost();}})">&#9733; Snippets</button>
-      </div>
-      <textarea id="gen-prompt" class="gen-ta" rows="3" placeholder="Describe your image&hellip;"></textarea>
-      <details style="margin-top:6px;">
-        <summary style="cursor:pointer;color:var(--subtext);font-size:11px;">Advanced</summary>
-        <textarea id="gen-neg" class="gen-ta" rows="2" placeholder="lowres, text, watermark&hellip;" style="margin-top:5px;"></textarea>
-        <div style="display:flex;gap:10px;margin-top:6px;">
-          <label style="font-size:11px;color:var(--subtext);flex:1;">Steps
-            <input type="number" id="gen-steps" min="1" max="150" step="1" value="25" style="width:100%;margin-top:2px;">
-          </label>
-          <label style="font-size:11px;color:var(--subtext);flex:1;">CFG scale
-            <input type="number" id="gen-cfg" min="1" max="30" step="0.5" value="7" style="width:100%;margin-top:2px;">
-          </label>
-        </div>
-        <div id="gen-modeldefaults" style="display:none;justify-content:space-between;align-items:center;margin-top:6px;">
-          <span id="gen-modeldefaults-label" style="font-size:10.5px;color:var(--overlay0);">&#10003; using this model's tuned preset</span>
-          <button type="button" class="snip-btn" onclick="Gen.resetModelDefaults()">&#8630; reset</button>
-        </div>
-      </details>
-      <div class="gen-lbl">Aspect</div>
-      <div class="gen-aspects" id="gen-aspects">
-        <button type="button" data-rw="1" data-rh="1" class="on">1:1</button>
-        <button type="button" data-rw="3" data-rh="4">3:4</button>
-        <button type="button" data-rw="4" data-rh="3">4:3</button>
-        <button type="button" data-rw="2" data-rh="3">2:3</button>
-        <button type="button" data-rw="3" data-rh="2">3:2</button>
-        <button type="button" data-rw="9" data-rh="16">9:16</button>
-        <button type="button" data-rw="16" data-rh="9">16:9</button>
-        <button type="button" data-rw="3" data-rh="1">3:1</button>
-      </div>
-      <div class="gen-row" style="margin-top:8px;">
-        <div style="flex:1;"><div class="gen-lbl">Size &middot; long edge</div>
-          <select id="gen-size" class="gen-sel">
-            <option value="768">S &middot; 768</option>
-            <option value="1024" selected>M &middot; 1024</option>
-            <option value="1536">L &middot; 1536</option>
-            <option value="2048">XL &middot; 2048</option>
-          </select></div>
-        <div style="flex:1;"><div class="gen-lbl">Custom W&times;H <span style="text-transform:none;color:var(--subtext);">&middot; overrides</span></div>
-          <div style="display:flex;gap:5px;align-items:center;">
-            <input id="gen-cw" class="gen-sel" type="number" min="64" max="4096" step="8" placeholder="W" style="flex:1;min-width:0;">
-            <span style="color:var(--subtext);">&times;</span>
-            <input id="gen-ch" class="gen-sel" type="number" min="64" max="4096" step="8" placeholder="H" style="flex:1;min-width:0;">
-          </div></div>
-      </div>
-      <div id="gen-dim-note" style="font-size:11px;color:var(--subtext);margin-top:5px;"></div>
-      <div class="gen-row" style="margin-top:8px;">
-        <div style="flex:1;"><div class="gen-lbl">Mode</div>
-          <select id="gen-mode" class="gen-sel"><option value="auto">Auto</option><option value="lite">Lite</option><option value="standard">Standard</option><option value="pro">Pro</option><option value="ultra">Ultra</option></select></div>
-        <div style="flex:1;"><div class="gen-lbl">Count</div>
-          <select id="gen-count" class="gen-sel"><option>1</option><option>2</option><option>3</option><option>4</option></select></div>
-      </div>
-      <div style="margin-top:8px;"><div class="gen-lbl">Seed <span style="text-transform:none;color:var(--subtext);">&middot; blank = random</span></div>
-        <input id="gen-seed" class="gen-sel" type="number" placeholder="random" autocomplete="off" style="width:100%;"></div>
-      <div class="gen-lbl">Boosters <span style="text-transform:none;color:var(--subtext);">&middot; each one costs extra credits</span></div>
-      <div class="gen-aspects">
-        <button type="button" id="gen-facefix" onclick="Gen.toggleBooster('facefix')"
-                title="PixAI's Face Fix: re-renders faces at higher detail after the main pass (enableADetailer)">Face Fix</button>
-        <button type="button" id="gen-qtag" data-prefix="Masterpiece" onclick="Gen.toggleBooster('qtag')"
-                title="PixAI's Quality Tag: prepends &lsquo;Masterpiece&rsquo; to the prompt">Quality Tag</button>
-        <!-- PixAI's third booster. It is the Hires (`upscale`) family and nothing else: their
-             ESRGAN `enlarge` method lives on the image view, where a real source exists. -->
-        <button type="button" id="gen-hires" onclick="Gen.toggleBooster('hires')"
-                title="PixAI's Enhance Details: re-renders the finished image at a larger size (hi-res fix), so it adds detail rather than just resolution. To upscale a picture you already have, open it and use Upscale there.">Enhance Details</button>
-      </div>
-      <label class="gen-check" title="PixAI's High Priority channel (priority=1000): ~10x faster and it COSTS EXTRA credits. It is not Turbo — Turbo is a separate, members-only channel that is free, and it is what an unticked box already asks for (falling back to standard speed on its own if this account isn't a member)."><input type="checkbox" id="gen-hp"> High priority (faster &middot; costs extra)</label>
-      <label class="gen-check"><input type="checkbox" id="gen-ph" checked> Prompt helper</label>
-      <mg-cost-badge id="gen-cost" hint="Pick a model to see the cost." card-label="a card"></mg-cost-badge>
-      <button id="gen-go" class="gen-go" onclick="Gen.generate()" disabled>Generate</button>
-      <div id="gen-result" class="gen-result" style="display:none;"></div>
-    </div>
-    </div>
-    <div id="gen-mode-edit" style="display:none;">
-      <div class="gen-lbl">Editing image</div>
-      <img id="edit-src-img" alt="source" style="width:100%;border-radius:10px;display:none;margin-bottom:8px;">
-      <div style="display:flex;gap:6px;align-items:center;">
-        <input id="edit-src" class="gen-search" style="margin-bottom:0;flex:1;" placeholder="Source media_id" autocomplete="off">
-        <button type="button" class="gen-seg" style="flex:0 0 auto;padding:7px 11px;font-size:12px;border-radius:6px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);cursor:pointer;white-space:nowrap;" onclick="Picker.open(function(mid){ Gen.setEditSource(mid); })">&#9648; Pick</button>
-      </div>
-      <div class="gen-seg" style="margin:10px 0;">
-        <button id="es-edit" class="on" onclick="Gen.setEditSub('edit')">Edit</button>
-        <button id="es-enhance" onclick="Gen.setEditSub('enhance')">Enhance</button>
-        <button id="es-fix" onclick="Gen.setEditSub('fix')">Fix</button>
-      </div>
-      <div id="edit-sub-edit">
-        <div class="gen-lbl" style="margin-top:0;">Edit model</div>
-        <div class="gen-seg" style="margin-bottom:9px;">
-          <button id="em-edit-pro" type="button" class="on" onclick="Gen.setEditModel('edit-pro')" title="Instruct edit + up to 4 reference images &middot; 1K/2K">Edit Pro</button>
-          <button id="em-reference-pro" type="button" onclick="Gen.setEditModel('reference-pro')" title="Reference edit + up to 10 reference images &middot; 2K/4K">Reference Pro</button>
-        </div>
-        <div class="gen-lbl">Toolbox preset <span style="text-transform:none;color:var(--subtext);">&middot; canned effects &middot; overrides the instruction</span></div>
-        <div style="display:flex;gap:6px;margin-bottom:6px;">
-          <select id="edit-preset" class="gen-sel" style="flex:1;" onchange="Gen.editCost()">
-            <option value="">None &mdash; custom instruction below</option>
-          </select>
-          <input id="preset-task" class="gen-search" style="margin:0;flex:0 0 150px;" placeholder="import: task id" autocomplete="off">
-          <button type="button" class="snip-btn" style="flex:0 0 auto;" onclick="Gen.presetImport()" title="Run any Toolbox item once on pixai.art, paste its task id here — banks that preset locally forever">＋ bank</button>
-        </div>
-        <textarea id="edit-ins" class="gen-ta" rows="3" placeholder="Describe the change &mdash; &lsquo;make it night, add snow&rsquo;&hellip;"></textarea>
-        <div class="gen-row" style="margin-top:8px;">
-          <div style="flex:1;"><div class="gen-lbl">Resolution</div>
-            <select id="edit-res" class="gen-sel"></select></div>
-          <div style="flex:1;" id="edit-qual-wrap"><div class="gen-lbl">Quality</div>
-            <select id="edit-qual" class="gen-sel"></select></div>
-        </div>
-        <div class="gen-lbl">Aspect</div>
-        <select id="edit-aspect" class="gen-sel"></select>
-        <div class="gen-lbl">Reference images <span id="edit-ref-cap" style="text-transform:none;color:var(--subtext);"></span></div>
-        <div id="edit-refs" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
-        <mg-cost-badge id="edit-cost" hint="Pick an image to see the cost." card-label="an Edit card"></mg-cost-badge>
-        <button id="edit-go" class="gen-go" onclick="Gen.edit()">Apply edit</button>
-        <div id="edit-result" class="gen-result" style="display:none;"></div>
-      </div>
-      {# This pane is the art-filters entry point. The ten one-click panelplugin cards, the
-         ComfyUI catalog search and the Run button that used to live here are gone: PixAI never
-         assigns a worker to a panelplugin task submitted with an API key -- it accepts it,
-         queues it, charges for it, then cancels it at roughly 60 minutes with outputs.reason
-         "waiting timeout" and refunds. Measured 2026-07-24 against their live API and proven by
-         elimination -- the same payload built with PixAI's own official preset workflow id also
-         never dispatches, while their web client runs that workflow in 1-3 seconds, and a
-         taskKind=chat Fix from this app dispatched in one second minutes earlier. No workflow
-         id, input key or payload shape changes that, so there was nothing to repair.
-
-         Art filters are the opposite story: they were never inference to begin with, so they
-         run here in full, locally and free (static/mg-art-filters.js). The working surface is
-         #filters-flyout below, because judging a filter needs the image at size and this drawer
-         column is 420px (600px in Edit). Guarded by tests/test_enhance.py, test_web_pick.py and
-         the rendering harness, which measures the panel's layout in a real browser. #}
-      <div id="edit-sub-enhance" style="display:none;">
-        <div class="gen-lbl" style="margin-top:0;">Art filters
-          <span style="text-transform:none;color:var(--emerald);">&middot; free, no generation</span></div>
-        <button type="button" id="af-open" class="gen-go" onclick="Gen.toggleFilters()"
-                style="background:var(--surface0);color:var(--text);border:1px solid var(--surface1);">
-          &#9673; Open filters</button>
-        <div class="enh-note" style="margin-top:9px;">
-          PixAI's seven art filters are gradient overlays, not AI &mdash; so they are applied
-          right here in the browser: <b>no credits, no request, works offline</b>. Pick a source
-          image above, then open the panel to compare and save.
-          <br><br>
-          Still <b>pixai.art</b> only: their one-click ComfyUI workflows (background removal,
-          line art, sketch colouring, relight). Submitted with an API key those queue and are
-          cancelled unstarted about an hour later, so this app can't offer them. But run one
-          <i>on their site</i> and the result still lands in your library automatically &mdash;
-          only the submit button is missing, never the collecting. What also works here:
-          <b>Upscale</b> and <b>Hires</b> on the <b>Generate</b> tab's Upscale row (plain
-          generation settings, not workflows), and <b>Fix</b> above for hands and faces.
-        </div>
-      </div>
-      <div id="edit-sub-fix" style="display:none;">
-        <div class="gen-lbl">Fix hands / faces <span style="text-transform:none;color:var(--subtext);">&middot; drag a box</span></div>
-        <div class="fix-tags">
-          <button type="button" id="fix-tag-face" class="on" onclick="Gen.fixTag('face')">Face</button>
-          <button type="button" id="fix-tag-hand" onclick="Gen.fixTag('hand')">Hand</button>
-          <button type="button" onclick="Gen.fixClear()">Clear</button>
-        </div>
-        <div id="fix-wrap"><img id="fix-img" alt="fix source"><canvas id="fix-canvas"></canvas></div>
-        {# No card-label: a Fix can never be covered by a free card (POST /v2/task/fixer has
-           no kaisuukenId field), so /api/price forces no_card for this mode and the badge's
-           `free` branch is unreachable here by construction. #}
-        <mg-cost-badge id="fix-cost" hint="Drag a box over a hand or face to see the cost."></mg-cost-badge>
-        <button id="fix-go" class="gen-go" onclick="Gen.fix()">Fix marked regions</button>
-        <div id="fix-result" class="gen-result" style="display:none;"></div>
-      </div>
-    </div>
-    <div id="gen-mode-video" style="display:none;">
-      {# Migrated to the shared <mg-generate-drawer> web component (static/mg-generate-drawer.js) --
-         the SAME element the Loom already mounts in production. It renders the full-parity Video
-         form (6 image + 3 video + 1 audio refs, negative prompt, Channel, the full model roster
-         with capability gating) and owns its own submit/poll/result/pricing over
-         /api/loom/generate. NO data-loom-ctx here, so Camera + Basic/Professional show -- the
-         gallery mount, per the LOCKED artifact 74ad3fd0. The host wires the gallery Picker to the
-         element's mg-pick-request event, and Gen.addVideoRefs feeds picked images via prefill()
-         -- see Gen.init below. The old hand-rolled #gen-mode-video form (9 undifferentiated image
-         slots, 5-model select, no video/audio refs, no negative, no channel) is gone. #}
-      <mg-generate-drawer></mg-generate-drawer>
-    </div>
-  </div>
-  <div id="model-flyout" aria-hidden="true" aria-label="Models and LoRAs">
-    <div class="gen-head"><span class="t">Models &amp; LoRAs</span>
-      <button class="x" onclick="Gen.toggleFlyout()" aria-label="Close">&times;</button></div>
-    <div class="gen-body">
-      <div class="gen-seg">
-        <button id="gen-k-base" class="on" onclick="Gen.setKind('base')">Models</button>
-        <button id="gen-k-lora" onclick="Gen.setKind('lora')">LoRAs</button>
-      </div>
-      <!-- O12: the search box, grid, hover preview, and (for LoRAs) the market sort/category
-           strip all live inside the two <mg-model-picker> elements Gen.ensurePickers() mounts
-           here lazily on first open -- see the Picker/Gen bridge in the script below. -->
-      <div id="gen-picker-host"></div>
-    </div>
-  </div>
-</aside>
-<!-- The art-filters panel. OUTSIDE </aside> on purpose: #gen-drawer carries a transform, which
-     makes its box the containing block for position:fixed descendants, so a fixed panel placed
-     from getBoundingClientRect() coordinates has to be a sibling of the drawer, not a child.
-     Same reason #model-preview sits out here. Gen.placeFilters() does the placement. -->
-<div id="filters-flyout" aria-hidden="true" aria-label="Art filters">
-  <div class="gen-head"><span class="t">&#9673; Art filters</span>
-    <button class="x" onclick="Gen.toggleFilters()" aria-label="Close">&times;</button></div>
-  <div class="gen-body">
-    <div class="af-wrap">
-      <!-- The comparison pair. #af-orig is deliberately a SECOND <img> of the same /full/ url
-           rather than a clone of the preview: the preview's <img> is inside #af-stage, which
-           MgArtFilters mutates (a CSS `filter` for image_parameters, overlay divs at inset:0),
-           and anything sharing that element would be filtered too -- leaving nothing to
-           compare against. Same-origin and already cached, so the second one costs a cache
-           hit, not a download. -->
-      <div class="af-col">
-        <div class="af-frame"><img id="af-orig" alt="the unfiltered original"></div>
-        <div class="af-cap">Original</div>
-      </div>
-      <div class="af-col">
-        <div class="af-frame"><div id="af-stage"><img id="af-img" alt="filtered preview"></div></div>
-        <div class="af-cap" id="af-cap">Preview &middot; <b>no filter</b></div>
-      </div>
-      <div class="af-rail">
-        <div id="af-swatches"></div>
-        <div class="gen-lbl">Strength <span id="af-sval" style="color:var(--lavender);">1.00</span></div>
-        <input type="range" id="af-strength" min="0" max="1" step="0.01" value="1" style="width:100%;"
-               oninput="Gen.filterStrength(this.value)">
-        <div class="gen-lbl">Angle <span id="af-aval" style="color:var(--lavender);">180&deg;</span></div>
-        <input type="range" id="af-angle" min="0" max="345" step="15" value="180" style="width:100%;"
-               oninput="Gen.filterAngle(this.value)">
-        <div class="af-acts">
-          <button type="button" id="af-none" class="gen-go" onclick="Gen.filterClear()"
-                  style="background:var(--surface0);color:var(--text);border:1px solid var(--surface1);">
-            No filter</button>
-          <button type="button" id="af-save" class="gen-go" onclick="Gen.filterSave()">Save to library</button>
-          <button type="button" id="af-send" class="gen-go" onclick="Gen.filterSend()"
-                  style="background:var(--surface0);color:var(--text);border:1px solid var(--surface1);"
-                  title="Upload the filtered image to PixAI (free) and load it as the Edit source">
-            Send to image gen</button>
-          <!-- Parked, not forgotten: publishing to PixAI is Epic C, and the mutation it needs
-               (createArtwork) is deliberately not wired up yet. Shown disabled with the reason
-               rather than hidden, so the button group matches the agreed layout and the
-               capability is discoverable. -->
-          <button type="button" id="af-publish" class="gen-go" disabled
-                  title="Publishing to PixAI is not built yet">Publish</button>
-        </div>
-        <div id="af-msg"></div>
-      </div>
-    </div>
-  </div>
-</div>
-<!-- O13: the gallery's picker is <mg-gallery-picker> now (mounted/unmounted by the
-     Picker IIFE below on open()/close()) -- no static markup needed here anymore. -->
-<div id="similar-scrim" onclick="Similar.close()"></div>
-<div id="similar-modal" aria-hidden="true" aria-label="Visually similar images">
-  <div class="pick-head"><span class="t">✧ Visually similar</span>
-    <button class="x" onclick="Similar.close()" aria-label="Close">&times;</button></div>
-  <div class="grid" id="similar-grid"></div>
-  <div class="pick-empty" id="similar-empty" style="display:none;"></div>
-</div>
-<div id="model-preview" aria-hidden="true"></div>
-<div id="ctx-menu"></div>
-<div id="tag-suggest"></div>
-<div id="jobs-fab" onclick="JobsCard.open()" title="Activity"><span class="jf-dot"></span><span class="jf-badge" id="jobs-fab-badge"></span><span>Activity</span></div>
-<div id="jobs-tray" aria-label="Job activity"></div>
-<div id="mg-toasts" aria-live="polite"></div>
-<div id="snip-menu"></div>
-<div id="ach-modal" class="ach-modal ach-hall" aria-hidden="true" onclick="if(event.target===this)Ach.close()">
-  <div class="ach-panel" role="dialog" aria-label="The Folio of Honors">
-    <div class="hall-head">
-      <div class="hall-title">&#127942; <b>The Folio of Honors</b>
-        <img class="ach-nar" id="ach-nar" src="/branding/mascots/gen_nel.png" title="the narrator"
-          alt="the narrator" onclick="Ach.poke()" onerror="this.remove()"><span id="ach-unleash-slot"></span></div>
-      <div class="hall-score" id="ach-progress">&hellip;</div>
-      <input id="ach-search" class="hall-search" type="search" placeholder="Search&hellip;"
-        oninput="Ach.search(this.value)" aria-label="Search achievements">
-      <button type="button" class="ach-x" onclick="Ach.close()" aria-label="Close">&times;</button>
-    </div>
-    <div class="hall-tabs" id="ach-tabs">
-      <button type="button" class="htab on" data-tab="summary" onclick="Ach.tab('summary')">Summary</button>
-      <button type="button" class="htab" data-tab="all" onclick="Ach.tab('all')">All</button>
-      <button type="button" class="htab" data-tab="stats" onclick="Ach.tab('stats')">Statistics</button>
-    </div>
-    <div class="hall-body">
-      <div class="hall-main" id="ach-main">
-        <div id="ach-summary" class="hall-view"></div>
-        <div id="ach-grid" class="ach-grid hall-view" style="display:none"></div>
-        <div id="ach-stats" class="hall-view" style="display:none"></div>
-      </div>
-      <aside class="hall-rail" id="ach-rail"></aside>
-    </div>
-  </div>
-</div>
-<div id="contest-modal" class="ach-modal" aria-hidden="true" onclick="if(event.target===this)Contests.close()">
-  <div class="ach-panel" role="dialog" aria-label="PixAI contests">
-    <button type="button" class="ach-x" onclick="Contests.close()" aria-label="Close">&times;</button>
-    <div class="ach-htitle">&#127941; Contests</div>
-    <div class="ach-hsub" id="contest-sub">Loading the community&hellip;</div>
-    <div id="contest-body"></div>
-    <div class="ct-foot">A community thing &mdash; the Oasis was never a 1-player game. Enter from the PixAI site. <a href="#" onclick="Contests.toggleAll(event)" id="ct-all">Show ended too</a></div>
-  </div>
-</div>
-<div id="art-modal" class="ach-modal" aria-hidden="true" onclick="if(event.target===this)YourArt.close()">
-  <div class="ach-panel" role="dialog" aria-label="Your art">
-    <button type="button" class="ach-x" onclick="YourArt.close()" aria-label="Close">&times;</button>
-    <div class="ach-htitle">&#128200; Your Art</div>
-    <div class="ach-hsub" id="art-sub">Loading&hellip;</div>
-    <div id="art-grid" class="art-grid"></div>
-    <div class="ct-foot" id="art-foot"></div>
-  </div>
-</div>
-{# "Delete from PixAI" -- the blast-radius dialog. Same .modal-bg/.modal chrome as
-   #del-modal ("Delete locally") on purpose: these two buttons sit beside each other in
-   the Actions menu and the more dangerous of the pair should not look like a different
-   feature. It replaces only the FIRST of the flow's two prompts (the prose confirm()
-   that described the batch rule but never showed it); the typed DELETE prompt behind
-   Continue is untouched, and so is /delete-tasks-bulk's localhost gate. #}
-<div class="modal-bg" id="cloud-del-modal" onclick="if(event.target===this)CloudDel.close()">
-  <div class="modal cd-modal" role="dialog" aria-label="Delete from PixAI">
-    <h2>Delete from PixAI</h2>
-    <p id="cd-summary"></p>
-    <div id="cd-tasks" class="cd-tasks"></div>
-    <p class="cd-foot">Irreversible on PixAI. The local copies move to
-      <b>_deleted/</b> and can be put back from the Control Panel&rsquo;s Trash panel.</p>
-    <div class="modal-actions">
-      <button class="btn" onclick="CloudDel.close()">Cancel</button>
-      <button class="btn btn-danger" onclick="CloudDel.proceed()">Continue&hellip;</button>
-    </div>
-  </div>
-</div>
-<style>
-  .art-tot{display:flex;gap:22px;margin:16px 0 4px;}
-  .art-tot .cell{display:flex;flex-direction:column;}
-  .art-tot .num{font-size:22px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;}
-  .art-tot .num.v{color:var(--lavender);} .art-tot .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--overlay0);}
-  .art-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:11px;margin-top:14px;}
-  .art-card{display:flex;gap:10px;background:var(--surface0);border:1px solid var(--surface1);border-radius:11px;padding:9px;align-items:center;}
-  .art-card img{width:52px;height:52px;border-radius:7px;object-fit:cover;background:var(--surface1);flex:0 0 auto;}
-  .art-card .ab{min-width:0;flex:1;}
-  .art-card .anm{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .art-card .ast{display:flex;gap:9px;font-size:11px;color:var(--subtext);margin-top:4px;font-variant-numeric:tabular-nums;}
-  .art-card .ast .v{color:var(--lavender);}
-  .art-rank{font-size:11px;font-weight:700;color:var(--overlay0);width:18px;text-align:right;flex:0 0 auto;}
-  /* .ach-modal (shared base modal chrome for #ach-modal/#contest-modal/#art-modal) now lives
-     in static/mg-notify.js, loaded via <script src> below -- do not re-add it here. */
-  .ct-sect{font-size:13px;font-weight:700;color:var(--text);margin:18px 0 9px;display:flex;align-items:center;gap:7px;}
-  .ct-sect .ct-count{font-size:10.5px;font-weight:500;color:var(--overlay0);}
-  .ct-sect.official{color:var(--gold);}
-  .ct-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:11px;}
-  .ct-card{display:flex;flex-direction:column;background:var(--surface0);border:1px solid var(--surface1);border-radius:11px;overflow:hidden;text-decoration:none;transition:transform .12s,box-shadow .12s,border-color .12s;}
-  .ct-card:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(0,0,0,.4);border-color:var(--lavender);text-decoration:none;}
-  .ct-card.official{border-color:#5a4a1e;} .ct-card.official:hover{border-color:var(--gold);}
-  .ct-cover{width:100%;height:104px;object-fit:cover;background:var(--surface1);display:block;}
-  .ct-body{padding:9px 11px 11px;display:flex;flex-direction:column;gap:4px;flex:1;}
-  .ct-nm{font-size:13px;font-weight:650;color:var(--text);line-height:1.25;}
-  .ct-badges{display:flex;flex-wrap:wrap;gap:5px;margin-top:1px;}
-  .ct-badges span{font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;border-radius:5px;padding:1px 6px;background:var(--surface1);color:var(--subtext);}
-  .ct-badges .prize{color:#0f1017;background:linear-gradient(180deg,#ffd27a,#e6a94b);}
-  .ct-badges .ends-soon{color:var(--peach);border:1px solid var(--peach);background:transparent;}
-  .ct-badges .ended{color:var(--overlay0);border:1px solid var(--surface1);background:transparent;}
-  .ct-when{font-size:10.5px;color:var(--subtext);margin-top:auto;font-variant-numeric:tabular-nums;}
-  .ct-foot{margin-top:20px;font-size:11px;color:var(--overlay0);font-style:italic;}
-  .ct-foot a{color:var(--lavender);font-style:normal;}
-</style>
-<style>
-  #snip-menu{position:fixed;z-index:236;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:220px;max-width:min(340px, calc(100vw - 16px));max-height:min(300px, calc(100vh - 16px));overflow-y:auto;padding:5px;}
-  #snip-menu .snip-head{display:flex;justify-content:space-between;align-items:center;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--overlay0);padding:3px 6px 5px;}
-  #snip-menu .snip-empty{color:var(--subtext);font-size:11.5px;padding:6px;}
-  /* The undo strip Snips.del() leaves behind. Pinned at the top of the popover, above the
-     rows, so the affordance is nowhere near the x that produced it. */
-  #snip-menu .snip-undo{display:flex;justify-content:space-between;align-items:center;gap:6px;background:var(--surface0);border-radius:5px;padding:3px 4px 3px 7px;margin-bottom:3px;font-size:11px;color:var(--subtext);}
-  #snip-menu .snip-undo span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .snip-row{display:flex;gap:4px;align-items:center;}
-  .snip-ins{flex:1;text-align:left;background:none;border:none;color:var(--text);font-size:12px;padding:6px 8px;border-radius:5px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .snip-ins:hover{background:var(--surface0);color:var(--lavender);}
-  .snip-btn{background:var(--surface0);border:1px solid var(--surface1);color:var(--subtext);border-radius:6px;font-size:11px;padding:3px 8px;cursor:pointer;}
-  .snip-btn:hover{color:var(--lavender);border-color:var(--overlay0);}
-  /* matches .btn so the balance sits in the same button row; links to the Panel */
-  a.acct-chip{font-size:13px;color:var(--text);background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;padding:5px 14px;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;}
-  a.acct-chip:hover{border-color:var(--lavender);text-decoration:none;}
-  .acct-chip b{color:var(--text);} .acct-chip .cd{color:var(--lavender);}
-  .acct-claim{font-size:12px;border:1px solid var(--emerald);background:rgba(166,227,161,.13);color:var(--emerald);border-radius:6px;padding:5px 11px;cursor:pointer;white-space:nowrap;}
-  .acct-claim:hover{background:rgba(166,227,161,.24);}
-  .acct-claim img.claim-ico{height:15px;width:15px;vertical-align:-2px;margin-right:3px;}
-  #ctx-menu{position:fixed;z-index:230;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:180px;padding:4px;}
-  #ctx-menu button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);font-size:12.5px;padding:7px 10px;border-radius:5px;cursor:pointer;}
-  #ctx-menu button:hover{background:var(--surface0);}
-  #tag-suggest{position:fixed;z-index:240;background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;min-width:190px;max-width:min(320px, calc(100vw - 16px));padding:4px;}
-  #tag-suggest .ts-head{display:flex;justify-content:space-between;gap:14px;color:var(--overlay0);font-size:10px;padding:3px 8px;text-transform:uppercase;letter-spacing:.05em;}
-  #tag-suggest button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);font-size:12.5px;padding:6px 9px;border-radius:5px;cursor:pointer;}
-  #tag-suggest button.hot,#tag-suggest button:hover{background:var(--surface0);color:var(--lavender);}
-  /* "Delete from PixAI" blast radius. Wider than the shared .modal's 400px because the
-     point is the thumbnails; the strip scrolls inside min(46vh, 380px) so a many-task
-     selection can never push Cancel/Continue off the bottom of the screen -- measured at
-     1280x900 (566px tall modal) and 375x812 (625px, actions still above the fold). */
-  .cd-modal{max-width:640px;}
-  .cd-tasks{max-height:min(46vh,380px);overflow-y:auto;margin-bottom:16px;display:flex;flex-direction:column;gap:10px;}
-  .cd-task{background:var(--surface0);border:1px solid var(--surface1);border-radius:9px;padding:8px 9px;}
-  .cd-tlbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--overlay0);margin-bottom:6px;display:flex;gap:7px;align-items:baseline;}
-  .cd-tlbl .cd-tid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:none;letter-spacing:0;color:var(--subtext);}
-  .cd-strip{display:flex;flex-wrap:wrap;gap:6px;}
-  .cd-thumb{position:relative;width:58px;height:58px;border-radius:6px;overflow:hidden;background:var(--surface1);border:1px solid var(--surface1);flex:0 0 auto;}
-  /* The selected ones are outlined, not the doomed ones: EVERYTHING here is doomed, and
-     the only thing the user cannot already infer is which of these they actually picked. */
-  .cd-thumb.on{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold);}
-  .cd-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
-  .cd-thumb .cd-noimg{display:flex;width:100%;height:100%;align-items:center;justify-content:center;font-size:9px;color:var(--overlay0);padding:2px;text-align:center;word-break:break-all;}
-  .cd-thumb .cd-vid{position:absolute;bottom:2px;right:3px;font-size:9px;color:var(--text);text-shadow:0 1px 3px #000;}
-  .cd-more,.cd-foot{font-size:11.5px;color:var(--overlay0);}
-  .cd-more{font-style:italic;}
-  .modal p.cd-foot{margin-bottom:16px;}
-</style>
-<script src="/static/picker-core.js"></script>
-<!-- O12/O13 (Phase 2): the Generate tab's model/LoRA flyout and the gallery's own picker are
-     the shared <mg-model-picker>/<mg-gallery-picker> components now (same two the Loom's
-     _LOOM_SHELL already loads) -- see Gen's model-flyout bridge and the Picker IIFE below. -->
-<script src="/static/mg-model-picker.js"></script>
-<script src="/static/mg-gallery-picker.js"></script>
-<!-- <mg-cost-badge> is the one renderer for "this costs N credits / a free card covers it"
-     (static/mg-cost-badge.js). Loaded FIRST because it is a hard dependency of three things on
-     this page: the Generate and Edit tabs' own cost lines below, and <mg-generate-drawer>'s
-     .mgd-cost. Without it those elements never upgrade, their setChecking()/setPrice() calls
-     throw, and the cost line freezes on its idle hint while the Go button beside it still
-     spends -- a silent failure on the spend path, which is why the pairing has a test
-     (test_web_pick.py::test_cost_badge_ships_with_every_price_surface) and not just a habit. -->
-<script src="/static/mg-cost-badge.js"></script>
-<!-- The shared <mg-generate-drawer> mounts in the gallery's Video tab too (not just the Loom,
-     which loads it in _LOOM_SHELL). It remains picker-agnostic itself -- no mg-model-picker /
-     mg-gallery-picker dependency of its OWN -- those two are loaded above for the Generate
-     tab's model-flyout and Picker, unrelated to the drawer; the drawer's own mg-pick-request
-     is wired to the gallery Picker in the inline JS below, same as always. -->
-<script src="/static/mg-generate-drawer.js"></script>
-<!-- PixAI's 7 art filters, baked in as data and composited locally (Edit > Enhance). Loaded
-     unconditionally rather than lazily: ~26KB of pure data + pure functions, with no network
-     access of its own, and the pane it drives has to work with the connection down. -->
-<script src="/static/mg-art-filters.js"></script>
-<script src="/static/mg-upscale-panel.js"></script>
-<script src="/static/mg-notify.js"></script>
-<script>
-var Contests = (function(){
-  function el(id){return document.getElementById(id);}
-  var lastAnchor=null;
-  function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
-  function fmt(n){ return (Number(n)||0).toLocaleString(); }
-  var showAll=false, loaded=false;
-  function open(){ el('contest-modal').classList.add('open'); el('contest-modal').setAttribute('aria-hidden','false');
-    if(!loaded) load(); }
-  function close(){ el('contest-modal').classList.remove('open'); el('contest-modal').setAttribute('aria-hidden','true'); }
-  function toggleAll(ev){ if(ev) ev.preventDefault(); showAll=!showAll;
-    el('ct-all').textContent = showAll ? 'Active only' : 'Show ended too'; load(); }
-  function load(){
-    el('contest-sub').textContent='Loading the community\\u2026';
-    fetch('/api/contests'+(showAll?'?all=1':''))
-      .then(function(r){return r.json();})
-      .then(function(d){ loaded=true; render(d); })
-      .catch(function(){ el('contest-sub').textContent='Could not load contests.'; });
-  }
-  function daysLeft(endIso){
-    if(!endIso) return null;
-    var ms=new Date(endIso).getTime()-Date.now();
-    if(isNaN(ms)) return null;
-    return Math.ceil(ms/86400000);
-  }
-  function card(c){
-    var a=document.createElement('a');
-    a.className='ct-card'+(c.type==='official'?' official':'');
-    a.href=c.url||'#'; a.target='_blank'; a.rel='noopener';
-    var cover = c.cover_url ? '<img class="ct-cover" loading="lazy" src="'+esc(c.cover_url)+'" alt="" onerror="this.style.display=\\'none\\'">' : '<div class="ct-cover"></div>';
-    var badges='';
-    if(c.prize_amount) badges+='<span class="prize">\\u2666 '+fmt(c.prize_amount)+' cr</span>';
-    var dl=daysLeft(c.end_at);
-    if(!c.active) badges+='<span class="ended">ended</span>';
-    else if(dl!=null && dl<=2) badges+='<span class="ends-soon">'+(dl<=0?'ends today':(dl+'d left'))+'</span>';
-    if(c.vote_type) badges+='<span>'+esc(c.vote_type.replace(/_/g,' '))+'</span>';
-    var when=((c.start_at||'').slice(0,10))+' \\u2192 '+((c.end_at||'').slice(0,10))
-      + (c.active && dl!=null && dl>2 ? '  \\u00b7 '+dl+' days left' : '');
-    a.innerHTML=cover+'<div class="ct-body"><div class="ct-nm">'+esc(c.title||'(untitled)')+'</div>'
-      +'<div class="ct-badges">'+badges+'</div><div class="ct-when">'+esc(when)+'</div></div>';
-    return a;
-  }
-  function section(list, name, cls){
-    if(!list.length) return '';
-    var wrap=document.createElement('div');
-    var hd=document.createElement('div'); hd.className='ct-sect '+cls;
-    hd.innerHTML=name+' <span class="ct-count">'+list.length+'</span>';
-    var grid=document.createElement('div'); grid.className='ct-grid';
-    list.forEach(function(c){ grid.appendChild(card(c)); });
-    wrap.appendChild(hd); wrap.appendChild(grid); return wrap;
-  }
-  function render(d){
-    var body=el('contest-body'); body.innerHTML='';
-    var list=d.contests||[];
-    if(d.error){ el('contest-sub').textContent='\\u26a0 '+d.error; return; }
-    if(!list.length){ el('contest-sub').textContent = showAll?'No contests found.':'No contests running right now \\u2014 check back soon.'; return; }
-    var official=list.filter(function(c){return c.type==='official';});
-    var community=list.filter(function(c){return c.type!=='official';});
-    el('contest-sub').innerHTML='<b>'+official.length+'</b> official \\u00b7 <b>'+community.length+'</b> community '+(showAll?'(all)':'running now');
-    var so=section(official,'\\ud83c\\udf1f Official','official'); if(so) body.appendChild(so);
-    var sc=section(community,'\\ud83e\\udd1d Community','community'); if(sc) body.appendChild(sc);
-  }
-  document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
-  return { open:open, close:close, toggleAll:toggleAll };
-})();
-var YourArt = (function(){
-  function el(id){return document.getElementById(id);}
-  function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
-  function fmt(n){ return (Number(n)||0).toLocaleString(); }
-  var loaded=false;
-  function open(){ el('art-modal').classList.add('open'); el('art-modal').setAttribute('aria-hidden','false'); if(!loaded) load(); }
-  function close(){ el('art-modal').classList.remove('open'); el('art-modal').setAttribute('aria-hidden','true'); }
-  function load(){
-    el('art-sub').textContent='Loading\\u2026';
-    fetch('/api/your-art').then(function(r){return r.json();}).then(function(d){ loaded=true; render(d); })
-      .catch(function(){ el('art-sub').textContent='Could not load your art.'; });
-  }
-  function render(d){
-    var items=d.items||[], t=d.totals||{};
-    if(!t.count){ el('art-sub').innerHTML='No published art synced yet \\u2014 run <code>--sync-artworks</code> to pull your posted works\\u2019 stats.'; el('art-grid').innerHTML=''; el('art-foot').textContent=''; return; }
-    el('art-sub').innerHTML='<div class="art-tot">'
-      +'<div class="cell"><span class="num">'+fmt(t.count)+'</span><span class="lbl">published</span></div>'
-      +(d.views_synced?'<div class="cell"><span class="num v">'+fmt(t.views_top)+'</span><span class="lbl">views (top 12)</span></div>':'')
-      +'<div class="cell"><span class="num">'+fmt(t.likes)+'</span><span class="lbl">likes</span></div>'
-      +'<div class="cell"><span class="num">'+fmt(t.comments)+'</span><span class="lbl">comments</span></div></div>'
-      +'<div style="font-size:12px;color:var(--subtext);margin-top:2px;">Your top posts'+(d.views_synced?' by views':' by likes')+':</div>';
-    var g=el('art-grid'); g.innerHTML='';
-    items.forEach(function(m,i){
-      var c=document.createElement('div'); c.className='art-card';
-      var stats='';
-      if(m.views!=null) stats+='<span class="v">\\ud83d\\udc41 '+fmt(m.views)+'</span>';
-      stats+='<span>\\u2665 '+fmt(m.likes)+'</span>';
-      if(m.comments) stats+='<span>\\ud83d\\udcac '+fmt(m.comments)+'</span>';
-      if(m.aes_score) stats+='<span>\\u2726 '+esc(String(m.aes_score).slice(0,4))+'</span>';
-      c.innerHTML='<span class="art-rank">'+(i+1)+'</span>'
-        +'<img loading="lazy" src="/thumbs/'+esc(m.media_id)+'.jpg" alt="" onerror="this.style.visibility=\\'hidden\\'">'
-        +'<div class="ab"><div class="anm" title="'+esc(m.title||m.prompt_preview||'')+'">'+esc(m.title||m.prompt_preview||'(untitled)')+'</div>'
-        +'<div class="ast">'+stats+'</div></div>';
-      g.appendChild(c);
-    });
-    el('art-foot').innerHTML = d.views_synced ? 'Live view counts, fetched fresh. Likes/comments from your last <code>--sync-artworks</code>.'
-      : 'Ranked by likes (live views load lazily, from any signed-in device). Run <code>--sync-artworks</code> to refresh stats.';
-  }
-  document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
-  return { open:open, close:close };
-})();
-// O13 (Phase 2): the gallery's own picker is the shared <mg-gallery-picker> web component
-// now, mount-to-open / unmount-to-close -- same pattern the Loom's openPick/bindGalleryPicker
-// already uses (master-storyboard.jsx). PickerCore/rendering/filters/infinite-scroll all live
-// INSIDE the component (static/mg-gallery-picker.js) now; this IIFE is just the bridge that
-// keeps Picker's own public contract -- open(callback, opts), close() -- unchanged, so its 4
-// existing call sites (refPick, the edit-ref "+ ref" slot, the edit-source Pick button, the
-// mg-pick-request listener) needed zero changes. show-source/show-upload/show-copy-prompt
-// (all three were the gallery's own #pick-modal features -- see mg-gallery-picker.js's header)
-// keep this a byte-for-byte feature match for the surface it replaces, not a downgrade.
-var Picker = (function(){
-  var cb=null, el=null;
-  function open(callback, opts){
-    close();   // idempotent: a stray double-open replaces rather than stacks two overlays
-    cb=callback;
-    el=document.createElement('mg-gallery-picker');
-    el.setAttribute('default-type', (opts&&opts.type==='video')?'video':'image');
-    el.setAttribute('show-source', '');
-    el.setAttribute('show-upload', '');
-    el.setAttribute('show-copy-prompt', '');
-    el.addEventListener('mg-pick', function(e){
-      var f=cb, d=e.detail; close();
-      // is_nsfw: the component's mg-pick detail is a real boolean (its own internal
-      // is_nsfw === '1' -> boolean conversion); every caller downstream of Picker.open
-      // (Gen.renderGenRef's data-nsfw setter, in particular) still does the app-wide
-      // '1'/'' STRING check, so convert back at the boundary rather than silently
-      // breaking Privacy Blur on a picked reference image.
-      if(f) f(d.media_id, d.thumb, d.prompt||'', d.is_nsfw?'1':'');
-    });
-    el.addEventListener('mg-close', function(){ close(); });
-    document.body.appendChild(el);
-  }
-  function close(){ if(el){ el.remove(); el=null; } cb=null; }
-  return {open:open, close:close};
-})();
-/* ---- Account balance chip (credits + free cards) in the header ---- */
-var Acct = (function(){
-  function chip(){ return document.getElementById('acct-chip'); }
-  function claimEl(){ return document.getElementById('acct-claim'); }
-  var CKEY='mg_acct';
-  // The real, live per-generation LoRA cap for this account (membership.privilege.lora,
-  // falling back to freeUserLora -- see /api/account). Not cached across reloads like the
-  // rest of the chip's data: it's read fresh every refresh() so it never drifts stale
-  // against an actual subscription change, and Gen reads it live via Acct.loraCap().
-  var loraCap=null;
-  function daysUntil(d){ if(!d) return 999; var t=(new Date(d+'T00:00:00')).getTime();
-    return isNaN(t)?999:Math.ceil((t-Date.now())/86400000); }
-  function paint(d){
-    var c=chip(); if(!c) return;
-    var parts=[]; if(d.credits!=null) parts.push('\\u25c8 <b>'+Number(d.credits).toLocaleString()+'</b>');
-    if(d.cards!=null) parts.push('<span class="cd">\\ud83c\\udfab '+d.cards+'</span>');
-    // urgency: soonest card expiry, or a subscription cliff that stops card grants
-    var warn=[], ce=daysUntil(d.card_expiry);
-    if(d.card_expiry && ce<=3) warn.push('cards expire in '+Math.max(0,ce)+'d ('+d.card_expiry+')');
-    if(d.sub && d.sub.cancel && d.sub.end && daysUntil(d.sub.end)<=7)
-      warn.push('premium ends '+d.sub.end+' \\u2014 card grants stop');
-    if(parts.length){ c.innerHTML=(warn.length?'\\u26a0 ':'')+parts.join(' \\u00b7 '); c.style.display=''; }
-    // rich tooltip: per-card breakdown + any warnings
-    var tip=['Your PixAI balance \\u2014 open the Control Panel'];
-    (d.cards_by||[]).forEach(function(k){ if(k.count) tip.push('\\ud83c\\udfab '+k.count+' '+(k.name||'')+(k.expires?' (exp '+k.expires+')':'')); });
-    warn.forEach(function(w){ tip.push('\\u26a0 '+w); });
-    c.title=tip.join('\\n');
-    // claimable free-credits badge
-    var b=claimEl();
-    if(b){ if(d.claim_credits){ b.innerHTML='<img class="claim-ico" src="/branding/rewards/claim.png" onerror="this.remove()">+'+Number(d.claim_credits).toLocaleString()+' claim'; b.style.display=''; }
-           else b.style.display='none'; }
-  }
-  function refresh(){
-    var c=chip(); if(!c) return;
-    // Paint the last-known balance instantly so navigating never shows a blank chip.
-    try{ var cached=JSON.parse(localStorage.getItem(CKEY)||'null'); if(cached) paint(cached); }catch(e){}
-    fetch('/api/account').then(function(r){return r.json();}).then(function(d){
-      // Only a fully-successful read (credits present) updates the chip; a transient
-      // miss or error keeps the last-known value instead of blanking it.
-      if(d.error || d.credits==null){ coverage(d); return; }
-      loraCap = (d.lora_cap!=null) ? d.lora_cap : null;
-      if(window.Gen && Gen.refreshLoraCap) Gen.refreshLoraCap();
-      var good={credits:d.credits, cards:(d.cards!=null?d.cards:0), cards_by:d.cards_by,
-                card_expiry:d.card_expiry, claim_credits:d.claim_credits, sub:d.sub};
-      try{ localStorage.setItem(CKEY, JSON.stringify(good)); }catch(e){}
-      paint(good); coverage(d);
-    }).catch(function(){});
-  }
-  function claim(){
-    var b=claimEl(); if(b) b.textContent='claiming\\u2026';
-    fetch('/api/claim',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
-      if(d && d.error){ if(window.Toast) Toast.show({kind:'err',title:'Claim failed',msg:d.error}); }
-      else if(window.Toast) Toast.show({kind:'ok',title:'Claimed +'+Number((d&&d.credits)||0).toLocaleString()+' credits'});
-      refresh();
-    }).catch(function(){ refresh(); });
-  }
-  function coverage(d){
-    var b=document.getElementById('cover-badge');
-    if(!b || d.coverage_pct==null || !d.server_tasks){ return; }
-    var pct=d.coverage_pct;
-    b.className='cover-badge '+(pct>=99.5?'full':(pct>=90?'high':'low'));
-    b.innerHTML='\\ud83d\\udcbe <b>'+pct+'%</b> backed up';
-    b.title=d.local_tasks.toLocaleString()+' of '+d.server_tasks.toLocaleString()
-      +' generation tasks archived locally'+(pct>=99.5?' \\u2014 complete backup \\u2728':'');
-    b.style.display='';
-  }
-  return {refresh:refresh, claim:claim, loraCap:function(){ return loraCap; }};
-})();
-/* ---- First-run wizard: paste a key, then trigger the first sync as a Panel job ---- */
-var Setup = (function(){
-  function msg(id, text, cls){
-    var el=document.getElementById(id); if(!el) return;
-    el.textContent=text; el.className='setup-msg'+(cls?' '+cls:'');
-  }
-  function saveKey(){
-    var input=document.getElementById('setup-key-input');
-    var key=(input&&input.value||'').trim();
-    if(!key){ msg('setup-key-msg','Paste your API key first.','err'); return; }
-    msg('setup-key-msg','Connecting\\u2026','');
-    fetch('/api/setup/save-key',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({api_key:key})}).then(function(r){return r.json();}).then(function(d){
-      if(d.error){ msg('setup-key-msg',d.error,'err'); return; }
-      var extra=d.credits!=null?(' \\u2014 '+Number(d.credits).toLocaleString()+' credits'):'';
-      msg('setup-key-msg','Connected'+extra+'. Reloading\\u2026','ok');
-      setTimeout(function(){ location.reload(); },900);
-    }).catch(function(){ msg('setup-key-msg','Network error \\u2014 try again.','err'); });
-  }
-  var poll=null, syncBtn=null, pollMisses=0;
-  // "Sync now" is the ONLY control on the first-run screen, so every failure path has to hand
-  // it back -- tick() polls long after firstSync()'s stack is gone, so the button lives here
-  // instead of in a closure the poller can't reach. It used to be disabled on click and
-  // re-enabled only when the POST itself was rejected: a brand-new user whose first sync
-  // failed mid-job (or whose status polling died) was stranded on the setup screen forever.
-  function syncFailed(text){
-    if(poll){ clearInterval(poll); poll=null; }
-    pollMisses=0;
-    msg('setup-sync-msg', text, 'err');
-    if(syncBtn) syncBtn.disabled=false;
-  }
-  // "See the Panel for details" is no help HERE: this is the one screen a brand-new user
-  // can reach, and it is the first thing they ever do. /api/panel/status already carries
-  // the job's own stdout and its exit code, so the reason gets said on the spot rather
-  // than sending someone who has not finished setting up off to find it. msg() assigns
-  // textContent, so the subprocess's output cannot inject markup on the way through.
-  function syncReason(d){
-    var lines=(d&&d.lines)||[];
-    var rc=(d&&d.rc!=null)?(' (exit '+d.rc+')'):'';
-    // A non-loopback caller gets one placeholder line instead of the real output.
-    if(lines.length===1 && String(lines[0]).indexOf('only on the server')!==-1){
-      return 'Sync failed'+rc+' \\u2014 open Moonglade on the server itself to see why.';
-    }
-    var tail=[];
-    for(var i=lines.length-1;i>=0 && tail.length<3;i--){
-      var t=String(lines[i]||'').trim(); if(t) tail.unshift(t);
-    }
-    return tail.length ? ('Sync failed'+rc+': '+tail.join(' \\u00b7 '))
-                       : ('Sync failed'+rc+' \\u2014 the job ended without printing a reason.');
-  }
-  function firstSync(){
-    var btn=event&&event.target; if(btn) syncBtn=btn;
-    if(syncBtn) syncBtn.disabled=true;
-    pollMisses=0;
-    msg('setup-sync-msg','Starting\\u2026','');
-    fetch('/api/panel/run',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'sync'})}).then(function(r){return r.json();}).then(function(d){
-      if(d.error){ syncFailed(d.error); return; }
-      poll=setInterval(tick, 1500); tick();
-    }).catch(function(){ syncFailed('Network error \\u2014 try again.'); });
-  }
-  function tick(){
-    fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
-      pollMisses=0;
-      if(d.status==='running'){
-        var p=d.progress;
-        msg('setup-sync-msg', p ? ('Syncing\\u2026 '+p.done+' / '+p.total+(p.new?(' ('+p.new+' new)'):'')) : 'Syncing\\u2026', '');
-        return;
-      }
-      clearInterval(poll); poll=null;
-      if(d.status==='failed'){ syncFailed(syncReason(d)); return; }
-      msg('setup-sync-msg','Done! Reloading\\u2026','ok');
-      setTimeout(function(){ location.reload(); },900);
-    }).catch(function(){
-      // A status read can blip while the job is genuinely running, so give up only after
-      // several consecutive misses -- but DO give up, rather than polling a dead endpoint
-      // forever behind a disabled button.
-      if(++pollMisses>=5) syncFailed('Lost contact with the sync job \\u2014 check the Panel, then try again.');
-    });
-  }
-  return {saveKey:saveKey, firstSync:firstSync};
-})();
-/* ---- Prompt snippets / favorites (server-stored) ---- */
-var Snips = (function(){
-  var list=null, target=null;
-  function menu(){ return document.getElementById('snip-menu'); }
-  function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
-  function load(){ return (list!==null?Promise.resolve():fetch('/api/snippets').then(function(r){return r.json();})
-      .then(function(d){ list=d.snippets||[]; }).catch(function(){ list=[]; })); }
-  function persist(){
-    // Was fully fire-and-forget: the server answers 200 with an {error:...} body on a write
-    // failure (see /api/snippets' except OSError branch), and nothing here ever looked at
-    // the response -- a save/delete could silently not stick and the UI would still show it
-    // as saved until the next reload wiped it back out. Surface a failure the same way
-    // Acct.claim() already does (window.Toast), and only there -- a clean save stays silent
-    // exactly as before.
-    fetch('/api/snippets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({snippets:list})})
-      .then(function(r){return r.json();})
-      .then(function(d){ if(!d || d.error){ if(window.Toast) Toast.show({kind:'err', title:'Snippet not saved', msg:(d&&d.error)||'The server rejected the save.'}); } })
-      .catch(function(){ if(window.Toast) Toast.show({kind:'err', title:'Snippet not saved', msg:'Network error.'}); });
-  }
-  function open(anchor, tgt){ target=tgt; lastAnchor=anchor;
-    load().then(function(){ render(); place(anchor); }); }
-  // render() can change the popover's HEIGHT while it is open -- the undo strip adds a row,
-  // undoing removes it -- and place() only ever ran once, at open. A popover that had been
-  // flipped ABOVE its button (the common case: the snippet button sits low in the drawer)
-  // grows upward off the top of the screen, so the strip it just grew to show is the exact
-  // part that gets clipped. Re-measure after any re-render that happens while it is open.
-  function reflow(){ var m=menu();
-    if(m && m.style.display==='block' && lastAnchor && lastAnchor.isConnected) place(lastAnchor); }
-  function hide(){ var m=menu(); if(m) m.style.display='none'; }
-  function place(a){ var m=menu(), r=a.getBoundingClientRect();
-    m.style.display='block';
-    // clientWidth/clientHeight, NOT window.innerWidth/innerHeight: innerWidth counts the
-    // vertical scrollbar as usable space, so clamping against it parked the popover's right
-    // edge under the scrollbar gutter -- readable, but sitting on top of a control. The
-    // documentElement's client box is the same viewport minus the scrollbars, which is what
-    // "keep 8px clear of the edge" actually means here.
-    var vw=document.documentElement.clientWidth, vh=document.documentElement.clientHeight;
-    m.style.left=Math.max(8, Math.min(r.left, vw-m.offsetWidth-8))+'px';
-    var top=r.bottom+4; if(top+m.offsetHeight>vh-8) top=r.top-m.offsetHeight-4;
-    m.style.top=Math.max(8,top)+'px';
-  }
-  function render(){
-    var m=menu(); var html='<div class="snip-head"><span>Snippets</span>'
-      +'<button class="jt-x" onmousedown="event.preventDefault();Snips.saveCurrent()">+ save current</button></div>';
-    if(pendingUndo) html+='<div class="snip-undo"><span>Deleted \\u201c'+esc(trunc(pendingUndo.text))+'\\u201d</span>'
-      +'<button class="jt-x" onmousedown="event.preventDefault()" onclick="event.stopPropagation();Snips.undo()">Undo</button></div>';
-    if(!list.length) html+='<div class="snip-empty">No saved snippets yet.</div>';
-    (list||[]).forEach(function(s,i){
-      // The x fires on CLICK, not mousedown -- see del() for why that one word matters.
-      html+='<div class="snip-row"><button class="snip-ins" onmousedown="event.preventDefault();Snips.insert('+i+')" title="Insert">'+esc(s)+'</button>'
-        +'<button class="jt-x" onmousedown="event.preventDefault()" onclick="event.stopPropagation();Snips.del('+i+')" title="Delete (Undo appears at the top)">\\u00d7</button></div>';
-    });
-    m.innerHTML=html;
-  }
-  function trunc(s){ s=String(s||''); return s.length>44 ? s.slice(0,44)+'\\u2026' : s; }
-  function saveCurrent(){ if(!target) return; var v=(target.get()||'').trim(); if(!v) return;
-    if(list.indexOf(v)<0){ list.unshift(v); list=list.slice(0,200); persist(); render(); reflow(); } }
-  function insert(i){ if(!target||!list[i]) return; var cur=(target.get()||'').trim();
-    target.set(cur ? (cur.replace(/,\\s*$/,'')+', '+list[i]) : list[i]); hide(); }
-  var pendingUndo=null;   /* one level: the last snippet del() removed, offered back in render() */
-  function del(i){
-    if(!list[i]) return;
-    // This used to run on MOUSEDOWN, unconfirmed and unrecoverable. The x sits 4px from
-    // the insert button in a popover 220-340px wide, and mousedown commits before the
-    // button is even released -- there is no press-then-slide-away-to-cancel, and by the
-    // time you notice, persist() has already POSTed the truncated list to /api/snippets.
-    // One fat-finger and a saved prompt is gone for good. Two cheap changes instead of a
-    // confirm(): fire on CLICK, which restores the cancel gesture every destructive
-    // control in every app has; and keep the removed text so the popover can hand it
-    // straight back. Deliberately NOT confirm() -- this menu exists to be used quickly,
-    // and a modal on every delete is friction paid by the deletes that were meant, to
-    // protect the rare one that wasn't. An undo taxes only the mistake.
-    //
-    // The event.stopPropagation() on that button is load-bearing, not decoration:
-    // render() below replaces the popover's innerHTML while the click is still bubbling,
-    // so by the time the document-level "click outside closes the menu" listener runs,
-    // its e.target has been detached and m.contains(e.target) is false. The popover would
-    // shut itself -- taking the undo affordance with it -- on every delete.
-    pendingUndo={text:list[i], index:i};
-    list.splice(i,1); persist(); render(); reflow();
-    // Neutral kind, not 'ok': a green tick on a deletion reads as "saved successfully",
-    // which is the opposite of the thing being reported. The toast's whole job is to say
-    // it happened and where the way back is.
-    if(window.Toast) Toast.show({kind:'', icon:'\\u21ba', title:'Snippet deleted',
-      msg:'Undo sits at the top of the Snippets menu.'});
-  }
-  function undo(){
-    if(!pendingUndo) return;
-    var p=pendingUndo; pendingUndo=null;
-    // Clamped, and skipped entirely if the text is somehow back already: a "+ save
-    // current" between the delete and the undo shifts every index by one, and re-adding
-    // a duplicate would be a second bug wearing the first one's clothes.
-    if(list.indexOf(p.text)<0) list.splice(Math.min(p.index, list.length), 0, p.text);
-    persist(); render(); reflow();   // the strip just went away -- re-measure, same as del()
-  }
-  document.addEventListener('click', function(e){ var m=menu();
-    if(m && m.style.display==='block' && !m.contains(e.target) && !(e.target.classList&&e.target.classList.contains('snip-btn'))) hide(); });
-  return {open:open, saveCurrent:saveCurrent, insert:insert, del:del, undo:undo};
-})();
-var Gen = (function(){
-  var kind='base', selected=null, costSeq=0, costTimer=null;
-  // Every price badge gets its OWN debounce timer and stale-response counter -- Generate,
-  // Edit and Fix never share a pair. They have to: one user action schedules more than one
-  // of them. setEditSource refreshes the Edit badge AND the Fix badge for the same source,
-  // and a ?edit=<id> arrival fires the Edit check while the page's opening Generate check is
-  // still sitting on its debounce -- on a shared timer that second call cancels the first,
-  // which is exactly why the Generate tab used to open with no price at all on an ?edit=
-  // load. On a shared counter, whichever response lands second silently invalidates the
-  // first badge's own answer.
-  var editSeq=0, editTimer=null;
-  var fixTag_='face', fixBoxes=[], fixStart=null, fixSeq=0, fixTimer=null, fixCostVal=null;
-  function el(id){return document.getElementById(id);}
-  function open(){
-    el('gen-drawer').classList.add('open'); el('gen-scrim').classList.add('open');
-    el('gen-drawer').setAttribute('aria-hidden','false');
-    setTimeout(function(){el('gen-prompt').focus();},200);
-  }
-  function close(){
-    el('gen-drawer').classList.remove('open'); el('gen-scrim').classList.remove('open');
-    el('gen-drawer').setAttribute('aria-hidden','true');
-    var f=el('model-flyout'); if(f){ f.classList.remove('open'); f.setAttribute('aria-hidden','true'); }
-    // The filters panel is a SIBLING of the drawer (it has to be -- see its CSS), so closing
-    // the drawer does not hide it the way a child would be hidden. Close it explicitly or it
-    // is left floating over the gallery, anchored to a drawer that has slid away.
-    var af=el('filters-flyout');
-    if(af && af.classList.contains('open')) toggleFilters();
-    hidePreview();
-  }
-  // O12 (Phase 2): the flyout's own grid/search/market UI is the shared <mg-model-picker>
-  // now -- two instances, lazily created on first open (matching the old "only fetch on
-  // first open" behavior, `if(!el('gen-grid').children.length) search();`, instead of
-  // paying for both an always-mounted base AND LoRA fetch on every page load): kind="base"
-  // for Models, kind="lora" multi market for LoRAs (market = the O13 sort/category
-  // extension, opt-in so the Loom's own kind="lora" multi mount -- no market attribute --
-  // stays byte-for-byte unaffected). setKind() now just toggles which one is visible;
-  // each keeps its OWN last-searched results independently, so switching Models<->LoRAs
-  // and back no longer re-fetches either side (a small improvement over the old
-  // shared-grid behavior, not just parity with it).
-  var basePickerEl=null, loraPickerEl=null;
-  function ensurePickers(){
-    if(basePickerEl) return;
-    var host=el('gen-picker-host'); if(!host) return;
-    basePickerEl=document.createElement('mg-model-picker');
-    basePickerEl.setAttribute('kind','base');
-    basePickerEl.setAttribute('market','');
-    basePickerEl.addEventListener('mg-pick', function(e){ onBasePick(e.detail); });
-    host.appendChild(basePickerEl);
-    loraPickerEl=document.createElement('mg-model-picker');
-    loraPickerEl.setAttribute('kind','lora');
-    loraPickerEl.setAttribute('multi','');
-    loraPickerEl.setAttribute('market','');
-    loraPickerEl.style.display='none';
-    loraPickerEl.addEventListener('mg-pick', function(e){ onLoraPick(e.detail.model, e.detail.selected); });
-    host.appendChild(loraPickerEl);
-  }
-  function toggleFlyout(){
-    var f=el('model-flyout'), on=!f.classList.contains('open');
-    f.classList.toggle('open', on); f.setAttribute('aria-hidden', on?'false':'true');
-    if(on){
-      ensurePickers();
-      setTimeout(function(){
-        var vis=(kind==='lora')?loraPickerEl:basePickerEl, q=vis&&vis.querySelector('.mg-q');
-        if(q) q.focus();
-      },120);
-    }
-    else hidePreview();
-  }
-  function setDock(d){
-    d=(d==='left'||d==='top'||d==='bottom')?d:'right';
-    var dr=el('gen-drawer');
-    ['left','top','bottom'].forEach(function(x){ dr.classList.toggle('dock-'+x, d===x); });
-    document.querySelectorAll('.dock-ctl button').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-dock')===d); });
-    try{ localStorage.setItem('gen-dock', d); }catch(e){}
-    // #model-flyout re-anchors on a dock change through CSS alone (its position is written in
-    // `#gen-drawer.dock-* #model-flyout` rules). The filters panel is placed by JS, so it has to
-    // be told: without this it keeps the coordinates of the dock it was opened against. Deferred
-    // past the drawer's own .2s width/transform transition, or it measures the OLD box.
-    if(el('filters-flyout') && el('filters-flyout').classList.contains('open'))
-      setTimeout(placeFilters, 220);
-  }
-  function setKind(k){
-    if(k===kind) return; kind=k;
-    el('gen-k-base').classList.toggle('on',k==='base');
-    el('gen-k-lora').classList.toggle('on',k==='lora');
-    ensurePickers();
-    if(basePickerEl) basePickerEl.style.display = (k==='base') ? '' : 'none';
-    if(loraPickerEl) loraPickerEl.style.display = (k==='lora') ? '' : 'none';
-    // Owner report 2026-07-24 ("still slow"): both pickers used to search on mount even
-    // while hidden, so opening the flyout always fired two searches at once for a tab
-    // nobody had asked to see yet. ensureSearched() is a no-op after the first real call,
-    // so switching tabs back and forth still never re-fetches.
-    var vis = (k==='base') ? basePickerEl : loraPickerEl;
-    if(vis && vis.ensureSearched) vis.ensureSearched();
-  }
-  function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
-  function fmt(n){ return (n||0).toLocaleString(); }
-  function fmtCompact(n){ n=Number(n)||0;   // 207743449 -> "207.7M"; refCount = lifetime uses
-    if(n>=1e9) return (n/1e9).toFixed(1).replace(/\\.0$/,'')+'B';
-    if(n>=1e6) return (n/1e6).toFixed(1).replace(/\\.0$/,'')+'M';
-    if(n>=1e3) return (n/1e3).toFixed(1).replace(/\\.0$/,'')+'K';
-    return String(n); }
-  function tyShort(t){ t=(t||'').toUpperCase();
-    if(t.indexOf('LORA')>=0)return 'LoRA'; if(t.indexOf('MMDIT')>=0)return 'MMDiT';
-    if(t.indexOf('DIT')>=0)return 'DiT'; if(t.indexOf('SDXL')>=0)return 'SDXL';
-    if(t.indexOf('SD_V1')>=0)return 'SD1.5'; if(t.indexOf('SD3')>=0)return 'SD3';
-    if(t.indexOf('Z_IMAGE')>=0)return 'Z-Image'; if(t.indexOf('CHAT')>=0)return 'Chat';
-    return (t.split('_')[0]||'model').toLowerCase(); }
-  function baseLabel(cat){ // "uploaded-sdxl" -> "SDXL", "flux-1" -> "Flux 1"
-    cat=(cat||'').replace(/^uploaded-/,'').replace(/[-_]+/g,' ').trim();
-    if(!cat) return '';
-    if(/sdxl/i.test(cat)) return 'SDXL'; if(/sd3/i.test(cat)) return 'SD3';
-    if(/^sd ?v?1/i.test(cat)) return 'SD1.5'; if(/flux/i.test(cat)) return 'Flux';
-    if(/pony/i.test(cat)) return 'Pony'; if(/illustrious/i.test(cat)) return 'Illustrious';
-    return cat.replace(/\\b\\w/g,function(c){return c.toUpperCase();}); }
-  function showPreview(m, anchor){
-    var p=el('model-preview'); if(!p||!m) return;
-    var src=m.cover_url||m.preview_url;
-    var base=baseLabel(m.base_model);
-    var badges='';
-    if(base) badges+='<span class="bdg base">'+esc(base)+'</span>';
-    if(m.official) badges+='<span class="bdg official" title="In-house / official model">\\u2713 Official</span>';
-    var stats='<span class="ty">'+tyShort(m.type)+'</span>';
-    if(m.ref_count) stats+='<span title="'+fmt(m.ref_count)+' generations \\u2014 lifetime uses">\\u25c8 '+fmtCompact(m.ref_count)+' uses</span>';
-    stats+='<span>\\u2665 '+fmt(m.liked_count)+'</span>';
-    if(m.comment_count) stats+='<span>\\ud83d\\udcac '+fmt(m.comment_count)+'</span>';
-    var html = (src?'<img src="'+esc(src)+'"'+(m.should_blur?' class="blur"':'')+' alt="">':'')
-      +'<div class="mp-meta"><div class="mp-nm">'+esc(m.title)+'</div>'
-      +'<div class="mp-sub">'+stats+'</div>'
-      +(badges?'<div class="mp-badges">'+badges+'</div>':'')
-      +(m.description?'<div class="mp-desc">'+esc(m.description)+'</div>':'')
-      +'</div>';
-    p.innerHTML=html; p.classList.add('open'); p.setAttribute('aria-hidden','false');
-    placePreview(p, anchor);
-  }
-  function hidePreview(){ var p=el('model-preview'); if(p){ p.classList.remove('open'); p.setAttribute('aria-hidden','true'); } }
-  // scheduleShowPreview/cancelPreview (the search-grid card hover-intent debounce) moved
-  // into <mg-model-picker> itself (O12) -- it owns its own cards now. hidePreview/
-  // showPreview/placePreview stay: previewSelected (the #gen-selrow summary-button hover)
-  // and showRefPreview (the reference-image slot hover) are unrelated to the picker grid.
-  function placePreview(p, anchor){
-    var r=anchor.getBoundingClientRect(), w=300, gap=14, x;
-    var dr=el('gen-drawer'), leftish = dr && dr.classList.contains('dock-left');
-    // Preview should open toward screen center, away from the drawer edge: to the RIGHT
-    // of the card when the drawer is docked left, to the LEFT otherwise.
-    if(leftish){ x = r.right + gap; if(x + w > window.innerWidth - 8) x = Math.max(8, r.left - w - gap); }
-    else { x = r.left - w - gap; if(x < 8) x = Math.min(r.right + gap, window.innerWidth - w - 8); }
-    var y = Math.max(8, Math.min(r.top - 20, window.innerHeight - 470));
-    p.style.left=x+'px'; p.style.top=y+'px';
-  }
-  function showRefPreview(mid, anchor){
-    var p=el('model-preview'); if(!p||!mid) return;
-    p.innerHTML='<img src="/thumbs/'+mid+'.jpg" alt="">';
-    p.classList.add('open'); p.setAttribute('aria-hidden','false');
-    placePreview(p, anchor);
-  }
-  function previewSelected(ev){ if(selected) showPreview(selected, ev.currentTarget); }
-  var loras=[];
-  // O12 (Phase 2): <mg-model-picker kind="lora" multi>'s own _toggleMulti() now owns the
-  // pending/resolve/fail lifecycle (same shape as the old toggleLora() -- see the
-  // component's own header comment) -- this just upserts the Gallery's own `loras` array
-  // by model_id, mirroring the Loom's identical bindLoraPicker bridge. Note: the old cap
-  // (`if(loras.length>=6) return;`) is DELIBERATELY not reproduced here -- the component
-  // already optimistically highlights a picked card in ITS OWN grid before this listener
-  // ever runs, so silently refusing to add it here would leave the picker showing a card
-  // as selected that never actually made it into `loras` (visually picked, silently not
-  // submitted) -- confusing in a strictly worse way than no cap at all. The Loom's own
-  // identical mount has run uncapped since D-11 with no reported issue.
-  function onLoraPick(model, sel){
-    var i=-1; loras.forEach(function(l,j){ if(l.model_id===model.model_id) i=j; });
-    if(!sel){ if(i>=0) loras.splice(i,1); }
-    else { if(i<0) loras.push(model); else loras[i]=model; }
-    renderLoras(); refreshLoraNotes(); updateGoState(); debouncedCost();
-  }
-  // --- LoRA<->base compatibility gate + trigger-word offers ------------------
-  // A LoRA runs on a base ONLY if its loraBaseModelType == the base's modelType (exact enum
-  // equality). Family-level only (Pony/Illustrious/vanilla all = SDXL_MODEL) so this is a HARD
-  // block on architecture mismatch, never a quality promise. Fails OPEN on unknown types.
-  function prettyType(t){ t=(t||'').toUpperCase();
-    if(t.indexOf('SDXL')>=0)return 'SDXL'; if(t.indexOf('SD_V1')>=0)return 'SD1.5';
-    if(t.indexOf('DIT7')>=0)return 'DiT-7B'; if(t.indexOf('MMDIT')>=0)return 'MMDiT';
-    if(t.indexOf('DIT9')>=0)return 'DiT-9'; if(t.indexOf('SD3')>=0)return 'SD3';
-    if(t.indexOf('Z_IMAGE')>=0)return 'Z-Image'; return t||'?'; }
-  function loraIncompat(e){
-    var b=selected&&selected.model_type, l=e&&e.lora_base_type;
-    if(!b||!l) return false;                       // unknown -> don't block
-    return String(b).toUpperCase()!==String(l).toUpperCase();
-  }
-  function anyIncompat(){ return loras.some(loraIncompat); }
-  // A LoRA still missing its version_id -- whether the lookup is still in flight or has
-  // permanently failed -- must block Generate. The old code let this fall through silently:
-  // the submit payload just filtered the unresolved LoRA out (see payload()), so a paid
-  // generation could fire missing a LoRA the user believed was included, with nothing on
-  // screen but an hourglass that never explained itself.
-  function anyLoraUnresolved(){ return loras.some(function(l){ return !l.version_id; }); }
-  function overLoraCap(){ var cap=window.Acct&&Acct.loraCap?Acct.loraCap():null; return cap!=null && loras.length>cap; }
-  function updateGoState(){ var go=el('gen-go'); if(go) go.disabled = !(selected&&selected.version_id) || anyIncompat() || anyLoraUnresolved() || overLoraCap(); }
-  function triggersInPrompt(tw){
-    var first=(tw||'').split(',')[0].trim().toLowerCase();
-    return first && (el('gen-prompt').value||'').toLowerCase().indexOf(first)>=0;
-  }
-  function refreshLoraNotes(){
-    var box=el('gen-lora-note'); if(!box) return; box.innerHTML='';
-    if(overLoraCap()){                               // over the account's real cap (blocking)
-      var cap=Acct.loraCap();
-      var w0=document.createElement('div'); w0.className='lora-warn';
-      w0.innerHTML='\\u26a0 Your account allows <b>'+cap+' LoRA'+(cap===1?'':'s')+'</b> per generation \\u2014 remove '
-        +(loras.length-cap)+' to continue.';
-      box.appendChild(w0);
-    }
-    loras.forEach(function(e){                      // incompatibility warnings (blocking)
-      if(!loraIncompat(e)) return;
-      var w=document.createElement('div'); w.className='lora-warn';
-      w.innerHTML='\\u26a0 <b>'+esc(e.title)+'</b> needs a '+esc(prettyType(e.lora_base_type))
-        +' base, but '+esc(selected.title)+' is '+esc(prettyType(selected.model_type))
-        +'. It would fail on submit \\u2014 remove it or switch the base.';
-      box.appendChild(w);
-    });
-    loras.forEach(function(e,i){                    // trigger-word offers (skip incompatible)
-      if(!e.trigger_words || loraIncompat(e) || triggersInPrompt(e.trigger_words)) return;
-      var t=document.createElement('div'); t.className='lora-trig';
-      t.innerHTML='\\u2728 <b>'+esc(e.title)+'</b> triggers: <code>'+esc(e.trigger_words)+'</code>'
-        +'<button type="button" onclick="Gen.insertTriggers('+i+',this)">Insert</button>';
-      box.appendChild(t);
-    });
-    updateGoState();
-  }
-  function insertTriggers(i, btn){
-    var e=loras[i]; if(!e||!e.trigger_words) return;
-    var ta=el('gen-prompt'), cur=(ta.value||'').trim();
-    ta.value = cur ? (cur.replace(/,\\s*$/,'')+', '+e.trigger_words) : e.trigger_words;
-    if(btn){ btn.textContent='Inserted \\u2713'; btn.className='done'; btn.disabled=true; }
-    refreshCost();
-  }
-  function renderLoras(){
-    var box=el('gen-loras'); if(!box) return; box.innerHTML='';
-    var lrange=loraRange();
-    loras.forEach(function(l,i){
-      var d=document.createElement('div'); d.className='lora-chip'+((loraIncompat(l)||l.failed)?' incompat':'');
-      var badge=l.version_id?'':(l.failed?' \\u26a0':' \\u23f3');
-      var titleAttr=l.failed?(esc(l.title)+' \\u2014 could not load; remove it (\\u00d7) and re-add to retry'):esc(l.title);
-      // Per-LoRA version selection: only when the LoRA actually HAS more than one
-      // published release (l.versions, resolved alongside version_id itself -- see
-      // mg-model-picker.js's _toggleMulti ?all=1 fetch) -- the common single-version
-      // case renders nothing extra. Wraps onto its own line (.lora-chip's flex-wrap)
-      // rather than cramming a third control into the name/weight/remove row.
-      var verSel=(l.versions&&l.versions.length>1)
-        ?('<select class="ver" title="This LoRA\\u2019s published releases \\u2014 PixAI defaults to the latest; pick another to use it instead" onchange="Gen.loraPickVersion('+i+', this.value)">'
-          +l.versions.map(function(v){ return '<option value="'+esc(v.version_id)+'"'+(v.version_id===l.version_id?' selected':'')+'>'+esc(v.label||v.version_id)+'</option>'; }).join('')
-          +'</select>') : '';
-      d.innerHTML=(l.preview_url?'<img src="'+esc(l.preview_url)+'" alt="">':'')
-        +'<span class="nm" title="'+titleAttr+'">'+esc(l.title)+badge+'</span>'
-        // A slider with its value beside it, rather than a spinner you have to click 40
-        // times to cross the range. `oninput` (not onchange) so the number tracks the drag,
-        // and the cost re-check behind it is already debounced. Bounds come from the base
-        // model's architecture -- see loraRange().
-        +'<span class="lw"><input type="range" step="0.1" min="'+lrange[0]+'" max="'+lrange[1]
-        +'" value="'+l.weight+'" title="Weight \\u2014 '+lrange[0]+' to '+lrange[1]+' for this base model'
-        +(lrange[0]<0?'; negative subtracts this LoRA\\u2019s influence':'')+'"'
-        +' oninput="Gen.loraWeight('+i+', this.value)"><b>'+(+l.weight).toFixed(1)+'</b></span>'
-        +'<button type="button" class="rm" title="Remove" onclick="Gen.loraRemove('+i+')">&times;</button>'
-        +verSel;
-      box.appendChild(d);
-    });
-    paintLoraCap();
-  }
-  // The account's real per-generation LoRA entitlement (Acct.loraCap(), sourced from
-  // membership.privilege via /api/account -- see that route's comment). Purely informational
-  // + a pre-submit guard (updateGoState below), never hides the "+ Add LoRA" button or blocks
-  // the picker's own selection -- refusing an add there would leave a card visually selected
-  // in the picker that never actually landed in `loras` (the exact reason the old 6-LoRA cap
-  // was NOT reproduced during the O12 migration, see CHANGELOG). Unknown cap (null, e.g. a
-  // fresh account or a transient /api/account miss) shows nothing rather than a false "no
-  // limit" or a made-up number.
-  function paintLoraCap(){
-    var s=el('gen-lora-cap'); if(!s) return;
-    var cap=window.Acct&&Acct.loraCap?Acct.loraCap():null;
-    if(cap==null){ s.textContent=''; return; }
-    var over=loras.length>cap;
-    s.textContent='\\u00b7 '+loras.length+' / '+cap;
-    s.classList.toggle('over', over);
-    updateGoState();   // the cap can arrive (or change) after LoRAs are already picked
-  }
-  // LoRA weight bounds follow the BASE MODEL's architecture: DiT allows 0..1.2, the SD
-  // family -2..2 (negative weights subtract that LoRA's influence). Served from core in
-  // window.MG_LORA so this cannot drift from the builder's own clamp. An unknown or
-  // not-yet-picked base falls back to the widest range rather than the narrowest -- the
-  // same fail-open reasoning the LoRA base-type filter uses, and a weight the architecture
-  // refuses comes back as a refused submit, which costs nothing.
-  function loraRange(){
-    var L=window.MG_LORA, t=(selected&&selected.model_type)||'';
-    if(!L) return [-2,2];
-    return (L.ranges&&L.ranges[String(t).toUpperCase()]) || L.fallback || [-2,2];
-  }
-  // Re-clamp every chip when the base model changes: switching from SDXL to a DiT model
-  // with a -0.8 LoRA attached would otherwise leave a weight on screen, and in the payload,
-  // that the new architecture rejects.
-  function reclampLoras(){
-    var r=loraRange(), changed=false;
-    loras.forEach(function(l){
-      var w=Math.max(r[0], Math.min(r[1], +l.weight));
-      if(w!==l.weight){ l.weight=w; changed=true; }
-    });
-    renderLoras();
-    if(changed) debouncedCost();
-  }
-  function loraWeight(i, v){ if(!loras[i]) return;
-    v=parseFloat(v);
-    var r=loraRange();
-    loras[i].weight=(isNaN(v)?Math.max(r[0],Math.min(r[1],0.7)):Math.max(r[0],Math.min(r[1],v)));
-    // Repaint the readout in place rather than re-rendering the chip list -- rebuilding the
-    // row mid-drag would destroy the very slider the pointer is holding.
-    var chip=el('gen-loras')&&el('gen-loras').children[i];
-    var out=chip&&chip.querySelector('.lw b');
-    if(out) out.textContent=loras[i].weight.toFixed(1);
-    debouncedCost(); }
-  // Note (O12): removing a LoRA via its chip's own x no longer re-searches the picker grid
-  // (there IS no search() anymore -- see the ensurePickers block above). The LoRA picker's
-  // OWN card for the removed entry can stay visually highlighted until the user interacts
-  // with that exact card again (clicking it re-toggles it off, correctly, through
-  // onLoraPick) -- a minor, cosmetic-only staleness, not a functional gap: `loras` (and
-  // therefore payload()) is always correct immediately, regardless of the grid's own
-  // highlight state. Flagged as a precise, known, low-severity remainder rather than
-  // silently left unexplained.
-  function loraRemove(i){
-    var gone=loras[i];
-    loras.splice(i,1);
-    // Tell the picker too. It keeps its OWN copy of what's picked, and removing a chip
-    // here never touched it: the card stayed lit, clicking it again read as a remove
-    // rather than a re-add, and a version resolve still in flight for that LoRA saw it
-    // as live and re-dispatched it straight back into this list.
-    if(gone && loraPickerEl && loraPickerEl.deselect) loraPickerEl.deselect(gone.model_id);
-    renderLoras(); refreshLoraNotes(); updateGoState(); debouncedCost();
-  }
-  // Switch an already-added LoRA to a different published release -- mirrors pickVersion()
-  // (the base model's own version switcher) exactly, just applied to loras[i] instead of the
-  // single `selected` object. No extra network call: l.versions was already resolved in full
-  // when the LoRA was first picked (mg-model-picker.js's _toggleMulti, ?all=1).
-  function loraPickVersion(i, vid){
-    var l=loras[i]; if(!l||!l.versions) return;
-    var v=l.versions.filter(function(x){ return x.version_id===vid; })[0];
-    if(!v) return;
-    l.version_id=v.version_id||''; l.lora_base_type=v.lora_base_model_type||'';
-    l.trigger_words=v.trigger_words||''; l.failed=!l.version_id;
-    renderLoras(); refreshLoraNotes(); updateGoState(); debouncedCost();
-  }
-  function openLoraBrowser(){
-    var f=el('model-flyout');
-    if(!f.classList.contains('open')) toggleFlyout();
-    setKind('lora');
-  }
-  var selSeq=0;   // guards onBasePick's async version fetch against a stale-response race
-  // O12 (Phase 2): replaces the old selectCard(m, c) -- <mg-model-picker kind="base">'s
-  // mg-pick fires with the raw /api/model-search row (detail: m), and the component
-  // already owns highlighting the picked card in its own grid, so this only has to do
-  // what selectCard did AFTER that: resolve the real version + metadata and refresh
-  // every downstream surface (LoRA compat notes, model-defaults prefill, cost).
-  function onBasePick(m){
-    // Owner report 2026-07-24: picking a model left the flyout open, forcing a manual
-    // close to get back to the form -- close it the instant a base model is picked
-    // (single-select: one choice ends the browsing task). LoRA picking is deliberately
-    // left open (multi-select -- see onLoraPick/toggleLora), matching the existing
-    // separate "+ Add LoRA" button as the explicit way to continue into LoRA selection.
-    if(el('model-flyout').classList.contains('open')) toggleFlyout();
-    selected=Object.assign({}, m); var mySeq=++selSeq;
-    var th=el('gen-selthumb');
-    if(m.preview_url){ th.src=m.preview_url; th.style.display=''; } else { th.style.display='none'; }
-    el('gen-selname').textContent=m.title+' \\u2026';
-    // picker-parity-round2 (problem 4/5): ?all=1 replaces the old single-version fetch --
-    // ONE request either way (same endpoint), but now returns every published release
-    // (versions[0] is the same "latest" resolve_version_meta always gave) so the version
-    // picker + sampling_method + capabilities the app was resolving and throwing away can
-    // finally be shown, not just negative/steps/cfg (which were already wired -- see
-    // applyModelDefaults below).
-    fetch('/api/model-version?model_id='+encodeURIComponent(m.model_id)+'&all=1')
-      .then(function(r){return r.json();})
-      .then(function(d){ if(mySeq!==selSeq) return;   // a newer pick superseded this fetch
-        var versions=(d&&d.versions)||[], v=versions[0]||{};
-        selected.versions=versions;
-        applyVersion(v);
-        el('gen-selname').textContent=m.title+(v.version_id?'':' (no version!)');
-        renderVersions(versions, v.version_id);
-        refreshLoraNotes();   // re-check any attached LoRAs against the new base + set go-state
-        applyModelDefaults();
-        refreshCost(); })
-      .catch(function(){ if(mySeq!==selSeq) return;   // a newer pick already owns the UI
-        // `selected` was swapped to the new base at the top of this function, so a failed
-        // resolve leaves it with NO version_id -- only the success path ever re-ran the gate,
-        // so Go stayed enabled from the previously-resolved model and would submit a base
-        // that never resolved. Re-run the same gate here, and say so instead of silently
-        // dropping the " ..." and looking like a normal pick.
-        el('gen-selname').textContent=m.title+' (version lookup failed)';
-        updateGoState();
-        if(window.Toast) Toast.show({kind:'err', title:'Model not loaded',
-          msg:'Could not look up versions for '+m.title+' \\u2014 pick it again.'});
-      });
-  }
-  // Copy one resolved version's meta (list_model_versions row shape) onto `selected` --
-  // shared by onBasePick's initial (latest) resolve and pickVersion's switch, so the two
-  // can never disagree about which fields a "version" carries.
-  function applyVersion(v){
-    selected.version_id=v.version_id||''; selected.model_type=v.model_type||'';
-    selected.negative_prompt=v.negative_prompt||''; selected.sampling_steps=v.sampling_steps||null;
-    selected.cfg_scale=v.cfg_scale||null; selected.sampling_method=v.sampling_method||'';
-    selected.capabilities=v.capabilities||[];
-    selected.compatibility=v.compatibility||{}; selected.restrictions=v.restrictions||{};
-    if(loraPickerEl) loraPickerEl.setAttribute('base-type', selected.model_type||'');
-    reclampLoras();          // DiT allows 0..1.2, SD -2..2 -- the chips must follow the base
-    applyCapabilityGating();
-  }
-  // extra.compatibility (probed live 2026-07-06, memory pixai-model-capability-schema) says
-  // which Advanced-panel params THIS model actually honors -- e.g. Tsubaki.2 ignores CFG
-  // scale and runs sampling steps FIXED at 16 regardless of what the field says. Showing an
-  // editable control that silently does nothing is worse than showing nothing: disable it
-  // (not hide -- the owner can still see the field exists and why it's off) with a plain
-  // tooltip. Fails OPEN on unknown data (compatibility==={} for a model never probed, or any
-  // key simply absent) -- only an EXPLICIT `false` disables anything, matching every other
-  // fail-open gate in this app (is_lora_compatible, annotate_lora_compat, ...). restrictions
-  // (real min/max bounds, e.g. {samplingSteps:{min:16,max:50}}) clamp the field's own
-  // hardcoded HTML bounds when the model publishes tighter ones.
-  //
-  // defMin/defMax are ALWAYS applied when bounds doesn't cover them -- caught live: an
-  // earlier version only set min/max when `bounds` had them, so switching FROM a model with
-  // real restrictions TO one with none left the field's min/max stuck at the PREVIOUS
-  // model's numbers (imperative DOM attributes persist across calls unless explicitly
-  // touched -- unlike React's declarative re-render, which recomputes from scratch every
-  // time and never had this bug on the Loom's own copy of this same gate).
-  // NOTE, because "clamp ... when the model publishes tighter ones" above describes the
-  // INTENT and not a guarantee: `bounds` REPLACES defMin/defMax, it does not clip them.
-  // Every restriction PixAI has been observed to publish is narrower (samplingSteps
-  // {min:16,max:50}, Tsubaki.2's fixed 16), but nothing here enforces it -- and
-  // `restrictions` is live remote data, so a published
-  // samplingSteps.max of 200 would widen this control past what the server accepts, the
-  // POST would carry 200, and _gen_args_from_payload would clamp it to 150 on the way to a
-  // PAID submit. That is why the server side REPORTS a clamp that fires (see `adjusted`)
-  // instead of applying it in silence: the owner finds out they paid for 150 steps rather
-  // than being charged for a substitution nobody mentioned. Clipping here as well would be
-  // the belt to that braces -- deliberately not done in this pass, because it changes three
-  // lines tests/test_web_pick.py pins verbatim and that file is outside this repair.
-  function gateField(id, honored, bounds, defMin, defMax){
-    var f=el(id); if(!f) return;
-    var off = honored===false;
-    f.disabled = off;
-    f.title = off ? 'This model doesn\\u2019t use this setting' : '';
-    f.classList.toggle('cap-off', off);
-    if(defMin!=null) f.min = (bounds&&bounds.min!=null) ? bounds.min : defMin;
-    if(defMax!=null) f.max = (bounds&&bounds.max!=null) ? bounds.max : defMax;
-  }
-  // A booster the model does not honor must not be offerable. PixAI's own Add Booster menu
-  // omits Enhance Details entirely on a DiT model (measured 2026-07-28 on Tsubaki.2), and
-  // compatibility.upscale:false is the same fact in their metadata. Sending it anyway is the
-  // image-side twin of the V3.0 Lite video bug, where an unsupported flag came back as a
-  // bogus "sensitive or NSFW content" refusal -- so the cost of not gating is a misleading
-  // error, not a no-op. Disables rather than hides, same reasoning as gateField, and turns
-  // the booster OFF if the model changed underneath it while it was armed.
-  function gateBooster(k, honored, why){
-    var b=el(BOOSTER_BTN[k]); if(!b) return;
-    if(b.getAttribute('data-title')===null) b.setAttribute('data-title', b.title||'');
-    var off = honored===false;
-    b.disabled = off;
-    b.classList.toggle('cap-off', off);
-    b.title = off ? why : (b.getAttribute('data-title')||'');
-    if(off && boosters[k]){
-      boosters[k]=false;
-      b.classList.remove('on');
-      return true;                    // caller re-costs: the submit shape just changed
-    }
-    return false;
-  }
-  function applyCapabilityGating(){
-    var s=selected||{}, compat=s.compatibility||{}, restr=s.restrictions||{};
-    gateField('gen-neg', compat.negativePrompt, null);
-    gateField('gen-steps', compat.samplingSteps, restr.samplingSteps, 1, 150);
-    gateField('gen-cfg', compat.cfgScale, restr.cfgScale, 1, 30);
-    var disarmed = gateBooster('hires', compat.upscale,
-      'This model doesn\\u2019t support Enhance Details \\u2014 PixAI doesn\\u2019t offer it on this model either.');
-    if(disarmed) debouncedCost();
-  }
-  // problem 4: PixAI's own model/LoRA cards offer a version selector; resolve_version_meta
-  // always silently took the newest release and discarded the rest. #gen-version lists every
-  // one (core.list_model_versions, via ?all=1 above); switching re-applies that version's OWN
-  // meta (a different release can carry a different tuned preset, in principle a different
-  // model_type) through the exact same applyVersion() onBasePick uses, then re-runs the same
-  // downstream refresh -- no extra network call, the data's already in hand.
-  function pickVersion(vid){
-    if(!selected||!selected.versions) return;
-    var v=selected.versions.filter(function(x){ return x.version_id===vid; })[0];
-    if(!v) return;
-    applyVersion(v);
-    el('gen-selname').textContent=selected.title+(v.version_id?'':' (no version!)');
-    renderCaps(v.capabilities);
-    refreshLoraNotes();
-    applyModelDefaults();
-    refreshCost();
-  }
-  function renderVersions(versions, currentId){
-    var wrap=el('gen-selmeta'), sel=el('gen-version');
-    if(!wrap||!sel) return;
-    if(!versions.length){ wrap.classList.remove('show'); sel.innerHTML=''; renderCaps([]); return; }
-    // Only offer the <select> when there's actually more than one release to choose from --
-    // the same versions.length>1 gate the per-LoRA chips above (renderLoras) and the Loom's
-    // own .lv-versel already use. A one-option dropdown is a control that cannot do
-    // anything; most models have exactly one release, so this row was showing on almost
-    // every pick. #gen-selmeta still opens for the capability badges alone, which are
-    // independent of how many versions exist.
-    var multi=versions.length>1;
-    sel.innerHTML=multi?versions.map(function(v){
-      return '<option value="'+esc(v.version_id)+'"'+(v.version_id===currentId?' selected':'')+'>'+esc(v.label||v.version_id)+'</option>';
-    }).join(''):'';
-    sel.style.display=multi?'':'none';
-    var cur=versions.filter(function(v){ return v.version_id===currentId; })[0]||versions[0];
-    renderCaps(cur.capabilities);
-    var caps=(cur.capabilities||[]).length;
-    wrap.classList.toggle('show', multi||caps>0);
-  }
-  // problem 5: `extra.capabilities` (PixAI's own descriptive tags -- "high-resolution",
-  // "pose-accuracy", ...) was resolved by resolve_version_meta and never shown anywhere.
-  // Read-only badges -- these are not a submit param, just what PixAI's own info card says
-  // the model is good at.
-  function renderCaps(caps){
-    var box=el('gen-caps'); if(!box) return;
-    box.innerHTML=(caps||[]).map(function(c){ return '<span class="cap">'+esc(c)+'</span>'; }).join('');
-  }
-  // Prefill negative/steps/cfg from the model author's own tuned preset (resolve_version_meta
-  // already fetches these; the drawer just never used them). Only for fields the model actually
-  // has data for -- a model with no tuned preset leaves whatever's already in the fields alone.
-  // problem 5: sampling_method is READ-ONLY informational text here, not a new submit field --
-  // the create mutation is never called with an explicit samplingMethod anywhere in this app
-  // (PixAI picks its own default sampler; only Mode/inferenceProfile is user-facing), and
-  // unlike inferenceProfile (which has a confirmed server-rejection retry path,
-  // submit_generation()) there is no confirmed-safe way to force an arbitrary sampler per
-  // model without risking a silent submit rejection this pass has no safety net for. Showing
-  // it is still real, honest progress -- the owner can now actually SEE what preset a model's
-  // author tuned, which was the concrete complaint ("it's all in their info cards already").
-  function applyModelDefaults(){
-    var note=el('gen-modeldefaults'), lbl=el('gen-modeldefaults-label'); if(!note) return;
-    var s=selected||{}, has=s.negative_prompt||s.sampling_steps||s.cfg_scale||s.sampling_method;
-    note.style.display = has ? 'flex' : 'none';
-    if(lbl) lbl.textContent = s.sampling_method
-      ? ('\\u2713 using this model\\'s tuned preset (' + s.sampling_method + ')')
-      : '\\u2713 using this model\\'s tuned preset';
-    if(!has) return;
-    if(s.negative_prompt) el('gen-neg').value=s.negative_prompt;
-    if(s.sampling_steps) el('gen-steps').value=s.sampling_steps;
-    if(s.cfg_scale) el('gen-cfg').value=s.cfg_scale;
-  }
-  function resetModelDefaults(){ applyModelDefaults(); }
-  var genRef=null;   // {media_id, thumb, is_nsfw} -- the img2img reference, or null
-  function refPick(){
-    if(genRef){ genRef=null; renderGenRef(); debouncedCost(); return; }   // click filled slot = clear
-    Picker.open(function(mid, thumb, prompt, is_nsfw){ genRef={media_id:mid, thumb:thumb, is_nsfw:is_nsfw}; renderGenRef(); debouncedCost(); });
-  }
-  function renderGenRef(){
-    var s=el('gen-ref-slot'), c=el('gen-ref-ctl'); if(!s) return;
-    if(genRef){
-      if(genRef.is_nsfw==='1') s.setAttribute('data-nsfw','1'); else s.removeAttribute('data-nsfw');
-      s.innerHTML='<img src="'+genRef.thumb+'" style="width:100%;height:100%;object-fit:cover;">'
-        +'<span style="position:absolute;top:1px;right:1px;background:rgba(21,19,28,.85);color:var(--subtext);border-radius:50%;width:15px;height:15px;font-size:10px;line-height:15px;text-align:center;">&times;</span>';
-      s.style.borderStyle='solid'; s.title='Click to remove the reference';
-      c.style.display='';
-      s.onmouseenter=function(){ showRefPreview(genRef.media_id, s); }; s.onmouseleave=hidePreview;
-    } else {
-      s.removeAttribute('data-nsfw');
-      s.innerHTML='+ ref'; s.style.borderStyle='dashed'; s.title='Pick a reference image from your gallery';
-      s.onmouseenter=null; s.onmouseleave=null; c.style.display='none';
-    }
-  }
-  function refStrength(v){ el('gen-ref-sval').textContent=(+v).toFixed(2); debouncedCost(); }
-  function d8(n){ n=Math.round(n/8)*8; return Math.max(64, Math.min(4096, n)); }
-  function dims(){
-    // Custom W&H (both set) win; else aspect ratio scaled so the LONG edge = chosen size.
-    var cw=+(el('gen-cw')&&el('gen-cw').value||0), ch=+(el('gen-ch')&&el('gen-ch').value||0);
-    if(cw>0 && ch>0) return {w:d8(cw), h:d8(ch), custom:true};
-    var b=document.querySelector('#gen-aspects button.on');
-    var rw=b?+b.getAttribute('data-rw'):1, rh=b?+b.getAttribute('data-rh'):1;
-    var size=+((el('gen-size')&&el('gen-size').value)||1024);
-    var w,h; if(rw>=rh){ w=size; h=size*rh/rw; } else { h=size; w=size*rw/rh; }
-    return {w:d8(w), h:d8(h), custom:false};
-  }
-  function updateDimNote(){ var n=el('gen-dim-note'); if(!n) return; var d=dims();
-    n.textContent='\\u2192 '+d.w+' \\u00d7 '+d.h+(d.custom?' \\u00b7 custom':' px'); }
-  // --- Boosters (Face Fix / Quality Tag / Enhance Details) --------------------
-  // PixAI has TWO upscale methods and they live in different places. `enlarge` (their
-  // ESRGAN "Upscale") and `upscale` (their "Hires") are both offered from the IMAGE VIEW,
-  // on a picture that already exists -- that is <mg-upscale-panel>, not this drawer. What
-  // belongs here is only their `Enhance Details (HiRes)` BOOSTER, which is the `upscale`
-  // family and sits with Face Fix and Quality Tag.
-  //
-  // This used to be a three-way Off/Upscale/Hires segment in the generation panel, which
-  // was wrong twice over: it is not where PixAI puts it, and the drawer has no source
-  // image, so the ratio cap and the "-> 1952x1096" output line were derived from the size
-  // the generation is ABOUT to be rather than from a real picture.
-  //
-  // The drawer's chip carries NO settings, matching PixAI: their Add Booster menu offers
-  // add-or-remove and nothing else. The ratio/denoise sliders that used to live here were
-  // the image-view tool's controls on a booster that has none, and the pixel-ceiling cap
-  // that drove them does not apply: it was inferred from their image-view DIALOG's slider
-  // maxima, and a real booster task submitted 1.5 on a 1400x784 source (2100x1176) --
-  // over that inferred ceiling -- and completed. The ceiling still governs
-  // <mg-upscale-panel>, which is where a slider actually exists.
-  // PixAI's own values for the Enhance Details chip, captured from a real task rather than
-  // guessed. Their booster exposes no controls, so these are not defaults the user can move.
-  var MG_HIRES={ratio:1.5, denoise:0.6};
-  var boosters={facefix:false, qtag:false, hires:false};
-  var BOOSTER_BTN={facefix:'gen-facefix', qtag:'gen-qtag', hires:'gen-hires'};
-  function toggleBooster(k){
-    boosters[k]=!boosters[k];
-    var b=el(BOOSTER_BTN[k]);
-    if(b) b.classList.toggle('on', boosters[k]);
-    // Enhance Details is the one booster with settings of its own; the ratio panel is its
-    // disclosure, so it opens and closes with the chip rather than living on screen at all
-    // times the way the old segment's controls did.
-    debouncedCost();
-  }
-  function payload(){ var a=dims();
-    // Enhance Details is a plain on/off chip, exactly like PixAI's: their Add Booster menu
-    // offers add-or-remove and NO settings at all. The values below are theirs, captured
-    // from a real task (2026-07-28, task 2039053268124647852): upscale 1.5, denoising
-    // strength 0.6, and denoising steps that MIRROR the generation's own sampling steps
-    // rather than a constant -- their task carried samplingSteps 32 and
-    // upscaleDenoisingSteps 32. The drawer used to expose a ratio/denoise panel, which was
-    // the IMAGE-VIEW upscale tool's control surface bolted onto a booster that has none.
-    var upR = boosters.hires ? MG_HIRES.ratio : null;
-    var qt=el('gen-qtag');
-    return { version_id:(selected&&selected.version_id)||'', model_id:(selected&&selected.model_id)||'', prompt:el('gen-prompt').value.trim(),
-      negative:el('gen-neg').value.trim(), width:a.w, height:a.h, mode:el('gen-mode').value,
-      steps:+el('gen-steps').value||25, cfg:+el('gen-cfg').value||7,
-      count:+el('gen-count').value, seed:(el('gen-seed')?el('gen-seed').value.trim():''),
-      high_priority:el('gen-hp').checked, prompt_helper:el('gen-ph').checked,
-      ref_media_id:(genRef?genRef.media_id:''), ref_strength:+el('gen-ref-strength').value,
-      // null (not 0/1) when Enhance Details is off -- the server omits every upscale key
-      // unless a real ratio above 1 arrives, so an untouched drawer submits exactly what it
-      // submitted before these controls existed. `enlarge` is never sent from here at all:
-      // the drawer offers Hires only, and a stray enlarge alongside it is the one
-      // combination the builder refuses outright.
-      upscale:upR,
-      upscale_denoise: boosters.hires ? MG_HIRES.denoise : null,
-      upscale_denoise_steps: boosters.hires ? (+el('gen-steps').value||25) : null,
-      face_fix:boosters.facefix,
-      quality_tag:(boosters.qtag?(qt&&qt.getAttribute('data-prefix')||''):''),
-      loras:loras.filter(function(l){return l.version_id;}).map(function(l){return {version_id:l.version_id, weight:l.weight};}) }; }
-  function refreshCost(){
-    updateDimNote();
-    var cost=el('gen-cost');
-    // Was a bare early `return` that left whatever the line last said on screen. Harmless in
-    // practice (`selected` is only ever assigned, never cleared) but clear() is the honest
-    // shape and it costs nothing to be right here.
-    if(!(selected&&selected.version_id)){ cost.clear(); return; }
-    cost.setChecking();
-    var mine=++costSeq;
-    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())})
-      .then(function(r){return r.json();})
-      // Same split as editCost above: the host owns the fetch/debounce/stale-guard, the badge
-      // owns every state's wording and colour. This tab had TWO fail-open branches, both now
-      // gone: an unpriceable {cost:null, free:false} response rendered "~ ? credits", and a
-      // server `note` was never handled at all so it fell into that same string.
-      .then(function(d){ if(mine===costSeq) cost.setPrice(d); })
-      .catch(function(){ if(mine===costSeq) cost.setPrice(null); });
-  }
-  function debouncedCost(){ clearTimeout(costTimer); costTimer=setTimeout(refreshCost,250); }
-  // LOCAL PORT of loom/src/loom-mutations.js's friendlyGenErr(raw) -- same regex patterns,
-  // same intent as static/mg-generate-drawer.js's own local copy just below this same
-  // reasoning (see its duplication-risk comment). This page's Gen IIFE is ALSO a plain
-  // inline <script> generated straight into the page with no build step, so it can't
-  // import loom-mutations.js either -- a THIRD hand-maintained copy, same drift risk: if
-  // loom-mutations.js's friendlyGenErr ever gets new/changed regexes or wording, this one
-  // and the drawer's must both be updated by hand to match, or this tab's raw-error
-  // rendering silently drifts from the Video tab's (which already goes through the real
-  // one via <mg-generate-drawer>). A code-search for "friendlyGenErr" is the only guard
-  // against drift beyond the parity test covering this copy (loom/test/mg-generate-drawer-parity.test.js).
-  function friendlyGenErr(raw){
-  // A friendly label NEVER replaces the raw text -- it is APPENDED. 2026-07-26: a video
-  // decline read "PixAI's content filter blocked this generation" while PixAI had created no
-  // task at all, and the real cause was unrecoverable because this function discarded the raw
-  // string (and no route logged it either). Guidance AND ground truth, always.
-  //
-  // The moderation test deliberately does NOT fire on a bare "not allowed" / "violates" /
-  // "sensitive" / "prohibited": those are ordinary words in PARAMETER rejections, and matching
-  // them relabelled a validation error as a content-filter block -- which sends someone off to
-  // rewrite a prompt that was never the problem. They now need a content-ish noun beside them.
-  // Falling through to the raw text is safe; mislabelling is not.
-  //
-  // i2vPro is in the quality branch because VIDEO's quality field is `i2vPro.mode`, not
-  // `inferenceProfile` -- so before this, the one message written to explain a quality mismatch
-  // could never fire for a video error, and it fell into the moderation test instead.
-    var s = String(raw || '');
-    if (!s) return 'generation failed';
-    var hint = '';
-    if (/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s))
-      hint = 'Out of balance for this model \\u2014 no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.';
-    else if (/maxLength|too long|exceeds maximum/i.test(s))
-      hint = 'That prompt is too long for video \\u2014 PixAI allows 2000 characters. Trim it and resubmit; nothing was created or charged.';
-    else if (/image contains (sensitive|nsfw|prohibited)|NSFW_DETECTED|40300032/i.test(s))
-      hint = 'PixAI refused the SOURCE IMAGE on content grounds, not the prompt \\u2014 rewriting the text will not help. Try a different frame.';
-    else if (/moderat|content.?polic|flagged|nsfw/i.test(s)
-      || (/prohibit|sensitive|not.?allowed|violat/i.test(s)
-          && /content|prompt|polic|guideline|term|image/i.test(s)))
-      hint = "PixAI's content filter blocked this generation \\u2014 that's decided on PixAI's side, not here.";
-    else if (/inferenceProfile|i2vPro[./]mode|unknown mode/i.test(s))
-      hint = "That quality setting isn't available for this model \\u2014 try a different Mode.";
-    return hint ? hint + ' (PixAI said: ' + s.slice(0, 160) + ')' : s;
-  }
-  function renderResultInto(target, d, past){
-    if(d.error){ target.innerHTML='<span style="color:var(--red);font-size:12px;">'+esc(friendlyGenErr(d.error))+'</span>'; return; }
-    var ids=d.media_ids||[];
-    var cost = d.paid_credit===0 ? 'free (card used)' : ((d.paid_credit||0).toLocaleString()+' credits');
-    var html='<div style="color:var(--emerald);font-size:12px;margin-bottom:6px;">\\u2713 '+past+' \\u2014 '+cost+'. Added to your gallery.</div>';
-    ids.forEach(function(mid){ html+='<a href="/image/'+mid+'"><img src="/thumbs/'+mid+'.jpg" alt="result" loading="lazy"></a>'; });
-    if(ids.length){ html+='<a href="#" onclick="Gen.setEditSource(\\''+ids[0]+'\\');Gen.setMode(\\'edit\\');return false;">Edit this result \\u2192</a>'; }
-    target.innerHTML=html;
-  }
-  // Concurrent generations (owner-approved 2026-07-23): PixAI itself runs tasks in
-  // parallel, so the Go button used to lock for no real reason -- every OTHER tab reused
-  // this one runTask(), so fixing it here fixes Generate/Edit/Enhance/Fix together. Each
-  // call now gets its OWN line appended into the result strip (never overwriting a sibling
-  // submission's still-live status/result), and the button frees up the moment the SERVER
-  // ANSWERS the submit -- accepted or rejected -- not when the task finishes rendering.
-  // Jobs already polls each task_id independently (its own de-dupe map is keyed by id), so
-  // nothing about the polling itself needed to change -- only who owns the button and
-  // where a submission's own status gets rendered.
-  function runTask(url, p, res, opts){
-    opts=opts||{};
-    res.style.display='block';
-    var line=document.createElement('div'); line.className='gen-result-line';
-    line.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Submitting\\u2026</span>';
-    res.appendChild(line);
-    if(opts.btn){ opts.btn.disabled=true; opts.btn.textContent=opts.busy; }
-    function unlock(){ if(opts.btn){ opts.btn.disabled=false; opts.btn.textContent=opts.idle; } }
-    fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
-      .then(function(r){return r.json();})
-      .then(function(d){
-        unlock();   // the server answered -- free the button for the NEXT submission
-        if(d.error || !d.task_id){ renderResultInto(line, {error:d.error||'submit failed'}); return; }
-        // The server clamped something. It is already submitted and already charged, so
-        // this is a receipt, not a warning -- but it has to be SAID: paying for a 150-step
-        // render after asking for 200 is the substitution M20's clamp would otherwise make
-        // in silence. The key is absent unless a clamp really fired, so an ordinary submit
-        // costs nothing here -- and the drawer itself CAN produce one, because gateField()
-        // takes a model's published `restrictions` verbatim (see its note).
-        if(d.adjusted && d.adjusted.length && window.Toast){
-          Toast.show({kind:'err', title:'Settings were adjusted before submitting',
-            msg:d.adjusted.map(function(a){ return a.field+' '+a.asked+' \\u2192 '+a.used; }).join(', ')
-              +' \\u2014 this generation used the adjusted values.'});
-        }
-        line.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Queued \\u2014 running\\u2026</span>';
-        // Jobs owns the polling, so the task (and its result) survive closing the drawer.
-        // The callback below only ever touches THIS submission's own `line`.
-        Jobs.track(d.task_id, opts.past||'Task', function(phase, data){
-          if(phase==='done'){ renderResultInto(line, data, opts.past); Acct.refresh(); }
-          else if(phase==='failed'){ renderResultInto(line, {error:data.error||('task '+(data.status||'failed'))}); }
-          else { line.innerHTML='<span class="gen-moon"></span><span style="color:var(--subtext);font-size:12px;">Rendering under the eclipse\\u2026 (task '+String(d.task_id).slice(-6)+')</span>'; }
-        });
-      }).catch(function(){ unlock(); renderResultInto(line, {error:'network error'}); });
-  }
-  function generate(){
-    var p=payload();
-    if(!p.version_id) return;
-    if(!p.prompt){ el('gen-prompt').focus(); return; }
-    // Belt-and-suspenders alongside updateGoState()'s disabled attribute: never let a
-    // paid submit fire while a LoRA the user added is still unresolved or failed --
-    // payload() would otherwise just quietly drop it and spend credits on a mismatch.
-    if(anyLoraUnresolved()){ el('gen-lora-note').scrollIntoView({block:'nearest'}); return; }
-    runTask('/api/generate', p, el('gen-result'),
-            {past:'Generated', btn:el('gen-go'), busy:'Generating\\u2026', idle:'Generate'});
-  }
-  function setMode(m){
-    ['generate','edit','video'].forEach(function(x){
-      var pane=el('gen-mode-'+x); if(pane) pane.style.display=(x===m)?'':'none';
-      var btn=el('gm-'+x); if(btn) btn.classList.toggle('on', x===m); });
-    el('gen-drawer').classList.toggle('wide', m==='video'||m==='edit');
-    if(m==='edit'){ setEditModel(editModel); if(!presetsLoaded) loadPresets(); }
-    // Video is the <mg-generate-drawer> web component now -- it self-renders on connect and
-    // owns its own state; nothing to (re)build here (the old renderVideoSlots is gone).
-  }
-  function setEditSub(s){
-    ['edit','enhance','fix'].forEach(function(x){
-      var pane=el('edit-sub-'+x); if(pane) pane.style.display=(x===s)?'':'none';
-      var b=el('es-'+x); if(b) b.classList.toggle('on', x===s); });
-    if(s==='fix'){ fixResize(); fixCost(); }   // arriving on the tab re-prices whatever is marked
-  }
-  function editSrc(){ return el('edit-src').value.trim(); }
-  function setEditSource(mid){
-    el('edit-src').value=mid||'';
-    var img=el('edit-src-img');
-    if(mid){ img.onerror=function(){img.style.display='none';}; img.src='/thumbs/'+mid+'.jpg'; img.style.display='block'; fixInit(); fixLoad(mid); }
-    else { img.style.display='none'; }
-    // An open filters panel is showing the OLD image until it is told otherwise -- reloading it
-    // here is what stops a preview from being judged against the wrong source.
-    if(el('filters-flyout') && el('filters-flyout').classList.contains('open')) afLoadSource();
-    renderEditRefs();   // primary changed -> @image1 slot + cap count update
-    debEditCost();
-    fixCost();          // fixLoad() dropped the boxes with the old source; clear its badge too
-  }
-  var EDIT_CAPS={
-    'edit-pro':{max_refs:4,resolutions:['1K','2K'],qualities:['low','medium','high'],
-      aspects:['16:9','9:16','1:1','2:3','3:2','3:4','4:3','4:5','5:4','1:3','3:1'],
-      def:{resolution:'1K',quality:'medium',aspect:'3:4'}},
-    'reference-pro':{max_refs:10,resolutions:['2K','4K'],qualities:[],
-      aspects:['16:9','9:16','1:1','2:3','3:2','3:4','4:3','4:5','5:4','21:9'],
-      def:{resolution:'2K',quality:'',aspect:'3:4'}}
-  }; /* mirrors core.EDIT_MODELS caps (capability probe 2026-07-06) */
-  var editModel='edit-pro';
-  function _fillEditSel(id,opts,val){ var s=el(id); if(!s)return; s.innerHTML='';
-    opts.forEach(function(o){ var e2=document.createElement('option'); e2.value=o; e2.textContent=o;
-      if(o===val)e2.selected=true; s.appendChild(e2); }); }
-  function setEditModel(k){
-    var c=EDIT_CAPS[k]; if(!c)return; editModel=k;
-    var a=el('em-edit-pro'), b=el('em-reference-pro');
-    if(a)a.classList.toggle('on',k==='edit-pro'); if(b)b.classList.toggle('on',k==='reference-pro');
-    _fillEditSel('edit-res',c.resolutions,c.def.resolution);
-    _fillEditSel('edit-aspect',c.aspects,c.def.aspect);
-    var qw=el('edit-qual-wrap');
-    if(c.qualities.length){ if(qw)qw.style.display=''; _fillEditSel('edit-qual',c.qualities,c.def.quality); }
-    else { if(qw)qw.style.display='none'; if(el('edit-qual'))el('edit-qual').innerHTML=''; }
-    var maxAdd=Math.max(0, editRefCap()-(editSrc()?1:0));   // trim refs that no longer fit the model cap
-    if(editRefs.length>maxAdd){
-      // ...and SAY SO. This slice was silent: pick six references under Reference Pro
-      // (cap 10), tap the Edit Pro toggle (cap 4), and three of them vanished from the
-      // strip with no message anywhere -- the user then submitted a paid edit believing
-      // all six were still attached. bulkSendVideo has toasted its identical cap
-      // truncation since the day it was written; this is the same class of loss and
-      // deserves the same treatment and the same voice. Nothing toasts on the initial
-      // setEditModel('edit-pro') at page load: editRefs is empty, so this branch is
-      // simply not entered.
-      var had=editRefs.length, dropped=had-maxAdd, nm=el('em-'+k);
-      nm=nm?nm.textContent.trim():k;
-      editRefs=editRefs.slice(0,maxAdd);
-      if(window.Toast) Toast.show({kind:'err',
-        title:'Only '+maxAdd+' reference image'+(maxAdd===1?'':'s')+' kept',
-        msg:nm+' takes up to '+editRefCap()+' images in total (the one being edited counts as one) — '
-          +dropped+' of your '+had+' references were left out.'});
-    }
-    renderEditRefs();
-    editCost();
-  }
-  var editRefs=[];   /* ADDITIONAL reference images beyond the primary edit-src (@image2..) */
-  function editRefCap(){ return (EDIT_CAPS[editModel]||{max_refs:4}).max_refs; }
-  function renderEditRefs(){
-    var wrap=el('edit-refs'); if(!wrap) return; wrap.innerHTML='';
-    var cap=editRefCap(), prim=editSrc(), used=(prim?1:0)+editRefs.length;
-    function slot(inner,dashed){ var d=document.createElement('div');
-      d.style.cssText='position:relative;width:64px;height:64px;border-radius:8px;border:1px '+(dashed?'dashed':'solid')+' var(--surface1);background:var(--surface0);overflow:hidden;display:grid;place-items:center;color:var(--subtext);font-size:10px;text-align:center;';
-      d.innerHTML=inner; return d; }
-    function tag(t){ return '<span style="position:absolute;left:3px;bottom:3px;background:rgba(21,19,28,.85);color:var(--lavender);font-size:9px;padding:1px 4px;border-radius:4px;">'+t+'</span>'; }
-    if(prim) wrap.appendChild(slot('<img src="/thumbs/'+esc(prim)+'.jpg" style="width:100%;height:100%;object-fit:cover;">'+tag('@image1'),false));
-    editRefs.forEach(function(r,i){
-      var d=slot('<img src="'+esc(r.thumb)+'" style="width:100%;height:100%;object-fit:cover;">'+tag('@image'+(i+2))
-        +'<button type="button" style="position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:50%;border:none;background:rgba(21,19,28,.85);color:var(--subtext);font-size:11px;line-height:1;cursor:pointer;padding:0;">&times;</button>',false);
-      d.querySelector('button').onclick=function(ev){ ev.stopPropagation(); editRefs.splice(i,1); renderEditRefs(); debEditCost(); };
-      wrap.appendChild(d);
-    });
-    if(used<cap){ var add=slot('+ ref',true); add.style.cursor='pointer';
-      add.onclick=function(){ Picker.open(function(mid){ if(mid){ editRefs.push({media_id:mid,thumb:'/thumbs/'+mid+'.jpg'}); renderEditRefs(); debEditCost(); } }); };
-      wrap.appendChild(add); }
-    var capEl=el('edit-ref-cap'); if(capEl) capEl.textContent='\\u00b7 '+used+'/'+cap+' (@image1 = the image being edited)';
-  }
-  function editPayload(){
-    var prim=editSrc();
-    var sources=[prim].concat(editRefs.map(function(r){return r.media_id;})).filter(Boolean);
-    return { mode:'edit', edit_model:editModel, source:prim, sources:sources, instruction:el('edit-ins').value.trim(),
-      preset:(el('edit-preset')?el('edit-preset').value:''),
-      resolution:el('edit-res').value, quality:(el('edit-qual')?el('edit-qual').value:''), aspect:el('edit-aspect').value };
-  }
-  var presetsLoaded=false;
-  function loadPresets(){
-    fetch('/api/presets').then(function(r){return r.json();}).then(function(d){
-      var sel=el('edit-preset'); if(!sel) return;
-      var cur=sel.value; presetsLoaded=true;
-      sel.innerHTML='<option value="">None \\u2014 custom instruction below</option>';
-      Object.keys(d.presets||{}).sort().forEach(function(k){
-        var o=document.createElement('option'); o.value=k; o.textContent=d.presets[k].label||k;
-        sel.appendChild(o); });
-      sel.value=cur;
-    }).catch(function(){});
-  }
-  function presetImport(){
-    var tid=(el('preset-task').value||'').trim(); if(!tid) { el('preset-task').focus(); return; }
-    var btn=el('preset-task');
-    fetch('/api/presets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:tid})})
-      .then(function(r){return r.json();})
-      .then(function(d){
-        if(d.error){ btn.value=''; btn.placeholder='\\u26a0 '+d.error.slice(0,40); return; }
-        btn.value=''; btn.placeholder='banked: '+(d.label||d.imported);
-        loadPresets(); var sel=el('edit-preset'); if(sel) setTimeout(function(){ sel.value=d.imported; editCost(); }, 300);
-      }).catch(function(){ btn.placeholder='\\u26a0 network error'; });
-  }
-  function editCost(){
-    var cost=el('edit-cost');
-    // Bump BEFORE the early return -- see fixCost's note. Same contract, same defect: a
-    // response for the previous source stayed valid across a source change and repainted
-    // its price over the new one.
-    var mine=++editSeq;
-    if(!editSrc()){ cost.clear(); return; }
-    cost.setChecking();
-    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(editPayload())})
-      .then(function(r){return r.json();})
-      // <mg-cost-badge> owns the whole classification now (idle / checking / free / paid /
-      // could-not-verify), so this function keeps only what a HOST must own: the request, the
-      // 250ms debounce (debEditCost) and the stale-response guard. Not just tidying -- the
-      // branch this replaces rendered a {cost:null, free:false} response as the price-shaped
-      // "~ ? credits". That shape is NOT rare: price_task() in moonglade_backup.py fails
-      // soft and returns None on any /v2/task-price error, so a transient PixAI hiccup used to
-      // put a neutral, price-looking string on the one line whose job is to say whether this
-      // spends money. The badge renders it red instead.
-      .then(function(d){ if(mine===editSeq) cost.setPrice(d); })
-      // setPrice(null), NOT clear(): a failed fetch is could-not-verify, never "not priced
-      // yet". Conflating the two is exactly what the old neutral "cost unavailable" did.
-      .catch(function(){ if(mine===editSeq) cost.setPrice(null); });
-  }
-  function debEditCost(){ clearTimeout(editTimer); editTimer=setTimeout(editCost,250); }
-  function edit(){
-    var p=editPayload();
-    if(!p.source){ el('edit-src').focus(); return; }
-    if(!p.instruction && !p.preset){ el('edit-ins').focus(); return; }
-    runTask('/api/edit', p, el('edit-result'),
-            {past:'Edited', btn:el('edit-go'), busy:'Editing\\u2026', idle:'Apply edit'});
-  }
-  function fixTag(t){ fixTag_=t; el('fix-tag-face').classList.toggle('on',t==='face'); el('fix-tag-hand').classList.toggle('on',t==='hand'); }
-  function fixClear(){ fixBoxes=[]; fixRedraw(); fixCost(); }
-  function fixColor(tag){ return tag==='face' ? '#b692e6' : '#4fc99a'; }
-  function fixRedraw(){
-    var cv=el('fix-canvas'); if(!cv || !cv.getContext) return;
-    var ctx=cv.getContext('2d'); ctx.clearRect(0,0,cv.width,cv.height);
-    fixBoxes.forEach(function(b){
-      ctx.strokeStyle=fixColor(b.tag); ctx.lineWidth=2; ctx.strokeRect(b.x,b.y,b.w,b.h);
-      ctx.fillStyle=fixColor(b.tag); ctx.font='11px system-ui'; ctx.fillText(b.tag,b.x+3,b.y+13);
-    });
-  }
-  function fixResize(){
-    var img=el('fix-img'), cv=el('fix-canvas'); if(!img||!cv) return;
-    cv.width=img.clientWidth; cv.height=img.clientHeight;
-    cv.style.width=img.clientWidth+'px'; cv.style.height=img.clientHeight+'px'; fixRedraw();
-  }
-  function fixLoad(mid){
-    fixBoxes=[]; var img=el('fix-img'); if(!img) return;
-    img.onload=fixResize; img.onerror=function(){ el('fix-canvas').width=0; };
-    img.src='/full/'+encodeURIComponent(mid);
-  }
-  function fixInit(){
-    var cv=el('fix-canvas'); if(!cv || cv._wired) return; cv._wired=true;
-    function pos(e){ var r=cv.getBoundingClientRect(); var t=e.touches&&e.touches[0]?e.touches[0]:e; return {x:t.clientX-r.left,y:t.clientY-r.top}; }
-    function down(e){ fixStart=pos(e); e.preventDefault(); }
-    function move(e){ if(!fixStart)return; var p=pos(e); fixRedraw(); var ctx=cv.getContext('2d'); ctx.strokeStyle=fixColor(fixTag_); ctx.lineWidth=2; ctx.strokeRect(fixStart.x,fixStart.y,p.x-fixStart.x,p.y-fixStart.y); e.preventDefault(); }
-    function up(e){ if(!fixStart)return; var p=e.changedTouches&&e.changedTouches[0]?{x:e.changedTouches[0].clientX-cv.getBoundingClientRect().left,y:e.changedTouches[0].clientY-cv.getBoundingClientRect().top}:pos(e); var x=Math.min(fixStart.x,p.x),y=Math.min(fixStart.y,p.y),w=Math.abs(p.x-fixStart.x),h=Math.abs(p.y-fixStart.y); fixStart=null; if(w>6&&h>6){ fixBoxes.push({x:x,y:y,w:w,h:h,tag:fixTag_}); debFixCost(); } fixRedraw(); }
-    cv.addEventListener('mousedown',down); cv.addEventListener('mousemove',move); window.addEventListener('mouseup',up);
-    cv.addEventListener('touchstart',down,{passive:false}); cv.addEventListener('touchmove',move,{passive:false}); cv.addEventListener('touchend',up);
-  }
-  // The boxes as PixAI sees them: the canvas renders the source at whatever width the drawer
-  // gives it, so every box has to be scaled back to ORIGINAL-image pixels first. One helper
-  // for both callers on purpose -- the badge has to quote the exact request the button sends,
-  // and two copies of this arithmetic is how that stops being true.
-  function fixBoxesScaled(){
-    var img=el('fix-img');
-    var scale=(img && img.naturalWidth && img.clientWidth) ? (img.naturalWidth/img.clientWidth) : 1;
-    return fixBoxes.map(function(b){ return {x:Math.round(b.x*scale),y:Math.round(b.y*scale),
-      width:Math.round(b.w*scale),height:Math.round(b.h*scale),tag:b.tag}; });
-  }
-  function fixCost(){
-    var cost=el('fix-cost'); if(!cost) return;
-    fixCostVal=null;
-    // Bump BEFORE any return. This sequence number is what makes a late response
-    // discardable, so bailing out has to count as an invalidation too: without it, a
-    // request fired for a real selection is still "current" after the user hits Clear or
-    // swaps the source, and its response repaints a confident price for boxes that no
-    // longer exist.
-    var mine=++fixSeq;
-    if(!editSrc() || !fixBoxes.length){ cost.clear(); return; }
-    cost.setChecking();
-    fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({mode:'fix', source:editSrc(), boxes:fixBoxesScaled()})})
-      .then(function(r){return r.json();})
-      // Same host contract as editCost: the badge owns every bit of the idle / checking /
-      // paid / could-not-verify classification, this function owns only the request, the
-      // debounce and the stale-response guard. fixCostVal caches the settled number for the
-      // submit confirm below so the dialog and the badge can never disagree.
-      .then(function(d){ if(mine!==fixSeq) return; cost.setPrice(d); fixCostVal=cost.settled?cost.cost:null; })
-      // setPrice(null), not clear(): a failed fetch is could-not-verify, never "not priced yet".
-      .catch(function(){ if(mine===fixSeq){ cost.setPrice(null); fixCostVal=null; } });
-  }
-  function debFixCost(){
-    // The boxes have ALREADY changed by the time this runs, so the quoted price is stale NOW,
-    // not 250ms from now. Drop it here and burn the sequence token on the same line, so a
-    // reply still in flight for the previous box set can't put its number back either.
-    // Without both, drawing a second box and pressing Fix inside the debounce window put the
-    // FIRST box's price in the confirm dialog -- a figure approved for a request it never
-    // described.
-    fixCostVal=null; fixSeq++;
-    clearTimeout(fixTimer); fixTimer=setTimeout(fixCost,250); }
-  function fix(){
-    var src=editSrc(); if(!src){ el('edit-src').focus(); return; }
-    if(!fixBoxes.length){
-      var fr=el('fix-result'); fr.style.display='block';
-      var w=document.createElement('div'); w.className='gen-result-line';
-      w.innerHTML='<span style="color:var(--subtext);font-size:12px;">Drag a box over a hand or face first.</span>';
-      fr.appendChild(w);   // append, not overwrite -- a fix task already in flight keeps its own line
-      return;
-    }
-    // The confirm stays, but it can name the number now. /v2/task-price DOES price a Fix,
-    // given the chat.fixer-shaped params PixAI's server builds out of a /v2/task/fixer submit
-    // (see build_fixer_price_parameters) -- so the <mg-cost-badge> above this button carries
-    // the live figure and this dialog quotes it. It is not redundant with the badge: a Fix can
-    // never be covered by a free card, so every press of this button spends real credits, and
-    // an unverified price has to read as a warning rather than as silence.
-    var n=fixBoxes.length, what='Fix '+n+' marked region'+(n===1?'':'s')+'?';
-    if(!window.confirm(fixCostVal!=null
-        ? what+' This spends about '+fixCostVal.toLocaleString()+' PixAI credits.'
-        : what+" The cost check didn't come back, so this may spend PixAI credits.")) return;
-    runTask('/api/fix', {source:src, boxes:fixBoxesScaled()}, el('fix-result'),
-            {past:'Fixed', btn:el('fix-go'), busy:'Fixing\\u2026', idle:'Fix marked regions'});
-  }
-  function openEdit(mid){ open(); setMode('edit'); setEditSource(mid); }
-
-  // ---- Art filters (Edit > Enhance) --------------------------------------------------
-  // The panelplugin client half (loadWorkflows / renderWorkflows / selectEnhance /
-  // enhanceCost / runEnhance) is gone with the controls it drove -- see the sub-tab's markup
-  // for why a panelplugin submit can never complete from an API key. What lives here instead
-  // spends nothing and, until you press Save, makes no request at all: window.MgArtFilters
-  // (static/mg-art-filters.js) carries PixAI's own 7 filter recipes as baked data and does the
-  // whole composite on the client -- CSS mix-blend-mode for the preview, one canvas fill per
-  // layer for the export, both pinned to the same gradient geometry so they agree.
-  var afId=null;
-  function afOpts(){
-    return {strength:parseFloat(el('af-strength').value),
-            angle:parseFloat(el('af-angle').value)};
-  }
-  function afMsg(t, bad){
-    var m=el('af-msg'); if(!m) return;
-    m.textContent=t||''; m.classList.toggle('bad', !!bad);
-  }
-  function afBuildSwatches(){
-    var AF=window.MgArtFilters, host=el('af-swatches');
-    if(!AF || !host || host.children.length) return;   // built once, like ensurePickers()
-    // Two headed sections, ours first -- AF.groups() owns that order. Grouping matters
-    // because the sets do not behave alike: the Moonglade five use exact-mapping blend modes
-    // only, so their export is their preview, while four of PixAI's seven lean on Photoshop
-    // whole-colour modes CSS can only approximate. Each tile's tooltip says which it is.
-    AF.groups().forEach(function(g){
-      var h=document.createElement('div'); h.className='af-grp'; h.textContent=g.label;
-      host.appendChild(h);
-      var grid=document.createElement('div'); grid.className='af-tiles';
-      host.appendChild(grid);
-      g.ids.forEach(function(id){
-        var f=AF.get(id), approx=f.filters.some(function(L){
-          var e=AF.BLEND_MODE_MAP[L.blendMode]; return e && e.exact===false;
-        });
-        var t=document.createElement('button');
-        t.type='button'; t.className='af-tile'; t.setAttribute('data-af', id);
-        t.title=f.name+' \\u00b7 free, applied in your browser'
-               +(f.note ? ' \\u2014 '+f.note : '')
-               +(approx ? ' \\u00b7 uses a blend mode CSS can only approximate, so the saved '
-                          +'file differs slightly from this preview' : '');
-        var sw=document.createElement('div'); sw.className='sw';
-        var cap=document.createElement('div'); cap.className='cap';
-        cap.textContent=(f.name||id).replace('Filter ','');
-        t.appendChild(sw); t.appendChild(cap);
-        t.onclick=function(){ afPick(id); };
-        grid.appendChild(t);
-        AF.renderSwatch(sw, id);    // the tile IS that filter's own gradients, no art needed
-      });
-    });
-  }
-  // Built from nodes, not innerHTML: the name is baked data today, but a caption is exactly
-  // the kind of thing a later "custom filters" pass starts feeding user-typed names into.
-  function afCap(t){
-    var c=el('af-cap'); if(!c) return;
-    c.textContent='Preview \\u00b7 ';
-    var b=document.createElement('b'); b.textContent=t; c.appendChild(b);
-  }
-  function afPaintTiles(){
-    var tiles=el('af-swatches').querySelectorAll('.af-tile');
-    for(var i=0;i<tiles.length;i++)
-      tiles[i].classList.toggle('on', tiles[i].getAttribute('data-af')===afId);
-  }
-  function afPick(id){
-    var AF=window.MgArtFilters; if(!AF) return;
-    afId=id; afPaintTiles();
-    var n=AF.applyPreview(el('af-stage'), id, afOpts());
-    // normalizeLayers reports any layer it had to drop -- an unmapped blend mode, a stop colour
-    // that isn't a plain literal. The preview still renders, just without that layer, so saying
-    // so is the difference between "this filter looks off" and a silent wrong result.
-    afMsg(n.warnings.length ? n.warnings[0]
-                            : (AF.get(id).name+' \\u00b7 nothing sent, nothing spent'),
-          n.warnings.length > 0);
-    afCap(AF.get(id).name||id);
-  }
-  function filterClear(){
-    var AF=window.MgArtFilters; if(!AF) return;
-    afId=null; afPaintTiles(); AF.clearPreview(el('af-stage')); afMsg('');
-    afCap('no filter');
-  }
-  function filterStrength(v){
-    el('af-sval').textContent=(parseFloat(v)||0).toFixed(2);
-    if(afId) afPick(afId);
-  }
-  function filterAngle(v){
-    el('af-aval').textContent=v+'\\u00b0';
-    if(afId) afPick(afId);
-  }
-  function afLoadSource(){
-    var mid=editSrc(), img=el('af-img'), og=el('af-orig');
-    if(!mid){
-      img.removeAttribute('src'); if(og) og.removeAttribute('src');
-      afMsg('Pick a source image above first.', true); return false;
-    }
-    // /full/ is this app's OWN route, which is what makes Save work: composite() draws the
-    // source into a canvas, and a cross-origin image without CORS taints that canvas so
-    // toBlob() throws SecurityError. A PixAI CDN url dropped in here would do exactly that.
-    var want='/full/'+encodeURIComponent(mid);
-    if(img.getAttribute('src')!==want) img.src=want;
-    if(og && og.getAttribute('src')!==want) og.src=want;   // same url -> served from cache
-    return true;
-  }
-  // Placement follows mg-model-picker's _place(): open toward whichever side has room, then clamp
-  // to the viewport. #model-flyout's pure-CSS `right:100%` pop is not enough for this one -- it is
-  // a side-by-side panel, so it is far wider than the drawer, and the drawer can be docked to any
-  // of four edges at either 420px or (in Edit/Video) 600px. Called on open, on the source image's
-  // load (its height decides the panel's), on a dock change and on resize.
-  //
-  // The width ADAPTS to the room rather than being fixed, because a fixed one doesn't fit: at
-  // 1280x720 -- an ordinary laptop -- a 600px-wide Edit drawer leaves 647px beside it, so
-  // demanding AF_W would center the panel on top of the drawer it is supposed to sit next to.
-  // Below AF_MIN_SIDE there is no honest side-by-side left (the controls column alone is 232px),
-  // so it centres over the drawer instead -- which is #model-flyout's own documented behaviour
-  // for the top and bottom docks, where the drawer is a full-width bar and nothing can sit beside
-  // it: "an edge-popped flyout gets clipped ... render it as a centered overlay instead".
-  // Three columns now, so both numbers went up -- and AF_MIN_SIDE is set by what the panel
-  // is FOR, not by what technically fits. Two pictures fit beside the rail from about 790px
-  // (250+250+236 + two 14px gaps + 26px padding), but at that width they render ~250px each,
-  // which is smaller than the single 373px picture the old two-column panel gave you: the
-  // comparison would arrive as a downgrade. The floor is therefore the width at which each
-  // picture is worth judging -- ~380px, so 380*2 + 236 + 28 + 26 = 1050. Below it there is no
-  // honest side-by-side left and the panel centres over the drawer instead, which is
-  // #model-flyout's documented behaviour for the top and bottom docks.
-  //
-  // Measured at 1600x1000 with a 600px right-docked Edit drawer: 982px of side room is under
-  // the floor, so it centres at AF_W and each picture renders ~430px -- comfortably past the
-  // old single-image size rather than under it.
-  var AF_W=1180, AF_MIN_SIDE=1050;
-  function placeFilters(){
-    var f=el('filters-flyout');
-    if(!f || !f.classList.contains('open')) return;
-    var r=el('gen-drawer').getBoundingClientRect();
-    var vw=window.innerWidth, vh=window.innerHeight, pad=8, gap=10;
-    var leftRoom=r.left-gap-pad, rightRoom=vw-r.right-gap-pad;
-    var w, x;
-    if(Math.max(leftRoom, rightRoom) >= AF_MIN_SIDE){
-      if(leftRoom>=rightRoom){ w=Math.min(AF_W, leftRoom); x=r.left-gap-w; }
-      else { w=Math.min(AF_W, rightRoom); x=r.right+gap; }
-    } else {
-      w=Math.min(AF_W, vw-pad*2); x=(vw-w)/2;
-    }
-    f.style.width=Math.round(w)+'px';
-    f.style.maxHeight=(vh-pad*2)+'px';
-    var h=f.offsetHeight;                    // the real height: needs .open and the width set
-    f.style.left=Math.round(Math.max(pad, x))+'px';
-    f.style.top=Math.round(Math.max(pad, Math.min(r.top+8, vh-h-pad)))+'px';
-  }
-  function toggleFilters(){
-    var f=el('filters-flyout'), on=!f.classList.contains('open');
-    f.classList.toggle('open', on); f.setAttribute('aria-hidden', on?'false':'true');
-    if(!on) return;
-    afBuildSwatches();
-    var ok=afLoadSource();
-    if(ok && !afId) afMsg('Free \\u2014 applied in your browser, nothing leaves this machine.');
-    placeFilters();
-    var img=el('af-img');
-    img.onload=function(){ placeFilters(); if(afId) afPick(afId); };
-  }
-  // toggleFilters() is a TOGGLE. Both actions below run across an await, and the panel's
-  // own x, #gen-scrim and the global Escape -> Gen.close() all stay live while a request is
-  // in flight (only the pressed button is disabled), so calling the toggle blind on resolve
-  // RE-OPENS a panel the user already dismissed -- orphaned over a closed drawer and placed
-  // off its slid-away rect, which is the exact state Gen.close() exists to prevent.
-  function closeFiltersIfOpen(){
-    var f=el('filters-flyout');
-    if(f && f.classList.contains('open')) toggleFilters();
-  }
-  // The filter being ACTED ON, captured before the await. afId is module state and the tiles
-  // and No filter stay clickable during a request, so reading it back on resolve can name a
-  // different filter -- or null, and AF.get(null) is null, so `.name` on it throws inside a
-  // .then SUCCESS handler, where the sibling rejection handler cannot catch it: every side
-  // effect still lands and the only trace is an unhandled rejection in the console.
-  function afActing(){
-    var AF=window.MgArtFilters, r=(AF && afId) ? AF.get(afId) : null;
-    return r ? {id:afId, name:r.name||afId} : null;
-  }
-  function filterSave(){
-    var AF=window.MgArtFilters, mid=editSrc(), img=el('af-img');
-    if(!AF) return;
-    var acting=afActing();
-    if(!acting){ afMsg('Pick a filter first.', true); return; }
-    if(!mid || !img.naturalWidth){ afMsg('The source image has not finished loading.', true); return; }
-    var btn=el('af-save'), idle=btn.textContent;
-    btn.disabled=true; btn.textContent='Saving\\u2026';
-    function done(t, bad){ btn.disabled=false; btn.textContent=idle; afMsg(t, bad); }
-    AF.toBlob(img, acting.id, afOpts()).then(function(b){
-      // Saved through /api/import-local -- the SAME route the Picker's file import uses -- so
-      // the composite lands in imported/ with a thumbnail and a source='local' catalog row like
-      // any other local file. Nothing is uploaded to PixAI; no generation is created.
-      //
-      // Strength/angle are part of the OUTPUT, not just the filter id -- without them in the
-      // name, re-saving the same filter at a different slider position collides with the
-      // first file's name, and run_import_local's dedup keys purely on filename (not content),
-      // so it silently treats a genuinely different image as "already in your library."
-      var o=afOpts(), fd=new FormData();
-      var tag=acting.id+'_s'+o.strength.toFixed(2).replace('.','')+'_a'+o.angle;
-      fd.append('files', b, mid+'_'+tag+'.png');
-      return fetch('/api/import-local', {method:'POST', body:fd}).then(function(r){ return r.json(); });
-    }).then(function(d){
-      if(d && d.error){ done(d.error, true); return; }
-      var n=(d && d.imported) || 0;
-      done(n ? ('Saved to your library \\u00b7 reload the gallery to see it')
-             : 'Already in your library \\u2014 nothing to add.', !n);
-      if(n && window.Toast) Toast.show({kind:'ok', title:'Filtered image saved',
-                                        msg:acting.name+' \\u00b7 no credits spent'});
-    }, function(e){
-      done('Could not save: '+((e && e.message) || e), true);
-    });
-  }
-  // "Send to image gen": bake the filter in, hand the PNG to /api/upload -- the same free
-  // 3-step S3 handshake the Picker's file import uses -- and drop the returned media_id into
-  // the Edit source. A filtered composite exists only in this browser until something gives
-  // it an id, and every i2i path (edit, reference, video) is keyed on a media_id, so the
-  // upload is what makes the result usable as an input at all. It spends no credits; the
-  // generation you then run from the drawer is the thing that costs, priced as usual.
-  function filterSend(){
-    var AF=window.MgArtFilters, img=el('af-img');
-    if(!AF) return;
-    var acting=afActing();
-    if(!acting){ afMsg('Pick a filter first.', true); return; }
-    if(!img.naturalWidth){ afMsg('The source image has not finished loading.', true); return; }
-    var btn=el('af-send'), idle=btn.textContent;
-    btn.disabled=true; btn.textContent='Uploading\\u2026';
-    function done(t, bad){ btn.disabled=false; btn.textContent=idle; afMsg(t, bad); }
-    AF.toBlob(img, acting.id, afOpts()).then(function(b){
-      var fd=new FormData();
-      fd.append('file', b, 'filtered_'+acting.id+'.png');
-      return fetch('/api/upload', {method:'POST', body:fd}).then(function(r){ return r.json(); });
-    }).then(function(d){
-      if(!d || d.error || !d.media_id){ done((d && d.error) || 'Upload failed.', true); return; }
-      done('');
-      // Close the panel before switching the drawer's source: leaving it open would keep
-      // showing the OLD source beside a preview of an image that is now the input, which
-      // reads as though nothing happened. A no-op if the panel (or the whole drawer) was
-      // already dismissed mid-upload -- the upload still landed, so the source is still
-      // switched and the toast still says so; it is simply found there next time the drawer
-      // is opened, rather than the panel springing back open unasked.
-      closeFiltersIfOpen();
-      setMode('edit'); setEditSource(String(d.media_id));
-      if(window.Toast) Toast.show({kind:'ok', title:'Filtered image is your edit source',
-                                   msg:acting.name+' \\u00b7 uploaded free, nothing generated yet'});
-    }, function(e){
-      done('Could not send: '+((e && e.message) || e), true);
-    });
-  }
-  window.addEventListener('resize', placeFilters);
-
-  function genDrawerEl(){ var w=el('gen-mode-video'); return w?w.querySelector('mg-generate-drawer'):null; }
-  function addVideoRefs(refs){
-    // Gallery bulk-send ("make a video from these"): feed the picked images straight into
-    // the <mg-generate-drawer> via its prefill() -- the same shot-context entry the Loom
-    // uses. Image bank is 6 now (the full-parity split), not the old 9. >1 image -> Multi-ref.
-    refs=(refs||[]).slice(0,6); if(!refs.length) return;
-    open(); setMode('video');
-    var drawer=genDrawerEl(); if(!drawer) return;
-    drawer.prefill({ mode: refs.length>1?'r2v':'i2v',
-                     images: refs.map(function(r){ return {media_id:r.mid, thumb:r.thumb}; }) });
-  }
-  return {open:open, close:close, setKind:setKind,
-          refreshCost:debouncedCost, generate:generate, setMode:setMode, edit:edit,
-          editCost:debEditCost, setEditSource:setEditSource, openEdit:openEdit,
-          fixTag:fixTag, fixClear:fixClear, fix:fix,
-          toggleFilters:toggleFilters, filterStrength:filterStrength, filterAngle:filterAngle,
-          filterClear:filterClear, filterSave:filterSave, filterSend:filterSend,
-          setDock:setDock, toggleFlyout:toggleFlyout,
-          previewSelected:previewSelected, hidePreview:hidePreview,
-          refPick:refPick, refStrength:refStrength, presetImport:presetImport,
-          toggleBooster:toggleBooster,
-          loraWeight:loraWeight, loraRemove:loraRemove, openLoraBrowser:openLoraBrowser,
-          reclampLoras:reclampLoras,
-          insertTriggers:insertTriggers, refreshLoraCap:paintLoraCap, loraPickVersion:loraPickVersion,
-          // addVideoRefs stays: it's the gallery bulk-send entry, rewired to feed
-          // <mg-generate-drawer>.prefill(). The old video machinery (setVideoMode /
-          // videoGenerate / renderVideoSlots / videoCost / vp* / videoPromptText/Set) is
-          // gone -- the component owns all of that now.
-          setEditSub:setEditSub, setEditModel:setEditModel, addVideoRefs:addVideoRefs,
-          resetModelDefaults:resetModelDefaults, pickVersion:pickVersion,
-          get selected(){return selected;}};
-})();
-// Gallery mount wiring for <mg-generate-drawer>: the component is picker-agnostic and fires
-// mg-pick-request (bubbling + composed) whenever a slot's "+ pick" is clicked. Open the
-// gallery Picker filtered to the requested kind (image | video -> /api/gallery-images type)
-// and hand the choice back through respond(media_id, thumb). Audio refs never arrive here --
-// the component uploads those directly (there is no gallery/catalog concept for a raw audio
-// file). One document-level listener; the drawer is the only source of this event.
-document.addEventListener('mg-pick-request', function(e){
-  var d=e.detail; if(!d||typeof d.respond!=='function') return;
-  Picker.open(function(mid, thumb, prompt, is_nsfw){ d.respond(mid, thumb, is_nsfw); }, d.kind==='video'?{type:'video'}:null);
-});
-// mg-submit / mg-result: the drawer polls and renders ITS OWN result inline (self-contained,
-// same as the Loom's mount) -- these two listeners are not for that. They are the two things
-// runTask() gives every OTHER tab (Generate/Edit/Fix, still the pre-migration inline JS) that
-// the Video tab silently lost when it moved to <mg-generate-drawer> and nothing was ever wired
-// to replace them: Jobs.register (the Activity card entry that survives closing the drawer or
-// navigating away -- the drawer's own poll dies with the page, per its `if(!self.isConnected)
-// return;` guard, so without this a video that finishes after you leave shows NOWHERE) and
-// Acct.refresh() (the header credit balance, which every other spend path already updates on
-// completion). Found 2026-07-21 by the post-v2.2.0 audit (B4): verified the drawer dispatches
-// both events (bubbles+composed) but the gallery bound neither, while the Loom's own mount
-// binds both via bindGenDrawer -- and its onVideoSubmit comment explicitly says the "Rendered"
-// label is chosen to match "the gallery's own existing label for this same endpoint", i.e. this
-// wiring was always assumed to exist here. One document-level listener each, matching
-// mg-pick-request immediately above: the drawer is the only source of either event.
-document.addEventListener('mg-submit', function(e){
-  var d=e.detail; if(!d||!d.task_id) return;
-  if(window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, 'Rendered');
-});
-document.addEventListener('mg-result', function(){ Acct.refresh(); });
-var Tags = (function(){
-  var items=[], hot=0, ta=null, timer=null, seq=0;
-  function box(){ return document.getElementById('tag-suggest'); }
-  function seg(){
-    var v=ta.value, p=ta.selectionStart;
-    var start=Math.max(v.lastIndexOf(',', p-1), v.lastIndexOf('\\n', p-1))+1;
-    return {start:start, text:v.slice(start, p)};
-  }
-  function hide(){ var b=box(); if(b) b.style.display='none'; items=[]; }
-  function accept(i){
-    if(!items[i]||!ta) return;
-    var s=seg(), v=ta.value, lead=v.slice(0, s.start);
-    var pad=(lead && !/\\s$/.test(lead)) ? ' ' : '';
-    var ins=lead+pad+items[i]+', ';
-    ta.value=ins+v.slice(ta.selectionStart);
-    ta.setSelectionRange(ins.length, ins.length); ta.focus(); hide();
-  }
-  function show(){
-    var b=box(); if(!items.length){ hide(); return; }
-    b.innerHTML='<div class="ts-head"><span>Tag suggestions</span><span>TAB accepts</span></div>'
-      + items.map(function(t,i){ return '<button type="button" class="'+(i===hot?'hot':'')
-          +'" onmousedown="event.preventDefault();Tags.accept('+i+')">'+t.replace(/[&<>]/g,'')+'</button>'; }).join('');
-    var r=ta.getBoundingClientRect();
-    b.style.display='block';
-    b.style.left=Math.min(r.left, window.innerWidth-b.offsetWidth-8)+'px';
-    var top=r.bottom+4;
-    if(top+b.offsetHeight > window.innerHeight-8) top=r.top-b.offsetHeight-4;
-    b.style.top=top+'px';
-  }
-  function query(){
-    var t=seg().text.trim();
-    if(t.length<2){ hide(); return; }
-    var mine=++seq;
-    fetch('/api/tag-suggest?q='+encodeURIComponent(t)).then(function(r){return r.json();}).then(function(d){
-      if(mine!==seq) return; items=(d.tags||[]).slice(0,8); hot=0; show();
-    }).catch(function(){});
-  }
-  function onInput(e){ ta=e.target; clearTimeout(timer); timer=setTimeout(query, 220); }
-  function onKey(e){
-    var b=box(); if(!b || b.style.display!=='block') return;
-    if(e.key==='Tab'){ e.preventDefault(); accept(hot); }
-    else if(e.key==='ArrowDown'){ e.preventDefault(); hot=Math.min(hot+1, items.length-1); show(); }
-    else if(e.key==='ArrowUp'){ e.preventDefault(); hot=Math.max(hot-1, 0); show(); }
-    else if(e.key==='Escape'){ e.stopPropagation(); hide(); }
-  }
-  function attach(id){ var t=document.getElementById(id); if(!t) return;
-    t.addEventListener('input', onInput); t.addEventListener('keydown', onKey);
-    t.addEventListener('blur', function(){ setTimeout(hide, 150); }); }
-  return {attach:attach, accept:accept, hide:hide};
-})();
-function lbMid(){ var m=(document.getElementById('lb-details').href||'').match(/\\/image\\/([^/?]+)/); return m?decodeURIComponent(m[1]):''; }
-function lbEdit(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Gen.openEdit(mid); }
-function lbVideo(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Gen.addVideoRefs([{mid:mid, thumb:'/thumbs/'+mid+'.jpg'}]); }
-// Unlike Edit/To Video/Similar, this does NOT close the lightbox: judging a ratio means
-// seeing the picture, which is the whole reason it is a flyout over the overlay rather than
-// somewhere you navigate to. That is also why the element's z-index has to clear .lb's 300.
-function lbUpscale(){
-  var mid=lbMid(), p=document.getElementById('up-flyout');
-  if(mid && p) p.open(mid);
-}
-// It is bound to ONE picture, so it must never outlive the picture it was opened for --
-// stepping to the next image or closing the overlay closes it too. Retargeting it silently
-// would leave a half-configured panel pointed at something else.
-function lbUpscaleClose(){
-  var p=document.getElementById('up-flyout');
-  if(p && p.close) p.close();
-}
-function lbSimilar(){ var mid=lbMid(); if(!mid) return; closeLightbox(); Similar.open(mid); }
-var Ctx = (function(){
-  var mid='', isVideo=false;
-  function m(){ return document.getElementById('ctx-menu'); }
-  function hide(){ var e=m(); if(e) e.style.display='none'; }
-  function show(e, card){
-    mid=card.getAttribute('data-mid'); isVideo=card.getAttribute('data-video')==='1';
-    var menu=m();
-    menu.innerHTML=(isVideo?'':'<button onclick="Ctx.edit()">\\u270e Edit image</button>'
-        +'<button onclick="Ctx.video()">\\u25b6 Send to Video</button>'
-        +'<button onclick="Ctx.similar()">\\u2727 Similar</button>')
-      +'<button onclick="Ctx.copy()">\\u2398 Copy media id</button>'
-      +'<button onclick="Ctx.detail()">Open details</button>';
-    menu.style.display='block';
-    menu.style.left=Math.min(e.clientX, window.innerWidth-menu.offsetWidth-8)+'px';
-    menu.style.top=Math.min(e.clientY, window.innerHeight-menu.offsetHeight-8)+'px';
-  }
-  document.addEventListener('click', hide);
-  document.addEventListener('scroll', hide, true);
-  document.addEventListener('contextmenu', function(e){
-    var card=e.target && e.target.closest ? e.target.closest('.card') : null;
-    if(!card || !card.getAttribute('data-mid')){ hide(); return; }
-    e.preventDefault(); show(e, card);
-  });
-  return {
-    similar:function(){ hide(); Similar.open(mid); },
-    edit:function(){ hide(); Gen.openEdit(mid); },
-    video:function(){ hide(); Gen.addVideoRefs([{mid:mid, thumb:'/thumbs/'+mid+'.jpg'}]); },
-    copy:function(){ hide(); try{ navigator.clipboard.writeText(mid); }catch(e){} },
-    detail:function(){ hide(); location.href='/image/'+mid; }
-  };
-})();
-var Similar = (function(){
-  function el(id){ return document.getElementById(id); }
-  function open(mid){
-    if(!mid) return;
-    el('similar-scrim').classList.add('open'); el('similar-modal').classList.add('open');
-    var g=el('similar-grid'), em=el('similar-empty');
-    em.style.display='none';
-    g.innerHTML='<div class="pick-empty">Finding lookalikes\\u2026</div>';
-    fetch('/api/similar/'+encodeURIComponent(mid)+'?k=48').then(function(r){return r.json();}).then(function(d){
-      g.innerHTML='';
-      var imgs=(d&&d.images)||[];
-      // Was an unconditional 'the index may still be building', which reads as a transient
-      // state and is what hid a permanently orphaned index for three days. The route now
-      // distinguishes an EMPTY index -- with instructions -- from a genuine no-matches
-      // result, so trust its error text and only guess when it stays silent.
-      if(!imgs.length){ em.textContent=(d&&d.error)?d.error:'No similar images found for this one.'; em.style.display='block'; return; }
-      imgs.forEach(function(it){
-        var c=document.createElement('div');
-        c.className='card'; c.setAttribute('data-mid', it.media_id);
-        c.setAttribute('data-prompt', it.prompt||'');
-        if(it.is_video==='1') c.setAttribute('data-video','1');
-        // Mirrors the server template's own is_nsfw-gated data-nsfw attribute (see the main
-        // grid's card markup) -- without it, Privacy Blur never touches an NSFW lookalike here.
-        if(it.is_nsfw==='1') c.setAttribute('data-nsfw','1');
-        c.innerHTML='<a class="cover" href="/image/'+encodeURIComponent(it.media_id)+'"></a>'
-          +'<img class="loaded" src="'+it.thumb+'" loading="lazy" decoding="async" alt="">'
-          +(it.is_video==='1'?'<div class="vbadge" title="Video">\\u25b6</div>':'')
-          +'<div class="meta"><div class="model">\\u2727 '+(it.score!=null?it.score:'')+'</div></div>';
-        g.appendChild(c);
-      });
-    }).catch(function(){ g.innerHTML=''; em.textContent='Could not load similar images.'; em.style.display='block'; });
-  }
-  function close(){ el('similar-scrim').classList.remove('open'); el('similar-modal').classList.remove('open'); }
-  document.addEventListener('keydown', function(e){ if(e.key==='Escape'&&el('similar-modal').classList.contains('open')) close(); });
-  return {open:open, close:close};
-})();
-function bulkSendVideo(){
-  var ids=[...selGet()];
-  if(!ids.length) return;
-  // The selection is a list of media_ids in localStorage; it is NOT the cards on screen. So
-  // "is this one a video?" cannot be asked of `#card-<mid>` alone -- filter or paginate away
-  // from a selected video and there is no card to read data-video off, the test finds
-  // nothing, and the video rides into an image-reference send. A card that IS rendered still
-  // answers for free; only the ids this page can't see cost a lookup.
-  selectedVideoIds(ids).then(function(vids){
-    var refs=[];
-    ids.forEach(function(mid){
-      if(vids.has(mid)) return;   // videos can't be image refs
-      refs.push({mid:mid, thumb:'/thumbs/'+mid+'.jpg'});
-    });
-    if(!refs.length) return;
-    // Gen.addVideoRefs() itself caps at 6 (the multi-ref drawer's real limit, see its own
-    // comment) -- this used to slice(0,9), a stale number left over from before that cap
-    // dropped 9->6 in the full-parity split. addVideoRefs's cap was always the authoritative
-    // one, so nothing over-sent either way, but nobody was ever TOLD their extra picks got
-    // dropped -- fixed here, not by raising the cap.
-    if(refs.length>6 && window.Toast) Toast.show({kind:'err', title:'Only 6 images used',
-      msg:'The video drawer takes up to 6 reference images — '+(refs.length-6)+' of your '+refs.length+' were left out.'});
-    Gen.addVideoRefs(refs);
-    clearAll();   // sent to the video drawer -- clear the gallery selection (we stay on the page)
-  });
-}
-document.addEventListener('DOMContentLoaded', function(){
-  // O12: the flyout's search input lives inside <mg-model-picker> now (its own .mg-q),
-  // wired internally by the component -- no external #gen-q to bind here anymore.
-  document.addEventListener('keydown', function(e){ if(e.key==='Escape') Gen.close(); });
-  try{ Gen.setDock(localStorage.getItem('gen-dock')||'right'); }catch(e){}
-  Acct.refresh();
-  (function(){ var tl=document.getElementById('tagline'); if(!tl) return;
-    if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    var lines=['a library against the Void','the archive remembers','what the moon keeps','every dream, kept','a light in the Nightmare'];
-    var i=0; setInterval(function(){ i=(i+1)%lines.length; tl.style.opacity=0;
-      setTimeout(function(){ tl.textContent=lines[i]; tl.style.opacity=1; }, 500); }, 9000); })();
-  ['gen-prompt','gen-neg','edit-ins'].forEach(Tags.attach);
-  // (#video-prompt + its chipify listeners are gone -- the <mg-generate-drawer> component
-  // owns the video prompt box and its own @ref chip handling now.)
-  var asp=document.getElementById('gen-aspects');
-  if(asp) asp.addEventListener('click', function(e){ var b=e.target.closest('button'); if(!b)return;
-    asp.querySelectorAll('button').forEach(function(x){x.classList.remove('on');});
-    b.classList.add('on'); Gen.refreshCost(); });
-  ['gen-mode','gen-count','gen-hp','gen-ph','gen-size'].forEach(function(id){
-    var e2=document.getElementById(id); if(e2) e2.addEventListener('change', Gen.refreshCost); });
-  ['gen-cw','gen-ch'].forEach(function(id){
-    var e2=document.getElementById(id); if(e2) e2.addEventListener('input', Gen.refreshCost); });
-  if(document.getElementById('gen-dim-note') && window.Gen) Gen.refreshCost();
-  ['edit-res','edit-qual','edit-aspect'].forEach(function(id){
-    var e2=document.getElementById(id); if(e2) e2.addEventListener('change', Gen.editCost); });
-  if(document.getElementById('em-edit-pro') && window.Gen) Gen.setEditModel('edit-pro');  // populate the option lists
-  var es=document.getElementById('edit-src');
-  if(es) es.addEventListener('input', function(){ Gen.setEditSource(es.value.trim()); });
-  var em=new URLSearchParams(location.search).get('edit');
-  if(em) Gen.openEdit(em);
-});
-</script>
-""").replace("__UPSCALE_CONST__", _upscale_const_js())
-
-    DETAIL_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
-<script>
-function toggleFocus() {
-  var wrap = document.querySelector('.detail-wrap');
-  var on = wrap.classList.toggle('focus-mode');
-  localStorage.setItem('gallery_focus', on ? '1' : '');
-  document.getElementById('focus-btn').textContent = on ? 'Details' : 'Focus';
-}
-document.addEventListener('DOMContentLoaded', function() {
-  if (localStorage.getItem('gallery_focus')) {
-    document.querySelector('.detail-wrap').classList.add('focus-mode');
-    document.getElementById('focus-btn').textContent = 'Details';
-  }
-  document.addEventListener('keydown', function(e) {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-    if (e.key === 'ArrowLeft' || e.keyCode === 37) {
-      var el = document.getElementById('nav-prev');
-      if (el) window.location.href = el.href;
-    } else if (e.key === 'ArrowRight' || e.keyCode === 39) {
-      var el = document.getElementById('nav-next');
-      if (el) window.location.href = el.href;
-    } else if (e.key === 'Escape' || e.keyCode === 27 || e.key === 'ArrowUp' || e.keyCode === 38) {
-      e.preventDefault();
-      var g = document.getElementById('nav-gallery');
-      if (g) window.location.href = g.href;
-    } else if (e.key === 'f' || e.key === 'F') {
-      toggleFocus();
-    }
-  });
-});
-</script>
-<div class="detail-wrap">
-  <div class="detail-nav">
-    {% if prev_id %}
-    <a id="nav-prev" class="nav-arrow" href="{{ url_for('detail', media_id=prev_id, back=back) }}" title="Previous (← arrow key)">&#8592; Prev</a>
-    {% else %}
-    <span class="nav-arrow nav-disabled">&#8592; Prev</span>
-    {% endif %}
-    <a id="nav-gallery" class="back-link" href="{{ back }}" title="Back to gallery (Esc or ↑ arrow)">↑ Gallery</a>
-    <button id="focus-btn" class="focus-btn" onclick="toggleFocus()" title="Toggle focus mode (F key)">Focus</button>
-    {% if next_id %}
-    <a id="nav-next" class="nav-arrow" href="{{ url_for('detail', media_id=next_id, back=back) }}" title="Next (→ arrow key)">Next &#8594;</a>
-    {% else %}
-    <span class="nav-arrow nav-disabled">Next &#8594;</span>
-    {% endif %}
-  </div>
-
-  <div class="detail-img">
-    {# video_url is None when the clip is missing from disk -- see detail(). Without that
-       test this branch rendered a player over a 404 and said nothing, while the image
-       branch beside it has always degraded to a readable line. #}
-    {% if row.is_video == '1' and video_url %}
-    <video controls autoplay loop playsinline preload="metadata"
-           style="max-width:100%;border-radius:8px;background:#000"
-           {% if poster_url %}poster="{{ poster_url }}"{% endif %}>
-      <source src="{{ video_url }}" type="video/mp4">
-      Your browser can't play this video. <a href="{{ video_url }}">Download it</a>.
-    </video>
-    {% elif row.is_video == '1' %}
-    <div style="color:var(--overlay0);padding:40px">Video file not found on disk.</div>
-    {% elif img_url %}
-    <a href="{{ img_url }}" target="_blank" title="Click to open full resolution">
-      <img src="{{ img_url }}" alt="{{ row.prompt_preview }}">
-    </a>
-    {% else %}
-    <div style="color:var(--overlay0);padding:40px">Image file not found on disk.</div>
-    {% endif %}
-  </div>
-
-  <div class="detail-meta">
-    {% if row.prompt_full %}
-    <span class="lbl">Full Prompt</span>
-    <span class="val prompt">{{ row.prompt_full }}</span>
-    {% endif %}
-    {% if row.natural_prompt %}
-    <span class="lbl">Natural Prompt</span>
-    <span class="val prompt">{{ row.natural_prompt }}</span>
-    {% endif %}
-    {% if row.negative_prompt %}
-    <span class="lbl">Negative Prompt</span>
-    <span class="val prompt">{{ row.negative_prompt }}</span>
-    {% endif %}
-    <span class="lbl">Prompt Preview</span>
-    <span class="val">{{ row.prompt_preview }}</span>
-    <span class="lbl">Model</span>
-    <span class="val">{{ row.model_name or row.model_id or '—' }}</span>
-    {% if row.loras %}
-    <span class="lbl">LoRAs</span>
-    <span class="val">{{ row.loras }}</span>
-    {% endif %}
-    {% if row.title %}
-    <span class="lbl">Title</span>
-    <span class="val">{{ row.title }}</span>
-    {% endif %}
-    {% if row.is_published == '1' %}
-    <span class="lbl">Engagement</span>
-    <span class="val">
-      <span id="detail-views" data-artwork="{{ row.artwork_id }}">{% if row.artwork_id %}&#128065; &hellip;{% endif %}</span>
-      {% if row.liked_count %}&#9829; {{ row.liked_count }}{% endif %}
-      {% if row.comment_count and row.comment_count != '0' %} &middot; &#128172; {{ row.comment_count }}{% endif %}
-      {% if row.aes_score %} &middot; &#10022; {{ row.aes_score[:4] }}{% endif %}
-    </span>
-    {% endif %}
-    {% if row.nsfw_scores %}
-    <span class="lbl">Content</span>
-    <span class="val" id="detail-nsfw" data-scores="{{ row.nsfw_scores|e }}"></span>
-    {% endif %}
-    {% if row.art_tags %}
-    <span class="lbl">Tags</span>
-    <span class="val">{{ row.art_tags }}</span>
-    {% endif %}
-    {% if row.collections %}
-    <span class="lbl">Collections</span>
-    <span class="val">{{ row.collections.replace(',', ', ') }}</span>
-    {% endif %}
-    <span class="lbl">Seed</span>
-    <span class="val">{{ row.seed or '—' }}</span>
-    <span class="lbl">Steps</span>
-    <span class="val">{{ row.steps or '—' }}</span>
-    <span class="lbl">Sampler</span>
-    <span class="val">{{ row.sampler or '—' }}</span>
-    <span class="lbl">CFG Scale</span>
-    <span class="val">{{ row.cfg_scale or '—' }}</span>
-    {% if row.clip_skip %}
-    <span class="lbl">Clip Skip</span>
-    <span class="val">{{ row.clip_skip }}</span>
-    {% endif %}
-    <span class="lbl">Dimensions</span>
-    <span class="val">{{ row.width }}×{{ row.height }}</span>
-    <span class="lbl">Date</span>
-    <span class="val">{{ row.created_at[:10] if row.created_at else '—' }}</span>
-    <span class="lbl">Task ID</span>
-    <span class="val" style="font-size:11px;color:var(--overlay0)">{{ row.task_id }}</span>
-    <span class="lbl">Media ID</span>
-    <span class="val" style="font-size:11px;color:var(--overlay0)">{{ row.media_id }}</span>
-    <span class="lbl">Filename</span>
-    <span class="val" style="font-size:11px;color:var(--overlay0)">{{ row.filename }}</span>
-  </div>
-
-  <div class="detail-stars">
-    <div class="stars" id="detail-stars"
-         data-mid="{{ row.media_id }}" data-rating="{{ row.rating or 0 }}"></div>
-    <span class="rating-label">{{ row.rating + ' / 5' if row.rating else 'unrated' }}</span>
-  </div>
-
-__UPSCALE_CONST__
-  <div class="detail-actions">
-    {% if img_url %}
-    <a class="btn" href="{{ url_for('full_image', media_id=row.media_id) }}?dl=1">&#8681; Download</a>
-    <a class="btn" href="{{ img_url }}" target="_blank">Open Full Size (local)</a>
-    {% endif %}
-    {% if row.url %}
-    <a class="btn" href="{{ row.url }}" target="_blank">Open on PixAI CDN</a>
-    {% endif %}
-    {% set _prompt = row.prompt_full or row.prompt_preview or '' %}
-    {% if _prompt %}
-    <button class="btn" id="copy-prompt-btn"
-      data-prompt="{{ _prompt|e }}" onclick="copyPrompt(this)">Copy Prompt</button>
-    {% endif %}
-    <button class="btn" data-cmd="{{ row.media_id }}" onclick="copyCmd(this)"
-      title="Copy this image's media_id (paste into the Edit tab or the Loom)">Copy media id</button>
-    <button class="btn" onclick="window.print()" title="Print this image with its details (Letter)">&#128424; Print</button>
-    {% if row.is_video != '1' %}
-    <a class="btn" href="/contact-sheet?ids={{ row.media_id }}&format=photo" target="_blank" title="Print as a 4x6 photo">4&times;6 photo</a>
-    <a class="btn" href="/contact-sheet?ids={{ row.media_id }}&format=strip" target="_blank" title="Print as a photo-booth strip (cut into two 2x6 strips)">Photo strip</a>
-    {% endif %}
-    {% if row.is_video != '1' %}
-    <button class="btn" id="suggest-prompt-btn" data-mid="{{ row.media_id }}"
-      onclick="suggestPrompt(this)"
-      title="Ask PixAI to read this image back into a prompt (free)">&#9998; Suggest prompt</button>
-    <a class="btn btn-primary" href="/?edit={{ row.media_id }}"
-      title="Open this image in the Edit tab">&#10022; Edit this</a>
-    <button class="btn" id="upscale-btn" onclick="toggleUpscale()"
-      title="Upscale this image with PixAI Upscale (ESRGAN) or Hires">&#8689; Upscale</button>
-    {% endif %}
-    {% if row.is_video != '1' %}
-    <button class="btn"
-      data-cmd='python moonglade_backup.py --generate-video --image {{ row.media_id }} --prompt "describe the motion"'
-      onclick="copyCmd(this)"
-      title="Copy a ready-to-run Animate (image→video) command; add --confirm to run">Animate this → cmd</button>
-    {% endif %}
-    {% if row.model_name %}
-    <a class="btn" href="{{ url_for('index', model=row.model_name) }}"
-       title="Show all images from this model">Find Similar (model)</a>
-    {% endif %}
-    {% if row.batch %}
-    <a class="btn" href="{{ url_for('index', batch=row.batch) }}"
-       title="Show the rest of this batch">View Batch</a>
-    {% endif %}
-    <button class="btn" id="edit-prompt-btn" onclick="toggleEdit()">Edit Prompt</button>
-    <!-- Two delete paths, and the split is deliberate and load-bearing. LOCAL moves the
-         file to _deleted/ and drops the catalog row; PixAI still has the image, so a later
-         sync brings it back. CLOUD is irreversible on their side and asks you to type
-         DELETE. They were separated as a safety net and stay separated here, at image
-         granularity now -- the gallery's own "Delete from PixAI" is TASK-level and takes
-         every image of a batch with it. -->
-    <button class="btn btn-danger"
-      onclick="confirmDelete('{{ url_for('delete_one', media_id=row.media_id) }}?back={{ back|urlencode }}',
-        'Remove this image from your local library? The file moves to _deleted/ and is recoverable, and PixAI still has it \u2014 a later sync brings it back.')">
-      Delete locally
-    </button>
-    {% if can_delete_cloud and row.task_id %}
-    <button class="btn btn-danger" id="del-cloud-btn"
-      data-mid="{{ row.media_id }}" data-siblings="{{ siblings }}"
-      onclick="deleteFromPixai(this)"
-      title="Delete just this image from your PixAI account (irreversible)">
-      Delete from PixAI
-    </button>
-    {% endif %}
-  </div>
-  <mg-upscale-panel id="up-panel" inline></mg-upscale-panel>
-  <div id="prompt-editor" style="display:none;margin-top:12px;">
-    <textarea id="prompt-text" style="width:100%;min-height:120px;background:var(--surface0);color:var(--text);border:1px solid var(--surface1);border-radius:6px;padding:8px;font-size:13px;font-family:var(--font-mono,monospace);">{{ row.prompt_full or row.prompt_preview or '' }}</textarea>
-    <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
-      <button class="btn btn-primary" onclick="savePrompt()">Save</button>
-      <button class="btn" onclick="toggleEdit()">Cancel</button>
-      <span id="save-status" style="color:var(--green);font-size:12px;"></span>
-    </div>
-  </div>
-</div>
-<!-- picker-core + mg-model-picker are what the panel's model fallback mounts: an image whose
-     model the catalog does not know (never swept, or imported from this computer) still needs
-     one to upscale under, and it uses the SAME picker the Generate drawer opens rather than a
-     second model-choosing UI. -->
-<script src="/static/picker-core.js"></script>
-<script src="/static/mg-model-picker.js"></script>
-<script src="/static/mg-cost-badge.js"></script>
-<script src="/static/mg-upscale-panel.js"></script>
-<script>
-function deleteFromPixai(btn){
-  var mid=btn.getAttribute('data-mid'), sibs=+btn.getAttribute('data-siblings')||1;
-  // Say what is about to happen BEFORE the typed prompt, and say it differently for the two
-  // cases: trimming one frame out of a batch is not the same act as deleting the only image
-  // a task ever made, and a dialog that words them identically hides that.
-  var what = (sibs > 1)
-    ? ('This deletes ONLY this image from PixAI.\\n\\nThe other ' + (sibs - 1) +
-       ' image' + (sibs === 2 ? '' : 's') + ' in its batch stay on your account.')
-    : 'This deletes this image from PixAI. It is the only image its task made.';
-  if(!confirm(what + '\\n\\nIt is also removed from your local library. This cannot be undone.'))
-    return;
-  var typed = prompt('This permanently deletes from PixAI. Type DELETE to confirm:');
-  if(typed !== 'DELETE'){ alert('Cancelled.'); return; }
-  var idle = btn.textContent;
-  btn.disabled = true; btn.textContent = 'Deleting\\u2026';
-  fetch('/api/delete-image', {method:'POST', headers:{'Content-Type':'application/json'},
-                              body:JSON.stringify({media_id:mid, confirm:true})})
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if(!d || d.error){
-        btn.disabled=false; btn.textContent=idle;
-        alert((d && d.error) || 'Could not delete it.');
-        return;
-      }
-      // The image this page is ABOUT no longer exists, so staying here would show a detail
-      // page for something deleted. Back to wherever the user came from.
-      location.href = {{ back|tojson }};
-    }, function(e){
-      btn.disabled=false; btn.textContent=idle;
-      alert('Could not delete it: ' + ((e && e.message) || e));
-    });
-}
-function toggleUpscale(){
-  var p=document.getElementById('up-panel'), b=document.getElementById('upscale-btn');
-  if(!p) return;
-  var on=!p.hasAttribute('open');
-  if(on) p.open('{{ row.media_id }}'); else p.close();
-  if(b) b.classList.toggle('btn-primary', on);
-}
-// Published-artwork engagement: live views (per artwork_id) + the captured granular NSFW
-// breakdown (nsfw_scores JSON). Both only present for synced published works.
-document.addEventListener('DOMContentLoaded', function(){
-  var vEl = document.getElementById('detail-views');
-  if (vEl && vEl.getAttribute('data-artwork')) {
-    fetch('/api/artwork-views?id='+encodeURIComponent(vEl.getAttribute('data-artwork')))
-      .then(function(r){return r.json();})
-      .then(function(d){ if(d && d.views!=null) vEl.innerHTML='\\ud83d\\udc41 '+Number(d.views).toLocaleString()+' '; })
-      .catch(function(){ vEl.textContent=''; });
-  }
-  var nEl = document.getElementById('detail-nsfw');
-  if (nEl && nEl.getAttribute('data-scores')) {
-    try {
-      var s = JSON.parse(nEl.getAttribute('data-scores'));
-      var parts = Object.keys(s).map(function(k){ return [k, s[k]]; })
-        .filter(function(p){ return p[1] >= 0.05; })
-        .sort(function(a,b){ return b[1]-a[1]; })
-        .map(function(p){ return p[0]+' '+Math.round(p[1]*100)+'%'; });
-      nEl.textContent = parts.length ? parts.join(' \\u00b7 ') : 'clean';
-    } catch(e){ nEl.textContent=''; }
-  }
-});
-function copyPrompt(btn) {
-  var text = btn.getAttribute('data-prompt');
-  navigator.clipboard.writeText(text).then(function(){
-    var old = btn.textContent;
-    btn.textContent = 'Copied!';
-    setTimeout(function(){ btn.textContent = old; }, 1200);
-  });
-}
-function copyCmd(btn) {
-  var text = btn.getAttribute('data-cmd');
-  navigator.clipboard.writeText(text).then(function(){
-    var old = btn.textContent;
-    btn.textContent = 'Copied!';
-    setTimeout(function(){ btn.textContent = old; }, 1200);
-  });
-}
-function suggestPrompt(btn) {
-  var mid = btn.getAttribute('data-mid'), old = btn.textContent;
-  btn.disabled = true; btn.textContent = 'Reading…';
-  var box = document.getElementById('suggest-box');
-  if (!box) { box = document.createElement('div'); box.id = 'suggest-box';
-    box.style.cssText = 'margin-top:12px;padding:12px 14px;background:var(--surface0);border:1px solid var(--surface1);border-radius:8px;font-size:13px;line-height:1.5;';
-    btn.closest('.detail-actions').after(box); }
-  fetch('/api/suggest-prompt?media_id=' + encodeURIComponent(mid)).then(function(r){return r.json();}).then(function(d){
-    btn.disabled = false; btn.textContent = old;
-    var s = d.suggestions || [];
-    if (d.error || !s.length) {
-      // d.error is a server-side str(e)[:200] -- an upstream exception string. Build it
-      // as a TEXT node, never innerHTML: this page (DETAIL_HTML) has no escaper in scope,
-      // and concatenating raw server text into innerHTML is an injection sink. textContent
-      // cannot inject, so no escaper is needed.
-      box.textContent = '';
-      var em = document.createElement('span');
-      em.style.color = 'var(--overlay0)';
-      em.textContent = d.error || 'No suggestion returned.';
-      box.appendChild(em);
-      return;
-    }
-    box.innerHTML = '<div style="color:var(--overlay0);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Suggested prompt(s) &middot; click to copy</div>';
-    s.forEach(function(t){
-      var line = document.createElement('div');
-      line.className = 'suggest-line'; line.textContent = t || '';
-      line.style.cssText = 'padding:6px 8px;border-radius:6px;cursor:pointer;';
-      line.onclick = function(){ navigator.clipboard.writeText(t || ''); line.style.color = 'var(--emerald)'; };
-      box.appendChild(line);
-    });
-  }).catch(function(){ btn.disabled = false; btn.textContent = old; box.innerHTML = '<span style="color:var(--red);">Network error.</span>'; });
-}
-function toggleEdit() {
-  var e = document.getElementById('prompt-editor');
-  e.style.display = e.style.display === 'none' ? 'block' : 'none';
-}
-function savePrompt() {
-  var text = document.getElementById('prompt-text').value;
-  fetch('/edit-prompt/{{ row.media_id }}', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({prompt: text})})
-   .then(function(r){ return r.json(); })
-   .then(function(d){
-     var s = document.getElementById('save-status');
-     s.textContent = d.ok ? 'Saved ✓' : 'Error';
-     var cp = document.getElementById('copy-prompt-btn');
-     if (cp) cp.setAttribute('data-prompt', text);
-   });
-}
-</script>
-""").replace("__UPSCALE_CONST__", _upscale_const_js())
-
-    LOGIN_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
-{# Splash background: three tinted radial washes, a procedurally-generated star
-   field, and a vignette. The stars are an SVG feTurbulence filter, not an image
-   asset -- so this renders identically on a fresh clone with no branding art
-   dropped in, and costs no request. #}
-<div class="login-splash" aria-hidden="true">
-  <div class="splash-wash"></div>
-  <svg class="splash-stars" xmlns="http://www.w3.org/2000/svg">
-    <filter id="mg-stars">
-      <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="1" stitchTiles="stitch"/>
-      <feColorMatrix type="luminanceToAlpha"/>
-      <feComponentTransfer><feFuncA type="discrete" tableValues="0 0 0 0 0 0 0 0 0 1"/></feComponentTransfer>
-      <feColorMatrix type="matrix" values="0 0 0 0 0.84  0 0 0 0 0.82  0 0 0 0 0.89  0 0 0 1 0"/>
-    </filter>
-    <rect width="100%" height="100%" filter="url(#mg-stars)"/>
-  </svg>
-  <div class="splash-vignette"></div>
-</div>
-<div class="login-wrap">
-  <div class="login-stage" id="login-stage">
-    {# Mascot, ported from the mock's .char-stub: rises from BEHIND the card while
-       the card dims, on submit. Uses real mascot art when present; if it's absent
-       the glow + sparkle behind it is exactly the mock's own placeholder, so a
-       fresh install still gets the moment rather than a broken image. #}
-    <div class="login-char" id="login-char" aria-hidden="true">
-      {# ANIMATED-OR-STILL, the same contract the per-achievement mascots already have:
-         `ach/<id>.webp` -> `ach/<id>.png` -> `present_<tier>.png`, which is why dropping
-         first-light.webp beside the stills just animated it. The login screen was built
-         later and never carried that context -- it hardcoded ONE path with ONE fallback,
-         so it silently rendered nothing whichever format or folder the art landed in.
-         This walks the same ladder: webp before png, root before mascots/ (root is the
-         precedent the job-tracker spinner sets -- branding/gen_nel.png is a different file
-         from mascots/gen_nel.png), then the narrator still, then removes the element
-         entirely rather than leaving a broken-image icon that would keep the `:has(img)`
-         rule below from restoring the mock's own sparkle placeholder. #}
-      <img src="/branding/login_nel.webp" alt=""
-           data-fb="/branding/login_nel.png|/branding/mascots/login_nel.webp|/branding/mascots/login_nel.png|/branding/mascots/gen_nel.png"
-           onerror="var f=(this.dataset.fb||'').split('|').filter(Boolean);var n=f.shift();this.dataset.fb=f.join('|');if(n){this.src=n;}else{this.remove();}">
-    </div>
-  <div class="login-card">
-    <div class="login-brand">
-      {# Prefers a login-specific banner (the gallery header's banner.png is cropped
-         for a wide header, not this 280x64 slot), falling back to it, and finally to
-         the container's gradient -- which is the mock's own "banner art" placeholder,
-         so every rung of the ladder degrades to the design, never to a broken image. #}
-      <div class="login-banner"><img src="/branding/login-banner.png" alt=""
-           onerror="this.onerror=null;this.src='/branding/banner.png';this.onerror=function(){this.remove();};"></div>
-      <h1>Moonglade Athenaeum</h1>
-      <p class="login-tagline">a library against the Void</p>
-    </div>
-    {% if bootstrap_mode %}
-      <div class="login-note">
-        <b>First run:</b> there's no login account yet on this install. Create the
-        first account below &mdash; from then on, sign in with it from any device.
-      </div>
-      <form method="post" class="login-form" action="{{ url_for('login', next=next_url) if next_url else url_for('login') }}">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <input type="hidden" name="mode" value="create">
-        <div class="login-field">
-          <label for="lf-user">Username</label>
-          <input id="lf-user" type="text" name="username" autocomplete="username" maxlength="64" autofocus required>
-        </div>
-        <div class="login-field">
-          <label for="lf-pass">Password</label>
-          <input id="lf-pass" type="password" name="password" autocomplete="new-password" required>
-        </div>
-        <div class="login-field">
-          <label for="lf-conf">Confirm password</label>
-          <input id="lf-conf" type="password" name="confirm" autocomplete="new-password" required>
-        </div>
-        {% if error %}<p class="login-err">{{ error }}</p>{% endif %}
-        <button type="submit" class="login-submit">Create account</button>
-      </form>
-    {% elif no_accounts %}
-      <div class="login-note" id="login-no-accounts-remote">
-        <b>No account has been set up yet.</b> Ask whoever runs this server to
-        create the first account from the server machine.
-      </div>
-    {% else %}
-      <form method="post" class="login-form" action="{{ url_for('login', next=next_url) if next_url else url_for('login') }}">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <div class="login-field">
-          <label for="lf-user">Username</label>
-          <input id="lf-user" type="text" name="username" autocomplete="username" maxlength="64" autofocus required>
-        </div>
-        <div class="login-field">
-          <label for="lf-pass">Password</label>
-          <input id="lf-pass" type="password" name="password" autocomplete="current-password" required>
-        </div>
-        {% if error %}<p class="login-err">{{ error }}</p>{% endif %}
-        <button type="submit" class="login-submit">Sign in</button>
-      </form>
-    {% endif %}
-  </div>
-  </div>
-</div>
-<script>
-/* On submit, raise the mascot from behind the card and dim the card -- the mock's
-   `l.submitted` state. Progressive: if anything here throws, the form still posts
-   normally, because nothing calls preventDefault. */
-(function(){
-  var stage = document.getElementById('login-stage');
-  var form  = stage && stage.querySelector('form.login-form');
-  if (!form || !stage) return;
-  form.addEventListener('submit', function(){ stage.classList.add('submitted'); });
-})();
-</script>
-<style>
-  /* ---- Login screen -------------------------------------------------------
-     The composition is the design, not just the components: banner + splash
-     behind a centered stack, with real uppercase field labels rather than
-     placeholder-only inputs. Treat the values below as one tuned set --
-     changing them piecemeal is how this page once drifted into reading as a
-     different page entirely. */
-  .login-splash { position: fixed; inset: 0; background: var(--base); overflow: hidden; z-index: 0; }
-  .splash-wash { position: absolute; inset: 0;
-    background:
-      radial-gradient(ellipse 80% 60% at 15% 20%, color-mix(in srgb, var(--accent) 7%, transparent) 0%, transparent 60%),
-      radial-gradient(ellipse 60% 80% at 85% 75%, color-mix(in srgb, var(--mauve) 5%, transparent) 0%, transparent 55%),
-      radial-gradient(ellipse 100% 50% at 50% 100%, color-mix(in srgb, var(--mantle) 90%, transparent) 0%, transparent 50%); }
-  .splash-stars { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .55; }
-  .splash-vignette { position: absolute; inset: 0;
-    background: radial-gradient(ellipse 100% 100% at 50% 50%, transparent 40%, color-mix(in srgb, var(--mantle) 70%, transparent) 100%); }
-
-  .login-wrap { position: relative; z-index: 1; min-height: 100vh; display: flex;
-    align-items: center; justify-content: center; padding: 24px 16px; box-sizing: border-box; }
-  /* The stage exists so the mascot can be positioned against the card and rise
-     from BEHIND it (z-index 0 vs the card's 1) -- the mock's own arrangement. */
-  .login-stage { position: relative; width: 100%; max-width: 380px; }
-  .login-card {
-    position: relative; z-index: 1;
-    width: 100%; background: color-mix(in srgb, var(--surface0) 82%, transparent);
-    backdrop-filter: blur(18px);
-    border: 1px solid color-mix(in srgb, var(--surface1) 70%, transparent); border-radius: 14px;
-    padding: 36px 32px; box-shadow: 0 32px 80px rgba(0,0,0,.6); box-sizing: border-box;
-    transition: opacity .4s;
-  }
-  .login-stage.submitted .login-card { opacity: .5; }
-  .login-char { position: absolute; bottom: 0; left: 50%; width: 150px; height: 190px;
-    pointer-events: none; z-index: 0; opacity: 0; transform: translate(-50%, 0);
-    background: radial-gradient(ellipse 70% 90% at 50% 100%, color-mix(in srgb, var(--accent) 55%, transparent), transparent 72%);
-    filter: drop-shadow(0 -6px 20px color-mix(in srgb, var(--accent) 50%, transparent)); }
-  .login-char::after { content: '\\2726'; position: absolute; top: 18%; left: 50%;
-    transform: translateX(-50%); font-size: 38px; color: var(--text); opacity: .85;
-    text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 70%, transparent); }
-  /* Real art, when present, sits over the glow and hides the sparkle stand-in. */
-  .login-char img { position: absolute; inset: 0; width: 100%; height: 100%;
-    object-fit: contain; object-position: bottom center; }
-  .login-char:has(img)::after { display: none; }
-  .login-stage.submitted .login-char {
-    animation: login-char-rise 1.6s cubic-bezier(.22,1,.36,1) forwards; }
-  @keyframes login-char-rise {
-    0%   { opacity: 0; transform: translate(-50%, 40px) scale(.94); }
-    100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .login-stage.submitted .login-char { animation: none; opacity: 1; }
-  }
-  .login-brand { text-align: center; margin-bottom: 28px; }
-  .login-banner { width: 100%; max-width: 280px; height: 64px; margin: 0 auto 12px; border-radius: 6px;
-    background: linear-gradient(120deg, var(--purple-deep), var(--surface1) 45%, var(--accent) 100%);
-    filter: drop-shadow(0 0 14px color-mix(in srgb, var(--accent) 40%, transparent));
-    overflow: hidden; display: flex; align-items: center; justify-content: center; }
-  .login-banner img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .login-card h1 { font-family: Georgia, 'Times New Roman', serif; font-size: 22px;
-    font-weight: 400; color: var(--text); margin: 0 0 6px; letter-spacing: .04em; border: none; }
-  .login-tagline { font-size: 12px; color: var(--overlay0); margin: 0;
-    letter-spacing: .12em; text-transform: uppercase; }
-
-  .login-form { display: flex; flex-direction: column; gap: 16px; }
-  .login-field { display: flex; flex-direction: column; gap: 6px; }
-  .login-field label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--subtext); }
-  .login-field input { width: 100%; background: var(--mantle); border: 1px solid var(--surface1);
-    border-radius: 6px; padding: 10px 12px; color: var(--text); font: inherit; font-size: 14px;
-    box-sizing: border-box; }
-  .login-field input:focus { outline: none; border-color: var(--accent); }
-  /* Browser autofill repaints inputs with its own near-white background, which
-     overrides `background` outright -- so a saved password turned these fields
-     stark white on a dark card. There is no property to unset it; the only
-     reliable fix is to cover the painted area with an inset box-shadow and force
-     the text colour. The absurd transition delay stops Chrome re-applying its
-     colour a beat after load. Nothing else in this app had autofill handling. */
-  .login-field input:-webkit-autofill,
-  .login-field input:-webkit-autofill:hover,
-  .login-field input:-webkit-autofill:focus,
-  .login-field input:-webkit-autofill:active {
-    -webkit-box-shadow: 0 0 0 1000px var(--mantle) inset !important;
-    box-shadow: 0 0 0 1000px var(--mantle) inset !important;
-    -webkit-text-fill-color: var(--text) !important;
-    caret-color: var(--text);
-    transition: background-color 9999s ease-in-out 0s;
-  }
-  .login-submit { width: 100%; background: var(--accent); color: var(--mantle); border: none;
-    border-radius: 6px; padding: 11px 0; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
-  .login-submit:hover { filter: brightness(1.06); }
-  /* First-run notice: the mock's gold callout. The remote "no account yet"
-     message reuses it -- same weight of statement, same treatment. */
-  .login-note { background: color-mix(in srgb, var(--gold) 8%, transparent);
-    border: 1px solid color-mix(in srgb, var(--gold) 20%, transparent); border-radius: 6px;
-    padding: 10px 12px; margin-bottom: 20px; font-size: 12px; color: var(--gold); line-height: 1.5; }
-  .login-err { color: var(--red); font-size: 13px; margin: 0; padding: 8px 10px;
-    background: color-mix(in srgb, var(--red) 8%, transparent); border-radius: 5px;
-    border: 1px solid color-mix(in srgb, var(--red) 20%, transparent); }
-</style>
-""")
-
-    HEALTH_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
-{% macro stat(label, value, flag='') %}
-<div style="background:var(--mantle);border-radius:8px;padding:14px 16px;">
-  <div style="font-size:12px;color:var(--subtext);margin-bottom:6px;">{{ label }}</div>
-  <div style="font-size:22px;font-weight:500;color:{{ '#e2a04a' if flag=='warn' else ('#e25555' if flag=='bad' else 'var(--text)') }};">{{ value }}</div>
-</div>
-{% endmacro %}
-<header>
-  <div class="brand"><span class="mark anim-{{ mark_anim|default('classic', true) }}{% if mark_kind == 'tile' %} mk-tile{% endif %}"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span><h1>Collection Health</h1></div>
-  <a class="btn" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
-</header>
-
-<div style="padding:8px 20px 24px;max-width:1100px;">
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">
-    {{ stat('Images on disk', '{:,}'.format(h.total_files)) }}
-    {{ stat('Storage used', h.total_size_h) }}
-    {{ stat('Catalog rows', '{:,}'.format(h.catalog_rows)) }}
-    {{ stat('Full-meta', h.full_meta_pct|string + '%') }}
-    {{ stat('Model known', h.model_pct|string + '%') }}
-    {{ stat('Rated', '{:,}'.format(h.rated)) }}
-    {{ stat('Published', '{:,}'.format(h.published)) }}
-    {{ stat('Total likes', '{:,}'.format(h.total_likes)) }}
-    {{ stat('Duplicates', '{:,}'.format(h.dup_redundant), 'warn' if h.dup_redundant else '') }}
-    {{ stat('Reclaimable', h.dup_bytes_h, 'warn' if h.dup_bytes else '') }}
-    {{ stat('Missing files', '{:,}'.format(h.missing), 'bad' if h.missing else '') }}
-    {{ stat('Uncataloged', '{:,}'.format(h.uncataloged), 'warn' if h.uncataloged else '') }}
-  </div>
-
-  <h2 style="margin:28px 0 10px;font-size:16px;">Images by month</h2>
-  <div style="display:flex;flex-direction:column;gap:4px;">
-    {% set maxm = (h.by_month|map(attribute=1)|max) if h.by_month else 1 %}
-    {% for m, c in h.by_month %}
-    <div style="display:flex;align-items:center;gap:10px;font-size:12px;">
-      <span style="width:64px;color:var(--subtext);">{{ m }}</span>
-      <div style="flex:1;background:var(--mantle);border-radius:4px;overflow:hidden;height:16px;">
-        <div style="height:100%;width:{{ (100*c/maxm)|round(1) }}%;background:var(--accent);"></div>
-      </div>
-      <span style="width:52px;text-align:right;color:var(--subtext);">{{ '{:,}'.format(c) }}</span>
-    </div>
-    {% endfor %}
-  </div>
-
-  <h2 style="margin:28px 0 10px;font-size:16px;">Top models</h2>
-  <div style="display:flex;flex-direction:column;gap:4px;">
-    {% set maxt = (h.top_models|map(attribute=1)|max) if h.top_models else 1 %}
-    {% for name, c in h.top_models %}
-    <div style="display:flex;align-items:center;gap:10px;font-size:12px;">
-      <span style="width:180px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
-            title="{{ name }}">{{ name }}</span>
-      <div style="flex:1;background:var(--mantle);border-radius:4px;overflow:hidden;height:16px;">
-        <div style="height:100%;width:{{ (100*c/maxt)|round(1) }}%;background:var(--accent-soft);"></div>
-      </div>
-      <a style="width:52px;text-align:right;color:var(--subtext);"
-         href="{{ url_for('index', model=name) }}">{{ '{:,}'.format(c) }}</a>
-    </div>
-    {% endfor %}
-  </div>
-
-  {% if h.top_tags %}
-  <h2 style="margin:28px 0 10px;font-size:16px;">Top tags &amp; contests</h2>
-  <div style="display:flex;flex-wrap:wrap;gap:8px;">
-    {% for name, c in h.top_tags %}
-    <a href="{{ url_for('index', tag=name) }}"
-       style="display:inline-flex;align-items:center;gap:6px;background:var(--mantle);border:0.5px solid var(--surface1);border-left:3px solid var(--gold);border-radius:4px;padding:4px 10px;font-size:12px;color:var(--text);text-decoration:none;">
-      {{ name }} <span style="color:var(--subtext);">{{ c }}</span></a>
-    {% endfor %}
-  </div>
-  {% endif %}
-
-  {% if h.top_words %}
-  <h2 style="margin:28px 0 10px;font-size:16px;">Prompt word cloud</h2>
-  {% set wmax = h.top_words[0][1] %}
-  <div style="display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;line-height:1.6;">
-    {% for word, c in h.top_words %}
-    <a href="{{ url_for('index', q=word) }}" title="{{ c }} images"
-       style="text-decoration:none;color:var(--lavender);font-size:{{ (12 + (16 * c / wmax))|round|int }}px;">{{ word }}</a>
-    {% endfor %}
-  </div>
-  {% endif %}
-
-  {% if h.top_loras %}
-  <h2 style="margin:28px 0 10px;font-size:16px;">Top LoRAs</h2>
-  <div style="display:flex;flex-wrap:wrap;gap:8px;">
-    {% for name, c in h.top_loras %}
-    <a href="{{ url_for('index', lora=name) }}"
-       style="display:inline-flex;align-items:center;gap:6px;background:var(--mantle);border:0.5px solid var(--surface1);border-left:3px solid var(--accent-soft);border-radius:4px;padding:4px 10px;font-size:12px;color:var(--text);text-decoration:none;">
-      {{ name }} <span style="color:var(--subtext);">{{ c }}</span></a>
-    {% endfor %}
-  </div>
-  {% endif %}
-
-  <h2 style="margin:28px 0 10px;font-size:16px;">Folder breakdown</h2>
-  <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--subtext);">
-    {% for b, c in h.per_bucket.items() %}
-    <span><strong style="color:var(--text);">{{ '{:,}'.format(c) }}</strong> {{ b }}</span>
-    {% endfor %}
-  </div>
-
-  {% if h.dup_redundant or h.missing or h.uncataloged %}
-  <div style="margin-top:24px;padding:12px 16px;background:var(--mantle);border-radius:8px;font-size:13px;color:var(--subtext);">
-    {% if h.dup_redundant %}<div>· {{ '{:,}'.format(h.dup_redundant) }} duplicate copies ({{ h.dup_bytes_h }}). Run <code>--dedup</code> to quarantine.</div>{% endif %}
-    {% if h.missing %}<div>· {{ '{:,}'.format(h.missing) }} catalog rows reference a file that's missing on disk. Re-run a download to refetch.</div>{% endif %}
-    {% if h.uncataloged %}<div>· {{ '{:,}'.format(h.uncataloged) }} file(s) on disk aren't in the catalog. Use the <a href="{{ url_for('index') }}" style="color:var(--lavender);">↑ Import</a> button on the gallery, or run <code>--import-local</code>, to catalog them.</div>{% endif %}
-  </div>
-  {% endif %}
-  {% if h.dup_redundant %}
-  <div style="margin-top:14px;"><a class="back-link" href="{{ url_for('duplicates') }}">Review duplicates →</a></div>
-  {% endif %}
-</div>
-""")
-
-    DUPES_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
-<header>
-  <div class="brand"><span class="mark anim-{{ mark_anim|default('classic', true) }}{% if mark_kind == 'tile' %} mk-tile{% endif %}"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span><h1>Duplicate Review</h1></div>
-  <a class="btn" href="{{ url_for('index') }}" style="margin-left:auto;">↑ Back to gallery</a>
-</header>
-<div style="padding:10px 20px 28px;max-width:1100px;">
-  {% if not groups %}
-  <div class="empty"><div class="big">✓</div><div>No duplicate copies found.</div></div>
-  {% else %}
-  <p style="color:var(--subtext);font-size:13px;">
-    {{ groups|length }} media id(s) exist in more than one folder. The
-    <span style="color:var(--green);">keeper</span> is the most-organized copy;
-    <code>--dedup</code> would quarantine the rest. Review below, then run Dedup from the
-    <a href="{{ url_for('panel') }}">Control Panel</a>.
-  </p>
-  {% for g in groups %}
-  <div style="display:flex;gap:14px;align-items:flex-start;background:var(--mantle);border-radius:8px;padding:12px;margin-bottom:10px;">
-    <img src="{{ url_for('thumb', media_id=g.media_id) }}" loading="lazy"
-         style="width:90px;height:90px;object-fit:cover;border-radius:6px;background:var(--surface0);flex-shrink:0;">
-    <div style="flex:1;min-width:0;">
-      <div style="font-size:12px;color:var(--subtext);margin-bottom:4px;">media_id {{ g.media_id }}</div>
-      {% for c in g.copies %}
-      <div style="font-size:12px;font-family:var(--font-mono,monospace);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-                  color:{{ 'var(--green)' if c.rel == g.keeper else 'var(--subtext)' }};">
-        {{ 'KEEP  ' if c.rel == g.keeper else 'dupe  ' }}{{ c.rel }}
-        <span style="color:var(--overlay0);">({{ c.bucket }})</span>
-      </div>
-      {% endfor %}
-      <a class="back-link" style="font-size:12px;"
-         href="{{ url_for('detail', media_id=g.media_id) }}">open →</a>
-    </div>
-  </div>
-  {% endfor %}
-  {% endif %}
-</div>
-""")
-
-    PANEL_HTML = BASE_HTML.replace("{% block body %}{% endblock %}", """
-<style>
-  .panel{padding:10px 20px 40px;max-width:1000px;}
-  .p-sec{background:var(--mantle);border:1px solid var(--surface0);border-radius:12px;padding:16px 18px;margin-bottom:16px;}
-  .p-sec h2{font-size:15px;margin:0 0 12px;font-weight:600;}
-  .p-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;}
-  .p-stat{background:var(--surface0);border-radius:8px;padding:12px 14px;}
-  .p-stat .l{font-size:11.5px;color:var(--subtext);margin-bottom:5px;}
-  .p-stat .v{font-size:21px;font-weight:500;color:var(--text);font-variant-numeric:tabular-nums;}
-  .p-stat .v.lav{color:var(--lavender);}
-  .jobrow{display:flex;flex-wrap:wrap;gap:8px;}
-  .jobbtn{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;background:var(--surface0);border:1px solid var(--surface1);border-radius:8px;padding:9px 12px;cursor:pointer;color:var(--text);font-family:inherit;min-width:180px;}
-  /* Per-job option toggle. Sits inside its button but swallows the click, so ticking it
-     configures the run instead of starting one. */
-  .job-opt{display:flex;align-items:center;gap:5px;margin-top:5px;font-size:11.5px;color:var(--subtext);cursor:pointer;}
-  .job-opt input{margin:0;accent-color:var(--accent);cursor:pointer;}
-  .jobbtn.danger .job-opt{color:var(--red);}
-  .jobbtn:hover{border-color:var(--lavender);}
-  .jobbtn:disabled{opacity:.45;cursor:not-allowed;}
-  .jobbtn .t{font-size:13px;font-weight:500;}
-  .jobbtn .d{font-size:11px;color:var(--subtext);}
-  .jobbtn.danger{border-color:#5a3a4a;} .jobbtn.danger .t{color:var(--red);}
-  .p-note{font-size:12px;color:var(--subtext);margin-top:10px;}
-  .p-fl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--overlay0);margin-bottom:4px;}
-  .p-sel{background:var(--surface0);border:1px solid var(--surface1);border-radius:6px;color:var(--text);padding:6px 9px;font-size:13px;font-family:inherit;}
-  .p-check{display:inline-flex;align-items:center;gap:7px;color:var(--text);font-size:13px;cursor:pointer;}
-  #joblog{background:var(--base);border:1px solid var(--surface1);border-radius:8px;padding:12px 14px;font-family:ui-monospace,monospace;font-size:12px;color:var(--subtext);white-space:pre-wrap;line-height:1.5;max-height:340px;overflow-y:auto;margin-top:12px;display:none;}
-  #jobstatus{font-size:12.5px;margin-top:6px;}
-  .st-running{color:var(--lavender);} .st-done{color:var(--emerald);} .st-failed{color:var(--red);} .st-warn{color:var(--peach);}
-  .jobprog{margin:12px 0 4px;}
-  .jp-bar{height:10px;border-radius:6px;background:var(--surface1);overflow:hidden;}
-  .jp-bar i{display:block;height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent-soft));transition:width .4s ease;}
-  .jp-txt{font-size:11.5px;color:var(--subtext);margin-top:5px;font-variant-numeric:tabular-nums;}
-  /* Panel tab bar -- same .htab/.htab.on visual language as the Folio of Honors'
-     Summary/All/Statistics tabs (static/mg-notify.js's injected styles), copied
-     rather than shared via a <script src> because mg-notify.js also wires up the
-     Jobs tray/Achievement modals that this page doesn't otherwise use; see
-     panel()'s docstring. Do not restyle these independently of that source. */
-  .p-tabs{display:flex;gap:4px;padding:0 0 10px;border-bottom:1px solid var(--surface0);margin-bottom:16px;}
-  .htab{background:none;border:none;color:var(--subtext);font-size:13px;font-weight:600;cursor:pointer;padding:8px 14px;border-radius:8px 8px 0 0;border-bottom:2px solid transparent;}
-  .htab:hover{color:var(--text);}
-  .htab.on{color:var(--lavender);border-bottom-color:var(--lavender);background:rgba(182,146,230,.06);}
-  .ptab-view{display:none;}
-  .ptab-view.on{display:block;}
-  .u-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--surface0);border-radius:8px;border:1px solid var(--surface1);}
-  .u-row + .u-row{margin-top:6px;}
-  /* The name flexes and truncates; the Remove button never shrinks or moves. This
-     is the layout half of the username-length fix -- new names are capped at 64,
-     but a legacy over-long name in config must still not push the button off-card. */
-  .u-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;color:var(--text);}
-  .u-row .btn{flex:none;}
-  .u-you{font-size:11px;color:var(--accent);margin-left:8px;}
-  /* Trash panel (2026-07-24) -- a floating overlay opened from the button below,
-     same pattern as the Folio of Honors/Contests/YourArt modals (#ach-modal /
-     #contest-modal / #art-modal), NOT a page embedded in this Panel's own layout.
-     .ach-modal/.ach-panel/.ach-x/.ach-htitle/.ach-hsub are that shared base modal
-     chrome, normally injected by static/mg-notify.js -- copied here rather than
-     loaded via <script src>, same reasoning + same precedent as the .p-tabs/.htab
-     copy above (mg-notify.js also wires up the Jobs tray/Achievement modals this
-     page doesn't otherwise use). Do not restyle these independently of that source. */
-  .ach-modal{position:fixed;inset:0;z-index:300;background:rgba(6,4,14,.72);backdrop-filter:blur(4px);display:none;align-items:flex-start;justify-content:center;padding:5vh 16px;overflow-y:auto;}
-  .ach-modal.open{display:flex;}
-  .ach-panel{position:relative;width:760px;max-width:96vw;background:var(--mantle);border:1px solid var(--surface1);border-radius:16px;box-shadow:0 30px 90px rgba(0,0,0,.6);padding:24px 26px 28px;}
-  .ach-x{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--subtext);font-size:26px;line-height:1;cursor:pointer;}
-  .ach-x:hover{color:var(--text);}
-  .ach-htitle{font-size:21px;font-weight:700;color:var(--text);letter-spacing:.01em;}
-  .ach-hsub{font-size:12px;color:var(--subtext);margin-top:3px;}
-  /* Trash-specific: the grid/toolbar/cells, all new -- no shared-chrome equivalent exists yet. */
-  .tr-panel{width:920px;max-width:96vw;height:82vh;display:flex;flex-direction:column;}
-  .tr-toolbar{display:flex;align-items:center;gap:10px;margin:14px 0 10px;flex-wrap:wrap;}
-  .tr-grid{flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));grid-auto-rows:min-content;gap:10px;align-content:start;padding:2px;}
-  .tr-cell{position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--surface1);background:var(--surface0);cursor:pointer;}
-  .tr-cell:hover{border-color:var(--lavender);}
-  .tr-cell.sel{outline:2px solid var(--accent);}
-  .tr-cell img{width:100%;height:120px;object-fit:cover;display:block;background:var(--surface1);}
-  .tr-cell .tr-check{position:absolute;top:6px;left:6px;width:17px;height:17px;accent-color:var(--accent);}
-  .tr-cell .tr-vid{position:absolute;top:6px;right:6px;background:rgba(6,4,16,.72);color:var(--text);font-size:9px;border-radius:4px;padding:1px 6px;}
-  .tr-cell .tr-cap{padding:5px 7px;font-size:10.5px;color:var(--subtext);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .tr-empty{text-align:center;padding:34px;color:var(--subtext);font-size:13px;}
-  .tr-foot{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:11px;color:var(--overlay0);}
-</style>
-<header>
-  <div class="brand"><span class="mark anim-{{ mark_anim|default('classic', true) }}{% if mark_kind == 'tile' %} mk-tile{% endif %}"><span class="mark-m">M</span><img class="mark-logo" src="{{ mark_url|default('/branding/logo.png', true) }}" alt="" onerror="this.remove()"></span><h1>Control Panel</h1></div>
-  <span id="acct-chip" class="acct-chip" title="Your PixAI balance" style="margin-left:auto;display:none;"></span>
-  <a class="btn" href="{{ url_for('index') }}">↑ Back to gallery</a>
-</header>
-<div class="panel">
-  <div class="p-tabs" id="panel-tabs">
-    <button type="button" class="htab on" data-tab="maintenance" onclick="setPanelTab('maintenance')">Maintenance</button>
-    <button type="button" class="htab" data-tab="users" onclick="setPanelTab('users')">Users</button>
-  </div>
-  <div id="ptab-maintenance" class="ptab-view on">
-  <div class="p-sec">
-    <h2>Library at a glance</h2>
-    <div class="p-grid">
-      <div class="p-stat"><div class="l">Images</div><div class="v">{{ '{:,}'.format(stats.images) }}</div></div>
-      <div class="p-stat"><div class="l">Videos</div><div class="v">{{ '{:,}'.format(stats.videos) }}</div></div>
-      <div class="p-stat"><div class="l">Collections</div><div class="v">{{ stats.collections }}</div></div>
-      <div class="p-stat"><div class="l">Credits</div><div class="v lav" id="ps-credits">—</div></div>
-      <div class="p-stat"><div class="l">Free cards</div><div class="v lav" id="ps-cards">—</div></div>
-    </div>
-    <div style="margin-top:14px;">
-      <a class="btn" href="{{ url_for('export_csv_download') }}" download>&#11015; Download catalog (CSV)</a>
-      <span style="font-size:11.5px;color:var(--overlay0);margin-left:8px;">saves to your Downloads &mdash; doesn&rsquo;t touch the backup folder</span>
-    </div>
-    <div id="libwrap" style="margin-top:16px;display:none;">
-      <div class="p-note" style="margin-top:0;">Where this library lives. Changing it points
-        Moonglade at a different folder next time it starts &mdash; <b>nothing is moved,
-        copied or deleted</b>, and the folder you leave behind stays exactly as it is.</div>
-      <div style="display:flex;gap:8px;margin-top:9px;flex-wrap:wrap;">
-        <input id="libpath" type="text" spellcheck="false" autocomplete="off"
-               style="flex:1 1 320px;min-width:0;background:var(--surface0);color:var(--text);
-                      border:1px solid var(--surface1);border-radius:7px;padding:7px 9px;
-                      font-size:12.5px;font-family:var(--font-mono,monospace);">
-        <button type="button" class="jobbtn" style="flex:0 0 auto;min-width:0;"
-                onclick="saveLib(false)"><span class="t">Save folder</span></button>
-      </div>
-      <div id="libmsg" style="font-size:11.5px;color:var(--overlay0);margin-top:7px;"></div>
-    </div>
-  </div>
-
-  <div class="p-sec">
-    <h2>&#128465; Trash</h2>
-    <div class="p-note" style="margin-top:0;">Deleted images and videos are quarantined in <code>_deleted/</code>, not destroyed &mdash; recoverable here until you permanently remove them.</div>
-    <div style="margin-top:10px;">
-      <button type="button" class="jobbtn" style="flex:0 0 auto;min-width:0;" onclick="Trash.open()"><span class="t">&#128465; Open trash&hellip;</span></button>
-    </div>
-  </div>
-
-  <div class="p-sec">
-    <h2>Maintenance</h2>
-    <div style="font-size:12px;color:var(--overlay0);margin-bottom:8px;">Safe &middot; read-only or reversible</div>
-    <div class="jobrow" id="jobs-safe"></div>
-    <div style="font-size:12px;color:var(--overlay0);margin:16px 0 8px;">Changes files &middot; asks first</div>
-    <div class="jobrow" id="jobs-danger"></div>
-    {% if not panel_is_local %}
-    <div class="p-note" style="margin-top:0;">Destructive actions (Organize, Dedup, Rebuild thumbnails, and the rest) are restricted to the machine running the gallery &mdash; sign in there to use them.</div>
-    {% endif %}
-    <details class="jobs-adv" style="margin-top:16px;">
-      <summary style="font-size:12px;color:var(--overlay0);cursor:pointer;user-select:none;">Advanced &middot; sync variants the one-click Sync doesn't cover</summary>
-      <div style="font-size:11.5px;color:var(--overlay0);margin:8px 0;line-height:1.5;">These re-walk the full account rather than the incremental default. Slower, all read/append (never delete).</div>
-      <div class="jobrow" id="jobs-advanced"></div>
-    </details>
-    <div id="jobprog" class="jobprog" style="display:none;"><div class="jp-bar"><i></i></div><div class="jp-txt"></div></div>
-    <div id="jobstatus"></div>
-    <button type="button" id="job-stop" class="jobbtn danger" style="display:none;width:auto;min-width:0;margin-top:8px;" onclick="stopJob()"><span class="t">&#9632; Stop this job</span></button>
-    <pre id="joblog"></pre>
-    <div style="display:flex;align-items:center;gap:10px;margin-top:14px;flex-wrap:wrap;">
-      <span style="font-size:12.5px;color:var(--subtext);">Download workers</span>
-      <select id="dl-workers" class="p-sel" onchange="saveWorkers()">
-        <option value="1">1</option><option value="2">2</option><option value="4" selected>4</option>
-        <option value="6">6</option><option value="8">8</option><option value="12">12</option><option value="16">16</option>
-      </select>
-      <span id="workers-status" style="font-size:11.5px;color:var(--overlay0);">parallel fetches for Sync + the scheduled run</span>
-    </div>
-    <div class="p-note">One job runs at a time. Backup / audit / dry-runs never delete anything. Organize and Dedup move files (both reversible &mdash; Organize writes an undo manifest, Dedup quarantines to <code>_duplicates/</code>). <b>Sync</b> only pulls what's new (it stops once it hits already-downloaded items) &mdash; more workers mainly speed a big metadata backfill or a first catch-up.</div>
-  </div>
-
-  <div class="p-sec">
-    <h2>Recover a task by ID</h2>
-    <div style="font-size:12px;color:var(--overlay0);margin-bottom:10px;">Pull a specific generation or edit straight from PixAI into your gallery by its task id &mdash; handy for edits and anything stuck in Favorites that Sync misses (edits aren&rsquo;t in the listing Sync pages). Downloads your own finished media; spends nothing.</div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-      <input id="import-tid" class="p-sel" style="flex:1;min-width:220px;" placeholder="task id, e.g. 2030585251815688815" autocomplete="off" onkeydown="if(event.key==='Enter')importTask()">
-      <button type="button" class="jobbtn" style="width:auto;min-width:0;" onclick="importTask()"><span class="t">&#11015; Import</span></button>
-    </div>
-    <div id="import-status" style="font-size:12.5px;margin-top:8px;"></div>
-  </div>
-
-  <div class="p-sec">
-    <h2>Automated tasks</h2>
-    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;">
-      <label class="p-check"><input type="checkbox" id="sch-enabled"> Enabled</label>
-      <div><div class="p-fl">Run</div>
-        <select id="sch-action" class="p-sel"></select></div>
-      <div><div class="p-fl">Every</div>
-        <select id="sch-interval" class="p-sel">
-          <option value="1">1 hour</option><option value="3">3 hours</option>
-          <option value="6" selected>6 hours</option><option value="12">12 hours</option>
-          <option value="24">1 day</option><option value="48">2 days</option><option value="168">1 week</option>
-        </select></div>
-      <button class="jobbtn" style="flex:0 0 auto;min-width:0;" id="sch-save" onclick="saveSchedule()"><span class="t">Save schedule</span></button>
-      <span id="sch-status" style="font-size:12.5px;color:var(--subtext);"></span>
-    </div>
-    <div class="p-note">Only safe jobs can be scheduled (no file deletion). It fires <b>while the app is open</b> &mdash; this isn't an OS cron. For always-on, point Windows Task Scheduler at <code>moonglade_backup.py --update</code>.</div>
-  </div>
-
-  <div class="p-sec">
-    <h2>Live Mirror</h2>
-    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;">
-      <span id="watch-dot" style="width:9px;height:9px;border-radius:50%;background:var(--overlay0);flex:0 0 auto;"></span>
-      <span id="watch-status" style="font-size:12.5px;color:var(--subtext);">checking&hellip;</span>
-    </div>
-    <div class="p-note">Listens for your generations to finish over PixAI's push connection and mirrors each one the instant it completes &mdash; <code>--update</code> becomes a fallback, not the only way gens land locally. Read-only + free; always on while the server runs.</div>
-  </div>
-
-  <div class="p-sec">
-    <h2>&#127912; Branding</h2>
-    <div class="p-note">The <b>banner mark</b> &mdash; the icon beside the title &mdash; and its animation. {% if panel_is_local %}<b>Set launcher icon</b> writes a Desktop shortcut whose icon is the selected mark (a .pyw can't carry its own icon; the shortcut can).{% else %}<b>Set launcher icon</b> is restricted to the machine running the gallery &mdash; sign in there to use it.{% endif %} The favicon stays the Gem Tome.</div>
-    <div id="brand-marks" style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;"></div>
-    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;">
-      <div><div class="p-fl">Animation</div>
-        <select id="brand-anim" class="p-sel"></select></div>
-      <button class="jobbtn" style="flex:0 0 auto;min-width:0;" onclick="saveBrand()"><span class="t">Save</span></button>
-      {% if panel_is_local %}
-      <button class="jobbtn" style="flex:0 0 auto;min-width:0;" onclick="setLauncher()" title="Creates/updates the Desktop 'Moonglade Athenaeum' shortcut; its icon becomes the selected mark"><span class="t">&#128279; Set launcher icon</span></button>
-      {% endif %}
-      <span id="brand-status" style="font-size:12.5px;color:var(--subtext);"></span>
-    </div>
-  </div>
-
-  <div class="p-sec">
-    <h2>&#127912; Skins</h2>
-    <div class="p-note">Cosmetic palette swaps for the whole suite (moved here from the achievements panel &mdash; cosmetics live together). Unlock more by earning epic achievements in the gallery (&#127942;).</div>
-    <div id="skin-grid" style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;"></div>
-    <span id="skin-status" style="font-size:12.5px;color:var(--subtext);"></span>
-  </div>
-
-  <div class="p-sec">
-    <h2>Server</h2>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;">
-      <button class="jobbtn" style="flex:0 0 auto;min-width:0;" id="btn-restart"
-        onclick="restartServer()" {% if not supervised %}disabled title="Start via the 'Serve Gallery' launcher to enable one-click restart"{% endif %}>
-        <span class="t">&#8635; Restart server</span></button>
-      <button class="jobbtn danger" style="flex:0 0 auto;min-width:0;" onclick="stopServer()">
-        <span class="t">&#9632; Stop server</span></button>
-    </div>
-    <div class="p-note">{% if supervised %}Managed by the launcher &mdash; <b>Restart</b> brings the server right back; <b>Stop</b> shuts the whole app down (relaunch from the <code>Serve Gallery</code> shortcut).{% else %}This server was started headlessly (not managed). <b>Stop</b> works; <b>Restart</b> needs the <code>Serve Gallery</code> launcher (which supervises + relaunches it).{% endif %} No more Task Manager.</div>
-  </div>
-
-  <div class="p-sec">
-    <h2>This build</h2>
-    <div style="font-size:13px;color:var(--subtext);">Running <b style="color:var(--text);">{{ build_stamp }}</b> &middot; library at <code>{{ out_dir }}</code></div>
-    <div class="p-note">More settings (default workers, page size, verbose) land here next. Deleting from your PixAI account stays CLI-only, behind its typed confirm &mdash; on purpose.</div>
-  </div>
-  </div>
-  <div id="ptab-users" class="ptab-view">
-  <div class="p-sec">
-    <h2>Accounts</h2>
-    <div id="users-list">
-      {% for u in web_users %}
-      <div class="u-row" data-username="{{ u.username }}">
-        <span class="u-name">{{ u.username }}{% if u.username == current_username %}<span class="u-you">you</span>{% endif %}</span>
-        {# Resetting SOMEONE ELSE'S password is owner-machine only, and the control is
-           HIDDEN rather than shown-disabled on the LAN (owner's choice 2026-07-26). Your own
-           password is changed through the form below instead, which requires the current one --
-           so there is deliberately no Reset button on your own row. #}
-        {% if panel_is_local and u.username != current_username %}
-        <button type="button" class="btn" onclick="resetUserPassword(this)">Reset password</button>
-        {% endif %}
-        {% if panel_is_local or u.username == current_username %}
-        <button type="button" class="btn btn-danger" onclick="removeUser(this)">Remove</button>
-        {% endif %}
-      </div>
-      {% else %}
-      <div class="p-note" id="users-empty">No accounts.</div>
-      {% endfor %}
-    </div>
-  </div>
-  <div class="p-sec">
-    <h2>Your password</h2>
-    <form id="own-pw-form" onsubmit="return changeOwnPassword(event)">
-      <div class="setup-row login-fields" style="max-width:380px;">
-        <input type="password" id="pw-current" placeholder="Current password"
-               autocomplete="current-password" required>
-        <input type="password" id="pw-new" placeholder="New password"
-               autocomplete="new-password" required>
-        <input type="password" id="pw-confirm" placeholder="Confirm new password"
-               autocomplete="new-password" required>
-        <button type="submit" class="btn btn-primary">Change password</button>
-      </div>
-    </form>
-    <div id="own-pw-status" style="margin-top:8px;"></div>
-    <div class="p-note">Changing your password signs you out on every OTHER device
-      immediately &mdash; this one stays signed in. Your current password is required even here,
-      so an unlocked browser left open somewhere can't be used to lock you out of your own
-      account.{% if not panel_is_local %} Forgotten it entirely? It can only be reset from the
-      machine running the gallery &mdash; being at that machine is the proof of who you are, which
-      is the job an emailed reset link does elsewhere.{% endif %}</div>
-  </div>
-  <div class="p-sec">
-    <h2>Add user</h2>
-    {% if panel_is_local %}
-    <form id="add-user-form" onsubmit="return addUser(event)">
-      <div class="setup-row login-fields" style="max-width:380px;">
-        <input type="text" id="new-username" placeholder="Username" autocomplete="off" maxlength="64" required>
-        <input type="password" id="new-password" placeholder="Password" autocomplete="new-password" required>
-        <input type="password" id="new-confirm" placeholder="Confirm password" autocomplete="new-password" required>
-        <button type="submit" class="btn btn-primary">Add user</button>
-      </div>
-    </form>
-    <div id="add-user-status" style="margin-top:8px;"></div>
-    <div class="p-note">Once you're signed in, every account has equal access to this gallery (generate, browse, maintenance) &mdash; there's no separate admin tier. Adding a new account, or removing someone else's, is restricted to the machine running the gallery.</div>
-    {% else %}
-    <div class="p-note">Only the machine running the gallery can add new accounts. Ask the owner, or sign in from that machine. (You can still remove your own account above.)</div>
-    {% endif %}
-  </div>
-  </div>
-</div>
-<!-- Trash panel: a FLOATING OVERLAY (sibling of .panel above, not nested inside it),
-     opened by the "Open trash..." button in the Trash card above via Trash.open().
-     Same #ach-modal/.ach-panel chrome pattern as the gallery's Folio of
-     Honors/Contests/YourArt modals -- see the CSS comment near .ach-modal above. -->
-<div id="trash-modal" class="ach-modal" aria-hidden="true" onclick="if(event.target===this)Trash.close()">
-  <div class="ach-panel tr-panel" role="dialog" aria-label="Trash">
-    <button type="button" class="ach-x" onclick="Trash.close()" aria-label="Close">&times;</button>
-    <div class="ach-htitle">&#128465; Trash</div>
-    <div class="ach-hsub" id="tr-sub">Loading&hellip;</div>
-    <div class="tr-toolbar">
-      <label class="p-check"><input type="checkbox" id="tr-selall" onchange="Trash.toggleAll(this.checked)"> Select all loaded</label>
-      <span style="flex:1"></span>
-      <button type="button" class="btn" onclick="Trash.restoreSelected()">&#8634; Restore selected</button>
-      {% if panel_is_local %}
-      <button type="button" class="btn btn-danger" onclick="Trash.deleteSelected()">Delete forever</button>
-      {% endif %}
-    </div>
-    <div id="tr-grid" class="tr-grid" onscroll="Trash.onScroll()"></div>
-    <div class="tr-empty" id="tr-empty" style="display:none;">Nothing in the trash.</div>
-    <div class="tr-foot">
-      <span id="tr-status"></span>
-      <span style="flex:1"></span>
-      {% if panel_is_local %}
-      <button type="button" class="btn btn-danger" onclick="Trash.emptyAll()">Empty trash&hellip;</button>
-      {% else %}
-      <span style="font-size:11px;color:var(--overlay0);">Delete-forever &amp; Empty trash need the machine running the gallery &mdash; restore is available here.</span>
-      {% endif %}
-    </div>
-  </div>
-</div>
-<div id="srv-overlay">
-  <div class="srv-box"><div class="srv-spin" id="srv-spin"></div>
-    <div class="srv-msg" id="srv-msg">Working&hellip;</div>
-    <div class="srv-sub" id="srv-sub"></div></div>
-</div>
-<style>
-  #srv-overlay{position:fixed;inset:0;z-index:500;background:rgba(6,4,14,.86);backdrop-filter:blur(5px);display:none;align-items:center;justify-content:center;}
-  #srv-overlay.on{display:flex;}
-  .srv-box{text-align:center;color:var(--text);}
-  .srv-spin{width:44px;height:44px;margin:0 auto 18px;border-radius:50%;border:3px solid var(--surface1);border-top-color:var(--accent);animation:srv-sp 0.9s linear infinite;}
-  @keyframes srv-sp{to{transform:rotate(360deg);}}
-  .srv-msg{font-size:18px;font-weight:600;}
-  .srv-sub{font-size:12.5px;color:var(--subtext);margin-top:6px;}
-</style>
-<script>
-var ACTIONS = {{ actions_json|safe }};       // Maintenance buttons -- panel_visible only
-var ALL_ACTIONS = {{ all_actions_json|safe }};  // scheduler dropdown -- includes background-only jobs
-var CSRF = "{{ csrf }}";   // same session-based token every other mutating form in this app uses
-function el(i){return document.getElementById(i);}
-// --- Trash panel: floating overlay opened from the "Open trash..." button above,
-// same #ach-modal/.ach-panel pattern as the gallery's Folio of Honors/Contests/
-// YourArt modals (see the CSS comment near .ach-modal). Self-contained (no
-// dependency on mg-notify.js's Ach object, which this page doesn't load) --------
-var Trash = (function(){
-  var page = 1, limit = 60, total = 0, loading = false, exhausted = false;
-  var selected = {};
-  function open(){
-    el('trash-modal').classList.add('open');
-    el('trash-modal').setAttribute('aria-hidden', 'false');
-    reset();
-    load();
-  }
-  function close(){
-    el('trash-modal').classList.remove('open');
-    el('trash-modal').setAttribute('aria-hidden', 'true');
-  }
-  function reset(){
-    page = 1; total = 0; loading = false; exhausted = false; selected = {};
-    el('tr-grid').innerHTML = '';
-    el('tr-empty').style.display = 'none';
-    el('tr-selall').checked = false;
-    el('tr-status').textContent = '';
-    el('tr-sub').textContent = 'Loading…';
-  }
-  function describeTotal(){
-    el('tr-sub').textContent = total.toLocaleString() + ' item' + (total === 1 ? '' : 's') + ' in the trash';
-  }
-  function load(){
-    if (loading || exhausted) return;
-    loading = true;
-    fetch('/api/trash/list?page=' + page + '&limit=' + limit)
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        loading = false;
-        total = d.total || 0;
-        var got = (d.items || []).length;
-        (d.items || []).forEach(renderCell);
-        exhausted = got === 0 || (page * limit) >= total;
-        page += 1;
-        describeTotal();
-        el('tr-empty').style.display = (total === 0) ? 'block' : 'none';
-        maybeFillPage();
-      })
-      .catch(function(){
-        loading = false;
-        el('tr-sub').innerHTML = '<span class="st-failed">could not load the trash</span>';
-      });
-  }
-  function maybeFillPage(){
-    // If the loaded cells don't yet overflow the grid, there's no scrollbar to
-    // drive onScroll()'s infinite-scroll -- pull one more page, same fix as the
-    // gallery Picker's own maybeFillPage (picker-core.js).
-    var g = el('tr-grid');
-    if (!exhausted && !loading && g.scrollHeight <= g.clientHeight + 4) load();
-  }
-  function onScroll(){
-    var g = el('tr-grid');
-    if (g.scrollTop + g.clientHeight > g.scrollHeight - 300) load();
-  }
-  function humanSize(n){
-    n = +n || 0;
-    if (n >= 1073741824) return (n / 1073741824).toFixed(1) + ' GB';
-    if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
-    if (n >= 1024) return (n / 1024).toFixed(1) + ' KB';
-    return n + ' B';
-  }
-  function humanDate(ts){
-    if (!ts) return '';
-    try { return new Date(ts * 1000).toLocaleDateString(); } catch (e) { return ''; }
-  }
-  function renderCell(it){
-    if (el('tr-grid').querySelector('[data-mid="' + it.media_id + '"]')) return;   // already rendered
-    var c = document.createElement('div');
-    c.className = 'tr-cell';
-    c.dataset.mid = it.media_id;
-    c.title = it.prompt || it.filename;
-    c.innerHTML =
-      '<input type="checkbox" class="tr-check">' +
-      '<img loading="lazy" decoding="async" src="' + it.thumb + '" alt="">' +
-      (it.is_video === '1' ? '<span class="tr-vid">&#9654;</span>' : '') +
-      '<div class="tr-cap">' + escH2(it.filename) + '<br>' + humanSize(it.size) + ' · ' + humanDate(it.deleted_at) + '</div>';
-    var cb = c.querySelector('.tr-check');
-    cb.addEventListener('click', function(e){ e.stopPropagation(); toggle(it.media_id, cb.checked, c); });
-    c.addEventListener('click', function(){ cb.checked = !cb.checked; toggle(it.media_id, cb.checked, c); });
-    el('tr-grid').appendChild(c);
-  }
-  function toggle(mid, on, cellEl){
-    if (on) selected[mid] = true; else delete selected[mid];
-    (cellEl || el('tr-grid').querySelector('[data-mid="' + mid + '"]')).classList.toggle('sel', !!on);
-    updateSelStatus();
-  }
-  function toggleAll(on){
-    el('tr-grid').querySelectorAll('.tr-cell').forEach(function(c){
-      var mid = c.dataset.mid, cb = c.querySelector('.tr-check');
-      cb.checked = on; c.classList.toggle('sel', on);
-      if (on) selected[mid] = true; else delete selected[mid];
-    });
-    updateSelStatus();
-  }
-  function updateSelStatus(){
-    var n = Object.keys(selected).length;
-    el('tr-status').textContent = n ? (n + ' selected') : '';
-  }
-  function removeCells(ids){
-    ids.forEach(function(mid){
-      var c = el('tr-grid').querySelector('[data-mid="' + mid + '"]');
-      if (c) c.remove();
-      delete selected[mid];
-    });
-    total = Math.max(0, total - ids.length);
-    describeTotal();
-    updateSelStatus();
-    if (!el('tr-grid').children.length) el('tr-empty').style.display = 'block';
-    maybeFillPage();
-  }
-  function restoreSelected(){
-    var ids = Object.keys(selected);
-    if (!ids.length) { alert('Select one or more items first (check the boxes, or "Select all loaded").'); return; }
-    el('tr-status').innerHTML = '<span class="st-running">Restoring&hellip;</span>';
-    fetch('/api/trash/restore', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({media_ids: ids})})
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        var restored = d.restored || [], errs = d.errors || [];
-        removeCells(restored);
-        var msg = restored.length + ' restored';
-        if (errs.length) msg += ', ' + errs.length + ' failed';
-        el('tr-status').innerHTML = '<span class="' + (errs.length ? 'st-warn' : 'st-done') + '">' + msg + '</span>';
-      })
-      .catch(function(){ el('tr-status').innerHTML = '<span class="st-failed">network error</span>'; });
-  }
-  function deleteSelected(){
-    var ids = Object.keys(selected);
-    if (!ids.length) { alert('Select one or more items first (check the boxes, or "Select all loaded").'); return; }
-    if (!confirm('Permanently delete ' + ids.length + ' item(s)? This cannot be undone.')) return;
-    var typed = prompt('This permanently deletes ' + ids.length + ' file(s) from disk. Type DELETE to confirm:');
-    if (typed !== 'DELETE') { alert('Cancelled.'); return; }
-    el('tr-status').innerHTML = '<span class="st-running">Deleting&hellip;</span>';
-    fetch('/api/trash/delete-forever', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({media_ids: ids, confirm: true})})
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        removeCells(ids);
-        el('tr-status').innerHTML = '<span class="st-done">' + (d.deleted || 0) + ' permanently deleted</span>';
-      })
-      .catch(function(){ el('tr-status').innerHTML = '<span class="st-failed">network error</span>'; });
-  }
-  function emptyAll(){
-    if (!total) { alert('The trash is already empty.'); return; }
-    if (!confirm('Permanently delete ALL ' + total.toLocaleString() + ' item(s) in the trash? This cannot be undone.')) return;
-    var typed = prompt('This empties the ENTIRE trash (' + total.toLocaleString() + ' files) permanently. Type DELETE to confirm:');
-    if (typed !== 'DELETE') { alert('Cancelled.'); return; }
-    el('tr-status').innerHTML = '<span class="st-running">Emptying trash&hellip;</span>';
-    fetch('/api/trash/empty', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({confirm: true})})
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        reset();
-        total = 0;
-        describeTotal();
-        el('tr-empty').style.display = 'block';
-        el('tr-status').innerHTML = '<span class="st-done">emptied (' + (d.deleted || 0) + ' files removed)</span>';
-      })
-      .catch(function(){ el('tr-status').innerHTML = '<span class="st-failed">network error</span>'; });
-  }
-  return {open: open, close: close, onScroll: onScroll, toggleAll: toggleAll,
-          restoreSelected: restoreSelected, deleteSelected: deleteSelected, emptyAll: emptyAll};
-})();
-document.addEventListener('keydown', function(e){
-  if (e.key === 'Escape') {
-    var m = el('trash-modal');
-    if (m && m.classList.contains('open')) Trash.close();
-  }
-});
-// --- Panel tab bar (Maintenance / Users) -----------------------------------
-function setPanelTab(tab){
-  document.querySelectorAll('#panel-tabs .htab').forEach(function(b){
-    b.classList.toggle('on', b.getAttribute('data-tab') === tab); });
-  el('ptab-maintenance').classList.toggle('on', tab === 'maintenance');
-  el('ptab-users').classList.toggle('on', tab === 'users');
-}
-// --- Users tab: add / remove gallery web-login accounts --------------------
-function escH2(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function addUser(evt){
-  evt.preventDefault();
-  var u=el('new-username').value.trim(), p=el('new-password').value, c=el('new-confirm').value;
-  var st=el('add-user-status');
-  fetch('/api/users/add',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({username:u, password:p, confirm:c, csrf:CSRF})})
-    .then(function(r){return r.json();}).then(function(d){
-      if(d.error){ st.innerHTML='<span class="st-failed">⚠ '+escH2(d.error)+'</span>'; return; }
-      var empty=el('users-empty'); if(empty) empty.remove();
-      // Built via DOM APIs (not innerHTML string concatenation) so an arbitrary
-      // username can never be interpreted as HTML or JS -- the same reason the
-      // server-rendered row below passes `this` to removeUser() instead of
-      // templating the username into an inline onclick string.
-      var row=document.createElement('div'); row.className='u-row'; row.setAttribute('data-username', d.username);
-      var span=document.createElement('span'); span.className='u-name'; span.textContent=d.username;
-      var btn=document.createElement('button'); btn.type='button'; btn.className='btn btn-danger'; btn.textContent='Remove';
-      btn.onclick=function(){ removeUser(btn); };
-      row.appendChild(span); row.appendChild(btn);
-      el('users-list').appendChild(row);
-      el('new-username').value=''; el('new-password').value=''; el('new-confirm').value='';
-      st.innerHTML='<span class="st-done">✓ Account "'+escH2(d.username)+'" created.</span>';
-    }).catch(function(){ st.innerHTML='<span class="st-failed">⚠ network error</span>'; });
-  return false;
-}
-function changeOwnPassword(evt){
-  evt.preventDefault();
-  var cur=el('pw-current').value, nw=el('pw-new').value, cf=el('pw-confirm').value;
-  var st=el('own-pw-status');
-  // Confirm-match is checked HERE and not server-side on purpose: the route takes one new
-  // password, and a typo in a field the user cannot read back is a client concern.
-  if(nw!==cf){ st.innerHTML='<span class="st-failed">&#9888; The two new passwords do not match.</span>'; return false; }
-  fetch('/api/users/password',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({current_password:cur, new_password:nw, csrf:CSRF})})
-    .then(function(r){return r.json();}).then(function(d){
-      if(d.error){ st.innerHTML='<span class="st-failed">&#9888; '+escH2(d.error)+'</span>'; return; }
-      el('pw-current').value=''; el('pw-new').value=''; el('pw-confirm').value='';
-      st.innerHTML='<span class="st-done">&#10003; Password changed. Other devices have been signed out.</span>';
-    }).catch(function(){ st.innerHTML='<span class="st-failed">&#9888; network error</span>'; });
-  return false;
-}
-function resetUserPassword(btn){
-  // Username off the row's data attribute, never a templated JS argument -- see addUser().
-  // Reusing the row also means the name is never re-typed, so the wrong account cannot be
-  // reset by a typo.
-  var row=btn.closest('.u-row');
-  var username=row.getAttribute('data-username');
-  var nw=prompt('Set a new password for "'+username+'".\\n\\nThey will be signed out on every device immediately.');
-  if(nw===null) return;                       // cancelled
-  nw=String(nw);
-  if(!nw.trim()){ return; }
-  var st=el('add-user-status');
-  fetch('/api/users/password',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({username:username, new_password:nw, csrf:CSRF})})
-    .then(function(r){return r.json();}).then(function(d){
-      if(d.error){ st.innerHTML='<span class="st-failed">&#9888; '+escH2(d.error)+'</span>'; return; }
-      st.innerHTML='<span class="st-done">&#10003; Password reset for "'+escH2(username)+'". They have been signed out.</span>';
-    }).catch(function(){ st.innerHTML='<span class="st-failed">&#9888; network error</span>'; });
-}
-function removeUser(btn){
-  // Read the username back off the row's data attribute rather than a
-  // templated/interpolated JS argument -- see the comment in addUser() above.
-  // Whether this is YOUR OWN row is read the same way, off the server-rendered
-  // ".u-you" marker already on the page -- no second templated JS value needed.
-  var row=btn.closest('.u-row');
-  var username=row.getAttribute('data-username');
-  var isSelf = !!row.querySelector('.u-you');
-  var msg = isSelf
-    ? 'Remove your own account "'+username+'"?\\n\\nYou will be signed out immediately, on every device.'
-    : 'Remove account "'+username+'"?\\n\\nThey will be signed out on every device immediately.';
-  if(!confirm(msg)) return;
-  var st=el('add-user-status');
-  fetch('/api/users/remove',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({username:username, csrf:CSRF})})
-    .then(function(r){return r.json();}).then(function(d){
-      if(d.error){ st.innerHTML='<span class="st-failed">⚠ '+escH2(d.error)+'</span>'; return; }
-      // Self-removal kills the caller's own session server-side immediately
-      // (get_web_user_session_epoch returns None once the account is gone) --
-      // send them to /login rather than leave a dead session sitting on the
-      // Panel page looking functional until their next click fails.
-      if(isSelf){ location.href='/login'; return; }
-      row.remove();
-      if(!el('users-list').querySelector('.u-row')){
-        var e=document.createElement('div'); e.className='p-note'; e.id='users-empty'; e.textContent='No accounts.';
-        el('users-list').appendChild(e);
-      }
-    }).catch(function(){ st.innerHTML='<span class="st-failed">⚠ network error</span>'; });
-}
-// Option toggles. A checkbox here does NOT add a flag to the request -- it swaps which
-// WHITELISTED action key gets sent, so the server still only ever accepts a fixed set of
-// keys and the "never an arbitrary command" property of _panel_run is untouched. Any
-// action listed as a `variant` is hidden from the button list so it can't also render as
-// its own button (the checkbox IS its entry point).
-var JOB_OPTIONS = {
-  'audit':       {variant:'audit-full',   label:'full (byte-compare — slower)',
-                  title:'Also hash file CONTENT to catch byte-identical duplicates saved under different ids (Class B). The default fast pass only finds the same id in two places.'},
-  'dedup-apply': {variant:'dedup-delete', label:'DELETE instead of quarantining',
-                  title:'Redundant copies are deleted outright instead of being moved to _duplicates/. There is no undo and no safety net -- run the preview and the verify step first.'}
-};
-function renderJobs(){
-  var safe=el('jobs-safe'), danger=el('jobs-danger'), adv=el('jobs-advanced');
-  var variants={}; Object.keys(JOB_OPTIONS).forEach(function(k){ variants[JOB_OPTIONS[k].variant]=1; });
-  ACTIONS.forEach(function(a){
-    if(variants[a.action]) return;              // reached via its checkbox, not its own button
-    var opt=JOB_OPTIONS[a.action];
-    var b=document.createElement('button'); b.className='jobbtn'+(a.destructive?' danger':'');
-    b.innerHTML='<span class="t">'+a.label+'</span>';
-    var cb=null, numInput=null;
-    if(opt){
-      var wrap=document.createElement('label');
-      wrap.className='job-opt'; wrap.title=opt.title;
-      cb=document.createElement('input'); cb.type='checkbox';
-      wrap.appendChild(cb);
-      wrap.appendChild(document.createTextNode(' '+opt.label));
-      // Clicking the checkbox must not also fire the button it sits under.
-      wrap.onclick=function(ev){ ev.stopPropagation(); };
-      b.appendChild(wrap);
-    }
-    if(a.int_param){
-      // A single bounded integer (test-pull's N), clamped again server-side. Lives inside
-      // the button; interacting with it must not fire the run.
-      var rng=a.int_range||[1,200];
-      var nwrap=document.createElement('label'); nwrap.className='job-opt';
-      nwrap.appendChild(document.createTextNode('N '));
-      numInput=document.createElement('input'); numInput.type='number';
-      numInput.min=rng[0]; numInput.max=rng[1];
-      numInput.value=(a.int_default!=null?a.int_default:rng[0]);
-      numInput.style.width='56px';
-      nwrap.appendChild(numInput);
-      nwrap.onclick=function(ev){ ev.stopPropagation(); };
-      b.appendChild(nwrap);
-    }
-    b.onclick=function(){
-      var chosen=a;
-      if(opt && cb && cb.checked){
-        var alt=ACTIONS.concat(ALL_ACTIONS).filter(function(x){ return x.action===opt.variant; })[0];
-        if(alt) chosen=alt;
-      }
-      runJob(chosen, numInput ? numInput.value : null);
-    };
-    (a.advanced && adv ? adv : (a.destructive?danger:safe)).appendChild(b);
-  });
-}
-var polling=false;
-function runJob(a, n){
-  if(a.destructive && !confirm('Run: '+a.label+'?\\n\\nThis changes files on disk (reversible). Continue?')) return;
-  var payload={action:a.action, confirm:true};
-  if(n!=null && n!=='') payload.n=n;           // only test-pull sends it; server clamps + ignores elsewhere
-  fetch('/api/panel/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
-    .then(function(r){return r.json();}).then(function(d){
-      if(d.error){ el('jobstatus').innerHTML='<span class="st-failed">\\u26a0 '+escH2(d.error)+'</span>'; return; }
-      el('joblog').style.display='block'; if(!polling){ polling=true; poll(); }
-    });
-}
-function setButtons(disabled){ document.querySelectorAll('.jobbtn').forEach(function(b){ b.disabled=disabled; }); }
-function poll(){
-  fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
-    var log=el('joblog'); if(d.lines){ log.textContent=d.lines.join('\\n'); log.scrollTop=log.scrollHeight; }
-    var jp=el('jobprog'), p=d.progress;
-    if(d.status==='running' && p && p.total){
-      jp.style.display=''; jp.querySelector('.jp-bar i').style.width=(p.pct||0)+'%';
-      jp.querySelector('.jp-txt').textContent=(p.done||0).toLocaleString()+' / '+(p.total||0).toLocaleString()
-        +'  ('+(p.pct!=null?p.pct:0)+'%)'+(p.new?('  \\u00b7 +'+p.new+' new'):'');
-    } else { jp.style.display='none'; }
-    var st=el('jobstatus'), stop=el('job-stop');
-    if(d.status==='running'){ st.innerHTML='<span class="st-running">\\u25c9 running: '+escH2(d.label)+'\\u2026</span>'; stop.style.display=''; setButtons(true); setTimeout(poll,1000); }
-    else { setButtons(false); polling=false; stop.style.display='none';
-      if(d.status==='done'){ st.innerHTML='<span class="st-done">\\u2713 '+escH2(d.label||'job')+' finished (exit '+d.rc+')</span>'; loadAcct(); }
-      else if(d.status==='done_with_errors'){ st.innerHTML='<span class="st-warn">\\u26a0 '+escH2(d.label||'job')+' finished with errors \\u2014 '+(d.warn_count||0)+' file(s) failed (exit '+d.rc+')</span>'; loadAcct(); }
-      else if(d.status==='cancelled'){ st.innerHTML='<span class="st-failed">\\u25a0 '+escH2(d.label||'job')+' stopped by you</span>'; loadAcct(); }
-      else if(d.status==='failed'){ st.innerHTML='<span class="st-failed">\\u26a0 '+escH2(d.label||'job')+' failed (exit '+d.rc+')</span>'; }
-      else { st.innerHTML='<span class="st-warn">? '+escH2(d.label||'job')+' ended in an unrecognized state ('+escH2(String(d.status))+')</span>'; loadAcct(); }
-    }
-  }).catch(function(){ polling=false; setButtons(false); });
-}
-function stopJob(){
-  if(!confirm('Stop the running job?\\n\\nDry-runs/backups have nothing to undo; Organize and Dedup are reversible (Organize writes an undo manifest, Dedup quarantines to _duplicates/, nothing is deleted).')) return;
-  el('job-stop').disabled=true;
-  fetch('/api/panel/cancel',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
-    el('job-stop').disabled=false;
-    if(d.error) el('jobstatus').innerHTML='<span class="st-failed">\\u26a0 '+escH2(d.error)+'</span>';
-  }).catch(function(){ el('job-stop').disabled=false; });
-}
-function _acctPaint(d){
-  if(d.credits!=null && el('ps-credits')) el('ps-credits').textContent=Number(d.credits).toLocaleString();
-  if(d.cards!=null && el('ps-cards')) el('ps-cards').textContent=d.cards;
-  var chip=el('acct-chip'); if(chip && d.credits!=null){ chip.innerHTML='\\u25c8 <b>'+Number(d.credits).toLocaleString()+'</b> \\u00b7 <span style="color:var(--lavender)">\\ud83c\\udfab '+(d.cards||0)+'</span>'; chip.style.display=''; }
-}
-function loadAcct(){
-  // Paint the last-known balance immediately (shared cache with the header chip),
-  // then only overwrite on a good read -- a transient miss never blanks it.
-  try{ var cached=JSON.parse(localStorage.getItem('mg_acct')||'null'); if(cached) _acctPaint(cached); }catch(e){}
-  fetch('/api/account').then(function(r){return r.json();}).then(function(d){
-    if(d.error || d.credits==null) return;
-    var good={credits:d.credits, cards:(d.cards!=null?d.cards:0)};
-    try{ localStorage.setItem('mg_acct', JSON.stringify(good)); }catch(e){}
-    _acctPaint(good);
-  }).catch(function(){});
-}
-function importTask(){
-  var tid=(document.getElementById('import-tid').value||'').trim();
-  var st=document.getElementById('import-status');
-  if(!/^\\d+$/.test(tid)){ st.innerHTML='<span class="st-failed">Enter a numeric task id.</span>'; return; }
-  st.innerHTML='<span class="st-running">\\u25c9 Pulling task '+escH2(tid)+'\\u2026</span>';
-  fetch('/api/import-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:tid})})
-    .then(function(r){return r.json();}).then(function(d){
-      if(d.error){ st.innerHTML='<span class="st-failed">\\u26a0 '+escH2(d.error)+'</span>'; return; }
-      if(d.already){ var n=(d.media_ids||[]).length, mid=(d.media_ids||[])[0];
-        st.innerHTML='<span class="st-done">\\u2713 Already in your gallery ('+n+' item'+(n===1?'':'s')+')'
-          +(mid?' \\u2014 <a href="/image/'+mid+'" style="color:var(--lavender);text-decoration:underline;">view it \\u2192</a>':'')+'</span>'; return; }
-      if(!d.saved){ st.innerHTML='<span class="st-failed">\\u26a0 Task resolved but no media to import.</span>'; return; }
-      st.innerHTML='<span class="st-done">\\u2713 Imported '+d.saved+' item(s) from task '+escH2(tid)+' \\u2014 open the gallery to see it.</span>';
-      document.getElementById('import-tid').value=''; loadAcct();
-    }).catch(function(){ st.innerHTML='<span class="st-failed">\\u26a0 network error</span>'; });
-}
-function loadSchedule(){
-  var sel=el('sch-action');
-  ALL_ACTIONS.filter(function(a){return !a.destructive && !a.advanced;}).forEach(function(a){
-    var o=document.createElement('option'); o.value=a.action; o.textContent=a.label; sel.appendChild(o); });
-  fetch('/api/panel/schedule').then(function(r){return r.json();}).then(function(s){
-    el('sch-enabled').checked=!!s.enabled;
-    if(s.action) sel.value=s.action;
-    if(s.interval_hours) el('sch-interval').value=String(s.interval_hours);
-    if(s.workers && el('dl-workers')) el('dl-workers').value=String(s.workers);
-    if(s.last_run){ var dt=new Date(s.last_run*1000); el('sch-status').textContent='last run: '+dt.toLocaleString(); }
-  }).catch(function(){});
-}
-function saveWorkers(){
-  var w=+el('dl-workers').value, st=el('workers-status');
-  fetch('/api/panel/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workers:w})})
-    .then(function(r){return r.json();}).then(function(s){
-      if(s.error){ st.textContent='\\u26a0 '+s.error; return; }
-      st.innerHTML='<span style="color:var(--emerald)">\\u2713 '+(s.workers||w)+' workers</span> \\u00b7 Sync + scheduled run';
-    }).catch(function(){ st.textContent='\\u26a0 network error'; });
-}
-// Echo the interval using the dropdown's OWN label for that value, never a
-// re-formatted number: the confirmation used to read "every 168h" beside a
-// dropdown reading "1 week", so the app appeared to have saved something other
-// than what was picked. Reading the option back means the two cannot disagree
-// again, including for any interval added to the list later.
-function _schIntervalLabel(hours){
-  var opts=el('sch-interval').options;
-  for(var i=0;i<opts.length;i++){ if(+opts[i].value===+hours) return opts[i].text; }
-  return hours+'h';   // value not in the list (hand-edited config): show the raw number
-}
-function saveSchedule(){
-  var body={enabled:el('sch-enabled').checked, action:el('sch-action').value, interval_hours:+el('sch-interval').value};
-  fetch('/api/panel/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-    .then(function(r){return r.json();}).then(function(s){
-      if(s.error){ el('sch-status').textContent='\\u26a0 '+s.error; return; }
-      el('sch-status').innerHTML='<span style="color:var(--emerald)">\\u2713 saved'+(s.enabled?(' \\u00b7 every '+_schIntervalLabel(s.interval_hours)+' while open'):' \\u00b7 disabled')+'</span>';
-    }).catch(function(){ el('sch-status').textContent='\\u26a0 network error'; });
-}
-function _timeAgo(ts){
-  var s=Math.max(0, Math.floor(Date.now()/1000 - ts));
-  if(s<60) return s+'s ago';
-  if(s<3600) return Math.floor(s/60)+'m ago';
-  return Math.floor(s/3600)+'h ago';
-}
-function loadWatchStatus(){
-  fetch('/api/watch/status').then(function(r){return r.json();}).then(function(d){
-    var dot=el('watch-dot'), st=el('watch-status'); if(!dot||!st) return;
-    if(d.connected){
-      dot.style.background='var(--emerald)';
-      var bits=['\\u25c9 connected'];
-      if(d.last_event_at) bits.push('last event '+_timeAgo(d.last_event_at));
-      bits.push((d.mirrored||0)+' mirrored this session');
-      // Only shown once it has actually happened -- most sessions never trip the
-      // staleness watchdog, and an always-visible "0 stale reconnects" would just
-      // be noise on the one status line the Panel gives this feature.
-      if(d.stale_reconnects) bits.push(d.stale_reconnects+' stale reconnect'+(d.stale_reconnects===1?'':'s')+
-        (d.last_stale_reconnect_at ? ' (last '+_timeAgo(d.last_stale_reconnect_at)+')' : ''));
-      st.textContent=bits.join(' \\u00b7 ');
-    } else {
-      dot.style.background = d.last_error ? 'var(--red)' : 'var(--overlay0)';
-      st.textContent = d.last_error ? ('reconnecting\\u2026 ('+d.last_error+')') : 'connecting\\u2026';
-    }
-  }).catch(function(){ var st=el('watch-status'); if(st) st.textContent='status unavailable'; });
-}
-// --- Branding: banner mark + animation + launcher shortcut ---
-var _brandMark='';
-function escH(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function loadBrand(){
-  fetch('/api/branding').then(function(r){return r.json();}).then(function(d){
-    _brandMark=d.mark;
-    var row=el('brand-marks'); if(!row) return;
-    if(!(d.marks||[]).length){
-      row.innerHTML='<span style="font-size:12.5px;color:var(--subtext);">No cut marks on this machine yet (branding/marks/ is empty) &mdash; the header uses the drop-in logo.png.</span>';
-    } else {
-      row.innerHTML=(d.marks||[]).map(function(m){
-        return '<span class="brand-pick" data-mark="'+escH(m.id)+'" title="'+escH(m.label)+'" style="cursor:pointer;border:2px solid var(--surface1);border-radius:10px;padding:4px;background:var(--mantle);text-align:center;">'
-          +'<img src="'+escH(m.png)+'" style="width:44px;height:44px;display:block;'+(m.kind==='tile'?'border-radius:8px;':'')+'">'
-          +'<span style="display:block;font-size:9.5px;color:var(--subtext);max-width:52px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+escH(m.label)+'</span></span>';
-      }).join('');
-      row.querySelectorAll('.brand-pick').forEach(function(p){
-        p.onclick=function(){ _brandMark=p.dataset.mark; paintBrand(); };
-      });
-    }
-    var sel=el('brand-anim');
-    if(sel && !sel.options.length){ (d.anims||[]).forEach(function(a){
-      var o=document.createElement('option'); o.value=a; o.textContent=a; sel.appendChild(o); }); }
-    if(sel) sel.value=d.anim;
-    paintBrand();
-  }).catch(function(){});
-}
-function paintBrand(){
-  var row=el('brand-marks'); if(!row) return;
-  row.querySelectorAll('.brand-pick').forEach(function(p){
-    p.style.borderColor = (p.dataset.mark===_brandMark) ? 'var(--lavender)' : 'var(--surface1)';
-  });
-}
-function saveBrand(){
-  var sel=el('brand-anim');
-  fetch('/api/branding',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({mark:_brandMark, anim:(sel?sel.value:'classic')})})
-    .then(function(r){return r.json();}).then(function(d){
-      if(d.error){ el('brand-status').textContent='\\u26a0 '+d.error; return; }
-      el('brand-status').innerHTML='<span style="color:var(--emerald)">\\u2713 saved \\u00b7 refresh the gallery to see it</span>';
-    }).catch(function(){ el('brand-status').textContent='\\u26a0 network error'; });
-}
-function setLauncher(){
-  el('brand-status').textContent='writing shortcut\\u2026';
-  fetch('/api/branding/shortcut',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({mark:_brandMark})})
-    .then(function(r){return r.json();}).then(function(d){
-      if(d.error){ el('brand-status').textContent='\\u26a0 '+d.error; return; }
-      el('brand-status').innerHTML='<span style="color:var(--emerald)">\\u2713 Desktop shortcut updated (F5 the Desktop if the icon looks stale)</span>';
-    }).catch(function(){ el('brand-status').textContent='\\u26a0 network error'; });
-}
-// --- Skins: cosmetic palettes (moved here from the achievements panel) ---
-var SKIN_SW={ moonglade:['#0c0a1c','#b692e6','#4fc99a','#d4af37'],
-              nightfallen:['#0a0713','#a678f0','#7f6fe0','#d9b3ff'],
-              moonlit:['#0b1018','#8fb8e8','#68d5e0','#cfe1f5'],
-              ember:['#160c0c','#e8935f','#e0a94b','#ffcf7a'],
-              verdant:['#0a1410','#5fd39a','#4fc99a','#c8e6a8'] };
-function loadSkins(){
-  fetch('/api/achievements').then(function(r){return r.json();}).then(function(d){
-    var g=el('skin-grid'); if(!g) return; g.innerHTML='';
-    (d.skins||[]).forEach(function(s){
-      var active=(s.id===d.skin);
-      var c=document.createElement('div');
-      c.style.cssText='width:150px;border:1px solid '+(active?'var(--accent)':'var(--surface1)')
-        +';border-radius:11px;padding:9px;background:var(--surface0);'
-        // A locked card was dimmed with opacity:.5, which composited its 10px
-        // description down to a measured 2.57:1 and its "locked" label to 1.88:1 --
-        // the latter under even the 3:1 large-text floor. .82 still reads as
-        // clearly inactive but keeps the text legible (measured 9.00 name /
-        // 4.77 desc / 4.77 locked). Re-measure if you change it; the label below
-        // also had to come off --overlay0, which is too dim to survive any dimming.
-        +(s.earned?'cursor:pointer;':'opacity:.82;');
-      var sw=(SKIN_SW[s.id]||SKIN_SW.moonglade).map(function(h){
-        return '<i style="flex:1;background:'+h+'"></i>'; }).join('');
-      c.innerHTML='<div style="height:30px;border-radius:7px;display:flex;overflow:hidden;margin-bottom:7px;">'+sw+'</div>'
-        +'<div style="font-size:12px;font-weight:600;color:var(--text);">'+escH(s.name)
-        +(active?' <span style="color:var(--accent)">\\u2713</span>':'')+'</div>'
-        +'<div style="font-size:10px;color:var(--subtext);margin-top:2px;">'+escH(s.desc)+'</div>'
-        +(s.earned?'':'<div style="font-size:10px;color:var(--subtext);margin-top:3px;">\\ud83d\\udd12 locked</div>');
-      if(s.earned) c.onclick=function(){ pickSkin(s.id); };
-      g.appendChild(c);
-    });
-  }).catch(function(){});
-}
-function pickSkin(id){
-  fetch('/api/skin',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({skin:id})})
-    .then(function(r){return r.json();}).then(function(d){
-      if(d.error){ el('skin-status').textContent='\\u26a0 '+d.error; return; }
-      try{ localStorage.setItem('skin', d.skin||'moonglade'); }catch(e){}
-      if(d.skin && d.skin!=='moonglade') document.documentElement.setAttribute('data-skin', d.skin);
-      else document.documentElement.removeAttribute('data-skin');
-      // Transient confirmation: nothing else ever cleared #skin-status, so the "applied"
-      // line lingered indefinitely -- and since a LOCKED card is inert (no handler), a
-      // later click on one left the stale success showing, reading as though the locked
-      // skin had applied. Clear it after a few seconds; re-arm on each pick.
-      var st=el('skin-status'); st.innerHTML='<span style="color:var(--emerald)">\\u2713 skin applied suite-wide</span>';
-      if(window._skinMsgTimer) clearTimeout(window._skinMsgTimer);
-      window._skinMsgTimer=setTimeout(function(){ if(st) st.innerHTML=''; }, 3500);
-      loadSkins();
-    }).catch(function(){ el('skin-status').textContent='\\u26a0 network error'; });
-}
-// --- Server control (Homebridge-style stop / restart from the browser) ---
-function _srvOverlay(msg, sub){ el('srv-msg').textContent=msg; el('srv-sub').textContent=sub||''; el('srv-overlay').classList.add('on'); }
-function stopServer(){
-  if(!confirm('Stop the server?\\n\\nThe web interface goes offline until you relaunch it from the \"Serve Gallery\" shortcut.')) return;
-  _srvOverlay('Stopping the server\\u2026','');
-  fetch('/api/server/stop',{method:'POST'}).catch(function(){});
-  _watchServer(false);
-}
-function restartServer(){
-  if(!confirm('Restart the server?\\n\\nIt goes offline for a few seconds, then this page reconnects automatically.')) return;
-  _srvOverlay('Restarting the server\\u2026','This page reconnects on its own.');
-  fetch('/api/server/restart',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
-    if(d && d.error){ el('srv-overlay').classList.remove('on'); alert(d.error); return; }
-    _watchServer(true);
-  }).catch(function(){ _watchServer(true); });
-}
-function _watchServer(comeBack){
-  // Poll liveness. Restart: wait until it goes down THEN comes back -> reload. Stop: wait until it stops answering.
-  var tries=0, sawDown=false;
-  var iv=setInterval(function(){
-    tries++;
-    fetch('/api/ping',{cache:'no-store'}).then(function(r){ return r.ok; }).then(function(ok){
-      if(comeBack && ok && sawDown){ clearInterval(iv); location.reload(); }
-      if(comeBack && ok && tries>=8 && !sawDown){ clearInterval(iv); location.reload(); } // never saw a gap; just reload
-    }).catch(function(){
-      sawDown=true;
-      if(!comeBack){ clearInterval(iv); el('srv-msg').textContent='Server stopped.'; el('srv-sub').textContent='Relaunch any time from the \"Serve Gallery\" shortcut.'; el('srv-spin').style.display='none'; }
-    });
-    if(tries>50){ clearInterval(iv); el('srv-msg').textContent=comeBack?'Still restarting\\u2026 give it a moment, then refresh.':'Server stopped.'; el('srv-spin').style.display='none'; }
-  }, 800);
-}
-function loadLib(){
-  fetch('/api/library-path').then(function(r){return r.json();}).then(function(d){
-    // Hidden entirely for a LAN session: the field would be empty (the host path is
-    // withheld, exactly as /panel already withholds it) and the save is localhost-only, so
-    // showing it would be a control that cannot work -- the dead-end click the LAN chip
-    // exists to prevent.
-    if(!d || !d.local) return;
-    el('libwrap').style.display='';
-    el('libpath').value = d.path || '';
-    // `configured` answers "is a folder set?" without carrying the path itself, so this
-    // keeps working whatever the route decides to withhold.
-    el('libmsg').textContent = d.configured ? '' :
-      'Currently the default folder. Set one to move the library somewhere else.';
-  }).catch(function(){});
-}
-function saveLib(create){
-  var path=el('libpath').value.trim(), m=el('libmsg');
-  if(!path){ m.textContent='Enter a folder path.'; return; }
-  m.textContent='Saving\u2026';
-  fetch('/api/library-path',{method:'POST',headers:{'Content-Type':'application/json'},
-                             body:JSON.stringify({path:path, create:!!create})})
-    .then(function(r){return r.json();}).then(function(d){
-      if(d && d.needs_create){
-        m.textContent='';
-        if(confirm('That folder does not exist yet.\\n\\n'+d.path+'\\n\\nCreate it?')) saveLib(true);
-        else m.textContent='Not saved.';
-        return;
-      }
-      if(!d || d.error){ m.textContent=(d&&d.error)||'Could not save.'; return; }
-      if(!d.restart_needed){ m.textContent='Saved \u2014 that is already the folder in use.'; return; }
-      // The setting is read at STARTUP, so it does nothing until the server restarts. Saying
-      // "saved" and stopping would leave the owner looking at an unchanged library.
-      var warn = d.has_catalog ? '' :
-        ' There is no catalog there yet, so it will start empty until you sync.';
-      if(d.supervised){
-        m.textContent='Saved.'+warn+' Restarting to pick it up\u2026';
-        restartServer();
-      } else {
-        m.textContent='Saved.'+warn+' Restart Moonglade to start using it.';
-      }
-    }).catch(function(){ m.textContent='Could not save.'; });
-}
-renderJobs(); loadAcct(); loadSchedule(); loadBrand(); loadSkins(); loadWatchStatus(); loadLib();
-setInterval(loadWatchStatus, 8000);
-// if a job was already running when the page loaded, resume polling
-fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){ if(d.status==='running'){ el('joblog').style.display='block'; polling=true; poll(); } });
-</script>
-""")
-
-    # ------------------------------------------------------------------
     # Helpers
-    # ------------------------------------------------------------------
-    def _page_range(page, total_pages, window=2):
-        pages = []
-        for p in range(1, total_pages + 1):
-            if p == 1 or p == total_pages or abs(p - page) <= window:
-                pages.append(p)
-        result = []
-        prev = None
-        for p in pages:
-            if prev and p - prev > 1:
-                result.append("…")
-            result.append(p)
-            prev = p
-        return result
-
-    # ------------------------------------------------------------------
-    # Routes
     # ------------------------------------------------------------------
     def _safe_next(url):
         """Only ever redirect to a same-site PATH after login -- ?next=https://evil.example
@@ -10839,25 +5534,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return url
         return None
 
-    def _safe_back(url):
-        """The same same-site guarantee as _safe_next, for the gallery's `back`
-        parameter -- which the pages produce as request.url, i.e. an ABSOLUTE
-        same-origin URL, so it is reduced to path+query first and then vetted by
-        _safe_next itself (one validator, not two).
-
-        `back` is not just a redirect target: the detail page renders it into an
-        href= AND assigns it to location.href after a delete. Neither Jinja
-        autoescaping nor |tojson stops a `javascript:` URI -- they only stop
-        quote-breakout -- so /image/<id>?back=javascript:... ran in the logged-in
-        session until this. Reducing to path+query kills that (a scheme-only URL
-        has no leading-slash path left) and closes the open redirect on
-        /delete, /delete-bulk, /delete-tasks-bulk and the collection routes at
-        the same time."""
-        from urllib.parse import urlsplit
-        parts = urlsplit(url or "")
-        rel = parts.path + (("?" + parts.query) if parts.query else "")
-        return _safe_next(rel)
-
     def _establish_session(username):
         """Populate a freshly-authenticated session for `username` -- the ONE place
         that decides what "you are now logged in" means, shared by BOTH a normal
@@ -10871,301 +5547,220 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         session["csrf"] = secrets.token_hex(16)
         session.permanent = True
 
-    @app.route("/login", methods=["GET", "POST"])
+    @app.route("/login")
     def login():
-        """Session-based login gate -- for EVERY request, including from the server's
-        own machine; there is no localhost bypass (see _is_authorized_request()
-        above). GET renders the form; POST verifies the
-        CSRF token, then credentials, then signs in. Any failure (rate-limited,
-        bad CSRF, bad credentials) re-renders the SAME form with one generic
-        "invalid username or password" message -- never which field was wrong --
-        and a freshly rotated CSRF token.
-
-        Local-only first-account bootstrap (first-run setup happens in the
-        browser, never the CLI): while NO
-        accounts exist yet, a request from the machine the server itself runs on
-        (_is_local_request()) gets this SAME form doubling as an account-creation
-        form (a hidden mode=create field) instead of a banner pointing at
-        --add-web-user. A request for that same zero-accounts state from a LAN
-        address never even sees that form -- and `bootstrap_mode` below is the
-        REAL race-condition guard, not just the template branch that hides the
-        form from it: a hand-crafted mode=create POST from a non-local address,
-        or one that arrives after the first account already exists, is refused
-        before add_or_update_web_user is ever called, regardless of what HTML
-        was ever rendered to that requester.
-
-        The lockout check and the CSRF check run FIRST, ahead of that
-        wants_create/bootstrap_mode gate, exactly like an ordinary credential
-        POST -- a mode=create POST is not a different, lesser-checked request
-        shape (regression fix: the gate used to sit ahead of
-        both, so a mode=create POST from an already-lockout-triggering IP sailed
-        through with neither the lockout message nor any CSRF requirement,
-        confirmed reproducible). Reordering does NOT weaken the bootstrap
-        boundary itself: passing the lockout/CSRF checks only earns a request
-        the SAME generic error the old ordering gave it once bootstrap_mode is
-        false -- create still never proceeds without bootstrap_mode true,
-        checked explicitly right below, not inferred from CSRF validity."""
-        error = None
+        """The sign-in page: serves the React shell (LoginPage.jsx) for EVERY request,
+        including from the server's own machine -- there is no localhost bypass (see
+        _is_authorized_request() above). GET-ONLY since the classic cut (2026-08-08):
+        the real submit is POST /api/login (JSON; sign-in AND local-only first-run
+        account creation, with the lockout/CSRF/bootstrap enforcement + its own test
+        suite). The classic FORM POST branch and LOGIN_HTML died with the cut -- a
+        stale pre-cut tab replaying a form POST now gets a 405 and a reload lands
+        here. LoginPage.jsx renders one of three states off the boot flags below:
+        sign-in (an account exists), local bootstrap-create (no_accounts + is_local),
+        or the LAN-first-run safety message (no_accounts + NOT is_local)."""
         next_url = _safe_next(request.values.get("next", "")) or ""
         import moonglade_backup as core
         no_accounts = not core.list_web_users()
         is_local = _is_local_request()
-        bootstrap_mode = no_accounts and is_local
-        if request.method == "POST":
-            ip = _client_ip()
-            locked_for = _login_seconds_locked(ip)
-            submitted_csrf = request.form.get("csrf", "")
-            live_csrf = session.get("csrf", "") or ""
-            wants_create = request.form.get("mode") == "create"
-            if locked_for is not None:
-                mins = max(1, (locked_for + 59) // 60)
-                error = ("Too many failed attempts from this address. "
-                        "Try again in about {} minute{}.".format(mins, "" if mins == 1 else "s"))
-            elif not (live_csrf and secrets.compare_digest(submitted_csrf, live_csrf)):
-                error = "Your session expired. Reload the page and try again."
-            elif wants_create and not bootstrap_mode:
-                # Defense in depth: honor a create-account submission ONLY while
-                # bootstrap_mode is true for THIS request -- a remote requester
-                # can legitimately hold a valid csrf token for ITSELF (nothing
-                # stops a LAN device from GETting /login and receiving one), so
-                # csrf validity alone must never be read as "this create
-                # request is allowed".
-                error = ("No account has been set up yet. Ask whoever runs this "
-                        "server to sign in from the machine itself first.") if no_accounts \
-                        else "Invalid username or password."
-            else:
-                # Reserve this attempt atomically, immediately before the slow
-                # password-hash comparison below runs. Closes a TOCTOU race:
-                # `locked_for` above is a fast, lock-protected READ taken before
-                # verify_web_user()'s slow (unlocked) scrypt comparison: many
-                # concurrent requests from the same IP could all pass that read
-                # while each was still inside its own verify_web_user() call, so
-                # the counter wouldn't reflect any of them until the whole burst
-                # finished -- N free guesses per lockout cycle instead of 5. See
-                # _login_try_acquire's docstring. Applied identically to the
-                # bootstrap create path (below) as to a normal credential guess --
-                # same infrastructure, same reuse principle as the CSRF check.
-                relocked_for = _login_try_acquire(ip)
-                if relocked_for is not None:
-                    mins = max(1, (relocked_for + 59) // 60)
-                    error = ("Too many failed attempts from this address. "
-                            "Try again in about {} minute{}.".format(mins, "" if mins == 1 else "s"))
-                elif wants_create:
-                    # bootstrap_mode is guaranteed True here -- the guard above
-                    # already rejected wants_create whenever it's False.
-                    username = (request.form.get("username") or "").strip()
-                    password = request.form.get("password") or ""
-                    confirm = request.form.get("confirm") or ""
-                    un_problem = core.username_problem(username)
-                    pw_problem = core.password_problem(password)
-                    if un_problem:
-                        error = un_problem
-                    elif pw_problem:
-                        error = pw_problem
-                    elif password != confirm:
-                        error = "Passwords do not match."
-                    else:
-                        core.add_or_update_web_user(username, password)
-                        _login_clear(ip)
-                        _establish_session(username)
-                        return redirect(_safe_next(next_url) or url_for("index"))
-                else:
-                    username = (request.form.get("username") or "").strip()
-                    password = request.form.get("password") or ""
-                    if username and core.verify_web_user(username, password):
-                        _login_clear(ip)
-                        _establish_session(username)
-                        return redirect(_safe_next(next_url) or url_for("index"))
-                    error = "Invalid username or password."
-                    # If THIS failure is the one that tripped the lockout, say so now.
-                    # _login_try_acquire reserves the attempt up front and returns None
-                    # so the attempt may proceed -- which is right, a correct password
-                    # on the 5th try must still work -- but it means the request that
-                    # crosses the threshold otherwise renders the ordinary "invalid"
-                    # message and the user is locked WITHOUT BEING TOLD. They then wait,
-                    # retype the correct password, and get refused for 15 minutes with no
-                    # idea why. (The function's own docstring already promised to report
-                    # a lockout that "was just now triggered"; the code did not.)
-                    just_locked = _login_seconds_locked(ip)
-                    if just_locked is not None:
-                        mins = max(1, (just_locked + 59) // 60)
-                        error = ("Too many failed attempts from this address. "
-                                 "Try again in about {} minute{}.".format(
-                                     mins, "" if mins == 1 else "s"))
-        if request.method == "POST":
-            # A POST that fell through to an error above: always hand back a
-            # FRESH CSRF token -- one that was just consumed or never matched
-            # must never be resubmittable.
+        # setdefault, NEVER a fresh mint on GET: the front door redirects every
+        # unauthenticated request here including the browser's own incidental asset
+        # GETs (favicon, apple-touch-icon, ...) -- an unconditional mint orphaned the
+        # token the visible page already held ("Your session expired" on every submit,
+        # reproduced). Failed POSTs rotate the token in /api/login instead.
+        session.setdefault("csrf", secrets.token_hex(16))
+        brand = brand_context(out_dir)
+        boot = {
+            "authenticated": False,
+            "csrf": session["csrf"],
+            "no_accounts": no_accounts,
+            "is_local": is_local,
+            "next": next_url,
+            "build_stamp": build_stamp,
+            "mark_url": brand.get("mark_url") or "/branding/logo.png",
+            "mark_anim": brand.get("mark_anim") or "classic",
+            "mark_kind": brand.get("mark_kind") or "",
+        }
+        return render_template_string(
+            LOGIN_PAGE.replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS),
+            boot=boot)
+
+    @app.route("/api/login", methods=["POST"])
+    def api_login():
+        """JSON sign-in AND first-run account creation for the React Login page
+        (2026-08-02) -- docs/DECISIONS.md's 2026-07-31 feasibility map called
+        this out explicitly: 'A SPA needs real POST /api/login -> JSON... before
+        auth can be driven from React at all.' Public (see _PUBLIC_PATHS) -- an
+        unauthenticated caller is exactly who needs to reach this.
+
+        mode="create" (added once design_handoff/request-bootstrap-account-creation.md
+        came back with a real spec) mirrors classic login()'s own bootstrap POST
+        branch exactly -- same bootstrap_mode gate (no_accounts AND is_local,
+        re-checked here independent of what GET rendered, so a hand-crafted
+        mode=create POST from a non-local address or after the first account
+        already exists is refused server-side regardless of client state), same
+        core.username_problem/password_problem/add_or_update_web_user. Every
+        other branch (lockout, CSRF, plain sign-in, error strings) is identical
+        to before this existed -- shares _login_seconds_locked/_login_try_acquire/
+        _login_clear (one IP-keyed counter for both modes), _establish_session,
+        _safe_next. Errors are the identical generic strings login() gives, on
+        purpose -- never which field was wrong for a sign-in attempt, and this
+        and the classic form must never be distinguishable to an attacker by
+        their error text."""
+        body = request.get_json(silent=True) or {}
+        import moonglade_backup as core
+
+        def _fail(error):
+            # Every failed POST rotates the session token, exactly like classic
+            # login()'s POST branch ("a consumed/known-bad token must never stay
+            # silently resubmittable" -- guarded there by test_web_auth.py's
+            # rotation test; this route's missing rotation was found by the
+            # 2026-08-07 /api/login test port). Unlike the classic form, which
+            # re-renders with the fresh token embedded, a SPA holds its token in
+            # JS -- so the fresh one rides back in the error payload for the
+            # login page to adopt on the next attempt.
             session["csrf"] = secrets.token_hex(16)
-        else:
-            # GET: reuse whatever token this session already holds rather than
-            # unconditionally minting a new one. The front door redirects EVERY
-            # unauthenticated request here, including ones a browser fires on
-            # its own the instant this page loads (favicon.ico, sw.js,
-            # manifest.webmanifest, apple-touch-icon, ...) via next=<asset
-            # path> -- each of those is a real GET that used to silently
-            # overwrite session["csrf"] before the human ever touched the
-            # form, orphaning the token already baked into the visible page's
-            # hidden input. Reproduced: load /login, let one such incidental
-            # GET land, then submit the original form -- "Your session
-            # expired" every time, unconditionally, no matter how many times
-            # cookies are cleared or the server restarted (the bug re-fires
-            # instantly on the very next page load). setdefault leaves an
-            # existing token alone and only mints one the first time this
-            # session has none, so the visible form's token stays valid
-            # across any number of these background hits.
-            session.setdefault("csrf", secrets.token_hex(16))
-        return render_template_string(LOGIN_HTML, error=error, csrf=session["csrf"],
-                                      next_url=next_url, no_accounts=no_accounts,
-                                      bootstrap_mode=bootstrap_mode)
+            return jsonify({"error": error, "csrf": session["csrf"]})
+
+        next_url = _safe_next(str(body.get("next") or "")) or ""
+        no_accounts = not core.list_web_users()
+        bootstrap_mode = no_accounts and _is_local_request()
+        wants_create = body.get("mode") == "create"
+        ip = _client_ip()
+        locked_for = _login_seconds_locked(ip)
+        if locked_for is not None:
+            mins = max(1, (locked_for + 59) // 60)
+            return _fail("Too many failed attempts from this address. "
+                         "Try again in about {} minute{}.".format(
+                             mins, "" if mins == 1 else "s"))
+        if not _check_csrf(body):
+            return _fail("Your session expired. Reload the page and try again.")
+        if wants_create and not bootstrap_mode:
+            # Same defense-in-depth as classic login()'s identical check: a
+            # mode=create POST is only ever honored while bootstrap_mode is
+            # true for THIS request, never inferred from CSRF validity alone.
+            error = ("No account has been set up yet. Ask whoever runs this "
+                    "server to sign in from the machine itself first.") if no_accounts \
+                    else "Invalid username or password."
+            return _fail(error)
+        relocked_for = _login_try_acquire(ip)
+        if relocked_for is not None:
+            mins = max(1, (relocked_for + 59) // 60)
+            return _fail("Too many failed attempts from this address. "
+                         "Try again in about {} minute{}.".format(
+                             mins, "" if mins == 1 else "s"))
+        if wants_create:
+            # bootstrap_mode is guaranteed True here -- the guard above already
+            # rejected wants_create whenever it's False.
+            username = str(body.get("username") or "").strip()
+            password = str(body.get("password") or "")
+            confirm = str(body.get("confirm") or "")
+            un_problem = core.username_problem(username)
+            pw_problem = core.password_problem(password)
+            if un_problem:
+                return _fail(un_problem)
+            if pw_problem:
+                return _fail(pw_problem)
+            if password != confirm:
+                return _fail("Passwords do not match.")
+            core.add_or_update_web_user(username, password)
+            _login_clear(ip)
+            _establish_session(username)
+            return jsonify({"ok": True, "next": next_url or "/"})
+        username = str(body.get("username") or "").strip()
+        password = str(body.get("password") or "")
+        if username and core.verify_web_user(username, password):
+            _login_clear(ip)
+            _establish_session(username)
+            return jsonify({"ok": True, "next": next_url or "/"})
+        error = "Invalid username or password."
+        # Same "just tripped the lockout" report login()'s own POST branch
+        # gives -- see that comment for why this can't just be inferred from
+        # _login_try_acquire's own return value (it deliberately let THIS
+        # attempt through so a correct 5th-try password still works).
+        just_locked = _login_seconds_locked(ip)
+        if just_locked is not None:
+            mins = max(1, (just_locked + 59) // 60)
+            error = ("Too many failed attempts from this address. "
+                     "Try again in about {} minute{}.".format(mins, "" if mins == 1 else "s"))
+        return _fail(error)
 
     # Served by logout() in place of a redirect -- see its own comment for why a
     # real page (not a 3xx) is required to run the Cache Storage purge. Static, no
     # Jinja/user input involved, so a plain string is safer than round-tripping it
     # through render_template_string for nothing.
-    _LOGOUT_HTML = (
-        "<!doctype html><html><head><meta charset=\"utf-8\">"
-        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<title>Signing out…</title>"
-        "<style>body{margin:0;height:100vh;display:flex;align-items:center;"
-        "justify-content:center;background:#0b0a12;color:#cfd0e0;"
-        "font:14px system-ui,sans-serif}</style></head>"
-        "<body>Signing you out… <a href=\"/login\">Continue</a>"
-        "<script>(function(){"
-        "function go(){location.replace('/login');}"
-        "if('caches' in window){"
-        "caches.keys().then(function(ks){"
-        "return Promise.all(ks.map(function(k){return caches.delete(k);}));"
-        "}).catch(function(){}).then(go);"
-        "}else{go();}"
-        "})();</script>"
-        "<noscript><meta http-equiv=\"refresh\" content=\"0;url=/login\"></noscript>"
-        "</body></html>"
-    )
+    @app.route("/api/logout", methods=["POST"])
+    def api_logout():
+        """JSON sign-out for the React app (2026-08-02) -- POST-only mirror of
+        logout()'s own POST branch; see that route's docstring for the full
+        CSRF/revoke-scope reasoning, identical here (same shared
+        bump_web_user_session_epoch, same scope="this-device" opt-out of the
+        global revoke). Public (see _PUBLIC_PATHS): an already-dead cookie
+        must still be able to shed itself locally with no valid session to
+        check a CSRF token against -- same "fail toward MORE cleanup, never
+        less" shape as the classic route, so this skips the CSRF check
+        entirely (not just downgrades it) whenever `authorized` is false,
+        exactly like logout() does.
 
-    @app.route("/logout", methods=["GET", "POST"])
-    def logout():
-        """Sign out. A GET clears THIS browser's cookie and nothing else; a POST
-        carrying the session's csrf token ALSO revokes every other outstanding
-        session for this identity, by bumping its sess_epoch.
-
-        The split exists because the global revoke used to hang off a bare GET with
-        no token (the old state doc's "/logout is a CSRF-able GET that revokes
-        globally"). SESSION_COOKIE_SAMESITE="Lax" already killed the
-        <img src=".../logout"> version of that -- a cross-site SUBRESOURCE carries
-        no cookie, so the handler saw an anonymous request and skipped the bump --
-        but Lax deliberately still sends the cookie on a cross-site TOP-LEVEL GET
-        navigation. Any page that got the owner to follow a link (or ran
-        location.href=, window.open, a meta refresh) signed them out on the desktop,
-        the phone and the tablet at once. Same for any link-prefetcher or crawler
-        that walks the header: a GET must not write server state, and this one did.
-        Lax blocks a cross-site POST outright, and the csrf field checked below is
-        the same session-bound token /login's form and the Panel's Users tab already
-        carry -- belt and braces, so this does not silently re-open if SameSite is
-        ever loosened for an HTTPS/reverse-proxy deployment.
-
-        What a cross-site GET can still do is drop this one browser's cookie. That
-        is the irreducible floor for any sign-out reachable by navigation, it writes
-        NOTHING server-side, and the user recovers by signing in again -- versus the
-        old behaviour, which kicked every other device they own.
-
-        `scope=this-device` on the POST skips the global revoke (sign out here
-        only). Its ABSENCE means global: a truncated or hand-built POST has to fail
-        toward MORE revocation, never less, because the whole mechanism exists to
-        kill a cookie captured off plain-HTTP LAN traffic (see
-        moonglade_backup.get_web_user_session_epoch's docstring)."""
+        No HTML page to run the Cache Storage purge from this time -- the
+        caller (React) does that purge itself in JS on a successful response,
+        then navigates to /login. See LoginPage.jsx / App.jsx's logout
+        handler."""
         import moonglade_backup as core
+        body = request.get_json(silent=True) or {}
         user = session.get("user")
-        # A DEAD cookie must not be allowed to REVOKE. /logout is in _PUBLIC_PATHS so
-        # _enforce_front_door() never runs here, and app.secret_key persists across
-        # restarts -- so an already-revoked cookie still DESERIALIZES, and without
-        # this check it stayed a valid "log this identity out" token forever.
-        # Replayed in a loop it bumped the epoch on every hit, kicking the real user
-        # off the instant they signed back in: no credential needed, and recoverable
-        # only by rotating AUTH_SECRET_KEY, which the owner has no signal to do.
-        #
-        # ORDER MATTERS: read `user` BEFORE calling _is_authorized_request(), which
-        # calls session.clear() on the stale path. Swapping these two lines silently
-        # disables the bump for everyone.
+        # ORDER MATTERS, same as logout(): read `user` before any call that
+        # might clear the session.
         authorized = bool(user) and _is_authorized_request()
-        if request.method == "POST" and authorized:
-            # _check_csrf is defined further down in this same create_app() closure
-            # (with the Panel's Users tab, its other caller); it is bound long before
-            # any request can reach this line.
-            #
-            # A bad token is a loud 400, NOT a quiet downgrade to a local-only sign
-            # out: if the header form ever stopped emitting the field, a silent
-            # downgrade would delete the global revoke and nothing would notice. The
-            # session is deliberately left INTACT -- the user reloads and clicks
-            # again. Note the token buys nothing against someone who already holds
-            # the cookie (Flask's session cookie is signed, not encrypted, so the
-            # token is readable inside it); the _is_authorized_request() check above
-            # is what stops a stolen-cookie replay, and it stays.
-            if not _check_csrf(request.form):
-                return ("Your session expired. Reload the page and try again.", 400)
-            if request.form.get("scope") != "this-device":
-                # BEFORE the local clear, so this revokes EVERY outstanding cookie
-                # for this username -- e.g. one captured off plain-HTTP LAN traffic
-                # before the click -- not just this browser's copy.
+        if authorized:
+            if not _check_csrf(body):
+                return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+            if body.get("scope") != "this-device":
                 core.bump_web_user_session_epoch(user)
-        # Unconditional and outside the guard: whoever holds an already-invalid cookie
-        # must still be able to shed it locally. Client-side only, touches no server
-        # state, and leaves the anonymous case a harmless no-op.
         session.clear()
-        # Cache Storage (used by /sw.js for the installed/PWA view) is browser-side
-        # state a redirect can't touch -- the server can clear the SESSION but not
-        # what the browser itself cached under /img/ and /full/. A bare redirect()
-        # never runs script, so the purge has to happen from an actual page: this
-        # unconditional (same reasoning as session.clear() above -- even an
-        # already-signed-out /logout hit should leave a clean cache) 200 response
-        # deletes every Cache Storage entry client-side, then does the SAME
-        # navigation to /login a redirect would have. This must NOT be hooked onto
-        # /login instead: login() has no signed-in short-circuit, so purging there
-        # would wipe a currently-signed-in user's cache on a stray bookmark/Back
-        # hit to /login (the flaw that got an earlier draft of this fix rejected).
-        return _LOGOUT_HTML
+        return jsonify({"ok": True})
 
     # ------------------------------------------------------------------
     # THE front door: DEFAULT-DENY for every request, enforced in one place.
     # ------------------------------------------------------------------
-    # Allowlist is intentionally tiny -- /login (GET, to render the form; POST,
-    # to submit it) and /logout. LOGIN_HTML is BASE_HTML with fully inline CSS
-    # (__DESIGN_TOKENS__ is a Python string substituted at import time via
-    # .replace(), never a fetched stylesheet) and no <link>/<script src> to a
-    # /static/ file is load-bearing for it to render or submit -- the mark
-    # <img> already carries onerror="this.remove()" as a safety net either way.
-    # /branding/ IS additionally public (see _PUBLIC_PREFIXES below): it was
-    # briefly left gated on the theory that a missing logo is a harmless
-    # degrade, but the actual effect was the real chosen mark/banner/favicon
-    # never rendering on the one page every visitor -- including a
-    # not-yet-authenticated LAN device -- is guaranteed to see. That route
-    # only serves static drop-in art (banner/logo/marks/mascots) with path
-    # traversal already rejected (see branding()); there's no user data,
-    # credential, or spend behind it, so it carries the same public trust
-    # tier as /login itself, not a re-opened security gap.
-    # /manifest.webmanifest joined this set on 2026-07-21, on the same reasoning as
-    # /branding/ and then some. Its handler builds a compile-time CONSTANT -- app name,
-    # start_url "/", two hex colours and an inline data: URI SVG icon. There is no code
-    # path in it that reflects a user, a catalog, an install path or a credential, so
-    # there is nothing to withhold. The "but it fingerprints the install" objection dies
-    # on inspection: /login is itself public and renders branded HTML that identifies
-    # this app far more loudly than a manifest ever could.
-    #
-    # The positive reason to make it public is stronger than the neutral one. A browser
-    # fires this request BY ITSELF the instant the login page loads, and the front door
-    # answered it with a redirect to /login?next=/manifest.webmanifest -- which is
-    # exactly the traffic that produced the csrf-overwrite bug documented at the GET
-    # branch of login() ("Your session expired", unconditionally, on every submit).
-    # setdefault fixed the symptom; letting these self-fired static assets through is
-    # what removes the category.
-    _PUBLIC_PATHS = frozenset({"/login", "/logout", "/manifest.webmanifest"})
-    _PUBLIC_PREFIXES = ("/branding/",)
-    # Routes whose EXISTING contract (long before this hook existed) was JSON,
-    # not an HTML page -- these get a JSON 401 instead of a login redirect, so a
-    # fetch(...).then(r => r.json()) caller still gets parseable JSON instead
-    # of choking on the login page's HTML. Everything under /api/, plus the two
-    # legacy non-/api/ JSON routes (/rate/<id>, /edit-prompt/<id>) match this.
-    _JSON_GATE_PREFIXES = ("/api/", "/rate/", "/edit-prompt/")
+    # Allowlist is intentionally tiny: /login (GET-only since the classic cut,
+    # 2026-08-08 -- it renders the React sign-in shell), the React JSON
+    # sign-in/sign-out, and the public /branding/ art prefix below.
+    # /branding/ IS public (see _PUBLIC_PREFIXES below): it was briefly left
+    # gated on the theory that a missing logo is a harmless degrade, but the
+    # actual effect was the real chosen mark/banner/favicon never rendering on
+    # the one page every visitor -- including a not-yet-authenticated LAN
+    # device -- is guaranteed to see. That route only serves static drop-in
+    # art (banner/logo/marks/mascots) with path traversal already rejected
+    # (see branding()); there's no user data, credential, or spend behind it,
+    # so it carries the same public trust tier as /login itself.
+    _PUBLIC_PATHS = frozenset({
+        "/login",
+        # The React app's JSON sign-in/sign-out (2026-08-02) -- an
+        # unauthenticated caller is exactly who needs to reach /api/login,
+        # and /api/logout must stay reachable by an already-dead cookie (an
+        # expired session still deserves a clean local sign-out).
+        "/api/login", "/api/logout",
+    })
+    _PUBLIC_PREFIXES = (
+        "/branding/",
+        # The React bundle (2026-08-02): LoginPage.jsx's own shell needs its
+        # compiled CSS/JS to render at all, and it renders for a visitor who
+        # by definition is not authenticated yet -- same public tier as
+        # /branding/ and /manifest.webmanifest above (plain compiled code, no
+        # user data, no catalog, no credential). LOGIN_PAGE below deliberately
+        # does NOT reference the 4 /static/mg-*.js custom-element scripts
+        # next_gallery()'s NEXT_PAGE loads -- none of that (pickers, cost
+        # badge, upscale panel) exists on the login page, so those stay
+        # exactly as gated as they always were.
+        "/next/assets/",
+    )
+    # Routes whose contract is JSON, not an HTML page -- these get a JSON 401
+    # instead of a login redirect, so a fetch(...).then(r => r.json()) caller
+    # still gets parseable JSON instead of choking on the login page's HTML.
+    # ONE prefix since the classic cut (2026-08-08): the two legacy non-/api/
+    # JSON routes (/rate/<id>, /edit-prompt/<id>) were renamed under /api/.
+    _JSON_GATE_PREFIXES = ("/api/",)
 
     @app.before_request
     def _enforce_front_door():
@@ -11207,39 +5802,44 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             return jsonify({"error": "authentication required"}), 401
         return redirect(url_for("login", next=_safe_next(request.path) or ""))
 
-    @app.route("/health")
-    def health():
-        return render_template_string(
-            HEALTH_HTML, h=collection_health(out_dir, db_path))
+    _health_cache = {"ts": 0, "payload": None}   # api_health's TTL cache -- see its docstring
+    # (Used to live beside the classic /health page; the page died in the 2026-08-08 cut,
+    # the cache moved here to its one surviving consumer.)
 
-    @app.route("/panel")
-    def panel():
-        # panel_is_local is computed FIRST because it now drives several things below,
-        # not just the Users tab it started as (2026-07-22): which PANEL_ACTIONS become
-        # Maintenance buttons at all, whether "Set launcher icon" renders in the
-        # Branding section, panel_out_dir's redaction, and the Users tab's Add/Remove UI.
-        # FIXED 2026-07-24 (the 2026-07-21 audit P3/S5-3): a LAN session used to see
-        # every destructive Maintenance button (Organize, Dedup, Rebuild thumbnails, ...)
-        # and "Set launcher icon" render normally, then hit a confirm-dialog-then-403
-        # dead end on click -- api_panel_run/api_branding_shortcut were always correctly
-        # gated server-side (never a security hole), but the owner's call was to gate
-        # visibility on the real check too instead of leaving that a known UX gap.
-        # Hiding controls a caller can't use avoids the dead end; the server enforces
-        # the same boundary regardless of what this flag renders, so getting this wrong
-        # is a UX regression, not a security one.
+    @app.route("/api/health")
+    def api_health():
+        """The health dashboard's data as JSON -- gap-audit route #10, consumed by the
+        React app's HealthOverlay (the in-app modal that replaces bouncing to the
+        /health page). Same computation, same fields, same LOGIN tier as the page it
+        un-bakes; the page route stays until demolition.
+
+        ROUTE-LEVEL TTL CACHE (owner report 2026-08-06: "VERY slow" at 35k images).
+        collection_health() walks the whole library; at production scale that is
+        seconds of disk work per open, and the numbers it produces are glance-stats
+        that do not change second to second. 120s of staleness on a dashboard is
+        invisible; re-walking 70k files per open is not. The cache lives HERE, not in
+        collection_health() itself, so every direct caller (the classic /health page,
+        the tests) stays pure. ?fresh=1 bypasses -- the client sends it on an explicit
+        user refresh, never on a plain open."""
+        import time as _time
+        now = _time.time()
+        if (not request.args.get("fresh")
+                and _health_cache.get("payload") is not None
+                and now - _health_cache.get("ts", 0) < 120):
+            return jsonify(_health_cache["payload"])
+        payload = collection_health(out_dir, db_path)
+        _health_cache["payload"] = payload
+        _health_cache["ts"] = now
+        return jsonify(payload)
+
+    @app.route("/api/panel/summary")
+    def api_panel_summary():
+        """JSON twin of /panel's own aggregation, for the React Control Panel overlay --
+        same data, same local/destructive action-visibility rule (see /panel's own long
+        comment on panel_is_local), just packaged for fetch() instead of Jinja. Nothing
+        computed here is new: every field is a value /panel already builds every request.
+        LOGIN tier, matching /panel itself."""
         panel_is_local = _is_local_request()
-        # actions -> Maintenance buttons: panel_visible ones, and (as of this fix)
-        # destructive ones ONLY when panel_is_local -- a LAN session's Maintenance tab
-        # now simply never receives Organize/Dedup/Rebuild-thumbnails/etc. in its
-        # ACTIONS payload, so renderJobs() has nothing to render into #jobs-danger and
-        # needed no change of its own; PANEL_HTML shows one explanatory note in that
-        # now-empty row instead (see the `{% if not panel_is_local %}` beside
-        # #jobs-danger). all_actions -> the scheduler dropdown, deliberately NOT
-        # filtered by locality: it needs the background-only jobs too (that's their
-        # only home now that they're not buttons), and loadSchedule() already excludes
-        # every destructive action from that dropdown for everyone, local or LAN --
-        # scheduling a destructive job was never a feature, so there's nothing more to
-        # hide there.
         all_actions = [{"action": k, "label": v["label"], "destructive": v["destructive"],
                         "advanced": v.get("advanced", False),
                         "int_param": v.get("int_param", False),
@@ -11249,29 +5849,33 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         actions = [a for a, (k, v) in zip(all_actions, PANEL_ACTIONS.items())
                   if v.get("panel_visible", True) and (panel_is_local or not v["destructive"])]
         import moonglade_backup as core
-        # Reuse whatever csrf token this session already carries (set at login
-        # time by _establish_session) -- only mint one here if it's somehow
-        # missing. Unlike /login's form, the Users tab's Add/Remove actions are
-        # fired via fetch() without a full page reload in between, so the token
-        # must stay valid across multiple calls on the same page, not rotate
-        # after each one.
         session.setdefault("csrf", secrets.token_hex(16))
-        # out_dir is a HOST FILESYSTEM PATH -- withheld from a LAN caller the same way
-        # /api/panel/status's job stdout is (2026-07-21 audit, S2): it's unrelated to
-        # this route's actual trust decision. Usernames on this same page stay visible
-        # to every signed-in session on purpose -- reading the roster isn't the same
-        # action as adding to or removing from it, and that's a different, narrower
-        # question than the one below. A server install path is a different kind of
-        # fact -- it identifies the owner's machine, not a fellow account -- and the
-        # front door never signed up to expose it past the loopback boundary.
-        panel_out_dir = str(out_dir) if panel_is_local else "(local to the server)"
-        return render_template_string(
-            PANEL_HTML, stats=catalog_counts(db_path), build_stamp=build_stamp,
-            all_actions_json=json.dumps(all_actions),
-            out_dir=panel_out_dir, actions_json=json.dumps(actions),
-            supervised=_supervised(), panel_is_local=panel_is_local,
-            web_users=core.list_web_users(), csrf=session["csrf"],
-            current_username=session.get("user"))
+        try:
+            sweep_branding_drops(out_dir)   # see api_branding()'s own GET for why
+        except Exception:
+            pass
+        branding = load_branding(out_dir)
+        # Control Panel.dc.html:226's {{ trashCount }} -- the Trash tile's own real
+        # count, previously hardcoded to "--" on both platforms (nothing fetched
+        # it; the real number only ever resolved once TrashSubOverlay's own
+        # /api/trash/list call ran). Reuses list_quarantined()'s own total rather
+        # than a second counting pass -- see that function's docstring for why an
+        # os.scandir()-based count stays cheap even at a large trash size.
+        trash_count = list_quarantined(out_dir, page=1, page_size=1)[1]
+        return jsonify({
+            "stats": catalog_counts(db_path),
+            "trash_count": trash_count,
+            "supervised": _supervised(),
+            "panel_is_local": panel_is_local,
+            "actions": actions, "all_actions": all_actions,
+            "out_dir": str(out_dir) if panel_is_local else "",
+            "web_users": core.list_web_users(),
+            "current_username": session.get("user"),
+            "csrf": session["csrf"],
+            "branding": {"mark": branding["mark"], "anim": branding["anim"],
+                        "anims": MARK_ANIMS, "marks": list_marks(out_dir),
+                        "slots": branding_slots_payload(out_dir)},
+        })
 
     def _check_csrf(body):
         """Shared CSRF check for this app's state-changing POSTs -- the Panel's
@@ -11837,260 +6441,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 _save_sched(s)
             return jsonify(s)
 
-    @app.route("/duplicates")
-    def duplicates():
-        return render_template_string(
-            DUPES_HTML, groups=duplicate_groups(out_dir))
-
-    @app.route("/")
-    def index():
-        q            = request.args.get("q", "")
-        model_filter = request.args.get("model", "")
-        batch_filter = request.args.get("batch", "")
-        sort         = request.args.get("sort", "newest")
-        page         = int(request.args.get("page", 1))
-
-        # Date filters come from Year+Month dropdowns and assemble into YYYY-MM.
-        # A year with no month still filters by year (month defaults to 01/12).
-        def _ym(prefix, month_default):
-            y = request.args.get(prefix + "_year", "")
-            m = request.args.get(prefix + "_month", "")
-            if not y:
-                return ""
-            return "{}-{}".format(y, m or month_default)
-        date_from = _ym("from", "01")
-        date_to   = _ym("to", "12")
-
-        per_page_opts = [50, 100, 200, 500]
-        try:
-            per_page = int(request.args.get("per_page", PAGE_SIZE))
-        except ValueError:
-            per_page = PAGE_SIZE
-        if per_page not in per_page_opts:
-            per_page = PAGE_SIZE
-
-        try:
-            rating_min = max(0, min(5, int(request.args.get("rating_min", 0))))
-        except ValueError:
-            rating_min = 0
-        published_only = request.args.get("published") == "1"
-        art_tag = request.args.get("tag", "")
-        lora_filter = request.args.get("lora", "")
-        media_type = request.args.get("media", "")
-        if media_type not in ("image", "video"):
-            media_type = ""
-        source = request.args.get("source", "")
-        if source not in ("online", "api", "local", "deleted"):
-            source = ""
-        collection = request.args.get("collection", "")
-
-        models  = unique_models(db_path)
-        batches = unique_batches(db_path)
-        years   = catalog_years(db_path)
-        collections = unique_collections(db_path)
-        page_rows, total = query_catalog(
-            db_path, q, model_filter, date_from, date_to, sort, page, per_page,
-            batch=batch_filter, rating_min=rating_min,
-            published_only=published_only, art_tag=art_tag, lora=lora_filter,
-            media_type=media_type, source=source, collection=collection,
-        )
-        total_pages = max(1, (total + per_page - 1) // per_page)
-        page = max(1, min(page, total_pages))
-
-        for r in page_rows:
-            mid = r["media_id"]
-            tmid = mid
-            if r.get("is_video") == "1" and not (thumb_dir / "{}.jpg".format(mid)).exists():
-                # fall back to the still-frame poster's thumb if the video's own
-                # poster thumb wasn't generated (older sync runs)
-                tmid = r.get("poster_media_id") or mid
-            r["_thumb_mid"] = tmid
-            r["_has_thumb"] = (thumb_dir / "{}.jpg".format(tmid)).exists()
-
-        def page_url(p):
-            args = dict(request.args)
-            args["page"] = p
-            return url_for("index", **args)
-
-        def _without(*keys):
-            args = {k: v for k, v in request.args.items() if k not in keys}
-            args.pop("page", None)
-            return url_for("index", **args)
-
-        # Active-filter chips (label + a URL that removes just that filter).
-        chips = []
-        if q:
-            chips.append({"k": "search", "v": q, "url": _without("q")})
-        if model_filter:
-            chips.append({"k": "model", "v": model_filter, "url": _without("model")})
-        if batch_filter:
-            chips.append({"k": "batch", "v": batch_filter, "url": _without("batch")})
-        if rating_min:
-            chips.append({"k": "rating", "v": "★" * rating_min + "+",
-                          "url": _without("rating_min")})
-        if date_from:
-            chips.append({"k": "from", "v": date_from,
-                          "url": _without("from_year", "from_month")})
-        if date_to:
-            chips.append({"k": "to", "v": date_to,
-                          "url": _without("to_year", "to_month")})
-        if published_only:
-            chips.append({"k": "published", "v": "yes", "url": _without("published")})
-        if art_tag:
-            chips.append({"k": "tag", "v": art_tag, "url": _without("tag")})
-        if lora_filter:
-            chips.append({"k": "lora", "v": lora_filter, "url": _without("lora")})
-        if media_type:
-            chips.append({"k": "media", "v": media_type + "s", "url": _without("media")})
-        if source:
-            chips.append({"k": "source", "v": source, "url": _without("source")})
-        if collection:
-            chips.append({"k": "collection", "v": collection, "url": _without("collection")})
-
-        stats = catalog_counts(db_path)
-        # First-run wizard gating: a FRESH read of config.json, not the module-cached
-        # core._cfg -- someone who just pasted a key via the wizard needs this to flip on
-        # the very next page load, not after a process restart. Real catalog size (not the
-        # current search/filter's `total`) is what decides "never synced yet".
-        #
-        # needs_key/catalog_empty no longer AND against _is_authorized_request(): reaching
-        # this line at all now guarantees it -- the global _enforce_front_door() hook (see
-        # its docstring) already enforced it for this exact request, since `/` carries no
-        # allowlist exemption. Before that hook existed, `/` had NO gate of its own, so an
-        # unauthenticated LAN viewer could land here and see the "paste your API key" setup
-        # wizard; that conjunct hid it from them. That viewer can no longer reach this line.
-        # `is_local` below (the header template's flag for showing the owner-only
-        # Generate/Loom/Panel controls) is hardcoded True for the identical reason --
-        # same call site, same guarantee: those three are genuinely LOGIN-tier,
-        # matching their own route gating. The name is a misnomer and the dead
-        # `{% else %}` note it used to carry ("read-only LAN view") is gone: a
-        # signed-in LAN session is not read-only, and the header now says what really
-        # differs about it off `is_true_local` (see the #lan-chip comment there).
-        # `is_true_local` is the REAL, un-hardcoded _is_local_request() result. It
-        # gates the Import button's own visibility (see the head-nav comment above it),
-        # FIXED 2026-07-24 (the 2026-07-21 audit P3/S5-3): a signed-in, non-local
-        # LAN session used to see a working-looking Import button that always 403'd,
-        # because /api/import-local re-checks the stricter _is_local_request() itself
-        # while the button's old visibility only checked the blanket is_local flag.
-        # `can_delete_cloud` reuses this SAME value for a different control -- whether
-        # the "Delete from PixAI" bulk-action button renders at all. That button posts
-        # to /delete-tasks-bulk, which is gated to the same stricter _is_local_request()
-        # (irreversible cloud deletion, same trust tier as /api/branding/shortcut), so a
-        # logged-in LAN session sees "Delete locally" but not "Delete from PixAI".
-        # The header's #lan-chip is the third reader of the same value, and the only one
-        # that renders on the FALSE side: it names the controls the two above withhold,
-        # so a remote session sees a reason instead of a hole.
-        import moonglade_backup as _core
-        _fresh_cfg = _core._load_config()
-        needs_key = not bool(_fresh_cfg.get("PIXAI_API_KEY") or _fresh_cfg.get("U3T"))
-        catalog_empty = not needs_key and (stats["images"] + stats["videos"]) == 0
-        is_true_local = _is_local_request()
-        can_delete_cloud = is_true_local
-        # The header's Sign out control is a POST form now (see INDEX_HTML), so this
-        # page has to carry the session's csrf token the same way /login's form and
-        # the Panel do. setdefault, never a fresh mint: _establish_session already set
-        # one at login, and overwriting it here would orphan the token baked into any
-        # other tab the user has open -- the exact bug /login's GET branch documents
-        # at length.
-        session.setdefault("csrf", secrets.token_hex(16))
-
-        return render_template_string(
-            INDEX_HTML,
-            chips=chips, published_only=published_only, art_tag=art_tag,
-            lora_filter=lora_filter, media_type=media_type, source_filter=source,
-            collection=collection, collections=collections,
-            rows=page_rows, total=total, page=page, stats=stats,
-            needs_key=needs_key, catalog_empty=catalog_empty,
-            build_stamp=build_stamp, is_local=True, is_true_local=is_true_local,
-            can_delete_cloud=can_delete_cloud,
-            logged_in_user=session.get("user"), csrf=session["csrf"],
-            total_pages=total_pages, page_range=_page_range(page, total_pages),
-            q=q, model_filter=model_filter, batch_filter=batch_filter,
-            date_from=date_from,
-            date_to=date_to, sort=sort, models=models, batches=batches,
-            years=years, per_page=per_page, per_page_opts=per_page_opts,
-            rating_min=rating_min,
-            page_url=page_url, request=request,
-            current_url=request.url,
-        )
-
-    @app.route("/image/<media_id>")
-    def detail(media_id):
-        row = get_row(db_path, media_id)
-        if not row:
-            return "Image not found.", 404
-
-        img_path = find_image_file(out_dir, media_id, row.get("filename"))
-        img_url = None
-        if img_path:
-            img_url = url_for("serve_image", rel=str(img_path.relative_to(out_dir)).replace("\\", "/"))
-
-        back = _safe_back(request.args.get("back", "")) or url_for("index")
-
-        # Parse filter/sort state from back URL to compute prev/next
-        from urllib.parse import urlparse, parse_qs
-        parsed = urlparse(back)
-        qs = parse_qs(parsed.query)
-        def _qs1(key, default=""):
-            vals = qs.get(key, [])
-            return vals[0] if vals else default
-        # Reassemble the date filters the same way index() does, so prev/next
-        # navigation respects the active Year/Month dropdown filter.
-        def _ym(prefix, month_default):
-            y = _qs1(prefix + "_year")
-            return "{}-{}".format(y, _qs1(prefix + "_month") or month_default) if y else ""
-        try:
-            _rmin = max(0, min(5, int(_qs1("rating_min", "0"))))
-        except ValueError:
-            _rmin = 0
-        nav_ids = list_media_ids(
-            db_path,
-            q=_qs1("q"), model=_qs1("model"),
-            date_from=_ym("from", "01"), date_to=_ym("to", "12"),
-            sort=_qs1("sort", "newest"), batch=_qs1("batch"), rating_min=_rmin,
-            published_only=(_qs1("published") == "1"), art_tag=_qs1("tag"),
-            lora=_qs1("lora"), media_type=_qs1("media"), source=_qs1("source"),
-            collection=_qs1("collection"),
-        )
-        try:
-            idx = nav_ids.index(media_id)
-        except ValueError:
-            idx = -1
-        prev_id = nav_ids[idx - 1] if idx > 0 else None
-        next_id = nav_ids[idx + 1] if 0 <= idx < len(nav_ids) - 1 else None
-
-        poster_url = None
-        video_url = None
-        if row.get("is_video") == "1":
-            for pmid in (media_id, row.get("poster_media_id")):
-                if pmid and (thumb_dir / "{}.jpg".format(pmid)).exists():
-                    poster_url = url_for("thumb", media_id=pmid)
-                    break
-            # The image branch has always asked find_image_file() whether the file is
-            # really there and fallen back to a plain "not found on disk" line; the video
-            # branch emitted <video><source> unconditionally, so a row whose clip is gone
-            # -- a state the Health dashboard explicitly counts under "Missing files" --
-            # showed a dead black player and no explanation at all. _find_local_video_file
-            # is the video half of that same question (catalog filename first, then the
-            # shared media-id matcher with its quarantine exclusions), so this is the
-            # existing resolver, not a third one -- and, since 2026-07-27, it is also the
-            # resolver /video-file serves from, which is what makes the answer here
-            # binding. A check that asks a different question from the route it gates is
-            # not a check: it just moves the dead player behind a `video_url` that 404s.
-            # `row` is handed over so the resolver doesn't re-SELECT the row loaded above.
-            if _find_local_video_file(media_id, row=row):
-                video_url = url_for("video_file", media_id=media_id)
-
-        return render_template_string(
-            DETAIL_HTML, row=row, img_url=img_url, back=back,
-            prev_id=prev_id, next_id=next_id, poster_url=poster_url,
-            video_url=video_url,
-            # Same value the gallery's own "Delete from PixAI" is gated on. A LAN session
-            # can browse and spend, but not destroy on the owner's real cloud account.
-            can_delete_cloud=_is_local_request(),
-            siblings=_batch_sibling_count(row.get("task_id")),
-        )
-
     def _batch_sibling_count(task_id):
         """How many catalog rows share this task. Used to say, before anything is deleted,
         whether the picture is one of a batch or the only one this task made -- because
@@ -12162,53 +6512,39 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         telem_bump("culled", out_dir=out_dir)
         return jsonify({"ok": True, "media_id": mid, "task_id": tid})
 
-    def _back_with(back, **params):
-        """Redirect to `back` carrying a banner param (the grid renders `delerr`)."""
-        import urllib.parse
-        sep = "&" if "?" in back else "?"
-        return redirect(back + sep + urllib.parse.urlencode(params))
+    @app.route("/api/delete-local", methods=["POST"])
+    def api_delete_local():
+        """JSON twin of /delete-bulk (and /delete/<id>) for fetch()-driven clients:
+        quarantine the selected media to out_dir/_deleted/ through the SAME
+        purge_media_local path the page routes use, so /api/trash/restore undoes it,
+        minus the redirect-with-banner plumbing. LOGIN tier, exactly like the page
+        routes it mirrors: local quarantine is reversible library curation, not
+        cloud destruction (that is /api/delete-tasks, a different tier). The page
+        routes stay -- classic still posts forms at them.
 
-    @app.route("/delete/<media_id>", methods=["POST"])
-    def delete_one(media_id):
-        back = _safe_back(request.args.get("back")) or url_for("index")
-        row = get_row(db_path, media_id)
-        if row:
-            try:
-                purge_media_local(out_dir, thumb_dir, db_path, media_id, row.get("filename"))
-            except OSError as e:
-                # Nothing was lost (a failed move keeps both the file and its row), but
-                # nothing was deleted either -- say so on the banner instead of redirecting
-                # to a grid that still shows the image with no explanation.
-                return _back_with(back, delerr="could not move the file to the trash "
-                                               "folder, so nothing was deleted: "
-                                               + _redact_host_paths(str(e))[:120])
-        return redirect(back)
-
-    @app.route("/delete-bulk", methods=["POST"])
-    def delete_bulk():
-        back = _safe_back(request.form.get("back")) or url_for("index")
-        media_ids = set(request.form.getlist("media_ids"))
+        Deduped via dict.fromkeys for the same reason /api/delete-preview does it:
+        the count describes FILES quarantined, so a repeated id must not inflate it.
+        Per-file OSError keeps the loop going, exactly as /delete-bulk's does -- one
+        file the OS won't release must not strand the rest -- and comes back as a
+        `failed` count with ok=false instead of a delerr banner."""
+        body = request.get_json(silent=True) or {}
+        media_ids = list(dict.fromkeys(
+            str(m) for m in (body.get("media_ids") or []) if str(m).strip()))
         if not media_ids:
-            return redirect(back)
-
-        to_delete = {mid: get_row(db_path, mid) for mid in media_ids}
-        to_delete = {mid: r for mid, r in to_delete.items() if r}
-
+            return jsonify({"error": "no media_ids given"}), 400
         purged = failed = 0
-        for mid, row in to_delete.items():
+        for mid in media_ids:
+            row = get_row(db_path, mid)
+            if not row:
+                continue
             try:
                 purge_media_local(out_dir, thumb_dir, db_path, mid, row.get("filename"))
                 purged += 1
             except OSError:
-                failed += 1     # one file the OS won't release must not strand the rest
-
+                failed += 1
         if purged:
             telem_bump("culled", purged, out_dir=out_dir)           # The Great Sweep
-        if failed:
-            return _back_with(back, delerr="{} of {} could not be moved to the trash "
-                                           "folder and were left alone".format(
-                                               failed, len(to_delete)))
-        return redirect(back)
+        return jsonify({"ok": failed == 0, "count": purged, "failed": failed})
 
     def _purge_local(media_id, filename):
         """Remove a media's catalog row + thumbnail; quarantine its file to _deleted/
@@ -12350,51 +6686,34 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             },
         })
 
-    @app.route("/delete-tasks-bulk", methods=["POST"])
-    def delete_tasks_bulk():
-        """Delete the selected images' TASKS from PixAI (irreversible) AND purge
-        them locally, so cloud and catalog never drift. Task-level: deleting any
-        image deletes its whole task (all batch images), cloud + local. Imports
-        with no task id are purged locally only. Runs OFF-THREAD and reports progress
-        to the Activity card; localhost-only (this destroys on the owner's account) --
-        same trust tier as /api/branding/shortcut and destructive Panel actions, gated
-        to the stricter _is_local_request(), NOT the broader _is_authorized_request()
-        that the front-door hook enforces for everything else. A logged-in LAN session
-        unlocks browsing and spending the owner's credits, not irreversible deletion
-        from the owner's real cloud account. (This check was dropped during the
-        LAN-auth conversion pass and restored 2026-07-19 per adversarial review --
-        see CHANGELOG.md.)"""
-        import urllib.parse
+    def _start_bulk_delete(task_ids, local_only, purge_local=True):
+        """The shared engine behind BOTH /delete-tasks-bulk (form/redirect) and
+        /api/delete-tasks (JSON) -- extracted from the former verbatim so the two
+        routes cannot drift in what they actually DO, only in how they answer.
+        Kicks the delete off-thread, reporting to the Activity card exactly as
+        before.
+
+        Returns (job_id, total, err): started when err is None; otherwise err is
+        "busy" (a bulk delete is already running -- single-flight held) or
+        "thread" (the worker thread could not start; single-flight released and
+        the failure already logged to the job card). Callers check total > 0
+        themselves -- this helper assumes there is work.
+
+        purge_local=False is the JSON route's cloud-only mode (the CLI
+        --delete-task behavior: cloud gone, local files + catalog intact). It
+        drops the local_only imports HERE, not in the caller, because with no
+        cloud side they would otherwise be pure local purges -- exactly what the
+        flag says not to do."""
         import uuid
         import moonglade_backup as core   # lazy: avoid import cycle
-        back = _safe_back(request.form.get("back")) or url_for("index")
-
-        def _back(**params):
-            sep = "&" if "?" in back else "?"
-            return redirect(back + sep + urllib.parse.urlencode(params))
-
-        if not _is_local_request():
-            return _back(delerr="deleting from PixAI is localhost-only")
-
-        sel = request.form.getlist("media_ids")
-        if not sel:
-            return redirect(back)
-
-        con = _connect(db_path)
-        try:
-            # Same helper /api/delete-preview calls, on purpose: whatever the confirm
-            # dialog showed the user has to be what this route then acts on.
-            sel_rows, task_ids, local_only = _resolve_delete_targets(con, sel)
-        finally:
-            con.close()
+        if not purge_local:
+            local_only = []
         total = len(task_ids) + len(local_only)
-        if not total:
-            return redirect(back)
 
         # Single-flight: never let two bulk deletes interleave their cloud calls.
         with _bulkdel_lock:
             if _bulkdel_running["on"]:
-                return _back(delerr="a bulk delete is already running -- see the Activity card")
+                return None, total, "busy"
             _bulkdel_running["on"] = True
 
         job_id = "bulkdel-" + uuid.uuid4().hex[:12]
@@ -12417,22 +6736,23 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     except Exception:                            # noqa: BLE001
                         failed += 1
                         done += 1; _tick(); continue
-                    con2 = _connect(db_path)
-                    try:
-                        media = con2.execute(
-                            "SELECT media_id, filename FROM catalog WHERE task_id=?", (tid,)
-                        ).fetchall()
-                    finally:
-                        con2.close()
-                    for m in media:
+                    if purge_local:
+                        con2 = _connect(db_path)
                         try:
-                            _purge_local(m[0], m[1]); removed += 1
-                        except OSError:
-                            # This task's cloud delete has ALREADY fired, so one file the
-                            # OS won't let go of must not take the whole loop down with it:
-                            # every task still queued would be left deleted on PixAI but
-                            # live in the catalog, and nothing would say so.
-                            failed += 1
+                            media = con2.execute(
+                                "SELECT media_id, filename FROM catalog WHERE task_id=?", (tid,)
+                            ).fetchall()
+                        finally:
+                            con2.close()
+                        for m in media:
+                            try:
+                                _purge_local(m[0], m[1]); removed += 1
+                            except OSError:
+                                # This task's cloud delete has ALREADY fired, so one file the
+                                # OS won't let go of must not take the whole loop down with it:
+                                # every task still queued would be left deleted on PixAI but
+                                # live in the catalog, and nothing would say so.
+                                failed += 1
                     done += 1; _tick()
                 for r in local_only:
                     try:
@@ -12458,8 +6778,65 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             with _bulkdel_lock:                              # never wedge single-flight forever
                 _bulkdel_running["on"] = False
             _log_job(job_id, status="failed", error="could not start delete thread: " + _redact_host_paths(str(e))[:160])
-            return _back(delerr="could not start bulk delete -- try again")
-        return _back(bulkdel="started", n=total)
+            return None, total, "thread"
+        return job_id, total, None
+
+    @app.route("/api/delete-tasks", methods=["POST"])
+    def api_delete_tasks():
+        """JSON twin of /delete-tasks-bulk: same LOCALHOST tier (and for the same
+        reason -- this MUTATES THE OWNER'S REAL CLOUD ACCOUNT, irreversibly), same
+        _resolve_delete_targets selection so /api/delete-preview keeps describing
+        exactly what this route then does, and the same off-thread worker via
+        _start_bulk_delete -- which routes every cloud delete through
+        core.delete_task_gql, the single-attempt _check_read_only'd choke point the
+        page route uses, never gql_adhoc. The page route stays until classic's
+        demolition.
+
+        Body: {task_ids: [...]} OR {media_ids: [...]} (task_ids win when both are
+        sent -- they are already the unit the delete operates on), plus optional
+        purge_local (default true, the page behavior: purge follows cloud so
+        catalog and account never drift; false = cloud-only, the CLI
+        --delete-task behavior, and imports are then left alone entirely).
+
+        _check_read_only fires HERE, before the job even starts, on top of the one
+        inside delete_task_gql: failing fast with one readable refusal beats
+        spawning a job whose every task then fails red on the Activity card."""
+        import moonglade_backup as core   # lazy: avoid import cycle
+        if not _is_local_request():
+            return jsonify({"error": "deleting from PixAI is localhost-only"}), 403
+        body = request.get_json(silent=True) or {}
+        purge_local = bool(body.get("purge_local", True))
+        task_ids = sorted({str(t).strip() for t in (body.get("task_ids") or [])
+                           if str(t).strip()})
+        local_only = []
+        if not task_ids:
+            media_ids = [str(m) for m in (body.get("media_ids") or []) if str(m).strip()]
+            if not media_ids:
+                return jsonify({"error": "no task_ids or media_ids given"}), 400
+            con = _connect(db_path)
+            try:
+                _sel_rows, task_ids, local_only = _resolve_delete_targets(con, media_ids)
+            finally:
+                con.close()
+        if not purge_local:
+            local_only = []          # cloud-only mode: imports have no cloud side
+        if not (task_ids or local_only):
+            return jsonify({"ok": True, "count": 0, "job_id": None,
+                            "tasks": 0, "local_only": 0})
+        if task_ids:
+            try:
+                core._check_read_only("delete tasks from your PixAI account")
+            except core.PixAIError as e:
+                return jsonify({"error": _redact_host_paths(str(e))[:240]}), 403
+        job_id, total, err = _start_bulk_delete(task_ids, local_only,
+                                                purge_local=purge_local)
+        if err == "busy":
+            return jsonify({"error": "a bulk delete is already running -- "
+                                     "see the Activity card"}), 409
+        if err:
+            return jsonify({"error": "could not start bulk delete -- try again"}), 500
+        return jsonify({"ok": True, "count": total, "job_id": job_id,
+                        "tasks": len(task_ids), "local_only": len(local_only)})
 
     # -------------------------------------------------------------------
     # Trash / quarantine panel -- the floating panel opened from the Control
@@ -12553,7 +6930,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         telem_bump("trash_purged_forever", n, out_dir=out_dir)
         return jsonify({"deleted": n})
 
-    @app.route("/rate/<media_id>", methods=["POST"])
+    @app.route("/api/rate/<media_id>", methods=["POST"])
     def rate(media_id):
         data = request.get_json(silent=True) or {}
         try:
@@ -12563,45 +6940,51 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         update_rating(db_path, media_id, value)
         return json.dumps({"ok": True, "rating": value}), 200, {"Content-Type": "application/json"}
 
-    @app.route("/edit-prompt/<media_id>", methods=["POST"])
+    @app.route("/api/edit-prompt/<media_id>", methods=["POST"])
     def edit_prompt(media_id):
         data = request.get_json(silent=True) or {}
         update_prompt_full(db_path, media_id, data.get("prompt", ""))
         return json.dumps({"ok": True}), 200, {"Content-Type": "application/json"}
 
-    @app.route("/collection-add", methods=["POST"])
-    def collection_add():
-        back = _safe_back(request.form.get("back")) or url_for("index")
-        ids = request.form.getlist("media_ids")
-        name = request.form.get("name", "")
-        n = add_to_collection(db_path, ids, name)
-        sep = "&" if "?" in back else "?"
-        return redirect("{}{}collected={}".format(back, sep, n))
+    @app.route("/api/collection", methods=["POST"])
+    def api_collection():
+        """JSON twin of /collection-add + /collection-remove for fetch()-driven
+        clients: one route, `action` picks the direction, same add_to_collection /
+        remove_from_collection helpers underneath (comma-name scrubbing, the
+        read-modify-write lock, no-op-if-already-there counting -- all of it), no
+        redirect banner. LOGIN tier, exactly like both page routes it mirrors.
+        `count` is rows actually CHANGED, the page banner's own number -- adding to
+        a collection an image is already in counts zero, not one."""
+        body = request.get_json(silent=True) or {}
+        action = str(body.get("action") or "").strip()
+        if action not in ("add", "remove"):
+            return jsonify({"error": "action must be 'add' or 'remove'"}), 400
+        name = str(body.get("collection") or "").strip()
+        if not name:
+            return jsonify({"error": "no collection name given"}), 400
+        media_ids = [str(m) for m in (body.get("media_ids") or []) if str(m).strip()]
+        if not media_ids:
+            return jsonify({"error": "no media_ids given"}), 400
+        fn = add_to_collection if action == "add" else remove_from_collection
+        return jsonify({"ok": True, "count": fn(db_path, media_ids, name)})
 
-    @app.route("/collection-remove", methods=["POST"])
-    def collection_remove():
-        # Same shape as /collection-add, including the one-shot count in the query
-        # string: `back` normally carries the collection filter the removal happened
-        # under, so the reloaded grid is missing those rows and the banner is the only
-        # thing that says how many left. `uncollected` (not `removed`, which the
-        # cloud-delete banner already owns) keeps the two banners independent.
-        back = _safe_back(request.form.get("back")) or url_for("index")
-        ids = request.form.getlist("media_ids")
-        name = request.form.get("name", "")
-        n = remove_from_collection(db_path, ids, name)
-        sep = "&" if "?" in back else "?"
-        return redirect("{}{}uncollected={}".format(back, sep, n))
-
-    @app.route("/bulk-replace-prompt", methods=["POST"])
-    def bulk_replace():
-        back = _safe_back(request.form.get("back")) or url_for("index")
-        ids = request.form.getlist("media_ids")
-        find = request.form.get("find", "")
-        replace = request.form.get("replace", "")
-        n = bulk_replace_prompt(db_path, ids, find, replace)
-        # stash a one-shot result in the query string for a small banner
-        sep = "&" if "?" in back else "?"
-        return redirect("{}{}replaced={}".format(back, sep, n))
+    @app.route("/api/replace-prompts", methods=["POST"])
+    def api_replace_prompts():
+        """JSON twin of /bulk-replace-prompt: same bulk_replace_prompt helper (plain
+        substring find/replace over prompt_full, counting only rows that actually
+        changed), no redirect banner. LOGIN tier, like the page route it mirrors.
+        An empty `find` is a 400 here rather than the helper's silent 0: the page
+        form can't submit one, so a JSON caller sending one is a bug worth naming."""
+        body = request.get_json(silent=True) or {}
+        find = str(body.get("find") or "")
+        if not find:
+            return jsonify({"error": "no find text given"}), 400
+        media_ids = [str(m) for m in (body.get("media_ids") or []) if str(m).strip()]
+        if not media_ids:
+            return jsonify({"error": "no media_ids given"}), 400
+        changed = bulk_replace_prompt(db_path, media_ids, find,
+                                      str(body.get("replace") or ""))
+        return jsonify({"ok": True, "changed": changed})
 
     # Full images are write-once: /img/ is keyed by on-disk path and /full/ resolves to
     # the downloaded original, so the bytes behind a given URL never change. Cache those
@@ -12621,12 +7004,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         resp = send_from_directory(str(thumb_dir), "{}.jpg".format(media_id),
                                    max_age=300)
         resp.headers["Cache-Control"] = _THUMB_CACHE
-        return resp
-
-    @app.route("/img/<path:rel>")
-    def serve_image(rel):
-        resp = send_from_directory(str(out_dir), rel, max_age=31536000)
-        resp.headers["Cache-Control"] = _IMMUTABLE
         return resp
 
     @app.route("/video-file/<media_id>")
@@ -12658,88 +7035,6 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         resp = send_from_directory(str(out_dir), rel, max_age=31536000)
         resp.headers["Cache-Control"] = _IMMUTABLE
         return resp
-
-    @app.route("/manifest.webmanifest")
-    def manifest():
-        icon = ("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' "
-                "viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23cba6f7'/%3E"
-                "%3Cpath d='M9 22V10h6a4 4 0 0 1 0 8h-3' stroke='%231e1e2e' stroke-width='2.4' "
-                "fill='none' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='11' r='2.2' "
-                "fill='%23d4af37'/%3E%3C/svg%3E")
-        return app.response_class(
-            json.dumps({
-                "name": "Moonglade Athenaeum", "short_name": "Moonglade",
-                "start_url": "/", "display": "standalone",
-                "background_color": "#0c0a1c", "theme_color": "#0c0a1c",
-                "icons": [{"src": icon, "sizes": "any", "type": "image/svg+xml"}],
-            }),
-            mimetype="application/manifest+json")
-
-    @app.route("/sw.js")
-    def service_worker():
-        # Cache-first for write-once originals; stale-while-revalidate for thumbnails;
-        # network for everything else. Only OK (200) responses are cached -- NEVER a 404 --
-        # so a thumbnail that didn't exist yet (poster-less video mid-collect) can't get its
-        # miss frozen in. Bumping the cache name + deleting old caches on activate self-heals
-        # any client holding a poisoned entry from an older version (no hard-refresh needed).
-        #
-        # v3: /thumbs/ moved OFF cache-first. This worker ignores Cache-Control entirely --
-        # `c.match()` returns a hit without ever revalidating -- so cache-first pinned every
-        # thumbnail for the lifetime of the cache. `--rebuild-thumbs` rewrites posters in
-        # place at the same media_id URL, so the repair was invisible to any client that had
-        # already cached the broken one. Same failure shape as the v1 404 poisoning, one
-        # status code over. Originals stay cache-first: their bytes really are write-once.
-        #
-        # The thumb refetch passes cache:'no-cache' so it revalidates against the server
-        # instead of being answered by the HTTP cache's own max-age -- otherwise the
-        # "revalidate" half of stale-while-revalidate is a no-op until max-age expires.
-        # It costs one conditional request per thumb per view, answered by a ~200-byte 304
-        # off the ETag, and it never blocks paint (the cached bytes render immediately).
-        # LAN viewers over plain http get no service worker at all (secure-context only) --
-        # for them the route's short max-age + ETag is what bounds staleness.
-        # v4: `resp.ok` is NOT a sufficient cache guard, because a GATED response here is
-        # not a failure -- it is a 200. /thumbs/, /img/ and /full/ are not under
-        # _JSON_GATE_PREFIXES, so an unauthorized request for one gets the front door's
-        # `redirect(url_for("login", ...))`, and an <img> subresource has redirect mode
-        # "follow" -- the browser follows it and hands the worker the LOGIN PAGE with
-        # status 200, ok===true, redirected===true. That HTML then gets written into Cache
-        # Storage under the IMAGE's url.
-        #
-        # On /thumbs/ it self-heals (stale-while-revalidate overwrites on the next good
-        # fetch). On /img/ and /full/ it does not: that branch is `r=>r||fetch(...)`,
-        # cache-first with no revalidation on a hit, so those images render broken from
-        # then on -- surviving re-login, reloads and server restarts, curable only by
-        # Ctrl+Shift+R or this cache-name bump.
-        #
-        # The trigger is routine, not exotic: the header's Sign out is a GLOBAL revoke
-        # (bump_web_user_session_epoch), so signing out on the desktop kills the tablet's
-        # session while its grid is still lazy-loading. Same shape as the v1 bug (froze
-        # 404s) and the v2 bug (pinned stale posters), one status code over.
-        sw = (
-            "const C='pixai-img-v4';\n"
-            "self.addEventListener('install',e=>self.skipWaiting());\n"
-            "self.addEventListener('activate',e=>e.waitUntil(\n"
-            "  caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k))))\n"
-            "  .then(()=>self.clients.claim())));\n"
-            "self.addEventListener('fetch',e=>{\n"
-            " const u=new URL(e.request.url);\n"
-            " if(e.request.method!=='GET') return;\n"
-            " const isThumb=u.pathname.startsWith('/thumbs/');\n"
-            " const isOrig=u.pathname.startsWith('/img/')||u.pathname.startsWith('/full/');\n"
-            " if(!isThumb&&!isOrig) return;\n"
-            " if(isOrig){\n"
-            "  e.respondWith(caches.open(C).then(c=>c.match(e.request).then(\n"
-            "   r=>r||fetch(e.request).then(resp=>{if(resp&&resp.ok&&!resp.redirected)c.put(e.request,resp.clone());return resp;}))));\n"
-            "  return;\n"
-            " }\n"
-            " e.respondWith(caches.open(C).then(c=>c.match(e.request).then(r=>{\n"
-            "  const n=fetch(e.request,{cache:'no-cache'})\n"
-            "          .then(resp=>{if(resp&&resp.ok&&!resp.redirected)c.put(e.request,resp.clone());return resp;})\n"
-            "          .catch(()=>r);\n"
-            "  return r||n;\n"
-            " })));\n"
-            "});\n")
-        return app.response_class(sw, mimetype="application/javascript")
 
     @app.route("/full/<media_id>")
     def full_image(media_id):
@@ -13229,7 +7524,21 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         just the resolved latest -- {versions:[...]}, same per-row shape plus `label`/
         `is_latest` -- so the picker can offer a real choice (see
         core.list_model_versions). Default (no ?all) is UNCHANGED: the single resolved-latest
-        shape every existing caller already expects."""
+        shape every existing caller already expects.
+
+        ?version_id=X (2026-08-02, the Runs reel's reuse-prefill): the REVERSE lookup --
+        {"model_id": "..."} , "" if unresolvable. The catalog stores a run's model_id as the
+        VERSION PixAI actually rendered with, not the base model id this route's other two
+        modes take -- reuse-prefill needs this to feed applyModelRow the same real, current
+        base id a fresh market pick would use, never the version id verbatim (see
+        core.resolve_model_base_id)."""
+        version_id = (request.args.get("version_id") or "").strip()
+        if version_id:
+            try:
+                core, session = _gen_session()
+                return jsonify({"model_id": core.resolve_model_base_id(session, version_id)})
+            except Exception as e:
+                return jsonify({"error": _redact_host_paths(str(e))[:200], "model_id": ""}), 200
         mid = (request.args.get("model_id") or "").strip()
         if not mid:
             return jsonify({"error": "model_id required", "version_id": ""}), 400
@@ -13539,6 +7848,375 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 </body></html>""".format(title=title, cols=cols, n=len(cells), cells="".join(cells))
         return html
 
+    @app.route("/api/contact-sheet")
+    def api_contact_sheet():
+        """JSON twin of /contact-sheet -- feeds the React ContactSheetOverlay's on-screen
+        preview and its own native (window.print()) output. Same source selection as the
+        page route (rows_for_media_ids / query_catalog); the page route stays untouched
+        for classic's own use until demolition -- the new front door never calls it."""
+        import datetime as _dt
+        ids_arg = (request.args.get("ids") or "").strip()
+        collection = (request.args.get("collection") or "").strip()
+        if ids_arg:
+            ids = [x for x in ids_arg.split(",") if x.strip()]
+            rows = rows_for_media_ids(db_path, ids)
+            collection_name = "{} selected".format(len(rows))
+        elif collection:
+            rows, _ = query_catalog(db_path, collection=collection, sort="newest",
+                                    page=1, page_size=400)
+            collection_name = collection
+        else:
+            rows, _ = query_catalog(db_path, sort="newest", page=1, page_size=60)
+            collection_name = "Recent"
+
+        frames = []
+        for r in rows:
+            mid = str(r.get("media_id") or "")
+            if not mid:
+                continue
+            try:
+                stars = "★" * int(r.get("rating") or 0)
+            except (TypeError, ValueError):
+                stars = ""
+            title = ((r.get("title") or "").strip()
+                     or (r.get("prompt_preview") or "").strip()[:60]
+                     or "Untitled")
+            frames.append({
+                "media_id": mid,
+                "title": title,
+                "model": r.get("model_name") or "",
+                "stars": stars,
+                "thumb_url": "/thumbs/{}.jpg".format(mid),
+            })
+
+        d = _dt.datetime.now()
+        printed_date = "{} {}, {}".format(d.strftime("%B"), d.day, d.year)
+        return jsonify({
+            "collectionName": collection_name,
+            "frameCount": len(frames),
+            "printedDate": printed_date,
+            "frames": frames,
+        })
+
+    @app.route("/api/duplicates")
+    def api_duplicates():
+        """Real, working duplicate-groups listing for the React Duplicate Review overlay
+        (the parked affordance in HealthOverlay.jsx's Duplicates/Reclaimable stat tiles).
+        Owner-scoped "happy medium" (2026-08-02, docs/DECISIONS.md), FOUR tiers --
+        3 EXACT-match with no invented data/percentage, plus one perceptual-similarity
+        tier that carries a real, derived closeness score (see near_duplicate below) --
+
+          same_media     Class A: the same PixAI media_id reused across >1 folder bucket.
+                          duplicate_groups() (this module) -- the classic /duplicates
+                          page's own engine, reused as-is (its 300-row cap is lifted here;
+                          see the call below).
+          identical_file Class B: byte-identical files under DIFFERENT media_ids.
+                          moonglade_backup.audit_collection(content=True)'s size-bucketed
+                          SHA pass -- reused as-is; not naive O(n^2).
+          same_seed       Class C: catalog rows sharing (seed, prompt_full) -- a cheap
+                          SQL GROUP BY (same_seed_groups(), this module), not a new
+                          detection algorithm.
+          near_duplicate  Class D (new): images whose dHash `phash` column (populated by
+                          `--backfill-phash`, compute_dhash()) is within a Hamming-
+                          distance threshold of another's -- catches an upscaled or
+                          recompressed copy of the same image, which byte-hashing (Class
+                          B) cannot, because the bytes genuinely differ. The ONE tier
+                          that carries a `closeness_pct` per group (near_duplicate_groups(),
+                          this module) -- real, Hamming-distance-derived, never invented;
+                          the other three tiers stay percentage-free by design. Rows with
+                          no phash yet (backfill not run / not yet reached that row)
+                          simply don't participate -- they are not reported as "no match",
+                          they are just absent from this tier until backfilled.
+
+        Deliberately EXCLUDES the CLIP-embedding "similar composition" tier -- real
+        infrastructure exists at /api/similar, but it measures visual resemblance, not
+        duplication (see DECISIONS.md).
+
+        Read-only, no filesystem mutation -- LOGIN tier, same trust class as the classic
+        /duplicates page and api_health. Members are shaped identically across all four
+        tiers (media_id/thumb/dims/rating/date/path/bucket/size/is_keeper) so the client
+        never has to special-case by matchType."""
+        import moonglade_backup as core
+
+        def _member(mid, row, path, bucket, size, is_keeper):
+            row = row or {}
+            isv = str(row.get("is_video") or "") == "1"
+            return {
+                "media_id": str(mid),
+                "thumb": "/thumbs/{}.jpg".format(mid),
+                "width": row.get("width") or "",
+                "height": row.get("height") or "",
+                "rating": row.get("rating") or "",
+                "created_at": row.get("created_at") or "",
+                "is_video": "1" if isv else "",
+                "path": str(path).replace("\\", "/"),
+                "bucket": bucket,
+                "size": size,
+                "is_keeper": bool(is_keeper),
+            }
+
+        groups = []
+
+        # ---- same_media (Class A) -------------------------------------------
+        # No arbitrary cap here -- the classic page's limit=300 exists to keep an HTML
+        # render short, not because the underlying scan is expensive (one rglob pass,
+        # no hashing); this route reports the real count instead of silently truncating.
+        class_a = duplicate_groups(out_dir, limit=100000)
+        rows_a = {r["media_id"]: r for r in rows_for_media_ids(db_path, [g["media_id"] for g in class_a])}
+        for g in class_a:
+            mid = g["media_id"]
+            row = rows_a.get(str(mid))
+            members = [_member(mid, row, c["rel"], c["bucket"], c["size"], c["rel"] == g["keeper"])
+                       for c in g["copies"]]
+            reclaim = sum(m["size"] for m in members if not m["is_keeper"])
+            groups.append({"id": "same_media:{}".format(mid), "matchType": "same_media",
+                           "reclaimable_bytes": reclaim, "members": members})
+
+        # ---- identical_file (Class B) ----------------------------------------
+        audit = core.audit_collection(out_dir, content=True)
+        class_b = audit["class_b"]
+        mids_b = sorted({str(item[4]) for g in class_b for item in g["files"]})
+        rows_b = {r["media_id"]: r for r in rows_for_media_ids(db_path, mids_b)}
+        for g in class_b:
+            keeper_path = g["keeper"][0]
+            members = [_member(mid, rows_b.get(str(mid)), rel, bucket, size, p == keeper_path)
+                       for (p, rel, bucket, size, mid) in g["files"]]
+            reclaim = sum(m["size"] for m in members if not m["is_keeper"])
+            groups.append({"id": "identical_file:{}".format(g["sha"]), "matchType": "identical_file",
+                           "reclaimable_bytes": reclaim, "members": members})
+
+        # ---- same_seed (Class C) ----------------------------------------------
+        seed_groups = same_seed_groups(db_path)
+        mids_c = sorted({mid for g in seed_groups for mid in g["media_ids"]})
+        rows_c = {r["media_id"]: r for r in rows_for_media_ids(db_path, mids_c)}
+        for g in seed_groups:
+            candidates = []
+            for mid in g["media_ids"]:
+                row = rows_c.get(str(mid))
+                if not row:
+                    continue        # a stale media_id (row deleted since indexed) -- skip, don't fabricate
+                fpath = find_image_file(out_dir, mid, row.get("filename"))
+                try:
+                    size = fpath.stat().st_size if fpath else 0
+                except OSError:
+                    size = 0
+                # Sort key: oldest real created_at first (the original generation is the
+                # keeper); a blank date sorts LAST so an unknown-date row is never
+                # mistaken for the original over a row with a real timestamp.
+                sort_key = row.get("created_at") or "9999-99-99"
+                candidates.append((sort_key, mid, row, fpath, size))
+            if len(candidates) < 2:
+                continue             # every media_id in this seed group turned out stale
+            candidates.sort(key=lambda c: c[0])
+            keeper_mid = candidates[0][1]
+            members = [_member(mid, row, (str(fpath.relative_to(out_dir)) if fpath else ""),
+                               "", size, mid == keeper_mid)
+                       for (_, mid, row, fpath, size) in candidates]
+            reclaim = sum(m["size"] for m in members if not m["is_keeper"])
+            groups.append({"id": "same_seed:{}:{}".format(g["seed"], g["prompt_hash"]),
+                           "matchType": "same_seed", "seed": g["seed"],
+                           "reclaimable_bytes": reclaim, "members": members})
+
+        # ---- near_duplicate (Class D, new) ------------------------------------
+        # Same "resolve real rows/files, oldest created_at is the keeper" shape as
+        # same_seed above -- the only tier-specific addition is closeness_pct, carried
+        # at the group level exactly like same_seed carries `seed`.
+        near_groups = near_duplicate_groups(db_path)
+        mids_d = sorted({mid for g in near_groups for mid in g["media_ids"]})
+        rows_d = {r["media_id"]: r for r in rows_for_media_ids(db_path, mids_d)}
+        for g in near_groups:
+            candidates = []
+            for mid in g["media_ids"]:
+                row = rows_d.get(str(mid))
+                if not row:
+                    continue        # stale media_id (row deleted since phash was computed)
+                fpath = find_image_file(out_dir, mid, row.get("filename"))
+                try:
+                    size = fpath.stat().st_size if fpath else 0
+                except OSError:
+                    size = 0
+                sort_key = row.get("created_at") or "9999-99-99"
+                candidates.append((sort_key, mid, row, fpath, size))
+            if len(candidates) < 2:
+                continue             # every media_id in this group turned out stale
+            candidates.sort(key=lambda c: c[0])
+            keeper_mid = candidates[0][1]
+            members = [_member(mid, row, (str(fpath.relative_to(out_dir)) if fpath else ""),
+                               "", size, mid == keeper_mid)
+                       for (_, mid, row, fpath, size) in candidates]
+            reclaim = sum(m["size"] for m in members if not m["is_keeper"])
+            groups.append({"id": "near_duplicate:{}".format("-".join(g["media_ids"])),
+                           "matchType": "near_duplicate", "closeness_pct": g["closeness_pct"],
+                           "reclaimable_bytes": reclaim, "members": members})
+
+        groups.sort(key=lambda g: -g["reclaimable_bytes"])
+        counts = {"same_media": len(class_a), "identical_file": len(class_b),
+                 "same_seed": len(seed_groups), "near_duplicate": len(near_groups)}
+        return jsonify({
+            "groups": groups,
+            "counts": counts,
+            "total_groups": len(groups),
+            "total_reclaimable_bytes": sum(g["reclaimable_bytes"] for g in groups),
+        })
+
+    @app.route("/api/duplicates/resolve", methods=["POST"])
+    def api_duplicates_resolve():
+        """The destructive half of Duplicate Review: quarantines the LOSING
+        copies of one or more duplicate groups into out_dir/_duplicates/, via
+        quarantine_duplicate_file() above -- QUARANTINE ONLY, mirroring
+        cmd_dedup()'s DEFAULT (--apply without --dedup-delete) behavior.
+        --dedup-delete's hard-delete path is not reachable through this route
+        under any body field.
+
+        Body: {"csrf": "...", "resolutions": [ {group_id, keep, remove}, ... ]}
+        -- OR the single-resolution shortcut, the same three fields at the TOP
+        level (group_id/keep/remove), for the per-group "Resolve" button; the
+        frontend's "Auto-resolve all" sends the batch shape instead of one
+        request per group, so a many-group resolve is one round trip, not N.
+
+        `keep` and each entry of `remove` are {"media_id": "...", "path": "..."}
+        -- the exact (media_id, path) pair GET /api/duplicates already returned
+        for that member. `path`, not media_id, is what actually disambiguates a
+        member: a same_media group's members all share ONE media_id (that
+        tier's whole definition -- the same generation saved in more than one
+        folder), so media_id alone cannot say which COPY to keep vs remove;
+        path can, because GET /api/duplicates already returns a distinct path
+        per member in every tier.
+
+        SAFETY -- enforced here, not just a disabled frontend button:
+          * keep-count 0 (no valid `keep`, or nothing valid in `remove`) -> that
+            resolution is refused with a clear per-group error and nothing is
+            touched for it; "remove everything including the keeper" is not a
+            resolve.
+          * every path is validated to resolve strictly inside out_dir (no ../
+            escape) and its own filename's encoded media_id (media_id_of())
+            must match the media_id claimed for it.
+          * the keep/remove pair is re-verified as a REAL duplicate
+            relationship for the group_id's own matchType, against the actual
+            files/catalog rows right now -- see _validate_duplicate_pair()'s
+            docstring for the exact check run per tier.
+
+        CSRF: explicit-token class (_check_csrf(), the same helper
+        /api/users/add, /api/users/remove and /api/users/password use) -- a
+        real, hard-to-undo-by-accident file mutation triggered by one web
+        click, not the exempt spend-path class /api/generate etc. sit in.
+
+        READ_ONLY in config.json refuses this exactly like submit_generation/
+        submit_fixer/delete_task_gql/claim_reward -- see
+        quarantine_duplicate_file().
+
+        Response: {"quarantined": [...], "errors": [...], "reclaimed_bytes": N}.
+        Per-item, not all-or-nothing -- one bad group in a batch (a stale
+        group_id, a file already gone) does not block the rest, same "one file
+        the OS won't release must not strand the rest" shape as
+        /api/delete-local."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+
+        resolutions = body.get("resolutions")
+        if not isinstance(resolutions, list):
+            single = {k: body.get(k) for k in ("group_id", "keep", "remove")}
+            resolutions = [single] if single.get("group_id") else []
+        if not resolutions:
+            return jsonify({"error": "no resolutions given"}), 400
+
+        quarantined, errors = [], []
+        for res in resolutions:
+            res = res if isinstance(res, dict) else {}
+            group_id = str(res.get("group_id") or "").strip()
+            keep = res.get("keep")
+            remove_raw = res.get("remove")
+            if not group_id:
+                errors.append({"group_id": group_id, "error": "missing group_id"})
+                continue
+            if (not isinstance(keep, dict) or not str(keep.get("media_id") or "").strip()
+                    or not str(keep.get("path") or "").strip()):
+                errors.append({"group_id": group_id,
+                               "error": "no keeper specified -- refusing to resolve "
+                                        "(keep-count is 0)"})
+                continue
+
+            keep_path_str = str(keep.get("path") or "")
+            # The keeper guard compares RESOLVED paths, not the raw client strings --
+            # 'images//a.png', 'images\\a.png' and './images/a.png' all name the same
+            # file as 'images/a.png', and a raw-string compare would let an aliased
+            # spelling of the keeper slip into the remove list (the validator can't
+            # catch it either: the keeper is byte-identical and same-media with
+            # itself by definition). Found by the 2026-08-07 branch review.
+            keep_resolved = _resolve_under(out_dir, keep_path_str)
+            seen, remove_items = set(), []
+            for item in (remove_raw if isinstance(remove_raw, list) else []):
+                if not isinstance(item, dict):
+                    continue
+                mid = str(item.get("media_id") or "").strip()
+                path = str(item.get("path") or "").strip()
+                if not mid or not path or path in seen:
+                    continue
+                item_resolved = _resolve_under(out_dir, path)
+                if item_resolved is not None and item_resolved == keep_resolved:
+                    continue                      # the keeper itself, however spelled
+                if path == keep_path_str:
+                    continue                      # raw match still caught if unresolvable
+                seen.add(path)
+                remove_items.append({"media_id": mid, "path": path})
+            if not remove_items:
+                errors.append({"group_id": group_id, "error": "nothing valid to remove"})
+                continue
+
+            match_type = group_id.split(":", 1)[0]
+            ok, why = _validate_duplicate_pair(out_dir, db_path, match_type, keep, remove_items)
+            if not ok:
+                errors.append({"group_id": group_id, "error": why})
+                continue
+
+            keep_mid = str(keep.get("media_id"))
+            for item in remove_items:
+                result = quarantine_duplicate_file(out_dir, thumb_dir, db_path,
+                                                   item["media_id"], item["path"], group_id)
+                if result.get("ok"):
+                    result["group_id"] = group_id
+                    result["kept_media_id"] = keep_mid
+                    quarantined.append(result)
+                else:
+                    errors.append({"group_id": group_id, "media_id": item["media_id"],
+                                  "error": result.get("error")})
+
+        if quarantined:
+            telem_bump("duplicates_resolved", len(quarantined), out_dir=out_dir)
+        return jsonify({"quarantined": quarantined, "errors": errors,
+                        "reclaimed_bytes": sum(q.get("size", 0) for q in quarantined)})
+
+    @app.route("/api/duplicates/undo", methods=["POST"])
+    def api_duplicates_undo():
+        """Reverses ONE quarantine_duplicate_file() call (see its own docstring
+        and restore_quarantined_duplicate()): moves a single quarantined
+        duplicate back to its exact original recorded location and restores its
+        catalog row. Singular by design -- 'Undo' on one just-resolved item, not
+        a batch undo; an 'Auto-resolve all' that needs undoing calls this once
+        per item, the same acceptable simplification /api/duplicates/resolve's
+        own docstring notes for the read side of this feature.
+
+        Body: {"csrf": "...", "quarantine_path": "_duplicates/images/p_t2_333.webp"}
+        -- the exact `quarantine_path` /api/duplicates/resolve returned for that
+        item.
+
+        Same CSRF class, same tier, same READ_ONLY gate as resolve (see
+        restore_quarantined_duplicate()). Fails with a clear error -- never a
+        silent no-op or a write to some OTHER location -- when the undo record
+        is missing/stale or the original location is now occupied by something
+        else."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        quarantine_path = str(body.get("quarantine_path") or "").strip()
+        if not quarantine_path:
+            return jsonify({"error": "quarantine_path required"}), 400
+        result = restore_quarantined_duplicate(out_dir, thumb_dir, db_path, quarantine_path)
+        if result.get("ok"):
+            telem_bump("duplicates_undone", out_dir=out_dir)
+        return jsonify(result)
+
     @app.route("/api/account")
     def api_account():
         """Credits + free-card balance for the header chip. Read-only; login required.
@@ -13559,7 +8237,13 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     n = 0
                 cards += n
                 exp = (k.get("expires") or "")[:10]
-                cards_by.append({"name": k.get("name"), "count": n, "expires": exp})
+                # category (Model Card / Video Card) was fetched by list_kaisuukens all
+                # along but dropped before reaching cards_by, so the header tooltip and the
+                # new Account-detail modal's Cards tab couldn't tell the types apart. Default
+                # to "" (not None) so the JS `k.category ? ... : ""` check always compares a
+                # string. (Carried by hand from the card-coupon-ledger branch, 2026-08-07.)
+                cards_by.append({"name": k.get("name"), "count": n, "expires": exp,
+                                 "category": k.get("category") or ""})
                 if exp and n:
                     expiries.append(exp)
             card_expiry = min(expiries) if expiries else None
@@ -13599,7 +8283,16 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             local_tasks = distinct_task_count(db_path)
             coverage = (round(min(100.0, local_tasks / server_tasks * 100), 1)
                         if server_tasks else None)
+            # Paid/free credit split for the rail sub-line (Account-detail design, drift
+            # §37). A SUPPLEMENTARY read in its own guard: it must never break the core
+            # account response (credits/cards/coverage) if the split call fails -- a failure
+            # just leaves free/paid null, which the rail renders as an honest "split unknown".
+            try:
+                bal = core.credit_balance(session) or {}
+            except Exception:
+                bal = {}
             return jsonify({"credits": credits, "cards": cards,
+                            "credits_free": bal.get("free"), "credits_paid": bal.get("paid"),
                             "cards_by": cards_by, "card_expiry": card_expiry,
                             "claim_credits": claim_credits, "claim_ids": claim_ids,
                             "sub": {"end": (sub.get("endAt") or "")[:10],
@@ -13615,6 +8308,88 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                             "is_member": core.account_is_member(me)})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
+
+    # --- Account detail (cards · coupons · credit ledger) -------------------------------
+    # The web UI for the card-coupon-ledger branch's backend, wired into the Control Panel's
+    # "PixAI account" modal (Account-detail design, drift §37). All three are READ-ONLY
+    # account queries -- no mutation, no spend, no redeem -- and fail soft to {"error"}, 200
+    # exactly like /api/account, so the modal degrades gracefully when PixAI is unreachable.
+    def _acct_count(default, lo=1, hi=100):
+        try:
+            return max(lo, min(int(request.args.get("count") or default), hi))
+        except (TypeError, ValueError):
+            return default
+
+    @app.route("/api/account/card-history")
+    def api_account_card_history():
+        """Benefit-card (kaisuuken) usage. ?all=1 -> the lifetime type roster
+        (kaisuuken_type_catalog); otherwise the recent usage events (list_kaisuuken_logs,
+        forward-paginated via ?after=<cursor>). Read-only."""
+        try:
+            core, session = _gen_session()
+            if request.args.get("all") in ("1", "true", "yes"):
+                return jsonify(core.kaisuuken_type_catalog(session))
+            after = request.args.get("after") or None
+            return jsonify(core.list_kaisuuken_logs(session, first=_acct_count(20), after=after))
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
+
+    @app.route("/api/account/coupons")
+    def api_account_coupons():
+        """Coupons / Credit Boost. On-hand (available|locked) by default; ?history=1 swaps
+        to redeemed|expired. Informational only -- no redeem/apply here by design. Read-only,
+        forward-paginated via ?after=<cursor>."""
+        try:
+            core, session = _gen_session()
+            history = request.args.get("history") in ("1", "true", "yes")
+            statuses = core.COUPON_STATUSES_HISTORY if history else core.COUPON_STATUSES_ON_HAND
+            after = request.args.get("after") or None
+            return jsonify(core.list_extra_package_boosts(session, statuses=statuses,
+                                                          first=_acct_count(20), after=after))
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
+
+    @app.route("/api/account/credit-log")
+    def api_account_credit_log():
+        """Full credit movement history (purchase/gift/spend/refund). Newest-first;
+        BACKWARD-paginated via ?before=<cursor>. Optional ?reason=<type> filter. Read-only."""
+        try:
+            core, session = _gen_session()
+            before = request.args.get("before") or None
+            reason = request.args.get("reason") or None
+            return jsonify(core.list_credit_log(session, last=_acct_count(30),
+                                                before=before, reason=reason))
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
+
+    @app.route("/api/stats")
+    def api_stats():
+        """Catalog totals for fetch()-driven headers: the SAME numbers the classic
+        template bakes into its banner (catalog_counts -- images, videos, distinct
+        collections) plus the backed-up percent its cover-badge lazily pulls from
+        /api/account, computed the identical way (server lifetime TASK count from
+        account_info vs distinct_task_count locally; both are tasks, not images, so
+        the ratio is honest -- see api_account above). LOGIN tier, matching index()
+        and /api/account.
+
+        The account read fails soft: coverage_pct/server_tasks come back null when
+        PixAI is unreachable, which is exactly the case where the classic banner
+        shows counts but hides its coverage badge. The catalog counts never depend
+        on the network."""
+        counts = catalog_counts(db_path)
+        local_tasks = distinct_task_count(db_path)
+        try:
+            core, gsession = _gen_session()
+            me = core.account_info(gsession)
+            server_tasks = int((me.get("tasks") or {}).get("totalCount"))
+        except Exception:                                    # noqa: BLE001
+            server_tasks = None
+        coverage = (round(min(100.0, local_tasks / server_tasks * 100), 1)
+                    if server_tasks else None)
+        return jsonify({"images": counts["images"], "videos": counts["videos"],
+                        "collections": counts["collections"],
+                        "local_tasks": local_tasks, "server_tasks": server_tasks,
+                        "coverage_pct": coverage})
 
     @app.route("/api/setup/save-key", methods=["POST"])
     def api_setup_save_key():
@@ -13845,6 +8620,393 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 pass
         return jsonify({"items": top, "totals": totals, "views_synced": views_synced})
 
+    @app.route("/api/myart/items")
+    def api_myart_items():
+        """Card-ready rows for the My Art tabbed gallery (Frontend Gallery.dc.html's
+        ovMyArt, rebuilt 2026-08-06): every catalog row that exists as a PixAI ARTWORK
+        (artwork_id set by --sync-artworks), public AND private -- the design's
+        Visibility filter distinguishes them ('everything you've made, published or
+        held back'). Pure catalog read, no network: title/likes/comments/tags/nsfw
+        arrive via --sync-artworks; thumbs are the local /thumbs/<mid>.jpg the grid
+        already serves. The Artworks/Animations tab split is the is_video flag."""
+        con = _connect(db_path)
+        try:
+            rows = con.execute(
+                "SELECT media_id, artwork_id, title, prompt_preview, is_video, is_nsfw,"
+                " created_at, art_tags, is_published,"
+                " CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER) AS likes,"
+                " CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments"
+                " FROM catalog WHERE COALESCE(artwork_id,'') != '' AND media_id != ''"
+                " ORDER BY created_at DESC").fetchall()
+        finally:
+            con.close()
+        items = []
+        for (mid, aid, title, preview, is_video, is_nsfw, created, tags, pub,
+             likes, comments) in rows:
+            items.append({
+                "media_id": mid, "artwork_id": aid,
+                "title": (title or "").strip() or (preview or "").strip()[:60] or mid,
+                "thumb": "/thumbs/%s.jpg" % mid,
+                "is_video": is_video == "1", "is_nsfw": is_nsfw == "1",
+                "date": (created or "")[:10],
+                "tags": [t.strip() for t in (tags or "").split(",") if t.strip()][:4],
+                "public": pub == "1", "likes": likes, "comments": comments,
+            })
+        # The card actions POST to /api/myart/publish, which is in the explicit-token
+        # CSRF class; MG_BOOT doesn't carry the token, so it rides along here rather
+        # than making the overlay fetch the whole Control Panel summary for one field.
+        return jsonify({"items": items, "csrf": session.get("csrf", "")})
+
+    def _artwork_row(mid):
+        """The catalog row behind one media_id (artwork_id/task_id/title), or None."""
+        con = _connect(db_path)
+        try:
+            r = con.execute(
+                "SELECT media_id, artwork_id, task_id, title, art_tags, is_published"
+                " FROM catalog WHERE media_id = ? LIMIT 1", (str(mid),)).fetchone()
+        finally:
+            con.close()
+        if not r:
+            return None
+        return {"media_id": r[0], "artwork_id": r[1], "task_id": r[2],
+                "title": r[3], "art_tags": r[4], "is_published": r[5]}
+
+    @app.route("/api/myart/publish", methods=["POST"])
+    def api_myart_publish():
+        """Publish / unpublish / re-tag / delete one of the owner's artworks -- the My Art
+        card actions and the Lightbox/Details Publish button.
+
+        PREVIEW-FIRST, like every other account-mutating path in this app: without
+        `confirm: true` the route performs NO network call and returns exactly what it
+        WOULD do (action, target, resolved tag ids, and anything it could not resolve).
+        The UI shows that preview and only then sends the confirmed call. READ_ONLY in
+        config.json refuses the confirmed form regardless, inside the core functions.
+
+        Actions:
+          publish   -- createArtworkFromTaskV2 for a media_id that has no artwork yet
+                       (needs its task_id + the image's index in that task)
+          visibility-- upsertArtwork flipping public/private on an existing artwork
+          tags      -- upsertArtwork replacing the tack list
+          delete    -- deleteArtwork (irreversible on PixAI; local files untouched)
+
+        CSRF: explicit-token class, matching /api/duplicates/resolve and the user-admin
+        routes -- a real account mutation triggered by one web click."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        action = str(body.get("action") or "").strip()
+        mid = str(body.get("media_id") or "").strip()
+        if action not in ("publish", "visibility", "tags", "delete"):
+            return jsonify({"error": "unknown action"}), 400
+        row = _artwork_row(mid)
+        if not row:
+            return jsonify({"error": "unknown media id"}), 400
+        confirm = bool(body.get("confirm"))
+        tags = body.get("tags") if isinstance(body.get("tags"), list) else None
+        private = body.get("private")
+        title = body.get("title")
+
+        if action == "publish" and row["artwork_id"]:
+            return jsonify({"error": "already published -- use visibility/tags instead"}), 400
+        if action != "publish" and not row["artwork_id"]:
+            return jsonify({"error": "not published yet -- publish it first"}), 400
+        if action == "publish" and not row["task_id"]:
+            return jsonify({"error": "no task id for that image -- it can't be published from a task"}), 400
+
+        try:
+            core, session = _gen_session()
+        except Exception as e:
+            return jsonify({"error": "PixAI session unavailable: %s" % e}), 502
+
+        tack_ids, unmatched = [], []
+        if tags is not None:
+            tack_ids, unmatched = core.resolve_tack_ids(session, tags)   # read-only
+
+        # Which image of its task this media_id is. Resolved SERVER-side from the task's
+        # own ordered outputs, never taken from the client: publishing index 2 when the
+        # user picked index 0 puts the wrong picture on their public profile, and that is
+        # not a recoverable mistake. Read-only lookup, so it runs during preview too --
+        # which is what lets the preview refuse an unresolvable image before confirming.
+        media_index = None
+        if action == "publish":
+            media_index = core.task_media_index(session, row["task_id"], mid)
+            if media_index is None:
+                return jsonify({"error": "couldn't work out which image of task %s this is "
+                                         "-- refusing to publish rather than risk the wrong "
+                                         "one" % row["task_id"]}), 400
+
+        if not confirm:
+            return jsonify({"preview": True, "action": action, "media_id": mid,
+                            "artwork_id": row["artwork_id"], "task_id": row["task_id"],
+                            "title": title if title is not None else row["title"],
+                            "private": private, "tack_ids": tack_ids,
+                            "unmatched_tags": unmatched,
+                            "media_index": media_index,
+                            "spends_credits": False,
+                            "irreversible": action == "delete"})
+        try:
+            if action == "publish":
+                # Same null-preserving expression the preview above uses (line ~15873) --
+                # an intentionally CLEARED title (title == "") must publish empty, not
+                # silently fall back to the catalog's old title. `or` treats "" as falsy,
+                # which is exactly the bug: the confirm sheet showed "(untitled)" but the
+                # mutation went out with the stale title. Only an absent field (title is
+                # None, the client never sent it) falls back. Found by ultrareview 2026-08-06.
+                art = core.publish_artwork_from_task(
+                    session, row["task_id"],
+                    media_index=media_index,
+                    title=(title if title is not None else row["title"]) or "",
+                    description=body.get("description") or "",
+                    tack_ids=tack_ids, private=bool(private),
+                    hide_prompts=bool(body.get("hide_prompts")),
+                    challenge=body.get("challenge") or None)
+                result = {"artwork_id": art.get("id"), "published": True}
+            elif action == "delete":
+                core.delete_artwork(session, row["artwork_id"])
+                result = {"deleted": True}
+            else:
+                art = core.update_artwork(
+                    session, row["artwork_id"],
+                    title=title,
+                    tack_ids=(tack_ids if tags is not None else None),
+                    private=(None if private is None else bool(private)))
+                result = {"artwork_id": art.get("id") or row["artwork_id"], "updated": True}
+        except Exception as e:
+            return jsonify({"error": str(e)}), 502
+
+        # Mirror the change into the catalog so the grid reflects it without a full sync.
+        con = _connect(db_path)
+        try:
+            if action == "delete":
+                con.execute("UPDATE catalog SET artwork_id='', is_published='0' WHERE media_id=?", (mid,))
+            else:
+                if action == "publish":
+                    con.execute("UPDATE catalog SET artwork_id=?, is_published=? WHERE media_id=?",
+                                (result.get("artwork_id") or "", "0" if private else "1", mid))
+                if private is not None:
+                    con.execute("UPDATE catalog SET is_published=? WHERE media_id=?",
+                                ("0" if private else "1", mid))
+                if tags is not None:
+                    con.execute("UPDATE catalog SET art_tags=? WHERE media_id=?",
+                                (", ".join(str(t).lstrip("#").strip() for t in tags), mid))
+                if title is not None:
+                    con.execute("UPDATE catalog SET title=? WHERE media_id=?", (title, mid))
+            con.commit()
+        finally:
+            con.close()
+        result["unmatched_tags"] = unmatched
+        return jsonify(result)
+
+    def _lineage_card(row):
+        """One image reduced to a lineage chip: id, thumb, video flag, and a title hint."""
+        mid = row["media_id"]
+        return {"media_id": mid, "thumb": "/thumbs/%s.jpg" % mid,
+                "is_video": (row["is_video"] == "1"),
+                "title": (row["title"] or "").strip() or (row["prompt_preview"] or "").strip()[:48]}
+
+    @app.route("/api/lineage/<media_id>")
+    def api_lineage(media_id):
+        """The family tree of one image, for Image Details' LINEAGE panel:
+          * siblings -- the other outputs of the SAME generation task (share task_id; up to
+            4 per batch). Free -- task_id is already indexed.
+          * parent   -- the SOURCE image this one was derived from (source_media_id), plus
+            the kind of derivation (edit/upscale/video).
+          * children -- every image derived FROM this one (rows whose source_media_id == this).
+        Pure catalog read, no network. Any dimension can be empty (an original txt2img with
+        a batch size of 1 and no derivatives has an empty tree)."""
+        mid = str(media_id or "").strip()
+        con = _connect(db_path)
+        try:
+            me = con.execute(
+                "SELECT media_id, task_id, source_media_id, derive_kind FROM catalog"
+                " WHERE media_id = ? LIMIT 1", (mid,)).fetchone()
+            if not me:
+                return jsonify({"error": "unknown media id"}), 404
+            cols = ("media_id, is_video, title, prompt_preview")
+            siblings = []
+            if me["task_id"]:
+                siblings = [_lineage_card(r) for r in con.execute(
+                    "SELECT %s FROM catalog WHERE task_id = ? AND media_id != ?"
+                    " ORDER BY media_id" % cols, (me["task_id"], mid)).fetchall()]
+            parent = None
+            if me["source_media_id"]:
+                pr = con.execute("SELECT %s FROM catalog WHERE media_id = ? LIMIT 1" % cols,
+                                 (me["source_media_id"],)).fetchone()
+                if pr:
+                    parent = dict(_lineage_card(pr), kind=me["derive_kind"] or "derived")
+            children = [dict(_lineage_card(r), kind=(r["derive_kind"] or "derived"))
+                        for r in con.execute(
+                            "SELECT %s, derive_kind FROM catalog WHERE source_media_id = ?"
+                            " ORDER BY created_at" % cols, (mid,)).fetchall()]
+        finally:
+            con.close()
+        return jsonify({"media_id": mid, "siblings": siblings,
+                        "parent": parent, "children": children})
+
+    @app.route("/api/train/recent-tasks")
+    def api_train_recent_tasks():
+        """Recent generations grouped by task, for the mobile Train dataset picker
+        (Moonglade Mobile.dc.html's 'tap a task, it adds its images' tile grid). Desktop's
+        picker selects individual images one at a time; the mobile design picks whole
+        TASKS instead -- each tile is one generation, tapping it adds every real sibling
+        image from that batch. The design's own mock assumes every task contributes
+        exactly 4 images (a fixed demo constant); real batches are 1-4, so this returns
+        each task's REAL image count and media_id list rather than a hardcoded number --
+        the mobile picker's running total is a sum of real counts, not tiles*4.
+        Pure catalog read, no network."""
+        try:
+            limit = max(1, min(int(request.args.get("limit") or 18), 60))
+        except ValueError:
+            limit = 18
+        con = _connect(db_path)
+        try:
+            rows = con.execute(
+                "SELECT media_id, task_id, is_video, created_at FROM catalog"
+                " WHERE task_id != '' AND is_video != '1' AND filename != ''"
+                " ORDER BY created_at DESC LIMIT 400").fetchall()
+        finally:
+            con.close()
+        groups, order = {}, []
+        for r in rows:
+            tid = r["task_id"]
+            if tid not in groups:
+                if len(order) >= limit:
+                    continue
+                groups[tid] = []
+                order.append(tid)
+            if tid in groups:
+                groups[tid].append(r["media_id"])
+        tasks = [{"task_id": tid, "media_ids": groups[tid], "count": len(groups[tid]),
+                  "thumb": "/thumbs/%s.jpg" % groups[tid][0]} for tid in order]
+        return jsonify({"tasks": tasks})
+
+    @app.route("/api/train/quota")
+    def api_train_quota():
+        """How many FREE LoRA trainings are left (PixAI quota `free::user_lora_training`,
+        NOT a kaisuuken card -- the card pool is generation-only). Read-only, free."""
+        try:
+            core, session = _gen_session()
+            return jsonify({"free_trainings": core.training_free_quota(session)})
+        except Exception as e:
+            return jsonify({"free_trainings": 0,
+                            "error": _redact_host_paths(str(e))[:200]}), 200
+
+    @app.route("/api/train/models")
+    def api_train_models():
+        """Trainable base models grouped by architecture (the train panel's Model Type ->
+        Model Theme picker). Read-only, free. Each model carries the VERSION id the submit
+        needs, its real title, and a cover -- fixing the earlier build, which used the
+        generic market search and rendered raw model ids with no architecture grouping."""
+        try:
+            core, session = _gen_session()
+            return jsonify({"groups": core.list_trainable_base_models(),
+                            "pricing": core._TRAIN_PRICING})
+        except Exception as e:
+            return jsonify({"groups": [], "error": _redact_host_paths(str(e))[:200]}), 200
+
+    import requests as _rq
+
+    @app.route("/api/train/cover")
+    @app.route("/api/pixai-cdn/thumb")   # the general name -- covers My Art's LoRA cards too
+    def api_train_cover():
+        """Proxy a PixAI CDN thumbnail (images-ng.pixai.art), which the browser can't load
+        cross-origin from localhost but the server fetches fine. Started as the Train
+        panel's base-model covers; My Art's Models & LoRAs tab (2026-08-06) hit the exact
+        same block for its own cover_url rows and reuses this route rather than growing a
+        second proxy. SSRF-guarded: the URL host MUST be exactly the PixAI image CDN --
+        nothing else is fetchable through here. Read-only, cached a day (these thumbnails
+        are immutable)."""
+        import urllib.parse as _up
+        raw = request.args.get("u") or ""
+        try:
+            parsed = _up.urlparse(raw)
+        except ValueError:
+            return ("bad url", 400)
+        if parsed.scheme != "https" or parsed.netloc != "images-ng.pixai.art":
+            return ("forbidden host", 403)
+        try:
+            # PUBLIC CDN thumbnails -- no auth needed (verified). A PLAIN per-request
+            # requests.get, NOT _gen_session() and NOT a shared Session: the panel loads
+            # ~15 covers at once across Flask's request threads, and (a) minting an
+            # authenticated PixAI session per image is too slow, while (b) sharing one
+            # requests.Session across those threads is not thread-safe and hangs them.
+            # A fresh get() per call is thread-safe and plenty fast for cached thumbnails.
+            r = _rq.get(raw, timeout=20)
+            if r.status_code != 200:
+                return ("upstream %d" % r.status_code, 502)
+            resp = app.response_class(r.content,
+                                      mimetype=r.headers.get("content-type", "image/webp"))
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
+        except Exception:
+            return ("fetch failed", 502)
+
+    @app.route("/api/train/submit", methods=["POST"])
+    def api_train_submit():
+        """Submit a LoRA training task -- PREVIEW-FIRST, like /api/myart/publish.
+
+        Without `confirm: true` this makes NO mutating call: it validates the request
+        with the site's own rules and reports the real cost position (how many free
+        trainings remain, whether this one is free).
+
+        COST SAFETY. PixAI prices training CLIENT-side from a matrix, so there is no
+        server value to quote (documented in private/GENERATOR_SURFACE.md). That gives
+        exactly two honest states:
+          * free quota > 0  -> this training is FREE and consumes one quota unit.
+          * free quota == 0 -> it costs real credits, and this app CANNOT say how many.
+            The confirmed call is then REFUSED unless the caller also sends
+            `accept_credit_cost: true`, so nobody spends a large unknown amount by
+            clicking the same button they used when it was free.
+        READ_ONLY still refuses the confirmed form inside core. Explicit-token CSRF."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        media_ids = body.get("media_ids") if isinstance(body.get("media_ids"), list) else []
+        base_model_id = str(body.get("base_model_id") or "").strip()
+        title = str(body.get("title") or "")
+        trigger = str(body.get("trigger_words") or "")
+        category = str(body.get("category") or "")
+        try:
+            core, session = _gen_session()
+        except Exception as e:
+            return jsonify({"error": "PixAI session unavailable: %s" % e}), 502
+
+        try:
+            tw = core.validate_training(base_model_id, media_ids, title, trigger, category)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
+        free_left = core.training_free_quota(session)
+        is_free = free_left > 0
+        price = core.training_price_for_version(base_model_id)   # credits, or None if unknown
+        if is_free:
+            cost_note = "Free — uses 1 of your %d free trainings." % free_left
+        elif price is not None:
+            cost_note = ("No free trainings left — this base costs %s credits to train."
+                         % "{:,}".format(price))
+        else:
+            cost_note = ("No free trainings left, and this app can't price this base — "
+                         "check the cost on PixAI before going ahead.")
+        if not bool(body.get("confirm")):
+            return jsonify({
+                "preview": True, "image_count": len(media_ids),
+                "title": title.strip(), "trigger_words": tw, "category": category,
+                "free_trainings_left": free_left, "is_free": is_free,
+                "price": price, "cost_note": cost_note,
+            })
+        if not is_free and not bool(body.get("accept_credit_cost")):
+            return jsonify({"error": "This training charges credits (%s). Re-send with "
+                                     "accept_credit_cost to proceed."
+                                     % (("{:,}".format(price)) if price is not None
+                                        else "amount unknown")}), 402
+        try:
+            task = core.submit_training(session, base_model_id, media_ids, title, trigger,
+                                        category)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 502
+        return jsonify({"submitted": True, "task": task, "was_free": is_free,
+                        "free_trainings_left": max(0, free_left - 1) if is_free else 0})
+
     _telem_day = {"day": None}   # once-per-day throttle for the passive marks
 
     @app.route("/api/achievements")
@@ -13868,6 +9030,14 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                 sweep_telemetry(out_dir)
             if 2 <= _dt.datetime.now().hour < 4:
                 telem_flag("session_hour", out_dir=out_dir)
+        except Exception:
+            pass
+        # "Under the Hood"'s real trigger -- unlike sweep_telemetry above, this runs
+        # EVERY call, not once a day: a curious user who just dropped a file into
+        # branding/<slot>/ deserves the achievement on their next reload, not up to
+        # a day later. See sweep_branding_drops()'s own docstring.
+        try:
+            sweep_branding_drops(out_dir)
         except Exception:
             pass
         metrics = achievement_metrics(db_path)
@@ -13985,9 +9155,18 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         read or change it, same as the rest of the LOGIN-tier settings surface.
         Persists to out_dir/branding.json."""
         if request.method == "GET":
+            # Reflects a raw filesystem drop immediately, same as /api/achievements --
+            # a caller reading branding state directly (this route, not the achievements
+            # one) must never see a stale pre-adoption picture. Cheap; see
+            # sweep_branding_drops()'s own docstring.
+            try:
+                sweep_branding_drops(out_dir)
+            except Exception:
+                pass
             cfg = load_branding(out_dir)
             return jsonify({"mark": cfg["mark"], "anim": cfg["anim"],
-                            "anims": MARK_ANIMS, "marks": list_marks(out_dir)})
+                            "anims": MARK_ANIMS, "marks": list_marks(out_dir),
+                            "slots": branding_slots_payload(out_dir)})
         body = request.get_json(silent=True) or {}
         cfg = load_branding(out_dir)
         have = {m["id"] for m in list_marks(out_dir)}
@@ -14007,6 +9186,77 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         if cfg["anim"] == "eclipse":           # Eclipse: sun and moon in balance
             telem_flag("eclipse_anim_triggered", out_dir=out_dir)
         return jsonify({"mark": cfg["mark"], "anim": cfg["anim"]})
+
+    @app.route("/api/branding/slot", methods=["POST"])
+    def api_branding_slot_upload():
+        """Upload a new asset into one Branding slot (banner_main/banner_login/
+        mascots/rewards -- Control Panel.dc.html's 'From disk' chip). LOGIN tier,
+        matching /api/branding just above: cosmetic, no host-filesystem risk
+        beyond writing into branding/, the same machine-local git-ignored tree
+        marks already live in (NOT the shortcut route's stricter local-only gate).
+        Re-encodes through Pillow rather than trusting the upload's own bytes/
+        extension, the same defense-in-depth this app already applies to real
+        library thumbnails (see _thumb_for, above)."""
+        slot = request.form.get("slot") or ""
+        if slot not in BRANDING_SLOTS:
+            return jsonify({"error": "unknown slot"}), 400
+        f = request.files.get("file")
+        media_id = (request.form.get("media_id") or "").strip()
+        if (f is None or not f.filename) and not media_id:
+            return jsonify({"error": "no file"}), 400
+        try:
+            import io
+            from PIL import Image
+            if f is not None and f.filename:
+                im = Image.open(f.stream)
+            else:
+                # "From the gallery..." (Control Panel.dc.html:342) -- source the asset
+                # from the user's own library by media_id, via the same shared resolver
+                # every other media_id->file path uses. Images only; a video id simply
+                # resolves to no usable frame here.
+                hits = find_files_for_media_id(out_dir, media_id)
+                img_hit = next((p for p in hits if p.suffix.lower() in _IMAGE_EXTS), None)
+                if img_hit is None:
+                    return jsonify({"error": "no local image for that media id"}), 400
+                im = Image.open(img_hit)
+            im.load()
+            buf = io.BytesIO()
+            im.convert("RGBA").save(buf, format="PNG")
+        except Exception:
+            return jsonify({"error": "not a readable image"}), 400
+        item = add_slot_asset(out_dir, slot, buf.getvalue())   # neutral transform to start
+        return jsonify({"slot": slot, "item": item, "assets": list_slot_assets(out_dir, slot)})
+
+    @app.route("/api/branding/slot/crop", methods=["POST"])
+    def api_branding_slot_crop():
+        """Update one uploaded asset's zoom/cropX/cropY transform (Control
+        Panel.dc.html's three banner sliders). LOGIN tier, same as the upload
+        route. Any of the three fields may be omitted to keep its stored value.
+        Legacy `crop` (left/center/right) is still accepted for back-compat and
+        mapped to a cropX pan. Widened 2026-08-06 from the old cycleCrop."""
+        body = request.get_json(silent=True) or {}
+        slot, item_id = body.get("slot"), str(body.get("id") or "")
+        zoom, cropx, cropy = body.get("zoom"), body.get("cropX"), body.get("cropY")
+        if zoom is None and cropx is None and cropy is None:
+            legacy = {"left": 0, "center": 50, "right": 100}
+            crop = str(body.get("crop") or "")
+            if crop not in legacy:
+                return jsonify({"error": "unknown crop value"}), 400
+            cropx = legacy[crop]
+        if not set_slot_crop(out_dir, slot, item_id, zoom=zoom, cropx=cropx, cropy=cropy):
+            return jsonify({"error": "unknown slot or asset"}), 400
+        return jsonify({"assets": list_slot_assets(out_dir, slot)})
+
+    @app.route("/api/branding/slot/active", methods=["POST"])
+    def api_branding_slot_active():
+        """Pick which already-uploaded asset is active for a slot. LOGIN tier,
+        same as the upload route. There is no "clear to none" -- see
+        set_slot_active()'s own docstring for why."""
+        body = request.get_json(silent=True) or {}
+        slot, item_id = body.get("slot"), body.get("id")
+        if not set_slot_active(out_dir, slot, str(item_id) if item_id else None):
+            return jsonify({"error": "unknown slot or asset"}), 400
+        return jsonify({"slots": branding_slots_payload(out_dir)})
 
     @app.route("/api/branding/shortcut", methods=["POST"])
     def api_branding_shortcut():
@@ -14945,9 +10195,279 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         except OSError:
             pass
 
+    # ==== THE NEW GALLERY -- React pilot ====================================
+    # /next serves gallery/dist (Vite build: `npm run build` inside gallery/).
+    # This is the FIRST-CLASS frontend the gallery UI is migrating to -- real
+    # component files, its own purpose-built API below, NOT the Loom's delivery
+    # and NOT the picker routes. The classic gallery at / is untouched; pieces
+    # flip only on the owner's sign-off. Design lock + suite-shell rationale:
+    # docs/DECISIONS.md "THE MIX is the pilot's locked direction" (2026-07-29).
+    # Auth: covered by the global _enforce_front_door() hook like every route.
+    _NEXT_DIST = Path(__file__).resolve().parent / "gallery" / "dist"
+
+    # No vanilla web components ride along anymore: the video Generate drawer and
+    # its cost badge became the React <VideoDrawer>/<CostBadge> in the 2026-08-08
+    # no-vanilla port (the last of static/mg-*.js), joining the notify system
+    # (toasts/tracker/celebrations) already in the React bundle -- so this shell
+    # carries no <script src="/static/mg-*.js"> tags and no anchors.
+    # __UPSCALE_CONST__ serves MG_LORA / MG_UPSCALE from their one Python source,
+    # same idiom as the classic pages.
+    NEXT_PAGE = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moonglade Athenaeum</title>
+<link rel="icon" href="/branding/favicon.ico">
+<link rel="manifest" href="/next/assets/manifest.json">
+<meta name="theme-color" content="#0a0818">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Moonglade">
+<link rel="apple-touch-icon" href="/next/assets/icon-180.png">
+<script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + """
+<link rel="stylesheet" href="/next/assets/app.css">
+{# The app's ONE palette + every skin override, AFTER the bundle's stylesheet so
+   the tokens win any same-specificity :root collision. Same idiom BASE_HTML and
+   the Loom shell use -- deliberately not a /next/assets/tokens.css route, which
+   would split the single source of truth. The notify system (in the React bundle
+   as of the 2026-08-08 no-vanilla port) does the rest: it reconciles data-skin
+   against /api/achievements on load. #}
+<style>
+__DESIGN_TOKENS__
+</style>
+</head><body>
+<div id="root"></div>
+{# The Job Tracker's #jobs-fab/#jobs-tray anchors lived here as body-level divs until the
+   2026-08-08 no-vanilla port -- the React <ActivityTray> now renders them (same ids, still
+   body-level via a portal), so the shell carries no notify markup, no pre-paint flash guard,
+   and no mg-notify.js script tag. #}
+{# |tojson, NOT json.dumps|safe: json.dumps does not escape "</script>", and boot
+   carries third-party text (PixAI model titles via unique_models, collection
+   names from any account). One "</script>" in a model title would break out of
+   this inline script and run in a session that can POST the CSRF-exempt
+   /api/generate -- i.e. spend without consent. Jinja's tojson escapes < > &. #}
+<script>window.MG_BOOT = {{ boot|tojson }};</script>
+__UPSCALE_CONST__
+<script type="module" src="/next/assets/app.js"></script>
+</body></html>"""
+
+    # LoginPage.jsx's own shell (2026-08-02) -- deliberately its OWN, smaller
+    # template rather than reusing NEXT_PAGE verbatim. Two real reasons, not
+    # just tidiness:
+    #   1. NEXT_PAGE's 8 <script src="/static/mg-*.js"> custom-element tags
+    #      (pickers, cost badge, generate drawer, upscale panel) are for
+    #      surfaces that don't exist on the login page at all -- dead weight
+    #      to parse before a visitor has even signed in.
+    #   2. Those files (and __UPSCALE_CONST__) are NOT on the public
+    #      allowlist, and never needed to be until now -- only
+    #      /next/assets/ (this page's own bundle/stylesheet) was added to
+    #      _PUBLIC_PREFIXES. Reusing NEXT_PAGE unmodified would have 404/401'd
+    #      an unauthenticated visitor's <script> requests for all 8 -- caught
+    #      live: those requests 302'd back to /login (the front door redoing
+    #      its own job on itself), the module script's own fetch got HTML
+    #      back and threw "Unexpected token '<'", and the bundle never ran at
+    #      all. Same app.js bundle either way (main.jsx statically imports
+    #      both App and LoginPage, so Vite ships one file) -- only the SHELL
+    #      differs, and the shell is what decides which one actually needs to
+    #      reach an unauthenticated browser.
+    LOGIN_PAGE = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moonglade Athenaeum</title>
+<link rel="icon" href="/branding/favicon.ico">
+<link rel="manifest" href="/next/assets/manifest.json">
+<meta name="theme-color" content="#0a0818">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Moonglade">
+<link rel="apple-touch-icon" href="/next/assets/icon-180.png">
+<script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + """
+<link rel="stylesheet" href="/next/assets/app.css">
+<style>
+__DESIGN_TOKENS__
+</style>
+</head><body>
+<div id="root"></div>
+{# |tojson, NOT json.dumps|safe -- same XSS reasoning as NEXT_PAGE's own boot
+   script: Jinja's tojson escapes < > & so a stray "</script>" in, say, a
+   redirected `next` path can never break out of this inline script. #}
+<script>window.MG_BOOT = {{ boot|tojson }};</script>
+<script type="module" src="/next/assets/app.js"></script>
+</body></html>"""
+
+    # "/" is the FRONT DOOR now (the flip, 2026-08-01); /next stays as a second
+    # path to the same page so bookmarks and pushState URLs from the pilot era
+    # keep working. One endpoint, two paths -- no redirect hop, same tier.
+    @app.route("/")
+    @app.route("/next")
+    def next_gallery():
+        session.setdefault("csrf", secrets.token_hex(16))
+        brand = brand_context(out_dir)
+        stats = catalog_counts(db_path)
+        # First-run wizard gating -- SAME computation as classic's index() (see its own
+        # long comment on why this is a fresh config.json read, not the module-cached
+        # core._cfg): someone who just pasted a key via the wizard needs this to flip on
+        # the very next load, not after a restart. No is_local/is_true_local conjunct here
+        # either, matching index() exactly -- the front door's own auth gate is what keeps
+        # an anonymous LAN visitor from ever reaching this line at all; a signed-in LAN
+        # session sees the same wizard an owner does, and the real write endpoints
+        # (/api/setup/save-key) enforce their own localhost-only check independently.
+        import moonglade_backup as _core
+        _fresh_cfg = _core._load_config()
+        needs_key = not bool(_fresh_cfg.get("PIXAI_API_KEY") or _fresh_cfg.get("U3T"))
+        catalog_empty = not needs_key and (stats["images"] + stats["videos"]) == 0
+        boot = {
+            "stats": stats,
+            "needs_key": needs_key,
+            "catalog_empty": catalog_empty,
+            "collections": unique_collections(db_path),
+            "user": session.get("user") or "",
+            "is_local": True,
+            "is_true_local": _is_local_request(),
+            "csrf": session["csrf"],
+            "build_stamp": build_stamp,
+            # The locked default; becomes a Branding-panel setting later
+            # (docs/DECISIONS.md "Banner controls join the Branding panel").
+            "band": {"height": 340, "crop": 30},
+            # For the Advanced flyout: the model datalist + the From/To year range.
+            "models": unique_models(db_path),
+            "years": catalog_years(db_path),
+            # The chosen branding: which mark, its animation, and whether it is a
+            # rounded tile or a transparent floater. _inject_branding() already
+            # puts these in every template's Jinja context; the pilot needs them
+            # in JS because its mark is a React component, and the glint mask
+            # needs the URL as a CSS variable (a built stylesheet cannot
+            # Jinja-interpolate one). Without this the mark rendered dead.
+            "mark_url": brand.get("mark_url") or "/branding/logo.png",
+            "mark_anim": brand.get("mark_anim") or "classic",
+            "mark_kind": brand.get("mark_kind") or "",
+        }
+        return render_template_string(
+            NEXT_PAGE.replace("__UPSCALE_CONST__", _upscale_const_js())
+                     .replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS),
+            boot=boot)
+
+    @app.route("/next/assets/<path:fname>")
+    def next_assets(fname):
+        resp = send_from_directory(str(_NEXT_DIST), fname)
+        # The bundle changes on every `npm run build` with NO url change, and this
+        # response carried no Cache-Control -- so browsers HEURISTICALLY cached
+        # app.css/app.js and kept painting days-old layout. Bit for real (2026-08-08):
+        # the Details full-window takeover looked "overridden by the banner" on the
+        # owner's everyday tab -- a stale cached app.css from BEFORE the takeover fix,
+        # while a fresh session's probe of the same server looked perfect. no-cache
+        # forces revalidation; ETag/Last-Modified make that a cheap 304 on localhost/
+        # LAN, so repeat loads stay fast but can never be stale again.
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+    @app.route("/api/next/library")
+    def api_next_library():
+        """The new gallery's own listing surface -- full filter set, clean field
+        names, one purpose. Reads the same catalog engine (query_catalog) as
+        everything else; nothing here is borrowed from the picker routes."""
+        q = (request.args.get("q") or "").strip()
+        try:
+            page = max(1, int(request.args.get("page") or 1))
+            page_size = max(1, min(int(request.args.get("page_size") or 100), 200))
+            rating_min = max(0, min(int(request.args.get("rating_min") or 0), 5))
+        except ValueError:
+            page, page_size, rating_min = 1, 100, 0
+        media = (request.args.get("media") or "").strip().lower()
+        media = media if media in ("image", "video") else ""
+        sort = (request.args.get("sort") or "newest").strip()
+        rows, total = query_catalog(
+            db_path, q=q, sort=sort, page=page, page_size=page_size,
+            rating_min=rating_min, media_type=media,
+            collection=(request.args.get("collection") or "").strip(),
+            source=(request.args.get("source") or "").strip(),
+            # The Advanced flyout's fields -- same engine params the classic
+            # gallery's form submits, same names where the URL is user-visible.
+            model=(request.args.get("model") or "").strip(),
+            lora=(request.args.get("lora") or "").strip(),
+            date_from=(request.args.get("from") or "").strip(),
+            date_to=(request.args.get("to") or "").strip(),
+            art_tag=(request.args.get("tag") or "").strip(),
+            # Not a flyout field -- reached only from the Details view's "View batch"
+            # link (same engine param the classic gallery's own link sets).
+            batch=(request.args.get("batch") or "").strip(),
+            published_only=(request.args.get("published") or "") == "1")
+        items = []
+        for r in rows:
+            mid = r.get("media_id")
+            if not mid:
+                continue
+            items.append({
+                "media_id": str(mid),
+                "thumb": "/thumbs/{}.jpg".format(mid),
+                "is_video": str(r.get("is_video") or "") == "1",
+                "is_nsfw": str(r.get("is_nsfw") or "") == "1",
+                "model": str(r.get("model_name") or ""),
+                "date": str(r.get("created_at") or "")[:10],
+                "rating": int(str(r.get("rating") or "0") or 0)
+                          if str(r.get("rating") or "").isdigit() else 0,
+                "w": str(r.get("width") or ""),
+                "h": str(r.get("height") or ""),
+                "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:1200],
+                # The pilot's captions were missing metrics the classic card shows
+                # (owner QA, 2026-07-30): where it came from, and the actual file.
+                "source": str(r.get("source") or ""),
+                "filename": str(r.get("filename") or ""),
+            })
+        pages = max(1, (total + page_size - 1) // page_size)
+        return jsonify({"items": items, "total": total, "page": page, "pages": pages})
+
+    @app.route("/api/next/detail/<media_id>")
+    def api_next_detail(media_id):
+        """The pilot's Details view backing data -- classic's detail() route (~12254),
+        JSON instead of a server-rendered page. Full row, plus prev_id/next_id computed
+        the SAME way: list_media_ids() under the CURRENT filter/sort (the same param
+        names /api/next/library accepts), index looked up in that ordered id list.
+
+        Deliberately does NOT precompute img_url/video_url/an existence check the way
+        classic's route does -- classic needed that because a dead <img src> shows a
+        broken-image icon with no explanation. The client already gets that signal for
+        free (an <img>/<video> onError), so there is nothing here worth a filesystem
+        stat the caller didn't ask for."""
+        row = get_row(db_path, media_id)
+        if not row:
+            return jsonify({"error": "not found"}), 404
+        q = (request.args.get("q") or "").strip()
+        media = (request.args.get("media") or "").strip().lower()
+        media = media if media in ("image", "video") else ""
+        sort = (request.args.get("sort") or "newest").strip()
+        try:
+            rating_min = max(0, min(int(request.args.get("rating_min") or 0), 5))
+        except ValueError:
+            rating_min = 0
+        nav_ids = list_media_ids(
+            db_path, q=q, sort=sort, rating_min=rating_min, media_type=media,
+            collection=(request.args.get("collection") or "").strip(),
+            source=(request.args.get("source") or "").strip(),
+            model=(request.args.get("model") or "").strip(),
+            lora=(request.args.get("lora") or "").strip(),
+            date_from=(request.args.get("from") or "").strip(),
+            date_to=(request.args.get("to") or "").strip(),
+            art_tag=(request.args.get("tag") or "").strip(),
+            published_only=(request.args.get("published") or "") == "1")
+        try:
+            idx = nav_ids.index(media_id)
+        except ValueError:
+            idx = -1
+        prev_id = nav_ids[idx - 1] if idx > 0 else None
+        next_id = nav_ids[idx + 1] if 0 <= idx < len(nav_ids) - 1 else None
+        return jsonify({
+            "row": row,
+            "prev_id": prev_id, "next_id": next_id,
+            # Same value the gallery's own "Delete from PixAI" is gated on. A LAN
+            # session can browse and spend, but not destroy on the owner's real
+            # cloud account.
+            "can_delete_cloud": _is_local_request(),
+            "siblings": _batch_sibling_count(row.get("task_id")),
+        })
+
     @app.route("/loom/vendor/<path:fname>")
     def loom_vendor(fname):
-        """Serve the Loom's vendored JS (React/ReactDOM/Babel UMD builds) from
+        """Serve the Loom's vendored JS (React/ReactDOM UMD builds) from
         loom/vendor/ so the page paints with zero network calls. Path-safe; absent
         files 404. Not gated by _is_authorized_request() -- these are static library
         files, not gallery data, and /loom itself already enforces authorization above."""
@@ -14965,11 +10485,10 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
     @app.route("/loom/dist/<path:fname>")
     def loom_dist(fname):
         """Serve the esbuild-bundled Loom (loom/dist/, built by `npm run build` in
-        loom/) -- the NEW, opt-in delivery path (/loom?bundle=1). Same path-safety
-        pattern as loom_vendor(). Absent files 404; loom() below treats that as
-        'bundle not built yet' and falls back to the Babel-standalone page rather
-        than erroring. max_age=0 (unlike the vendor libs) since this output changes
-        every time the source is rebuilt."""
+        loom/) -- the Loom's SOLE delivery path since the Babel-standalone retirement
+        (2026-08-08). Same path-safety pattern as loom_vendor(). Absent files 404;
+        loom() below treats a missing bundle as 'not built yet' and says so (503).
+        max_age=0 (unlike the vendor libs) since this output changes every rebuild."""
         from flask import send_from_directory, abort
         ddir = (Path(__file__).resolve().parent / "loom" / "dist").resolve()
         try:
@@ -14986,65 +10505,19 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         """Serve the Seedance video-storyboard tool inside the gallery, persisted to the
         backend (window.storage swapped for /api/loom/*). Authorized only.
 
-        Two delivery paths (see LOOM_PAGE / LOOM_PAGE_BUNDLE above):
-        default is the in-browser Babel-standalone transpile (unchanged); passing
-        ?bundle=1 opts into the pre-built esbuild bundle IF loom/dist/ actually has
-        one, else it quietly falls back to the default so a fresh checkout that
-        hasn't run `npm run build` yet never breaks."""
-        import re as _re
+        Bundle-ONLY since 2026-08-08 (the vanilla static/ -> React campaign): serves the
+        pre-built esbuild bundle (loom/dist/master-storyboard.bundle.js, `npm run build` in
+        loom/). The old in-browser Babel-standalone transpile was retired here -- the bundle
+        is a real module build, so shared modules (loom-core, loom-mutations, the art-filter
+        engine, ...) are plain imports esbuild resolves, with no hand-inlining. A checkout
+        that hasn't built the bundle gets a clear message, not a silent fallback; the
+        committed bundle + the CI staleness guard keep it current."""
         loom_dir = Path(__file__).resolve().parent / "loom"
-        src = loom_dir / "master-storyboard.jsx"
-        try:
-            jsx = src.read_text(encoding="utf-8")
-        except OSError:
-            return "Loom source not found (loom/master-storyboard.jsx).", 404
-
-        wants_bundle = request.args.get("bundle") in ("1", "true", "yes")
         bundle_file = loom_dir / "dist" / "master-storyboard.bundle.js"
-        if wants_bundle and bundle_file.is_file():
-            return LOOM_PAGE_BUNDLE.replace("__UPSCALE_CONST__", _upscale_const_js())
-
-        # ---- Babel-standalone path (default + bundle-requested-but-not-built) ----
-        # loom/src/loom-core.js AND loom/src/loom-mutations.js (Phase 2, the
-        # composed-hooks extraction, 2026-07-16) are real ES modules
-        # master-storyboard.jsx imports from; this <script type="text/babel">
-        # block isn't a real module system, so inline both modules' source
-        # ahead of the JSX and strip `export` the same way "export default
-        # function App()" is already stripped below.
-        core_src = ""
-        try:
-            core_src = (loom_dir / "src" / "loom-core.js").read_text(encoding="utf-8")
-        except OSError:
-            pass
-        core_inline = _re.sub(r"(?m)^export const ", "const ", core_src)
-        # master-storyboard.jsx imports shotPayload aliased (`as buildShotPayload`)
-        # for its own local wrapper; provide that name once the real `import {...}`
-        # statement below is stripped out.
-        if core_inline:
-            core_inline += "\nconst buildShotPayload = shotPayload;\n"
-
-        mut_src = ""
-        try:
-            mut_src = (loom_dir / "src" / "loom-mutations.js").read_text(encoding="utf-8")
-        except OSError:
-            pass
-        mut_inline = _re.sub(r"(?m)^export const ", "const ", mut_src)
-        mut_inline = _re.sub(r"(?m)^export function ", "function ", mut_inline)
-
-        jsx = _re.sub(r"(?m)^\s*import\s+React.*$", "", jsx)          # React is a CDN global
-        jsx = _re.sub(r"import\s*\{.*?\}\s*from\s*[\"']\./src/loom-core\.js[\"'];?",
-                       "", jsx, count=1, flags=_re.S)                  # loom-core is inlined instead
-        jsx = _re.sub(r"import\s*\{.*?\}\s*from\s*[\"']\./src/loom-mutations\.js[\"'];?",
-                       "", jsx, count=1, flags=_re.S)                  # loom-mutations is inlined instead
-        # master-storyboard.jsx imports moveCardToAct aliased (`as mvCardToAct`)
-        # so the useShotMutations hook's own returned `moveCardToAct` doesn't
-        # collide with the pure reducer of the same name; provide that alias
-        # once the real `import {...}` statement above is stripped out.
-        if mut_inline:
-            mut_inline += "\nconst mvCardToAct = moveCardToAct;\n"
-        jsx = jsx.replace("export default function App()", "function App()")
-        return (LOOM_PAGE.replace("__JSX__", core_inline + "\n" + mut_inline + "\n" + jsx)
-                .replace("__UPSCALE_CONST__", _upscale_const_js()))
+        if not bundle_file.is_file():
+            return ("The Loom bundle is not built. Run `npm run build` in loom/ to "
+                    "generate loom/dist/master-storyboard.bundle.js."), 503
+        return LOOM_PAGE_BUNDLE.replace("__UPSCALE_CONST__", _upscale_const_js())
 
     @app.route("/api/loom/get")
     def loom_get():
@@ -15902,7 +11375,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
 
     # ---- queue-vs-render phase, recorded for the Activity tray -----------------------
     # Maps a task id to the `started` value already written to the job log for it. The tray
-    # (static/mg-notify.js) renders from /api/jobs, never from api_task_status()'s response,
+    # (gallery/src/notify/ActivityTray.jsx) renders from /api/jobs, never from api_task_status()'s response,
     # so `started` has to be written DOWN to reach it -- and writing it here is what makes
     # the signal identical on both hosts, because the gallery's Jobs.poll(), the Loom's
     # pollShot/pollTaskWithCeiling and mg-generate-drawer.js's own poll all hit this one
@@ -16065,7 +11538,7 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
             # st["phase"] == "failed" above logs a terminal failure.
             #
             # The RESPONSE used to say phase:'failed' too, which defeated the whole point of
-            # the paragraph above: static/mg-notify.js's Jobs.poll() treats phase==='failed'
+            # the paragraph above: the Jobs poller (gallery/src/notify/jobs.js) treats phase==='failed'
             # as terminal and stops polling right there (it only reschedules on anything
             # else), so even with the job log correctly left alone, THIS live poll would
             # still brick the card with a false failure. Report it as non-terminal instead --
@@ -16105,9 +11578,22 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
         jid = str(body.get("job_id") or "").strip()
         if not jid:
             return jsonify({"ok": False, "error": "job_id required"}), 400
+        # count: how many images this task was submitted to render (image-gen only --
+        # absent on edit/fix/video/Loom registrations). Clamped to the same 1-4 range
+        # /api/generate enforces; anything else is a caller bug or a stale client, not
+        # data worth trusting into the log. Lets the React dock's Runs reel render a
+        # real "N requested" placeholder for a running batch instead of one generic
+        # tile (2026-08-02, closes the verify-flagged gap in the reel rebuild).
+        _count = body.get("count")
+        try:
+            _count = int(_count)
+            if not (1 <= _count <= 4):
+                _count = None
+        except (TypeError, ValueError):
+            _count = None
         _log_job(jid, status=(body.get("status") or "running"),
                  type=body.get("type"), label=body.get("label"),
-                 done=body.get("done"), total=body.get("total"),
+                 done=body.get("done"), total=body.get("total"), count=_count,
                  source=body.get("source") or "web")
         return jsonify({"ok": True})
 
@@ -16153,6 +11639,17 @@ fetch('/api/panel/status').then(function(r){return r.json();}).then(function(d){
                     resp.headers["Vary"] = "Accept-Encoding"
         except Exception:
             pass
+        return resp
+
+    @app.after_request
+    def _code_assets_no_cache(resp):
+        # Same staleness class as /next/assets (see next_assets): the shared
+        # static/mg-*.js web components change on edit with no url change, and
+        # heuristic caching kept old copies live in real tabs. Scoped to /static/
+        # ONLY -- thumbnails and full media stay freely cacheable (huge, and a
+        # media file's content never changes under its id).
+        if request.path.startswith("/static/"):
+            resp.headers["Cache-Control"] = "no-cache"
         return resp
 
     @app.after_request
@@ -16343,6 +11840,33 @@ def main():
     # other out all evening). Naming the cookie by port lets instances coexist. Costs one
     # re-login per instance when this ships, then never again.
     app.config["SESSION_COOKIE_NAME"] = "moonglade_session_{}".format(args.port)
+    # Per-port session cookie. Browsers scope cookies by HOST ONLY -- localhost:5757 and
+    # localhost:5057 share one cookie jar entry -- so two Moonglade instances with the
+    # default "session" name and different secrets evict each other's login on every
+    # sign-in (discovered 2026-07-29: a sandbox and the run-copy silently logged each
+    # other out all evening). Naming the cookie by port lets instances coexist. Costs one
+    # re-login per instance when this ships, then never again.
+    app.config["SESSION_COOKIE_NAME"] = "moonglade_session_{}".format(args.port)
+    # Companion IPv6 loopback listener -- the fix for "the Lightbox/Details sometimes
+    # load slowly" (owner report, diagnosed live 2026-08-06). Chrome resolves
+    # `localhost` dual-stack and tries IPv6 ::1 FIRST; bound only to 127.0.0.1, every
+    # FRESH connection burns ~300ms failing that attempt before falling back to IPv4
+    # (measured: connect 312ms vs 39ms of actual server work on /api/next/detail).
+    # Keep-alive reuse hides it, every new connection pays it -- hence "sometimes."
+    # A second werkzeug server on [::1], same port, same app, makes the browser's
+    # first attempt succeed instead. The main IPv4 bind below is UNTOUCHED (LAN via
+    # --host 0.0.0.0 keeps working exactly as before); an explicit non-loopback
+    # --host skips this; no IPv6 stack on the machine -> fail-soft, nothing changes.
+    if args.host in ("127.0.0.1", "0.0.0.0", "localhost"):
+        try:
+            import threading as _threading
+            from werkzeug.serving import make_server as _make_server6
+            _srv6 = _make_server6("::1", args.port, app, threaded=True,
+                                  ssl_context=ssl_context)
+            _threading.Thread(target=_srv6.serve_forever, daemon=True,
+                              name="moonglade-ipv6-loopback").start()
+        except Exception:
+            pass                     # IPv6 unavailable -- IPv4-only, as ever
     app.run(host=args.host, port=args.port, debug=False, threaded=True, ssl_context=ssl_context)
 
 

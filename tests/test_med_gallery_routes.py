@@ -9,12 +9,10 @@ Each test here pins a promise the code was making but not keeping:
   without a word, so every clamp that fires now comes back in the response as `adjusted`.
 * **M21** -- /api/fix was the last spend route that never called `_log_gen_failure`, and it
   is the ONE drawer action no free card ever covers, so every failure there is money gone.
-* **M30** -- the detail page's video branch rendered a player with no check that the clip
-  is on disk, while the image branch beside it degrades to a readable line. The first
-  repair asked that question through `_find_local_video_file` (catalog filename, then the
-  shared media-id matcher) while `/video-file` still served `row["filename"]` alone -- two
-  different questions, so the page could draw a player over a URL that 404s, which is the
-  same dead player wearing the fix's clothes. Both now go through the one resolver.
+* **M30** -- one resolver answers "is this clip on disk": `_find_local_video_file`
+  (catalog filename, then the shared media-id matcher, quarantine excluded, library-bound).
+  The classic detail page that used to share it is gone (React shell now), so /video-file
+  is the surviving caller and these tests pin the resolver's behavior through it.
 * **M32** -- /export-csv counted matching rows, then fetched exactly that many in a second,
   later query, so a concurrent catalog write silently truncated the download.
 
@@ -199,7 +197,9 @@ def test_a_fix_that_fails_before_the_shape_exists_still_logs(tmp_path, monkeypat
 
 
 # ---------------------------------------------------------------------------
-# M30 -- the detail page's video branch checks the disk, like the image branch
+# M30 -- /video-file answers through the one resolver, _find_local_video_file
+# (the classic /image/<id> detail page that shared it was cut; the React shell
+# is the page now, so the serving route is where the resolver's promises live)
 # ---------------------------------------------------------------------------
 
 def _video_app(tmp_path, rows):
@@ -207,127 +207,84 @@ def _video_app(tmp_path, rows):
     return login_test_client(create_app(tmp_path))
 
 
-def test_detail_says_so_when_the_video_file_is_missing(tmp_path):
-    """A catalog row whose clip is gone is a state the Health dashboard explicitly counts
-    ("Missing files"). It used to render <video><source> over a 404 -- a dead black player
-    and no explanation -- while an image row in the identical state has always fallen back
-    to a readable "Image file not found on disk." line."""
-    cli = _video_app(tmp_path, [_row(media_id="GONE", filename="videos/gone_GONE.mp4",
-                                     is_video="1", prompt_preview="a lost clip")])
-    html = cli.get("/image/GONE").get_data(as_text=True)
-    assert "Video file not found on disk." in html
-    assert "<video" not in html, "a player was rendered over a file that isn't there"
-    assert "/video-file/GONE" not in html
-
-
-def test_detail_still_plays_a_video_that_is_on_disk(tmp_path):
-    """The guard must not cost the working case -- this is the everyday path."""
+def test_video_file_serves_a_clip_that_is_on_disk(tmp_path):
+    """The everyday path: catalog filename is right, the file is there, bytes come back."""
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "dance_HERE.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42FAKE")
     cli = _video_app(tmp_path, [_row(media_id="HERE", filename="videos/dance_HERE.mp4",
                                      is_video="1", prompt_preview="a real clip")])
-    html = cli.get("/image/HERE").get_data(as_text=True)
-    assert "<video" in html
-    assert "/video-file/HERE" in html
-    assert "Video file not found on disk." not in html
+    served = cli.get("/video-file/HERE")
+    assert served.status_code == 200
+    assert served.data.endswith(b"FAKE")
 
 
 def test_an_imported_m4v_counts_as_present(tmp_path):
     """_find_local_video_file's hand-written extension tuple was missing .m4v, which
-    core.run_import_local copies in and catalogs as is_video='1'. Reusing that resolver for
-    a whole-catalog existence check made the gap matter: without core._VIDEO_EXTS this
-    reports a perfectly present imported clip as missing from disk."""
+    core.run_import_local copies in and catalogs as is_video='1'. The resolver reads
+    core._VIDEO_EXTS now; without that, a perfectly present imported clip 404s here."""
     (tmp_path / "imported").mkdir()
     (tmp_path / "imported" / "home_M4V.m4v").write_bytes(b"\x00\x00\x00\x18ftypM4V ")
     cli = _video_app(tmp_path, [_row(media_id="M4V", filename="imported/home_M4V.m4v",
                                      is_video="1", source="local", prompt_preview="import")])
-    html = cli.get("/image/M4V").get_data(as_text=True)
-    assert "<video" in html
-    assert "Video file not found on disk." not in html
+    served = cli.get("/video-file/M4V")
+    assert served.status_code == 200
 
 
-def _detail_and_video(cli, mid):
-    """What the page decided, and what the URL it drew actually answers.
-
-    The whole of M30's residual lives in the gap between these two, so every case below
-    asserts them together rather than trusting either one alone.
-    """
-    html = cli.get("/image/{}".format(mid)).get_data(as_text=True)
-    served = cli.get("/video-file/{}".format(mid))
-    return html, served
-
-
-def test_a_stale_catalog_filename_does_not_leave_a_player_over_a_404(tmp_path):
+def test_a_stale_catalog_filename_still_resolves_and_serves(tmp_path):
     """The reviewer's reproduction, and the reason the first repair did not close M30.
 
     Row says the clip is at 2024-01/moved_STALE.mp4 (an `--organize` move, or a re-download
-    under a new name); the real file is at videos/shot_STALE.mp4. detail() resolved it
-    through _find_local_video_file, whose media-id fallback finds it, and drew a player --
-    but /video-file served row["filename"] and nothing else, so the src 404'd. The page
-    printed no message because, as far as it knew, the clip was there: a dead black player,
-    which is verbatim the symptom M30 names.
+    under a new name); the real file is at videos/shot_STALE.mp4. /video-file used to serve
+    row["filename"] and nothing else, so this 404'd even though the shared media-id
+    fallback finds the clip fine. Both callers ask the one resolver now, so a stale column
+    must not cost the download.
     """
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "shot_STALE.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42REAL")
     cli = _video_app(tmp_path, [_row(media_id="STALE", filename="2024-01/moved_STALE.mp4",
                                      is_video="1", prompt_preview="a moved clip")])
-    html, served = _detail_and_video(cli, "STALE")
-    assert "<video" in html and "/video-file/STALE" in html
+    served = cli.get("/video-file/STALE")
     assert served.status_code == 200, (
-        "the page drew a player and the URL behind it returned {} -- the existence check "
-        "and the serving route are asking different questions again".format(served.status_code))
+        "the resolver's media-id fallback found the clip but the route returned {} -- the "
+        "existence check and the serving route are asking different questions again".format(
+            served.status_code))
     assert served.data.endswith(b"REAL")
 
 
-def test_a_blank_catalog_filename_does_not_leave_a_player_over_a_404(tmp_path):
+def test_a_blank_catalog_filename_still_resolves_and_serves(tmp_path):
     """The other half of the same divergence: an older row (or one written before the
-    download settled on a name) has an empty `filename`, so the old /video-file 404'd on the
-    column check alone while detail()'s media-id fallback found the file perfectly well."""
+    download settled on a name) has an empty `filename`, so the old /video-file 404'd on
+    the column check alone while the resolver's media-id fallback found the file fine."""
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "shot_BLANK.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42HERE")
     cli = _video_app(tmp_path, [_row(media_id="BLANK", filename="", is_video="1",
                                      prompt_preview="a nameless row")])
-    html, served = _detail_and_video(cli, "BLANK")
-    assert "<video" in html and "Video file not found on disk." not in html
+    served = cli.get("/video-file/BLANK")
     assert served.status_code == 200
     assert served.data.endswith(b"HERE")
 
 
-def test_the_two_agree_in_the_negative_as_well(tmp_path):
-    """Agreement has to hold in both directions. When nothing is on disk the page says so
-    AND the route refuses -- the check must not have been widened into serving something
-    the page decided was missing."""
+def test_a_clip_missing_from_disk_is_refused(tmp_path):
+    """The negative direction: when nothing is on disk the route refuses -- the resolver
+    must not have been widened into serving something that is not there."""
     cli = _video_app(tmp_path, [_row(media_id="NONE", filename="videos/none_NONE.mp4",
                                      is_video="1", prompt_preview="gone")])
-    html, served = _detail_and_video(cli, "NONE")
-    assert "Video file not found on disk." in html
+    served = cli.get("/video-file/NONE")
     assert served.status_code == 404
 
 
 def test_a_quarantined_copy_is_not_served_as_the_live_clip(tmp_path):
     """Sharing the resolver means sharing its exclusions. The media-id fallback skips
-    _deleted/ and _duplicates/, so a quarantined copy cannot be resolved back and served as
-    the live clip -- and the page agrees, printing the missing line. (Only the fallback is
-    exercised here, because that is the branch a blank filename takes; a live catalog row
-    still pointing INTO the Trash is not a state the purge leaves behind, since it removes
-    the row.)"""
+    _deleted/ and _duplicates/, so a quarantined copy cannot be resolved back and served
+    as the live clip. (Only the fallback is exercised here, because that is the branch a
+    blank filename takes; a live catalog row still pointing INTO the Trash is not a state
+    the purge leaves behind, since it removes the row.)"""
     (tmp_path / "_deleted").mkdir()
     (tmp_path / "_deleted" / "shot_TRASH.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42OLD")
     cli = _video_app(tmp_path, [_row(media_id="TRASH", filename="", is_video="1",
                                      prompt_preview="quarantined")])
-    html, served = _detail_and_video(cli, "TRASH")
-    assert "Video file not found on disk." in html
+    served = cli.get("/video-file/TRASH")
     assert served.status_code == 404
-
-
-def test_a_missing_image_still_gets_its_own_message(tmp_path):
-    """The image branch is untouched -- pinned here because the two branches now share one
-    if/elif chain and it would be easy to break the older half while adding the new one."""
-    cli = _video_app(tmp_path, [_row(media_id="NOIMG", filename="2025-01/x_NOIMG.png",
-                                     prompt_preview="a lost picture")])
-    html = cli.get("/image/NOIMG").get_data(as_text=True)
-    assert "Image file not found on disk." in html
-    assert "Video file not found on disk." not in html
 
 
 # ---------------------------------------------------------------------------
@@ -431,28 +388,22 @@ def test_a_filtered_export_ships_every_matching_row(tmp_path):
     assert sorted(got) == ["0", "1", "2", "3"]
 
 
-def test_a_traversing_catalog_filename_does_not_leave_a_player_over_a_404(tmp_path):
+def test_a_traversing_catalog_filename_is_refused(tmp_path):
     """The last one-sided divergence, found by the reviewer after the M30 repair landed.
 
-    `filename` is joined onto out_dir, and the resolver's catalog-filename branch trusted the
-    join. /video-file never did -- it adds relative_to(out_dir) on top of send_from_directory's
-    own safe_join -- so a row whose filename walks out of the library made the two disagree in
-    the one direction the repair was supposed to eliminate: the page decided the clip was
-    present and drew a player, the route refused the URL behind it, and nothing said anything.
-    The same dead black player, reached by a different road.
+    `filename` is joined onto out_dir, and the resolver's catalog-filename branch used to
+    trust the join. /video-file never did -- it adds relative_to(out_dir) on top of
+    send_from_directory's own safe_join -- so a row whose filename walks out of the library
+    made the resolver and the route disagree. The resolver is library-bound now, so the
+    file outside the backup folder is refused, even though it exists.
 
-    Not a hostile-input scenario -- `filename` is written by this app, not by a visitor -- which
-    is why it is a one-liner and not a security fix. It is here because "the existence check and
-    the serving route ask the same question" is the entire content of M30, and an exception to
-    that is the bug, whoever produced the row.
+    Not a hostile-input scenario -- `filename` is written by this app, not by a visitor --
+    but "the existence check and the serving route ask the same question" is the entire
+    content of M30, and an exception to that is the bug, whoever produced the row.
     """
     outside = tmp_path.parent / "outside_the_library.mp4"
     outside.write_bytes(b"\x00\x00\x00\x18ftypmp42OUTSIDE")
     cli = _video_app(tmp_path, [_row(media_id="TRAV", filename="../outside_the_library.mp4",
                                      is_video="1", prompt_preview="a clip outside the library")])
-    html, served = _detail_and_video(cli, "TRAV")
+    served = cli.get("/video-file/TRAV")
     assert served.status_code != 200, "the serving route handed back a file outside the library"
-    assert "<video" not in html, (
-        "the page drew a player for a file /video-file refuses -- the existence check and the "
-        "serving route are asking different questions again")
-    assert "Video file not found on disk." in html

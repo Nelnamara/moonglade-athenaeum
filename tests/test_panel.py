@@ -10,9 +10,12 @@ from tests.conftest import login_test_client, login_existing_client
 
 
 def _csrf(html):
-    m = re.search(r'name="csrf" value="([^"]+)"', html)
-    assert m, "login page did not render a csrf hidden field"
-    return m.group(1)
+    # Either the classic hidden input (bootstrap_mode) or the React shell's
+    # window.MG_BOOT JSON blob (the common case: a real account already
+    # exists, so GET /login now serves LoginPage.jsx -- 2026-08-02).
+    m = re.search(r'name="csrf" value="([^"]+)"|"csrf":\s*"([^"]+)"', html)
+    assert m, "login page did not render a csrf token (classic hidden field or MG_BOOT)"
+    return m.group(1) or m.group(2)
 
 
 def _row(**kw):
@@ -33,29 +36,28 @@ def _authed_client(tmp_path):
     return login_test_client(_client(tmp_path))
 
 
-def test_panel_page_renders_with_actions(tmp_path):
-    html = _authed_client(tmp_path).get("/panel").get_data(as_text=True)
-    assert "Control Panel" in html
-    assert "Sync now" in html
-    # ACTIONS drives the Maintenance BUTTONS (panel_visible only); ALL_ACTIONS drives the
-    # scheduler dropdown and must still include the background-only jobs.
-    buttons_json = html.split("var ACTIONS = ", 1)[1].split(";", 1)[0]
-    dropdown_json = html.split("var ALL_ACTIONS = ", 1)[1].split(";", 1)[0]
-    assert '"action": "sync"' in buttons_json
+def test_panel_actions_table_reaches_the_client(tmp_path):
+    """PORTED from the classic /panel page-scrape (test_panel_page_renders_with_actions;
+    the page and its inline var ACTIONS/ALL_ACTIONS died in the 2026-08-08 classic cut).
+    The action TABLE survives and now reaches the client solely via /api/panel/summary:
+    `actions` drives the Maintenance buttons (panel_visible only), `all_actions` drives
+    the scheduler dropdown and must still include the background-only jobs."""
+    d = _authed_client(tmp_path).get("/api/panel/summary").get_json()
+    by_action = {a["action"]: a for a in d["actions"]}
+    all_by_action = {a["action"]: a for a in d["all_actions"]}
+    assert "sync" in by_action
     # update/backfill-meta/fix-models folded into --sync -- no longer standalone actions
     for gone in ("update", "backfill-meta", "fix-models"):
-        assert gone not in buttons_json and gone not in dropdown_json
+        assert gone not in by_action and gone not in all_by_action
     # sync-videos / sync-artworks GAINED buttons in the web-parity pass: nothing should
     # need the CLI. They are full-history re-walks, so their labels say so out loud
     # rather than hiding them.
     for shown in ("sync-videos", "sync-artworks"):
-        assert '"action": "{}"'.format(shown) in buttons_json
-        assert "full re-walk" in buttons_json
+        assert shown in by_action, "{} has no Maintenance button".format(shown)
+        assert "full re-walk" in by_action[shown]["label"]
     # undo-organize / restore-orphans were the last two CLI-only maintenance actions;
-    # they must RENDER a button (not merely be runnable), which is the point of adding
-    # them -- and render among the DESTRUCTIVE ones, since both move files on disk.
-    import json
-    by_action = {a["action"]: a for a in json.loads(buttons_json)}
+    # they must reach the client as visible actions (not merely be runnable), which is
+    # the point of adding them -- flagged DESTRUCTIVE, since both move files on disk.
     for shown in ("undo-organize", "restore-orphans"):
         assert shown in by_action, "{} has no Maintenance button".format(shown)
         assert by_action[shown]["destructive"] is True
@@ -63,8 +65,59 @@ def test_panel_page_renders_with_actions(tmp_path):
     # runs it as its final step (run_sync's pipeline), so a button would be a second path
     # to work that just happened, inviting someone to run it and wonder why nothing
     # changed. It stays schedulable for anyone wanting it on its own cadence.
-    assert "reconcile-deleted" not in buttons_json
-    assert '"action": "reconcile-deleted"' in dropdown_json
+    assert "reconcile-deleted" not in by_action
+    assert "reconcile-deleted" in all_by_action
+
+
+def test_panel_summary_matches_the_page_route(tmp_path):
+    """/api/panel/summary (2026-08-02, for the React Control Panel overlay) is a JSON
+    twin of /panel's own aggregation -- same data, same local/destructive visibility
+    rule. Asserted against the SAME two properties test_panel_page_renders_with_actions
+    checks on the HTML route, so a future change to either can't silently diverge."""
+    cli = _authed_client(tmp_path)
+    d = cli.get("/api/panel/summary").get_json()
+    assert d["stats"]["images"] == 1  # the one seeded row
+    by_action = {a["action"]: a for a in d["actions"]}
+    assert "sync" in by_action
+    assert "reconcile-deleted" not in by_action          # panel_visible: False
+    all_by_action = {a["action"]: a for a in d["all_actions"]}
+    assert "reconcile-deleted" in all_by_action            # still in the full list
+    for shown in ("undo-organize", "restore-orphans"):
+        assert by_action[shown]["destructive"] is True
+    assert d["panel_is_local"] is True                     # test client is loopback
+    assert d["out_dir"], "a local session must see the real out_dir"
+    assert "csrf" in d and d["csrf"]
+    assert d["branding"]["mark"] == "logo"                 # load_branding()'s own default
+    assert "anims" in d["branding"] and "classic" in d["branding"]["anims"]
+    assert set(d["branding"]["slots"].keys()) == {"banner_main", "banner_login", "mascots", "rewards", "banner_loom"}
+    assert d["trash_count"] == 0                            # nothing quarantined yet
+
+
+def test_panel_summary_trash_count_is_real(tmp_path):
+    """Control Panel.dc.html:226's {{ trashCount }} -- the Trash tile's own real
+    count. Previously hardcoded to "--" on both platforms (2026-08-05 fix):
+    nothing fetched it until now, the real number only ever resolved once
+    TrashSubOverlay's own /api/trash/list call ran."""
+    import moonglade_gallery as g
+    qdir = tmp_path / g.DELETED_DIRNAME
+    qdir.mkdir()
+    (qdir / "a.webp").write_bytes(b"x")
+    (qdir / "b.webp").write_bytes(b"x")
+    cli = _authed_client(tmp_path)
+    assert cli.get("/api/panel/summary").get_json()["trash_count"] == 2
+
+
+def test_panel_summary_withholds_out_dir_from_lan(tmp_path):
+    """The host filesystem path is the same host-detail /panel's own docstring withholds
+    from a LAN caller (S2, 2026-07-21 audit) -- this JSON twin must match, not leak it."""
+    cli = _authed_client(tmp_path)
+    LAN = "203.0.113.5"
+    d = cli.get("/api/panel/summary", environ_overrides={"REMOTE_ADDR": LAN}).get_json()
+    assert d["out_dir"] == ""
+    assert d["panel_is_local"] is False
+    by_action = {a["action"]: a for a in d["actions"]}
+    assert "undo-organize" not in by_action, (
+        "a LAN session must not receive destructive actions in the visible list")
 
 
 def test_run_rejects_unknown_action(tmp_path):
@@ -112,7 +165,12 @@ def test_destructive_action_refuses_authenticated_lan_session(tmp_path, monkeypa
     cli = _client(tmp_path).test_client()
     LAN = "203.0.113.5"
     html = cli.get("/login").get_data(as_text=True)
-    cli.post("/login", data={"username": "alice", "password": "hunter2", "csrf": _csrf(html)})
+    # POST /api/login (JSON) is the one and only sign-in path since the classic cut
+    # (2026-08-08) -- a form POST to /login is 405 now. Deliberately hand-rolled (not
+    # conftest's helpers) because THIS test's own account/session is its subject.
+    r_login = cli.post("/api/login", json={"username": "alice", "password": "hunter2",
+                                           "csrf": _csrf(html)})
+    assert r_login.get_json().get("ok") is True
     # Prove the session really is authenticated (it can reach an ordinary
     # authorized-LAN route) before proving it still can't reach this one.
     assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
@@ -152,6 +210,41 @@ def test_run_safe_action_spawns_and_status(tmp_path, monkeypatch):
         time.sleep(0.02)
     assert d["status"] == "done" and d["rc"] == 0
     assert "line two" in d["lines"]
+
+
+def test_panel_job_events_carry_action_and_rc(tmp_path, monkeypatch):
+    """The run-history ledger (2026-08-06) reads jobs.jsonl's panel events: the start
+    event must carry the machine `action` key (per-action last-run lookups + "run
+    again"), and the terminal event must carry `rc` (the design's own "… · rc 0"
+    result format). Reconstructed via the same read_jobs() the /api/jobs feed uses,
+    so this asserts what the ledger actually receives, not raw log lines."""
+    import subprocess
+
+    class FakeProc:
+        def __init__(self):
+            import io
+            self.stdout = io.StringIO("line one\n")
+        def wait(self):
+            return 0
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: FakeProc())
+
+    cli = _authed_client(tmp_path)
+    cli.post("/api/panel/run", json={"action": "sync"})
+    import time
+    for _ in range(50):
+        d = cli.get("/api/panel/status").get_json()
+        if d["status"] != "running":
+            break
+        time.sleep(0.02)
+    assert d["status"] == "done"
+
+    import moonglade_backup as core
+    jobs = [j for j in core.read_jobs(tmp_path) if j.get("type") == "panel"]
+    assert jobs, "the panel run never reached jobs.jsonl"
+    job = jobs[0]
+    assert job.get("action") == "sync", "start event lost the machine action key"
+    assert job.get("rc") == 0, "terminal event lost the exit code"
+    assert job.get("status") == "done"
 
 
 def test_run_reports_done_with_errors_from_the_warn_marker(tmp_path, monkeypatch):
@@ -382,10 +475,16 @@ def test_server_restart_needs_supervisor(tmp_path, monkeypatch):
     assert d["action"] == "restart" and codes == [42]
 
 
-def test_panel_shows_restart_state(tmp_path, monkeypatch):
+def test_panel_summary_reports_restart_state(tmp_path, monkeypatch):
+    """PORTED from the classic /panel page-scrape (test_panel_shows_restart_state; the
+    page and its inline Restart/Stop buttons died in the 2026-08-08 classic cut). The
+    React Control Panel decides whether to offer Restart off /api/panel/summary's
+    `supervised` field -- the same _supervised() the old template branched on."""
+    cli = _authed_client(tmp_path)
     monkeypatch.setattr(g, "_supervised", lambda: True)
-    html = _authed_client(tmp_path).get("/panel").get_data(as_text=True)
-    assert "Restart server" in html and "Stop server" in html
+    assert cli.get("/api/panel/summary").get_json()["supervised"] is True
+    monkeypatch.setattr(g, "_supervised", lambda: False)
+    assert cli.get("/api/panel/summary").get_json()["supervised"] is False
 
 
 # --- Cancel a running maintenance job from the browser (no Task Manager) ---
@@ -826,13 +925,13 @@ def test_advanced_actions_are_flagged_and_kept_off_the_scheduler(tmp_path):
     """The panel hands the client an `advanced` flag per action (so they render in the
     Advanced section, not the main button rows) and the scheduler dropdown filters on it.
     Server-side backstop: the scheduler LOOP also skips advanced actions, so even a
-    hand-edited schedule naming one never fires. Here we pin the flag the client keys on."""
-    import json
+    hand-edited schedule naming one never fires. Here we pin the flag the client keys on.
+    (PORTED off the classic /panel page's inline var ALL_ACTIONS, which died in the
+    2026-08-08 classic cut; the same list now reaches the client solely as
+    /api/panel/summary's `all_actions`.)"""
     cli = _authed_client(tmp_path)
-    html = cli.get("/panel").get_data(as_text=True)
-    m = re.search(r"var ALL_ACTIONS = (\[.*?\]);", html)
-    assert m, "ALL_ACTIONS not found on the panel page"
-    by_action = {a["action"]: a for a in json.loads(m.group(1))}
+    d = cli.get("/api/panel/summary").get_json()
+    by_action = {a["action"]: a for a in d["all_actions"]}
     for adv in ("resync-full", "inventory", "test-pull"):
         assert by_action[adv]["advanced"] is True
     assert by_action["test-pull"]["int_param"] is True
@@ -851,3 +950,376 @@ def test_dedup_delete_refuses_without_confirm(tmp_path, monkeypatch):
     r = cli.post("/api/panel/run", json={"action": "dedup-delete"})   # no confirm
     assert r.status_code == 400 and "confirm" in r.get_json()["error"]
     assert spawned["n"] == base
+
+def test_myart_items_returns_card_ready_artwork_rows(tmp_path):
+    """GET /api/myart/items (the My Art tabbed gallery, 2026-08-06): every catalog
+    row with an artwork_id -- public AND private -- card-ready: thumb URL, title
+    with prompt fallback, is_video split, parsed tags, visibility flag. Rows with
+    no artwork_id (never published/synced) are excluded."""
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="m1", artwork_id="a1", title="Titled One", prompt_preview="p1",
+             is_video="0", is_published="1", liked_count="12", art_tags="elf, moon",
+             created_at="2026-07-01T10:00:00", filename="x_m1.png"),
+        _row(media_id="m2", artwork_id="a2", title="", prompt_preview="fallback prompt here",
+             is_video="0", is_published="0", created_at="2026-07-02T10:00:00",
+             filename="x_m2.png"),
+        _row(media_id="m3", artwork_id="a3", title="Vid", is_video="1", is_published="1",
+             liked_count="3", art_tags="loop", created_at="2026-07-03T10:00:00",
+             filename="x_m3.mp4"),
+        _row(media_id="m4", title="No artwork", created_at="2026-07-04T10:00:00",
+             filename="x_m4.png"),
+    ])
+    cli = login_test_client(create_app(tmp_path))
+    d = cli.get("/api/myart/items").get_json()
+    items = {it["media_id"]: it for it in d["items"]}
+    assert set(items) == {"m1", "m2", "m3"}          # m4 has no artwork_id
+    assert items["m1"]["public"] is True and items["m1"]["likes"] == 12
+    assert items["m1"]["tags"] == ["elf", "moon"]
+    assert items["m1"]["thumb"] == "/thumbs/m1.jpg"
+    assert items["m2"]["public"] is False
+    assert items["m2"]["title"].startswith("fallback prompt")   # title falls back
+    assert items["m3"]["is_video"] is True
+    assert [it["media_id"] for it in d["items"]] == ["m3", "m2", "m1"]   # newest first
+
+def _publish_setup(tmp_path, monkeypatch):
+    """Logged-in client with every PixAI call stubbed AT THE CORE MODULE -- these tests
+    must never touch the real account. (The route's own _gen_session is a closure inside
+    create_app, so patching a module attribute of moonglade_gallery would silently do
+    nothing and let a real session through; patching moonglade_backup itself is what
+    actually intercepts. Found the hard way while writing these.) Returns (client, calls)."""
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="mUn", task_id="t99", title="Unpublished one", filename="x_mUn.png",
+             created_at="2026-07-01T00:00:00"),
+        _row(media_id="mPub", task_id="t1", artwork_id="a1", title="Published one",
+             is_published="1", art_tags="elf", filename="x_mPub.png",
+             created_at="2026-07-02T00:00:00"),
+    ])
+    calls = []
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+
+    def _tacks(session, tags):
+        calls.append(("resolve_tack_ids", list(tags)))
+        return ([("tack-" + str(t).lstrip("#")) for t in tags if t != "nosuchtag"],
+                [t for t in tags if t == "nosuchtag"])
+
+    def _publish(session, task_id, **kw):
+        calls.append(("publish", task_id, kw)); return {"id": "newart1"}
+
+    def _update(session, artwork_id, **kw):
+        calls.append(("update", artwork_id, kw)); return {"id": artwork_id}
+
+    def _delete(session, artwork_id):
+        calls.append(("delete", artwork_id)); return True
+
+    def _media_index(session, task_id, media_id):
+        calls.append(("task_media_index", task_id, media_id))
+        return None if media_id == "mNoIdx" else 1
+
+    monkeypatch.setattr(core, "task_media_index", _media_index)
+    monkeypatch.setattr(core, "resolve_tack_ids", _tacks)
+    monkeypatch.setattr(core, "publish_artwork_from_task", _publish)
+    monkeypatch.setattr(core, "update_artwork", _update)
+    monkeypatch.setattr(core, "delete_artwork", _delete)
+    return login_test_client(create_app(tmp_path)), calls
+
+
+def _post_publish(cli, body):
+    # the live session token, the same source the React panel reads it from
+    csrf = cli.get("/api/panel/summary").get_json()["csrf"]
+    return cli.post("/api/myart/publish", json=dict(body, csrf=csrf))
+
+
+def test_myart_publish_previews_without_touching_the_account(tmp_path, monkeypatch):
+    """No confirm -> NO mutation fires. The route reports what it WOULD do, including
+    resolved tag ids and any tag it could not resolve."""
+    cli, calls = _publish_setup(tmp_path, monkeypatch)
+    d = _post_publish(cli, {"action": "publish", "media_id": "mUn",
+                            "tags": ["elf", "nosuchtag"]}).get_json()
+    assert d["preview"] is True and d["action"] == "publish" and d["task_id"] == "t99"
+    assert d["tack_ids"] == ["tack-elf"] and d["unmatched_tags"] == ["nosuchtag"]
+    assert d["spends_credits"] is False
+    assert d["media_index"] == 1        # resolved from the task, shown in the preview
+    # both lookups are read-only; NO publish/update/delete reached the account
+    assert sorted(c[0] for c in calls) == ["resolve_tack_ids", "task_media_index"]
+
+
+def test_myart_publish_confirmed_mutates_and_mirrors_the_catalog(tmp_path, monkeypatch):
+    cli, calls = _publish_setup(tmp_path, monkeypatch)
+    d = _post_publish(cli, {"action": "publish", "media_id": "mUn", "confirm": True,
+                            "title": "New title", "media_index": 2}).get_json()
+    assert d["published"] is True and d["artwork_id"] == "newart1"
+    _, task_id, kw = next(c for c in calls if c[0] == "publish")
+    # media_index comes from the TASK's own ordered outputs, not the client's body --
+    # the request said 2, the server resolved 1, and the server wins.
+    assert task_id == "t99" and kw["media_index"] == 1 and kw["title"] == "New title"
+    items = cli.get("/api/myart/items").get_json()["items"]
+    assert any(i["media_id"] == "mUn" and i["public"] for i in items)
+
+
+def test_myart_publish_confirm_honors_a_deliberately_cleared_title(tmp_path, monkeypatch):
+    """Regression, ultrareview 2026-08-06 bug_003: the confirm branch used to `title or
+    row["title"] or ""`, so an intentionally-cleared title (empty string, not omitted)
+    silently fell back to the catalog's stale title -- while the preview/confirm sheet had
+    already shown the user an empty title. `mUn`'s catalog row starts with a real title
+    ("Unpublished one"); sending title="" must publish EMPTY, not that stale title."""
+    cli, calls = _publish_setup(tmp_path, monkeypatch)
+    d = _post_publish(cli, {"action": "publish", "media_id": "mUn", "confirm": True,
+                            "title": ""}).get_json()
+    assert d["published"] is True
+    _, _, kw = next(c for c in calls if c[0] == "publish")
+    assert kw["title"] == "", "an explicitly empty title must not fall back to the catalog row's stale title"
+
+
+def test_myart_publish_confirm_falls_back_only_when_title_is_omitted(tmp_path, monkeypatch):
+    """The counterpart to the test above: when the client never sends `title` at all
+    (field genuinely absent, not cleared), falling back to the catalog's own title is
+    correct -- that's the "publish with no explicit title" case, unaffected by this fix."""
+    cli, calls = _publish_setup(tmp_path, monkeypatch)
+    d = _post_publish(cli, {"action": "publish", "media_id": "mUn", "confirm": True}).get_json()
+    assert d["published"] is True
+    _, _, kw = next(c for c in calls if c[0] == "publish")
+    assert kw["title"] == "Unpublished one"
+
+
+def test_myart_actions_guard_their_preconditions(tmp_path, monkeypatch):
+    cli, calls = _publish_setup(tmp_path, monkeypatch)
+    # an unpublished image has no artwork to toggle
+    assert _post_publish(cli, {"action": "visibility", "media_id": "mUn",
+                               "private": True, "confirm": True}).status_code == 400
+    # an already-published one cannot be published again
+    assert _post_publish(cli, {"action": "publish", "media_id": "mPub",
+                               "confirm": True}).status_code == 400
+    assert _post_publish(cli, {"action": "nope", "media_id": "mPub"}).status_code == 400
+    assert _post_publish(cli, {"action": "delete", "media_id": "ghost"}).status_code == 400
+    assert not [c for c in calls if c[0] in ("publish", "update", "delete")]
+    # the real flip works and mirrors into the catalog
+    d = _post_publish(cli, {"action": "visibility", "media_id": "mPub",
+                            "private": True, "confirm": True}).get_json()
+    assert d["updated"] is True
+    assert next(c for c in calls if c[0] == "update")[2]["private"] is True
+    items = {i["media_id"]: i for i in cli.get("/api/myart/items").get_json()["items"]}
+    assert items["mPub"]["public"] is False
+
+
+def test_myart_publish_requires_csrf(tmp_path, monkeypatch):
+    cli, calls = _publish_setup(tmp_path, monkeypatch)
+    r = cli.post("/api/myart/publish", json={"action": "delete", "media_id": "mPub",
+                                             "confirm": True})
+    assert r.status_code == 400
+    assert not calls          # nothing reached the account
+
+def test_myart_publish_refuses_when_the_batch_position_is_unresolvable(tmp_path, monkeypatch):
+    """If the server can't tell WHICH image of a task a media_id is, it refuses rather
+    than defaulting to index 0 -- publishing the wrong picture of a batch to a public
+    profile is not a recoverable mistake."""
+    cli, calls = _publish_setup(tmp_path, monkeypatch)
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="mNoIdx", task_id="t77", title="Ambiguous", filename="x_mNoIdx.png",
+             created_at="2026-07-05T00:00:00"),
+    ])
+    r = _post_publish(cli, {"action": "publish", "media_id": "mNoIdx", "confirm": True})
+    assert r.status_code == 400
+    assert "refusing to publish" in r.get_json()["error"]
+    assert not [c for c in calls if c[0] == "publish"]
+
+# --- LoRA training: the spend path. Every test here stubs the account at the core
+# module (see _publish_setup's comment for why a moonglade_gallery attribute patch
+# would silently let a real session through). ---
+
+def _train_setup(tmp_path, monkeypatch, free_quota=9):
+    save_catalog(tmp_path / "catalog.db", [_row(media_id="1", filename="a_1.png")])
+    calls = []
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "training_free_quota", lambda s: free_quota)
+
+    def _submit(session, *a, **kw):
+        calls.append(("submit", a, kw))
+        return {"id": "trn1", "refId": "model9"}
+
+    monkeypatch.setattr(core, "submit_training", _submit)
+    return login_test_client(create_app(tmp_path)), calls
+
+
+def _post_train(cli, body):
+    csrf = cli.get("/api/panel/summary").get_json()["csrf"]
+    return cli.post("/api/train/submit", json=dict(body, csrf=csrf))
+
+
+_GOOD_TRAIN = {"base_model_id": "bm1", "media_ids": [str(i) for i in range(12)],
+               "title": "Nel test", "trigger_words": "nelnamara druid",
+               "category": "character"}
+
+
+def test_train_preview_reports_free_quota_and_fires_nothing(tmp_path, monkeypatch):
+    cli, calls = _train_setup(tmp_path, monkeypatch, free_quota=9)
+    d = _post_train(cli, _GOOD_TRAIN).get_json()
+    assert d["preview"] is True and d["is_free"] is True
+    assert d["free_trainings_left"] == 9 and d["image_count"] == 12
+    assert "Free" in d["cost_note"]
+    assert not calls                       # nothing submitted
+
+
+def test_train_confirmed_submits_when_free(tmp_path, monkeypatch):
+    cli, calls = _train_setup(tmp_path, monkeypatch, free_quota=9)
+    d = _post_train(cli, dict(_GOOD_TRAIN, confirm=True)).get_json()
+    assert d["submitted"] is True and d["was_free"] is True
+    assert d["task"]["refId"] == "model9"
+    assert d["free_trainings_left"] == 8
+    assert len(calls) == 1
+
+
+def test_train_refuses_to_spend_credits_without_explicit_acceptance(tmp_path, monkeypatch):
+    """With no free quota the cost is real AND unquotable (PixAI prices client-side),
+    so the same click that was free must NOT silently spend. 402 until the caller
+    explicitly accepts."""
+    cli, calls = _train_setup(tmp_path, monkeypatch, free_quota=0)
+    # a REAL base model version -> the preview quotes its real price (Illustrious = SDXL = 25k)
+    body = dict(_GOOD_TRAIN, base_model_id="1844843519625072849")
+    prev = _post_train(cli, body).get_json()
+    assert prev["is_free"] is False and prev["price"] == 25000
+    assert "25,000" in prev["cost_note"]
+    r = _post_train(cli, dict(body, confirm=True))
+    assert r.status_code == 402
+    assert not calls
+    # explicit acceptance lets it through
+    d = _post_train(cli, dict(body, confirm=True, accept_credit_cost=True)).get_json()
+    assert d["submitted"] is True and d["was_free"] is False
+    assert len(calls) == 1
+
+
+def test_train_validates_with_pixais_own_rules_before_any_network(tmp_path, monkeypatch):
+    cli, calls = _train_setup(tmp_path, monkeypatch)
+    bad = [
+        (dict(_GOOD_TRAIN, media_ids=["1", "2"]), "at least 10"),
+        (dict(_GOOD_TRAIN, title=""), "name"),
+        (dict(_GOOD_TRAIN, trigger_words="   "), "trigger words"),
+        (dict(_GOOD_TRAIN, category="wrong"), "category"),
+        (dict(_GOOD_TRAIN, base_model_id=""), "base model"),
+    ]
+    for body, needle in bad:
+        r = _post_train(cli, dict(body, confirm=True))
+        assert r.status_code == 400, needle
+        assert needle in r.get_json()["error"], (needle, r.get_json())
+    assert not calls
+
+
+def test_train_submit_requires_csrf(tmp_path, monkeypatch):
+    cli, calls = _train_setup(tmp_path, monkeypatch)
+    r = cli.post("/api/train/submit", json=dict(_GOOD_TRAIN, confirm=True))
+    assert r.status_code == 400
+    assert not calls
+
+
+def test_trigger_words_normalize_to_pixais_rules():
+    assert core.normalize_trigger_words("  nel   druid  ") == "nel druid"
+    assert core.normalize_trigger_words(None) == ""
+
+def test_list_trainable_base_models_is_the_curated_snapshot_grouped_by_arch():
+    """The picker's data contract: PixAI's curated base list (captured snapshot, NOT the
+    public model catalog -- the owner caught the first build pulling the general feed),
+    grouped by architecture with the friendly labels and each model's VERSION id."""
+    groups = core.list_trainable_base_models()
+    labels = [g["label"] for g in groups]
+    assert labels == ["DiT.2", "DiT.1", "SDXL", "SD 1.5"]     # DiT.3 has no models -> dropped
+    sdxl = next(g for g in groups if g["label"] == "SDXL")
+    titles = [m["title"] for m in sdxl["models"]]
+    assert "Illustrious-v1.0" in titles and "NoobAI XL" in titles   # the real curated set
+    assert "xl aaa" not in titles                                   # not the community feed
+    assert sdxl["price"] == 25000
+    il = next(m for m in sdxl["models"] if m["title"] == "Illustrious-v1.0")
+    assert il["version_id"] == "1844843519625072849"     # the VERSION id, submit-ready
+    assert il["cover"].startswith("https://images-ng.pixai.art/")
+    # DiT.2 is the priciest; SD 1.5 the cheapest -- real captured pricing
+    assert core.training_price_for_version("1983308862240288769") == 100000   # Tsubaki.2 (DiT.2)
+    assert core.training_price_for_version("1648918127446573124") == 25000    # Moonbeam (SD 1.5)
+    assert core.training_price_for_version("not-a-real-version") is None
+
+# --- Lineage (2026-08-06): batch siblings (task_id) + derivation chain (source_media_id).
+
+def test_source_media_of_task_reads_all_three_derive_shapes():
+    edit = core.source_media_of_task({"parameters": {"chat": {"mediaId": "111", "modelId": "x"}}})
+    assert edit == ("111", "edit")
+    video = core.source_media_of_task({"parameters": {"i2v": {"mediaId": "222"}}})
+    assert video == ("222", "video")
+    upscale = core.source_media_of_task({"parameters": {"mediaId": "333", "upscale": 2}})
+    assert upscale == ("333", "upscale")
+    enlarge = core.source_media_of_task({"parameters": {"mediaId": "444", "enlarge": 2}})
+    assert enlarge == ("444", "upscale")
+    original = core.source_media_of_task({"parameters": {"prompts": "a cat"}})
+    assert original == (None, None)
+    assert core.source_media_of_task(None) == (None, None)
+    assert core.source_media_of_task({}) == (None, None)
+
+
+def test_api_lineage_returns_siblings_parent_and_children(tmp_path):
+    save_catalog(tmp_path / "catalog.db", [
+        # a 2-image batch: mBatch1/mBatch2 share task_id "tBatch"
+        _row(media_id="mBatch1", task_id="tBatch", title="Batch one", filename="x_1.png"),
+        _row(media_id="mBatch2", task_id="tBatch", title="Batch two", filename="x_2.png"),
+        # mUp was upscaled FROM mBatch1
+        _row(media_id="mUp", task_id="tUp", source_media_id="mBatch1", derive_kind="upscale",
+             title="Upscaled", filename="x_3.png"),
+        # an edit made from mUp too, so mUp has both a parent (mBatch1) and a child (mEdit)
+        _row(media_id="mEdit", task_id="tEdit", source_media_id="mUp", derive_kind="edit",
+             title="Edited", filename="x_4.png"),
+        # an unrelated original, no lineage at all
+        _row(media_id="mLoner", task_id="tLoner", title="Alone", filename="x_5.png"),
+    ])
+    cli = login_test_client(create_app(tmp_path))
+
+    d = cli.get("/api/lineage/mBatch1").get_json()
+    assert [s["media_id"] for s in d["siblings"]] == ["mBatch2"]
+    assert d["parent"] is None
+    assert [c["media_id"] for c in d["children"]] == ["mUp"]   # mUp was made FROM mBatch1
+    assert d["children"][0]["kind"] == "upscale"
+
+    d = cli.get("/api/lineage/mUp").get_json()
+    assert d["siblings"] == []                              # tUp has only mUp
+    assert d["parent"]["media_id"] == "mBatch1" and d["parent"]["kind"] == "upscale"
+    assert [c["media_id"] for c in d["children"]] == ["mEdit"]
+    assert d["children"][0]["kind"] == "edit"
+
+    d = cli.get("/api/lineage/mLoner").get_json()
+    assert d["siblings"] == [] and d["parent"] is None and d["children"] == []
+
+    assert cli.get("/api/lineage/does-not-exist").status_code == 404
+
+
+def test_extract_full_meta_includes_lineage_fields():
+    fm = core.extract_full_meta({"parameters": {"chat": {"mediaId": "999", "modelId": "x"}},
+                                 "outputs": {}})
+    assert fm["source_media_id"] == "999" and fm["derive_kind"] == "edit"
+    fm2 = core.extract_full_meta({"parameters": {"prompts": "a cat"}, "outputs": {}})
+    assert fm2["source_media_id"] == "" and fm2["derive_kind"] == ""
+
+def test_train_recent_tasks_groups_real_images_by_real_task_id(tmp_path):
+    """The mobile Train dataset picker taps a TASK, not an image -- each tile must carry
+    the task's REAL image count (1-4), not a hardcoded assumption. Videos and rows with
+    no local file are excluded (nothing to train on); newest-task-first."""
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="b1", task_id="tBatch", filename="x_b1.png", created_at="2026-07-03T00:00:00"),
+        _row(media_id="b2", task_id="tBatch", filename="x_b2.png", created_at="2026-07-03T00:00:00"),
+        _row(media_id="b3", task_id="tBatch", filename="x_b3.png", created_at="2026-07-03T00:00:00"),
+        _row(media_id="s1", task_id="tSingle", filename="x_s1.png", created_at="2026-07-01T00:00:00"),
+        _row(media_id="v1", task_id="tVideo", filename="x_v1.mp4", is_video="1", created_at="2026-07-04T00:00:00"),
+        _row(media_id="n1", task_id="tNoFile", filename="", created_at="2026-07-05T00:00:00"),
+    ])
+    cli = login_test_client(create_app(tmp_path))
+    d = cli.get("/api/train/recent-tasks").get_json()
+    by_id = {t["task_id"]: t for t in d["tasks"]}
+    assert "tVideo" not in by_id and "tNoFile" not in by_id
+    assert by_id["tBatch"]["count"] == 3
+    assert set(by_id["tBatch"]["media_ids"]) == {"b1", "b2", "b3"}
+    assert by_id["tSingle"]["count"] == 1
+    # newest task first
+    assert [t["task_id"] for t in d["tasks"]] == ["tBatch", "tSingle"]
+
+
+def test_train_recent_tasks_respects_limit(tmp_path):
+    rows = [_row(media_id="m%d" % i, task_id="t%d" % i, filename="x_%d.png" % i,
+                 created_at="2026-07-%02dT00:00:00" % (i % 28 + 1)) for i in range(30)]
+    save_catalog(tmp_path / "catalog.db", rows)
+    cli = login_test_client(create_app(tmp_path))
+    d = cli.get("/api/train/recent-tasks?limit=5").get_json()
+    assert len(d["tasks"]) == 5
+

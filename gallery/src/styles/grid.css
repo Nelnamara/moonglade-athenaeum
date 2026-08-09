@@ -1,0 +1,199 @@
+/* ======================= GRID REFIT (DC §5 / drift §9) ========================
+   Owned by Grid.jsx — imported from there, nothing here leaks into styles.css.
+   Class prefix mgg- (Moonglade Grid). The container class changed .grid →
+   .mgg-grid on purpose: it absorbs shell.css's INTERIM `.mgx-main .grid`
+   --thumb mapping (that rule is now inert and can be deleted by the shell
+   workstream) and detaches the old styles.css .grid card rules wholesale.
+
+   Layout law (DC gridStyle, line 2457): columns auto-fill minmax(thumb, 1fr),
+   auto-rows thumb × 0.84, gap 11 — every 6th card (1st, 7th, …) spans 2 rows,
+   the masonry accent. --thumb is set on .mgx-main by the shell (SIZE slider);
+   Grid.jsx mirrors it onto .mgg-grid as a fallback for out-of-shell mounts.
+
+   Motion: micro .18–.25s reveals, card hover .22s, art zoom .35s — all on the
+   DC's cubic-bezier(.2,.9,.24,1); reduced-motion guard at the bottom. */
+
+/* Loom Masonry v1 (grid-algorithm-spec.md §1): 8px row grain + `row dense`;
+   each card's row span is computed per-image in Grid.jsx from its true aspect
+   and written inline. The old fixed auto-rows + `nth-child(6n+1)` decorative
+   span are GONE -- that pattern is exactly what stuffed real images into
+   arbitrary shapes and cropped them at random. */
+.mgg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--thumb, 210px), 1fr));
+  grid-auto-rows: 8px;
+  grid-auto-flow: row dense;
+  gap: 11px;
+  padding: 12px 12px 0;
+}
+
+.mgg-card {
+  position: relative; margin: 0; border-radius: 12px; overflow: hidden;
+  cursor: pointer; background: var(--base);
+  border: 1px solid transparent;
+  transition: box-shadow .22s, border-color .22s,
+    transform .22s cubic-bezier(.2, .9, .24, 1);
+}
+.mgg-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .55);
+}
+.mgg-card.sel {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 10px 26px rgba(0, 0, 0, .5);
+}
+
+/* the art fills the fixed grid cell; the caption overlays it */
+.mgg-art {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  display: block; object-fit: cover;
+  transition: transform .35s cubic-bezier(.2, .9, .24, 1), filter .3s;
+}
+.mgg-card:hover .mgg-art { transform: scale(1.05); }
+
+/* Privacy blur — CLASSIC strengths kept on purpose (App.jsx: one localStorage
+   key, both surfaces, "exactly the classic semantics"): eye ON blurs all thumbs
+   16px, flagged 28px, hover reveals. The DC's flat 7px is superseded by that
+   owner-locked parity. */
+.mgg-blur .mgg-art { filter: blur(16px); }
+.mgg-blur .mgg-card.nsfw .mgg-art { filter: blur(28px); }
+.mgg-blur .mgg-card:hover .mgg-art { filter: none; }
+
+/* ---- top row: checkbox + metallic source pill --------------------------------
+   Reveals on hover / picked / Select mode (fade + 3px slide, DC topRowStyle):
+   the card is the picture until you ask for more. */
+.mgg-top {
+  position: absolute; top: 7px; left: 7px; z-index: 2;
+  display: flex; align-items: center; gap: 6px;
+  opacity: 0; transform: translateY(-3px);
+  transition: opacity .2s, transform .2s cubic-bezier(.2, .9, .24, 1);
+}
+.mgg-card:hover .mgg-top,
+.mgg-card.sel .mgg-top,
+.mgg-selecting .mgg-top { opacity: 1; transform: none; }
+
+/* 15×15 checkbox — ALWAYS single-toggles, no mode needed (drift §9) */
+.mgg-check {
+  width: 15px; height: 15px; flex: none; padding: 0;
+  display: grid; place-items: center;
+  border-radius: 4px; font-size: 10px; font-weight: 800; line-height: 1;
+  color: color-mix(in oklab, var(--accent) 26%, #08040f);
+  border: 1px solid rgba(255, 255, 255, .4);
+  background: rgba(5, 4, 13, .6);
+  cursor: pointer;
+  transition: background .18s, border-color .18s;
+}
+.mgg-card.sel .mgg-check { background: var(--accent); border-color: var(--accent); }
+
+/* metallic source pill, 8px/800/.06em — VIDEO teal (the documented Loom fixed
+   hue family) · LOCAL silver (DC metal stops) · default accent-mix metal, so it
+   follows the skin like the shell's own metal recipe. */
+.mgg-pill {
+  font-size: 8px; font-weight: 800; letter-spacing: .06em;
+  padding: 2px 7px; border-radius: 999px; white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .3);
+  border: 1px solid rgba(255, 255, 255, .3);
+  color: color-mix(in oklab, var(--accent) 26%, #08040f);
+  background: linear-gradient(100deg,
+    color-mix(in oklab, var(--accent) 52%, #06030d) 0%,
+    var(--accent) 22%,
+    color-mix(in oklab, var(--accent) 22%, #ffffff) 40%,
+    var(--accent) 58%,
+    color-mix(in oklab, var(--accent) 52%, #06030d) 100%);
+  background-size: 200% 100%;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6), 0 2px 6px rgba(0, 0, 0, .45);
+}
+.mgg-pill.video {
+  color: #0a2422;
+  background: linear-gradient(100deg,
+    #1e6f6b 0%, var(--loomc, #47cbc3) 22%, #d8fbf7 40%,
+    var(--loomc, #47cbc3) 58%, #1e6f6b 100%);
+  background-size: 200% 100%;
+}
+.mgg-pill.local {
+  color: #22203a;
+  background: linear-gradient(100deg,
+    #4a4668 0%, #9a93ab 22%, #e8e5f2 40%, #9a93ab 58%, #4a4668 100%);
+  background-size: 200% 100%;
+}
+
+/* the ▶ corner glyph on videos — always on, not reveal-gated (DC line 178) */
+.mgg-vglyph {
+  position: absolute; top: 8px; right: 8px; z-index: 2;
+  /* DC literal (near-white at .9), restored per owner 2026-08-01 -- the token
+     substitution pass dimmed this without asking. */
+  font-size: 9px; color: rgba(214, 210, 226, .9); pointer-events: none;
+}
+
+/* ---- caption slab: reveals on hover / picked / Select mode ------------------- */
+.mgg-cap {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; margin: 0;
+  display: flex; flex-direction: column; gap: 1px; padding: 9px 9px 8px;
+  background: linear-gradient(to top,
+    rgba(5, 4, 13, .94) 0%, rgba(5, 4, 13, .72) 62%, rgba(5, 4, 13, 0) 100%);
+  opacity: 0; transform: translateY(8px);
+  transition: opacity .24s, transform .24s cubic-bezier(.2, .9, .24, 1);
+}
+.mgg-card:hover .mgg-cap,
+.mgg-card.sel .mgg-cap,
+.mgg-selecting .mgg-cap { opacity: 1; transform: none; }
+
+.mgg-model {
+  font-size: 10.5px; font-weight: 600; color: var(--lavender, var(--accent));
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* DC literals restored (owner 2026-08-01): the DC brightens the date over the
+   filename (.5 vs .35 white) -- the single-token version flattened that. */
+.mgg-date { font-size: 9.5px; color: rgba(255, 255, 255, .5); font-variant-numeric: tabular-nums; }
+.mgg-file {
+  font-size: 9.5px; color: rgba(255, 255, 255, .35);
+  font-family: ui-monospace, Menlo, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.mgg-caprow { display: flex; align-items: center; gap: 6px; padding-top: 2px; }
+.mgg-caprow .stars { flex: 1 1 auto; display: flex; gap: 2px; letter-spacing: 0; }
+.mgg-caprow .stars .st { font-size: 9px; }
+
+/* Open (accent metal) + Details (ghost) chips — 9px/700 uppercase, radius 999 */
+.mgg-chip {
+  font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 999px; cursor: pointer; flex: none;
+  white-space: nowrap; line-height: 1.2;
+}
+.mgg-chip.open {
+  border: 1px solid rgba(255, 255, 255, .28);
+  color: color-mix(in oklab, var(--accent) 26%, #08040f);
+  background: linear-gradient(100deg,
+    color-mix(in oklab, var(--accent) 50%, #06030d) 0%,
+    var(--accent) 22%,
+    color-mix(in oklab, var(--accent) 22%, #ffffff) 42%,
+    var(--accent) 60%,
+    color-mix(in oklab, var(--accent) 50%, #06030d) 100%);
+  background-size: 200% 100%;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55);
+}
+.mgg-chip.ghost {
+  border: 1px solid rgba(255, 255, 255, .16);
+  background: rgba(9, 7, 22, .7);
+  /* DC literal restored (owner 2026-08-01). */
+  color: rgba(226, 222, 238, .82);
+}
+.mgg-chip.ghost:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+
+/* ---- the marquee rubber band (Select mode drag) ------------------------------
+   Fixed-position; z 7 = the top of the component band (0–7), under the sticky
+   header and every overlay. Pointer-events off: it never eats its own drag. */
+.mgg-marquee {
+  position: fixed; z-index: 7; pointer-events: none; border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent),
+    0 8px 24px rgba(0, 0, 0, .4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mgg-card, .mgg-art, .mgg-top, .mgg-cap { transition: none; }
+  .mgg-card:hover { transform: none; }
+  .mgg-card:hover .mgg-art { transform: none; }
+}

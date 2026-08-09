@@ -110,6 +110,22 @@ static/_mockup_*.html
 # egg, so they must exist and must not carry anyone else's art.
 /branding/
 /branding.json
+/branding_slots.json
+
+# The Claude Design handoff package (design_handoff_moonglade_suite): DC prototype
+# surfaces, drift report, and ASSETS INCLUDING THE OWNER'S BRANDING ART -- which is
+# deliberately machine-local (see /branding/ above) and must never reach this public
+# repo. Kept beside the code as the implementation reference for the gallery-era
+# redesign; master copies are the zips the owner downloaded from Claude Design.
+/design_handoff/
+
+# The REPO-ROOT gallery/ is the React frontend's SOURCE (the /next pilot) -- not an
+# out-dir's runtime gallery folder, which is what the unanchored `gallery/` above
+# guards at any depth. Re-include the source tree; keep its node_modules out. dist/
+# is committed on purpose, same as loom/dist -- the other machine and the run-copy
+# work without npm.
+!/gallery/
+/gallery/node_modules/
 
 # Local triage worksheet from the 2026-07-27 adversarial code review. Working material:
 # findings get parsed out into Decisions.md and the file is deleted. Never committed --

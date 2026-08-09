@@ -6,7 +6,9 @@ import path from "node:path";
 
 // D-12 increments 2-4: the Image tab already had a working submit path (confirmSpend's
 // window.confirm) but no live preview of the cost before you click Go. Fixed with a
-// <mg-cost-badge> per tab, kept live via a debounced read-only /api/price check.
+// <CostBadge> per tab (the shared React component, ported from the vanilla <mg-cost-badge>
+// element in the 2026-08-08 no-vanilla campaign), kept live via a debounced read-only
+// /api/price check.
 //
 // These three tabs' window.confirm is NOT removed alongside it --
 // confirmSpend was built as this project's fail-closed guardrail after these exact tabs
@@ -16,8 +18,10 @@ import path from "node:path";
 // window.confirm is still wired into genImage/genEdit/genRef.
 //
 // master-storyboard.jsx has no jsdom/React test harness in this runner (same situation as
-// mg-model-picker.js) -- source-presence assertions are the established pattern for files
-// in that position; real interaction verification needs a real browser.
+// the shared ModelPicker.jsx / GalleryPicker.jsx it mounts) -- source-presence assertions
+// are the established pattern for files in that position; real interaction verification
+// needs a real browser (done live, 2026-08-08: the Gallery drawer's CostBadge priced a
+// picked model to its FREE state).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(path.join(__dirname, "../master-storyboard.jsx"), "utf8");
 
@@ -27,12 +31,12 @@ test("each of the three Deep Focus gen tabs gets its own cost-badge ref", () => 
   assert.match(src, /const refCostRef = useRef\(null\);/);
 });
 
-test("a <mg-cost-badge> is actually mounted in the Image, Edit, and Reference tab JSX", () => {
-  assert.match(src, /<mg-cost-badge ref=\{imgCostRef\}/,
+test("a <CostBadge> is actually mounted in the Image, Edit, and Reference tab JSX", () => {
+  assert.match(src, /<CostBadge ref=\{imgCostRef\}/,
     "the Image tab's badge must actually be in the rendered tabBody, not just declared as a ref");
-  assert.match(src, /<mg-cost-badge ref=\{editCostRef\}/,
+  assert.match(src, /<CostBadge ref=\{editCostRef\}/,
     "the Edit tab's badge must actually be in the rendered tabBody, not just declared as a ref");
-  assert.match(src, /<mg-cost-badge ref=\{refCostRef\}/,
+  assert.match(src, /<CostBadge ref=\{refCostRef\}/,
     "the Reference tab's badge must actually be in the rendered tabBody, not just declared as a ref");
 });
 

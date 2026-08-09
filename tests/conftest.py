@@ -128,18 +128,28 @@ _TEST_USERNAME = "tester"
 _TEST_PASSWORD = "a-real-test-password-1"
 
 
+def extract_login_csrf(html_or_boot):
+    """CSRF token off GET /login's response: the React shell's window.MG_BOOT JSON
+    blob (the ONLY login page since the classic cut, 2026-08-08 -- the classic form
+    and its hidden input died with LOGIN_HTML; the classic-input pattern is kept in
+    the regex purely so a regression that resurrects it still extracts+fails loudly
+    at the POST step rather than silently here)."""
+    m = re.search(r'name="csrf" value="([^"]+)"|"csrf":\s*"([^"]+)"', html_or_boot)
+    return (m.group(1) or m.group(2)) if m else None
+
+
 def _do_login(cli, username, password):
-    """Perform the real GET (csrf) + POST /login flow against `cli` and return it,
-    now authenticated. Asserts the login actually redirected (succeeded) rather
-    than silently leaving callers with a still-anonymous client on a typo/regression."""
+    """Authenticate `cli` the way the real app does (2026-08-08, classic cut): GET
+    /login for the session csrf, then POST /api/login (JSON) -- the one and only
+    sign-in path now. Asserts success so callers never continue anonymous on a
+    typo/regression."""
     html = cli.get("/login").get_data(as_text=True)
-    m = re.search(r'name="csrf" value="([^"]+)"', html)
-    assert m, "login page did not render a csrf hidden field"
-    r = cli.post("/login", data={"username": username, "password": password,
-                                 "csrf": m.group(1)})
-    assert r.status_code in (301, 302, 303, 307, 308), (
-        "test login helper failed to authenticate: {}".format(
-            r.get_data(as_text=True)[:300]))
+    csrf = extract_login_csrf(html)
+    assert csrf, "login page did not render a csrf token in MG_BOOT"
+    d = cli.post("/api/login", json={"username": username, "password": password,
+                                     "csrf": csrf}).get_json()
+    assert d and d.get("ok"), (
+        "test login helper failed to authenticate: {!r}".format(d))
     return cli
 
 

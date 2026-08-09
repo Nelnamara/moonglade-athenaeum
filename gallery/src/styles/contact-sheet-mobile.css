@@ -1,0 +1,73 @@
+/* ============================================================================
+   Contact Sheet Mobile -- design spec: "Contact Sheet Mobile.dc.html" (design_
+   handoff_moonglade_suite/). Mounted by AppMobile.jsx as a full-viewport
+   overlay (position:fixed, covers hero + tab bar too, NOT just .glm-body) --
+   see ContactSheetMobile.jsx's own header comment for why this is a dedicated
+   full-screen presentation rather than MobileScreen.jsx's generic
+   back-chevron+title push chrome: the design's own top bar carries a Back
+   link AND a Share action, a two-affordance header MobileScreen's single
+   back-chevron contract doesn't fit.
+
+   csm- prefix throughout (Contact Sheet Mobile -- matching the design's own
+   `slotId: 'csm-...'` naming), matching every other mobile surface's own
+   prefix convention (glm-/ctm-/cm-/idm-/fm-/lbm-). Colors are all
+   DESIGN_TOKENS_CSS var()s -- no literal hex standing in for a token that
+   exists, same rule every other mobile stylesheet documents for itself.
+   Card/typography treatment (Georgia italic title, monospace meta/model,
+   gold star glyphs, blue frame number) matches contact-sheet-overlay.css's
+   own token choices for the identical fields, so desktop and mobile read as
+   the same document family. */
+
+@keyframes csmIn { from { opacity: 0; transform: scale(.98) translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes csmOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(10px); } }
+@keyframes csmCardIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.csm-root { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
+  background: var(--mantle); color: var(--text);
+  animation: csmIn .22s cubic-bezier(.2,.9,.24,1) both; }
+.csm-root.closing { animation: csmOut .18s ease both; }
+
+/* ---- top bar: Back / Share ---- */
+.csm-topbar { flex: none; display: flex; align-items: center; gap: 12px;
+  padding: max(14px, env(safe-area-inset-top)) 16px 10px; border-bottom: 1px solid var(--surface1); }
+.csm-back, .csm-share { font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  cursor: pointer; background: none; border: none; padding: 0; font-family: inherit; }
+.csm-back { color: rgba(226,222,238,.7); }
+.csm-share { color: var(--lavender); }
+.csm-share:disabled { color: var(--overlay0); cursor: default; }
+.csm-fill { flex: 1 1 auto; }
+
+/* ---- title block ---- */
+.csm-titleblock { flex: none; padding: 16px; border-bottom: 1px solid var(--surface1); }
+.csm-title { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 20px;
+  color: var(--text); margin-bottom: 4px; }
+.csm-meta { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--subtext); }
+
+/* ---- scrollable body ---- */
+.csm-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 12px; }
+.csm-loading, .csm-empty { padding: 40px 16px; text-align: center; color: var(--subtext); font-style: italic; }
+
+/* ---- single-column card list (NOT desktop's grid -- design's own layout) ---- */
+.csm-list { display: flex; flex-direction: column; gap: 10px; }
+.csm-card { display: flex; gap: 10px; padding: 10px; border-radius: 8px;
+  background: var(--surface0); border: 1px solid var(--surface1);
+  animation: csmCardIn .3s ease both; }
+
+/* Placeholder-quality thumbnail -- deliberate, locked (drift-report.md item
+   26: "Placeholder thumbnails only, no per-image browse"), NOT a missing-data
+   gap: this screen exists to browse/share the LIST, not to inspect each
+   image, so the design's own decorative gradient box stands in for a real
+   /thumbs/<id>.jpg -- see ContactSheetMobile.jsx's header comment. */
+.csm-thumb { flex: none; width: 60px; height: 60px; border-radius: 6px; overflow: hidden;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--lavender) 20%, transparent),
+    color-mix(in srgb, var(--blue) 15%, transparent)); }
+
+.csm-info { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.csm-row1 { display: flex; gap: 8px; align-items: baseline; margin-bottom: 3px; min-width: 0; }
+.csm-no { font-family: ui-monospace, Menlo, monospace; font-size: 9px; font-weight: 700;
+  color: var(--blue); flex: none; }
+.csm-cardtitle { font-family: Georgia, "Times New Roman", serif; font-size: 13px; color: var(--text);
+  flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.csm-model { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--subtext);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.csm-stars { margin-top: 4px; font-size: 11px; color: var(--gold); letter-spacing: 1px; }

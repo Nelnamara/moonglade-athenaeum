@@ -38,7 +38,13 @@ def _scripts(html):
 
 
 @pytest.mark.skipif(NODE is None, reason="node not installed")
-@pytest.mark.parametrize("path", ["/", "/image/1", "/health", "/duplicates", "/panel", "/login"])
+# Post-classic-cut (2026-08-08): the surviving server-rendered pages with plain
+# embedded JS are the React shells ("/" and "/login" -- boot/skin/guard inline
+# scripts). The classic pages (/classic /image /health /duplicates /panel) are gone,
+# and /loom is NOT here on purpose: its inline code rides Babel-standalone (not plain
+# JS Node can --check) and its delivery is pinned by the dedicated bundle/preamble
+# tests below plus the 401-guard test, where it has always lived.
+@pytest.mark.parametrize("path", ["/", "/login"])
 def test_embedded_js_is_valid(client, tmp_path, path):
     html = client.get(path).get_data(as_text=True)
     blocks = _scripts(html)
@@ -58,7 +64,7 @@ def test_embedded_js_is_valid(client, tmp_path, path):
     assert rc == 0, f"{path} has invalid JS:\n{out.read_text(encoding='utf-8')}"
 
 
-@pytest.mark.parametrize("path", ["/", "/panel", "/health", "/duplicates", "/loom", "/login"])
+@pytest.mark.parametrize("path", ["/", "/loom", "/login"])
 def test_every_page_carries_the_401_guard(client, path):
     """A browser crawl found ~90 fetch() calls across the inline JS, static/*.js and
     the Loom bundle, and NOT ONE inspected response status. The front door answers an
@@ -79,36 +85,34 @@ def test_every_page_carries_the_401_guard(client, path):
 
 
 def _hook_list(text, label):
-    """Pull the hook names out of a `... { a, b, c } ... React` construct."""
+    """Pull the hook NAMES out of a `... { a, b, c } ... React` construct. Takes the key
+    before any `:` -- since the Loom went bundle-only + the react-global-shim alias landed
+    (2026-08-08), esbuild may locally rename the injected `var {...} = React` preamble to
+    avoid a bundle-scope collision (`useState: useState2`); the destructured HOOK is still
+    `useState`, so compare on the key, not the local binding."""
     m = re.search(r"\{([^}]*)\}\s*(?:from\s*[\"']react[\"']|=\s*React)", text)
     assert m, "no React hook destructure/import found in " + label
-    return [h.strip() for h in m.group(1).split(",") if h.strip()]
+    return [h.split(":")[0].strip() for h in m.group(1).split(",") if h.strip()]
 
 
 def test_loom_hook_preamble_matches_source_in_every_delivery_path():
-    """The Loom ships two ways, and BOTH strip master-storyboard.jsx's `import React,
-    {...}` line and inject their own `const {...} = React;` preamble in its place:
-    moonglade_gallery.py's LOOM_PAGE (the default Babel-standalone path) and
-    loom/dist/master-storyboard.bundle.js (the ?bundle=1 path, emitted by
-    loom/scripts/build.mjs).
+    """The Loom is bundle-ONLY since 2026-08-08 (the in-browser Babel-standalone path was
+    retired). build.mjs strips master-storyboard.jsx's `import React, {...}` line -- React
+    is a CDN global, not bundled -- and injects a `var {...} = React;` preamble derived from
+    that import's own hook list. This pins that the committed bundle's preamble matches the
+    source's import, i.e. no hook the code calls is missing from the destructure.
 
-    Those preambles were hand-maintained copies of one list, and they rotted exactly as
-    build.mjs's own comment warned they could: `useMemo` was added to the .jsx (imported
-    L1, used L2344) and to LOOM_PAGE, but not to build.mjs. The committed bundle then
-    destructured four hooks while the bundled code called a fifth, so /loom?bundle=1 threw
-    `ReferenceError: useMemo is not defined` during mount and rendered a blank page -- and
-    because the throw happens in App, a PARENT of the app's own error boundary, the
-    boundary could not catch it either. Nothing failed: the Node suite covers pure logic,
-    not the bundle's mount, and the default path was fine, so the opt-in path was broken
-    alone and silently. Found by a browser crawl, not by any test.
+    Why it matters: `useMemo` was once added to the .jsx (imported L1, used deep in App) but
+    not to build.mjs's then-hand-maintained list, so the bundle destructured four hooks while
+    the code called a fifth -- `ReferenceError: useMemo is not defined` on mount, a blank page,
+    uncatchable by the app's own error boundary (the throw is in App, its parent). build.mjs
+    now derives the list from the source; this test guards that the SHIPPED bundle stayed in
+    sync.
 
-    build.mjs now derives its list from the source. This test pins the remaining two.
-
-    NOTE this catches only preamble drift -- a stale bundle whose hook list happens to
-    still match sails through. The full staleness gate is
-    test_committed_loom_bundle_matches_a_fresh_build below (and the "Fail if the
-    committed bundle is stale" step in .github/workflows/tests.yml, which is the
-    authoritative one because CI always has the pinned toolchain)."""
+    NOTE this catches only preamble drift -- a stale bundle whose hook list happens to still
+    match sails through. The full staleness gate is test_committed_loom_bundle_matches_a_fresh_build
+    below (and the CI "fail if the committed bundle is stale" step, authoritative because CI
+    always has the pinned toolchain)."""
     root = Path(__file__).resolve().parent.parent
     jsx = root / "loom" / "master-storyboard.jsx"
     if not jsx.is_file():
@@ -118,18 +122,8 @@ def test_loom_hook_preamble_matches_source_in_every_delivery_path():
                   jsx.read_text(encoding="utf-8"), flags=re.M).group(0),
         "master-storyboard.jsx")
 
-    # 1. The default Babel path's preamble, as literally written in moonglade_gallery.py.
-    py = (root / "moonglade_gallery.py").read_text(encoding="utf-8")
-    m = re.search(r"const \{[^}]*\} = React;", py)
-    assert m, "moonglade_gallery.py no longer contains a `const {...} = React;` preamble"
-    assert _hook_list(m.group(0), "moonglade_gallery.py LOOM_PAGE") == src_hooks, (
-        "LOOM_PAGE's hook preamble has drifted from master-storyboard.jsx's import.\n"
-        "  jsx imports : {}\n  LOOM_PAGE   : {}\n"
-        "Any hook in the source but missing here is a ReferenceError on mount."
-        .format(src_hooks, _hook_list(m.group(0), "LOOM_PAGE")))
-
-    # 2. The committed bundle. A stale bundle is exactly how this shipped broken, so a
-    #    checkout that HAS one must have a current one -- rebuild with `npm run build`.
+    # The committed bundle -- the ONE delivery path now. A stale bundle is exactly how this
+    # shipped broken, so a checkout that HAS one must have a current one (rebuild + commit).
     bundle = root / "loom" / "dist" / "master-storyboard.bundle.js"
     if bundle.is_file():
         bm = re.search(r"var \{[^}]*\} = React;", bundle.read_text(encoding="utf-8"))
@@ -214,29 +208,3 @@ def test_committed_loom_bundle_matches_a_fresh_build(tmp_path):
         .format(len(committed), len(fresh)))
 
 
-def test_no_real_newline_inside_confirm_string(client):
-    """Even without Node: the cloud-delete confirm must keep its escaped newline as
-    the two chars backslash-n, not an actual line break that splits the literal.
-
-    confirmBulkDeleteCloud's confirm() argument is several single-quoted JS literals
-    joined with `+` across multiple source lines -- a real newline BETWEEN those
-    literals (where the template wraps the `+`-concatenation) is harmless source
-    formatting, but a real newline INSIDE one of the quoted literals is a JS syntax
-    error. The old version checked the newline-freedom of the WHOLE matched span
-    (picking up that harmless formatting newline) and then papered over the resulting
-    false positive with `"\\n\\n" in html`, which is true on every render regardless
-    of what is inside the confirm() call -- it only checks the escape sequence exists
-    SOMEWHERE on the whole page, which it always does. That made the assertion pass
-    unconditionally, even with the real bug reintroduced (audit: tests-that-dont-bite,
-    2026-07-21). Tightened: pull out each quoted literal from the matched span and
-    check each ONE for a real newline, not the span they're formatted across."""
-    html = client.get("/").get_data(as_text=True)
-    m = re.search(r"confirm\('Delete '.*?\)\)", html, flags=re.S)
-    assert m, "confirmBulkDeleteCloud string not found"
-    literals = re.findall(r"'((?:[^'\\]|\\.)*)'", m.group(0), flags=re.S)
-    assert literals, "no quoted string literals found inside the confirm() call"
-    bad = [s for s in literals if "\n" in s]
-    assert not bad, (
-        "confirmBulkDeleteCloud has a real newline inside a JS string literal -- "
-        "it should be the escaped two chars backslash-n, not an actual line break "
-        "(which is a JS syntax error): {!r}".format(bad))

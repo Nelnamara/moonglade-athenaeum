@@ -277,7 +277,11 @@ def test_catalog_model_options_most_used_first(tmp_path):
     assert ("Dreamix", "222") in opts
 
 
-def test_source_badges_render(tmp_path):
+def test_source_surfaced_per_item_in_library_api(tmp_path):
+    """Ported from the classic grid's source badges (classic cut 2026-08-08):
+    the per-row `source` the "sbadge gen/loc" markup rendered from must still
+    reach the client -- it now rides each /api/next/library item, where the
+    React grid draws its badge from."""
     from tests.conftest import login_client
     db = tmp_path / "catalog.db"
     save_catalog(db, [
@@ -287,8 +291,9 @@ def test_source_badges_render(tmp_path):
     (tmp_path / "images").mkdir()
     (tmp_path / "images" / "a.png").write_bytes(b"x")
     (tmp_path / "images" / "b.png").write_bytes(b"x")
-    data = login_client(tmp_path).get("/").data
-    assert b"sbadge gen" in data and b"sbadge loc" in data
+    d = login_client(tmp_path).get("/api/next/library").get_json()
+    by = {i["media_id"]: i["source"] for i in d["items"]}
+    assert by == {"g1": "api", "l1": "local"}
 
 
 def test_source_filter(tmp_path):
@@ -331,16 +336,20 @@ def test_collection_add_route(tmp_path):
     (tmp_path / "images" / "a.png").write_bytes(b"x")
     (tmp_path / "images" / "b.png").write_bytes(b"x")
     client = login_client(tmp_path)
-    r = client.post("/collection-add", data={"media_ids": ["m1", "m2"], "name": "Moonlit", "back": "/"})
-    assert r.status_code == 302 and "collected=2" in r.headers["Location"]
+    r = client.post("/api/collection", json={"action": "add", "collection": "Moonlit",
+                                             "media_ids": ["m1", "m2"]})
+    assert r.status_code == 200
+    d = r.get_json()
+    assert d["ok"] is True and d["count"] == 2
     by = {x["media_id"]: x for x in load_catalog(db)}
     assert by["m1"]["collections"] == "Moonlit"
 
 
-def test_collection_remove_route_and_ui(tmp_path):
-    """The remove path end to end: the button only appears while a collection filter
-    is active (that's what tells it WHICH collection to remove from), and the route
-    drops the label without touching the row."""
+def test_collection_remove_route(tmp_path):
+    """The remove path (classic cut 2026-08-08 -- the filter-bar button and its
+    /collection-remove form route died with the classic page; /api/collection
+    action=remove is the one remove surface now): the route drops the label
+    without touching the row, and never bleeds onto the other member."""
     from moonglade_gallery import load_catalog, add_to_collection
     from tests.conftest import login_client
     db = tmp_path / "catalog.db"
@@ -351,22 +360,14 @@ def test_collection_remove_route_and_ui(tmp_path):
     add_to_collection(db, ["m1", "m2"], "Moonlit")
     client = login_client(tmp_path)
 
-    # No collection filter -> no remove entry (nothing to remove FROM).
-    assert b"bulkRemoveCollection(this.dataset.coll)" not in client.get("/").data
-    # Collection filter active -> the entry is rendered, carrying that collection.
-    page = client.get("/?collection=Moonlit").data
-    assert b"bulkRemoveCollection(this.dataset.coll)" in page
-    assert b'data-coll="Moonlit"' in page
-
-    r = client.post("/collection-remove",
-                    data={"media_ids": ["m1"], "name": "Moonlit", "back": "/?collection=Moonlit"})
-    assert r.status_code == 302 and "uncollected=1" in r.headers["Location"]
+    r = client.post("/api/collection", json={"action": "remove", "collection": "Moonlit",
+                                             "media_ids": ["m1"]})
+    assert r.status_code == 200
+    assert r.get_json() == {"ok": True, "count": 1}
     by = {x["media_id"]: x for x in load_catalog(db)}
     assert by["m1"]["collections"] == ""      # label gone
     assert by["m2"]["collections"] == "Moonlit"   # untouched
     assert query_catalog(db, collection="Moonlit")[1] == 1
-    # the redirect target renders the confirmation banner
-    assert b"Removed 1 item(s) from the collection" in client.get(r.headers["Location"]).data
 
 
 def test_deleted_remote_filter(tmp_path):
@@ -510,58 +511,26 @@ def test_export_zip_by_collection_resolves_full_membership(tmp_path):
     assert names == {"a_1.png", "b_2.png"}     # both Trip members; the Other one excluded
 
 
-def test_contact_sheet_collection_button_appears_with_active_filter(tmp_path):
-    """O5 (audit 2026-07-21): /contact-sheet?collection=<name> is fully implemented
-    server-side (see contact_sheet() in moonglade_gallery.py) but had NO ui entry point anywhere
-    -- every emitter that builds a contact-sheet link passed ids= only. Its ZIP-export twin
-    ('Download collection', downloadCollection()) IS wired into the filter bar, right next to
-    the Collection dropdown, gated on the exact same "a collection filter is active"
-    condition (same reasoning: there's no collection to act on otherwise). This adds a
-    sibling contact-sheet control in that same spot, under that same condition."""
+def test_contact_sheet_resolves_a_collection_serverside(tmp_path):
+    """What survives of O5 (audit 2026-07-21) after the classic cut 2026-08-08:
+    the filter-bar entry point (contactSheetCollection() and its button) died
+    with classic's inline JS, but /contact-sheet?collection=<name> itself is a
+    live route the React gallery links to. Keep the server-side contract: the
+    sheet resolves the named collection's OWN membership in SQL -- members in,
+    non-members out -- rather than whatever ids a client happened to pass."""
     from tests.conftest import login_client
-    save_catalog(tmp_path / "catalog.db", [_row(media_id="1", filename="a.png", collections="Moonlit")])
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="1", filename="a.png", collections="Moonlit"),
+        _row(media_id="2", filename="b.png", collections="Other")])
     (tmp_path / "images").mkdir()
     (tmp_path / "images" / "a.png").write_bytes(b"x")
+    (tmp_path / "images" / "b.png").write_bytes(b"x")
     client = login_client(tmp_path)
 
-    # No collection filter -> no contact-sheet-for-collection entry (nothing to sheet FROM,
-    # same absence-reasoning as downloadCollection's own button just above it).
-    assert b"contactSheetCollection(this.dataset.coll)" not in client.get("/").data
-
-    # Collection filter active -> the entry is rendered, carrying that collection.
-    page = client.get("/?collection=Moonlit").data
-    assert b"contactSheetCollection(this.dataset.coll)" in page
-    assert b'data-coll="Moonlit"' in page
-    # sits beside the ZIP twin, not instead of it
-    assert b"downloadCollection(this.dataset.coll)" in page
-
-
-def test_contact_sheet_collection_js_builds_the_collection_query():
-    """The JS side of O5: contactSheetCollection(name) must open /contact-sheet with
-    collection=, mirroring bulkContactSheet()'s existing ids= pattern (both encodeURIComponent
-    the value and open in a new tab -- the print view is meant to sit alongside the gallery,
-    not navigate away from it)."""
-    from pathlib import Path
-    import re
-    src = (Path(__file__).resolve().parents[1] / "moonglade_gallery.py").read_text(encoding="utf-8")
-    m = re.search(r"function contactSheetCollection\(name\)\s*\{([\s\S]*?)\n\}", src)
-    assert m, "contactSheetCollection(name) JS function not found"
-    body = m.group(1)
-    assert "/contact-sheet?collection=" in body
-    assert "encodeURIComponent(name)" in body
-    assert "_blank" in body, "should open in a new tab, like bulkContactSheet's ids= version"
-
-
-def test_detail_page_has_plain_download(tmp_path):
-    """The detail page offers a plain one-click Download of the original (no convert here --
-    that lives in the bulk/collection flow)."""
-    from tests.conftest import login_client
-    save_catalog(tmp_path / "catalog.db",
-                 [_row(media_id="55", filename="a_55.png", created_at="2025-01-01T00:00:00")])
-    (tmp_path / "images").mkdir()
-    (tmp_path / "images" / "a_55.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
-    html = login_client(tmp_path).get("/image/55").get_data(as_text=True)
-    assert "/full/55?dl=1" in html
+    html = client.get("/contact-sheet?collection=Moonlit").get_data(as_text=True)
+    assert "Collection: Moonlit" in html
+    assert "/thumbs/1.jpg" in html          # the member is on the sheet
+    assert "/thumbs/2.jpg" not in html      # the non-member is excluded
 
 
 def test_collection_health_resolves_video_and_local_by_filename(tmp_path):
@@ -634,7 +603,12 @@ def test_duplicate_groups_ignores_deleted(tmp_path):
     assert duplicate_groups(tmp_path) == []
 
 
-def test_video_row_renders_and_serves(tmp_path):
+def test_video_row_flagged_and_serves(tmp_path):
+    """Ported from the classic grid/detail render (classic cut 2026-08-08): the
+    play badge and the <video> element are the React client's to draw now, but
+    the signals it draws them FROM are still this server's contract -- is_video
+    on the library item, the full row on the detail API, and /video-file
+    actually serving the mp4 (and refusing a non-video id)."""
     from tests.conftest import login_client
     db = tmp_path / "catalog.db"
     save_catalog(db, [
@@ -649,16 +623,16 @@ def test_video_row_renders_and_serves(tmp_path):
     (tmp_path / "gallery" / "thumbs" / "POSTER.jpg").write_bytes(b"\xff\xd8\xff\xe0jpegposter")
     client = login_client(tmp_path)
 
-    # grid: shows the play badge and points the thumb at the poster media id
-    idx = client.get("/").data
-    assert b"vbadge" in idx
-    assert b"/thumbs/POSTER.jpg" in idx
+    # grid data: the video row is flagged so the client can badge it
+    items = client.get("/api/next/library").get_json()["items"]
+    by = {i["media_id"]: i for i in items}
+    assert by["VID"]["is_video"] is True
+    assert by["POSTER"]["is_video"] is False
 
-    # detail: renders a <video> element pointing at the video-file route
-    d = client.get("/image/VID")
+    # detail data: the full row (incl. is_video) backs the Details view's player decision
+    d = client.get("/api/next/detail/VID")
     assert d.status_code == 200
-    assert b"<video" in d.data
-    assert b"/video-file/VID" in d.data
+    assert d.get_json()["row"]["is_video"] == "1"
 
     # the mp4 is actually served
     v = client.get("/video-file/VID")
@@ -691,9 +665,10 @@ def test_delete_tasks_bulk_purges_whole_task_cloud_and_local(tmp_path, monkeypat
     client = login_client(tmp_path)
 
     # select ONE image of task T1, plus the local-only import
-    r = client.post("/delete-tasks-bulk", data={"media_ids": ["m1", "loc"], "back": "/"})
-    assert r.status_code == 302
-    assert "bulkdel=started" in r.headers["Location"]   # async: kicked off, reports to the Activity card
+    r = client.post("/api/delete-tasks", json={"media_ids": ["m1", "loc"]})
+    assert r.status_code == 200
+    d = r.get_json()   # async: kicked off, reports to the Activity card
+    assert d["ok"] is True and d["tasks"] == 1 and d["local_only"] == 1
 
     import time
     for _ in range(200):                                # wait for the background delete thread
@@ -720,11 +695,12 @@ def test_edit_prompt_and_bulk_replace_routes(tmp_path):
     (tmp_path / "images" / "b_m2.png").write_bytes(b"x")
     client = login_client(tmp_path)
 
-    r = client.post("/edit-prompt/m1", json={"prompt": "blue cat"})
+    r = client.post("/api/edit-prompt/m1", json={"prompt": "blue cat"})
     assert r.status_code == 200 and r.get_json()["ok"] is True
 
-    r2 = client.post("/bulk-replace-prompt",
-                     data={"media_ids": ["m1", "m2"], "find": "cat", "replace": "lion", "back": "/"})
-    assert r2.status_code == 302 and "replaced=1" in r2.headers["Location"]
+    r2 = client.post("/api/replace-prompts",
+                     json={"media_ids": ["m1", "m2"], "find": "cat", "replace": "lion"})
+    assert r2.status_code == 200
+    assert r2.get_json() == {"ok": True, "changed": 1}
     by_id = {x["media_id"]: x["prompt_full"] for x in load_catalog(db)}
     assert by_id["m1"] == "blue lion" and by_id["m2"] == "red dog"

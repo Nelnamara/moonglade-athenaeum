@@ -1,0 +1,244 @@
+/* My Art + Contests overlays — ported from the Frontend Gallery DC's ovMyArt
+   (lines ~567-599) and ovContests (lines ~601-645) slabs. Shares the generic
+   .mgv-* shell from overlays.css; these are the "different innards" that
+   file's own header comment anticipated. */
+
+/* ---- My Art, rebuilt 2026-08-06 to the handoff's tabbed-gallery design (Frontend
+   Gallery.dc.html ovMyArt 599-809 / 2277-2436): 980px slab, sticky header with serif
+   title + stat row + count-pill sub-tabs, dropdown toolbar, 3:4 card grid. The old
+   desktop ranked-list rules are gone with it; .mgma-barwrap/.mgma-bar/.mgma-footnote
+   survive below because MyArtMobile still renders them. ---- */
+.mgma2-slab { width: min(980px, calc(100vw - 40px)); max-height: 90vh; display: flex;
+  flex-direction: column; padding: 0; }
+.mgma2-head { flex: none; padding: 22px 26px 0; }
+.mgma2-titlerow { display: flex; align-items: flex-start; gap: 12px; }
+.mgma2-titlerow .mgv-x { margin-left: auto; }
+.mgma2-title { font-family: Georgia, 'Times New Roman', serif; font-style: italic;
+  font-size: 24px; color: var(--text); }
+.mgma2-sub { font-size: 11.5px; color: var(--subtext); margin-top: 2px; }
+.mgma2-stats { display: flex; gap: 30px; flex-wrap: wrap; padding: 16px 0 14px; }
+.mgma2-stat { display: flex; flex-direction: column; gap: 4px; }
+.mgma2-statval { font-size: 24px; font-weight: 800; letter-spacing: -.01em; line-height: 1;
+  font-variant-numeric: tabular-nums; color: var(--text); }
+.mgma2-statval.accent { color: var(--accent); }
+.mgma2-statlab { font-size: 9px; font-weight: 700; letter-spacing: .14em; color: var(--overlay0); }
+/* DC:2296-2297 -- sub-tabs + count pills. */
+.mgma2-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--surface1); }
+button.mgma2-tab { display: flex; align-items: center; gap: 7px; padding: 9px 14px;
+  font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
+  color: var(--subtext); border: none; background: transparent; font-family: inherit;
+  border-bottom: 2px solid transparent; margin-bottom: -1px; }
+button.mgma2-tab.on { font-weight: 700; color: var(--text); border-bottom-color: var(--accent); }
+.mgma2-pill { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px;
+  color: var(--overlay0); background: var(--surface0); }
+.mgma2-pill.on { color: var(--mauve); background: rgba(182,146,230,.16); }
+/* DC:627-664 -- toolbar. */
+.mgma2-toolbar { flex: none; padding: 14px 26px; display: flex; gap: 10px;
+  align-items: center; flex-wrap: wrap; }
+.mgma2-dd { position: relative; }
+button.mgma2-ddbtn { display: flex; align-items: center; gap: 8px; padding: 8px 13px;
+  border-radius: 9px; font-size: 12px; cursor: pointer; border: 1px solid var(--surface1);
+  background: rgba(33,31,58,.5); font-family: inherit; color: var(--text); }
+button.mgma2-ddbtn .k { font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--overlay0); }
+button.mgma2-ddbtn .c { color: var(--overlay0); }
+.mgma2-ddmenu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 5;
+  min-width: 150px; border-radius: 10px; overflow: hidden; border: 1px solid var(--surface1);
+  background: linear-gradient(180deg, rgba(24,18,50,.99), rgba(14,11,32,.99));
+  box-shadow: 0 18px 44px rgba(0,0,0,.6); }
+.mgma2-dditem { padding: 9px 14px; font-size: 12.5px; cursor: pointer; color: var(--subtext); }
+.mgma2-dditem.on { color: var(--text); background: var(--surface0); }
+button.mgma2-toolbtn { display: flex; align-items: center; gap: 7px; padding: 8px 14px;
+  border-radius: 9px; font-size: 12px; font-weight: 600; cursor: pointer;
+  color: var(--subtext); border: 1px solid var(--surface1); background: rgba(33,31,58,.5);
+  font-family: inherit; }
+button.mgma2-toolbtn:disabled { opacity: .55; cursor: not-allowed; }
+button.mgma2-toolbtn.on { border-color: var(--accent); background: rgba(182,146,230,.14); color: var(--text); }
+button.mgma2-toolbtn.danger { color: var(--red, #f38ba8); border-color: rgba(243,139,168,.4);
+  background: rgba(243,139,168,.1); }
+/* Bulk bar (DC:667-678) -- the real pipeline, one confirm for the whole selection. */
+.mgma2-bulkbar { flex: none; margin: 0 26px 12px; padding: 10px 14px; border-radius: 11px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  border: 1px solid var(--accent); background: rgba(182,146,230,.1); }
+.mgma2-bulkbar .n { font-size: 12px; font-weight: 700; color: var(--text); }
+.mgma2-bulkresult { font-size: 11.5px; color: var(--emerald); }
+.mgma2-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 26px 22px; }
+.mgma2-empty { padding: 60px 0; text-align: center; color: var(--overlay0); font-size: 13px; }
+.mgma2-emptywhy { font-size: 11px; margin-top: 8px; max-width: 420px;
+  margin-left: auto; margin-right: auto; line-height: 1.6; }
+/* DC:686-729 -- 3:4 media cards. */
+.mgma2-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
+  gap: 14px; }
+.mgma2-card { position: relative; border-radius: 13px; overflow: hidden;
+  border: 1px solid var(--surface1); background: rgba(33,31,58,.5); cursor: pointer;
+  transition: border-color .2s, transform .2s; }
+.mgma2-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.mgma2-art { position: relative; aspect-ratio: 3 / 4; background: var(--surface0); }
+.mgma2-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.mgma2-vis { position: absolute; top: 8px; left: 8px; z-index: 2; font-size: 9px;
+  font-weight: 700; padding: 3px 8px; border-radius: 999px; backdrop-filter: blur(4px);
+  background: rgba(8,6,20,.72); }
+.mgma2-vis.pub { border: 1px solid rgba(79,201,154,.4); color: var(--emerald); }
+/* DC:2340-2341 -- the bulk-select checkbox, same slot the visibility badge sits in. */
+.mgma2-checkbox { position: absolute; top: 8px; left: 8px; z-index: 3; width: 22px;
+  height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 12px;
+  font-weight: 800; color: transparent; background: rgba(8,6,20,.8);
+  border: 1px solid var(--surface1); }
+.mgma2-checkbox.on { color: var(--mantle, #0a0818); background: var(--accent);
+  border-color: var(--accent); }
+.mgma2-card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+/* Models & LoRAs tab (DC:775-805) -- 4:5 cards, real data. */
+.mgma2-loragrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 14px; }
+.mgma2-loracard { position: relative; display: block; border-radius: 13px; overflow: hidden;
+  border: 1px solid var(--surface1); background: rgba(33,31,58,.5); text-decoration: none;
+  transition: border-color .2s, transform .2s; }
+.mgma2-loracard:hover { border-color: var(--accent); transform: translateY(-2px); }
+.mgma2-loraart { position: relative; aspect-ratio: 4 / 5; background: var(--surface0); }
+.mgma2-loraart img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.mgma2-lorabadge { position: absolute; top: 8px; left: 8px; z-index: 2; font-size: 9px;
+  font-weight: 800; letter-spacing: .04em; padding: 3px 8px; border-radius: 999px;
+  color: var(--mauve); background: rgba(20,14,42,.85); border: 1px solid rgba(182,146,230,.4);
+  backdrop-filter: blur(4px); }
+.mgma2-lorabase { position: absolute; top: 8px; right: 8px; z-index: 2; font-size: 9px;
+  font-weight: 800; padding: 3px 8px; border-radius: 999px; border: 1px solid;
+  backdrop-filter: blur(4px); }
+.mgma2-loraname { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1;
+  padding: 30px 11px 10px;
+  background: linear-gradient(to top, rgba(8,6,20,.94) 0%, rgba(8,6,20,.5) 60%, rgba(8,6,20,0) 100%);
+  font-family: Georgia, serif; font-size: 13.5px; color: var(--text); line-height: 1.3; }
+.mgma2-lorastats { display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  font-size: 11px; color: var(--subtext); font-variant-numeric: tabular-nums; }
+.mgma2-lorastats .fire { color: var(--gold); }
+.mgma2-lorapill { margin-left: auto; display: flex; align-items: center; gap: 4px;
+  padding: 3px 9px; border-radius: 999px; background: var(--surface0); }
+.mgma2-vis.priv { border: 1px solid rgba(212,175,55,.4); color: var(--gold); }
+.mgma2-acts { position: absolute; top: 8px; right: 8px; z-index: 3; display: flex; gap: 5px;
+  opacity: 0; transition: opacity .18s; }
+.mgma2-card:hover .mgma2-acts { opacity: 1; }
+.mgma2-acts button { width: 26px; height: 26px; border-radius: 7px; display: grid;
+  place-items: center; font-size: 12px; border: 1px solid var(--surface1);
+  background: rgba(8,6,20,.8); color: var(--subtext); backdrop-filter: blur(4px); }
+.mgma2-acts button:disabled { opacity: .6; cursor: not-allowed; }
+.mgma2-tagband { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1;
+  display: flex; gap: 5px; flex-wrap: wrap; padding: 26px 9px 8px;
+  background: linear-gradient(to top, rgba(8,6,20,.92) 0%, rgba(8,6,20,.55) 55%, rgba(8,6,20,0) 100%); }
+.mgma2-tag { font-size: 9.5px; font-weight: 600; padding: 2px 7px; border-radius: 999px;
+  color: var(--mauve); background: rgba(182,146,230,.16); border: 1px solid rgba(182,146,230,.32); }
+.mgma2-vid { position: absolute; right: 8px; bottom: 8px; z-index: 2; font-size: 11px;
+  color: #fff; background: rgba(8,6,20,.72); border-radius: 999px; padding: 2px 8px;
+  backdrop-filter: blur(4px); }
+.mgma2-foot { display: flex; align-items: center; gap: 9px; padding: 9px 11px; }
+.mgma2-avatar { flex: none; width: 26px; height: 26px; border-radius: 7px; display: grid;
+  place-items: center; font-size: 10px; font-weight: 800; color: var(--mantle, #0a0818);
+  background: linear-gradient(135deg, var(--mauve), var(--accent)); }
+.mgma2-ftitle { flex: 1 1 auto; min-width: 0; font-size: 11.5px; font-weight: 600;
+  color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgma2-fdate { font-size: 9.5px; color: var(--overlay0); font-variant-numeric: tabular-nums; }
+.mgma2-likes { font-size: 11px; font-variant-numeric: tabular-nums; }
+
+/* Card actions + the confirm step (2026-08-06 publish pipeline). Nothing here fires
+   a PixAI mutation until the confirm sheet is accepted -- see MyArtOverlay.jsx. */
+.mgma2-tagedit { position: absolute; inset: auto 8px 8px 8px; z-index: 4; display: flex;
+  flex-direction: column; gap: 7px; padding: 9px; border-radius: 10px;
+  border: 1px solid var(--surface1); background: rgba(8,6,20,.94); backdrop-filter: blur(6px); }
+.mgma2-tagedit input { width: 100%; box-sizing: border-box; background: var(--surface0);
+  border: 1px solid var(--surface1); border-radius: 7px; color: var(--text);
+  padding: 7px 10px; font-size: 11px; outline: none; font-family: inherit; }
+.mgma2-tagedit-row { display: flex; gap: 6px; justify-content: flex-end; }
+.mgma2-godone { padding: 6px 14px; border-radius: 8px; font-size: 11px; font-weight: 700;
+  cursor: pointer; color: var(--mantle, #0a0818); background: var(--accent);
+  border: 1px solid var(--accent); font-family: inherit; }
+.mgma2-godone.danger { background: var(--red, #f38ba8); border-color: var(--red, #f38ba8); }
+.mgma2-godone:disabled { opacity: .6; cursor: not-allowed; }
+.mgma2-acterr { font-size: 11.5px; color: var(--red, #f38ba8); }
+.mgma2-confirm { flex: none; margin: 0 26px 12px; padding: 12px 14px; border-radius: 11px;
+  border: 1px solid var(--accent); background: rgba(182,146,230,.1); display: flex;
+  flex-direction: column; gap: 8px; }
+.mgma2-confirmtitle { font-size: 13px; font-weight: 700; color: var(--text); }
+.mgma2-confirmbody { font-size: 11.5px; color: var(--subtext); line-height: 1.6; }
+.mgma2-confirmbody .warn { color: var(--gold); }
+.mgma2-confirmnote { font-size: 10.5px; color: var(--overlay0); margin-top: 4px; }
+.mgma2-confirmacts { display: flex; gap: 8px; justify-content: flex-end; }
+
+.mgma-barwrap { height: 4px; border-radius: 2px; background: var(--surface0); overflow: hidden; }
+.mgma-bar { height: 100%; border-radius: 2px; background: var(--accent); }
+.mgma-footnote { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px;
+  font-style: italic; color: var(--overlay0); padding-top: 14px; }
+
+/* ---- My Art mobile row -- Moonglade Mobile.dc.html:506, artPostRowStyle/artRankStyle/
+   artPostTitleStyle/dimTextStyle. A flat, dashed-divider LIST row -- no card chrome, no
+   border-radius, no background fill -- distinct from .mgma-post's desktop card treatment. ---- */
+.gmob-artlist { display: flex; flex-direction: column; }
+.gmob-artrow { display: flex; align-items: center; gap: 10px; padding: 9px 0;
+  border-bottom: 1px dashed var(--surface1); }
+.gmob-artrank { flex: none; width: 20px; font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px; color: var(--overlay0); }
+.gmob-artcol { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.gmob-arttitle { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.gmob-artmeta { font-size: 10px; color: var(--overlay0); }
+
+/* ---- Contests ---- */
+.mgct-slab { width: min(820px, calc(100vw - 48px)); }
+.mgct-summary { font-size: 11.5px; color: var(--subtext); padding: 3px 0 14px; }
+.mgct-summary b { color: var(--text); }
+.mgct-h { font-size: 11px; font-weight: 700; padding-bottom: 8px; }
+.mgct-h .n { color: var(--overlay0); font-weight: 600; }
+.mgct-h.official { color: var(--gold); }
+.mgct-h.community { color: var(--mauve); }
+
+/* Official banner -- gallery-era correction (Frontend Gallery.dc.html ovContests,
+   2026-08-06): FULL width, 3:1, radius 14, info overlaid on a bottom gradient scrim. */
+.mgct-official { width: 100%; border-radius: 14px; overflow: hidden;
+  border: 1px solid rgba(212,175,55,.45); background: rgba(33,31,58,.5); cursor: pointer;
+  display: block; font-family: inherit; text-align: left; padding: 0; }
+.mgct-cover { position: relative; aspect-ratio: 2.4 / 1; background: var(--surface0); }
+.mgct-cover.official { aspect-ratio: 3 / 1; }
+.mgct-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.mgct-scrim { position: absolute; inset: 0;
+  background: linear-gradient(to top, rgba(8,6,20,.92) 0%, rgba(8,6,20,.35) 40%, rgba(8,6,20,0) 70%); }
+.mgct-overlaid { position: absolute; left: 0; right: 0; bottom: 0; padding: 16px 18px; }
+.mgct-title.big { font-size: 16px; margin-bottom: 8px; }
+.mgct-prize.strong { background: rgba(212,175,55,.2); border-color: rgba(212,175,55,.5); }
+.mgct-dates.dim { color: rgba(226,222,238,.72); font-size: 10.5px; }
+.mgct-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 7px; }
+.mgct-title { font-size: 12.5px; font-weight: 700; line-height: 1.4; }
+.mgct-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.mgct-prize { font-family: ui-monospace, Menlo, monospace; font-size: 10px; font-weight: 700;
+  padding: 3px 9px; border-radius: 999px; background: rgba(212,175,55,.16);
+  border: 1px solid rgba(212,175,55,.45); color: var(--gold); }
+.mgct-votepick { font-size: 9.5px; font-weight: 800; letter-spacing: .06em; padding: 3px 9px;
+  border-radius: 999px; background: var(--gold); color: #2a1f06; }
+.mgct-votepick.user { background: transparent; border: 1px solid rgba(182,146,230,.4);
+  background: rgba(182,146,230,.12); color: var(--mauve); }
+.mgct-dates { font-size: 10.5px; color: var(--subtext); font-variant-numeric: tabular-nums; }
+
+/* Fixed 2-col (gallery-era correction) -- was auto-fill minmax(300px). */
+.mgct-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.mgct-card { border-radius: 12px; overflow: hidden; border: 1px solid var(--surface1);
+  background: rgba(33,31,58,.5); cursor: pointer; transition: border-color .2s;
+  display: block; font-family: inherit; text-align: left; padding: 0; width: 100%; }
+.mgct-card:hover { border-color: var(--accent); }
+
+/* Shortlist -- the card is a <button>, so the "☆ Shortlist" control is a SIBLING
+   overlaid on it (a button inside a button is invalid HTML), positioned in the card's
+   own relative wrapper. */
+.mgct-cardwrap { position: relative; }
+.mgct-shortlist { position: absolute; top: 8px; right: 8px; z-index: 2;
+  font-size: 10.5px; font-weight: 600; padding: 4px 9px; border-radius: 999px;
+  border: 1px solid var(--surface1); background: rgba(12,10,28,.78); color: var(--subtext);
+  cursor: pointer; font-family: inherit; backdrop-filter: blur(3px); transition: border-color .15s, color .15s; }
+.mgct-shortlist:hover { border-color: var(--lavender); color: var(--text); }
+.mgct-shortlist:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
+.mgct-card .mgct-title { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgct-card .mgct-body { padding: 9px 12px 11px; gap: 6px; }
+.mgct-empty { font-size: 11.5px; color: var(--subtext); padding: 20px 0; }
+/* Footer -- the DC's own hint face (Frontend Gallery.dc.html:642: 10.5px, overlay0,
+   12px top padding), carrying the real count + the official Discord link instead of
+   the mock's static "+12 more" demo text (owner Option C). */
+.mgct-footer { font-size: 10.5px; color: var(--overlay0); padding-top: 12px; }
+.mgct-footer .mgct-discord { color: var(--lavender); text-decoration: underline;
+  text-underline-offset: 2px; }
+.mgct-footer .mgct-discord:hover { color: var(--text); }
