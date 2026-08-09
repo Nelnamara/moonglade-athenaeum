@@ -1508,12 +1508,21 @@ def test_toasts_anchored_top_right(tmp_path):
     """Toast/Jobs/Achievement CSS moved into static/mg-notify.js (2026-07-18, shared with the
     Loom) -- it's injected client-side, not present in the server-rendered HTML, so this now
     checks the page loads the shared script and that the script's own CSS still positions
-    toasts top-right (unchanged) at the z-index raised above the Loom's own overlays."""
+    toasts top-right (unchanged) at the z-index raised above the Loom's own overlays.
+
+    Ported 2026-08-08 (no-vanilla campaign): mg-notify.js is DELETED -- the notify system is
+    React (gallery/src/notify/) and its styles are a real stylesheet
+    (gallery/src/styles/notify.css) bundled by Vite into gallery/dist/app.css. So the shell
+    must NOT load the dead script anymore, the anchor rule lives in the source stylesheet,
+    and the SHIPPED bundle must carry it too -- a rule that only exists under src/ never
+    reaches the served page."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = cli.get("/").get_data(as_text=True)   # the React shell (classic cut, 2026-08-08)
-    assert '<script src="/static/mg-notify.js"></script>' in html
-    notify_js = (Path(__file__).resolve().parents[1] / "static" / "mg-notify.js").read_text(encoding="utf-8")
-    assert "#mg-toasts{position:fixed;right:16px;top:64px" in notify_js   # top-right, clear of the header
+    assert "mg-notify.js" not in html            # the vanilla script tag is gone from the shell
+    notify_css = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "styles" / "notify.css").read_text(encoding="utf-8")
+    assert "#mg-toasts{position:fixed;right:16px;top:64px" in notify_css   # top-right, clear of the header
+    app_css = (Path(__file__).resolve().parents[1] / "gallery" / "dist" / "app.css").read_text(encoding="utf-8")
+    assert "#mg-toasts{position:fixed;right:16px;top:64px" in app_css      # the built bundle truly ships it
 
 
 def test_flyout_open_does_not_search_the_hidden_tab():

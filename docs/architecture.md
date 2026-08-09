@@ -380,19 +380,21 @@ engine (`gallery/src/art/artFilters.js`); the image picker (`GalleryPicker.jsx` 
 which absorbed the old `picker-core.js` engine); and The Loom went **bundle-only** (its esbuild
 bundle is the sole delivery — the in-browser Babel transpile is retired — so it imports shared
 modules like a normal build, with `react`/`react-dom` aliased to the runtime globals and a
-sibling `master-storyboard.bundle.css` for their CSS). **Remaining:** the files below, still
-`<script>`-loaded by the React gallery shell (and the Loom shell), ported in dependency order.
-The model/LoRA picker (`ModelPicker.jsx`) and the image-view upscale surface (`UpscalePanel.jsx`,
-which also embeds `ModelPicker`/`CostBadge` and posts the same `/api/price`+`/api/generate` as the
-drawer — there is deliberately no `/api/upscale`) are already React under `gallery/src/`;
-`mg-cost-badge.js` now lingers only because `mg-generate-drawer.js` still embeds it. Each
-remaining file self-injects its own `<style>` reading `DESIGN_TOKENS_CSS` so it re-skins with the app:
+sibling `master-storyboard.bundle.css` for their CSS). **Remaining (2):** the files below, still
+`<script>`-loaded by the React gallery shell (and the Loom shell). Already React under
+`gallery/src/`: the model/LoRA picker (`ModelPicker.jsx`), the image-view upscale surface
+(`UpscalePanel.jsx` — embeds `ModelPicker`/`CostBadge`, posts the same `/api/price`+`/api/generate`
+as the drawer; there is deliberately no `/api/upscale`), and the whole notify system
+(`gallery/src/notify/` — the corner toasts, the Activity job tracker, the achievement
+celebrations, and the spend-critical `Jobs` poller; it publishes the `window.Toast/Jobs/JobsCard/
+Ach` compat surface both bundles' call sites use). `mg-cost-badge.js` now lingers only because
+`mg-generate-drawer.js` still embeds it. Each remaining file self-injects its own `<style>`
+reading `DESIGN_TOKENS_CSS` so it re-skins with the app:
 
 | File | Element / global | Role |
 |---|---|---|
 | `mg-generate-drawer.js` | `<mg-generate-drawer>` | The full Generate/Edit/Video form (Multi-ref slots, cost line, submit+poll) |
 | `mg-cost-badge.js` | `<mg-cost-badge>` | The one renderer for "this costs N credits" / "a free card covers it" (the React `CostBadge.jsx` is what every React surface uses; this file serves only the still-vanilla drawer) |
-| `mg-notify.js` | `Ach` / `Toast` / `Jobs` / `JobsCard` (plain globals, not a custom element) | Achievement-toast celebrations, the corner Toast utility, and the Job activity tracker |
 
 ## Testing
 

@@ -65,10 +65,10 @@
   #root { display: none !important; }
   .mgcs-slab .mgv-titlerow { display: none !important; }
   .mgv-scrim { display: none !important; }
-  /* mg-notify.js (static/, plain JS -- not part of the React tree, so #root
-     hiding it doesn't reach these) appends its Activity FAB and toast host
-     straight to document.body. Both are body-level siblings of the portal
-     same as this overlay is; exclude them explicitly. */
+  /* The notify system (gallery/src/notify/ -- ToastHost/ActivityTray) portals its Activity
+     FAB and toast host straight to document.body, so #root hiding doesn't reach these.
+     Both are body-level siblings of the portal same as this overlay is; exclude them
+     explicitly. */
   #jobs-fab, #mg-toasts { display: none !important; }
   .mgv-host { position: static !important; display: block !important; }
   .mgv-slab { position: static !important; width: auto !important; max-height: none !important;

@@ -6277,3 +6277,64 @@ cards, independent of the React internals, so it neither blocks nor is invalidat
 Give the designer the CURRENT job tracker as the starting point (a real, recently-shipped surface:
 silent-death detection, per-job cost, QUEUED + ETA, 2026-07-25) so the redesign is a deliberate
 evolution, not a from-scratch guess. **Flagged so it is not lost when the port lands.**
+
+### Vanilla campaign 6/8: notify -> React (the keystone; static/ down to 2)  ·  *2026-08-08*
+
+static/mg-notify.js (1,710 lines -- the corner Toast utility, the Job activity tracker
+Jobs/JobsCard, and the achievement celebration engine Ach) is DELETED, reimplemented as
+`gallery/src/notify/`. The scoping corrected an assumption: mg-generate-drawer.js never used
+these globals (it is event-based) -- mg-notify.js was the DEFINER of window.Toast/Jobs/JobsCard/
+Ach that ~20 call sites across the gallery AND the Loom consume, so it was the keystone, not a
+dependent.
+
+**The architecture (the port's one real decision).** The system split cleanly into ENGINE
+singletons (module scope, outside any React lifecycle) and REACT UI:
+- `jobs.js` -- Jobs.track/register + the private per-task poller, VERBATIM: recursive setTimeout
+  chains holding no component reference (a paid generation's completion callback survives any
+  view unmounting -- the property the vanilla's IIFE had, preserved on purpose), the `seen`
+  de-dupe map, the 6h wall-clock ceiling -> 'stalled' (never 'failed'), read-only retries only.
+- `jobsStore.js` -- the tray state machine: /api/jobs refresh, the adaptive 2500/7000ms poll
+  (document.hidden gated), toastTransitions with `stale` IN the TERMINAL map (the
+  five-unstarted-gens-died-unnoticed regression stays closed), dismiss/clearFinished,
+  localStorage tray state. `toastStore.js` -- show() + the two-phase exit timers.
+- `ToastHost.jsx` + `ActivityTray.jsx` -- the visible UI as REAL React, portaled to
+  document.body with the SAME ids (#mg-toasts/#jobs-fab/#jobs-tray/#jt-detail) so the Loom
+  shell's !important overrides (401/402, bottom:88px) and contact-sheet-overlay.css's hide rule
+  keep working. Row semantics verbatim (queued = started===false, typeof+isFinite eta/cost
+  guards, stop-tracking confirm); the detail popover's live Time Spent interval runs only while
+  the JOB is running, re-decided every render (the syncTick discipline).
+- `ach.js` -- the celebration engine (chime/synth, _mkMoment badge sweep + mascot canvas
+  seating, fanfare, queue, replay handle for the Folio scramble) kept IMPERATIVE inside the
+  module: a one-shot self-cleaning animation timeline is not a rendering concern, and forcing
+  it into JSX would fight the framework for zero benefit.
+- `format.js` -- ago/fmtClock/fmtDuration/kindLabel/labelFor/groupThousands as PURE exports,
+  so the loom node-tests now import the real functions instead of regex-extracting a vanilla file.
+- `index.jsx` -- installNotify(): publishes the window.* compat surface (all ~20 guarded
+  `if (window.Toast)` call sites keep working unchanged; rewiring them to direct imports is a
+  follow-up cleanup, not this port) + starts the singletons (the old DOMContentLoaded work);
+  <NotifyRoot/> rendered by the gallery's authenticated root AND the Loom's root App. Each
+  bundle carries the same modules; each page publishes its own globals.
+
+**DROPPED, disclosed:** the entire #ach-modal "Trophy Hall" DOM machinery (open/close/tab/
+search/render*/card/carousel/setUnleash/poke + .ach-modal/.hall-* CSS) -- no served page has
+the skeleton (the React Folio replaced it), so every path was guarded dead code on both hosts.
+window.Ach now publishes exactly what is called: check + replay. Also dead-dropped: the
+#gen-live header spinner (zero consumers). One REPAIR: the legendary/feat star-rain CSS
+(.ee-star) now rides notify.css scoped under .ach-m2 -- the vanilla relied on the gallery's
+styles.css, so the rain silently no-opped on the Loom.
+
+**Shells:** both mg-notify.js script tags and both #jobs-fab/#jobs-tray anchor divs removed
+(React renders them); NEXT_PAGE's pre-paint flash guard removed (nothing to flash); the Loom's
+z-index/bottom !important overrides KEPT (retargeted prose: they now beat the bundle stylesheet's
+later cascade position, same tie-break). loom/scripts/build.mjs marks /branding/* external
+(absolute runtime URLs in shared CSS; Vite already passed them through).
+
+**static/ is down to 2: mg-cost-badge.js + mg-generate-drawer.js** (+ their harnesses), both
+dying with the drawer port (7/8). Verified LIVE on BOTH hosts (his Chrome, localhost:5057,
+post-restart): the vanilla script gone from both pages; all four globals React-backed; a
+Toast.show renders the React toast on each host; the tray opens with a REAL server job
+("Sync now -- pull new + fill metadata" · Control Panel · ago-format) and hides the FAB; the
+detail popover shows Task ID + copy / Time Sent / Time Spent; the Loom FAB obeys the shell
+overrides (computed bottom:88px, z-index:401); zero console errors. Tests reconciled via a
+14-agent workflow; job-tracker frontend REDESIGN deferred by owner decision (see the entry
+above) -- this port is deliberately faithful chrome.

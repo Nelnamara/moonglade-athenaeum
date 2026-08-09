@@ -8,7 +8,7 @@ import path from "node:path";
 // to show it's actually active." Two frames two seconds apart were pixel-identical -- the
 // running job's spinner was frozen solid.
 //
-// Cause: static/mg-notify.js styles BOTH the mascot (.jt-spin .jt-nel) and the ring
+// Cause: static/mg-notify.js styled BOTH the mascot (.jt-spin .jt-nel) and the ring
 // (.jt-spin .gen-ring) with `animation: gen-spin ...`, but never DEFINED @keyframes gen-spin.
 // The only definition lived in the gallery's own page CSS (inside create_app, beside
 // .header-stats/.ver-badge). So on the gallery the animation worked by accident of the host
@@ -17,23 +17,47 @@ import path from "node:path";
 // job was therefore indistinguishable from a stalled one, on the surface where that matters
 // most.
 //
-// mg-notify.js is deliberately host-neutral (its own comments say so) and already injects six
-// of its own @keyframes. This asserts it owns every animation it references, so the next
-// component to be styled here cannot inherit the same invisible dependency on its host.
+// Port note 2026-08-08 (React migration): static/mg-notify.js is deleted; the notify system's
+// styles now live verbatim in gallery/src/styles/notify.css, riding gallery/dist/app.css
+// (Vite) AND loom/dist/master-storyboard.bundle.css (esbuild). The self-ownership contract
+// transfers wholesale: that stylesheet is the only thing standing between the Loom shell and
+// a frozen spinner, so it must own every @keyframes it references -- gen-spin first among
+// them -- and keep the .jt-spin rules pointed at it. The name-collector below also grew up
+// with the move: the CSS uses comma-separated `animation:` shorthand lists (the old
+// first-name-only scan would have skipped the trailing names), so it now reads every name
+// in each list.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const src = readFileSync(path.join(__dirname, "../../static/mg-notify.js"), "utf8");
+const src = readFileSync(
+  path.join(__dirname, "../../gallery/src/styles/notify.css"), "utf8");
 
-describe("mg-notify owns every keyframe it animates", () => {
+describe("notify.css owns every keyframe it animates", () => {
   test("defines @keyframes gen-spin itself", () => {
     assert.match(src, /@keyframes gen-spin\s*\{/,
-      "mg-notify.js animates `gen-spin` but does not define it -- on any host page that " +
-      "lacks the gallery's CSS (the Loom) the tracker spinner is frozen");
+      "notify.css animates `gen-spin` but does not define it -- on any host page that " +
+      "lacks extra CSS (the Loom shell) the tracker spinner is frozen");
+  });
+
+  test("the .jt-spin rules still animate gen-spin", () => {
+    // The mascot and the ring are the two visible 'this job is alive' signals; both
+    // must stay wired to the keyframe the previous test proves exists.
+    assert.match(src, /\.jt-spin\s+\.jt-nel\s*\{[^}]*animation:\s*gen-spin/,
+      ".jt-spin .jt-nel no longer animates gen-spin -- the mascot spinner is frozen");
+    assert.match(src, /\.jt-spin\s+\.gen-ring\s*\{[^}]*animation:\s*gen-spin/,
+      ".jt-spin .gen-ring no longer animates gen-spin -- the ring spinner is frozen");
   });
 
   test("every animation name it uses is defined in its own stylesheet", () => {
-    // `animation: <name> ...` / `animation:<name>` -- collect the names it relies on
+    // `animation: <a> ..., <b> ...` -- collect every name the stylesheet relies on.
+    // Split each declaration's value on commas and take the leading ident of each
+    // segment (commas inside cubic-bezier(...) yield numeric-led fragments, which the
+    // ident regex simply doesn't match).
     const used = new Set();
-    for (const m of src.matchAll(/animation:\s*([a-zA-Z_][\w-]*)\s/g)) used.add(m[1]);
+    for (const decl of src.matchAll(/animation:\s*([^;{}]+)/g)) {
+      for (const part of decl[1].split(",")) {
+        const m = part.match(/^\s*([a-zA-Z_][\w-]*)/);
+        if (m) used.add(m[1]);
+      }
+    }
     // names that are CSS keywords rather than a custom keyframe
     for (const kw of ["none", "inherit", "initial", "unset", "revert"]) used.delete(kw);
     const defined = new Set(

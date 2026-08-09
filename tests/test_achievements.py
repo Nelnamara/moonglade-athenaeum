@@ -128,20 +128,14 @@ def _client(tmp_path, rows):
     return login_client(tmp_path), tmp_path
 
 
-def test_ach_grid_stacks_its_sections_instead_of_tiling_them():
-    """Real regression, caught on a live install after the 2026-07-22
-    redesign shipped: #ach-grid still carried the PRE-redesign '.ach-grid' class, whose CSS
-    was `display:grid;grid-template-columns:repeat(auto-fill,minmax(216px,1fr))` -- correct
-    for the OLD layout, where every direct child really was one ~216px .ach-card tile, but
-    wrong for the new one, where every direct child is a full-width section (the carousel,
-    the ladder row, each .hall-block). The auto-fill grid was auto-placing those full-width
-    sections into narrow tiled columns instead of stacking them, producing a scrambled,
-    overlapping render -- invisible to every automated check that ran BEFORE a human looked
-    at the real thing, because none of them checked cross-element geometry (innerText and
-    getComputedStyle on individual elements were all individually correct)."""
-    notify_js = (Path(__file__).resolve().parent.parent / "static" / "mg-notify.js").read_text(encoding="utf-8")
-    assert "'.ach-grid{display:flex;flex-direction:column" in notify_js
-    assert "grid-template-columns:repeat(auto-fill,minmax(216px,1fr))" not in notify_js
+# RETIRED 2026-08-08 (React port): test_ach_grid_stacks_its_sections_instead_of_tiling_them
+# read static/mg-notify.js for the '.ach-grid{display:flex;flex-direction:column' CSS. That
+# file is deleted, and the #ach-modal Trophy Hall machinery it styled (open/close/tab/search/
+# render*/card/carousel) was deliberately dropped as dead code in the React notify port --
+# no served page has the #ach-modal skeleton anymore. The React Folio (FolioOverlay.jsx)
+# owns its own section layout, so there is no '.ach-grid' auto-fill grid left to regress.
+# The original test guarded a real 2026-07-22 live-install regression (auto-fill grid tiling
+# full-width sections into narrow scrambled columns); that history stays in git.
 
 
 def test_the_hall_was_renamed_the_folio_of_honors():

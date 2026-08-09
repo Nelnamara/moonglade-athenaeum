@@ -4,24 +4,34 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { fmtClock, fmtDuration, groupThousands } from "../../gallery/src/notify/format.js";
+
 // Owner field-report 2026-07-23: two generations sat spinning in the Activity tray with no
 // way to get their task id (the one thing the existing "Import task" recovery flow needs) --
-// he was completely stuck without direct developer access to the server. static/mg-notify.js's
-// row(j) never surfaced the task id anywhere; this test file covers the fix, a click-to-open
-// job detail popover showing Task ID (+ copy), Time Sent, and Time Spent.
+// he was completely stuck without direct developer access to the server. The old row() never
+// surfaced the task id anywhere; this test file covers the fix, a click-to-open job detail
+// popover showing Task ID (+ copy), Time Sent, and Time Spent.
 //
-// static/mg-notify.js is a plain global-IIFE <script> (no ES module exports, no build step),
-// same situation as master-storyboard.jsx and static/mg-generate-drawer.js -- so, matching
-// this repo's established convention (see loom-activity-tracker-live-update.test.js and
-// mg-generate-drawer-parity.test.js): pure/self-contained helper functions are extracted as
-// REAL callables and unit-tested for real; everything else (DOM wiring, event listeners) is
-// covered by source-presence assertions since there is no DOM/jsdom harness here.
+// Port note 2026-08-08 (no-vanilla campaign, component 6): static/mg-notify.js is DELETED and
+// the system reimplemented in React. What that means for this suite:
+//   - the pure formatters (fmtClock/fmtDuration/groupThousands) are now REAL exports in
+//     gallery/src/notify/format.js, imported and run directly above -- no more regex-extracting
+//     an IIFE body out of a vanilla file. Their tests below are byte-for-byte the originals.
+//   - the popover/tray DOM is JSX in gallery/src/notify/ActivityTray.jsx (same ids: #jobs-fab /
+//     #jobs-tray / #jt-detail). There is still no DOM/jsdom harness here, so the wiring coverage
+//     keeps this suite's established split -- self-contained logic extracted as REAL callables
+//     (the Detail component's copy handler and the Cost row's render gate are plain JS inside
+//     the JSX), everything else covered by source-presence assertions, now against the JSX.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const src = readFileSync(path.join(__dirname, "../../static/mg-notify.js"), "utf8");
+// Normalized to LF regardless of local checkout line endings (.gitattributes stores LF, but
+// core.autocrlf legitimately checks these out as CRLF on Windows) -- the extraction regexes
+// below anchor on exact `\n` + indent boundaries.
+const traySrc = readFileSync(path.join(__dirname, "../../gallery/src/notify/ActivityTray.jsx"), "utf8")
+  .replace(/\r\n/g, "\n");
 
 function extract(re, label) {
-  const m = src.match(re);
-  assert.ok(m, `expected to find ${label} in static/mg-notify.js`);
+  const m = traySrc.match(re);
+  assert.ok(m, `expected to find ${label} in gallery/src/notify/ActivityTray.jsx`);
   return m[0];
 }
 
@@ -34,24 +44,15 @@ function extract(re, label) {
 // the machine's offset, so this exercises the REAL formatting logic without hardcoding a
 // wall-clock string that would only be correct in one timezone.
 //
-// fmtClock closes over MONTHS/pad2 (both declared just above it in the same IIFE scope), so
-// extracting fmtClock alone would leave those unresolved when called via `new Function`
-// (whose body runs in the GLOBAL scope, not JobsCard's closure) -- pull the whole
-// MONTHS..fmtDuration block out together and return both functions from one wrapper, same
-// idea as mg-generate-drawer-parity.test.js's single self-contained extraction, just two
-// functions' worth instead of one.
+// (Port note 2026-08-08: the old MONTHS..fmtDuration new-Function extraction dance is gone --
+// fmtClock and fmtDuration are the real exports from format.js, imported at the top.)
 // ---------------------------------------------------------------------------
-const clockBlock = extract(/var MONTHS=\[[\s\S]*?function fmtDuration\(s\)\{[\s\S]*?\n {4}\}/,
-  "the MONTHS/pad2/fmtClock/fmtDuration block");
-const { fmtClock, fmtDuration } = new Function(
-  clockBlock + "\nreturn { fmtClock: fmtClock, fmtDuration: fmtDuration };"
-)();
 
 function localTs(y, mo, d, h, mi) {
   return new Date(y, mo, d, h, mi, 0, 0).getTime() / 1000;
 }
 
-describe("fmtClock -- Time Sent, a real readable clock time (not row()'s relative ago())", () => {
+describe("fmtClock -- Time Sent, a real readable clock time (not the row's relative ago())", () => {
   test("falsy ts renders an em dash, not '12:00 AM' off epoch 0 or NaN off undefined", () => {
     assert.equal(fmtClock(0), "—");
     assert.equal(fmtClock(null), "—");
@@ -80,9 +81,9 @@ describe("fmtClock -- Time Sent, a real readable clock time (not row()'s relativ
 });
 
 // ---------------------------------------------------------------------------
-// fmtDuration(s) -- "Time Spent", an elapsed DURATION (not row()'s "3m ago" bucketing, which
+// fmtDuration(s) -- "Time Spent", an elapsed DURATION (not the row's "3m ago" bucketing, which
 // drops everything below its chosen unit). Pure arithmetic, no TZ dependency at all.
-// (extracted together with fmtClock above -- see that block's comment)
+// (imported for real from format.js -- see the port note above)
 // ---------------------------------------------------------------------------
 
 describe("fmtDuration -- Time Spent, an honest two-unit elapsed duration", () => {
@@ -117,19 +118,32 @@ describe("fmtDuration -- Time Spent, an honest two-unit elapsed duration", () =>
 });
 
 // ---------------------------------------------------------------------------
-// copyText(s) -- the one-click copy button. Per spec: a graceful fallback / silent no-op if
-// the clipboard API isn't available, never a thrown error -- unlike this app's OTHER copy
-// buttons (moonglade_gallery.py's copyPrompt/copyCmd), which call navigator.clipboard.writeText
-// direct and unguarded. Real behavioral tests against a mocked global `navigator`, since the
-// bug this guards against (a bare, unguarded `navigator.clipboard.writeText(s)`) throws
-// synchronously the instant navigator.clipboard is missing -- exactly reproducing that
-// unguarded shape here is what makes these tests fail first.
+// The copy button. Per spec: a graceful fallback / silent no-op if the clipboard API isn't
+// available, never a thrown error -- unlike this app's OTHER copy buttons (moonglade_gallery.py's
+// copyPrompt/copyCmd), which call navigator.clipboard.writeText direct and unguarded. Real
+// behavioral tests against a mocked global `navigator`, since the bug this guards against
+// (a bare, unguarded `navigator.clipboard.writeText(s)`) throws synchronously the instant
+// navigator.clipboard is missing -- exactly reproducing that unguarded shape here is what makes
+// these tests fail first.
+//
+// Port note 2026-08-08: the vanilla's standalone copyText(s) became the Detail component's
+// `copy` callback -- plain JS inside the JSX, so it can still be extracted and CALLED for real.
+// It closes over `job` (it copies job.job_id instead of taking the string as an argument) and
+// over React's setCopied/setTimeout for the new "copied!" flash; those are supplied as recording
+// stand-ins. The guard shape under test is unchanged: guarded access, a caught throw, a
+// .catch(() => {}) on the write promise.
 // ---------------------------------------------------------------------------
-// Non-greedy-to-first-"\n\s*}" would stop at the inner if-block's own closing brace (this
-// function has one) rather than the function's -- anchor on the exact 4-space indent its own
-// closing brace is written at, same technique as loom-activity-tracker-live-update.test.js's
-// pollShotBody() extractor.
-const copyText = new Function("return (" + extract(/function copyText\(s\)\s*\{[\s\S]*?\n {4}\}/, "copyText") + ")")();
+// Anchor on the exact 2-space indent the callback's own closing `};` is written at (the same
+// don't-stop-at-an-inner-brace technique the vanilla version of this file used).
+const copyBlock = extract(/const copy = \(\) => \{[\s\S]*?\n {2}\};/, "the Detail component's copy callback");
+function makeCopy(job) {
+  const feedback = [];
+  const copy = new Function(
+    "job", "setCopied", "setTimeout",
+    copyBlock + "\nreturn copy;",
+  )(job, (v) => feedback.push(v), () => {});   // setTimeout stub: don't run the 1200ms reset
+  return { copy, feedback };
+}
 
 // Node 21+ defines a lazy, getter-only `navigator` on globalThis (its own experimental
 // navigator.userAgent), so a plain `globalThis.navigator = {...}` throws
@@ -138,13 +152,16 @@ const copyText = new Function("return (" + extract(/function copyText\(s\)\s*\{[
 // an ordinary, restorable data property.
 function mockNavigator(v) { delete globalThis.navigator; globalThis.navigator = v; }
 
-describe("copyText -- one-click task-id copy, never throws", () => {
-  test("calls navigator.clipboard.writeText with the given string when available", () => {
+describe("the Detail copy callback -- one-click task-id copy, never throws", () => {
+  test("calls navigator.clipboard.writeText with the job's task id when available", () => {
     const calls = [];
     mockNavigator({ clipboard: { writeText(s) { calls.push(s); return Promise.resolve(); } } });
     try {
-      assert.doesNotThrow(() => copyText("2037215124834251576"));
+      const { copy, feedback } = makeCopy({ job_id: "2037215124834251576" });
+      assert.doesNotThrow(copy);
       assert.deepEqual(calls, ["2037215124834251576"]);
+      // The React port's visible feedback: the button flips to "copied!" via setCopied(true).
+      assert.deepEqual(feedback, [true]);
     } finally {
       delete globalThis.navigator;
     }
@@ -153,7 +170,7 @@ describe("copyText -- one-click task-id copy, never throws", () => {
   test("navigator.clipboard entirely missing: silent no-op, not a TypeError", () => {
     mockNavigator({});
     try {
-      assert.doesNotThrow(() => copyText("some-id"));
+      assert.doesNotThrow(makeCopy({ job_id: "some-id" }).copy);
     } finally {
       delete globalThis.navigator;
     }
@@ -161,7 +178,7 @@ describe("copyText -- one-click task-id copy, never throws", () => {
 
   test("navigator itself missing (no browser clipboard API at all): silent no-op, not a ReferenceError", () => {
     delete globalThis.navigator;
-    assert.doesNotThrow(() => copyText("some-id"));
+    assert.doesNotThrow(makeCopy({ job_id: "some-id" }).copy);
   });
 
   test("a rejected write promise does not become an unhandled rejection", async () => {
@@ -170,7 +187,7 @@ describe("copyText -- one-click task-id copy, never throws", () => {
     const onUnhandled = (err) => { leaked = err; };
     process.once("unhandledRejection", onUnhandled);
     try {
-      copyText("some-id");
+      makeCopy({ job_id: "some-id" }).copy();
       await new Promise((r) => setTimeout(r, 20));   // let the microtask queue settle
       assert.equal(leaked, null, "a rejected clipboard write leaked as an unhandled rejection");
     } finally {
@@ -181,113 +198,132 @@ describe("copyText -- one-click task-id copy, never throws", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Wiring / composition -- source-presence, matching loom-activity-tracker-live-update.test.js's
-// established style for this non-module file.
+// Wiring / composition -- source-presence, this suite's established style for DOM wiring
+// without a jsdom harness. Port note 2026-08-08: retargeted from static/mg-notify.js's string
+// building + addEventListener wiring to the equivalent JSX/hooks in ActivityTray.jsx. Each
+// vanilla guarantee has a named React counterpart below.
 // ---------------------------------------------------------------------------
-describe("job detail popover is wired into row(), click/keyboard handling, and the tray lifecycle", () => {
-  test("row() stamps data-job on the row itself so a click can look the job back up", () => {
-    assert.match(src, /<div class="jt-item'\+cls\+'" data-job="'\+esc\(j\.job_id\)\+'" tabindex="0" role="button"/,
-      "row() no longer carries data-job/tabindex/role on .jt-item -- the detail popover has no row to bind to");
+describe("job detail popover is wired into the Row, click/keyboard handling, and the tray lifecycle", () => {
+  test("a row is a focusable button that hands its own job id to the popover opener", () => {
+    // Vanilla stamped data-job on .jt-item so the click handler could look the job back up in
+    // the DOM; React closes over j.job_id directly, so the equivalent guarantee is the Row's
+    // root keeping the button semantics and passing j.job_id through onOpenDetail.
+    assert.match(traySrc, /className=\{"jt-item" \+ cls\} tabIndex=\{0\} role="button"/,
+      "Row no longer carries tabIndex/role on .jt-item -- the detail popover has no row to bind to");
+    assert.match(traySrc, /onClick=\{\(e\) => onOpenDetail\(j\.job_id, e\.currentTarget\)\}/,
+      "a row click no longer opens/toggles the detail popover for its own job");
   });
 
-  test("detailHtml renders all three required fields with the right source data", () => {
-    assert.match(src, />Task ID</, "detail popover is missing the Task ID label");
-    assert.match(src, />Time Sent</, "detail popover is missing the Time Sent label");
-    assert.match(src, />Time Spent</, "detail popover is missing the Time Spent label");
-    assert.match(src, /var startedAt=j\.started_at\|\|j\.ts\|\|0;/,
+  test("the Detail component renders all three required fields with the right source data", () => {
+    const detailSrc = extract(/function Detail\(\{ job, anchor, onClose \}\) \{[\s\S]*?\n\}/,
+      "the Detail component");
+    assert.match(detailSrc, />Task ID</, "detail popover is missing the Task ID label");
+    assert.match(detailSrc, />Time Sent</, "detail popover is missing the Time Sent label");
+    assert.match(detailSrc, />Time Spent</, "detail popover is missing the Time Spent label");
+    assert.match(detailSrc, /const startedAt = job\.started_at \|\| job\.ts \|\| 0;/,
       "detail popover does not read started_at (falling back to ts for pre-fix log lines)");
-    assert.match(src, /data-copy="'\+esc\(tid\)\+'"/, "the copy button does not carry the raw task id");
+    assert.match(detailSrc, /navigator\.clipboard\.writeText\(job\.job_id \|\| ""\)/,
+      "the copy button does not copy the raw task id");
+    assert.match(detailSrc, /title="Copy task ID" onClick=\{copy\}/,
+      "the copy button is not wired to the copy callback");
   });
 
   test("clicking a row toggles the popover, but a thumbnail-link click is left alone", () => {
-    // \b anchors on a standalone `t` -- without it, "t.addEventListener" also matches as a
-    // SUBSTRING of "documen[t].addEventListener", and since that false match sits later in
-    // the file, an unanchored regex happens to still find the right (earlier) block today by
-    // luck of ordering alone, not by actually discriminating the two.
-    const clickBlock = extract(/\bt\.addEventListener\('click', function\(e\)\{[\s\S]*?\n\s*\}\);/, "the tray's click listener");
-    assert.match(clickBlock, /e\.target\.closest\('\.jt-thumb'\)\) return;/,
+    // Vanilla: the tray's delegated click listener bailed on e.target.closest('.jt-thumb').
+    // React: the thumbnail anchor stops propagation itself, so the Row's onClick never fires.
+    assert.match(traySrc, /className="jt-thumb" href=\{[^}]*\} onClick=\{\(e\) => e\.stopPropagation\(\)\}/,
       "a click on the result thumbnail must not also toggle the detail popover (it should just navigate)");
-    assert.match(clickBlock, /toggleDetail\(row\.getAttribute\('data-job'\), row\);/,
-      "row clicks no longer open/toggle the detail popover");
+    // ...and "toggle" is real: re-clicking the open row's id closes it.
+    const toggleBlock = extract(/const toggleDetail = useCallback\(\(jid, anchorEl\) => \{[\s\S]*?\}, \[\]\);/,
+      "toggleDetail");
+    assert.match(toggleBlock, /if \(cur === jid\) \{ anchorRef\.current = null; return null; \}/,
+      "re-clicking the same row no longer closes (toggles) its own popover");
   });
 
   test("Enter/Space on a keyboard-focused row also opens the popover", () => {
-    const keyBlock = extract(/\bt\.addEventListener\('keydown', function\(e\)\{[\s\S]*?\n\s*\}\);/, "the tray's keydown listener");
-    assert.match(keyBlock, /e\.key!=='Enter' && e\.key!==' '/, "only Enter/Space should trigger the popover from the keyboard");
-    assert.match(keyBlock, /toggleDetail\(row\.getAttribute\('data-job'\), row\);/);
+    const keyBlock = extract(/onKeyDown=\{\(e\) => \{[\s\S]*?\}\}/, "the Row's keydown handler");
+    assert.match(keyBlock, /if \(e\.key !== "Enter" && e\.key !== " "\) return;/,
+      "only Enter/Space should trigger the popover from the keyboard");
+    assert.match(keyBlock, /onOpenDetail\(j\.job_id, e\.currentTarget\);/);
   });
 
   test("Escape closes the popover (existing app-wide precedent: Ach's own modal does the same)", () => {
-    assert.match(src, /document\.addEventListener\('keydown', function\(e\)\{ if\(e\.key==='Escape'\) closeDetail\(\); \}\);/,
+    assert.match(traySrc, /const onKey = \(e\) => \{ if \(e\.key === "Escape"\) onClose\(\); \};/,
       "no Escape-key handler closes the job detail popover");
   });
 
   test("clicking outside both the tray and the popover closes it", () => {
-    const outsideBlock = extract(/document\.addEventListener\('click', function\(e\)\{\s*if\(!detailJobId\) return;[\s\S]*?\n\s*\}\);/,
+    const outsideBlock = extract(/const onDoc = \(e\) => \{[\s\S]*?\};/,
       "the document-level outside-click handler");
-    assert.match(outsideBlock, /var insideDetail=e\.target\.closest && e\.target\.closest\('#jt-detail'\);/);
-    assert.match(outsideBlock, /var insideTray=e\.target\.closest && e\.target\.closest\('#jobs-tray'\);/);
-    assert.match(outsideBlock, /if\(!insideDetail && !insideTray\) closeDetail\(\);/);
+    assert.match(outsideBlock, /e\.target\.closest && e\.target\.closest\("#jt-detail"\)/);
+    assert.match(outsideBlock, /e\.target\.closest && e\.target\.closest\("#jobs-tray"\)/);
+    assert.match(outsideBlock, /if \(!inDetail && !inTray\) onClose\(\);/);
   });
 
   test("collapsing the tray (the header's '–' button) also closes any open popover", () => {
-    assert.match(src, /function close\(\)\{ setOpen\(false\); closeDetail\(\); \}/,
+    assert.match(traySrc, /onClick=\{\(\) => \{ closeTray\(\); closeDetail\(\); \}\}/,
       "closing the tray leaves an orphaned floating popover on screen");
   });
 
-  test("a poll refresh keeps an open popover's numbers live, and closes it if its job vanished", () => {
-    const renderTop = extract(/function render\(jobs\)\{[\s\S]*?running\+\+; \}\);/, "the top of render(jobs)");
-    assert.match(renderTop, /if\(jobsById\[detailJobId\]\) renderDetail\(jobsById\[detailJobId\]\);/,
-      "an open popover is not refreshed on every poll -- Time Spent would go stale while open");
-    assert.match(renderTop, /else closeDetail\(\);/,
+  test("a store refresh keeps an open popover's numbers live, and closes it if its job vanished", () => {
+    // Vanilla: render(jobs) called renderDetail(jobsById[detailJobId]) / else closeDetail().
+    // React: the Detail's job prop is re-derived from FRESH store state on every repaint (so
+    // each poll repaints the numbers), and an effect closes the popover when the job is gone.
+    assert.match(traySrc, /const detailJob = detailId \? jobs\.find\(\(j\) => j\.job_id === detailId\) : null;/,
+      "an open popover's job is not re-derived from fresh store state on every repaint -- Time Spent would go stale while open");
+    assert.match(traySrc, /if \(detailId && !detailJob\) closeDetail\(\);/,
       "a popover left open for a job that just got dismissed/aged out is not closed");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Cost row. /api/task-status now logs PixAI's server-authoritative `paidCredit` onto the
-// done event, so the popover can show what a generation actually cost -- the one number the
-// owner cannot reconstruct later without re-querying PixAI task by task.
+// Cost row. /api/task-status logs PixAI's server-authoritative `paidCredit` onto the done
+// event, so the popover can show what a generation actually cost -- the one number the owner
+// cannot reconstruct later without re-querying PixAI task by task.
 //
-// detailHtml is extracted and CALLED for real (not source-matched) so the 0-vs-absent
-// distinction is exercised rather than asserted about: a card-covered generation genuinely
-// costs 0, and "free" must not render as "unknown". It closes over esc/fmtClock/fmtDuration,
-// supplied here as trivial stand-ins -- the logic under test is the row's presence and its
-// number, not the formatting those helpers already have their own tests for.
+// Port note 2026-08-08: the vanilla's detailHtml(j) string builder is gone; the row is JSX.
+// The load-bearing 0-vs-absent distinction now lives in the row's render gate, so the gate's
+// EXACT source expression is extracted and executed for real (not source-matched) -- a
+// card-covered generation genuinely costs 0, and "free" must not render as "unknown" -- and
+// the number formatting rides the real groupThousands import from format.js, which the row is
+// source-asserted to call.
 // ---------------------------------------------------------------------------
-describe("detailHtml cost row", () => {
-  const detailBlock = extract(/function detailHtml\(j\)\{[\s\S]*?\n {4}\}/, "detailHtml");
-  const detailHtml = new Function(
-    "var esc=function(s){return String(s==null?'':s);};" +
-    "var fmtClock=function(t){return 'CLOCK';};" +
-    "var fmtDuration=function(s){return 'DUR';};" +
-    detailBlock + "\nreturn detailHtml;"
-  )();
+describe("Detail cost row", () => {
+  const costRow = extract(/\{typeof job\.paid_credit === "number" && isFinite\(job\.paid_credit\) \? \([\s\S]*?\) : null\}/,
+    "the Cost row block (typeof+isFinite gate + JSX)");
+  // The REAL gate expression, run for real: paste it into a predicate and feed it jobs.
+  const costShown = new Function("job",
+    'return (typeof job.paid_credit === "number" && isFinite(job.paid_credit));');
 
   test("shows the actual cost when the job recorded one", () => {
-    const html = detailHtml({ job_id: "4242", ts: 1000, started_at: 1000,
-                              status: "done", paid_credit: 3700 });
-    assert.match(html, />Cost</, "no Cost row for a job that recorded paid_credit");
-    assert.match(html, /3,700/, "cost not thousands-separated: " + html);
+    assert.ok(costShown({ job_id: "4242", ts: 1000, started_at: 1000, status: "done", paid_credit: 3700 }),
+      "no Cost row for a job that recorded paid_credit");
+    assert.match(costRow, />Cost</, "the gated row is not the Cost row");
+    assert.match(costRow, /groupThousands\(job\.paid_credit\)\} credits/,
+      "the Cost row does not render a thousands-separated credit figure");
+    assert.equal(groupThousands(3700), "3,700", "cost not thousands-separated");
   });
 
   test("renders a free (card-covered) generation as 0, not as absent", () => {
-    const html = detailHtml({ job_id: "4243", ts: 1000, started_at: 1000,
-                              status: "done", paid_credit: 0 });
-    assert.match(html, />Cost</, "a genuinely free generation hid its cost row");
-    assert.match(html, /\b0\b/, "free generation did not render an explicit 0: " + html);
+    assert.ok(costShown({ job_id: "4243", ts: 1000, started_at: 1000, status: "done", paid_credit: 0 }),
+      "a genuinely free generation hid its cost row");
+    assert.equal(groupThousands(0), "0", "free generation did not render an explicit 0");
   });
 
   test("omits the row entirely when cost is unknown", () => {
-    const html = detailHtml({ job_id: "4244", ts: 1000, started_at: 1000, status: "running" });
-    assert.doesNotMatch(html, />Cost</,
+    assert.equal(costShown({ job_id: "4244", ts: 1000, started_at: 1000, status: "running" }), false,
       "showed a Cost row for a job with no cost recorded -- unknown must not read as free");
+    assert.equal(costShown({ job_id: "4244", ts: 1000, paid_credit: null }), false,
+      "null must not read as a recorded cost");
+    assert.equal(costShown({ job_id: "4244", ts: 1000, paid_credit: NaN }), false,
+      "NaN would render as 'NaN credits' -- the isFinite half of the gate exists for this");
   });
 
-  test("still renders the three original rows", () => {
-    const html = detailHtml({ job_id: "4245", ts: 1000, started_at: 1000, status: "done" });
-    assert.match(html, />Task ID</);
-    assert.match(html, />Time Sent</);
-    assert.match(html, />Time Spent</);
+  test("still renders the three original rows alongside the cost row", () => {
+    const detailSrc = extract(/function Detail\(\{ job, anchor, onClose \}\) \{[\s\S]*?\n\}/,
+      "the Detail component");
+    assert.match(detailSrc, />Task ID</);
+    assert.match(detailSrc, />Time Sent</);
+    assert.match(detailSrc, />Time Spent</);
   });
 });

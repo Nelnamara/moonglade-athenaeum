@@ -1,0 +1,59 @@
+import React from "react";
+import * as toastStore from "./toastStore.js";
+import * as jobs from "./jobs.js";
+import * as jobsStore from "./jobsStore.js";
+import * as ach from "./ach.js";
+import ToastHost from "./ToastHost.jsx";
+import ActivityTray from "./ActivityTray.jsx";
+import "../styles/notify.css";
+
+/* notify/index.jsx -- the one installer for the notify system (no-vanilla campaign, component
+   6, replacing static/mg-notify.js). Two things:
+
+   1. installNotify() -- publishes the window.* compat surface and starts the background
+      singletons. The window globals are the SAME four contracts the vanilla published
+      (Toast.show / Jobs.track+register / JobsCard.open+close+refresh+dismiss+clearFinished /
+      Ach.check+replay), now backed by the React-owned stores -- kept so the ~30 existing
+      guarded `if (window.Toast) ...` call sites across gallery/src and the Loom keep working
+      unchanged. (Rewiring those callers to direct imports is a follow-up cleanup, not part of
+      this port -- see docs/DECISIONS.md.) Dead vanilla API deliberately NOT re-published:
+      Ach.open/close/tab/search/setUnleash/poke served only the #ach-modal Trophy Hall, which
+      no served page carries (the React Folio replaced it).
+
+      Also the old DOMContentLoaded work: jobsStore.start() (the tray's first refresh + the
+      adaptive poll) and ach.check() (mark-and-toast newly earned achievements + reconcile the
+      active skin) -- by the time a bundle evaluates, the DOM is ready.
+
+   2. <NotifyRoot/> -- the React UI (corner toasts + Activity FAB/tray), portaled to
+      document.body from whichever app tree renders it (the gallery's authenticated root, the
+      Loom's root component). The engines run either way; the root only paints. */
+
+let installed = false;
+
+export function installNotify() {
+  if (installed) return;
+  installed = true;
+
+  window.Toast = { show: toastStore.show };
+  window.Jobs = { track: jobs.track, register: jobs.register };
+  window.JobsCard = {
+    open: jobsStore.openTray,
+    close: jobsStore.closeTray,
+    refresh: jobsStore.refresh,
+    dismiss: jobsStore.dismiss,
+    clearFinished: jobsStore.clearFinished,
+  };
+  window.Ach = { check: ach.check, replay: ach.replay };
+
+  jobsStore.start();
+  ach.check();
+}
+
+export function NotifyRoot() {
+  return (
+    <>
+      <ToastHost />
+      <ActivityTray />
+    </>
+  );
+}

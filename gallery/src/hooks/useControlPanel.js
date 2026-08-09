@@ -80,7 +80,7 @@ export const DEDUP_STAGES = [
 ];
 
 // Applies a skin app-wide, not just inside whichever component called this -- classic's
-// pickSkin() and static/mg-notify.js's applySkin() both write the SAME pair
+// pickSkin() and the notify module's applySkin (gallery/src/notify/ach.js) both write the SAME pair
 // (html[data-skin], localStorage['skin']) after a successful POST, since every skin rule
 // in the suite's CSS reads off that attribute, and the pre-paint inline script on next
 // load reads localStorage first. Missing this meant picking a skin here changed nothing

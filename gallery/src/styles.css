@@ -35,7 +35,7 @@ button:disabled { cursor: default; }
 /* Z-LADDER (one place, so nothing guesses): header 100 · drawer scrim 300 ·
    model flyout 305 · drawer 310 · lightbox + picker 400. Anything that must sit
    OVER the sticky header has to clear 100 -- the drawer sat at 90 and the header
-   ate its top half. mg-notify owns 234/235 (tray) and 510/520 (celebrations). */
+   ate its top half. notify.css owns 234/235 (tray) and 510/520 (celebrations). */
 :root { --drawer-w: min(640px, 96vw); }   /* the drawer's one width */
 header.mg-head { position: sticky; z-index: 100; display: block; overflow: visible;
   --bnr-hero: clamp(348px, 24vw, 370px); --bnr-slim: 76px;

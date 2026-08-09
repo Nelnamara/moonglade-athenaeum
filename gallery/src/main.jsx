@@ -7,6 +7,7 @@ import LoginPageMobile from "./components/LoginPageMobile.jsx";
 import SetupWizard from "./components/SetupWizard.jsx";
 import SetupWizardMobile from "./components/SetupWizardMobile.jsx";
 import useIsMobile from "./hooks/useIsMobile.js";
+import { installNotify, NotifyRoot } from "./notify/index.jsx";
 import "./styles.css";
 
 const boot = window.MG_BOOT || {};
@@ -31,14 +32,32 @@ const boot = window.MG_BOOT || {};
 // render honest placeholders inside it (see its own header comment) -- so
 // adding it here does not change App.jsx's own behavior at all: App only ever
 // mounts when isMobile is false, exactly as before this change.
+// The notify system (toasts · Activity tray · achievement celebrations · the spend-critical
+// Jobs poller) -- installed for every AUTHENTICATED render, matching the old shell rule that
+// LOGIN_PAGE never loaded mg-notify.js. installNotify() publishes the window.Toast/Jobs/
+// JobsCard/Ach compat surface and starts the background singletons; <NotifyRoot/> portals the
+// visible UI to document.body. The engines live outside the React tree on purpose (a paid
+// generation's poll loop must survive any view unmounting) -- see gallery/src/notify/.
+if (boot.authenticated !== false) installNotify();
+
 function Root() {
   const isMobile = useIsMobile();
   if (boot.authenticated === false) {
     return isMobile ? <LoginPageMobile boot={boot} /> : <LoginPage boot={boot} />;
   }
   if (boot.needs_key || boot.catalog_empty) {
-    return isMobile ? <SetupWizardMobile boot={boot} /> : <SetupWizard boot={boot} />;
+    return (
+      <>
+        {isMobile ? <SetupWizardMobile boot={boot} /> : <SetupWizard boot={boot} />}
+        <NotifyRoot />
+      </>
+    );
   }
-  return isMobile ? <AppMobile boot={boot} /> : <App boot={boot} />;
+  return (
+    <>
+      {isMobile ? <AppMobile boot={boot} /> : <App boot={boot} />}
+      <NotifyRoot />
+    </>
+  );
 }
 createRoot(document.getElementById("root")).render(<Root />);
