@@ -1,6 +1,9 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import NavSpine from "./NavSpine.jsx";
 import CostBadge from "./CostBadge.jsx";
+import ActivityChip from "../notify/ActivityChip.jsx";
+import ActivityPanel from "../notify/ActivityPanel.jsx";
+import useActivity from "../notify/useActivity.js";
 import "../styles/shell.css";
 
 /* The separator bar (DC "Frontend Gallery", §3 of the build map): nav pills ·
@@ -63,12 +66,22 @@ export default function SeparatorBar({
 
   const claimCredits = account && account.claim_credits;
 
-  const count = (running && running.count) || 0;
-  const pct = running && running.pct != null ? running.pct : null;
-  const actText = count
-    ? count + " generation" + (count === 1 ? "" : "s") + " running" +
-      (pct != null ? " · " + pct + "%" : "")
-    : "idle · nothing in the queue";
+  // Header-docked Activity control (Claude Design handoff 2026-08-09, drift item 39):
+  // replaces the old floating #jobs-fab/#jobs-tray with this bar's own ambient activity
+  // cluster upgraded into the real trigger+dropdown. Reads jobsStore -- real /api/jobs
+  // truth across every job type (generate/panel/import/delete), not the `running` prop
+  // above (that same-tab submit/result counter is a separate, narrower signal the
+  // Generate composer owns; App.jsx's own comment already flags it as a stopgap for a
+  // richer workstream to replace later -- left untouched here, just no longer what
+  // drives this control).
+  const act = useActivity();
+  const actRef = useRef(null);
+  useEffect(() => {
+    if (!act.open) return undefined;
+    const onDoc = (e) => { if (actRef.current && !actRef.current.contains(e.target)) act.close(); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [act.open, act.close]);
 
   return (
     <div className="mgx-sep">
@@ -111,10 +124,18 @@ export default function SeparatorBar({
       </div>
 
       <div className="mgx-sepright">
-        {/* activity cluster */}
-        <div className={"mgx-act" + (count ? " live" : "")}>
-          <div className="mgx-actdot" />
-          <div className="mgx-acttxt">{actText}</div>
+        {/* Activity control -- trigger chip + anchored dropdown, see the useActivity()
+            comment above for why this reads jobsStore, not the `running` prop. */}
+        <div className="mgx-act-wrap" ref={actRef}>
+          <ActivityChip jobs={act.jobs} open={act.open} onToggle={act.toggle} title="Activity — recent jobs" />
+          {act.open ? (
+            <ActivityPanel
+              jobs={act.jobs} expandedId={act.expandedId} closing={act.closing}
+              onToggleRow={act.toggleRow} onDismiss={act.dismiss}
+              onClearFinished={act.clearFinished} onClose={act.close}
+              className="mgx-act-panel"
+            />
+          ) : null}
         </div>
 
         {/* shared price chip (hidden until the dock pushes a price) */}
