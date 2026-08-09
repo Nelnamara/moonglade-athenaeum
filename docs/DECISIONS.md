@@ -6497,3 +6497,71 @@ changelog + Release were scrubbed to this bar. Internal documentation lives ONLY
    so they ship OUTSIDE the git-ignored `branding/` folder. This unblocks the "Under the Hood"
    trigger working from a clean install, and lets the packaged app carry its defaults. Previously
    deferred (DECISIONS.md:983-997, 3487-3511); now the priority item after the v3.0 cut.
+
+### Post-v3.0 regroup: nine decisions ruled via the decision-console artifact  ·  *2026-08-09*
+
+Owner worked the [Post-v3.0 Attack Order](https://claude.ai/code/artifact/a6fa3811-e103-47ec-8156-400b61fbfb13)
+console (built same day) and pasted the export back. Verbatim rulings:
+
+- **D1 -- public wiki/README spoiler posture: MIDDLE GROUND.** Keep the wiki pages, strip the
+  spoilers -- `wiki/Folio-of-Honors.md` (achievement names + earn conditions, the skins
+  "How you get it" table), `wiki/Control-Panel.md` (names the Branding tab), `README.md` (points
+  at `branding/`) all need the same scrub the changelog got. Scoped into P2 (docs audit).
+- **D2 -- achievement roster count (57 vs 60): WORK IT THROUGH TOGETHER.** Owner: *"We want to
+  get to 60 we have pitched ideas."* Not settled here -- a real workshop session, not a quick call.
+- **D3 -- the unearnable summit (Completionist/Master of the Athenaeum): NOT YET RULED, re-scope.**
+  Owner: *"We scoped their replacements and these were documented. Let's workshop again now that
+  generate and edit panels are rebuilt."* A prior replacement scoping pass exists in this doc
+  (search for the Enhance-chain banking entries) -- re-open it now that Generate/Edit are the
+  shipped v3.0 React surfaces, not the classic ones it was scoped against.
+- **D4 -- the banked Enhance chain (Refiner's Touch/Full Toolbox/Enhance Adept): RETARGET to
+  Fix/filters.** Owner: *"We had scoped these replacements too!!"* -- same prior scoping pass as
+  D3; both ready to re-open together. Wiki spoiler leak covered by D1.
+- **D5 -- unlock-toast SFX: UNDECIDED, owner asked what's needed from them.** Answered inline in
+  chat: nothing except a go/no-go and, if go, sign-off on the CC0 sources already scouted
+  (DECISIONS.md's "Real SFX for the unlock toast" entry) -- no design mockup needed, it's audio
+  wired to an existing celebration trigger. Owner's call whenever.
+- **D6 -- historical changelog blocks (<=v2.5.0) still mention Branding: LEAVE AS-IS.** Owner:
+  *"Some branding was shipped as available -- full scrubs not needed."* Only the [3.0.0]-forward
+  bar (and now the wiki, per D1) gets the no-spoiler treatment.
+- **D7 -- the docs-prune-2026-07-31 branch: DELETE, already gone remotely.** Owner: *"It was
+  deleted remotely -- kill all remains. Document what was done in this audit so we may run it
+  again."* Local branch ref cleanup + doc note pending (see follow-up below); the prune's
+  original intent (`docs/ROADMAP.md` as WIP tracker, DECISIONS.md reasoning-only) can be
+  re-attempted against the current v3.0 tree in P2, this time to completion.
+- **D8 -- DOM-level test automation: ADD a Playwright smoke layer.** Scoped into P1 (test audit).
+- **D9 -- the P0-P5 attack order: APPROVED AS PROPOSED.**
+
+**Art redo directions (the 7 flagged 2026-08-07 items) -- real handoff art delivered same day**
+at `C:\Users\gwilkins\Desktop\Moonglade arthandoff 8.8.26\`:
+- **A1 Narrator** -- `nel_narrator.png` (577x478, real alpha 0-255) replaces
+  `branding/mascots/gen_nel.png` across all 9 consumers (ClaimModal fallback rung, FolioOverlay
+  poke-narrator, LoginPage + useLogin fallback arrays, SetupWizard/useSetupWizard SLIDES[3] +
+  sync-mascot img, SetupWizardMobile sync-mascot, folio-overlay.css + folio-mobile.css
+  background-image). Filename change (`gen_nel.png` -> `nel_narrator.png`) also resolves the
+  long-flagged twin-filename code smell (ART.md "Two code smells") since the root spinner file
+  (A3) gets its own distinct new name too.
+- **A2 Setup Wizard pages 2/3/4** -- `nel_setup2/3/4.png` + matching animated `.webp` pairs
+  replace `nel_carl.png` (SLIDES[1]) and `nel_micdrop.png` (SLIDES[2]); page 4 (SLIDES[3])
+  previously borrowed the narrator file and now gets its own dedicated `nel_setup4` art,
+  freeing `nel_carl.png`/`nel_micdrop.png` for whatever the owner has planned for those
+  characters next. Owner: *"We need to test if their transparent layer works properly in the
+  setup assistant"* -- live-verify after wiring, don't assume.
+- **A3 Job-Tracker spinner** -- `nel_spinner.png` (566x560, real alpha) replaces root
+  `branding/gen_nel.png` (Banner.jsx narrator-adjacent spinner, ActivityTray job-tracker spinner,
+  test_render_harness.py's route mock).
+- **A4 Claim pill icon** -- HELD. Owner: *"Considering retirement and replacing with new
+  badging -- leave for now until follow-up design pass. Flag for Claude Design banner
+  notice."* Added to the P5 design-pass batch, not executed now.
+- **A5 Drop-in logo -> Void Sentinel default** -- CONFIRMED. Owner: *"Void sentinel is default
+  and new marks will be flagged for replacement in an upcoming patch."* Ships as part of the
+  asset-bundling project (P3), where the default-logo-asset mechanism actually lives.
+- **A6 Favicon** -- no notes; stays open, un-executed, still flagged for a future redo pass.
+- **A7 PWA icons** -- owner asked whether there's an Apple sizing requirement. Answered inline in
+  chat: yes, `apple-touch-icon` (currently 180x180, already shipped and correctly sized per
+  Apple's HIG) is the iOS-specific one; the 192/512 pair are the general PWA manifest icons
+  (Android/desktop-install spec, not Apple-specific). All three stay in scope for the redo;
+  no new sizes needed, just new art at the existing three sizes.
+
+**Executed same session:** A1/A2/A3 wired + live-verified (see the commit this entry sits
+alongside); A4/A6 held; A5/D2/D3/D4/D5/D7 need a follow-up workshop/doc pass, tracked above.

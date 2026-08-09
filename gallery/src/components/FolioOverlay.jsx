@@ -669,7 +669,7 @@ export default function FolioOverlay({ onClose }) {
                         direction (the DC's own mock never wired this one,
                         but there's no reason the bigger portrait shouldn't
                         answer a click too). */}
-                    <img className="mgfo-narrator-img poke" src="/branding/mascots/gen_nel.png" alt="Nel, the Athenaeum archivist"
+                    <img className="mgfo-narrator-img poke" src="/branding/mascots/nel_narrator.png" alt="Nel, the Athenaeum archivist"
                       onClick={pokeNarrator} onError={(e) => e.currentTarget.remove()} />
                     <div className="mgfo-narrator-quote" title="she has opinions about your backlog">
                       "{NARRATOR_LINES[quoteIdx]}"
