@@ -283,7 +283,7 @@ export default function Lightbox({
             <button className="lbx-chip" title="Publish this image to PixAI"
               onClick={() => onPublish && onPublish(it.media_id)}>☁ Publish</button>
             <a className="lbx-chip" title="Open the full record"
-              href={"/next?image=" + encodeURIComponent(it.media_id)}
+              href={"/?image=" + encodeURIComponent(it.media_id)}
               onClick={(e) => {
                 if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
                 e.preventDefault();

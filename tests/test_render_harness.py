@@ -694,9 +694,13 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
     could go stale while the other moves on.
 
     Measured as shipped at 1280x900, on `/` and on `/loom?bundle=1` alike: the icon carries
-    `jt-queued`, the mascot's and ring's computed animationName are both `none` (a rendering
-    job reads `gen-spin`), the phase pill reads "queued" uppercased, and the estimate chip
-    reads "est. 27s wait".
+    `jt-queued`, the ring's computed animationName is `none` (a rendering job reads
+    `gen-spin`), the phase pill reads "queued" uppercased, and the estimate chip reads
+    "est. 27s wait". The mascot's own animationName is checked too but is ALWAYS `none`,
+    queued or not -- since the 2026-08-09 fix (owner: "spins weirdly offset") the portrait
+    never animates by design (object-position:60% 32% crops it off-center to frame the face;
+    rotating that asymmetric crop as a rigid unit made the face itself tumble through every
+    orientation), so the ring alone is the real discriminator now.
     """
     seen = {}
     for host, path in (("gallery", "/"), ("loom", "/loom?bundle=1")):
@@ -708,11 +712,13 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
         assert m["hasQueuedClass"], (
             "{}: the queued row's icon has no jt-queued modifier".format(host))
         assert m["mascotAnimation"] == "none", (
-            "{}: the mascot is still animating ({!r}) on a job PixAI has not started -- "
-            "motion is what reads as work in progress".format(host, m["mascotAnimation"]))
+            "{}: the mascot has an animationName again ({!r}) -- it must never spin (an "
+            "asymmetric object-position crop tumbles the face when rotated as a rigid unit, "
+            "the 2026-08-09 bug); this should hold true regardless of queued/running state, "
+            "not just here".format(host, m["mascotAnimation"]))
         assert m["ringAnimation"] == "none", (
-            "{}: the progress ring is still spinning ({!r})".format(
-                host, m["ringAnimation"]))
+            "{}: the progress ring is still spinning ({!r}) on a job PixAI has not started -- "
+            "motion is what reads as work in progress".format(host, m["ringAnimation"]))
         assert m["pillText"] == "queued", (
             "{}: phase pill reads {!r}".format(host, m["pillText"]))
         assert m["pillTransform"] == "uppercase", (
@@ -723,17 +729,15 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
         assert m["iconVisible"] and m["rowWidth"] > 200, (
             "{}: the queued row did not lay out ({!r})".format(host, m))
 
-        # --- phase 2, per host: prove the measurement discriminates. Dropping the modifier
-        # is the pre-fix state exactly (one spinner for queued and rendering alike); if the
-        # animation stays `none` without it, the assertions above are vacuous.
+        # --- phase 2, per host: prove the RING measurement discriminates (the mascot's own
+        # animationName can't -- it's always "none", queued or not, since the 2026-08-09 fix).
+        # Dropping the modifier is the pre-fix state exactly (one spinner for queued and
+        # rendering alike); if the ring's animation stays `none` without it, the assertion
+        # above proves nothing.
         page.evaluate("() => document.querySelector('#jobs-tray .jt-spin')"
                       ".classList.remove('jt-queued')")
         _settle(page)
         reverted = page.evaluate(_TRAY_QUEUED_JS)
-        assert reverted["mascotAnimation"] == "gen-spin", (
-            "{}: removing jt-queued left the mascot's animationName at {!r} -- the "
-            "'none' assertion above proves nothing".format(
-                host, reverted["mascotAnimation"]))
         assert reverted["ringAnimation"] == "gen-spin", (
             "{}: removing jt-queued left the ring at {!r}".format(
                 host, reverted["ringAnimation"]))
@@ -1173,3 +1177,34 @@ def test_setup_wizard_onboards_a_genuinely_fresh_install(
     finally:
         ctx.close()
 
+
+
+def test_tracker_spin_ring_renders_as_a_true_circle_not_an_ellipse(logged_in_page):
+    """A second, independent bug hiding behind the 2026-08-09 face-tumble fix above: owner
+    caught it on a SECOND recording after that fix shipped, still "wonky". `.jt-spin` is a
+    flex CHILD of `.jt-ic` (34px wide) but declares `width:48px` with no shrink override --
+    a flex item's default flex-shrink:1 compresses its WIDTH to fit the 34px parent while its
+    explicit HEIGHT:48px is untouched (flexbox only resizes the main axis), measured live via
+    getBoundingClientRect at 34x48 before the fix. `.gen-ring`'s `inset:2px` on that non-square
+    box made it an ELLIPSE, and animating an ellipse's rotation visibly bulges/narrows as it
+    turns -- exactly the "wonky, offset" look, independent of which crop the portrait itself
+    carries. Fix: flex-shrink:0 on .jt-spin. Asserted as real rendered geometry (not CSS text
+    presence) because that is exactly the kind of mismatch a shrink-eligible flex child creates
+    invisibly -- the declared width:48px in the stylesheet was never the lie, the cascade was.
+    """
+    page = logged_in_page(**DESKTOP)
+    _open_tray_with_queued_job(page, "/")
+    page.evaluate("() => document.querySelector('#jobs-tray .jt-spin').classList.remove('jt-queued')")
+    _settle(page)
+    geo = page.evaluate("""() => {
+        const spin = document.querySelector('#jobs-tray .jt-spin');
+        const ring = spin.querySelector('.gen-ring');
+        const r = el => { const b = el.getBoundingClientRect(); return {w: b.width, h: b.height}; };
+        return {spin: r(spin), ring: r(ring)};
+    }""")
+    assert abs(geo["spin"]["w"] - geo["spin"]["h"]) < 0.5, (
+        ".jt-spin is not square ({!r}) -- a flex child of the 34px-wide .jt-ic shrinking its "
+        "own declared 48px width again".format(geo["spin"]))
+    assert abs(geo["ring"]["w"] - geo["ring"]["h"]) < 0.5, (
+        ".gen-ring is not square ({!r}) -- it renders an ellipse, which bulges/narrows as it "
+        "rotates instead of spinning cleanly".format(geo["ring"]))

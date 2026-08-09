@@ -228,7 +228,7 @@ export default function Grid({
      App's own listener reads back into state. Same destination, no new API. */
   const goDetails = (mid) => {
     if (typeof onOpenDetails === "function") { onOpenDetails(mid); return; }
-    window.history.pushState({}, "", "/next?image=" + encodeURIComponent(mid));
+    window.history.pushState({}, "", "/?image=" + encodeURIComponent(mid));
     window.dispatchEvent(new PopStateEvent("popstate"));
   };
 

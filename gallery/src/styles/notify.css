@@ -134,15 +134,31 @@
 .jt-glyph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}
 .jt-ok{color:var(--emerald);font-size:15px;} .jt-err{color:var(--red);font-size:15px;} .jt-warn{color:var(--peach);font-size:15px;}
 .jt-nel{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;}
-.jt-spin{position:relative;width:48px;height:48px;}
-.jt-spin .jt-nel{inset:6px;width:36px;height:36px;border-radius:50%;object-fit:cover;object-position:60% 32%;animation:gen-spin 1.6s linear infinite;}
+/* flex-shrink:0 fixed 2026-08-09 (owner: still "wonky" after the crop fix below, caught on a
+   second recording). .jt-spin is a flex CHILD of .jt-ic, which is only 34px wide; with no
+   shrink override a flex item's default flex-shrink:1 compresses its WIDTH to fit that 34px
+   box while its explicit HEIGHT:48px is untouched (flexbox only resizes the main axis) --
+   measured live via getBoundingClientRect at 34x48, not 48x48. inset:2px on that non-square
+   box makes .gen-ring an ELLIPSE, and animating an ellipse's rotation visibly bulges/narrows
+   as it turns -- a second, independent bug the crop fix never touched (it was always there,
+   just unreadable underneath the face-tumble). */
+.jt-spin{position:relative;width:48px;height:48px;flex-shrink:0;}
+/* Portrait STAYS STILL -- fixed 2026-08-09 (owner: "spins weirdly offset", live-diagnosed
+   from screen recordings). object-position:60% 32% deliberately crops an OFF-CENTER slice of
+   the source art to frame the face -- spinning that asymmetric crop as a rigid unit (this rule
+   used to carry the same rotating keyframe the ring below still does) made the face itself
+   tumble through every orientation as the icon turned -- rotated a quarter turn, upside down
+   at halfway. The ring below is now the ONLY thing that reads as in-motion, the usual spinner
+   shape: a still glyph inside a turning ring. */
+.jt-spin .jt-nel{inset:6px;width:36px;height:36px;border-radius:50%;object-fit:cover;object-position:60% 32%;}
 .jt-spin .gen-ring{position:absolute;inset:2px;border-radius:50%;border:2px solid rgba(182,146,230,.22);border-top-color:var(--lavender);animation:gen-spin .8s linear infinite;}
-/* OWN the keyframes both rules above animate -- host-neutral by design: this file must define
+/* OWN the keyframe the ring above animates -- host-neutral by design: this file must define
    every animation it references (the Loom shell carries no gallery page CSS). */
 @keyframes gen-spin{to{transform:rotate(360deg);}}
-/* QUEUED: the SAME .jt-spin element with its two animations stopped -- motion is the thing that
-   reads as "work is happening", and for a queued job that is the entire lie being told. */
-.jt-spin.jt-queued .jt-nel{animation:none;opacity:.62;}
+/* QUEUED: the ring's motion stops -- motion is the thing that reads as "work is happening",
+   and for a queued job that is the entire lie being told. The portrait has no animation to
+   stop (it never spins now); it still dims to read as "not the active one". */
+.jt-spin.jt-queued .jt-nel{opacity:.62;}
 .jt-spin.jt-queued .gen-ring{animation:none;border-color:var(--surface1);border-top-color:var(--overlay0);}
 .jt-empty-nel{width:104px;height:104px;object-fit:contain;margin:0 auto 8px;display:block;opacity:.92;}
 .jt-main{flex:1;min-width:0;}

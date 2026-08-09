@@ -208,7 +208,7 @@ export default function DetailsView({
   const detailIdx = row && items ? items.findIndex((it) => it.media_id === row.media_id) : -1;
   const indexLabel = detailIdx >= 0 && items ? (detailIdx + 1) + " of " + items.length : "";
 
-  const navHref = (mid) => "/next?image=" + encodeURIComponent(mid || "");
+  const navHref = (mid) => "/?image=" + encodeURIComponent(mid || "");
   const navClick = (mid) => (e) => {
     // mid=null is the "Back to gallery" link: close the takeover. (This used to
     // preventDefault and then just RETURN -- a dead click; only Escape closed.
@@ -223,7 +223,7 @@ export default function DetailsView({
   if (state.error || !row) {
     return (
       <div className="detail-wrap">
-        <div className="detail-nav"><a className="back-link" href="/next" onClick={navClick(null)}>&larr; Back to gallery</a></div>
+        <div className="detail-nav"><a className="back-link" href="/" onClick={navClick(null)}>&larr; Back to gallery</a></div>
         <div className="gd-note">{state.error || "Image not found."}</div>
       </div>
     );
@@ -237,7 +237,7 @@ export default function DetailsView({
   return (
     <div className={"detail-wrap" + (focusMode ? " focus-mode" : "")}>
       <div className="detail-nav">
-        <a className="back-link" href="/next" onClick={navClick(null)}>&larr; Back to gallery</a>
+        <a className="back-link" href="/" onClick={navClick(null)}>&larr; Back to gallery</a>
         {onOpenLightbox ? (
           <button type="button" className="nav-arrow" title="Full-screen viewer"
             onClick={() => onOpenLightbox(row.media_id)}>&#9974;</button>
