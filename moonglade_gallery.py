@@ -4602,6 +4602,34 @@ def _account_key(username):
     return hashlib.sha256(str(username).encode("utf-8")).hexdigest()[:16]
 
 
+def _redact_host_paths_cli(out_dir, msg):
+    """Module-level twin of create_app()'s nested `_redact_host_paths` closure, for a
+    caller with no Flask request/closure of its own -- specifically
+    moonglade_backup.py's `_cli_job_finish`, which logs a bare-terminal CLI run's
+    failure straight to jobs.jsonl (served to any LOGIN-tier caller via /api/jobs)
+    with no `out_dir` closure to reuse. The nested version can't be imported (it's a
+    local name inside create_app's function body, not a module attribute), so this
+    is the SAME algorithm -- same candidate list, same longest-first/case-insensitive
+    path-segment matching, same "<host-path>" placeholder -- kept as one copy here
+    rather than two independently-maintained ones drifting apart. See that closure
+    (just inside create_app, above) for the full rationale on each design choice
+    (resolve()'d out_dir, longest-first, case-insensitive separator-agnostic regex)."""
+    if not msg:
+        return msg
+    import tempfile
+    candidates = [str(Path(out_dir).resolve()), os.path.expanduser("~"),
+                 tempfile.gettempdir(), sys.prefix, os.getcwd()]
+    seen, out = set(), str(msg)
+    for path in sorted(set(candidates), key=len, reverse=True):
+        if not path or len(path) < 4 or path in seen:
+            continue
+        seen.add(path)
+        segments = re.split(r'[\\/]+', path)
+        pattern = r'[\\/]+'.join(re.escape(s) for s in segments)
+        out = re.sub(pattern, "<host-path>", out, flags=re.IGNORECASE)
+    return out
+
+
 def create_app(out_dir: Path):
     app = Flask(__name__)
 
