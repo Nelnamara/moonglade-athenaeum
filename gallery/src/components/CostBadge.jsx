@@ -29,13 +29,14 @@ import "../styles/cost-badge.css";
                the user that generating may spend. Never silently neutral: the fail-closed
                spend gate this exists for.
 
-   VANILLA CAMPAIGN NOTE (2026-08-08): static/mg-cost-badge.js is deliberately NOT deleted in
-   the same step this lands. The still-vanilla mg-generate-drawer.js (the Loom's gen drawer)
-   hard-embeds a <mg-cost-badge> in its markup, so the custom element stays registered until the
-   drawer is ported (campaign step 7). (mg-upscale-panel.js also embedded it, but was ported to
-   React UpscalePanel + deleted in step 5.) This React component is what every REACT surface
-   uses; the frozen vanilla file serves only that one dying embedder and is deleted with the
-   drawer, when static/ finally empties.
+   VANILLA CAMPAIGN NOTE (2026-08-08): static/mg-cost-badge.js was deleted at the END of the
+   no-vanilla campaign (step 7), together with its last embedder, the video drawer. That drawer's
+   markup used to hard-embed a <mg-cost-badge> custom element, which kept mg-cost-badge.js
+   registered through steps 4-6; step 7 ported the drawer to the React <VideoDrawer>, which embeds
+   this same React <CostBadge> instead, so the custom element had no remaining embedder and both
+   files went. (mg-upscale-panel.js also embedded it, but was ported to React UpscalePanel +
+   deleted in step 5.) This React component is now what EVERY surface uses; static/ holds no
+   vanilla JS at all.
 
    Props (all optional):
      hint       — the idle label. Hosts with a mode-dependent hint just re-set it.

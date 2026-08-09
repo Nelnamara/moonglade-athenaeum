@@ -51,6 +51,7 @@ import MgArtFilters from "../gallery/src/art/artFilters.js";
 import GalleryPicker from "../gallery/src/components/GalleryPicker.jsx";
 import ModelPicker from "../gallery/src/components/ModelPicker.jsx";
 import CostBadge from "../gallery/src/components/CostBadge.jsx";
+import VideoDrawer from "../gallery/src/components/VideoDrawer.jsx";
 import { installNotify, NotifyRoot } from "../gallery/src/notify/index.jsx";
 
 // The shared notify system (toasts · Activity tray · achievement celebrations · the Jobs
@@ -2577,12 +2578,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             render can't unmount the element and kill its in-flight poll -- CSS-hidden
             instead, exactly like every other tab's content stays out of the DOM flow
             without losing its live state. See the videoTrailer comment above. */}
-        {/* data-loom-ctx tells the shared drawer's own CSS (static/mg-generate-drawer.js) to
-            hide its Camera + Basic/Professional controls -- this host already owns both (the
-            shot Camera field above, the top-strip Draft toggle) via its own state. Without
-            this attribute the drawer renders its own copies alongside the Loom's, showing two
-            Camera controls and two quality controls for the same setting. */}
-        <mg-generate-drawer ref={bindGenDrawer} data-loom-ctx="" style={{ display: tab === "Video" ? "" : "none" }}></mg-generate-drawer>
+        {/* loomCtx tells the shared drawer's own CSS (gen-drawer.css) to hide its Camera +
+            Basic/Professional controls -- this host already owns both (the shot Camera field
+            above, the top-strip Draft toggle) via its own state. Without it the drawer renders
+            its own copies alongside the Loom's, showing two Camera controls and two quality
+            controls for the same setting. VideoDrawer's ref resolves to its root DOM node, so
+            bindGenDrawer's addEventListener/prefill/setBusy calls are unchanged from the vanilla
+            <mg-generate-drawer> custom element this replaced (no-vanilla port, 2026-08-08). */}
+        <VideoDrawer ref={bindGenDrawer} loomCtx style={{ display: tab === "Video" ? "" : "none" }} />
         {videoTrailer}
         {/* picker-parity-round2 (problem 2): the Model/LoRA picker overlay -- a floating
             panel, not squeezed inline into this rail (the owner's exact complaint). Lazy-
@@ -6179,9 +6182,9 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       // it in practice. generateShot has exactly one caller, batchGenerate, whose own
       // `todo` filter already excludes status:"done" -- importedFootagePatch always sets
       // that -- so an imported card never reaches here via "Generate all" either. The real
-      // per-shot "Generate video" click lives entirely in <mg-generate-drawer>'s own
-      // _generate() (static/mg-generate-drawer.js), a SEPARATE, pre-existing guard
-      // (_hasAnyRef) with its own message ("Pick a source image first."/"Pick at least one
+      // per-shot "Generate video" click lives entirely in <VideoDrawer>'s own
+      // doGenerate() (gallery/src/components/VideoDrawer.jsx), a SEPARATE, pre-existing guard
+      // (hasAnyRef) with its own message ("Pick a source image first."/"Pick at least one
       // reference first.") -- live-verified: clicking it on an imported shot fires no
       // fetch, spends nothing, and leaves the footage untouched. This message stays as a
       // defensive fallback in case a future refactor ever re-routes per-shot generation

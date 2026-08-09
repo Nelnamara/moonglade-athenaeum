@@ -132,8 +132,8 @@ export const effectivePrompt = (c) => (c.promptOverride ? (c.promptOverrideText 
 //   1. A project-GLOBAL tag on each cast asset (assigned once, in cast-add order -- see
 //      nextTag/maxTagNum above -- e.g. a cast member added 4th is "@image4" forever, project-
 //      wide, regardless of which shots actually use them).
-//   2. The Multi-Reference drawer's OWN per-shot numbering (static/mg-generate-drawer.js's
-//      _refMap()/_renderSlots()), which has zero concept of a global tag namespace -- it always
+//   2. The Multi-Reference drawer's OWN per-shot numbering (the React <VideoDrawer>'s refMap(),
+//      gallery/src/components/VideoDrawer.jsx), which has zero concept of a global tag namespace -- it always
 //      labels whatever lands in its image bank "@image1", "@image2", ... purely by ARRAY
 //      POSITION, in the exact order shotPayload()/buildShotPayload() hands it (see that
 //      function's own prefill-effect comment in master-storyboard.jsx).
@@ -330,8 +330,8 @@ export const pickTarget = (entry, project, imgSrc, slot) => {
 };
 
 // ---------- r2v video-reference bank pick persistence (parallel to pickTarget() above) ---
-// The Multi-Reference drawer's SEPARATE video-reference bank (static/mg-generate-drawer.js's
-// _vidSlots, requested with bank:"vid") has the exact same "a pick only ever lands in the
+// The Multi-Reference drawer's SEPARATE video-reference bank (the React <VideoDrawer>'s
+// vidSlots, requested with bank:"vid") has the exact same "a pick only ever lands in the
 // drawer's own private slots" gap pickTarget() closes for the image bank -- but it can't
 // reuse shotImageRefs()/pickTarget() as-is: video refs carry their media id in c.refs' own
 // .source field as a numeric STRING (see shotPayload()'s `vids` computation below), never

@@ -484,11 +484,17 @@ Stopping a maintenance job is localhost-only and server-enforced. The BUTTON is 
 
 **Why.** The achievement and branding assets are to be bundled into a package format (the MPQ-style container the owner has raised repeatedly), which changes what is discoverable at a level a response tweak cannot reach — anyone can read a JSON response, bundled or not, but the whole discoverability model shifts once the assets stop being loose files. Masking the array now is work thrown away against that design, and would also have to be undone or reconciled when the bundle lands. Revisit as part of the bundling design, not before. See [[Packaged assets must keep a loose-file override layer]].
 
-### mg-generate-drawer must stay a build-free <script>  ·  *2026-07-18*
+### mg-generate-drawer must stay a build-free <script>  ·  *2026-07-18* — SUPERSEDED 2026-08-08
 
-The shared generate drawer cannot import from loom-mutations.js (an ES module) and must stay a build-free <script>. Shared logic it needs (e.g. the friendly generation-error mapper) is a local, verbatim port, with a permanent parity test guarding the copy against drift.
+**SUPERSEDED by "Vanilla campaign 7/8 COMPLETE" (2026-08-08):** the whole no-vanilla directive
+reversed this. The drawer is now the React `<VideoDrawer>`, bundled into both hosts' builds; the
+friendlyGenErr copy moved to `gallery/src/gen/videoDrawerCore.js` and its parity test (against
+loom-mutations.js) moved with it. Kept below for history. ~~The shared generate drawer cannot
+import from loom-mutations.js (an ES module) and must stay a build-free `<script>`.~~
 
-**Why.** The component is framework-neutral and mounted by two different hosts; requiring a build step would break that. A duplicated-with-parity-test copy is the accepted cost of the constraint, not an oversight.
+~~Shared logic it needs (e.g. the friendly generation-error mapper) is a local, verbatim port, with a permanent parity test guarding the copy against drift.~~
+
+~~**Why.** The component is framework-neutral and mounted by two different hosts; requiring a build step would break that. A duplicated-with-parity-test copy is the accepted cost of the constraint, not an oversight.~~ (Both hosts now have a build — the Loom went bundle-only in campaign step 1 — so the constraint no longer holds.)
 
 ### RESOLVED: /api/task-status conflated a local blip with a real PixAI failure  ·  *2026-07-18, resolved since*
 
@@ -6338,3 +6344,60 @@ detail popover shows Task ID + copy / Time Sent / Time Spent; the Loom FAB obeys
 overrides (computed bottom:88px, z-index:401); zero console errors. Tests reconciled via a
 14-agent workflow; job-tracker frontend REDESIGN deferred by owner decision (see the entry
 above) -- this port is deliberately faithful chrome.
+
+### Vanilla campaign 7/8 COMPLETE — generate-drawer -> React VideoDrawer; static/ is empty of JS  ·  *2026-08-08*
+
+The last and largest vanilla component. `static/mg-generate-drawer.js` (1,416 lines -- the shared
+VIDEO Generate form: 3 modes i2v/flf/r2v, 6 image + 3 video + 1 audio ref banks, the 7-model
+roster with capability gating, a contenteditable prompt with live @image/@video/@audio chips, live
+cost, submit, and its own concurrent poll loops) became `gallery/src/components/VideoDrawer.jsx` +
+`gen-drawer.css`. It embedded `<mg-cost-badge>`, so this port also deletes `static/mg-cost-badge.js`
+(the "file lingers by design" from step 4). **With both gone, static/ holds ZERO .js files** --
+the campaign's stated goal (owner: "no trace of Vanilla JS should survive"). Remaining static/
+files are HTML design mockups + the design-token kit.
+
+**DROP-IN, not a rewrite of the contract.** The vanilla was a custom ELEMENT: hosts held the DOM
+node, called `node.prefill()/setRefs()/flushPromptEdit()/setBusy()`, read `node.mode`, and
+`node.addEventListener('mg-*')`. VideoDrawer preserves that exactly -- its ref resolves to the
+ROOT DOM node with those methods hung on it (via useImperativeHandle) and it dispatches the same
+11 BUBBLING, composed CustomEvents (mg-submit/result/error/slow/paused/dirty/prompt-commit/
+mode-commit/duration-commit/audio-commit/pick-request), NOT React callback props. So App.jsx's
+document-level listeners and the Loom's `bindGenDrawer` (addEventListener + prefill + setBusy)
+work UNCHANGED; only the mount changed (createElement / `<mg-generate-drawer>` -> `<VideoDrawer>`).
+
+**The spend-critical state logic became a PURE layer** (`gallery/src/gen/videoDrawerCore.js`):
+`applyMode`/`applyModelGating`/`applySetRefs`/`applyPrefill`/`buildPayload`/`hasAnyRef`/
+`flfMissingStart`/`heldRefsNotice`, operating on a plain `{mode, slots, imgSlots, vidSlots,
+audSlot, ...}` object with NO DOM/React. The vanilla entangled this in element methods, so its
+money-bug tests (M27 "another shot's media in a paid payload", flf positional end-frame) had to
+regex-extract class methods and stub DOM; now the React component AND the loom node-tests call the
+SAME pure functions, so those regressions are pinned by EXECUTING the real transition, not a
+source-presence proxy -- stronger coverage than before. The React side owns only paint (a state
+ref + forceUpdate; the contenteditable + floating preview are imperative through refs, React never
+touches their children) and pricing/poll debounce. Concurrent-submit safety kept verbatim: each
+submit gets its own appended result line, the button frees on submit-answer (not completion), each
+poll loop tracks its timeout in a shared ref array, and the unmount effect sweeps them all
+(never-orphan a ~210k-credit render).
+
+**Consumers rewired:** gallery `GenerateDrawer.jsx` VideoTab + mobile `VideoMode.jsx` render
+`<VideoDrawer ref>`; the Loom mounts `<VideoDrawer ref={bindGenDrawer} loomCtx style=…>` (loomCtx
+replaces the data-loom-ctx attribute; style/className pass through). Bundled into both the gallery
+Vite build and the loom esbuild bundle (VideoDrawer imports the React CostBadge, already bundled).
+Shells: both `<script src="/static/mg-*.js">` tags removed from NEXT_PAGE + the Loom shell.
+
+**Tests reconciled, all green.** Loom node suite 716/716; full pytest 1528 passed. friendlyGenErr
+parity repointed to videoDrawerCore's copy; the concurrent-safety test is now source-presence on
+VideoDrawer.jsx; med/med2/med3/med4 execute the pure layer directly; loom-gen-drawer-loom-ctx +
+loom-picker-flyout-overlay assert the `<VideoDrawer>` mount; loom-picker-video-import's per-shot
+no-ref guard repointed; test_web_pick's privacy-blur + V4.0-red-warn checks repointed to
+VideoDrawer.jsx/gen-drawer.css; test_cost_badge_ships_with_every_price_surface retired (no custom
+element left to pair a script to); test_design_kit_sync's kit-page floor dropped the two deleted
+harnesses. Both bundles rebuilt + committed.
+
+**NOT yet live-verified in a browser** -- builds + both full test suites are the verification so
+far (the spend-critical logic is behaviorally unit-tested). A live Video-tab walkthrough (render,
+the @-chip contenteditable, cost pricing on a picked ref -- WITHOUT ever clicking Generate, per the
+hands-off spend rule) is the natural next check before the master merge.
+
+**v3.0 GATE:** static/ is empty of JS -> the no-vanilla campaign is complete -> `design-final-pass`
+is ready for the master merge + v3.0 tag, pending the owner's live test.

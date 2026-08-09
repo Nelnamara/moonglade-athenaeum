@@ -8,9 +8,9 @@ import path from "node:path";
 // <mg-cost-badge> custom element was reimplemented as gallery/src/components/CostBadge.jsx --
 // a forwardRef + useImperativeHandle component so every existing costRef.current.setPrice/
 // setChecking/clear call site (useGenerate/useEditGenerate/EditTab/FixTab and the Loom's
-// priceInto) keeps working verbatim. The frozen vanilla file stays registered only for the one
-// remaining vanilla embedder (mg-generate-drawer.js -- mg-upscale-panel.js was ported to React
-// UpscalePanel + deleted in step 5) and is deleted with the drawer at the end of the campaign.
+// priceInto) keeps working verbatim. static/mg-cost-badge.js was deleted with its last embedder,
+// the video drawer, in step 7 (the campaign's end) -- the video drawer is now the React
+// <VideoDrawer>, which embeds this same React <CostBadge>.
 //
 // No jsdom/React harness in this runner (same as ModelPicker.jsx / master-storyboard.jsx) --
 // source-presence assertions are the established pattern; real interaction was verified live

@@ -5,6 +5,7 @@ import {
 } from "../gen/genCore.js";
 import ModelFlyout from "./ModelFlyout.jsx";
 import CostBadge from "./CostBadge.jsx";
+import VideoDrawer from "./VideoDrawer.jsx";
 import EditTab from "./EditTab.jsx";
 import FixTab from "./FixTab.jsx";
 import FiltersPanel from "./FiltersPanel.jsx";
@@ -18,38 +19,34 @@ import "../styles/dock.css";
 
    MACHINERY IS UNCHANGED. Image tab = React port riding the classic endpoints
    (useGenerate/genCore/submitTask); Edit/Fixer = EditTab/FixTab; Enhance =
-   the art-filters compare panel; Video tab = the SHARED <mg-generate-drawer>
-   web component. Every submit path, the <mg-cost-badge> pricing, the request
-   contract ({tab, mid, thumb, nonce}) and the videoPrefill hand-off all keep
-   firing exactly as before — this file only re-shells the chrome around them.
+   the art-filters compare panel; Video tab = the React <VideoDrawer> (the
+   no-vanilla port of the shared video form, 2026-08-08). Every submit path, the
+   CostBadge pricing, the request contract ({tab, mid, thumb, nonce}) and the
+   videoPrefill hand-off all keep firing exactly as before — this file only
+   re-shells the chrome around them.
 
    THE DRAWER IS NEVER UNMOUNTED. It hides with CSS (the host's open/closing
-   classes on .mgx-dock-host drive mgDockIn/mgDockOut), because the shared
-   video component's disconnectedCallback sweeps its poll timers -- unmounting
-   on close would orphan an in-flight (already charged) video task from every
-   surface, and a v4.0 15s render is ~210,000 credits. */
+   classes on .mgx-dock-host drive mgDockIn/mgDockOut), because VideoDrawer's
+   unmount effect sweeps its poll timers -- unmounting on close would orphan an
+   in-flight (already charged) video task from every surface, and a v4.0 15s
+   render is ~210,000 credits. */
 
 function VideoTab({ visible, prefillRequest }) {
-  const host = useRef(null);
   const el = useRef(null);
-  useEffect(() => {
-    if (!host.current || host.current.firstChild) return;
-    if (!window.customElements || !window.customElements.get("mg-generate-drawer")) {
-      host.current.textContent = "The shared video drawer script did not load.";
-      return;
-    }
-    const e = document.createElement("mg-generate-drawer");
-    host.current.appendChild(e);
-    el.current = e;
-  }, []);
   // The lightbox's "To Video" hand-off (classic's Gen.addVideoRefs): a single
   // image reference always prefills as i2v (first-frame), matching classic's
-  // refs.length>1?'r2v':'i2v' for the one-image case.
+  // refs.length>1?'r2v':'i2v' for the one-image case. VideoDrawer's ref resolves
+  // to its root DOM node with .prefill hung on it, so this call site is unchanged
+  // from the vanilla custom element it replaced.
   useEffect(() => {
     if (!prefillRequest || !el.current || typeof el.current.prefill !== "function") return;
     el.current.prefill(prefillRequest);
   }, [prefillRequest]);
-  return <div ref={host} className="mgdock-videohost" style={{ display: visible ? "" : "none" }} />;
+  return (
+    <div className="mgdock-videohost" style={{ display: visible ? "" : "none" }}>
+      <VideoDrawer ref={el} />
+    </div>
+  );
 }
 
 export default function GenerateDrawer({ open, onClose, account, request }) {

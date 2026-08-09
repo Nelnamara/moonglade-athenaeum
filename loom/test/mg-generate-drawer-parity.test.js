@@ -1,33 +1,24 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
 import { friendlyGenErr } from "../src/loom-mutations.js";
+import { friendlyGenErr as localFriendlyGenErr } from "../../gallery/src/gen/videoDrawerCore.js";
 
-// static/mg-generate-drawer.js is a plain host-agnostic <script> with no build step, so it
-// can't import loom-mutations.js -- its friendlyGenErr is a deliberate, hand-maintained LOCAL
-// COPY (see that file's own duplication-risk comment next to the function). The only guard
-// against the two silently drifting apart on a future edit to either one is this test:
-// extract the drawer's copy as a live function and assert it stays byte-identical to the
-// real one across a fixed case list. If this ever fails, someone edited one copy without
-// updating the other.
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const drawerSrc = readFileSync(path.join(__dirname, "../../static/mg-generate-drawer.js"), "utf8");
-
-const match = drawerSrc.match(/function friendlyGenErr\(raw\) \{[\s\S]*?\n  \}/);
-if (!match) {
-  throw new Error(
-    "static/mg-generate-drawer.js's local friendlyGenErr(raw) was not found by this test's " +
-    "regex -- its signature or indentation changed. Update this test's extraction pattern " +
-    "to match, don't just delete the test."
-  );
-}
-const localFriendlyGenErr = new Function("return (" + match[0] + ")")();
-
+// The video Generate drawer carries a deliberate, hand-maintained LOCAL COPY of
+// friendlyGenErr (gallery/src/gen/videoDrawerCore.js) so a video generation rejected by PixAI
+// reads identically whether it surfaced via the Loom's own poll path or the drawer's independent
+// submit/poll cycle. There is no shared module the Loom bundle and the gallery build can both
+// import at build time without pulling in loom-core, so the mapping is intentionally duplicated
+// (see videoDrawerCore.js's own duplication-risk comment next to the function). The only guard
+// against the two silently drifting apart on a future edit to either one is this test.
+//
+// Before the no-vanilla port (2026-08-08) the copy lived inline in static/mg-generate-drawer.js
+// (a build-free <script>), so this test regex-extracted it as text. Now videoDrawerCore.js is a
+// real ES module with no DOM/React dependency, so the copy is imported directly and compared
+// across the same fixed case list. If this ever fails, someone edited one copy without the other.
+//
 // (There used to be a THIRD hand-copy in moonglade_gallery.py's classic Image-tab inline
-// <script>, checked here too; that whole classic surface was removed in the 2026-08-08
-// classic cut, so only the drawer's copy remains to keep in parity with the real one.)
+// <script>, checked here too; that whole classic surface was removed in the 2026-08-08 classic
+// cut, so only the drawer's copy remains to keep in parity with the real one.)
 
 const CASES = [
   "INSUFFICIENT_BALANCE", "insufficient balance for this task", "40300010",
@@ -38,7 +29,7 @@ const CASES = [
   "", null, undefined, 0, false,
 ];
 
-describe("mg-generate-drawer.js's local friendlyGenErr stays in parity with loom-mutations.js's real one", () => {
+describe("videoDrawerCore.js's local friendlyGenErr stays in parity with loom-mutations.js's real one", () => {
   CASES.forEach((c) => {
     test(`matches real friendlyGenErr for input ${JSON.stringify(c)}`, () => {
       assert.equal(localFriendlyGenErr(c), friendlyGenErr(c));
