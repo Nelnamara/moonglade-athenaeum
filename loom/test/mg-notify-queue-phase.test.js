@@ -204,10 +204,14 @@ describe("the queued state is styled, and styled the same on both hosts", () => 
   // Port note 2026-08-08: the styles moved verbatim from mg-notify.js's injected MG_CSS to
   // gallery/src/styles/notify.css, which rides BOTH hosts' bundles (gallery/dist/app.css and
   // loom/dist/master-storyboard.bundle.css) -- one file, so the two hosts cannot drift.
-  test("the queued modifier stops both animations rather than hiding the icon", () => {
-    assert.match(css, /\.jt-spin\.jt-queued \.jt-nel\{[^}]*animation:none/,
-      "the mascot keeps spinning on a queued job -- motion is precisely what reads as " +
-      "'work is happening', which is the bug");
+  test("the queued modifier stops the ring's motion rather than hiding the icon", () => {
+    // The portrait (.jt-nel) never animates at all any more (fixed 2026-08-09 -- see
+    // notify.css's own note above .jt-spin .jt-nel), so there is no per-queued-state
+    // `animation:none` override left to pin on it; it still dims via opacity instead.
+    // The ring is the one real motion signal now, and it must still stop when queued --
+    // motion is precisely what reads as "work is happening", which is the bug.
+    assert.match(css, /\.jt-spin\.jt-queued \.jt-nel\{[^}]*opacity:/,
+      "the queued portrait lost its dim-when-queued styling");
     assert.match(css, /\.jt-spin\.jt-queued \.gen-ring\{[^}]*animation:none/,
       "the progress ring keeps spinning on a queued job");
   });

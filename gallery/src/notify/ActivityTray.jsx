@@ -85,7 +85,13 @@ function Row({ j, onDismiss, onOpenDetail }) {
         {showErr ? <div className="jt-errmsg">{j.error}</div> : null}
       </div>
       {st === "done" && mid ? (
-        <a className="jt-thumb" href={"/next?image=" + encodeURIComponent(mid)} onClick={(e) => e.stopPropagation()}>
+        <a className="jt-thumb" href={"/?image=" + encodeURIComponent(mid)}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;   // real new-tab open
+            e.preventDefault();
+            document.dispatchEvent(new CustomEvent("mg-open-details", { bubbles: true, composed: true, detail: { mid } }));
+          }}>
           <img src={"/thumbs/" + encodeURIComponent(mid) + ".jpg"} alt="" />
         </a>
       ) : null}
