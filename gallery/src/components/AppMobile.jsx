@@ -25,6 +25,8 @@ import FolioMobile from "./FolioMobile.jsx";
 import ContactSheetMobile from "./ContactSheetMobile.jsx";
 import ClaimModal from "./ClaimModal.jsx";
 import useClaimModal from "../hooks/useClaimModal.js";
+import ActivityRow from "../notify/ActivityRow.jsx";
+import { subscribe as subscribeJobs, dismiss as dismissJob, clearFinished as clearFinishedJobs } from "../notify/jobsStore.js";
 import "../styles/gallery-mobile.css";
 import "../styles/create-mobile.css";
 
@@ -278,6 +280,17 @@ export default function AppMobile({ boot }) {
   // 'import' | 'contests' | 'health'. See header comment. 220ms = MobileScreen's
   // own CSS duration (vs the sheets' 280ms).
   const { sheet: screen, closing: screenClosing, open: openScreenKey, close: closeScreenRaw } = useSheet(220);
+  // Header-docked Activity control, mobile idiom (Claude Design handoff 2026-08-09, drift
+  // item 39): reuses the SAME jobsStore every host reads (real /api/jobs truth, no new
+  // endpoint) and the app's existing MobileSheet/useSheet machinery -- not useActivity's own
+  // open/close (that hook's open state drives jobsStore's PERSISTED mg_jobs_open flag, meant
+  // for the desktop dropdown; the sheet's own open/closed state is `sheet === "activity"`
+  // instead, ephemeral like every other mobile sheet, never persisted across reloads).
+  const [jobsState, setJobsState] = useState({ jobs: [], open: false });
+  useEffect(() => subscribeJobs(setJobsState), []);
+  const jobsRunning = jobsState.jobs.filter((j) => (j.status || "running") === "running").length;
+  const [jobExpandedId, setJobExpandedId] = useState(null);
+  const toggleJobRow = (jid) => setJobExpandedId((cur) => (cur === jid ? null : jid));
   const fl = useFlavour(undefined, boot.build_stamp);
   const lib = useLibrary();
   const costRef = useRef(null);
@@ -493,6 +506,11 @@ export default function AppMobile({ boot }) {
             onClick={openFolio}>🌙</button>
           <button type="button" className="glm-iconbtn glm-iconbtn-teal" title="The Loom — video storyboard"
             onClick={() => openSheet("loom")}>▮</button>
+          <button type="button" className="glm-iconbtn glm-iconbtn-lav" title="Activity"
+            style={{ position: "relative" }} onClick={() => openSheet("activity")}>
+            ◉
+            {jobsRunning ? <span className="glm-iconbtn-badge" aria-hidden="true" /> : null}
+          </button>
           <button type="button" className="glm-iconbtn glm-iconbtn-lav" title="More"
             onClick={() => openSheet("menu")}>☰</button>
         </div>
@@ -643,6 +661,37 @@ export default function AppMobile({ boot }) {
           onClose={closeContactSheet}
         />
       )}
+
+      <MobileSheet open={sheet === "activity"} closing={closing} onClose={closeSheet}
+        title={
+          <span style={{ display: "flex", alignItems: "baseline" }}>
+            <span>ACTIVITY {jobsState.jobs.length || ""}</span>
+            <span style={{ flex: 1 }} />
+            {jobsState.jobs.length ? (
+              <span className="glm-sheet-title-action" role="button" tabIndex={0}
+                onClick={() => clearFinishedJobs()}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); clearFinishedJobs(); } }}>
+                clear finished
+              </span>
+            ) : null}
+          </span>
+        }>
+        {!jobsState.jobs.length ? (
+          <div className="at-empty">
+            <img className="at-empty-nel" src="/branding/mascots/trk_empty.png" alt="" onError={(e) => e.currentTarget.remove()} />
+            <div>The archive is quiet.<br />Generations and syncs will appear here.</div>
+          </div>
+        ) : (
+          <div className="glm-activity-list">
+            {jobsState.jobs.map((j) => (
+              <ActivityRow key={j.job_id} job={j} compact
+                expanded={jobExpandedId === j.job_id}
+                onToggle={toggleJobRow} onDismiss={dismissJob}
+              />
+            ))}
+          </div>
+        )}
+      </MobileSheet>
 
       <MobileSheet open={sheet === "loom"} closing={closing} onClose={closeSheet} title="THE LOOM">
         <div className="glm-loom-note">

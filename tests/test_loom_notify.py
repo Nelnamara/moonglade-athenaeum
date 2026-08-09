@@ -1,10 +1,16 @@
-"""The Loom shell and the shared notify system (Ach/Toast/Jobs/ActivityTray) -- a cheap
+"""The Loom shell and the shared notify system (Ach/Toast/Jobs/Activity) -- a cheap
 regression guard on the contract between them. Ported 2026-08-08 (no-vanilla campaign,
 component 6): static/mg-notify.js is DELETED; the notify system now lives in React at
 gallery/src/notify/ and rides the Loom's own bundle (loom/dist/master-storyboard.bundle.js
-+ .css), so the shell must NOT load the old script or ship the old anchor divs -- the React
-<ActivityTray> portals to body and renders #jobs-fab/#jobs-tray itself, with the SAME ids,
-which is what keeps the shell's Loom-scoped z-index overrides working."""
++ .css), so the shell must NOT load the old script or ship the old anchor divs.
+
+RE-PORT 2026-08-09 (Claude Design handoff, drift item 39): the floating #jobs-fab/#jobs-tray
+(portaled to body by <ActivityTray>, same ids on both hosts, needing the shell's own Loom-
+scoped z-index/bottom !important overrides to clear .lv-overlay) is retired entirely.
+<ActivityTray>.jsx is deleted; the Activity control is now inline in each host's own header
+(gallery/src/components/SeparatorBar.jsx's `.mgx-act-wrap`, the Loom toolbar's
+`.lv-top-act-wrap` in master-storyboard.jsx) -- a normal DOM descendant on the Loom, not a
+body-level sibling, so it needs none of the old !important reconciliation at all."""
 import re
 from pathlib import Path
 
@@ -18,40 +24,45 @@ def test_loom_shell_loads_shared_notify_script_and_anchors(tmp_path):
     # on purpose (the bundle carries notify; React renders the anchors), so the guard now
     # points the other way: a reappearing script tag or anchor div means the shell edit
     # was reverted to the vanilla wiring.
+    #
+    # Re-port 2026-08-09: the ids themselves are retired now (drift item 39) -- the Activity
+    # control lives inline in the toolbar, not portaled to body -- so there is no longer a
+    # z-index override for the shell to carry for them at all; asserting their absence covers
+    # both "reverted to vanilla" and "reverted to the 2026-08-08 floating-tray shape".
     cli = login_client(tmp_path)
     body = cli.get("/loom").get_data(as_text=True)
     assert "/static/mg-notify.js" not in body, (
         "the Loom shell references the deleted mg-notify.js -- the React bundle carries "
         "the notify system now")
     assert 'id="jobs-fab"' not in body and 'id="jobs-tray"' not in body, (
-        "the shell ships its own anchor divs again -- React's <ActivityTray> renders "
-        "these ids itself; a second copy means duplicate ids on the page")
-    # The ids still matter to the shell: its Loom-scoped lift over .lv-overlay(400) must
-    # keep targeting the React-rendered elements.
-    assert "#jobs-fab  { z-index: 401 !important; }" in body
-    assert "#jobs-tray { z-index: 402 !important; }" in body
+        "the shell ships its own anchor divs, or the retired floating Activity tray's ids "
+        "reappeared -- the Activity control is inline in the toolbar now, not body-portaled")
+    assert "z-index: 401 !important" not in body and "z-index: 402 !important" not in body, (
+        "a Loom-scoped z-index override for the old floating tray reappeared -- the inline "
+        "Activity control (.lv-top-act-wrap) is a normal .lv-overlay descendant and needs none")
 
 
-def test_loom_shell_lifts_activity_and_help_widgets_above_the_overlay(tmp_path):
-    """LoomV2's .lv-overlay (z-index:400, opaque) buried the Activity chip (#jobs-fab, z234
-    from the notify styles) and the ? help FAB (#eb-help-btn, z300) so both were invisible on
-    /loom though the wiki documents them as usable there. The shell now lifts them just above
-    400 (401/402), Loom-scoped -- the notify stylesheet keeps its base 234 so the gallery is
-    untouched. (Port note 2026-08-08: the base z used to live in static/mg-notify.js's
-    injected CSS; it now lives in gallery/src/styles/notify.css, same numbers.)"""
+def test_loom_shell_lifts_help_widget_above_the_overlay(tmp_path):
+    """LoomV2's .lv-overlay (z-index:400, opaque) buried the ? help FAB (#eb-help-btn, z300)
+    so it was invisible on /loom though the wiki documents it as usable there. The shell
+    lifts it just above 400 (401/402), Loom-scoped.
+
+    Re-port note 2026-08-09 (Claude Design handoff, drift item 39): this test used to also
+    cover the Activity chip (#jobs-fab, same 401/402 lift) -- that control is retired, and
+    its replacement never needed the lift in the first place (it's an inline .lv-overlay
+    descendant now, not a body-portaled sibling racing the same z-index). This test now
+    covers only what's still real: the help FAB, which is unrelated to the Activity control
+    and was never part of that retirement.
+    """
     cli = login_client(tmp_path)
     body = cli.get("/loom").get_data(as_text=True)
-    # the Loom-only <style> override lifts the shared jobs widgets over .lv-overlay(400)
-    assert "#jobs-fab  { z-index: 401 !important; }" in body
-    assert "#jobs-tray { z-index: 402 !important; }" in body
-    # the shell-only help FAB + its modal clear it too (401/402, not the old 300/301)
+    # the shell-only help FAB + its modal clear .lv-overlay(400) via 401/402 (not the old 300/301)
     assert "right:18px;z-index:401;width:38px" in body                # #eb-help-btn
     assert "inset:0;z-index:402;background:rgba(6,4,16,.72)" in body   # #eb-help modal
-    # the raise is Loom-scoped: notify.css still ships the base 234/235 (gallery unaffected)
+    # notify.css no longer ships a base 234/235 at all -- there is no floating tray left to
+    # lift, on either host.
     css = _notify_css()
-    assert "z-index:234" in css   # #jobs-fab
-    assert "z-index:235" in css   # #jobs-tray
-    assert "z-index:401" not in css and "z-index:402" not in css
+    assert "z-index:234" not in css and "z-index:235" not in css
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +138,9 @@ def _format_js():
 
 
 def _tray_jsx():
-    return (_notify_dir() / "ActivityTray.jsx").read_text(encoding="utf-8")
+    # Re-port note 2026-08-09: ActivityTray.jsx (the floating tray) is deleted; the row
+    # render it used to own lives in ActivityRow.jsx now (one row per host's own dropdown).
+    return (_notify_dir() / "ActivityRow.jsx").read_text(encoding="utf-8")
 
 
 def _notify_css():
@@ -189,7 +202,7 @@ def test_notify_components_do_not_inherit_their_font_from_the_host_page():
 
     #jobs-fab / #jobs-tray / #mg-toasts set font-SIZE but used to inherit font-FAMILY, and
     the two hosts disagree: the gallery's BASE_HTML body declares `system-ui, sans-serif`,
-    while _LOOM_SHELL's body set only background and margin. Those three are siblings of
+    while _LOOM_SHELL's body set only background and margin. Those three were siblings of
     #root in that shell, so on /loom they inherited nothing and fell back to the browser
     default. The notify system is host-neutral by design, so the component owns this.
 
@@ -202,10 +215,17 @@ def test_notify_components_do_not_inherit_their_font_from_the_host_page():
     React port (no served page carries the #ach-modal skeleton; the React Folio replaced
     it) and notify.css deliberately did not carry its rules forward.
 
+    Re-port note 2026-08-09 (Claude Design handoff, drift item 39): #jobs-fab/#jobs-tray ->
+    .at-chip/.at-panel (the Activity control's new trigger + dropdown). Both are now inline
+    in each host's own header, no longer body-level siblings of #root -- but the self-
+    declared font-family stays on principle (the component is still host-neutral by design,
+    and a future change could re-portal or relocate either piece without anyone remembering
+    to re-add this).
+
     Bite: drop font-family from any of the four roots and this fails, naming it.
     """
     css = _notify_css()
-    for sel in ("#jobs-fab{", "#jobs-tray{", "#mg-toasts{", ".ach-m2{"):
+    for sel in (".at-chip{", ".at-panel{", "#mg-toasts{", ".ach-m2{"):
         i = css.index(sel)
         rule = css[i:css.index("}", i)]
         assert "font-family" in rule, (

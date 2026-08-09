@@ -260,16 +260,16 @@
 .mgx-size input[type=range] { width: 78px; height: 3px; cursor: pointer;
   accent-color: var(--accent); }
 
-/* ---- activity cluster ---- */
-.mgx-act { position: relative; display: flex; align-items: center; gap: 9px; flex: none; }
-.mgx-actdot { width: 7px; height: 7px; border-radius: 50%; flex: none;
-  background: rgba(214, 210, 226, .3); }
-.mgx-act.live .mgx-actdot { background: var(--accent);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 80%, transparent);
-  animation: mgPulse 1.5s ease-in-out infinite; }
-.mgx-acttxt { font-size: 10.5px; font-weight: 600; white-space: nowrap;
-  color: rgba(214, 210, 226, .45); transition: color .3s; }
-.mgx-act.live .mgx-acttxt { color: var(--mauve); }
+/* ---- Activity control (Claude Design handoff 2026-08-09, drift item 39) ----
+   The old ambient-only .mgx-act/.mgx-actdot/.mgx-acttxt cluster (a static dot+text, no
+   click handler) is retired -- SeparatorBar.jsx now renders the real header-docked trigger
+   (notify/ActivityChip.jsx) + anchored dropdown (notify/ActivityPanel.jsx) here instead,
+   styled by the shared .at-* rules in notify.css. This wrapper's ONLY job is to be the
+   positioned ancestor .at-panel's `position:absolute;right:0` anchors against -- without
+   position:relative here the panel falls through to the next positioned ancestor up the
+   tree instead (found live: it anchored against something page-width, pinning the dropdown
+   to the far right of the whole viewport instead of tucking under the little chip). */
+.mgx-act-wrap { position: relative; }
 
 /* ---- credits chip (account balance; gold billing tooltip drops below-right) ---- */
 .mgx-cred { position: relative; z-index: 1; display: flex; align-items: center; gap: 9px;
@@ -370,6 +370,8 @@ button.mgx-claim .coin { font-size: 13px; }
 /* ============================ reduced motion =============================== */
 @media (prefers-reduced-motion: reduce) {
   .mgx-metal, .mgx-sqbtn.mgx-metal, .mgx-mark-tilt, .mgx-mark-sheen, .mgx-nelimg,
-  .mgx-nelhalo, .mgx-act.live .mgx-actdot, .mgx-flavour.fA, .mgx-flavour.fB { animation: none; }
+  .mgx-nelhalo, .mgx-flavour.fA, .mgx-flavour.fB { animation: none; }
+  /* .at-chip's own live dot / indeterminate ring have their own reduced-motion guard in
+     notify.css (shared across every host, not gallery-specific like this block). */
   .mgx-bnr, .mgx-title, .mgx-mark { transition: none; }
 }

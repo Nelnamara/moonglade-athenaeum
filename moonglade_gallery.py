@@ -4393,49 +4393,20 @@ try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.docu
 <style>
 __DESIGN_TOKENS__
 /* font-family here, not just in .sb-root: anything mounted OUTSIDE #root inherits from
-   body, and this shell deliberately mounts things there -- the Activity chip and tray, the
-   toast stack, the ? FAB. Without it they fell back to the browser default font while the
-   gallery shell gave them system-ui, so the same components looked different on the
-   two pages. notify.css now also states its own family (host-neutral by design), but the
-   shell should not be handing anything an unstyled baseline. */
+   body, and this shell deliberately mounts things there -- the toast stack, the ? FAB.
+   Without it they fell back to the browser default font while the gallery shell gave them
+   system-ui, so the same components looked different on the two pages. notify.css now also
+   states its own family (host-neutral by design), but the shell should not be handing
+   anything an unstyled baseline. */
 body { background: var(--base); margin: 0; font-family: system-ui, sans-serif; }
-/* The shared Job Tracker (the React <ActivityTray>, styled by notify.css in the bundle's
-   stylesheet) defaults #jobs-fab/#jobs-tray to bottom:14px;left:14px -- fine on the gallery's
-   own layout, but in the Loom the left Cast panel's own "+ add from gallery"/"Import
-   collection" buttons live at the BOTTOM of that same scrollable rail. Confirmed via live
-   measurement 2026-07-18: an open (even empty) tray overlaps the top ~13px of those buttons
-   once the panel is scrolled to its end -- worse with real jobs in the tray (it grows up to
-   600px tall). Shifted up just enough to clear that fixed ~70px control strip. No selector
-   scoping needed -- this whole <style> block only ever ships inside _LOOM_SHELL, never the
-   gallery's own page, so it's already Loom-exclusive by virtue of which page includes it
-   (the tray portals to document.body, siblings of #root, so a .sb-root-scoped selector
-   couldn't match them). Repositioning left<->right instead of shifting up was considered and
-   rejected -- the Generate drawer panel on the right is equally wide (560px) and would risk
-   the identical collision with ITS OWN bottom controls instead of solving anything.
-   !important is deliberate, not laziness: the bundle's stylesheet <link> is injected at the
-   END of the page (LOOM_PAGE_BUNDLE's runtime block), landing LATER in the cascade than this
-   static <style> -- a plain same-specificity override here silently loses the tie-break, so
-   !important is the only way to reliably win without depending on load order. */
-#jobs-fab, #jobs-tray { bottom: 88px !important; }
-/* Lift the Activity chip (and the ? help FAB below, inline) above LoomV2's center view.
-   .lv-overlay (master-storyboard.jsx: position:fixed; inset:0; z-index:400; background:
-   var(--base) -- opaque) buries them: neither #root nor its .sb-root child forms a stacking
-   context, so that 400 competes in the ROOT context directly against these body-level FABs
-   (notify.css gives them 234/235) and wins. 401/402 floats them over the board while staying
-   UNDER the modal/celebration tier that must keep covering them -- .sb-seq / .sb-pick-ov and the
-   frame picker <mg-gallery-picker> (all 500), #mg-toasts (510), .ach-m2 (520; its confetti
-   sheet sits INSIDE at local z 1, behind the card -- the old 521-in-front was a bug).
-   Loom-only: this block ships only in _LOOM_SHELL, so the gallery's own #jobs-fab keeps 234.
-   !important for the same bundle-stylesheet cascade-timing reason as the bottom rule above.
-   FIXED 2026-07-24 (was a known residual): Deep Focus's .lv-df-veil (450) and its nested
-   flyouts render INSIDE .lv-overlay, so from the root they were part of the single 400 atom
-   and these corner FABs painted over them. A DOM hoist wasn't needed after all --
-   master-storyboard.jsx now toggles a `.lv-overlay-df` class onto .lv-overlay itself while
-   Deep Focus is open (z-index 450, matching the veil's own intended value), which lifts the
-   whole atom back above these FABs in the root context for as long as Deep Focus stays open.
-   !important for the same bundle-stylesheet cascade-timing reason as the bottom rule above. */
-#jobs-fab  { z-index: 401 !important; }
-#jobs-tray { z-index: 402 !important; }
+/* The old #jobs-fab/#jobs-tray positioning overrides (bottom:88px to clear the Cast panel's
+   own buttons; z-index:401/402 to climb over .lv-overlay's 400) were retired 2026-08-09
+   (Claude Design handoff, drift item 39). The Activity control is no longer a body-portaled
+   floating tray -- it's .lv-top-act-wrap, a normal child of .lv-overlay itself
+   (master-storyboard.jsx's own toolbar), so it was never competing with .lv-overlay's z-index
+   at the root context in the first place; it just paints in normal document order, correctly
+   UNDER Deep Focus's veil like everything else inside .lv-overlay, with no !important
+   reconciliation needed anywhere. */
 
 /* Clearance under the ? help FAB, which is the cost of making it visible at all.
    #eb-help-btn is position:fixed bottom:18px + 38px tall, so it floats over the
@@ -4462,9 +4433,10 @@ body { background: var(--base); margin: 0; font-family: system-ui, sans-serif; }
 __UPSCALE_CONST__
 </head><body>
 <div id="root"></div>
-<!-- The #jobs-fab/#jobs-tray anchors lived here until the 2026-08-08 no-vanilla port; the
-     React <ActivityTray> (bundled, portaled to body) now renders them with the same ids, so
-     the shell's z-index/bottom overrides above still apply. -->
+<!-- The #jobs-fab/#jobs-tray anchors lived here until the 2026-08-08 no-vanilla port, then
+     were rendered by the portaled React <ActivityTray> with the same ids. Both are gone as
+     of 2026-08-09 (Claude Design handoff, drift item 39): the Activity control is inline in
+     the toolbar (master-storyboard.jsx's own .lv-top-act-wrap) now, not body-level. -->
 <script>
 window.storage = {
   get:function(k){ return fetch('/api/loom/get?key='+encodeURIComponent(k)).then(function(r){return r.json();}).then(function(d){ return (d&&d.value!=null)?{value:d.value}:null; }); },

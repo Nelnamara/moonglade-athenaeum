@@ -377,89 +377,27 @@ def _settle(page):
 
 
 # ---------------------------------------------------------------------------
-# 4. Deep Focus's veil vs the corner FABs  (stacking OUTCOME, not a z-index number)
+# 4. Deep Focus's veil vs the corner FABs -- RETIRED 2026-08-09
 # ---------------------------------------------------------------------------
-_DF_STACKING_JS = """() => {
-  const overlay = document.querySelector('.lv-overlay');
-  const veil = document.querySelector('.lv-df-veil');
-  const fab = document.getElementById('jobs-fab');
-  const b = fab.getBoundingClientRect();
-  // The one coordinate where the two provably overlap: the FAB's own centre. The veil is
-  // position:fixed;inset:0, so it covers this point whenever it is painted at all.
-  const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
-  return {
-    overlayClass: overlay.className,
-    overlayZ: getComputedStyle(overlay).zIndex,
-    veilPresent: !!veil,
-    veilZ: veil ? getComputedStyle(veil).zIndex : null,
-    veilCoversFab: !!veil && (() => {
-      const v = veil.getBoundingClientRect();
-      return v.left <= b.left && v.top <= b.top && v.right >= b.right && v.bottom >= b.bottom;
-    })(),
-    fabZ: getComputedStyle(fab).zIndex,
-    fabDisplay: getComputedStyle(fab).display,
-    hitIsFab: !!hit && !!hit.closest('#jobs-fab'),
-    hitIsVeil: !!hit && !!hit.closest('.lv-df-veil'),
-    hitDescription: hit ? (hit.id || String(hit.className) || hit.tagName) : null,
-  };
-}"""
-
-
-def test_deep_focus_veil_wins_over_the_corner_fabs(logged_in_page):
-    """Deep Focus must paint OVER #jobs-fab/#jobs-tray -- asserted as the effective
-    stacking outcome (`elementFromPoint` where they overlap), not as a z-index number.
-
-    Measured as shipped at 1280x900: `.lv-overlay.lv-overlay-df` computes z-index 450 and
-    `#jobs-fab` 401 (both real, both live), the veil is inset:0 so it covers the FAB's
-    31x79 box at (14, 781), and the hit test at that box's centre lands in `.lv-df-veil`.
-    A z-index comparison alone would have MISSED the original bug entirely: 450 > 401 read
-    correctly on paper the whole time, and the veil still lost, because it renders inside
-    `.lv-overlay`'s 400 atom. Only the hit test sees that.
-
-    Deep Focus is opened for real (double-click a board card, exactly as a user does), so
-    this covers the JSX toggle and the CSS together. `loom/test/loom-df-veil-stacking.test.js`
-    is the text-level guard on the same rule; this is the rendering one.
-    """
-    page = logged_in_page(**DESKTOP)
-    # ?bundle=1 serves the committed esbuild bundle instead of transpiling the JSX in the
-    # browser with Babel-standalone -- several seconds faster, and CI already has a
-    # stale-bundle gate so it cannot drift from the source.
-    _visit(page, "/loom?bundle=1")
-    page.wait_for_selector(".lv-overlay")
-    page.wait_for_selector(".lv-card")
-    # The floating side panels (the real floating-glass-panel design, 2026-08-05 rebuild)
-    # open OVER the board, each with its own backdrop -- while either is up, no board
-    # card is clickable, by design. A real user collapses them first (each panel's own
-    # ‹/› button), so the test does exactly that. This test predates the floating
-    # rebuild; it used to reach the card directly because the old panels were docked
-    # siblings, not overlays.
-    for side in ("left", "right"):
-        if page.locator(".lv-panel." + side).count():
-            page.click(".lv-panel." + side + " .lv-col")
-            page.wait_for_selector(".lv-panel." + side, state="detached")
-    _freeze_motion(page)                       # re-applied: React injects its own <style>
-    page.dblclick(".lv-card")                  # -> setDeepFocus(entry)
-    page.wait_for_selector(".lv-df-veil")
-    _settle(page)
-
-    m = page.evaluate(_DF_STACKING_JS)
-    assert m["fabDisplay"] != "none", "#jobs-fab is not rendered -- nothing to lose to"
-    assert m["veilCoversFab"], "the veil does not cover the FAB, so the hit test proves nothing"
-    assert m["hitIsVeil"] and not m["hitIsFab"], (
-        "with Deep Focus open, the topmost element over #jobs-fab is {!r} (overlay z={}, "
-        "fab z={}) -- the corner FABs are painting over the veil".format(
-            m["hitDescription"], m["overlayZ"], m["fabZ"]))
-
-    # --- phase 2: prove the guard bites. Drop the `.lv-overlay-df` modifier the JSX adds
-    # while Deep Focus is open; that IS the pre-fix state (a 450 veil inside a 400 atom).
-    page.evaluate("() => document.querySelector('.lv-overlay')"
-                  ".classList.remove('lv-overlay-df')")
-    _settle(page)
-    reverted = page.evaluate(_DF_STACKING_JS)
-    assert reverted["hitIsFab"] and not reverted["hitIsVeil"], (
-        "removing .lv-overlay-df restored the pre-fix stacking and the veil STILL won "
-        "the hit test ({!r}) -- the assertion above is vacuous".format(
-            reverted["hitDescription"]))
+# This test (test_deep_focus_veil_wins_over_the_corner_fabs) verified that Deep Focus's veil
+# painted OVER the OLD floating #jobs-fab, a body-portaled element sitting OUTSIDE
+# .lv-overlay's own DOM subtree -- exactly the shape of bug where a z-index comparison alone
+# (450 > 401) reads correctly on paper while the veil still visually loses, because the FAB
+# was never really competing inside .lv-overlay's stacking context at all.
+#
+# Claude Design handoff 2026-08-09 (drift item 39) retired that floating FAB entirely. The
+# new Activity control (.lv-top-act-wrap, in loom/master-storyboard.jsx's own toolbar) is a
+# normal DESCENDANT of .lv-overlay -- confirmed by reading the actual JSX nesting, not
+# assumed -- so it was never a candidate for this bug class again: anything Deep Focus's veil
+# already covers inside .lv-overlay (which is everything in that subtree, toolbar included)
+# covers the new control too, by ordinary DOM stacking, no z-index reconciliation needed. The
+# property this test measured (a floating overlay racing a full-screen veil via z-index) no
+# longer describes anything real on this page, so there is nothing left to regression-guard --
+# keeping the test would mean asserting on a selector (#jobs-fab) that no longer exists.
+# `loom/test/loom-df-veil-stacking.test.js`'s own guard (the `.lv-overlay-df` z-index-bump
+# mechanism itself, not the FAB it used to protect) is UNTOUCHED and still accurate -- that
+# mechanism wasn't removed, it's just no longer load-bearing for the Activity control
+# specifically; left in place since nothing here asked it to be pulled out.
 
 
 # ---------------------------------------------------------------------------
@@ -610,30 +548,37 @@ def test_saved_skin_is_applied_before_the_body_exists(logged_in_page):
         "a post-load skin change was recorded with body absent -- the pre-paint assertion "
         "above cannot distinguish pre- from post-paint and is vacuous")
 # ---------------------------------------------------------------------------
-# 6. The Activity tray's QUEUED state, rendered -- and rendered IDENTICALLY on both hosts
+# 6. The Activity control's QUEUED state, rendered -- and rendered IDENTICALLY on both hosts
 # ---------------------------------------------------------------------------
 # Owner complaint 2026-07-25: a plain generation "goes right to generated and spins until
 # done. That's it." A task PixAI has accepted but never dispatched sits at a non-terminal
 # status for ~60 minutes and used to draw the same spinning mascot as real work.
 #
 # Asserted the only way that can see it: read the mascot's COMPUTED animationName. Asserting
-# the CSS text (`.jt-spin.jt-queued .jt-nel{animation:none}` -- since the 2026-08-08 React
-# port it lives in gallery/src/styles/notify.css, verbatim) proves nothing about whether
-# the class reaches the element or wins the cascade -- and the Loom overrides #jobs-tray CSS
-# in its own <style>, which is precisely the shape of edit that could break one host and not
-# the other (the tray's font-family already drifted that way once, 2026-07-21).
+# the CSS text alone proves nothing about whether the class reaches the element or wins the
+# cascade -- and each host CAN carry its own extra CSS (the Loom shell's own <style>), which
+# is precisely the shape of edit that could break one host and not the other (the tray's
+# font-family already drifted that way once, 2026-07-21).
+#
+# RE-PORT 2026-08-09 (Claude Design handoff, drift item 39): the floating #jobs-fab/#jobs-tray
+# pair (one shared portaled component, identical ids on both hosts) is retired. Each host now
+# mounts its OWN trigger inline in its own header -- gallery/src/components/SeparatorBar.jsx's
+# `.mgx-act-wrap .at-chip` vs the Loom's `.lv-top-act-wrap .at-chip` in
+# loom/master-storyboard.jsx -- so the TRIGGER selector is host-specific, but everything past
+# it (the dropdown panel, the row, the spinner) is the SAME shared `.at-*` markup/CSS on both,
+# which is what this test actually verifies stays identical.
 #
 # _freeze_motion is deliberately NOT used here: it nulls every animation on the page, which
 # would make "animationName is none" trivially true and this whole test vacuous.
 _TRAY_QUEUED_JS = """() => {
-  const item = document.querySelector('#jobs-tray .jt-item');
-  const spin = item.querySelector('.jt-spin');
-  const nel = spin.querySelector('.jt-nel');
-  const ring = spin.querySelector('.gen-ring');
-  const pill = item.querySelector('.jt-phase');
-  const eta = item.querySelector('.jt-eta');
+  const item = document.querySelector('.at-panel .at-row');
+  const spin = item.querySelector('.at-spin');
+  const nel = spin.querySelector('.at-nel');
+  const ring = spin.querySelector('.at-ring');
+  const pill = item.querySelector('.at-phase');
+  const eta = item.querySelector('.at-eta');
   return {
-    hasQueuedClass: spin.classList.contains('jt-queued'),
+    hasQueuedClass: spin.classList.contains('at-queued'),
     mascotAnimation: getComputedStyle(nel).animationName,
     ringAnimation: getComputedStyle(ring).animationName,
     pillText: pill ? pill.textContent.trim() : null,
@@ -641,7 +586,7 @@ _TRAY_QUEUED_JS = """() => {
     pillColor: pill ? getComputedStyle(pill).color : null,
     etaText: eta ? eta.textContent.trim() : null,
     // The row must still be a visible, laid-out row -- not collapsed to nothing by the
-    // extra chips wrapping badly in the tray's 366px.
+    // extra chips wrapping badly in the panel's ~380px.
     rowWidth: Math.round(item.getBoundingClientRect().width),
     iconVisible: getComputedStyle(nel).display !== 'none',
   };
@@ -649,7 +594,7 @@ _TRAY_QUEUED_JS = """() => {
 
 # One queued job, stubbed at /api/jobs rather than written into the harness server's own
 # jobs.jsonl: the log's collapse/ageing behaviour has thorough coverage in
-# tests/test_jobs.py, and what needs a browser is only how the tray DRAWS this record.
+# tests/test_jobs.py, and what needs a browser is only how the row DRAWS this record.
 _QUEUED_JOB = {"jobs": [{
     "job_id": "2037594262049550370", "type": "generate", "label": "Generated",
     "status": "running", "started": False, "eta_seconds": 27,
@@ -657,12 +602,12 @@ _QUEUED_JOB = {"jobs": [{
 }]}
 
 
-# The tray row renders `<img class="jt-nel" ...>` with an onError handler that REMOVES the
-# element (ActivityTray.jsx's Row since the 2026-08-08 React port -- same self-delete the
-# vanilla row() had), so on a throwaway catalog with no branding/ directory the mascot
-# DELETES ITSELF and there is no element left to read an animationName off (this test's
-# first run died exactly there). A real install has the file; served here as a 1x1
-# transparent PNG so the measured DOM matches a real one.
+# The row renders `<img class="at-nel" ...>` with an onError handler that REMOVES the element
+# (ActivityRow.jsx's own self-delete, ported from the vanilla row() before it), so on a
+# throwaway catalog with no branding/ directory the mascot DELETES ITSELF and there is no
+# element left to read an animationName off (this test's first run died exactly there). A
+# real install has the file; served here as a 1x1 transparent PNG so the measured DOM matches
+# a real one.
 _PIXEL_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4zwAAAgIBAG4/xUwAAAAASUVORK5CYII=")
 
@@ -673,28 +618,41 @@ def _open_tray_with_queued_job(page, path):
     page.route("**/branding/nel_spinner.png", lambda route: route.fulfill(
         status=200, content_type="image/png", body=_PIXEL_PNG))
     page.goto(path, wait_until="domcontentloaded")
-    # The fab is what a user clicks. 2026-08-08 port note: the vanilla's
-    # JobsCard.applyState() reveal-on-DOMContentLoaded is now ActivityTray.jsx rendering
-    # #jobs-fab with class "show" whenever the tray is closed (installNotify() ->
-    # jobsStore.start() has already run by the time the bundle mounts) -- same selector,
-    # same first observable state.
-    page.wait_for_selector("#jobs-fab.show")
-    page.click("#jobs-fab")
-    page.wait_for_selector("#jobs-tray.open #jobs-tray .jt-item, #jobs-tray.open .jt-item")
+    # The trigger chip is ALWAYS rendered now (idle or live -- there is no more separate
+    # "show" class to wait for; the old floating FAB only existed at all once the tray had
+    # something to report). One trigger per page on either host.
+    page.wait_for_selector(".at-chip")
+    page.click(".at-chip")
+    page.wait_for_selector(".at-panel .at-row")
+    # The panel's own entrance animation (atSlideIn, 220ms, notify.css) carries a
+    # translateY+scale transform that only resolves to `transform:none` once it finishes --
+    # _settle()'s two animation frames (~32ms) are nowhere near long enough to guarantee that,
+    # so a geometry read right after opening can catch it mid-transform (measured live: a
+    # lingering scale(.97) shrank a 380px-wide panel to 368.6px, explained exactly by
+    # 380*.97). Polled rather than a fixed sleep so this waits exactly as long as needed, no
+    # more -- and freeze_motion is NOT an option here, several callers of this helper
+    # (test_queued_generation_stops_the_spinner_on_both_hosts) measure the ring's OWN
+    # continuous animationName, which freeze_motion would zero out and make vacuous.
+    # A settled `transform: none` (the animation's own "to" keyframe, held via its `both`
+    # fill-mode) serializes as the identity matrix, NOT the literal string "none" -- measured
+    # live (Chromium): 'matrix(1, 0, 0, 1, 0, 0)'. Accept either serialization rather than
+    # assume one.
+    page.wait_for_function(
+        "() => { const t = getComputedStyle(document.querySelector('.at-panel')).transform;"
+        " return t === 'none' || t === 'matrix(1, 0, 0, 1, 0, 0)'; }")
     _settle(page)
 
 
 def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
-    """The gallery and the Loom render ONE shared tray source -- since the 2026-08-08 React
-    port that is gallery/src/notify/ActivityTray.jsx + gallery/src/styles/notify.css, built
-    into TWO separate bundles (Vite's app.css for "/", esbuild's
-    master-storyboard.bundle.css for /loom) -- so the queued state must be measurably
-    identical on both. That is the claim, and this measures it rather than inferring it
-    from the source being shared: two build pipelines is exactly how one host's bundle
-    could go stale while the other moves on.
+    """The gallery and the Loom render the SAME shared Activity markup/CSS -- ActivityRow.jsx
+    + gallery/src/styles/notify.css, built into TWO separate bundles (Vite's app.css for "/",
+    esbuild's master-storyboard.bundle.css for /loom) -- so the queued state must be
+    measurably identical on both. That is the claim, and this measures it rather than
+    inferring it from the source being shared: two build pipelines is exactly how one host's
+    bundle could go stale while the other moves on.
 
     Measured as shipped at 1280x900, on `/` and on `/loom?bundle=1` alike: the icon carries
-    `jt-queued`, the ring's computed animationName is `none` (a rendering job reads
+    `at-queued`, the ring's computed animationName is `none` (a rendering job reads
     `gen-spin`), the phase pill reads "queued" uppercased, and the estimate chip reads
     "est. 27s wait". The mascot's own animationName is checked too but is ALWAYS `none`,
     queued or not -- since the 2026-08-09 fix (owner: "spins weirdly offset") the portrait
@@ -710,7 +668,7 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
         seen[host] = m
 
         assert m["hasQueuedClass"], (
-            "{}: the queued row's icon has no jt-queued modifier".format(host))
+            "{}: the queued row's icon has no at-queued modifier".format(host))
         assert m["mascotAnimation"] == "none", (
             "{}: the mascot has an animationName again ({!r}) -- it must never spin (an "
             "asymmetric object-position crop tumbles the face when rotated as a rigid unit, "
@@ -734,16 +692,16 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
         # Dropping the modifier is the pre-fix state exactly (one spinner for queued and
         # rendering alike); if the ring's animation stays `none` without it, the assertion
         # above proves nothing.
-        page.evaluate("() => document.querySelector('#jobs-tray .jt-spin')"
-                      ".classList.remove('jt-queued')")
+        page.evaluate("() => document.querySelector('.at-panel .at-spin')"
+                      ".classList.remove('at-queued')")
         _settle(page)
         reverted = page.evaluate(_TRAY_QUEUED_JS)
         assert reverted["ringAnimation"] == "gen-spin", (
-            "{}: removing jt-queued left the ring at {!r}".format(
+            "{}: removing at-queued left the ring at {!r}".format(
                 host, reverted["ringAnimation"]))
 
     assert seen["gallery"] == seen["loom"], (
-        "the shared Activity tray renders the queued state DIFFERENTLY on the two hosts:\n"
+        "the shared Activity markup renders the queued state DIFFERENTLY on the two hosts:\n"
         "  gallery: {!r}\n  loom:    {!r}".format(seen["gallery"], seen["loom"]))
 
 
@@ -1181,30 +1139,37 @@ def test_setup_wizard_onboards_a_genuinely_fresh_install(
 
 def test_tracker_spin_ring_renders_as_a_true_circle_not_an_ellipse(logged_in_page):
     """A second, independent bug hiding behind the 2026-08-09 face-tumble fix above: owner
-    caught it on a SECOND recording after that fix shipped, still "wonky". `.jt-spin` is a
-    flex CHILD of `.jt-ic` (34px wide) but declares `width:48px` with no shrink override --
-    a flex item's default flex-shrink:1 compresses its WIDTH to fit the 34px parent while its
-    explicit HEIGHT:48px is untouched (flexbox only resizes the main axis), measured live via
-    getBoundingClientRect at 34x48 before the fix. `.gen-ring`'s `inset:2px` on that non-square
-    box made it an ELLIPSE, and animating an ellipse's rotation visibly bulges/narrows as it
-    turns -- exactly the "wonky, offset" look, independent of which crop the portrait itself
-    carries. Fix: flex-shrink:0 on .jt-spin. Asserted as real rendered geometry (not CSS text
-    presence) because that is exactly the kind of mismatch a shrink-eligible flex child creates
-    invisibly -- the declared width:48px in the stylesheet was never the lie, the cascade was.
+    caught it on a SECOND recording after that fix shipped, still "wonky". The spinner's icon
+    box was a flex CHILD of a narrower parent but declared its own wider width with no shrink
+    override -- a flex item's default flex-shrink:1 compresses its WIDTH to fit the narrower
+    parent while its explicit HEIGHT is untouched (flexbox only resizes the main axis),
+    measured live via getBoundingClientRect as genuinely non-square before the fix. The ring's
+    `inset` on that non-square box made it an ELLIPSE, and animating an ellipse's rotation
+    visibly bulges/narrows as it turns -- exactly the "wonky, offset" look, independent of
+    which crop the portrait itself carries. Fix: flex-shrink:0 on the spin box. Asserted as
+    real rendered geometry (not CSS text presence) because that is exactly the kind of
+    mismatch a shrink-eligible flex child creates invisibly -- the declared width was never
+    the lie, the cascade was.
+
+    Re-port note 2026-08-09 (Claude Design handoff, drift item 39): `.jt-spin`/`.jt-ic`/
+    `.gen-ring` -> `.at-spin`/`.at-ic`/`.at-ring` (the header-docked Activity control's own
+    prefix). The old 34px-vs-48px mismatch is gone in the new markup (`.at-ic` and `.at-spin`
+    both declare 44px now), but flex-shrink:0 stays on `.at-spin` as a guard -- this test still
+    measures the real box, not just trusts the declared value.
     """
     page = logged_in_page(**DESKTOP)
     _open_tray_with_queued_job(page, "/")
-    page.evaluate("() => document.querySelector('#jobs-tray .jt-spin').classList.remove('jt-queued')")
+    page.evaluate("() => document.querySelector('.at-panel .at-spin').classList.remove('at-queued')")
     _settle(page)
     geo = page.evaluate("""() => {
-        const spin = document.querySelector('#jobs-tray .jt-spin');
-        const ring = spin.querySelector('.gen-ring');
+        const spin = document.querySelector('.at-panel .at-spin');
+        const ring = spin.querySelector('.at-ring');
         const r = el => { const b = el.getBoundingClientRect(); return {w: b.width, h: b.height}; };
         return {spin: r(spin), ring: r(ring)};
     }""")
     assert abs(geo["spin"]["w"] - geo["spin"]["h"]) < 0.5, (
-        ".jt-spin is not square ({!r}) -- a flex child of the 34px-wide .jt-ic shrinking its "
-        "own declared 48px width again".format(geo["spin"]))
+        ".at-spin is not square ({!r}) -- a flex child of a narrower parent shrinking its "
+        "own declared width again".format(geo["spin"]))
     assert abs(geo["ring"]["w"] - geo["ring"]["h"]) < 0.5, (
-        ".gen-ring is not square ({!r}) -- it renders an ellipse, which bulges/narrows as it "
+        ".at-ring is not square ({!r}) -- it renders an ellipse, which bulges/narrows as it "
         "rotates instead of spinning cleanly".format(geo["ring"]))

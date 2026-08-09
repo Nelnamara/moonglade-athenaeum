@@ -3504,6 +3504,75 @@ ${"=".repeat(48)}
     );
   }
 
+  // ../gallery/src/notify/index.jsx
+  var installed = false;
+  function installNotify() {
+    if (installed) return;
+    installed = true;
+    window.Toast = { show };
+    window.Jobs = { track, register };
+    window.JobsCard = {
+      open: openTray,
+      close: closeTray,
+      refresh,
+      dismiss: dismiss2,
+      clearFinished
+    };
+    window.Ach = { check, replay };
+    start();
+    check();
+  }
+  function NotifyRoot() {
+    return /* @__PURE__ */ react_global_shim_default.createElement(ToastHost, null);
+  }
+
+  // ../gallery/src/notify/ActivityChip.jsx
+  function ringPct(j) {
+    if (j.status !== "running" || !j.total) return null;
+    return Math.min(100, Math.round((j.done || 0) / j.total * 100));
+  }
+  function ActivityChip({ jobs: jobs2, open: open2, onToggle, title, max = 3 }) {
+    const live = jobs2.filter((j) => (j.status || "running") === "running");
+    const hasLive = live.length > 0;
+    const shown = live.slice(0, max);
+    const overflow = live.length > max ? live.length - max : 0;
+    return /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        className: "at-chip" + (hasLive ? " live" : "") + (open2 ? " open" : ""),
+        onClick: onToggle,
+        title: title || "Activity \u2014 recent jobs",
+        role: "button",
+        tabIndex: 0,
+        "aria-haspopup": "true",
+        "aria-expanded": open2,
+        onKeyDown: (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggle();
+          }
+        }
+      },
+      hasLive ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-stack" }, shown.map((j, i) => {
+        const pct = ringPct(j);
+        return /* @__PURE__ */ react_global_shim_default.createElement(
+          "div",
+          {
+            key: j.job_id,
+            className: "at-ministack" + (pct == null ? " indet" : ""),
+            style: {
+              zIndex: max - i,
+              marginLeft: i ? -8 : 0,
+              background: pct == null ? void 0 : "conic-gradient(var(--accent) 0deg " + pct * 3.6 + "deg, rgba(255,255,255,.16) " + pct * 3.6 + "deg 360deg)"
+            }
+          }
+        );
+      }), overflow ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-overflow" }, "+", overflow) : null) : /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dot" }),
+      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-chiptext" }, hasLive ? live.length + (live.length === 1 ? " job" : " jobs") + " running" : "idle \xB7 nothing in the queue"),
+      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-caret" }, "\u25BE")
+    );
+  }
+
   // ../gallery/src/notify/format.js
   function ago(ts) {
     const s = Math.max(0, Math.floor(Date.now() / 1e3 - (ts || 0)));
@@ -3562,16 +3631,38 @@ ${"=".repeat(48)}
     return grp;
   }
 
-  // ../gallery/src/notify/ActivityTray.jsx
-  function Row({ j, onDismiss, onOpenDetail }) {
+  // ../gallery/src/notify/ActivityRow.jsx
+  function ActivityRow({ job: j, expanded, onToggle, onDismiss, compact }) {
     const st = j.status || "running";
     const queued = st === "running" && j.started === false;
     const fin = st === "done" || st === "failed" || st === "done_with_errors" || st === "stale";
     const mid = (j.media_ids || [])[0] || "";
     const pct = st === "running" && j.total ? Math.min(100, Math.round((j.done || 0) / j.total * 100)) : null;
     const showErr = (st === "failed" || st === "done_with_errors" || st === "stale") && j.error;
-    const cls = st === "failed" ? " st-failed" : st === "done_with_errors" || st === "stale" ? " st-warn" : "";
-    const icon = st === "done" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-ok jt-glyph" }, "\u2713"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "jt-nel", src: "/branding/mascots/trk_done.png", alt: "", onError: (e) => e.currentTarget.remove() })) : st === "done_with_errors" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-warn jt-glyph" }, "\u26A0"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "jt-nel", src: "/branding/mascots/trk_done.png", alt: "", onError: (e) => e.currentTarget.remove() })) : st === "failed" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-err jt-glyph" }, "\u26A0"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "jt-nel", src: "/branding/mascots/trk_fail.png", alt: "", onError: (e) => e.currentTarget.remove() })) : st === "stale" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-warn jt-glyph" }, "?"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "jt-nel", src: "/branding/mascots/trk_fail.png", alt: "", onError: (e) => e.currentTarget.remove() })) : /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-spin" + (queued ? " jt-queued" : "") }, /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "jt-nel", src: "/branding/nel_spinner.png", alt: "", onError: (e) => e.currentTarget.remove() }), /* @__PURE__ */ react_global_shim_default.createElement("i", { className: "gen-ring" }));
+    const cls = st === "failed" ? " at-failed" : st === "done_with_errors" || st === "stale" ? " at-warn" : "";
+    const icon = st === "done" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-ok at-glyph" }, "\u2713"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "at-nel", src: "/branding/mascots/trk_done.png", alt: "", onError: (e) => e.currentTarget.remove() })) : st === "done_with_errors" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-warn at-glyph" }, "\u26A0"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "at-nel", src: "/branding/mascots/trk_done.png", alt: "", onError: (e) => e.currentTarget.remove() })) : st === "failed" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-err at-glyph" }, "\u26A0"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "at-nel", src: "/branding/mascots/trk_fail.png", alt: "", onError: (e) => e.currentTarget.remove() })) : st === "stale" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-warn at-glyph" }, "?"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "at-nel", src: "/branding/mascots/trk_fail.png", alt: "", onError: (e) => e.currentTarget.remove() })) : /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-spin" + (queued ? " at-queued" : "") }, /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "at-nel", src: "/branding/nel_spinner.png", alt: "", onError: (e) => e.currentTarget.remove() }), /* @__PURE__ */ react_global_shim_default.createElement("i", { className: "at-ring" }));
+    const [, tick] = useState(0);
+    const running = st === "running";
+    const startedAt = j.started_at || j.ts || 0;
+    const spent = (running ? Date.now() / 1e3 : j.ts || startedAt) - startedAt;
+    useEffect(() => {
+      if (!running || !expanded) return void 0;
+      const t = setInterval(() => tick((n) => n + 1), 1e3);
+      return () => clearInterval(t);
+    }, [running, expanded]);
+    const [copied, setCopied] = react_global_shim_default.useState(false);
+    const copy = (e) => {
+      e.stopPropagation();
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(j.job_id || "").catch(() => {
+          });
+        }
+      } catch {
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    };
     const stopTracking = (e) => {
       e.stopPropagation();
       if (!fin && !window.confirm(
@@ -3582,23 +3673,21 @@ ${"=".repeat(48)}
     return /* @__PURE__ */ react_global_shim_default.createElement(
       "div",
       {
-        className: "jt-item" + cls,
+        className: "at-row" + cls + (expanded ? " open" : ""),
         tabIndex: 0,
         role: "button",
-        "aria-haspopup": "true",
-        onClick: (e) => onOpenDetail(j.job_id, e.currentTarget),
+        "aria-expanded": expanded,
+        onClick: () => onToggle(j.job_id),
         onKeyDown: (e) => {
           if (e.key !== "Enter" && e.key !== " ") return;
           e.preventDefault();
-          onOpenDetail(j.job_id, e.currentTarget);
+          onToggle(j.job_id);
         }
       },
-      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-ic" }, icon),
-      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-main" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-lab" }, labelFor(j, fin)), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-sub" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-kind" }, kindLabel(j.type)), queued ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-phase", title: "PixAI has accepted this generation and no worker has picked it up yet \u2014 it has not started rendering." }, "queued") : null, queued && typeof j.eta_seconds === "number" && isFinite(j.eta_seconds) ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-eta", title: "The queue wait PixAI predicted for this model when the job was accepted. An estimate of the WAIT, not a countdown, and not progress \u2014 PixAI reports no progress on a running task." }, "est. ", fmtDuration(j.eta_seconds), " wait") : null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-when" }, ago(j.ts))), pct != null ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-bar" }, /* @__PURE__ */ react_global_shim_default.createElement("i", { style: { width: pct + "%" } })) : null, showErr ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-errmsg" }, j.error) : null),
-      st === "done" && mid ? /* @__PURE__ */ react_global_shim_default.createElement(
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-line" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-ic" }, icon), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-main" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-lab" }, labelFor(j, fin)), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-sub" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-kind" }, kindLabel(j.type)), queued ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-phase", title: "PixAI has accepted this generation and no worker has picked it up yet \u2014 it has not started rendering." }, "queued") : null, queued && typeof j.eta_seconds === "number" && isFinite(j.eta_seconds) ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-eta", title: "The queue wait PixAI predicted for this model when the job was accepted. An estimate of the WAIT, not a countdown, and not progress \u2014 PixAI reports no progress on a running task." }, "est. ", fmtDuration(j.eta_seconds), " wait") : null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-when" }, ago(j.ts)))), st === "done" && mid ? /* @__PURE__ */ react_global_shim_default.createElement(
         "a",
         {
-          className: "jt-thumb",
+          className: "at-thumb",
           href: "/?image=" + encodeURIComponent(mid),
           onClick: (e) => {
             e.stopPropagation();
@@ -3608,124 +3697,98 @@ ${"=".repeat(48)}
           }
         },
         /* @__PURE__ */ react_global_shim_default.createElement("img", { src: "/thumbs/" + encodeURIComponent(mid) + ".jpg", alt: "" })
-      ) : null,
-      fin ? /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "jt-x", title: "Dismiss", onClick: stopTracking }, "\xD7") : /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "jt-x jt-forcex", title: "Stop tracking this job -- does not cancel it on PixAI", onClick: stopTracking }, "Stop tracking")
-    );
-  }
-  function Detail({ job, anchor, onClose }) {
-    const [, tick] = useState(0);
-    const [copied, setCopied] = useState(false);
-    const running = (job.status || "running") === "running";
-    const startedAt = job.started_at || job.ts || 0;
-    useEffect(() => {
-      if (!running) return void 0;
-      const t = setInterval(() => tick((n) => n + 1), 1e3);
-      return () => clearInterval(t);
-    }, [running]);
-    useEffect(() => {
-      const onDoc = (e) => {
-        const inDetail = e.target.closest && e.target.closest("#jt-detail");
-        const inTray = e.target.closest && e.target.closest("#jobs-tray");
-        if (!inDetail && !inTray) onClose();
-      };
-      const onKey = (e) => {
-        if (e.key === "Escape") onClose();
-      };
-      document.addEventListener("click", onDoc);
-      document.addEventListener("keydown", onKey);
-      return () => {
-        document.removeEventListener("click", onDoc);
-        document.removeEventListener("keydown", onKey);
-      };
-    }, [onClose]);
-    const r = anchor.getBoundingClientRect();
-    const w = 264, gap = 10;
-    let x = r.right + gap;
-    if (x + w > window.innerWidth - 8) x = Math.max(8, r.left - w - gap);
-    const y = Math.max(8, Math.min(r.top, window.innerHeight - 140));
-    const spent = (running ? Date.now() / 1e3 : job.ts || startedAt) - startedAt;
-    const copy = () => {
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(job.job_id || "").catch(() => {
-          });
-        }
-      } catch {
-      }
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    };
-    return /* @__PURE__ */ react_global_shim_default.createElement("div", { id: "jt-detail", className: "open", "aria-hidden": "false", style: { left: x, top: y } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jd-row" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-k" }, "Task ID"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-v jd-id" }, job.job_id || ""), /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "jd-copy" + (copied ? " copied" : ""), title: "Copy task ID", onClick: copy }, copied ? "copied!" : "copy")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jd-row" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-k" }, "Time Sent"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-v" }, fmtClock(startedAt))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jd-row" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-k" }, "Time Spent"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-v" }, fmtDuration(spent), running ? " so far" : "")), typeof job.eta_seconds === "number" && isFinite(job.eta_seconds) ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jd-row" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-k" }, "Est. wait"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-v" }, fmtDuration(job.eta_seconds), " (PixAI, when queued)")) : null, typeof job.paid_credit === "number" && isFinite(job.paid_credit) ? (
-      // typeof+isFinite, not truthiness: a card-covered gen genuinely costs 0 and must render
-      // "0 credits", while an unknown cost shows NO row at all.
-      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jd-row" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-k" }, "Cost"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jd-v" }, groupThousands(job.paid_credit), " credits"))
-    ) : null);
-  }
-  function ActivityTray() {
-    const [state, setState] = useState({ jobs: [], open: false });
-    const [detailId, setDetailId] = useState(null);
-    const anchorRef = useRef(null);
-    useEffect(() => subscribe2(setState), []);
-    const closeDetail = useCallback(() => {
-      setDetailId(null);
-      anchorRef.current = null;
-    }, []);
-    const toggleDetail = useCallback((jid, anchorEl) => {
-      setDetailId((cur) => {
-        if (cur === jid) {
-          anchorRef.current = null;
-          return null;
-        }
-        anchorRef.current = anchorEl;
-        return jid;
-      });
-    }, []);
-    const { jobs: jobs2, open: open2 } = state;
-    const running = runningCount();
-    const detailJob = detailId ? jobs2.find((j) => j.job_id === detailId) : null;
-    useEffect(() => {
-      if (detailId && !detailJob) closeDetail();
-    }, [detailId, detailJob, closeDetail]);
-    return createPortal(
-      /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(
-        "div",
-        {
-          id: "jobs-fab",
-          className: (open2 ? "" : "show") + (running > 0 ? " busy" : ""),
-          title: "Activity",
-          onClick: () => openTray()
-        },
-        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jf-dot" }),
-        /* @__PURE__ */ react_global_shim_default.createElement("span", { id: "jobs-fab-badge", className: "jf-badge" }, running || ""),
-        /* @__PURE__ */ react_global_shim_default.createElement("span", null, "Activity")
-      ), /* @__PURE__ */ react_global_shim_default.createElement("div", { id: "jobs-tray", className: open2 ? "open" : "", "aria-label": "Job activity" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-head" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-title" }, "\u25C9 Activity", jobs2.length ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "jt-count" }, jobs2.length) : null), /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "jt-hbtn", title: "Clear finished", onClick: () => clearFinished() }, "clear"), /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "jt-hbtn", title: "Collapse", onClick: () => {
-        closeTray();
-        closeDetail();
-      } }, "\u2013")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-body" }, !jobs2.length ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "jt-empty" }, /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "jt-empty-nel", src: "/branding/mascots/trk_empty.png", alt: "", onError: (e) => e.currentTarget.remove() }), /* @__PURE__ */ react_global_shim_default.createElement("div", null, "The archive is quiet.", /* @__PURE__ */ react_global_shim_default.createElement("br", null), "Generations and syncs will appear here.")) : jobs2.map((j) => /* @__PURE__ */ react_global_shim_default.createElement(Row, { key: j.job_id, j, onDismiss: dismiss2, onOpenDetail: toggleDetail })))), detailJob && anchorRef.current ? /* @__PURE__ */ react_global_shim_default.createElement(Detail, { job: detailJob, anchor: anchorRef.current, onClose: closeDetail }) : null),
-      document.body
+      ) : null),
+      pct != null ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-bar" }, /* @__PURE__ */ react_global_shim_default.createElement("i", { style: { width: pct + "%" } })) : null,
+      showErr ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-errmsg" }, j.error) : null,
+      expanded ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-detail" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "STATUS"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv" + (st === "failed" ? " bad" : st === "done_with_errors" || st === "stale" ? " warn" : st === "done" ? " good" : "") }, fin ? st === "done" ? "Done" : st === "failed" ? "Failed" : st === "stale" ? "Stalled" : "Done, with errors" : queued ? "Queued" : "Running")), typeof j.paid_credit === "number" && isFinite(j.paid_credit) ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "COST"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv" }, groupThousands(j.paid_credit), " credits")) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "TASK"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv at-mono" }, j.job_id || "\u2014"), /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "at-copy" + (copied ? " copied" : ""), title: "Copy task ID", onClick: copy }, copied ? "copied!" : "\u29C9")), !compact ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow at-divider" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "SENT"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv at-mono" }, fmtClock(startedAt))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "SPENT"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv at-mono" }, fmtDuration(spent), running ? " so far" : ""))) : null, typeof j.eta_seconds === "number" && isFinite(j.eta_seconds) ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "EST. WAIT"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv at-mono" }, fmtDuration(j.eta_seconds), " (PixAI, when queued)")) : null) : null,
+      fin ? /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "at-x", title: "Dismiss", onClick: stopTracking }, "\xD7") : /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "at-x at-forcex", title: "Stop tracking this job -- does not cancel it on PixAI", onClick: stopTracking }, "Stop tracking")
     );
   }
 
-  // ../gallery/src/notify/index.jsx
-  var installed = false;
-  function installNotify() {
-    if (installed) return;
-    installed = true;
-    window.Toast = { show };
-    window.Jobs = { track, register };
-    window.JobsCard = {
-      open: openTray,
-      close: closeTray,
-      refresh,
+  // ../gallery/src/notify/ActivityPanel.jsx
+  function ActivityPanel({
+    jobs: jobs2,
+    expandedId,
+    onToggleRow,
+    onDismiss,
+    onClearFinished,
+    onClose,
+    compact,
+    className,
+    closing
+  }) {
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-panel" + (closing ? " closing" : "") + (className ? " " + className : "") }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-head" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-title" }, "Activity"), jobs2.length ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-count" }, jobs2.length) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-headsp" }), jobs2.length ? /* @__PURE__ */ react_global_shim_default.createElement(
+      "span",
+      {
+        className: "at-clear",
+        role: "button",
+        tabIndex: 0,
+        onClick: onClearFinished,
+        onKeyDown: (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onClearFinished();
+          }
+        }
+      },
+      "clear finished"
+    ) : null, /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "at-collapse", title: "Collapse", onClick: onClose }, "\u203A")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-body" }, !jobs2.length ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-empty" }, /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "at-empty-nel", src: "/branding/mascots/trk_empty.png", alt: "", onError: (e) => e.currentTarget.remove() }), /* @__PURE__ */ react_global_shim_default.createElement("div", null, "The archive is quiet.", /* @__PURE__ */ react_global_shim_default.createElement("br", null), "Generations and syncs will appear here.")) : jobs2.map((j) => /* @__PURE__ */ react_global_shim_default.createElement(
+      ActivityRow,
+      {
+        key: j.job_id,
+        job: j,
+        compact,
+        expanded: expandedId === j.job_id,
+        onToggle: onToggleRow,
+        onDismiss
+      }
+    ))));
+  }
+
+  // ../gallery/src/notify/useActivity.js
+  var CLOSE_MS = 260;
+  function useActivity() {
+    const [state, setState] = useState({ jobs: [], open: false });
+    const [expandedId, setExpandedId] = useState(null);
+    const [closing, setClosing] = useState(false);
+    const closeTimer = useRef(null);
+    useEffect(() => subscribe2(setState), []);
+    useEffect(() => () => clearTimeout(closeTimer.current), []);
+    const { jobs: jobs2, open: open2 } = state;
+    useEffect(() => {
+      if (expandedId && !jobs2.find((j) => j.job_id === expandedId)) setExpandedId(null);
+    }, [expandedId, jobs2]);
+    const close = useCallback(() => {
+      clearTimeout(closeTimer.current);
+      setClosing(true);
+      closeTimer.current = setTimeout(() => {
+        closeTray();
+        setClosing(false);
+        setExpandedId(null);
+      }, CLOSE_MS);
+    }, []);
+    const toggle = useCallback(() => {
+      if (open2 && !closing) close();
+      else {
+        clearTimeout(closeTimer.current);
+        setClosing(false);
+        openTray();
+      }
+    }, [open2, closing, close]);
+    const toggleRow = useCallback((jid) => {
+      setExpandedId((cur) => cur === jid ? null : jid);
+    }, []);
+    return {
+      jobs: jobs2,
+      open: open2 || closing,
+      closing,
+      expandedId,
+      toggle,
+      close,
+      toggleRow,
       dismiss: dismiss2,
       clearFinished
     };
-    window.Ach = { check, replay };
-    start();
-    check();
-  }
-  function NotifyRoot() {
-    return /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(ToastHost, null), /* @__PURE__ */ react_global_shim_default.createElement(ActivityTray, null));
   }
 
   // master-storyboard.jsx
@@ -4194,7 +4257,13 @@ ${"=".repeat(48)}
 .lv-top button,.lv-top label,.lv-top a{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
 .lv-top a{text-decoration:none;display:inline-block;}
 .lv-top a:hover{border-color:var(--accent);}
-.lv-top .lv-close{margin-left:auto;}
+/* margin-left:auto moved onto .lv-top-act-wrap (2026-08-09, the header-docked Activity
+   control) -- it's the first of the two right-side items now, so it alone absorbs the row's
+   free space; .lv-close just follows it at the row's normal gap, both landing flush at the
+   far right together. Two adjacent auto-margins would each grab a share and split them apart
+   with a gap in between, which is not what either the old single-.lv-close layout or this one
+   wants. */
+.lv-top-act-wrap{position:relative;margin-left:auto;}
 .lv-top button:hover{border-color:var(--accent);}
 .lv-top button:disabled{opacity:.5;cursor:default;}
 .lv-top button:disabled:hover{border-color:var(--surface1);}
@@ -4796,6 +4865,16 @@ ${"=".repeat(48)}
   }) {
     const [bannerOpen, setBannerOpen] = useState2(true);
     const [tab, setTab] = useState2("Video");
+    const act = useActivity();
+    const actRef = useRef2(null);
+    useEffect2(() => {
+      if (!act.open) return void 0;
+      const onDoc = (e) => {
+        if (actRef.current && !actRef.current.contains(e.target)) act.close();
+      };
+      document.addEventListener("mousedown", onDoc);
+      return () => document.removeEventListener("mousedown", onDoc);
+    }, [act.open, act.close]);
     const [acct, setAcct] = useState2(null);
     const [handoff, setHandoff] = useState2("");
     const [deepFocus, setDeepFocus] = useState2(null);
@@ -5423,9 +5502,9 @@ ${"=".repeat(48)}
       const el = genDrawerRef.current;
       if (el && el.setBusy) el.setBusy(stillBusy);
     }, [active.c.id, active.c.status, genState[active.c.id] && genState[active.c.id].phase]);
-    const board = /* @__PURE__ */ React.createElement("div", { className: "lv-board" }, project.acts.map((act, ai) => {
+    const board = /* @__PURE__ */ React.createElement("div", { className: "lv-board" }, project.acts.map((act2, ai) => {
       const items = entries.filter((e) => e.ai === ai);
-      return /* @__PURE__ */ React.createElement("div", { key: act.id, className: "lv-act" }, /* @__PURE__ */ React.createElement("div", { className: "lv-actrow" }, /* @__PURE__ */ React.createElement("input", { className: "lv-actname-in", value: act.name, onChange: (ev) => setAct(act.id, { name: ev.target.value }), "aria-label": "Act name" }), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, -1), title: "Move act up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, 1), title: "Move act down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico danger", onClick: () => delAct(act.id), title: "Delete act" }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "lv-cards" }, items.map((e) => {
+      return /* @__PURE__ */ React.createElement("div", { key: act2.id, className: "lv-act" }, /* @__PURE__ */ React.createElement("div", { className: "lv-actrow" }, /* @__PURE__ */ React.createElement("input", { className: "lv-actname-in", value: act2.name, onChange: (ev) => setAct(act2.id, { name: ev.target.value }), "aria-label": "Act name" }), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, -1), title: "Move act up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, 1), title: "Move act down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico danger", onClick: () => delAct(act2.id), title: "Delete act" }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "lv-cards" }, items.map((e) => {
         const gs = genState[e.c.id];
         const paused = gs && gs.phase === "paused";
         const st = paused ? "paused" : gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : e.c.status;
@@ -5485,13 +5564,13 @@ ${"=".repeat(48)}
             },
             gs && gs.msg ? gs.msg : st
           )),
-          /* @__PURE__ */ React.createElement("div", { className: "lv-crow", onClick: (ev) => ev.stopPropagation(), onDoubleClick: (ev) => ev.stopPropagation() }, /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => moveCard(act.id, e.ci, -1), title: "Move up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => moveCard(act.id, e.ci, 1), title: "Move down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => dupCard(act.id, e.c), title: "Duplicate" }, "\u29C9"), /* @__PURE__ */ React.createElement(
+          /* @__PURE__ */ React.createElement("div", { className: "lv-crow", onClick: (ev) => ev.stopPropagation(), onDoubleClick: (ev) => ev.stopPropagation() }, /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => moveCard(act2.id, e.ci, -1), title: "Move up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => moveCard(act2.id, e.ci, 1), title: "Move down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => dupCard(act2.id, e.c), title: "Duplicate" }, "\u29C9"), /* @__PURE__ */ React.createElement(
             "button",
             {
               className: "lv-ico xs danger",
               title: "Delete",
               onClick: () => {
-                if (window.confirm(`Delete shot ${e.code}${e.c.title ? ` \u2014 "${e.c.title}"` : ""}? This can't be undone.`)) delCard(act.id, e.c);
+                if (window.confirm(`Delete shot ${e.code}${e.c.title ? ` \u2014 "${e.c.title}"` : ""}? This can't be undone.`)) delCard(act2.id, e.c);
               }
             },
             "\u2715"
@@ -5501,13 +5580,13 @@ ${"=".repeat(48)}
               className: "lv-actsel",
               value: "",
               title: "Move to another act",
-              onChange: (ev) => ev.target.value && moveCardToAct2(act.id, e.c, ev.target.value)
+              onChange: (ev) => ev.target.value && moveCardToAct2(act2.id, e.c, ev.target.value)
             },
             /* @__PURE__ */ React.createElement("option", { value: "" }, "move to\u2026"),
-            project.acts.filter((a) => a.id !== act.id).map((a) => /* @__PURE__ */ React.createElement("option", { key: a.id, value: a.id }, a.name))
+            project.acts.filter((a) => a.id !== act2.id).map((a) => /* @__PURE__ */ React.createElement("option", { key: a.id, value: a.id }, a.name))
           ))
         );
-      })), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => addCard(act.id) }, "+ Add shot to ", act.name));
+      })), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => addCard(act2.id) }, "+ Add shot to ", act2.name));
     }), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: addAct }, "+ New act"), !project.acts.length && /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No acts yet \u2014 add one below."));
     const tlHeight = tlDragH != null ? tlDragH : TL_HEIGHTS[tlState];
     const showTlPreview = tlHeight > (TL_HEIGHTS.slim + TL_HEIGHTS.full) / 2;
@@ -6251,7 +6330,19 @@ ${"=".repeat(48)}
         bundling,
         importBackup
       }
-    ), /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: "/", style: { textDecoration: "none" } }, "\u2190 Gallery")), batchTally && (() => {
+    ), /* @__PURE__ */ React.createElement("div", { className: "lv-top-act-wrap", ref: actRef }, /* @__PURE__ */ React.createElement(ActivityChip, { jobs: act.jobs, open: act.open, onToggle: act.toggle, title: "Activity \u2014 render jobs" }), act.open ? /* @__PURE__ */ React.createElement(
+      ActivityPanel,
+      {
+        jobs: act.jobs,
+        expandedId: act.expandedId,
+        closing: act.closing,
+        onToggleRow: act.toggleRow,
+        onDismiss: act.dismiss,
+        onClearFinished: act.clearFinished,
+        onClose: act.close,
+        className: "lv-top-act-panel"
+      }
+    ) : null), /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: "/", style: { textDecoration: "none" } }, "\u2190 Gallery")), batchTally && (() => {
       const outs = Object.values(batchTally.outcomes);
       const done = outs.filter((o) => o === "done").length;
       const failed = outs.filter((o) => o === "failed").length;

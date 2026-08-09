@@ -53,6 +53,9 @@ import ModelPicker from "../gallery/src/components/ModelPicker.jsx";
 import CostBadge from "../gallery/src/components/CostBadge.jsx";
 import VideoDrawer from "../gallery/src/components/VideoDrawer.jsx";
 import { installNotify, NotifyRoot } from "../gallery/src/notify/index.jsx";
+import ActivityChip from "../gallery/src/notify/ActivityChip.jsx";
+import ActivityPanel from "../gallery/src/notify/ActivityPanel.jsx";
+import useActivity from "../gallery/src/notify/useActivity.js";
 
 // The shared notify system (toasts · Activity tray · achievement celebrations · the Jobs
 // poller) -- the SAME modules the gallery bundle carries, so window.Toast/Jobs/JobsCard keep
@@ -452,7 +455,13 @@ const V2_STYLES = `
 .lv-top button,.lv-top label,.lv-top a{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
 .lv-top a{text-decoration:none;display:inline-block;}
 .lv-top a:hover{border-color:var(--accent);}
-.lv-top .lv-close{margin-left:auto;}
+/* margin-left:auto moved onto .lv-top-act-wrap (2026-08-09, the header-docked Activity
+   control) -- it's the first of the two right-side items now, so it alone absorbs the row's
+   free space; .lv-close just follows it at the row's normal gap, both landing flush at the
+   far right together. Two adjacent auto-margins would each grab a share and split them apart
+   with a gap in between, which is not what either the old single-.lv-close layout or this one
+   wants. */
+.lv-top-act-wrap{position:relative;margin-left:auto;}
 .lv-top button:hover{border-color:var(--accent);}
 .lv-top button:disabled{opacity:.5;cursor:default;}
 .lv-top button:disabled:hover{border-color:var(--surface1);}
@@ -974,6 +983,18 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // this matches exactly rather than adding localStorage this feature never had in spec.
   const [bannerOpen, setBannerOpen] = useState(true);
   const [tab, setTab] = useState("Video");
+  // Header-docked Activity control (Claude Design handoff 2026-08-09, drift item 39):
+  // replaces the old floating #jobs-fab/#jobs-tray with a toolbar pill, same as the
+  // gallery's own sep-bar (gallery/src/components/SeparatorBar.jsx) -- one shared
+  // jobsStore/useActivity, two host-specific mounts, no fixed-position element on either.
+  const act = useActivity();
+  const actRef = useRef(null);
+  useEffect(() => {
+    if (!act.open) return undefined;
+    const onDoc = (e) => { if (actRef.current && !actRef.current.contains(e.target)) act.close(); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [act.open, act.close]);
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
   const [deepFocus, setDeepFocus] = useState(null);   // entry {a,c,ai,ci,code} double-clicked on the board, or null
@@ -2923,6 +2944,17 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8681; Render</button>
         <ExportMenu exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle}
           bundling={bundling} importBackup={importBackup} />
+        <div className="lv-top-act-wrap" ref={actRef}>
+          <ActivityChip jobs={act.jobs} open={act.open} onToggle={act.toggle} title="Activity — render jobs" />
+          {act.open ? (
+            <ActivityPanel
+              jobs={act.jobs} expandedId={act.expandedId} closing={act.closing}
+              onToggleRow={act.toggleRow} onDismiss={act.dismiss}
+              onClearFinished={act.clearFinished} onClose={act.close}
+              className="lv-top-act-panel"
+            />
+          ) : null}
+        </div>
         <a className="lv-close" href="/" style={{ textDecoration: "none" }}>← Gallery</a>
       </div>
       {batchTally && (() => {
