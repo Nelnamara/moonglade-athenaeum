@@ -101,7 +101,7 @@ function ledgerResult(j) {
 
 export default function ControlMobile({ account }) {
   const {
-    summary, summaryErr, skins, activeSkin, pickSkin, brandingUnlocked,
+    summary, summaryErr, skins, activeSkin, pickSkin, brandingUnlocked, achievements,
     panelHistory, schedule,
     fetchSummary, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
@@ -191,6 +191,39 @@ export default function ControlMobile({ account }) {
           ))}
         </div>
       </div>
+
+      {/* handoff-2026-08-09-branding-integration.md: parity fix -- Mobile's
+          Branding entry had no lock treatment at all before this pass (it
+          either rendered the real tile or nothing); Control Panel's own tab
+          nav already hides the whole tab the same way, so this is a NEW
+          treatment for both surfaces, added here first per the handoff's own
+          "mobile-specific parity fix" scope. Moved to directly under "At a
+          glance" so its presence (or locked state) reads first, matching how
+          prominent the desktop tab pair is. */}
+      {brandingUnlocked ? (
+        <div className="ctm-sec">
+          <div className="mgcp-tile click" onClick={openBrand}>
+            <div className="mgcp-mkick">✦ Branding</div>
+            <div className="mgcp-marks">
+              {(summary.branding.marks || []).slice(0, 6).map((m) => (
+                <button type="button" key={m.id}
+                  className={"mgcp-mark" + (m.id === summary.branding.mark ? " on" : "")}
+                  title={m.id} onClick={(e) => { e.stopPropagation(); openBrand(); }}>
+                  {m.id === "logo" ? "🌙" : "◈"}
+                </button>
+              ))}
+            </div>
+            <div className="mgcp-tilenote">mark · animation — open Branding</div>
+          </div>
+        </div>
+      ) : (
+        <div className="ctm-sec">
+          <div className="mgcp-tile mgcp-tile-locked">
+            <div className="mgcp-mkick">🔒 Branding</div>
+            <div className="mgcp-tilenote">Unlocks with Under the Hood</div>
+          </div>
+        </div>
+      )}
 
       <div className="ctm-sec">
         <div className="ctm-mirror">
@@ -412,24 +445,6 @@ export default function ControlMobile({ account }) {
         <a className="mgcp-smallchip" href="/export-csv" style={{ textDecoration: "none" }}>⬇ Download catalog (CSV)</a>
       </div>
 
-      {brandingUnlocked && (
-        <div className="ctm-sec">
-          <div className="mgcp-tile click" onClick={openBrand}>
-            <div className="mgcp-mkick">Branding</div>
-            <div className="mgcp-marks">
-              {(summary.branding.marks || []).slice(0, 6).map((m) => (
-                <button type="button" key={m.id}
-                  className={"mgcp-mark" + (m.id === summary.branding.mark ? " on" : "")}
-                  title={m.id} onClick={(e) => { e.stopPropagation(); openBrand(); }}>
-                  {m.id === "logo" ? "🌙" : "◈"}
-                </button>
-              ))}
-            </div>
-            <div className="mgcp-tilenote">mark · animation — open Branding</div>
-          </div>
-        </div>
-      )}
-
       {skins.length > 0 && (
         <div className="ctm-sec">
           <div className="cm-subhead">Skins</div>
@@ -455,7 +470,7 @@ export default function ControlMobile({ account }) {
 
       <MobileScreen open={brandOpen} closing={brandClosing} onClose={closeBrand} title="BRANDING">
         <BrandingTab summary={summary} onSaved={fetchSummary} isLocal={isLocal}
-          skins={skins} activeSkin={activeSkin} onPickSkin={pickSkin} />
+          skins={skins} activeSkin={activeSkin} onPickSkin={pickSkin} achievements={achievements} />
       </MobileScreen>
     </div>
   );

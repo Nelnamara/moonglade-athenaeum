@@ -1881,6 +1881,84 @@ def set_slot_active(out_dir, slot, item_id):
     return True
 
 
+def _mark_earned(out_dir, db_path, ach_id):
+    """Whether one specific achievement id is currently earned -- runs the exact
+    same compute_achievements() pipeline /api/achievements itself uses, so a
+    custom-mark upload can never disagree with what the Branding tab already
+    shows unlocked. Pure read (no save_ach_state call), so unlike that route it
+    needs no lock -- nothing here can race a concurrent write."""
+    metrics = achievement_metrics(db_path)
+    metrics.update(telemetry_metrics(out_dir))
+    state = load_ach_state(out_dir)
+    result = compute_achievements(metrics, state.get("seen"),
+                                   sets=load_telemetry(out_dir).get("sets", {}))
+    return any(a["id"] == ach_id and a["earned"] for a in result["achievements"])
+
+
+def add_custom_mark(out_dir, png_bytes, label="Custom mark"):
+    """Save The Great Library's custom-mark upload into branding/marks/ and make
+    it the active mark. Same manifest shape list_marks() already reads
+    (marks.json + <id>.png) -- one new kind:'upload' entry, not a new storage
+    concept, matching how add_slot_asset() extends the identical contract for
+    banner slots. Unlike _adopt_mark() (the filesystem-drop path, which derives
+    an id from the dropped filename), this is a real upload with a random id,
+    same convention add_slot_asset() uses for banner uploads.
+
+    There is only ONE custom-mark slot (the design's single 6th tile), so a
+    second upload REPLACES the first -- any existing kind:'upload' entry (and
+    its .png) is dropped here first, rather than accumulating orphaned marks
+    the picker would need de-duping logic to hide."""
+    mdir = branding_root() / "marks"
+    mdir.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
+        marks = list(data.get("marks") or []) if isinstance(data, dict) else []
+    except (OSError, ValueError):
+        marks = []
+    for old in [m for m in marks if isinstance(m, dict) and (m.get("kind") or "tile") == "upload"]:
+        old_png = mdir / (str(old.get("id")) + ".png")
+        if old_png.exists():
+            old_png.unlink()
+    marks = [m for m in marks if not (isinstance(m, dict) and (m.get("kind") or "tile") == "upload")]
+    new_id = secrets.token_hex(4)
+    (mdir / (new_id + ".png")).write_bytes(png_bytes)
+    marks.append({"id": new_id, "label": label, "kind": "upload"})
+    (mdir / "marks.json").write_text(json.dumps({"marks": marks}, indent=2), encoding="utf-8")
+    cfg = load_branding(out_dir)
+    cfg["mark"] = new_id
+    save_branding(out_dir, cfg)
+    return {"id": new_id, "label": label, "kind": "upload",
+            "png": "/branding/marks/%s.png" % new_id, "ico": False}
+
+
+def remove_custom_mark(out_dir, mark_id):
+    """Remove one uploaded custom mark. Refuses to touch a non-upload (built-in
+    tile) mark -- the design's Replace/Remove chips only ever appear next to the
+    uploaded one, but this guard makes that true at the data layer too, not just
+    the UI. Reverts the active mark back to the default logo if the removed one
+    was the one currently worn."""
+    mdir = branding_root() / "marks"
+    try:
+        data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
+        marks = list(data.get("marks") or []) if isinstance(data, dict) else []
+    except (OSError, ValueError):
+        return False
+    target = next((m for m in marks if isinstance(m, dict) and str(m.get("id")) == str(mark_id)
+                   and (m.get("kind") or "tile") == "upload"), None)
+    if target is None:
+        return False
+    keep = [m for m in marks if m is not target]
+    (mdir / "marks.json").write_text(json.dumps({"marks": keep}, indent=2), encoding="utf-8")
+    png = mdir / (str(mark_id) + ".png")
+    if png.exists():
+        png.unlink()
+    cfg = load_branding(out_dir)
+    if cfg.get("mark") == str(mark_id):
+        cfg["mark"] = "logo"
+        save_branding(out_dir, cfg)
+    return True
+
+
 def branding_slots_payload(out_dir):
     """The Branding tab's full slot state -- assets + which one is active, per
     slot -- in the one shape both /api/branding and /api/panel/summary hand to
@@ -9257,6 +9335,41 @@ def create_app(out_dir: Path):
         if not set_slot_active(out_dir, slot, str(item_id) if item_id else None):
             return jsonify({"error": "unknown slot or asset"}), 400
         return jsonify({"slots": branding_slots_payload(out_dir)})
+
+    @app.route("/api/branding/mark/custom", methods=["POST"])
+    def api_branding_mark_custom():
+        """Upload The Great Library's custom mark (Control Panel.dc.html's 6th
+        marks tile). LOGIN tier + a real server-side achievement check -- unlike
+        the deferred banner-earned-art masking (still local-UI-only pending the
+        SQLite asset-bundling project), this route actually performs a write, so
+        it gets the same real gate /api/skin already applies to earned skins."""
+        if not _mark_earned(out_dir, db_path, "the-great-library"):
+            return jsonify({"error": "The Great Library hasn't been earned yet"}), 403
+        f = request.files.get("file")
+        if f is None or not f.filename:
+            return jsonify({"error": "no file"}), 400
+        try:
+            import io
+            from PIL import Image
+            im = Image.open(f.stream)
+            im.load()
+            buf = io.BytesIO()
+            im.convert("RGBA").save(buf, format="PNG")
+        except Exception:
+            return jsonify({"error": "not a readable image"}), 400
+        mark = add_custom_mark(out_dir, buf.getvalue())
+        return jsonify({"mark": mark["id"], "marks": list_marks(out_dir)})
+
+    @app.route("/api/branding/mark/custom/remove", methods=["POST"])
+    def api_branding_mark_custom_remove():
+        """Remove an uploaded custom mark (Control Panel.dc.html's Remove chip).
+        LOGIN tier, same as the upload route above."""
+        body = request.get_json(silent=True) or {}
+        mark_id = str(body.get("id") or "")
+        if not remove_custom_mark(out_dir, mark_id):
+            return jsonify({"error": "unknown custom mark"}), 400
+        cfg = load_branding(out_dir)
+        return jsonify({"mark": cfg["mark"], "marks": list_marks(out_dir)})
 
     @app.route("/api/branding/shortcut", methods=["POST"])
     def api_branding_shortcut():
