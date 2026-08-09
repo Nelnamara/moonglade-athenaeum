@@ -6565,3 +6565,71 @@ at `C:\Users\gwilkins\Desktop\Moonglade arthandoff 8.8.26\`:
 
 **Executed same session:** A1/A2/A3 wired + live-verified (see the commit this entry sits
 alongside); A4/A6 held; A5/D2/D3/D4/D5/D7 need a follow-up workshop/doc pass, tracked above.
+
+### Auto-updater (P4) scoped in detail -- version-everywhere audit + the SQLite-bundle cross-reference  ·  *2026-08-09*
+
+Owner's word: build it, and it must ALWAYS refresh every place the version number shows, not
+just the Control-Panel badge. Traced the actual architecture before writing any code.
+
+**Version display is already ONE source, not several.** `_build_stamp()`
+(`moonglade_gallery.py:4515`) computes `v{__version__} · {short git sha}` ONCE at process
+startup (its own docstring: "If you pull without restarting, this keeps showing the OLD
+sha -- which is precisely how you tell a stale server from a fresh one") and is stored in a
+closure variable shared by both boot-payload routes -- `/login`'s boot (:5579) and
+`next_gallery()`'s boot (:10327, the authenticated app AND the setup-wizard path, same
+handler). Every frontend consumer reads `boot.build_stamp` from there; there is no second,
+hardcoded copy to forget:
+- `ControlPanelOverlay.jsx:307` -- the literal sidebar-footer badge (`{boot?.build_stamp ||
+  "—"}`).
+- `Banner.jsx` / `AppMobile.jsx` / `LoginPage.jsx` -- all three feed `boot.build_stamp` into
+  `useFlavour.js`'s `reveal()`: clicking the rotating banner tagline (**this is the "branding
+  title click action"**) shows `"next · build " + buildStamp` for 3 seconds, then reverts to
+  the normal rotating flavour line. One hook, three mount points, same stamp.
+
+So the "always" requirement is structurally already met server-side -- restart is intrinsic
+to the update flow, and this stamp is *designed* to only change on a fresh process start.
+**The one real gap:** a browser tab left open across the restart keeps its stale
+`boot.build_stamp` in React state until it reloads -- the restart itself pushes nothing to
+open tabs. Proposed fix for the tab that actually clicked update: after `POST
+/api/update/apply` returns, poll `/api/ping` the same way the existing Restart flow already
+does (`ControlPanelOverlay.jsx:30`'s documented pattern -- wait for down, then back up) and
+auto-reload that tab once the new process answers. Covers the person who triggered it, with
+zero new mechanism. **Open call, not decided here:** whether a stale tab elsewhere on the LAN
+(one that didn't trigger the update) deserves a nudge too -- the app already has a live-events
+push channel it could ride (a toast: "Moonglade updated, refresh when ready"), but that is
+scope beyond "always shows the new number where it's looked at" and is the owner's call.
+
+**SQLite-migration check, resolved for catalog.db, open for the asset bundle.** Confirmed via
+grep: `catalog.db` is the ONLY SQLite database in the app today, and its schema is already
+self-healing -- `init_db()` (`moonglade_gallery.py:174`) runs a list of idempotent `ALTER
+TABLE catalog ADD COLUMN ...` statements on every server start (:192-226+), so a `git pull`
+to a version with new catalog columns needs no updater-specific migration step; the next
+boot just adds what's new. There is no `PRAGMA user_version` or migration-table scheme
+anywhere in the codebase -- this ADD-COLUMN-and-ignore-if-present pattern IS the app's whole
+migration story, and it works only because every catalog change has ever been purely
+additive.
+
+**Cross-reference into the P3 asset-bundling plan (context update, not a new decision):** the
+SQLite asset bundle P3 will introduce does not exist yet, so it has no such self-healing
+pattern of its own. P3's own schema design needs to bake in the SAME idempotent,
+purely-additive migration approach from day one -- otherwise a future app update that ships a
+newer bundle schema would need bespoke migration handling the auto-updater was never scoped
+to provide. Flagging this now, before P3's schema gets designed, is cheaper than retrofitting
+it after the bundle format is locked. See [[The asset-bundling project]].
+
+**Restart mechanism, confirmed matching the console's claim.** `/api/server/restart`
+(`moonglade_gallery.py:6169`) already gates on `_supervised()` (needs the managed launcher,
+"Serve Gallery") and `_job_busy()` (refuses mid-job, identical rule to Stop), then calls
+`_schedule_server_exit(42)` -- exit code 42 is what the launcher relaunches on. The
+auto-updater's apply step is `git pull --ff-only` (atomic, refuses on a dirty tree) followed
+by a reinstall of requirements, then this exact same guarded restart call -- no new
+supervision mechanism needed, it rides the one Restart already has.
+
+**Still open, needs your call before build starts:** (1) update-check cadence -- the console
+proposed `GET /api/update/check` vs GitHub releases, cached at 60/hr unauthenticated; is that
+the right poll interval, or should it only check on-demand (Panel opened) plus a slower
+background tick? (2) the Control-Panel Server-section badge itself is a visual addition next
+to the existing Restart chip (`ControlPanelOverlay.jsx:288-297`) -- wants a mockup before
+code per the project's own mock-before-code rule; can ride the same workshop pass as the
+job-tracker chrome redesign, or stay separate, owner's preference. (3) the cross-LAN
+stale-tab nudge noted above -- in scope for v1 or deferred.
