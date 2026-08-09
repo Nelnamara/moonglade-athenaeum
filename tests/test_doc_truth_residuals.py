@@ -16,55 +16,73 @@ def _read(relpath):
 
 
 # ---------------------------------------------------------------------------
-# P3 residual: the header's hardcoded is_local=True and the "^ Import" button.
+# P3 residual: the hardcoded is_local=True and the Import control.
 # /api/import-local IS correctly re-checked server-side as LOCALHOST-tier (no real
-# security hole) -- originally, the comments that justify hardcoding is_local=True
-# named only Generate/Loom/Panel (genuinely LOGIN-tier) and never mentioned Import
-# (LOCALHOST-tier), so a signed-in LAN session saw a working-looking Import button
-# that always 403'd with no comment explaining why (comment-only fix, 2026-07-23,
-# commit e36976d). FIXED FOR REAL 2026-07-24 (docs/AUDIT_2026-07-21.md P3/S5-3): the
-# button's own VISIBILITY is now also gated on the real `is_true_local` check (see
-# tests/test_route_tiers.py's test_index_withholds_the_import_button_from_a_lan_session
-# for the behavioral regression test), so a LAN session no longer even sees the
-# button, let alone a 403 after clicking it. The two tests below still hold: they
-# pin that the comments explaining is_local's hardcode continue to name Import and
-# its real tier accurately, now describing why the button is gated differently
-# rather than just flagging that it's an exception.
+# security hole) -- originally, the classic header's comments justifying the
+# is_local=True hardcode never mentioned Import's stricter tier, so a signed-in LAN
+# session saw a working-looking Import button that always 403'd (comment fix
+# 2026-07-23 e36976d; visibility gated on the real check 2026-07-24, P3/S5-3).
+# PORTED 2026-08-08, the classic-UI cut: BASE_HTML/INDEX_HTML (the head-nav block,
+# ImportUI, and both classic comments these tests used to scrape) are deleted. The
+# same enforcement now lives in the React shell: next_gallery()'s boot payload
+# ships the hardcoded `"is_local": True` PAIRED with the real
+# `"is_true_local": _is_local_request()`, and the surviving Import control
+# (gallery/src/components/NavSpine.jsx) is marked localOnly and withheld unless
+# boot.is_true_local -- with ImportOverlay.jsx's header documenting the route as
+# localhost-only. The two tests below pin that ported shape: the UI source that
+# renders Import must keep saying (and doing) the LOCALHOST-tier exception, and
+# the hardcode must never ship without the real check beside it.
 # ---------------------------------------------------------------------------
 
-def test_head_nav_comment_names_import_as_the_localhost_exception():
-    """The head-nav block's `{% if is_local %}` gate covers Generate/Import/The Loom
-    together, but /api/import-local -- unlike Generate and The Loom -- is actually
-    LOCALHOST-tier (re-checked server-side via _is_local_request()). The comment right
-    above that gate must say so, not just describe Generate/Loom/Panel/balance."""
-    src = _read("moonglade_gallery.py")
-    start = src.index('<div class="head-nav">')
-    end = src.index("ImportUI.open()", start)
-    window = src[start:end]
-    assert "Import" in window, (
-        "the head-nav comment above the is_local-gated buttons never mentions Import, "
-        "even though the Import button renders inside that same gate")
-    assert re.search(r"import-local|LOCALHOST|_is_local_request", window), (
-        "the head-nav comment mentions Import but doesn't explain that its target route "
-        "is LOCALHOST-tier -- the whole point of the fix")
+def test_navspine_gates_and_documents_import_as_the_localhost_exception():
+    """The React nav (the surviving home of the Import control) must (a) mark the
+    Import item localOnly, (b) actually withhold localOnly items unless the REAL
+    boot.is_true_local flag is set -- never the hardcoded boot.is_local -- and
+    (c) carry commentary naming /api/import-local so a reader knows why Import is
+    gated differently from its neighbors (Generate-tier surfaces are LOGIN-tier;
+    Import writes to the server's own filesystem)."""
+    src = _read("gallery/src/components/NavSpine.jsx")
+    item_start = src.index('label: "Import"')
+    item_end = src.index("label:", item_start + 1)
+    item = src[item_start:item_end]
+    assert "localOnly: true" in item, (
+        "NavSpine's Import item is no longer marked localOnly -- a LAN session would "
+        "see a working-looking Import control that always 403s (the original P3 bug)")
+    assert re.search(r"localOnly\s*&&\s*!boot\.is_true_local", src), (
+        "NavSpine no longer withholds localOnly items on the REAL is_true_local check; "
+        "gating on the hardcoded is_local flag would resurrect the P3 bug")
+    comment_window = src[max(0, item_start - 400):item_start]
+    assert re.search(r"import-local|localhost|LOCALHOST", comment_window), (
+        "the comment above NavSpine's Import item no longer names /api/import-local or "
+        "its localhost tier -- the doc half of the P3 fix")
 
 
-def test_is_local_hardcode_comment_names_import_as_the_documented_exception():
-    """Same underlying area, the other nearby comment: the one explaining why
-    `is_local=True` is a safe hardcode (right next to the render_template_string call
-    that does it) must name Generate/Loom/Panel as the surfaces it gates AND still
-    call out Import as the one control that needs the stricter, real
-    `is_true_local` check instead -- so a reader has no doubt Import is actually
-    LOCALHOST-tier, not LOGIN-tier like its neighbors."""
+def test_is_local_hardcode_ships_with_the_real_check_and_the_route_backs_the_doc():
+    """The `is_local: True` hardcode survives in next_gallery()'s boot payload. It is
+    only safe because the REAL `_is_local_request()` verdict ships right beside it as
+    `is_true_local` (what the Import control gates on), and because /api/import-local
+    re-checks localhost server-side regardless of what any client renders --
+    which is also exactly what ImportOverlay.jsx's header comment claims
+    ('/api/import-local ... is localhost-only'). Pin all three so the doc claim,
+    the boot payload, and the route can't drift apart."""
     src = _read("moonglade_gallery.py")
-    start = src.index("# `is_local` below")
-    end = src.index("is_local=True", start)
-    window = src[start:end]
-    assert "Import" in window, (
-        "the is_local=True hardcode's explanatory comment never mentions Import as an "
-        "exception, even though Import renders under the same flag")
-    assert re.search(r"import-local|LOCALHOST|_is_local_request", window), (
-        "the comment mentions Import but doesn't explain the LOCALHOST-tier exception")
+    start = src.index('"is_local": True')
+    window = src[start:start + 200]
+    assert re.search(r'"is_true_local":\s*_is_local_request\(\)', window), (
+        "the boot payload hardcodes is_local=True without shipping the real "
+        "_is_local_request() verdict beside it as is_true_local -- the client would "
+        "have no way to gate Import correctly")
+    route_start = src.index('@app.route("/api/import-local"')
+    route_body = src[route_start:route_start + 2500]
+    assert "_is_local_request()" in route_body, (
+        "/api/import-local no longer re-checks _is_local_request() server-side -- "
+        "client-side gating alone is not a tier")
+    assert re.search(r"[Ll]ocalhost-only", route_body), (
+        "/api/import-local's docstring no longer states its localhost-only tier")
+    overlay = _read("gallery/src/components/ImportOverlay.jsx")
+    assert re.search(r"import-local[\s\S]{0,120}localhost-only", overlay), (
+        "ImportOverlay.jsx's header no longer documents /api/import-local as "
+        "localhost-only -- the surviving doc half of the P3 fix")
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +196,7 @@ def test_contributing_md_does_not_harden_the_false_single_matcher_claim():
 # ---------------------------------------------------------------------------
 
 def test_generating_wiki_documents_the_video_model_roster_and_duration_gating():
-    """Verified directly against static/mg-generate-drawer.js's MODELS/MODEL_VMODES/
+    """Verified directly against gallery/src/gen/videoDrawerCore.js's MODELS/MODEL_VMODES/
     MODEL_MAXDUR tables: seven selectable video engines, a 6s duration that's real but
     was never mentioned anywhere user-facing, two models (V3.0 Flash, V2.7) that no free
     card ever covers, and per-model gating of which Shot modes are offered."""

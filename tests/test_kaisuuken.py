@@ -244,4 +244,157 @@ def test_edit_params_inject_kaisuuken():
 
 def test_params_no_kaisuuken_by_default():
     assert "kaisuukenId" not in core.build_video_parameters("m", media_id="1")
+
+
+# ---- list_kaisuuken_logs: GET /v2/kaisuuken/logs -- the per-redemption "paper trail",
+# distinct from /v2/kaisuuken/summary's live held-count. Verified live 2026-08-02. ----
+
+def test_list_kaisuuken_logs_normalizes_real_shape(monkeypatch):
+    seen = {}
+
+    def fake_get(s, path, params=None, **k):
+        seen["path"] = path
+        seen["params"] = params
+        return {"data": [
+            {"id": "rec-1", "kaisuukenId": "k-1", "templateCode": "common-tsubaki-2",
+             "categoryCode": "Model Card", "templateName": "Tsubaki.2 Only",
+             "taskType": "image-gen", "taskId": "2040084122530788759", "action": "consumed",
+             "creditCost": 3200, "createdAt": "2026-07-31T17:16:00.000Z"},
+        ], "pageInfo": {"hasNextPage": True, "endCursor": "cursor-abc"}}
+
+    monkeypatch.setattr(core, "_rest_get", fake_get)
+    result = core.list_kaisuuken_logs(object(), first=20)
+    assert seen["path"] == "/kaisuuken/logs" and seen["params"] == {"first": 20}
+    assert result["has_next"] is True and result["end_cursor"] == "cursor-abc"
+    row = result["logs"][0]
+    assert row["template_name"] == "Tsubaki.2 Only" and row["category"] == "Model Card"
+    assert row["action"] == "consumed" and row["credit_cost"] == 3200
+    assert row["task_id"] == "2040084122530788759"
+
+
+def test_list_kaisuuken_logs_passes_cursor_when_given(monkeypatch):
+    seen = {}
+
+    def fake_get(s, path, params=None, **k):
+        seen["params"] = params
+        return {"data": [], "pageInfo": {}}
+
+    monkeypatch.setattr(core, "_rest_get", fake_get)
+    core.list_kaisuuken_logs(object(), first=50, after="cursor-xyz")
+    assert seen["params"] == {"first": 50, "after": "cursor-xyz"}
+
+
+def test_list_kaisuuken_logs_fails_soft(monkeypatch):
+    def boom(*a, **k):
+        raise core.PixAIError("network down")
+    monkeypatch.setattr(core, "_rest_get", boom)
+    assert core.list_kaisuuken_logs(object()) == {
+        "logs": [], "has_next": False, "end_cursor": None}
+
+
+# ---- kaisuuken_type_catalog: page all the way back for the lifetime card-type roster --
+# ("dig the entire crop" -- current holdings alone can't show a type that's fully cycled
+# out, e.g. Reference Pro Only / Edit Pro Only both did exactly that between 2026-07-06
+# and 2026-08-02.) ----
+
+def test_kaisuuken_type_catalog_pages_until_exhausted(monkeypatch):
+    pages = [
+        {"data": [
+            {"templateName": "Tsubaki.2 Only", "categoryCode": "Model Card",
+             "taskType": "image-gen", "action": "consumed",
+             "createdAt": "2026-07-31T00:00:00Z"},
+            {"templateName": "Edit Pro Only", "categoryCode": "Model Card",
+             "taskType": "chat-edit", "action": "refunded",
+             "createdAt": "2026-07-10T00:00:00Z"},
+        ], "pageInfo": {"hasNextPage": True, "endCursor": "cursor-2"}},
+        {"data": [
+            {"templateName": "Edit Pro Only", "categoryCode": "Model Card",
+             "taskType": "chat-edit", "action": "consumed",
+             "createdAt": "2026-07-06T00:00:00Z"},
+        ], "pageInfo": {"hasNextPage": False, "endCursor": None}},
+    ]
+    calls = {"n": 0}
+
+    def fake_get(s, path, params=None, **k):
+        i = calls["n"]
+        calls["n"] += 1
+        return pages[i]
+
+    monkeypatch.setattr(core, "_rest_get", fake_get)
+    result = core.kaisuuken_type_catalog(object())
+    assert result["pages_read"] == 2 and result["hit_page_cap"] is False
+    assert set(result["templates"].keys()) == {"Tsubaki.2 Only", "Edit Pro Only"}
+    edit_pro = result["templates"]["Edit Pro Only"]
+    assert edit_pro["consumed"] == 1 and edit_pro["refunded"] == 1     # both events counted
+    assert edit_pro["last_seen"] == "2026-07-10T00:00:00Z"             # newer of its 2 rows
+    assert edit_pro["first_seen"] == "2026-07-06T00:00:00Z"            # older of its 2 rows
+
+
+def test_kaisuuken_type_catalog_respects_page_cap(monkeypatch):
+    """A log that NEVER runs out (hasNextPage always True) must stop at max_pages, not hang
+    -- an old account paging forever would otherwise hammer PixAI's API indefinitely."""
+    def fake_get(s, path, params=None, **k):
+        return {"data": [{"templateName": "X", "categoryCode": "", "taskType": "",
+                           "action": "consumed", "createdAt": "2026-01-01T00:00:00Z"}],
+                "pageInfo": {"hasNextPage": True, "endCursor": "always-more"}}
+
+    monkeypatch.setattr(core, "_rest_get", fake_get)
+    result = core.kaisuuken_type_catalog(object(), max_pages=3)
+    assert result["pages_read"] == 3 and result["hit_page_cap"] is True
+
+
+def test_kaisuuken_type_catalog_empty_history(monkeypatch):
+    monkeypatch.setattr(core, "_rest_get", lambda s, path, params=None, **k: {
+        "data": [], "pageInfo": {"hasNextPage": False}})
+    result = core.kaisuuken_type_catalog(object())
+    assert result == {"templates": {}, "pages_read": 1, "hit_page_cap": False}
+
+
+# ---- run_card_history display (list_kaisuuken_logs / kaisuuken_type_catalog stubbed) ----
+
+def test_run_card_history_empty(monkeypatch, capsys):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "list_kaisuuken_logs", lambda s, **k: {
+        "logs": [], "has_next": False, "end_cursor": None})
+    res = core.run_card_history(SimpleNamespace(token=None, card_history_all=False,
+                                                 card_history_count=0))
+    assert res == {"logs": 0}
+    assert "No benefit-card history" in capsys.readouterr().out
+
+
+def test_run_card_history_lists_recent(monkeypatch, capsys):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "list_kaisuuken_logs", lambda s, **k: {
+        "logs": [{"template_name": "Tsubaki.2 Only", "action": "consumed",
+                  "task_id": "2040084122530788759", "created_at": "2026-07-31T17:16:00Z",
+                  "category": "Model Card", "task_type": "image-gen", "credit_cost": 3200,
+                  "record_id": "rec-1"}],
+        "has_next": True, "end_cursor": "cursor-abc"})
+    res = core.run_card_history(SimpleNamespace(token=None, card_history_all=False,
+                                                 card_history_count=0))
+    out = capsys.readouterr().out
+    assert res == {"logs": 1}
+    assert "Tsubaki.2 Only" in out and "consumed" in out and "2040084122530788759" in out
+    assert "--card-history-all" in out            # points at how to see more
+
+
+def test_run_card_history_all_prints_type_catalog(monkeypatch, capsys):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "kaisuuken_type_catalog", lambda s, **k: {
+        "templates": {
+            "Tsubaki.2 Only": {"category": "Model Card", "task_type": "image-gen",
+                                "consumed": 16, "refunded": 0,
+                                "first_seen": "2026-07-29T00:00:00Z",
+                                "last_seen": "2026-07-31T17:16:00Z"},
+            "Edit Pro Only": {"category": "Model Card", "task_type": "chat-edit",
+                               "consumed": 16, "refunded": 1,
+                               "first_seen": "2026-07-06T00:00:00Z",
+                               "last_seen": "2026-07-10T19:44:00Z"},
+        }, "pages_read": 3, "hit_page_cap": False})
+    res = core.run_card_history(SimpleNamespace(token=None, card_history_all=True,
+                                                 card_history_count=0))
+    out = capsys.readouterr().out
+    assert res == {"templates": 2}
+    assert "Tsubaki.2 Only" in out and "Edit Pro Only" in out
+    assert "consumed=16" in out and "refunded=1" in out
     assert "kaisuukenId" not in core.build_chat_edit_parameters("x", ["10"])

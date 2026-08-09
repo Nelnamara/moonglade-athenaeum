@@ -1,0 +1,80 @@
+/* PixAI account detail modal — Control Panel.dc.html account-detail design (drift §37).
+   Values translated 1:1 from the DC's own style generators (grp/row/monoDim/dimChip/
+   statusPill/onHandCard/kick/split/amt/pct). Rides the shared mgcp-sub-* slab chrome. */
+
+.mgcp-sub-slab.acct-slab { width: min(880px, calc(100vw - 60px)); max-height: 84vh;
+  display: flex; flex-direction: column; }
+.acct-readonly { font-size: 11.5px; color: var(--overlay0); }
+
+/* Balance strip */
+.acct-balance { display: flex; gap: 26px; flex-wrap: wrap; align-items: flex-end;
+  padding: 14px 2px; border-bottom: 1px solid var(--surface0); }
+.acct-bignum { font-family: Georgia, serif; font-size: 27px; line-height: 1; font-variant-numeric: tabular-nums; }
+.acct-bignum.accent { color: var(--accent); }
+.acct-splitnum { font-family: Georgia, serif; font-size: 22px; line-height: 1; font-variant-numeric: tabular-nums; color: var(--text); }
+.acct-splitnum.unknown { color: var(--overlay0); }
+.acct-midnum { font-family: Georgia, serif; font-size: 22px; line-height: 1; font-variant-numeric: tabular-nums; color: var(--text); }
+.acct-kick { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9.5px;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--overlay0); margin-top: 5px; white-space: nowrap; }
+
+/* Tabs */
+.acct-tabs { display: flex; gap: 6px; padding: 12px 0; }
+.acct-tab { font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 999px; cursor: pointer;
+  color: var(--subtext); background: var(--surface0); border: 1px solid var(--surface1); font-family: inherit; white-space: nowrap; }
+.acct-tab.on { color: var(--text); background: color-mix(in srgb, var(--accent) 20%, var(--surface0));
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+
+.acct-body { flex: 1 1 auto; min-height: 240px; overflow-y: auto; overflow-x: hidden; padding-right: 4px; }
+.acct-err { font-size: 12px; color: var(--red, #f38ba8); padding: 8px 0; }
+
+.acct-grp { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 10px; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--overlay0); margin: 0 0 9px; white-space: nowrap; }
+
+/* One list row */
+.acct-row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-bottom: 1px dashed #262242; }
+.acct-rowmain { flex: 1 1 auto; min-width: 0; }
+.acct-rowmain b { font-size: 12.5px; }
+.acct-rowmeta { font-size: 10.5px; color: var(--overlay0); margin-top: 2px; }
+.acct-ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-empty { font-size: 11.5px; color: var(--overlay0); padding: 12px 2px; }
+
+.acct-monodim { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--overlay0); white-space: nowrap; flex: none; }
+.acct-mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--text); }
+.acct-numcell { flex: none; font-size: 11px; color: var(--overlay0); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.acct-numcell b { color: var(--text); }
+
+.acct-dimchip { flex: none; white-space: nowrap; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+  color: var(--subtext); background: var(--surface0); border: 1px solid var(--surface1); }
+.acct-dimchip.raw { font-family: ui-monospace, Menlo, monospace; opacity: .75; }
+
+/* On-hand cards */
+.acct-onhandrow { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.acct-onhandcard { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; font-size: 12px;
+  color: var(--subtext); padding: 9px 13px; border-radius: 10px; border: 1px solid var(--surface1); background: var(--surface0); }
+.acct-onhandcard b { font-size: 17px; font-variant-numeric: tabular-nums; color: var(--text); }
+
+/* Usage-history action cell */
+.acct-act { flex: none; width: 86px; font-size: 10.5px; font-weight: 700; color: var(--subtext); }
+.acct-act.refund { color: var(--emerald); }
+
+/* Coupons */
+.acct-couphead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.acct-couphint { font-size: 11px; color: var(--overlay0); margin-bottom: 12px; }
+.acct-histchip { display: inline-flex; align-items: center; background: var(--surface0); border: 1px solid var(--surface1);
+  border-radius: 8px; padding: 5px 10px; font-size: 11.5px; color: var(--text); cursor: pointer; font-family: inherit; }
+.acct-pct { flex: none; width: 52px; font-family: Georgia, serif; font-size: 19px; font-variant-numeric: tabular-nums; color: var(--overlay0); }
+.acct-pct.avail { color: var(--gold); }
+.acct-status { flex: none; font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+  color: var(--overlay0); background: var(--surface0); border: 1px solid var(--surface1); }
+.acct-status.available { color: var(--emerald); background: rgba(79,201,154,.14); border-color: rgba(79,201,154,.45); }
+.acct-status.locked { color: var(--gold); background: rgba(212,175,55,.1); border-color: rgba(212,175,55,.4); }
+
+/* Ledger amount (signed; + emerald, − plain — ruby stays destructive-only per hue law) */
+.acct-amt { flex: none; width: 74px; text-align: right; font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+  font-variant-numeric: tabular-nums; color: var(--text); }
+.acct-amt.pos { color: var(--emerald); }
+
+/* Load more/older */
+.acct-load { margin-top: 10px; text-align: center; font-size: 11.5px; font-weight: 600; color: var(--subtext);
+  padding: 8px; border-radius: 9px; border: 1px dashed var(--surface1); cursor: pointer; }
+.acct-load:hover { border-color: var(--accent); color: var(--text); }

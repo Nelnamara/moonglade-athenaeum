@@ -25,7 +25,7 @@ A row of frosted glow-pill buttons, one hue per destination:
   skins. It opens as a maximized overlay over the gallery, not a separate page (`Esc`
   closes it).
 - **🏅 Contests** — live PixAI contests. **📈 My Art** — how your published art is doing.
-- **⚙ Panel** — the Control Panel at `/panel`: maintenance jobs with live logs and progress,
+- **⚙ Panel** — the Control Panel overlay: maintenance jobs with live logs and progress,
   the scheduler, server Stop/Restart, branding.
 - **♡ Health** — the [collection health](Health) dashboard.
 

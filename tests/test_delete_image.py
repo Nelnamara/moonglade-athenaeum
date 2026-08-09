@@ -203,33 +203,36 @@ def test_the_cloud_delete_is_single_attempt(monkeypatch):
         .format(len(attempts)))
 
 
-def test_the_two_delete_paths_are_worded_apart_on_the_page(tmp_path):
-    """A dialog that words the recoverable and the irreversible identically is how the wrong
-    one gets clicked. Local must say it is recoverable and that a sync brings it back; cloud
-    must say it cannot be undone and must carry the typed-DELETE prompt."""
+def test_the_batch_size_reaches_the_delete_dialog(tmp_path):
+    """Ported from the classic detail page (cut 2026-08-08): the server-rendered dialog
+    carried `data-siblings="3"` so "the other 2 images stay" was a real number rather than
+    a claim the page could not back up. The dialog markup is React's now and out of a Flask
+    client's reach, but the NUMBER still has to come from the server -- /api/next/detail is
+    the surviving route that feeds the Details view, and its `siblings` field is what the
+    dialog words the batch warning from. An import (blank task_id) reports 0, which is how
+    the client knows there is no batch to warn about at all."""
     cli = _cli(tmp_path, _batch(tmp_path))
-    html = cli.get("/image/b").get_data(as_text=True)
-    assert "Delete locally" in html and "Delete from PixAI" in html
-    assert "recoverable" in html and "sync brings it back" in html
-    assert "Type DELETE to confirm" in html
-    assert "cannot be undone" in html
-    # The batch size reaches the dialog, so "the other 2 images stay" is a real number rather
-    # than a claim the page cannot back up.
-    assert 'data-siblings="3"' in html
+    d = cli.get("/api/next/detail/b").get_json()
+    assert d.get("siblings") == 3, "the batch size never reached the client"
+    assert cli.get("/api/next/detail/z").get_json().get("siblings") == 0, (
+        "an imported file claimed batch siblings it does not have")
 
 
-def test_the_cloud_button_is_absent_for_an_import_and_over_lan(tmp_path):
-    """An import has nothing on PixAI to delete, and a LAN session is not allowed to destroy
-    on the owner's account. Both cases hide the control rather than offering a dead-end
-    click -- the same rule the LAN chip exists to enforce."""
+def test_the_cloud_delete_is_withheld_from_a_lan_session(tmp_path):
+    """Ported from the classic detail page (cut 2026-08-08), which hid #del-cloud-btn for a
+    LAN request: a logged-in LAN session unlocks browsing and spending, not irreversible
+    destruction on the owner's real account. The button is React's now; the server's half of
+    that rule is /api/next/detail's `can_delete_cloud` flag, computed from
+    _is_local_request() -- the SAME check /api/delete-image itself enforces (the 403 for an
+    authenticated LAN POST is proven in test_route_tiers.py, where api_delete_image is
+    declared LOCALHOST). This proves the client is TOLD not to offer the control, so the
+    gate is a hidden button rather than a dead-end click into a 403."""
     cli = _cli(tmp_path, _batch(tmp_path))
-    # By the button's id, not its label: the markup's own explanatory comment names the
-    # gallery's task-level "Delete from PixAI", so a label substring matches even when no
-    # button is rendered at all.
-    assert 'id="del-cloud-btn"' not in cli.get("/image/z").get_data(as_text=True)
-    assert 'id="del-cloud-btn"' in cli.get("/image/b").get_data(as_text=True)
+    assert cli.get("/api/next/detail/b").get_json().get("can_delete_cloud") is True, (
+        "the owner's own localhost session was denied the cloud-delete control")
 
-    lan = cli.get("/image/b", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
-    if lan.status_code == 200:
-        assert 'id="del-cloud-btn"' not in lan.get_data(as_text=True), (
-            "a LAN session was offered cloud deletion")
+    lan = cli.get("/api/next/detail/b",
+                  environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
+    assert lan.status_code == 200, "a logged-in LAN session should still browse details"
+    assert lan.get_json().get("can_delete_cloud") is False, (
+        "a LAN session was offered cloud deletion")

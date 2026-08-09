@@ -1,28 +1,14 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
 
-// static/mg-notify.js is a plain global IIFE that builds its DOM on connect, so the label
-// helper is exercised here the way the rest of this suite treats that file: by pulling the
-// function out of the source and running it. That is enough -- the whole behaviour is a
-// lookup with a fallback, and the interesting part is WHICH string comes back.
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const src = readFileSync(path.join(__dirname, "../../static/mg-notify.js"), "utf8");
-
-function loadLabelFor() {
-  const table = src.slice(src.indexOf("var LABEL_ING = {"),
-                          src.indexOf("function labelFor(j, terminal){"));
-  const fn = src.slice(src.indexOf("function labelFor(j, terminal){"));
-  const body = fn.slice(0, fn.indexOf("\n    }") + 6);
-  // eslint-disable-next-line no-new-func
-  return new Function(table + body + "\nreturn labelFor;")();
-}
+// Port note 2026-08-08: static/mg-notify.js is gone (no-vanilla campaign) and with it the old
+// regex-extract-the-IIFE-body loader. The label helper now lives as a real export in
+// gallery/src/notify/format.js, so this suite imports and runs the ACTUAL implementation.
+// The behaviour under test is unchanged: a lookup with a fallback, and the interesting part
+// is WHICH string comes back.
+import { labelFor, LABEL_ING } from "../../gallery/src/notify/format.js";
 
 describe("activity card label tense", () => {
-  const labelFor = loadLabelFor();
-
   test("an in-flight job reads in the PRESENT tense", () => {
     // The stored label is the completion wording, written at SUBMIT time, so the card used
     // to say "Generated" about a job still sitting in PixAI's queue. Owner-reported
@@ -50,5 +36,16 @@ describe("activity card label tense", () => {
   test("a job with no label at all still says something", () => {
     assert.equal(labelFor({}, false), "Generation");
     assert.equal(labelFor({}, true), "Generation");
+  });
+
+  test("every LABEL_ING entry actually changes tense (table sanity)", () => {
+    // Port note 2026-08-08: new check, possible only now that the real table is importable.
+    // Guards against a copy-paste row where past and present tense are identical, which would
+    // silently reintroduce the "Generated while spinning" bug for that job type.
+    for (const [past, present] of Object.entries(LABEL_ING)) {
+      assert.notEqual(present, past, `LABEL_ING["${past}"] maps to itself`);
+      assert.equal(labelFor({ label: past }, false), present);
+      assert.equal(labelFor({ label: past }, true), past);
+    }
   });
 });

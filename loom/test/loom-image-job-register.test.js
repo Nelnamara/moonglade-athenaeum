@@ -34,10 +34,14 @@ import path from "node:path";
 // loom-v2-dead-generate-shot-prop.test.js).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(path.join(__dirname, "../master-storyboard.jsx"), "utf8");
-const notify = readFileSync(path.join(__dirname, "../../static/mg-notify.js"), "utf8");
+// PORT NOTE 2026-08-08 (no-vanilla campaign): static/mg-notify.js was DELETED. The Jobs
+// engine (register/track, the register-ONLY split this whole fix depends on) now lives at
+// gallery/src/notify/jobs.js; installNotify() still publishes it as window.Jobs, so every
+// master-storyboard.jsx call site under test here is byte-identical to before the port.
+const notify = readFileSync(path.join(__dirname, "../../gallery/src/notify/jobs.js"), "utf8");
 
 // The established guard shape, copied verbatim from generateShot's own call (line ~2716):
-// the Loom must not hard-depend on mg-notify.js having loaded.
+// the Loom must not hard-depend on the notify bundle having installed window.Jobs yet.
 const GUARDED_REGISTER = /if \(window\.Jobs && window\.Jobs\.register\) window\.Jobs\.register\(/;
 
 function body(re, what) {
@@ -96,11 +100,16 @@ describe("every Loom image submit path registers its generation in the shared Jo
   });
 
   test("it REGISTERS rather than TRACKS -- no second poll loop for the same task id", () => {
-    // mg-notify.js's register() is the register-ONLY entry point; track() also starts its own
-    // poll. These paths already own pollTaskWithCeiling, so track() would poll the same task
-    // twice from one page.
-    assert.match(notify, /function register\(id, label\)\{/,
-      "mg-notify.js must still expose the register-ONLY entry point this fix depends on");
+    // register() is the register-ONLY entry point; track() also starts its own poll. These
+    // paths already own pollTaskWithCeiling, so track() would poll the same task twice from
+    // one page. `count` (2026-08-02, the Runs reel batch-grid feature) is a 3rd, optional
+    // param -- every Loom call site here still passes just (id, label), which is a
+    // no-op-compatible call against the new signature.
+    // PORT NOTE 2026-08-08: retargeted from mg-notify.js's `function register(id, label,
+    // count){` to the React port's exported form; the register/track split itself is
+    // preserved verbatim (jobs.js's own header calls it the spend-safety contract).
+    assert.match(notify, /export function register\(id, label, count\) \{/,
+      "gallery/src/notify/jobs.js must still expose the register-ONLY entry point this fix depends on");
     assert.doesNotMatch(src, /window\.Jobs\.track\(/,
       "master-storyboard.jsx must never call Jobs.track() -- every generation path in this file " +
       "already owns a private poll loop (pollShot / pollTaskWithCeiling), so track()'s own " +
@@ -173,7 +182,8 @@ describe("no NEW Loom submit path can quietly skip the shared Job Tracker", () =
 
 describe("the tray labels distinguish the three image paths and name the shot", () => {
   // .jt-lab is `white-space:nowrap;overflow:hidden;text-overflow:ellipsis` inside a 366px
-  // tray (static/mg-notify.js), so a long shot title truncates the TAIL -- whatever has to
+  // tray (gallery/src/styles/notify.css since the 2026-08-08 React port, verbatim from
+  // mg-notify.js), so a long shot title truncates the TAIL -- whatever has to
   // survive must come first. Hence: tab name, then shot code, then title. The tab names are
   // the owner's own vocabulary (the Loom's side tabs are literally Image / Edit / Reference /
   // Video), so a row maps 1:1 onto the button that was clicked.
@@ -277,7 +287,9 @@ describe("nothing that is registered can be left spinning forever (the make-it-w
     // resolve_orphan_jobs (moonglade_backup.py) only considers jobs whose type is
     // 'generate' and whose job_id is all digits -- which is exactly what Jobs.register posts
     // for a PixAI task id.
-    assert.match(notify, /type:'generate'/,
+    // PORT NOTE 2026-08-08: the vanilla wrote `type:'generate'`; the React port's register()
+    // writes `type: "generate"` (jobs.js line ~36). Same wire bytes after JSON.stringify.
+    assert.match(notify, /type:\s*["']generate["']/,
       "Jobs.register must post type:'generate' or the server-side orphan-reconciliation sweep " +
       "(resolve_orphan_jobs, run on every /api/jobs read) will skip these jobs and a closed tab " +
       "would leave the row spinning until it simply aged out");

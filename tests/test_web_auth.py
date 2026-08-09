@@ -1,8 +1,20 @@
 """Session-based web-gallery login auth: the auth pass that gates EVERY request
 behind a login, including from the server's own machine -- there is no
-localhost bypass (see moonglade_gallery.py's _is_authorized_request() and /login /logout, and
-moonglade_backup.py's get_or_create_secret_key/add_or_update_web_user/
-remove_web_user/verify_web_user/list_web_users).
+localhost bypass (see moonglade_gallery.py's _is_authorized_request(), GET /login,
+POST /api/login and POST /api/logout, and moonglade_backup.py's
+get_or_create_secret_key/add_or_update_web_user/remove_web_user/verify_web_user/
+list_web_users).
+
+Since the classic-UI cut (2026-08-08) the ONLY sign-in surface is GET /login
+(the React shell; csrf rides in window.MG_BOOT) + POST /api/login (JSON).
+tests/test_api_login.py owns that endpoint's core contract (generic-error
+parity, lockout incl. the 5th-try report and the shared counter, csrf rotation
+incl. the returned-token flow, bootstrap policy and the local-only refusal).
+This file keeps everything that ISN'T duplicated there: the core/CLI account
+helpers, the GET /login boot flags, the front-door route matrix, session
+revocation, and the unique regressions ported off the dead form route
+(next-sanitizer bypasses, lockout-clears-on-success, the lockout race,
+incidental-GET csrf setdefault, blank-remote_addr fail-closed).
 
 NOT about PIXAI_API_KEY auth -- that's tests/test_auth.py. This file is about
 the *web session* login that gates the gallery itself."""
@@ -13,6 +25,7 @@ import pytest
 
 import moonglade_backup as core
 from moonglade_gallery import create_app
+from tests.conftest import login_existing_client
 
 
 def _client(tmp_path):
@@ -20,20 +33,56 @@ def _client(tmp_path):
 
 
 def _csrf(html):
-    m = re.search(r'name="csrf" value="([^"]+)"', html)
-    assert m, "login page did not render a csrf hidden field"
-    return m.group(1)
+    # The React shell's window.MG_BOOT JSON blob (the only login page since the
+    # classic cut, 2026-08-08). The classic hidden-input pattern is kept in the
+    # regex purely so a regression that resurrects it still extracts + fails
+    # loudly at the POST step rather than silently here.
+    m = re.search(r'name="csrf" value="([^"]+)"|"csrf":\s*"([^"]+)"', html)
+    assert m, "login page did not render a csrf token in MG_BOOT"
+    return m.group(1) or m.group(2)
+
+
+def _is_react_login_shell(html):
+    """True when GET /login served LoginPage.jsx's shell (the only login surface
+    since the classic cut). The actual <input name="username"> only exists in
+    client-rendered DOM, not this raw server response, so tests check the boot
+    payload's own authenticated:false marker instead of form-field text that
+    isn't there server-side."""
+    return re.search(r'"authenticated":\s*false', html) is not None
+
+
+def _session_csrf(cli):
+    """The token straight out of the live session -- for request shapes where
+    the rendered page carries none, and for /api/logout (whose caller holds the
+    token in JS, not in a form)."""
+    with cli.session_transaction() as sess:
+        return sess.get("csrf", "")
+
+
+_NO_OVERRIDE = object()
+
+
+def _api_login(cli, payload, remote_addr=_NO_OVERRIDE):
+    """One JSON POST to /api/login the way LoginPage.jsx makes it: GET /login
+    first (that's what mounts the React page and stashes session['csrf'] --
+    setdefault, so repeat GETs reuse the same token), then POST the body with
+    the csrf folded in. Returns the parsed JSON response. remote_addr may be
+    "" or None to exercise the blank-remote_addr fail-closed path."""
+    env = {} if remote_addr is _NO_OVERRIDE else {"REMOTE_ADDR": remote_addr}
+    cli.get("/login", environ_overrides=env)
+    body = dict(payload)
+    body.setdefault("csrf", _session_csrf(cli))
+    r = cli.post("/api/login", json=body, environ_overrides=env)
+    assert r.status_code == 200   # this route's contract: always 200, ok/error in the body
+    return r.get_json()
 
 
 def _logout(cli):
-    """Sign out the way the header's form does: a POST carrying this session's csrf
-    token. /logout's GET is a LOCAL sign-out only (it clears this client's cookie and
-    writes nothing server-side) since the CSRF-able-GET fix, so any test about
-    REVOKING OTHER SESSIONS has to use the POST. The token comes from the live
-    session, not a scraped page: _establish_session mints a fresh one at login."""
-    with cli.session_transaction() as sess:
-        token = sess.get("csrf", "")
-    return cli.post("/logout", data={"csrf": token})
+    """Sign out the way the React app does: POST /api/logout carrying this
+    session's csrf token. The default scope is the GLOBAL revoke (it bumps the
+    per-user sess_epoch), which is what any test about REVOKING OTHER SESSIONS
+    needs -- scope="this-device" is the opt-out, not the default."""
+    return cli.post("/api/logout", json={"csrf": _session_csrf(cli)})
 
 
 LAN = "203.0.113.5"          # TEST-NET-3 -- a "some other device on the LAN" stand-in
@@ -141,7 +190,6 @@ def test_cli_add_web_user_rejects_mismatched_confirmation(tmp_path, monkeypatch)
     passwords = iter(["hunter2-valid-pw", "totally-different"])
     monkeypatch.setattr(core.getpass, "getpass", lambda prompt="": next(passwords))
     monkeypatch.setattr(sys, "argv", ["moonglade_backup.py", "--add-web-user"])
-    import pytest
     with pytest.raises(SystemExit):
         core.main()
     assert core.list_web_users() == []
@@ -149,11 +197,10 @@ def test_cli_add_web_user_rejects_mismatched_confirmation(tmp_path, monkeypatch)
 
 def test_cli_add_web_user_enforces_the_same_password_policy(tmp_path, monkeypatch):
     """The CLI is the documented recovery path, not a back door around the rules
-    the web forms enforce -- a weak password must be refused here too."""
+    the web sign-in enforces -- a weak password must be refused here too."""
     monkeypatch.setattr("builtins.input", lambda prompt="": "alice")
     monkeypatch.setattr(core.getpass, "getpass", lambda prompt="": "1111")
     monkeypatch.setattr(sys, "argv", ["moonglade_backup.py", "--add-web-user"])
-    import pytest
     with pytest.raises(SystemExit):
         core.main()
     assert core.list_web_users() == []
@@ -177,128 +224,107 @@ def test_cli_list_web_users_flag_runs_without_error(tmp_path, monkeypatch, capsy
 
 
 # ---------------------------------------------------------------------------
-# /login /logout routes
+# GET /login (React shell + boot flags)
 # ---------------------------------------------------------------------------
 
-def test_login_page_renders_form_with_csrf(tmp_path):
+def test_login_page_renders_shell_with_csrf(tmp_path):
     cli = _client(tmp_path).test_client()
     html = cli.get("/login").get_data(as_text=True)
-    assert 'name="username"' in html and 'name="password"' in html
+    # Every state (create/sign-in/LAN-safety) is the React shell now; the actual
+    # <input> only exists in client-rendered DOM.
+    assert _is_react_login_shell(html)
     assert _csrf(html)   # a token is present
 
 
-def test_login_page_shows_bootstrap_form_locally_until_an_account_exists(tmp_path):
+def _boot_field(html, field):
+    """Pull a boolean field out of the React shell's window.MG_BOOT blob."""
+    m = re.search(r'"' + field + r'":\s*(true|false)', html)
+    return m is not None and m.group(1) == "true"
+
+
+def test_login_page_no_accounts_flag_flips_once_a_real_account_exists(tmp_path):
     """With zero AUTH_USERS configured (the fresh-clone default), a LOCAL request to
-    /login gets a real, functional account-creation form -- first-run setup happens
-    in the browser, never the CLI -- so it must never be a
-    banner pointing at --add-web-user. The bootstrap form (with its extra confirm
-    field) disappears -- and the ordinary two-field sign-in form takes its place --
-    the moment a real account exists."""
+    /login gets the React shell with boot.no_accounts:true -- LoginPage.jsx reads
+    that client-side to default into its create-account mode (design:
+    design_handoff/request-bootstrap-account-creation.md) -- first-run setup
+    happens in the browser, never the CLI, so classic's --add-web-user hint must
+    never leak into the response either way. The flag flips to false -- and
+    LoginPage.jsx switches to its ordinary sign-in mode -- the moment a real
+    account exists."""
     cli = _client(tmp_path).test_client()
     html = cli.get("/login").get_data(as_text=True)
     assert "--add-web-user" not in html
-    assert 'name="username"' in html and 'name="password"' in html
-    assert 'name="confirm"' in html                          # bootstrap-only field
-    assert 'name="mode" value="create"' in html
+    assert _is_react_login_shell(html)
+    assert _boot_field(html, "no_accounts") is True
     core.add_or_update_web_user("alice", "hunter2")
     html2 = cli.get("/login").get_data(as_text=True)
     assert "--add-web-user" not in html2
-    assert 'name="username"' in html2 and 'name="password"' in html2
-    assert 'name="confirm"' not in html2                      # ordinary sign-in form now
-    assert 'name="mode" value="create"' not in html2
+    assert _is_react_login_shell(html2)
+    assert _boot_field(html2, "no_accounts") is False
 
 
 def test_login_page_shows_safe_message_for_lan_request_when_no_accounts(tmp_path):
-    """The exact same zero-accounts state, but requested from a LAN address, must
-    NEVER show (or accept) the bootstrap form -- only a plain message with no CLI
-    mention and no way to submit credentials. This is the race-condition guard's
-    visible half; test_lan_direct_post_cannot_create_first_account below is the
-    server-side enforcement half."""
+    """The exact same zero-accounts state, but requested from a LAN address, must NEVER
+    offer the bootstrap form. The boot carries no_accounts:true AND is_local:false, which
+    LoginPage.jsx reads to render the "no account set up yet -- do it from the server
+    machine" message (client-side) instead of a create form a remote caller could never
+    use. --add-web-user must never leak. The server-side enforcement half is
+    tests/test_api_login.py's test_api_login_bootstrap_refused_from_lan_address."""
     cli = _client(tmp_path).test_client()
     html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
     assert "--add-web-user" not in html
-    assert 'name="username"' not in html and 'name="password"' not in html
-    assert "No account has been set up yet" in html
-    normalized = " ".join(html.lower().split())
-    assert "create the first account from the server machine" in normalized
-    # Once an account exists, a LAN request goes right back to the ordinary form.
+    assert _is_react_login_shell(html)
+    assert _boot_field(html, "no_accounts") is True
+    assert _boot_field(html, "is_local") is False   # -> LoginPage shows the safe message
+    # Once an account exists, a LAN request goes to the ordinary sign-in shell.
     core.add_or_update_web_user("alice", "hunter2")
     html2 = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
-    assert 'name="username"' in html2 and 'name="password"' in html2
-    assert "No account has been set up yet" not in html2
+    assert _is_react_login_shell(html2)
+    assert _boot_field(html2, "no_accounts") is False
 
 
 def test_bootstrap_treats_empty_or_missing_remote_addr_as_not_local(tmp_path):
     """Adversarial-review regression: _is_local_request() used to treat a
     missing/empty remote_addr as local (`ra in (..., "")`) -- a fail-OPEN
-    default in a function that gates the first-account bootstrap form (and
+    default in a function that gates the first-account bootstrap (and
     destructive Panel actions). It must now fail CLOSED: an empty or None
     remote_addr is refused exactly like a real LAN address in the
-    zero-accounts state -- no account-creation form, no CLI mention, and a
-    hand-crafted mode=create POST under the same condition is still refused
-    server-side."""
+    zero-accounts state -- boot.is_local:false so LoginPage never offers the
+    create form, and a hand-crafted mode=create POST to /api/login under the
+    same condition is still refused server-side."""
     cli = _client(tmp_path).test_client()
     for blank in ("", None):
         html = cli.get("/login", environ_overrides={"REMOTE_ADDR": blank}).get_data(as_text=True)
-        # The "no accounts, non-local" state renders NO form at all (see
-        # LOGIN_HTML's {% elif no_accounts %} branch) -- so there is no
-        # hidden csrf input to scrape; pull the one GET already stashed in
-        # the session instead, same as test_lan_direct_post_cannot_create_first_account.
-        assert 'name="mode" value="create"' not in html
-        assert 'name="username"' not in html   # no ordinary sign-in form either
-        assert "No account has been set up yet" in html
-        with cli.session_transaction() as sess:
-            csrf = sess["csrf"]
-        r = cli.post("/login", environ_overrides={"REMOTE_ADDR": blank},
-                     data={"username": "mallory", "password": "pw123456",
-                           "confirm": "pw123456", "mode": "create", "csrf": csrf})
-        assert "No account has been set up yet" in r.get_data(as_text=True)
+        assert _is_react_login_shell(html)
+        assert _boot_field(html, "no_accounts") is True
+        assert _boot_field(html, "is_local") is False
+        body = _api_login(cli, {"username": "mallory", "password": "pw123456",
+                                "confirm": "pw123456", "mode": "create"},
+                          remote_addr=blank)
+        assert "No account has been set up yet" in body["error"]
     assert core.list_web_users() == []
 
 
-def test_bootstrap_form_creates_account_and_logs_in_immediately(tmp_path):
-    """The local bootstrap POST must both create the account AND establish a
-    session in one step (redirect straight past a second login) -- the same
-    session-setting path a normal /login POST uses (_establish_session)."""
-    cli = _client(tmp_path).test_client()
-    html = cli.get("/login").get_data(as_text=True)
-    r = cli.post("/login", data={"username": "alice", "password": "hunter22",
-                                 "confirm": "hunter22", "mode": "create",
-                                 "csrf": _csrf(html)})
-    assert r.status_code in (301, 302, 303, 307, 308)
-    assert core.verify_web_user("alice", "hunter22")
-    # The session this redirect set really did authenticate -- a LAN request
-    # against the SAME client now succeeds.
-    assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
-    # And logging out + back in with the same credentials works normally --
-    # bootstrap didn't leave the account in some special state.
-    cli.get("/logout")
-    assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 401
-    html2 = cli.get("/login").get_data(as_text=True)
-    r2 = cli.post("/login", data={"username": "alice", "password": "hunter22",
-                                  "csrf": _csrf(html2)})
-    assert r2.status_code in (301, 302, 303, 307, 308)
-    assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
+# ---------------------------------------------------------------------------
+# Unique bootstrap/validation coverage ported off the dead form route to
+# POST /api/login (the surviving sign-in endpoint). The endpoint's own core
+# contract lives in tests/test_api_login.py -- these are the regressions and
+# policy matrices that file does NOT carry.
+# ---------------------------------------------------------------------------
 
-
-def test_bootstrap_form_validates_username_and_password_rules(tmp_path):
-    """The bootstrap form's validation rules are enforced server-side, not just in
-    the client: empty username, too-short password, mismatched confirm."""
+def test_bootstrap_validates_username_and_password_rules(tmp_path):
+    """The bootstrap validation rules are enforced server-side, not just in
+    LoginPage.jsx: empty username, too-short password, mismatched confirm."""
     cli = _client(tmp_path).test_client()
-    html = cli.get("/login").get_data(as_text=True)
-    csrf = _csrf(html)
-    r = cli.post("/login", data={"username": "", "password": "hunter22",
-                                 "confirm": "hunter22", "mode": "create", "csrf": csrf})
-    assert "Username is required" in r.get_data(as_text=True)
-    html = cli.get("/login").get_data(as_text=True)
-    r = cli.post("/login", data={"username": "alice", "password": "ab",
-                                 "confirm": "ab", "mode": "create", "csrf": _csrf(html)})
-    assert "at least 8 characters" in r.get_data(as_text=True)
-    html = cli.get("/login").get_data(as_text=True)
-    r = cli.post("/login", data={"username": "alice", "password": "hunter22",
-                                 "confirm": "totally-different", "mode": "create",
-                                 "csrf": _csrf(html)})
-    assert "Passwords do not match" in r.get_data(as_text=True)
+    body = _api_login(cli, {"username": "", "password": "hunter22",
+                            "confirm": "hunter22", "mode": "create"})
+    assert "Username is required" in body["error"]
+    body = _api_login(cli, {"username": "alice", "password": "ab",
+                            "confirm": "ab", "mode": "create"})
+    assert "at least 8 characters" in body["error"]
+    body = _api_login(cli, {"username": "alice", "password": "hunter22",
+                            "confirm": "totally-different", "mode": "create"})
+    assert body["error"] == "Passwords do not match."
     assert core.list_web_users() == []
 
 
@@ -315,80 +341,40 @@ def test_bootstrap_form_validates_username_and_password_rules(tmp_path):
 def test_bootstrap_rejects_weak_passwords(tmp_path, password, expected):
     """Length alone is not the policy: a password can clear 8 characters and still
     be trivially guessable. Guards core.password_problem() through the real
-    bootstrap form, since that is the path a first-run owner actually uses."""
+    bootstrap path (/api/login mode=create), since that is the path a first-run
+    owner actually uses."""
     cli = _client(tmp_path).test_client()
-    html = cli.get("/login").get_data(as_text=True)
-    r = cli.post("/login", data={"username": "alice", "password": password,
-                                 "confirm": password, "mode": "create",
-                                 "csrf": _csrf(html)})
-    assert expected in r.get_data(as_text=True)
+    body = _api_login(cli, {"username": "alice", "password": password,
+                            "confirm": password, "mode": "create"})
+    assert expected in body["error"]
     assert core.list_web_users() == []   # nothing was created
 
 
 def test_password_policy_is_shared_by_login_and_users_tab(tmp_path):
     """Regression guard for the duplication that used to exist: the 4-character
-    rule was written out separately in login() and api_users_add(), so tightening
-    it in one place would silently leave the other weak. Both must now refuse the
-    same password via the same core.password_problem()."""
+    rule was written out separately in the login path and api_users_add(), so
+    tightening it in one place would silently leave the other weak. Both must
+    refuse the same password via the same core.password_problem()."""
     weak = "11111111"
     assert core.password_problem(weak)                    # the shared helper refuses it
     assert core.password_problem("a-valid-password") is None
     cli = _client(tmp_path).test_client()
-    html = cli.get("/login").get_data(as_text=True)
-    r = cli.post("/login", data={"username": "alice", "password": weak,
-                                 "confirm": weak, "mode": "create",
-                                 "csrf": _csrf(html)})
-    assert "one character repeated" in r.get_data(as_text=True)
+    body = _api_login(cli, {"username": "alice", "password": weak,
+                            "confirm": weak, "mode": "create"})
+    assert "one character repeated" in body["error"]
     assert core.list_web_users() == []
 
 
-def test_bootstrap_form_missing_confirm_field_does_not_crash(tmp_path):
+def test_bootstrap_missing_confirm_field_does_not_crash(tmp_path):
     """A malformed/short-circuited POST (e.g. a client that dropped the confirm
     field entirely, not just sent it empty) must be handled as a validation
-    failure, never a 500."""
+    failure, never a 500. The 200-with-error contract is asserted inside
+    _api_login."""
     cli = _client(tmp_path).test_client()
-    html = cli.get("/login").get_data(as_text=True)
-    r = cli.post("/login", data={"username": "alice", "password": "hunter22",
-                                 "mode": "create", "csrf": _csrf(html)})
-    assert r.status_code == 200
-    assert "Passwords do not match" in r.get_data(as_text=True)
+    body = _api_login(cli, {"username": "alice", "password": "hunter22",
+                            "mode": "create"})
+    assert body["error"] == "Passwords do not match."
     assert core.list_web_users() == []
-
-
-def test_lan_direct_post_cannot_create_first_account(tmp_path):
-    """Defense in depth for the race guard: a hand-crafted mode=create POST from a
-    LAN address must be refused even though it carries a technically-valid csrf
-    token for ITS OWN session (nothing stops a LAN device from GETting /login and
-    receiving one) -- the real gate is `bootstrap_mode` (no_accounts AND
-    is_local), not csrf validity."""
-    cli = _client(tmp_path).test_client()
-    html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
-    with cli.session_transaction() as sess:
-        csrf = sess["csrf"]
-    r = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
-                 data={"username": "mallory", "password": "pw123456",
-                       "confirm": "pw123456", "mode": "create", "csrf": csrf})
-    assert r.status_code == 200
-    assert "No account has been set up yet" in r.get_data(as_text=True)
-    assert core.list_web_users() == []
-    # And still refused with a session already logged in from elsewhere? No --
-    # simpler and sufficient: confirm no account was ever created and the LAN
-    # request never got authorized.
-    assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 401
-
-
-def test_direct_post_create_mode_ignored_once_an_account_exists(tmp_path):
-    """A mode=create POST that arrives after the first account already exists
-    (whether from local or LAN) must never be treated as account creation --
-    bootstrap_mode is false the moment ANY account exists, from ANY path."""
-    core.add_or_update_web_user("alice", "hunter2")
-    cli = _client(tmp_path).test_client()
-    html = cli.get("/login").get_data(as_text=True)
-    r = cli.post("/login", data={"username": "mallory", "password": "pw123456",
-                                 "confirm": "pw123456", "mode": "create",
-                                 "csrf": _csrf(html)})
-    assert "Invalid username or password" in r.get_data(as_text=True)
-    assert {u["username"] for u in core.list_web_users()} == {"alice"}
 
 
 def test_concurrent_add_or_update_web_user_does_not_lose_either_account(tmp_path, monkeypatch):
@@ -396,13 +382,13 @@ def test_concurrent_add_or_update_web_user_does_not_lose_either_account(tmp_path
     unlocked _load_config() -> mutate -> _save_config() -- two concurrent calls
     for DIFFERENT usernames could both read the pre-write state, so the second
     write would silently clobber the first's on disk (adversarial review,
-    2026-07-19: reproduced live via two concurrent local /login bootstrap
-    POSTs that both returned a 302 "success" redirect to their own browser,
-    while only one of the two usernames actually ended up in AUTH_USERS).
-    Force the interleaving with a real delay + real threads (not just
-    sequential calls, which would never expose the race) and confirm
-    _accounts_lock now serializes the two full read-modify-write cycles --
-    BOTH accounts survive, regardless of which thread's write lands first."""
+    2026-07-19: reproduced live via two concurrent local bootstrap POSTs that
+    both returned success to their own browser, while only one of the two
+    usernames actually ended up in AUTH_USERS). Force the interleaving with a
+    real delay + real threads (not just sequential calls, which would never
+    expose the race) and confirm _accounts_lock now serializes the two full
+    read-modify-write cycles -- BOTH accounts survive, regardless of which
+    thread's write lands first."""
     import threading
     import time as _time
 
@@ -425,175 +411,50 @@ def test_concurrent_add_or_update_web_user_does_not_lose_either_account(tmp_path
     assert {u["username"] for u in core.list_web_users()} == {"alice", "bob"}
 
 
-def test_login_success_sets_session_and_redirects(tmp_path):
-    core.add_or_update_web_user("alice", "hunter2")
-    cli = _client(tmp_path).test_client()
-    html = cli.get("/login").get_data(as_text=True)
-    r = cli.post("/login", data={"username": "alice", "password": "hunter2",
-                                 "csrf": _csrf(html)})
-    assert r.status_code in (301, 302, 303, 307, 308)
-    # The session this redirect set now authorizes a LAN request that would
-    # otherwise be refused -- proves session["user"] really got set, not just
-    # that we got redirected.
-    r2 = cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN})
-    assert r2.status_code == 200
-
-
-def test_login_failure_same_message_bad_user_and_bad_password(tmp_path):
-    core.add_or_update_web_user("alice", "hunter2")
-    cli = _client(tmp_path).test_client()
-
-    html = cli.get("/login").get_data(as_text=True)
-    r1 = cli.post("/login", data={"username": "alice", "password": "wrong-pw",
-                                  "csrf": _csrf(html)})
-    body1 = r1.get_data(as_text=True)
-
-    html2 = cli.get("/login").get_data(as_text=True)
-    r2 = cli.post("/login", data={"username": "nobody-at-all", "password": "hunter2",
-                                  "csrf": _csrf(html2)})
-    body2 = r2.get_data(as_text=True)
-
-    assert "Invalid username or password" in body1
-    assert "Invalid username or password" in body2
-    # Never a field-specific hint like "no such user" / "wrong password" -- the
-    # two failure modes (bad username vs. bad password) must be indistinguishable.
-    for leaky in ("no such user", "unknown user", "user not found", "wrong password",
-                  "incorrect password"):
-        assert leaky not in body1.lower()
-        assert leaky not in body2.lower()
-
-
-def test_login_csrf_mismatch_rejected(tmp_path):
-    core.add_or_update_web_user("alice", "hunter2")
-    cli = _client(tmp_path).test_client()
-    cli.get("/login")   # establishes a session + a real csrf token, which we deliberately ignore
-    r = cli.post("/login", data={"username": "alice", "password": "hunter2",
-                                 "csrf": "forged-token-not-in-session"})
-    assert r.status_code == 200   # re-renders the form, does not log in
-    assert "expired" in r.get_data(as_text=True).lower()
-    # Confirm it truly did NOT log in: a LAN request is still refused.
-    r2 = cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN})
-    assert r2.status_code == 401
-
-
 def test_incidental_get_does_not_invalidate_pending_csrf_token(tmp_path):
     """Real regression: first-run account creation stuck on "Your session
     expired" no matter what -- even after clearing cookies and restarting the
     server. Root cause: the front door (_enforce_front_door()) redirects EVERY
     unauthenticated request to /login?next=<path> -- including background
-    requests a browser fires the instant the page loads (favicon.ico, sw.js,
-    manifest.webmanifest, /branding/* images before that route went public).
-    Each of those landed on login()'s own GET branch, which used to
+    requests a browser fires the instant the page loads (favicon.ico and
+    friends). Each of those landed on login()'s GET, which used to
     unconditionally mint a FRESH session["csrf"] on every GET -- silently
-    orphaning the token already rendered into the hidden input of whatever
-    real, visible login/bootstrap form the human had open. The very next real
-    submit then failed with "Your session expired," deterministically, no
-    matter how many times cookies were cleared or the server restarted (the
-    race re-fires on the very next page load). Reproduce exactly that
-    sequence -- grab a token, let unrelated GETs land on /login in between
-    (simulating the front door redirecting incidental asset requests here),
-    then submit the ORIGINAL token -- and confirm it still works."""
+    orphaning the token the real, visible login page had already handed the
+    human via MG_BOOT. The very next real submit then failed with "Your
+    session expired," deterministically. login() now uses
+    session.setdefault("csrf", ...) so incidental GETs reuse the token.
+    Reproduce exactly that sequence -- grab a token, let unrelated GETs land
+    on /login in between, then submit the ORIGINAL token to /api/login -- and
+    confirm it still works."""
     cli = _client(tmp_path).test_client()
     html = cli.get("/login").get_data(as_text=True)
     original_csrf = _csrf(html)
     # Simulate the front door redirecting a handful of incidental background
-    # requests here (what favicon.ico/sw.js/manifest.webmanifest actually do)
-    # before the human ever touches the visible form.
+    # requests here before the human ever touches the visible page.
     cli.get("/login", query_string={"next": "/favicon.ico"})
-    cli.get("/login", query_string={"next": "/sw.js"})
-    cli.get("/login", query_string={"next": "/manifest.webmanifest"})
-    r = cli.post("/login", data={
+    cli.get("/login", query_string={"next": "/apple-touch-icon.png"})
+    cli.get("/login", query_string={"next": "/some-asset.js"})
+    r = cli.post("/api/login", json={
         "username": "nel", "password": "pw123456", "confirm": "pw123456",
         "mode": "create", "csrf": original_csrf})
-    assert r.status_code == 302   # succeeds and redirects, not a re-rendered error form
+    assert r.get_json() == {"ok": True, "next": "/"}   # not "Your session expired"
     assert core.list_web_users() == [{"username": "nel"}]
 
 
-def test_failed_post_still_rotates_csrf_token(tmp_path):
-    """The fix must not throw out the OTHER half of the token lifecycle: a
-    token that was just used in a failed POST (wrong password, bad create
-    input, etc.) must still be rotated out from under a follow-up attempt --
-    otherwise a consumed/known-bad token would stay silently resubmittable
-    forever. Only GETs became "reuse the existing token"; a POST that falls
-    through to any error must keep unconditionally minting a fresh one."""
-    core.add_or_update_web_user("alice", "hunter2")
-    cli = _client(tmp_path).test_client()
-    html = cli.get("/login").get_data(as_text=True)
-    csrf = _csrf(html)
-    r1 = cli.post("/login", data={"username": "alice", "password": "wrong", "csrf": csrf})
-    assert "Invalid username or password" in r1.get_data(as_text=True)
-    # Reusing that SAME (now-stale) token again must be rejected as expired,
-    # not silently accepted a second time.
-    r2 = cli.post("/login", data={"username": "alice", "password": "hunter2", "csrf": csrf})
-    assert "expired" in r2.get_data(as_text=True).lower()
-
-
-def test_login_rate_limit_locks_out_after_five_failures(tmp_path):
-    core.add_or_update_web_user("alice", "hunter2")
-    cli = _client(tmp_path).test_client()
-    for attempt in range(1, 6):
-        html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
-        r = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
-                     data={"username": "alice", "password": "wrong",
-                           "csrf": _csrf(html)})
-        body = r.get_data(as_text=True)
-        if attempt < 5:
-            assert "Invalid username or password" in body
-            assert "too many failed attempts" not in body.lower()
-        else:
-            # The 5th failure is the one that TRIPS the lock. It used to render the
-            # ordinary "invalid password" text, so the user was locked out without
-            # being told -- their next attempt looked like the same rejection for no
-            # stated reason. The attempt itself is still spent (five real tries), only
-            # the message changes.
-            assert "too many failed attempts" in body.lower()
-    # 6th attempt from the SAME address, even with the CORRECT password, is refused.
-    html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
-    r = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
-                 data={"username": "alice", "password": "hunter2", "csrf": _csrf(html)})
-    body = r.get_data(as_text=True)
-    assert "too many failed attempts" in body.lower()
-    r2 = cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN})
-    assert r2.status_code == 401   # correct password during lockout still does not authorize
-
-
-def test_lockout_applies_uniformly_to_mode_create_requests(tmp_path):
-    """Adversarial-review regression: mode=create used to be checked BEFORE the
-    lockout/CSRF gates, so a crafted mode=create POST from an already-locked-out
-    address sailed through with neither the lockout message nor any CSRF
-    requirement -- a mode=create POST is not a lesser-checked request shape.
-    Lock out an address via 5 failed ORDINARY logins (an account already
-    exists, so bootstrap_mode is false throughout -- mode=create can never
-    succeed here regardless), then confirm a 6th request carrying mode=create
-    from that SAME address gets the lockout message, not the create-specific
-    "invalid" text."""
-    core.add_or_update_web_user("alice", "hunter2")
-    cli = _client(tmp_path).test_client()
-    for _ in range(5):
-        html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
-        cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
-                 data={"username": "alice", "password": "wrong", "csrf": _csrf(html)})
-    html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
-    r = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
-                 data={"username": "mallory", "password": "pw123456",
-                       "confirm": "pw123456", "mode": "create", "csrf": _csrf(html)})
-    assert "too many failed attempts" in r.get_data(as_text=True).lower()
-    assert core.list_web_users() == [{"username": "alice"}]   # still refused, nothing created
-
-
 def test_csrf_applies_uniformly_to_mode_create_requests(tmp_path):
-    """Companion to the lockout regression above: a mode=create POST carrying a
-    forged/stale CSRF token must get the same "session expired" message an
-    ordinary login POST would, not skip straight to the create-specific
-    "invalid" text."""
+    """Adversarial-review lesson (learned on the classic route, kept on the JSON
+    one): a mode=create POST carrying a forged/stale CSRF token must get the
+    same "session expired" message an ordinary login POST would, not skip
+    straight to any create-specific text -- mode=create is not a lesser-checked
+    request shape."""
     core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
     cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN})   # establishes a session/csrf we ignore
-    r = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
-                 data={"username": "mallory", "password": "pw123456",
+    r = cli.post("/api/login", environ_overrides={"REMOTE_ADDR": LAN},
+                 json={"username": "mallory", "password": "pw123456",
                        "confirm": "pw123456", "mode": "create",
                        "csrf": "forged-token-not-in-session"})
-    assert "expired" in r.get_data(as_text=True).lower()
+    assert "expired" in r.get_json()["error"].lower()
     assert core.list_web_users() == [{"username": "alice"}]
 
 
@@ -602,67 +463,61 @@ def test_login_rate_limit_clears_on_success(tmp_path):
     cli = _client(tmp_path).test_client()
     # 4 failures -- under the 5-fail threshold, so not locked out yet.
     for _ in range(4):
-        html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN2}).get_data(as_text=True)
-        cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN2},
-                 data={"username": "alice", "password": "wrong", "csrf": _csrf(html)})
+        body = _api_login(cli, {"username": "alice", "password": "wrong"},
+                          remote_addr=LAN2)
+        assert body["error"] == "Invalid username or password."
     # A correct login clears this address's counter.
-    html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN2}).get_data(as_text=True)
-    r = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN2},
-                 data={"username": "alice", "password": "hunter2", "csrf": _csrf(html)})
-    assert r.status_code in (301, 302, 303, 307, 308)
+    body = _api_login(cli, {"username": "alice", "password": "hunter2"},
+                      remote_addr=LAN2)
+    assert body == {"ok": True, "next": "/"}
     # Two MORE wrong attempts from the same address: if the counter had NOT been
     # cleared, the 4 old fails + these would cross the 5-fail threshold partway
     # through and the 2nd of these would show the lockout message instead of the
     # normal invalid-credentials one.
     for _ in range(2):
-        html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN2}).get_data(as_text=True)
-        r = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN2},
-                     data={"username": "alice", "password": "wrong", "csrf": _csrf(html)})
-        body = r.get_data(as_text=True)
-        assert "too many failed attempts" not in body.lower()
-        assert "Invalid username or password" in body
+        body = _api_login(cli, {"username": "alice", "password": "wrong"},
+                          remote_addr=LAN2)
+        assert "too many failed attempts" not in body["error"].lower()
+        assert body["error"] == "Invalid username or password."
 
 
 # ---------------------------------------------------------------------------
-# _safe_next() open-redirect guard (the /login ?next= parameter)
+# _safe_next() open-redirect guard (the `next` target /api/login echoes back
+# for LoginPage.jsx's client-side navigate)
 # ---------------------------------------------------------------------------
 # Adversarial-review regression (2026-07-19): _safe_next() blocked a literal
 # leading "//" (scheme-relative) and a literal backslash, but not an embedded
-# TAB/CR/LF. Werkzeug's own Response.get_wsgi_headers() strips those control
-# characters back out of a Location header value (via iri_to_uri) before it
-# hits the socket -- so "/\t/evil.example" sailed past the "//" check here,
-# yet Werkzeug itself rewrote it into a literal "//evil.example" scheme-
-# relative redirect handed to a user who just entered real credentials. The
-# \r/\n variants didn't even reach a response: redirect() raised an
-# unhandled ValueError ("Header values must not contain newline characters"),
-# turning a real login into a 500. Both confirmed against the real /login
-# flow before the fix; these assert neither happens now.
+# TAB/CR/LF. On the classic route those control characters could survive into a
+# Location header (Werkzeug's iri_to_uri strips them back out, turning
+# "/\t/evil.example" into a literal "//evil.example" scheme-relative redirect;
+# the \r/\n variants crashed redirect() into a 500). The JSON route has no
+# Location header, but LoginPage.jsx navigates to the returned `next` verbatim
+# -- so the exact same smuggled shapes must still be REJECTED server-side
+# (fall back to "/"), or /api/login becomes the same open redirect one hop
+# later. These assert _safe_next() still screens every shape.
 
 def test_login_next_tab_bypass_no_longer_open_redirects(tmp_path):
     core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
-    next_url = "/\t/evil.example.com"
-    html = cli.get("/login", query_string={"next": next_url}).get_data(as_text=True)
-    r = cli.post("/login", query_string={"next": next_url},
-                 data={"username": "alice", "password": "hunter2", "csrf": _csrf(html)})
-    assert r.status_code in (301, 302, 303, 307, 308)
-    location = r.headers.get("Location") or ""
-    assert not location.startswith("//"), (
-        "open redirect: tab-smuggled //-prefixed next was honored: {!r}".format(location))
+    body = _api_login(cli, {"username": "alice", "password": "hunter2",
+                            "next": "/\t/evil.example.com"})
+    assert body["ok"] is True
+    assert body["next"] == "/", (
+        "open redirect: tab-smuggled //-prefixed next was honored: {!r}".format(body["next"]))
 
 
 def test_login_next_newline_bypass_no_longer_500s(tmp_path):
     core.add_or_update_web_user("alice", "hunter2")
-    cli = _client(tmp_path).test_client()
+    app = _client(tmp_path)
     for smuggled in ("/\n/evil.example.com", "/\r/evil.example.com"):
-        html = cli.get("/login", query_string={"next": smuggled}).get_data(as_text=True)
-        r = cli.post("/login", query_string={"next": smuggled},
-                     data={"username": "alice", "password": "hunter2", "csrf": _csrf(html)})
-        assert r.status_code in (301, 302, 303, 307, 308), (
-            "next={!r} must redirect safely, not crash: got {}".format(smuggled, r.status_code))
-        location = r.headers.get("Location") or ""
-        assert not location.startswith("//"), (
-            "open redirect: newline-smuggled //-prefixed next was honored: {!r}".format(location))
+        cli = app.test_client()
+        # _api_login itself asserts the 200 -- a crash/500 here fails loudly.
+        body = _api_login(cli, {"username": "alice", "password": "hunter2",
+                                "next": smuggled})
+        assert body["ok"] is True, (
+            "next={!r} must sign in cleanly, not error: got {!r}".format(smuggled, body))
+        assert body["next"] == "/", (
+            "open redirect: newline-smuggled //-prefixed next was honored: {!r}".format(body["next"]))
 
 
 def test_login_next_plain_scheme_relative_still_blocked(tmp_path):
@@ -670,33 +525,29 @@ def test_login_next_plain_scheme_relative_still_blocked(tmp_path):
     regression on the case that was never broken."""
     core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
-    next_url = "//evil.example.com"
-    html = cli.get("/login", query_string={"next": next_url}).get_data(as_text=True)
-    r = cli.post("/login", query_string={"next": next_url},
-                 data={"username": "alice", "password": "hunter2", "csrf": _csrf(html)})
-    assert r.status_code in (301, 302, 303, 307, 308)
-    assert not (r.headers.get("Location") or "").startswith("//")
+    body = _api_login(cli, {"username": "alice", "password": "hunter2",
+                            "next": "//evil.example.com"})
+    assert body["ok"] is True
+    assert body["next"] == "/"
 
 
 def test_login_next_normal_path_still_honored(tmp_path):
-    """The fix must not collateral-damage the one real shape every caller
-    actually produces: redirect(url_for('login', next=request.path))."""
+    """The guard must not collateral-damage the one real shape every caller
+    actually produces: the front door's redirect(url_for('login',
+    next=request.path)), which LoginPage.jsx folds into the POST body."""
     core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
-    html = cli.get("/login", query_string={"next": "/loom"}).get_data(as_text=True)
-    r = cli.post("/login", query_string={"next": "/loom"},
-                 data={"username": "alice", "password": "hunter2", "csrf": _csrf(html)})
-    assert r.status_code in (301, 302, 303, 307, 308)
-    assert r.headers.get("Location") == "/loom"
+    body = _api_login(cli, {"username": "alice", "password": "hunter2",
+                            "next": "/loom"})
+    assert body == {"ok": True, "next": "/loom"}
 
 
 def test_logout_clears_session(tmp_path):
-    core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
-    html = cli.get("/login").get_data(as_text=True)
-    cli.post("/login", data={"username": "alice", "password": "hunter2", "csrf": _csrf(html)})
+    login_existing_client(cli, "alice", "hunter2")
     assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
-    cli.get("/logout")
+    r = _logout(cli)
+    assert r.get_json() == {"ok": True}
     assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 401
 
 
@@ -729,10 +580,8 @@ def test_nonlocal_request_without_session_is_denied(tmp_path):
 
 
 def test_nonlocal_request_with_logged_in_session_is_authorized(tmp_path):
-    core.add_or_update_web_user("alice", "hunter2")
     cli = _client(tmp_path).test_client()
-    html = cli.get("/login").get_data(as_text=True)
-    cli.post("/login", data={"username": "alice", "password": "hunter2", "csrf": _csrf(html)})
+    login_existing_client(cli, "alice", "hunter2")
     r = cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN})
     assert r.status_code == 200
 
@@ -742,15 +591,14 @@ def test_logout_revokes_a_stolen_cookie_on_another_client(tmp_path):
     a second client (a network capture off plain-HTTP LAN traffic, a shared
     machine) must stop working the moment the real owner signs out, not just on
     the browser that clicked logout. Regression test for the adversarial-review
-    finding that /logout only ever called session.clear() (which can only ever
+    finding that logout only ever called session.clear() (which can only ever
     affect the ONE client making that request) with nothing server-side to
     revoke the cookie itself -- fixed via a per-user sess_epoch, bumped on
-    logout and re-checked by _is_authorized_request() on every request."""
-    core.add_or_update_web_user("alice", "hunter2")
+    logout (POST /api/logout's default global scope) and re-checked by
+    _is_authorized_request() on every request."""
     app = _client(tmp_path)
     victim = app.test_client()
-    html = victim.get("/login").get_data(as_text=True)
-    victim.post("/login", data={"username": "alice", "password": "hunter2", "csrf": _csrf(html)})
+    login_existing_client(victim, "alice", "hunter2")
     attacker = app.test_client()
     attacker.set_cookie("session", victim.get_cookie("session").value)
     assert attacker.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
@@ -765,10 +613,8 @@ def test_removed_user_loses_access_via_old_session(tmp_path):
     the adversarial-review finding that _is_authorized_request() only checked
     `session.get("user") is not None`, never re-validating that user against
     AUTH_USERS, so a session opened before removal kept full access forever."""
-    core.add_or_update_web_user("mallory", "hunter2")
     cli = _client(tmp_path).test_client()
-    html = cli.get("/login").get_data(as_text=True)
-    cli.post("/login", data={"username": "mallory", "password": "hunter2", "csrf": _csrf(html)})
+    login_existing_client(cli, "mallory", "hunter2")
     assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
     core.remove_web_user("mallory")
     r = cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN})
@@ -778,10 +624,8 @@ def test_removed_user_loses_access_via_old_session(tmp_path):
 def test_password_change_revokes_old_session(tmp_path):
     """Changing a password (re-running --add-web-user for an existing username)
     must also invalidate sessions issued under the old password."""
-    core.add_or_update_web_user("alice", "old-pw")
     cli = _client(tmp_path).test_client()
-    html = cli.get("/login").get_data(as_text=True)
-    cli.post("/login", data={"username": "alice", "password": "old-pw", "csrf": _csrf(html)})
+    login_existing_client(cli, "alice", "old-pw")
     assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
     core.add_or_update_web_user("alice", "new-pw")
     r = cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN})
@@ -801,13 +645,13 @@ def test_login_rate_limit_race_does_not_grant_extra_guesses(tmp_path, monkeypatc
 
     core.add_or_update_web_user("alice", "hunter2")
     # Each thread gets its OWN client (own session/cookie jar) from the SAME app.
-    # A single shared test client is NOT thread-safe: 10 concurrent GET+POST pairs on
+    # A single shared test client is NOT thread-safe: concurrent GET+POST pairs on
     # one session race on the CSRF cookie, so some POSTs land with a token a sibling
     # already rotated and come back "session expired" -- neither Invalid nor locked,
-    # which broke the `== N` count intermittently (green locally, red on CI's timing).
-    # The rate limiter is keyed by IP, not session, so separate sessions from the same
-    # REMOTE_ADDR still share the counter -- the concurrency race under test is intact;
-    # only the incidental CSRF cross-talk is removed.
+    # which broke the count intermittently. The rate limiter is keyed by IP, not
+    # session, so separate sessions from the same REMOTE_ADDR still share the
+    # counter -- the concurrency race under test is intact; only the incidental
+    # CSRF cross-talk is removed.
     app = _client(tmp_path)
     real_verify = core.verify_web_user
 
@@ -821,11 +665,9 @@ def test_login_rate_limit_race_does_not_grant_extra_guesses(tmp_path, monkeypatc
 
     def attempt(i):
         cli = app.test_client()
-        html = cli.get("/login", environ_overrides={"REMOTE_ADDR": LAN}).get_data(as_text=True)
-        r = cli.post("/login", environ_overrides={"REMOTE_ADDR": LAN},
-                     data={"username": "alice", "password": "wrong-{}".format(i),
-                           "csrf": _csrf(html)})
-        results[i] = r.get_data(as_text=True)
+        body = _api_login(cli, {"username": "alice", "password": "wrong-{}".format(i)},
+                          remote_addr=LAN)
+        results[i] = body.get("error", "")
 
     threads = [threading.Thread(target=attempt, args=(i,)) for i in range(N)]
     for t in threads:
@@ -837,30 +679,33 @@ def test_login_rate_limit_race_does_not_grant_extra_guesses(tmp_path, monkeypatc
     # may ever have been evaluated as "Invalid" -- the rest must observe the
     # lockout message once 5 failures land, even though every one of them started
     # before any single one finished.
-    invalid_count = sum(1 for body in results if "Invalid username or password" in body)
-    locked_count = sum(1 for body in results if "too many failed attempts" in body.lower())
+    invalid_count = sum(1 for err in results if err and "Invalid username or password" in err)
+    locked_count = sum(1 for err in results if err and "too many failed attempts" in err.lower())
     assert invalid_count <= 5
     assert invalid_count + locked_count == N
 
 
 def test_empty_auth_users_makes_lan_login_impossible(tmp_path):
     """No AUTH_USERS configured (the default) -- there is no backdoor account, so a
-    LAN login attempt always fails, with any username/password."""
+    plain (non-create) sign-in attempt always fails, with any username/password."""
     cli = _client(tmp_path).test_client()
-    html = cli.get("/login").get_data(as_text=True)
-    r = cli.post("/login", data={"username": "admin", "password": "admin",
-                                 "csrf": _csrf(html)})
-    assert "Invalid username or password" in r.get_data(as_text=True)
+    body = _api_login(cli, {"username": "admin", "password": "admin"})
+    assert body["error"] == "Invalid username or password."
     assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 401
 
 
 # ---------------------------------------------------------------------------
 # Front-door coverage: every route a prior adversarial review found reachable
 # with ZERO auth check of any kind (see _enforce_front_door()'s docstring in
-# moonglade_gallery.py for the full list) must now be denied for an unauthenticated,
-# non-local request. This is the direct proof that the global gate (replacing 43
+# moonglade_gallery.py) must be denied for an unauthenticated, non-local
+# request. This is the direct proof that the global gate (replacing 43
 # scattered per-route checks, and closing these routes that had never had one at
 # all) actually did what it was built for -- not just architectural confidence.
+# Classic cut, 2026-08-08: the dead classic pages/form routes left these lists;
+# where a form route's SUBJECT moved to a surviving JSON route (/rate ->
+# /api/rate, /delete-bulk -> /api/delete-local, /collection-add|remove ->
+# /api/collection, /bulk-replace-prompt -> /api/replace-prompts, /delete/<id> ->
+# /api/delete-image), the gate coverage moved with it.
 #
 # /api/gallery-images has its own, more thorough test in test_web_pick.py
 # (test_gallery_images_requires_login_over_lan_but_then_works) since it also
@@ -880,38 +725,30 @@ _PREVIOUSLY_UNGATED_JSON_GET = [
     "/api/ping",
 ]
 _PREVIOUSLY_UNGATED_JSON_POST = [
-    "/rate/does-not-exist",
-    "/edit-prompt/does-not-exist",
+    "/api/rate/does-not-exist",
+    "/api/edit-prompt/does-not-exist",
     "/api/skin",
     "/api/ach-event",
+    # The surviving JSON counterparts of the cut classic form routes -- the
+    # subjects (delete/collect/replace) moved here, so the gate proof does too.
+    "/api/delete-image",
+    "/api/delete-local",
+    "/api/delete-tasks",
+    "/api/collection",
+    "/api/replace-prompts",
 ]
 
 # Routes whose contract is an HTML page or a raw asset: the front door redirects
 # to /login?next=<path> instead (see _enforce_front_door()).
 _PREVIOUSLY_UNGATED_HTML_GET = [
     "/",
-    "/image/does-not-exist",
-    "/panel",
-    "/duplicates",
-    "/health",
     "/contact-sheet",
     "/thumbs/does-not-exist.jpg",
-    "/img/does-not-exist.png",
     "/video-file/does-not-exist",
     "/full/does-not-exist",
     "/badge-thumb/does-not-exist.png",
-    # /manifest.webmanifest left this list on 2026-07-21 -- it went public, like
-    # /branding/ before it, and has its own carve-out test below. /sw.js stays:
-    # serving the worker script is a separate decision from serving the manifest,
-    # because the worker CACHES, and cache-survives-sign-out is unsettled.
-    "/sw.js",
 ]
 _PREVIOUSLY_UNGATED_HTML_POST = [
-    "/delete/does-not-exist",
-    "/delete-bulk",
-    "/collection-add",
-    "/collection-remove",
-    "/bulk-replace-prompt",
     "/export-zip",
 ]
 
@@ -980,39 +817,3 @@ def test_branding_stays_public_unauthenticated(tmp_path, remote_addr):
     cli = _client(tmp_path).test_client()
     r = cli.get("/branding/does-not-exist.png", environ_overrides={"REMOTE_ADDR": remote_addr})
     assert r.status_code == 404
-
-
-@pytest.mark.parametrize("remote_addr", [LAN, "127.0.0.1"])
-def test_manifest_stays_public_unauthenticated(tmp_path, remote_addr):
-    """The second deliberate carve-out, added 2026-07-21 on the same reasoning as
-    /branding/ above: the manifest handler returns a compile-time CONSTANT -- app
-    name, start_url, two hex colours, an inline data: URI icon. No user data, no
-    catalog, no install path, nothing to withhold. And /login is itself public and
-    identifies this app far more loudly than a manifest could, so gating it bought
-    no secrecy.
-
-    What it DID buy was a self-inflicted bug. The browser requests this file on its
-    own the moment the login page loads, and the front door answered with
-    302 -> /login?next=/manifest.webmanifest -- the same incidental traffic that
-    silently overwrote session["csrf"] and made every login attempt fail with "Your
-    session expired" (see login()'s GET branch, which now uses setdefault). Letting
-    the self-fired static assets through is what removes that whole category.
-
-    Anonymous, from LAN or localhost, must get the real manifest -- never a redirect.
-    """
-    cli = _client(tmp_path).test_client()
-    r = cli.get("/manifest.webmanifest", environ_overrides={"REMOTE_ADDR": remote_addr})
-    assert r.status_code == 200, (
-        "anonymous request for the manifest got {} -- if it redirected, the route "
-        "fell back off _PUBLIC_PATHS".format(r.status_code))
-    assert r.mimetype == "application/manifest+json"
-    body = r.get_json(force=True)   # force=: the mimetype is manifest+json, not application/json
-    assert body["name"] == "Moonglade Athenaeum"
-    # The point of the carve-out is that this body is a CONSTANT. If a future edit
-    # starts folding real state into it (a username, the out_dir, a catalog count),
-    # the public tier stops being free and this assertion is where that gets caught.
-    assert set(body) == {"name", "short_name", "start_url", "display",
-                         "background_color", "theme_color", "icons"}, (
-        "the manifest grew a new key -- it is served ANONYMOUSLY now, so re-check that "
-        "whatever was added carries no user, install or credential detail before "
-        "widening this assertion.")

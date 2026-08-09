@@ -1,0 +1,128 @@
+/* Overlay shell + the Health overlay — ported from the Frontend Gallery DC's
+   ovHealth slab (lines ~647-706) and its renderVals styles (~2376-2390).
+   The shell pieces (scrim/slab/title/close) are shared by design: the other
+   five nav overlays are the same slab with different innards, so they land in
+   this file as they port. DC literal rgba()/hex values are the spec's own;
+   everything else rides the skin tokens. Z: the DC prototyped 40/41 — here they
+   sit in the app's real overlay band per drift §3 (300/301, like the power
+   modal), under the celebration band. */
+
+@keyframes mgvSlab { from { opacity: 0; transform: translate3d(0, 12px, 0); } to { opacity: 1; transform: none; } }
+@keyframes mgvFade { from { opacity: 0; } to { opacity: 1; } }
+
+.mgv-scrim { position: fixed; inset: 0; z-index: 300; background: rgba(5,4,13,.62);
+  -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px);
+  animation: mgvFade .3s ease both; }
+.mgv-host { position: fixed; inset: 0; z-index: 301; display: grid; place-items: center;
+  pointer-events: none; }
+.mgv-slab { pointer-events: auto; box-sizing: border-box;
+  width: min(980px, calc(100vw - 48px)); max-height: 90vh; overflow-y: auto;
+  border-radius: 18px; border: 1px solid var(--surface1);
+  background: linear-gradient(180deg, rgba(18,14,42,.99) 0%, rgba(10,8,24,.99) 100%);
+  box-shadow: 0 34px 100px rgba(0,0,0,.78); padding: 22px 26px;
+  animation: mgvSlab .3s cubic-bezier(.2,.9,.24,1) both; }
+.mgv-titlerow { display: flex; align-items: center; gap: 10px; }
+.mgv-title { font-size: 19px; font-weight: 800; }
+.mgv-x { margin-left: auto; width: 28px; height: 28px; display: grid; place-items: center;
+  border-radius: 8px; border: 1px solid var(--surface1); background: rgba(33,31,58,.6);
+  color: var(--subtext); font-size: 13px; cursor: pointer; }
+.mgv-x:hover { color: var(--text); border-color: var(--accent); }
+
+/* ---- Health innards (DC ovHealth) ---- */
+.mgh-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px 18px; padding: 16px 0 6px; }
+.mgh-stat { display: flex; flex-direction: column; gap: 4px;
+  border-bottom: 1px dashed rgba(58,52,96,.5); padding-bottom: 9px; }
+.mgh-stat-label { font-size: 10px; color: var(--subtext); }
+.mgh-stat-value { font-size: 21px; font-weight: 800; letter-spacing: -.01em; line-height: 1.1;
+  font-variant-numeric: tabular-nums; color: var(--text); }
+.mgh-stat-value.gold { color: var(--gold); }
+/* Duplicates/Reclaimable: the DC underlines these and opens the Duplicate
+   Review overlay on click — LIVE (DuplicateReviewOverlay.jsx +
+   GET /api/duplicates, 2026-08-02), rendered as a real <button> in
+   HealthOverlay.jsx. Accent + underline kept as designed; it just also
+   clicks now. */
+.mgh-stat-value.dup { color: var(--accent); text-decoration: underline;
+  text-underline-offset: 3px; cursor: pointer; }
+
+.mgh-h { font-size: 12.5px; font-weight: 700; padding: 16px 0 8px; }
+.mgh-rows { display: flex; flex-direction: column; gap: 4px; }
+.mgh-row { display: flex; align-items: center; gap: 10px; }
+.mgh-rowlabel { flex: none; width: 56px; font-family: ui-monospace, Menlo, monospace;
+  font-size: 10px; color: var(--subtext); }
+.mgh-rowlabel.model { width: 168px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.mgh-barwrap { flex: 1 1 auto; min-width: 0; }
+.mgh-bar { height: 11px; border-radius: 3px; background: var(--accent); }
+.mgh-bar.model { opacity: .85; }
+.mgh-rowcount { flex: none; width: 52px; text-align: right;
+  font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--subtext);
+  font-variant-numeric: tabular-nums; }
+.mgh-rowcount.model { width: 44px; color: var(--lavender);
+  text-decoration: underline dotted; cursor: pointer; }
+
+.mgh-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.mgh-chip { font-size: 11px; padding: 4px 10px; border-radius: 8px;
+  border: 1px solid var(--surface1); background: rgba(12,10,28,.6); color: var(--text);
+  cursor: pointer; max-width: 280px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-family: inherit; text-align: left; }
+.mgh-chip:hover { border-color: var(--accent); }
+.mgh-chip .n { color: var(--overlay0); font-size: 10px; }
+
+.mgh-cloud { display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: baseline; }
+.mgh-word { line-height: 1.5; white-space: nowrap; }
+.mgh-word.t1 { font-size: 25px; font-weight: 700; color: var(--mauve); }
+.mgh-word.t2 { font-size: 16px; font-weight: 600; color: rgba(214,210,226,.88); }
+.mgh-word.t3 { font-size: 12.5px; font-weight: 500; color: var(--subtext); }
+
+.mgh-folders { font-size: 12px; color: var(--subtext); }
+.mgh-folders b { color: var(--text); font-variant-numeric: tabular-nums; }
+.mgh-note { margin-top: 14px; padding: 9px 13px; border-radius: 9px;
+  border: 1px solid var(--surface1); background: rgba(12,10,28,.6);
+  font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--subtext); }
+.mgh-loading { padding: 40px 0 30px; text-align: center; font-size: 12px;
+  color: var(--subtext); }
+
+/* ---- Animated charts (gallery-era pass, handoff-2026-08-06 §4) -- the DC's own
+   keyframes (Frontend Gallery.dc.html:41-46) + the Trend/Bars & Bars/Share chrome. ---- */
+@keyframes hGrow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes hRise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes hDraw { to { stroke-dashoffset: 0; } }
+@keyframes hArea { from { opacity: 0; } to { opacity: 1; } }
+@keyframes hDot { from { opacity: 0; transform: scale(0); } to { opacity: 1; transform: scale(1); } }
+@keyframes hRing { from { opacity: 0; transform: rotate(-90deg) scale(.7); } to { opacity: 1; transform: rotate(0) scale(1); } }
+.mgh-bar { transform-origin: left; animation: hGrow .8s cubic-bezier(.2,.9,.24,1) both; }
+.mgh-hrow { display: flex; align-items: center; gap: 10px; padding: 18px 0 10px; }
+.mgh-hrow .mgh-h { padding: 0; flex: 1 1 auto; }
+.mgh-seg { display: flex; gap: 2px; padding: 3px; border-radius: 9px;
+  border: 1px solid var(--surface1); background: rgba(12,10,28,.6); }
+button.mgh-segbtn { padding: 5px 12px; border-radius: 7px; font-size: 11px; font-weight: 700;
+  cursor: pointer; transition: background .18s, color .18s; border: none; background: none;
+  color: var(--subtext); font-family: inherit; }
+button.mgh-segbtn.on { background: var(--accent); color: var(--mantle); }
+.mgh-trendbox { position: relative; border-radius: 13px; border: 1px solid var(--surface1);
+  background: rgba(12,10,28,.5); padding: 14px 12px 8px; }
+.mgh-trendfoot { display: flex; justify-content: space-between;
+  font-family: ui-monospace, Menlo, monospace; font-size: 9px; color: var(--overlay0);
+  padding: 4px 4px 0; }
+.mgh-donutwrap { display: flex; gap: 26px; align-items: center; flex-wrap: wrap; padding: 6px 0; }
+.mgh-donut { flex: none; position: relative; width: 150px; height: 150px;
+  animation: hRing .7s cubic-bezier(.2,.9,.24,1) both; }
+.mgh-donutring { position: absolute; inset: 0; border-radius: 50%; }
+.mgh-donuthole { position: absolute; inset: 26px; border-radius: 50%; background: #0d0a1e;
+  display: grid; place-items: center; text-align: center; }
+.mgh-donuttotal { font-size: 20px; font-weight: 800; color: var(--text);
+  font-variant-numeric: tabular-nums; }
+.mgh-donutlab { font-size: 8.5px; letter-spacing: .12em; color: var(--overlay0); }
+.mgh-donutlegend { flex: 1 1 200px; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.mgh-donutrow { display: flex; align-items: center; gap: 9px; }
+.mgh-donutdot { flex: none; width: 11px; height: 11px; border-radius: 3px; }
+.mgh-donutname { flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--subtext);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgh-donutpct { flex: none; font-size: 10.5px; font-weight: 700; color: var(--text);
+  font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mgv-scrim, .mgv-slab { animation: none; }
+  .mgh-bar, .mgh-donut, .mgh-trendbox svg path, .mgh-trendbox svg circle { animation: none !important; opacity: 1; stroke-dashoffset: 0 !important; }
+}

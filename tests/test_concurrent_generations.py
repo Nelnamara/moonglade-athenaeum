@@ -1,114 +1,120 @@
-"""Concurrent generations (owner-approved 2026-07-23), gallery side. Every gen panel's Go
-button used to disable at submit and stay disabled until the whole task finished -- but
-PixAI itself runs tasks in parallel, and Jobs.track (static/mg-notify.js) already polls
-each task_id independently. runTask() now frees the button the moment the SERVER ANSWERS
-the submit (accepted or rejected), not when Jobs.track's poll reaches a terminal phase, and
-each submission gets its OWN line appended into the result strip instead of one shared
-innerHTML a second submission would overwrite. Generate/Edit/Enhance/Fix all share this one
-runTask(), so fixing it here covers all four. Template-level checks on the embedded JS, the
-same technique test_web_pick.py's B4 drawer-wiring tests use (no JS runtime in this suite).
+"""Concurrent generations (owner-approved 2026-07-23), gallery side -- pilot coverage.
 
-(The shared <mg-generate-drawer>'s own concurrency -- per-task poll registry, unlock on
-accept, per-submission result lines -- is a separate file with its own test coverage:
+The classic drawer's inline runTask() died with the classic cut (2026-08-08), but the
+guarantees it carried did not: gallery/src/gen/submitTask.js is its explicit port ("The
+classic has runTask; this is its port") -- ONE shared submit path for /api/generate,
+/api/edit and /api/fix -- with useResultLines() as the per-submission result-line side,
+and FixTab.jsx carrying the classic fix()'s spend confirm. These tests keep the same
+guarantees pinned on those surviving sources, with the same source-level string technique
+the old template checks used (no JS runtime in this suite):
+
+- the busy latch frees the moment the SERVER ANSWERS the submit (accepted or rejected),
+  never inside Jobs.track's later completion tick;
+- each submission owns its OWN appended result line; nothing rewrites the whole strip;
+- the Fix spend confirm still gates every /api/fix submission;
+- every submitting surface still routes through the one shared submitTask().
+
+(The classic-only "draw a box first" DOM-overwrite hazard died with the classic cut:
+FixTab renders its no-boxes hint as separate React state, structurally unable to wipe
+the result lines, so that test went with the template. The shared <mg-generate-drawer>'s
+own copy of this concurrency behavior keeps its own separate coverage:
 loom/test/mg-generate-drawer-concurrent.test.js.)
 """
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+import pathlib
+import re
 
-from tests.conftest import login_client
-
-
-def _row(**kw):
-    return {f: "" for f in CATALOG_FIELDS} | kw
+_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
-def _authed_client(tmp_path):
-    save_catalog(tmp_path / "catalog.db", [
-        _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00"),
-    ])
-    return login_client(tmp_path)
+def _src(rel):
+    return (_ROOT / rel).read_text(encoding="utf-8")
 
 
-def _run_task_fn(html):
-    """The runTask() source as served -- generate() is the next function in the module."""
-    i = html.index("function runTask(")
-    j = html.index("function generate()", i)
-    return html[i:j]
+def test_submit_task_resolves_on_submit_answer_not_on_task_completion():
+    """A caller's `await submitTask(...)` must finish (freeing its busy latch) the moment
+    the server answers the submit -- success OR rejection -- not when Jobs.track's poll
+    reaches a terminal phase."""
+    src = _src("gallery/src/gen/submitTask.js")
+    assert "window.Jobs.track(" in src, "submitTask no longer hands polling off to Jobs.track"
+    # Tracking is registration only -- awaiting it would hold the caller's busy latch
+    # until the task completed, resurrecting the old single-flight lock.
+    assert "await window.Jobs.track" not in src, (
+        "submitTask awaits Jobs.track -- the button would stay locked until the whole "
+        "task finished instead of freeing on the submit answer")
+    # A rejected submit must RESOLVE (return null), not throw -- otherwise the caller's
+    # `await` raises past its unlock lines and the button stays disabled forever.
+    i = src.index("if (d.error || !d.task_id)")
+    assert "return null;" in src[i:i + 250], (
+        "the rejected-submit branch no longer resolves with null -- a rejected submit "
+        "could leave the caller's button disabled forever")
+    # The completion callback (the poll side) must not be what frees the button.
+    track_cb = src[src.index("window.Jobs.track("):]
+    assert "setBusy" not in track_cb and "busyRef" not in track_cb, (
+        "submitTask's Jobs.track callback touches the busy latch -- the old "
+        "disabled-until-completion lock is back")
+    # And the generate caller frees its latch RIGHT AFTER the awaited submit answer.
+    gen = _src("gallery/src/gen/useGenerate.js")
+    j = gen.index('await submitTask("/api/generate"')
+    after = gen[j:j + 250]
+    assert "busyRef.current = false" in after and "setBusy(false)" in after, (
+        "useGenerate no longer unlocks immediately after the awaited submit answer")
 
 
-def test_run_task_unlocks_on_submit_answer_not_on_task_completion(tmp_path):
-    """The button must free up the moment fetch() resolves (the server answered the
-    submit), not inside Jobs.track's callback (which only fires on a later poll tick)."""
-    html = _authed_client(tmp_path).get("/").get_data(as_text=True)
-    fn = _run_task_fn(html)
-    assert "Jobs.track(" in fn, "runTask no longer hands polling off to Jobs.track"
-    before_track = fn[: fn.index("Jobs.track(")]
-    # unlock() must be called, and called BEFORE the d.error/d.task_id check -- i.e. on
-    # every server answer, success or rejection, not gated behind a successful submit.
-    assert "function unlock()" in before_track
-    unlock_call_idx = before_track.index("unlock();")
-    error_check_idx = before_track.index("if(d.error || !d.task_id)")
-    assert unlock_call_idx < error_check_idx, (
-        "unlock() must run as soon as the server answers, before branching on whether "
-        "the submit was accepted -- otherwise a rejected submit could leave the button "
-        "disabled forever, or an accepted one stays locked pending a later check"
-    )
-    # And Jobs.track's own callback (the completion/poll side) must NOT be what frees the
-    # button anymore -- only render the per-submission line.
-    track_cb = fn[fn.index("Jobs.track("): fn.index(".catch(", fn.index("Jobs.track("))]
-    assert "unlock()" not in track_cb, (
-        "runTask's Jobs.track callback still frees the button -- the old single-flight "
-        "lock (disabled until the task completes) is back"
-    )
-
-
-def test_run_task_gives_each_submission_its_own_result_line(tmp_path):
-    """Two submissions in flight at once must not fight over one shared result div --
-    each gets its own appended line, and nothing in runTask rewrites the whole strip."""
-    html = _authed_client(tmp_path).get("/").get_data(as_text=True)
-    fn = _run_task_fn(html)
-    assert "res.appendChild(line)" in fn, (
-        "runTask no longer appends a per-submission line -- concurrent tasks would "
-        "fight over one shared result element")
-    assert "res.innerHTML=" not in fn, (
-        "runTask still rewrites the WHOLE result strip -- a second submission would "
+def test_result_lines_append_per_submission_and_patch_only_their_own_line():
+    """Two submissions in flight at once must not fight over one shared result strip --
+    useResultLines() appends a line per open() and its emit patches ONLY that line."""
+    src = _src("gallery/src/gen/submitTask.js")
+    i = src.index("export function useResultLines()")
+    fn = src[i:]
+    assert "old.concat([{ id" in fn, (
+        "useResultLines no longer APPENDS a per-submission line -- concurrent tasks "
+        "would fight over one shared result element")
+    assert "x.id === id ? { ...x, ...patch } : x" in fn, (
+        "emit no longer patches only its OWN line by id -- a second submission's "
+        "updates could clobber the first task's still-live status/result")
+    assert "innerHTML" not in src, (
+        "submitTask.js rewrites raw innerHTML somewhere -- a second submission could "
         "wipe the first task's still-live status/result")
-    # Every render call inside runTask must target the submission's OWN `line`, never the
-    # shared `res` container directly.
-    assert "renderResultInto(res," not in fn and "renderResultInto(line," in fn
 
 
-def test_fix_tab_no_boxes_warning_appends_instead_of_overwriting(tmp_path):
-    """fix()'s own pre-submit validation (no boxes drawn) used to overwrite el('fix-result')
-    directly, bypassing runTask's per-line convention -- a Fix task already rendering from a
-    PRIOR submission would be wiped by a second click that forgot to draw a box first."""
-    html = _authed_client(tmp_path).get("/").get_data(as_text=True)
-    i = html.index("function fix(){")
-    j = html.index("function openEdit(", i)
-    fix_fn = html[i:j]
-    assert "fr.appendChild(w)" in fix_fn, (
-        "the 'draw a box first' warning no longer appends its own line -- it can wipe "
-        "an in-flight Fix submission's own status/result")
-    assert "fr.innerHTML=" not in fix_fn and "el('fix-result').innerHTML=" not in fix_fn
-
-
-def test_fix_spend_confirm_still_gates_each_submission(tmp_path):
-    """No-regression: a Fix can never be covered by a free card, so its window.confirm is a
-    real spend gate and not a duplicate of the cost badge beside it (see Gen.fix's own
-    comment). Concurrency must never bypass a spend gate -- the confirm still runs before
-    every runTask('/api/fix') submission."""
-    html = _authed_client(tmp_path).get("/").get_data(as_text=True)
-    i = html.index("function fix()")
-    fix_fn = html[i: html.index("function openEdit(", i)]
-    assert "window.confirm(" in fix_fn, "the Fix spend confirm is gone"
-    assert fix_fn.index("window.confirm(") < fix_fn.index("runTask('/api/fix'"), (
+def test_fix_spend_confirm_still_gates_each_submission():
+    """No-regression: a Fix can never be covered by a free card, so FixTab's
+    window.confirm is a real spend gate (see FixTab.jsx's own header comment).
+    Concurrency must never bypass a spend gate -- the confirm still runs, and still
+    bails out, before every submitTask('/api/fix') submission."""
+    src = _src("gallery/src/components/FixTab.jsx")
+    assert "window.confirm(" in src, "the Fix spend confirm is gone"
+    assert src.index("window.confirm(") < src.index('submitTask("/api/fix"'), (
         "the Fix spend confirm no longer gates the submission")
+    gate = src[src.index("if (!window.confirm("):src.index('submitTask("/api/fix"')]
+    assert ") return;" in gate, (
+        "declining the Fix spend confirm no longer bails out before the submission")
 
 
-def test_generate_edit_fix_all_still_route_through_the_shared_runtask(tmp_path):
-    """No-regression: every submitting surface in the drawer must still go through the one
-    shared runTask() the fixes above cover -- if any of them grew its own bespoke submit
-    path, it would silently lose the concurrency fix (and the spend-gate guarantees) above."""
-    html = _authed_client(tmp_path).get("/").get_data(as_text=True)
-    assert "runTask('/api/generate'" in html
-    assert "runTask('/api/edit'" in html
-    assert "runTask('/api/fix'" in html
+def test_generate_edit_fix_all_still_route_through_the_shared_submit_task():
+    """No-regression: every submitting surface in the pilot must still go through the one
+    shared submitTask() the guarantees above cover -- if any of them grew its own bespoke
+    fetch to a spend route, it would silently lose the concurrency fix (and the no-retry /
+    spend-gate guarantees) above."""
+    assert 'submitTask("/api/generate"' in _src("gallery/src/gen/useGenerate.js")
+    assert 'submitTask("/api/edit"' in _src("gallery/src/components/EditTab.jsx")
+    assert 'submitTask("/api/edit"' in _src("gallery/src/gen/useEditGenerate.js")
+    assert 'submitTask("/api/fix"' in _src("gallery/src/components/FixTab.jsx")
+    # No surface owns a bespoke fetch to a spend route -- the ONLY fetch of these
+    # routes is submitTask's own fetch(route).
+    #
+    # ONE deliberate exception: UpscalePanel.jsx (2026-08-08 port of static/mg-upscale-panel.js).
+    # The image-view upscale is a one-shot MODAL that closes on success and shows its own inline
+    # error, so it does not fit submitTask's openLine/result-line contract. It posts the SAME
+    # /api/generate (server-side READ_ONLY / free-card / job-tracker guards all apply) and carries
+    # its OWN equivalents of the client guarantees this test protects: a busyRef double-submit
+    # latch, a canSubmit spend-gate, and a single no-retry fetch. The vanilla did exactly this;
+    # it was invisible here only because it lived in static/ (this test globs gallery/src). If a
+    # future pass wants the shared path anyway, route it through submitTask and drop this skip.
+    bespoke = re.compile(r'fetch\(\s*["\']/api/(?:generate|edit|fix)["\']')
+    exempt = {(_ROOT / "gallery" / "src" / "components" / "UpscalePanel.jsx").resolve()}
+    for f in (_ROOT / "gallery" / "src").rglob("*.js*"):
+        if f.resolve() in exempt:
+            continue
+        assert not bespoke.search(f.read_text(encoding="utf-8")), (
+            "bespoke spend-route fetch outside submitTask: " + str(f))

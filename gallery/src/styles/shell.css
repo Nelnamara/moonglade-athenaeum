@@ -1,0 +1,375 @@
+/* ============================================================================
+   mgx shell — the redesigned app shell (Banner / NavSpine / SeparatorBar / dock
+   host), per design_handoff_moonglade_suite "Frontend Gallery.dc.html" + drift
+   items 8–11 & 16. NEW file on purpose: styles.css is shared and collision-
+   prone, so every shell class here carries the mgx- prefix and nothing in
+   styles.css is redefined (the two .strip integration overrides at the bottom
+   are scoped under .mgx-libslot and documented as interim).
+
+   Tokens come from the page shell (DESIGN_TOKENS_CSS). Fixed hues allowed by
+   the kit: Loom teal #47cbc3 (via --cyan -> --loomc alias), gold #d4af37,
+   ruby (--red family), emerald. Everything else is var(--*) / color-mix.
+
+   Motion laws: enter .4–.44s cubic-bezier(.2,.9,.24,1) · exit .34–.36s
+   cubic-bezier(.4,0,.2,1) · micro .18–.25s · metal drift 7s (mgMetal).
+   Z bands: components 0–7 only (the dock/overlays own 300–500 elsewhere).
+   ========================================================================== */
+
+/* ---- the mg* keyframes this shell uses (Frontend Gallery.dc.html lines 19–40,
+   verbatim). Other workstreams may re-declare identical copies — identical
+   definitions collide harmlessly. */
+@keyframes mgMetal { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+@keyframes mgMarkTilt { 0% { transform: rotateY(-9deg) rotateX(3deg) translateY(0); } 50% { transform: rotateY(9deg) rotateX(-2deg) translateY(-3px); } 100% { transform: rotateY(-9deg) rotateX(3deg) translateY(0); } }
+@keyframes mgMarkSheen { 0% { transform: translateX(-160%) skewX(-12deg); } 55% { transform: translateX(320%) skewX(-12deg); } 100% { transform: translateX(320%) skewX(-12deg); } }
+@keyframes mgFlavourA { from { opacity: 0; transform: translate3d(0, 7px, 0); } to { opacity: 1; transform: none; } }
+@keyframes mgFlavourB { from { opacity: 0; transform: translate3d(0, 7px, 0); } to { opacity: 1; transform: none; } }
+@keyframes mgPulse { 0%, 100% { opacity: .45; transform: scale(1); } 50% { opacity: 1; transform: scale(1.35); } }
+@keyframes mgNelSpin { to { transform: rotate(360deg); } }
+@keyframes mgNelHalo { 0%, 100% { opacity: .3; transform: scale(.9); } 50% { opacity: .8; transform: scale(1.08); } }
+@keyframes mgDockIn { from { opacity: 0; transform: translateX(-50%) translateY(22px) scale(.97); } to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); } }
+@keyframes mgDockOut { from { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); } to { opacity: 0; transform: translateX(-50%) translateY(22px) scale(.97); } }
+
+/* ============================== METAL FACES =================================
+   UI Kit v2 section 1 metalBtn(dark, mid, light, mid2, ink), as a class + custom
+   properties. The DEFAULT face is the skin-aware accent-mix metal (its 84% stop
+   is var(--mauve), per the DC's bannerGenStyle); the Loom/Folio variants restore
+   the generic recipe's light stop at 84% with their fixed hues. */
+.mgx-metal {
+  --mm-dark: color-mix(in oklab, var(--accent) 50%, #06030d);
+  --mm-mid: var(--accent);
+  --mm-light: color-mix(in oklab, var(--accent) 22%, #ffffff);
+  --mm-mid2: color-mix(in oklab, var(--accent) 74%, #06030d);
+  --mm-hi: var(--mauve);
+  --mm-ink: color-mix(in oklab, var(--accent) 26%, #08040f);
+  font-weight: 800; letter-spacing: .03em; white-space: nowrap; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, .3);
+  color: var(--mm-ink);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .35);
+  background: linear-gradient(100deg, var(--mm-dark) 0%, var(--mm-mid) 18%,
+    var(--mm-light) 34%, var(--mm-mid) 50%, var(--mm-mid2) 68%, var(--mm-hi) 84%,
+    var(--mm-dark) 100%);
+  background-size: 220% 100%;
+  animation: mgMetal 7s ease-in-out infinite;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .65), inset 0 -3px 5px rgba(0, 0, 0, .4),
+    0 8px 22px rgba(0, 0, 0, .48);
+  transition: filter .2s, box-shadow .25s;
+}
+/* metalBtn('#1e6f6b','#47cbc3','#d8fbf7','#2f8f89','#0a2422') — the Loom teal */
+.mgx-metal-loom { --mm-dark: #1e6f6b; --mm-mid: var(--cyan, #47cbc3); --mm-light: #d8fbf7;
+  --mm-mid2: #2f8f89; --mm-hi: #d8fbf7; --mm-ink: #0a2422; }
+/* metalBtn('#7a5f1c','#d4af37','#fff3cd','#9c7d24','#2a1f06') — the rare gold */
+.mgx-metal-folio { --mm-dark: #7a5f1c; --mm-mid: var(--gold, #d4af37); --mm-light: #fff3cd;
+  --mm-mid2: #9c7d24; --mm-hi: #fff3cd; --mm-ink: #2a1f06; }
+/* size grades */
+.mgx-gen { font-size: 14px; padding: 11px 26px; border-radius: 12px;
+  border-color: rgba(255, 255, 255, .34);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .72), inset 0 -3px 5px rgba(40, 20, 70, .5),
+    0 10px 26px rgba(0, 0, 0, .5); }
+.mgx-metal-md { font-size: 13px; padding: 10px 20px; border-radius: 12px; }
+.mgx-launcher { font-size: 11px; padding: 6px 15px; border-radius: 9px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), inset 0 -2px 4px rgba(40, 20, 70, .5),
+    0 6px 16px rgba(0, 0, 0, .45); }
+/* Generate faces dim while the dock is open (they read as pressed toggles) */
+.mgx-dockdim { filter: saturate(.6) brightness(.82); }
+
+/* ============================== HEADER ====================================== */
+/* Banner + separator ride together in one sticky band; the page keeps WINDOW
+   scroll (Grid's own scroll-to-top on page change depends on it). z 7 = top of
+   the component band; the dock/overlays (300+) still clear it. */
+.mgx-hdr { position: sticky; top: 0; z-index: 7; background: var(--mantle); }
+
+/* ============================== BANNER ====================================== */
+.mgx-bnr { position: relative; display: flex; flex-direction: column;
+  justify-content: space-between; overflow: visible;
+  min-height: clamp(150px, 22vw, 300px);
+  transition: min-height .5s cubic-bezier(.2, .9, .24, 1), height .5s cubic-bezier(.2, .9, .24, 1); }
+.mgx-bnr.slim { min-height: 0; height: 62px; }
+/* the art is its OWN clipped layer so flyouts/tooltips in the band can escape
+   the banner (the DC clips the whole banner; it has no anchored popovers) */
+.mgx-art { position: absolute; inset: 0; overflow: hidden; background: var(--base); }
+.mgx-art img { width: 100%; height: 100%; object-fit: cover;
+  object-position: 50% var(--crop, 30%); display: block; }
+/* bottom scrim, 30% height (DC spec) */
+.mgx-art::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0;
+  height: 30%; pointer-events: none;
+  background: linear-gradient(to bottom, rgba(7, 5, 18, 0) 0%, rgba(7, 5, 18, .34) 62%, rgba(7, 5, 18, .92) 100%); }
+
+/* hero nav column: right-aligned brand block. slim: one 62px row. */
+.mgx-navcol { position: relative; z-index: 1; align-self: flex-end; width: 56%;
+  flex: none; display: flex; flex-direction: column; align-items: stretch;
+  gap: 8px; padding: 16px 22px 0; }
+.mgx-bnr.slim .mgx-navcol { align-self: stretch; width: auto; flex: 1 1 auto;
+  min-width: 0; flex-direction: row; align-items: center; justify-content: flex-end;
+  gap: 12px; padding: 0 74px 0 22px; height: 100%; }
+.mgx-slimslot { flex: 1 1 auto; min-width: 0; display: none; }
+.mgx-bnr.slim .mgx-slimslot { display: flex; align-items: center; }
+
+.mgx-brand { display: flex; align-items: flex-start; justify-content: flex-end; gap: 13px; }
+.mgx-bnr.slim .mgx-brand { align-items: center; }
+.mgx-brandtxt { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column;
+  align-items: flex-end; gap: 3px; }
+.mgx-title { font-size: 27px; font-weight: 700; letter-spacing: -.02em; line-height: 1.05;
+  color: var(--text); text-shadow: 0 2px 22px rgba(0, 0, 0, .85); white-space: nowrap;
+  transition: font-size .5s cubic-bezier(.2, .9, .24, 1); }
+.mgx-bnr.slim .mgx-title { font-size: 16.5px; }
+.mgx-flavour { font-size: 11.5px; color: rgba(226, 222, 238, .78); white-space: nowrap;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, .85); cursor: pointer;
+  transition: opacity .5s ease; background: none; border: 0; padding: 0; font-family: inherit; }
+.mgx-flavour.fading { opacity: 0; }
+.mgx-flavour.fA { animation: mgFlavourA .5s cubic-bezier(.2, .9, .24, 1) both; }
+.mgx-flavour.fB { animation: mgFlavourB .5s cubic-bezier(.2, .9, .24, 1) both; }
+
+/* 58×58 living mark: tilt 9s, sheen 6.2s, static halo */
+.mgx-mark { flex: none; position: relative; width: 58px; height: 58px; perspective: 320px;
+  transition: width .5s cubic-bezier(.2, .9, .24, 1), height .5s cubic-bezier(.2, .9, .24, 1); }
+.mgx-bnr.slim .mgx-mark { width: 34px; height: 34px; }
+.mgx-mark-tilt { position: absolute; inset: 0; animation: mgMarkTilt 9s ease-in-out infinite;
+  transform-style: preserve-3d; border-radius: 14px; background: var(--accent);
+  display: grid; place-items: center; font-weight: 700; font-size: 26px; color: var(--base); }
+.mgx-mark-tilt img { position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: contain; border-radius: 14px; }
+.mgx-mark-sheenclip { position: absolute; inset: 0; border-radius: 14px; overflow: hidden;
+  pointer-events: none; }
+.mgx-mark-sheen { position: absolute; top: -30%; bottom: -30%; width: 46%;
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, .4) 50%, rgba(255, 255, 255, 0) 100%);
+  animation: mgMarkSheen 6.2s cubic-bezier(.4, 0, .5, 1) infinite; }
+.mgx-mark-halo { position: absolute; inset: -8px; border-radius: 20px; pointer-events: none;
+  box-shadow: 0 0 26px color-mix(in srgb, var(--accent) 34%, transparent); }
+
+/* hero-only bottom band: library bar left · stats-over-actions right.
+   Slim = display:none, exactly the DC's bannerBottomStyle — the banner's own
+   .5s height animation carries the exit/entry motion both ways, and keeping
+   the band in flow would squeeze the 62px slim row. */
+.mgx-bottom { position: relative; z-index: 2; display: flex; align-items: flex-end;
+  justify-content: flex-start; gap: 18px; padding: 0 22px 10px; }
+.mgx-bnr.slim .mgx-bottom { display: none; }
+.mgx-libslot { flex: 1 1 auto; min-width: 0; }
+.mgx-bnrright { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.mgx-statsrow { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.mgx-actrow { display: flex; flex-wrap: nowrap; align-items: center;
+  justify-content: flex-end; gap: 8px; }
+
+/* metallic stat pills (silver-lavender; emerald variant for backed-up) */
+.mgx-statpill { display: flex; align-items: baseline; gap: 7px; padding: 6px 13px;
+  border-radius: 999px; white-space: nowrap; border: 1px solid rgba(255, 255, 255, .2);
+  background: linear-gradient(150deg, rgba(222, 214, 246, .34) 0%, rgba(122, 96, 178, .36) 46%, rgba(24, 18, 44, .66) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .4), inset 0 -2px 4px rgba(20, 12, 40, .45),
+    0 5px 14px rgba(0, 0, 0, .4); }
+.mgx-statpill.emerald { border-color: rgba(255, 255, 255, .16);
+  background: linear-gradient(150deg, rgba(126, 214, 176, .32) 0%, rgba(52, 120, 96, .34) 46%, rgba(16, 38, 32, .6) 100%); }
+.mgx-statval { font-size: 15.5px; font-weight: 800; letter-spacing: -.01em;
+  font-variant-numeric: tabular-nums; color: #f2ecff; text-shadow: 0 1px 1px rgba(0, 0, 0, .45); }
+.mgx-statpill.emerald .mgx-statval { color: #dcffee; }
+.mgx-statlab { font-size: 8.5px; font-weight: 700; letter-spacing: .16em;
+  color: rgba(255, 255, 255, .62); }
+
+/* spinning-Nel mascot while a run is live */
+.mgx-nelwrap { position: relative; width: 30px; height: 30px; flex: none; }
+.mgx-nelhalo { position: absolute; inset: -7px; border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 55%, transparent), transparent 66%);
+  animation: mgNelHalo 1.6s ease-in-out infinite; }
+.mgx-nelimg { position: relative; z-index: 2; width: 100%; height: 100%;
+  object-fit: contain; border-radius: 50%;
+  animation: mgNelSpin 1.9s cubic-bezier(.6, .1, .4, .9) infinite; }
+
+/* =========================== SEPARATOR BAR ================================== */
+/* Real narrow-width fix (confirmed live via getBoundingClientRect overlap testing at
+   ~500-580px CSS width -- a real desktop-window band, not covered by useIsMobile's 430px
+   breakpoint): .mgx-sep used to be a single, non-wrapping flex ROW, so when .mgx-sepleft's
+   OWN internal wrapping grew taller than one line, .mgx-sepright (flex:none, vertically
+   centered across that now-taller row) could land on top of sepleft's later wrapped rows --
+   "Health"/"Panel" measured literally overlapping "idle · nothing in the queue" text.
+   flex-wrap:wrap on the outer container is the real fix: when there's no room for sepright
+   on sepleft's current row, it drops to its own new row below instead of overlapping one.
+   margin-left:auto on sepright keeps it right-aligned whenever it DOES have room (unchanged
+   from before), and align-items:flex-start keeps a wrapped-multi-row sepleft from stretching
+   sepright's own single row taller than it needs to be. */
+.mgx-sep { position: relative; display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px 14px;
+  padding: 6px 20px; min-height: 42px;
+  border-top: 1px solid rgba(255, 255, 255, .06);
+  border-bottom: 1px solid rgba(255, 255, 255, .06);
+  background: linear-gradient(180deg, rgba(18, 14, 42, .72) 0%, rgba(10, 8, 24, .86) 100%); }
+.mgx-sepleft { position: relative; display: flex; align-items: center; flex-wrap: wrap;
+  gap: 8px 20px; flex: 1 1 auto; min-width: 0; }
+.mgx-sepright { display: flex; align-items: center; gap: 12px; flex: none; margin-left: auto; }
+
+/* ---- glyph-spine nav pills ---- */
+.mgx-navspine { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; }
+.mgx-nav { position: relative; display: flex; align-items: center; gap: 6px;
+  padding: 4px 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .13em;
+  text-transform: uppercase; white-space: nowrap; cursor: pointer;
+  background: none; border: 0; font-family: inherit;
+  color: rgba(214, 210, 226, .62); transition: color .22s, text-shadow .22s; }
+.mgx-nav:hover, .mgx-nav:focus-visible { color: #f4eeff;
+  text-shadow: 0 0 14px color-mix(in srgb, var(--accent) 75%, transparent); }
+.mgx-nav.soon { opacity: .55; }
+.mgx-nav-underline { position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  border-radius: 2px; transform-origin: left center; transform: scaleX(0);
+  transition: transform .3s cubic-bezier(.2, .9, .24, 1), box-shadow .3s;
+  background: linear-gradient(90deg, var(--accent), var(--mauve)); }
+.mgx-nav:hover .mgx-nav-underline, .mgx-nav:focus-visible .mgx-nav-underline {
+  transform: scaleX(1);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 85%, transparent); }
+.mgx-nav-mark { display: inline-grid; place-items: center;
+  color: rgba(214, 210, 226, .6);
+  transition: transform .4s cubic-bezier(.2, .9, .24, 1), color .2s; }
+.mgx-nav:hover .mgx-nav-mark, .mgx-nav:focus-visible .mgx-nav-mark {
+  transform: rotate(90deg); color: var(--mauve); }
+/* custom opaque tooltip, BELOW the pill (open canvas is beneath the bar) */
+.mgx-nav-tip { position: absolute; left: 50%; top: calc(100% + 9px); z-index: 5;
+  white-space: nowrap; pointer-events: none; font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0; text-transform: none; padding: 6px 10px; border-radius: 8px;
+  color: var(--text); background: rgba(9, 7, 22, .96);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .6);
+  opacity: 0; transform: translateX(-50%) translateY(-4px);
+  transition: opacity .18s, transform .18s cubic-bezier(.2, .9, .24, 1); }
+.mgx-nav:hover .mgx-nav-tip, .mgx-nav:focus-visible .mgx-nav-tip {
+  opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ---- 26px square utility toggles (slim, blur) ---- */
+.mgx-sqbtn { display: grid; place-items: center; width: 26px; height: 26px;
+  border-radius: 8px; cursor: pointer; background: rgba(7, 5, 18, .46);
+  border: 1px solid rgba(255, 255, 255, .12); color: rgba(226, 222, 238, .72); padding: 0;
+  transition: border-color .2s, color .2s, background .2s; }
+.mgx-sqbtn svg { transition: transform .35s cubic-bezier(.2, .9, .24, 1); }
+.mgx-sqbtn.flip svg { transform: rotate(180deg); }
+/* blurred = the guarded state, so it wears the metal (border/bg via .mgx-metal);
+   unblurred = the exposed state, ruby-rimmed. The combined selector restores the
+   metal face .mgx-sqbtn's own background would otherwise override (same
+   specificity, later in file). Shadows per the DC's blurStyle. */
+.mgx-sqbtn.mgx-metal { color: var(--mm-ink);
+  background: linear-gradient(100deg, var(--mm-dark) 0%, var(--mm-mid) 18%,
+    var(--mm-light) 34%, var(--mm-mid) 50%, var(--mm-mid2) 68%, var(--mm-hi) 84%,
+    var(--mm-dark) 100%);
+  background-size: 220% 100%;
+  animation: mgMetal 7s ease-in-out infinite;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .65), inset 0 -2px 4px rgba(40, 20, 70, .4),
+    0 5px 14px rgba(0, 0, 0, .4); }
+.mgx-blur.guard { border: 1px solid rgba(255, 255, 255, .32); }
+.mgx-blur.off { border-color: color-mix(in srgb, var(--red) 50%, transparent);
+  background: color-mix(in srgb, var(--red) 16%, transparent); color: var(--red); }
+
+/* ---- SIZE pill ---- */
+.mgx-size { display: flex; align-items: center; gap: 7px; padding: 4px 11px;
+  border-radius: 999px; border: 1px solid rgba(255, 255, 255, .12);
+  background: rgba(7, 5, 18, .5); }
+.mgx-size-lab { font-size: 8.5px; font-weight: 700; letter-spacing: .14em;
+  color: rgba(214, 210, 226, .45); }
+.mgx-size input[type=range] { width: 78px; height: 3px; cursor: pointer;
+  accent-color: var(--accent); }
+
+/* ---- activity cluster ---- */
+.mgx-act { position: relative; display: flex; align-items: center; gap: 9px; flex: none; }
+.mgx-actdot { width: 7px; height: 7px; border-radius: 50%; flex: none;
+  background: rgba(214, 210, 226, .3); }
+.mgx-act.live .mgx-actdot { background: var(--accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 80%, transparent);
+  animation: mgPulse 1.5s ease-in-out infinite; }
+.mgx-acttxt { font-size: 10.5px; font-weight: 600; white-space: nowrap;
+  color: rgba(214, 210, 226, .45); transition: color .3s; }
+.mgx-act.live .mgx-acttxt { color: var(--mauve); }
+
+/* ---- credits chip (account balance; gold billing tooltip drops below-right) ---- */
+.mgx-cred { position: relative; z-index: 1; display: flex; align-items: center; gap: 9px;
+  padding: 6px 15px; border-radius: 999px; cursor: pointer; font-family: inherit;
+  border: 1px solid rgba(255, 255, 255, .22);
+  background: linear-gradient(150deg, rgba(222, 214, 246, .32) 0%, rgba(122, 96, 178, .34) 46%, rgba(24, 18, 44, .66) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .42), inset 0 -2px 4px rgba(20, 12, 40, .45),
+    0 5px 14px rgba(0, 0, 0, .4);
+  transition: filter .2s; }
+/* the chip elevates to the TOP of the component band while its tip shows */
+.mgx-cred:hover, .mgx-cred:focus-visible { z-index: 7; filter: brightness(1.08); }
+.mgx-credval { font-size: 14px; font-weight: 800; color: #f2ecff;
+  font-variant-numeric: tabular-nums; text-shadow: 0 1px 1px rgba(0, 0, 0, .45); }
+.mgx-credval.cards { color: #dcffee; }
+.mgx-credlab { font-size: 8.5px; font-weight: 700; letter-spacing: .16em;
+  color: rgba(255, 255, 255, .62); }
+.mgx-credlab.cards { color: rgba(220, 255, 238, .6); }
+.mgx-creddiv { width: 1px; height: 12px; background: rgba(255, 255, 255, .2); }
+.mgx-warndot { flex: none; width: 15px; height: 15px; display: grid; place-items: center;
+  border-radius: 50%; font-size: 10px; font-weight: 800; color: #2a1f06;
+  border: 1px solid rgba(255, 255, 255, .4);
+  background: linear-gradient(150deg, #ffe9a8 0%, #d4af37 52%, #8a6c18 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6); }
+.mgx-credtip { position: absolute; right: 0; top: calc(100% + 10px); z-index: 5;
+  width: 252px; pointer-events: none; font-size: 10.5px; line-height: 1.5;
+  font-weight: 500; padding: 10px 12px; border-radius: 9px; text-align: left;
+  white-space: normal; color: var(--text); background: #0a0818;
+  border: 1px solid rgba(212, 175, 55, .45); box-shadow: 0 12px 30px rgba(0, 0, 0, .62);
+  opacity: 0; transform: translateY(-4px);
+  display: flex; flex-direction: column; gap: 3px;
+  transition: opacity .18s, transform .18s cubic-bezier(.2, .9, .24, 1); }
+.mgx-cred:hover .mgx-credtip, .mgx-cred:focus-visible .mgx-credtip {
+  opacity: 1; transform: translateY(0); }
+/* Rich account tooltip: paid/free split (blur-gated) + per-type card breakdown. */
+.mgx-tipwarn { font-size: 10px; color: var(--gold); font-weight: 600; margin-bottom: 4px; }
+.mgx-tiprow { display: flex; justify-content: space-between; align-items: baseline; }
+.mgx-tiprow.head { margin-top: 5px; padding-top: 6px; border-top: 1px solid rgba(212, 175, 55, .22); }
+.mgx-tipk { font-family: ui-monospace, Menlo, monospace; font-size: 8.5px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--overlay0); }
+.mgx-tipv { font-family: Georgia, serif; font-weight: 400; font-size: 15px; line-height: 1;
+  font-variant-numeric: tabular-nums; color: var(--text); }
+.mgx-tipdim { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--overlay0);
+  font-variant-numeric: tabular-nums; }
+.mgx-tipcard { display: flex; gap: 7px; align-items: baseline; font-size: 10.5px; color: var(--subtext); }
+.mgx-tipcard b { flex: none; min-width: 18px; color: var(--text); font-variant-numeric: tabular-nums; }
+.mgx-tipcard .nm { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgx-tipcard i { flex: none; font-style: normal; font-size: 9px; color: var(--overlay0); }
+.mgx-tipfoot { font-size: 9px; color: var(--overlay0); margin-top: 5px;
+  padding-top: 5px; border-top: 1px solid rgba(255, 255, 255, .06); }
+
+/* claim pill -- classic's own #acct-claim (Acct.claim() in moonglade_gallery.py),
+   ported verbatim: hidden until claim_credits > 0, instant claim + toast on
+   click, no modal ceremony. Sits beside .mgx-cred, same row. The newer
+   ClaimModal (claim-modal.css) is additive, not a replacement -- this pill is
+   the always-there quiet reminder even after the modal's been dismissed for
+   the session. */
+@keyframes mgxClaimPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(79,201,154,.45); } 50% { box-shadow: 0 0 0 6px rgba(79,201,154,0); } }
+button.mgx-claim { display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+  font-weight: 600; padding: 7px 13px; border-radius: 999px; cursor: pointer; font-family: inherit;
+  border: 1px solid var(--emerald); background: rgba(79,201,154,.14); color: var(--emerald);
+  animation: mgxClaimPulse 2.6s ease-in-out infinite; white-space: nowrap; }
+button.mgx-claim:hover:not(:disabled) { background: rgba(79,201,154,.26); }
+button.mgx-claim:disabled { opacity: .7; cursor: default; animation: none; }
+button.mgx-claim .coin { font-size: 13px; }
+
+/* <mg-cost-badge compact> host — hidden until a dock/composer pushes its first
+   price (its idle hint would otherwise sit in the bar as permanent noise) */
+.mgx-costslot { display: none; }
+.mgx-costslot.has { display: inline-flex; align-items: center; }
+
+/* =============================== PAGE ====================================== */
+/* dock host wrapper: a DOM anchor for outside-click + the dock motion contract.
+   display:contents — the drawer inside is position:fixed and styles itself. */
+.mgx-dock-host { display: contents; }
+
+/* the DC's veil: darkens the column bottom so the (future bottom) dock always
+   reads. Fixed + pointer-events none; z 2 keeps it under the header (7) and far
+   under the drawer/lightbox (300+). */
+.mgx-veil { position: fixed; inset: 0; z-index: 2; pointer-events: none;
+  background: linear-gradient(to top, rgba(5, 4, 13, .9) 0%, rgba(5, 4, 13, .35) 22%, rgba(5, 4, 13, 0) 42%); }
+
+/* SIZE slider → the live grid, via the --thumb var the shell sets on <main>.
+   INTERIM: the Grid refit (span-2 rhythm, auto-rows) should absorb this rule
+   into its own stylesheet and delete it here. */
+.mgx-main { position: relative; z-index: 1; }
+.mgx-main .grid { grid-template-columns: repeat(auto-fill, minmax(var(--thumb, 210px), 1fr)); }
+
+/* ====================== INTERIM Strip integration ==========================
+   The pilot Strip (library bar) mounts INSIDE the banner's bottom band until
+   its LibraryBar refit lands. styles.css pins .strip to the header bottom
+   (absolute, --bnr-slim tall, its own glass) — inside the band it must flow.
+   The banner also owns the brand now, so Strip's brand block hides. DELETE
+   this whole section when Strip.jsx becomes LibraryBar.jsx. */
+.mgx-libslot .strip { position: static; height: auto; padding: 0;
+  background: none; border-top: 0; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.mgx-libslot .strip .brand { display: none; }
+
+/* ============================ reduced motion =============================== */
+@media (prefers-reduced-motion: reduce) {
+  .mgx-metal, .mgx-sqbtn.mgx-metal, .mgx-mark-tilt, .mgx-mark-sheen, .mgx-nelimg,
+  .mgx-nelhalo, .mgx-act.live .mgx-actdot, .mgx-flavour.fA, .mgx-flavour.fB { animation: none; }
+  .mgx-bnr, .mgx-title, .mgx-mark { transition: none; }
+}

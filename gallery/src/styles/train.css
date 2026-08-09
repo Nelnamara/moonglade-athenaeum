@@ -1,0 +1,77 @@
+/* Train a LoRA — Frontend Gallery.dc.html's ovTrain (L392+). Reuses publish.css's
+   form primitives (.mgpub-lab/.mgpub-in/.mgpub-go/.mgpub-confirm) rather than a second
+   copy of the same controls; these are the parts unique to training. */
+
+.mgtr-slab { pointer-events: auto; box-sizing: border-box;
+  width: min(1100px, calc(100vw - 40px)); max-height: 90vh; display: flex;
+  flex-direction: column; border-radius: 18px; border: 1px solid var(--surface1);
+  background: linear-gradient(180deg, rgba(18,14,42,.99) 0%, rgba(10,8,24,.99) 100%);
+  box-shadow: 0 34px 100px rgba(0,0,0,.78);
+  animation: mgSlab .3s cubic-bezier(.2,.9,.24,1) both; }
+.mgtr-sub { font-size: 11.5px; color: var(--subtext); margin-top: 3px; }
+
+/* The cost line -- deliberately the first thing under the header. */
+.mgtr-cost { flex: none; margin: 14px 24px 0; padding: 10px 14px; border-radius: 10px;
+  font-size: 12px; font-weight: 600; border: 1px solid rgba(79,201,154,.4);
+  background: rgba(79,201,154,.1); color: var(--emerald); }
+.mgtr-cost.paid { border-color: rgba(212,175,55,.45); background: rgba(212,175,55,.1);
+  color: var(--gold); font-weight: 700; }
+
+.mgtr-body { flex: 1 1 auto; min-height: 0; display: grid;
+  grid-template-columns: minmax(320px, 480px) 1fr; }
+@media (max-width: 880px) { .mgtr-body { grid-template-columns: 1fr; } }
+.mgtr-left { min-height: 0; overflow-y: auto; padding: 18px 22px; display: flex;
+  flex-direction: column; gap: 10px; border-right: 1px solid var(--surface1);
+  background: rgba(9,7,22,.4); }
+.mgtr-right { min-height: 0; overflow-y: auto; padding: 18px 24px; display: flex;
+  flex-direction: column; }
+
+/* Dataset counter + progress toward the 100 cap. */
+.mgtr-dshead { display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12px; color: var(--subtext); }
+.mgtr-dshead b { color: var(--text); font-variant-numeric: tabular-nums; }
+.mgtr-dshead .need { font-size: 10.5px; color: var(--gold); font-weight: 700; }
+.mgtr-dshead .ok { font-size: 10.5px; color: var(--emerald); font-weight: 700; }
+.mgtr-bar { height: 5px; border-radius: 999px; background: var(--surface0); overflow: hidden; }
+.mgtr-barfill { height: 100%; border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--emerald)); transition: width .2s; }
+.mgtr-tilehead { font-size: 9.5px; font-weight: 700; letter-spacing: .14em;
+  color: var(--overlay0); padding-top: 6px; }
+.mgtr-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr));
+  gap: 7px; }
+.mgtr-tile { position: relative; aspect-ratio: 1 / 1; border-radius: 9px; overflow: hidden;
+  padding: 0; cursor: pointer; background: var(--surface0);
+  border: 2px solid var(--surface1); opacity: .72; transition: opacity .18s, border-color .18s; }
+.mgtr-tile:hover { opacity: 1; }
+.mgtr-tile.on { border-color: var(--accent); opacity: 1; }
+.mgtr-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mgtr-check { position: absolute; top: 4px; right: 4px; width: 18px; height: 18px;
+  border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 800;
+  color: var(--mantle, #0a0818); background: var(--accent); }
+
+/* Trigger words + live counter. */
+.mgtr-trigwrap { position: relative; }
+.mgtr-trigcount { position: absolute; right: 9px; bottom: 8px; font-size: 10px;
+  color: var(--overlay0); font-variant-numeric: tabular-nums; }
+
+/* Model Type filter chips. */
+.mgtr-types { display: flex; gap: 7px; flex-wrap: wrap; }
+.mgtr-type { padding: 7px 13px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
+  cursor: pointer; border: 1px solid var(--surface1); background: rgba(12,10,28,.55);
+  color: var(--subtext); font-family: inherit; }
+.mgtr-type.on { border-color: var(--accent); background: rgba(182,146,230,.14); color: var(--text); }
+
+/* Model Theme cards. */
+.mgtr-themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 9px; }
+.mgtr-theme { position: relative; border-radius: 11px; overflow: hidden; padding: 0;
+  cursor: pointer; background: var(--surface0); border: 2px solid var(--surface1);
+  display: flex; flex-direction: column; font-family: inherit; text-align: left;
+  transition: border-color .18s; }
+.mgtr-theme.on { border-color: var(--accent); }
+.mgtr-theme img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; }
+.mgtr-theme .n { font-size: 10.5px; color: var(--text); padding: 6px 8px 7px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.mgtr-accept { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px;
+  font-size: 11.5px; color: var(--gold); cursor: pointer; font-weight: 600; }

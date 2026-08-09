@@ -35,7 +35,7 @@ QUICK START
   python moonglade_backup.py --max 40    # small test first
 """
 
-__version__ = "2.5.0"
+__version__ = "3.0.0"
 
 import argparse
 import csv
@@ -973,8 +973,9 @@ def _jobs_path(out_dir):
 def append_job_event(out_dir, job_id, status=None, **fields):
     """Append ONE job event to jobs.jsonl (append-only; safe from many processes).
     Each call records a job's CURRENT state; readers collapse by job_id. Known
-    fields: type, label, done, total, media_ids, error, source, dismissed. `ts`
-    is stamped here. Fails soft -- logging a job must never break the job.
+    fields: type, label, done, total, media_ids, error, source, dismissed, count
+    (requested image count, image-gen registrations only). `ts` is stamped here.
+    Fails soft -- logging a job must never break the job.
 
     Every STRING field is capped at 200 chars here, at the one write choke point
     every job event from every source funnels through (web routes' own _log_job
@@ -2079,6 +2080,7 @@ _FULL_META_FIELDS = (
     "prompt_full", "natural_prompt", "seed", "steps",
     "sampler", "cfg_scale", "model_id", "model_name", "loras",
     "negative_prompt", "clip_skip", "paid_credit",
+    "source_media_id", "derive_kind",
 )
 
 
@@ -3442,6 +3444,54 @@ def model_name_gql(session, model_version_id, _cache={}, strict=False):
     return name
 
 
+def resolve_model_base_id(session, model_version_id):
+    """The base MODEL id a generation VERSION id belongs to -- what
+    `/generation-model/<id>/versions` (list_model_versions, and so the base-model picker's
+    own re-resolve flow) actually wants, distinct from the VERSION id a submitted task uses
+    and so the catalog's `model_id` column stores (api_generate resolves `args.model` to a
+    VERSION id before submit; every catalog write path follows the same convention -- see
+    moonglade_gallery.py's api_generate and this module's own catalog-row builders).
+
+    Needed by the gallery's Runs-reel reuse-prefill (2026-08-02): it only has a run's
+    catalog row, so it must ask PixAI 'what model is this a version of' before it can feed
+    the picker's normal base-model-id flow -- feeding it the version id directly returns an
+    empty version list (a real, verify-flagged bug: 'Model lookup failed' on every reuse
+    click, old or new gens alike, since it's a catalog-wide convention).
+
+    Same GraphQL op as model_name_gql (getGenerationModelByVersionId), deliberately its OWN
+    request rather than a refactor of that function's cache: model_name_gql's failure
+    semantics are hardened against two real production incidents (see its docstring, M18),
+    and this is a rare, one-off, user-triggered lookup (a single reuse click), not a hot
+    backfill loop -- the extra request is cheap and the isolation is worth it.
+
+    Fails soft: '' on anything short of a clean answer (no hash configured, network error,
+    GraphQL error, missing/null model) -- this is a "nice to restore" path, never a reason to
+    block or mislead the caller. The caller leaves the composer's model untouched on ''
+    rather than repeating today's wrong-id failure toast for a case that isn't the user's
+    mistake."""
+    if not model_version_id or not MODEL_DETAIL_HASH:
+        return ""
+    try:
+        params = {
+            "operation": "getGenerationModelByVersionId",
+            "u3t": U3T,
+            "operationName": "getGenerationModelByVersionId",
+            "variables": json.dumps({"id": str(model_version_id)}, separators=(",", ":")),
+            "extensions": json.dumps(
+                {"clientLibrary": CLIENT_LIBRARY,
+                 "persistedQuery": {"version": 1, "sha256Hash": MODEL_DETAIL_HASH}},
+                separators=(",", ":")),
+        }
+        r = session.get(API_URL, params=params, timeout=30)
+        body = r.json()
+        if not isinstance(body, dict) or body.get("errors"):
+            return ""
+        mv = ((body.get("data") or {}).get("generationModelVersion")) or {}
+        return str((mv.get("model") or {}).get("id") or "")
+    except Exception:                        # noqa: BLE001 -- a soft-fail restore, never fatal
+        return ""
+
+
 def extract_full_meta(task):
     """Pull the extended fields out of a getTaskById task dict."""
     if not task:
@@ -3467,7 +3517,12 @@ def extract_full_meta(task):
     # resolves locally: a Fix's Model reads "Reference Pro" rather than a 19-digit id, with no
     # extra network round trip. Callers that also run model_name_gql still overwrite it.
     chat_label = (edit_model_by_id(model_id) or {}).get("label", "") if chat else ""
+    # LINEAGE: the source image + derivation kind, if this task derived from another image.
+    # Filled here so both the forward sync and --backfill-full-meta populate it for free.
+    src_mid, derive_kind = source_media_of_task(task)
     return {
+        "source_media_id": src_mid or "",
+        "derive_kind":     derive_kind or "",
         "prompt_full":    params.get("prompts", ""),
         "natural_prompt": extra.get("naturalPrompts", ""),
         "seed":           str(outputs.get("seed") or ""),
@@ -7449,6 +7504,365 @@ def artwork_views(session, artwork_id):
         return 0
 
 
+_UPSERT_ARTWORK = (
+    "mutation upsertArtwork($input: UpsertArtworkInput!, $id: ID) {"
+    " upsertArtwork(input: $input, id: $id) { id mediaId title visibility hidePrompts } }")
+_PUBLISH_FROM_TASK = (
+    "mutation createArtworkFromTaskV2($taskId: ID!, $input: CreateArtworkFromTaskInput!) {"
+    " createArtworkFromTaskV2(taskId: $taskId, input: $input)"
+    " { id mediaId title visibility hidePrompts } }")
+_DELETE_ARTWORK = "mutation deleteArtwork($id: ID!) { deleteArtwork(id: $id) }"
+_LIST_TACKS = (
+    "query listTacks($q: String, $first: Int) { tacks(q: $q, first: $first) {"
+    " edges { node { id codeName defaultName } } } }")
+
+
+def resolve_tack_ids(session, tags):
+    """Map plain tag strings to PixAI 'tack' ids (their tag objects). The publish form
+    sends `tackIds`, not free text -- `tags` is always [] in the real payload -- so a tag
+    that has no tack simply cannot be attached, and is reported back to the caller rather
+    than silently dropped. Read-only. Returns (ids, unmatched)."""
+    ids, unmatched = [], []
+    for t in tags or []:
+        name = str(t).lstrip("#").strip()
+        if not name:
+            continue
+        try:
+            d = gql_adhoc(session, _LIST_TACKS, {"q": name, "first": 8}) or {}
+            edges = ((d.get("tacks") or {}).get("edges")) or []
+        except PixAIError:
+            edges = []
+        hit = None
+        for e in edges:
+            n = (e or {}).get("node") or {}
+            if str(n.get("codeName") or "").lower() == name.lower() \
+                    or str(n.get("defaultName") or "").lower() == name.lower():
+                hit = n
+                break
+        # NO fuzzy fallback to edges[0] here -- that used to silently attach whatever
+        # ranked first in PixAI's search (e.g. typing "moon" attaching "moonlight") with
+        # no signal in the preview, contradicting this function's own contract below.
+        # Found by ultrareview 2026-08-06: a real, unreported substitution onto a public
+        # artwork. Only an EXACT codeName/defaultName match counts as resolved now;
+        # anything else is reported in `unmatched`, exactly as promised.
+        if hit and hit.get("id"):
+            ids.append(str(hit["id"]))
+        else:
+            unmatched.append(name)
+    return ids, unmatched
+
+
+_TRAIN_FREE_CURRENCY = "free::user_lora_training"
+_CREATE_TRAINING = ("mutation createTrainingTask($input: CreateTrainingTaskInput!) {"
+                    " createTrainingTask(input: $input) { id refId } }")
+# PixAI's real LoRA-training categories, probed live off the train-lora page's own
+# category select 2026-08-06 (the design mockup's character/style/concept was placeholder
+# -- "concept" isn't a real PixAI value). Values are what the mutation takes.
+TRAIN_CATEGORIES = ("character", "animal", "style", "realistic", "pose", "clothing",
+                    "background", "detail", "other")
+TRAIN_MIN_IMAGES = 10
+TRAIN_MAX_IMAGES = 100
+
+
+# The trainable base-model architectures, in the order PixAI's own train page shows them,
+# each mapped to its friendly label. The label map is PixAI's own (harvested
+# constants-*.js: mmdit26b->DiT.3, mmdit26a->DiT.2, dit7->DiT.1, sdxl->SDXL) plus SD 1.5.
+# "Model Type" on the train page IS this architecture -- picking one filters which base
+# models ("Model Theme") are offered; the value actually submitted is the chosen model's
+# VERSION id, not its model id (the site names the field baseModelId but assigns it the
+# versionId -- confirmed in the harvested submit builder).
+_TRAIN_ARCHS = (
+    ("MMDIT26B_MODEL", "DiT.3"),
+    ("MMDIT26A_MODEL", "DiT.2"),
+    ("DIT7_MODEL",     "DiT.1"),
+    ("SDXL_MODEL",     "SDXL"),
+    ("SD_V1_MODEL",    "SD 1.5"),
+)
+
+# PixAI's curated training-base list is NOT the public generationModels catalog (the
+# owner caught this -- my first build pulled the general model-picker feed). The real
+# list is served bundled with the pricing matrix by the train page's own config, which
+# is NOT reachable through any documented endpoint or the RE harvest (probed exhaustively
+# 2026-08-06: the connection's `feed` arg is ignored, `category:"in-house"` only covers
+# SD 1.5, and the SDXL officials aren't in the public catalog at all). So this is a
+# CAPTURED SNAPSHOT of that config (owner pasted the real response 2026-08-06). It matches
+# the site exactly. To refresh when PixAI adds base models: on the train-lora page, capture
+# the config response (models[] + pricing) and replace both constants below.
+_TRAIN_BASE_MODELS = [
+    # (version_id, model_id, title, modelType, usage, cover)
+    ("1983308862240288769", "1982880136609467518", "Tsubaki.2", "MMDIT26A_MODEL", "animation", "https://images-ng.pixai.art/images/stillThumb/b03c47d1-fcfa-4502-af96-7ef049ebaade"),
+    ("1894092844569363483", "1884107375027888751", "Tsubaki", "DIT7_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/98cd261b-9a65-42cd-916b-df27b5e61607"),
+    ("1844843519625072849", "1844843518698131638", "Illustrious-v1.0", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/2e0591cc-50fa-4e37-89c6-e641cf65c483"),
+    ("1830737069924162722", "1800107133055979065", "NoobAI XL", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/bd4ff6a2-b3de-4645-94e8-3ad19ed82f3f"),
+    ("1869108561160475178", "1869108554114044295", "Hinata v2", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/43cf3a51-b7e3-4e8c-8847-38b44471f03b"),
+    ("1795876005752987687", "1795876005744599078", "Illustrious-v0.1", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/dc62608f-53f3-426f-a462-ea49578115cd"),
+    ("1861558740588989558", "1861558737426484240", "Haruka-v2", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/1c51e854-da5d-4e38-9a60-5532d1e64d23"),
+    ("1856956435031440023", "1856956427276171616", "Otome-v2", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/908f0958-f377-4cca-93ee-11438fd0752f"),
+    ("1805666669332128958", "1805666668619097261", "Haruka", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/8f07e40a-dca1-41fe-a950-cf5c06a59d3f"),
+    ("1772043571096449082", "1772043569905266745", "Hikari", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/11ca16f5-a018-4c4f-92e5-4f7d67d8ac84"),
+    ("1856964022763541122", "1856964021647856206", "Illustrious-v2.0", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/2f6816a5-82f3-47e4-afa9-58a8415d0f22"),
+    ("1788325270093701704", "1788325267627450916", "Waterfront-v0.9", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/52b7f937-5abc-4406-b753-b826115f92a3"),
+    ("1728110559428576906", "1728110558497441412", "Animagine XL", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/49c70b8b-82f0-435b-97f9-0887139aa375"),
+    ("1722800994358889032", "1722800993478085189", "PhotoPedia XL", "SDXL_MODEL", "realistic", "https://images-ng.pixai.art/images/thumb/1b5538ef-4ffd-4e00-ab27-393104db7b51"),
+    ("1954632828118619567", "1954632827019711809", "Hoshino v2", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/fbc85e5d-6f5e-4b02-a54a-fc679001770f"),
+    ("1811528826405408057", "1811528825797233974", "Hoshino", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/d3b638af-7bac-4878-8f3a-1ec4b62998ab"),
+    ("1854247165841065427", "1854247164461139322", "Hinata v1", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/060b9c8c-ed2e-4e45-98c1-ac5df005b248"),
+    ("1648918127446573124", "1648918125777240131", "Moonbeam", "SD_V1_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/96596124-b2cd-4619-819a-55b425c79307"),
+    ("1718827626761711784", "1718827626749128871", "majicMIX realistic", "SD_V1_MODEL", "realistic", "https://images-ng.pixai.art/images/thumb/9bb8d254-ef76-44ef-8a1a-9a64a95df76b"),
+    ("1648918115270508582", "1648918113336934437", "Anything V5", "SD_V1_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/e0e7b6a7-baa5-4178-adbe-36610797019f"),
+]
+
+# Real training prices per architecture (captured with the model list 2026-08-06). PixAI
+# prices training from this matrix, keyed by modelType: `price` for a fresh dataset,
+# `reuse` when re-using an existing dataset, `retrain` for a re-run. A free-training quota
+# unit overrides all of this to 0. `originalPrice` (when present) is the pre-discount tag.
+_TRAIN_PRICING = {
+    "SD_V1_MODEL":    {"price": 25000, "retrain": 25000, "reuse": 12500},
+    "SDXL_MODEL":     {"price": 25000, "retrain": 25000, "reuse": 12500, "originalPrice": 75000},
+    "DIT7_MODEL":     {"price": 50000, "retrain": 50000, "reuse": 25000, "originalPrice": 150000},
+    "MMDIT26A_MODEL": {"price": 100000, "retrain": 50000, "reuse": 50000, "originalPrice": 200000},
+}
+
+
+def training_price_for_version(version_id):
+    """The base training price (fresh dataset) for the base model behind version_id, from
+    the captured pricing matrix -- or None if the version isn't a known base or its type
+    isn't priced. None means 'unknown', which the caller must treat as the unsafe case."""
+    arch = next((m[3] for m in _TRAIN_BASE_MODELS if m[0] == str(version_id)), None)
+    row = _TRAIN_PRICING.get(arch or "")
+    return row.get("price") if row else None
+
+
+def list_trainable_base_models(session=None, per_type=None):
+    """The base models a LoRA can be trained on, grouped by architecture -- the train
+    page's Model Type -> Model Theme picker. Served from PixAI's own curated config (see
+    _TRAIN_BASE_MODELS' note). `session` is accepted but unused: the list is a captured
+    snapshot, not a live query, because the real config endpoint isn't reachable. Each
+    model dict: {version_id, model_id, title, cover, usage}. version_id is what
+    `submit_training(base_model_id=...)` takes."""
+    groups = []
+    for arch, label in _TRAIN_ARCHS:
+        models = [
+            {"version_id": v, "model_id": mid, "title": title, "cover": cover, "usage": usage}
+            for (v, mid, title, mtype, usage, cover) in _TRAIN_BASE_MODELS if mtype == arch
+        ]
+        if models:
+            price = (_TRAIN_PRICING.get(arch) or {}).get("price")
+            groups.append({"arch": arch, "label": label, "models": models, "price": price})
+    return groups
+
+
+def training_free_quota(session):
+    """How many FREE LoRA trainings the account has left. PixAI tracks these as a QUOTA
+    under the currency `free::user_lora_training` -- NOT as a kaisuuken free card (the
+    card pool is generation-only, which is why /v2/kaisuuken/summary never lists one).
+    Read-only. Returns an int; 0 on any failure, which is the safe direction: 0 means
+    'treat this as paid', never 'assume it's free'."""
+    try:
+        d = gql_adhoc(session,
+                      "query($currency:String!){ me { id quotaAmount(currency:$currency) } }",
+                      {"currency": _TRAIN_FREE_CURRENCY}) or {}
+        return int(((d.get("me") or {}).get("quotaAmount")) or 0)
+    except (PixAIError, TypeError, ValueError):
+        return 0
+
+
+def normalize_trigger_words(text):
+    """PixAI's own trigger-word rules, from the train-LoRA form: no leading/trailing
+    spaces and no consecutive spaces (the form states both). Returns the cleaned string."""
+    return " ".join(str(text or "").split())
+
+
+def validate_training(base_model_id, media_ids, title, trigger_words, category,
+                      training_task_id=""):
+    """Mirror the site's OWN pre-submit validation (its Er() builder) so a bad request is
+    refused here instead of burning a round trip -- or worse, a free-training quota unit.
+    Returns the normalized trigger words. Raises PixAIError with a plain-language reason."""
+    # base_model_id is the model VERSION id (list_trainable_base_models' version_id) --
+    # PixAI's baseModelId input takes the version, not the model, id.
+    if not base_model_id:
+        raise PixAIError("pick a base model to train on")
+    ids = [str(m) for m in (media_ids or []) if str(m).strip()]
+    if len(ids) < TRAIN_MIN_IMAGES and not training_task_id:
+        raise PixAIError("training needs at least %d images -- you have %d"
+                         % (TRAIN_MIN_IMAGES, len(ids)))
+    if len(ids) > TRAIN_MAX_IMAGES:
+        raise PixAIError("training takes at most %d images -- you have %d"
+                         % (TRAIN_MAX_IMAGES, len(ids)))
+    if not str(title or "").strip():
+        raise PixAIError("give the LoRA a name")
+    tw = normalize_trigger_words(trigger_words)
+    if not tw:
+        raise PixAIError("trigger words are required -- they're how you summon the LoRA")
+    if len(tw) > 200:
+        raise PixAIError("trigger words are too long")
+    if str(category or "") not in TRAIN_CATEGORIES:
+        raise PixAIError("pick a category (%s)" % "/".join(TRAIN_CATEGORIES))
+    return tw
+
+
+def submit_training(session, base_model_id, media_ids, title, trigger_words, category,
+                    training_task_id="", primary_lora_model_id="", kaisuuken_id=""):
+    """Submit a real LoRA training task to PixAI (`createTrainingTask`).
+
+    SPENDS unless the account has free-training quota left (see training_free_quota) --
+    so it goes through gql_mutate: SINGLE ATTEMPT, no retry, for exactly the reason
+    every other spend path does. A lost response after the server accepted the task
+    would, on retry, start a SECOND training and consume a second quota unit (or a real
+    credit charge, which for training is large). _check_read_only gates it like every
+    other account mutation.
+
+    This function does NOT decide whether the user wants to pay: callers preview first
+    (quota + validation) and only call this once the user has confirmed. Input shape
+    mirrors the site's own form exactly. Returns the created task dict."""
+    _check_read_only("submit a LoRA training task")
+    tw = validate_training(base_model_id, media_ids, title, trigger_words, category,
+                           training_task_id)
+    inp = {
+        "baseModelId": str(base_model_id),
+        "mediaIds": [str(m) for m in (media_ids or []) if str(m).strip()],
+        "title": str(title).strip(),
+        "type": "USER_MULTI_LORA",
+        "triggerWords": tw,
+        "category": str(category),
+    }
+    if training_task_id:
+        inp["trainingTaskId"] = str(training_task_id)
+    if primary_lora_model_id:
+        inp["primaryLoraModelId"] = str(primary_lora_model_id)
+    if kaisuuken_id:
+        inp["kaisuukenId"] = str(kaisuuken_id)
+    d = gql_mutate(session, _CREATE_TRAINING, {"input": inp}) or {}
+    return d.get("createTrainingTask") or {}
+
+
+def source_media_of_task(task):
+    """The SOURCE image a derived generation was made FROM, plus what kind of derivation
+    it was -- returns (source_media_id, kind) or (None, None) for an original generation.
+
+    This is the data behind Image Details' LINEAGE panel. Every derive path already puts
+    its input image's mediaId in the submit parameters, and PixAI persists it on the task,
+    so it is readable back from getTaskById for history as well as recordable going
+    forward. The three real shapes (see build_video_parameters / build_chat_edit_parameters
+    / the upscale block):
+      * img2video      -> parameters.i2v.mediaId          (kind "video")
+      * edit/reference -> parameters.chat.mediaId         (kind "edit")
+      * upscale/hires  -> parameters.mediaId + upscale|enlarge ratio  (kind "upscale")
+    A plain txt2img has no input image and returns (None, None)."""
+    params = ((task or {}).get("parameters") or {})
+    if not isinstance(params, dict):
+        return (None, None)
+    i2v = params.get("i2v")
+    if isinstance(i2v, dict) and i2v.get("mediaId"):
+        return (str(i2v["mediaId"]), "video")
+    chat = params.get("chat")
+    if isinstance(chat, dict) and chat.get("mediaId"):
+        return (str(chat["mediaId"]), "edit")
+    mid = params.get("mediaId")
+    if mid:
+        ratio = params.get("upscale") or params.get("enlarge")
+        return (str(mid), "upscale" if ratio else "derived")
+    return (None, None)
+
+
+def task_media_index(session, task_id, media_id):
+    """Which image of a task a given media_id IS -- the `mediaIndex` the publish mutation
+    needs. Derived from the task's own ordered output list (`_task_image_media`, the same
+    enumeration the downloader uses), never guessed from a filename: a batchSize>1 task
+    stores individuals under outputs.batch[] and their ORDER is the index PixAI means.
+    Read-only. Returns the int index, or None if the task/media can't be resolved -- the
+    caller decides whether that's fatal (it is, for publishing: publishing the wrong image
+    of a batch is not a recoverable mistake)."""
+    if not task_id or not media_id:
+        return None
+    try:
+        task = task_detail_gql(session, str(task_id))
+    except PixAIError:
+        return None
+    if not task:
+        return None
+    pairs = _task_image_media(task.get("outputs") or {})
+    for i, (mid, _seed) in enumerate(pairs):
+        if str(mid) == str(media_id):
+            return i
+    return None
+
+
+def publish_artwork_from_task(session, task_id, media_index=0, title="", description="",
+                              tack_ids=None, private=False, hide_prompts=False,
+                              challenge=None, extra=None):
+    """Publish one image of a generation task as a PixAI ARTWORK
+    (`createArtworkFromTaskV2`). Account-mutating (it puts work on your public profile),
+    so it goes through gql_mutate -- single attempt, no retry: a lost response after the
+    server already created the artwork would otherwise publish a duplicate. Costs no
+    credits. Input shape mirrors the site's own publish form exactly (title/description/
+    visibility/isPrivate/hidePrompts/tags=[]/tackIds/mediaIndex, challenge inside extra).
+    Returns the created artwork dict; raises PixAIError on failure."""
+    _check_read_only("publish an artwork to your PixAI account")
+    vis = "PRIVATE" if private else "PUBLIC"
+    ex = dict(extra or {})
+    if challenge:
+        ex["challenge"] = challenge
+    if description:
+        ex["description"] = description
+    inp = {
+        "title": title or "",
+        "description": description or "",
+        "tags": [],                       # always empty on the wire; tackIds carries tags
+        "tackIds": list(tack_ids or []),
+        "visibility": vis,
+        "isPrivate": bool(private),
+        "hidePrompts": bool(hide_prompts),
+        "mediaIndex": int(media_index or 0),
+        "extra": ex,
+    }
+    d = gql_mutate(session, _PUBLISH_FROM_TASK,
+                   {"taskId": str(task_id), "input": inp}) or {}
+    return d.get("createArtworkFromTaskV2") or {}
+
+
+def update_artwork(session, artwork_id, media_id=None, title=None, description=None,
+                   tack_ids=None, private=None, hide_prompts=None, extra=None):
+    """Edit an EXISTING artwork (`upsertArtwork` with an id) -- retitle, re-tag, or flip
+    visibility (the My Art publish-toggle / edit-tags actions). Account-mutating ->
+    gql_mutate. Only the fields you pass are sent, so a tag edit can't silently reset a
+    title. Returns the updated artwork dict; raises PixAIError on failure."""
+    _check_read_only("edit an artwork on your PixAI account")
+    inp = {}
+    if media_id is not None:
+        inp["mediaId"] = str(media_id)
+    if title is not None:
+        inp["title"] = title
+    if tack_ids is not None:
+        inp["tags"] = []
+        inp["tackIds"] = list(tack_ids)
+    if private is not None:
+        inp["visibility"] = "PRIVATE" if private else "PUBLIC"
+        inp["isPrivate"] = bool(private)
+    if hide_prompts is not None:
+        inp["hidePrompts"] = bool(hide_prompts)
+    ex = dict(extra or {})
+    if description is not None:
+        ex["description"] = description
+    if ex:
+        inp["extra"] = ex
+    if not inp:
+        raise PixAIError("update_artwork: nothing to change")
+    d = gql_mutate(session, _UPSERT_ARTWORK,
+                   {"id": str(artwork_id), "input": inp}) or {}
+    return d.get("upsertArtwork") or {}
+
+
+def delete_artwork(session, artwork_id):
+    """Unpublish/delete one artwork from your PixAI account (`deleteArtwork`).
+    IRREVERSIBLE on their side; your local files and catalog row are untouched.
+    Single attempt (gql_mutate) so a flaky network can never delete twice. Like
+    deleteGenerationTask, success is the ABSENCE of an error, not the payload."""
+    _check_read_only("delete an artwork from your PixAI account")
+    gql_mutate(session, _DELETE_ARTWORK, {"id": str(artwork_id)})
+    return True
+
+
 def account_info(session, raise_on_error=False):
     """Fetch credits + membership/subscription via ad-hoc GraphQL. Returns the `me` dict.
     Fails soft to {} by default (the web header chip relies on that); pass raise_on_error=True
@@ -7480,6 +7894,39 @@ def account_is_member(me):
     if not me:
         return None
     return bool(me.get("membership"))
+
+
+_CREDIT_BALANCE_QUERY = """
+query {
+  me {
+    id
+    total: quotaAmount
+    free: quotaAmount(currency: "free")
+    paid: quotaAmount(currency: "paid")
+  }
+}
+"""
+
+
+def credit_balance(session):
+    """Read the account's credit balance split Paid vs Free -- the same three numbers the
+    site's own Membership & Credits page shows, where account_info()'s `quotaAmount` only
+    ever surfaces the lump total. Returns {"total", "free", "paid"} (ints, or None on error).
+
+    ** The mechanism, learned the hard way (2026-08-07): the split is `me { quotaAmount,
+    quotaAmount(currency: "free"), quotaAmount(currency: "paid") }` -- aliased fields on
+    `me`, with the currency codes being the bare strings "free"/"paid". The ORIGINAL query
+    `user(id).{total,free,paid}` was invalid (PixAI: "Cannot query field total on type
+    User") and always failed; a long probe missed the codes because `freeCredit`/`paidCredit`
+    etc. all return null and introspection is disabled. The exact query was finally recovered
+    from the site's own bundled operation AST (owner-supplied currency dump). Verified live:
+    free 219,951 + paid 3,533,040 = total 3,752,991. ** Read-only; fails soft to all-None."""
+    try:
+        data = gql_adhoc(session, _CREDIT_BALANCE_QUERY, {}) or {}
+    except (PixAIError, requests.RequestException, ValueError):
+        return {"total": None, "free": None, "paid": None}
+    me = data.get("me") or {}
+    return {"total": me.get("total"), "free": me.get("free"), "paid": me.get("paid")}
 
 
 # PixAI's free-tier LoRAs-per-generation allowance. Their own generate panel prints it
@@ -7543,6 +7990,10 @@ def run_account_info(args):
         credits = str(me.get("quotaAmount"))
     print("Account ID       : {}".format(me.get("id") or USER_ID))
     print("Credits (balance): {}".format(credits))
+    balance = credit_balance(session)
+    if balance["free"] is not None or balance["paid"] is not None:
+        print("  of which free  : {:,}".format(int(balance["free"] or 0)))
+        print("  of which paid  : {:,}".format(int(balance["paid"] or 0)))
     server_tasks = ((me.get("tasks") or {}).get("totalCount"))
     if server_tasks is not None:
         print("Lifetime tasks   : {:,}  (server's count of every generation you've made)".format(
@@ -7580,7 +8031,8 @@ def run_account_info(args):
             sub.get("provider", "-"), sub.get("status", "-"),
             renew, (sub.get("endAt") or "")[:10]))
     print("\n(Read-only. To buy credits or change your plan, use the browser.)")
-    return {"quota": me.get("quotaAmount"), "membership": mem.get("membershipId")}
+    return {"quota": me.get("quotaAmount"), "membership": mem.get("membershipId"),
+            "free_credits": balance["free"], "paid_credits": balance["paid"]}
 
 
 # --- Live event push (WebSocket) ------------------------------------------------
@@ -7933,6 +8385,243 @@ def list_kaisuukens(session):
     if rows is None:
         return []
     return [_normalize_kaisuuken(k) for k in rows]
+
+
+def list_kaisuuken_logs(session, first=50, after=None):
+    """Read the account's benefit-card USAGE history via GET /v2/kaisuuken/logs -- the
+    per-redemption ledger, distinct from the held-count summary /v2/kaisuukens/summary gives
+    (that one only has a live `count`; this one is the paper trail of every time a card was
+    actually spent). Verified live 2026-08-02 against the account's own history.
+
+    Each row: {record_id, template_name, category, task_type, task_id, action, credit_cost,
+    created_at}. `action` is "consumed" or "refunded" -- PixAI hands a card back (a NEW record,
+    same kaisuukenId, action=refunded) when the task it was attached to failed or was refused;
+    a single card can cycle consumed->refunded->consumed again across different tasks, so
+    record_id is not 1:1 with "one use". `credit_cost` is what the redemption would have cost
+    in credits had no card covered it -- useful for a "cards have saved you N credits" total,
+    never an actual charge (the whole point of the card is that it wasn't charged).
+
+    Cursor-paginated (Relay style): pass a previous call's `end_cursor` as `after` to page
+    forward; `has_next` says whether more exist. Read-only; fails soft on error (matching
+    list_kaisuukens()'s contract) since a glitched read should never block a display."""
+    try:
+        params = {"first": int(first)}
+        if after:
+            params["after"] = str(after)
+        data = _rest_get(session, "/kaisuuken/logs", params=params) or {}
+    except (PixAIError, requests.RequestException, ValueError):
+        return {"logs": [], "has_next": False, "end_cursor": None}
+    rows = data.get("data")
+    if rows is None:
+        return {"logs": [], "has_next": False, "end_cursor": None}
+    page = data.get("pageInfo") or {}
+    logs = [{
+        "record_id": r.get("id") or "",
+        "template_name": r.get("templateName") or "",
+        "category": r.get("categoryCode") or "",
+        "task_type": r.get("taskType") or "",
+        "task_id": str(r.get("taskId") or ""),
+        "action": r.get("action") or "",
+        "credit_cost": r.get("creditCost"),
+        "created_at": r.get("createdAt") or "",
+    } for r in rows]
+    return {"logs": logs, "has_next": bool(page.get("hasNextPage")), "end_cursor": page.get("endCursor")}
+
+
+def kaisuuken_type_catalog(session, max_pages=25):
+    """Page ALL the way back through list_kaisuuken_logs() to build a lifetime roster of
+    every benefit-card TEMPLATE this account has ever redeemed or been refunded -- the "what
+    types have I ever held" answer /v2/kaisuuken/summary can't give once a card type fully
+    expires out of current holdings (verified 2026-08-02: Reference Pro Only and Edit Pro
+    Only both fully cycled out of live holdings but still show up here going back ~a month).
+
+    Caveat: this only catches types actually USED (consumed or refunded) at least once -- a
+    card that expired untouched leaves no trace in this log, so it is a lower bound on
+    "every card type ever granted", not an exact one.
+
+    Capped at `max_pages` pages of 100 rows each as a politeness/safety bound -- an old
+    account could otherwise page indefinitely. Returns what it found plus whether the cap
+    was hit before the log ran out, so a caller can tell "that's everything" from "there's
+    more, ask for more pages"."""
+    catalog = {}
+    cursor, pages, hit_cap = None, 0, False
+    while pages < max_pages:
+        page = list_kaisuuken_logs(session, first=100, after=cursor)
+        for row in page["logs"]:
+            name = row["template_name"] or "(unknown)"
+            entry = catalog.setdefault(name, {
+                "category": row["category"], "task_type": row["task_type"],
+                "consumed": 0, "refunded": 0,
+                "first_seen": row["created_at"], "last_seen": row["created_at"]})
+            if row["action"] == "consumed":
+                entry["consumed"] += 1
+            elif row["action"] == "refunded":
+                entry["refunded"] += 1
+            ts = row["created_at"]
+            if ts and (not entry["first_seen"] or ts < entry["first_seen"]):
+                entry["first_seen"] = ts
+            if ts and (not entry["last_seen"] or ts > entry["last_seen"]):
+                entry["last_seen"] = ts
+        pages += 1
+        if not page["has_next"] or not page["logs"]:
+            break
+        cursor = page["end_cursor"]
+    else:
+        hit_cap = True
+    return {"templates": catalog, "pages_read": pages, "hit_page_cap": hit_cap}
+
+
+# --- Coupons ("Credit Boost", extra-package-boosts) ---------------------------
+# A reward type entirely SEPARATE from kaisuuken benefit cards, verified live 2026-08-02
+# (owner: "coupons are for monthly events, one is live now"). A coupon is a percentage
+# bonus applied to an "Extra Package" (credit-pack) purchase, not a free generation -- the
+# naming of its own endpoint (extra-package-boosts) confirms the mechanic. Lives on the
+# same oRPC /v2 REST surface as kaisuuken, but is its own resource, not a kaisuuken variant.
+
+#: The site's own "My Coupons" top list (what you currently HOLD) vs its "View coupon
+#: history" accordion (what's past) are the SAME endpoint, told apart only by `statuses` --
+#: both CONFIRMED via live network capture 2026-08-02, resolving what the first pass here
+#: left as an unconfirmed guess.
+COUPON_STATUSES_ON_HAND = ("available", "locked")
+COUPON_STATUSES_HISTORY = ("redeemed", "expired")
+
+
+def list_extra_package_boosts(session, statuses=COUPON_STATUSES_ON_HAND, first=50, after=None):
+    """Read the account's "Credit Boost" coupons via GET /v2/extra-package-boosts. Defaults
+    to what you currently HOLD (COUPON_STATUSES_ON_HAND) -- the primary ask ("list what we
+    have on hand", not just a spend history). Pass `statuses=COUPON_STATUSES_HISTORY` for
+    the past (redeemed + expired) view instead; both share this one endpoint.
+
+    Each row: {code, boost_percent, status, issued_by, note, locked_for_order_id,
+    available_since, available_until, created_at}. `locked_for_order_id` ties a redeemed
+    coupon to the specific purchase order it boosted -- the same link behind the credit log's
+    "Extra Package" rows carrying a matching reason tag (see the credit-ledger work).
+    Cursor-paginated (Relay style, same shape as list_kaisuuken_logs); read-only, fails soft
+    on error."""
+    try:
+        params = {"first": int(first)}
+        for i, s in enumerate(statuses):
+            params["status[{}]".format(i)] = s
+        if after:
+            params["after"] = str(after)
+        data = _rest_get(session, "/extra-package-boosts", params=params) or {}
+    except (PixAIError, requests.RequestException, ValueError):
+        return {"coupons": [], "has_next": False, "end_cursor": None}
+    rows = data.get("data")
+    if rows is None:
+        return {"coupons": [], "has_next": False, "end_cursor": None}
+    page = data.get("pageInfo") or {}
+    coupons = [{
+        "code": r.get("code") or "",
+        "boost_percent": r.get("boostRatePercentage"),
+        "status": r.get("status") or "",
+        "issued_by": r.get("issuedBy") or "",
+        "note": r.get("note") or "",
+        "locked_for_order_id": r.get("lockedForOrderId") or "",
+        "available_since": r.get("availableSince") or "",
+        "available_until": r.get("availableUntil") or "",
+        "created_at": r.get("createdAt") or "",
+    } for r in rows]
+    return {"coupons": coupons, "has_next": bool(page.get("hasNextPage")),
+            "end_cursor": page.get("endCursor")}
+
+
+# --- Credit Ledger (full spend/purchase/gift history) -------------------------
+# The REAL "spend history" behind the site's Membership & Credits -> Credit log table --
+# a much bigger surface than either kaisuuken_logs or extra_package_boosts, and NOT the
+# same endpoint as either: rides ad-hoc GraphQL `me.quotaLogs`, not the /v2 REST surface.
+#
+# ** 2026-08-07 fix: query `me`, NOT `user(id: $userId)`. ** The original used
+# `user(id).quotaLogs` and always came back EMPTY -- quotaLogs is private financial data
+# that PixAI exposes ONLY on `me`, never on the public `user(id)` type, even for your own
+# id (no error, just an empty connection -- which is why the "verified live 2026-08-02"
+# claim slipped through). Confirmed live against the real account 2026-08-07: `me.quotaLogs`
+# returns the real ledger (daily claims, event gifts, spend...) with working backward
+# pagination; `user(id).quotaLogs` returns nothing. The `reason`/`logReason` server-side
+# filter is dropped -- it isn't offered on the `me` connection and nothing in the app sends
+# it (the modal has no reason filter); re-add via a probed arg name if a filter UI is built.
+_QUOTA_LOG_QUERY = """
+query($last: Int!, $before: String) {
+  me {
+    id
+    quotaLogs(last: $last, before: $before) {
+      pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
+      edges {
+        cursor
+        node { refId userId amount type extra createdAt updatedAt }
+      }
+    }
+  }
+}
+"""
+
+# `type` enum values CONFIRMED against real account data 2026-08-02 (one entry each,
+# sampled from a mixed page -- NOT exhaustive). PixAI's own filter dropdown offers ~25
+# distinct labels across 5 categories (Credits Spending / Purchased Credits / Earned
+# Rewards / Grants & Refunds / Special Rewards); only these four have a confirmed enum so
+# far. An unmapped type still comes through list_credit_log() (label falls back to the raw
+# enum string) -- this dict is a display nicety, not a gate.
+CREDIT_LOG_REASONS = {
+    "task_cost": "Generation Task",
+    "daily": "Daily Claim",
+    "event_gift": "Event Gift",
+    "extra_package": "Extra Package",
+}
+
+
+def list_credit_log(session, last=50, before=None, reason=None):
+    """Read the account's full credit transaction ledger via ad-hoc GraphQL
+    `user(id).quotaLogs` -- every credit gain AND loss (purchases, daily claims, event
+    gifts, generation spend, refunds, ...), not just generation cost. Distinct from
+    list_kaisuuken_logs()/list_extra_package_boosts(), which are their own narrower REST
+    endpoints for card/coupon-specific history.
+
+    Each row: {ref_id, amount, type, label, extra, created_at, updated_at}. `amount` is
+    signed (negative = spend, positive = gain). `type` is the raw enum (see
+    CREDIT_LOG_REASONS for the ones confirmed so far); `label` is the friendly name when
+    known, else the raw enum. `extra` is an opaque per-type payload -- e.g. the coupon-boost
+    "🎫 +15%" reason tag seen on an extra_package row in the site's own UI must live in
+    here, but no populated sample was captured to confirm its structure, so it is passed
+    through raw rather than parsed.
+
+    Backward-paginated (last/before over hasPreviousPage/startCursor), matching this
+    codebase's OWN established connection style for history listings (see
+    page_variables()) -- the opposite direction from kaisuuken/coupons' forward
+    first/after. Pass a previous call's `next_cursor` as `before` to page further into the
+    past. Optional `reason` filters server-side to one raw type, mirroring the site's own
+    per-category filter dropdown. Read-only; fails soft on error, matching every other
+    reader in this module."""
+    try:
+        variables = {"last": int(last)}
+        if before:
+            variables["before"] = str(before)
+        # `reason` is accepted for API compatibility but no longer sent -- the `me`
+        # connection doesn't take it (see _QUOTA_LOG_QUERY's note). Kept as a param so the
+        # route/CLI signatures don't change; a filter UI would need a probed arg name.
+        _ = reason
+        data = gql_adhoc(session, _QUOTA_LOG_QUERY, variables) or {}
+    except (PixAIError, requests.RequestException, ValueError):
+        return {"entries": [], "has_more": False, "next_cursor": None}
+    quota_logs = (data.get("me") or {}).get("quotaLogs") or {}
+    edges = quota_logs.get("edges")
+    if edges is None:
+        return {"entries": [], "has_more": False, "next_cursor": None}
+    page = quota_logs.get("pageInfo") or {}
+    entries = []
+    for e in edges:
+        n = e.get("node") or {}
+        t = n.get("type") or ""
+        entries.append({
+            "ref_id": n.get("refId") or "",
+            "amount": n.get("amount"),
+            "type": t,
+            "label": CREDIT_LOG_REASONS.get(t, t),
+            "extra": n.get("extra"),
+            "created_at": n.get("createdAt") or "",
+            "updated_at": n.get("updatedAt") or "",
+        })
+    return {"entries": entries, "has_more": bool(page.get("hasPreviousPage")),
+            "next_cursor": page.get("startCursor")}
 
 
 def _target_model_id(parameters):
@@ -8390,6 +9079,95 @@ def run_cards(args):
     print("  Edit Pro card   -> --edit-image       (default model already matches)")
     print("  Reference Pro   -> --generate --model 1948514378441961474")
     return {"cards": len(cards), "total": total}
+
+
+def run_card_history(args):
+    """Print the account's benefit-card usage history (list_kaisuuken_logs) -- the paper
+    trail /v2/kaisuuken/summary can't show: every past redemption/refund, the task it was
+    attached to, and when. Read-only. Pass --card-history-all to page all the way back and
+    print the lifetime card-type catalog instead (kaisuuken_type_catalog) -- slower, several
+    requests, but answers "what card types have I ever held" once a type cycles out of
+    current holdings."""
+    session = _make_session(getattr(args, "token", None))
+    if getattr(args, "card_history_all", False):
+        result = kaisuuken_type_catalog(session)
+        templates = result["templates"]
+        if not templates:
+            print("No benefit-card history found (read-only; nothing was spent).")
+            return {"templates": 0}
+        print("Every benefit-card TYPE this account has ever used, across {} page(s){}:\n".format(
+            result["pages_read"],
+            " (stopped at the page cap -- there may be more)" if result["hit_page_cap"] else ""))
+        for name, info in sorted(templates.items(), key=lambda kv: kv[1]["last_seen"], reverse=True):
+            print("  {:<22} [{:<11}] consumed={:<3} refunded={:<3} last used {}".format(
+                name, info["category"] or "-", info["consumed"], info["refunded"],
+                str(info["last_seen"])[:10]))
+        return {"templates": len(templates)}
+    page = list_kaisuuken_logs(session, first=int(getattr(args, "card_history_count", 0) or 20))
+    logs = page["logs"]
+    if not logs:
+        print("No benefit-card history found (read-only; nothing was spent).")
+        return {"logs": 0}
+    print("Recent benefit-card usage (most recent first):\n")
+    for row in logs:
+        print("  {:<22} {:<9} task {:<20} {}".format(
+            row["template_name"], row["action"], row["task_id"],
+            str(row["created_at"])[:19].replace("T", " ")))
+    if page["has_next"]:
+        print("\n...more exist -- pass --card-history-all to page through the full history.")
+    return {"logs": len(logs)}
+
+
+def run_coupons(args):
+    """Print the account's "Credit Boost" coupons (list_extra_package_boosts) -- a reward
+    type separate from benefit cards: a percentage bonus on an Extra Package (credit-pack)
+    purchase, tied to promotional events. Defaults to what you currently HOLD (the primary
+    ask -- on-hand inventory, not just a spend history); pass --coupons-history for the past
+    (redeemed + expired) view instead. Read-only."""
+    session = _make_session(getattr(args, "token", None))
+    history = getattr(args, "coupons_history", False)
+    statuses = COUPON_STATUSES_HISTORY if history else COUPON_STATUSES_ON_HAND
+    page = list_extra_package_boosts(session, statuses=statuses)
+    coupons = page["coupons"]
+    if not coupons:
+        print("No {} coupons found (read-only; nothing was spent).".format(
+            "past" if history else "currently-held"))
+        return {"coupons": 0}
+    print("Credit Boost coupons ({}):\n".format(
+        "redeemed + expired history" if history else "currently held"))
+    for c in coupons:
+        print("  +{}%  {:<10} issued by {:<8} available {} -> {}".format(
+            c["boost_percent"], c["status"], c["issued_by"],
+            str(c["available_since"])[:10], str(c["available_until"])[:10]))
+    if page["has_next"]:
+        print("\n...more exist than shown here.")
+    return {"coupons": len(coupons)}
+
+
+def run_credit_log(args):
+    """Print the account's full credit transaction ledger (list_credit_log) -- the real
+    spend/purchase/gift history behind Membership & Credits -> Credit log, not just
+    generation cost. Read-only. Pass --credit-log-reason to filter to one raw type (see
+    CREDIT_LOG_REASONS for the ones with a confirmed friendly label) or --credit-log-before
+    <cursor> to page further into the past."""
+    session = _make_session(getattr(args, "token", None))
+    page = list_credit_log(session, last=int(getattr(args, "credit_log_count", 0) or 30),
+                            before=getattr(args, "credit_log_before", "") or None,
+                            reason=getattr(args, "credit_log_reason", "") or None)
+    entries = page["entries"]
+    if not entries:
+        print("No credit log entries found (read-only; nothing was spent).")
+        return {"entries": 0}
+    print("Credit log (most recent first):\n")
+    for e in entries:
+        amount = e["amount"] or 0
+        sign = "+" if amount >= 0 else ""
+        print("  {}{:<10,} {:<20} {}".format(
+            sign, amount, e["label"], str(e["created_at"])[:19].replace("T", " ")))
+    if page["has_more"]:
+        print("\n...more exist further back -- pass --credit-log-before {} to page.".format(
+            page["next_cursor"]))
+    return {"entries": len(entries)}
 
 
 def run_reconcile_deleted(args):
@@ -9019,6 +9797,174 @@ def run_backfill_full_meta(args):
                   "--workers 2 --delay 1")
 
 
+def run_backfill_lineage(args):
+    """--backfill-lineage: fill source_media_id/derive_kind for rows that already have full
+    meta (so --backfill-full-meta's own _needs() gate would never revisit them) but predate
+    lineage tracking. Same per-task getTaskById + source_media_of_task as the forward path
+    (extract_full_meta), just re-scoped to target ONLY the two lineage columns so a catalog
+    that's already fully backfilled doesn't need a second full re-fetch to gain lineage.
+    Safe to re-run -- skips rows that already have EITHER column set (an original txt2img
+    legitimately has both blank forever, so "blank" alone can't be the skip signal; a task_id
+    already visited is tracked instead so an original is never re-fetched every run)."""
+    out = Path(args.out)
+    db_path = _ensure_db(out)
+    session = _make_session(getattr(args, "token", None))
+
+    if not TASK_DETAIL_HASH:
+        raise PixAIError(
+            "TASK_DETAIL_HASH is empty -- the built-in default is missing or was overridden "
+            "with a blank value in config.json. Restore it, or capture a current getTaskById "
+            "sha256Hash from DevTools if the hash rotated.")
+
+    rows = load_catalog(db_path)
+    # A task is "done" once ANY of its rows carries a real source_media_id OR the persisted
+    # lineage_checked marker (a confirmed original -- "blank" alone is ambiguous with "never
+    # checked", which is exactly what lineage_checked exists to disambiguate).
+    done_tasks = {r["task_id"] for r in rows
+                  if r.get("task_id") and (r.get("source_media_id") or r.get("lineage_checked"))}
+    task_ids = list(dict.fromkeys(
+        r["task_id"] for r in rows if r.get("task_id") and r["task_id"] not in done_tasks))
+    print("Found {:,} unfiled tasks to check for lineage.".format(len(task_ids)))
+    if not task_ids:
+        print("Nothing to backfill.")
+        return
+
+    workers = max(1, getattr(args, "workers", 1) or 1)
+
+    def _fetch(tid):
+        task_data = task_detail_gql(session, tid)
+        src, kind = source_media_of_task(task_data)
+        return (src or "", kind or "")
+
+    task_lineage = {}
+    found = checked = 0
+    _prog = getattr(args, "progress", None)
+    err_kinds = {}
+
+    def _note_error(tid, exc):
+        key = "{}: {}".format(type(exc).__name__, str(exc).strip().splitlines()[0][:120]
+                              if str(exc).strip() else "(no message)")
+        err_kinds[key] = err_kinds.get(key, 0) + 1
+
+    for tid, res in _parallel_map(task_ids, _fetch, workers, _prog, delay=args.delay,
+                                  on_error=_note_error):
+        if res is None:
+            # The fetch RAISED (network blip, rate limit, PixAI 500) -- _parallel_map
+            # calls on_error and then still yields the item with res=None. Leaving the
+            # task OUT of task_lineage keeps lineage_checked unstamped so the next run
+            # retries it; folding it in as ("", "") would stamp the error as a confirmed
+            # original and permanently exclude the task from every future run.
+            continue
+        src, kind = res
+        task_lineage[tid] = (src, kind)
+        checked += 1
+        if src:
+            found += 1
+        if not _prog and workers <= 1:
+            sys.stdout.write("\r  Tasks {:,}/{:,}  derived {:,}  ".format(
+                checked, len(task_ids), found))
+            sys.stdout.flush()
+
+    print("\nApplying to catalog rows...")
+    for row in rows:
+        tid = row.get("task_id")
+        if tid not in task_lineage:
+            continue
+        src, kind = task_lineage[tid]
+        if src:
+            row["source_media_id"] = src
+            row["derive_kind"] = kind
+        # No source image -- a confirmed original, not "not yet checked". Persisted (a real
+        # catalog column) so this task is skipped on every future run instead of re-fetched
+        # forever -- see this command's docstring.
+        row["lineage_checked"] = "1"
+
+    save_catalog(db_path, rows)
+    errored = sum(err_kinds.values())
+    print("Done. Checked {:,} tasks, {:,} carried a derivation source, {:,} errored. "
+          "Catalog updated.".format(checked, found, errored))
+    if err_kinds:
+        print("Why they failed:")
+        for kind, n in sorted(err_kinds.items(), key=lambda kv: -kv[1])[:5]:
+            print("  {:>7,}  {}".format(n, kind))
+
+
+def run_backfill_phash(args):
+    """--backfill-phash: compute a perceptual difference-hash (compute_dhash(), a 64-bit
+    dHash -- see its docstring in moonglade_gallery.py) for every catalog row missing
+    one. IMAGE ROWS ONLY: is_video='1' rows are skipped by design -- the near-duplicate
+    tier this feeds (near_duplicate_groups(), moonglade_gallery.py) is scoped to images,
+    matching the same image-only scope every other duplicate tier already has.
+
+    Purely local, CPU-bound Pillow work -- no network call, so --delay/politeness pacing
+    (that flag exists to be polite to PixAI's servers) does not apply here. --workers
+    still parallelizes it via a thread pool (Pillow releases the GIL during decode, same
+    reasoning build_thumbnails() already uses). --max caps how many rows THIS RUN
+    processes (0 = all) -- useful for scoping a first pass on a large library, or a small
+    disposable verification run, before committing to hashing the whole thing.
+
+    Safe to re-run -- skips rows that already have a phash. A row whose image file can't
+    be found on disk and a row whose file exists but Pillow can't decode are counted
+    SEPARATELY from each other (and from the video rows skipped by design), so the
+    summary can say WHY a row wasn't filled rather than just how many weren't -- the
+    same "don't collapse different failure reasons into one number" lesson
+    run_backfill_full_meta's docstring already explains."""
+    out = Path(args.out)
+    db_path = _ensure_db(out)
+    from moonglade_gallery import load_catalog, save_catalog, compute_dhash, find_image_file
+
+    rows = load_catalog(db_path)
+    videos = [r for r in rows if str(r.get("is_video") or "") == "1"]
+    to_fill = [r for r in rows
+              if not r.get("phash") and str(r.get("is_video") or "") != "1"]
+    found_n = len(to_fill)
+    max_n = int(getattr(args, "max", 0) or 0)
+    capped = bool(max_n and found_n > max_n)
+    if capped:
+        to_fill = to_fill[:max_n]
+    print("Found {:,} image rows missing a perceptual hash (out of {:,} total catalog "
+          "rows, {:,} video rows skipped by design).".format(found_n, len(rows), len(videos)))
+    if capped:
+        print("  Capped to the first {:,} by --max.".format(max_n))
+    if not to_fill:
+        print("Nothing to backfill.")
+        return {"filled": 0, "unresolved": 0, "unreadable": 0, "total": len(rows)}
+
+    workers = max(1, getattr(args, "workers", 1) or 1)
+    if workers > 1:
+        print("Hashing with {} parallel workers.".format(workers))
+
+    def _one(row):
+        path = find_image_file(out, row["media_id"], row.get("filename"))
+        if not path:
+            return None, "unresolved"
+        h = compute_dhash(path)
+        return (h, "ok") if h else (None, "unreadable")
+
+    filled = unresolved = unreadable = 0
+    _prog = getattr(args, "progress", None)
+    for row, res in _parallel_map(to_fill, _one, workers, _prog, delay=0):
+        h, status = res if res else (None, "unreadable")
+        if h:
+            row["phash"] = h
+            filled += 1
+        elif status == "unresolved":
+            unresolved += 1
+        else:
+            unreadable += 1
+        if not _prog and workers <= 1:
+            sys.stdout.write(
+                "\r  {:,}/{:,}  hashed {:,}  unresolved {:,}  unreadable {:,}  ".format(
+                    filled + unresolved + unreadable, len(to_fill), filled, unresolved, unreadable))
+            sys.stdout.flush()
+
+    print("\nWriting catalog...")
+    save_catalog(db_path, to_fill)
+    print("Done. Hashed {:,} rows. {:,} had no resolvable file on disk, {:,} couldn't be "
+          "decoded.".format(filled, unresolved, unreadable))
+    return {"filled": filled, "unresolved": unresolved, "unreadable": unreadable, "total": len(rows)}
+
+
 def _check_time_capsule(created_at, out_dir):
     """Time Capsule feat: a NEWLY-downloaded piece created >2 years ago. Fires
     only on the download event, never on a full-catalog rescan (old rows already
@@ -9633,7 +10579,9 @@ def main():
                     help="parallel download workers (default 4). 1 = serial/polite. "
                          "Higher saturates bandwidth on bulk first-time pulls; ignored for "
                          "--collect-only.")
-    ap.add_argument("--max", type=int, default=0, help="stop after N tasks (0=all)")
+    ap.add_argument("--max", type=int, default=0,
+                    help="stop after N tasks (0=all); with --backfill-phash, caps the number "
+                         "of rows that run processes instead")
     ap.add_argument("--update", action="store_true",
                     help="incremental follow-up run: stop paging once a run of pages is "
                          "already fully on disk (newest-first, so older items are already "
@@ -9724,6 +10672,17 @@ def main():
                     help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
                          "no recorded credit cost yet (recovers the paid_credit column for older "
                          "generations from the task record; long run)")
+    ap.add_argument("--backfill-lineage", action="store_true",
+                    help="fill in source_media_id/derive_kind (which image an edit/upscale/"
+                         "video was made FROM) for rows that predate lineage tracking, via "
+                         "getTaskById; powers Image Details' LINEAGE panel. Idempotent -- a "
+                         "confirmed original is remembered and never re-fetched. Then exit.")
+    ap.add_argument("--backfill-phash", action="store_true",
+                    help="compute a perceptual difference-hash (dHash) for every image catalog "
+                         "row that lacks one, powering the near-duplicate ('upscaled or "
+                         "recompressed copy') tier of GET /api/duplicates. Local Pillow work, no "
+                         "network call -- --workers parallelizes it, --max caps how many rows "
+                         "this run processes. Videos are skipped. Then exit.")
     ap.add_argument("--export-csv", action="store_true",
                     help="export catalog.db to catalog.csv for interop/backup, then exit")
     ap.add_argument("--sync-artworks", action="store_true",
@@ -9745,6 +10704,33 @@ def main():
     ap.add_argument("--cards", action="store_true",
                     help="show your free-generation cards (kaisuuken) + their ids, then exit. "
                          "Read-only; pass an id to a run with --kaisuuken-id")
+    ap.add_argument("--card-history", action="store_true",
+                    help="show recent benefit-card usage (redemptions + refunds), then exit. "
+                         "Read-only. Pass --card-history-all for the full lifetime card-type "
+                         "catalog instead of a recent list")
+    ap.add_argument("--card-history-all", action="store_true",
+                    help="with --card-history, page all the way back and print every card "
+                         "TYPE ever used (several requests; read-only)")
+    ap.add_argument("--card-history-count", type=int, default=0, metavar="N",
+                    help="with --card-history, how many recent records to show (default 20)")
+    ap.add_argument("--coupons", action="store_true",
+                    help="show your currently-held Credit Boost coupons, then exit. "
+                         "Read-only -- a reward type separate from benefit cards. Pass "
+                         "--coupons-history for the redeemed + expired view instead")
+    ap.add_argument("--coupons-history", action="store_true",
+                    help="with --coupons, show the past (redeemed + expired) view instead "
+                         "of what you currently hold")
+    ap.add_argument("--credit-log", action="store_true",
+                    help="show your full credit transaction ledger (purchases, claims, "
+                         "gifts, generation spend, refunds), then exit. Read-only")
+    ap.add_argument("--credit-log-count", type=int, default=0, metavar="N",
+                    help="with --credit-log, how many recent entries to show (default 30)")
+    ap.add_argument("--credit-log-reason", default="", metavar="TYPE",
+                    help="with --credit-log, filter to one raw type (e.g. task_cost, daily, "
+                         "event_gift, extra_package -- see CREDIT_LOG_REASONS)")
+    ap.add_argument("--credit-log-before", default="", metavar="CURSOR",
+                    help="with --credit-log, page further into the past using a cursor "
+                         "printed by a previous --credit-log run")
     ap.add_argument("--contests", action="store_true",
                     help="list PixAI contests currently running (community + official), then "
                          "exit. Read-only. Add --all-contests to include ended ones")
@@ -10058,6 +11044,15 @@ def main():
         if getattr(args, "cards", False):
             run_cards(args)
             return
+        if getattr(args, "card_history", False) or getattr(args, "card_history_all", False):
+            run_card_history(args)
+            return
+        if getattr(args, "coupons", False) or getattr(args, "coupons_history", False):
+            run_coupons(args)
+            return
+        if getattr(args, "credit_log", False):
+            run_credit_log(args)
+            return
         if getattr(args, "contests", False):
             run_contests(args)
             return
@@ -10177,6 +11172,12 @@ def main():
             return
         if args.backfill_full_meta:
             run_backfill_full_meta(args)
+            return
+        if getattr(args, "backfill_lineage", False):
+            run_backfill_lineage(args)
+            return
+        if getattr(args, "backfill_phash", False):
+            run_backfill_phash(args)
             return
         if args.convert_existing:
             cmd_convert_existing(args, out)

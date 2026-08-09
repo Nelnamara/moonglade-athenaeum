@@ -8,15 +8,1221 @@ git tags. Full prose notes for tagged versions live on
 
 > **Maintenance note.** This file is the in-repo source of truth — **update the `[Unreleased]`
 > section with every change, and cut it into a dated version block when you tag a release.**
-> GitHub Releases are published through **v2.2.0** — publishing paused after **v1.6.0**, and
-> **v1.8.0–v1.10.0 were back-published** on 2026-07-10 from tag messages + git history. **v1.11.0 is
-> tagged but has no Release of its own** — its commits reached master as part of **v2.0.0**, which
-> does have a Release. There is **no v1.7.x** (the series jumped 1.6.0 → 1.8.0).
+> **Which tags have a published GitHub Release is a live fact — check `gh release list` against
+> `git tag`, never transcribed here** (it drifts). Two durable history notes a command won't tell
+> you: publishing paused after **v1.6.0**, then **v1.8.0–v1.10.0 were back-published** on 2026-07-10
+> from tag messages + git history; and **v1.11.0 is tagged but has no Release of its own** (its
+> commits reached master as part of **v2.0.0**, which does). There is **no v1.7.x** (1.6.0 → 1.8.0).
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-08-09 — One app, front to back: the classic interface retired, the whole front end unified into a single build, and the shared video Generate drawer ported
+- Under the hood: **the migration to a single app build is complete.** Every loose front-end script has now been folded in — the art-filters engine, the image picker, the model/LoRA picker, the cost badge (the "this costs N credits / a free card covers it" line), the image-view Upscale panel, the whole notifications system (the corner toasts, the Activity job tracker, and the achievement celebrations), and finally the shared video Generate form (the Video tab and The Loom's video drawer, the biggest and most cost-sensitive of them). No loose scripts remain. Also switched The Loom to its real pre-built bundle instead of transpiling itself in the browser — faster to load, drops a 3 MB dependency. No visible change to any of it.
+- Fixed: the falling-stars flourish on legendary/feat achievement celebrations now plays on The Loom too (it silently did nothing there before — only the confetti showed).
+- Fixed: Upscale's "Choose a model" button (offered when a picture has no recorded model) had been broken since the model picker moved into the main app build — it said "picker not loaded" instead of opening. It works again. Upscaling itself was never affected (it falls back to PixAI's own upscale model), only the option to pick a different one.
+- **The classic interface is gone.** The React app is now the only interface — the old server-rendered pages (`/classic`, the old image page, `/health`, `/panel`, `/duplicates`, the old login/logout pages) and their offline service worker have been removed, along with roughly 6,400 lines of legacy code. Everything they did lives in the React app; result links from the job tray now open the new Image Details. Two API paths were renamed for consistency (`/rate` → `/api/rate`, `/edit-prompt` → `/api/edit-prompt`). "Add to home screen" installability is unchanged.
+- Fixed: Image Details now truly takes over the whole window — it was rendering underneath the banner. Also fixed alongside it: "← Back to gallery" was a dead click (only Escape closed the view), and the app's stylesheets/scripts could be served days-stale from browser cache after an update (they now always revalidate, so a fix you just got is the fix you see).
+- Gallery grid: right-click a thumbnail for a quick menu — Edit, Send to Video, Find similar, Copy id, Open details.
+- Login: the React sign-in page now covers every first-run case, including a device that reaches the app over the network before any account exists (it shows a "set this up on the server machine first" message instead of a form it can't use). The old server-rendered login page is no longer needed for that case.
+- Generate drawer: ★ Snippets is now a real per-account manager (save the current prompt, insert, delete with one-level Undo) instead of four fixed chips — your saved snippets sync across machines.
+- Advanced search: you can now **save** the current view as a named preset and delete saved views (loading them already worked), and a "⬇ Export view" link downloads exactly the filtered rows as CSV (the whole-catalog dump stays in the Control Panel).
+- Gallery header: hovering the credits chip now shows a full breakdown — the paid/free credit split plus your free cards broken out by type (with Model/Video Card labels and soonest expiry). The paid/free split is hidden while the grid privacy-blur is on, so your real balance isn't left sitting on screen.
+- Control Panel: a new "PixAI account" panel — your benefit cards (on-hand + lifetime usage), coupons, and the real credit ledger (daily claims, event gifts, spend…), opened from the Control Panel, all read-only. The rail gains a free-cards count and the real paid/free credit split.
+- Contests: each contest card now has a "☆ Shortlist" button — select images in the gallery, open Contests, and stage your picks into a collection named for that contest in one click (no files moved, no credits). Re-implemented on the new React Contests panel from the earlier classic-only version.
+- Hardened sign-in: a failed login attempt now refreshes its security token so the next try always goes through (previously a second attempt after one failure could be rejected as "session expired"), and the whole login path now has real automated test coverage.
+- Fixed: the Control Panel could get stuck on a spinning button if a background action hit a network hiccup — actions now recover and show the error instead.
+- Fixed: re-sending the same image to the Edit tab after clearing it now reloads it (it silently did nothing before); Escape inside the Control Panel now closes just the top layer (a sub-panel or the picker) instead of the whole panel; and a failed Publish/Train confirmation on mobile now shows the error instead of hiding it behind the dialog.
+- Fixed: duplicate review can no longer be tricked into removing the copy you chose to keep via an alternate spelling of its path.
+- Fixed: mobile My Art's per-card Delete ran the irreversible PixAI delete on a single tap — it now asks first, through the same confirm sheet bulk delete uses. A mid-action network error can also no longer leave the screen stuck on "working…". Both caught by the 2026-08-07 branch review.
+- Fixed: `--backfill-lineage` no longer marks a task as "checked" when its lookup merely errored (rate limit, network blip) — errored tasks are retried on the next run instead of being silently excluded forever.
+- Mobile: My Art, Publish, and Train a LoRA are real now, replacing a stale placeholder list and two "no backend route" placeholders. Same real pipelines as desktop; the Train dataset picker groups your recent generations by task and adds each task's true image count (not a fixed guess), and a new ☁ Publish button on Image Details opens the mobile Publish flow.
+- Fixed: publish/re-tag could silently attach the wrong PixAI tag on an ambiguous partial match, and confirming a cleared title could silently republish the old one. Both caught by ultrareview.
+- My Art: bulk Manage (multi-select publish/unpublish/delete, one confirm for the whole batch) and a real Models & LoRAs tab showing your own published LoRAs.
+- Image Details: a real LINEAGE section — batch siblings and the derivation chain (which edit/upscale/video an image came from, and what came from it), click-to-navigate, hidden when there's nothing to show.
+- Train panel: the Model Theme list is now PixAI's real curated base-model set (Illustrious, NoobAI XL, Moonbeam, …) with covers, and the cost line quotes the real training price per base when free trainings run out.
+- Train panel: the Category dropdown now carries PixAI's real nine LoRA categories (character, animal, style, realistic, pose, clothing, background, detail, other), replacing the design mockup's placeholder three.
+- Train panel: Model Type (DiT.2/DiT.1/SDXL/SD 1.5) and Model Theme now use PixAI's real trainable-model list — real names and covers, themes filtered by the selected architecture, and the correct model-version id sent on submit.
+- Train a LoRA: pick a dataset from your recent generations, name it, set trigger words/category/base model, and submit a real PixAI training. Shows how many free trainings you have left, and refuses to spend credits without an explicit extra confirmation.
+- Publish panel: the inline image strip, ✦ suggest-a-title (PixAI's own image-to-prompt, free) and the live tag dropdown are all built as designed.
+- Publish is live: the nav Publish panel plus the ☁ Publish buttons in the Lightbox and Image Details all open a real publish flow (title/description/tags/contest/private), with a preview-and-confirm step and no credits spent. Already-published images say so instead of offering to publish again.
+- My Art: publish, re-tag and delete your artworks on PixAI directly from the card grid. Every action previews what it will do (including which tags resolved) and only runs when you confirm; no credits are spent.
+- My Art: rebuilt as the design's tabbed card gallery (Artworks/Animations with real thumbnails, visibility badges, tags, likes; sort + visibility filters).
+
 ### Added
 
+- **The job console's Ledger — run history, the standing order, and last-run stamps.** A
+  Pipelines/Ledger toggle in the Control Panel's console header (both platforms) opens the
+  real maintenance run history: dated rows with result + exit code, "run again" on safe
+  jobs, a "Never run here" footer of safe jobs with no recorded run, and the auto-sync
+  standing order (editable on/off + interval from the serving machine). The Sync card gains
+  its "last run … · auto on/off — every N hours" meta line and every Check row remembers
+  when it last ran. All real data: panel runs were always logged to `jobs.jsonl`, the React
+  UI just never read them — the only backend change is two enriched event fields (`action`,
+  `rc`). Full account in `docs/DECISIONS.md`.
+- **The daily-credit claim UI, ported to `/next` for the first time.** Classic's `#acct-claim`
+  pill (instant-claim, hidden until something's ready) never reached the React front door —
+  the backend (`POST /api/claim`, `/api/account`'s `claim_credits`) was already fully shared
+  and working, just never read by any component. Shipped as two pieces: the pill itself
+  (`SeparatorBar.jsx`/`AppMobile.jsx`), and a new popup (`ClaimModal.jsx`, owner-requested,
+  modeled on the Power modal's mascot-in-a-halo shell but its own `mgclaim-*` namespace) that
+  fires at most once per real session — deliberately not PixAI's own every-page-load pattern.
+  Both share one `useClaimModal.js` hook and one claim action, not two copies. On close
+  (claim or dismiss), a CSS-drawn coin pops out and arcs away — no art dependency. New mascot
+  art (`nel_redeem.png`/`.webp`) ships with the feature, git-ignored like the rest of the app's
+  bundled art, so it needs a manual copy onto any other real install. Live-verified against
+  the real running server (the real
+  `/api/claim` route, not mocked) — full account in `docs/DECISIONS.md`.
+
+### Added (2026-08-06 handoff corrections, gallery-era pass)
+
+- **Image Details is a full-window takeover** — floating blurred bar, centered image,
+  internally-scrolling record; the page never scrolls.
+- **Contests: full-width 3:1 official banner** with overlaid info + a fixed 2-column
+  community grid.
+- **Health charts animate** — bars grow in; Images-over-time gains a Trend view (SVG area
+  line on a sqrt scale) and Top models gains a Share donut, each behind a toggle.
+- **Loom Frame Handoff clarified** — shows on Reference/Video/Edit with a label naming its
+  role per tab; hidden on Image.
+- **Speed:** the localhost IPv6 stall fixed (restart required), lightbox neighbors
+  preload, large images decode async.
+
+### Added (2026-08-06 polish pass)
+
+- **The Generate composer's ★ Snippets** — the design's quick-insert prompt chips, plus the
+  size summary corrected to the design's own "1024×1024 · Auto · ×N" format.
+- **Loom Mobile's four missing animations** — the metal shimmer on every primary button
+  (skin-aware, stops when disabled/reduced-motion) and real slide-down + fade sheet closes
+  replacing instant unmounts, on all three bottom sheets.
+- **The Upscale panel became the design's centered modal** (Details + Lightbox): blurred
+  click-to-close scrim, centered card, and a custom animated dropdown for the upscaler
+  instead of a native `<select>` — with the Escape-closes-list-first chain. The mobile
+  sheets' inline mount and every spend-safety guard are unchanged.
+- **The Loom Mobile frame/gallery picker got its own bottom sheet** — the same shared
+  picker, reshaped into the mobile design's glass sheet with real slide-up/down closes,
+  instead of the desktop modal squeezed onto a phone.
+- **The Loom's video Channel (Normal/Enhanced) reaches every submit path** — the real
+  `is_private` setting the Generate drawer always had is now carried per-shot through the
+  Loom's own price previews and generates too, with the design's Channel row on the mobile
+  Video tab. An earlier audit note claiming the field didn't exist was wrong and is
+  corrected in the tracker.
+- **The Contests overlay footer is honest now** — the mockup's fake "+12 more below the
+  fold" became the real live community-contest count plus a link to the official PixAI
+  Discord, on both platforms.
+
+### Fixed
+
+- **The "lightbox and details sometimes load slowly" mystery, solved.** It was never the
+  images or the database — it was Windows trying IPv6 first on every fresh `localhost`
+  connection and burning ~300ms falling back to the IPv4-only server. The gallery now
+  listens on IPv6 loopback too (takes effect on the next restart). The lightbox also
+  pre-warms the previous/next images so arrow-key browsing renders from cache, and large
+  images decode off the main thread.
+
+- **Two render-harness tests had been silently failing since 2026-08-05** — one broken by a
+  test-environment isolation gap (a button the test clicks never renders in an isolated test
+  environment, since the isolation correctly hides a folder the feature's own code reads), one
+  by the floating-glass-panel rebuild (the Loom's side panels now float over the board with
+  click-blocking backdrops, so the test's direct card double-click could never land — a real
+  user collapses the panels first, and the test now does too). Both verified pre-existing
+  against the pre-session baseline commit, both fixed at the harness level: the fixture now
+  pre-seeds notification state so no toast races page load. 15/15 module green. Full failure
+  chains in `docs/DECISIONS.md`.
+- **Power modal's "Close" button on a stopped server dismissed the modal but didn't actually
+  close anything** — the server is dead at that point, so returning to the (now non-functional)
+  Panel behind it was a dead end. Button now attempts `window.close()` first, with a code
+  comment flagging the real browser limit (only tabs opened via script can be closed by script;
+  a normally-navigated tab silently ignores the call). Copy also updated to state plainly that
+  there's no restart-from-here.
+- **Control Panel's Trash tile showed a hardcoded "—" instead of a real count**, on both
+  platforms — nothing had ever fetched one. `/api/panel/summary` now carries a real
+  `trash_count`.
+
+- **Loom Mobile follow-up — the per-shot kebab (⋮) actions sheet.** Move up / Move down /
+  Duplicate / Delete, reusing the exact same `moveCard`/`dupCard`/`delCard` functions
+  desktop LoomV2's own board already calls — they simply weren't threaded into
+  `LoomMobile`'s props before. The delete confirm gate is byte-identical to desktop's own
+  message, a real early return so cancelling touches nothing. Verified live with a genuine
+  destructive round trip (duplicate → move → delete with the confirm stubbed both ways →
+  full server-side page reload confirming exactly one shot remained). 708/708 loom tests,
+  1539/1539 pytest. Closes one of the two disclosed gaps from increment 6's completeness
+  pass — a Loom-specific Fixer port remains open.
+
+- **Loom Mobile increment 6 — Filter compare ("Art filters"), the last screen of the locked
+  mobile design.** Applies one of PixAI's real, free, client-side art filters
+  (`static/mg-art-filters.js`, already used by the Gallery's own `FiltersPanel.jsx`) to a
+  shot's frame — Original/Preview comparison, live Strength/Angle sliders, no reimplemented
+  blend/gradient math anywhere (traced and live-verified against the real library).
+  `filter`/`filterStrength`/`filterAngle` are new, optional card fields; `loom-core.js`/
+  `loom-mutations.js` untouched. Needed one real backend change — the Loom's page shell never
+  loaded `mg-art-filters.js` at all — verified end to end (Save→reload→persisted,
+  Clear→reload→cleared) against a real, freshly-restarted dev server, not a workaround.
+  687/687 loom tests, 1539/1539 pytest. **Two real, disclosed gaps remain, so this is
+  "complete except two follow-ups," not flatly done:** the shot card's Move up/down/Delete
+  actions sheet has no mobile path at all yet (Duplicate has a workaround via Shot Detail's
+  Copy button); Fixer (face/hand touch-up) was correctly left out of this pass but is a real,
+  already-shipped Gallery feature never ported to a Loom shot, not a nonexistent one. Full
+  reasoning in `docs/DECISIONS.md`'s entry of the same date.
+
+- **Contact Sheet Mobile + Duplicate Review Mobile.** Both reuse this session's
+  hook-extraction pattern (`useContactSheet.js`/`useDuplicateReview.js`) against
+  already-real, already-shipped backends — no new endpoints, no forked write paths.
+  Contact Sheet Mobile wires the Gallery Actions sheet's existing "Print sheet" action;
+  placeholder-quality thumbnails and a Share-based (not `window.print()`) export, per the
+  locked design. Duplicate Review Mobile wires Health's previously-non-tappable
+  Duplicates/Reclaimable tiles; per-group Resolve gets its own bottom-sheet confirm (a real,
+  deliberate difference from desktop's no-confirm), Auto-resolve-all shows a live-computed
+  blast-radius count in a centered modal. A real Resolve→Undo round trip was verified against
+  the owner's actual library and left it unchanged; swipe gestures are explicitly deferred,
+  per the design. Both desktop overlays refactored to consume the same new hooks, unchanged
+  behavior. 1539/1539 pytest, clean build (124 modules). Full reasoning — including a
+  parallel-build cross-contamination risk caught by review and independently re-verified
+  clean — in `docs/DECISIONS.md`'s entry of the same date.
+
+- **Loom Mobile increment 5 — Review & trim.** Crop rectangle + trim handles on a finished
+  shot, opened from a new ▶ badge on the board. `trimIn`/`trimOut`/`crop` were already real
+  fields on the card (used by desktop's `ShotPreview`, export, and split) — no schema
+  changes. Pointer-drag math traced against the locked design's own real formulas with
+  hand-computed expected values, not just "it moved" — found and correctly did not port a
+  real bug in the design's own reference implementation (its trim-handle math reads off a
+  div that moves every render; sourced off the static track instead, matching the pattern
+  already used elsewhere in this codebase for the same reason). One real Rules-of-Hooks bug
+  caught only by the live render check (static tests can't catch it), fixed same pass. Live
+  verification wrote real values onto a real shot in testing; restored via the app's own
+  existing reset controls, confirmed clean. 669/669 loom tests, 1539/1539 pytest. Only
+  Filter compare remains to complete Loom Mobile. Full reasoning in `docs/DECISIONS.md`'s
+  entry of the same date.
+
+- **Loom Mobile increment 4 — the Image/Edit/Reference/Video standalone-asset generate
+  rail, completing "Generate" on mobile.** Adds Image/Edit/Reference tabs (real
+  `genImage`/`genEdit`/`genRef`, no forked submit or pricing logic) alongside increment 3's
+  Video tab. Found and fixed a real, pre-existing credit-safety bug along the way: desktop's
+  `<mg-generate-drawer>` (Video tab) has a genuinely component-local poll loop that dies
+  silently on unmount with no recovery event — since the Mobile-view toggle unmounts the
+  whole desktop view, a real in-flight video render was left permanently frozen until a full
+  page reload. Fixed by extending the generation pipeline's existing "resume any in-flight
+  shot" effect to also re-run on the toggle. Verified via the same injected-fake-state
+  technique as increment 3 (a synthetic submit event proved the fix without any real spend).
+  One real Image-tab generation was submitted under the owner's new gated testing
+  allowance (credits confirmed ≥250,000): model `Tsubaki.2`, an in-theme prompt from the
+  owner's own recent catalog, succeeded first try, cost 0 credits (free-card covered) —
+  independently cross-checked by the reviewer against the real catalog/job logs, confirming
+  no scope violation. 651/651 loom tests, 1539/1539 pytest. Remaining for Loom Mobile:
+  Review & trim, Filter compare. Full reasoning in `docs/DECISIONS.md`'s entry of the same
+  date.
+
+- **Loom Mobile increment 3 — Generate, real submit for a shot's video clip.** Wires the
+  mobile Generate screen through `generateShot`/`pollShot`/`priceShot` — the exact real
+  functions the desktop batch-generate path already calls, no forked spend logic, no
+  duplicated pricing math. Rather than reproduce desktop's own `<mg-generate-drawer>`
+  mount-lifecycle fix a second time for the Mobile-view toggle, submit routes through the
+  app-level generation-pipeline hook instead (instantiated once above both views, with a
+  plain `setTimeout`-based poll loop with no DOM lifecycle to break). Verified end to end
+  **without ever submitting a real generation** — a synthetic in-flight job was injected
+  through the app's own real storage layer to exercise the exact same poll/lifecycle path a
+  real job would, independently cross-checked against the real server logs to confirm zero
+  real submissions occurred. Disclosed scope: this covers only the per-shot video-clip
+  submit; the separate Image/Edit/Reference tabbed asset-generation panel is a further
+  increment. 640/640 loom tests, 1539/1539 pytest. Full reasoning in `docs/DECISIONS.md`'s
+  entry of the same date.
+
+- **Loom Mobile increment 2 — Shot Detail, Cast & assets sheet, Frame picker.** Built by
+  reusing three of the Loom's existing real, shared components rather than reimplementing
+  them: `FrameSlot` for the opening/closing frame (real `@imageN` tagging, upload, gallery-
+  pick), the one real `<mg-gallery-picker>` for the Frame picker (the locked design's own
+  version was a fictional mock grid with no real backing data), and desktop's exact
+  `copyShot` clipboard call. Five disclosed, independently-verified deviations from the
+  design (a 4th "paused" status the data model doesn't have, a hardcoded reference-slot
+  count that would misreport on a real FLF shot, mode-chip order, no "Select in Generate →"
+  since Generate doesn't exist on mobile yet, no per-row cast picture upload — matching the
+  design exactly, flagged as a real gap regardless). Generate, Review/trim, and Filter
+  compare remain later increments, guarded by a source test. 626/626 loom tests (20 new),
+  1539/1539 pytest, verified live against the real account (real shot data, real cast
+  budget, real gallery picker showing the real 2,313-image count). Full reasoning,
+  including a review-process failure caught and corrected mid-pass, in
+  `docs/DECISIONS.md`'s entry of the same date.
+
+- **Loom — a real "📱 Mobile view" toolbar toggle, plus the first increment of a new
+  portrait mobile UI (board + reel).** The Loom is a real, shipped, working app with a
+  real backend — this ships the first of several increments toward a portrait-first
+  presentation matching the locked `Loom Mobile.dc.html` design, not new backend work. A
+  checkbox-chip in `.lv-top` (styled like the existing Draft chip) switches between the
+  existing desktop-style UI and the new `LoomMobile`, persisted via `localStorage`
+  (`mg_loom_mobile_ui`) — both views read the exact same live project data, so switching
+  never re-fetches or loses the board. An in-progress, not-yet-attached generation draft
+  (`draftCard`/`draftTarget`/`draftAttachedInfo`) was lifted from `LoomV2`'s own local
+  state up to `App()` specifically so it survives a toggle instead of being silently
+  discarded — `LoomV2`'s own behavior is otherwise unchanged (verified live: a marker
+  typed into the draft prompt survived two full round-trips of the toggle). This
+  increment builds only the board/reel — a real hand-rolled pointer-drag scrub (verified
+  live with dispatched `PointerEvent`s, matched frac-to-shot resolution exactly) and the
+  act-grouped shot board (add shot/add act, real thumbnails, cast-missing warnings). Shot
+  detail, Cast sheet, Generate, Review/trim, and Filter compare are explicit later
+  increments (guarded by a source test asserting none of that copy exists yet). One
+  disclosed deviation from the design: added a reciprocal "🖥 Desktop" return chip inside
+  the new mobile view, since the locked design's own mobile top bar has no way back — a
+  straight port would have made the toggle one-way. Full suite green (1539 pytest, 607
+  loom `node --test`, 28 new). Full reasoning in `docs/DECISIONS.md`'s entry of the same
+  date.
+
+- **Folio of Honors Mobile — real data, and the real celebration engine confirmed reused,
+  not duplicated.** This is the exact surface where an earlier build this session made a
+  real, corrected mistake: building a custom achievement-celebration toast instead of the
+  real, shared engine in `static/mg-notify.js`. Before touching anything here, the desktop
+  `FolioOverlay.jsx` and the full `Ach` engine were re-read fresh (not from memory) to
+  confirm the corrected state was still exactly what shipped earlier — it was; nothing had
+  drifted, on either the code or the design side.
+  `FolioMobile.jsx` is a real full-page destination reached from the hero's gold Folio icon
+  (previously a "coming later" toast). A new `useFolio.js` hook is a mechanical, byte-for-byte
+  extraction of `FolioOverlay.jsx`'s entire data/narrator/glitch-reveal/replay engine —
+  desktop's overlay now consumes it too, rather than holding a second copy (verified line-by-
+  line against the pre-extraction version; the one real behavior change, a stale-variable
+  reference caught during extraction, was checked and is provably equivalent, not a
+  regression). Click-to-replay calls the exact same `window.Ach.replay(a, {line})` desktop
+  does — confirmed by grepping every new file for any confetti/toast/celebration/fanfare
+  reference: every hit is a comment pointing at the real engine, never a locally-rendered one.
+  Verified live against a real account:
+  tapping an earned achievement fires the real `.ach-m2` celebration node with real roast
+  text, not a mock. One hardcoded hex caught by review (a checkmark color that should have
+  tracked the active skin via `var(--base)`) fixed before shipping. Full suite green (1539).
+
+- **Lightbox Mobile — real swipe-navigate, real data, and the mount-race lesson applied
+  proactively this time.** `LightboxMobile.jsx` is the real destination for Image Details
+  Mobile's "full-screen viewer" button (previously a "coming next" toast). Deliberately
+  does **not** reuse `useImageDetails.js` — that hook's eager full-row fetch and eager
+  Upscale mount would be a real regression on a fast swipe/filmstrip surface. Instead it
+  mirrors desktop `Lightbox.jsx`'s own already-correct pattern exactly: chrome fields read
+  straight off the same `items` array the Gallery tab already has loaded, and only the
+  prompt slab's negative/LoRA fields are lazily fetched (and cached) on demand, matching
+  desktop's identical mechanism field-for-field.
+  Real swipe gesture (Pointer Events, drag-follow at 0.4× damping, strict >60px commit
+  threshold, matching the design's own values exactly — distinct from desktop's own
+  0.35×/70px) — verified live against the real account: a real drag genuinely advanced the
+  index from "1 OF 100" to "2 OF 100," not just in an isolated harness.
+  **A real mount-race risk — same family as Image Details' Upscale bug — was found and
+  fixed proactively this time, during the build, not discovered afterward:** stepping across
+  a page boundary can leave a transient render where the loaded page has already changed but
+  the index hasn't caught up yet, so the component's `if (!it) return null` guard fires and
+  tears down the Upscale host div. Desktop's own `Lightbox.jsx` mounts that panel with a
+  one-shot `[]`-keyed effect — safe only because desktop's own step-across-a-boundary path
+  doesn't hit the same transient window in practice, but genuinely fragile if it ever does.
+  This build keys the mobile effect on `[mid]` instead, so any real navigation reliably
+  re-creates the panel on the very next valid render. Desktop's own latent version of this
+  risk was deliberately **not** patched (out of scope for this surface) — flagged separately
+  for its own look rather than silently changed.
+  Full suite green (1539); real Upscale panel confirmed opening correctly on the real
+  account too, same as Image Details Mobile.
+
+- **Image Details Mobile — ships, plus a real Upscale race condition caught on the real
+  account and fixed before shipping.** `ImageDetailsMobile.jsx` reuses the exact same data
+  and Upscale math as the already-shipped desktop `DetailsView.jsx`, via a new shared
+  `useImageDetails.js` hook (same extraction pattern used throughout this pass). Real entry
+  point: tapping a gallery tile outside select-mode now opens this real screen instead of
+  the earlier "coming later" toast.
+  While unifying the shared code, two real desktop bugs surfaced and got fixed as a
+  byproduct: desktop's own Upscale button was silently dead (the host div only rendered
+  once `upscaleOpen` was already true, but the mount effect that creates the panel runs
+  once, right after the *first* commit, while it's still false), and Prev/Next while
+  Upscale was open left the panel visibly open and bound to the old image. Both fixed to
+  match `Lightbox.jsx`'s own already-correct pattern.
+  **A third instance of the identical bug class was caught live against the real account,
+  after the above two were already "fixed" and independently reviewed:** `ImageDetailsMobile.jsx`
+  has an early-return for its loading state before the real JSX (with the Upscale host div)
+  ever paints. On a genuine network fetch, the mount-once effect's first run lands during
+  that loading branch — `upHost.current` is null, the effect bails, and with an empty
+  dependency array it never gets a second try once the real content finally renders. This
+  is exactly why it survived the build and review's own checks: both used a stubbed/instant
+  fetch, which resolved fast enough to dodge the race entirely — a real network round-trip
+  against the real account exposed it immediately. Fixed by keying the mount effect off
+  `row` instead of mounting once, so it re-fires the moment the loaded content actually
+  exists; the existing `firstChild` guard keeps every later re-render a no-op.
+  Verified live against the real account (not a stub): Details opens with real ledger/tags/
+  stars data, the Upscale panel now genuinely opens with real method descriptions and cost
+  math on both mobile and desktop, and Prev/Next correctly closes it rather than leaving it
+  open on stale data. One real, previously-undisclosed gap closed in the same pass: mobile's
+  ledger was missing the conditional **Clip Skip** row desktop shows; added, matching
+  desktop's own conditional-render rule. Full suite green (1539).
+
+- **Mobile pass, surface 3 (part 8): real content for 4 of the hamburger menu's 6
+  destinations — My Art, Collection Health, Import, and Contests.** Part 7 shipped the
+  push-screen mechanism with an honest placeholder per destination; this increment
+  replaces 4 of those 6 placeholders with the real, live-data surface, following the
+  extract-a-shared-hook pattern `useLibrary.js`/`useGenerate.js`/`useEditGenerate.js`/
+  `useControlPanel.js` already set 4 times this session. New hooks
+  (`useMyArt.js`/`useHealth.js`/`useImport.js`/`useContests.js`, `gallery/src/hooks/`)
+  mechanically lift each desktop overlay's fetch/state/derivation logic out —
+  `MyArtOverlay.jsx`/`HealthOverlay.jsx`/`ImportOverlay.jsx`/`ContestsOverlay.jsx` are
+  refactored to CONSUME their own hook rather than hold a second, drifting copy, and 4
+  new mobile components (`MyArtMobile.jsx`/`HealthMobile.jsx`/`ImportMobile.jsx`/
+  `ContestsMobile.jsx`) consume the identical hook instance — same route, same fetch,
+  never re-derived.
+  Design mock vs. real-data deviations, disclosed in full in each component's own
+  header comment (matching every desktop overlay's own precedent for this): My Art
+  keeps the real stat-label set (the route can't back the mock's plain "Views" total)
+  and drops the row click-through (no mobile Lightbox/Details surface exists yet, same
+  disclosed-gap treatment as Health's Duplicate Review link below); Collection Health
+  shows all 12 real stat tiles (not the mock's 8), adds a real "Top models" section the
+  mock omits, wires tag/LoRA chips as LIVE filters through the already-lifted
+  `useLibrary()` instance (switches to Gallery tab + closes the screen so the filtered
+  result is actually visible), renders Duplicates/Reclaimable as plain non-clickable
+  tiles (no mobile Duplicate Review surface exists yet — disclosed, not built this
+  round, per instruction), and scopes out the prompt word-cloud/folder-breakdown as a
+  deliberate trim; Import gets one real native file-picker button (the design specifies
+  no picker at all; desktop's second "Browse a folder…" button is dropped —
+  `webkitdirectory` has no reliable mobile support) plus a real `<select>` collection
+  picker (live `collections` data + new-collection input); Contests ports the
+  official/community split, live vote-type pills, real cover art, and the pixai.art
+  click-through forward, with community cards showing a computed "days left" (the
+  design's own compact shape) instead of desktop's literal date range.
+  Verified: full suite green (1,539 passed), `npm run build` clean (a CSS-comment typo
+  containing a literal `*/` sequence — caught by the build's own minifier warning, not
+  by a human proofread — was fixed before it shipped), and live in the running dev
+  server: all 4 screens push correctly (back chevron + correct title), and — since this
+  dev session isn't authenticated — each one's real fetch genuinely round-trips and
+  correctly renders its own coded error state (`couldn't load — HTTP 401` / `couldn't
+  load health data — HTTP 401`), confirming the wiring end-to-end rather than only the
+  happy-path markup. Import's empty state (no fetch on mount) rendered its real
+  drop-zone/button copy correctly.
+  **Follow-up verification against the real account** (this commit shipped from an
+  unauthenticated dev session, so its own live check only reached the 401 error state —
+  re-verified separately against real data): My Art shows a real, honest empty state (0
+  published); Collection Health shows real numbers across all 12 tiles (2,486 images on
+  disk, 2.7 GB, 99% full metadata, a real top-models breakdown); Import's real upload UI
+  renders correctly; Contests shows real live PixAI contest data (1 official + 21
+  community contests running, real prize amounts up to 54,500,000 CR, correctly computed
+  "days left"). Zero console errors across all four.
+
+- **Mobile pass, surface 3 (part 7): the hamburger menu's real push-screen navigation.**
+  The ☰ Menu sheet's 6 destinations (My Art/Publish/Train a LoRA/Import/Contests/Health) no
+  longer just show a disclosure toast — tapping one now genuinely dismisses the sheet and
+  pushes a real full-screen destination, reusing `MobileScreen.jsx` exactly as-is (the same
+  component Create's Advanced screen already uses — no fork,
+  no new push-screen convention). A new `screen`/`screenClosing` pair generalizes the pattern
+  the same way `sheet` already generalizes `MobileSheet.jsx`: one state key driving one shared
+  mount, not six separate open/closed booleans. The screen mounts once at the app-shell level
+  (a sibling of the three tab bodies, not nested inside Gallery specifically) since the
+  hamburger is reachable from all three tabs — verified live that it genuinely survives an
+  underlying tab switch (opened from Gallery, switched to Create while it stayed open, closed
+  it and landed back on Create, not forced back to Gallery).
+  This increment is the navigation mechanism only, not the 6 destinations' real content yet
+  (that's next) — each pushes an honest, destination-specific placeholder rather than generic
+  filler: My Art/Import/Contests/Health each name the real desktop overlay and API route
+  already backing them (`MyArtOverlay`/`GET /api/your-art`, etc. — real, shipped, just not
+  yet ported to this screen). Log Out is untouched — it was
+  never part of the screen mechanism, still a real, direct logout.
+  Verified live end-to-end: hamburger opens all 7 rows in the design's exact order, tapping
+  a destination dismisses the sheet and pushes the screen on the same frame (no animated
+  sheet-close, matching the design's own spec), the back chevron closes cleanly, and Health's
+  screen correctly reads "Collection Health" — distinct from its row label. One cheap cleanup
+  caught by review and applied: an orphaned `.soon`-styling CSS rule left over from before
+  these rows became real navigation. Full suite green.
+
+- **Mobile pass, surface 3 (part 6): Control tab — a real full-page destination, not a
+  placeholder anymore.** `ControlMobile.jsx` replaces `AppMobile.jsx`'s Control placeholder.
+  Data layer (`useControlPanel.js`) is a mechanical extraction of `ControlPanelOverlay.jsx`'s
+  own fetch/poll/action/power logic — desktop's Control Panel modal now consumes this same
+  hook instead of holding a second copy, the identical "refactor the one place this state
+  lived to consume its own extracted hook" call `useLibrary.js` already made for `App.jsx`.
+  `ActionChip`/`UsersSubOverlay`/`TrashSubOverlay`/`PowerModal` are
+  now also named exports of `ControlPanelOverlay.jsx`, reused verbatim by the mobile tab —
+  Trash/Accounts management is therefore
+  full-featured on mobile from this first pass. Chrome call: Control is a sibling tab body
+  (the DC's own `tab` state includes it alongside Gallery/Create, same scrollable body
+  region), not `MobileScreen.jsx`'s push chrome — that IS used one level down, for the
+  Trash/Accounts sub-overlay drill-ins, matching the DC's own documented full-viewport-push
+  behavior regardless of what container Control itself
+  lives in. Job-console outer-tab-switch safety was checked explicitly, per the 2026-08-03
+  DECISIONS.md entry naming this exact console as the next surface to verify: unlike
+  `<mg-generate-drawer>`, whose `disconnectedCallback` sweeps every poll timer on unmount
+  with no way back, `useControlPanel()`'s job-status poll already re-derives `running`/
+  `progress`/`log` from `/api/panel/status` on every mount — these are local maintenance
+  jobs, not billed generations, so switching Gallery/Create ↔ Control just pauses this
+  component's own polling, never the job itself, and resumes tracking correctly on return.
+  So the hook is deliberately NOT lifted above the tab conditional the way `VideoMode` was —
+  no credit-billing risk is being masked by that choice. Two honest departures beyond what
+  `ControlPanelOverlay.jsx` already discloses for desktop: Live Mirror's dot/text are
+  `GET /api/watch/status`'s own real fields (connected/last_event_at/mirrored/
+  stale_reconnects/last_error, the same ones classic's `loadWatchStatus()` already renders),
+  not the DC mockup's invented "watching N files — M pending" (no route computes that
+  anywhere); and the Ledger sub-tab is an honest disclosure note, not the DC's fabricated
+  run-history rows — nothing persists per-action run history, the same gap
+  `ControlPanelOverlay.jsx`'s header comment already discloses for the identical desktop
+  console. Full suite green (1539 passed); `npm run build` clean.
+  **One claim corrected after a live check:** the extraction incidentally changed
+  `ControlPanelOverlay.jsx`'s own Escape-key handler's dependency array (`[]` →
+  `[power, subOverlay]`), which looked like a real fix for a stale closure that used to always
+  close the whole desktop Panel instead of just its top sub-overlay. Pressing Escape against
+  the real running app (Panel open → Trash sub-overlay open → Escape) still closes the whole
+  Panel — `App.jsx` already owns Escape for any open overlay via its own capture-phase
+  handler, which fires first and stops the event from ever reaching this component's handler
+  at all. The dependency-array change is real but has no observable effect either way; not a
+  regression, just not the behavior fix it looked like on paper. See docs/DECISIONS.md.
+
+- **Mobile pass, surface 3 (part 5): Create tab, Advanced screen — the Create tab is now
+  functionally complete.** A new shared `MobileScreen.jsx` primitive (full-screen push chrome
+  — back chevron, slide-in, scrollable body) is the second reusable mobile overlay pattern
+  alongside `MobileSheet.jsx`'s bottom sheet; no full-screen-push convention existed anywhere
+  in this codebase's mobile surfaces before this. Image's Advanced screen (LoRA weight
+  sliders, size stops + custom W×H, count, generation mode, steps/CFG/seed, the three
+  boosters, negative prompt) and Edit's (resolution/quality/aspect, correctly reshaping
+  between Edit Pro's and Reference Pro's different option sets) both read and write the exact
+  same lifted state the main composer and the real cost quote already use — verified live with
+  a genuine round-trip (changed the frame size inside Advanced, confirmed the change appeared
+  back on the main screen after closing Advanced, not just inside the screen itself).
+  Two small, disclosed corrections to the design's literal copy, not silent departures: Count
+  uses the real `[1,2,3,4]` stops the backend actually clamps to, not the mockup's `1/2/4/6`
+  (which would let you tap "6" and silently get 4 — a worse experience than not showing the
+  option at all); and Edit's "⚙ Advanced" summary row drops the word "negative" from its
+  copy — `editCore.js` genuinely has no negative-prompt field anywhere in Edit's state or
+  wire payload, so that word was leftover phrasing carried over from Image mode's own summary
+  text, not a real deferred field worth promising.
+  Video mode needs no Advanced screen at all — confirmed the shared generate-drawer element
+  builds its own camera/quality/channel controls entirely inside itself, so there was no
+  reachable dead tap to fix. Full suite green. Edit's Edit Pro/Reference Pro sub-mode is now real: prompt, model choice,
+  source + multi-reference picker, a real `/api/price` quote, and real submit — all through
+  a new `useEditGenerate.js` hook wired to the exact same `editCore.js`
+  (`buildEditPayload`/`editGate`/`switchEditModel`) and shared `submitTask.js` desktop's
+  `EditTab.jsx` uses, confirmed zero-diff. Model choice is a two-chip row rather than the
+  open-ended marketplace picker Image mode uses — a deliberate match to desktop's own simpler
+  card-row control for this exact fixed 2-item field, not a workaround (an earlier code
+  comment claimed this was needed to make Reference Pro reachable at all; review caught that
+  the design's main pane already has its own independent route there, so the comment was
+  corrected to state the real reason: `ModelFlyout.jsx`'s catalog-browsing picker doesn't fit
+  a closed enum of two, desktop's own control is the better match).
+  **Fixer ships as an honest, disclosed placeholder, not a shortcut on anything actually
+  designed** — its touch box-drawing has no reference implementation anywhere, not in
+  desktop's mouse-only version, not in the design mockup itself (its own copy is descriptive
+  text only: "Drag a box over the hand or face..."). Building a novel touch interaction under
+  overnight time pressure risked exactly the kind of new, unreviewed bug this pass has been
+  trying to avoid, so it's deferred with the design's own real copy plus an honest "coming
+  next" note, not a fake interactive canvas.
+  **Enhance is not built anywhere in this mobile surface, confirmed dead-and-staying-dead**
+  before and after: re-ran `tests/test_enhance.py` (6/6) both in research and in review,
+  confirmed no `/api/enhance` route, no workflow/panelplugin surface, exists anywhere in the
+  live server — this app's only two things still named "Enhance" are the free client-side Art
+  Filters panel and the Image-mode hires booster, neither a paid generation dispatch, neither
+  touched here.
+  Verified live against the real account: Edit Pro/Reference Pro both render with the design's
+  exact reference-count copy ("Edit Pro takes up to 4 references." / "...10 references."),
+  cost badge correctly fails closed until a source is picked, Fixer shows the real design copy
+  plus its disclosure, zero "Enhance" text anywhere in Edit mode. Full suite green.
+
+- **Mobile pass, surface 3 (part 3): Create tab, Video mode — plus a credit-safety fix caught
+  before shipping.** The Video-mode placeholder is now the real, shared `<mg-generate-drawer>`
+  web component (`static/mg-generate-drawer.js`) — the exact same element desktop's
+  `GenerateDrawer.jsx` mounts for its own Video tab, no reimplementation of form state, live
+  cost, submit/poll, or the result strip.
+  **First pass shipped a real gap, caught by review before it went out:** mounting the drawer
+  only inside `CreateMobile.jsx` meant switching the *outer* bottom-nav tab away from Create
+  (to Gallery or Control) unmounted it — and the element's `disconnectedCallback` sweeps every
+  outstanding poll timer, so an already-charged, in-flight video render's UI tracking would
+  silently die the moment the user left the Create tab (the job keeps running and billing
+  server-side regardless; only the UI stops watching it). A 15s v4.0 render is roughly 210,000
+  credits — this codebase treats spend paths as sacred everywhere else (no-retry mutations,
+  `READ_ONLY` gating, etc.), so this got fixed in the same pass rather than shipped as a
+  disclosed gap. Fix: the video host (`VideoMode`, now its own file) was lifted out of
+  `CreateMobile.jsx` up to `AppMobile.jsx` itself — mounted once, unconditionally, for the
+  lifetime of the whole mobile app, with only a `display:none` toggle controlling visibility —
+  the same "lift shared state above the tab switch" pattern already used for `useLibrary()` and
+  `useGenerate()`.
+  Verified twice over, independently: an instrumented copy of the real, unmodified
+  `mg-generate-drawer.js` proved the exact bug live (outer tab switch → disconnect → poll state
+  lost) before the fix and proved it gone after (same clicks, same element, zero
+  connect/disconnect churn across a Create → Gallery → Create round trip) — then reconfirmed a
+  third time against the real running app with the real account: switching to Gallery leaves
+  the video wrap genuinely `display:none` while the exact same `<mg-generate-drawer>` DOM node
+  persists underneath, untouched. CSS positioning measured live (not just read): zero overlap
+  with the header or tab bar, exact fill of the content area between them. No overflow at
+  390/430px in any shot mode, including Multi-Reference with all 6 reference slots filled.
+  Full suite green (1539 passed) both before and after the fix.
+
+- **Mobile pass, surface 3 (part 2): Create tab, Image mode.** The Create tab's placeholder
+  (shipped alongside the Gallery tab) is now a real, working Image generator — prompt, the
+  real model/LoRA picker (`<mg-model-picker>`, the same shared web component the desktop dock
+  uses), aspect chips, a reference picker, and a real `/api/price`-backed cost badge that
+  fails closed ("No cost yet — pick a model first") rather than ever showing a fake or
+  formula-derived number. Generate calls the exact same `submitTask()`/`/api/generate` path
+  desktop uses — no mobile-specific fork of the spend logic exists anywhere. The design
+  mockup's own Generate button is a hardcoded 1400ms fake-busy stub with no error handling;
+  this ships the real spend-safety path instead (busy-ref double-submit guard, real
+  error/result feed, real `Jobs.track()` completion callback).
+  One real defect caught by review and fixed before shipping: a hardcoded hex gradient in the
+  new CSS that should have been the existing `--purple-deep` token — fixed to use the real
+  token plus a `color-mix()` derivation, matching this file's own established convention.
+  Verified live against the real account: the segmented control, all fields, and the real
+  model picker all render and open correctly; cost badge correctly shows its real "pick a
+  model" fail-closed state. Full suite green.
+
+- **Mobile pass, surface 3 (part 1): the Gallery/Create/Control shell — real Gallery tab.**
+  The mobile app's nav skeleton — a 3-icon Gallery/Create/Control bottom tab bar — ships along
+  with a fully real Gallery tab, not a decorative preview of one. Every field the design
+  shows (search, media pills, Sort sheet, the Advanced Search sheet's 8 fields, the bulk
+  Actions sheet) is wired to the same real data engine desktop uses, not the design mockup's
+  own inert placeholder inputs — real search, real filter/sort, real pagination (Prev/Next,
+  matching the deliberate choice already made for desktop over infinite scroll), real bulk
+  actions via the existing `ActionsMenu.jsx` mounted as-is.
+  A new `useLibrary()` hook (`gallery/src/hooks/useLibrary.js`) is a mechanical, byte-for-byte
+  extraction of `App.jsx`'s own browse/search/filter/sort/paginate/select-mode logic — the
+  same lift-out process already used for `useLogin.js`/`useSetupWizard.js`, except this time
+  desktop's `App.jsx` itself was refactored to consume the new hook (there's no sibling
+  desktop-only copy to preserve here, unlike Login/Setup Wizard) rather than left untouched.
+  This is the single highest-risk change of the mobile pass so far — `App.jsx` is the app's
+  most-used surface — so it got the most scrutiny: an independent review read the actual
+  diff line-by-line and confirmed every prop `Grid.jsx`/`FiltersPanel.jsx`/`ActionsMenu.jsx`
+  depend on is supplied identically, then independently re-ran the full suite itself rather
+  than trusting the build's reported numbers (1539 passed, matching exactly).
+  Selection needed a genuinely new mobile gesture, since desktop's marquee/shift/ctrl-click
+  has no touch equivalent: long-press (480ms, cancelled by >10px movement so scrolling isn't
+  mistaken for a hold) arms select mode, tap toggles once armed — built on Pointer Events, so
+  it also works with a mouse on a resized desktop browser, not just touch.
+  A few small calls made without stopping to ask (each cheap, each judged in the design's own
+  spirit rather than a shortcut): **Log Out** and **The Loom** link were wired for real since both were cheap and
+  it's a real signed-in session; tapping a tile outside select mode shows a disclosing toast
+  rather than reusing desktop's `Lightbox.jsx` unadapted into a 390px sheet — that would have
+  been exactly the "close enough" shortcut this pass explicitly rejects (Lightbox Mobile is
+  its own separate, not-yet-built surface with its own locked design).
+  Verified live against the real account (2,313 images, 22 videos) — real thumbnails, real
+  pagination reading "Page 1 of 24 · 2,335 matches," a real Sort interaction, zero console
+  errors. Full suite green (1539) twice over (build + independent review each ran it).
+
+- **Mobile pass, surface 2: Setup Wizard Mobile.** `SetupWizardMobile.jsx` (intro carousel →
+  key entry → sync → ready) built against `Setup Wizard Mobile.dc.html`, switched in via the
+  same `useIsMobile()` hook Login Mobile established. Desktop `SetupWizard.jsx` is untouched —
+  its state/handlers were mechanically lifted into a new `useSetupWizard.js` hook (the same
+  tangled-logic shape `LoginPage.jsx` was in before `useLogin.js`), so mobile consumes the
+  identical logic rather than a second copy.
+  **The one thing this surface exists specifically to get right, after the Folio incident
+  earlier this session:** the design mockup's sync-progress step is a fake fixed-timer
+  animation with fabricated numbers, and its key-entry step is a dummy task-id 401/403 probe
+  — neither is real. The shipped desktop wizard, it turns out, already calls REAL endpoints
+  for both (`POST /api/setup/save-key` for live key validation against PixAI,
+  `POST /api/panel/run{action:'sync'}` + polled `GET /api/panel/status` for real sync
+  progress parsed from the actual `--sync` subprocess's stdout) — confirmed by reading the
+  code, not assumed. `useSetupWizard.js` carries that real logic over unchanged; a dedicated
+  review independently diffed the fetch calls in both the desktop and mobile-hook versions
+  side by side and confirmed they hit identical endpoints, with zero trace of the mockup's
+  fake stand-ins (no `localStorage`, no `SYNC_STAGES` timer, no fabricated counts).
+  Verified live: viewport genuinely confirmed at the design's real 390×844 (not just a resize
+  call's success message — see the Login Mobile entry's verification note, the same false-
+  negative risk applies to every browser-automation surface used this pass), the mobile
+  component confirmed mounting via direct DOM check, real click-through confirmed the intro
+  carousel and "Skip to setup" phase transition genuinely work (not just render statically),
+  and both the intro and key-entry phases' copy matched the real desktop wizard verbatim. A
+  pixel screenshot wasn't obtainable this pass (the preview pane's compositor and the real
+  Chrome window's resize were both unavailable in different ways) — verification instead
+  relied on the DOM/interaction/computed-style checks above, stated plainly rather than
+  claimed as a visual confirmation it wasn't. Full suite green (1539 passed). Gallery shell
+  (Moonglade Mobile) is next — it defines the shared mobile nav pattern every remaining
+  surface routes into.
+
+- **Mobile pass, first surface: Login Mobile + real PWA installability.** The React app is
+  installable now — a fresh, real `manifest.json` (correct `start_url:"/"`, this app's actual
+  theme color, not copied verbatim from either the classic app's live manifest or the design
+  bundle's demo one) plus the real 180/192/512 icon PNGs, wired identically into both app
+  shells (`NEXT_PAGE` and `LOGIN_PAGE` in `moonglade_gallery.py`, and the Vite dev entry). No
+  service worker, no offline caching — the owner called full offline support "overkill for
+  this app," so this is installability only (Add to Home Screen, standalone look), matching
+  exactly what any of the 7 mobile designs actually show.
+  A new `useIsMobile()` hook (`gallery/src/hooks/useIsMobile.js`, matching the one existing
+  hook's established convention) does a real reactive `matchMedia` check around ~430px — not
+  a one-shot width read — and `main.jsx` now renders a genuinely native `LoginPageMobile.jsx`
+  (built directly against `Login Mobile.dc.html`: mascot peek/bob, blurred "Welcome back"
+  transition, live password-strength checklist) below that breakpoint, `LoginPage.jsx`
+  unchanged above it. All error copy is reused verbatim from the shipped desktop page via a
+  new `useLogin.js` hook — a mechanical, disclosed duplication of `LoginPage.jsx`'s own
+  logic (not shared yet; nothing enforces the two stay in sync if one changes later, a real
+  but deliberate trade-off for this first surface). Three demo-only QA preview chips in the
+  design (expired/locked-out/remote-bootstrap error-state previews, meant for reviewing the
+  mockup, not for shipping) were deliberately excluded, documented inline.
+  Because this is the first mobile surface, it also doubled as the foundation-risk check for
+  everything after it: a dedicated review independently re-read every changed file (not just
+  the build report) specifically hunting for the one failure mode this app has hit for real
+  before — the unauthenticated `LOGIN_PAGE` shell accidentally inheriting something that
+  breaks it (a past incident had it 401/302-loop trying to load authenticated-only scripts).
+  Confirmed clean: the only additions to either shell are six static `<link>`/`<meta>` tags,
+  zero new `<script>` tags, and `/next/assets/` was already public before this change. Full
+  suite green (1539 passed) after a dev-server restart to pick up the template changes;
+  live-verified in a real browser at the design's actual 390×844 breakpoint (confirmed via
+  DOM inspection, not just a screenshot, after the first verification attempt — the real
+  Chrome window's resize tool turned out not to actually shrink the viewport, which would
+  have made a screenshot alone a false negative) — desktop login and the authenticated
+  gallery both confirmed unaffected at their normal width.
+  Two real design questions surfaced during scoping and relayed back for Claude Design to
+  resolve (`design_handoff/request-mobile-corrections.md`, on the owner's Desktop): the mobile
+  PWA manifest's `orientation:"portrait"` lock contradicts the Loom's own in-app "rotate to
+  landscape" instruction, and all 7 mobile designs are tap-only with no swipe gestures
+  anywhere despite several natural spots for them (closing the Lightbox, dismissing a bottom
+  sheet, the Setup Wizard's intro carousel) — worth an explicit confirm rather than an
+  engineering guess either way. Setup Wizard Mobile is next.
+
+- **Folio of Honors ships in the React front door.** Real `/api/achievements` data (real
+  points, tiers, earn-dates and ladders) renders in a new
+  `FolioOverlay.jsx`: Summary/All/Statistics tabs, the Evolution Ladder tracks, Milestones,
+  Masteries, and (once earned) Feats, a category filter, search, and a "Within reach"/"Relics"
+  rail — the client derives the same grouped shape the DC's own unshipped `trophy-data.js`
+  mock implied, straight from the real flat achievements array (no backend change needed for
+  browsing). The gold "🏆 Folio" banner button already fired (`onFolio` → `openOverlay("folio")`)
+  but hit a dead overlay key with nothing mounted; that's now wired.
+  **The Folio's interactive discovery bits are real, not mocks** — the header-avatar
+  interaction feeds the same real, persisted achievement-event endpoint classic's Trophy Hall
+  uses, so progress counts identically no matter which surface it happens on. **The special
+  reveal an earned card can show is new here** — a character-by-character glyph-scramble
+  animation, ported verbatim from its locked spec; it didn't exist anywhere before (classic
+  swapped the text in instantly, with none of the animation).
+  **Achievement progress earned this way is genuine and persists across sessions** — using the
+  feature during verification advanced real progress live in the header.
+  Live-celebration wiring closes a real, separately-verified gap (not React-specific in
+  origin — it never fired after an action in *either* environment, just less noticeable in
+  classic's more frequent full-page navigations): a new `Ach.check()` export on
+  `static/mg-notify.js` re-runs the achievement-check-and-celebrate pass on demand, called
+  from React's existing `mg-gen-done` event listener (`App.jsx`) and `submitTask.js`'s "done"
+  branch, so an achievement earned mid-session now celebrates immediately instead of waiting
+  for the next hard refresh.
+  **A real correction mid-build, caught by the owner, not by review:** the first version of
+  the click-to-replay interaction built its own small custom toast, closely following the
+  DC prototype's own simplified corner-notification markup — but the DC prototype can't call
+  into a real running app's JS, so its toast was necessarily a standalone mockup, not a
+  pointer to the real thing. The result looked wrong, had no confetti/fanfare, and — worse —
+  never auto-dismissed, sitting open like a warning until manually closed. The REAL, already-
+  shipped celebration a genuine new unlock gets (`_mkMoment()`/`_play()`/`_fanfare()`/`_chime()`
+  in `static/mg-notify.js` — badge medallion sweep, mascot pop, ring pulse, tier-colored glow,
+  and on legendary/feat tiers a full 84-piece confetti + 46-star fanfare across the whole
+  viewport, confirmed byte-for-byte matching `Ambient Layer.dc.html`'s own locked spec) was
+  never touched by that first build — a second, drifting, incomplete copy got built next to it
+  instead of reusing it. Fixed by adding one new export, `Ach.replay(achievement, opts)`, that
+  plays the exact same real celebration on demand for an already-earned achievement (not
+  queued — immediate, since it's a manual click, not a batch of real earn-events) and returns
+  a handle so the ruby-scramble can write its progressive reveal directly into that real DOM.
+  The custom toast component and its CSS were deleted outright, not kept as a fallback.
+  Full suite green (1539 passed) after the fix; live-verified against the owner's real account
+  — a real earned feat's replay shows the actual badge, mascot, and full confetti/star fanfare,
+  auto-dismisses on its own after its rarity-scaled hold, and the ruby-scramble still reveals
+  correctly inside the real moment.
+
+- **Duplicate Review — real matching, real (reversible) deletion, built via a 9-agent
+  Workflow + adversarial safety review.** New `GET /api/duplicates` (LOGIN tier) with four
+  honest tiers, no fabricated data: **same-media** (Class A, `duplicate_groups()`, same
+  PixAI id in >1 location), **identical file** (Class B, `audit_collection(content=True)`,
+  byte-hash match), **same seed** (new — a `GROUP BY (seed, prompt_full)` query; `seed` was
+  already a real, populated catalog column), and **near-duplicate** (new — a hand-rolled
+  dHash perceptual hash, Pillow-only, no new dependency; LSH-banded Hamming-distance
+  clustering with union-find so a visual chain merges into one group; this is the only tier
+  carrying a real percentage, computed from actual bit distance). Deliberately excluded: any
+  CLIP-embedding "similar composition" tier — real infra exists (`/api/similar`) but it
+  measures resemblance, not duplication, and wiring it to a delete action risked
+  quarantining genuinely distinct images on a false positive.
+  Measured against the owner's real ~2,460-file library: all three cheap tiers run in
+  ~2.6s combined (zero same-media/identical-file duplicates found today — a clean library —
+  but 218 real same-seed groups, so the new tier was exercised at real scale, not just
+  synthetic data).
+  **The owner's explicit, deliberate choice: Resolve really quarantines files from the web
+  UI**, not just a link to run the CLI's Dedup job. New `POST /api/duplicates/resolve` /
+  `POST /api/duplicates/undo` (LOGIN tier, matching `api_delete_local`'s reversible-file-move
+  precedent; explicit-CSRF class, the same `_check_csrf()` account-mutation routes use).
+  **Quarantine only, hard-delete is not reachable under any request body** — verified by a
+  dedicated adversarial review pass that actively hunted for a bypass and found none. Every
+  quarantine/restore call is gated by `_check_read_only()` and by a new
+  `_validate_duplicate_pair()` anti-forgery check (every path must resolve inside `out_dir`,
+  its filename's own media_id must match the claim, and the keep/remove pair is re-verified
+  as a real duplicate relationship for that group's matchType *at request time* — closes a
+  gap where a crafted request could pair real duplicate metadata with an unrelated file). A
+  keep-count-0 resolution is refused **server-side**, not just disabled in the UI.
+  New `DuplicateReviewOverlay.jsx`, reached from Health's own Duplicates/Reclaimable stat
+  tiles (real `<button>`s now, previously static placeholders). Per-group Resolve has no
+  extra confirm dialog (the keep/remove choice is already visible and deliberate, Undo sits
+  one click away); **Auto-resolve-all gets its own harder-to-misclick gate** — an inline
+  panel naming the real blast radius ("quarantine N files across M groups"), computed live,
+  not estimated — more friction than per-group Resolve but not a typed-DELETE gate, since
+  this is reversible quarantine, not permanent deletion, and overstating the stakes would
+  misrepresent the real precedent this codebase's own typed-vs-simple confirm split sets.
+  **A dedicated 4-way adversarial review** (one reviewer per angle: the READ_ONLY gate,
+  quarantine-never-delete, CSRF/tier correctness, and the frontend click-guard/undo
+  correctness) found one real bug before ship: a partial Undo failure (some files in a
+  multi-file group restore, others don't) left the card permanently lying about which files
+  were still actually quarantined, made a clean retry impossible, and skipped the grid
+  refresh even for the files that did come back. Fixed: undo now tracks success per file, a
+  tile shows a genuine `RESTORED` state distinct from `KEPT`/`QUARANTINED` when only part of
+  a group comes back, a retry only re-attempts the files that actually still need it, and
+  the grid refreshes on any real restore, not just a fully clean one. (A second, low-severity
+  finding — two concurrent Undo calls for the *same* multi-copy media_id racing on one
+  unlocked catalog-row reconcile step — is real but not data-destroying per the reviewer's
+  own trace; tracked as a known gap rather than fixed in this pass, since it needs a small
+  per-media_id lock and dedicated concurrency test, not a quick patch.)
+  Full suite green: **1539 passed, 0 failed**. Live-verified against the owner's real library
+  in his real running session: opened Duplicate Review off Health's tiles (218 real same-seed
+  groups, 751.7 MB reclaimable, correct default keeper = highest-rated member), Resolved one
+  real group (files genuinely moved, counters updated live), Undo restored it exactly
+  (counters returned to their pre-resolve values, zero files left behind in `_duplicates/` —
+  confirmed on disk, not just in the UI).
+  **Optional `--backfill-phash` CLI flag** (+ a Control Panel job chip, since it turned out
+  small to add) computes the new near-duplicate tier's hashes; skipped entirely, tier absent
+  from results, until a library has run it at least once.
+
+- **Contact Sheet — native React build, not a hand-off to classic.** New
+  `GET /api/contact-sheet` (JSON twin of the existing `/contact-sheet` page,
+  same `rows_for_media_ids`/`query_catalog`/rating→stars logic, LOGIN tier)
+  backs a new `ContactSheetOverlay.jsx`: on-screen preview matching the DC's
+  `Contact Sheet.dc.html` layout, plus a genuinely native print — `window.print()`
+  scoped by `@media print`, not a redirect to the classic HTML route. Both
+  real entry points wired: the Actions menu's "Print sheet" (explicit
+  selection) and a new "🖶 Contact sheet" in the Advanced flyout (current
+  collection view, added to `Flyout.jsx`). The classic `/contact-sheet` route
+  is untouched and still serves `/classic`.
+  **Two real bugs caught live, via direct browser verification against the
+  owner's real library, before this shipped:** (1) a classic CSS grid
+  overflow — a grid item's default `min-width:auto` let a real (large) `<img>`
+  force its column wider than its `1fr` track, since the mock's placeholder
+  art was too small to ever trip it; fixed with `min-width:0` down the cell/
+  image chain. (2) A much bigger one: printing rendered as ~8 near-solid dark
+  blank pages. Root cause — the overlay was nested inline in `App.jsx`'s tree
+  like every other overlay, deep inside `#root` *after* the entire multi-
+  thousand-image gallery grid in DOM order; the print CSS's `visibility:hidden`
+  approach hides paint but not layout height, so print pagination reflected
+  the whole hidden grid's real height, with the actual sheet content buried
+  many pages down. Fixed by portaling `ContactSheetOverlay` straight to
+  `document.body` (`createPortal`, matching `ActionsMenu.jsx`'s own portal
+  precedent) so print CSS can just `#root { display: none }` outright instead
+  of relying on visibility tricks. A third small fix in the same pass:
+  `mg-notify.js`'s Activity FAB/toast host (`#jobs-fab`/`#mg-toasts`) also
+  live outside `#root` (plain-JS, appended straight to `document.body`), so
+  they needed explicit exclusion too — otherwise the Activity pill printed
+  in the corner of every page.
+
+### Added
+
+- **Control Panel — ported as a MODAL, not the DC's own designed page, per the owner's live
+  2026-08-02 correction** ("Control panel is now ALSO modal. no separate pages anymore").
+  `ControlPanelOverlay.jsx` carries the DC's real content (Maintenance tab's job console +
+  tile grid, Users and Trash sub-overlays, the server power modal) inside the
+  same `.mgv-scrim`/`.mgv-host` shell every other overlay uses, sized much larger. The
+  Panel nav pill (`NavSpine.jsx`) changed from a full-page `href:"/panel"` to
+  `overlay:"panel"`. Confirmed before writing a line of it: the ENTIRE Maintenance job
+  console (Sync, Organize, the 5-stage Dedup pipeline, Rebuild thumbnails, Similar index,
+  Checks, Test pull) is already real, whitelisted backend via `PANEL_ACTIONS` +
+  `/api/panel/run`/`/api/panel/status` — the same mechanism Setup Wizard's sync phase
+  already uses — so this is a port, not new business logic, for that whole surface. Users
+  (`/api/users/*`), Trash (`/api/trash/*`), and server Stop/Restart (`/api/server/stop|restart`
+  + `/api/ping`) are all equally pre-existing and real. One new backend route:
+  `GET /api/panel/summary`, a thin JSON twin of `/panel`'s own long-standing aggregation
+  (same fields, same local/destructive action-visibility rule) — no new business logic,
+  just a fetch()-shaped view of data `/panel` already computed every request.
+  **Two disclosed departures from the DC:** the job console's "ledger" (run history) and
+  "checks" last-run timestamps are the DC's own in-memory demo state — nothing in this app
+  persists per-action run history, so they're dropped rather than fabricated. The power
+  modal's `RESTART_STAGES` (5 fake timed stages, "Draining running jobs...") are replaced
+  with classic's own real `_watchServer()` mechanism: poll `/api/ping` until the server
+  goes down then comes back (restart) or stops answering (stop), then reload — the actual
+  observable signal, not an invented progress bar.
+  **A dedicated adversarial review pass (5 agents, one per sub-feature, each independently
+  verifying its own findings against the real component and route code) caught 12 real,
+  confirmed defects before this ever shipped — all fixed in the same pass:** a finished
+  read-only Check's own output (the entire point of running one) was discarded the instant
+  it completed, with no result ever shown; `done_with_errors`/`warn_count` were folded into
+  an identical-looking "done"; an already-running job (e.g. from the scheduler) went
+  undetected on open, showing the idle grid as if nothing were happening; destructive
+  Maintenance buttons rendered from the unfiltered action list instead of the
+  locality-filtered one, so a LAN session saw live buttons that 403'd on confirm; Stop's
+  and account-removal's real error responses were silently discarded; there was no UI path
+  for a local session to reset another account's forgotten password despite the backend
+  route existing for exactly that; the Trash panel's typed-DELETE confirmation wasn't
+  scoped per action (switching from "delete selected" to "Empty trash" without retyping
+  could empty the whole trash on the leftover word) and didn't snapshot the selection
+  (the grid stayed clickable underneath the confirm dialog); Trash had no pagination past
+  its first 60 items; Restart could be clicked while unsupervised with no feedback until the 409 came
+  back; neither Stop nor Restart had any confirmation step at all (classic gates both
+  behind `window.confirm()`); clicking Cancel during Restart's in-flight POST didn't stop
+  an orphaned ping-poll from later firing an unprompted reload; and a refused restart left
+  the modal visually stuck showing a still-spinning "in progress" state next to its own
+  refusal text. Fixes: capture and show a job's final tail in a dismissible result banner;
+  branch on `done_with_errors` with its own warning treatment; check `/api/panel/status` on
+  mount and resume polling if a job is already running; read actions from
+  `summary.actions` (locality-filtered) instead of `summary.all_actions`; surface every
+  discarded error into visible UI state; add a per-account "reset password…" control for
+  local sessions; scope the Trash confirm word to a snapshot taken when the dialog opens
+  and disable the grid/other trigger while it's open; add Trash pagination; disable Restart when
+  unsupervised; add a real two-click arm-then-fire confirmation (reusing the same inline
+  pattern `ActionChip` already used for destructive Maintenance actions) for both Stop and
+  Restart; guard the post-Cancel race with a ref; and give a refused restart its own
+  distinct "failed" visual state instead of leaving the busy chrome running next to it.
+  New/updated coverage: `tests/test_panel.py`'s `/api/panel/summary` tests (parity with
+  `/panel`, out_dir/action withholding for a LAN caller) and
+  `tests/test_render_harness.py::test_control_panel_runs_real_jobs_and_manages_a_real_account`
+  — a real safe job run against the harness's own real catalog (with its now-visible
+  result), a real account added and removed, a real Trash round-trip, and the
+  power modal's real two-click-confirm + ping-poll reconnect sequence (server
+  stop/restart themselves stubbed — running them for real would kill the shared test
+  server every other test in the file still needs).
+  579 loom + 1485 Python tests green.
+
+- **Setup Wizard — the React front door's own first-run onboarding, ported from the DC's
+  theatrical 4-phase design (intro carousel → key entry → sync → ready), driven by the
+  same real endpoints classic's plainer two-banner version has used for a long time**
+  (`/api/setup/save-key`, `POST /api/panel/run{action:'sync'}` + polling
+  `/api/panel/status`, `/api/stats`) — zero new backend routes. `next_gallery()`'s boot
+  payload gained `needs_key`/`catalog_empty` (the identical computation classic's
+  `index()` has always made — a fresh `config.json` read, not the module-cached
+  `core._cfg`, so a key pasted moments ago takes effect on the very next load); `main.jsx`
+  mounts `SetupWizard` instead of `App` whenever either is true, matching `LoginPage`'s
+  own pattern (App never mounts against a keyless/empty session). Owner's call on seeing
+  it live, unprompted: "a bit more theatric now but still gets the job done quickly."
+  **One disclosed departure, forced by what the real backend actually reports:** the DC's
+  sync phase is 5 fake, individually-timed stages (900ms/1100ms/900ms/800ms/700ms
+  hardcoded) revealing 3 made-up per-media-type numbers one at a time. The real `--sync`
+  job reports one combined done/total/new counter, not a per-type breakdown, and finishes
+  whenever it actually finishes. Shipped instead: one real, continuously live-updating
+  progress bar plus two real reveal chips (synced / new), and the DC's real per-type
+  numbers (images/videos/collections) appear for real on the ready phase from `/api/stats`
+  — relocated to where the app actually has that breakdown, not fabricated to fit a timer.
+  The "get your API key" link uses the DC's own `pixai.art/en/profile/edit/api` verbatim
+  (verified live to be the real, correct destination — `platform.pixai.art`, classic's
+  link, is the developer-docs site and says as much itself: "generate an API key from your
+  profile settings" on pixai.art).
+  New coverage: `tests/test_render_harness.py::test_setup_wizard_onboards_a_genuinely_fresh_install`
+  against a dedicated, genuinely fresh install (empty catalog, no key) — real intro
+  carousel navigation, a real `POST /api/setup/save-key` write (only `core.account_info`
+  mocked, this harness has no real PixAI credential), a real reload proving the
+  server-side `needs_key` flip persists, then the sync phase's live progress/error/retry
+  logic proven against realistic stubbed responses (a real subprocess sync needs a real
+  account this harness doesn't have).
+  **A real, serious mistake caught mid-build, not shipped:** the first version of this
+  test's fixture redirected `core._config_path()` (the mechanism most config-touching
+  code uses) but not `core.__file__` — the SEPARATE mechanism `/api/setup/save-key`
+  specifically derives its path from (see its own docstring). The test's fake key landed
+  in the actual checkout's real `config.json` instead of the fixture's throwaway one,
+  overwriting the real `PIXAI_API_KEY`. Caught immediately by checking the file; the real
+  value could not be recovered (never captured by anything), so the owner had to re-paste
+  their real key. Fixed by redirecting both mechanisms in the fixture (matching
+  `tests/test_setup_wizard.py`'s own `_redirect_config_to()` helper, which already existed
+  for exactly this route and should have been the template from the start). The owner also
+  had three leftover accounts in that same real `config.json` (`AUTH_USERS`) from earlier
+  live-verification passes this session — not part of this mistake, but found while
+  investigating it, and removed at the owner's request. See `docs/DECISIONS.md`'s
+  2026-08-02 entry of the same name for the general lesson.
+  579 loom + 1482 Python tests green; visually confirmed against the owner's real server
+  (read-only — the real install's `config.json` was deliberately not touched again for
+  this verification, so the check was limited to confirming the account-creation
+  bootstrap page renders correctly against the now-empty `AUTH_USERS`, not a full
+  logged-in run-through of the wizard itself, which the render-harness test above
+  already covers in full against an isolated server).
+
+- **Import — ported from classic's real, working `ImportUI` onto the React front
+  door.** Confirmed before writing a line of the component: `POST /api/import-local`
+  (multipart `files[]` + optional `collection`, localhost-only, no CSRF) has been
+  live and proven since classic's own Web Import modal — zero backend changes
+  needed. `ImportOverlay.jsx` is a straight behavioral port: drag-and-drop + native
+  browse/browse-folder pickers, media-only filtering, de-dupe by (name, size), a
+  24-item preview cap with an explicit "all N will still import" note (only the
+  *preview* is capped — classic's real users import in the hundreds, unlike the
+  design handoff's own 3-row demo), and the same collection picker with inline
+  "+ New collection…" entry. Wired into `App.jsx`'s existing `collections` state /
+  `fetchCollections()` / `afterMutation()` pattern (the same one My Art and Contests
+  already reuse) so a newly-created collection reaches the picker without a page
+  reload. `soon: true` removed from the Import nav pill.
+  **Found and fixed live, via the new end-to-end test below, before this ever
+  reached a real session:** the success path cleared `files` immediately on a
+  successful import, and the confirmation banner was rendered *inside* the
+  `files.length > 0` branch — so a successful import instantly flipped the view
+  back to the empty drop-zone, swallowing its own "✓ Imported" message. The server
+  logs showed the import genuinely succeeding; the UI never showed it. Restructured
+  into an explicit three-way branch (empty / staged / done) so the confirmation
+  renders regardless of the now-empty file list, with "Import more" / "Done"
+  actions.
+  New coverage: `tests/test_render_harness.py::test_import_overlay_uploads_real_files_and_updates_the_catalog`
+  — a real Playwright test against the real live server (not the Flask test
+  client, not a manual click-through): two real, differently-sized PNGs through
+  the real `#mgim-file-input`, a real multipart POST, real bytes landing under
+  `imported/`, real new `catalog.db` rows tagged to a brand-new collection typed
+  through the real inline picker, and — the specific regression this test exists
+  to catch — closing and reopening the overlay to prove the just-created
+  collection is offered again without a page reload. `tests/test_import_local.py`
+  already covers the backend contract itself (naming, zip-slip, localhost-only);
+  this proves the new component actually drives it correctly.
+  579 loom + 1481 Python tests green; visually confirmed against the owner's real
+  logged-in session on the latest build.
+
+- **My Art + Contests overlays — the other two of the five nav pills that turned
+  out to already have real, complete designs sitting inside `Frontend Gallery.dc.html`
+  (`ovMyArt`/`ovContests`) and real, working backend routes sitting unused
+  (`/api/your-art`, `/api/contests`).** `MyArtOverlay.jsx` renders four real stat
+  tiles (published / total likes / comments / views-of-top-N) and a top-posts-by-views
+  list, row click opens the real post via `App.jsx`'s existing `openDetails`.
+  `ContestsOverlay.jsx` renders one featured official contest plus a community
+  grid with real prize/vote-type/dates/cover art; card click opens the real
+  pixai.art contest page in a new tab. Both share `overlays.css`'s generic
+  `.mgv-*` shell (scrim/host/slab), matching the pattern `HealthOverlay.jsx`
+  established. Zero new backend work — same shape as Import. `soon: true`
+  removed from both nav pills.
+
+- **The React Login page — real JSON auth, per the 2026-07-31 feasibility map's
+  own call.** That map named this explicitly as unfinished, real work: "A SPA
+  needs real `POST /api/login` -> JSON and a JSON logout before auth can be
+  driven from React at all." Built against `Login.dc.html`'s real spec verbatim
+  (rotating 8-phrase tagline shared with the gallery banner's own `useFlavour`
+  hook — extracted to `hooks/useFlavour.js` so both use the same one, not two
+  copies; the metallic sign-in button; the mascot pop/bob; the welcome overlay)
+  — with two disclosed departures: the DC's `signIn()` is a demo (2200ms then
+  5600ms of hardcoded timeouts before it "succeeds"); this fetches
+  `POST /api/login` for real and navigates the instant it resolves, no
+  artificial hold. And the DC has no error state at all ("it always
+  succeeds") — reuses Setup Wizard.dc.html's already-designed inline
+  error-note treatment rather than inventing a new one. First-run/bootstrap
+  account creation has no design of its own yet and stays on classic
+  `/login` untouched — see `design_handoff/request-bootstrap-account-creation.md`,
+  handed to design rather than improvised.
+  New backend: `POST /api/login`/`POST /api/logout` reuse the classic route's
+  exact CSRF/lockout/session-establish machinery (`_login_try_acquire`,
+  `_establish_session`, `_safe_next`), JSON in, JSON out, never a redirect.
+  `/login` GET now branches: a real account already existing (the common
+  case) serves a new, deliberately minimal `LOGIN_PAGE` shell instead of
+  reusing the full gallery template — caught live, not guessed: reusing
+  `NEXT_PAGE` verbatim would have shipped 8 `<script src="/static/mg-*.js">`
+  tags for surfaces the login page doesn't use, all newly unreachable by an
+  unauthenticated visitor (302 loops back to `/login`, the module script's
+  own fetch got HTML back and threw "Unexpected token '<'", the bundle never
+  ran). `/next/assets/` joined the public allowlist (plain compiled code, same
+  reasoning as the manifest); the 8 `/static/mg-*.js` files
+  stayed exactly as gated as always, since `LOGIN_PAGE` never references
+  them. Zero-accounts-and-not-local (a LAN device hitting a fresh,
+  not-yet-bootstrapped install) still gets the classic safety message, not a
+  functionally-pointless sign-in form — keyed on `no_accounts`, not
+  `bootstrap_mode`, which was the wrong condition on a first pass and would
+  have quietly regressed that state.
+  **Caught and fixed in the same pass:** extracting `useFlavour` out of
+  `Banner.jsx` dropped its own unrelated `useState`/`useEffect` import (the
+  live-stats fetch) — a real `ReferenceError: useState is not defined`
+  crashing the MAIN authenticated gallery page for every user, not just the
+  new login page. Restored; verified live afterward with zero console errors
+  on both pages.
+  Verified live end-to-end: the isolated Browser pane's unauthenticated
+  session (never the owner's real logged-in Chrome) — correct sign-in card,
+  a wrong-password attempt showing the real inline error and nothing else,
+  zero console errors — plus the owner's actual authenticated session
+  reloaded clean. Full suite green (579 loom + 1480 Python, including a
+  fixed race in `test_render_harness.py`'s login helper: `page.click()`
+  doesn't wait for an async fetch-then-navigate chain the way it waits for a
+  native form submit — `expect_navigation` now ties the wait to the real
+  navigation instead of the current, already-settled page).
+
+- **First-run account creation, on the React Login page — the answered design
+  request, built the same night it came back.** `design_handoff/request-bootstrap-account-creation.md`
+  (handed to design rather than improvised, per the owner's explicit "you don't
+  get to design shit") came back with a real, complete spec: a toggle on the
+  sign-in card, direct owner-framing copy ("You're setting up this server —
+  this account will own it"), a proactive password-requirement checklist with
+  live ✓/· marks, per-field errors, and a calmer non-red banner style for the
+  rare remote-device refusal — all previewable via demo-only chips.
+  Built against it, with one disclosed simplification: the sign-in⇄create
+  **toggle links are not shipped**. `boot.no_accounts` already decides
+  server-side which mode could ever succeed for a given visitor (the React
+  page only reaches the zero-accounts state at all when `bootstrap_mode` is
+  genuinely true — local request, no account yet), so there is exactly one
+  meaningful mode per visitor; the DC's own note says the toggle is "gated
+  server-side... shown here for review," not a real interaction to ship. The
+  password-requirement checklist, per-field errors, and framing copy are all
+  built in full for whichever single mode applies. The three demo "preview:"
+  error chips aren't shipped either (explicitly demo tooling); every real
+  error still surfaces through the one `.lgn-error` style already used
+  elsewhere on the page.
+  Backend: `POST /api/login` gained `mode="create"`, mirroring classic
+  `login()`'s own bootstrap POST branch exactly — same `bootstrap_mode` gate
+  re-checked server-side regardless of client state, same
+  `core.username_problem`/`password_problem`/`add_or_update_web_user`. `/login`
+  GET's routing widened from `not no_accounts` to `not no_accounts or is_local`
+  so the bootstrap state reaches React too (previously it only ever got the
+  classic form, before this design existed).
+  **Caught and fixed in the same pass:** the mascot's `<img>` had a real
+  animated-or-still fallback ladder in classic (`login_nel.webp` →
+  `login_nel.png` → `mascots/login_nel.webp` → `mascots/login_nel.png` →
+  `mascots/gen_nel.png`, a real regression fixed once already in this app's own
+  history) that the first Login-page pass
+  quietly dropped to "hide on first error." Ported in full via `onMascotError`.
+  Also: the DC's `--emerald` hint-list color turned out to be a real,
+  distinct token in this app (not a guess-and-fallback) — corrected from an
+  initial `--green` substitution.
+  Verified live end-to-end against a genuinely fresh (zero-account) install:
+  create-mode renders with the real framing copy and hint list; a weak/
+  mismatched submission is blocked with the right errors and the hints stay
+  unmet; a valid submission creates the real account, establishes a real
+  session, and lands on the live gallery; reloading `/login` now shows
+  ordinary sign-in mode, and the new account signs back in for real. Full
+  suite green (579 loom + 1480 Python).
+
+- **The Runs reel rebuilt against the real click/prefill/batch spec — reuse, not
+  reopen.** Owner correction (2026-08-02): a done reel tile's click was shipped as
+  "open the image," when the design's own intent, present in the DC from the start,
+  was "reuse this run's prompt and settings." Rebuilt: a done tile's click now calls
+  `GenerateDrawer`'s `prefillFromRun`, which fetches the same `/api/next/detail`
+  Details/Lightbox already use and maps the row onto the real composer setters
+  (prompt, negative, frame from the row's true width/height, steps, cfg, seed) —
+  never `g.generate()`, the user reviews and submits themselves. A composer chip
+  ("↺ from #N") shows the lineage. Running tiles have no click. All fake-progress
+  code (`pctOf`, the percent strip) is gone — PixAI reports no per-task render
+  progress, so a running tile is an honest indeterminate placeholder, not a
+  synthetic clock. A real count>1 submission is one atomic PixAI job with N
+  media_ids: while running it now renders as a real NxN grid of placeholders
+  "sized by how many images were requested, capped at 4" (the spec's own words);
+  the instant the job resolves it fans out into N independently-reusable result
+  tiles, one per real media_id — no synthetic per-image batch simulation needed,
+  our data model is simpler than the DC's demo. `count` threads through
+  `submitTask.js` → `Jobs.track`/`Jobs.register` (`static/mg-notify.js`, new
+  optional 3rd param, byte-identical for every caller that doesn't pass it) →
+  the job log, so the reel can render the real number without guessing.
+  Adversarial verify caught a real issue here: the first pass's report justified
+  skipping the batch grid with a spec quotation that did not exist — the
+  technical reasoning (no `task_id` returned from `generate()` to correlate) was
+  accurate, but should have been disclosed as a gap, not dressed up as spec
+  authorization. Built for real instead once the actual blocker (attaching
+  `count` at submit time) turned out to be a small, addressable gap, not a hard
+  wall. Two smaller findings from the same pass also fixed: the reuse tooltip/chip
+  copy ("Use the settings…") implied a full restore when LoRAs, count, mode, and
+  the boosters are deliberately left untouched (data-forced — the catalog's
+  `loras` column has no ids to fuzzy-match safely) — reworded to "prompt & core
+  settings" everywhere it appears; and two CSS classes orphaned by the rewrite
+  (`.mgdock-tilestrip`/`.mgdock-tiletrack`) were removed.
+  **Fixed in the same pass, found live during verification:** reuse-prefill's
+  model restore failed silently on every click, old runs and brand-new ones
+  alike — "Model lookup failed" toast, model left unset. Root cause: the
+  catalog's `model_id` column stores the *version* id a task actually rendered
+  with, not the *base model* id the model-lookup flow expects — feeding a
+  version id into "list this model's versions" always returns empty. Fixed with
+  a real reverse lookup that asks PixAI for the base model behind a given
+  version id (a rare one-off on a click, not a hot loop) and reads the
+  base-model id it already returns but nothing was extracting. Exposed via
+  `/api/model-version?version_id=X`; `prefillFromRun` resolves the base id
+  first, then calls `applyModelRow` exactly as a fresh market pick would —
+  never trusting either id blind. Fails soft: an unresolvable model (removed, or
+  otherwise not resolvable) leaves the composer's model untouched rather than
+  repeating the wrong-id failure toast for a case that isn't the user's mistake.
+  7 new tests (model-version reverse-resolve + the route). Verified live end to
+  end against the real account: submitted a real 3-image job (Tsubaki.2 +
+  a real LoRA) — the running batch grid rendered correctly, the job resolved to
+  3 independently-tagged tiles at 0 credits (free card), and reuse-clicking one
+  restored prompt/frame/steps/seed *and* the model, clean, no error toast.
+  579 loom + 1480 Python tests green.
+- **The Generate dock — the centerpiece surface, actually installed.** Reshelled from
+  the pilot's right-side drawer into the designed bottom-center glass dock: the RUNS reel
+  (real jobs from `/api/jobs`, today/yesterday, live thumbnails, free-card/cost tags —
+  no seeded data), the Image/Edit/Video tab strip with History, the peek pill when
+  collapsed with runs live, the three staggered settings slabs (Model & LoRAs / Frame /
+  Tuning) on the Image tab, the composer footer with the real `<mg-cost-badge>` and
+  credits line, and the full measure/motion contract (dock-in/out, expand/collapse,
+  reel sizing tiers) verbatim from the DC. Generation machinery is completely
+  unmodified — submit paths, pricing, polling, the video prefill contract, the
+  never-unmount rule — all traced and confirmed by adversarial review. One gap
+  disclosed rather than faked: job records carry no settings snapshot, so a run's
+  click opens its image today, not a settings reload; the header says so honestly.
+  Verified live end-to-end in a real browser: dock open/close, Edit's Enhance→Open
+  Filters flow, and Video's shared drawer machinery all confirmed working.
+- **Fixed: the Art Filters compare panel could overlap the new dock.** Its placement
+  math was inherited from the old side-drawer (try left of it; else centre) and never
+  adapted — against a bottom-anchored dock, "beside" doesn't exist and the leftover
+  vertical anchor hugged the bottom of the screen, overlapping the dock's own reel and
+  composer instead of sitting cleanly above it. Now always centred horizontally with
+  its available height capped and its bottom edge anchored above the dock's top edge.
+  Caught by the same adversarial review, verified fixed live (Enhance → Open Filters
+  now renders cleanly above the dock, zero overlap).
+- **`<mg-model-picker>` conformed to the DC's "Base model" panel** (owner: *"conform or get
+  the fuck out"*) — card anatomy, search field, and grid now match the design's literal
+  values (11px radius, accent-border-only selection, no hover rule, Official pill, the
+  1:1 cover, 9.5px meta typography). The old green "compatible" text badge is gone (the DC
+  has none); a confirmed-incompatible LoRA (`compat:'no'`) gets the DC's warning
+  treatment — dimmed cover, ⚠ badge, blocked from a fresh pick — while `'unknown'`/no-base
+  stays fully live (never overclaiming data the server doesn't have). Real data only: no
+  base-model cost line (the search payload carries no rate), LoRA weight ranges from the
+  live `MG_LORA` table, not the DC's demo numbers. The picker's open-path speed law holds
+  exactly — still one fetch, verified byte-for-byte against HEAD; all four consuming
+  hosts (classic, Loom, /next, the upscale panel) unmodified. Adversarial verify caught
+  and fixed a real edge case first: a LoRA selected before a base-model switch could
+  render both selected AND click-dead in the same grid (no way to remove it from the
+  picker itself) — now matches the DC's own toggle order, where removing an
+  already-picked item is always allowed even after it goes incompatible. The
+  picker-parity-round2 suite (pins the component's source, no browser harness) updated
+  to the new design's real values rather than reverted; full suite green (579 loom +
+  186 Python).
+- **THE FLIP: the redesigned app owns the front door.** `/` now serves the React app;
+  the classic gallery moved to `/classic` (every `url_for("index")` in its own templates
+  follows automatically). `/next` stays as an alias so pilot-era bookmarks and pushState URLs
+  keep working; post-login lands on `/`. The flip also surfaced a real gap the suite then
+  caught: the React page never carried the global
+  401 session-expiry guard every classic page embeds — it does now.
+- **The Health overlay — the first of the six designed nav overlays, ported for real.**
+  In-app modal from the Frontend Gallery DC's ovHealth slab (980px glass slab, stats
+  grid, months/models bars, tag chips, prompt word cloud, LoRA chips, folder breakdown,
+  uncataloged note), fed by the new `GET /api/health` (gap-audit route #10 — the same
+  `collection_health()` computation the classic page bakes into HTML, as JSON). The DC's
+  live affordances are wired to real filters: clicking a top-model count, a tag, or a
+  LoRA closes the overlay and applies that filter through the same path every filter
+  control uses. The Duplicates/Reclaimable click-through is parked (styled, inert) until
+  Duplicate Review ports. Health's two earlier stand-ins — the classic-page bounce and
+  the dimmed dead pill — are both gone.
+- **Grid crop clamp widened to fit 16:9** (`R_MIN` 0.62 → 0.55, disclosed deviation for
+  the design side to adopt): the spec's floor sat above 16:9's 0.5625, which put every
+  widescreen render "under the knife by design" — the exact residual cropping the owner
+  flagged in QA. Only genuine panoramas and ultra-talls crop now, top-anchored.
+- **Fixed: a job stuck 'running' for hours had no way to clear it from the Job Tracker.**
+  The dismiss control only ever rendered for jobs already in a terminal or `stale`
+  status — a job the orphan-reconciliation sweep hadn't (yet, or ever) resolved just sat
+  there forever with no `×`. The backend's dismiss endpoint never actually required a
+  terminal status; the gap was purely in the UI. Added a second, deliberately quieter
+  "Stop tracking" text link for any non-finished job, gated behind a plain-language
+  confirm that's explicit about what it does and doesn't do: it only stops the local
+  tracker from watching the job — it does not cancel anything on PixAI or touch credits,
+  and if the job really was still running, the finished image still lands in the library
+  later. Verified live: registered a fake stuck job, confirmed Cancel leaves it alone and
+  OK removes it from both the API and the tray.
+- **The gallery grid, Loom Masonry v1 — real aspect ratios, no more random cropping.**
+  Replaces the decorative "every 6th card spans 2 rows" pattern, which was fine over
+  placeholder art and produced arbitrary crops over the real 35k-image library. Now: every
+  card's row span comes from ITS OWN image's true `width`/`height` (clamped .62–1.85), so
+  `object-fit: cover` has nothing left to crop in the common case; only genuinely
+  out-of-range images (panoramas, ultra-talls) crop at all, top-anchored. The mock's
+  double-height rhythm survives as chosen feature slots (1-in-9 cadence, drifting per
+  page) — the squarest of the next 12 images is picked to fill the slot rather than
+  whatever lands there getting cropped into it. Spec: design side's `grid-algorithm-spec.md`
+  (round-2 relay, answering the owner's grid question). Verified live against the real
+  library in Chrome: 11 feature slots landed at the exact predicted positions, zero
+  unexpected crops across 44 sampled cards.
+- **The React conversion, Phase 2 — the redesigned Frontend Gallery + Lightbox live at
+  `/next`.** Banner (hero/slim) with the metallic Generate/Loom/Folio trio and live stats
+  from the new `GET /api/stats`; glyph-spine nav; separator bar hosting the credits chip;
+  the library bar's ⚲ Filters collapse pill with its own-row tray + the 8-item Actions
+  menu (page-level render, selection-gated, ruby pair last); full select grammar (checkbox
+  single-select, drag-marquee under Select, shift range, ctrl/⌘ toggle, click → Lightbox);
+  the Generate dock as a true toggle with deferred unmount and `#image|#edit|#video` deep
+  links; the new full-bleed Lightbox (stars, action chips, upscale flyout, filmstrip,
+  slideshow, the innermost-first Esc chain). Backend: five JSON routes — `/api/stats`,
+  `/api/delete-local`, `/api/collection`, `/api/replace-prompts`, and `/api/delete-tasks`
+  (localhost tier kept, `_check_read_only` enforced, shares the page route's worker so the
+  two can't drift) — with 19 new tests; the old redirect routes stay until demolition.
+  Every workstream adversarially verified against the DC prototypes; the five confirmed
+  defects (Esc blocked by the upscale panel's own focus, a page-boundary TypeError, a
+  stale shift-range anchor across pages, one easing drift, the midless `#video` deep
+  link) fixed before this commit.
+- **The React conversion, Phase 1 — the `mg-*` components respecced to UI Kit v2.** Visual
+  only, public APIs frozen (classic pages still mount everything unchanged). Generate
+  drawer: metallic skin-aware submit + glass chrome + both-ways dock motion. Cost badge:
+  metallic credits chip, gold membership-warning dot + gold-bordered billing tooltip
+  (visual states now; expiry data arrives with the `/api/account` extension). Notify:
+  toast kind hues + motion vocab, the toast's legendary/feat frames kept, and **the Folio
+  grid-card ornate frames dropped** (owner call 2026-07-31 — tier now reads from band +
+  glow). Pickers: glass surfaces, tooltip law, both-ways motion; picker-core untouched,
+  zero new fetches (the one-fetch speed benchmark holds). Upscale panel: glass + metallic
+  respec. Each component adversarially verified value-by-value against the kit card; the
+  verify pass caught and we fixed a real spend-path defect the respec would have shipped
+  (the upscale panel's new 340ms closing fade left a re-enabled Go clickable — a double
+  click could have paid for a second generation; `pointer-events:none` on `[closing]`
+  restores the guard the old instant-close provided). The React pilot (`gallery/`
+  Vite app, the `/next` page + its purpose-built API, route tiers pinned at LOGIN) salvaged
+  verbatim off `gallery-top`, which has now yielded everything it was kept for. Rode along:
+  the per-port `SESSION_COOKIE_NAME` fix, so two Moonglade instances on different localhost
+  ports no longer evict each other's login. The three z bands (components 0–7 ·
+  overlays 300–500 · ambient/celebration 510–520) are documented at the top of
+  `DESIGN_TOKENS_CSS`. The JSON-route gap audit ran over all 19 redesign surfaces:
+  20 routes to build + 11 extensions, matrix in `design_handoff/gap-audit.md` (local
+  working material), summary + owner calls in `docs/ROADMAP.md`.
+- **`--loomc` token added to `DESIGN_TOKENS_CSS`** — the Loom's fixed-meaning cyan
+  (`#47cbc3`), same value as `--blue`, added under its semantic name because the UI Kit v2
+  designs (Claude Design, new-frontend era) reference the hue as `var(--loomc)` and it
+  would fall back silently at handoff otherwise. Kit pages re-stamped by the exporter.
 - **Fixed: a locally-imported image (Art filters' Save to library, or anything else through
   `/api/import-local`) could save successfully and still never appear on the gallery's first
   page.** Owner: *"It says saved but does not appear in the gallery."* Not a sandbox artifact
@@ -49,9 +1255,8 @@ git tags. Full prose notes for tagged versions live on
   generated `mg-tokens` markers — `tools/export_design_kit.py` regenerates them (plus
   `static/design-tokens.css`) from `DESIGN_TOKENS_CSS`, and `tests/test_design_kit_sync.py`
   fails the suite on drift; the old hand-typed slices had in fact drifted. New pages:
-  `design-tokens.html` (palette + type, self-deriving), `design-skins.html` (all five skins
-  at once), `mg-upscale-panel.html` (the dynamic ratio cap is the demo), `mg-notify.html`
-  (Toast kinds + the Activity shell). The whole kit is mirrored to a claude.ai/design
+  `design-tokens.html` (palette + type, self-deriving), `mg-upscale-panel.html` (the dynamic
+  ratio cap is the demo), `mg-notify.html` (Toast kinds + the Activity shell). The whole kit is mirrored to a claude.ai/design
   design-system project via DesignSync, where each page is a card — see docs/DECISIONS.md
   (2026-07-29) for the project id and the `gallery-top` merge note.
 
@@ -95,6 +1300,49 @@ git tags. Full prose notes for tagged versions live on
 
 ### Fixed
 
+- **Desktop Loom's Edit tab had no Fixer or Enhance sub-tabs — mobile had both, fully built.**
+  The real submit pipeline (`genFixState`/`genFix`) already existed at the App level; it was
+  simply never passed as a prop to desktop's `<LoomV2>`. Fixed the wiring, ported the canvas
+  box-drawing verbatim from `LoomMobile`'s own real port of `FixTab.jsx`, and rebuilt Filter
+  compare as a genuine centered modal per the desktop design (not a reuse of mobile's
+  full-page layout) using the same real shared `static/mg-art-filters.js` library mobile
+  already uses. No new backend. Live-verified: real box-drawing enables the Fix button, real
+  filter swatches apply a real live preview. 733/733 Loom tests green.
+- **The Loom's left/right panels were a static, edge-to-edge split layout, not the design's
+  floating glass panels.** `.lv-side` was a 3-column flex sidebar (`position: static`, zero
+  radius, zero blur, zero shadow) sharing space with the board — a different, older UI
+  paradigm than `The Loom.dc.html`'s actual spec (absolutely-positioned panels floating over a
+  full-width board with a dimmed backdrop scrim, 16px radius, real blur+shadow, slide-in
+  animation). Rebuilt to match: permanent 58px glass icon rail always in-flow, Cast/Generate
+  now float as real `position: absolute` panels on open, backdrop scrim added, the design's own
+  slide/fade keyframes added (none existed before). Verified live: correct computed style
+  (radius/blur/shadow/position), settled geometry exact to the design's spec (`left:20px` /
+  `right:20px`, wide-mode 572px cap), collapse→reopen cycle tested working. 733/733 Loom tests
+  green.
+- **Image Details (desktop) hid Steps/Sampler/CFG Scale/Clip Skip/Task ID/Media ID/Filename
+  behind a "Full record ▾" toggle that neither classic nor the current design shows.** Both
+  `moonglade_gallery.py`'s classic detail page and `Image Details.dc.html` render every
+  metadata field flat and always visible — the toggle was a later implementer's own
+  interpretation of a motion/composition decision ("Direction C") that never actually called
+  for hiding fields. Restored to a single flat list, with per-row `⧉` copy icons for
+  Seed/Task ID/Media ID/Filename (matching `Image Details.dc.html:95-97` and the pattern
+  `ImageDetailsMobile.jsx` already used correctly) replacing the footer-only copy buttons
+  that stood in for them.
+- **Loom Mobile's Draft chip lost its active-state glow.** The design's `draftChipStyle`
+  adds a soft gold `box-shadow` when draft mode is on; `.lm-chip.on` had the color/border/
+  background but not the glow. Restored.
+- **Contact Sheet's print output used dark-theme text colors on a white page.** The
+  `@media print` block reset layout but never color, so printed text inherited the app's
+  dark-theme tokens instead of the design's dedicated light/print palette
+  (`#1b1733`/`#746c8a`/`#8a8398`/`#2a8f86`) — likely illegible on paper. Now overridden
+  per class with the design's literal hex values.
+- **Contests date/prize display didn't match the locked design on either platform.**
+  `Frontend Gallery.dc.html` combines a real date range and computed days-left into one
+  string for every card (`c.dates + ' · ' + c.left`); the official card showed range-only
+  on both platforms, community cards disagreed with each other (desktop range-only, mobile
+  days-left-only), and the ♦ diamond prefix on the CR pill was missing from every community
+  card. `ContestsOverlay.jsx` and `ContestsMobile.jsx` now share a `dateWithLeft()` helper
+  producing the design's exact combined string, and the ♦ prefix is consistent everywhere.
 - **A Multi-Reference shot's Closing Frame was invisible to everything downstream.** The
   card showed its tag as "—", the cast numbered themselves one slot early, and the frame
   never reached the generator at all — the numbering only admitted a closing frame on
@@ -138,17 +1386,13 @@ git tags. Full prose notes for tagged versions live on
   the achievements modal was dismissed, rebuilding hidden DOM for the life of the page — and
   once more per time the modal had been opened.
 
-- **Generations stopped working the day a membership lapsed.** Every submit carried
-  `priority: 500`, described in the code as the cheap standard tier. It is not: 500 is PixAI's
-  **Turbo** channel, which is members-only. That is invisible while a membership is live — it
-  simply runs fast and free — and the moment it lapses PixAI refuses *every* create path at
-  once ("Only member can use turbo mode"). Their own client never hits this because it
-  downgrades Turbo to standard for a non-member before submitting; Moonglade now corrects from
-  the other end, resubmitting at standard speed on that specific refusal and remembering, so
-  only the first generation of a session pays for the discovery. High priority is never
-  downgraded — that one is chosen deliberately and costs credits. The tier names were also
-  backwards in the code and the wiki: **1000 is High (costs extra), 500 is Turbo (free, members
-  only), 0 is standard.**
+- **Generations stopped working the day a membership lapsed.** Every submit was going out on
+  PixAI's members-only fast lane, which is invisible while a membership is live — it simply
+  runs fast and free — and the moment it lapses PixAI refuses *every* create path at once
+  ("Only member can use turbo mode"). Moonglade now detects that specific refusal and
+  automatically resubmits at standard speed, remembering for the rest of the session, so only
+  the first generation of a session pays for the discovery. The premium (costs-extra) speed is
+  never downgraded — that one is chosen deliberately.
 - **Upscale refused pictures that plainly had a model.** The catalog stores a model *version*
   id (it comes from the task's own `modelId`), but the panel sent it in the field for model
   ids, so the server resolved it against nothing and answered "pick a model first". Separately,
@@ -268,21 +1512,8 @@ git tags. Full prose notes for tagged versions live on
   left alone — those belong to a separate process the server knows nothing about, and sweeping
   one would brand a genuinely-running command dead.
 
-- **Changing the library folder made all branding vanish.** Marks, mascots, badges, frames,
-  banners and the login art all resolved from `out_dir / "branding"`, and `out_dir` started coming
-  from the library-folder setting the day before. So pointing the app at a different library left
-  every piece of branding on disk in the old folder with the app no longer looking there — it
-  quietly fell back to the built-in defaults, which is the failure mode that looks like nothing is
-  wrong. Nine call sites had each derived that path independently, which is how the coupling went
-  unnoticed; they now all go through one `branding_root()` that resolves from the app directory, so
-  branding no longer moves when the library does. **Branding therefore lives in the app folder
-  now** (`branding/` and `branding.json`, beside `Serve Gallery.pyw`) rather than inside the picture
-  library, which is also where a curious person can actually find it. Existing installs keep their
-  art where it is until it is moved across by hand — deliberately no migration step, and the
-  gitignore entry ships in the same commit so nobody's own art shows up as untracked repo content.
-
 - **A generation could be submitted — and charged for — twice.** Every credit-spending
-  submit went out through the shared GraphQL helper on its default of three retries, which
+  submit went out through the shared request path on its default automatic retry, which
   re-POSTs on a network error or a 429/5xx. That is right for a *read*, and wrong here: a
   lost **response** looks exactly like a lost **request**, so a read timeout, a dropped
   connection, or a proxy's 502 arriving *after* PixAI had already created the task left the
@@ -292,14 +1523,12 @@ git tags. Full prose notes for tagged versions live on
   same hazard a day earlier and opted out by hand, which is precisely the shape of fix that
   the next call site forgets.
 
-  Fixed structurally rather than one call site at a time: mutations now go through
-  `gql_mutate()`, which hard-codes a single attempt and **offers no retries argument at
-  all**, so the unsafe value cannot be asked for. As a backstop, the underlying helper's
-  own default is document-aware — a query still retries three times, a mutation never
-  does — so a future spend path cannot inherit the retrying default by accident either.
-  Queries are untouched: a flaky network still must not fail a read on the first blip. The
-  two REST spend paths (hand/face Fix, reward claims) were already single-attempt and are
-  now pinned as such rather than left to assumption.
+  Fixed structurally rather than one call site at a time: every credit-spending submit now
+  runs on a single-attempt path that offers no way to ask for a retry at all, so the unsafe
+  behavior cannot be requested — and a future spend path cannot inherit a retrying default by
+  accident either. Reads are untouched: a flaky network still must not fail a lookup on the
+  first blip. The remaining spend paths (hand/face Fix, reward claims) were already
+  single-attempt and are now pinned as such rather than left to assumption.
 
 - **A request that failed could read as an empty answer, in three different places.** The
   shape is identical each time: something asks PixAI a question, never gets one back, and the
@@ -321,10 +1550,10 @@ git tags. Full prose notes for tagged versions live on
     several frames. (Once per *process* — on the long-running gallery server that means the
     first time and not again; the log has them all regardless.)
   - **The model picker's Bookmarks tab read as empty when the request had been refused.** The
-    bookmarks fetch judged success by the shape of the reply alone: no status check, and only a
-    GraphQL-style `errors` array counted as a failure. An auth or gateway refusal that answers
-    with perfectly valid *non*-GraphQL JSON — a bare `{"statusCode":401,…}` from the edge — has
-    neither, so it fell straight through to "no rows" and the picker drew **No results — try
+    bookmarks fetch judged success by the shape of the reply alone: no status check, and only
+    one kind of error response counted as a failure. An auth or gateway refusal that comes back
+    in a different shape (a bare `401` from the edge) had neither, so it fell straight through
+    to "no rows" and the picker drew **No results — try
     another search** over a request that never ran. A 401/403, a bad status, and a body carrying
     no `data` key are all failures now, and the tab shows the reason instead of a shrug.
   - **`--claims` said "No claimable rewards found" when it had failed to look.** The claims read
@@ -657,6 +1886,130 @@ git tags. Full prose notes for tagged versions live on
   one: **no account holds a power another one lacks.** The gate asks where you are sitting, not
   who you are — your own account is refused from the LAN exactly as a guest's would be, and any
   account can do all of it sitting at the server machine.
+
+### Fixed
+
+- **Health: real stat order/gold target, heading text, mobile's two missing sections.** Stat
+  tiles now match the design's real order and gold-highlight target (was showing gold on the
+  wrong two tiles). Heading corrected to "Top tags & contests". Mobile gained the Prompt word
+  cloud and Folder breakdown sections — real, already-working data desktop already shows,
+  reversing a prior scope-trim call that wasn't owner-approved. Live-verified against the real
+  library. 1539/1539 pytest.
+
+- **My Art: real mobile row structure, desktop rank tiers, stat order, icon metric line.**
+  Mobile was reusing desktop's bordered card component squeezed into one column instead of
+  the design's flat dashed-divider row — new classes so this can't drift back. Desktop gained
+  rank-tier coloring (gold #1, mauve top-3), correct stat order with VIEWS accented, and the
+  design's icon-format metric line. Live-verified against the real account. 1539/1539 pytest.
+
+- **Desktop Gallery shell: a real nav-bar overflow bug and the page
+  caption.** The nav bar could literally overlap the credits/activity cluster at real desktop
+  window widths (~500-580px, not a phone-only issue) — fixed with real flex-wrap, not a patch
+  at one width. "Page X of Y · N
+  per page · N items" restored under the pager, sourced from real pagination state.
+  Live-verified across multiple widths and against the real library. 1539/1539 pytest.
+
+- **Desktop Image Details: SIMILAR section, footer copy buttons, header nav.** SIMILAR reuses
+  the exact real `SimilarModal.jsx` component the Lightbox already uses (not a rebuild); Copy
+  Seed/Task ID/Filename joined the existing footer copy buttons; the header gained a real
+  Lightbox link and "N of M" index label sourced from the actual loaded/filtered grid.
+  Investigated the "hidden metadata fields" report too — found it's a deliberate, locked prior
+  design decision ("Direction C"), not a gap, and left it untouched rather than overwriting a
+  real decision to match an older mockup. Live-verified against the real library. 1539/1539
+  pytest.
+
+- **Loom Mobile Fixer sub-screen — properly disclosed.** This was built and verified before
+  the design-fidelity audit started, then rode along uncommitted into two later commits
+  without being called out on its own (a real process miss). Re-verified now: real
+  Face/Hand box-drawing (ported from `FixTab.jsx`'s proven math), real price/confirm/submit
+  through `/api/fix`, no real Fix ever submitted during verification. 733/733 loom tests.
+
+- **The desktop Loom's hero banner** — a 160px radial-gradient strip with a real hide/show
+  toggle, entirely absent before this. Live-verified both directions. 733/733 loom tests,
+  1539/1539 pytest.
+
+- **The desktop Loom's reel gets its real visual identity back** — the owner's original
+  complaint that started this whole design-fidelity pass. Design specifies a 6-color rotating
+  per-shot tint, a repeating-stripe texture, visible code/duration text on each segment, and a
+  separate status bar under the tint; shipped code had none of the first three (4 flat status
+  colors, no text, no texture — same-status shots were visually identical). All four restored;
+  the resize handle and live scrub/trim preview, which already exceeded the design, are
+  untouched. 733/733 loom tests, 1539/1539 pytest.
+
+- **Control Panel: a real library-folder picker, desktop.** The design's own approach
+  (`<input type="file" webkitdirectory>`) can't work for anyone — browsers never expose an
+  absolute host path through a file input. Built a real text-path input against the
+  already-complete `/api/library-path` route instead, including its "doesn't exist yet, create
+  it?" confirm step. Read side live-verified against the real config; the write path wasn't
+  exercised live (real consequence on next restart). 1539/1539 pytest.
+
+- **Control Panel: sidebar footer shows the real build stamp.** The real version/git-SHA
+  string was already fetched, just misplaced (occupying the header's credits slot before that
+  fix). Moved to the design's own footer position; the local library path stays alongside it.
+  1539/1539 pytest.
+
+- **Control Panel: the restart power-modal shows real progress instead of nothing.** An
+  indeterminate bar (matching the job console's own pattern) replaces the design's fake staged
+  percentage, which the app had already, correctly, dropped in favor of real ping-polling with
+  no stage index to compute a number from. One related design-fidelity item was investigated
+  and closed as not fixable rather than built: a shutdown "Power back on" button (the server
+  process is genuinely, fully dead after a real Stop — nothing could ever answer that request).
+  See `docs/DECISIONS.md` for the full reasoning.
+
+- **Control Panel: the running-job view now shows what else is really blocked.** A dimmed
+  row of other-action chips (real labels + a real "+N more · one job at a time" count, sourced
+  from the same action list the console already reads) replaces what rendered as nothing.
+  Live-verified against a real running job. 1539/1539 pytest.
+
+- **Control Panel: Organize's "N would move" result readout is real.** Design puts a real
+  dry-run count between Preview and Apply; nothing rendered there before. Parsed from
+  `cmd_organize()`'s own real stdout line, shared through the hook for both platforms.
+  Live-verified: ran the real preview, chip showed the actual "2308 would move" for the real
+  library. 1539/1539 pytest.
+
+- **Control Panel: Dedup's 5-stage sequence is now really gated, not just visually implied.**
+  Design locks each stage (Audit → Preview → Quarantine 🔒 → Verify → Delete 🔒) until the
+  previous one has run; every stage was clickable in any order. Fixed in the shared hook, so
+  both desktop and mobile got it in one pass. Only advances on a clean completion, never a
+  partial/errored/cancelled run. Live-verified against the real library: ran real Audit,
+  confirmed Preview unlocked while the destructive stages stayed locked. 1539/1539 pytest.
+
+- **Control Panel (desktop): real credit balance and a real Live Mirror, both previously
+  missing.** The overlay was never given the `account` data `App.jsx` already fetches, so its
+  header fell back to a build-stamp string and its vitals list stayed 3 items instead of the
+  design's 4. Live Mirror had working CSS and a working mobile implementation
+  (`/api/watch/status`, already shipped) that was simply never ported to desktop's own,
+  separate section. Both fixed; live-verified against real account/watch state. 1539/1539
+  pytest. Second/third items off the design-fidelity punch list — see
+  `docs/DECISIONS.md`.
+
+- **Duplicate Review (desktop) rebuilt against its real, previously-unopened design.** The
+  component's own header comment claimed no locked mockup existed for this overlay — it did
+  (`Duplicate Review.dc.html`, complete, 244 lines) and was never read. Now matches it: the
+  real header (← Library / divider / label / filter-by-filename search), a hero block
+  (eyebrow/serif title/3 stat cards), a color-coded similarity badge (red/gold/purple/blue,
+  driven by the real per-group `closeness_pct`), a "★ suggested keep" ribbon tracking the
+  algorithm's own pick independent of whatever the owner has toggled, a corrected Resolve
+  label ("keep 1, remove N"), and a session-local "Skip for now" (hides a card, no mutation).
+  Live-verified against the real library (218 real duplicate groups). 1539/1539 pytest. First
+  item off a full design-fidelity audit covering every shipped surface — see
+  `docs/DECISIONS.md`'s "Design-fidelity audit... punch list" entry for the complete backlog.
+
+- **A real, severe, pre-existing bug: opening Image Details (desktop and mobile) could
+  enter an infinite refetch loop** — reported by the owner via two screen recordings
+  ("even worse now," "seizure inducing"), reproduced live (~1,000 identical
+  `GET /api/next/detail/<id>` requests fired in a few seconds), and root-caused to
+  `App.jsx`'s (and `AppMobile.jsx`'s identical copy for `ImageDetailsMobile.jsx`)
+  `advParams` object being built fresh every render and used by reference in
+  `useImageDetails.js`'s fetch effect's dependency array — a new reference every render
+  re-fired the effect every render, forever. This is what produced the reported stutter/
+  stuck-loading/flashing: a real render briefly completing, then immediately reverting as
+  the next re-render already had a new `advParams` object queued. Fixed by memoizing both
+  call sites' `advParams` on the actual underlying values, not the object identity.
+  Verified live post-fix: zero new requests over a 3-second settle window after the initial
+  load, Details rendering and staying rendered. 1539/1539 pytest. Full reasoning, including
+  why this affected every image on both platforms and not just the one in the report video,
+  in `docs/DECISIONS.md`'s entry of the same date.
 
 ## [2.5.0] - 2026-07-25 — Upscale where PixAI puts it, five filters of our own, metadata that captures itself, and a settable library folder
 

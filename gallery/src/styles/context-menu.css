@@ -1,0 +1,17 @@
+/* Grid right-click context menu (the five classic actions, React port). */
+.mgctx {
+  position: fixed; z-index: 60; min-width: 168px; padding: 5px;
+  border-radius: 10px; background: #0c0a1a; border: 1px solid var(--surface1);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .62); display: flex; flex-direction: column; gap: 1px;
+  animation: mgctxIn .12s cubic-bezier(.2, .9, .24, 1) both;
+}
+@keyframes mgctxIn { from { opacity: 0; transform: translateY(-3px) scale(.98); } to { opacity: 1; transform: none; } }
+.mgctx-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  font-family: inherit; font-size: 12.5px; color: var(--subtext); background: transparent;
+  border: none; border-radius: 7px; padding: 8px 10px; cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.mgctx-item:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text); }
+.mgctx-ico { width: 16px; text-align: center; font-size: 12px; color: var(--overlay0); flex: none; }
+.mgctx-item:hover .mgctx-ico { color: var(--accent); }

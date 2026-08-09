@@ -1,7 +1,10 @@
-"""The Loom shell must load the shared mg-notify.js (Ach/Toast/Jobs/JobsCard) and carry the
-two DOM anchors JobsCard needs to render the activity tray -- a cheap regression guard against
-this shell edit being silently reverted (the achievement-toast path needs no anchor at all,
-see mg-notify.js's own top-of-file comment; only the visible Job Tracker card does)."""
+"""The Loom shell and the shared notify system (Ach/Toast/Jobs/ActivityTray) -- a cheap
+regression guard on the contract between them. Ported 2026-08-08 (no-vanilla campaign,
+component 6): static/mg-notify.js is DELETED; the notify system now lives in React at
+gallery/src/notify/ and rides the Loom's own bundle (loom/dist/master-storyboard.bundle.js
++ .css), so the shell must NOT load the old script or ship the old anchor divs -- the React
+<ActivityTray> portals to body and renders #jobs-fab/#jobs-tray itself, with the SAME ids,
+which is what keeps the shell's Loom-scoped z-index overrides working."""
 import re
 from pathlib import Path
 
@@ -10,18 +13,32 @@ from tests.conftest import login_client
 
 
 def test_loom_shell_loads_shared_notify_script_and_anchors(tmp_path):
+    # Port note 2026-08-08: this test used to assert the OPPOSITE -- that the shell loads
+    # /static/mg-notify.js and carries the #jobs-fab/#jobs-tray anchor divs. Both are gone
+    # on purpose (the bundle carries notify; React renders the anchors), so the guard now
+    # points the other way: a reappearing script tag or anchor div means the shell edit
+    # was reverted to the vanilla wiring.
     cli = login_client(tmp_path)
     body = cli.get("/loom").get_data(as_text=True)
-    assert '<script src="/static/mg-notify.js"></script>' in body
-    assert 'id="jobs-fab"' in body
-    assert 'id="jobs-tray"' in body
+    assert "/static/mg-notify.js" not in body, (
+        "the Loom shell references the deleted mg-notify.js -- the React bundle carries "
+        "the notify system now")
+    assert 'id="jobs-fab"' not in body and 'id="jobs-tray"' not in body, (
+        "the shell ships its own anchor divs again -- React's <ActivityTray> renders "
+        "these ids itself; a second copy means duplicate ids on the page")
+    # The ids still matter to the shell: its Loom-scoped lift over .lv-overlay(400) must
+    # keep targeting the React-rendered elements.
+    assert "#jobs-fab  { z-index: 401 !important; }" in body
+    assert "#jobs-tray { z-index: 402 !important; }" in body
 
 
 def test_loom_shell_lifts_activity_and_help_widgets_above_the_overlay(tmp_path):
     """LoomV2's .lv-overlay (z-index:400, opaque) buried the Activity chip (#jobs-fab, z234
-    from mg-notify.js) and the ? help FAB (#eb-help-btn, z300) so both were invisible on /loom
-    though the wiki documents them as usable there. The shell now lifts them just above 400
-    (401/402), Loom-scoped -- mg-notify.js keeps its base 234 so the gallery is untouched."""
+    from the notify styles) and the ? help FAB (#eb-help-btn, z300) so both were invisible on
+    /loom though the wiki documents them as usable there. The shell now lifts them just above
+    400 (401/402), Loom-scoped -- the notify stylesheet keeps its base 234 so the gallery is
+    untouched. (Port note 2026-08-08: the base z used to live in static/mg-notify.js's
+    injected CSS; it now lives in gallery/src/styles/notify.css, same numbers.)"""
     cli = login_client(tmp_path)
     body = cli.get("/loom").get_data(as_text=True)
     # the Loom-only <style> override lifts the shared jobs widgets over .lv-overlay(400)
@@ -30,10 +47,11 @@ def test_loom_shell_lifts_activity_and_help_widgets_above_the_overlay(tmp_path):
     # the shell-only help FAB + its modal clear it too (401/402, not the old 300/301)
     assert "right:18px;z-index:401;width:38px" in body                # #eb-help-btn
     assert "inset:0;z-index:402;background:rgba(6,4,16,.72)" in body   # #eb-help modal
-    # the raise is Loom-scoped: mg-notify.js still ships the base 234 (gallery unaffected)
-    notify = (Path(moonglade_gallery.__file__).parent / "static" / "mg-notify.js").read_text(encoding="utf-8")
-    assert "z-index:234" in notify
-    assert "z-index:401" not in notify and "z-index:402" not in notify
+    # the raise is Loom-scoped: notify.css still ships the base 234/235 (gallery unaffected)
+    css = _notify_css()
+    assert "z-index:234" in css   # #jobs-fab
+    assert "z-index:235" in css   # #jobs-tray
+    assert "z-index:401" not in css and "z-index:402" not in css
 
 
 # ---------------------------------------------------------------------------
@@ -95,9 +113,29 @@ def test_deep_focus_prompt_edit_is_not_silent_about_destroying_an_override():
 # ---------------------------------------------------------------------------
 # The activity card shows words, not internal identifiers
 # ---------------------------------------------------------------------------
+# Port note 2026-08-08: these read static/mg-notify.js until the React port. The kind
+# mapping now lives in gallery/src/notify/format.js (pure, exported) and the row render
+# in gallery/src/notify/ActivityTray.jsx; the injected-CSS block became
+# gallery/src/styles/notify.css. Same assertions, retargeted.
 
-def _notify_js():
-    return (Path(__file__).resolve().parents[1] / "static" / "mg-notify.js").read_text(encoding="utf-8")
+def _notify_dir():
+    return Path(__file__).resolve().parents[1] / "gallery" / "src" / "notify"
+
+
+def _format_js():
+    return (_notify_dir() / "format.js").read_text(encoding="utf-8")
+
+
+def _tray_jsx():
+    return (_notify_dir() / "ActivityTray.jsx").read_text(encoding="utf-8")
+
+
+def _notify_css():
+    """notify.css with its comments stripped -- RULES only. The file's own header narrates
+    the Loom shell's `#jobs-fab{z-index:401}` override in prose, so matching against the
+    raw text finds the comment before the real rule (bit this port's first run)."""
+    raw = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "styles" / "notify.css").read_text(encoding="utf-8")
+    return re.sub(r"/\*.*?\*/", "", raw, flags=re.S)
 
 
 def test_activity_rows_translate_the_job_type_instead_of_printing_the_enum():
@@ -105,11 +143,14 @@ def test_activity_rows_translate_the_job_type_instead_of_printing_the_enum():
     row's sub-line used to print it raw under `.jt-kind{text-transform:capitalize}` -- which
     rendered the non-word "Cli" under every terminal-run job.
 
-    Bite: put `esc(j.type||'job')` back in the sub-line and this fails.
+    Bite: put `j.type` back in the sub-line raw and this fails.
     """
-    js = _notify_js()
-    assert "kindLabel(j.type)" in js, "the sub-line still prints the raw job type enum"
-    assert "cli: 'Terminal'" in js, "no display name for the 'cli' job type"
+    # The render half: the sub-line goes through kindLabel, not the raw enum.
+    assert "kindLabel(j.type)" in _tray_jsx(), "the sub-line still prints the raw job type enum"
+    # The mapping half: format.js owns KIND_LABEL (double-quoted strings there, so the old
+    # single-quote probe is updated with it).
+    js = _format_js()
+    assert 'cli: "Terminal"' in js, "no display name for the 'cli' job type"
     # Every type any writer actually emits needs a mapping, or it leaks through capitalized.
     for kind in ("cli", "panel", "generate", "delete", "import"):
         assert ("%s:" % kind) in js or ("'%s':" % kind) in js, (
@@ -119,8 +160,8 @@ def test_activity_rows_translate_the_job_type_instead_of_printing_the_enum():
 def test_cli_jobs_are_labelled_in_words_not_command_slugs():
     """The activity row's title is `j.label`, and _cli_job_finish never relabels -- so a
     label set at start is what the user reads forever. Passing the bare command name put
-    "generate-video" in a list beside real sentences, and mg-notify's completion toast is
-    built as `label + " — done"`, so it also popped "generate-video — done".
+    "generate-video" in a list beside real sentences, and the notify system's completion
+    toast is built as `label + " — done"`, so it also popped "generate-video — done".
 
     Noun phrases on purpose: the same string has to read correctly while running, when done,
     and inside that toast.
@@ -150,19 +191,23 @@ def test_notify_components_do_not_inherit_their_font_from_the_host_page():
     the two hosts disagree: the gallery's BASE_HTML body declares `system-ui, sans-serif`,
     while _LOOM_SHELL's body set only background and margin. Those three are siblings of
     #root in that shell, so on /loom they inherited nothing and fell back to the browser
-    default. mg-notify is host-neutral by design, so the component owns this.
+    default. The notify system is host-neutral by design, so the component owns this.
 
     The original 2026-07-21 fix covered only those three roots; the achievement celebration
-    (.ach-m2) and the Folio of Honors subtree (#ach-modal -- the achievement-specific id, not
-    the `.ach-modal` class shared with #contest-modal/#art-modal) had the exact same gap and
-    got the same fix afterward.
+    (.ach-m2) had the exact same gap and got the same fix afterward.
 
-    Bite: drop font-family from any of the five roots and this fails, naming it.
+    Port note 2026-08-08: retargeted from mg-notify.js's injected CSS to
+    gallery/src/styles/notify.css. #ach-modal (the Folio of Honors / Trophy Hall subtree)
+    is DROPPED from the list -- that modal's machinery was retired as dead code in the
+    React port (no served page carries the #ach-modal skeleton; the React Folio replaced
+    it) and notify.css deliberately did not carry its rules forward.
+
+    Bite: drop font-family from any of the four roots and this fails, naming it.
     """
-    js = _notify_js()
-    for sel in ("#jobs-fab{", "#jobs-tray{", "#mg-toasts{", ".ach-m2{", "#ach-modal{"):
-        i = js.index(sel)
-        rule = js[i:js.index("}", i)]
+    css = _notify_css()
+    for sel in ("#jobs-fab{", "#jobs-tray{", "#mg-toasts{", ".ach-m2{"):
+        i = css.index(sel)
+        rule = css[i:css.index("}", i)]
         assert "font-family" in rule, (
             "%s does not state its own font-family -- it will inherit the host page's, and "
             "the gallery and the Loom shell do not agree" % sel.rstrip("{"))
@@ -170,8 +215,8 @@ def test_notify_components_do_not_inherit_their_font_from_the_host_page():
 
 def test_loom_shell_body_declares_a_font_for_what_mounts_outside_root():
     """The shell mounts the Activity chip/tray, the toasts and the ? FAB outside #root, so
-    they inherit from body, not from .sb-root's own font-family. Belt to mg-notify's braces:
-    the shell should not hand anything an unstyled baseline."""
+    they inherit from body, not from .sb-root's own font-family. Belt to notify.css's braces
+    (mg-notify's, pre-port): the shell should not hand anything an unstyled baseline."""
     src = (Path(__file__).resolve().parents[1] / "moonglade_gallery.py").read_text(encoding="utf-8")
     shell = src[src.index("_LOOM_SHELL = r"):]
     body_rule = shell[shell.index("body {"):shell.index("}", shell.index("body {"))]

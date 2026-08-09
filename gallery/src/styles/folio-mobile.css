@@ -1,0 +1,279 @@
+/* ============================================================================
+   The Folio of Honors -- MOBILE full-page destination. Pixel source of truth:
+   design_handoff/design_handoff_moonglade_suite/"Folio Mobile.dc.html" (527
+   lines). fm- prefix throughout (Folio Mobile), matching every other mobile
+   surface's own prefix convention (glm-/ctm-/cm-/idm-/lbm-). Colors are all
+   DESIGN_TOKENS_CSS var()s -- no literal hex standing in for a token that
+   exists, same rule every other mobile stylesheet documents for itself.
+   Tier-triad tokens (--tc/--tcl/--tcd) and the rarity pill/glitch-reveal
+   classes are REUSED verbatim from folio-overlay.css (byte-for-byte, not
+   redefined) -- see FolioMobile.jsx's own import list.
+
+   WHY A DEDICATED FULL-SCREEN PRESENTATION, NOT MobileScreen.jsx: same
+   reasoning as ImageDetailsMobile.jsx's own header comment -- this design's
+   own top bar carries a back link, a title chip AND the narrator avatar (a
+   three-part header), plus a whole second layer of hero/tabs beneath it,
+   which MobileScreen's fixed back-chevron+title contract wasn't built for.
+   Folio is also reachable from the hero's OWN icon row (not the hamburger
+   Menu sheet's six destinations), one level up from every MobileScreen
+   consumer. */
+
+@keyframes fmIn { from { opacity: 0; transform: scale(.98) translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes fmOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(10px); } }
+@keyframes fmPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(79,201,154,.5); } 50% { box-shadow: 0 0 0 6px rgba(79,201,154,0); } }
+@keyframes fmGlint { 0% { transform: translateX(-60px); opacity: 0; } 12% { opacity: 1; } 45% { transform: translateX(220px); opacity: 0; } 100% { transform: translateX(220px); opacity: 0; } }
+
+.fm-root { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
+  background: var(--mantle); color: var(--text);
+  animation: fmIn .22s cubic-bezier(.2,.9,.24,1) both; }
+.fm-root.closing { animation: fmOut .18s ease both; }
+
+/* ---- sticky top bar: back link / title chip / narrator avatar ---- */
+.fm-topbar { flex: none; display: flex; align-items: center; gap: 8px; position: sticky; top: 0; z-index: 5;
+  background: var(--mantle); padding: max(14px, env(safe-area-inset-top)) 16px 8px; }
+.fm-back { font-size: 11.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: rgba(226,222,238,.75); cursor: pointer; background: none; border: none; padding: 0; font-family: inherit; }
+.fm-fill { flex: 1 1 auto; }
+.fm-titlechip { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: rgba(226,222,238,.55); white-space: nowrap; }
+.fm-avatar { position: relative; width: 26px; height: 26px; border-radius: 50%; flex: none; cursor: pointer;
+  border: 1px solid rgba(255,255,255,.16); background: none; padding: 0;
+  background-image: url('/branding/mascots/gen_nel.png'); background-position: 58% 10%; background-size: 250%; background-repeat: no-repeat; }
+.fm-avatar-dot { position: absolute; bottom: -1px; right: -1px; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--emerald); border: 1.5px solid var(--mantle); animation: fmPulse 2.6s ease-in-out infinite; }
+
+/* ---- scrollable body (hero + tabs live inside, matching the design's own
+   sc-if gate -- everything below the top bar waits for real data) ---- */
+.fm-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.fm-loading { padding: 40px 16px; text-align: center; color: var(--subtext); font-style: italic; }
+
+/* ---- hero header ---- */
+.fm-hero { flex: none; padding: 6px 16px 12px; }
+.fm-kicker { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9px;
+  letter-spacing: .16em; color: var(--overlay0); }
+.fm-h1 { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 22px;
+  color: var(--text); margin: 4px 0 0; }
+.fm-rulewrap { height: 2px; overflow: hidden; margin-top: 8px; width: 100%; position: relative; }
+.fm-rule { height: 100%; background: linear-gradient(90deg, var(--gold), rgba(212,175,55,0) 80%); }
+.fm-rule::after { content: ""; position: absolute; inset: 0; width: 46px;
+  background: linear-gradient(90deg, transparent, #fff4d1, transparent); animation: fmGlint 3.6s ease-in-out infinite; }
+.fm-statline { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--subtext); margin-top: 8px; }
+
+/* ---- Unleash pill -- added beyond the design mock (which has none, see
+   FolioMobile.jsx's own header comment): same real, persisted `triggered`
+   flag as desktop's pill, placed here since the top bar has no room. ---- */
+.fm-unleash { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; padding: 5px 11px;
+  border-radius: 999px; border: 1px solid var(--red); cursor: pointer; }
+.fm-unleash-dot { width: 9px; height: 9px; border-radius: 3px; border: 1px solid var(--red); background: transparent; }
+.fm-unleash-dot.on { background: var(--red); box-shadow: 0 0 6px color-mix(in srgb, var(--red) 70%, transparent); }
+.fm-unleash-label { font-size: 10px; font-weight: 700; letter-spacing: .04em; color: var(--red); white-space: nowrap; }
+
+/* ---- segmented tabs ---- */
+.fm-tabsrow { flex: none; display: flex; gap: 6px; padding: 4px 16px 12px; }
+.fm-tab { flex: 1; text-align: center; font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; padding: 8px 0; border-radius: 999px; cursor: pointer;
+  color: var(--subtext); background: transparent; border: 1px solid var(--surface1); font-family: inherit; }
+.fm-tab.on { color: var(--base); background: var(--lavender); border-color: var(--lavender); }
+
+/* ---- tab body ---- */
+.fm-body { padding: 0 16px 30px; }
+
+/* ---- section headings ---- */
+.fm-sech { display: flex; align-items: baseline; gap: 8px; padding-bottom: 6px;
+  border-bottom: 1px dashed var(--surface0); margin: 18px 0 10px; }
+.fm-sech b { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9.5px;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--overlay0); }
+.fm-sech span { font-size: 10px; color: var(--overlay0); }
+.fm-sech.emerald b { color: var(--emerald); }
+.fm-sech.feat b { color: var(--gunmetal); }
+.fm-count { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--overlay0); }
+.fm-count.feat { color: var(--gunmetal); }
+
+/* ---- horizontal scrollers (recent cards / relic chips / ladder icons) ---- */
+.fm-hscroll { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+
+/* ---- Recently entered cards ---- */
+.fm-reccard { flex: none; width: 84px; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  cursor: pointer; background: none; border: none; padding: 0; font-family: inherit; }
+.fm-reccard-imgwrap { width: 76px; height: 76px; border-radius: 12px; overflow: hidden; background: var(--surface0); }
+.fm-reccard-imgwrap img { width: 100%; height: 100%; object-fit: cover; }
+.fm-reccard-name { font-size: 10.5px; text-align: center; color: var(--subtext); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; width: 100%; }
+
+/* ---- ledger / statistics boxes (shared box style across both tabs, matching
+   the design's own single `ledgerBoxStyle` reused everywhere) ---- */
+.fm-ledgerbox { display: flex; flex-direction: column; gap: 1px; border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px; background: rgba(9,7,22,.6); padding: 10px 13px; }
+.fm-progrow { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+.fm-progrow-lab { flex: none; width: 84px; text-align: right; font-size: 8.5px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--overlay0); }
+.fm-progrow-lab.wide { width: 100px; text-align: left; font-size: 10.5px; font-weight: 400;
+  letter-spacing: normal; text-transform: none; color: var(--subtext); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fm-bartrack { flex: 1 1 auto; height: 3px; border-radius: 3px; overflow: hidden; background: var(--surface0); }
+.fm-bartrack i { display: block; height: 100%; border-radius: 3px; transition: width .5s;
+  background: linear-gradient(90deg, var(--purple-bright), var(--accent)); }
+.fm-bartrack i.rarity { background: var(--tc); }
+.fm-bartrack i.reach { background: linear-gradient(90deg, var(--emerald), var(--accent-soft)); }
+.fm-progrow-ct { flex: none; width: 38px; font-size: 10px; color: var(--subtext); text-align: right;
+  font-variant-numeric: tabular-nums; }
+.fm-laddericon-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.fm-laddericon-thumb { width: 16px; height: 16px; border-radius: 4px; flex: none; opacity: .8; object-fit: cover; }
+
+/* ---- Within reach ---- */
+.fm-reachcard { border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: rgba(9,7,22,.6);
+  padding: 10px 12px; margin-bottom: 8px; }
+.fm-reachtop { display: flex; align-items: baseline; gap: 7px; }
+.fm-reachtop b { font-family: Georgia, serif; font-weight: 400; font-size: 13px; color: var(--text); }
+.fm-reachnote { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--overlay0); }
+.fm-reachpts { font-size: 10px; color: var(--gold); }
+.fm-reachcard .fm-bartrack { margin-top: 7px; height: 3px; }
+
+/* ---- Relics (Summary carousel + full sheet) ---- */
+.fm-relicnote { font-size: 10px; color: var(--overlay0); margin-bottom: 2px; }
+.fm-relicchip { flex: none; width: 72px; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  background: none; border: none; padding: 0; cursor: pointer; font-family: inherit; }
+.fm-relicchip.dim { opacity: .55; }
+.fm-relicsw { display: flex; gap: 2px; }
+.fm-relicsw i { width: 9px; height: 9px; border-radius: 3px; border: 1px solid rgba(255,255,255,.14); }
+.fm-relicchip-name { font-size: 9.5px; text-align: center; color: var(--subtext); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; width: 100%; }
+
+/* ---- Nel strip ---- */
+.fm-nelstrip { display: flex; align-items: center; gap: 10px; margin: 20px 0 6px; padding: 11px 13px;
+  border-radius: 12px; border: 1px solid var(--surface1); background: var(--base); }
+.fm-nelimg { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(255,255,255,.16);
+  background-image: url('/branding/mascots/gen_nel.png'); background-position: 58% 10%; background-size: 250%; background-repeat: no-repeat; }
+.fm-nelquote { font-size: 11px; font-style: italic; color: var(--subtext); line-height: 1.4; cursor: pointer;
+  background: none; border: none; padding: 0; text-align: left; font-family: inherit; }
+
+/* ---- bucket filter chips (All tab) ---- */
+.fm-chipsrow { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 4px; margin-bottom: 14px; }
+.fm-chip { flex: none; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; padding: 7px 12px;
+  border-radius: 999px; cursor: pointer; color: var(--subtext); background: transparent;
+  border: 1px solid var(--surface1); font-family: inherit; white-space: nowrap; }
+.fm-chip.on { color: var(--base); background: var(--lavender); border-color: var(--lavender); }
+.fm-chip-ct { font-size: 9px; margin-left: 4px; color: var(--overlay0); }
+.fm-chip.on .fm-chip-ct { color: rgba(12,10,28,.6); }
+
+/* ---- ladder icon picker ---- */
+.fm-laddericon { flex: none; width: 62px; display: flex; flex-direction: column; align-items: center; gap: 5px;
+  cursor: pointer; background: none; border: none; padding: 0; font-family: inherit; }
+.fm-laddericon-tile { width: 52px; height: 52px; border-radius: 11px; overflow: hidden; outline: 2px solid transparent;
+  outline-offset: 2px; background: var(--base); }
+.fm-laddericon-tile img { width: 100%; height: 100%; object-fit: cover; }
+.fm-laddericon.zero .fm-laddericon-tile { filter: grayscale(.75) brightness(.45); }
+.fm-laddericon.on .fm-laddericon-tile { outline-color: var(--lavender); }
+.fm-laddericon-lab { font-size: 9px; text-align: center; color: var(--overlay0); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; width: 100%; }
+.fm-laddericon.on .fm-laddericon-lab { color: var(--text); }
+
+/* ---- hero single-card tier navigator ---- */
+.fm-herowrap { margin-top: 14px; border-radius: 16px; border: 1px solid rgba(255,255,255,.08);
+  background: var(--base); padding: 18px 16px 16px; display: flex; flex-direction: column;
+  align-items: center; text-align: center; }
+.fm-herokicker { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9px;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--tc); }
+.fm-herobadgewrap { position: relative; width: 168px; height: 168px; border-radius: 20px; overflow: hidden;
+  margin-top: 10px; outline: 3px solid var(--surface1); outline-offset: 4px; filter: grayscale(.75) brightness(.4); }
+.fm-herobadgewrap.earned { outline-color: var(--tc); filter: drop-shadow(0 0 18px var(--tc)); }
+.fm-heroimg { width: 100%; height: 100%; object-fit: cover; }
+.fm-herocheck { position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; background: var(--tc); color: var(--base);
+  font-size: 12px; font-weight: 800; }
+.fm-heronavrow { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.fm-heroarrow { flex: none; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--surface1);
+  display: flex; align-items: center; justify-content: center; font-size: 14px; color: var(--subtext);
+  cursor: pointer; background: none; font-family: inherit; }
+.fm-heropipsrow { display: flex; gap: 4px; }
+.fm-heropip { border-radius: 999px; height: 5px; width: 5px; background: var(--surface1); border: none;
+  padding: 0; cursor: pointer; transition: width .15s, background .15s; }
+.fm-heropip.on { width: 14px; background: var(--tc); }
+.fm-heropip.earned { background: var(--tc); opacity: .35; }
+.fm-heroname { font-family: Georgia, serif; font-style: italic; font-size: 18px; color: var(--text); margin-top: 12px; }
+.fm-herodesc { font-size: 11.5px; font-style: italic; color: var(--subtext); line-height: 1.5; margin-top: 5px;
+  transition: color .25s; }
+.fm-herometarow { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.fm-heropts { font-size: 11px; color: var(--gold); }
+.fm-herosubmeta { font-size: 10.5px; color: var(--overlay0); margin-top: 6px; }
+
+/* ---- flat row list (ladder tiers / milestones / masteries / feats) ---- */
+.fm-listcol { display: flex; flex-direction: column; gap: 7px; }
+.fm-row { position: relative; overflow: hidden; display: flex; align-items: center; gap: 10px; padding: 9px 10px;
+  border-radius: 12px; border: 1px solid rgba(255,255,255,.08); background: rgba(9,7,22,.6); cursor: pointer;
+  width: 100%; text-align: left; font-family: inherit; }
+.fm-row.earned { box-shadow: 0 0 10px color-mix(in srgb, var(--tc) 20%, transparent); }
+/* Locked tier/milestone/mastery rows stay CLICKABLE (design's own mkTierRow/
+   mkFlatRow onClick fires regardless of earned) -- only a locked FEAT row
+   (.fm-row-featlocked below) is non-interactive, matching mkFeatRow's own
+   `if (!locked) this._openDetail(...)` guard. */
+.fm-row-featlocked { cursor: default; background: rgba(5,4,13,.66); }
+.fm-row-gem { position: absolute; top: 0; left: 0; right: 0; height: 2.5px; pointer-events: none; opacity: .55;
+  background: linear-gradient(90deg, transparent, var(--tc) 18%, var(--tcl) 50%, var(--tc) 82%, transparent); }
+.fm-row.earned .fm-row-gem { opacity: 1; }
+.fm-row-thumbwrap { flex: none; width: 46px; height: 46px; border-radius: 10px; overflow: hidden; position: relative; }
+.fm-row-thumbwrap img { width: 100%; height: 100%; object-fit: cover; }
+.fm-row.locked .fm-row-thumbwrap img { filter: grayscale(.7) brightness(.5); }
+.fm-row-lock { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.42); color: rgba(255,255,255,.35); font-size: 11px; }
+.fm-row-textcol { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.fm-row-name { font-family: Georgia, serif; font-size: 13.5px; color: var(--text); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.fm-row-meta { font-size: 10px; font-style: italic; color: var(--subtext); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+/* Locked FEAT row only -- mkFeatRow's own dimmer name/meta treatment (tier/
+   milestone/mastery rows keep normal --text/--subtext color even locked,
+   matching mkTierRow/mkFlatRow's own undimmed nameStyle/metaStyle). */
+.fm-row-featlocked .fm-row-name { color: #4a4067; }
+.fm-row-featlocked .fm-row-meta { color: #35304e; }
+.fm-row-rightcol { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.fm-row-rightcol.center { flex-direction: row; align-items: center; }
+.fm-row-pill { font-size: 8px; font-weight: 800; text-transform: uppercase; padding: 2px 6px; border-radius: 5px;
+  letter-spacing: .07em; color: #241c10;
+  background: linear-gradient(180deg, var(--tcl) 0%, var(--tc) 50%, var(--tcd) 100%); }
+.fm-row-pill.feat { color: #171a20; }
+.fm-row-pts { font-size: 9px; color: var(--overlay0); }
+.fm-row.earned .fm-row-pts { color: var(--gold); }
+.fm-row-glyph { font-size: 13px; }
+
+/* ---- glitch-reveal text (folio-glitch-spec.md, same law as desktop's
+   .mgfo-card-ds/.mgfo-recds -- see folio-overlay.css's own header comment.
+   Applied here to the bottom detail sheet's description, since that's the
+   ONE description text FolioMobile renders inline (row descriptions are
+   scoped out on the compact row -- see FolioMobile.jsx's header comment). ---- */
+.fm-sheet-desc.mgfo-glitch {
+  font-style: normal; font-family: ui-monospace, Menlo, monospace; letter-spacing: .01em;
+  color: var(--red); text-shadow: 0 0 9px color-mix(in srgb, var(--red) 50%, transparent);
+}
+.fm-sheet-desc.mgfo-settled { color: var(--red); }
+
+/* ---- bottom detail sheet content (chrome itself is MobileSheet.jsx's
+   .glm-scrim/.glm-sheet, reused as-is -- see FolioMobile.jsx) ---- */
+.fm-sheet-imgwrap { width: 100%; aspect-ratio: 1.6 / 1; border-radius: 14px; overflow: hidden; margin-bottom: 12px;
+  background: var(--surface0); }
+.fm-sheet-imgwrap.earned { box-shadow: 0 0 20px color-mix(in srgb, var(--tc) 30%, transparent); }
+.fm-sheet-imgwrap img { width: 100%; height: 100%; object-fit: cover; }
+.fm-sheet-name { font-family: Georgia, serif; font-style: italic; font-size: 19px; color: var(--text); }
+.fm-sheet-metarow { display: flex; align-items: center; gap: 9px; margin-top: 8px; }
+.fm-sheet-pts { font-size: 11px; color: var(--gold); }
+.fm-sheet-desc { font-size: 12.5px; font-style: italic; color: var(--subtext); line-height: 1.55; margin-top: 10px; }
+.fm-sheet-sub { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--overlay0); margin-top: 8px; }
+.fm-sheet-closebtn { display: block; width: 100%; box-sizing: border-box; margin-top: 14px; text-align: center;
+  padding: 11px; border-radius: 11px; border: 1px solid var(--surface1); background: none; font-size: 12.5px;
+  font-weight: 700; color: var(--subtext); cursor: pointer; font-family: inherit; }
+
+/* ---- Relics sheet (full list) ---- */
+.fm-relicrow { display: flex; align-items: center; gap: 11px; padding: 9px 0; border-bottom: 1px dashed var(--surface0); }
+.fm-relicrow-sw { display: flex; gap: 3px; flex: none; }
+.fm-relicrow-sw i { width: 9px; height: 9px; border-radius: 3px; border: 1px solid rgba(255,255,255,.14); }
+.fm-relicrow-textcol { flex: 1 1 auto; min-width: 0; }
+.fm-relicrow-name { font-size: 12.5px; color: var(--subtext); }
+.fm-relicrow-name.active { color: var(--text); font-weight: 600; }
+.fm-relicrow-desc { font-size: 10.5px; font-style: italic; color: var(--overlay0); margin-top: 1px; }
+.fm-relicrow-sub { flex: none; font-size: 9.5px; color: var(--overlay0); }
+.fm-relicrow-sub.active { color: var(--emerald); }
+
+.fm-empty { color: var(--overlay0); font-size: 11.5px; font-style: italic; padding: 8px 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fm-avatar-dot, .fm-rule::after { animation: none; }
+}

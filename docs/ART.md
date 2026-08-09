@@ -121,8 +121,8 @@ not specced.
 | 4 | **Marks system** | `marks/marks.json` + `marks/<id>.png` (+ optional `<id>.ico`) (`:1279`) | PNG **512×512** RGBA; ICO carries **7 frames** (16·24·32·48·64·128·256). 5 marks live: `mark_4` + `mark_12` (`kind:"tile"`), `mark_62` / `mark_63` / `mark_74` (`kind:"alpha"`) | 42px. `"tile"` → `.mk-tile` rounded tile, `"alpha"` → floater. 16 `MARK_ANIMS` (15 + `none`, `:1268`). The `.ico` feeds the Desktop `.lnk` via `/api/branding/shortcut` (`:1349`) | ✅ |
 | 5 | **Badge masters** | `badges/<achievement-id>.png` | **2000×2000** RGBA — 53 of 57 (4 exceptions below). 57 files; ids match the roster exactly (owner's off-repo backup of `achievements_roster_57.json`; committed copy scrubbed 2026-07-27), 0 missing / 0 extra | Tiles **46px** (`.ach-card .ico`) + Recent rail **38px**, both via `/badge-thumb/<id>.png` (`_badge_thumb(…, size=256)`, lazy into `_thumbs/`, mtime self-heal, master fallback). **The toast pulls the MASTER at 100px** (`.ach-m2 .badge`, `:4928`) — not the thumb | ✅ |
 | 6 | **Mystery tile** | `mystery/secret_feat.png` (`:5107`) | **512×512** RGBA | Fills the 46px `.ico` well for masked feats | ✅ MYS8 |
-| 7 | **Legendary frame** | `frames/legendary.png` (`:4980`) | **1100×829** RGBA | 9-slice `border-image`; `border-width:46px 44px`; `slice:16.8% 13.3% 16.8% 13%`; `outset:6px` | ✅ LEG6 ⚠️ scheduled for removal — `DECISIONS.md`, 2026-07-26 |
-| 8 | **Feat frame** | `frames/feat.png` (`:4981`) | **1100×719** RGBA | 9-slice; `border-width:46px 38px`; `slice:15.8% 10.3% 16.8% 10%`; `outset:6px` | ✅ FEAT13 |
+| 7 | **Legendary frame** | ~~`frames/legendary.png`~~ | — | Frames axed everywhere 2026-08-01 | 🗑 DELETED 2026-08-07, owner ruling (art-decision pass) |
+| 8 | **Feat frame** | ~~`frames/feat.png`~~ | — | Frames axed everywhere 2026-08-01 | 🗑 DELETED 2026-08-07, owner ruling (art-decision pass) |
 | 9 | **Reward · gift** | `rewards/gift.png` (`:5310`) | **128×119** RGBA | **15×15** in the toast reward ribbon `.rwd .giftbox` | ✅ CLAIM7 |
 | 10 | **Reward · claim** | `rewards/claim.png` (`:5620`) | **128×128** RGBA | **15×15** in the header credit chip `.claim-ico` | ✅ CLAIM3 |
 | 11 | **Toast mascot** (per-ach) | chain: `mascots/ach/<id>.webp` → `<id>.png` → `mascots/present_<tier>.png` (`:5332`) | 57 png + **1 webp** (`first-light.webp`, 480×480, 76 frames — the only animated file; `first-light` also ships a `.png`). PNGs span **389×400** (`kindred-spirits`) to **1846×1871** (`triggered.png`): most are ~390–600 wide (the single most common exact size is 597×504), three are **landscape 597×336** (`first-spark` · `night-owl` · `under-the-hood`), and there are **two** large outliers — `moonwatch.png` **1728×1152** and `triggered.png` **1846×1871** (the largest — a live feat mascot, byte-identical to the `nel_carl.png` orphan below). `present_*` 269–359 × 256–263 | Walks the chain on 404, removes itself only at the end. feat falls back to `present_legendary`. Adaptive alpha-bbox seating via `_seatMascot` | ✅ |
@@ -194,8 +194,8 @@ and the 2026-07-13 "alpha gaps" are both **closed**: every winner is keyed, on d
 
 | Slot | Winner | Why it won | Landed at | Verified |
 |---|---|---|---|---|
-| Legendary frame | **LEG6** | gold + emerald = the house palette | `frames/legendary.png` | ✅ 1100×829 ⚠️ scheduled for removal, see §1.2 |
-| Feat frame | **FEAT13** | ruby thorns — the showstopper; feats are 0-point pure bragging rights, so the most dramatic frame fits | `frames/feat.png` | ✅ 1100×719 |
+| Legendary frame | **LEG6** | gold + emerald = the house palette | ~~`frames/legendary.png`~~ | 🗑 deleted 2026-08-07 (frames axed; owner ruling) |
+| Feat frame | **FEAT13** | ruby thorns — the showstopper; feats are 0-point pure bragging rights, so the most dramatic frame fits | ~~`frames/feat.png`~~ | 🗑 deleted 2026-08-07 (frames axed; owner ruling) |
 | Claim icon (daily) | **CLAIM3** | the re-keyed gallery gem — "a BETTER GEM" | `rewards/claim.png` | ✅ 128×128 |
 | Reward ribbon (redeem) | **CLAIM7** | gift box | `rewards/gift.png` | ✅ 128×119 |
 | Mystery tile | **MYS8** | SecretFeatSquareAlpha | `mystery/secret_feat.png` | ✅ 512×512 |

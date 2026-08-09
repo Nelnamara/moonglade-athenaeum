@@ -1,0 +1,117 @@
+/* My Art mobile -- Moonglade Mobile.dc.html screenIsMyArt block (2026-08-07 update).
+   Values are the design's own literal pixel/color strings, ported from its inline-style
+   generators. New myam- prefix (not mgma- or the old retired gmob- list rows) so this
+   can never silently drift onto desktop's or the old surface's classes. */
+
+.myam-statrow { display: flex; gap: 8px; padding: 2px 0 12px; border-bottom: 1px solid var(--surface1);
+  margin-bottom: 12px; }
+.myam-statcell { flex: 1 1 0; display: flex; flex-direction: column; gap: 3px; }
+.myam-statval { font-size: 19px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+.myam-statlabel { font-size: 8px; font-weight: 700; letter-spacing: .12em; color: var(--overlay0); }
+
+.myam-tabrow { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 12px; margin: 0 -2px; }
+button.myam-tab { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px;
+  border-radius: 999px; font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap;
+  color: var(--subtext); background: var(--surface0); border: 1px solid var(--surface1);
+  font-family: inherit; }
+button.myam-tab.on { font-weight: 700; color: var(--text);
+  background: color-mix(in srgb, var(--lavender) 22%, var(--surface0));
+  border-color: color-mix(in srgb, var(--lavender) 55%, transparent); }
+.myam-pill { font-size: 9.5px; font-weight: 700; padding: 0 6px; border-radius: 999px;
+  color: var(--overlay0); background: var(--mantle); }
+.myam-pill.on { color: var(--mauve); background: rgba(182,146,230,.2); }
+
+.myam-toolbar { display: flex; align-items: center; gap: 7px; margin-bottom: 12px; flex-wrap: wrap; }
+.myam-visseg { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface0);
+  border: 1px solid var(--surface1); }
+button.myam-vischip { flex: 1; text-align: center; padding: 5px 8px; border-radius: 8px; font-size: 10.5px;
+  font-weight: 600; cursor: pointer; color: var(--subtext); background: transparent; border: none;
+  font-family: inherit; }
+button.myam-vischip.on { color: var(--base); background: var(--lavender); }
+button.myam-sortbtn { flex: none; font-size: 11px; padding: 6px 10px; border-radius: 9px; cursor: pointer;
+  color: var(--subtext); background: var(--surface0); border: 1px solid var(--surface1); font-family: inherit; }
+button.myam-traincta { flex: none; font-size: 11px; font-weight: 700; padding: 6px 12px; border-radius: 9px;
+  cursor: pointer; color: var(--gold); background: rgba(212,175,55,.1); border: 1px solid rgba(212,175,55,.4);
+  font-family: inherit; }
+.myam-spacer { flex: 1 1 auto; }
+button.myam-managebtn { font-size: 11px; padding: 6px 12px; border-radius: 9px; cursor: pointer;
+  color: var(--subtext); background: var(--surface0); border: 1px solid var(--surface1); font-family: inherit; }
+button.myam-managebtn.on { color: #fff; background: var(--lavender); border-color: var(--lavender); }
+.myam-err { font-size: 11.5px; color: var(--red, #f38ba8); margin-bottom: 10px; }
+
+.myam-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.myam-card { border-radius: 13px; overflow: hidden; border: 1px solid var(--surface1);
+  background: var(--mantle); cursor: pointer; }
+.myam-card.sel { border-color: var(--lavender); box-shadow: 0 0 0 1px var(--lavender); }
+.myam-thumb { position: relative; aspect-ratio: 3 / 4; background: var(--surface0); }
+.myam-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.myam-play { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 20px;
+  color: rgba(255,255,255,.9); text-shadow: 0 2px 8px rgba(0,0,0,.6); }
+.myam-visbadge { position: absolute; left: 6px; top: 6px; z-index: 2; font-size: 8.5px; font-weight: 700;
+  padding: 2px 7px; border-radius: 999px; color: var(--subtext); background: rgba(8,6,20,.7);
+  border: 1px solid var(--surface1); }
+.myam-visbadge.pub { color: var(--emerald); background: rgba(79,201,154,.18);
+  border-color: rgba(79,201,154,.4); }
+.myam-check { position: absolute; top: 6px; right: 6px; z-index: 2; width: 20px; height: 20px;
+  border-radius: 50%; display: grid; place-items: center; font-size: 11px;
+  background: rgba(8,6,20,.6); border: 1px solid rgba(255,255,255,.5); }
+.myam-check.on { background: var(--lavender); color: var(--base); border-color: var(--lavender); }
+button.myam-menubtn { position: absolute; top: 5px; right: 5px; z-index: 2; width: 24px; height: 24px;
+  border-radius: 7px; display: grid; place-items: center; font-size: 14px; cursor: pointer; color: var(--text);
+  background: rgba(8,6,20,.7); border: 1px solid var(--surface1); backdrop-filter: blur(3px);
+  font-family: inherit; }
+.myam-tagrow { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px 7px 6px; display: flex;
+  gap: 4px; flex-wrap: wrap; background: linear-gradient(to top, rgba(8,6,20,.9), transparent); }
+.myam-tagchip { font-size: 8.5px; font-weight: 600; padding: 1px 6px; border-radius: 999px;
+  color: var(--mauve); background: rgba(182,146,230,.18); border: 1px solid rgba(182,146,230,.3); }
+.myam-foot { display: flex; align-items: center; gap: 7px; padding: 7px 9px; }
+.myam-avatar { flex: none; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center;
+  font-size: 8.5px; font-weight: 800; color: var(--base);
+  background: linear-gradient(135deg, var(--mauve), var(--lavender)); }
+.myam-metacol { flex: 1 1 auto; min-width: 0; }
+.myam-title { font-size: 10.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.myam-date { font-size: 8.5px; color: var(--overlay0); }
+.myam-likes { flex: none; font-size: 10px; }
+
+.myam-loracard { display: flex; align-items: center; gap: 10px; padding: 10px 11px; border-radius: 12px;
+  border: 1px solid var(--surface1); background: var(--mantle); margin-bottom: 8px; text-decoration: none; }
+.myam-loramark { flex: none; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center;
+  font-size: 13px; background: rgba(212,175,55,.12); border: 1px solid rgba(212,175,55,.3); }
+.myam-loracol { flex: 1 1 auto; min-width: 0; }
+.myam-loraname { font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.myam-lorameta { font-size: 10px; color: var(--subtext); margin-top: 2px; }
+
+.myam-bulkbar { position: sticky; bottom: 0; flex: none; display: flex; align-items: center; gap: 7px;
+  padding: 10px 13px calc(10px + env(safe-area-inset-bottom)); margin: 0 -14px -14px;
+  border-top: 1px solid var(--surface1); background: var(--mantle); }
+.myam-bulkcount { font-size: 12px; font-weight: 700; color: var(--text); }
+button.myam-bulkbtn { font-size: 10.5px; font-weight: 700; padding: 7px 11px; border-radius: 9px;
+  cursor: pointer; color: var(--text); background: var(--surface0); border: 1px solid var(--surface1);
+  font-family: inherit; }
+button.myam-bulkbtn:disabled { opacity: .5; cursor: not-allowed; }
+button.myam-bulkdgr { font-size: 12px; padding: 7px 11px; border-radius: 9px; cursor: pointer;
+  color: var(--red, #f38ba8); background: rgba(243,139,168,.1); border: 1px solid rgba(243,139,168,.4);
+  font-family: inherit; }
+
+button.myam-sheetopt { display: block; width: 100%; box-sizing: border-box; text-align: center;
+  margin-bottom: 6px; padding: 9px; border-radius: 9px; font-size: 12px; font-weight: 600; cursor: pointer;
+  color: var(--subtext); background: var(--surface0); border: 1px solid var(--surface1); font-family: inherit; }
+button.myam-sheetopt.on { color: #fff; background: var(--lavender); border-color: var(--lavender); }
+button.myam-sheetrow { display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box;
+  text-align: left; padding: 12px 6px; border-bottom: 1px dashed var(--surface1); font-size: 13px;
+  cursor: pointer; color: var(--text); background: transparent; border-left: none; border-right: none;
+  border-top: none; font-family: inherit; }
+button.myam-sheetrow:last-child { border-bottom: none; }
+button.myam-sheetrow.dgr { color: var(--red, #f38ba8); }
+button.myam-sheetrow:disabled { opacity: .5; cursor: not-allowed; }
+.myam-sheetsub { font-size: 10.5px; color: var(--overlay0); margin: 10px 0 6px; }
+.myam-tagbox { display: flex; gap: 6px; flex-wrap: wrap; min-height: 20px; }
+.myam-tagpill { font-size: 10px; font-weight: 600; padding: 4px 9px; border-radius: 999px; cursor: pointer;
+  color: var(--mauve); background: rgba(182,146,230,.18); border: 1px solid rgba(182,146,230,.3); }
+.myam-taginput { width: 100%; box-sizing: border-box; background: var(--surface0); border: 1px solid var(--surface1);
+  border-radius: 9px; color: var(--text); padding: 9px 11px; font-size: 12.5px; font-family: inherit;
+  outline: none; }
+.myam-tagopts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.myam-tagadd { font-size: 10px; font-weight: 600; padding: 4px 9px; border-radius: 999px; cursor: pointer;
+  color: var(--subtext); background: var(--surface0); border: 1px solid var(--surface1); }
