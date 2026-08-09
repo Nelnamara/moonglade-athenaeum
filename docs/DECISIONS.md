@@ -6838,3 +6838,47 @@ raced the panel's own 220ms open animation (a settled `transform:none` serialize
 now polls for either form before any test reads geometry off the panel).
 
 Full suite green: 1528 pytest, 724 loom.
+
+### Branding tab: real Custom Mark + banner-picker polish (drift item 40) · *2026-08-09*
+
+Second Claude Design handoff the same day (`handoff-2026-08-09-branding-integration.md`),
+ported into `gallery/src/components/ControlPanelOverlay.jsx`'s `BrandingTab` -- shared verbatim
+between desktop and Mobile (`ControlMobile.jsx` mounts the same component), so one
+implementation covers both surfaces per the handoff's own framing.
+
+**Shipped, real data:**
+- **Custom Mark** -- a 6th marks tile gated on the REAL `the-great-library` achievement (the
+  same earned/unearned array `brandingUnlocked` already reads for the whole tab, not a local
+  mock toggle). Locked placeholder pre-unlock -> upload tile once earned -> the uploaded mark
+  itself, with Replace/Remove. New backend: `add_custom_mark()` / `remove_custom_mark()` /
+  `_mark_earned()` + `POST /api/branding/mark/custom` (+ `/remove`), same manifest shape
+  `list_marks()` already reads (`marks.json` + `<id>.png`, one new `kind:"upload"` entry) --
+  not a new storage concept. Only one custom-mark slot exists; a second upload replaces the
+  first rather than accumulating an orphaned entry the picker would need to hide.
+- **Banner slot picker** -- the existing, already real-data-wired `mgcp-slotcard-thumbs` row
+  (this predates the handoff; it already called `set_slot_active` on click) got the design's
+  visual upgrade: gold border + checkmark badge on the active thumbnail, matching the marks
+  row's own new `.mgcp-markbig-check` badge.
+- **Mobile parity** -- moved the Branding entry card to directly under "At a glance" (it used
+  to sit near the bottom, after Trash/Accounts), and added a locked-placeholder state
+  ("🔒 Branding — Unlocks with Under the Hood") for when `brandingUnlocked` is false. The
+  handoff's own claim that Mobile "had no achievement gate at all" was already stale by the
+  time it was written -- the real gate (`brandingUnlocked`, off the real `under-the-hood`
+  achievement) shipped 2026-08-05; only the reposition and the locked-placeholder rendering
+  (previously it rendered nothing at all when locked) were genuinely new.
+
+**Deliberately NOT built: the design's per-asset "earned banner art" masking.** The design
+(`Control Panel.dc.html`'s `BANNER_SEED`) models preset banner art -- Embercourt tied to
+`reel-director`, Nightfallen tied to `the-great-library` -- sharing one row with user uploads,
+locked/dashed/masked until earned. `reel-director` and `the-great-library` ARE real
+achievements (and this exact reward mapping is the owner's own, from the earlier unlock-chain
+correction the same day), but no such art ships with the app and no backend concept of
+"earned banner content" exists yet -- `list_slot_assets()` only ever returns user uploads.
+Building fake locked tiles for content that doesn't exist would fabricate data the same way
+this app's Cost/ETA rows already refuse to; the masking styling exists (forward-compatible)
+but nothing populates it until the SQLite asset-bundling project seeds real earned art (owner
+call: "Wait for P3").
+
+7 new tests in `tests/test_branding.py` (41/41 green); `test_panel_users.py` and the Playwright
+Control Panel suite re-run unaffected. Committed to `claude-design-tracker-branding-2026-08-09`
+(same branch as the job-tracker work above), pushed, NOT merged -- awaiting owner review.
