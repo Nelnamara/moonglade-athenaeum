@@ -38,7 +38,7 @@
   color: rgba(226,222,238,.55); white-space: nowrap; }
 .fm-avatar { position: relative; width: 26px; height: 26px; border-radius: 50%; flex: none; cursor: pointer;
   border: 1px solid rgba(255,255,255,.16); background: none; padding: 0;
-  background-image: url('/branding/mascots/gen_nel.png'); background-position: 58% 10%; background-size: 250%; background-repeat: no-repeat; }
+  background-image: url('/branding/mascots/nel_narrator.png'); background-position: 58% 10%; background-size: 250%; background-repeat: no-repeat; }
 .fm-avatar-dot { position: absolute; bottom: -1px; right: -1px; width: 7px; height: 7px; border-radius: 50%;
   background: var(--emerald); border: 1.5px solid var(--mantle); animation: fmPulse 2.6s ease-in-out infinite; }
 
@@ -142,7 +142,7 @@
 .fm-nelstrip { display: flex; align-items: center; gap: 10px; margin: 20px 0 6px; padding: 11px 13px;
   border-radius: 12px; border: 1px solid var(--surface1); background: var(--base); }
 .fm-nelimg { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(255,255,255,.16);
-  background-image: url('/branding/mascots/gen_nel.png'); background-position: 58% 10%; background-size: 250%; background-repeat: no-repeat; }
+  background-image: url('/branding/mascots/nel_narrator.png'); background-position: 58% 10%; background-size: 250%; background-repeat: no-repeat; }
 .fm-nelquote { font-size: 11px; font-style: italic; color: var(--subtext); line-height: 1.4; cursor: pointer;
   background: none; border: none; padding: 0; text-align: left; font-family: inherit; }
 

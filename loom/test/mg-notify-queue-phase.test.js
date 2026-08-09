@@ -52,9 +52,9 @@ describe("Row tells a queued generation apart from one that is actually renderin
     // Stopping it is the honest version of the same idiom (the animation:none half of this
     // lives in notify.css, pinned in the styling describe below).
     assert.match(tray,
-      /<span className=\{"jt-spin" \+ \(queued \? " jt-queued" : ""\)\}>\s*<img className="jt-nel" src="\/branding\/gen_nel\.png"/,
+      /<span className=\{"jt-spin" \+ \(queued \? " jt-queued" : ""\)\}>\s*<img className="jt-nel" src="\/branding\/nel_spinner\.png"/,
       "the queued row must be the SAME .jt-spin spinner with a .jt-queued modifier, keeping " +
-      "the same gen_nel mascot the running row uses -- not a separate queued glyph");
+      "the same spinner mascot the running row uses -- not a separate queued glyph");
   });
 
   test("a job a worker has picked up keeps the ordinary spinner and no queued label", () => {

@@ -93,7 +93,7 @@ const MASCOT_FALLBACKS = [
   "/branding/login_nel.png",
   "/branding/mascots/login_nel.webp",
   "/branding/mascots/login_nel.png",
-  "/branding/mascots/gen_nel.png",
+  "/branding/mascots/nel_narrator.png",
 ];
 function onMascotError(e) {
   const img = e.currentTarget;

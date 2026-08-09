@@ -40,7 +40,7 @@ function Row({ j, onDismiss, onOpenDetail }) {
     <><span className="jt-warn jt-glyph">?</span><img className="jt-nel" src="/branding/mascots/trk_fail.png" alt="" onError={(e) => e.currentTarget.remove()} /></>
   ) : (
     <span className={"jt-spin" + (queued ? " jt-queued" : "")}>
-      <img className="jt-nel" src="/branding/gen_nel.png" alt="" onError={(e) => e.currentTarget.remove()} />
+      <img className="jt-nel" src="/branding/nel_spinner.png" alt="" onError={(e) => e.currentTarget.remove()} />
       <i className="gen-ring" />
     </span>
   );

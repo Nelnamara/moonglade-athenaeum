@@ -102,7 +102,7 @@ export default function Banner({
               <div className="mgx-nelwrap"
                 title={live + " generation" + (live === 1 ? "" : "s") + " running — the dock shows them resolve"}>
                 <div className="mgx-nelhalo" aria-hidden="true" />
-                <img className="mgx-nelimg" src="/branding/gen_nel.png" alt=""
+                <img className="mgx-nelimg" src="/branding/nel_spinner.png" alt=""
                   onError={(e) => e.currentTarget.remove()} />
               </div>
             ) : null}

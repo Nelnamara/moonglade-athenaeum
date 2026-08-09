@@ -516,7 +516,7 @@ def test_login_mascot_takes_webp_or_png_like_the_achievement_mascots(tmp_path):
     for later in ("/branding/login_nel.png",
                   "/branding/mascots/login_nel.webp",
                   "/branding/mascots/login_nel.png",
-                  "/branding/mascots/gen_nel.png"):
+                  "/branding/mascots/nel_narrator.png"):
         assert later in src, later + " is missing from the fallback ladder"
     # It must still END by hiding the element: a broken-image icon is the one
     # thing worse than no mascot at all.
