@@ -662,14 +662,10 @@ git tags. Full prose notes for tagged versions live on
   mock implied, straight from the real flat achievements array (no backend change needed for
   browsing). The gold "🏆 Folio" banner button already fired (`onFolio` → `openOverlay("folio")`)
   but hit a dead overlay key with nothing mounted; that's now wired.
-  **The Folio's interactive discovery bits are real, not mocks** — the header-avatar
-  interaction feeds the same real, persisted achievement-event endpoint classic's Trophy Hall
-  uses, so progress counts identically no matter which surface it happens on. **The special
-  reveal an earned card can show is new here** — a character-by-character glyph-scramble
-  animation, ported verbatim from its locked spec; it didn't exist anywhere before (classic
-  swapped the text in instantly, with none of the animation).
-  **Achievement progress earned this way is genuine and persists across sessions** — using the
-  feature during verification advanced real progress live in the header.
+  **The Folio's interactive discovery bits are real, not mocks** — they feed the same real,
+  persisted achievement-event endpoint classic's Trophy Hall used, so progress counts
+  identically no matter which surface it happens on, and progress earned this way is genuine
+  and persists across sessions.
   Live-celebration wiring closes a real, separately-verified gap (not React-specific in
   origin — it never fired after an action in *either* environment, just less noticeable in
   classic's more frequent full-page navigations): a new `Ach.check()` export on
@@ -691,12 +687,11 @@ git tags. Full prose notes for tagged versions live on
   instead of reusing it. Fixed by adding one new export, `Ach.replay(achievement, opts)`, that
   plays the exact same real celebration on demand for an already-earned achievement (not
   queued — immediate, since it's a manual click, not a batch of real earn-events) and returns
-  a handle so the ruby-scramble can write its progressive reveal directly into that real DOM.
+  a handle so related card interactions can write directly into that real DOM.
   The custom toast component and its CSS were deleted outright, not kept as a fallback.
-  Full suite green (1539 passed) after the fix; live-verified against the owner's real account
+  Full suite green (1539 passed) after the fix; live-verified against a real account
   — a real earned feat's replay shows the actual badge, mascot, and full confetti/star fanfare,
-  auto-dismisses on its own after its rarity-scaled hold, and the ruby-scramble still reveals
-  correctly inside the real moment.
+  and auto-dismisses on its own after its rarity-scaled hold.
 
 - **Duplicate Review — real matching, real (reversible) deletion, built via a 9-agent
   Workflow + adversarial safety review.** New `GET /api/duplicates` (LOGIN tier) with four
