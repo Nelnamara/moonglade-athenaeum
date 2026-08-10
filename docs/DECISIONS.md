@@ -6952,3 +6952,49 @@ this time because skin-changer no longer forces the issue, not because of a seco
 bolted on top. Earning every skin still counts toward skin-changer; it's just never required.
 
 Committed to `p3-asset-bundling-2026-08-09`, pushed, full suite green (1535 pytest).
+
+### P3: the sealed default-asset bundle, actually built and wired · *2026-08-09*
+
+**Real prior scope, found (not re-derived) after a false start.** Went looking for what
+"start the sqlite bundling" actually meant before writing more code, and found it was already
+substantially decided across several earlier entries this session missed: [[Packaging must not
+be scoped as secrecy for displayed art]] ("what the browser renders, the browser has" -- a hard
+limit, already ruled out as a goal), [[Packaged assets must keep a loose-file override layer]]
+(any sealed container MUST let a loose file win, because branding drop-in is a shipped feature),
+and ["Under the Hood" — gated on bundling the assets and clearing the branding folder] (the
+actual point: `branding/` stays EMPTY on a fresh install on purpose -- that emptiness IS the
+discovery mechanic -- so the owner's real default art has to ship somewhere else entirely, or a
+fresh/distributed install just has no branding at all). A tangent about achievement data leaking
+via the public GitHub repo got chased first and was a real miss: `/branding/` was already fully
+gitignored (never public), so that specific framing solved a problem that didn't exist for the
+art. Owner's own correction: *"The main point... was to bundle all of MY art as a default for
+the specified items and then the unlock gives the ability to add your own after under the hood
+is stumbled upon... The bundle system was the way to keep it all together and tidy."*
+
+**Built for real, `tools/build_asset_bundle.py`:** packs everything under `branding_root()`
+(minus `_thumbs/`, a regenerable cache) plus the full `ACHIEVEMENTS` list into one SQLite file
+(`assets(path, sha256, bytes, size, mtime)` + `achievements(id, data)`), self-verified
+byte-for-byte on every build. `path` is the same relative addressing `/branding/<path>` already
+served loose files under.
+
+**Every real read path now checks loose-then-bundle**, via three small helpers
+(`_branding_bytes`/`_branding_exists`/`_bundle_get`): `list_marks`, `list_slot_assets`, the raw
+`/branding/<path>` route, `_badge_thumb` (thumbnail cache still writes loose, self-heals off the
+bundle FILE's own mtime when sourced from it, since a whole bundle rebuild is the only way
+bundle-sourced art changes), the launcher-shortcut `.ico` (materialized into a new git-ignored
+`_bundle_cache/` since PowerShell's `CreateShortcut` needs a real file on disk, not just
+servable bytes), and `_write_banner_flat`'s active-asset read. The discovery SWEEP itself
+(`sweep_branding_drops`/`_adopt_mark`) is deliberately untouched -- it must only ever see the
+real filesystem, since detecting a genuinely new loose file is its whole job, and routing it
+through the fallback would make a bundled default look like a fresh drop-in.
+
+**Achievement data rides along in the same file** (one JSON blob per id) under the same "one
+tidy distributable package" idea, but `moonglade_gallery.py` does NOT yet read achievements from
+it -- still the in-source Python list. That cutover is separate, not-yet-scoped follow-up work,
+not done here.
+
+`asset_bundle.db` and `_bundle_cache/` are git-ignored, same treatment as `/branding/` itself --
+this is the owner's own unreleased content, not code.
+
+9 new tests exercise every fallback path plus the loose-overrides-bundle behavior end to end.
+Full suite green (1544 pytest). Committed to `p3-asset-bundling-2026-08-09`, pushed, NOT merged.
