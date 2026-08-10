@@ -4,7 +4,6 @@ import * as jobs from "./jobs.js";
 import * as jobsStore from "./jobsStore.js";
 import * as ach from "./ach.js";
 import ToastHost from "./ToastHost.jsx";
-import ActivityTray from "./ActivityTray.jsx";
 import "../styles/notify.css";
 
 /* notify/index.jsx -- the one installer for the notify system (no-vanilla campaign, component
@@ -24,9 +23,13 @@ import "../styles/notify.css";
       adaptive poll) and ach.check() (mark-and-toast newly earned achievements + reconcile the
       active skin) -- by the time a bundle evaluates, the DOM is ready.
 
-   2. <NotifyRoot/> -- the React UI (corner toasts + Activity FAB/tray), portaled to
-      document.body from whichever app tree renders it (the gallery's authenticated root, the
-      Loom's root component). The engines run either way; the root only paints. */
+   2. <NotifyRoot/> -- the React UI, portaled to document.body from whichever app tree
+      renders it (the gallery's authenticated root, the Loom's root component). The engines
+      run either way; the root only paints. Corner toasts only as of 2026-08-09 -- the
+      Activity control moved OUT of this shared body-level portal into each host's own header
+      (Claude Design handoff, drift item 39: the old floating #jobs-fab/#jobs-tray had to
+      out-rank every overlay in z-index just to stay visible). See
+      gallery/src/components/SeparatorBar.jsx for the gallery's own mount. */
 
 let installed = false;
 
@@ -50,10 +53,5 @@ export function installNotify() {
 }
 
 export function NotifyRoot() {
-  return (
-    <>
-      <ToastHost />
-      <ActivityTray />
-    </>
-  );
+  return <ToastHost />;
 }

@@ -65,11 +65,13 @@
   #root { display: none !important; }
   .mgcs-slab .mgv-titlerow { display: none !important; }
   .mgv-scrim { display: none !important; }
-  /* The notify system (gallery/src/notify/ -- ToastHost/ActivityTray) portals its Activity
-     FAB and toast host straight to document.body, so #root hiding doesn't reach these.
-     Both are body-level siblings of the portal same as this overlay is; exclude them
-     explicitly. */
-  #jobs-fab, #mg-toasts { display: none !important; }
+  /* The notify system's toast host (gallery/src/notify/ToastHost.jsx) portals straight to
+     document.body, so #root hiding doesn't reach it -- a body-level sibling of this overlay's
+     own portal, excluded explicitly. The Activity control no longer needs the same treatment
+     (2026-08-09): it mounts inline inside each host's own header now, a real #root descendant,
+     so hiding #root already hides it -- correctly, a print view has no business showing a
+     live activity dropdown anyway. */
+  #mg-toasts { display: none !important; }
   .mgv-host { position: static !important; display: block !important; }
   .mgv-slab { position: static !important; width: auto !important; max-height: none !important;
     overflow: visible !important; box-shadow: none !important; border: none !important;

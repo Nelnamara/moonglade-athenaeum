@@ -130,7 +130,7 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
   }, []);
 
   const {
-    summary, summaryErr, skins, activeSkin, pickSkin, brandingUnlocked,
+    summary, summaryErr, skins, activeSkin, pickSkin, brandingUnlocked, achievements,
     panelHistory, schedule, saveSchedule,
     fetchSummary, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
@@ -682,7 +682,7 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
 
               {tab === "brand" && brandingUnlocked && (
                 <BrandingTab summary={summary} onSaved={fetchSummary} isLocal={isLocal}
-                  skins={skins} activeSkin={activeSkin} onPickSkin={pickSkin} />
+                  skins={skins} activeSkin={activeSkin} onPickSkin={pickSkin} achievements={achievements} />
               )}
             </div>
           </div>
@@ -807,11 +807,20 @@ const SKIN_VARS = {
   verdant:     { mantle: "#08110d", surface0: "#173026", surface1: "#2a5140", text: "#e2f5ea", subtext: "#93bda6", overlay0: "#6f9d84", accent: "#5fd39a", mauve: "#a5f3cf", emerald: "#4fc99a" },
 };
 
-function MarksSection({ summary, busy, msg, pickMark, pickAnim, setShortcut, isLocal }) {
+function MarksSection({
+  summary, busy, msg, pickMark, pickAnim, setShortcut, isLocal,
+  greatLibrary, uploadCustomMark, removeCustomMark,
+}) {
   const marks = summary.branding.marks || [];
   const anims = summary.branding.anims || [];
   const cur = marks.find((m) => m.id === summary.branding.mark) || null;
   const anim = summary.branding.anim || "classic";
+  // handoff-2026-08-09-branding-integration.md's 6th tile: locked pre-unlock,
+  // an upload tile once earned, then the uploaded mark itself (already present
+  // in `marks` -- list_marks() has no separate "custom" concept, it's just
+  // another kind:"upload" entry, so it renders via the normal map() below like
+  // any other mark; this only covers the two states before that exists).
+  const customMark = marks.find((m) => m.kind === "upload") || null;
   return (
     <div className="mgcp-brandsec">
       <h3 className="mgcp-brandh">Icons, marks &amp; animation</h3>
@@ -833,16 +842,55 @@ function MarksSection({ summary, busy, msg, pickMark, pickAnim, setShortcut, isL
         <div className="mgcp-markprevside">
           <div className="mgcp-markprevcap">Shown at 44px · animated live</div>
           <div className="mgcp-marksbig">
-            {marks.map((m) => (
-              <button type="button" key={m.id}
-                className={"mgcp-markbig" + (m.id === summary.branding.mark ? " on" : "")}
-                onClick={() => pickMark(m.id)} disabled={busy} title={m.label || m.id}>
-                {m.png
-                  ? <img src={m.png} alt="" onError={(e) => e.currentTarget.remove()} />
-                  : (m.id === "logo" ? "🌙" : "◈")}
+            {marks.map((m) => {
+              const on = m.id === summary.branding.mark;
+              return (
+                <button type="button" key={m.id}
+                  className={"mgcp-markbig" + (on ? " on" : "")}
+                  onClick={() => pickMark(m.id)} disabled={busy} title={m.label || m.id}>
+                  {m.png
+                    ? <img src={m.png} alt="" onError={(e) => e.currentTarget.remove()} />
+                    : (m.id === "logo" ? "🌙" : "◈")}
+                  {on && <span className="mgcp-markbig-check">✓</span>}
+                </button>
+              );
+            })}
+            {/* handoff-2026-08-09-branding-integration.md: 6th tile, gated to
+                the-great-library. Locked placeholder pre-unlock; an upload
+                tile once earned (only while no custom mark exists yet -- once
+                uploaded it's just another entry in `marks` above). */}
+            {!greatLibrary && !customMark && (
+              <button type="button" className="mgcp-markbig locked" disabled
+                title="The Great Library — unlocks a custom mark of your own">
+                🔒
               </button>
-            ))}
+            )}
+            {greatLibrary && !customMark && (
+              <label className="mgcp-markbig upload" title="Upload a custom mark">
+                ⬆
+                <input type="file" accept="image/*" disabled={busy} style={{ display: "none" }}
+                  onChange={(e) => { uploadCustomMark(e.target.files[0]); e.target.value = ""; }} />
+              </label>
+            )}
           </div>
+          {greatLibrary && (
+            <div className="mgcp-tilesmall" style={{ marginTop: 2 }}>
+              PNG · square (1:1) · 256px or larger — shown at 44px
+            </div>
+          )}
+          {customMark && (
+            <div className="mgcp-markreplace">
+              <label className="mgcp-chip mgcp-slotcard-uploadchip">
+                ↻ Replace…
+                <input type="file" accept="image/*" disabled={busy} style={{ display: "none" }}
+                  onChange={(e) => { uploadCustomMark(e.target.files[0]); e.target.value = ""; }} />
+              </label>
+              <button type="button" className="mgcp-chip" disabled={busy}
+                onClick={() => removeCustomMark(customMark.id)}>
+                ✕ Remove
+              </button>
+            </div>
+          )}
         </div>
       </div>
       <div className="mgcp-mkick">Animation</div>
@@ -1024,14 +1072,18 @@ function BannerEditor({ summary, onSaved }) {
       </div>
       {assets.length > 1 && (
         <div className="mgcp-slotcard-thumbs">
-          {assets.map((a) => (
-            <button type="button" key={a.id}
-              className={"mgcp-slotcard-thumb" + (a.id === data.active ? " on" : "")}
-              onClick={() => pickActive(a.id)} disabled={busy}
-              title={a.id === data.active ? "active" : "Set active"}>
-              <img src={a.png} alt="" />
-            </button>
-          ))}
+          {assets.map((a) => {
+            const on = a.id === data.active;
+            return (
+              <button type="button" key={a.id}
+                className={"mgcp-slotcard-thumb" + (on ? " on" : "")}
+                onClick={() => pickActive(a.id)} disabled={busy}
+                title={on ? "active" : "Set active"}>
+                <img src={a.png} alt="" />
+                {on && <span className="mgcp-slotcard-thumb-check">✓</span>}
+              </button>
+            );
+          })}
         </div>
       )}
       {msg && <div className="mgcp-tilenote">{msg}</div>}
@@ -1042,11 +1094,20 @@ function BannerEditor({ summary, onSaved }) {
   );
 }
 
-export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPickSkin }) {
+export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPickSkin, achievements }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   // DC:895-909 -- brandSections sub-nav; marks is the default section.
   const [section, setSection] = useState("marks");
+  // The-Great-Library gate for the Custom Mark tile -- real earned state, the
+  // exact same array/shape brandingUnlocked already reads off useControlPanel's
+  // achievements for the whole tab, just checked for a different id. (The
+  // banner row's per-asset "earned art" masking stays a local/no-real-content
+  // concept below -- see BannerEditor's own comment -- because unlike this,
+  // there is no seeded earned banner art yet for a real check to gate.)
+  const greatLibrary = (achievements?.achievements || []).some(
+    (a) => a.id === "the-great-library" && a.earned
+  );
 
   const pickMark = async (id) => {
     setBusy(true); setMsg("");
@@ -1067,6 +1128,23 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
     const d = await postJSON("/api/branding/shortcut", {});
     setBusy(false);
     setMsg(d.error ? "⚠ " + d.error : "✓ Desktop shortcut updated");
+  };
+  const uploadCustomMark = async (file) => {
+    if (!file) return;
+    setBusy(true); setMsg("");
+    const fd = new FormData(); fd.append("file", file);
+    const r = await fetch("/api/branding/mark/custom", { method: "POST", body: fd });
+    const d = await r.json();
+    setBusy(false);
+    if (d.error) { setMsg("⚠ " + d.error); return; }
+    onSaved();
+  };
+  const removeCustomMark = async (id) => {
+    setBusy(true); setMsg("");
+    const d = await postJSON("/api/branding/mark/custom/remove", { id });
+    setBusy(false);
+    if (d.error) { setMsg("⚠ " + d.error); return; }
+    onSaved();
   };
 
   const SECTIONS = [
@@ -1090,7 +1168,8 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
       <div className="mgcp-brandmain">
         {section === "marks" && (
           <MarksSection summary={summary} busy={busy} msg={msg} isLocal={isLocal}
-            pickMark={pickMark} pickAnim={pickAnim} setShortcut={setShortcut} />
+            pickMark={pickMark} pickAnim={pickAnim} setShortcut={setShortcut}
+            greatLibrary={greatLibrary} uploadCustomMark={uploadCustomMark} removeCustomMark={removeCustomMark} />
         )}
         {section === "skins" && (
           <SkinsSection skins={skins} activeSkin={activeSkin} onPickSkin={onPickSkin} />
