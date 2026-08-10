@@ -6998,3 +6998,50 @@ this is the owner's own unreleased content, not code.
 
 9 new tests exercise every fallback path plus the loose-overrides-bundle behavior end to end.
 Full suite green (1544 pytest). Committed to `p3-asset-bundling-2026-08-09`, pushed, NOT merged.
+
+### Adversarial review of the bundle work found (and fixed) a real severe regression · *2026-08-09*
+
+Owner's ask: run agents adversarially against the bundling work -- see if they can find gaps
+"on their own or via polling the data" -- to check overall integrity, not just trust the prior
+commit's own self-report. A 4-finder parallel pass (static code hunt, live route probing over a
+real Flask test client, a cross-codebase sweep of the frontend/Loom/tools/tests, and an
+independent byte-for-byte bundle-content audit) plus adversarial re-verification (2 independent
+skeptics per finding, defaulting to refuted unless one confirms) surfaced 21 raw findings, 4
+confirmed real, 17 correctly not-actionable (mostly "checked, actually fine" -- the masking
+contract, the traversal guards, the SQL parameterization, and the bundle's own byte/hash/schema
+integrity all held up under direct, independent reproduction, not just re-reading the prior
+commit's claims).
+
+**The severe one, fixed:** `sweep_telemetry()` granted the hidden "Under the Hood" achievement
+off `if list_marks(out_dir):` -- a backward-compat shim for installs that customized branding
+before telemetry existed. `list_marks()` became loose-then-bundle aware in the previous commit,
+so THIS check went from "did the user drop something in" to "does the bundle exist at all" --
+meaning any install shipping the sealed default bundle silently, permanently earned the hidden
+discovery achievement on its very first `/api/achievements` hit, zero user action required. This
+is the exact mechanic the whole day's design work (`branding/` deliberately empty, defaults
+sealed elsewhere, a drop-in both overrides AND fires the feat) exists to protect, undone by one
+stale truthiness check the prior commit didn't touch. Fixed with a new `_has_loose_marks()`,
+deliberately filesystem-only, same contract `sweep_branding_drops`/`_adopt_mark` already hold.
+
+**Two more real bugs, both from the same root cause (a read path that skipped the loose-then-
+bundle fallback) but lower severity:**
+- `_badge_thumb()`'s "always resolves to *something*" fallback only covered a LOOSE master
+  failing; a bundle-sourced master (the actual default install shape) that failed to thumbnail
+  fell through to a 404 instead. Now writes the raw bundled bytes out as a last resort.
+- `set_slot_crop()` read `manifest.json` straight off disk with no bundle fallback, so adjusting
+  the crop on a shipped default banner always 400'd. Now reads loose-then-bundle like every
+  other slot function; the first edit promotes the bundled default to a real loose override.
+
+**One coverage gap, not a bug, tracked but not fixed this pass:** the Playwright/browser E2E
+harness (`tests/test_render_harness.py`) never exercises `/branding/<path>`'s real bundle-
+serving branch over live HTTP -- every branding image in that suite either 404s against the
+harness's empty isolated folder or is intercepted client-side. The WSGI-test-client coverage in
+`tests/test_branding.py` is real and passing; a true browser-socket test of the bundle path
+specifically does not exist yet.
+
+Also corrected two stale docs the sweep caught: `docs/architecture.md` and
+`wiki/How-It-Works.md` both still showed `branding/` nested inside `pixai_backup/` (true before
+the 2026-07-26 move) and neither mentioned the bundle fallback at all.
+
+4 new regression tests. Full suite green (1548 pytest). Committed to
+`p3-asset-bundling-2026-08-09`, pushed, NOT merged.
