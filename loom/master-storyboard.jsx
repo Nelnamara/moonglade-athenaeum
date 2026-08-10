@@ -443,7 +443,7 @@ const V2_STYLES = `
 .lv-banner-show{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--subtext);
   background:var(--surface1);border:1px solid var(--surface1);border-radius:7px;padding:7px 11px;
   cursor:pointer;white-space:nowrap;font-family:inherit;}
-.lv-top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
+.lv-top{position:relative;display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
 .lv-eyebrow{font:700 11px/1 system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);}
 .lv-note{color:var(--subtext);font-size:12px;}
 /* The trailing "a" in this selector is deliberate: the back-to-gallery control is an
@@ -455,16 +455,14 @@ const V2_STYLES = `
 .lv-top button,.lv-top label,.lv-top a{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
 .lv-top a{text-decoration:none;display:inline-block;}
 .lv-top a:hover{border-color:var(--accent);}
-/* margin-left:auto lives on the "← Gallery" link's own inline style now (2026-08-09,
-   corrected same day the header-docked Activity control landed): Activity moved to be the
-   LAST item in the row instead of the first, because its right:0-anchored dropdown only
-   ever reaches its OWN chip's right edge, not the row's -- with anything sitting after it
-   (as "← Gallery" originally did), the panel fell short of the true right edge by that
-   sibling's width. Whichever of the two flush-right items comes FIRST needs the one
-   auto-margin (it alone absorbs the row's free space; two adjacent auto-margins would
-   each grab a share and split the pair apart with a gap in between) -- that's "← Gallery"
-   now, Activity before. */
-.lv-top-act-wrap{position:relative;}
+/* margin-left:auto back here, Activity first again, "← Gallery" last (2026-08-10: the
+   2026-08-09 reorder that put Activity last was never actually shown to/approved -- only
+   "the dropdown is cut off" was). The cutoff and the trigger's own position are separable:
+   .lv-top itself now owns the positioned-ancestor role (position:relative, above), so
+   .at-panel's right:0 anchors to the FULL row's true right edge no matter where the
+   trigger sits inside it -- deliberately NOT position:relative here, so it doesn't shadow
+   that and pull the anchor back down to just this chip. */
+.lv-top-act-wrap{margin-left:auto;}
 .lv-top button:hover{border-color:var(--accent);}
 .lv-top button:disabled{opacity:.5;cursor:default;}
 .lv-top button:disabled:hover{border-color:var(--surface1);}
@@ -2965,16 +2963,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8681; Render</button>
         <ExportMenu exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle}
           bundling={bundling} importBackup={importBackup} />
-        <a className="lv-close" href="/" style={{ textDecoration: "none", marginLeft: "auto" }}>← Gallery</a>
-        {/* Activity LAST in the row when docked right (found live 2026-08-09, same bug as
-            the gallery header's SeparatorBar.jsx): its dropdown is right-aligned to its OWN
-            chip via right:0, so with "← Gallery" following it, the panel fell short of
-            the row's true right edge by that link's width. The one auto-margin needed to
-            flush the pair right belongs to "← Gallery" (the first of the two) -- see
-            .lv-top-act-wrap's own CSS comment for why only one of a flush-right pair ever
-            gets it. When docked left (act.edge === "left") the whole control instead
+        {/* Activity FIRST again in the flush-right pair (2026-08-10, see .lv-top-act-wrap's
+            own CSS comment above) -- margin-left:auto lives on it, "← Gallery" follows with
+            its normal gap. When docked left (act.edge === "left") the whole control instead
             mounts near the row's START, right after the banner-show button -- see above. */}
         {act.edge === "left" ? null : activityControl}
+        <a className="lv-close" href="/" style={{ textDecoration: "none" }}>← Gallery</a>
       </div>
       {batchTally && (() => {
         // done/failed/stale are DERIVED from the outcomes map every render, never stored as
