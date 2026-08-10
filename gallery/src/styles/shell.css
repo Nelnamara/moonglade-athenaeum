@@ -192,7 +192,7 @@
   background: linear-gradient(180deg, rgba(18, 14, 42, .72) 0%, rgba(10, 8, 24, .86) 100%); }
 .mgx-sepleft { position: relative; display: flex; align-items: center; flex-wrap: wrap;
   gap: 8px 20px; flex: 1 1 auto; min-width: 0; }
-.mgx-sepright { display: flex; align-items: center; gap: 12px; flex: none; margin-left: auto; }
+.mgx-sepright { position: relative; display: flex; align-items: center; gap: 12px; flex: none; margin-left: auto; }
 
 /* ---- glyph-spine nav pills ---- */
 .mgx-navspine { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; }
@@ -264,12 +264,17 @@
    The old ambient-only .mgx-act/.mgx-actdot/.mgx-acttxt cluster (a static dot+text, no
    click handler) is retired -- SeparatorBar.jsx now renders the real header-docked trigger
    (notify/ActivityChip.jsx) + anchored dropdown (notify/ActivityPanel.jsx) here instead,
-   styled by the shared .at-* rules in notify.css. This wrapper's ONLY job is to be the
-   positioned ancestor .at-panel's `position:absolute;right:0` anchors against -- without
-   position:relative here the panel falls through to the next positioned ancestor up the
-   tree instead (found live: it anchored against something page-width, pinning the dropdown
-   to the far right of the whole viewport instead of tucking under the little chip). */
-.mgx-act-wrap { position: relative; }
+   styled by the shared .at-* rules in notify.css.
+
+   Deliberately NOT position:relative (2026-08-10): .at-panel's `position:absolute;right:0`
+   is meant to anchor against .mgx-sepright -- the whole row -- not against this little
+   trigger box, so the dropdown always reaches the row's true outer edge regardless of
+   where the trigger itself sits inside that row. .mgx-sepright now carries
+   position:relative for exactly this. Giving this wrapper its OWN position:relative would
+   shadow that and pull the anchor back down to just this chip -- the earlier bug
+   (2026-08-09) where the dropdown fell short of the edge whenever anything else in the row
+   sat between the trigger and the true edge. No rule needed here -- .mgx-act-wrap is just
+   a DOM hook for the outside-click-to-close ref, unstyled on purpose. */
 
 /* ---- credits chip (account balance; gold billing tooltip drops below-right) ---- */
 .mgx-cred { position: relative; z-index: 1; display: flex; align-items: center; gap: 9px;

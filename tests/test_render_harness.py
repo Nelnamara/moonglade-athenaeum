@@ -705,6 +705,54 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
         "  gallery: {!r}\n  loom:    {!r}".format(seen["gallery"], seen["loom"]))
 
 
+_TRAY_GEOMETRY_JS = {
+    "gallery": """() => {
+        const chip = document.querySelector('.mgx-act-wrap').getBoundingClientRect();
+        const cred = document.querySelector('.mgx-cred').getBoundingClientRect();
+        const row = document.querySelector('.mgx-sepright').getBoundingClientRect();
+        const panel = document.querySelector('.at-panel').getBoundingClientRect();
+        return {chipLeft: chip.left, credLeft: cred.left, rowRight: row.right, panelRight: panel.right};
+    }""",
+    "loom": """() => {
+        const chip = document.querySelector('.lv-top-act-wrap').getBoundingClientRect();
+        const close = document.querySelector('a.lv-close').getBoundingClientRect();
+        const row = document.querySelector('.lv-top').getBoundingClientRect();
+        const panel = document.querySelector('.at-panel').getBoundingClientRect();
+        return {chipLeft: chip.left, credLeft: close.left, rowRight: row.right, panelRight: panel.right};
+    }""",
+}
+
+
+def test_activity_dropdown_reaches_the_true_edge_regardless_of_trigger_position(logged_in_page):
+    """Regression guard for a real, live-found bug and its real, live-found fix (both
+    2026-08-09/10, same day): the dropdown must always reach the header row's true outer
+    edge, and that must hold NO MATTER where the trigger chip itself sits in the row.
+
+    Sequence of events this pins down: the trigger originally sat FIRST in its row, and its
+    dropdown (`right:0` anchored to its own small box) fell short of the row's true right
+    edge by however wide the sibling chips after it were. The first fix moved the trigger
+    itself to be LAST in the row -- which worked, but was never actually shown to the owner
+    for approval, only "the dropdown is cut off" was (2026-08-10 correction). The real fix
+    decouples the two: `.mgx-sepright` / `.lv-top` (the whole row) is now the panel's
+    positioned ancestor, not the trigger's own wrapper, so the panel reaches the true edge
+    regardless of where the trigger sits -- letting the trigger go back to its original,
+    FIRST position without reintroducing the cutoff. Both properties are asserted below so
+    neither a `position:relative` regression on the trigger wrapper NOR a reorder-without-
+    approval regression can land silently again.
+    """
+    for host, path in (("gallery", "/"), ("loom", "/loom?bundle=1")):
+        page = logged_in_page(**DESKTOP)
+        _open_tray_with_queued_job(page, path)
+        g = page.evaluate(_TRAY_GEOMETRY_JS[host])
+
+        assert g["chipLeft"] < g["credLeft"], (
+            "{}: the Activity trigger is not before the credits/close chip anymore -- "
+            "{!r}".format(host, g))
+        assert abs(g["panelRight"] - g["rowRight"]) <= 1, (
+            "{}: the dropdown does not reach the row's true right edge (panel right={}, "
+            "row right={})".format(host, g["panelRight"], g["rowRight"]))
+
+
 # ---------------------------------------------------------------------------
 # 7. Import overlay -- real files, through the real control, land in the real catalog
 # ---------------------------------------------------------------------------

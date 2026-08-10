@@ -1,4 +1,4 @@
-/* ../gallery/src/styles/gallery-picker.css */
+/* gallery/src/styles/gallery-picker.css */
 .mg-gallery-picker {
   position: fixed;
   inset: 0;
@@ -285,7 +285,7 @@ body.privacy-blur .mg-gallery-picker .mg-pk-cell:hover img {
   filter: none;
 }
 
-/* ../gallery/src/styles/model-picker.css */
+/* gallery/src/styles/model-picker.css */
 .model-picker {
   display: flex;
   flex-direction: column;
@@ -610,7 +610,7 @@ body.privacy-blur .mg-gallery-picker .mg-pk-cell:hover img {
   display: block;
 }
 
-/* ../gallery/src/styles/cost-badge.css */
+/* gallery/src/styles/cost-badge.css */
 .cost-badge {
   display: block;
   margin: 12px 0 8px;
@@ -805,7 +805,7 @@ body.privacy-blur .mg-gallery-picker .mg-pk-cell:hover img {
   }
 }
 
-/* ../gallery/src/styles/gen-drawer.css */
+/* gallery/src/styles/gen-drawer.css */
 .gen-drawer {
   display: block;
   position: relative;
@@ -1290,7 +1290,7 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
   font-size: 11px;
 }
 
-/* ../gallery/src/styles/notify.css */
+/* gallery/src/styles/notify.css */
 .ach-m2 {
   position: fixed;
   inset: 0;

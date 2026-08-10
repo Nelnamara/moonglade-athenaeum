@@ -4285,7 +4285,7 @@ ${"=".repeat(48)}
 .lv-banner-show{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--subtext);
   background:var(--surface1);border:1px solid var(--surface1);border-radius:7px;padding:7px 11px;
   cursor:pointer;white-space:nowrap;font-family:inherit;}
-.lv-top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
+.lv-top{position:relative;display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
 .lv-eyebrow{font:700 11px/1 system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);}
 .lv-note{color:var(--subtext);font-size:12px;}
 /* The trailing "a" in this selector is deliberate: the back-to-gallery control is an
@@ -4297,16 +4297,14 @@ ${"=".repeat(48)}
 .lv-top button,.lv-top label,.lv-top a{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
 .lv-top a{text-decoration:none;display:inline-block;}
 .lv-top a:hover{border-color:var(--accent);}
-/* margin-left:auto lives on the "\u2190 Gallery" link's own inline style now (2026-08-09,
-   corrected same day the header-docked Activity control landed): Activity moved to be the
-   LAST item in the row instead of the first, because its right:0-anchored dropdown only
-   ever reaches its OWN chip's right edge, not the row's -- with anything sitting after it
-   (as "\u2190 Gallery" originally did), the panel fell short of the true right edge by that
-   sibling's width. Whichever of the two flush-right items comes FIRST needs the one
-   auto-margin (it alone absorbs the row's free space; two adjacent auto-margins would
-   each grab a share and split the pair apart with a gap in between) -- that's "\u2190 Gallery"
-   now, Activity before. */
-.lv-top-act-wrap{position:relative;}
+/* margin-left:auto back here, Activity first again, "\u2190 Gallery" last (2026-08-10: the
+   2026-08-09 reorder that put Activity last was never actually shown to/approved -- only
+   "the dropdown is cut off" was). The cutoff and the trigger's own position are separable:
+   .lv-top itself now owns the positioned-ancestor role (position:relative, above), so
+   .at-panel's right:0 anchors to the FULL row's true right edge no matter where the
+   trigger sits inside it -- deliberately NOT position:relative here, so it doesn't shadow
+   that and pull the anchor back down to just this chip. */
+.lv-top-act-wrap{margin-left:auto;}
 .lv-top button:hover{border-color:var(--accent);}
 .lv-top button:disabled{opacity:.5;cursor:default;}
 .lv-top button:disabled:hover{border-color:var(--surface1);}
@@ -6388,7 +6386,7 @@ ${"=".repeat(48)}
         bundling,
         importBackup
       }
-    ), /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: "/", style: { textDecoration: "none", marginLeft: "auto" } }, "\u2190 Gallery"), act.edge === "left" ? null : activityControl), batchTally && (() => {
+    ), act.edge === "left" ? null : activityControl, /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: "/", style: { textDecoration: "none" } }, "\u2190 Gallery")), batchTally && (() => {
       const outs = Object.values(batchTally.outcomes);
       const done = outs.filter((o) => o === "done").length;
       const failed = outs.filter((o) => o === "failed").length;
