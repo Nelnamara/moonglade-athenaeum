@@ -6934,3 +6934,21 @@ instead of the old dead Edit/Enhance/Fix trio. The old `"tools"` set, `tools_use
 5 new tests exercise each real writer plus the 1/3/5 thresholds end to end; the existing
 telemetry-mechanism tests (store roundtrip, corrupt-store fail-soft, criteria checklist shape)
 were updated to use `enhance_chain` as their worked example instead of the retired set.
+
+### Skin-Changer's threshold was the actual bug, not Completionist's exemption · *2026-08-09*
+
+Follow-up to the "discovered side effect" flagged in the entry above. Owner's ruling: *"exempt
+the skin changer. that was never to be gated behind anything except earning more than 1
+skin."* -- `skin-changer` (`'metric': 'skins_unlocked'`) was `threshold: 5` ("unlock every
+skin"), which is what actually chained it to whichever skin is hardest to earn (Nightfallen,
+gated behind The Great Library the same day) and let that leak into Completionist's own
+deliberate exemption for The Great Library's banner-only reward.
+
+**Fixed at the source rather than special-cased around:** threshold corrected to `2` (desc/
+roast rewritten to "unlock a second skin" instead of "every skin"). Completionist's exemption
+for The Great Library is restored for real -- `test_completionist_requires_every_non_feat` is
+back to its original shape (completionist earned at 4/5 skins, The Great Library un-earned),
+this time because skin-changer no longer forces the issue, not because of a second exemption
+bolted on top. Earning every skin still counts toward skin-changer; it's just never required.
+
+Committed to `p3-asset-bundling-2026-08-09`, pushed, full suite green (1535 pytest).
