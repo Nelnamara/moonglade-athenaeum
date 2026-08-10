@@ -6,6 +6,21 @@ import { subscribe, openTray, closeTray, dismiss, clearFinished } from "./jobsSt
 // side-panel choreography this control is modeled on (jtSlideOut in the DC reference).
 const CLOSE_MS = 260;
 
+// Which side of the header the whole control (trigger + panel) docks to -- persisted so
+// the choice survives a reload, and shared across hosts (one browser, one localStorage,
+// same preference whether you're looking at the gallery or the Loom). A real ask
+// (2026-08-09), traced to Job Tracker Fullscreen.dc.html's own ◧Left/Right◨ edge
+// selector -- an unshipped exploration doc, not the header-docked pattern that actually
+// got built, so this is new work against the real component, not a restore.
+const EDGE_KEY = "mg_activity_edge";
+
+function readEdge() {
+  try {
+    const v = window.localStorage.getItem(EDGE_KEY);
+    return v === "left" ? "left" : "right";
+  } catch { return "right"; }
+}
+
 /* useActivity -- the header-docked Activity control's shared state, one copy consumed by
    each host's own trigger+panel markup (Claude Design handoff 2026-08-09, drift item 39
    replaces the single shared floating <ActivityTray> with per-host chrome, but every host
@@ -14,9 +29,16 @@ export default function useActivity() {
   const [state, setState] = useState({ jobs: [], open: false });
   const [expandedId, setExpandedId] = useState(null);
   const [closing, setClosing] = useState(false);
+  const [edge, setEdgeState] = useState(readEdge);
   const closeTimer = useRef(null);
   useEffect(() => subscribe(setState), []);
   useEffect(() => () => clearTimeout(closeTimer.current), []);
+
+  const setEdge = useCallback((next) => {
+    const v = next === "left" ? "left" : "right";
+    setEdgeState(v);
+    try { window.localStorage.setItem(EDGE_KEY, v); } catch { /* best-effort */ }
+  }, []);
 
   const { jobs, open } = state;
 
@@ -40,5 +62,6 @@ export default function useActivity() {
 
   return {
     jobs, open: open || closing, closing, expandedId, toggle, close, toggleRow, dismiss, clearFinished,
+    edge, setEdge,
   };
 }

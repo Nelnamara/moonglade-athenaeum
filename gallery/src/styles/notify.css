@@ -142,6 +142,11 @@
 @media (prefers-reduced-motion: reduce){ .at-ministack.indet,.at-dot{animation:none;} }
 
 .at-panel{position:absolute;top:calc(100% + 10px);right:0;z-index:60;width:380px;max-width:calc(100vw - 28px);max-height:min(64vh,560px);box-sizing:border-box;display:flex;flex-direction:column;padding:14px;border-radius:14px;border:1px solid var(--surface1);background:linear-gradient(180deg,var(--surface0),var(--mantle) 60%);box-shadow:0 24px 60px rgba(0,0,0,.6);font-family:system-ui,sans-serif;animation:atSlideIn .22s cubic-bezier(.2,.9,.24,1) both;}
+/* Docked left instead: the trigger itself moves to the header's left side (see
+   SeparatorBar.jsx/the Loom toolbar), so the panel anchors off its own LEFT edge
+   here too -- always flush against whichever edge the trigger actually lives near,
+   never a fixed side that could push it off-screen. */
+.at-panel.edge-left{right:auto;left:0;}
 .at-panel.closing{animation:atSlideOut .24s ease both;}
 @keyframes atSlideIn{from{opacity:0;transform:translateY(-8px) scale(.97);}to{opacity:1;transform:none;}}
 @keyframes atSlideOut{from{opacity:1;transform:none;}to{opacity:0;transform:translateY(-8px) scale(.97);}}
@@ -154,6 +159,12 @@
 .at-clear:hover{color:var(--text);background:var(--surface1);}
 .at-collapse{width:20px;height:20px;border-radius:6px;border:1px solid var(--surface1);background:none;display:grid;place-items:center;font-size:10px;color:var(--overlay0);cursor:pointer;flex:none;}
 .at-collapse:hover{color:var(--text);background:var(--surface1);}
+/* Left/right dock toggle -- Job Tracker Fullscreen.dc.html's own ◧Left/Right◨ edge
+   selector, real work against the shipped panel (2026-08-09). */
+.at-edgeseg{display:flex;gap:2px;flex:none;margin-right:2px;}
+.at-edgebtn{width:20px;height:20px;border-radius:6px;border:1px solid var(--surface1);background:none;display:grid;place-items:center;font-size:11px;color:var(--overlay0);cursor:pointer;}
+.at-edgebtn:hover{color:var(--text);background:var(--surface1);}
+.at-edgebtn.on{color:var(--accent);border-color:var(--accent);background:rgba(182,146,230,.14);}
 .at-body{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:5px;margin-top:10px;}
 .at-empty{color:var(--overlay0);font-size:12px;text-align:center;padding:30px 16px;line-height:1.55;}
 .at-empty-nel{width:104px;height:104px;object-fit:contain;margin:0 auto 8px;display:block;opacity:.92;}
