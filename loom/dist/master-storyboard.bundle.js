@@ -17,13 +17,13 @@ var LoomBundle = (() => {
   };
   var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-  // loom/master-storyboard.jsx
+  // master-storyboard.jsx
   var master_storyboard_exports = {};
   __export(master_storyboard_exports, {
     default: () => App
   });
 
-  // loom/src/loom-core.js
+  // src/loom-core.js
   var CONNECT = {
     new: { label: "New scene", hint: "intentional break \u2014 fresh look/place" },
     cut: { label: "Cut (in edit)", hint: "hard/match cut joined in your editor \u2014 rhyme the frames" },
@@ -243,7 +243,7 @@ var LoomBundle = (() => {
     return { total, rows, hidden: Math.max(0, total - rows.length) };
   };
 
-  // loom/src/loom-mutations.js
+  // src/loom-mutations.js
   var patchCard = (project, actId, cardId, fn) => ({
     ...project,
     acts: project.acts.map((a) => a.id !== actId ? a : {
@@ -502,7 +502,7 @@ ${"=".repeat(48)}
     };
   }
 
-  // gallery/src/art/artFilters.js
+  // ../gallery/src/art/artFilters.js
   var MgArtFilters = (function() {
     "use strict";
     var SOURCE_URL = "https://api.pixai.art/config/imageArtFilters";
@@ -1158,7 +1158,7 @@ ${"=".repeat(48)}
   })();
   var artFilters_default = MgArtFilters;
 
-  // loom/scripts/react-global-shim.js
+  // scripts/react-global-shim.js
   var React2 = window.React;
   var react_global_shim_default = React2;
   var useState = React2.useState;
@@ -1191,7 +1191,7 @@ ${"=".repeat(48)}
   var Component = React2.Component;
   var PureComponent = React2.PureComponent;
 
-  // gallery/src/picker/pickerCore.js
+  // ../gallery/src/picker/pickerCore.js
   var PickerCore = (function() {
     "use strict";
     function createPickerCore(opts) {
@@ -1320,7 +1320,7 @@ ${"=".repeat(48)}
   })();
   var pickerCore_default = PickerCore;
 
-  // gallery/src/components/GalleryPicker.jsx
+  // ../gallery/src/components/GalleryPicker.jsx
   var COPY_KEY = "pick-copyprompt";
   var TILE_KEY = "mg-pk-tile";
   function readTile() {
@@ -1583,7 +1583,7 @@ ${"=".repeat(48)}
     );
   }
 
-  // gallery/src/components/ModelPicker.jsx
+  // ../gallery/src/components/ModelPicker.jsx
   function fmt(n) {
     return (Number(n) || 0).toLocaleString();
   }
@@ -1953,7 +1953,7 @@ ${"=".repeat(48)}
     ));
   }
 
-  // gallery/src/components/CostBadge.jsx
+  // ../gallery/src/components/CostBadge.jsx
   function fmt2(n) {
     return Number(n).toLocaleString();
   }
@@ -2107,7 +2107,7 @@ ${"=".repeat(48)}
   });
   var CostBadge_default = CostBadge;
 
-  // gallery/src/gen/videoDrawerCore.js
+  // ../gallery/src/gen/videoDrawerCore.js
   var MODELS = [
     { value: "v4.0", label: "V4.0 Preview", caps: ["multi-ref", "audio", "15s", "top quality", "~2.5\xD7 cost"] },
     { value: "v4.0.1", label: "V4.0 Lite Preview", caps: ["multi-ref", "audio", "15s", "end-frame"] },
@@ -2262,7 +2262,7 @@ ${"=".repeat(48)}
     return hint ? hint + " (PixAI said: " + s.slice(0, 160) + ")" : s;
   }
 
-  // gallery/src/components/VideoDrawer.jsx
+  // ../gallery/src/components/VideoDrawer.jsx
   var lineSeq = 0;
   var VideoDrawer = forwardRef(function VideoDrawer2(props, ref) {
     const { loomCtx, style, className } = props;
@@ -2912,7 +2912,7 @@ ${"=".repeat(48)}
   });
   var VideoDrawer_default = VideoDrawer;
 
-  // gallery/src/notify/toastStore.js
+  // ../gallery/src/notify/toastStore.js
   var seq = 0;
   var toasts = [];
   var subs = /* @__PURE__ */ new Set();
@@ -2956,7 +2956,7 @@ ${"=".repeat(48)}
     return remove;
   }
 
-  // gallery/src/notify/jobsStore.js
+  // ../gallery/src/notify/jobsStore.js
   var LSK = "mg_jobs_open";
   var jobs = [];
   var open = false;
@@ -3086,7 +3086,7 @@ ${"=".repeat(48)}
     refresh().then(schedule);
   }
 
-  // gallery/src/notify/jobs.js
+  // ../gallery/src/notify/jobs.js
   var seen = {};
   function register(id, label, count) {
     if (!id || seen[id]) return;
@@ -3132,7 +3132,7 @@ ${"=".repeat(48)}
     }).catch(() => again(4e3));
   }
 
-  // gallery/src/notify/ach.js
+  // ../gallery/src/notify/ach.js
   var data = null;
   function unleashed() {
     try {
@@ -3484,7 +3484,7 @@ ${"=".repeat(48)}
     };
   }
 
-  // loom/scripts/react-dom-global-shim.js
+  // scripts/react-dom-global-shim.js
   var ReactDOM = window.ReactDOM;
   var createPortal = ReactDOM.createPortal;
   var flushSync = ReactDOM.flushSync;
@@ -3494,7 +3494,7 @@ ${"=".repeat(48)}
   var unmountComponentAtNode = ReactDOM.unmountComponentAtNode;
   var findDOMNode = ReactDOM.findDOMNode;
 
-  // gallery/src/notify/ToastHost.jsx
+  // ../gallery/src/notify/ToastHost.jsx
   function ToastHost() {
     const [toasts2, setToasts] = useState([]);
     useEffect(() => subscribe(setToasts), []);
@@ -3504,7 +3504,7 @@ ${"=".repeat(48)}
     );
   }
 
-  // gallery/src/notify/index.jsx
+  // ../gallery/src/notify/index.jsx
   var installed = false;
   function installNotify() {
     if (installed) return;
@@ -3526,7 +3526,7 @@ ${"=".repeat(48)}
     return /* @__PURE__ */ react_global_shim_default.createElement(ToastHost, null);
   }
 
-  // gallery/src/notify/ActivityChip.jsx
+  // ../gallery/src/notify/ActivityChip.jsx
   function ringPct(j) {
     if (j.status !== "running" || !j.total) return null;
     return Math.min(100, Math.round((j.done || 0) / j.total * 100));
@@ -3573,7 +3573,7 @@ ${"=".repeat(48)}
     );
   }
 
-  // gallery/src/notify/format.js
+  // ../gallery/src/notify/format.js
   function ago(ts) {
     const s = Math.max(0, Math.floor(Date.now() / 1e3 - (ts || 0)));
     if (s < 60) return "just now";
@@ -3631,7 +3631,7 @@ ${"=".repeat(48)}
     return grp;
   }
 
-  // gallery/src/notify/ActivityRow.jsx
+  // ../gallery/src/notify/ActivityRow.jsx
   function ActivityRow({ job: j, expanded, onToggle, onDismiss, compact }) {
     const st = j.status || "running";
     const queued = st === "running" && j.started === false;
@@ -3705,7 +3705,7 @@ ${"=".repeat(48)}
     );
   }
 
-  // gallery/src/notify/ActivityPanel.jsx
+  // ../gallery/src/notify/ActivityPanel.jsx
   function ActivityPanel({
     jobs: jobs2,
     expandedId,
@@ -3765,7 +3765,7 @@ ${"=".repeat(48)}
     ))));
   }
 
-  // gallery/src/notify/useActivity.js
+  // ../gallery/src/notify/useActivity.js
   var CLOSE_MS = 260;
   var EDGE_KEY = "mg_activity_edge";
   function readEdge() {
@@ -3831,7 +3831,7 @@ ${"=".repeat(48)}
     };
   }
 
-  // loom/master-storyboard.jsx
+  // master-storyboard.jsx
   var { useState: useState2, useEffect: useEffect2, useRef: useRef2, useCallback: useCallback2, useMemo: useMemo2 } = React;
   installNotify();
   var LV_TINTS = [
