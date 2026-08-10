@@ -910,7 +910,12 @@ def test_control_panel_runs_real_jobs_and_manages_a_real_account(logged_in_page,
 
     # --- Trash sub-overlay: real /api/trash/list against a genuinely empty quarantine. ---
     page.click('div.mgcp-tile:has-text("Trash")')
-    page.wait_for_selector('[aria-label="Trash"]')
+    # wait for the SETTLED empty-state text, not just the dialog mounting -- it opens
+    # showing "0 items"/"Loading..." before its own /api/trash/list fetch resolves and
+    # swaps in "Nothing in the trash.", a race this assertion used to lose reliably in CI
+    # (consistently slower than local) while passing every time locally (found via 13
+    # straight red "Tests" runs on master, 2026-08-09 through 2026-08-10, never checked).
+    page.wait_for_selector('[aria-label="Trash"] .mgcp-trashempty:has-text("Nothing in the trash")')
     assert "Nothing in the trash" in page.inner_text('[aria-label="Trash"]')
     page.click('[aria-label="Trash"] button[aria-label="Close"]')
     page.wait_for_selector('[aria-label="Trash"]', state="detached")
