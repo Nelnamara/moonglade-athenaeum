@@ -6882,3 +6882,55 @@ call: "Wait for P3").
 7 new tests in `tests/test_branding.py` (41/41 green); `test_panel_users.py` and the Playwright
 Control Panel suite re-run unaffected. Committed to `claude-design-tracker-branding-2026-08-09`
 (same branch as the job-tracker work above), pushed, NOT merged -- awaiting owner review.
+
+### Nightfallen gated behind The Great Library; D4 locked and shipped for real · *2026-08-09*
+
+New branch `p3-asset-bundling-2026-08-09` (off master), started to scope the P3 asset-bundling
+work plus finish outstanding reward wiring while the owner works through the mascot-video
+animation batch separately. Both pieces below are committed and pushed, full suite green
+(1535 pytest), NOT yet merged.
+
+**Nightfallen skin gated.** Was the only one of 5 skins still `"free": True` -- `hoardsmith`/
+`reel-director`/`menagerie` already real-gate `moonlit`/`ember`/`verdant` via a live `'skin'`
+field + `/api/skin`'s earned check, so this just finishes a pattern already live in code, not
+a new enforcement mechanism. Added `'skin': 'nightfallen'` to `the-great-library`.
+
+**Discovered side effect, flagged rather than silently resolved:** `skin-changer` (needs all 5
+skins unlocked) now transitively requires The Great Library too, since nightfallen is one of
+the 5. This quietly routes around Completionist's own `banner_reward` exemption for The Great
+Library -- the exemption still holds literally (the-great-library stays excluded from
+Completionist's own pool), but skin-changer re-introduces the same dependency by a side door.
+Nothing is unearnable; whether this coupling is fine thematically ("need every skin including
+the newest") or should be closed (exempt skin-changer too) is an open owner call, not resolved
+here.
+
+**D4 locked and shipped -- the three "dead achievement" enhance metrics fixed for real.**
+`first-enhance`/`full-toolbox`/`enhance-adept` were all permanently unearnable (their old
+metrics -- `enhances`, `tools_used`, `enhance_workflows_distinct` -- had zero or a dead-end
+writer, `/api/enhance` having been removed from the app long ago; see the "P3 asset-bundling
+scoping, begun" entry above for how `full-toolbox` specifically was rediscovered). The proposed
+5-ability pool from the "D4 metric redesign proposed" entry above was already effectively
+locked (the "boosters" overlap concern named a pool member -- "Custom Prompts" -- that turned
+out not to exist in code at all, and isn't one of the chosen 5, so there was nothing left
+blocking it) -- implemented directly rather than re-asking a question already answered:
+
+- One shared `enhance_chain` telemetry set, 5 members, backing all three achievements at
+  thresholds 1/3/5: `first-enhance`=1, `full-toolbox`=3, `enhance-adept`=5.
+- **Edit Pro / Reference Pro** -- detected in `/api/generate` off the resolved model id
+  (a Generate-tab model pick, confirmed distinct from the app's own `/api/edit` tool).
+- **Fixer** -- `/api/fix`'s existing `telem_set_add` redirected from the dead `"tools"` set.
+- **Art Filters** -- confirmed a pure client-side composite with no backend call at all
+  (`tests/test_enhance.py`); new `/api/ach-event` `"art_filter"` beacon fired from
+  `FiltersPanel.jsx`'s two terminal actions (Save to library / Send to edit).
+- **Regenerate, different model** -- `reuseFrom`'s origin model is client-only state
+  (`GenerateDrawer.jsx`), never reaches the server; new `"regenerate_model"` beacon fired
+  client-side when the Generate button's current model differs from the reeled-in run's.
+- **Upscale / Hi-res enhance** -- detected in `/api/generate` off `args.upscale`.
+
+`full-toolbox`'s `_ACH_CRITERIA` checklist now shows the real 5-item pool (with real labels)
+instead of the old dead Edit/Enhance/Fix trio. The old `"tools"` set, `tools_used`, and
+`enhance_workflows_distinct` are removed entirely -- no reader was left for any of them.
+
+5 new tests exercise each real writer plus the 1/3/5 thresholds end to end; the existing
+telemetry-mechanism tests (store roundtrip, corrupt-store fail-soft, criteria checklist shape)
+were updated to use `enhance_chain` as their worked example instead of the retired set.
