@@ -7045,3 +7045,33 @@ the 2026-07-26 move) and neither mentioned the bundle fallback at all.
 
 4 new regression tests. Full suite green (1548 pytest). Committed to
 `p3-asset-bundling-2026-08-09`, pushed, NOT merged.
+
+### Activity control's dropdown fixed to reach the header's true right edge · *2026-08-09*
+
+Owner live-tested `claude-design-tracker-branding-2026-08-09` and flagged the position as
+"off." Live-diagnosed via a real browser session (not guessed from a screenshot): the panel
+was correctly `right:0`-anchored to its OWN trigger chip, but the chip itself sat FIRST in the
+header's right-side cluster on both hosts -- before credits/cards on the gallery
+(`SeparatorBar.jsx`), before the "← Gallery" link on the Loom -- so the dropdown reached its
+chip's own right edge, not the row's, leaving a real, measured 265px gap to the row's actual
+right edge on the gallery.
+
+**Fixed by reordering, not by changing the anchor math:** Activity is now the LAST item in
+both rows -- a utility/notification control belongs at the true outer edge. Gallery needed
+only a JSX move (the row's own flex layout does the rest). The Loom's `margin-left:auto` (the
+one auto-margin needed to flush a pair of right-side items together) moved from the Activity
+wrapper onto "← Gallery", since that's now the first of the two. Mobile is unaffected --
+it opens a bottom sheet, a different mechanism entirely, not a right-anchored dropdown.
+
+**Real, unrelated gap the full suite caught while verifying:** the Custom Mark upload routes
+(`api_branding_mark_custom`/`_remove`, added earlier the same day) were never registered in
+`test_route_tiers.py`'s auth-tier declarations -- fixed alongside.
+
+**Also surfaced, not yet resolved:** the owner separately asked about a left/right side toggle
+for the Activity panel. That's real -- `Job Tracker Fullscreen.dc.html` (an UNSHIPPED
+exploration doc, not the header-docked pattern that actually got built) has a genuine
+`◧ Left` / `Right ◨` edge selector. Not built here; owner hasn't confirmed he still wants it
+added as new scope against the real shipped component.
+
+Full suite green (1535 pytest, 724 loom). Committed to
+`claude-design-tracker-branding-2026-08-09`, pushed, NOT merged.
