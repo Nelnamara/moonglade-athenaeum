@@ -124,20 +124,6 @@ export default function SeparatorBar({
       </div>
 
       <div className="mgx-sepright">
-        {/* Activity control -- trigger chip + anchored dropdown, see the useActivity()
-            comment above for why this reads jobsStore, not the `running` prop. */}
-        <div className="mgx-act-wrap" ref={actRef}>
-          <ActivityChip jobs={act.jobs} open={act.open} onToggle={act.toggle} title="Activity — recent jobs" />
-          {act.open ? (
-            <ActivityPanel
-              jobs={act.jobs} expandedId={act.expandedId} closing={act.closing}
-              onToggleRow={act.toggleRow} onDismiss={act.dismiss}
-              onClearFinished={act.clearFinished} onClose={act.close}
-              className="mgx-act-panel"
-            />
-          ) : null}
-        </div>
-
         {/* shared price chip (hidden until the dock pushes a price) */}
         <span className={"mgx-costslot" + (hasCost ? " has" : "")}>
           <CostBadge compact onCost={() => setHasCost(true)} />
@@ -202,6 +188,25 @@ export default function SeparatorBar({
             ✦ Generate
           </button>
         ) : null}
+
+        {/* Activity control -- trigger chip + anchored dropdown, see the useActivity()
+            comment above for why this reads jobsStore, not the `running` prop. LAST in
+            this row on purpose: a utility/notification control docks at the true outer
+            edge, not wedged between credits and whatever else sits in this cluster --
+            found live 2026-08-09, it used to sit FIRST, so its right:0-anchored panel
+            (correctly right-aligned to its OWN chip) still fell short of the header's
+            real right edge by however wide the credits/claim/generate chips were. */}
+        <div className="mgx-act-wrap" ref={actRef}>
+          <ActivityChip jobs={act.jobs} open={act.open} onToggle={act.toggle} title="Activity — recent jobs" />
+          {act.open ? (
+            <ActivityPanel
+              jobs={act.jobs} expandedId={act.expandedId} closing={act.closing}
+              onToggleRow={act.toggleRow} onDismiss={act.dismiss}
+              onClearFinished={act.clearFinished} onClose={act.close}
+              className="mgx-act-panel"
+            />
+          ) : null}
+        </div>
       </div>
     </div>
   );

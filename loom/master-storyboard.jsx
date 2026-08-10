@@ -455,13 +455,16 @@ const V2_STYLES = `
 .lv-top button,.lv-top label,.lv-top a{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
 .lv-top a{text-decoration:none;display:inline-block;}
 .lv-top a:hover{border-color:var(--accent);}
-/* margin-left:auto moved onto .lv-top-act-wrap (2026-08-09, the header-docked Activity
-   control) -- it's the first of the two right-side items now, so it alone absorbs the row's
-   free space; .lv-close just follows it at the row's normal gap, both landing flush at the
-   far right together. Two adjacent auto-margins would each grab a share and split them apart
-   with a gap in between, which is not what either the old single-.lv-close layout or this one
-   wants. */
-.lv-top-act-wrap{position:relative;margin-left:auto;}
+/* margin-left:auto lives on the "← Gallery" link's own inline style now (2026-08-09,
+   corrected same day the header-docked Activity control landed): Activity moved to be the
+   LAST item in the row instead of the first, because its right:0-anchored dropdown only
+   ever reaches its OWN chip's right edge, not the row's -- with anything sitting after it
+   (as "← Gallery" originally did), the panel fell short of the true right edge by that
+   sibling's width. Whichever of the two flush-right items comes FIRST needs the one
+   auto-margin (it alone absorbs the row's free space; two adjacent auto-margins would
+   each grab a share and split the pair apart with a gap in between) -- that's "← Gallery"
+   now, Activity before. */
+.lv-top-act-wrap{position:relative;}
 .lv-top button:hover{border-color:var(--accent);}
 .lv-top button:disabled{opacity:.5;cursor:default;}
 .lv-top button:disabled:hover{border-color:var(--surface1);}
@@ -2944,6 +2947,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8681; Render</button>
         <ExportMenu exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle}
           bundling={bundling} importBackup={importBackup} />
+        <a className="lv-close" href="/" style={{ textDecoration: "none", marginLeft: "auto" }}>← Gallery</a>
+        {/* Activity LAST in the row on purpose (found live 2026-08-09, same bug as the
+            gallery header's SeparatorBar.jsx): its dropdown is right-aligned to its OWN
+            chip via right:0, so with "← Gallery" following it, the panel fell short of
+            the row's true right edge by that link's width. The one auto-margin needed to
+            flush the pair right now belongs to "← Gallery" (the new first of the two) --
+            see .lv-top-act-wrap's own CSS comment for why only one of a flush-right pair
+            ever gets it. */}
         <div className="lv-top-act-wrap" ref={actRef}>
           <ActivityChip jobs={act.jobs} open={act.open} onToggle={act.toggle} title="Activity — render jobs" />
           {act.open ? (
@@ -2955,7 +2966,6 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             />
           ) : null}
         </div>
-        <a className="lv-close" href="/" style={{ textDecoration: "none" }}>← Gallery</a>
       </div>
       {batchTally && (() => {
         // done/failed/stale are DERIVED from the outcomes map every render, never stored as
