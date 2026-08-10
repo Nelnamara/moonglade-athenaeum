@@ -305,6 +305,11 @@ ROUTE_TIERS = {
     ("api_branding_slot_upload", "POST"): LOGIN,
     ("api_branding_slot_crop", "POST"): LOGIN,
     ("api_branding_slot_active", "POST"): LOGIN,
+    # Custom Mark upload slot (the-great-library reward, 2026-08-09) -- same
+    # trust level as the slot uploads above, plus its own real server-side
+    # achievement-earned check (see api_branding_mark_custom's docstring).
+    ("api_branding_mark_custom", "POST"): LOGIN,
+    ("api_branding_mark_custom_remove", "POST"): LOGIN,
     ("api_skin", "POST"): LOGIN,
     ("api_ach_event", "POST"): LOGIN,
     # api_users_remove is LOGIN, not LOCALHOST, because it is genuinely reachable

@@ -683,3 +683,90 @@ def test_non_banner_slots_never_write_a_flat(tmp_path):
              content_type="multipart/form-data")
     assert not (tmp_path / "branding" / "banner.png").exists()
     assert not (tmp_path / "branding" / "login-banner.png").exists()
+
+
+# ---- Custom Mark (handoff-2026-08-09-branding-integration.md's 6th marks tile,
+# gated to the-great-library) -----------------------------------------------
+
+def test_add_custom_mark_writes_manifest_and_becomes_active(tmp_path):
+    mark = g.add_custom_mark(tmp_path, _png_bytes(), label="My mark")
+    assert mark["kind"] == "upload" and mark["label"] == "My mark"
+    from PIL import Image
+    png = tmp_path / "branding" / "marks" / (mark["id"] + ".png")
+    assert png.exists()
+    with Image.open(png) as im:
+        assert im.format == "PNG"
+    d = g.load_branding(tmp_path)
+    assert d["mark"] == mark["id"]
+    assert {m["id"] for m in g.list_marks(tmp_path)} == {mark["id"]}
+
+
+def test_add_custom_mark_replaces_not_accumulates(tmp_path):
+    """Only one custom-mark slot exists -- a second upload replaces the first
+    rather than leaving an orphaned entry the picker would need to hide."""
+    first = g.add_custom_mark(tmp_path, _png_bytes((1, 1, 1)))
+    second = g.add_custom_mark(tmp_path, _png_bytes((2, 2, 2)))
+    marks = g.list_marks(tmp_path)
+    assert {m["id"] for m in marks} == {second["id"]}
+    assert not (tmp_path / "branding" / "marks" / (first["id"] + ".png")).exists()
+    assert g.load_branding(tmp_path)["mark"] == second["id"]
+
+
+def test_remove_custom_mark_reverts_active_mark_to_logo(tmp_path):
+    mark = g.add_custom_mark(tmp_path, _png_bytes())
+    assert g.remove_custom_mark(tmp_path, mark["id"]) is True
+    assert g.list_marks(tmp_path) == []
+    assert not (tmp_path / "branding" / "marks" / (mark["id"] + ".png")).exists()
+    assert g.load_branding(tmp_path)["mark"] == "logo"
+
+
+def test_remove_custom_mark_refuses_a_built_in_tile_mark(tmp_path):
+    """The Replace/Remove chips only ever sit next to the uploaded mark -- this
+    guard makes that true at the data layer too, not just the UI not rendering
+    the chips next to a built-in tile."""
+    _cut_fake_marks(tmp_path, ids=("mark_4",))
+    assert g.remove_custom_mark(tmp_path, "mark_4") is False
+    assert {m["id"] for m in g.list_marks(tmp_path)} == {"mark_4"}
+
+
+def test_custom_mark_route_requires_the_great_library(tmp_path, monkeypatch):
+    cli = _client(tmp_path)
+    monkeypatch.setattr(g, "_mark_earned", lambda *a, **k: False)
+    r = cli.post("/api/branding/mark/custom",
+                 data={"file": (io_bytes(_png_bytes()), "m.png")},
+                 content_type="multipart/form-data")
+    assert r.status_code == 403
+    assert g.list_marks(tmp_path) == []
+
+    monkeypatch.setattr(g, "_mark_earned", lambda *a, **k: True)
+    r = cli.post("/api/branding/mark/custom",
+                 data={"file": (io_bytes(_png_bytes()), "m.png")},
+                 content_type="multipart/form-data")
+    d = r.get_json()
+    assert r.status_code == 200
+    assert d["mark"] == d["marks"][0]["id"] and d["marks"][0]["kind"] == "upload"
+    assert cli.get("/api/branding").get_json()["mark"] == d["mark"]
+
+
+def test_custom_mark_route_rejects_bad_image(tmp_path, monkeypatch):
+    monkeypatch.setattr(g, "_mark_earned", lambda *a, **k: True)
+    cli = _client(tmp_path)
+    r = cli.post("/api/branding/mark/custom",
+                 data={"file": (io_bytes(b"not an image"), "x.png")},
+                 content_type="multipart/form-data")
+    assert r.status_code == 400
+    r = cli.post("/api/branding/mark/custom", data={}, content_type="multipart/form-data")
+    assert r.status_code == 400
+
+
+def test_custom_mark_remove_route(tmp_path, monkeypatch):
+    monkeypatch.setattr(g, "_mark_earned", lambda *a, **k: True)
+    cli = _client(tmp_path)
+    mark_id = cli.post("/api/branding/mark/custom",
+                        data={"file": (io_bytes(_png_bytes()), "m.png")},
+                        content_type="multipart/form-data").get_json()["mark"]
+    r = cli.post("/api/branding/mark/custom/remove", json={"id": mark_id})
+    assert r.status_code == 200
+    assert r.get_json()["marks"] == []
+    assert cli.get("/api/branding").get_json()["mark"] == "logo"
+    assert cli.post("/api/branding/mark/custom/remove", json={"id": "nope"}).status_code == 400

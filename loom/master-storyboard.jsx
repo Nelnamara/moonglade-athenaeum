@@ -53,6 +53,9 @@ import ModelPicker from "../gallery/src/components/ModelPicker.jsx";
 import CostBadge from "../gallery/src/components/CostBadge.jsx";
 import VideoDrawer from "../gallery/src/components/VideoDrawer.jsx";
 import { installNotify, NotifyRoot } from "../gallery/src/notify/index.jsx";
+import ActivityChip from "../gallery/src/notify/ActivityChip.jsx";
+import ActivityPanel from "../gallery/src/notify/ActivityPanel.jsx";
+import useActivity from "../gallery/src/notify/useActivity.js";
 
 // The shared notify system (toasts · Activity tray · achievement celebrations · the Jobs
 // poller) -- the SAME modules the gallery bundle carries, so window.Toast/Jobs/JobsCard keep
@@ -440,7 +443,7 @@ const V2_STYLES = `
 .lv-banner-show{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--subtext);
   background:var(--surface1);border:1px solid var(--surface1);border-radius:7px;padding:7px 11px;
   cursor:pointer;white-space:nowrap;font-family:inherit;}
-.lv-top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
+.lv-top{position:relative;display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
 .lv-eyebrow{font:700 11px/1 system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);}
 .lv-note{color:var(--subtext);font-size:12px;}
 /* The trailing "a" in this selector is deliberate: the back-to-gallery control is an
@@ -452,7 +455,14 @@ const V2_STYLES = `
 .lv-top button,.lv-top label,.lv-top a{background:var(--surface1);border:1px solid var(--surface1);color:var(--text);border-radius:8px;padding:7px 13px;font:600 12px/1 system-ui;cursor:pointer;}
 .lv-top a{text-decoration:none;display:inline-block;}
 .lv-top a:hover{border-color:var(--accent);}
-.lv-top .lv-close{margin-left:auto;}
+/* margin-left:auto back here, Activity first again, "← Gallery" last (2026-08-10: the
+   2026-08-09 reorder that put Activity last was never actually shown to/approved -- only
+   "the dropdown is cut off" was). The cutoff and the trigger's own position are separable:
+   .lv-top itself now owns the positioned-ancestor role (position:relative, above), so
+   .at-panel's right:0 anchors to the FULL row's true right edge no matter where the
+   trigger sits inside it -- deliberately NOT position:relative here, so it doesn't shadow
+   that and pull the anchor back down to just this chip. */
+.lv-top-act-wrap{margin-left:auto;}
 .lv-top button:hover{border-color:var(--accent);}
 .lv-top button:disabled{opacity:.5;cursor:default;}
 .lv-top button:disabled:hover{border-color:var(--surface1);}
@@ -974,6 +984,35 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // this matches exactly rather than adding localStorage this feature never had in spec.
   const [bannerOpen, setBannerOpen] = useState(true);
   const [tab, setTab] = useState("Video");
+  // Header-docked Activity control (Claude Design handoff 2026-08-09, drift item 39):
+  // replaces the old floating #jobs-fab/#jobs-tray with a toolbar pill, same as the
+  // gallery's own sep-bar (gallery/src/components/SeparatorBar.jsx) -- one shared
+  // jobsStore/useActivity, two host-specific mounts, no fixed-position element on either.
+  const act = useActivity();
+  const actRef = useRef(null);
+  useEffect(() => {
+    if (!act.open) return undefined;
+    const onDoc = (e) => { if (actRef.current && !actRef.current.contains(e.target)) act.close(); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [act.open, act.close]);
+  // Trigger + anchored dropdown, built once and placed conditionally in .lv-top below --
+  // see the placement comments at both call sites for why the edge choice moves the whole
+  // control rather than just re-anchoring the panel's CSS.
+  const activityControl = (
+    <div className="lv-top-act-wrap" ref={actRef}>
+      <ActivityChip jobs={act.jobs} open={act.open} onToggle={act.toggle} title="Activity — render jobs" />
+      {act.open ? (
+        <ActivityPanel
+          jobs={act.jobs} expandedId={act.expandedId} closing={act.closing}
+          onToggleRow={act.toggleRow} onDismiss={act.dismiss}
+          onClearFinished={act.clearFinished} onClose={act.close}
+          edge={act.edge} onSetEdge={act.setEdge}
+          className="lv-top-act-panel"
+        />
+      ) : null}
+    </div>
+  );
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
   const [deepFocus, setDeepFocus] = useState(null);   // entry {a,c,ai,ci,code} double-clicked on the board, or null
@@ -2865,6 +2904,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <button type="button" className="lv-banner-show" title="Show banner"
             onClick={() => setBannerOpen(true)}>🖼 Banner</button>
         )}
+        {act.edge === "left" ? activityControl : null}
         <span className="lv-eyebrow">The Loom · V2</span>
         <span className="lv-note">Click a shot → it binds to Generate.</span>
         <ProjectSwitcher api={projectApi} />
@@ -2923,6 +2963,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8681; Render</button>
         <ExportMenu exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle}
           bundling={bundling} importBackup={importBackup} />
+        {/* Activity FIRST again in the flush-right pair (2026-08-10, see .lv-top-act-wrap's
+            own CSS comment above) -- margin-left:auto lives on it, "← Gallery" follows with
+            its normal gap. When docked left (act.edge === "left") the whole control instead
+            mounts near the row's START, right after the banner-show button -- see above. */}
+        {act.edge === "left" ? null : activityControl}
         <a className="lv-close" href="/" style={{ textDecoration: "none" }}>← Gallery</a>
       </div>
       {batchTally && (() => {

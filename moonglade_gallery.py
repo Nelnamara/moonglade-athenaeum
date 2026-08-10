@@ -1881,6 +1881,84 @@ def set_slot_active(out_dir, slot, item_id):
     return True
 
 
+def _mark_earned(out_dir, db_path, ach_id):
+    """Whether one specific achievement id is currently earned -- runs the exact
+    same compute_achievements() pipeline /api/achievements itself uses, so a
+    custom-mark upload can never disagree with what the Branding tab already
+    shows unlocked. Pure read (no save_ach_state call), so unlike that route it
+    needs no lock -- nothing here can race a concurrent write."""
+    metrics = achievement_metrics(db_path)
+    metrics.update(telemetry_metrics(out_dir))
+    state = load_ach_state(out_dir)
+    result = compute_achievements(metrics, state.get("seen"),
+                                   sets=load_telemetry(out_dir).get("sets", {}))
+    return any(a["id"] == ach_id and a["earned"] for a in result["achievements"])
+
+
+def add_custom_mark(out_dir, png_bytes, label="Custom mark"):
+    """Save The Great Library's custom-mark upload into branding/marks/ and make
+    it the active mark. Same manifest shape list_marks() already reads
+    (marks.json + <id>.png) -- one new kind:'upload' entry, not a new storage
+    concept, matching how add_slot_asset() extends the identical contract for
+    banner slots. Unlike _adopt_mark() (the filesystem-drop path, which derives
+    an id from the dropped filename), this is a real upload with a random id,
+    same convention add_slot_asset() uses for banner uploads.
+
+    There is only ONE custom-mark slot (the design's single 6th tile), so a
+    second upload REPLACES the first -- any existing kind:'upload' entry (and
+    its .png) is dropped here first, rather than accumulating orphaned marks
+    the picker would need de-duping logic to hide."""
+    mdir = branding_root() / "marks"
+    mdir.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
+        marks = list(data.get("marks") or []) if isinstance(data, dict) else []
+    except (OSError, ValueError):
+        marks = []
+    for old in [m for m in marks if isinstance(m, dict) and (m.get("kind") or "tile") == "upload"]:
+        old_png = mdir / (str(old.get("id")) + ".png")
+        if old_png.exists():
+            old_png.unlink()
+    marks = [m for m in marks if not (isinstance(m, dict) and (m.get("kind") or "tile") == "upload")]
+    new_id = secrets.token_hex(4)
+    (mdir / (new_id + ".png")).write_bytes(png_bytes)
+    marks.append({"id": new_id, "label": label, "kind": "upload"})
+    (mdir / "marks.json").write_text(json.dumps({"marks": marks}, indent=2), encoding="utf-8")
+    cfg = load_branding(out_dir)
+    cfg["mark"] = new_id
+    save_branding(out_dir, cfg)
+    return {"id": new_id, "label": label, "kind": "upload",
+            "png": "/branding/marks/%s.png" % new_id, "ico": False}
+
+
+def remove_custom_mark(out_dir, mark_id):
+    """Remove one uploaded custom mark. Refuses to touch a non-upload (built-in
+    tile) mark -- the design's Replace/Remove chips only ever appear next to the
+    uploaded one, but this guard makes that true at the data layer too, not just
+    the UI. Reverts the active mark back to the default logo if the removed one
+    was the one currently worn."""
+    mdir = branding_root() / "marks"
+    try:
+        data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
+        marks = list(data.get("marks") or []) if isinstance(data, dict) else []
+    except (OSError, ValueError):
+        return False
+    target = next((m for m in marks if isinstance(m, dict) and str(m.get("id")) == str(mark_id)
+                   and (m.get("kind") or "tile") == "upload"), None)
+    if target is None:
+        return False
+    keep = [m for m in marks if m is not target]
+    (mdir / "marks.json").write_text(json.dumps({"marks": keep}, indent=2), encoding="utf-8")
+    png = mdir / (str(mark_id) + ".png")
+    if png.exists():
+        png.unlink()
+    cfg = load_branding(out_dir)
+    if cfg.get("mark") == str(mark_id):
+        cfg["mark"] = "logo"
+        save_branding(out_dir, cfg)
+    return True
+
+
 def branding_slots_payload(out_dir):
     """The Branding tab's full slot state -- assets + which one is active, per
     slot -- in the one shape both /api/branding and /api/panel/summary hand to
@@ -4393,49 +4471,20 @@ try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.docu
 <style>
 __DESIGN_TOKENS__
 /* font-family here, not just in .sb-root: anything mounted OUTSIDE #root inherits from
-   body, and this shell deliberately mounts things there -- the Activity chip and tray, the
-   toast stack, the ? FAB. Without it they fell back to the browser default font while the
-   gallery shell gave them system-ui, so the same components looked different on the
-   two pages. notify.css now also states its own family (host-neutral by design), but the
-   shell should not be handing anything an unstyled baseline. */
+   body, and this shell deliberately mounts things there -- the toast stack, the ? FAB.
+   Without it they fell back to the browser default font while the gallery shell gave them
+   system-ui, so the same components looked different on the two pages. notify.css now also
+   states its own family (host-neutral by design), but the shell should not be handing
+   anything an unstyled baseline. */
 body { background: var(--base); margin: 0; font-family: system-ui, sans-serif; }
-/* The shared Job Tracker (the React <ActivityTray>, styled by notify.css in the bundle's
-   stylesheet) defaults #jobs-fab/#jobs-tray to bottom:14px;left:14px -- fine on the gallery's
-   own layout, but in the Loom the left Cast panel's own "+ add from gallery"/"Import
-   collection" buttons live at the BOTTOM of that same scrollable rail. Confirmed via live
-   measurement 2026-07-18: an open (even empty) tray overlaps the top ~13px of those buttons
-   once the panel is scrolled to its end -- worse with real jobs in the tray (it grows up to
-   600px tall). Shifted up just enough to clear that fixed ~70px control strip. No selector
-   scoping needed -- this whole <style> block only ever ships inside _LOOM_SHELL, never the
-   gallery's own page, so it's already Loom-exclusive by virtue of which page includes it
-   (the tray portals to document.body, siblings of #root, so a .sb-root-scoped selector
-   couldn't match them). Repositioning left<->right instead of shifting up was considered and
-   rejected -- the Generate drawer panel on the right is equally wide (560px) and would risk
-   the identical collision with ITS OWN bottom controls instead of solving anything.
-   !important is deliberate, not laziness: the bundle's stylesheet <link> is injected at the
-   END of the page (LOOM_PAGE_BUNDLE's runtime block), landing LATER in the cascade than this
-   static <style> -- a plain same-specificity override here silently loses the tie-break, so
-   !important is the only way to reliably win without depending on load order. */
-#jobs-fab, #jobs-tray { bottom: 88px !important; }
-/* Lift the Activity chip (and the ? help FAB below, inline) above LoomV2's center view.
-   .lv-overlay (master-storyboard.jsx: position:fixed; inset:0; z-index:400; background:
-   var(--base) -- opaque) buries them: neither #root nor its .sb-root child forms a stacking
-   context, so that 400 competes in the ROOT context directly against these body-level FABs
-   (notify.css gives them 234/235) and wins. 401/402 floats them over the board while staying
-   UNDER the modal/celebration tier that must keep covering them -- .sb-seq / .sb-pick-ov and the
-   frame picker <mg-gallery-picker> (all 500), #mg-toasts (510), .ach-m2 (520; its confetti
-   sheet sits INSIDE at local z 1, behind the card -- the old 521-in-front was a bug).
-   Loom-only: this block ships only in _LOOM_SHELL, so the gallery's own #jobs-fab keeps 234.
-   !important for the same bundle-stylesheet cascade-timing reason as the bottom rule above.
-   FIXED 2026-07-24 (was a known residual): Deep Focus's .lv-df-veil (450) and its nested
-   flyouts render INSIDE .lv-overlay, so from the root they were part of the single 400 atom
-   and these corner FABs painted over them. A DOM hoist wasn't needed after all --
-   master-storyboard.jsx now toggles a `.lv-overlay-df` class onto .lv-overlay itself while
-   Deep Focus is open (z-index 450, matching the veil's own intended value), which lifts the
-   whole atom back above these FABs in the root context for as long as Deep Focus stays open.
-   !important for the same bundle-stylesheet cascade-timing reason as the bottom rule above. */
-#jobs-fab  { z-index: 401 !important; }
-#jobs-tray { z-index: 402 !important; }
+/* The old #jobs-fab/#jobs-tray positioning overrides (bottom:88px to clear the Cast panel's
+   own buttons; z-index:401/402 to climb over .lv-overlay's 400) were retired 2026-08-09
+   (Claude Design handoff, drift item 39). The Activity control is no longer a body-portaled
+   floating tray -- it's .lv-top-act-wrap, a normal child of .lv-overlay itself
+   (master-storyboard.jsx's own toolbar), so it was never competing with .lv-overlay's z-index
+   at the root context in the first place; it just paints in normal document order, correctly
+   UNDER Deep Focus's veil like everything else inside .lv-overlay, with no !important
+   reconciliation needed anywhere. */
 
 /* Clearance under the ? help FAB, which is the cost of making it visible at all.
    #eb-help-btn is position:fixed bottom:18px + 38px tall, so it floats over the
@@ -4462,9 +4511,10 @@ body { background: var(--base); margin: 0; font-family: system-ui, sans-serif; }
 __UPSCALE_CONST__
 </head><body>
 <div id="root"></div>
-<!-- The #jobs-fab/#jobs-tray anchors lived here until the 2026-08-08 no-vanilla port; the
-     React <ActivityTray> (bundled, portaled to body) now renders them with the same ids, so
-     the shell's z-index/bottom overrides above still apply. -->
+<!-- The #jobs-fab/#jobs-tray anchors lived here until the 2026-08-08 no-vanilla port, then
+     were rendered by the portaled React <ActivityTray> with the same ids. Both are gone as
+     of 2026-08-09 (Claude Design handoff, drift item 39): the Activity control is inline in
+     the toolbar (master-storyboard.jsx's own .lv-top-act-wrap) now, not body-level. -->
 <script>
 window.storage = {
   get:function(k){ return fetch('/api/loom/get?key='+encodeURIComponent(k)).then(function(r){return r.json();}).then(function(d){ return (d&&d.value!=null)?{value:d.value}:null; }); },
@@ -9285,6 +9335,41 @@ def create_app(out_dir: Path):
         if not set_slot_active(out_dir, slot, str(item_id) if item_id else None):
             return jsonify({"error": "unknown slot or asset"}), 400
         return jsonify({"slots": branding_slots_payload(out_dir)})
+
+    @app.route("/api/branding/mark/custom", methods=["POST"])
+    def api_branding_mark_custom():
+        """Upload The Great Library's custom mark (Control Panel.dc.html's 6th
+        marks tile). LOGIN tier + a real server-side achievement check -- unlike
+        the deferred banner-earned-art masking (still local-UI-only pending the
+        SQLite asset-bundling project), this route actually performs a write, so
+        it gets the same real gate /api/skin already applies to earned skins."""
+        if not _mark_earned(out_dir, db_path, "the-great-library"):
+            return jsonify({"error": "The Great Library hasn't been earned yet"}), 403
+        f = request.files.get("file")
+        if f is None or not f.filename:
+            return jsonify({"error": "no file"}), 400
+        try:
+            import io
+            from PIL import Image
+            im = Image.open(f.stream)
+            im.load()
+            buf = io.BytesIO()
+            im.convert("RGBA").save(buf, format="PNG")
+        except Exception:
+            return jsonify({"error": "not a readable image"}), 400
+        mark = add_custom_mark(out_dir, buf.getvalue())
+        return jsonify({"mark": mark["id"], "marks": list_marks(out_dir)})
+
+    @app.route("/api/branding/mark/custom/remove", methods=["POST"])
+    def api_branding_mark_custom_remove():
+        """Remove an uploaded custom mark (Control Panel.dc.html's Remove chip).
+        LOGIN tier, same as the upload route above."""
+        body = request.get_json(silent=True) or {}
+        mark_id = str(body.get("id") or "")
+        if not remove_custom_mark(out_dir, mark_id):
+            return jsonify({"error": "unknown custom mark"}), 400
+        cfg = load_branding(out_dir)
+        return jsonify({"mark": cfg["mark"], "marks": list_marks(out_dir)})
 
     @app.route("/api/branding/shortcut", methods=["POST"])
     def api_branding_shortcut():
