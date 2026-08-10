@@ -998,6 +998,23 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [act.open, act.close]);
+  // Trigger + anchored dropdown, built once and placed conditionally in .lv-top below --
+  // see the placement comments at both call sites for why the edge choice moves the whole
+  // control rather than just re-anchoring the panel's CSS.
+  const activityControl = (
+    <div className="lv-top-act-wrap" ref={actRef}>
+      <ActivityChip jobs={act.jobs} open={act.open} onToggle={act.toggle} title="Activity — render jobs" />
+      {act.open ? (
+        <ActivityPanel
+          jobs={act.jobs} expandedId={act.expandedId} closing={act.closing}
+          onToggleRow={act.toggleRow} onDismiss={act.dismiss}
+          onClearFinished={act.clearFinished} onClose={act.close}
+          edge={act.edge} onSetEdge={act.setEdge}
+          className="lv-top-act-panel"
+        />
+      ) : null}
+    </div>
+  );
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
   const [deepFocus, setDeepFocus] = useState(null);   // entry {a,c,ai,ci,code} double-clicked on the board, or null
@@ -2889,6 +2906,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <button type="button" className="lv-banner-show" title="Show banner"
             onClick={() => setBannerOpen(true)}>🖼 Banner</button>
         )}
+        {act.edge === "left" ? activityControl : null}
         <span className="lv-eyebrow">The Loom · V2</span>
         <span className="lv-note">Click a shot → it binds to Generate.</span>
         <ProjectSwitcher api={projectApi} />
@@ -2948,24 +2966,15 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         <ExportMenu exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle}
           bundling={bundling} importBackup={importBackup} />
         <a className="lv-close" href="/" style={{ textDecoration: "none", marginLeft: "auto" }}>← Gallery</a>
-        {/* Activity LAST in the row on purpose (found live 2026-08-09, same bug as the
-            gallery header's SeparatorBar.jsx): its dropdown is right-aligned to its OWN
+        {/* Activity LAST in the row when docked right (found live 2026-08-09, same bug as
+            the gallery header's SeparatorBar.jsx): its dropdown is right-aligned to its OWN
             chip via right:0, so with "← Gallery" following it, the panel fell short of
             the row's true right edge by that link's width. The one auto-margin needed to
-            flush the pair right now belongs to "← Gallery" (the new first of the two) --
-            see .lv-top-act-wrap's own CSS comment for why only one of a flush-right pair
-            ever gets it. */}
-        <div className="lv-top-act-wrap" ref={actRef}>
-          <ActivityChip jobs={act.jobs} open={act.open} onToggle={act.toggle} title="Activity — render jobs" />
-          {act.open ? (
-            <ActivityPanel
-              jobs={act.jobs} expandedId={act.expandedId} closing={act.closing}
-              onToggleRow={act.toggleRow} onDismiss={act.dismiss}
-              onClearFinished={act.clearFinished} onClose={act.close}
-              className="lv-top-act-panel"
-            />
-          ) : null}
-        </div>
+            flush the pair right belongs to "← Gallery" (the first of the two) -- see
+            .lv-top-act-wrap's own CSS comment for why only one of a flush-right pair ever
+            gets it. When docked left (act.edge === "left") the whole control instead
+            mounts near the row's START, right after the banner-show button -- see above. */}
+        {act.edge === "left" ? null : activityControl}
       </div>
       {batchTally && (() => {
         // done/failed/stale are DERIVED from the outcomes map every render, never stored as

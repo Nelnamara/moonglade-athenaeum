@@ -2194,6 +2194,10 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
   font-family: system-ui, sans-serif;
   animation: atSlideIn .22s cubic-bezier(.2, .9, .24, 1) both;
 }
+.at-panel.edge-left {
+  right: auto;
+  left: 0;
+}
 .at-panel.closing {
   animation: atSlideOut .24s ease both;
 }
@@ -2272,6 +2276,33 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
 .at-collapse:hover {
   color: var(--text);
   background: var(--surface1);
+}
+.at-edgeseg {
+  display: flex;
+  gap: 2px;
+  flex: none;
+  margin-right: 2px;
+}
+.at-edgebtn {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1px solid var(--surface1);
+  background: none;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  color: var(--overlay0);
+  cursor: pointer;
+}
+.at-edgebtn:hover {
+  color: var(--text);
+  background: var(--surface1);
+}
+.at-edgebtn.on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(182, 146, 230, .14);
 }
 .at-body {
   flex: 1;

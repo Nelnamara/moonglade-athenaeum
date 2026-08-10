@@ -83,10 +83,33 @@ export default function SeparatorBar({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [act.open, act.close]);
 
+  // Trigger chip + anchored dropdown, see the useActivity() comment above for why this
+  // reads jobsStore, not the `running` prop. Docks at whichever edge is preferred
+  // (act.edge, persisted, default "right") -- a utility/notification control belongs at
+  // the row's true OUTER edge on either side, never wedged between other chrome (found
+  // live 2026-08-09: it used to sit first in .mgx-sepright, so its right:0-anchored panel
+  // fell short of the header's real right edge by however wide credits/claim/generate
+  // were). Left/right toggle itself lives inside the panel's own header.
+  const activityControl = (
+    <div className="mgx-act-wrap" ref={actRef}>
+      <ActivityChip jobs={act.jobs} open={act.open} onToggle={act.toggle} title="Activity — recent jobs" />
+      {act.open ? (
+        <ActivityPanel
+          jobs={act.jobs} expandedId={act.expandedId} closing={act.closing}
+          onToggleRow={act.toggleRow} onDismiss={act.dismiss}
+          onClearFinished={act.clearFinished} onClose={act.close}
+          edge={act.edge} onSetEdge={act.setEdge}
+          className="mgx-act-panel"
+        />
+      ) : null}
+    </div>
+  );
+
   return (
     <div className="mgx-sep">
       <div className="mgx-sepleft">
         <NavSpine boot={boot} onOverlay={onOverlay} />
+        {act.edge === "left" ? activityControl : null}
 
         {/* slim-banner toggle: chevron flips 180° between states */}
         <button type="button" className={"mgx-sqbtn" + (slim ? " flip" : "")}

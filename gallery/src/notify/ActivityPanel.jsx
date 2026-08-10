@@ -9,9 +9,10 @@ import ActivityRow from "./ActivityRow.jsx";
 
 export default function ActivityPanel({
   jobs, expandedId, onToggleRow, onDismiss, onClearFinished, onClose, compact, className, closing,
+  edge, onSetEdge,
 }) {
   return (
-    <div className={"at-panel" + (closing ? " closing" : "") + (className ? " " + className : "")}>
+    <div className={"at-panel" + (edge === "left" ? " edge-left" : "") + (closing ? " closing" : "") + (className ? " " + className : "")}>
       <div className="at-head">
         <span className="at-title">Activity</span>
         {jobs.length ? <span className="at-count">{jobs.length}</span> : null}
@@ -22,6 +23,14 @@ export default function ActivityPanel({
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClearFinished(); } }}>
             clear finished
           </span>
+        ) : null}
+        {onSetEdge ? (
+          <div className="at-edgeseg" role="group" aria-label="Dock the Activity panel left or right">
+            <button type="button" className={"at-edgebtn" + (edge === "left" ? " on" : "")}
+              title="Dock to the left" onClick={() => onSetEdge("left")}>◧</button>
+            <button type="button" className={"at-edgebtn" + (edge !== "left" ? " on" : "")}
+              title="Dock to the right" onClick={() => onSetEdge("right")}>◨</button>
+          </div>
         ) : null}
         <button className="at-collapse" title="Collapse" onClick={onClose}>›</button>
       </div>
