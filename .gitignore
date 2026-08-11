@@ -112,6 +112,15 @@ static/_mockup_*.html
 /branding.json
 /branding_slots.json
 
+# The asset container (tools/build_container.py -> moonglade.dat). NOT committed BY DECISION
+# (docs/DECISIONS.md "The asset container, re-scoped from scratch", 2026-08-10): delivery is a
+# GitHub Release asset fetched on first run -- Releases have no bandwidth caps, git/LFS does.
+# This entry implements that decision; it is not a privacy call.
+/moonglade.dat
+# Materialized-from-container cache for things needing a REAL file on disk (the Desktop-shortcut
+# writer's .ico -- PowerShell reads IconLocation off disk). Regenerable, like branding/_thumbs/.
+/_container_cache/
+
 # The Claude Design handoff package (design_handoff_moonglade_suite): DC prototype
 # surfaces, drift report, and ASSETS INCLUDING THE OWNER'S BRANDING ART -- which is
 # deliberately machine-local (see /branding/ above) and must never reach this public
