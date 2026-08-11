@@ -7122,8 +7122,8 @@ fenced implementation until an explicit go.
 
 `moonglade_container.py` (the custom packed format decided above) + `tools/build_container.py`
 (pack + cold byte-for-byte verify) + the loose-then-container resolution layer wired through
-every branding read path in `moonglade_gallery.py`, on branch `asset-container-2026-08-10`
-(pushed, NOT merged). Details worth keeping: the first keystream cut (32-byte SHA-256 blocks,
+every branding read path in `moonglade_gallery.py` -- MERGED to master 2026-08-10 after the
+owner's live test on the real install (branch deleted). Details worth keeping: the first keystream cut (32-byte SHA-256 blocks,
 per-byte Python XOR) packed 392 MB in ~4 minutes and would have cost ~1 s per served image --
 rebuilt as 64 KiB SHAKE-256 blocks + one big-int XOR, 392 MB now packs+verifies in ~9.5 s and
 a 5.6 MB asset serves in <100 ms over live HTTP. Writes promote container-shipped manifests
