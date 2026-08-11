@@ -7117,3 +7117,21 @@ sources):**
 how far the achievement-definition move out of committed source goes (current-tree vs
 history -- owner has not ruled); source-repo visibility. Build has NOT started -- owner
 fenced implementation until an explicit go.
+
+### The container, built: format + resolution layer shipped to its branch  ·  *2026-08-10*
+
+`moonglade_container.py` (the custom packed format decided above) + `tools/build_container.py`
+(pack + cold byte-for-byte verify) + the loose-then-container resolution layer wired through
+every branding read path in `moonglade_gallery.py`, on branch `asset-container-2026-08-10`
+(pushed, NOT merged). Details worth keeping: the first keystream cut (32-byte SHA-256 blocks,
+per-byte Python XOR) packed 392 MB in ~4 minutes and would have cost ~1 s per served image --
+rebuilt as 64 KiB SHAKE-256 blocks + one big-int XOR, 392 MB now packs+verifies in ~9.5 s and
+a 5.6 MB asset serves in <100 ms over live HTTP. Writes promote container-shipped manifests
+loose before the first read-modify-write (an upload can no longer shadow the shipped defaults);
+the discovery sweep and its telemetry check are filesystem-only via `_has_loose_marks()` --
+the prior attempt's severe regression, guarded by dedicated tests from day one this time.
+The achievement payload slot is packed but deliberately UNWIRED pending the owner's
+source-cutover ruling. `moonglade.dat` is git-ignored BY the delivery decision (Releases
+asset), not privacy. 17 new tests (`tests/test_container.py`); branding/telemetry/web-pick/
+render-harness suites green; live-verified on a genuinely blank, branding_root-redirected
+install. NEXT: the manifest + first-run downloader (its one visible moment gets a mock first).
