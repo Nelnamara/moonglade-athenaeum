@@ -7135,3 +7135,42 @@ source-cutover ruling. `moonglade.dat` is git-ignored BY the delivery decision (
 asset), not privacy. 17 new tests (`tests/test_container.py`); branding/telemetry/web-pick/
 render-harness suites green; live-verified on a genuinely blank, branding_root-redirected
 install. NEXT: the manifest + first-run downloader (its one visible moment gets a mock first).
+
+### First-run download: engine + Setup Wizard integration  ·  *2026-08-10*
+
+**Engine** (`moonglade_assets.py`): `moonglade_manifest.json` (committed -- version, whole-file
+sha256, size, ordered mirror URL list) + a `.version` sidecar for a cheap boot-time staleness
+check. `AssetFetchJob` is single-flight, cancellable, streams to a same-directory `.part` file
+(atomic `os.replace`), verifies sha256 cold before the swap, and falls through the manifest's
+mirror list on any failure. `needs_assets` joins `needs_key`/`catalog_empty` in the boot
+payload. Routes: `GET /api/assets/status` (LOGIN), `POST /api/assets/fetch` (LOCALHOST, same
+trust class as `/api/setup/save-key`). Live-verified against a real HTTP download of the
+actual 391 MB container, including real mirror fallover. 22 new tests (`tests/test_assets.py`).
+
+**Placement, owner-ruled in chat:** the download UI lives INSIDE the Setup Wizard as new
+phases (checking/downloading/interrupted/assetsready), not a standalone screen -- though a
+past-wizard install missing only the container must still route back into the wizard on its
+own. Built from the real Claude Design handoff (`handoff-2026-08-10-first-run-download.md` +
+`Setup Wizard.dc.html`) Part 1 only; Part 2 (the Ready screen's persistent background-sync
+progress chip) is explicitly DEFERRED -- the DC's fixed-timer `SYNC_STAGES` simulation has no
+clean mapping onto the real single continuous `done/total` counter, so it needs its own design
+pass rather than a rushed change to already-shipped sync behavior.
+
+Two real bugs found by live-checking rather than trusting the code, both fixed same-session:
+- `gallery/src/main.jsx`'s wizard-mount condition didn't include `needs_assets` -- a
+  past-wizard install (real key, real catalog) missing only the container silently rendered
+  the undressed app forever instead of routing back to the wizard. Fixed.
+- `moonglade_assets.py` surfaced raw `str(exc)` (including Windows socket error text like
+  `[WinError 10061]...`) straight into the wizard's "delivery was interrupted" message. Added
+  `_friendly_error()` to classify failures into plain language instead.
+
+**Known, accepted nuance, not fixed:** when `needs_assets=true` but key+catalog are already
+satisfied, `afterAssets()` still routes to the `sync` phase, which re-runs a full `--sync` job
+even though nothing changed. Safe/idempotent (same precedent as the existing
+`catalog_empty && !needs_key` case) but not optimal; not in scope here.
+
+All four phases (checking/downloading/assetsready/interrupted, plus both interrupted-phase
+actions: retry and "continue without the default artwork") live-verified in the browser
+across three scratch installs (standalone past-wizard, fresh install, forced dead-mirror).
+Committed + pushed to `asset-downloader-2026-08-10` (NOT yet merged -- awaiting the owner's
+own live test per the branch-before-master rule).
