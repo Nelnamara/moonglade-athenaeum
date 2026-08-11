@@ -28,11 +28,29 @@ import os
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
 _CHUNK = 1 << 20    # 1 MiB per read -- coarse enough for real throughput,
                     # fine enough for smooth progress and quick cancel response.
+
+
+def _friendly_error(exc):
+    """Map a low-level download exception to a plain-language reason -- found
+    live 2026-08-10 checking the interrupted phase: a raw mirror-refused
+    connection surfaced as '<urlopen error [WinError 10061] No connection
+    could be made because the target machine actively refused it>' straight
+    into the wizard's UI. The owner's users are not expected to parse socket
+    errno text (see the 'plain language, not programmer' standing rule), so
+    every path here classifies instead of relaying str(exc)."""
+    if isinstance(exc, ValueError) and "checksum" in str(exc):
+        return "the download didn't match what was expected"
+    if isinstance(exc, urllib.error.HTTPError):
+        return "the server reported an error (HTTP %s)" % exc.code
+    if isinstance(exc, (urllib.error.URLError, OSError, ConnectionError, TimeoutError)):
+        return "couldn't reach the download server"
+    return "an unexpected error interrupted the download"
 
 
 def manifest_path():
@@ -161,7 +179,7 @@ class AssetFetchJob:
                     self._state.update(status="idle", error=None)
                 return
             except Exception as e:                     # noqa: BLE001
-                last_err = str(e)[:200]
+                last_err = _friendly_error(e)
                 continue            # try the next mirror
         with self._lock:
             self._state.update(status="failed",

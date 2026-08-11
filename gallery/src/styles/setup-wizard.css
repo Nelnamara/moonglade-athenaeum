@@ -99,6 +99,22 @@
   animation: wzSpin 1.2s linear infinite; flex: none; }
 .wz-footnote { text-align: center; font-size: 10px; color: rgba(214,210,226,.34); padding-top: 14px; }
 
+/* ---- asset download (checking/downloading/interrupted/assetsready) --
+   design spec: handoff-2026-08-10-first-run-download.md. Checking and
+   Downloading reuse the sync phase's own halo/mascot/track/reveal classes
+   verbatim (identical visual language, same component); only what's
+   genuinely new for Interrupted/AssetsReady lives here. */
+.wz-dlbody { font-size: 12.5px; line-height: 1.6; color: var(--subtext); max-width: 400px; margin: 0 auto 18px; }
+.wz-dlstatic { position: relative; z-index: 2; width: 100%; height: 100%; object-fit: contain; }
+.wz-dlhalo-off { position: absolute; inset: -14px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(243,139,168,.3), transparent 66%); opacity: .55; }
+.wz-dlhalo-good { position: absolute; inset: -14px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(79,201,154,.5), transparent 66%);
+  animation: wzHalo 1.8s ease-in-out infinite; }
+.wz-quietbtn { display: block; margin: 12px auto 0; font-size: 11px; font-weight: 600;
+  color: var(--subtext); cursor: pointer; background: none; border: none; font-family: inherit; }
+.wz-quietbtn:hover { color: var(--text); }
+
 /* ---- sync ---- */
 .wz-syncwrap { text-align: center; padding: 8px 4px 4px; }
 .wz-syncmascotbox { position: relative; width: 92px; height: 92px; margin: 0 auto 14px; }
