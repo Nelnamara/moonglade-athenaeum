@@ -7075,3 +7075,45 @@ added as new scope against the real shipped component.
 
 Full suite green (1535 pytest, 724 loom). Committed to
 `claude-design-tracker-branding-2026-08-09`, pushed, NOT merged.
+
+### The asset container, re-scoped from scratch: format and delivery decided  ·  *2026-08-10*
+
+The bundling effort restarted from a clean slate (all prior branches deleted, master the
+only branch). The full intent, owner-dictated in chat and now the standing scope, is three
+layers that must hold TOGETHER: (1) the app's default art ships WITH the app on every
+install, out of the box; (2) ONE sealed container carries the art, the root-level JSON
+defaults, and all achievement definitions -- protection bar is WoW-MPQ-class: opaque to
+casual inspection, crackable by a determined power user who studies the format, and that is
+accepted; (3) shipping the defaults sealed is exactly what lets `branding/` stay empty on a
+fresh install (the existing discovery mechanic depends on that emptiness). Any design that
+satisfies fewer than all three layers misses the point of the effort.
+
+**Decisions taken (owner, in chat, after a 6-agent researched-options pass with two
+independent fact-checkers -- every quota/price/library claim verified against primary
+sources):**
+
+- **Container format: a custom packed binary** -- Moonglade's own header/index/blob layout
+  with an encrypted table of contents and encrypted slices; stdlib `struct`/`io`/`mmap`
+  plus optionally `cryptography` for AES-CTR (which uniquely allows partial reads, so HTTP
+  Range serving works naturally). Chosen because it is the only option where cracking
+  requires actually writing code against the published reader. Rejected: encrypted SQLite
+  (DB Browser's built-in SQLCipher prompt + the public key = a two-minute browse) and
+  AES-zip (the file listing stays readable without a password, leaking names).
+- **Delivery: GitHub Release asset + a first-run downloader.** Releases are verified
+  2 GiB/file, explicitly no bandwidth limit, $0. A small committed manifest (container
+  version + sha256 + ordered mirror URL list) drives it: on launch the app checks the
+  local container against the manifest; missing/stale -> streamed download with progress,
+  fingerprint verify, atomic rename, retry on failure; the app still runs undressed if
+  offline. ~100-200 lines beside the existing loose-file-wins override layer. Git LFS
+  explicitly rejected: 10 GiB/month bandwidth is ~25 downloads of a 400 MB file and then
+  every user's fetch is blocked until the calendar flips, and each rebuild permanently
+  consumes storage quota.
+- **Distribution model: stay git-based now; a real Windows installer is BANKED, not
+  scoped** -- when it comes, PyInstaller onedir + Velopack (MIT, delta updates make a
+  400 MB payload livable). The downloader design above works unchanged under either model,
+  which is why it goes first.
+
+**Open, deliberately:** live-state JSON placement (owner: scope in naming pass Phase 2);
+how far the achievement-definition move out of committed source goes (current-tree vs
+history -- owner has not ruled); source-repo visibility. Build has NOT started -- owner
+fenced implementation until an explicit go.
