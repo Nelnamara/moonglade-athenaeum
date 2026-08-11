@@ -15,6 +15,7 @@ git tags. Full prose notes for tagged versions live on
 > commits reached master as part of **v2.0.0**, which does). There is **no v1.7.x** (1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- The app now ships its default look in one packed asset file (`moonglade.dat`): marks, banners, mascots, and badge art all display out of the box on a fresh install, with no setup. Your own files in `branding/` always take precedence over the packed defaults, exactly as before. Built with `python tools/build_container.py`; the file rides alongside the app rather than inside the repository.
 - Fresh art for the narrator, the Setup Wizard's three later slides (now animated), and the job-tracker spinner.
 
 ## [3.0.0] - 2026-08-09 — One app, front to back: the classic interface retired, the whole front end unified into a single build, and the shared video Generate drawer ported
