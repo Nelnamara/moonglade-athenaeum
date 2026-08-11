@@ -27,6 +27,8 @@ import sys
 import threading
 from pathlib import Path
 
+import moonglade_container
+
 try:
     from flask import (Flask, jsonify, redirect, render_template_string, request,
                        send_file, send_from_directory, session, url_for)
@@ -1671,13 +1673,122 @@ def _branding_path(out_dir):
     return branding_root().parent / "branding.json"
 
 
-def list_marks(out_dir):
-    """Marks available on THIS machine: branding/marks/marks.json entries whose
-    .png actually exists. Empty on a fresh install (assets are machine-local)."""
-    mdir = branding_root() / "marks"
+# ---------------------------------------------------------------------------
+# The asset container -- loose-then-container resolution (2026-08-10,
+# docs/DECISIONS.md "The asset container, re-scoped from scratch").
+#
+# moonglade.dat (moonglade_container.py's custom format; built by
+# tools/build_container.py, delivered as a GitHub Release asset, never
+# committed) carries the app's DEFAULT branding so a fresh install is fully
+# dressed while branding/ itself stays empty -- that emptiness is a shipped
+# mechanic, not a gap. Resolution order everywhere below: a real loose file
+# under branding/ ALWAYS wins; the container only answers when no loose file
+# exists. The discovery/adopt sweep (sweep_branding_drops/_adopt_mark) and
+# sweep_telemetry's earn check stay deliberately FILESYSTEM-ONLY: detecting a
+# genuinely new hand-dropped file is their whole job, and a container-aware
+# check there would make an untouched default install look customized.
+# ---------------------------------------------------------------------------
+def _container_path():
+    # Sibling of branding/ and branding.json -- the same app-root, machine-local tree.
+    return branding_root().parent / "moonglade.dat"
+
+
+_container_cache = {"path": None, "mtime": None, "box": None}
+_container_lock = threading.Lock()
+
+
+def _get_container():
+    """The current container read handle, or None if no (valid) moonglade.dat
+    exists. Cached per (path, mtime) so the TOC parses once, and re-opened
+    automatically when the file is replaced -- the downloader's atomic swap and
+    a hand-copied update both just work on the next request."""
+    p = _container_path()
     try:
-        data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        mtime = p.stat().st_mtime
+    except OSError:
+        with _container_lock:
+            _container_cache.update(path=None, mtime=None, box=None)
+        return None
+    with _container_lock:
+        if _container_cache["path"] == p and _container_cache["mtime"] == mtime:
+            return _container_cache["box"]
+        box = moonglade_container.open_container(p)
+        _container_cache.update(path=p, mtime=mtime, box=box)
+        return box
+
+
+def _branding_bytes(rel):
+    """One branding asset's bytes by branding_root()-relative posix path --
+    loose file first, container second, None if neither has it."""
+    loose = branding_root() / rel
+    try:
+        if loose.is_file():
+            return loose.read_bytes()
+    except OSError:
+        pass
+    box = _get_container()
+    return box.get(rel) if box else None
+
+
+def _branding_exists(rel):
+    loose = branding_root() / rel
+    try:
+        if loose.is_file():
+            return True
+    except OSError:
+        pass
+    box = _get_container()
+    return bool(box and box.has(rel))
+
+
+def _branding_mtime(rel):
+    """Freshness stamp for cache-invalidation: the loose file's own mtime when
+    it exists, else the container FILE's mtime (a whole-container rebuild is the
+    only way container-sourced content changes)."""
+    loose = branding_root() / rel
+    try:
+        if loose.is_file():
+            return loose.stat().st_mtime
+    except OSError:
+        pass
+    try:
+        return _container_path().stat().st_mtime
+    except OSError:
+        return None
+
+
+def _seed_loose_manifest(rel):
+    """Promote a container-shipped manifest to a real loose file before the
+    first read-modify-write against it. Without this, the first custom upload
+    on a container-dressed install would start from an EMPTY loose manifest and
+    silently shadow every shipped default out of the picker (loose wins). A
+    no-op when the loose file already exists or the container lacks it."""
+    loose = branding_root() / rel
+    if loose.exists():
+        return
+    box = _get_container()
+    data = box.get(rel) if box else None
+    if data is None:
+        return
+    try:
+        loose.parent.mkdir(parents=True, exist_ok=True)
+        loose.write_bytes(data)
+    except OSError:
+        pass
+
+
+def list_marks(out_dir):
+    """Marks available on THIS machine: marks/marks.json entries whose .png
+    actually exists, resolved loose-then-container (_branding_bytes) so the
+    shipped defaults show up even though branding/ itself is deliberately empty
+    on a fresh install -- and still empty on a truly bare install with no
+    container at all."""
+    raw = _branding_bytes("marks/marks.json")
+    if raw is None:
+        return []
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
         return []
     if not isinstance(data, dict):
         return []          # corrupt manifest degrades to "no marks", never a 500
@@ -1686,11 +1797,11 @@ def list_marks(out_dir):
         if not isinstance(m, dict):
             continue
         mid = str(m.get("id") or "")
-        if mid and (mdir / (mid + ".png")).exists():
+        if mid and _branding_exists("marks/%s.png" % mid):
             out.append({"id": mid, "label": m.get("label") or mid,
                         "kind": m.get("kind") or "tile",
                         "png": "/branding/marks/%s.png" % mid,
-                        "ico": (mdir / (mid + ".ico")).exists()})
+                        "ico": _branding_exists("marks/%s.ico" % mid)})
     return out
 
 
@@ -1747,10 +1858,12 @@ def list_slot_assets(out_dir, slot):
     its zoom/cropX/cropY transform (normalized, legacy crop migrated)."""
     if slot not in BRANDING_SLOTS:
         return []
-    sdir = _slot_dir(slot)
+    raw = _branding_bytes("%s/manifest.json" % slot)
+    if raw is None:
+        return []
     try:
-        data = json.loads((sdir / "manifest.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
         return []
     if not isinstance(data, dict):
         return []          # corrupt manifest degrades to "no assets", never a 500
@@ -1759,7 +1872,7 @@ def list_slot_assets(out_dir, slot):
         if not isinstance(it, dict):
             continue
         iid = str(it.get("id") or "")
-        if iid and (sdir / (iid + ".png")).exists():
+        if iid and _branding_exists("%s/%s.png" % (slot, iid)):
             out.append({"id": iid, **_asset_transform(it),
                         "png": "/branding/%s/%s.png" % (slot, iid)})
     return out
@@ -1809,6 +1922,9 @@ def add_slot_asset(out_dir, slot, png_bytes, zoom=100, cropx=50, cropy=50):
         return None
     sdir = _slot_dir(slot)
     sdir.mkdir(parents=True, exist_ok=True)
+    # First write against a container-dressed slot: promote the shipped manifest
+    # loose first, or this upload would shadow every default out of the picker.
+    _seed_loose_manifest("%s/manifest.json" % slot)
     try:
         data = json.loads((sdir / "manifest.json").read_text(encoding="utf-8"))
         items = list(data.get("items") or []) if isinstance(data, dict) else []
@@ -1834,6 +1950,10 @@ def set_slot_crop(out_dir, slot, item_id, zoom=None, cropx=None, cropy=None):
     if slot not in BRANDING_SLOTS:
         return False
     sdir = _slot_dir(slot)
+    # Adjusting a shipped default's crop is a WRITE -- promote the manifest
+    # loose first so the edit lands on a real file (P3-review lesson: without
+    # this, retuning a container-shipped banner just failed).
+    _seed_loose_manifest("%s/manifest.json" % slot)
     try:
         data = json.loads((sdir / "manifest.json").read_text(encoding="utf-8"))
         items = data.get("items") if isinstance(data, dict) else None
@@ -1910,6 +2030,7 @@ def add_custom_mark(out_dir, png_bytes, label="Custom mark"):
     the picker would need de-duping logic to hide."""
     mdir = branding_root() / "marks"
     mdir.mkdir(parents=True, exist_ok=True)
+    _seed_loose_manifest("marks/marks.json")   # keep shipped defaults in the picker
     try:
         data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
         marks = list(data.get("marks") or []) if isinstance(data, dict) else []
@@ -2028,6 +2149,7 @@ def _adopt_mark(out_dir, raw_stem, png_bytes):
     have = {m["id"] for m in list_marks(out_dir)}
     if mid in have:
         mid = (mid + "-" + secrets.token_hex(3))[:40]
+    _seed_loose_manifest("marks/marks.json")   # keep shipped defaults in the picker
     try:
         data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
         marks = list(data.get("marks") or []) if isinstance(data, dict) else []
@@ -2145,8 +2267,15 @@ def _write_banner_flat(out_dir, slot):
     if not a:
         return False
     try:
+        import io
         from PIL import Image
-        im = Image.open(_slot_dir(slot) / (a["id"] + ".png"))
+        # The active asset may be a shipped default living only in the container
+        # -- read via the resolution layer, not a raw path. The rendered FLAT is
+        # always written loose: it's derived per-install state, not shipped art.
+        raw = _branding_bytes("%s/%s.png" % (slot, a["id"]))
+        if raw is None:
+            return False
+        im = Image.open(io.BytesIO(raw))
         im.load()
         w, hh = im.size
         ar = _BANNER_RATIO.get(slot, 4.0)
@@ -2154,6 +2283,7 @@ def _write_banner_flat(out_dir, slot):
         crop = im.crop(box)
         ow, oh = _BANNER_OUT.get(slot, (1920, int(round(1920 / ar))))
         crop = crop.resize((ow, oh), Image.LANCZOS)
+        branding_root().mkdir(parents=True, exist_ok=True)
         crop.save(branding_root() / name, format="PNG")
         return True
     except Exception:
@@ -2251,7 +2381,7 @@ def brand_context(out_dir):
     processor, so old installs with only logo.png render exactly as before)."""
     cfg = load_branding(out_dir)
     marks = {m["id"]: m for m in list_marks(out_dir)}
-    has_banner = (branding_root() / "banner.png").exists()
+    has_banner = _branding_exists("banner.png")
     if cfg["mark"] in marks:
         m = marks[cfg["mark"]]
         return {"mark_url": m["png"], "mark_anim": cfg["anim"], "mark_kind": m["kind"],
@@ -2271,6 +2401,19 @@ def make_launcher_shortcut(out_dir, mark_id):
     .lnk path. Machine-local action -- caller must gate to localhost."""
     import subprocess
     ico = branding_root() / "marks" / (str(mark_id) + ".ico")
+    if not ico.exists():
+        # A container-shipped .ico must become a REAL file: PowerShell's
+        # CreateShortcut reads IconLocation straight off disk, servable bytes
+        # aren't enough. Materialized into a git-ignored cache, regenerable.
+        raw = _branding_bytes("marks/%s.ico" % mark_id)
+        if raw is not None:
+            cache = branding_root().parent / "_container_cache" / "marks"
+            try:
+                cache.mkdir(parents=True, exist_ok=True)
+                ico = cache / (str(mark_id) + ".ico")
+                ico.write_bytes(raw)
+            except OSError:
+                raise RuntimeError("no .ico cut for %s yet (branding/marks/)" % mark_id)
     if not ico.exists():
         raise RuntimeError("no .ico cut for %s yet (branding/marks/)" % mark_id)
     repo = Path(__file__).resolve().parent
@@ -2496,21 +2639,40 @@ def _badge_thumb(out_dir, aid, size=256):
     a full open doesn't pull the masters. Masters stay the source of truth; the cache
     self-heals when a master is re-cut (mtime check). Falls back to the master on any
     trouble, so a tile always resolves to *something*."""
-    src = branding_root() / "badges" / (aid + ".png")
-    if not src.is_file():
+    rel = "badges/%s.png" % aid
+    if not _branding_exists(rel):
         return None
+    src = branding_root() / "badges" / (aid + ".png")
     dst = branding_root() / "_thumbs" / (aid + ".png")
+    src_mtime = _branding_mtime(rel)   # loose master's own mtime, or the container file's
     try:
-        if dst.is_file() and dst.stat().st_mtime >= src.stat().st_mtime:
+        if dst.is_file() and src_mtime is not None and dst.stat().st_mtime >= src_mtime:
             return dst
+        raw = _branding_bytes(rel)
+        if raw is None:
+            return None
         dst.parent.mkdir(parents=True, exist_ok=True)
+        import io
         from PIL import Image
-        im = Image.open(src)
+        im = Image.open(io.BytesIO(raw))
         im.thumbnail((size, size))
         im.save(dst)
         return dst
     except Exception:
-        return src
+        if src.is_file():
+            return src         # loose master exists -- serve it full-size
+        # Container-sourced master that failed to thumbnail (P3-review lesson:
+        # this fell through to a 404 before): write the raw bytes out as the
+        # last resort so a tile still resolves to *something*.
+        try:
+            raw = _branding_bytes(rel)
+            if raw is not None:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_bytes(raw)
+                return dst
+        except Exception:
+            pass
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -2686,12 +2848,38 @@ def telemetry_metrics(out_dir):
     return m
 
 
+def _has_loose_marks():
+    """Pure-filesystem check: at least one REAL, on-disk mark (a loose
+    marks.json entry whose .png exists loose). Deliberately NOT list_marks() --
+    that is container-aware, and every install ships the default marks IN the
+    container, so a container-aware check here would be true on a completely
+    untouched install with zero user action. This exact substitution silently
+    defeated the discovery feat once before (caught by adversarial review,
+    2026-08-09) -- keep this filesystem-only, same contract the sweep/adopt
+    functions hold."""
+    mdir = branding_root() / "marks"
+    try:
+        data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    for m in data.get("marks") or []:
+        if isinstance(m, dict):
+            mid = str(m.get("id") or "")
+            if mid and (mdir / (mid + ".png")).is_file():
+                return True
+    return False
+
+
 def sweep_telemetry(out_dir):
     """Set the state-derived feat flags whose 'event' may predate the telemetry
     layer: a custom mark in branding/ (Under the Hood) and the eclipse mark
-    animation (Eclipse). Once set they stay set. Cheap; called by the API."""
+    animation (Eclipse). Once set they stay set. Cheap; called by the API.
+
+    Uses _has_loose_marks(), never list_marks() -- see that docstring."""
     try:
-        if list_marks(out_dir):
+        if _has_loose_marks():
             telem_flag("branding_custom_file", out_dir=out_dir)
         if load_branding(out_dir).get("anim") == "eclipse":
             telem_flag("eclipse_anim_triggered", out_dir=out_dir)
@@ -7781,19 +7969,30 @@ def create_app(out_dir: Path):
 
     @app.route("/branding/<path:fname>")
     def branding(fname):
-        """Serve drop-in branding art from the app-root branding/ folder — branding_root() — (banner.png, logo, icons).
-        Absent files 404 so the header's onerror simply removes the <img>. Path-safe."""
+        """Serve branding art: a loose drop-in file under branding_root() first,
+        the shipped container second (the loose-then-container contract every
+        read path holds). Absent in both -> 404 so the header's onerror simply
+        removes the <img>. Path-safe."""
         from flask import send_from_directory, abort
+        import mimetypes
         bdir = branding_root().resolve()
         try:
             target = (bdir / fname).resolve()
             target.relative_to(bdir)          # reject path traversal
         except (ValueError, OSError):
             abort(404)
-        if not target.is_file():
+        if target.is_file():
+            resp = send_from_directory(str(bdir), fname)
+            resp.headers["Cache-Control"] = "no-cache, must-revalidate"   # branding art gets re-cut; never serve a stale copy
+            return resp
+        # Container fallback keys on the SAME already-traversal-checked relative
+        # path (posix separators -- the container's native addressing).
+        raw = _branding_bytes(target.relative_to(bdir).as_posix())
+        if raw is None:
             abort(404)
-        resp = send_from_directory(str(bdir), fname)
-        resp.headers["Cache-Control"] = "no-cache, must-revalidate"   # branding art gets re-cut; never serve a stale copy
+        mime = mimetypes.guess_type(fname)[0] or "application/octet-stream"
+        resp = app.response_class(raw, mimetype=mime)
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
         return resp
 
     @app.route("/badge-thumb/<aid>.png")
