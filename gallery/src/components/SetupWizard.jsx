@@ -26,7 +26,18 @@ import "../styles/setup-wizard.css";
    halo-mascot/progress-bar/reveal-row visual language the DC specifies, and the DC's real
    per-type numbers (images/videos/collections) appear for real on the READY phase instead,
    sourced from the same /api/stats every other header/banner in the app already trusts --
-   relocated to where the app actually HAS that breakdown, not fabricated to fit a timer. */
+   relocated to where the app actually HAS that breakdown, not fabricated to fit a timer.
+
+   ASSET DOWNLOAD PHASES (2026-08-10, handoff-2026-08-10-first-run-download.md, owner-ruled
+   placement -- docs/DECISIONS.md): checking -> downloading -> (interrupted) -> assetsready,
+   ahead of the intro carousel, driven by real /api/assets/status polling + POST
+   /api/assets/fetch against moonglade_assets.AssetFetchJob -- NOT the DC's fixed-timer
+   simulated 391MB. Skipped entirely (falls straight to intro/sync, unchanged) when
+   boot.needs_assets is false: already dressed, or an old checkout with no manifest. One
+   disclosed departure, same class as the sync-phase one above: the DC's Interrupted copy
+   assumes every failure is a dropped connection; the real engine can fail for reasons that
+   aren't (a checksum mismatch, no release published yet, the localhost gate), so
+   dlErrorText() composes the DC's own shape and reassurance clause around the REAL reason. */
 
 const SLIDES = [
   { mascot: "/branding/login_nel.webp", head: "Welcome to the Athenaeum",
@@ -45,9 +56,18 @@ const KEY_STEPS = [
 ];
 const POLL_MS = 1500;
 const POLL_MISS_LIMIT = 5;
+const ASSET_POLL_MS = 400;
+const ASSET_POLL_MISS_LIMIT = 8;
+const MB = 1e6;
 
 export default function SetupWizard({ boot }) {
-  const [phase, setPhase] = useState(boot.needs_key ? "intro" : "sync");
+  // Asset download runs AHEAD of intro when needed (owner ruling, 2026-08-10,
+  // docs/DECISIONS.md: "inside the wizard as phases ahead of the intro
+  // carousel"). An install that's already dressed (or has no manifest at all --
+  // an old checkout) skips straight to the phase this component always started
+  // at before -- needs_assets computed server-side the same cheap way as needs_key.
+  const [phase, setPhase] = useState(
+    boot.needs_assets ? "checking" : (boot.needs_key ? "intro" : "sync"));
   const [slide, setSlide] = useState(0);
 
   const [apiKey, setApiKey] = useState("");
@@ -59,10 +79,132 @@ export default function SetupWizard({ boot }) {
   const [syncError, setSyncError] = useState("");
   const [finalStats, setFinalStats] = useState(null);
 
+  // dl.received/total in MB (the design's own display unit); speed in MB/s; eta
+  // in whole seconds or null while unknown.
+  const [dl, setDl] = useState({ received: 0, total: 0, speed: 0, eta: null });
+  const [dlError, setDlError] = useState("");
+
   const pollRef = useRef(null);
   const pollMissesRef = useRef(0);
+  const assetPollRef = useRef(null);
+  const assetMissesRef = useRef(0);
+  const assetsReadyTRef = useRef(null);
+  const checkingRef = useRef(false);
 
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+  useEffect(() => () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (assetPollRef.current) clearInterval(assetPollRef.current);
+    if (assetsReadyTRef.current) clearTimeout(assetsReadyTRef.current);
+  }, []);
+
+  // Where the wizard goes once the asset question is settled (dressed, or the
+  // owner chose to proceed undressed) -- the SAME phase this component always
+  // opened at before the download phases existed.
+  const afterAssets = () => setPhase(boot.needs_key ? "intro" : "sync");
+
+  // ONE disclosed departure from the DC here, same class as the sync phase's own
+  // (see this file's header comment): the design's dlErrText assumes every
+  // failure is a dropped connection. The real engine (moonglade_assets.
+  // AssetFetchJob) can fail for reasons that aren't a connection drop at all --
+  // a checksum mismatch, no release published yet, the localhost-only gate --
+  // so this composes the same shape and the same true reassurance clause around
+  // the REAL reason instead of a canned one that would be false most of the
+  // time it actually fires.
+  const dlErrorText = (reason) => {
+    const where = dl.total ? " (" + dl.received + " of " + dl.total + " MB)" : "";
+    return "The delivery was interrupted" + where + " — " + (reason || "something interrupted it") +
+      ". Nothing partial was kept — retrying starts clean, and the library is untouched.";
+  };
+
+  const assetTick = async () => {
+    let d;
+    try {
+      const r = await fetch("/api/assets/status");
+      d = await r.json();
+    } catch {
+      assetMissesRef.current += 1;
+      if (assetMissesRef.current >= ASSET_POLL_MISS_LIMIT) {
+        clearInterval(assetPollRef.current); assetPollRef.current = null;
+        setDlError(dlErrorText("lost contact while downloading"));
+        setPhase("interrupted");
+      }
+      return;
+    }
+    assetMissesRef.current = 0;
+    if (d.status === "running") {
+      setDl({ received: Math.round((d.downloaded || 0) / MB),
+              total: Math.round((d.total || 0) / MB),
+              speed: (d.speed_bps || 0) / MB, eta: d.eta_seconds });
+      return;
+    }
+    clearInterval(assetPollRef.current); assetPollRef.current = null;
+    if (d.status === "done") {
+      setPhase("assetsready");
+      assetsReadyTRef.current = setTimeout(afterAssets, 1600);
+      return;
+    }
+    // "failed" (a real error) or "idle" (the job never actually started, or was
+    // reset) -- both read as Interrupted; d.error is the honest reason either way.
+    setDl((s) => ({ ...s, received: Math.round((d.downloaded || 0) / MB) }));
+    setDlError(dlErrorText(d.error));
+    setPhase("interrupted");
+  };
+
+  const beginDownload = async () => {
+    setPhase("downloading");
+    setDlError("");
+    setDl({ received: 0, total: 0, speed: 0, eta: null });
+    assetMissesRef.current = 0;
+    let d;
+    try {
+      const r = await fetch("/api/assets/fetch", { method: "POST" });
+      d = await r.json();
+    } catch {
+      setDlError(dlErrorText("a network error reaching this machine's own server"));
+      setPhase("interrupted");
+      return;
+    }
+    // "already running" means someone/something else's fetch is genuinely in
+    // flight -- that's not a failure to report, just start polling its real
+    // progress. Any OTHER error (no manifest, no urls yet, localhost-only) means
+    // the job never started at all, so there's nothing to poll.
+    if (d.error && !/already running/i.test(d.error)) {
+      setDlError(dlErrorText(d.error));
+      setPhase("interrupted");
+      return;
+    }
+    assetPollRef.current = setInterval(assetTick, ASSET_POLL_MS);
+    assetTick();
+  };
+
+  const beginAssetCheck = async () => {
+    if (checkingRef.current) return;
+    checkingRef.current = true;
+    let d;
+    try {
+      const r = await fetch("/api/assets/status");
+      d = await r.json();
+    } catch {
+      d = null;
+    }
+    checkingRef.current = false;
+    if (!d || !d.needs) { afterAssets(); return; }   // already dressed, or nothing to fetch
+    beginDownload();
+  };
+
+  const retryDownload = () => setPhase("checking");   // the checking-phase effect below re-drives it
+  const continueWithoutArtwork = () => {
+    if (assetPollRef.current) { clearInterval(assetPollRef.current); assetPollRef.current = null; }
+    afterAssets();
+  };
+
+  useEffect(() => {
+    if (phase !== "checking") return undefined;
+    // Same 750ms visual beat the design specifies for Checking, real or retried.
+    const t = setTimeout(beginAssetCheck, 750);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   const openPixai = () => window.open("https://pixai.art/en/profile/edit/api", "_blank", "noopener");
 
@@ -181,6 +323,90 @@ export default function SetupWizard({ boot }) {
   }, [phase]);
 
   const enter = () => { window.location.href = "/"; };
+
+  if (phase === "checking" || phase === "downloading") {
+    const checking = phase === "checking";
+    return (
+      <div className="wz-stage">
+        <div className="wz-wash wz-wash-a" />
+        <div className="wz-wash wz-wash-b" />
+        <div className="wz-card">
+          <div className="wz-toprow"><div className="wz-kicker">FIRST-TIME SETUP</div></div>
+          <div className="wz-syncwrap">
+            <div className="wz-stepkicker">{checking ? "Preparing the Athenaeum" : "One-time download"}</div>
+            <div className="wz-syncmascotbox">
+              <div className="wz-synchalo" />
+              <img className="wz-syncmascotimg" src="/branding/mascots/gen_nel.png" alt="" />
+            </div>
+            <div className="wz-synchead">{checking ? "Taking stock of the shelves…" : "Furnishing the Athenaeum"}</div>
+            {checking ? null : (
+              <div className="wz-dlbody">The library's art and trappings are on their way — this happens once, and never again unless the collection itself is updated.</div>
+            )}
+            <div className="wz-synctrack">
+              <i className={"wz-syncbar" + (checking ? " indeterminate" : "")}
+                style={checking ? undefined : { width: (dl.total ? (dl.received / dl.total) * 100 : 0) + "%" }} />
+            </div>
+            {checking ? <div className="wz-revealrow" /> : (
+              <div className="wz-revealrow">
+                <div className="wz-reveal">
+                  <b className="wz-reveal-v">{dl.received} / {dl.total} MB</b>
+                  <span className="wz-reveal-k">received</span>
+                </div>
+                <div className="wz-reveal">
+                  <b className="wz-reveal-v">{dl.speed ? dl.speed.toFixed(1) + " MB/s" : "—"}</b>
+                  <span className="wz-reveal-k">speed</span>
+                </div>
+                <div className="wz-reveal">
+                  <b className="wz-reveal-v">{dl.eta == null ? "—" : dl.eta < 1 ? "<1 s" : "~" + Math.ceil(dl.eta) + " s"}</b>
+                  <span className="wz-reveal-k">remaining</span>
+                </div>
+              </div>
+            )}
+            <div className="wz-footnote">
+              {checking ? "One moment — checking what this library already holds."
+                        : "Verified against its fingerprint on arrival — a bad download can never be mistaken for a good one."}
+            </div>
+          </div>
+          <div className="wz-lore">a library against the Void</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === "interrupted" || phase === "assetsready") {
+    const interrupted = phase === "interrupted";
+    return (
+      <div className="wz-stage">
+        <div className="wz-wash wz-wash-a" />
+        <div className="wz-wash wz-wash-b" />
+        <div className="wz-card">
+          <div className="wz-toprow"><div className="wz-kicker">FIRST-TIME SETUP</div></div>
+          <div className="wz-syncwrap">
+            <div className="wz-stepkicker">One-time download</div>
+            <div className="wz-syncmascotbox">
+              <div className={interrupted ? "wz-dlhalo-off" : "wz-dlhalo-good"} />
+              <img className="wz-dlstatic"
+                src={interrupted ? "/branding/mascots/trk_fail.png" : "/branding/mascots/trk_done.png"} alt="" />
+            </div>
+            <div className="wz-synchead">{interrupted ? "The delivery was interrupted" : "The shelves are dressed"}</div>
+            {interrupted ? (
+              <>
+                <div className="wz-syncerr">{dlError}</div>
+                <button type="button" className="wz-retrybtn wz-metal" onClick={retryDownload}>↻ Try again</button>
+                <button type="button" className="wz-quietbtn" onClick={continueWithoutArtwork}>
+                  Continue without the default artwork — it can finish later
+                </button>
+                <div className="wz-footnote">The app works fully without it; things simply arrive undecorated until the download completes.</div>
+              </>
+            ) : (
+              <div className="wz-dlbody">{dl.total || 391} MB verified — now let's get you set up.</div>
+            )}
+          </div>
+          <div className="wz-lore">a library against the Void</div>
+        </div>
+      </div>
+    );
+  }
 
   if (phase === "intro") {
     const s = SLIDES[slide];

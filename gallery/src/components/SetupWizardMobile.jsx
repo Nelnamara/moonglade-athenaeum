@@ -62,8 +62,97 @@ export default function SetupWizardMobile({ boot }) {
     phase, slide,
     apiKey, onApiKeyChange, showKey, setShowKey, authBusy, authError,
     progress, syncError, finalStats,
+    dl, dlError, retryDownload, continueWithoutArtwork,
     openPixai, nextSlide, prevSlide, skipToKey, authenticate, startSync, enter,
   } = useSetupWizard(boot);
+
+  // Asset download phases (2026-08-10, handoff-2026-08-10-first-run-download.md) --
+  // same real /api/assets/* engine as desktop, entirely from useSetupWizard; this
+  // file only supplies the mobile-scaled markup/classes, matching every other
+  // phase's own split here.
+  if (phase === "checking" || phase === "downloading") {
+    const checking = phase === "checking";
+    return (
+      <div className="wzm-stage">
+        <div className="wzm-wash wzm-wash-a" />
+        <div className="wzm-wash wzm-wash-b" />
+        <div className="wzm-card">
+          <div className="wzm-toprow"><div className="wzm-kicker">FIRST-TIME SETUP</div></div>
+          <div className="wzm-syncwrap">
+            <div className="wzm-stepkicker">{checking ? "Preparing the Athenaeum" : "One-time download"}</div>
+            <div className="wzm-syncmascotbox">
+              <div className="wzm-synchalo" />
+              <img className="wzm-syncmascotimg" src="/branding/mascots/gen_nel.png" alt="" />
+            </div>
+            <div className="wzm-synchead">{checking ? "Taking stock of the shelves…" : "Furnishing the Athenaeum"}</div>
+            {checking ? null : (
+              <div className="wzm-dlbody">The library's art and trappings are on their way — this happens once, and never again unless the collection itself is updated.</div>
+            )}
+            <div className="wzm-synctrack">
+              <i className={"wzm-syncbar" + (checking ? " indeterminate" : "")}
+                style={checking ? undefined : { width: (dl.total ? (dl.received / dl.total) * 100 : 0) + "%" }} />
+            </div>
+            {checking ? <div className="wzm-revealrow" /> : (
+              <div className="wzm-revealrow">
+                <div className="wzm-reveal">
+                  <b className="wzm-reveal-v">{dl.received} / {dl.total} MB</b>
+                  <span className="wzm-reveal-k">received</span>
+                </div>
+                <div className="wzm-reveal">
+                  <b className="wzm-reveal-v">{dl.speed ? dl.speed.toFixed(1) + " MB/s" : "—"}</b>
+                  <span className="wzm-reveal-k">speed</span>
+                </div>
+                <div className="wzm-reveal">
+                  <b className="wzm-reveal-v">{dl.eta == null ? "—" : dl.eta < 1 ? "<1 s" : "~" + Math.ceil(dl.eta) + " s"}</b>
+                  <span className="wzm-reveal-k">remaining</span>
+                </div>
+              </div>
+            )}
+            <div className="wzm-footnote">
+              {checking ? "One moment — checking what this library already holds."
+                        : "Verified against its fingerprint on arrival — a bad download can never be mistaken for a good one."}
+            </div>
+          </div>
+          <div className="wzm-lore">a library against the Void</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === "interrupted" || phase === "assetsready") {
+    const interrupted = phase === "interrupted";
+    return (
+      <div className="wzm-stage">
+        <div className="wzm-wash wzm-wash-a" />
+        <div className="wzm-wash wzm-wash-b" />
+        <div className="wzm-card">
+          <div className="wzm-toprow"><div className="wzm-kicker">FIRST-TIME SETUP</div></div>
+          <div className="wzm-syncwrap">
+            <div className="wzm-stepkicker">One-time download</div>
+            <div className="wzm-syncmascotbox">
+              <div className={interrupted ? "wzm-dlhalo-off" : "wzm-dlhalo-good"} />
+              <img className="wzm-dlstatic"
+                src={interrupted ? "/branding/mascots/trk_fail.png" : "/branding/mascots/trk_done.png"} alt="" />
+            </div>
+            <div className="wzm-synchead">{interrupted ? "The delivery was interrupted" : "The shelves are dressed"}</div>
+            {interrupted ? (
+              <>
+                <div className="wzm-syncerr">{dlError}</div>
+                <button type="button" className="wzm-retrybtn wzm-metal" onClick={retryDownload}>↻ Try again</button>
+                <button type="button" className="wzm-quietbtn" onClick={continueWithoutArtwork}>
+                  Continue without the default artwork — it can finish later
+                </button>
+                <div className="wzm-footnote">The app works fully without it; things simply arrive undecorated until the download completes.</div>
+              </>
+            ) : (
+              <div className="wzm-dlbody">{dl.total || 391} MB verified — now let's get you set up.</div>
+            )}
+          </div>
+          <div className="wzm-lore">a library against the Void</div>
+        </div>
+      </div>
+    );
+  }
 
   if (phase === "intro") {
     const s = SLIDES[slide];

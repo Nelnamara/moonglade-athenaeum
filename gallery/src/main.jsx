@@ -22,6 +22,17 @@ const boot = window.MG_BOOT || {};
 // nothing for App's fetchLibrary/fetchAccount to usefully show anyway, and the DC's own
 // wizard is a dedicated screen, not a banner bolted onto the real gallery.
 //
+// needs_assets (2026-08-10, docs/DECISIONS.md "The asset container, re-scoped from
+// scratch") joins this condition for exactly the case the owner's own placement ruling
+// named: an install PAST the wizard (real key, real synced catalog) that is still
+// missing the container -- moved to a new machine, or an old checkout that predates the
+// downloader entirely. Without this, such an install would silently render App with an
+// undressed header/marks forever, since needs_key/catalog_empty are both already false
+// by then and nothing else would ever route it back to the wizard. Found live 2026-08-10
+// checking this exact scenario -- the wizard never mounted at all until this joined.
+// A brand-new install still sees the SAME wizard either way (needs_key is already true),
+// so this changes nothing for the common case, only closes the gap for the standalone one.
+//
 // Root is a real component (not a plain `view` variable, unlike before
 // 2026-08-02) because useIsMobile() needs a component to subscribe its
 // matchMedia listener from -- it live-switches every surface between its
@@ -48,7 +59,7 @@ function Root() {
   if (boot.authenticated === false) {
     return isMobile ? <LoginPageMobile boot={boot} /> : <LoginPage boot={boot} />;
   }
-  if (boot.needs_key || boot.catalog_empty) {
+  if (boot.needs_key || boot.catalog_empty || boot.needs_assets) {
     return (
       <>
         {isMobile ? <SetupWizardMobile boot={boot} /> : <SetupWizard boot={boot} />}
