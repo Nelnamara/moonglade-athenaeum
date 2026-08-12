@@ -225,6 +225,29 @@ class TestSpendingPathsAreSingleAttempt:
         core.delete_batch_media_gql(mock_session, "T1", "M1")
         _assert_single_attempt(gql_calls, core._DELETE_BATCH_MEDIA_MUT)
 
+    def test_submit_training(self, mock_session, gql_calls, monkeypatch):
+        """LoRA training spends real credits once the free-training quota is gone; a re-POST
+        after a lost response would start (and pay for) a SECOND training. validate_training
+        is stubbed so the test exercises the submit, not the (separately-tested) form rules."""
+        monkeypatch.setattr(core, "validate_training", lambda *a, **k: ["trigger"])
+        core.submit_training(mock_session, "base1", ["m1"], "Title", "trig", "style")
+        _assert_single_attempt(gql_calls, core._CREATE_TRAINING)
+
+    def test_publish_artwork_from_task(self, mock_session, gql_calls):
+        """No credits, but a re-POST after a lost response publishes the artwork twice."""
+        core.publish_artwork_from_task(mock_session, "task1")
+        _assert_single_attempt(gql_calls, core._PUBLISH_FROM_TASK)
+
+    def test_update_artwork(self, mock_session, gql_calls):
+        core.update_artwork(mock_session, "art1", title="new title")
+        _assert_single_attempt(gql_calls, core._UPSERT_ARTWORK)
+
+    def test_delete_artwork(self, mock_session, gql_calls):
+        """Like deleteGenerationTask: success is the ABSENCE of an error, and a retry could
+        delete something already gone."""
+        core.delete_artwork(mock_session, "art1")
+        _assert_single_attempt(gql_calls, core._DELETE_ARTWORK)
+
 
 class TestNoSpendPathReachesPastTheHelper:
     """The structural half. The dynamic tests above only cover the paths someone thought
