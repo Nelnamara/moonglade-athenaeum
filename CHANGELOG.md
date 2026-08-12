@@ -15,9 +15,11 @@ git tags. Full prose notes for tagged versions live on
 > commits reached master as part of **v2.0.0**, which does). There is **no v1.7.x** (1.6.0 → 1.8.0).
 
 ## [Unreleased]
-- The app now ships its default look in one packed asset file (`moonglade.dat`): marks, banners, mascots, and badge art all display out of the box on a fresh install, with no setup. Your own files in `branding/` always take precedence over the packed defaults, exactly as before. Built with `python tools/build_container.py`; the file rides alongside the app rather than inside the repository.
+
+## [3.1.0] - 2026-08-12 — Dressed out of the box: the default look ships with the app and fetches itself on first run
+- **The app now dresses itself out of the box.** Its default look — marks, banners, mascots, and badge art — ships in one packed asset file (`moonglade.dat`) and displays on a fresh install with no setup at all. Your own files in `branding/` always take precedence over the packed defaults, exactly as before. (Built with `python tools/build_container.py`; the file rides alongside the app rather than living in the repository.)
+- **First-run setup fetches that file for you.** The Setup Wizard gains a one-time download step — real progress bar, checksum verification, and automatic retry across mirrors — before the rest of setup continues. If it can't reach the server you can retry or continue without the default artwork and pick it up later; the app is fully usable either way, and a later launch that's still missing the file routes back to finish the download on its own.
 - Fresh art for the narrator, the Setup Wizard's three later slides (now animated), and the job-tracker spinner.
-- First-run setup now fetches that packed asset file for you: the Setup Wizard gains a one-time download step (with real progress, checksum verification, and automatic retry across mirrors) before the rest of setup continues. If it can't reach the server, you can retry or continue without the default artwork and pick it up later — the app works fully either way.
 - Under the hood: hardened the test suite. The LoRA-training and artwork publish/edit/delete paths now have real runtime tests proving they refuse to run under `READ_ONLY` and submit exactly once (previously only a source scan guarded them), and the request-pacing tests were rewritten to assert on the slots the pacer books rather than on real wall-clock timing, so they no longer flake under machine load. No behaviour change.
 
 ## [3.0.0] - 2026-08-09 — One app, front to back: the classic interface retired, the whole front end unified into a single build, and the shared video Generate drawer ported
