@@ -7211,3 +7211,30 @@ untested, the multi-block `_xor_at` path unexercised by units) and the Playwrigh
 (D8, approved) are real but sequenced AFTER the bundle ships, per the owner. Landed on branch
 `p1-safety-and-flake-fixes-2026-08-11` off master. Full audit detail was delivered in-session, not
 transcribed here.
+
+### `assets-v1` cut and the manifest wired to the RELEASED bytes  ·  *2026-08-11*
+
+The owner cut the `assets-v1` GitHub Release and uploaded `moonglade.dat` from their **D
+install** -- a fuller build (394,574,745 bytes; 162 assets + an `achievements` payload) than the
+copy sitting on this working machine (391,302,429 bytes), which the manifest had been keyed to
+during development. **The manifest is keyed to whatever is at the download URL, never to any one
+machine's local copy** -- the downloader hashes the bytes it pulls and rejects a mismatch, so a
+manifest describing a different file than the release serves would fail every fresh install's
+checksum. So the manifest now carries the RELEASED file's sha256
+(`70d7e330…`), size, and the `releases/download/assets-v1/moonglade.dat` URL. Verified three
+ways before committing: the released container opens and spot-reads clean via `open_container`
+(genuine, uncorrupted); the real `AssetFetchJob` streams + cold-verifies + swaps + writes its
+marker against the corrected manifest; and the public URL is reachable **anonymously** (200,
+right Content-Length, `MGC1` magic) -- the app fetches with plain urllib, not `gh`'s auth.
+
+**Version scheme, set here:** manifest `version` tracks the release tag -- `assets-v1` ↔ `"1"`.
+The owner expects an `assets-v2` (animated mascots) roughly the next day; that re-cut is: rebuild
+the container, `gh release create assets-v2 moonglade.dat`, then `moonglade_assets.write_manifest`
+with the new sha256/size/`…/assets-v2/…` URL and `version="2"`. The bumped sha256 alone triggers
+every existing install to re-download (the `.version` marker disagrees); the version string is the
+human label that keeps manifest and release tag legible together.
+
+**Consequence, flagged not fixed:** this working machine's local `moonglade.dat` is the older
+C-install build and has no `.version` marker, so `needs_download` treats it as satisfied and the
+app here keeps serving the C-install art rather than the published D-install set. Harmless (dev
+machine), and refreshable on demand by dropping the verified released copy in with its marker.

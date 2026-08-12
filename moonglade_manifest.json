@@ -1,6 +1,8 @@
 {
   "version": "1",
-  "sha256": "3bae100b533af3c124f69c271d47406b144cb8ac6360e97c47ee8a93715a7edc",
-  "size": 391302429,
-  "urls": []
+  "sha256": "70d7e3307e3fbe05706863ff1cba24404ef0d55a618e0872c5db7a9c7423e2b4",
+  "size": 394574745,
+  "urls": [
+    "https://github.com/Nelnamara/moonglade-athenaeum/releases/download/assets-v1/moonglade.dat"
+  ]
 }
