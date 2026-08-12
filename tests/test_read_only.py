@@ -84,6 +84,43 @@ class TestClaimReward:
         assert calls  # _rest_post genuinely fired
 
 
+class TestTrainingAndArtworkMutationsReadOnly:
+    """The account-mutating paths added AFTER this file's original four choke points:
+    LoRA training (spends real credits once the free-training quota is gone) and the
+    artwork publish/edit/delete surface (mutates your PUBLIC profile). Each names
+    _check_read_only as its first line, and until this test existed that guard was pinned
+    only by a source-grep (test_spend_no_retry.SPEND_PATHS) -- deleting the line would still
+    have passed the suite. The property asserted is the one the rest of this file makes: the
+    network call NEVER FIRES under READ_ONLY. Their single-attempt behaviour is pinned
+    separately in tests/test_spend_no_retry.py."""
+
+    def test_submit_training_blocked(self, mock_session, monkeypatch):
+        monkeypatch.setattr(core, "READ_ONLY", True)
+        # _check_read_only runs before validate_training, so even wholly-invalid args must
+        # be refused at the guard, not fall through to a validation error.
+        with pytest.raises(core.PixAIError, match="READ_ONLY"):
+            core.submit_training(mock_session, "base1", ["m1"], "Title", "trig", "style")
+        mock_session.post.assert_not_called()
+
+    def test_publish_artwork_blocked(self, mock_session, monkeypatch):
+        monkeypatch.setattr(core, "READ_ONLY", True)
+        with pytest.raises(core.PixAIError, match="READ_ONLY"):
+            core.publish_artwork_from_task(mock_session, "task1")
+        mock_session.post.assert_not_called()
+
+    def test_update_artwork_blocked(self, mock_session, monkeypatch):
+        monkeypatch.setattr(core, "READ_ONLY", True)
+        with pytest.raises(core.PixAIError, match="READ_ONLY"):
+            core.update_artwork(mock_session, "art1", title="new title")
+        mock_session.post.assert_not_called()
+
+    def test_delete_artwork_blocked(self, mock_session, monkeypatch):
+        monkeypatch.setattr(core, "READ_ONLY", True)
+        with pytest.raises(core.PixAIError, match="READ_ONLY"):
+            core.delete_artwork(mock_session, "art1")
+        mock_session.post.assert_not_called()
+
+
 class TestReadOnlyDoesNotTouchLocalOperations:
     """READ_ONLY is scoped to PixAI-account mutations. --organize/--dedup are a different,
     already-covered trust concern (dry-run-by-default + --apply, never the network) --

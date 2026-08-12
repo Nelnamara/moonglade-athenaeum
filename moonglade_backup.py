@@ -9494,7 +9494,7 @@ def _delay_was_chosen(args):
     return d is not None and not isinstance(d, _DefaultDelay)
 
 
-def _pace_gate(delay):
+def _pace_gate(delay, *, clock=None, sleep=None):
     """Return a zero-arg callable that blocks until the caller owns the next request slot.
 
     One global slot at a time: each caller reads the next free slot, waits for it, and books
@@ -9516,6 +9516,12 @@ def _pace_gate(delay):
     a defaulted --delay gets `_pace_gate(0)`, i.e. the no-op. _parallel_map's own callers are
     unaffected and pace as they always did. Read run_download's comment before assuming a
     default backup is throttled by this -- it is not.
+
+    `clock`/`sleep` are injectable for deterministic tests only: the pacing unit tests drive
+    the gate with a frozen clock and a recording sleep so they assert on the slots BOOKED,
+    not on real wall-clock gaps (which measured scheduling jitter and flaked under load).
+    Production passes neither and resolves `time.monotonic`/`time.sleep` at call time, so the
+    behaviour -- including anything that monkeypatches `core.time` -- is exactly as before.
     """
     if not delay:
         return lambda: None
@@ -9524,11 +9530,11 @@ def _pace_gate(delay):
 
     def _wait():
         with gate:
-            now = time.monotonic()
+            now = (clock or time.monotonic)()
             wait = max(0.0, next_start[0] - now)
             next_start[0] = max(now, next_start[0]) + delay
         if wait:
-            time.sleep(wait)
+            (sleep or time.sleep)(wait)
 
     return _wait
 

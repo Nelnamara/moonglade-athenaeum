@@ -7174,3 +7174,40 @@ actions: retry and "continue without the default artwork") live-verified in the 
 across three scratch installs (standalone past-wizard, fresh install, forced dead-mirror).
 Committed + pushed to `asset-downloader-2026-08-10` (NOT yet merged -- awaiting the owner's
 own live test per the branch-before-master rule).
+
+### P1 test-suite audit — two surgical fixes landed (spend-safety runtime tests + de-flaked pacing)  ·  *2026-08-11*
+
+A three-agent read-only audit of the test suite on `master` (coverage gaps, test quality/flake,
+frontend-e2e scope). Verdict: broad and well-documented; the two structural guards it was built
+around (GraphQL spend-no-retry, Flask route-tiers) are genuinely catch-all. Two findings were
+worth fixing immediately because they protect real credits and CI trust, and both are branch-
+independent of the asset-downloader work:
+
+- **The training/artwork account-mutations had only a SOURCE-GREP guard, no runtime test.**
+  `submit_training`, `publish_artwork_from_task`, `update_artwork`, `delete_artwork` were listed
+  in `test_spend_no_retry.SPEND_PATHS` (so `test_no_spend_path_calls_gql_adhoc_directly` proved
+  they don't call `gql_adhoc`), but nothing exercised them at runtime -- deleting their
+  `_check_read_only` line or making them re-POST would still have passed green, and in `test_panel`
+  they are mocked away. Added real runtime tests: READ_ONLY refusal with `post.assert_not_called()`
+  (`test_read_only.py::TestTrainingAndArtworkMutationsReadOnly`) and single-attempt via the
+  `gql_calls` recorder (`test_spend_no_retry.py::TestSpendingPathsAreSingleAttempt`). Training is
+  the sharp one: a re-POST after a lost response starts a SECOND LoRA training = a large real
+  charge.
+
+- **The request-pacing tests asserted on real wall-clock and flaked under load** (they were the
+  lone red in the 2026-08-11 full run, clean in isolation -- the same class DECISIONS already
+  noted flaking once). Root cause: the per-slot assertions compared `time.monotonic()` deltas
+  between RECORDED timestamps, which measured OS scheduling jitter (the recording runs after the
+  gate returns), not the gate. Fix: `_pace_gate` grew keyword-only `clock`/`sleep` injectables
+  (resolved at call time when omitted, so production behaviour -- including anything monkeypatching
+  `core.time` -- is byte-identical). The `TestPaceGate` unit tests now drive a FROZEN clock + a
+  recording sleep and assert on the slots BOOKED (deterministic, hammered 8x); the integration
+  tests keep only the aggregate-span lower bound (real `time.sleep` is a floor, so load can only
+  push it higher, never red) and the serial-check keeps only its overlap assertion (concurrency,
+  not speed). Same de-flake applied to `test_network.py`'s pool-pacing test.
+
+Rejected doing more of the audit now: the container build-tooling gaps (`tools/build_container.py`
+untested, the multi-block `_xor_at` path unexercised by units) and the Playwright DOM smoke layer
+(D8, approved) are real but sequenced AFTER the bundle ships, per the owner. Landed on branch
+`p1-safety-and-flake-fixes-2026-08-11` off master. Full audit detail was delivered in-session, not
+transcribed here.
