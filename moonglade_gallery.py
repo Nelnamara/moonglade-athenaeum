@@ -27,6 +27,7 @@ import sys
 import threading
 from pathlib import Path
 
+import moonglade_assets
 import moonglade_container
 
 try:
@@ -5016,6 +5017,17 @@ def create_app(out_dir: Path):
     # ever referenced this run. Losing it on restart just re-uploads, which is free.
     _ref_upload_cache = {}
 
+    # The asset container's first-run fetch (2026-08-10, docs/DECISIONS.md "The
+    # asset container, re-scoped from scratch"). A real streamed-download job,
+    # not a subprocess like PANEL_ACTIONS below -- one instance per server
+    # process, single-flight (AssetFetchJob.start() itself), deliberately
+    # UI-agnostic: the Setup Wizard drives it as a phase; a standalone boot
+    # check can drive the identical endpoints for a past-wizard install
+    # missing the container. _container_path() is a module-level function
+    # (defined above, beside branding_root()) so this binds the real, current
+    # app root -- not a value frozen at import time.
+    _asset_job = moonglade_assets.AssetFetchJob(_container_path())
+
     _panel_lock = threading.Lock()
     _panel_job = {"status": "idle", "action": "", "label": "", "lines": [],
                   "rc": None, "started_at": None, "progress": None,
@@ -8755,6 +8767,42 @@ def create_app(out_dir: Path):
             credits = None
         return jsonify({"ok": True, "credits": credits})
 
+    @app.route("/api/assets/status")
+    def api_assets_status():
+        """The asset container's current state: whether a (re)fetch is needed and,
+        if a fetch is running/just finished/just failed, its live progress. LOGIN
+        tier -- a read-only status poll, same trust class as /api/panel/status's
+        non-sensitive half (this payload carries no host paths or account detail
+        to redact, so unlike that route there is no local-vs-LAN split here).
+
+        `needs` is computed fresh each call (moonglade_assets.needs_download(),
+        a marker-file comparison, not a full re-hash) so a container that just
+        finished downloading -- or was hand-copied in from another machine mid-
+        session -- is reflected on the very next poll, not after a restart."""
+        job = _asset_job.status()
+        manifest = moonglade_assets.read_manifest()
+        return jsonify({
+            "needs": moonglade_assets.needs_download(_container_path(), manifest),
+            "manifest_present": manifest is not None,
+            **job,
+        })
+
+    @app.route("/api/assets/fetch", methods=["POST"])
+    def api_assets_fetch():
+        """Start the asset container fetch. LOCALHOST-ONLY, same trust class as
+        /api/setup/save-key just above -- it writes a real file into the app
+        root. Single-flight: a second call while one is already running is a
+        409, matching /api/panel/run's own busy shape, not a second job."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
+        started = _asset_job.start()
+        if not started:
+            st = _asset_job.status()
+            if st["status"] == "running":
+                return jsonify({"error": "a download is already running"}), 409
+            return jsonify({"error": st.get("error") or "could not start"}), 200
+        return jsonify({"ok": True})
+
     @app.route("/api/claim", methods=["POST"])
     def api_claim():
         """Claim ready daily rewards (free credits/stamina to the owner's OWN account -- no
@@ -10627,9 +10675,16 @@ __DESIGN_TOKENS__
         _fresh_cfg = _core._load_config()
         needs_key = not bool(_fresh_cfg.get("PIXAI_API_KEY") or _fresh_cfg.get("U3T"))
         catalog_empty = not needs_key and (stats["images"] + stats["videos"]) == 0
+        # Asset container check (2026-08-10): cheap (marker-file compare, not a
+        # re-hash) so it's safe on every boot, not just first-run. Placement of
+        # the resulting UI moment (a Setup Wizard phase vs. standalone) is a
+        # frontend decision -- this flag is UI-agnostic on purpose, same as
+        # needs_key above, so either caller can drive it.
+        needs_assets = moonglade_assets.needs_download(_container_path())
         boot = {
             "stats": stats,
             "needs_key": needs_key,
+            "needs_assets": needs_assets,
             "catalog_empty": catalog_empty,
             "collections": unique_collections(db_path),
             "user": session.get("user") or "",

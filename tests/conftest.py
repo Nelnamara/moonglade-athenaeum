@@ -4,6 +4,7 @@ import re
 
 import pytest
 
+import moonglade_assets
 import moonglade_backup as core
 import moonglade_gallery as gallery
 
@@ -70,6 +71,23 @@ def _isolated_branding(tmp_path, monkeypatch):
     branding.json as a SIBLING of this, which lands it at tmp_path/branding.json -- the path
     tests/test_branding.py already expects."""
     monkeypatch.setattr(gallery, "branding_root", lambda: tmp_path / "branding")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_asset_manifest(tmp_path, monkeypatch):
+    """moonglade_manifest.json (the first-run asset downloader's manifest,
+    2026-08-10) resolves from __file__ in moonglade_assets.py -- same hazard,
+    same remedy as _isolated_branding above: without this, every test reading
+    it would see the REAL checkout's own committed manifest (once one exists),
+    passing or failing based on whatever the developer's machine happens to
+    have built, not the code under test.
+
+    Redirected to a tmp_path file that does not exist by default, matching
+    read_manifest()'s own contract for "nothing here" (None, not an error) --
+    tests that need a real manifest write one via moonglade_assets.write_manifest()
+    after this fixture has already pointed the resolver at their own tmp_path."""
+    monkeypatch.setattr(moonglade_assets, "manifest_path",
+                        lambda: tmp_path / "moonglade_manifest.json")
 
 
 @pytest.fixture(autouse=True)

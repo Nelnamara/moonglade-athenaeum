@@ -7136,6 +7136,45 @@ asset), not privacy. 17 new tests (`tests/test_container.py`); branding/telemetr
 render-harness suites green; live-verified on a genuinely blank, branding_root-redirected
 install. NEXT: the manifest + first-run downloader (its one visible moment gets a mock first).
 
+### First-run download: engine + Setup Wizard integration  ·  *2026-08-10*
+
+**Engine** (`moonglade_assets.py`): `moonglade_manifest.json` (committed -- version, whole-file
+sha256, size, ordered mirror URL list) + a `.version` sidecar for a cheap boot-time staleness
+check. `AssetFetchJob` is single-flight, cancellable, streams to a same-directory `.part` file
+(atomic `os.replace`), verifies sha256 cold before the swap, and falls through the manifest's
+mirror list on any failure. `needs_assets` joins `needs_key`/`catalog_empty` in the boot
+payload. Routes: `GET /api/assets/status` (LOGIN), `POST /api/assets/fetch` (LOCALHOST, same
+trust class as `/api/setup/save-key`). Live-verified against a real HTTP download of the
+actual 391 MB container, including real mirror fallover. 22 new tests (`tests/test_assets.py`).
+
+**Placement, owner-ruled in chat:** the download UI lives INSIDE the Setup Wizard as new
+phases (checking/downloading/interrupted/assetsready), not a standalone screen -- though a
+past-wizard install missing only the container must still route back into the wizard on its
+own. Built from the real Claude Design handoff (`handoff-2026-08-10-first-run-download.md` +
+`Setup Wizard.dc.html`) Part 1 only; Part 2 (the Ready screen's persistent background-sync
+progress chip) is explicitly DEFERRED -- the DC's fixed-timer `SYNC_STAGES` simulation has no
+clean mapping onto the real single continuous `done/total` counter, so it needs its own design
+pass rather than a rushed change to already-shipped sync behavior.
+
+Two real bugs found by live-checking rather than trusting the code, both fixed same-session:
+- `gallery/src/main.jsx`'s wizard-mount condition didn't include `needs_assets` -- a
+  past-wizard install (real key, real catalog) missing only the container silently rendered
+  the undressed app forever instead of routing back to the wizard. Fixed.
+- `moonglade_assets.py` surfaced raw `str(exc)` (including Windows socket error text like
+  `[WinError 10061]...`) straight into the wizard's "delivery was interrupted" message. Added
+  `_friendly_error()` to classify failures into plain language instead.
+
+**Known, accepted nuance, not fixed:** when `needs_assets=true` but key+catalog are already
+satisfied, `afterAssets()` still routes to the `sync` phase, which re-runs a full `--sync` job
+even though nothing changed. Safe/idempotent (same precedent as the existing
+`catalog_empty && !needs_key` case) but not optimal; not in scope here.
+
+All four phases (checking/downloading/assetsready/interrupted, plus both interrupted-phase
+actions: retry and "continue without the default artwork") live-verified in the browser
+across three scratch installs (standalone past-wizard, fresh install, forced dead-mirror).
+Committed + pushed to `asset-downloader-2026-08-10` (NOT yet merged -- awaiting the owner's
+own live test per the branch-before-master rule).
+
 ### P1 test-suite audit — two surgical fixes landed (spend-safety runtime tests + de-flaked pacing)  ·  *2026-08-11*
 
 A three-agent read-only audit of the test suite on `master` (coverage gaps, test quality/flake,
@@ -7172,3 +7211,30 @@ untested, the multi-block `_xor_at` path unexercised by units) and the Playwrigh
 (D8, approved) are real but sequenced AFTER the bundle ships, per the owner. Landed on branch
 `p1-safety-and-flake-fixes-2026-08-11` off master. Full audit detail was delivered in-session, not
 transcribed here.
+
+### `assets-v1` cut and the manifest wired to the RELEASED bytes  ·  *2026-08-11*
+
+The owner cut the `assets-v1` GitHub Release and uploaded `moonglade.dat` from their **D
+install** -- a fuller build (394,574,745 bytes; 162 assets + an `achievements` payload) than the
+copy sitting on this working machine (391,302,429 bytes), which the manifest had been keyed to
+during development. **The manifest is keyed to whatever is at the download URL, never to any one
+machine's local copy** -- the downloader hashes the bytes it pulls and rejects a mismatch, so a
+manifest describing a different file than the release serves would fail every fresh install's
+checksum. So the manifest now carries the RELEASED file's sha256
+(`70d7e330…`), size, and the `releases/download/assets-v1/moonglade.dat` URL. Verified three
+ways before committing: the released container opens and spot-reads clean via `open_container`
+(genuine, uncorrupted); the real `AssetFetchJob` streams + cold-verifies + swaps + writes its
+marker against the corrected manifest; and the public URL is reachable **anonymously** (200,
+right Content-Length, `MGC1` magic) -- the app fetches with plain urllib, not `gh`'s auth.
+
+**Version scheme, set here:** manifest `version` tracks the release tag -- `assets-v1` ↔ `"1"`.
+The owner expects an `assets-v2` (animated mascots) roughly the next day; that re-cut is: rebuild
+the container, `gh release create assets-v2 moonglade.dat`, then `moonglade_assets.write_manifest`
+with the new sha256/size/`…/assets-v2/…` URL and `version="2"`. The bumped sha256 alone triggers
+every existing install to re-download (the `.version` marker disagrees); the version string is the
+human label that keeps manifest and release tag legible together.
+
+**Consequence, flagged not fixed:** this working machine's local `moonglade.dat` is the older
+C-install build and has no `.version` marker, so `needs_download` treats it as satisfied and the
+app here keeps serving the C-install art rather than the published D-install set. Harmless (dev
+machine), and refreshable on demand by dropping the verified released copy in with its marker.
