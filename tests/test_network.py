@@ -1224,13 +1224,14 @@ def test_parallel_map_paces_the_whole_pool_not_each_thread():
     t0 = time.monotonic()
     list(core._parallel_map(range(8), stamp, workers=8, delay=0.05))
     span = time.monotonic() - t0
-    # 8 starts one slot apart is 7 gaps; allow slack for scheduling, but a pool that ignored
-    # the pace finishes in ~0s and cannot reach this.
+    # 8 starts one slot apart is 7 gaps of real time.sleep -- a FLOOR, so load can only push
+    # this span higher, never below the bound. A pool that ignored the pace finishes in ~0s
+    # and cannot reach it. The finer per-slot contract (each start exactly `delay` after the
+    # last, global not per-thread) is pinned deterministically in
+    # tests/test_med_backup_pacing.py::TestPaceGate; asserting it here on recorded wall-clock
+    # times only measured scheduling jitter and was the flake this pass removes.
     assert span >= 0.05 * 7 * 0.8, (
         "8 workers finished in {:.3f}s -- the pool ignored the pace".format(span))
-    starts.sort()
-    assert all(b - a >= 0.04 for a, b in zip(starts, starts[1:])), (
-        "two requests started inside one delay slot")
 
 
 def test_backfill_names_why_tasks_failed(tmp_path, mocker, capsys):
