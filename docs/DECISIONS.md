@@ -7238,3 +7238,21 @@ human label that keeps manifest and release tag legible together.
 C-install build and has no `.version` marker, so `needs_download` treats it as satisfied and the
 app here keeps serving the C-install art rather than the published D-install set. Harmless (dev
 machine), and refreshable on demand by dropping the verified released copy in with its marker.
+
+### Container build-tooling test gaps closed (the after-ship half of the P1 audit)  ·  *2026-08-12*
+
+The two gaps the P1 audit (2026-08-11, above) explicitly sequenced for AFTER the bundle ships
+— `tools/build_container.py` untested, and the multi-block `_xor_at` path unexercised by units —
+are now covered, the bundle having shipped in v3.1.0. Worth keeping about *why* these needed
+their own tests rather than being incidentally covered: every prior `test_container.py` case
+packed sub-4 KiB blobs, all inside the FIRST 64 KiB keystream block, so the whole multi-block
+join in `_xor_at` (the `pads` list, the `start` offset, the boundary math) — the load-bearing
+random-access path a real 300 KiB+ mascot exercises on every read — was invisible to a green
+suite. New `test_container.py` cases drive genuinely boundary-straddling data and assert the
+one property the alignment exists for: a mid-blob slice, read at its own absolute file offset,
+decodes on its own (exactly what `Container._read` does). `tests/test_build_container.py`
+(new) covers the tool that produces the shipped `moonglade.dat` + committed manifest: the
+`_thumbs` exclusion, a verified happy-path build, the version-bump/url-carry-forward rules,
+the empty/missing-branding refusals, and — the safety that matters most — that a failed cold
+read-back deletes the output and writes NO manifest (a silently-wrong container is worse than
+none). Still deferred, unchanged: the Playwright DOM smoke layer (D8).
