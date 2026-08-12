@@ -15,6 +15,7 @@ git tags. Full prose notes for tagged versions live on
 > commits reached master as part of **v2.0.0**, which does). There is **no v1.7.x** (1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- Under the hood: closed the two asset-container test gaps that were deliberately held until the bundle shipped. The container builder (`tools/build_container.py`, which produces the packed default-art file and its download manifest) now has real coverage — including that a failed byte-for-byte verification deletes the output and writes no manifest — and the container's multi-block read path (what a large mascot spanning several 64 KiB blocks exercises on every read) is now unit-tested for correct random-access decoding, which every prior sub-4 KiB test had left untouched. No behaviour change.
 
 ## [3.1.0] - 2026-08-12 — Dressed out of the box: the default look ships with the app and fetches itself on first run
 - **The app now dresses itself out of the box.** Its default look — marks, banners, mascots, and badge art — ships in one packed asset file (`moonglade.dat`) and displays on a fresh install with no setup at all. Your own files in `branding/` always take precedence over the packed defaults, exactly as before. (Built with `python tools/build_container.py`; the file rides alongside the app rather than living in the repository.)

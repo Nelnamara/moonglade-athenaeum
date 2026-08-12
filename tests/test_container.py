@@ -238,3 +238,85 @@ def test_branding_route_traversal_still_rejected(tmp_path):
     client = login_client(tmp_path)
     r = client.get("/branding/..%2fconfig.json")
     assert r.status_code in (404, 400)
+
+
+# ---------------------------------------------------------------------------
+# The multi-block keystream path (_xor_at)
+#
+# Every test above packs sub-4 KiB blobs, all inside the FIRST 64 KiB keystream
+# block -- so the multi-block join in _xor_at (the `pads` list, the `start`
+# offset, the block-boundary math) was never exercised. It is the load-bearing
+# random-access path: a real container packs a 300 KiB+ mascot spanning several
+# blocks, and Container._read seeks to that blob's absolute offset -- which is
+# almost never block-aligned -- and decodes only its slice. These drive data
+# that genuinely spans block boundaries.
+# ---------------------------------------------------------------------------
+def _ramp(n):
+    """n bytes of a non-repeating-ish ramp, so a keystream bug can't hide behind
+    a run of identical plaintext bytes."""
+    return bytes((i * 31 + 7) & 0xFF for i in range(n))
+
+
+def test_xor_at_empty_is_identity():
+    assert mc._xor_at(b"", 0) == b""
+    assert mc._xor_at(b"", 999_999) == b""
+
+
+def test_xor_at_multi_block_round_trip_is_involutive():
+    # ~3.2 blocks: the pad is joined from four SHAKE-256 blocks, not one.
+    data = _ramp(mc._BLOCK * 3 + 12_345)
+    enc = mc._xor_at(data, 0)
+    assert enc != data
+    assert mc._xor_at(enc, 0) == data
+
+
+def test_xor_at_slice_decodes_independently_of_the_blob():
+    """The random-access contract, and the whole reason the keystream aligns to
+    ABSOLUTE file offsets: a mid-blob slice, read at its own absolute offset,
+    decodes correctly on its own. This is exactly what Container._read does --
+    seek to `off`, read `size`, `_xor_at(raw, off)` -- for a blob that starts
+    mid-block and spans several blocks."""
+    base = mc.HEADER_SIZE + 5           # a realistic, non-block-aligned pack offset
+    data = _ramp(mc._BLOCK * 2 + 4_096)
+    enc = mc._xor_at(data, base)
+    # Slices chosen to start mid-block and straddle at least one block boundary.
+    for i, j in [(0, 10),
+                 (100, mc._BLOCK + 100),
+                 (mc._BLOCK - 5, mc._BLOCK + 5),
+                 (mc._BLOCK + 7, 2 * mc._BLOCK + 50),
+                 (len(data) - 3, len(data))]:
+        assert mc._xor_at(enc[i:j], base + i) == data[i:j], (i, j)
+
+
+def test_xor_at_keystream_is_absolute_offset_aligned():
+    """The same bytes at different file offsets must not share a keystream (that
+    alignment is what makes slice-independence possible) -- and each still
+    decodes at its own offset."""
+    block = b"M" * (mc._BLOCK + 777)                # spans two blocks at any offset
+    at_zero = mc._xor_at(block, 0)
+    at_block = mc._xor_at(block, mc._BLOCK)         # shifted by exactly one block
+    at_odd = mc._xor_at(block, 12_345)
+    assert at_zero != at_block and at_block != at_odd and at_zero != at_odd, (
+        "identical bytes at different file offsets reused a keystream")
+    assert mc._xor_at(at_zero, 0) == block
+    assert mc._xor_at(at_block, mc._BLOCK) == block
+    assert mc._xor_at(at_odd, 12_345) == block
+
+
+def test_container_round_trip_with_boundary_straddling_assets(tmp_path):
+    """A real container whose first asset spans multiple 64 KiB blocks and whose
+    LATER assets therefore start mid-block (blobs are packed back-to-back). Only
+    correct multi-block, non-aligned slice math reads every one of them back
+    byte-for-byte -- plus a payload big enough to be multi-block itself, as the
+    real `achievements` payload is."""
+    big = _ramp(mc._BLOCK * 2 + 33)        # ~2 blocks
+    mid = _ramp(mc._BLOCK + 9)             # pushes the next offset off any block edge
+    assets = {"a_big.bin": big, "b_mid.bin": mid, "c_tail.bin": b"tail"}
+    payloads = {"achievements": b'[{"id":"x"}]' * 9_000}   # multi-block payload
+    path = tmp_path / "c.dat"
+    mc.write_container(path, assets, payloads)
+    box = mc.open_container(path)
+    assert box is not None
+    for rel, raw in assets.items():
+        assert box.get(rel) == raw, rel
+    assert box.payload("achievements") == payloads["achievements"]
