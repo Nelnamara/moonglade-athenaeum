@@ -37,9 +37,20 @@ export const KEY_STEPS = [
 ];
 const POLL_MS = 1500;
 const POLL_MISS_LIMIT = 5;
+const ASSET_POLL_MS = 400;       // more frequent than sync's -- a download bar reads as
+                                  // stalled at 1500ms between updates; a job poll doesn't.
+const ASSET_POLL_MISS_LIMIT = 8;
+const MB = 1e6;
 
 export default function useSetupWizard(boot) {
-  const [phase, setPhase] = useState(boot.needs_key ? "intro" : "sync");
+  // Asset download runs AHEAD of intro when needed (owner ruling, 2026-08-10,
+  // docs/DECISIONS.md: "inside the wizard as phases ahead of the intro
+  // carousel"). needs_assets is computed server-side the same cheap way as
+  // needs_key (moonglade_gallery.py's next_gallery()); an install that's
+  // already dressed (or has no manifest at all -- an old checkout) skips
+  // straight to the phase this component always started at before.
+  const [phase, setPhase] = useState(
+    boot.needs_assets ? "checking" : (boot.needs_key ? "intro" : "sync"));
   const [slide, setSlide] = useState(0);
 
   const [apiKey, setApiKey] = useState("");
@@ -51,10 +62,132 @@ export default function useSetupWizard(boot) {
   const [syncError, setSyncError] = useState("");
   const [finalStats, setFinalStats] = useState(null);
 
+  // dl.received/total in MB (matching the design's own display unit); speed in MB/s;
+  // eta in whole seconds or null while unknown.
+  const [dl, setDl] = useState({ received: 0, total: 0, speed: 0, eta: null });
+  const [dlError, setDlError] = useState("");
+
   const pollRef = useRef(null);
   const pollMissesRef = useRef(0);
+  const assetPollRef = useRef(null);
+  const assetMissesRef = useRef(0);
+  const assetsReadyTRef = useRef(null);
+  const checkingRef = useRef(false);
 
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+  useEffect(() => () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (assetPollRef.current) clearInterval(assetPollRef.current);
+    if (assetsReadyTRef.current) clearTimeout(assetsReadyTRef.current);
+  }, []);
+
+  // Where the wizard goes once the asset question is settled (dressed, or the
+  // owner chose to proceed undressed) -- the SAME phase this component always
+  // opened at before the download phases existed.
+  const afterAssets = () => setPhase(boot.needs_key ? "intro" : "sync");
+
+  // ONE disclosed departure from the DC here, same class as the sync phase's own
+  // (see this file's header comment): the design's dlErrText assumes every failure
+  // is a dropped connection ("The connection dropped at N of M MB..."). The real
+  // engine (moonglade_assets.AssetFetchJob) can fail for reasons that aren't a
+  // connection drop at all -- a checksum mismatch, no release published yet ("no
+  // download source configured"), or the localhost-only gate -- so this composes
+  // the same shape and the same true reassurance clause around the REAL reason
+  // instead of a canned one that would be false most of the time it actually fires.
+  const dlErrorText = (reason) => {
+    const where = dl.total ? " (" + dl.received + " of " + dl.total + " MB)" : "";
+    return "The delivery was interrupted" + where + " — " + (reason || "something interrupted it") +
+      ". Nothing partial was kept — retrying starts clean, and the library is untouched.";
+  };
+
+  const assetTick = async () => {
+    let d;
+    try {
+      const r = await fetch("/api/assets/status");
+      d = await r.json();
+    } catch {
+      assetMissesRef.current += 1;
+      if (assetMissesRef.current >= ASSET_POLL_MISS_LIMIT) {
+        clearInterval(assetPollRef.current); assetPollRef.current = null;
+        setDlError(dlErrorText("lost contact while downloading"));
+        setPhase("interrupted");
+      }
+      return;
+    }
+    assetMissesRef.current = 0;
+    if (d.status === "running") {
+      setDl({ received: Math.round((d.downloaded || 0) / MB),
+              total: Math.round((d.total || 0) / MB),
+              speed: (d.speed_bps || 0) / MB, eta: d.eta_seconds });
+      return;
+    }
+    clearInterval(assetPollRef.current); assetPollRef.current = null;
+    if (d.status === "done") {
+      setPhase("assetsready");
+      assetsReadyTRef.current = setTimeout(afterAssets, 1600);
+      return;
+    }
+    // "failed" (a real error) or "idle" (the job never actually started, or was
+    // reset) -- both read as Interrupted; d.error is the honest reason either way.
+    setDl((s) => ({ ...s, received: Math.round((d.downloaded || 0) / MB) }));
+    setDlError(dlErrorText(d.error));
+    setPhase("interrupted");
+  };
+
+  const beginDownload = async () => {
+    setPhase("downloading");
+    setDlError("");
+    setDl({ received: 0, total: 0, speed: 0, eta: null });
+    assetMissesRef.current = 0;
+    let d;
+    try {
+      const r = await fetch("/api/assets/fetch", { method: "POST" });
+      d = await r.json();
+    } catch {
+      setDlError(dlErrorText("a network error reaching this machine's own server"));
+      setPhase("interrupted");
+      return;
+    }
+    // "already running" means someone/something else's fetch is genuinely in
+    // flight -- that's not a failure to report, just start polling its real
+    // progress. Any OTHER error (no manifest, no urls yet, localhost-only) means
+    // the job never started at all, so there's nothing to poll.
+    if (d.error && !/already running/i.test(d.error)) {
+      setDlError(dlErrorText(d.error));
+      setPhase("interrupted");
+      return;
+    }
+    assetPollRef.current = setInterval(assetTick, ASSET_POLL_MS);
+    assetTick();
+  };
+
+  const beginAssetCheck = async () => {
+    if (checkingRef.current) return;
+    checkingRef.current = true;
+    let d;
+    try {
+      const r = await fetch("/api/assets/status");
+      d = await r.json();
+    } catch {
+      d = null;
+    }
+    checkingRef.current = false;
+    if (!d || !d.needs) { afterAssets(); return; }   // already dressed, or nothing to fetch
+    beginDownload();
+  };
+
+  const retryDownload = () => setPhase("checking");   // the checking-phase effect below re-drives it
+  const continueWithoutArtwork = () => {
+    if (assetPollRef.current) { clearInterval(assetPollRef.current); assetPollRef.current = null; }
+    afterAssets();
+  };
+
+  useEffect(() => {
+    if (phase !== "checking") return undefined;
+    // Same 750ms visual beat the design specifies for Checking, real or retried.
+    const t = setTimeout(beginAssetCheck, 750);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   const openPixai = () => window.open("https://pixai.art/en/profile/edit/api", "_blank", "noopener");
 
@@ -182,6 +315,7 @@ export default function useSetupWizard(boot) {
     phase, slide,
     apiKey, onApiKeyChange, showKey, setShowKey, authBusy, authError,
     progress, syncError, finalStats,
+    dl, dlError, retryDownload, continueWithoutArtwork,
     openPixai, nextSlide, prevSlide, skipToKey, authenticate, startSync, enter,
   };
 }

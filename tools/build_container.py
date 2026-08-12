@@ -20,6 +20,14 @@ Release asset fetched on first run -- decided 2026-08-10, same record. This tool
 runs on the machine that has the real art; `gh release upload` publishes what it
 produces.
 
+ALSO writes/refreshes moonglade_manifest.json (via moonglade_assets.py) --
+version, whole-file sha256, size, and the mirror URL list the first-run
+downloader reads. THAT file IS committed: it is a few lines of metadata, not
+content, and every install needs it to know what container it should have.
+--url can be passed (repeatable) once real release URLs exist; omitted, the
+prior manifest's urls carry forward untouched (empty on a build with no
+release cut yet -- the downloader then fails cleanly, never crashes).
+
 Verification is not optional: after writing, the container is re-opened cold and
 every asset is compared byte-for-byte against the source tree; any mismatch
 deletes the output and fails loudly. A container that silently packed wrong bytes
@@ -31,6 +39,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import moonglade_assets as ma
 import moonglade_container as mc
 import moonglade_gallery as g
 
@@ -53,6 +62,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=None,
                     help="output path (default: <app root>/moonglade.dat)")
+    ap.add_argument("--version", default=None,
+                    help="manifest version string (default: bump the current "
+                         "manifest's integer version by 1, or '1' if none exists)")
+    ap.add_argument("--url", action="append", default=[],
+                    help="a download URL for the manifest's mirror list "
+                         "(repeatable, tried in order). Omit to leave the "
+                         "existing manifest's urls untouched; the manifest's "
+                         "urls start empty if none has ever been written.")
     args = ap.parse_args()
 
     root = g.branding_root()
@@ -84,8 +101,27 @@ def main():
         out_path.unlink(missing_ok=True)
         sys.exit("Verification FAILED, container deleted:\n  " + "\n  ".join(problems))
 
+    # The manifest describes the container by its whole-file identity (what a
+    # downloader fetches and verifies), independent of the TOC-level format
+    # write_container() already checked above.
+    import hashlib
+    whole_sha256 = hashlib.sha256(out_path.read_bytes()).hexdigest()
+    size = out_path.stat().st_size
+
+    prior = ma.read_manifest()
+    if args.version:
+        version = args.version
+    elif prior and str(prior.get("version", "")).isdigit():
+        version = str(int(prior["version"]) + 1)
+    else:
+        version = "1"
+    urls = args.url if args.url else (prior.get("urls") if prior else [])
+    ma.write_manifest(version, whole_sha256, size, urls)
+
     print("Wrote %s (%d assets, %d payload(s), %.1f MB) -- verified byte-for-byte."
           % (out_path, n_assets, n_payloads, out_path.stat().st_size / 1e6))
+    print("Manifest: version %s, %s..., %d mirror URL(s)"
+          % (version, whole_sha256[:12], len(urls)))
 
 
 if __name__ == "__main__":

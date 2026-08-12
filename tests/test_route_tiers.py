@@ -109,6 +109,8 @@ ROUTE_TIERS = {
     ("api_panel_run", "POST"): LOCALHOST,           # destructive actions only -- see PROBE_BODIES
     ("api_panel_schedule", "POST"): LOCALHOST,      # writes the schedule + global workers count
     ("api_setup_save_key", "POST"): LOCALHOST,      # rewrites config.json
+    ("api_assets_status", "GET"): LOGIN,            # read-only progress poll, no host detail
+    ("api_assets_fetch", "POST"): LOCALHOST,        # writes moonglade.dat into the app root
     # The library folder. GET is LOGIN -- the Panel shows the current folder to whoever
     # can already open the Panel, and it withholds the host path from a non-local caller
     # exactly as /panel does. POST rewrites config.json too, so it matches save-key above.

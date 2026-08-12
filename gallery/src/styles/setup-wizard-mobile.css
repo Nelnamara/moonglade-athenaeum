@@ -136,6 +136,19 @@
 .wzm-retrybtn { margin-top: 13px; font-size: 11.5px; font-weight: 700; padding: 9px 18px;
   border-radius: 10px; cursor: pointer; font-family: inherit; }
 
+/* ---- asset download (checking/downloading/interrupted/assetsready) -- same design
+   spec as desktop's setup-wizard.css block, this file's own smaller mobile scale. ---- */
+.wzm-dlbody { font-size: 11px; line-height: 1.6; color: var(--subtext); max-width: 280px; margin: 0 auto 15px; }
+.wzm-dlstatic { position: relative; z-index: 2; width: 100%; height: 100%; object-fit: contain; }
+.wzm-dlhalo-off { position: absolute; inset: -12px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(243,139,168,.3), transparent 66%); opacity: .55; }
+.wzm-dlhalo-good { position: absolute; inset: -12px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(79,201,154,.5), transparent 66%);
+  animation: wzmHalo 1.8s ease-in-out infinite; }
+.wzm-quietbtn { display: block; margin: 11px auto 0; font-size: 10px; font-weight: 600;
+  color: var(--subtext); cursor: pointer; background: none; border: none; font-family: inherit; }
+.wzm-quietbtn:hover { color: var(--text); }
+
 /* ---- ready (no separate decorative glow layer -- the Mobile design's own markup
    renders only the mark/head/body/button, unlike desktop's extra .wz-readyglow blob) ---- */
 .wzm-readywrap { text-align: center; padding: 8px 2px 2px;
