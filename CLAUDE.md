@@ -41,9 +41,20 @@ mass commit. Follow this protocol:
 
 Long sessions get compacted; summaries lose design intent. Standing rule:
 
-1. **Checkpoint** after every shipped increment (and before starting any new build): update
-   **`docs/DECISIONS.md`** + `CHANGELOG.md [Unreleased]` (what shipped, dated) + memory with
-   what shipped, what's in flight, and the decided NEXT STEPS. **This includes `wiki/` — there
+1. **Checkpoint** after every shipped increment (and before starting any new build). **One fact,
+   one home — do not write the same status into two files:**
+   - **What shipped** → `CHANGELOG.md [Unreleased]`, a dated tagline. Nowhere else.
+   - **Planned/outstanding work** → `ROADMAP.md` (Now / Next / Later, with real context).
+     When an item ships, **delete it from ROADMAP** and add the CHANGELOG line — moving it, not
+     annotating "done" in place.
+   - **Why a decision was made** → `docs/DECISIONS.md`, reasoning only. If what you're about to
+     write contains a status word (shipped/done/deferred/next), it belongs in one of the two
+     files above instead.
+   - **Bugs** → GitHub Issues (`gh issue create`), not prose in a doc.
+
+   This split exists because `STATE.md` and then `DECISIONS.md` both rotted into grow-only
+   status logs that contradicted the code and themselves; DECISIONS was cut from 7,285 to
+   ~3,100 lines on 2026-08-13 to undo it. Do not restart the pattern. **This includes `wiki/` — there
    was a standing pre-1.9.1 practice of updating docs AND the wiki on every commit as needed;
    it silently dropped because it was never written down here, only followed by habit. Writing
    it down now (2026-07-15) so it can't drop again the same way.** If a shipped change is
