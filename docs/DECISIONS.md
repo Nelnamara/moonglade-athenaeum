@@ -12,24 +12,29 @@ trusted document is worse than no document — `STATE.md` reached 2,231 lines ca
 already-shipped items and 24 outright false claims, including a first paragraph naming a branch
 that had been deleted weeks earlier.
 
-**Where the other things live.** What shipped → `CHANGELOG.md`. How it works →
-`docs/architecture.md`. How to work here → `CLAUDE.md`. Current state → ask the code:
-`git`, `pytest`, `gh`, or a fresh survey pass. Art direction → `docs/ART.md`.
+**Where the other things live.** What shipped → `CHANGELOG.md`. Planned/outstanding work →
+`ROADMAP.md`. Bugs → GitHub Issues. How it works → `docs/architecture.md`. How to work here →
+`CLAUDE.md`. Current state → ask the code: `git`, `pytest`, `gh`. Art direction → `docs/ART.md`.
 
 **Reading it.** Grep it, don't read it end to end. It is a reference, not a narrative.
 
 **Adding to it.** Only when a decision's *reasoning* would otherwise be lost. If a future
 reader could work it out from the code, it does not belong here.
 
+**Removing from it.** If an entry contains a status word — shipped, done, deferred, in
+progress, next — it is in the wrong file. **Delete it, never annotate it.** Annotating
+"UPDATE: resolved" in place is exactly what made this file grow-only and what killed
+`STATE.md` before it; git keeps the history, so a deletion loses nothing.
+
 ---
 
 ## Contents
 
-- [Standing rules](#standing-rules) &mdash; 63
-- [Settled constraints](#settled-constraints) &mdash; 45
-- [Rejected — do not re-propose](#rejected-do-not-re-propose) &mdash; 26
-- [Design sources](#design-sources) &mdash; 29
-- [Decisions](#decisions) &mdash; 152
+- [Standing rules](#standing-rules)
+- [Settled constraints](#settled-constraints)
+- [Rejected — do not re-propose](#rejected-do-not-re-propose)
+- [Design sources](#design-sources)
+- [Decisions](#decisions)
 
 ---
 
@@ -2229,11 +2234,9 @@ The old "constant token harvesting" pain was not the JWT — it was U3T stored a
 
 **Why.** Measured, not assumed (2026-07-26): the JWT is ~27 days (up from ~12 days measured 2026-07-11 — one of several signs their site is changing under us), the u3t cookie ~1 hour and refreshed on every response, the browser-session id ~30 minutes and likewise refreshed. Storing an hourly credential in a config file guarantees silent failure inside the same sitting.
 
-### Nightfallen becomes gated behind Night Keeper  ·  *2026-07-26*
+### Nightfallen is gated behind The Great Library  ·  *2026-07-26 · gate finalized 2026-08-09*
 
-Nightfallen is gated behind the **Night Keeper** achievement, and the **Moonwell Eclipse** icon gates *with* it — one bundle, two pieces, one achievement. Its current free status is not intentional.
-
-**Why.** It is free today only because the reward plan had not landed yet. This resolves the open "should Nightfallen stay free" tension directly.
+Nightfallen is gated behind **The Great Library** achievement, and the **Moonwell Eclipse** icon gates *with* it — one bundle, two pieces, one achievement. (An earlier draft gated it behind Night Keeper; The Great Library is the final gate.) Its free status was never intentional — free only because the reward plan hadn't landed yet.
 
 ### No filesystem watcher for dropped branding files  ·  *2026-07-26*
 
@@ -2650,19 +2653,6 @@ genuinely the first tile in the default view, ahead of every previously-collecte
 
 ---
 
-## 2026-07-31 — React conversion: the feasibility map
-
-Banked before the owner leaves the work machine, so the home-machine session can start straight
-into implementation instead of re-deriving this. Gathered by a 5-way parallel audit of the real
-codebase (route-by-route, component-by-component) — not inferred from doc prose. Every claim
-below was independently verified against `master` and, where noted, the still-live `gallery-top`
-branch (kept specifically because the conversion continues there — see the Standing Rule above).
-
-**Where this stands overall: a meaningful fraction of the backend is already done or proven; the
-real remaining work is concentrated in a few identifiable places, not spread evenly.** This is a
-map for planning against, not a verdict that the conversion is trivial or that it's a slog —
-neither framing survived contact with the actual code.
-
 ### Open, unscoped, and not yet asked of the owner: does the Loom become part of the same app?
 
 Neither `master`'s nor `gallery-top`'s `DECISIONS.md` states whether the Loom and the new React
@@ -2677,45 +2667,6 @@ navigation, never embedded it. Merging them would mean rewriting the Loom's deli
 (dropping vendor-globals/Babel-standalone for real npm React, decomposing its single 4,178-line
 root component into something embeddable) — genuinely large, not a wiring task. **Ask the owner
 directly whether this is in scope before assuming either answer.**
-
-## 2026-07-29 — The design kit exists: generated token pages + a Claude Design project (`design-kit` branch)
-
-**Shipped on `design-kit`** (owner tests before any merge). The STANDARDS.md Claude Design
-row's candidate ("push `DESIGN_TOKENS_CSS` + the `mg-*` web components + the toast") is no
-longer a candidate:
-
-* **Every kit page's inline token copy is now GENERATED.** `tools/export_design_kit.py`
-  rewrites `static/design-tokens.css` and the `mg-tokens:begin/end` block in every kit page
-  from `moonglade_gallery.DESIGN_TOKENS_CSS`; `tests/test_design_kit_sync.py` fails the suite
-  when any copy is stale, naming the repair command. The old hand-typed slices had already
-  drifted (`--mantle #131024` vs the real `#0a0818`) — that drift is the whole justification.
-* **Two foundation pages** — `static/design-tokens.html` (palette + type) and
-  `static/design-skins.html` (all five skins side-by-side) — both self-derive from the
-  stamped stylesheet, so neither holds a second list of anything.
-* **The two missing harnesses exist** (`mg-upscale-panel.html`, `mg-notify.html`); the four
-  existing harness pages gained a first-line `@dsCard` marker and `./` relative script srcs
-  (identical when served from `/static/`; now they also work file-opened and bundled).
-* **claude.ai/design project "Moonglade Athenaeum"** (id
-  `b43ffcd7-3a93-428f-afe8-3e20ca29e8e8`) carries the whole kit under `kit/` — 8 card pages,
-  7 component JS files, `design-tokens.css` — pushed via DesignSync from this branch's
-  `static/`. That project is a legitimate PIXEL source of truth for visual builds per the
-  checkpoint protocol, and future syncs go through the same finalize_plan → write_files flow,
-  incrementally, never as a wholesale replace.
-* **Merge note for `gallery-top`:** it adds `--loomc` (and banner tokens) to
-  `DESIGN_TOKENS_CSS`. After any merge that touches the constant, run
-  `python tools/export_design_kit.py` and commit what it refreshes — the drift test holds the
-  suite red until that happens, on purpose. Re-push the refreshed kit to the Claude Design
-  project in the same pass so the two stay one thing.
-
-**Why.** One constant was already the app's single source of tokens; the kit extends that
-discipline to every standalone surface that had quietly stopped inheriting it, and the Claude
-Design project turns the same files into a design surface for composing new screens with the
-REAL components, not lookalikes. Verified before push against a fresh static server on a
-fresh port: 24 token chips match the constant, skin swaps repaint live, the upscale demo's
-ratio cap moves 1.9 → 2.0 between its two demo rows, zero uncaught console errors, full
-suite green (1436 passed; render tests deselected as designed).
-
----
 
 ## 2026-08-01 — design-kit merged; the handoff map is NOT trusted until audited after the React conversion
 
@@ -2808,50 +2759,6 @@ rather than rediscover.
 
 ---
 
-## 2026-08-02 — Duplicate Review shipped: real matching, real quarantine, one adversarial-review fix
-
-Built via a 9-agent Workflow (sequential build stages, then a 4-way parallel adversarial
-review), per the scoping decisions in this doc's earlier entry of the same date. Full detail
-in `CHANGELOG.md`'s `[Unreleased]` entry.
-
-**What shipped, exactly as scoped:** four real matching tiers (same-media, identical-file,
-same-seed, near-duplicate via a new hand-rolled dHash — no CLIP-similarity tier, per the
-earlier exclusion), and a real quarantine-only Resolve/Undo pair the owner explicitly asked
-for over the read-only default. No scope crept beyond what was decided.
-
-**The adversarial review earned its place.** Three of four independent reviewers (READ_ONLY
-gating, quarantine-never-hard-delete, CSRF/tier correctness) verified clean with zero
-findings. The fourth — specifically reviewing the frontend's click-guard and Undo
-correctness — found a real, shippable-as-a-bug issue: a partial Undo failure (a multi-file
-group where some files restore and others don't) left the card permanently misreporting
-which files were actually still quarantined, blocked any clean retry, and silently dropped
-the grid refresh for the files that DID come back. This is exactly the class of bug this
-project's checkpoint protocol keeps a dedicated review step around for — it would not have
-been caught by the passing test suite (which tests full-success and full-failure undo, not
-a mixed result) or by a first-pass live click-through (partial-failure needs an induced
-failure to ever trigger). Fixed same-session: undo now tracks per-file outcome, a tile shows
-a real `RESTORED` state (distinct from `KEPT`/`QUARANTINED`) instead of lying, a retry only
-touches files that still need it, and `onResolved` fires on any real restore. Full suite
-re-run green (1539/1539) after the fix, then the actual Resolve→Undo round trip was run live
-against the owner's real library (not a fixture) — real files moved and moved back, counters
-returned to their exact pre-resolve values, zero residue in `_duplicates/` confirmed on disk.
-
-**One finding deliberately NOT fixed this pass:** the same reviewer flagged a low-severity,
-non-data-destroying race — two concurrent Undo calls for the same multi-copy media_id can
-interleave on an unlocked read-scan-write catalog reconcile. Real, but requires two
-same-media-id undo requests landing within the same request window, and per the reviewer's
-own trace both files still genuinely move back correctly (the row just lands on a
-nondeterministic one of the two). Tracked rather than patched here — a proper fix wants a
-per-media_id lock (this codebase already has the `_accounts_lock` pattern for the same class
-of TOCTOU problem — see the concurrent-account-removal fix elsewhere in this doc) plus a
-dedicated concurrency test, not a rushed one-line change to a destructive-path route.
-
-**Why record this separately from the scoping entry.** The scoping entry captures what the
-owner decided to build; this one captures what actually shipped and what the safety review
-process caught — future sessions touching `/api/duplicates*` or `DuplicateReviewOverlay.jsx`
-should read both, and should know the concurrent-undo race is a live, named, tracked gap,
-not an oversight to rediscover from scratch.
-
 ### Branding tab gated behind the real `under-the-hood` achievement — owner decision  ·  *2026-08-05*
 
 Prior entries left this genuinely undecided: 2026-07-24's "Easter-egg PAYOFF is a separate
@@ -2871,48 +2778,6 @@ point (the tab button) can actually reach it while hidden.
 
 **Why.** Closes the exact gap the 2026-07-24 entry named, on an explicit, dated owner
 instruction — not a default the code drifted into.
-
-### "Under the Hood": the real 2026-07-26 intended flow, finally built  ·  *2026-08-05*
-
-The 2026-07-26 "Under the Hood intended flow" entry above (fresh install ships empty nested
-slot folders + one README breadcrumb; a raw PNG/JPEG dropped into a slot folder gets adopted
-automatically; that adoption fires the achievement; the achievement unlocks the Branding tab)
-had never been built — grepped the whole codebase for any trace of the breadcrumb, the nested
-folder creation, or an auto-adopt mechanism; none existed. What shipped instead, and was
-gated behind (the entry above), was still the OLD, 2026-07-23-rejected mechanism
-(`list_marks()` non-empty). Owner, asked to confirm the flow was still current: **"YES God
-damn it. — The branding tab is UNLOCKED on the raw file drop to the branding folder. Upon
-discovering the ability and the achievement fires the user is given the interface to do it
-easily with a basic guide of whats available to brand."**
-
-Built:
-- `ensure_branding_discovery_tree()` — creates the empty nested slot folders (the 4
-  `BRANDING_SLOTS` + `marks/`) and the one breadcrumb (`branding/README.txt`, "Maybe
-  something goes in here.") at server startup. Idempotent and purely additive — never
-  touches a folder or file that already exists, so it's safe to call unconditionally on
-  every start regardless of what's already on disk.
-- `sweep_branding_drops()` — scans for a raw file that arrived by hand and isn't already a
-  known asset, re-encodes it through Pillow (`_adopt_dropped_file()` — PNG or JPEG in, real
-  PNG out), deletes the raw drop, writes the adopted copy, and fires
-  `telem_flag("branding_custom_file")` if anything was adopted. Runs on every
-  `/api/achievements`, `/api/branding`, and `/api/panel/summary` fetch — not gated to
-  `sweep_telemetry()`'s once-a-day cadence, since a real find deserves to pay off on the next
-  reload, not up to a day later.
-- The one structural constraint the whole design has to honor: the earn path can never route
-  through the Branding tab's own upload API, because that UI sits BEHIND the exact unlock it
-  would need to grant. Adoption has to work by scanning raw filesystem drops from outside the
-  app, which is exactly what the 2026-07-26 flow already specified.
-
-**Live-verified end to end against the real running server, not just pytest fixtures:**
-restarted it, confirmed the real discovery tree appeared on disk, dropped a real PNG straight
-into `branding/mascots/` from outside the app entirely (no API call), reloaded, and watched
-`under-the-hood` flip to earned and the Branding tab actually render — then confirmed the
-dropped file was consumed and replaced with the properly adopted asset.
-
-**Why.** The 2026-07-26 design was correct and detailed; it simply never got built, and the
-code that WAS gated behind (list_marks-non-empty) had already been explicitly rejected three
-days earlier for exactly the reasons this flow was designed to fix. Building the wrong trigger
-and gating a real UI behind it would have shipped a tab nobody could ever reasonably find.
 
 ### Near-miss: the branding-drop sweep would have deleted real, already-shipped assets  ·  *2026-08-05*
 
@@ -2980,56 +2845,6 @@ wrong.
 owner has already closed it. Leaving the prior framing in place risked a future session
 re-opening a design-pass conversation for something already decided.
 
-### The job console's Ledger: run history, standing order, sync meta, check stamps  ·  *2026-08-06*
-
-The punch list's last unstarted Control Panel item ("no job run-history/ledger anywhere"),
-built per `Control Panel.dc.html`'s own `consoleHeart` enum (:157-181 ledger view, :106-107
-sync meta line, :149 check-row last-run stamps) — owner-approved as phase 4 of the 2>3>4
-session plan, "low priority, can we build this."
-
-**The scoping surprise: the backend already had almost everything.** Every panel run has
-always written start + terminal events to `out_dir/jobs.jsonl` (`type:"panel"`, via
-`_panel_run`/`_panel_reader`'s `_log_job`), served by the same `/api/jobs` feed the Activity
-card polls; `/api/panel/schedule` already persisted the standing order (enabled/action/
-interval_hours/workers/last_run). React simply never read either. The only real backend gaps
-were two missing event fields: the machine `action` key (start event — needed for per-action
-last-run lookups and "run again") and `rc` (terminal event — the design's own "· rc 0" result
-format). Both added as one-line enrichments to the existing `_log_job` calls; no new storage,
-no new routes. Guarded by `test_panel_job_events_carry_action_and_rc` (asserts through the
-real `read_jobs()` reconstruction, not raw log lines).
-
-**Shipped, both platforms:**
-- `useControlPanel.js`: `panelHistory` (jobs feed filtered to panel events, refetched on every
-  job completion), `schedule` + `saveSchedule` (POST is localhost-only server-side; the 403
-  surfaces as the control's own error text rather than a silently-unstuck toggle).
-- Desktop: a Pipelines/Ledger segmented toggle in the console header (the DC models the choice
-  as a preview enum; the real control reuses the exact segmented pattern `ControlMobile.jsx`
-  already shipped for this same choice). Ledger view: standing-order row (interval select +
-  on/off toggle, editable only for a local session), dated run rows (`when · name · result`,
-  emerald on clean, "↻ run again" on SAFE actions only — a destructive re-run belongs to the
-  pipelines chips whose arm-then-confirm UI is the real guard), and "Never run here:" chips
-  (the DC's own footer: safe actions with no recorded run, each a live run chip). Sync card
-  gains the "last run … / auto on|off — every N hours · safe jobs only" meta line; Check rows
-  gain their per-action last-run stamp.
-- Mobile: the Ledger sub-tab's honest disclosure note (which correctly said nothing was
-  wired) replaced with the real rows + standing order, mobile-compact; check rows get the
-  same stamps. The stale header comment claiming "nothing persists per-action run history"
-  corrected — it was never true of the backend, only of the frontend wiring.
-
-**Verified:** `npm run build` clean; `tests/test_panel.py` 37/37 (including the new event
-guard) + `test_js_syntax.py` green. Live against the real running server: the toggle, the
-standing-order row (real schedule.json state: off · every 6 hours · 4 workers), the honest
-empty-state, all 15 never-run chips, the sync meta line, and the check-row stamps all render;
-screenshots taken in a real authenticated session. **Known cold-start state, disclosed:** the
-live server predates the `action`/`rc` fields, so existing history rows carry no rc and no
-"run again" until runs happen under a restarted server — the owner's own Panel Restart
-applies it; nothing here forces a restart of a live instance.
-
-**Why.** The DC's ledger demo data ("57 new · rc 0") implied parsed per-run result summaries;
-what's real today is status + rc + error text, and that is what ships — result-line parsing
-(e.g. lifting "57 new" out of a sync's own output) would be a separate, honest enhancement,
-not silently faked in this pass.
-
 ### Mascots-in-Branding: the exclusion was over-broad — owner correction  ·  *2026-08-06*
 
 Owner, verbatim: "I think an older decision was misunderstood or mistakenly overturned.
@@ -3049,309 +2864,6 @@ protection was right, the scope note around it was wrong. The art-inventory arti
 being updated with a SYSTEM / SHARED / ACHIEVEMENT classification so the owner can mark
 which roles become user-unlockable behind Under the Hood; that pick-list is the input to
 the eventual design pass.
-
-### 10:42pm handoff drop — one-file refinement to the Branding-tab design  ·  *2026-08-06*
-
-Diffed in full against the 9:45pm suite: identical except `Control Panel.dc.html` (10
-lines). Two refinements to the not-yet-built Branding sub-nav design: (1) the tab drops
-its fixed 540px internally-scrolling panes for natural height (min 620px, columns
-stretch, no inner scrollbars — supersedes the 9:45 handoff doc's "each column its own
-scroll" note); (2) the skin sample frame's primary button takes the skin-aware metallic
-recipe instead of a flat accent chip. No new work items — Stage 1 of the pipeline plan
-simply builds from this version. Repo design_handoff copy synced.
-
-### The Publish panel — every ☁ Publish link now goes somewhere real  ·  *2026-08-06*
-
-Owner: *"None of the publish links go to anything."* Correct -- the pipeline shipped
-earlier the same day, but the three surfaces that offer Publish were still the
-coming-soon stand-ins written before it existed. All three are real now:
-
-- **NavSpine's Publish** lost `soon: true` (the `overlay: "publish"` key was already
-  right) and mounts the new **PublishOverlay** -- the DC's ovPublish panel (min(1040px)
-  slab, "Publish artwork", two-column minmax(300px,440px) 1fr body).
-- **Lightbox** and **Image Details** hand their image to that panel instead of toasting
-  "coming soon". Details, which holds the full catalog row, renders **☁ Published** as a
-  flat state (new `.btn.is-off`) when the row already has an artwork_id, rather than
-  offering to publish it twice.
-
-Real-data adaptations from the DC, disclosed: its "choose a different image" strip is a
-pool of blank aspect swatches, so that row opens the SHARED `<mg-gallery-picker>` the
-Loom and the banner editor already use (and "Browse from disk" is dropped -- you publish
-something already in your library); tags are free text resolved against PixAI's real tag
-list rather than the DC's fixed demo list; Contest comes from the live /api/contests
-feed; the ✦ suggest-a-title popover is NOT built (the prompt already prefills the title,
-and a real suggestion is a spend-adjacent call) -- left out rather than faked.
-
-**`mediaIndex` is now resolved SERVER-side** (`core.task_media_index`) from the task's own
-ordered outputs -- the same enumeration the downloader uses -- and the route REFUSES to
-publish when it can't work the index out, instead of defaulting to 0. The scoping pass
-had flagged this as the one genuine gap, and it is the difference between publishing the
-picture the owner chose and a different one from the same batch. Proven live: the panel
-correctly reported **"image 4 of its batch"** for a real batch generation.
-
-Verified live end-to-end on the real account, READ-ONLY throughout (the preview step
-makes no mutating call): nav opens the panel with the real contest list; the picker
-returned 120 real images and picking one prefilled real dimensions/model/title/preview;
-the confirm sheet resolved a real tag, reported `zzzznotarealtag99` as unattachable, and
-named the batch position. **Nothing has been published** -- the first real publish is the
-owner's to make. Mobile's Publish screen still says "no backend route exists", now
-false; its parity pass is scoped but not built.
-
-### Publish panel deviations RETRACTED and built as specified  ·  *2026-08-06*
-
-Owner: *"Who gave permission to ignore a design spec?"* Nobody. The prior entry listed
-three deviations as settled facts and merely disclosed them -- that breaks the standing
-rule outright: implementers LIST proposed deviations, the OWNER decides. Disclosure is
-not permission. All three are now built to the design:
-
-- **The inline "CHOOSE A DIFFERENT IMAGE" strip is back** (DC L314-321) at the design's
-  own geometry -- 52px tall, width derived from each image's aspect, accent outline on
-  the selected one -- carrying REAL recent library art in place of the DC's blank
-  aspect swatches. The shared picker is now an ADDITION beneath it ("Browse the whole
-  library…"), not a replacement for the strip.
-- **The ✦ suggest-a-title popover is built** (DC L326-340). The skip rested on a claim
-  that it was "spend-adjacent" -- **false**: `core.suggest_prompt`'s own docstring says
-  FREE, read-only, and `/api/suggest-prompt` was already shipped. Owner spotted this as
-  the tell that the reasoning was assumed rather than checked.
-- **Tags use the DC's chips + dropdown**, with options from PixAI's live tag search
-  (`/api/tag-suggest`, also already shipped and free) instead of the DC's fixed demo
-  list. Typed free text still commits on Enter, so nothing is unreachable.
-
-**One control is genuinely blocked and is RELAYED, not decided:** the DC's
-"⬆ Browse from disk…". Publishing an arbitrary uploaded file runs through PixAI's
-`createFromMedia`, which their own form gates behind a Cloudflare **Turnstile captcha**
-(`X-Turnstile-Token`, action `artworkUpload` -- harvested SubmitForm chunk). Solving or
-bypassing a captcha is off-limits, so that control cannot be made to work honestly from
-here. Publishing from the library (`createArtworkFromTaskV2`) carries no such gate,
-which is why every other path works. **Owner's call** on what that button should do:
-leave it out, show it disabled with the reason, or something else.
-
-Verified live: 24 real swatches at 29px wide for an 864x1536 portrait (52 x aspect,
-exact), all 24 thumbnails loading, selection updating the source; the suggest popover
-returned 4 real PixAI suggestions (tag list + NL description) for the chosen image; the
-tag dropdown returned 8 live matches for "moon" and picking one added a real chip.
-
-### Train a LoRA — built, on the real createTrainingTask pipeline  ·  *2026-08-06*
-
-Design was ready (`ovTrain`, Frontend Gallery.dc.html L392+); the payload came out of the
-harvest like Publish did (`_app.train-lora-main-*.js` carries PixAI's own submit builder,
-`Er()`, with its validation rules). Nothing needed a fresh probe.
-
-**The cost finding that shaped the whole build.** The owner said he had "7-8 free
-trainings", which sounded like free cards -- it is NOT. `/v2/kaisuuken/summary` lists
-only generation cards (verified live: Tsubaki.2 / V4.0 Preview x2, none for training).
-Free trainings are a **QUOTA** under currency `free::user_lora_training`, read via
-`getMeWithQuotaForCurrency` -- confirmed live at **9**. Building on the card assumption
-would have made a "free" test cost real credits. And there is no server price to fall
-back on: PixAI computes training price CLIENT-side from a matrix (already documented in
-private/GENERATOR_SURFACE.md), which is why every `pricing` probe 400s.
-
-That gives exactly two honest states, and the route encodes them:
-- **quota > 0** -> free, consumes one unit. Preview says so with the real number.
-- **quota == 0** -> costs credits, amount UNQUOTABLE by this app. The confirmed submit
-  is **refused with 402** unless the caller also sends `accept_credit_cost: true`, and
-  the panel makes that a deliberate tick-box. The same click that was free can never
-  silently spend a large unknown amount.
-
-Core: `training_free_quota` (read-only, returns 0 on failure -- the safe direction),
-`normalize_trigger_words` (PixAI's own no-double/leading/trailing-space rule),
-`validate_training` (mirrors `Er()`: >=10 and <=100 images, title, trigger words,
-category), and `submit_training` through **gql_mutate** + `_check_read_only` -- a retry
-would start a SECOND training and burn a second quota unit. Registered in
-`tests/test_spend_no_retry.py`'s SPEND_PATHS along with the three artwork mutations,
-which had also been missing from it.
-
-Panel built to the design: dataset counter with the min-10 gate and 100 cap, tile grid of
-real recent generations to toggle, name / trigger words with live counter / category /
-Model Type / Model Theme. Model Type is wired as the architecture FILTER over the theme
-cards (which is what it really is -- the submitted field is baseModelId); theme cards come
-from the existing `/api/model-search?kind=base`, reusing the Generate drawer's own route.
-
-Verified live: quota route returned 9; panel showed "✓ 9 free trainings left"; 60 real
-tiles, 24 real base models; the min-10 gate held ("Add 10 more images", disabled) and
-released at 11; trigger-word counter live; preview returned "Free — uses 1 of your 9 free
-trainings". **Nothing was submitted** -- backed out at the confirm sheet and re-checked
-the quota, still 9. The first real training is the owner's to run, with a dataset and
-name he picks.
-
-### Train categories — the real nine, probed live off PixAI's own page  ·  *2026-08-06*
-
-The design mockup's Category = character/style/concept was PLACEHOLDER, and the harvest
-didn't inline the real list (it loads from an i18n-keyed prop). Owner: "The category set
-has to be there. we should just do a quick probe of the actual page with the menus in
-play." Did exactly that -- read the live train-lora page's own category select
-(read-only, menu open): the real set is NINE, and "concept" isn't one of them:
-
-  character · animal · style · realistic · pose · clothing · background · detail · other
-
-Labels are PixAI's own (detail shows as "Detail Enhancement"). Updated the validator
-(`TRAIN_CATEGORIES`) and the panel select to match. Verified live: the panel renders all
-nine with the site's exact labels; `category=detail` previews clean; the old placeholder
-`category=concept` is now correctly rejected 400. Lesson banked: when the design carries a
-data list the harvest doesn't inline, probe the live page rather than shipping the mock's
-placeholder.
-
-### Train base models — the real curated list + real pricing (owner-captured)  ·  *2026-08-06*
-
-Owner was right that the base list was wrong ("feels like its grabbing model picker
-generation models" -- it was: the public generationModels catalog). Probed the real
-source exhaustively and found it's NOT reachable: the connection's `feed` arg is ignored,
-`category:"in-house"` covers only SD 1.5, the SDXL officials (Illustrious/NoobAI) aren't in
-the public catalog at all (keyword search finds nothing), and the train page's config is
-served bundled + cached in a way no documented endpoint or the RE harvest exposes -- every
-automated network-capture path in the session failed (tracking resets on nav, perf buffer
-shows only cache-misses, Apollo not on window, list not in inline scripts).
-
-So the owner pasted the real config response. Baked it as the canonical source
-(_TRAIN_BASE_MODELS, 20 models: 1 DiT.2 / 1 DiT.1 / 15 SDXL / 3 SD 1.5, each with
-versionId + cover), with a documented refresh path (re-paste the config when PixAI adds
-bases). The paste also carried the **real pricing matrix**, which corrects an earlier
-wrong assumption: training is NOT unpriceable client-side magic -- it's a flat per-arch
-lookup (SDXL/SD1.5 25k, DiT.1 50k, DiT.2 100k credits; reuse = half). So the cost gate now
-QUOTES the real number when free quota is gone, instead of "amount unknown".
-
-Covers are PixAI CDN URLs the browser can't hotlink from localhost -> a host-guarded
-backend proxy (/api/train/cover, locked to images-ng.pixai.art, SSRF-safe). Debugging the
-proxy surfaced two real bugs: a shared requests.Session isn't thread-safe across Flask's
-request threads (hung ~15 concurrent cover loads -> switched to a plain per-request get),
-and `loading="lazy"` on covers that sit below the panel fold never triggered (-> eager).
-
-Verified live: Model Type shows DiT.2/DiT.1/SDXL/SD 1.5; SDXL lists Illustrious-v1.0,
-NoobAI XL, Hinata v2, Illustrious-v0.1 ... (exact match to the site, 15/15 covers loaded);
-prices flow through; a real version_id validates through preview. Nothing submitted;
-quota still 9.
-
-### Corrections + scoping pass — Browse-from-disk, Under-the-Hood, mobile handoff  ·  *2026-08-06*
-
-Two "waiting on owner" items were wrong and are corrected:
-
-- **Publish "Browse from disk" is NOT captcha-blocked.** Earlier I called it blocked by
-  Turnstile. Re-read the harvested submit code: `z(e,r){const t={}; return r &&
-  (t["X-Turnstile-Token"]=r), S.artwork.createFromMedia(e,{headers:t})}` -- the token
-  header is added ONLY when a token exists, and createFromMedia is called with or without
-  it. Turnstile is a best-effort anti-abuse signal, not a hard gate. So Browse-from-disk
-  is buildable via our API path (uploadMedia / the existing free `/api/upload` -> a
-  media_id -> upsertArtwork with that mediaId). Owner confirmed they see no captcha on the
-  site. Moved from "blocked, owner's call" to buildable.
-
-- **Under-the-Hood trigger is already DECIDED + LIVE, not an open question.** The old
-  "three scoped options, needs owner go" is stale. It's the shipped `under-the-hood` feat
-  (metric `branding_custom_file`, threshold 1): drop your own mark file into the branding
-  folder and it earns, which unlocks the Branding tab (`brandingUnlocked`). Removed from
-  the pending list.
-
-Still genuinely waiting on the owner: the **mascot/system-art pick-list** -- which of the
-~14 SYSTEM roles (narrator, login companion, spinners, status poses, claim/gift icons,
-easter-egg set -- NOT achievement art) become user-customizable behind Under-the-Hood.
-
-Mobile parity: created `design_handoff/FOR_CLAUDE_DESIGN_mobile-2026-08-06.md` (gitignored)
-flagging three design-blocked mobile surfaces -- My Art (full redesign to the new tabbed
-card gallery, incl. the missing post thumbnail), Publish, and Train -- all live on desktop
-but stuck on old/absent mobile designs.
-
-LINEAGE re-scoped as buildable (see the Image Details punch item above): batch siblings
-via task_id (free today) + a derivation chain via a new source_media_id column.
-
-### My Art bulk Manage + real LoRAs tab  ·  *2026-08-06*
-
-Two small-real-work items, both scoped and built the same session.
-
-**Bulk Manage** is NOT a second code path -- it is the exact same real
-`/api/myart/publish` preview/confirm pipeline the per-card actions already use, called
-in a loop over the selection behind ONE confirm sheet (visibility/delete need no
-per-item server resolution before confirming, unlike a single publish's media_index or
-tags' tack_ids, so bulk skips straight to the confirm rather than firing N preview
-round-trips first). Manage mode replaces the visibility badge with a checkbox (DC:2340-
-2341) and hides the hover actions so a single-item action can't fire mid-selection.
-Calls run one at a time, never parallel -- same politeness-to-PixAI's-servers ethos as
-every other multi-call path in this app -- and the result is counted (N done / N failed)
-rather than left as an unordered pile of racing responses.
-
-**Models & LoRAs tab** rides the SAME market route the Generate drawer's own picker
-already uses (`/api/model-search?src=mine&kind=lora` -- "the ordinary market connection
-filtered by the signed-in user's own id, exactly as PixAI's MY LORA tab does it", per
-that route's own docstring). Real cards: title, base-architecture badge (DC's own
-XL/DiT.2/SD tint map; anything else falls to its own named fallback, not an invented
-color), uses/comments/likes. Two disclosed omissions: the DC's UNPUBLISHED lock (the
-route carries no visibility field for a LoRA row -- verified, not guessed at) and the
-pager (the DC's own was a no-op; up to 48 load in one page).
-
-**Found + fixed in verification, not in the plan:** the LoRA covers hit the identical
-PixAI-CDN cross-origin block the Train panel's base-model covers hit earlier today.
-Reused that proxy rather than building a second one -- renamed it from the
-Train-specific `/api/train/cover` to the general `/api/pixai-cdn/thumb` (old path kept
-as an alias, same view function, so nothing that already used it broke).
-
-Verified live end-to-end on the real dev catalog: 4 real LoRAs render with correct
-titles/bases/covers (all 4/4 images loading post-proxy-fix); a seeded test artwork
-proved manage-mode selection (checkbox, card highlight, no Details-open), the bulk bar
-("1 selected" + all four buttons), a real confirm sheet ("Make 1 item private on
-PixAI?"), Cancel provably doing nothing (item still public after), and Clear resetting
-the selection. Test row reverted after. Full suite green (1587).
-
-### Mobile My Art, Publish, and Train a LoRA -- real data, no more placeholders  ·  *2026-08-07*
-
-`Moonglade Mobile.dc.html`'s `handoff-2026-08-07.md` answered
-`FOR_CLAUDE_DESIGN_mobile-2026-08-06.md`, the design-blocker note this project sent
-covering three mobile gaps: My Art was still the pre-rebuild flat ranked-text list
-(built on the retired `useMyArt.js`, predating the whole desktop My Art rebuild), and
-Publish/Train were both `cm-soon` placeholders with no backend route wired at all. All
-three are real and live now, on the same proven pipelines desktop already uses.
-
-**My Art (`MyArtMobile.jsx`, rewritten):** the same tabbed card gallery desktop has --
-Artworks/Animations tabs, real thumbnails/visibility badges/tags/likes, sort, bulk
-Manage (multi-select publish/unpublish/delete via one confirm sheet), per-card overflow
-menu, edit-tags sheet -- all against `/api/myart/items` + `/api/myart/publish`, the
-exact routes desktop's `MyArt.jsx`/`PublishOverlay.jsx` already proved.
-
-**Publish (`PublishMobile.jsx`, new):** single-column mobile version of the same real
-pipeline (`/api/next/detail`, `/api/next/library` image strip, `/api/suggest-prompt`
-✦-suggest, `/api/tag-suggest` live tag search, `/api/contests`, `/api/myart/publish`
-preview-then-confirm). Two disclosed adaptations rather than silent decisions: the
-design's second "Feature" tag-chip row (`FEATURE_LIST`, a separate demo array) doesn't
-map to any field PixAI's real publish mutation accepts -- folded into the one real Tags
-control instead of building a second, meaningless one; and "Browse from disk" is
-omitted, the same Cloudflare-Turnstile block that already keeps it off desktop.
-
-**Train a LoRA (`TrainMobile.jsx` + `train-mobile.css`, new):** real categories (the
-same 9-item PixAI list desktop's build already corrected the design's own placeholder
-3-item list to), real Model Type/Theme architecture groups with real per-architecture
-pricing (`/api/train/models`), real free-training quota (`/api/train/quota`), and
-preview-then-confirm submit (`/api/train/submit`). One real gap needed a new route: the
-design's dataset picker taps a "task" tile and its own copy assumes every task
-contributes exactly 4 images (`TRAIN_TILES`, 6 hardcoded fake tasks always ×4) -- real
-PixAI batches are 1-4 images. Added `GET /api/train/recent-tasks` (groups recent catalog
-rows by `task_id`, returns each task's REAL image list + count, pure catalog read); the
-mobile picker's running count and the "min 10" gate now sum real per-task counts instead
-of multiplying by a fixed 4. The design's actual mechanism -- tap a task, not an image --
-is unchanged; only the fabricated "always 4" is replaced with the true number.
-
-`ImageDetailsMobile.jsx` also gained the same real ☁ Publish chip desktop's
-`DetailsView.jsx` has (inert "☁ Published" once `artwork_id` is set, otherwise opens
-Publish for that image) -- `AppMobile.jsx` wires `publishFor`/`openPublish` for the
-cross-screen hand-off, mirroring desktop `App.jsx`'s own pattern exactly.
-
-Backend: new route + 2 new tests (`tests/test_panel.py`, real per-task grouping and
-`limit` behavior) + 1 new route-tier entry (`tests/test_route_tiers.py`). Full suite
-green. `npm run build` clean (one CSS-comment-termination bug caught and fixed along the
-way: a header comment's own literal text contained an embedded `*/`, which esbuild read
-as the real end of the block comment -- reworded, rebuilt clean).
-
-**Verification, and its real limit.** Every backend route these three screens depend on
-was spot-checked live against the real account from an authenticated browser session --
-`/api/train/recent-tasks` (real grouped tasks, real counts of 4 and 1, real media_id
-lists), `/api/train/models` (all 4 real architecture groups, real prices), `/api/train/
-quota`, `/api/myart/items` (genuinely 0 items right now -- this account has no
-`artwork_id`-tagged rows at the moment, not a bug in the new code), `/api/next/detail`,
-`/api/contests` (27 real live contests), `/api/next/library` -- all returned correctly
-shaped real data. What did **not** get done: true mobile-viewport pixel/interaction
-verification. Real Chrome's window resize did not propagate to the rendered viewport
-this session (`innerWidth` stayed desktop-sized after both a `resize_window` call and a
-reload; a follow-up OS-level window-resize attempt hit an unrelated tool schema bug) --
-a tooling limitation encountered for the first time on a *mobile* verification pass,
-not a code issue. Recorded here rather than glossed over, per this project's own
-verify-before-presenting-state standard: the layout/interaction pass on these three
-screens is still owed, next session or once the resize tooling is sorted.
 
 ### Browse-from-disk: the 2026-08-06 "not blocked" correction was itself wrong — and a real scope  ·  *2026-08-07*
 
@@ -3475,185 +2987,6 @@ code untouched for now — it fail-softs through the 404 to "no mascot" — and 
 deprecated as part of the bundle-transition work, per the owner's sequencing, not
 before.
 
-### Classic-UI demolition readiness — mapped, verdict: closer than it looks  ·  *2026-08-07*
-
-Same workflow, second half (3 mappers + synthesis, cross-checked against code). Full
-detail in the workflow output; the durable facts:
-
-**No new backend is needed anywhere.** Every classic capability already has a JSON
-surface (`/api/snippets`, `/api/view-presets` read+write, filtered `/export-csv`,
-JSON twins for all five desktop form routes). The entire demolition backlog is UI-side.
-
-**Deletable today, zero loss:** `/health`, `/panel`, `/duplicates` (React equivalents
-shipped). `/classic` + `/image/<id>` blocked only by: two hard-coded `/image/<mid>`
-links inside mg-notify.js:1398 + mg-generate-drawer.js:1202 (repoint first), the
-`url_for("index")` `_safe_back` fallbacks (7 sites → `/next`), and the NavSpine escape
-pill. Template constants BASE/INDEX/DETAIL/HEALTH/DUPES/PANEL_HTML (~5541-11964, minus
-LOGIN_HTML) all die; DESIGN_TOKENS_CSS and `__UPSCALE_CONST__` survive (Loom + NEXT_PAGE
-inject them — the "INDEX/DETAIL only" comment near :4292 is stale).
-
-**Port-first (the real work, ~one focused session):** (1) prompt-snippets manager UI —
-endpoint exists, React has 4 hardcoded chips; (2) saved-views WRITE UI — React is
-read-only against what classic writes; (3) desktop form-route switchover — App.jsx +
-useImageDetails.js still POST 6 classic redirect routes whose JSON twins mobile already
-uses; (4) filtered CSV export href. **Owner calls:** grid right-click context menu
-(React has none; all 5 actions reachable elsewhere), PWA service worker (only classic
-registers it), `/logout` GET (deliberate stale-tab safety design), and the LAN-bootstrap
-login edge — the ONE undesigned surface, keeps LOGIN_HTML alive past everything else.
-
-**Vanilla static/*.js: zero of 8 are classic-only — all are load-bearing for the React
-shell** (NEXT_PAGE loads all 8; Loom loads 7). Retirement is a separate post-demolition
-campaign in dependency order: mg-art-filters (easiest, no deps) → mg-gallery-picker
-(+absorb picker-core) → mg-model-picker + mg-upscale-panel → mg-notify (big blast
-radius: jobs/achievements/toasts) → mg-generate-drawer + mg-cost-badge dead last (the
-drawer deliberately never unmounts, spend-safety poll lifecycle must be REDESIGNED not
-transliterated; cost-badge is its hard dep, guarded by
-test_web_pick.py::test_cost_badge_ships_with_every_price_surface). Loom independently
-loads 7 of 8, so each retirement lands in BOTH apps — realistically the campaign waits
-until/unless the Loom folds into the main React app.
-
-**Phased order:** 0) link repoints + dead-file deletes (minutes) → 1) desktop
-switchover to JSON twins (small) → 2) the three ports + owner calls → 3) THE CUT
-(routes + templates, full-suite phase gate) → 4) LAN-bootstrap login design, then
-LOGIN_HTML dies → 5) vanilla campaign, art-filters first, generate-drawer last.
-
-### Feature-request ledger — the 2026-07-16 persona sweep, owner-tagged  ·  *durable home written 2026-08-07*
-
-The 28 grounded feature requests from `SWEEP_2026-07-16.md` (8-finder sweep across three
-personas), each owner-tagged on 2026-08-02, now written into the tracker per the owner's
-2026-08-07 call. Source file survives on the owner's Desktop `Moonglade MD archive/` + git
-history (`git show 64ecc21^:docs/archive/SWEEP_2026-07-16.md`). Tags: **Shipped** (done) ·
-**In Development** (partial/in flight) · **Scope** (wanted, not yet scoped/built) · **Hold**
-(parked, owner's call). This is the durable reconciliation the sweep-tracking entry above
-was waiting on.
-
-**Daily Loom video creator (9)**
-- Persist task_id on the card — **Shipped**.
-- Trim-aware frame handoff — **Shipped** (owner first tagged Scope; corrected 2026-08-02
-  after reading `/api/loom/handoff`'s real code — it already sends/uses `trim_out` as the
-  ask wanted; no build needed).
-- Takes / per-shot generation history — **Scope** (may reuse the React Runs Reel / runs tray).
-- Draft-quality blocking pass — **Scope** (a video model selector already exists in the
-  generate drawer — related, not this).
-- Project spend ledger + cost-to-finish — **In Development** (see the card-coupon-ledger
-  branch's credit ledger, backend/CLI done; the Loom-project roll-up itself is unbuilt).
-- Project "Look" block — **Scope**.
-- Re-anchor warnings on the reel — **Scope**.
-- Music bed under Play sequence — **Scope**.
-- Editor handoff export (per-shot trims + CSV/EDL) — **Scope**.
-
-**31k-image gallery curator (9)**
-- Sibling warning on "Delete from PixAI" — **Shipped** (plus single-media-id delete now).
-- Trash browser for `_deleted/` — **Shipped**.
-- Near-duplicate clusters — **In Development** (Duplicate Review's near-dup tier shipped;
-  the cluster-review page is the unbuilt half).
-- Stack by batch — **In Development**.
-- Triage Deck (full-screen 1-at-a-time review queue: rate/collect/delete, resumable) —
-  **Hold** (owner reviewed the full description in-chat and held it deliberately).
-- Smart collections (saved queries as live collections) — **Scope**.
-- Search operators (`seed:` `aes:>` `ar:` …) — **Scope**.
-- Collections manager (rename/merge/delete) — **Scope**.
-- Archive integrity job — **Scope** (flagged: should account for the catalog's new tables).
-
-**PixAI power user + community (10)**
-- Model/LoRA favorites + recents in the picker — **Shipped**.
-- CONTRIBUTING.md + CI — **Shipped** (may need updating).
-- Credit ledger — **In Development** (card-coupon-ledger branch: backend/CLI done, React
-  port scoped 2026-08-07 — see the port plan; web UI is the remaining piece).
-- Card-utilization digest — **In Development** (same branch: benefit-card usage history +
-  on-hand inventory done backend/CLI; React port pending).
-- Remix from the lightbox (load full recipe into Generate) — **In Development** (owner's
-  call; overrides an earlier "no code found" note).
-- First-run wizard — **In Development** ("being updated with UI" — SetupWizard/Mobile shipped).
-- Contest workbench — **Scope**, but the **staging half shipped 2026-08-07**: the "☆
-  Shortlist" button (stage gallery picks into a contest-named collection) is now on the
-  React Contests overlay. The deadline/shortlist "workbench" beyond that stays Scope; the
-  2026-08-02 exploration concluded the two literally-asked pieces were the whole of it.
-- Prompt-matrix queue runs — **Scope**.
-- Metadata recovery for hand-made folders — **Scope**.
-- READ_ONLY flag + one-page spend/delete contract — **Scope** (owner wants to revisit,
-  tied to bundling into the SQLite assets — see the asset-bundle re-scope).
-
-**Tally:** 6 Shipped · 6 In Development · 15 Scope · 1 Hold. The In-Development cluster is
-the real active backlog; the two spend/card items collapse into the card-coupon-ledger
-React port.
-
-### Account detail: live PixAI probes — ledger FIXED, split has no API source  ·  *2026-08-07 (probe follow-up)*
-
-Followed up the "credit split query is broken" finding above with live GraphQL probes
-against the real account (authenticated page-context calls on pixai.art, read-only). Two
-outcomes:
-
-**Credit ledger — FIXED (was a real bug, now returns real data).** The branch queried
-`user(id: $userId).quotaLogs` and always got an empty connection. Root cause probed live:
-**`quotaLogs` is private and only exposed on `me`, never on the public `user(id)` type**
-(even for your own id — returns an empty connection, no error, which is exactly why it
-looked "verified"). Switched `_QUOTA_LOG_QUERY` to `me { quotaLogs(last, before) }`;
-confirmed live it returns the real ledger (Daily Claim 30,000 · Event Gift 1,000/5,000 ·
-… with working backward pagination, `has_more: true`). The `me` connection offers no
-`reason`/`logReason` arg, so the server-side reason filter was dropped (nothing sends it;
-the modal has no reason UI). `refId` IS a valid node field (probed) — not the bug. The
-route + modal Ledger tab now populate. Node type enums seen live: `daily`, `event_gift`
-(both already in CREDIT_LOG_REASONS).
-
-**Paid/free split — confirmed NO API source; can't be built as designed.** Probed the
-schema every way available: `me` exposes ONLY `quotaAmount` (the lump total, currency-null
-= real). There is NO `total`/`free`/`paid`/`credits`/`quota`/`wallet`/`balance` field on
-`User`/`me` (each `Cannot query field … on type "User"`; introspection is disabled).
-`credit_balance`'s original `user(id){total free paid}` was rejected outright. A per-
-CURRENCY breakdown DOES exist — the site's own "Generate / Bonus / BP" wallets ride
-`me { quotaAmount(currency: $c) }` — but every guessed currency code (`generate`, `bonus`,
-`bp`, `credit`, `bonusCredit`, …) returns null, the SPA caches the wallet so the real code
-never re-fires to network capture, and introspection is off. So `credit_balance` was
-rewritten to a VALID `me { quotaAmount }` (real total, `free`/`paid` = None) — it no longer
-sends a guaranteed-erroring query, and the rail/modal honestly show "paid / free split —
-unknown". **To finish the split, ONE thing is needed: the exact currency-code string(s)
-PixAI passes to `getMeWithQuotaForCurrency` — grab it from the site's DevTools Network on
-the Membership/Credits page.** With those, the "split" becomes the real per-wallet
-breakdown (Generate/Bonus/BP), which is more accurate than the design mock's invented
-"paid vs free" anyway. Coupons ride REST `/v2/extra-package-boosts` and returned 0 on-hand
-(plausibly genuine — the account holds none right now; re-check against
-`pixai.art/en/@nelnamara/assets/coupons` when it has some).
-
-### Account detail: the paid/free split is SOLVED — currency codes are "free"/"paid"  ·  *2026-08-07 (resolved)*
-
-The split's currency codes (the one open item from the probe entry above) were recovered
-from the site's own bundled GraphQL operation AST (owner-supplied "currency dump.js"). The
-real query is aliased fields on `me`:
-`me { total: quotaAmount, free: quotaAmount(currency: "free"), paid: quotaAmount(currency:
-"paid") }` — the codes are the bare strings **"free"** and **"paid"** (the earlier probe
-tried `freeCredit`/`paidCredit` and every other variant but never those two exact strings).
-`credit_balance` now uses this; verified live: free 219,951 + paid 3,533,040 = total
-3,752,991. So the design's original "paid vs free" split was right after all (the
-Generate/Bonus/BP wallet chips are a separate UI grouping). The rail sub-line and the modal
-balance strip now show the real split. Both the ledger AND the split are fully live; the
-whole account-detail port is real end-to-end. (Coupons still 0 on-hand — genuine for now.)
-
-### Placard identity — the "what sits at the top of the Details placard" research (recovered)  ·  *2026-08-08*
-
-The image-"renaming" research the owner remembered but that was NEVER checkpointed into the repo
-(a code/doc/transcript search found nothing; the owner later produced the artifact). Recorded
-here so it survives. It is about the DETAILS placard HEADLINE, not a rename feature: only ~17 of
-35,815 images carry a real `title`, so the rest fall through to the raw filename (the
-`title || filename || "Untitled"` rule in useImageDetails.js) -- which is what reads "rough".
-Artifact: https://claude.ai/code/artifact/5255447c-2ece-4dda-93f8-7effbbf83fd7 ("Placard identity
-— four directions"), rendered against REAL library rows. The test each direction had to pass: a
-sibling pair (same model/size/timestamp-to-the-second) must still be tellable apart, with NO
-prompt text and NO naming required from the owner. Four directions:
-
-- **A — The Accession Stamp  [OWNER'S PICK]**: no title slot; a small monospace stamp (local
-  date+time · model · "PLATE n OF m" of the batch · "find more"); a typed name, when you bother,
-  sits above it in the italic serif.
-- **B — Generation, and which output**: the batch is the unit -- italic-serif headline names the
-  generation, a line under it says which output you're looking at.
-- **C — The Accession Line**: smallest possible change (one string in the reveal animation);
-  refuses to invent anything.
-- **D — The Tombstone**: museum tombstone -- maker in the display face, then date + dimensions.
-
-NOT built. Tabled by the owner for now (raised as a "BTW" during the vanilla campaign). Related:
-the "Details View — Three Directions" composition decision above (that's LAYOUT; this is the
-HEADLINE that sits inside it).
-
 ### Job-tracker frontend redesign — DEFERRED to a design pass after the faithful notify port  ·  *2026-08-08*
 
 Owner asked (before the notify port) whether a design change to the **job tracker specifically**
@@ -3676,128 +3009,6 @@ cards, independent of the React internals, so it neither blocks nor is invalidat
 Give the designer the CURRENT job tracker as the starting point (a real, recently-shipped surface:
 silent-death detection, per-job cost, QUEUED + ETA, 2026-07-25) so the redesign is a deliberate
 evolution, not a from-scratch guess. **Flagged so it is not lost when the port lands.**
-
-### Easter eggs are DISCOVERED, never announced -- and the top post-v3.0 todos  ·  *2026-08-09*
-
-**HARD RULE (owner, reiterated + frustrated):** easter eggs and the features they unlock are
-DISCOVERED by the user, never announced. They get **ZERO mention in any public artifact** -- the
-public `CHANGELOG.md`, GitHub Release notes, `docs/`, `wiki/`, published Artifacts, or commit
-messages. **The Branding tab is gated by the "Under the Hood" hidden achievement, so it is OMITTED
-ENTIRELY from anything public** (not hinted, not genericized -- left out). Also externally-forbidden:
-the "Under the Hood" trigger, the "Triggered" feat + its trigger, real achievement progress numbers,
-the roster count (57/60), specific achievement/feat names, and how-to-earn thresholds. The v3.0
-changelog + Release were scrubbed to this bar. Internal documentation lives ONLY in git-ignored
-`private/EASTER_EGGS.md` (the canonical internal record); the owner holds the full canonical set.
-
-**TOP TODOs after v3.0 (owner-named, in order):**
-1. **Document the easter eggs internally** so they're maintained + never leaked -- started in
-   `private/EASTER_EGGS.md`; keep it current as new eggs ship.
-2. **The asset-bundling project** -- move default branding/mascot assets into a SQLite asset bundle
-   so they ship OUTSIDE the git-ignored `branding/` folder. This unblocks the "Under the Hood"
-   trigger working from a clean install, and lets the packaged app carry its defaults. Previously
-   deferred (DECISIONS.md:983-997, 3487-3511); now the priority item after the v3.0 cut.
-
-### P3 asset-bundling scoping, begun -- and `full-toolbox` is a THIRD dead achievement  ·  *2026-08-09*
-
-Owner's three answers on the open scoping questions: (1) container format -- **already
-decided**, see below, correcting his own "I'm almost certain this was documented" instinct
-half-right; (2) adoption from existing installs -- **owner will run a final stray-file audit
-himself** (assign each stray to an achievement/function, remove, or leave as placeholder)
-before the bundle imports anything; (3) PWA-icon build step -- **folds into the same bundle
-mechanism**, no separate handling.
-
-**Container format was already decided, a real schema was not.** `:775-779` (2026-07-27,
-owner verbatim: *"sqlite is the no-brainer. it already houses our catalog."*) -- SQLite over
-zipapp, one file shipped with the app (not rows in the user's `catalog.db`), shape as ranked:
-*"one file, a table of (path, bytes, sha256, mtime), hash-indexed random access, transactional
-updates, no extraction step."* That sentence is the entire design surface on record -- no
-column types, no keying/versioning scheme, no contents inventory. Confirmed via full repo +
-git-history sweep (no abandoned branch or commit ever drafted more). This IS "P3's own schema
-design" the auto-updater scoping note above said still needs doing -- starts from that one
-sentence, not from scratch.
-
-**New finding, not previously documented anywhere: `full-toolbox` ("The Full Toolbox," rare,
-requires edit+enhance+fix each used once, `moonglade_gallery.py:1347-1356`) is ALSO
-permanently unearnable**, same root cause as the two already-known dead achievements
-(`first-enhance`, `enhance-adept`) -- `/api/enhance` is gone, so nothing ever adds `"enhance"`
-to the `tools` telemetry set (only `/api/edit`:10036 and `/api/fix`:10070 write to it), and
-the set can never reach the required 3 distinct values. `full-toolbox` has no `banner_reward`
-key, so it sits in Completionist's required pool too (`:2366-2371`) -- **Completionist has at
-least three dead required achievements, not two.** The 2026-07-26 "all 36 metrics checked"
-claim (`:3529-3533`) predates this and should not be trusted for `full-toolbox` specifically.
-This changes the D3 pool-fix math and needs folding into whatever D3/D4 decide.
-
-**"The bonus mark slot" -- the literal phrase does not exist anywhere in the repo.** Best-guess
-candidates, neither confirmed: (a) `mark_12` (Gem Tome) is still shipped in
-`branding/marks/marks.json` despite a 2026-07-23 owner ruling to remove it (`:3271-3275`,
-"owner dislikes it") that was never executed; (b) Moonlit Silver's reward-bundle theme has a
-banner picked but no mark ever assigned (`:3339`, "no mark picked yet"). If neither is what
-was meant, the term needs a plain-language re-ask rather than another guess.
-
-**Skin banners: specced once, never built, not an oversight.** `docs/ART.md:135` -- *"'One
-banner per skin' was specced but never built; there is exactly one banner slot (#1), shared by
-every skin."* The slot schema (`BRANDING_SLOTS`, `:1713`) has zero skin dimension anywhere;
-per-skin selection was explicitly deferred to ride the asset-bundling work (owner, 2026-08-05,
-`:1703-1705`).
-
-**Wiki spoiler leak (D1) is live right now, not just theoretical.** `wiki/Folio-of-Honors.md`
-still prints the skin-unlock threshold table and `wiki/Control-Panel.md` still names the
-Branding tab -- both due the same scrub the changelog already got. Scoped into P2 (docs
-audit), which has not run.
-
-**P0/P1/P2 status, asked directly: none have run.** Only the art track (A1-A3) and this
-session's P4 scope + P5 workshop have had any real motion. Concretely still undone from P0:
-the wiki scrub above, `design-final-pass` branch still exists (`git branch -a` confirms),
-`_cli_job_finish`'s unredacted `str(error)` at `moonglade_backup.py:1061` is unfixed, and the
-four stale comments from the pre-v3.0 sweep are untouched. P1 (test-suite audit) and P2
-(DECISIONS.md condensing + branch graveyard + doc refresh) have not been started at all.
-
-### D4 metric redesign proposed -- and the Branding tab handoff sent to Claude Design  ·  *2026-08-09*
-
-**D4 (Enhance chain), proposed shape, owner-supplied ability list.** Owner gave 9 real,
-already-shipped abilities to draw from (Edit Pro/Reference Pro, Fixer, Art Filters, regenerate
-w/ a different model, reuse a seed, send to video, reference-image generation, Upscale/Hi-res
-enhance, boosters). None overlap an existing achievement metric except Fixer (already 1 of
-`full-toolbox`'s old 3 legs); `master-of-the-loom` already owns video-mode mastery, so send-
-to-video and reference-image generation were dropped to avoid duplicating it. Owner then asked
-to dial the pool to 5, calling the 9 "just thoughts/suggestions." Proposed 5 (not yet ruled
-on): Edit Pro/Reference Pro, Fixer, Art Filters, regenerate-different-model, Upscale/Hi-res
-enhance -- with Upscale/Hi-res enhance and "boosters (Hi-res, Custom Prompts)" flagged as a
-possible same-capability duplicate, unresolved. Shape: one shared distinct-count metric off
-this pool at three thresholds -- `first-enhance` (common) = 1, `full-toolbox` (rare) = 3,
-`enhance-adept` (epic) = 5 -- keeping all three existing ids/tiers (no D2 roster impact), and
-likely leaving D3/Completionist needing no pool surgery once D4 lands. **Not yet locked** --
-pending the Hi-res/boosters overlap call.
-
-**The branding unlock chain, corrected (supersedes the version in the P3/D3/D4 report above):**
-- `hoardsmith` -> Moonlit Silver skin + **Moonwell Eclipse mark** (moves off Nightfallen, which
-  no longer needs a fixed mark now that its own reward is a slot, not an asset)
-- `reel-director` -> Embercourt skin + **a banner, art ready**
-- `menagerie` -> Verdant Grove skin + Vine Crescent mark (still currently free in code, meant
-  to be gated once P3's backend work happens)
-- `the-great-library` -> Nightfallen skin + **a banner, art ready** + **a Custom Mark upload
-  slot** in the Branding tab -- a genuine upload (owner confirmed), same spirit as Under the
-  Hood's own drop-in mechanic, surfaced as a real control instead of a folder drop
-- Free tier is Moonglade (default) ONLY now -- Nightfallen is no longer free
-- Gem Tome: **being remade, not removed** -- supersedes the 2026-07-23 "owner dislikes it,
-  remove" ruling, which never executed and is now moot
-- Gating sequencing, owner's call: **wait for P3** -- none of this is built in code today
-  (marks/skins/banners are all free-for-all); design against the gated end-state anyway so the
-  UI is ready when the backend catches up
-
-**Branding tab handoff sent to Claude Design**, same workshop batch as the job-tracker chrome
-(owner's call): `panel/branding-tab-spec.html` written into the "Moonglade Athenaeum" design-
-system project (`b43ffcd7-...`, via DesignSync), matching the existing
-`panel/account-detail-spec.html` format/tokens. Covers two real gaps found while scoping:
-(1) banner slots can already hold multiple uploaded assets with one marked active (routes
-shipped 2026-08-05: `add_slot_asset`/`set_slot_crop`/`set_slot_active`) but no picker UI was
-ever built for choosing between them -- spec asks for the SAME interaction pattern the Marks
-section's thumbnail-grid picker already uses (`ControlPanelOverlay.jsx:810+`,
-`.mgcp-marksbig`), not a new one; (2) the Custom Mark upload slot, net new. Both design
-questions genuinely left open for Claude Design: locked-vs-hidden treatment for an unearned
-banner/mark, and upload constraints on the custom mark. **Owner confirms both the tracker and
-branding build are now underway in Claude Design** as of this entry -- next step on this side
-is picking up whatever comes back.
 
 ### The asset container, re-scoped from scratch: format and delivery decided  ·  *2026-08-10*
 
@@ -3932,3 +3143,27 @@ sync inserts rows as it pages, so 50 is safely past that). Safe because the sync
 server-side subprocess -- leaving the wizard doesn't stop it. **Still deferred:** the
 background-sync progress chip in the gallery (Part 2) -- exiting relies on the existing
 Activity tray for progress visibility until that lands.
+
+### HARD RULE: easter eggs are DISCOVERED, never announced  ·  *2026-08-09*
+
+Easter eggs and the features they unlock get **ZERO mention in any public artifact** — not the
+public `CHANGELOG.md`, GitHub Release notes, `docs/`, `wiki/`, published Artifacts, or commit
+messages. The Branding tab is gated by a hidden achievement, so it is **omitted entirely** from
+anything public — not hinted, not genericized, left out. Also externally forbidden: the hidden
+trigger mechanics, real achievement progress numbers, the roster count, specific achievement/feat
+names, and how-to-earn thresholds. Internal record lives in git-ignored `private/EASTER_EGGS.md`.
+
+**Why.** Owner rule, reiterated more than once and with visible frustration. Discovery IS the
+feature; a changelog line describing it destroys the thing being built.
+
+### Three achievements are permanently unearnable, and Completionist depends on them  ·  *2026-08-09*
+
+`first-enhance`, `enhance-adept` and `full-toolbox` can never be earned: all three need the
+`/api/enhance` path, which was removed, so nothing ever writes `"enhance"` into the `tools`
+telemetry set. `full-toolbox` has no `banner_reward` key, so it sits in Completionist's required
+pool too — **Completionist cannot be earned as it stands**.
+
+**Why.** Recorded because an earlier "all metrics checked" pass missed `full-toolbox`, so the
+count was believed to be two. The fix (exempt, repoint, or replace) is a live roadmap item, not
+a decision already taken.
+

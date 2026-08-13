@@ -23,10 +23,13 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Next — scoped, not started
 
-- **Remix from the lightbox**
-  Load a picture's *full recipe* (prompt + negative + seed + model + LoRAs) back into the Generate
-  drawer in one click. Today the lightbox only sends the *image* to Edit or Video; the recipe slab
-  is read-only. Asked for repeatedly; no code exists yet. (Overlaps GitHub issue #4 — reconcile.)
+- **Remix: send a picture's recipe back to Generate** — [issue #4](https://github.com/Nelnamara/moonglade-athenaeum/issues/4)
+  Load a picture's *full recipe* (prompt + negative + seed + model + LoRAs) into the Generate
+  drawer in one click, the way PixAI itself does — the point is going back to a good image and
+  re-running it against different models. Today the lightbox/details only send the *image* to Edit
+  or Video; the recipe slab is read-only display. Verified: no code for this exists anywhere.
+  A "send to image" button on Image Details is the asked-for shape; the grid right-click menu
+  already exists as a second entry point.
 
 - **Stack by batch (gallery grid)**
   Collapse the grid into per-batch/per-task stacks instead of one flat wall. Related surfaces exist
