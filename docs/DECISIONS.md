@@ -7257,3 +7257,39 @@ classes (`wz-syncmascotart`, `wz-synchalo-steam`) rather than reusing `.wz-syncm
 this change was scoped to leave alone. The glow's `wzHaloSurge` (9.1s, purple peak ~46%) is a
 loose match to the webp's own steam surge, same period so they re-align each loop; it is
 approximate by design, not frame-locked.
+
+### First-sync achievement gate + a mid-sync exit from the wizard  ·  *2026-08-13*
+
+Two first-run-wizard fixes, owner-directed.
+
+**Achievements gated to first-sync completion.** `first-light` is `metric:images,
+threshold:1`, and the notify system (mounted during the wizard) polls
+`/api/achievements?mark=1`, so it celebrated the instant image #1 landed -- seconds into a
+fresh install's first sync, with every image rung crossing the same way. Fix: a telemetry
+flag `first_sync_done`. While it is unset, `/api/achievements` withholds `newly` (no toasts)
+AND leaves `seen` untouched, so the rungs earned during the first sync are not lost -- they
+fire together once the flag flips. The flag is set at `--sync`'s completion (in
+moonglade_backup's `--sync` handler, after "Sync complete."); the wizard's "Sync now" job
+runs that same `--sync`, so one setter covers both paths. **Backfill for pre-existing
+installs is keyed on prior achievement recognition (`seen`/`earned_at` present), NOT on
+images>0** -- an images-based backfill (the first cut we discussed) would flip the flag
+mid-first-sync as the count climbs past zero and reintroduce the bug; any install that has
+ever surfaced an achievement has non-empty `seen`/`earned_at`, a fresh mid-sync one cannot.
+Fail-open if telemetry is unreadable (a broken gate must not hide trophies forever). Guarded
+by `test_first_sync_gate_*` in test_achievements.py; two existing tests now set the flag to
+model a normal post-first-sync install.
+
+The "feel" (owner left it to me): the earned rungs **fire on completion** rather than being
+swallowed -- a payoff at the right moment. **The ladder rungs themselves are being redone by
+the owner -- do NOT touch the rung/threshold definitions as part of this; the gate is about
+WHEN they fire, not WHICH exist.**
+
+**Exit from the sync screen.** The wizard forced a wait through the entire first sync (only
+"Enter the Athenaeum" on the post-sync ready screen let you out) -- brutal for a 35k-item
+library. Added "Browse the gallery" on the sync screen (desktop + mobile) that reuses the
+existing `enter()` nav. **Gated to appear once `progress.done >= 50`** to clear the
+`catalog_empty` boot-bounce (next_gallery routes back into the wizard while images+videos==0;
+sync inserts rows as it pages, so 50 is safely past that). Safe because the sync is a
+server-side subprocess -- leaving the wizard doesn't stop it. **Still deferred:** the
+background-sync progress chip in the gallery (Part 2) -- exiting relies on the existing
+Activity tray for progress visibility until that lands.

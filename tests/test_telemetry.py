@@ -171,6 +171,7 @@ def test_api_masked_feats_leak_no_points(tmp_path):
 def test_earn_dates_stamped_persisted_and_no_leak(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
+    g.telem_flag("first_sync_done", out_dir=out)   # past first sync -> achievements recognize
     with mock.patch("datetime.datetime", _FixedNoon):
         d = cli.get("/api/achievements?mark=1").get_json()
     assert "earned_at" in d

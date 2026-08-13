@@ -152,6 +152,9 @@ def test_the_hall_was_renamed_the_folio_of_honors():
 def test_api_achievements_marks_seen_once(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
+    g.telem_flag("first_sync_done", out_dir=out)   # a normal install past its first sync;
+    # the first-sync gate (celebrations withheld until the first --sync finishes) has its
+    # own coverage in test_first_sync_gate_* below.
     d1 = cli.get("/api/achievements").get_json()
     assert any(a["id"] == "first-light" and a["earned"] for a in d1["achievements"])
     assert "first-light" in d1["newly"]                 # not yet marked
@@ -162,6 +165,38 @@ def test_api_achievements_marks_seen_once(tmp_path):
     d3 = cli.get("/api/achievements").get_json()
     assert d3["newly"] == []
     assert "first-light" in g.load_ach_state(out)["seen"]
+
+
+def test_first_sync_gate_withholds_celebrations_until_complete(tmp_path):
+    """first-light is images>=1, so without a gate it pops seconds into a fresh install's
+    first sync (as images climb from 0). While the first sync is still running -- no
+    first_sync_done flag, no prior recognition -- /api/achievements must WITHHOLD `newly`
+    and leave `seen` untouched, so the rungs earned during it fire together once --sync sets
+    the flag, not mid-sync."""
+    cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                       created_at="2025-01-01T00:00:00")])
+    d1 = cli.get("/api/achievements?mark=1").get_json()
+    assert any(a["id"] == "first-light" and a["earned"] for a in d1["achievements"])  # earned still computes
+    assert d1["newly"] == []                                    # but no celebration mid-first-sync
+    assert not g.load_ach_state(out).get("seen")                # and nothing marked seen (not lost)
+    g.telem_flag("first_sync_done", out_dir=out)                # the first --sync completes
+    d2 = cli.get("/api/achievements").get_json()
+    assert "first-light" in d2["newly"]                         # now the earned rung fires
+
+
+def test_first_sync_gate_backfills_for_preexisting_install(tmp_path):
+    """A pre-existing install (an achievement already recognized) is never gated: the flag
+    backfills off prior `seen`/`earned_at`, so an established library neither suppresses nor
+    re-fires. Keyed on recognition, NOT images>0 -- an images-based backfill would flip the
+    flag mid-first-sync and reintroduce the bug."""
+    cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                       created_at="2025-01-01T00:00:00")])
+    st = g.load_ach_state(out)
+    st["seen"] = ["first-light"]
+    g.save_ach_state(out, st)
+    d = cli.get("/api/achievements").get_json()
+    assert d["newly"] == []                                      # already seen -> nothing new
+    assert g.load_telemetry(out)["flags"].get("first_sync_done")  # gate backfilled to done
 
 
 def test_api_skin_rejects_locked_accepts_earned(tmp_path):

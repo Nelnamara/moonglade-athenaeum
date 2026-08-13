@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 - Fixed: the first-run download screen's mascot now ships inside the app itself, so it shows even on the very first launch — before the artwork pack it's downloading has arrived. (It was loading from that not-yet-downloaded pack, so on a fresh install it was a broken image.) Its glow now also swells purple roughly in time with the mascot's animation.
+- First-run setup: once the first sync has pulled in a few dozen items you can now leave the sync screen with "Browse the gallery" instead of waiting for the whole library — the sync keeps running in the background (a real help when the first sync is tens of thousands of images).
+- Fixed: milestone unlocks tied to your first sync (First Light and the like) no longer fire seconds into that first sync — they now wait until the first full sync actually finishes, so they land as a real moment rather than mid-progress. Existing libraries are unaffected.
 
 ## [3.1.0] - 2026-08-12 — Dressed out of the box: the default look ships with the app and fetches itself on first run
 - **The app now dresses itself out of the box.** Its default look — marks, banners, mascots, and badge art — ships in one packed asset file (`moonglade.dat`) and displays on a fresh install with no setup at all. Your own files in `branding/` always take precedence over the packed defaults, exactly as before. (Built with `python tools/build_container.py`; the file rides alongside the app rather than living in the repository.)
