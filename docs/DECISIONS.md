@@ -7238,3 +7238,22 @@ human label that keeps manifest and release tag legible together.
 C-install build and has no `.version` marker, so `needs_download` treats it as satisfied and the
 app here keeps serving the C-install art rather than the published D-install set. Harmless (dev
 machine), and refreshable on demand by dropping the verified released copy in with its marker.
+
+### The first-run download mascot ships INLINE, not from the container  ·  *2026-08-12*
+
+Chicken-and-egg: the download screen ("Furnishing the Athenaeum") is shown WHILE the asset
+container downloads, but its mascot was loaded from that same not-yet-present container
+(`<img src="/branding/mascots/gen_nel.png">`) with no `onError` fallback -- so on a genuinely
+fresh install it rendered broken, exactly on the one screen a first-timer always sees. Fix:
+the mascot (`nel_wizard.webp`) is embedded as a base64 data-URI in `gallery/src/art/nelWizard.js`
+and applied as a CSS `background-image`, so it ships in the app BUILD and is present before the
+container is. This is the one deliberate exception to "default art lives in the container": art
+shown *during* the fetch cannot depend on the fetch. Keep it inline -- do not move it into the
+container to "tidy up," or the fresh-install bug returns. Only this download/checking-phase
+mascot is inline; the interrupted/done status icons and the `nel_narrator` sync-screen mascot
+still load normally (they appear after the container exists). The download screen got its OWN
+classes (`wz-syncmascotart`, `wz-synchalo-steam`) rather than reusing `.wz-syncmascotimg`/
+`.wz-synchalo`, which the narrator screen shares -- editing those would have restyled a screen
+this change was scoped to leave alone. The glow's `wzHaloSurge` (9.1s, purple peak ~46%) is a
+loose match to the webp's own steam surge, same period so they re-align each loop; it is
+approximate by design, not frame-locked.

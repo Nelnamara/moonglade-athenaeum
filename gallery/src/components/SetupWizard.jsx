@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { NEL_WIZARD } from "../art/nelWizard.js";
 import "../styles/setup-wizard.css";
 
 /* First-run Setup Wizard -- design spec: Setup Wizard.dc.html / Setup Wizard Mobile.dc.html.
@@ -335,8 +336,8 @@ export default function SetupWizard({ boot }) {
           <div className="wz-syncwrap">
             <div className="wz-stepkicker">{checking ? "Preparing the Athenaeum" : "One-time download"}</div>
             <div className="wz-syncmascotbox">
-              <div className="wz-synchalo" />
-              <img className="wz-syncmascotimg" src="/branding/mascots/gen_nel.png" alt="" />
+              <div className="wz-synchalo wz-synchalo-steam" />
+              <div className="wz-syncmascotart" style={{ backgroundImage: `url(${NEL_WIZARD})` }} aria-hidden="true" />
             </div>
             <div className="wz-synchead">{checking ? "Taking stock of the shelves…" : "Furnishing the Athenaeum"}</div>
             {checking ? null : (
