@@ -14,6 +14,12 @@
 @keyframes wzmFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes wzmSpin { to { transform: rotate(360deg); } }
 @keyframes wzmHalo { 0%, 100% { opacity: .3; transform: scale(.92); } 50% { opacity: .75; transform: scale(1.06); } }
+/* See setup-wizard.css wzHaloSurge -- loose purple sync to nel_wizard.webp's 9.1s steam loop. */
+@keyframes wzmHaloSurge {
+  0%, 22%   { background-image: radial-gradient(circle, rgba(182,146,230,.42), transparent 66%); }
+  46%       { background-image: radial-gradient(circle, rgba(196,110,250,.72), transparent 66%); }
+  68%, 100% { background-image: radial-gradient(circle, rgba(182,146,230,.42), transparent 66%); }
+}
 @keyframes wzmPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(182,146,230,.45); } 50% { box-shadow: 0 0 0 7px rgba(182,146,230,0); } }
 @keyframes wzmMetal { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
 @keyframes wzmSyncIndeterminate { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
@@ -119,6 +125,11 @@
   animation: wzmHalo 1.8s ease-in-out infinite; }
 .wzm-syncmascotimg { position: relative; z-index: 2; width: 100%; height: 100%; object-fit: contain;
   animation: wzmSpin 2.4s cubic-bezier(.6,.1,.4,.9) infinite; }
+/* Download-screen mascot: inline base64 webp (art/nelWizard.js); self-animated, no spin.
+   Distinct from .wzm-syncmascotimg, still used by the nel_narrator sync screen's <img>. */
+.wzm-syncmascotart { position: relative; z-index: 2; width: 100%; height: 100%;
+  background-size: contain; background-repeat: no-repeat; background-position: center; }
+.wzm-synchalo-steam { animation: wzmHalo 1.8s ease-in-out infinite, wzmHaloSurge 9.1s ease-in-out infinite; }
 .wzm-synchead { font-family: Georgia, serif; font-size: 15px; color: #efecf8; margin-bottom: 14px;
   min-height: 20px; }
 .wzm-synctrack { height: 5px; border-radius: 3px; background: var(--surface0); overflow: hidden;
