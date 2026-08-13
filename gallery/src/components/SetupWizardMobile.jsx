@@ -267,6 +267,11 @@ export default function SetupWizardMobile({ boot }) {
                 <button type="button" className="wzm-retrybtn wzm-metal" onClick={startSync}>Try again</button>
               </>
             ) : null}
+            {!syncError && progress && (progress.done || 0) >= 50 ? (
+              <button type="button" className="wzm-quietbtn wzm-syncexit" onClick={enter}>
+                Browse the gallery — this keeps going in the background →
+              </button>
+            ) : null}
           </div>
           <div className="wzm-lore">a library against the Void</div>
         </div>
