@@ -127,7 +127,7 @@ function playReveal(root) {
    classic, file-existence isn't precomputed server-side -- the <img>/<video>
    onError below gets the same "not found" message for free. */
 export default function DetailsView({
-  mediaId, onClose, onNavigate, onRate, onEdit, onDeleted,
+  mediaId, onClose, onNavigate, onRate, onEdit, onRemix, onDeleted,
   onFilterByModel, onFilterByBatch, advParams,
   items, onOpenLightbox, onPublish,
 }) {
@@ -431,6 +431,13 @@ export default function DetailsView({
               )}
               <button className="btn" disabled={suggestBusy} onClick={runSuggest}>{suggestBusy ? "Reading…" : "✎ Suggest prompt"}</button>
               <button className="btn" onClick={() => { onClose(); onEdit(row.media_id); }}>✧ Edit this</button>
+              {/* Remix (issue #4): the full recipe -- prompt/negative/size/steps/cfg/
+                  seed/model + LoRAs by exact version id -- into the Generate drawer.
+                  Prefill only; the video path stays "▶ Send to Video". */}
+              {row.is_video !== "1" && (
+                <button className="btn" title="Load this picture's full recipe into Generate"
+                  onClick={() => { onClose(); onRemix && onRemix(row.media_id); }}>↺ Remix</button>
+              )}
               <button className={"btn" + (upscaleOpen ? " btn-primary" : "")} onClick={toggleUpscale}>⇱ Upscale</button>
               {row.batch ? <button className="btn" onClick={() => onFilterByBatch(row.batch)}>View Batch</button> : null}
               <button className="btn" onClick={() => setEditingPrompt((v) => !v)}>Edit Prompt</button>

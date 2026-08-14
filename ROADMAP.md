@@ -25,20 +25,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Next — scoped, not started
 
-- **Remix: send a picture's recipe back to Generate** — [issue #4](https://github.com/Nelnamara/moonglade-athenaeum/issues/4)
-  Load a picture's *full recipe* (prompt + negative + seed + model + LoRAs) into the Generate
-  drawer in one click, the way PixAI itself does — the point is going back to a good image and
-  re-running it against different models. Both entry points wanted (owner, 2026-08-13): a
-  "send to image" button on Image Details AND a grid right-click item. The mechanism already
-  exists: GenerateDrawer's `prefillFromRun` does the whole job from a bare media_id (the
-  history reel's reuse path) — Remix is exposing that same call from the two new entry points.
-  The one real gap vs. the ask is LoRAs, deliberately not reconstructed from the catalog's
-  name-only string (spend-safety); the faithful upgrade is recovering the real submit shape via
-  the free task-recovery path (rows carry the task id) and prefixing real LoRA version ids,
-  falling back to no-LoRAs when recovery fails. Pairs with
-  [issue #13](https://github.com/Nelnamara/moonglade-athenaeum/issues/13) (drawer history
-  durability — a catalog-backed history feed would make every past generation reusable).
-
 - **Stack by batch (gallery grid)**
   Collapse the grid into per-batch/per-task stacks instead of one flat wall. Related surfaces exist
   but don't cover it: a batch-filter drill-down and the Image Details lineage-siblings section. The
@@ -212,3 +198,6 @@ it's actionable. Listed so they aren't lost, not because they're ready.
 - **Curator:** smart collections (saved queries as live collections) · search operators
   (`seed:` `aes:>` `ar:`) · collections manager (rename/merge/delete) · archive-integrity job.
 - **Power user:** prompt-matrix queue runs · metadata recovery for hand-made folders.
+- **Mobile:** Remix and Send to Video on the mobile details sheet — both need their own
+  wiring into CreateMobile's composer (the sheet has no dock hand-off; Send to Video is
+  already a disclosed stub there, Remix now ships desktop-only the same way).

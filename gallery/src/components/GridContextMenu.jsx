@@ -3,8 +3,10 @@ import "../styles/context-menu.css";
 
 /* Right-click context menu for a grid thumbnail -- the five classic Ctx actions
    (Edit / Send to Video / Find similar / Copy id / Open details) brought onto the
-   React grid (owner picked "all five", 2026-08-07). Every action is also reachable
-   via left-click -> details/lightbox; this is the fast power-user path.
+   React grid (owner picked "all five", 2026-08-07), plus Remix (issue #4,
+   2026-08-13: load the picture's full recipe into the Generate drawer). Every
+   action is also reachable via left-click -> details/lightbox; this is the fast
+   power-user path.
 
    Pure presentation: App owns the {mid, thumb, x, y} target and the action callbacks;
    this places itself (clamped to the viewport) and closes on any outside click, Escape,
@@ -48,6 +50,10 @@ export default function GridContextMenu({ target, onClose, actions }) {
   const items = [
     ["✎", "Edit", () => actions.onEdit(target.mid)],
     ["▶", "Send to Video", () => actions.onVideo(target.mid, target.thumb)],
+    // Remix is an image-recipe action -- a video row's recipe belongs to the
+    // video pipeline, so the item simply isn't offered there (same reason the
+    // Details footer hides its Remix button on videos).
+    ...(target.isVideo ? [] : [["↺", "Remix", () => actions.onRemix(target.mid)]]),
     ["✧", "Find similar", () => actions.onSimilar(target.mid)],
     ["⧉", "Copy id", () => actions.onCopyId(target.mid)],
     ["⤢", "Open details", () => actions.onDetails(target.mid)],

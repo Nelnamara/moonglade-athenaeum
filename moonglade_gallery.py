@@ -671,6 +671,20 @@ def get_row(db_path, media_id):
         con.close()
 
 
+def get_row_by_task(db_path, task_id):
+    """One catalog row for a task id, or None. Membership check for
+    /api/task-params: a task id this library never downloaded from is refused
+    there, so the route can't be used to probe arbitrary task ids under the
+    owner's credentials (adversarial review 2026-08-13, finding 4.3)."""
+    con = _connect(db_path)
+    try:
+        row = con.execute("SELECT * FROM catalog WHERE task_id=? LIMIT 1",
+                          (task_id,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        con.close()
+
+
 def _split_collections(s):
     return [c.strip() for c in (s or "").split(",") if c.strip()]
 
@@ -7960,6 +7974,80 @@ def create_app(out_dir: Path):
             return jsonify(core.resolve_version_meta(session, mid))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "version_id": ""}), 200
+
+    @app.route("/api/task-params/<task_id>")
+    def api_task_params(task_id):
+        """A task's submit parameters, reduced to what Remix (issue #4) needs:
+        the task's LoRAs -- exact {version_id, weight} pairs straight off
+        parameters.lora, each resolved to its base model id for the composer,
+        NEVER matched by name -- plus the exact model version id the task
+        rendered with. Read-only; nothing here submits or spends, and the
+        composer's own gates still stand between a prefill and a paid generate.
+
+        Contract hardened by the 2026-08-13 adversarial review:
+        - A task this library has no row for is refused (404) -- the route runs
+          under the owner's credentials and must not be a free probe of
+          arbitrary task ids for any signed-in LAN session (finding 4.3).
+        - Video and chat tasks are refused (400) -- their recipes belong to
+          their own pipelines (finding 4.2).
+        - task_detail_gql returning None (its NETWORK-failure value -- it does
+          not raise) answers {"error": ...}, never a success-shaped empty LoRA
+          list: the client's disclosure branch keys on `error`, and without
+          this the likeliest failure could structurally never be disclosed
+          (finding 2.1).
+        - retries=1: this is a prefill, not a lost generation -- the default
+          retry ladder would hold the composer's 'restoring' state for minutes
+          on a PixAI outage (finding 4.1).
+        - An unparseable stored weight SKIPS the LoRA and counts it in
+          `unresolved` -- never a silent plausible default (finding 1.5); a
+          failed compatibility-meta lookup ships the row flagged `degraded`
+          so the client can disclose it (finding 1.4)."""
+        tid = (task_id or "").strip()
+        if not tid:
+            return jsonify({"error": "task id required"}), 400
+        crow = get_row_by_task(db_path, tid)
+        if not crow:
+            return jsonify({"error": "no such task in this library"}), 404
+        if str(crow.get("is_video") or "") == "1":
+            return jsonify({"error": "not an image-generation task"}), 400
+        try:
+            core, session = _gen_session()
+            task = core.task_detail_gql(session, tid, retries=1)
+            if not task:
+                return jsonify({"error": "couldn't read the task from PixAI"}), 200
+            params = task.get("parameters") or {}
+            if isinstance(params.get("chat"), dict):
+                return jsonify({"error": "not an image-generation task"}), 400
+            lora_map = params.get("lora") or {}
+            rows, unresolved = [], 0
+            meta_cache = {}
+            if isinstance(lora_map, dict):
+                for vid, weight in lora_map.items():
+                    try:
+                        w = float(weight)
+                    except (TypeError, ValueError):
+                        unresolved += 1
+                        continue
+                    base = core.resolve_model_base_id(session, str(vid))
+                    if not base:
+                        unresolved += 1
+                        continue
+                    if base not in meta_cache:
+                        meta_cache[base] = core.resolve_version_meta(session, base) or {}
+                    meta = meta_cache[base]
+                    lbt = str(meta.get("lora_base_model_type") or "")
+                    rows.append({
+                        "model_id": base, "version_id": str(vid), "weight": w,
+                        "title": str(core.model_name_gql(session, str(vid)) or "") or base,
+                        "preview_url": "",
+                        "lora_base_model_type": lbt,
+                        "model_type": str(meta.get("model_type") or ""),
+                        "degraded": not lbt,
+                    })
+            return jsonify({"task_id": tid, "loras": rows, "unresolved": unresolved,
+                            "model_version_id": str(params.get("modelId") or "")})
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/image-meta/<media_id>")
     def api_image_meta(media_id):
