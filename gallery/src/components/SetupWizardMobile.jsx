@@ -1,5 +1,6 @@
 import React from "react";
 import useSetupWizard, { SLIDES, KEY_STEPS } from "../hooks/useSetupWizard.js";
+import { NEL_WIZARD } from "../art/nelWizard.js";
 import "../styles/setup-wizard-mobile.css";
 
 /* The mobile-viewport presentation of SetupWizard.jsx (design spec: Setup Wizard
@@ -81,8 +82,8 @@ export default function SetupWizardMobile({ boot }) {
           <div className="wzm-syncwrap">
             <div className="wzm-stepkicker">{checking ? "Preparing the Athenaeum" : "One-time download"}</div>
             <div className="wzm-syncmascotbox">
-              <div className="wzm-synchalo" />
-              <img className="wzm-syncmascotimg" src="/branding/mascots/gen_nel.png" alt="" />
+              <div className="wzm-synchalo wzm-synchalo-steam" />
+              <div className="wzm-syncmascotart" style={{ backgroundImage: `url(${NEL_WIZARD})` }} aria-hidden="true" />
             </div>
             <div className="wzm-synchead">{checking ? "Taking stock of the shelves…" : "Furnishing the Athenaeum"}</div>
             {checking ? null : (
@@ -265,6 +266,11 @@ export default function SetupWizardMobile({ boot }) {
                 <div className="wzm-syncerr">{syncError}</div>
                 <button type="button" className="wzm-retrybtn wzm-metal" onClick={startSync}>Try again</button>
               </>
+            ) : null}
+            {!syncError && progress && (progress.done || 0) >= 50 ? (
+              <button type="button" className="wzm-quietbtn wzm-syncexit" onClick={enter}>
+                Browse the gallery — this keeps going in the background →
+              </button>
             ) : null}
           </div>
           <div className="wzm-lore">a library against the Void</div>
