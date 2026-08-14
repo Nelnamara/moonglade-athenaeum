@@ -46,6 +46,32 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   project has *already* spent. Only the global account credit ledger tracks historical spend today.
   Low priority, but needs scoping before build.
 
+- **Marks render too small, everywhere they appear**
+  A recurring complaint since the beginning that keeps getting deprioritised as cosmetic. It is a
+  real sizing defect, not a taste question — fix it alongside any mark-system work. The header is
+  the current worst example.
+
+- **Earned rewards: extend beyond skins**
+  The Folio's "earned rewards" section is real and shipped, but only shows **skin** unlocks. Extend
+  it to cover **banner** and **icon** unlocks plus the easter egg. Build-more, not a reshape.
+
+- **Real generation progress, if PixAI exposes it**
+  An old rule said never show progress because PixAI exposes none — that's wrong: the site shows
+  graphical progress. Worth probing what's actually available and surfacing it honestly. The one
+  hard constraint that stands: never *fabricate* progress, and never let a queue-wait estimate
+  read as a render ETA.
+
+- **Retest the V3.0 Lite 15s decline in the new UI**
+  The old cause (audio fields sent to a model that rejects them) was found and fixed, but that was
+  on the classic UI. Not re-verified since the React cut — submit V3.0 Lite at 15s and confirm it
+  snaps to 10s and renders rather than declining.
+
+- **Confirm the live mirror really self-heals**
+  The mirror is supposed to recover its own gaps automatically after a drop, stale socket or
+  restart — no manual Panel job. That was the requirement ("im not suppposed to have to"), but it
+  hasn't been re-confirmed lately. Verify it in practice; if it holds, the old guardrail note can
+  stay retired.
+
 - **Contest workbench (beyond Shortlist)**
   The "☆ Shortlist" staging step shipped. The larger workbench — deadline tracking, submission
   management — is still just wanted, not scoped.
