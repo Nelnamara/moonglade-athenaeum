@@ -297,7 +297,7 @@ export default function Grid({
               onContextMenu={(ev) => {
                 if (!onContextMenu) return;
                 ev.preventDefault();
-                onContextMenu(it.media_id, it.thumb, ev.clientX, ev.clientY);
+                onContextMenu(it.media_id, it.thumb, ev.clientX, ev.clientY, !!it.is_video);
               }}
               /* plain click → Lightbox; shift = range, ctrl/⌘ = toggle (both
                  with Select OFF); Select ON = every click selects */

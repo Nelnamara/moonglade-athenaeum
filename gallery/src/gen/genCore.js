@@ -131,6 +131,33 @@ export function buildPayload(s) {
    gallery/src/gen/videoDrawerCore.js (the video drawer's copy) and
    loom/src/loom-mutations.js. Keep the wording in step with them;
    loom/test/mg-generate-drawer-parity.test.js watches the videoDrawerCore copy. */
+/* Remix (issue #4): turn /api/task-params' successful answer into the rows the
+   composer may ADD and the disclosures the reuse chip must carry. Pure --
+   pinned by loom/test/mg-remix-lora-plan.test.js. The composer keys LoRAs by
+   model_id, so a second version of the same LoRA model cannot ride; it is
+   COUNTED into the disclosed note, never silently merged or retuned with the
+   first version's weight (adversarial review 2026-08-13, finding 1.1). Rows
+   with missing ids are counted the same way -- an uncounted skip is a silent
+   substitution on a paid path. `hadLoras` is the catalog's own "this task used
+   LoRAs" signal: a clean-empty answer against a non-empty catalog string is a
+   failed restore, not a LoRA-free recipe. */
+export function planLoraRestore(dt, hadLoras) {
+  const rows = [], notes = [];
+  let missed = Number(dt && dt.unresolved) || 0, degraded = 0;
+  const seen = new Set();
+  for (const lr of ((dt && dt.loras) || [])) {
+    if (!lr.model_id || !lr.version_id) { missed += 1; continue; }
+    if (seen.has(lr.model_id)) { missed += 1; continue; }
+    seen.add(lr.model_id);
+    if (lr.degraded) degraded += 1;
+    rows.push(lr);
+  }
+  if (!rows.length && !missed && hadLoras) notes.push("LoRAs could not be restored");
+  if (missed) notes.push(missed + (missed > 1 ? " LoRAs" : " LoRA") + " could not be restored");
+  if (degraded) notes.push("a LoRA's compatibility data is unverified");
+  return { rows, notes };
+}
+
 export function friendlyGenErr(raw) {
   const e = String(raw || "");
   const add = (hint) => e + " — " + hint;

@@ -239,6 +239,10 @@ ROUTE_TIERS = {
     ("api_image_meta", "GET"): LOGIN,
     ("api_model_search", "GET"): LOGIN,
     ("api_model_version", "GET"): LOGIN,
+    # Remix's recipe recovery (issue #4): read-only, membership-checked against
+    # the local catalog, and the composer's own gates still stand between a
+    # prefill and a paid generate -- same tier reasoning as api_model_version.
+    ("api_task_params", "GET"): LOGIN,
     ("api_ping", "GET"): LOGIN,
     ("api_similar", "GET"): LOGIN,
     # Catalog totals + backup coverage for fetch()-driven headers: the same
