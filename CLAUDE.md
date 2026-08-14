@@ -25,6 +25,12 @@ mass commit. Follow this protocol:
    away someone's real work to make it "clean."
 2. **`master` is the trunk.** Work on a short-lived feature branch and merge back with
    `--no-ff`. Do not commit directly to `master` for anything beyond a doc typo.
+   **MERGING TO MASTER REQUIRES THE OWNER'S EXPLICIT SAY-SO — every time** (owner
+   directive, 2026-08-14, after a session treated task go-aheads as merge authorization).
+   A task go-ahead ("go on X", "run the Y pass") authorizes building and pushing the
+   BRANCH only. Finish by reporting "branch pushed, tests green, ready to merge" and
+   stop; leave the branch on the remote for his review. "Merge it" / "ship it" or
+   equivalent explicit words are the only merge trigger.
    (Historical note so an old transcript does not mislead: `loom-v2` was the long-running
    default branch through v2.5.0 and `naming-pass` after it. Both are merged and deleted --
    `git checkout loom-v2` will fail, and any instruction to do so is out of date.)
