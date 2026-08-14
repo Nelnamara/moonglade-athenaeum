@@ -25,6 +25,7 @@ import secrets
 import sqlite3
 import sys
 import threading
+import time
 from pathlib import Path
 
 import moonglade_assets
@@ -1758,6 +1759,74 @@ def _branding_mtime(rel):
         return None
 
 
+# ---------------------------------------------------------------------------
+# The bundle's unlock split, ENFORCED at the serving layer (docs/DECISIONS.md
+# "The bundle's unlock split" 2026-07-27 + the "Mascots-in-Branding" correction
+# 2026-08-06): achievement-bound art -- badge masters, the per-achievement
+# mascot poses under mascots/ach/, the rewards/ tree, the Konami ee_* assets --
+# is sealed to the achievement that earns it. System chrome (narrator, login
+# companion, wizard poses, tracker spinner/status art, present_* fallbacks)
+# stays open: it is the app's default dress, not a reward. Deny answers are
+# 404, indistinguishable from "no such file", so the route is not an oracle
+# for what art exists.
+# ---------------------------------------------------------------------------
+_ACH_IDS = frozenset(a["id"] for a in ACHIEVEMENTS)
+_ACH_HIDDEN = frozenset(a["id"] for a in ACHIEVEMENTS if a.get("hidden"))
+
+
+def _seal_rule(rel):
+    """(mode, achievement_id) for one branding_root()-relative posix path:
+    'open' (serve normally), 'deny' (never serve), or 'earned' (serve only once
+    the named achievement is earned)."""
+    if rel.startswith(("rewards/", "_thumbs/")) or rel in ("rewards", "_thumbs"):
+        # rewards/ is pure achievement data with no live front-end consumer (the
+        # reward-marker reconciliation is tracked work; gate per-achievement when
+        # it lands). _thumbs/ is the badge-thumb cache -- /badge-thumb/ is the one
+        # sanctioned path so its own hidden-feat gate can't be walked around.
+        return ("deny", None)
+    if rel.startswith("badges/"):
+        aid = rel[len("badges/"):]
+        if aid.endswith(".png"):
+            aid = aid[:-4]
+        if "/" not in aid and aid in _ACH_IDS:
+            return ("earned", aid)    # full-res master: the celebration fetches it AT earn time
+        return ("deny", None)         # the whole bucket is sauce; unknown files stay sealed
+    if rel.startswith("mascots/ach/"):
+        aid = rel[len("mascots/ach/"):].rsplit(".", 1)[0]
+        if "/" not in aid and aid in _ACH_IDS:
+            return ("earned", aid)
+        return ("deny", None)
+    if rel.startswith("ee_"):
+        return ("earned", "the-konami-code")
+    return ("open", None)
+
+
+_earned_ids_cache = {"t": 0.0, "ids": frozenset()}
+_earned_ids_lock = threading.Lock()
+
+
+def _earned_achievement_ids(out_dir, db_path, need=None):
+    """The set of currently-earned achievement ids -- the seal check for
+    achievement-bound art. Cached briefly (one celebration fetches several
+    sealed assets back-to-back); a cache answer that would DENY `need` is
+    recomputed fresh first, so the fetch that lands milliseconds after the
+    earning event never 404s off a stale cache -- staleness can only ever
+    delay a denial's recompute, never a legitimate serve."""
+    now = time.time()
+    with _earned_ids_lock:
+        ids = _earned_ids_cache["ids"]
+        if now - _earned_ids_cache["t"] < 5.0 and (need is None or need in ids):
+            return ids
+    metrics = achievement_metrics(db_path)
+    metrics.update(telemetry_metrics(out_dir))
+    result = compute_achievements(metrics, (),
+                                  sets=load_telemetry(out_dir).get("sets", {}))
+    ids = frozenset(a["id"] for a in result["achievements"] if a["earned"])
+    with _earned_ids_lock:
+        _earned_ids_cache.update(t=now, ids=ids)
+    return ids
+
+
 def _seed_loose_manifest(rel):
     """Promote a container-shipped manifest to a real loose file before the
     first read-modify-write against it. Without this, the first custom upload
@@ -1778,12 +1847,22 @@ def _seed_loose_manifest(rel):
         pass
 
 
+# Marks the owner has REMOVED from the roster (mark_12 "Gem Tome", ruled
+# 2026-07-23). A tombstone rather than a container rebuild alone because the
+# rebuild can't reach everywhere: _seed_loose_manifest promotes the container's
+# marks.json to a loose file on first customization, and loose wins forever
+# after -- so an install that already seeded keeps a removed mark in its picker
+# no matter what a new container ships. The filter here is what makes the
+# removal stick on every install.
+_MARK_TOMBSTONES = frozenset({"mark_12"})
+
+
 def list_marks(out_dir):
     """Marks available on THIS machine: marks/marks.json entries whose .png
     actually exists, resolved loose-then-container (_branding_bytes) so the
     shipped defaults show up even though branding/ itself is deliberately empty
     on a fresh install -- and still empty on a truly bare install with no
-    container at all."""
+    container at all. Tombstoned ids (_MARK_TOMBSTONES) never list."""
     raw = _branding_bytes("marks/marks.json")
     if raw is None:
         return []
@@ -1798,6 +1877,8 @@ def list_marks(out_dir):
         if not isinstance(m, dict):
             continue
         mid = str(m.get("id") or "")
+        if mid in _MARK_TOMBSTONES:
+            continue
         if mid and _branding_exists("marks/%s.png" % mid):
             out.append({"id": mid, "label": m.get("label") or mid,
                         "kind": m.get("kind") or "tile",
@@ -1820,9 +1901,17 @@ def list_marks(out_dir):
 # instead of a schema migration first.
 # banner_loom (12:1 workspace strip) added 2026-08-06 with the Branding-tab rebuild
 # (Control Panel.dc.html SLOTS index 5: "Banner - Loom", 1920x160). It joins the two
-# 4:1 banners as a real, written-through slot; mascots/rewards stay excluded from the
-# sweep (see _SWEEPABLE_SLOTS + the mascots-in-branding correction 2026-08-06).
-BRANDING_SLOTS = ("banner_main", "banner_login", "mascots", "rewards", "banner_loom")
+# 4:1 banners as a real, written-through slot.
+#
+# mascots/rewards were REMOVED from this tuple 2026-08-13, enforcing the bundle's
+# unlock split (docs/DECISIONS.md 2026-07-27 + the 2026-08-06 mascots correction):
+# the Branding surface reaches banners + marks only. rewards/ is achievement data,
+# and mascots' customization ships later as a named-role checklist over an
+# owner-curated SELECTION of system roles -- not a pick-one-active gallery, and not
+# the full role list. Until then neither is a slot: the payload doesn't list them,
+# the upload/crop/set-active routes refuse them. Their on-disk breadcrumb folders
+# stay (see _BRANDING_DISCOVERY_SLOTS).
+BRANDING_SLOTS = ("banner_main", "banner_login", "banner_loom")
 
 
 def _slot_dir(slot):
@@ -2101,7 +2190,12 @@ def branding_slots_payload(out_dir):
 # this exact unlock -- so this has to work by scanning raw filesystem drops,
 # not by extending the authenticated upload routes above.
 _BRANDING_README = "Maybe something goes in here.\n"
-_BRANDING_DISCOVERY_SLOTS = BRANDING_SLOTS + ("marks",)
+# mascots/rewards are listed here EXPLICITLY even though they are no longer
+# BRANDING_SLOTS (the 2026-08-13 unlock-split enforcement): their empty folders
+# are part of the tinkerer-discovery landscape and existing installs have them,
+# so the on-disk breadcrumb tree stays exactly what it was. A drop there still
+# does nothing (the sweep only ever adopts from _SWEEPABLE_SLOTS + marks).
+_BRANDING_DISCOVERY_SLOTS = BRANDING_SLOTS + ("mascots", "rewards", "marks")
 
 
 def ensure_branding_discovery_tree():
@@ -2147,7 +2241,9 @@ def _adopt_mark(out_dir, raw_stem, png_bytes):
     per-slot manifest convention)."""
     mdir = branding_root() / "marks"
     mid = re.sub(r"[^a-z0-9_-]+", "-", raw_stem.lower()).strip("-")[:40] or "custom"
-    have = {m["id"] for m in list_marks(out_dir)}
+    # Tombstoned ids count as taken: adopting a drop AS a tombstoned id would
+    # register a mark list_marks() then refuses to show.
+    have = {m["id"] for m in list_marks(out_dir)} | set(_MARK_TOMBSTONES)
     if mid in have:
         mid = (mid + "-" + secrets.token_hex(3))[:40]
     _seed_loose_manifest("marks/marks.json")   # keep shipped defaults in the picker
@@ -2337,7 +2433,13 @@ def sweep_branding_drops(out_dir):
         except OSError:
             entries = []
         for p in entries:
-            if not p.is_file() or p.name == "marks.json" or p.suffix.lower() == ".ico" or p.stem in known:
+            # A tombstoned stem is KNOWN, not a fresh drop. Without this, delisting
+            # a mark makes its still-on-disk loose file invisible to the `known` set
+            # and the sweep ADOPTS it -- delete-and-re-encode of a real asset, the
+            # exact 2026-08-05 near-miss. Caught live 2026-08-13 on the mark_12
+            # tombstone: the owner's own mark_12.png got eaten on first page load.
+            if (not p.is_file() or p.name == "marks.json" or p.suffix.lower() == ".ico"
+                    or p.stem in known or p.stem in _MARK_TOMBSTONES):
                 continue
             png_bytes = _adopt_dropped_file(p)
             if png_bytes is None:
@@ -8024,6 +8126,15 @@ def create_app(out_dir: Path):
             target.relative_to(bdir)          # reject path traversal
         except (ValueError, OSError):
             abort(404)
+        # The unlock split, enforced (see _seal_rule): achievement-bound art
+        # only serves once its achievement is earned, whether the bytes would
+        # come from a loose file or the container.
+        mode, seal_aid = _seal_rule(target.relative_to(bdir).as_posix())
+        if mode == "deny":
+            abort(404)
+        if mode == "earned" and seal_aid not in _earned_achievement_ids(
+                out_dir, db_path, need=seal_aid):
+            abort(404)
         if target.is_file():
             resp = send_from_directory(str(bdir), fname)
             resp.headers["Cache-Control"] = "no-cache, must-revalidate"   # branding art gets re-cut; never serve a stale copy
@@ -8044,6 +8155,13 @@ def create_app(out_dir: Path):
         truth). Lazily generated on first hit; path-safe (no slashes via <aid>)."""
         from flask import send_from_directory, abort
         if not aid or "/" in aid or "\\" in aid or ".." in aid:
+            abort(404)
+        # Hidden feats are masked in /api/achievements, but their ids sit in
+        # this public source -- so an unearned hidden feat's badge must not be
+        # fishable by id here either (thumbs for VISIBLE unearned achievements
+        # keep serving; the Folio's locked tiles show their art by design).
+        if aid in _ACH_HIDDEN and aid not in _earned_achievement_ids(
+                out_dir, db_path, need=aid):
             abort(404)
         p = _badge_thumb(out_dir, aid)
         if not p or not Path(p).is_file():
@@ -9375,8 +9493,9 @@ def create_app(out_dir: Path):
 
         Side effects (cheap, fail-soft): marks today in the Vigil day ledger, checks
         the Night Owl window, and sweeps the state-derived feat flags. Hidden feats
-        that aren't earned go out MASKED (??? name, no roast) so devtools can't
-        spoil them; the whole feat tab stays cloaked until the first feat lands."""
+        that aren't earned go out MASKED -- collapsed to a single ??? placeholder
+        so devtools can't spoil them or even count how many remain; the whole
+        feat tab stays cloaked until the first feat lands."""
         import datetime as _dt
         try:
             today = _dt.date.today().isoformat()
@@ -9435,20 +9554,33 @@ def create_app(out_dir: Path):
             a["earned"] for a in result["achievements"] if a["tier"] == "feat")
         unleashed = any(a["id"] == "triggered" and a["earned"]
                         for a in result["achievements"])
-        masked_metrics, n_masked = set(), 0
+        # Masked feats COLLAPSE to a single placeholder (2026-08-13): the old
+        # scheme kept one "hidden-feat-N" entry per undiscovered feat, so the
+        # array length -- and any earned/total arithmetic a client renders --
+        # counted exactly how many secrets were left. One placeholder says
+        # "there are hidden feats" (which the placeholder itself publicizes)
+        # and nothing more.
+        masked_metrics, n_masked, visible = set(), 0, []
         for a in result["achievements"]:
             if a["hidden"] and not a["earned"]:
                 n_masked += 1
                 masked_metrics.add(a["metric"])
-                a.update(name="???", desc="A hidden feat of the Athenaeum.",
-                         icon="❓", roast="", roast_nsfw="",
-                         current=0, threshold=1, points=0,
-                         id="hidden-feat-%d" % n_masked, metric="")
+                continue
             if not a["earned"]:               # roasts are the reward, not a preview
                 a["roast"] = ""
                 a["roast_nsfw"] = ""
             elif not unleashed:               # uncensored lines stay locked until Triggered
                 a["roast_nsfw"] = ""
+            visible.append(a)
+        if n_masked:
+            visible.append({
+                "id": "hidden-feat", "name": "???", "icon": "❓",
+                "desc": "A hidden feat of the Athenaeum.",
+                "tier": "feat", "bucket": "feat", "metric": "", "threshold": 1,
+                "current": 0, "earned": False, "skin": "", "hidden": True,
+                "banner_reward": False, "points": 0, "roast": "", "roast_nsfw": "",
+            })
+        result["achievements"] = visible
         # a masked feat's metric name/value must not leak through the metrics echo
         still_visible = {a["metric"] for a in result["achievements"] if a.get("metric")}
         for k in masked_metrics - still_visible:
@@ -9551,8 +9683,9 @@ def create_app(out_dir: Path):
 
     @app.route("/api/branding/slot", methods=["POST"])
     def api_branding_slot_upload():
-        """Upload a new asset into one Branding slot (banner_main/banner_login/
-        mascots/rewards -- Control Panel.dc.html's 'From disk' chip). LOGIN tier,
+        """Upload a new asset into one Branding slot (the three banner slots --
+        Control Panel.dc.html's 'From disk' chip; mascots/rewards are NOT slots,
+        see BRANDING_SLOTS' unlock-split note). LOGIN tier,
         matching /api/branding just above: cosmetic, no host-filesystem risk
         beyond writing into branding/, the same machine-local git-ignored tree
         marks already live in (NOT the shortcut route's stricter local-only gate).

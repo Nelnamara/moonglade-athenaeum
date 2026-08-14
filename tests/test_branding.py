@@ -34,7 +34,7 @@ def _client(tmp_path):
     return login_test_client(_app(tmp_path))
 
 
-def _cut_fake_marks(tmp_path, ids=("mark_4", "mark_12"), ico=True):
+def _cut_fake_marks(tmp_path, ids=("mark_4", "mark_7"), ico=True):
     mdir = tmp_path / "branding" / "marks"
     mdir.mkdir(parents=True)
     for i in ids:
@@ -61,15 +61,15 @@ def test_branding_save_and_render(tmp_path):
     _cut_fake_marks(tmp_path)
     cli = _client(tmp_path)
     d = cli.get("/api/branding").get_json()
-    assert {m["id"] for m in d["marks"]} == {"mark_4", "mark_12"}
+    assert {m["id"] for m in d["marks"]} == {"mark_4", "mark_7"}
     assert d["mark"] == "mark_4"          # default mark once assets exist
-    r = cli.post("/api/branding", json={"mark": "mark_12", "anim": "eclipse"})
-    assert r.get_json() == {"mark": "mark_12", "anim": "eclipse"}
+    r = cli.post("/api/branding", json={"mark": "mark_7", "anim": "eclipse"})
+    assert r.get_json() == {"mark": "mark_7", "anim": "eclipse"}
     assert json.loads((tmp_path / "branding.json").read_text())["anim"] == "eclipse"
     # the saved choice reads back through the same API the React header consumes
     # (the classic BASE_HTML mark-span render died in the 2026-08-08 classic cut)
     d = cli.get("/api/branding").get_json()
-    assert d["mark"] == "mark_12" and d["anim"] == "eclipse"
+    assert d["mark"] == "mark_7" and d["anim"] == "eclipse"
 
 
 def test_branding_validation_and_lan_gate(tmp_path):
@@ -228,11 +228,12 @@ def io_bytes(b):
 
 
 def test_branding_slots_empty_on_fresh_install(tmp_path):
-    """The 4 Control Panel Branding slots (banner_main/banner_login/mascots/
-    rewards) added 2026-08-05 -- no backend existed for them before this."""
+    """The Branding slots are the three banners ONLY (the 2026-08-13
+    unlock-split enforcement -- mascots/rewards are achievement-adjacent and
+    not slots; see tests/test_unlock_split.py for that boundary)."""
     cli = _client(tmp_path)
     d = cli.get("/api/branding").get_json()
-    assert set(d["slots"].keys()) == {"banner_main", "banner_login", "mascots", "rewards", "banner_loom"}
+    assert set(d["slots"].keys()) == {"banner_main", "banner_login", "banner_loom"}
     for slot in d["slots"].values():
         assert slot == {"assets": [], "active": None}
 
@@ -260,27 +261,18 @@ def test_branding_slot_upload_becomes_active(tmp_path):
     assert slots["banner_main"] == {"assets": [item], "active": item["id"]}
 
 
-def test_branding_slot_non_banner_defaults_neutral_transform(tmp_path):
-    cli = _client(tmp_path)
-    r = cli.post("/api/branding/slot", data={"slot": "mascots",
-                 "file": (io_bytes(_png_bytes()), "m.png")},
-                 content_type="multipart/form-data")
-    it = r.get_json()["item"]
-    assert (it["zoom"], it["cropX"], it["cropY"]) == (100, 50, 50)
-
-
 def test_branding_slot_second_upload_stays_available_and_becomes_active(tmp_path):
     """Uploading a second asset into the same slot does NOT delete the first --
     both exist, matching list_marks()'s own "many stored" shape, so a later
     rotating-source pass has more than one real candidate to pick from."""
     cli = _client(tmp_path)
-    first = cli.post("/api/branding/slot", data={"slot": "rewards",
+    first = cli.post("/api/branding/slot", data={"slot": "banner_loom",
                      "file": (io_bytes(_png_bytes((10, 10, 10))), "a.png")},
                      content_type="multipart/form-data").get_json()["item"]
-    second = cli.post("/api/branding/slot", data={"slot": "rewards",
+    second = cli.post("/api/branding/slot", data={"slot": "banner_loom",
                       "file": (io_bytes(_png_bytes((20, 20, 20))), "b.png")},
                       content_type="multipart/form-data").get_json()["item"]
-    slot = cli.get("/api/branding").get_json()["slots"]["rewards"]
+    slot = cli.get("/api/branding").get_json()["slots"]["banner_loom"]
     assert {a["id"] for a in slot["assets"]} == {first["id"], second["id"]}
     assert slot["active"] == second["id"]       # the most recent upload wins
 
@@ -291,11 +283,11 @@ def test_branding_slot_upload_rejects_unknown_slot_and_bad_image(tmp_path):
                  "file": (io_bytes(_png_bytes()), "x.png")},
                  content_type="multipart/form-data")
     assert r.status_code == 400
-    r = cli.post("/api/branding/slot", data={"slot": "mascots",
+    r = cli.post("/api/branding/slot", data={"slot": "banner_main",
                  "file": (io_bytes(b"not an image"), "x.png")},
                  content_type="multipart/form-data")
     assert r.status_code == 400 and "image" in r.get_json()["error"].lower()
-    r = cli.post("/api/branding/slot", data={"slot": "mascots"},
+    r = cli.post("/api/branding/slot", data={"slot": "banner_main"},
                  content_type="multipart/form-data")
     assert r.status_code == 400
 
@@ -343,13 +335,13 @@ def test_branding_slots_survive_corrupt_manifest(tmp_path):
     """A hand-edited/corrupt <slot>/manifest.json or branding_slots.json must
     degrade to empty/None, never a 500 -- the same contract
     test_branding_survives_corrupt_manifests already pins for marks.json."""
-    sdir = tmp_path / "branding" / "mascots"
+    sdir = tmp_path / "branding" / "banner_main"
     sdir.mkdir(parents=True)
     (sdir / "manifest.json").write_text('{"items": ["not-a-dict", 42]}', encoding="utf-8")
     (tmp_path / "branding_slots.json").write_text('["not", "an", "object"]', encoding="utf-8")
     cli = _client(tmp_path)
     d = cli.get("/api/branding").get_json()
-    assert d["slots"]["mascots"] == {"assets": [], "active": None}
+    assert d["slots"]["banner_main"] == {"assets": [], "active": None}
 
 
 # ---------------------------------------------------------------------------
@@ -437,9 +429,10 @@ def test_sweep_never_touches_mascots_or_rewards(tmp_path):
     # untouched: still sitting under their OWN real names, not adopted/renamed
     assert real_mascot.exists()
     assert real_reward.exists()
+    # and since the 2026-08-13 unlock-split enforcement they aren't slots at
+    # all -- the payload doesn't even list them
     slots = cli.get("/api/branding").get_json()["slots"]
-    assert slots["mascots"] == {"assets": [], "active": None}
-    assert slots["rewards"] == {"assets": [], "active": None}
+    assert "mascots" not in slots and "rewards" not in slots
     # and the achievement must NOT fire off a file that was never adopted --
     # unearned hidden feats are masked to a fake id, so "no real id present"
     # IS the not-earned assertion (see /api/achievements' own docstring).

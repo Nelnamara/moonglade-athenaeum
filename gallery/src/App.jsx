@@ -343,50 +343,56 @@ export default function App({ boot }) {
       pos = 0;
       if (busy) return;
       busy = true;
+      // The ee_* assets are SEALED to The Konami Code (the unlock-split
+      // enforcement, 2026-08-13) and this beacon is what earns it -- so the
+      // visuals wait for the beacon to land, or the very first trigger races
+      // its own unlock and the art 404s. Fail-soft on a beacon error: the
+      // stars/toast still play (the img/audio just may not resolve).
       fetch("/api/ach-event", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ event: "konami" }),
-      }).catch(() => {});
-      const glyphs = ["✦", "✧", "★", "✪", "✺"];
-      const stars = [];
-      for (let i = 0; i < 46; i++) {
-        const s = document.createElement("div");
-        s.className = "ee-star";
-        s.textContent = glyphs[i % glyphs.length];
-        s.style.left = Math.random() * 100 + "vw";
-        s.style.fontSize = 13 + Math.random() * 24 + "px";
-        s.style.animationDuration = 2.2 + Math.random() * 2.6 + "s";
-        s.style.animationDelay = Math.random() * 1.8 + "s";
-        document.body.appendChild(s);
-        stars.push(s);
-      }
-      const scrim = document.createElement("div");
-      scrim.className = "ee-scrim";
-      document.body.appendChild(scrim);
-      const nel = document.createElement("img");
-      nel.className = "ee-nel";
-      nel.src = "/branding/ee_nelstarfall.png";
-      nel.onerror = () => nel.remove();
-      document.body.appendChild(nel);
-      // Built with DOM methods, not innerHTML -- both lines are fixed literals
-      // (no interpolated data), but this way there is nothing to ever audit.
-      const toast = document.createElement("div");
-      toast.className = "ee-toast";
-      toast.appendChild(document.createTextNode("✺ Elune-adore, Nelnamara ✺"));
-      const sub = document.createElement("div");
-      sub.style.cssText = "font-size:12.5px;color:var(--subtext);margin-top:7px;";
-      sub.textContent = "The Athenaeum casts Starfall. Moonfire spam remains a lifestyle.";
-      toast.appendChild(sub);
-      document.body.appendChild(toast);
-      let cast, loop;
-      try { cast = new Audio("/branding/ee_starfall_cast.ogg"); cast.volume = 0.7; cast.play().catch(() => {}); } catch {}
-      try { loop = new Audio("/branding/ee_starfall_loop.ogg"); loop.loop = true; loop.volume = 0.35; loop.play().catch(() => {}); } catch {}
-      setTimeout(() => {
-        document.querySelectorAll(".ee-star,.ee-toast,.ee-nel,.ee-scrim").forEach((n) => n.remove());
-        try { loop && loop.pause(); } catch {}
-        try { cast && cast.pause(); } catch {}
-        busy = false;
-      }, 7000);
+      }).catch(() => {}).then(() => {
+        const glyphs = ["✦", "✧", "★", "✪", "✺"];
+        const stars = [];
+        for (let i = 0; i < 46; i++) {
+          const s = document.createElement("div");
+          s.className = "ee-star";
+          s.textContent = glyphs[i % glyphs.length];
+          s.style.left = Math.random() * 100 + "vw";
+          s.style.fontSize = 13 + Math.random() * 24 + "px";
+          s.style.animationDuration = 2.2 + Math.random() * 2.6 + "s";
+          s.style.animationDelay = Math.random() * 1.8 + "s";
+          document.body.appendChild(s);
+          stars.push(s);
+        }
+        const scrim = document.createElement("div");
+        scrim.className = "ee-scrim";
+        document.body.appendChild(scrim);
+        const nel = document.createElement("img");
+        nel.className = "ee-nel";
+        nel.src = "/branding/ee_nelstarfall.png";
+        nel.onerror = () => nel.remove();
+        document.body.appendChild(nel);
+        // Built with DOM methods, not innerHTML -- both lines are fixed literals
+        // (no interpolated data), but this way there is nothing to ever audit.
+        const toast = document.createElement("div");
+        toast.className = "ee-toast";
+        toast.appendChild(document.createTextNode("✺ Elune-adore, Nelnamara ✺"));
+        const sub = document.createElement("div");
+        sub.style.cssText = "font-size:12.5px;color:var(--subtext);margin-top:7px;";
+        sub.textContent = "The Athenaeum casts Starfall. Moonfire spam remains a lifestyle.";
+        toast.appendChild(sub);
+        document.body.appendChild(toast);
+        let cast, loop;
+        try { cast = new Audio("/branding/ee_starfall_cast.ogg"); cast.volume = 0.7; cast.play().catch(() => {}); } catch {}
+        try { loop = new Audio("/branding/ee_starfall_loop.ogg"); loop.loop = true; loop.volume = 0.35; loop.play().catch(() => {}); } catch {}
+        setTimeout(() => {
+          document.querySelectorAll(".ee-star,.ee-toast,.ee-nel,.ee-scrim").forEach((n) => n.remove());
+          try { loop && loop.pause(); } catch {}
+          try { cast && cast.pause(); } catch {}
+          busy = false;
+        }, 7000);
+      });
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);

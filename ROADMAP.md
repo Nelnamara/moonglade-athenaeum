@@ -14,10 +14,12 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Now — active
 
-- **Achievement ladder rungs — redefinition** *(owner)*
+- **Achievement ladder rungs — redefinition** *(workshop with the owner)*
   The rung/threshold definitions are being reworked. Scope is *which rungs exist and their
-  thresholds*, not the celebration timing (that gate already shipped). Hands off the definitions
-  until the owner lands them.
+  thresholds*, not the celebration timing (that gate already shipped). Not owner-solo after
+  all (corrected 2026-08-13): the owner wants a dedicated workshopping session for it. Natural
+  co-inputs when that session runs: the dead-achievement exemptions, the 57→60 roster growth,
+  and the system-mascot named-role pick-list (below).
 
 ---
 
@@ -26,20 +28,21 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 - **Remix: send a picture's recipe back to Generate** — [issue #4](https://github.com/Nelnamara/moonglade-athenaeum/issues/4)
   Load a picture's *full recipe* (prompt + negative + seed + model + LoRAs) into the Generate
   drawer in one click, the way PixAI itself does — the point is going back to a good image and
-  re-running it against different models. Today the lightbox/details only send the *image* to Edit
-  or Video; the recipe slab is read-only display. Verified: no code for this exists anywhere.
-  A "send to image" button on Image Details is the asked-for shape; the grid right-click menu
-  already exists as a second entry point.
+  re-running it against different models. Both entry points wanted (owner, 2026-08-13): a
+  "send to image" button on Image Details AND a grid right-click item. The mechanism already
+  exists: GenerateDrawer's `prefillFromRun` does the whole job from a bare media_id (the
+  history reel's reuse path) — Remix is exposing that same call from the two new entry points.
+  The one real gap vs. the ask is LoRAs, deliberately not reconstructed from the catalog's
+  name-only string (spend-safety); the faithful upgrade is recovering the real submit shape via
+  the free task-recovery path (rows carry the task id) and prefixing real LoRA version ids,
+  falling back to no-LoRAs when recovery fails. Pairs with
+  [issue #13](https://github.com/Nelnamara/moonglade-athenaeum/issues/13) (drawer history
+  durability — a catalog-backed history feed would make every past generation reusable).
 
 - **Stack by batch (gallery grid)**
   Collapse the grid into per-batch/per-task stacks instead of one flat wall. Related surfaces exist
   but don't cover it: a batch-filter drill-down and the Image Details lineage-siblings section. The
   grid-stacking itself is unbuilt.
-
-- **Hidden-achievement response hardening**
-  Masked feats are blanked in the API response, but the *number* of undiscovered ones is still
-  countable in the raw payload. Deferred until the asset bundle shipped (it now has), so this is a
-  live follow-up — collapse/withhold the masked slots so the count doesn't leak.
 
 - **Loom per-project spend ledger (historical)**
   The live *cost-to-finish* roll-up shipped; what's missing is a per-Loom-project record of what a
@@ -82,13 +85,34 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   The "☆ Shortlist" staging step shipped. The larger workbench — deadline tracking, submission
   management — is still just wanted, not scoped.
 
+- **Loom top bar: finish the styleset adoption**
+  The Loom's adoption of the new styleset was never fully applied across the top bar (owner,
+  2026-08-13, with a side-by-side): pill styling, the active-state fill on Generate all, the
+  "≈ N cr to finish" phrasing, the rendering-status chip, and ← GALLERY all differ from what
+  Claude Design handed down. [Issue #12](https://github.com/Nelnamara/moonglade-athenaeum/issues/12)'s
+  missing Draft-chip glow is one symptom of the same gap. UNBLOCKED 2026-08-13: the owner's
+  8.10 handoff zip carries the desktop frame — the pixel source is
+  `design_handoff/design_handoff_moonglade_suite/The Loom.dc.html` (machine-local, git-ignored),
+  synced into place alongside newer frames (Branding Workshop, Job Tracker Redesign/Fullscreen,
+  Setup Wizard, UI Kit v2) that later design passes should also build against.
+
 ---
 
 ## Design-pass reworks — owner wants these rescoped, not just built
 
 - **Masked-feats presentation.** Today a masked feat shows its art in full color with name/text
   withheld. Owner wants to rescope/redesign the whole masked-fields idea, not just keep the
-  old call.
+  old call. (The count-leak half already shipped: the API now collapses undiscovered feats to a
+  single placeholder — this item is the *presentation* rework on top of that.)
+
+- **System-mascot named-role customization — owner picks a SELECTION first.** The opening half
+  of the unlock split (the sealing half shipped 2026-08-13): the named-role system files
+  (narrator, login companion, Setup Wizard poses, Power-modal poses, claim popup, Job-Tracker
+  spinner + status poses, claim/gift icons) become customizable behind Under the Hood as a
+  checklist of named-role overrides — but NOT all of them. Owner (2026-08-13): review the full
+  role inventory and pick a curated selection; "I don't want to FLOOD the panel with options."
+  The SYSTEM / SHARED / ACHIEVEMENT classification from the 2026-08-06 correction is the input;
+  feeds the workshop session.
 - **Ladder representative badges.** Ladders currently show their FIRST rung's art (to avoid
   top-tier spoilers). Owner wants a new design pass on ladder badges.
 - **Roast NSFW gating.** The spicy-roast double gate (server withholds unless the feat is
@@ -132,12 +156,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   worth surfacing before building anything.
 - **Dead-code sweep.** With the React rebuild done, sweep for orphaned code the classic cut
   left behind (e.g. `--faststart-videos` is deprecated in place; what else is dead?).
-- **Enforce the bundle's unlock split in code.** The decided split (branding slots open on the
-  "Under the Hood" unlock; badges, Konami assets, tier frames, and any file carrying achievement
-  data stay sealed to the achievements that earn them) is NOT yet what the code does — badges,
-  Konami assets and frames are still counted as part of "Branding." Split them out so the
-  branding unlock cannot reach them, and verify the boundary is exactly the documented one
-  (mascots are Flair and open; badges are "the sauce" and sealed).
 
 ## Open questions — need a call before they can be scoped
 
@@ -178,8 +196,9 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   `/api/enhance`), so Completionist cannot be earned as it stands. Needs a call: exempt them,
   repoint the metrics, or replace the rungs. Folds into the ladder-rung rework.
 
-- **`mark_12` (Gem Tome) removal never executed.** Owner ruled 2026-07-23 to remove it; it is
-  still shipped in `marks.json`. Small, just never done.
+- **The "full taco" achievement.** A late, deep achievement that hands the COMPLETE
+  customization surface to the user — every named role, the full branding reach — beyond the
+  curated Branding selection above. Banked, unscoped (owner idea, 2026-08-13).
 
 ---
 
