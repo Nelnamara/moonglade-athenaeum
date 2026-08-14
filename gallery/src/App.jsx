@@ -542,14 +542,23 @@ export default function App({ boot }) {
     openDock();
     setGenRequest({ tab: "video", mid, thumb, nonce: Math.random() });
   };
+  /* Remix (issue #4): the picture's FULL recipe -- prompt/negative/size/steps/
+     cfg/seed/model, and LoRAs by exact version id -- prefilled into the Image
+     tab. Prefill only; generating stays a human click. */
+  const requestRemix = (mid) => {
+    setLbIndex(null);
+    openDock();
+    setGenRequest({ tab: "remix", mid, nonce: Math.random() });
+  };
 
   // Grid right-click context menu (the 5 classic actions; owner picked all five).
   const [ctxMenu, setCtxMenu] = useState(null);     // {mid, thumb, x, y} | null
   const [similarFor, setSimilarFor] = useState(null); // media_id | null
-  const openContextMenu = (mid, thumb, x, y) => setCtxMenu({ mid, thumb, x, y });
+  const openContextMenu = (mid, thumb, x, y, isVideo) => setCtxMenu({ mid, thumb, x, y, isVideo });
   const ctxActions = {
     onEdit: requestEdit,
     onVideo: requestVideo,
+    onRemix: requestRemix,
     onSimilar: (mid) => setSimilarFor(mid),
     onCopyId: (mid) => { try { navigator.clipboard.writeText(String(mid)); } catch { /* no-op */ } },
     onDetails: openDetails,
@@ -635,7 +644,7 @@ export default function App({ boot }) {
           createPortal(
             <DetailsView
               mediaId={detailsFor} onClose={closeDetails} onNavigate={openDetails}
-              onRate={rate} onEdit={requestEdit} onPublish={openPublish}
+              onRate={rate} onEdit={requestEdit} onRemix={requestRemix} onPublish={openPublish}
               onDeleted={() => { closeDetails(); load(1, true); }}
               onFilterByModel={filterByModel} onFilterByBatch={filterByBatch}
               advParams={detailsAdvParams}

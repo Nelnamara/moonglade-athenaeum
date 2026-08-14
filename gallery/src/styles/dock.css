@@ -383,6 +383,11 @@
   animation: mgFade .25s ease both; }
 .mgdock-reusefrom span { opacity: .75; }
 .mgdock-reusefrom:hover { border-color: rgba(182, 146, 230, .8); }
+/* Partial-recipe variant (Remix, issue #4): the restore was incomplete -- the
+   chip itself says so until cleared; a toast alone is not a receipt. */
+.mgdock-reusefrom.warn { border-color: rgba(233, 190, 110, .55);
+  background: rgba(172, 124, 40, .16); color: var(--yellow, #e9be6e); }
+.mgdock-reusefrom.warn:hover { border-color: rgba(233, 190, 110, .85); }
 .mgdock-composer-top .sp { flex: 1 1 auto; }
 
 /* ★ Snippets -- Frontend Gallery.dc.html:2827-2829 (button, accent border + text

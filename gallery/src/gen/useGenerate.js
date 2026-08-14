@@ -88,6 +88,12 @@ export default function useGenerate({ costRef }) {
     return out;
   };
 
+  /* Returns the applied model shape ({model_id, version_id, versions, ...}) on
+     success and null on failure or a verSeq drop. Callers historically ignore
+     this; Remix (issue #4) keys on it -- state can't answer "did MY apply
+     land, and which versions exist" in an async flow (React batches the setS,
+     so an eager-updater read right after the await sees the PRE-apply state;
+     that false-negatived the exact-version check on a live run, 2026-08-13). */
   const applyModelRow = useCallback(async (row) => {
     const seq = ++verSeq.current;
     setS((old) => ({
@@ -98,34 +104,34 @@ export default function useGenerate({ costRef }) {
       const r = await fetch("/api/model-version?model_id=" +
         encodeURIComponent(row.model_id) + "&all=1");
       const d = await r.json();
-      if (seq !== verSeq.current) return;
+      if (seq !== verSeq.current) return null;
       const versions = d.versions || [];
       const latest = versions.find((v) => v.is_latest) || versions[0];
       if (!latest || !latest.version_id) throw new Error(d.error || "no versions");
-      setS((old) => {
-        const model = {
-          model_id: row.model_id, title: row.title,
-          thumb: row.preview_url || row.cover_url || "",
-          version_id: latest.version_id, model_type: latest.model_type || "",
-          versions, ...applyFromVersion(latest),
-        };
-        return {
-          ...old, model,
-          // weights re-clamped to the NEW architecture, and an armed hires chip
-          // disarmed when this version can't upscale (classic gateBooster).
-          loras: clampLoras(old.loras, model.model_type),
-          boosters: model.compat_upscale === false
-            ? { ...old.boosters, hires: false } : old.boosters,
-          ...presetPatch(latest),
-        };
-      });
+      const model = {
+        model_id: row.model_id, title: row.title,
+        thumb: row.preview_url || row.cover_url || "",
+        version_id: latest.version_id, model_type: latest.model_type || "",
+        versions, ...applyFromVersion(latest),
+      };
+      setS((old) => ({
+        ...old, model,
+        // weights re-clamped to the NEW architecture, and an armed hires chip
+        // disarmed when this version can't upscale (classic gateBooster).
+        loras: clampLoras(old.loras, model.model_type),
+        boosters: model.compat_upscale === false
+          ? { ...old.boosters, hires: false } : old.boosters,
+        ...presetPatch(latest),
+      }));
+      return model;
     } catch {
-      if (seq !== verSeq.current) return;
+      if (seq !== verSeq.current) return null;
       setS((old) => ({
         ...old,
         model: { model_id: row.model_id, title: row.title, thumb: row.preview_url || row.cover_url || "", version_id: "", failed: true },
       }));
       if (window.Toast) window.Toast.show({ kind: "err", title: "Model lookup failed", msg: row.title });
+      return null;
     }
   }, []);
 
@@ -161,7 +167,13 @@ export default function useGenerate({ costRef }) {
         ...old,
         loras: old.loras.concat([{
           model_id: row.model_id, title: row.title, preview_url: row.preview_url,
-          version_id: row.version_id || "", weight: 0.7,
+          // Remix (issue #4) hands rows carrying the task's EXACT weight; the
+          // picker's market rows have none and keep the 0.7 default. Honoring
+          // it here (not via a follow-up setLora) is what keeps a two-versions-
+          // of-one-LoRA task from cross-patching the wrong entry's weight
+          // (adversarial review 2026-08-13, finding 1.1).
+          version_id: row.version_id || "",
+          weight: Number.isFinite(+row.weight) ? +row.weight : 0.7,
           lora_base_type: row.lora_base_model_type || row.model_type || "",
           trigger_words: typeof row.trigger_words === "string" ? row.trigger_words : "",
           versions: [],
