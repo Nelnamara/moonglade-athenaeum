@@ -20,7 +20,7 @@ A row of frosted glow-pill buttons, one hue per destination:
 - **✦ Generate** — the dockable Generate / Edit / Video drawer, right over the grid. See
   [Generating](Generating).
 - **▰ The Loom** — the storyboard for multi-clip video (acts, shots, cast, frame handoff),
-  at `/loom`. Also [Generating](Generating); full manual in `docs/LOOM.md`.
+  at `/loom`. Also [Generating](Generating); full manual on [The Loom](The-Loom).
 - **🏆** — [The Folio of Honors](Folio-of-Honors): achievements, points, and earnable
   skins. It opens as a maximized overlay over the gallery, not a separate page (`Esc`
   closes it).
