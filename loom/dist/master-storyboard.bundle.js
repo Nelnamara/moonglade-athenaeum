@@ -3883,8 +3883,10 @@ ${"=".repeat(48)}
 .sb-projx:hover{color:var(--coral);background:rgba(255,80,80,.12)}
 .sb-projacts{display:flex;gap:6px;border-top:1px solid var(--line);padding-top:6px}
 .sb-projveil{position:fixed;inset:0;z-index:59}
-/* Export \u25BE menu reuses .sb-projwrap/.sb-projbtn/.sb-projveil/.sb-projpop's chrome as-is --
-   same popover language as the storyboard switcher it sits beside. Only the row style is new. */
+/* Export \u25BE menu reuses .sb-projwrap/.sb-projveil/.sb-projpop's POPOVER chrome as-is --
+   same popover language as the storyboard switcher it sits beside. The TRIGGERS diverged in
+   the 2026-08-13 styleset pass: the switcher wears the DC's compact .lv-caret square, and
+   Export \u25BE wears the bar's normal button idiom (The Loom.dc.html topBtnStyle). */
 .sb-exportitem{display:flex;align-items:center;gap:6px;background:transparent;border:none;cursor:pointer;text-align:left;padding:7px 8px;border-radius:7px;color:var(--ink);font-size:12px;width:100%}
 .sb-exportitem:hover{background:rgba(255,255,255,.05)}
 .sb-exportitem:disabled{color:var(--ink3);cursor:default;background:transparent}
@@ -4285,9 +4287,12 @@ ${"=".repeat(48)}
 .lv-banner-show{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--subtext);
   background:var(--surface1);border:1px solid var(--surface1);border-radius:7px;padding:7px 11px;
   cursor:pointer;white-space:nowrap;font-family:inherit;}
-.lv-top{position:relative;display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
-.lv-eyebrow{font:700 11px/1 system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);}
-.lv-note{color:var(--subtext);font-size:12px;}
+/* Top bar geometry per The Loom.dc.html:45 (2026-08-13 styleset pass): wrapping
+   row, 8x10 gap, and NO eyebrow/hint -- the DC's bar opens straight with the
+   storyboard caret. Two .lv-fill spacers center the Generate cluster exactly
+   like the DC's twin flex-1 divs. */
+.lv-top{position:relative;display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
+.lv-fill{flex:1 1 auto;}
 /* The trailing "a" in this selector is deliberate: the back-to-gallery control is an
    anchor, not a button, so a button-only selector left it as an unstyled browser link --
    rgb(0,0,238) on the dark bar, a measured 1.69:1 against a 4.5:1 floor, and the only way
@@ -4304,12 +4309,33 @@ ${"=".repeat(48)}
    .at-panel's right:0 anchors to the FULL row's true right edge no matter where the
    trigger sits inside it -- deliberately NOT position:relative here, so it doesn't shadow
    that and pull the anchor back down to just this chip. */
-.lv-top-act-wrap{margin-left:auto;}
+.lv-top-act-wrap{/* flush-right position now comes from the second .lv-fill (DC layout);
+   still NOT position:relative -- .at-panel anchors to .lv-top, see above. */}
 .lv-top button:hover{border-color:var(--accent);}
 .lv-top button:disabled{opacity:.5;cursor:default;}
 .lv-top button:disabled:hover{border-color:var(--surface1);}
 .lv-cost-pill{opacity:.85;font-weight:600;}
 .lv-cost-pill:disabled{opacity:.5;}
+/* The storyboard caret, The Loom.dc.html caretBtnStyle: a compact 26px square,
+   not a text pill. (The Export trigger next to Render is the opposite case --
+   it dropped .sb-projbtn to inherit the bar's normal button idiom.) */
+.lv-top .lv-caret{width:26px;height:26px;box-sizing:border-box;background:var(--surface0);border:1px solid var(--surface1);
+  color:var(--subtext);border-radius:6px;cursor:pointer;font-size:11px;display:grid;place-items:center;padding:0;}
+.lv-top .lv-caret:hover{border-color:var(--accent);}
+/* \u25B6 Generate all -- the DC's "metal" treatment verbatim (The Loom.dc.html:748):
+   the one hero control on the bar, an animated accent-metal pill.
+   (No backticks in these comments -- this block is a JS template literal.) */
+.lv-genall{border:1px solid rgba(255,255,255,.3) !important;
+  color:color-mix(in oklab,var(--accent) 26%,#08040f) !important;
+  text-shadow:0 1px 0 rgba(255,255,255,.4);font-weight:800 !important;padding:7px 15px !important;
+  background:linear-gradient(100deg,color-mix(in oklab,var(--accent) 50%,#06030d) 0%,var(--accent) 18%,
+    color-mix(in oklab,var(--accent) 22%,#ffffff) 34%,var(--accent) 50%,
+    color-mix(in oklab,var(--accent) 74%,#06030d) 68%,var(--mauve) 84%,
+    color-mix(in oklab,var(--accent) 50%,#06030d) 100%) !important;
+  background-size:220% 100% !important;animation:mgMetal 7s ease-in-out infinite;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.6),inset 0 -2px 4px rgba(10,5,20,.45),0 6px 16px rgba(0,0,0,.45);}
+.lv-genall:hover{border-color:rgba(255,255,255,.5) !important;}
+@keyframes mgMetal{0%{background-position:0% 50%;}50%{background-position:100% 50%;}100%{background-position:0% 50%;}}
 .lv-batchbar{padding:6px 20px;font-size:12px;color:var(--subtext);background:var(--surface0);border-bottom:1px solid var(--surface1);}
 .lv-batchfail{color:var(--coral);font-weight:600;}
 .lv-batchstale{color:var(--subtext);font-weight:600;}
@@ -4478,9 +4504,16 @@ ${"=".repeat(48)}
 .lv-cframeph{font:700 9px/1 system-ui;color:var(--subtext);}
 .lv-cast{flex:1;min-height:0;overflow-y:auto;padding:8px;}
 .lv-castrow-h{font:700 10px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);margin-bottom:8px;}
-.lv-draft{display:inline-flex;align-items:center;gap:4px;font:600 11px/1 system-ui;color:var(--subtext);cursor:pointer;padding:5px 8px;border-radius:7px;border:1px solid var(--surface1);user-select:none;}
-.lv-draft.on{color:var(--accent);border-color:var(--accent);}
-.lv-draft input{margin:0;cursor:pointer;}
+/* The Loom.dc.html draftStyle/checkBox (2026-08-13 styleset pass): a surface0
+   chip whose BORDER stays surface1 even when on -- only the text and the little
+   check square take the accent -- and the native checkbox drawn as the DC's own
+   12px rounded square instead of the browser widget. (The \u{1F4F1} Mobile view switch
+   shares this chip pattern by design; it isn't in the DC at all.) */
+.lv-top label.lv-draft{display:inline-flex;align-items:center;gap:6px;font:600 12px/1 system-ui;color:var(--subtext);cursor:pointer;padding:6px 11px;border-radius:8px;border:1px solid var(--surface1);background:var(--surface0);user-select:none;}
+.lv-top label.lv-draft.on{color:var(--accent);}
+.lv-draft input{appearance:none;-webkit-appearance:none;margin:0;cursor:pointer;width:12px;height:12px;
+  border-radius:3px;border:1px solid var(--surface1);background:var(--base);flex:none;}
+.lv-draft input:checked{background:var(--accent);}
 .lv-look{margin-bottom:10px;border:1px solid var(--surface1);border-radius:8px;padding:6px 8px;background:var(--surface0);}
 .lv-look>summary{font:600 11px/1.3 system-ui;color:var(--text);cursor:pointer;list-style:none;user-select:none;}
 .lv-look>summary::-webkit-details-marker{display:none;}
@@ -4736,7 +4769,7 @@ ${"=".repeat(48)}
     return /* @__PURE__ */ React.createElement("div", { className: "sb-projwrap" }, /* @__PURE__ */ React.createElement(
       "button",
       {
-        className: "sb-projbtn",
+        className: "lv-caret",
         onClick: () => {
           setProjMenu((v) => !v);
           readProjList();
@@ -4760,7 +4793,6 @@ ${"=".repeat(48)}
     return /* @__PURE__ */ React.createElement("div", { className: "sb-projwrap" }, /* @__PURE__ */ React.createElement(
       "button",
       {
-        className: "sb-projbtn",
         onClick: () => setOpen2((v) => !v),
         title: "Export or restore this project",
         "aria-label": "Export"
@@ -6314,7 +6346,7 @@ ${"=".repeat(48)}
         onClick: () => setBannerOpen(true)
       },
       "\u{1F5BC} Banner"
-    ), act.edge === "left" ? activityControl : null, /* @__PURE__ */ React.createElement("span", { className: "lv-eyebrow" }, "The Loom \xB7 V2"), /* @__PURE__ */ React.createElement("span", { className: "lv-note" }, "Click a shot \u2192 it binds to Generate."), /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), /* @__PURE__ */ React.createElement(
+    ), act.edge === "left" ? activityControl : null, /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), /* @__PURE__ */ React.createElement(
       "label",
       {
         className: "lv-draft" + (project.draft ? " on" : ""),
@@ -6330,9 +6362,10 @@ ${"=".repeat(48)}
       },
       /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!mobileUI, onChange: (e) => setMobileUI(e.target.checked) }),
       "\u{1F4F1} Mobile view"
-    ), /* @__PURE__ */ React.createElement(
+    ), /* @__PURE__ */ React.createElement("span", { className: "lv-fill" }), /* @__PURE__ */ React.createElement(
       "button",
       {
+        className: "lv-genall",
         onClick: () => {
           const pending = genDrawerRef.current && genDrawerRef.current.flushPromptEdit ? genDrawerRef.current.flushPromptEdit() : null;
           let liveEntries = entries;
@@ -6360,7 +6393,7 @@ ${"=".repeat(48)}
         disabled: batching,
         title: costTooltip(costEstimate) + " \u2014 estimate reflects Generate-all composition; a shot generated by hand from its own Video-tab drawer (esp. I2V/FLF with both cast images and a frame set) may price differently. Click to refresh."
       },
-      formatCostEstimate(costEstimate)
+      /^≈.*cr/.test(formatCostEstimate(costEstimate)) ? formatCostEstimate(costEstimate) + " to finish" : formatCostEstimate(costEstimate)
     ), /* @__PURE__ */ React.createElement(
       "button",
       {
@@ -6376,7 +6409,7 @@ ${"=".repeat(48)}
         onClick: () => exportCut(entries),
         title: "Trim + stitch every finished shot into one mp4 (ffmpeg)"
       },
-      "\u21E9 Render"
+      "\u21E7 Render"
     ), /* @__PURE__ */ React.createElement(
       ExportMenu,
       {
@@ -6386,7 +6419,7 @@ ${"=".repeat(48)}
         bundling,
         importBackup
       }
-    ), act.edge === "left" ? null : activityControl, /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: "/", style: { textDecoration: "none" } }, "\u2190 Gallery")), batchTally && (() => {
+    ), /* @__PURE__ */ React.createElement("span", { className: "lv-fill" }), act.edge === "left" ? null : activityControl, /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: "/", style: { textDecoration: "none" } }, "\u2190 Gallery")), batchTally && (() => {
       const outs = Object.values(batchTally.outcomes);
       const done = outs.filter((o) => o === "done").length;
       const failed = outs.filter((o) => o === "failed").length;
@@ -6610,7 +6643,12 @@ ${"=".repeat(48)}
   border:1px solid var(--surface1);background:none;user-select:none;white-space:nowrap;}
 .lm-chip:hover{border-color:var(--accent);color:var(--accent);}
 .lm-chip.on{color:var(--gold);border-color:var(--gold);background:color-mix(in srgb,var(--gold) 15%,transparent);
-  box-shadow:0 0 10px rgba(212,175,55,.35);}
+  /* issue #12: the glow used the DC's LITERAL default-gold rgba(212,175,55,.35)
+     while every other on-state channel re-skins via var(--gold) -- under the
+     Nightfallen skin that painted a faint yellow smudge beneath a pale-violet
+     chip, i.e. "still doesn't glow". Mixed from the skin's own gold instead,
+     and a touch stronger so it reads at chip size. */
+  box-shadow:0 0 10px color-mix(in srgb,var(--gold) 45%,transparent);}
 .lm-chip input{margin:0;cursor:pointer;}
 .lm-reelwrap{flex:none;padding:4px 16px 10px;position:relative;}
 .lm-reelbar{display:flex;gap:3px;height:18px;border-radius:4px;cursor:pointer;touch-action:none;}

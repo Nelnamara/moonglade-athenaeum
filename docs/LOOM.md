@@ -186,7 +186,8 @@ you cast shots.
   - **Full bundle .zip** — the project JSON plus every referenced media file.
 - Importing a backup **always creates a new storyboard** — it never overwrites or restores
   the currently open project in place.
-- The top bar's **↓ Export** button is unrelated: see *Layout* below.
+- The top bar's **⇧ Render** button is unrelated (it stitches video, not files): see
+  *Layout* below.
 
 ## Layout
 
@@ -199,12 +200,18 @@ shot to select it — the whole workspace binds to it), a **Generate drawer** on
 The top bar also carries:
 
 - **▾** — the Storyboards switcher, see *Storyboards* above.
-- **▶ Generate all (N)** — batch-renders every unfinished shot.
 - **⚡ Draft** — see *Draft mode* above.
-- **↓ Export** — trims and stitches every finished shot into one mp4 via ffmpeg. This is a
-  different feature from the **Export ▾** file-export dropdown above (both are labeled
-  "Export" — don't confuse them).
+- **📱 Mobile view** — switch to the phone-sized board/reel view (your project and any
+  in-progress draft are unaffected; the mobile bar has a 🖥 Desktop chip to come back).
+- **▶ Generate all (N)** — batch-renders every unfinished shot; the bar's one metallic
+  accent button.
+- **≈ N cr to finish** — the standing cost estimate for everything not yet rendered;
+  click to refresh.
 - **▶▶ Play** — plays every finished shot back-to-back (Play sequence).
+- **⇧ Render** — trims and stitches every finished shot into one mp4 via ffmpeg.
+- **Export ▾** — the file-export dropdown (shot list / backup / bundle / restore), see
+  *Saving, backup, export* above.
+- The **Activity** chip and **← Gallery** sit at the right edge.
 
 ## Workflow suggestions
 
