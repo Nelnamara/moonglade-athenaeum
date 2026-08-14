@@ -29,9 +29,9 @@ def _build(tmp_path, assets=None, payloads=None):
     default_assets = {
         "marks/marks.json": json.dumps(
             {"marks": [{"id": "mark_4", "label": "Crescent", "kind": "tile"},
-                       {"id": "mark_12", "label": "Tile Twelve", "kind": "tile"}]}).encode(),
+                       {"id": "mark_7", "label": "Tile Seven", "kind": "tile"}]}).encode(),
         "marks/mark_4.png": PNG_1PX,
-        "marks/mark_12.png": PNG_1PX,
+        "marks/mark_7.png": PNG_1PX,
         "banner.png": PNG_1PX,
         "badges/first-light.png": PNG_1PX,
         "banner_main/manifest.json": json.dumps(
@@ -139,7 +139,7 @@ def test_container_swap_is_picked_up_without_restart(tmp_path):
 def test_list_marks_reads_from_the_container(tmp_path):
     _build(tmp_path)
     marks = {m["id"]: m for m in g.list_marks(tmp_path)}
-    assert set(marks) == {"mark_4", "mark_12"}
+    assert set(marks) == {"mark_4", "mark_7"}
     assert marks["mark_4"]["png"] == "/branding/marks/mark_4.png"
 
 
@@ -157,7 +157,7 @@ def test_seed_promotes_shipped_manifest_before_first_write(tmp_path):
     added = g.add_custom_mark(tmp_path, PNG_1PX, "My Mark")
     ids = {m["id"] for m in g.list_marks(tmp_path)}
     assert added["id"] in ids
-    assert {"mark_4", "mark_12"} <= ids, (
+    assert {"mark_4", "mark_7"} <= ids, (
         "shipped defaults vanished after a custom upload -- the loose manifest "
         "was not seeded from the container before the read-modify-write")
 
