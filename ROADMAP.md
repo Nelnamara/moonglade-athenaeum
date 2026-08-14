@@ -50,11 +50,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   hard constraint that stands: never *fabricate* progress, and never let a queue-wait estimate
   read as a render ETA.
 
-- **Retest the V3.0 Lite 15s decline in the new UI**
-  The old cause (audio fields sent to a model that rejects them) was found and fixed, but that was
-  on the classic UI. Not re-verified since the React cut — submit V3.0 Lite at 15s and confirm it
-  snaps to 10s and renders rather than declining.
-
 - **Test the branding drop-file detection end to end**
   A dropped file in `branding/` is detected on the next Panel/branding surface load (deliberate
   design — no filesystem watcher), and that same sweep is what arms the hidden achievement.
@@ -70,17 +65,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 - **Contest workbench (beyond Shortlist)**
   The "☆ Shortlist" staging step shipped. The larger workbench — deadline tracking, submission
   management — is still just wanted, not scoped.
-
-- **Loom top bar: finish the styleset adoption**
-  The Loom's adoption of the new styleset was never fully applied across the top bar (owner,
-  2026-08-13, with a side-by-side): pill styling, the active-state fill on Generate all, the
-  "≈ N cr to finish" phrasing, the rendering-status chip, and ← GALLERY all differ from what
-  Claude Design handed down. [Issue #12](https://github.com/Nelnamara/moonglade-athenaeum/issues/12)'s
-  missing Draft-chip glow is one symptom of the same gap. UNBLOCKED 2026-08-13: the owner's
-  8.10 handoff zip carries the desktop frame — the pixel source is
-  `design_handoff/design_handoff_moonglade_suite/The Loom.dc.html` (machine-local, git-ignored),
-  synced into place alongside newer frames (Branding Workshop, Job Tracker Redesign/Fullscreen,
-  Setup Wizard, UI Kit v2) that later design passes should also build against.
 
 ---
 
