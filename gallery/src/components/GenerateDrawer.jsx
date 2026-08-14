@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import useGenerate from "../gen/useGenerate.js";
 import {
   ASPECTS, MODES, SIZES, dims, goGate, loraIncompat, loraRange, loraStep,
+  planLoraRestore,
 } from "../gen/genCore.js";
 import ModelFlyout from "./ModelFlyout.jsx";
 import CostBadge from "./CostBadge.jsx";
@@ -72,7 +73,14 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   // Lineage: "reusing settings from run #N" -- a LOCAL annotation only (no
   // backend concept exists for it), set at prefill time and cleared the moment
   // a new submission goes out. See prefillFromRun below + the composer chip.
-  const [reuseFrom, setReuseFrom] = useState(null);   // {jobId, tag}
+  const [reuseFrom, setReuseFrom] = useState(null);   // {jobId, tag, partial}
+  // Prefill epoch + busy gate (adversarial review 2026-08-13, findings 1.3 +
+  // 2.2): the epoch retires an older in-flight prefill wholesale the moment a
+  // newer one starts (no chimera recipes), and the busy flag holds the
+  // Generate button until the whole recipe -- LoRAs included -- has settled,
+  // so an impatient click can't submit the recipe minus its LoRAs.
+  const prefillSeq = useRef(0);
+  const [prefillBusy, setPrefillBusy] = useState(false);
   const costRef = useRef(null);
   const drawerRef = useRef(null);
   const g = useGenerate({ costRef });
@@ -229,6 +237,13 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
       setTab("video");
       // A midless request is the #video deep link: land on the tab, prefill nothing.
       if (request.mid) setVideoPrefill({ mode: "i2v", images: [{ media_id: request.mid, thumb: request.thumb }] });
+    } else if (request.tab === "remix") {
+      // Remix (issue #4): the picture's FULL recipe into the Image tab -- the
+      // same prefill the Runs reel's reuse click performs, reached from the
+      // grid context menu / Details footer. prefillFromRun is deliberately NOT
+      // in the dep array: its identity changes every render (it closes over
+      // `g`), and [request] alone is the one-shot-nonce contract above.
+      if (request.mid) prefillFromRun("", request.mid);
     }
   }, [request]);
 
@@ -301,14 +316,20 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
      the composer's model untouched rather than showing the old wrong-id
      failure toast for a case that isn't the user's mistake.
 
-     LoRAs are DELIBERATELY NOT reconstructed: the catalog's `loras` column is a
-     display-only "Name:0.7, Name2:0.5" string (moonglade_backup.resolve_loras)
-     with no model_id/version_id in it -- fuzzy-matching a LoRA back from its
-     name would risk wiring a DIFFERENT LoRA into a paid submission on a name
-     collision, which the spend-safety contract in gen/genCore.js explicitly
-     guards against ("never let a substitution pass unremarked"). Proposed,
-     disclosed deviation from the literal "loras+weights" in the click-wiring
-     spec -- see the report.
+     LoRAs are restored by EXACT version id, never by name (Remix, issue #4,
+     2026-08-13): /api/task-params reads the task's own parameters.lora --
+     {loraVersionId: weight}, the only LoRA record PixAI stores -- and resolves
+     each id to its base model server-side. The catalog's `loras` column stays
+     what it always was, a display-only name string; fuzzy-matching it back
+     would risk wiring a DIFFERENT LoRA into a paid submission on a name
+     collision, which the spend-safety contract in gen/genCore.js forbids
+     ("never let a substitution pass unremarked"). Consequences of that same
+     contract here: LoRAs only load when their OWN model was restored (exact
+     weights are only valid against the task's architecture); a second version
+     of the same LoRA model, an unresolvable id, or a failed read is COUNTED
+     and disclosed -- on the persistent chip, not just a toast; and the exact
+     rendered model VERSION is re-picked after the base-model apply (the
+     catalog's model_id IS that version id).
 
      model_id resolution runs FIRST and is awaited: applyModelRow can apply the
      newly-picked model's own preset (negative/steps/cfg) as a side effect, and
@@ -316,42 +337,108 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
      it. */
   const prefillFromRun = useCallback(async (jobId, mediaId) => {
     if (!mediaId) return;
-    let row;
+    const my = ++prefillSeq.current;
+    const live = () => prefillSeq.current === my;   // stale flows stop applying, wholesale
+    setPrefillBusy(true);
+    const notes = [];
     try {
-      const r = await fetch("/api/next/detail/" + encodeURIComponent(mediaId));
-      const d = await r.json();
-      if (d.error || !d.row) {
-        if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that run's settings", msg: d.error || "" });
+      let row;
+      try {
+        const r = await fetch("/api/next/detail/" + encodeURIComponent(mediaId));
+        const d = await r.json();
+        if (d.error || !d.row) {
+          if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that run's settings", msg: d.error || "" });
+          return;
+        }
+        row = d.row;
+      } catch {
+        if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that run's settings", msg: "Network error." });
         return;
       }
-      row = d.row;
-    } catch {
-      if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that run's settings", msg: "Network error." });
-      return;
-    }
-    if (row.model_id) {
-      let baseId = "";
-      try {
-        const rv = await fetch("/api/model-version?version_id=" + encodeURIComponent(row.model_id));
-        const dv = await rv.json();
-        baseId = (dv && dv.model_id) || "";
-      } catch { /* soft-fail: leave the composer's model untouched below */ }
-      if (baseId) {
-        await g.applyModelRow({ model_id: baseId, title: row.model_name || row.model_id, preview_url: "" });
+      if (!live()) return;
+      let modelOk = false;
+      if (row.model_id) {
+        let baseId = "";
+        try {
+          const rv = await fetch("/api/model-version?version_id=" + encodeURIComponent(row.model_id));
+          const dv = await rv.json();
+          baseId = (dv && dv.model_id) || "";
+        } catch { /* soft-fail: leave the composer's model untouched below */ }
+        if (!live()) return;
+        if (baseId) {
+          const applied = await g.applyModelRow({ model_id: baseId, title: row.model_name || row.model_id, preview_url: "" });
+          if (!live()) return;
+          if (applied) {
+            modelOk = true;
+            // applyModelRow lands on the base's LATEST version; the catalog's
+            // model_id is the version the task actually rendered with -- re-pick
+            // it exactly, checking membership on the RETURNED versions list
+            // (state can't be read this soon after an async apply -- a live run
+            // false-warned off exactly that). A genuinely delisted version is a
+            // DISCLOSED substitution.
+            if ((applied.versions || []).some((v) => v.version_id === row.model_id)) {
+              if (applied.version_id !== row.model_id) g.pickVersion(row.model_id);
+            } else {
+              notes.push("rendered version no longer listed — latest used");
+            }
+          }
+        }
       }
+      if (!modelOk) notes.push("model could not be restored — pick it manually");
+      g.set({
+        prompt: row.prompt_full || row.prompt_preview || "",
+        negative: row.negative_prompt || "",
+        customW: row.width ? String(row.width) : "",
+        customH: row.height ? String(row.height) : "",
+        steps: row.steps || "",
+        cfg: row.cfg_scale || "",
+        seed: row.seed || "",
+        loras: [],          // the recipe REPLACES composer LoRA state on every path below
+      });
+      const hadLoras = !!(row.loras || "").trim();   // catalog display string: "did the task use any?"
+      if (!row.task_id) {
+        if (hadLoras) notes.push("no task record — LoRAs unknown");
+      } else if (!modelOk) {
+        // exact weights are only valid against the task's own architecture --
+        // never wire them onto whatever model happened to be selected
+        if (hadLoras) notes.push("LoRAs not loaded without the model");
+      } else {
+        try {
+          const rt = await fetch("/api/task-params/" + encodeURIComponent(row.task_id));
+          const dt = await rt.json();
+          if (!live()) return;
+          if (dt.error) {
+            if (hadLoras) notes.push("LoRAs could not be restored");
+          } else {
+            // dedup/count/cross-check logic is the PURE planLoraRestore
+            // (genCore.js) so the node harness can pin it -- see
+            // loom/test/mg-remix-lora-plan.test.js
+            const plan = planLoraRestore(dt, hadLoras);
+            for (const lr of plan.rows) {
+              await g.addLora(lr);          // exact version_id + weight ride the row itself
+              if (!live()) return;
+            }
+            notes.push(...plan.notes);
+          }
+        } catch {
+          if (hadLoras) notes.push("LoRAs could not be restored");
+        }
+      }
+      setTab("image");
+      setExpanded(true);
+      // A reel click has a jobId; a Remix doesn't -- fall back to the row's own
+      // task id so the chip still reads "↺ from #NNNN" either way. `partial`
+      // rides the chip so an incomplete recipe stays visibly incomplete until
+      // cleared -- a toast alone is not a receipt (genCore.js contract).
+      const tagId = jobId || row.task_id || mediaId;
+      const partial = notes.join("; ");
+      setReuseFrom({ jobId: tagId, tag: "#" + String(tagId || "").slice(-4), partial });
+      if (partial && window.Toast) {
+        window.Toast.show({ kind: "info", title: "Remix is partial", msg: partial + " — review before generating." });
+      }
+    } finally {
+      if (live()) setPrefillBusy(false);
     }
-    g.set({
-      prompt: row.prompt_full || row.prompt_preview || "",
-      negative: row.negative_prompt || "",
-      customW: row.width ? String(row.width) : "",
-      customH: row.height ? String(row.height) : "",
-      steps: row.steps || "",
-      cfg: row.cfg_scale || "",
-      seed: row.seed || "",
-    });
-    setTab("image");
-    setExpanded(true);
-    setReuseFrom({ jobId, tag: "#" + String(jobId || "").slice(-4) });
   }, [g]);
 
   /* multi picker contract: (model, selected). The picker owns its own highlight
@@ -737,10 +824,12 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
                 </button>
                 <span className="mgdock-frames">{frameSummary}</span>
                 {reuseFrom && (
-                  <button type="button" className="mgdock-reusefrom"
+                  <button type="button" className={"mgdock-reusefrom" + (reuseFrom.partial ? " warn" : "")}
                     onClick={() => setReuseFrom(null)}
-                    title={"Prompt & core settings prefilled from run " + reuseFrom.tag + " — click to clear"}>
-                    ↺ from {reuseFrom.tag} <span>&times;</span>
+                    title={reuseFrom.partial
+                      ? "PARTIAL recipe from " + reuseFrom.tag + ": " + reuseFrom.partial + " — click to clear"
+                      : "Prompt & core settings prefilled from run " + reuseFrom.tag + " — click to clear"}>
+                    ↺ from {reuseFrom.tag}{reuseFrom.partial ? " ⚠" : ""} <span>&times;</span>
                   </button>
                 )}
                 <span className="sp" />
@@ -799,9 +888,10 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
               {account && account.credits != null && (
                 <span className="mgdock-subline">{Number(account.credits).toLocaleString()} credits</span>
               )}
-              <button type="button" className={"mgdock-gen" + (gate || g.busy ? " off" : "")}
-                disabled={!!gate || g.busy}
-                title={gate ? "Pick a model and write a prompt first" : "Submit — this spends credits or a card"}
+              <button type="button" className={"mgdock-gen" + (gate || g.busy || prefillBusy ? " off" : "")}
+                disabled={!!gate || g.busy || prefillBusy}
+                title={prefillBusy ? "Restoring the recipe…"
+                  : gate ? "Pick a model and write a prompt first" : "Submit — this spends credits or a card"}
                 onClick={() => { setReuseFrom(null); g.generate(loraCap); }}>
                 <span>&#10022; Generate</span>
               </button>

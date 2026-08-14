@@ -478,8 +478,15 @@ what *is* restricted to the server's own machine.
   offers it, and every pick is still there.
 - **Tag Suggestions** — Danbooru-style autocomplete in the **Generate** prompt, the **Generate**
   negative, and the **Edit** instruction (not the Video tab's prompt); **TAB** accepts.
-- **Bridges from the gallery**: right-click any thumbnail (Edit / Send to Video / Copy media id),
-  the same buttons in the lightbox, and multi-select → **Send to Video** in the bulk bar.
+- **Bridges from the gallery**: right-click any thumbnail (Edit / Send to Video / Remix / Copy
+  media id), the same Edit/Video buttons in the lightbox, **↺ Remix** in Image Details, and
+  multi-select → **Send to Video** in the bulk bar.
+- **↺ Remix** loads a picture's *full recipe* into the Generate tab — prompt, negative, size,
+  steps/CFG/seed, the model at the exact version it rendered with, and its LoRAs at their real
+  weights (recovered from the task itself, never guessed by name). It only fills the composer;
+  generating is still your click. If any part can't be restored — the model's gone, a LoRA was
+  delisted — the "↺ from #…" chip turns amber and says exactly what's missing, so review it
+  before you spend. Desktop for now.
 - Results are downloaded and cataloged automatically (`source='api'`; videos into `videos/`),
   so everything you make lands in your own library the moment it finishes.
 
