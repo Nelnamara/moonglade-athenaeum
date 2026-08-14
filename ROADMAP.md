@@ -66,6 +66,12 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   on the classic UI. Not re-verified since the React cut — submit V3.0 Lite at 15s and confirm it
   snaps to 10s and renders rather than declining.
 
+- **Test the branding drop-file detection end to end**
+  A dropped file in `branding/` is detected on the next Panel/branding surface load (deliberate
+  design — no filesystem watcher), and that same sweep is what arms the hidden achievement.
+  Verify it directly on a real install: drop a file, load the surface, confirm it's adopted and
+  the flag arms. If a dropped file goes undetected, that's a bug in the sweep, not the design.
+
 - **Confirm the live mirror really self-heals**
   The mirror is supposed to recover its own gaps automatically after a drop, stale socket or
   restart — no manual Panel job. That was the requirement ("im not suppposed to have to"), but it
