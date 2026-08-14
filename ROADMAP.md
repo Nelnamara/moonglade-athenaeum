@@ -78,6 +78,17 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ---
 
+## Open questions — need a call before they can be scoped
+
+- **Does the Loom become part of the same app?**
+  Today they are two separate builds: the gallery app (`gallery/dist/app.js`) and the Loom
+  (`loom/dist/master-storyboard.bundle.js`), with the gallery reaching the Loom by full-page
+  navigation to `/loom`. Nothing says whether they should merge. This is not a wiring task — the
+  two load React by incompatible means, and the Loom's root component would have to be broken up
+  before it could be embedded. Worth deciding deliberately, not drifting into.
+
+---
+
 ## Later — directional / banked
 
 - **Epic A — The Foundry (image → 3D print).** Gated on an explicit go, resin-first, its own optional
