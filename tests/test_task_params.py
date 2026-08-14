@@ -160,3 +160,21 @@ def test_exception_answers_redacted_error(tmp_path, monkeypatch):
     d = r.get_json()
     assert r.status_code == 200 and d["error"]
     assert "gwilkins" not in d["error"]
+
+
+def test_redactor_scrubs_foreign_user_homes_any_os(tmp_path):
+    """Issue #14: the candidate list only knows THIS machine's directories, so a
+    path under any OTHER username used to sail through. The generic user-home
+    pass must scrub the home prefix on every OS's layout -- and only the
+    prefix, so the tail stays readable -- without eating ordinary text."""
+    from moonglade_gallery import _redact_host_paths_cli
+    red = lambda m: _redact_host_paths_cli(tmp_path, m)
+    assert "gwilkins" not in red(r"open C:\Users\gwilkins\secret\x failed")
+    assert "gwilkins" not in red("open C:/Users/gwilkins/secret/x failed")
+    assert "alice" not in red("read /home/alice/library/img.png: denied")
+    assert "bob" not in red("stat /Users/bob/backup: no such file")
+    out = red(r"D:\Users\Someone Else\place blew up")
+    assert "Someone" not in out and "blew up" in out       # prefix only
+    # Ordinary prose with no user-home path is untouched.
+    msg = "retry in 0.5s (attempt 2 of 3): connection reset by Users of the API"
+    assert red(msg) == msg
