@@ -848,122 +848,6 @@ are non-feat, so both sit in the required pool, and neither metric can ever incr
 Enhance never dispatches for an API-key client. **The top of the ladder is therefore unreachable
 by anyone.** Recorded here as a defect, not a design item.
 
-## The gallery top — the owner's own placement, 2026-07-27 · NOT locked
-
-*The owner did the placement himself in a component editor, and it is the best current reference
-for this surface — but he never locked it. The LOCKED status this section carried until 2026-07-28
-was stamped during the parsing of his design-pass answers, not by him ("No where did I lock this —
-that was unilaterally decided for me"). Locking is his explicit call; until he makes it, this is
-direction to review with him, not a pixel source of truth a build verifies against.*
-
-### The principle: sort by persistence, not by available space
-
-The header is `position:sticky` and collapses on scroll, so the page has two zones with completely
-different value. **Destinations** (Panel, Health, Contests, My Art, Publish, Folio, Profile, Sign
-out, notifications) live in the transient upper banner — you use them on arrival, not while
-working, so losing them to a scroll costs nothing. **Everything operational** (search, Media,
-Collection, Per page, Blur, Select, Clear, Filter, Reset, Import, Generate, The Loom, credits,
-brand, stats) lives in the strip that survives.
-
-This was the owner's insight and it is better than three alternative headers that sorted by where
-there happened to be room. Do not "tidy" a destination down into the persistent strip or an
-operational control up into the banner — the split is the design.
-
-### The filter bar is DELETED, not shrunk
-
-There is no `.filters` row. Its contents went three ways:
-- **out to the bar as pills/chips** — Media (three pills), Collection (chip), Per page (stepper)
-- **into the advanced flyout** — Search prompt, Sort, Saved views, Model, LoRA, From/To dates,
-  Min rating, Source, Tag/contest, Published only, plus the search-operator helper text
-- **to Deep Focus** — Thumb size
-
-`More` is gone entirely: once the bar it belonged to does not exist, it has nothing to reveal.
-**Filter and Reset stay visible on the page** — owner's explicit requirement, for same-page
-convenience.
-
-### The advanced flyout is ANCHORED, never placed
-
-Its position is derived from the search field: aligned to the input's left edge, ~6px below it.
-There is no flyout coordinate to capture, and a fixed `y` is wrong — it must survive the field
-being resized or the row reflowing. The **activator sits inside the search field at its right end**
-(`Advanced ▾`). The editor could not drag the flyout low enough because a tall component was
-clamped inside the stage; that was an artefact of the tool, not the intent.
-
-### Metal, and why colour is rationed
-
-Neutral controls take a **metallic** treatment — top-edge highlight, vertical gradient, seated
-shadow, built from white-alpha over the skin's own surface so it re-tints with every skin rather
-than being hard-coded. Applied to Clear, Select, Filter, Reset, Import, the search field, the
-Actions menu header, and the five destination buttons.
-
-**Colour means something and is not spent on ornament:** lavender = the primary action (Generate),
-cyan = The Loom, gold = credits, red = destructive. Giving Filter/Reset/Select their own hues would
-leave no hierarchy at all. Metal gives them physical presence without costing colour — and the
-owner's hunch was right that it makes the themes read more strongly, because the metal borrows the
-active skin instead of fighting it.
-
-**Back glow on exactly three things** — Generate (lavender), The Loom (cyan), the credit badge
-(gold). Nothing else glows, which is what keeps the glow meaningful.
-
-### The Loom is cyan/teal
-
-Driven by a single `--loomc` token. Chosen because it is already one of the Loom's own internal
-palette aliases (so not invented), because cyan reads as screen/motion for a video surface, and
-because it sits far from Generate's lavender so the two loudest buttons do not compete. **Known
-collision:** cyan is also the "1 running" status pill — accepted, since that is a readout rather
-than a button. **Coral** (`--peach`) is the banked alternative if the collision ever grates; it is a
-one-line token swap.
-
-### The persistent strip is 72px, not 62px
-
-Raised from the live app's `--bnr-slim: 62px` because the owner fits two rows into it with nothing
-to spare. Shipping it means changing that one token — the bulk bar's own JS reads the same value to
-position itself, so both move in step.
-
-### Banner composition is now a RULE, not a habit
-
-Banners are **1920×480 (4:1), composed subject-left**, because the right side carries UI. Only the
-bottom 72px is guaranteed visible. A banner with its subject on the right breaks the layout.
-Note `banner_legacy.png` is 2048×1024 (2:1) and is **incompatible** with this rule. Also worth
-knowing: the app caps display at 300px, so ~37% of every 480px banner is never shown — raising the
-clamp is available at zero art cost whenever wanted.
-
-### Control shapes: one language, three behaviours
-
-Pills toggle (Media, Blur). Chips open menus (Collection, Sort where it appears). A stepper steps
-(Per page — **deliberately not a slider**, because its values are discrete: 50/100/200/500, and a
-slider makes 200 hard to hit). Same visual family, different mechanics.
-
-The five destination buttons — **Panel, Health, Contests, My Art, Publish** — share one width
-(112px, centred), set by "Contests" as the longest label, so the right rail reads as a set. The rail
-steps evenly by 40px.
-
-### Select all: CUT
-
-Removed 2026-07-27. It looked like a capability and is only a convenience: `selectAll()` walks the
-checkboxes **rendered on the current page** and *adds* them to the existing set — and the selection
-lives in `localStorage` precisely so it survives pagination, which means **drag-select accumulates
-across pages exactly the same way**. So its sole advantage over drag-select was one click versus one
-drag, and the owner reaches for drag-select. `Select` and `Clear` stay, grouped ~8px apart.
-
-Two wrong justifications were argued for keeping it before the code was read — that it selects
-everything matching the filter (it does not, it is page-scoped) and that it uniquely accumulates
-across pages (it does not, drag-select does too). Recorded so nobody re-derives them.
-
-**Kept behaviour worth not breaking:** a fresh tab wipes the selection via a `sessionStorage`
-marker, so a stale multi-page selection cannot be inherited and acted on by accident.
-
-### The Actions menu
-
-Appears only when a selection exists; placed left of the search field. Its eight items and the two
-destructive ones in red are as shipped. **Its pill is a nudge smaller** than the other metal pills.
-
-### Coordinates
-
-The owner's own placement export lives with the design editor artifact. Treat the export as the
-positions and this section as the reasoning — if they ever disagree, the export is the geometry and
-this text is why.
-
 ## Design sources
 
 *Mockups and artifacts that are the pixel source of truth for a surface. A visual build verifies against the named source — never against prose.*
@@ -2369,12 +2253,6 @@ The included mark/icon set is the DEFAULT set — the launcher-icon picker keeps
 
 **Why.** Owner's design, answering the "are the tab/launcher icons gated?" question with something better than a yes/no: the default experience stays whole, achievements keep gating their own marks, and the unlock's reward is additive — your own mark, plus the hub to manage all of it.
 
-### Two manufactured statuses corrected: subject-left was never retired, and the gallery top was never locked  ·  *2026-07-28*
-
-Owner, on reviewing the doc-action sweep: two of his design-pass answers were parsed into decisions he never made. (1) **Subject-left stands.** The banner composition rule — focal content in the left third, because the right side carries UI — was never retired by him. A doc pass declared it "retired by the code" off the no-banner mask, missing that every header control renders ON TOP of the art (`header > * { z-index: 1 }`). The rule covers the gallery banner AND the Loom slim banner — which is the surface his answer was actually about. ART.md's passage siding with the "retirement" against his 2026-07-04 reassertion is corrected as of today. Any O5 slim-banner composition advice that carried "subject-left should not be carried over" is void. (2) **The gallery top is NOT locked.** He did the placement himself in the component editor, but the LOCKED stamp was applied in parsing — owner verbatim: *"No where did I lock this — that was unilaterally decided for me."* The section heading above is corrected; a build starts only after he explicitly locks the design, consistent with his own D1 note ("want a review pass first").
-
-**Why.** Standing rule going forward: **no session stamps LOCKED, settled, retired, or source-of-truth on the owner's behalf** — those statuses exist only when he says the words, and a quoted verbatim beats every paraphrase. And an owner design rule is never falsified by reading CSS — code shows mechanics, not intent.
-
 ### Boosters are PER-MODEL on PixAI, and our drawer offers all three on everything  ·  *measured live 2026-07-28*
 
 Measured in PixAI's own generate panel, driving the owner's account: on **Tsubaki.2 (DiT.2)** the Add Booster menu offers ONLY **Quality Tag** and **To Video**, both crowned (members-only). **Face Fix and Enhance Details (HiRes) are not offered at all** on that model. On an **SDXL** model (owner's capture) Face Fix and Enhance Details ARE offered and un-crowned, with the same two crowned extras beneath. So booster availability is a per-model property, and the crowned pair is a membership gate on top of it.
@@ -2461,21 +2339,6 @@ auto-reloader). Verified live post-restart: a fresh save's `created_at` lands as
 genuinely the first tile in the default view, ahead of every previously-collected row.
 
 ---
-
-### Open, unscoped, and not yet asked of the owner: does the Loom become part of the same app?
-
-Neither `master`'s nor `gallery-top`'s `DECISIONS.md` states whether the Loom and the new React
-gallery become one unified application. The only relevant entry (`gallery-top`, "gallery UI
-moves to React, the Loom's way") describes them being *built the same way*, phased, with Flask
-staying one shared backend — not merging into one bundle. The code as shipped already diverged
-from even that: the Loom loads React via vendored UMD globals + Babel-standalone (or a stripped
-esbuild bundle that deliberately does NOT bundle React), while the Mix pilot used real npm
-`react`/`react-dom` through Vite's ESM graph — two incompatible React-loading strategies that
-have never coexisted in one bundle. The pilot only ever linked to `/loom` as a full-page
-navigation, never embedded it. Merging them would mean rewriting the Loom's delivery mechanism
-(dropping vendor-globals/Babel-standalone for real npm React, decomposing its single 4,178-line
-root component into something embeddable) — genuinely large, not a wiring task. **Ask the owner
-directly whether this is in scope before assuming either answer.**
 
 ## 2026-08-01 — design-kit merged; the handoff map is NOT trusted until audited after the React conversion
 
