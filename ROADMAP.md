@@ -59,8 +59,11 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 - **Confirm the live mirror really self-heals**
   The mirror is supposed to recover its own gaps automatically after a drop, stale socket or
   restart — no manual Panel job. That was the requirement ("im not suppposed to have to"), but it
-  hasn't been re-confirmed lately. Verify it in practice; if it holds, the old guardrail note can
-  stay retired.
+  hasn't been re-confirmed lately. **Test recipe:** create the gap on purpose — stop the server,
+  complete one generation while it's down (site or CLI from another window; or kill the network
+  for a minute mid-generation instead), start it back up. The piece must appear in the gallery on
+  its own within the sweep interval, with no manual sync. If the button has to be pressed, it
+  failed.
 
 - **Contest workbench (beyond Shortlist)**
   The "☆ Shortlist" staging step shipped. The larger workbench — deadline tracking, submission
@@ -160,11 +163,12 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   as the Konami one. Banked, unscoped.
 - **Loom preview / placement follow-ups.** A handful of small Loom tweaks on a surface the owner
   already likes. Low priority, deliberately unscoped — owner to walk it.
-- **Public-docs spoiler-hygiene pass.** `ART.md` / roadmap notes still describe achievement
-  internals; decide what moves to private, what's trimmed, what stays. Low priority.
-  **Known live leaks:** `wiki/Folio-of-Honors.md` prints the skin-unlock threshold table, and
-  `wiki/Control-Panel.md` names the gated Branding tab — both need the same scrub the changelog
-  already got.
+- **Public-docs spoiler-hygiene pass — the docs/ half.** The wiki half is done (Folio page
+  scrubbed of the rung/threshold tables, milestone triggers, masteries criteria, and the
+  skin-unlock table, 2026-08-14; Control-Panel.md checked clean). Remaining: `docs/ART.md`
+  still carries the full badge list (ids, tiers, trigger conditions, art prompts) in a public
+  repo — decide what moves to git-ignored `private/`, what's trimmed, what stays. Structural
+  (ART.md is referenced by CLAUDE.md and the art pipeline), so it needs its own pass.
 
 - **Dead achievements in Completionist's pool.** Three required achievements are permanently
   unearnable (`first-enhance`, `enhance-adept`, `full-toolbox` — all depend on the removed

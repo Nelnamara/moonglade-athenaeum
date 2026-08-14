@@ -14,46 +14,26 @@ and your trophies come with you.
 ### Evolution Ladders
 
 The backbone. Ten tracks, each one concept climbed rung by rung — common at the foot,
-legendary at the crown.
+legendary at the crown. Each track follows one thing you do here: your archive's growth,
+videos woven in The Loom, generations made in the app, collections, the breadth of models
+you draw from, tagging, publishing, edits, curation culls, and simply showing up.
 
-| Track | Counts | Rungs |
-|---|---|---|
-| **The Archive** | images backed up | First Light (1) · Archivist (1,000) · Hoardsmith (10,000) · Loremaster (25,000) · The Great Library (50,000) |
-| **The Loom** | videos | First Frame (1) · Moonweaver (10) · Reel Director (50) · Cinematheque (100) |
-| **The Moonforge** | generations made *in* the app | First Spark (1) · Apprentice of the Forge (100) · Forgemaster (500) · Starsmith (1,000) |
-| **The Stacks** | collections | Curator (10) · Grand Curator (50) |
-| **The Menagerie** | distinct models drawn from | Menagerie (25) · Conclave of Hands (75) |
-| **The Index** | tagged pieces | Tag Scribe (50) · Tagsmith (500) · Catalogus Magnus (2,500) |
-| **The Gallery** | published works | Gallery Opening (10) · Vernissage (100) |
-| **The Restoration Wing** | edits run | Restorer (1) · Restitcher (50) · Masterworker (200) |
-| **The Great Sweep** | pieces culled | First Cull (1) · The Winnowing (100) |
-| **The Vigil** | distinct days you opened the app | Night Keeper (7) · Moonwatch (30) |
-
-**The Archive** counts everything in your library; **The Moonforge** counts only what you
-made here — pieces the gallery's Source filter calls **Generated or Imported**, not
-everything The Archive counts, but broader than **Source → Generated** alone (which
-excludes Imported).
+Every ladder's cards are right there in the Folio — locked rungs show their name, their
+progress bar, and `current / threshold`, so the climb is never a secret once you're
+looking at it. What the next crown asks of you is best discovered on the shelf itself.
 
 ### Milestones
 
 One-shot first-times. They fire the first time you touch a capability, so they mostly
-double as a tour of the app: **Keeper of Order** (run [Organize](Backing-Up)),
-**Interior Decorator** (wear a skin), **Refiner's Touch** (first enhance), **Woven In**
-(first LoRA), **Brought From Afar** (first upload), **Storyweaver** (send a shot from
-The Loom), **Kindred Spirits** (use ✧ Similar), **Claimant** (claim a daily reward), and
-**For the Viewers** (publish a work).
+double as a tour of the app — the first time you organize the library, wear a skin,
+upload a piece, send a shot from The Loom, claim a daily reward, publish a work… each
+gets its moment. If you're exploring the app, you're earning them.
 
 ### Masteries
 
-Breadth rather than depth — use *all* of a thing, or gather *N* distinct ones:
-**Master of the Loom** (all three ways to move a frame), **The Full Toolbox** (edit,
-enhance and fix), **Stacked Deck** (three LoRAs on one summoning), **Polyglot of Sigils**
-(15 distinct LoRAs), **Enhance Adept** (five different enhance workflows), **Skin-Changer**
-(unlock every skin), **Thrifty Archivist** (50 free cards spent), and **The Lexicon**
-(100 distinct keywords).
-
-**Master of the Loom** and **The Full Toolbox** show a per-item checklist on the card, so
-you can see *which* piece you're still missing rather than just "2 / 3".
+Breadth rather than depth — use *all* of a thing, or gather *N* distinct ones. Where a
+mastery has a short, knowable list behind it, its card shows a per-item checklist so you
+can see *which* piece you're still missing rather than just "2 / 3".
 
 ### …and one more
 
@@ -75,8 +55,7 @@ Every achievement carries a tier, and the tier sets a base score:
 | legendary | 50 |
 
 Ladder rungs add **+5 per step up the track**, so a crown is worth more than the same
-tier sitting on its own — *Loremaster* (rung 4 of The Archive) is 65, not 50. Feats
-score 0.
+tier sitting on its own. Feats score 0.
 
 The header keeps a running total: how many of the visible achievements you've earned,
 and your points out of the possible total.
@@ -89,19 +68,18 @@ Three tabs across the top:
   progress bar for the overall roster and for each category.
 - **All** — an auto-rotating showcase of your active ladder's tiers up top, a badge row
   to switch between all 10 ladders, that ladder's tiers as cards, then every ladder in
-  turn under its own divider, then Milestones/Masteries/Feats the same way. Legendary and
-  feat cards carry the same ornate 9-slice frame the unlock celebration uses. Earned
+  turn under its own divider, then Milestones/Masteries/Feats the same way. Earned
   cards light up and carry a one-line commentary from the narrator; locked ones show a
   progress bar and `current / threshold`.
 - **Statistics** — achieved/points/feats at a glance, plus breakdowns by category, by
   rarity, and by ladder completion, and underneath all the raw numbers behind the
   thresholds: images archived, videos, collections, models used, published works, tagged
-  pieces, local generations, best day, distinct keywords, edits, enhances, uploads,
+  pieces, local generations, best day, distinct keywords, edits, uploads,
   culled, days visited, LoRA uses, distinct LoRAs, Loom shots, more-like-this uses,
   rewards claimed, free cards used.
 
 The **search box** in the header filters by name, description or tier and jumps you to
-the **All** tab as you type. The right-hand rail's **Categories** list now filters
+the **All** tab as you type. The right-hand rail's **Categories** list filters
 in place — click one to show only that category, click again to clear it — alongside
 **Within Reach** (the three locked achievements you're closest to finishing) and
 **Relics**, a read-only look at all five skins (locked ones dimmed with a lock icon,
@@ -115,17 +93,9 @@ to replay its celebration.**
 ## Skins
 
 Some epic achievements unlock a **skin** — a palette swap applied across the whole
-suite. Five ship in total:
-
-| Skin | How you get it |
-|---|---|
-| **Moonglade** | free (the default — lavender leads, emerald magic) |
-| **Nightfallen** | free (void-touched violet and star-ash) |
-| **Moonlit Silver** | Hoardsmith — 10,000 images |
-| **Embercourt** | Reel Director — 50 videos |
-| **Verdant Grove** | Menagerie — 25 distinct models |
-
-A card tells you up front if it unlocks one (**★ unlocks … skin**), and unlocking all
+suite. Five ship in total: two free (**Moonglade**, the lavender-and-emerald default,
+and the void-touched **Nightfallen**) and three earned. A card tells you up front if it
+unlocks one (**★ unlocks … skin**), so the Folio itself is the map — and unlocking all
 five earns **Skin-Changer**.
 
 Skins are applied from the **Control Panel** (⚙ Panel → **🎨 Skins**), not from the
@@ -138,18 +108,12 @@ server, so there's nothing to cheat.
 Most metrics are counted live off `catalog.db` every time you open the Hall — images,
 videos, collections, models, published, tagged, local generations, keywords. The rest
 are **persisted counters** kept in `telemetry.json` beside your catalog, bumped as you
-work: edits, enhances, uploads, culls, days visited, LoRA uses, Loom shots, claims and
+work: edits, uploads, culls, days visited, LoRA uses, Loom shots, claims and
 free cards.
 
 Those counters are bumped from the **CLI too**, not just the web UI — so an `--organize`
 run, a `--dedup --apply`, a `--claim`, and every free card auto-applied to a generation
-all count toward your trophies:
-
-```bash
-python moonglade_backup.py --organize          # Keeper of Order
-python moonglade_backup.py --dedup --apply     # The Great Sweep
-python moonglade_backup.py --claim all --confirm   # Claimant
-```
+all count toward your trophies. Working from the terminal never costs you a moment.
 
 Your earned dates, the skin you're wearing, and which unlocks have already been
 celebrated live in `achievements.json` in the same folder. Both files fail soft — if
