@@ -205,6 +205,20 @@ class TestOutputsOrRaise:
         assert raw_status.lower() in msg.lower()
         assert "pixai.art" in msg, "no pointer to where the real reason might be found"
 
+    @pytest.mark.parametrize("raw_status", ["queued", "running", "Waiting", "PROCESSING"])
+    def test_a_still_running_task_says_yet_not_lost(self, raw_status):
+        """Issue #8: recovering a task that simply hasn't finished used to report
+        'no media found', which reads as a lost PAID generation -- the opposite
+        response (wait vs. investigate) from what the situation calls for. A
+        non-terminal status now says the task is still going and to come back."""
+        with pytest.raises(core.EmptyOutputsError) as exc:
+            core._outputs_or_raise({"status": raw_status}, found=[],
+                                   empty_message="task completed but no media ids found")
+        msg = str(exc.value)
+        assert "completed" not in msg
+        assert raw_status.lower() in msg.lower()
+        assert "YET" in msg
+
 
 # ---- referenceVideo (multi-image/video/audio) -- pinned to the real submit (2026-07-02) ----
 
@@ -885,3 +899,16 @@ def test_video_outputs_reads_a_plain_i2v_not_just_reference_video():
     # A task with neither block still returns the empty shape rather than raising.
     assert core.video_outputs({"parameters": {}, "outputs": {}}) == ([], {
         "prompt": "", "duration": "", "i2v_model": ""})
+
+
+def test_mode_can_never_ride_absent_on_the_video_spend_path():
+    """Issue #6: read-only price probes on one real shot measured professional
+    18,000 / basic 14,000 / OMITTED 50,000 -- PixAI's own default is the ~3x
+    one. The builder refuses to produce a payload without an explicit mode, so
+    no future caller can 'omit it to be safe' into a triple-price submit."""
+    for bad in (None, "", "auto", "pro"):
+        with pytest.raises(ValueError):
+            core.build_video_parameters("p", media_id="1", model="v4.0.1", mode=bad)
+    for good in ("basic", "professional"):
+        p = core.build_video_parameters("p", media_id="1", model="v4.0.1", mode=good)
+        assert p["i2vPro"]["mode"] == good

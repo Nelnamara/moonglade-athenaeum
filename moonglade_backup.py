@@ -5505,7 +5505,11 @@ def _gen_parameters(args):
     # Quality mode (inferenceProfile) is MODEL-TYPE-SPECIFIC: SD_V1_MODEL accepts
     # lite/standard but rejects pro/ultra (those are for newer model types). So we
     # only send it when explicitly chosen; "auto"/"" omits it and lets PixAI pick
-    # the model's default (always safe -- this is the original working behavior).
+    # the model's default. Safe for VALIDITY (the original working behavior) --
+    # NOT a general promise about PRICE: on the video path the omitted default is
+    # the ~3x-expensive one (issue #6, build_video_parameters' mode guard). If a
+    # price probe ever shows inferenceProfile behaving the same way, stop
+    # omitting here too.
     mode = (getattr(args, "mode", "") or "").strip().lower()
     if mode and mode != "auto":
         params["inferenceProfile"] = mode
@@ -5670,6 +5674,15 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
     NOTE: video costs FAR more than images (~27.5k credits for a 5s V4.0 clip), so
     submission stays gated behind explicit --confirm. This builder spends nothing.
     """
+    # NEVER let `mode` ride absent/empty on this spend path (issue #6): read-only
+    # price probes on one real shot measured professional 18,000 / basic 14,000 /
+    # OMITTED 50,000 -- PixAI's own default is the expensive one, so "omit it and
+    # let the server pick" is ~3x the money. Every caller today passes a real
+    # value; this guard is for the next caller, and it fails LOUDLY at build time
+    # (previews run this builder long before any --confirm can spend).
+    if mode not in ("basic", "professional"):
+        raise ValueError("i2vPro.mode must be 'basic' or 'professional', got %r -- "
+                         "omitting it triples the price (issue #6)" % (mode,))
     i2v = {
         "model": model,
         "mediaId": str(media_id),
@@ -6335,7 +6348,13 @@ def _outputs_or_raise(result, found, empty_message):
     `empty_message` is the ORIGINAL message, used verbatim for the case it was always
     right about -- a task that is genuinely done with empty outputs (e.g. silently
     content-filtered). Only the newly-distinguished failed/cancelled/rejected case gets
-    different text; nothing about the genuinely-empty case changes."""
+    different text; nothing about the genuinely-empty case changes.
+
+    Issue #8 (2026-08-13) added the third case the same lesson demanded: a task whose
+    status is NON-terminal (queued/running) is not missing anything -- it simply hasn't
+    produced output YET, and 'no media found' there reads as a lost paid generation and
+    sends real debugging effort at a task that is fine. Wait vs. investigate are
+    opposite responses; the message now says which one applies."""
     if found:
         return
     raw = str((result or {}).get("status") or "").lower()
@@ -6343,6 +6362,10 @@ def _outputs_or_raise(result, found, empty_message):
         raise EmptyOutputsError(
             "PixAI reported this task as '{}' -- it did not complete, so there is "
             "nothing to recover. Check pixai.art for why, or resubmit.".format(raw))
+    if raw and raw not in _GEN_DONE:
+        raise EmptyOutputsError(
+            "this task is still '{}' on PixAI -- nothing to collect YET. It hasn't "
+            "finished (or failed); try again once it completes.".format(raw))
     raise EmptyOutputsError(empty_message)
 
 
@@ -10795,7 +10818,8 @@ def main():
     gen.add_argument("--mode", default="auto",
                      choices=["auto", "lite", "standard", "pro", "ultra"],
                      help="quality mode (inferenceProfile). auto (default) lets PixAI pick the "
-                          "model's default -- always safe. lite/standard suit SD_V1 models; "
+                          "model's default -- always VALID (price depends on the model's own "
+                          "default). lite/standard suit SD_V1 models; "
                           "pro/ultra are for newer model types (an unsupported mode is rejected)")
     gen.add_argument("--no-prompt-helper", dest="prompt_helper", action="store_false",
                      help="disable PixAI's prompt-helper (use your prompt more literally; "
