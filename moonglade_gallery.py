@@ -2849,6 +2849,37 @@ def telemetry_metrics(out_dir):
     return m
 
 
+def first_sync_complete(out_dir, db_path):
+    """True once the first FULL library sync has finished -- the gate that stops the
+    achievement unlock toasts from firing mid-first-sync. `first-light` is metric
+    images>=1, so without this gate it pops the instant image #1 lands, seconds into a
+    fresh install's very first sync (and every image rung crosses the same way). While
+    this is False, /api/achievements withholds `newly` and leaves `seen` untouched, so
+    the rungs earned during the first sync fire together AFTER it completes, not during.
+
+    Set by `--sync`'s completion (telem flag 'first_sync_done') -- the CLI path AND the
+    wizard's sync job both run `--sync`, so one setter covers both.
+
+    Backfill for PRE-EXISTING installs so they neither suppress nor spam: keyed on
+    prior achievement recognition (`seen`/`earned_at` present), NOT on images>0. An
+    images-based backfill would re-fire the bug -- during a fresh first sync the image
+    count climbs above zero, so it would flip the flag mid-sync. Any install that has
+    ever surfaced an achievement has a non-empty `seen`/`earned_at`; a fresh mid-first-
+    sync install cannot (the gate keeps `seen` empty until completion). The rare install
+    with a real library but a pristine achievement state simply resolves on its next
+    `--sync`."""
+    try:
+        if load_telemetry(out_dir)["flags"].get("first_sync_done"):
+            return True
+        st = load_ach_state(out_dir)
+        if st.get("seen") or st.get("earned_at"):
+            telem_flag("first_sync_done", out_dir=out_dir)
+            return True
+    except Exception:                                    # never let the gate crash the route
+        return True                                      # fail OPEN: a broken gate must not hide trophies forever
+    return False
+
+
 def _has_loose_marks():
     """Pure-filesystem check: at least one REAL, on-disk mark (a loose
     marks.json entry whose .png exists loose). Deliberately NOT list_marks() --
@@ -9367,13 +9398,19 @@ def create_app(out_dir: Path):
             pass
         metrics = achievement_metrics(db_path)
         metrics.update(telemetry_metrics(out_dir))
+        # Gate the unlock toasts until the first full sync completes (see first_sync_complete):
+        # first-light is images>=1, so without this it pops seconds into a fresh first sync.
+        fsd = first_sync_complete(out_dir, db_path)
         persist_error = None
         with _ach_lock:
             state = load_ach_state(out_dir)
             result = compute_achievements(metrics, state.get("seen"),
                                           sets=load_telemetry(out_dir).get("sets", {}))
             newly = result["newly"]
-            if request.args.get("mark") == "1":
+            if not fsd:
+                result["newly"] = []   # first sync still running -- withhold celebrations and
+                newly = []             # leave `seen` untouched so the rungs fire on completion
+            if fsd and request.args.get("mark") == "1":
                 today = _dt.date.today().isoformat()
                 ea = dict(state.get("earned_at") or {})
                 # stamp every currently-earned achievement not yet dated: backfills the

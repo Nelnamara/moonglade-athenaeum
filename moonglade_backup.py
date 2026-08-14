@@ -11169,6 +11169,15 @@ def main():
                 except Exception as e:                   # noqa: BLE001 -- advisory step, never fatal
                     print("  reconcile skipped: {}".format(e))
                 print("Sync complete.")
+                # Mark the first full sync done so the gallery stops withholding achievement
+                # unlock toasts (first-light etc. fire on completion, not seconds into the
+                # very first sync). Idempotent; covers the wizard too (its "Sync now" job
+                # runs this same --sync). Fail-soft: a telemetry hiccup must not fail the sync.
+                try:
+                    import moonglade_gallery as _mg
+                    _mg.telem_flag("first_sync_done", out_dir=out)
+                except Exception:
+                    pass
             except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
                 _cli_job_finish(out, _job, error=e)
                 raise

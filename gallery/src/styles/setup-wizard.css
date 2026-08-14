@@ -7,6 +7,15 @@
 @keyframes wzFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes wzSpin { to { transform: rotate(360deg); } }
 @keyframes wzHalo { 0%, 100% { opacity: .3; transform: scale(.92); } 50% { opacity: .75; transform: scale(1.06); } }
+/* Loose sync to the download mascot's own animation (nel_wizard.webp, a 9.1s loop whose
+   steam surges purple ~46% in). This colour swell rides ON TOP of wzHalo's breathing and
+   shares the 9.1s period, so glow and steam re-align every loop instead of drifting. Calm
+   colour ~= the resting lavender; the peak is a brighter, more saturated purple. */
+@keyframes wzHaloSurge {
+  0%, 22%   { background-image: radial-gradient(circle, rgba(182,146,230,.42), transparent 66%); }
+  46%       { background-image: radial-gradient(circle, rgba(196,110,250,.72), transparent 66%); }
+  68%, 100% { background-image: radial-gradient(circle, rgba(182,146,230,.42), transparent 66%); }
+}
 @keyframes wzPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(182,146,230,.45); } 50% { box-shadow: 0 0 0 8px rgba(182,146,230,0); } }
 @keyframes wzMetal { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
 
@@ -114,6 +123,11 @@
 .wz-quietbtn { display: block; margin: 12px auto 0; font-size: 11px; font-weight: 600;
   color: var(--subtext); cursor: pointer; background: none; border: none; font-family: inherit; }
 .wz-quietbtn:hover { color: var(--text); }
+/* The sync-screen "browse now" exit -- shown once ~50 items are in (past the empty-catalog
+   bounce). A touch more presence than the plainer quiet links, since a large library's first
+   sync is a long wait and leaving early is the point; the sync keeps running server-side. */
+.wz-syncexit { margin-top: 18px; font-size: 12.5px; color: var(--lavender); letter-spacing: .01em; }
+.wz-syncexit:hover { color: #efecf8; }
 
 /* ---- sync ---- */
 .wz-syncwrap { text-align: center; padding: 8px 4px 4px; }
@@ -123,6 +137,15 @@
   animation: wzHalo 1.8s ease-in-out infinite; }
 .wz-syncmascotimg { position: relative; z-index: 2; width: 100%; height: 100%; object-fit: contain;
   animation: wzSpin 2.4s cubic-bezier(.6,.1,.4,.9) infinite; }
+/* Download-screen mascot: an inline base64 webp (see art/nelWizard.js), so it renders
+   before the asset container it is fetching exists. Its own art is animated (Nel cranking),
+   so it does NOT get wzSpin -- the art carries the motion. Distinct from .wz-syncmascotimg
+   on purpose: that class is still the <img> the nel_narrator sync screen uses. */
+.wz-syncmascotart { position: relative; z-index: 2; width: 100%; height: 100%;
+  background-size: contain; background-repeat: no-repeat; background-position: center; }
+/* Only the download halo surges purple with the steam; the plain .wz-synchalo (narrator
+   screen) is left alone. Restates the animation list to add the surge alongside wzHalo. */
+.wz-synchalo-steam { animation: wzHalo 1.8s ease-in-out infinite, wzHaloSurge 9.1s ease-in-out infinite; }
 .wz-synchead { font-family: Georgia, serif; font-size: 17px; color: #efecf8; margin-bottom: 16px;
   min-height: 24px; }
 .wz-synctrack { height: 5px; border-radius: 3px; background: var(--surface0); overflow: hidden;
