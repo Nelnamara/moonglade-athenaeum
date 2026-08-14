@@ -120,14 +120,19 @@ def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
                                        created_at="2025-01-01T00:00:00")])
     with mock.patch("datetime.datetime", _FixedNoon):   # never trip Night Owl mid-test
         d = cli.get("/api/achievements").get_json()
-    assert len(d["achievements"]) == 57
+    # every hidden feat is unearned here, and they COLLAPSE to one placeholder
+    # (2026-08-13): the payload must not reveal how many remain undiscovered --
+    # previously the array carried one hidden-feat-N entry per secret, so its
+    # length counted them for anyone reading devtools
+    n_hidden = sum(1 for a in g.ACHIEVEMENTS if a.get("hidden"))
+    assert n_hidden > 1                     # the collapse is genuinely collapsing
+    assert len(d["achievements"]) == len(g.ACHIEVEMENTS) - n_hidden + 1
     hidden = [a for a in d["achievements"] if a["tier"] == "feat" and not a["earned"]]
-    assert hidden and all(a["name"] == "???" for a in hidden)
-    assert all(a["roast"] == "" and a["roast_nsfw"] == "" for a in hidden)
-    # devtools must not spoil the secrets: no real id/metric on masked cards,
+    assert len(hidden) == 1 and hidden[0]["name"] == "???"
+    # devtools must not spoil the secrets: no real id/metric on the masked card,
     # and the metrics echo drops every still-hidden feat's counter
-    assert all(a["id"].startswith("hidden-feat-") for a in hidden)
-    assert all(a["metric"] == "" for a in hidden)
+    assert hidden[0]["id"] == "hidden-feat" and hidden[0]["metric"] == ""
+    assert hidden[0]["roast"] == "" and hidden[0]["roast_nsfw"] == ""
     for secret in ("konami_triggered", "narrator_pokes", "session_hour",
                    "docs_opened", "old_piece_backed_up"):
         assert secret not in d["metrics"]
