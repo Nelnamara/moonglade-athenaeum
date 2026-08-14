@@ -25,8 +25,11 @@ mass commit. Follow this protocol:
    away someone's real work to make it "clean."
 2. **`master` is the trunk.** Work on a short-lived feature branch and merge back with
    `--no-ff`. Do not commit directly to `master` for anything beyond a doc typo.
-   **MERGING TO MASTER REQUIRES THE OWNER'S EXPLICIT SAY-SO — every time** (owner
-   directive, 2026-08-14, after a session treated task go-aheads as merge authorization).
+   **MERGING TO MASTER REQUIRES THE OWNER'S EXPLICIT SAY-SO — every time.** Standing
+   rule since the project's inception; written down 2026-08-14 after a session violated
+   it by treating task go-aheads as merge authorization. (The merge commits in history
+   are NOT counter-evidence — each had the owner's yes in its own conversation; the
+   permission just isn't visible in git.)
    A task go-ahead ("go on X", "run the Y pass") authorizes building and pushing the
    BRANCH only. Finish by reporting "branch pushed, tests green, ready to merge" and
    stop; leave the branch on the remote for his review. "Merge it" / "ship it" or
