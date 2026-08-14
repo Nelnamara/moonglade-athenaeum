@@ -4988,21 +4988,38 @@ def _account_key(username):
     return hashlib.sha256(str(username).encode("utf-8")).hexdigest()[:16]
 
 
+# Any-OS user-home prefixes: X:\Users\<name>, /home/<name>, /Users/<name>.
+# The candidate loop below only knows THIS machine's directories, so an error
+# text carrying a path under any OTHER username (a library echoing a foreign
+# path, a message minted on another machine, a mapped drive) sailed through to
+# the browser untouched -- issue #14, caught by a cross-machine test run. The
+# username segment stops at the next separator, so only the home prefix is
+# replaced and the tail of the path stays readable, exactly like the candidate
+# pass. [\\/]+ mirrors the separator-agnostic matching rationale documented in
+# the candidate loop.
+_USER_HOME_RE = re.compile(
+    r'(?:[A-Za-z]:[\\/]+Users[\\/]+|/(?:home|Users)/+)[^\\/\s"\']+',
+    re.IGNORECASE)
+
+
 def _redact_host_paths_cli(out_dir, msg):
-    """Module-level twin of create_app()'s nested `_redact_host_paths` closure, for a
-    caller with no Flask request/closure of its own -- specifically
-    moonglade_backup.py's `_cli_job_finish`, which logs a bare-terminal CLI run's
-    failure straight to jobs.jsonl (served to any LOGIN-tier caller via /api/jobs)
-    with no `out_dir` closure to reuse. The nested version can't be imported (it's a
-    local name inside create_app's function body, not a module attribute), so this
-    is the SAME algorithm -- same candidate list, same longest-first/case-insensitive
-    path-segment matching, same "<host-path>" placeholder -- kept as one copy here
-    rather than two independently-maintained ones drifting apart. See that closure
-    (just inside create_app, above) for the full rationale on each design choice
-    (resolve()'d out_dir, longest-first, case-insensitive separator-agnostic regex)."""
+    """THE redactor -- the one copy. create_app()'s nested `_redact_host_paths`
+    delegates here (it existed as a closure twin and the two were documented as
+    a drift risk; collapsed 2026-08-14 while fixing issue #14). Also called
+    directly by moonglade_backup.py's `_cli_job_finish`, which logs a
+    bare-terminal CLI run's failure straight to jobs.jsonl (served to any
+    LOGIN-tier caller via /api/jobs). Design choices (resolve()'d out_dir,
+    longest-first, case-insensitive separator-agnostic regex, the length
+    floor) are documented inline below and were carried verbatim from the
+    original closure."""
     if not msg:
         return msg
     import tempfile
+    # str(out_dir) resolved -- --out defaults to a relative "pixai_backup";
+    # unresolved, `--out .` would make this candidate a bare "." that matches
+    # (and redacts) every period in every message app-wide. The length floor
+    # in the loop is the second, independent guard for candidates this
+    # function doesn't construct.
     candidates = [str(Path(out_dir).resolve()), os.path.expanduser("~"),
                  tempfile.gettempdir(), sys.prefix, os.getcwd()]
     seen, out = set(), str(msg)
@@ -5010,9 +5027,18 @@ def _redact_host_paths_cli(out_dir, msg):
         if not path or len(path) < 4 or path in seen:
             continue
         seen.add(path)
+        # Split the RAW path on separators FIRST, then escape each segment,
+        # then rejoin with a separator class: case-insensitive and
+        # separator-agnostic (a library can hand back the same directory in a
+        # different case or with forward slashes), while every segment stays
+        # re.escape'd so the pattern can only ever match this exact path.
         segments = re.split(r'[\\/]+', path)
         pattern = r'[\\/]+'.join(re.escape(s) for s in segments)
         out = re.sub(pattern, "<host-path>", out, flags=re.IGNORECASE)
+    # The generic pass runs AFTER the candidates: anything under a user home
+    # the candidates didn't already cover -- any username, any drive letter --
+    # loses its home prefix the same way (issue #14).
+    out = _USER_HOME_RE.sub("<host-path>", out)
     return out
 
 
@@ -5091,54 +5117,10 @@ def create_app(out_dir: Path):
     # (SIZE only) and every jsonify site's own [:N] slice; this must run BEFORE those
     # slices, not after, or a redaction landing past the cutoff never happens.
     def _redact_host_paths(msg):
-        if not msg:
-            return msg
-        import tempfile
-        # str(out_dir) resolved -- --out defaults to a relative "pixai_backup", and
-        # main() never resolves it before create_app(out_dir). Unresolved, a caller who
-        # started the server with (say) --out . would make out_dir's candidate a bare
-        # ".", which then matches -- and redacts -- every single period in every error
-        # message this function ever touches app-wide (found in adversarial review,
-        # reproduced: an ordinary "retry in 0.5s" style message came back full of
-        # "<host-path>" fragments). Resolving turns it into the same kind of real,
-        # multi-component absolute path the other 4 candidates already are.
-        candidates = [str(Path(out_dir).resolve()), os.path.expanduser("~"),
-                     tempfile.gettempdir(), sys.prefix, os.getcwd()]
-        seen, out = set(), str(msg)
-        for path in sorted(set(candidates), key=len, reverse=True):
-            # The length floor is a second, independent guard against the same class of
-            # bug for candidates this function doesn't control the construction of --
-            # no real absolute path on any real OS is this short, so it never rejects a
-            # genuine candidate, only a degenerate one.
-            if not path or len(path) < 4 or path in seen:
-                continue
-            seen.add(path)
-            # Case-INSENSITIVE, and separator-agnostic on Windows. The obvious
-            # `path in out` / `out.replace(path, ...)` is case-SENSITIVE, while the paths
-            # being redacted live on a case-insensitive filesystem: a third-party library or
-            # a normalized OS string can hand back the same directory in a different case,
-            # or with forward slashes instead of backslashes, and an exact-substring match
-            # silently misses it -- shipping the real host path and the OS username to a LAN
-            # caller while this function reports success. Both variants are real; neither is
-            # exotic.
-            #
-            # Split the RAW path on separators FIRST, then escape each segment, then rejoin
-            # with a separator class. Order matters and the obvious way round is broken:
-            # escaping first and then substituting separators inside the escaped string also
-            # rewrites the backslash that re.escape added in front of other characters -- a
-            # directory named "John Smith" escapes to "John\ Smith", whose backslash then
-            # gets swallowed into a separator class, producing "John[\\/]+ Smith" and a
-            # pattern that matches NOTHING, not even the plain case it used to handle.
-            #
-            # Every segment stays re.escape'd, so the pattern can still only ever match this
-            # exact path -- the separator class is the ONLY looseness introduced, which
-            # matters because a looser matcher here is precisely how the
-            # eats-ordinary-messages bug (see the resolve() note above) comes back. The
-            # length floor above remains the second, independent guard.
-            segments = re.split(r'[\\/]+', path)
-            pattern = r'[\\/]+'.join(re.escape(s) for s in segments)
-            out = re.sub(pattern, "<host-path>", out, flags=re.IGNORECASE)
-        return out
+        # Delegates to the one module-level copy (see _redact_host_paths_cli:
+        # the closure and the module function were maintained as twins until
+        # 2026-08-14, when issue #14's fix collapsed them).
+        return _redact_host_paths_cli(out_dir, msg)
 
     @app.context_processor
     def _inject_branding():
