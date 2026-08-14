@@ -40,37 +40,21 @@ progress, next — it is in the wrong file. **Delete it, never annotate it.** An
 
 ## Standing rules
 
-*How to work on this project. These are behavioural: violating one is a mistake, not a preference. Several exist because the owner had to say them more than once.*
+*Product rules the app must keep honouring — what it refuses to do, and what must not be
+"helpfully" fixed. Several exist because the owner had to say them more than once.*
 
-### Archiving a doc must not bury its live items  ·  *2026-07-16*
-
-When a doc is archived or consolidated, its live/unactioned items must be reconciled out first. The 2026-07-16 persona sweep's "PixAI power user + community member" bucket held live feature requests that went invisible the moment the file was archived — the same failure the audit-board reconciliation had already fixed once, recurring in a section reconciliation never reached. The sweep's other two persona buckets (Loom video creator, gallery curator) have never had that check and carry the identical risk.
-
-**Why.** This is a repeat failure mode, not a one-off: archive-then-forget silently deletes decisions and asks. Recorded so the remaining unchecked buckets are known and so the next consolidation reconciles before it archives.
-
-### Adversarial review before shipping generation-lifecycle changes  ·  *2026-07-18*
-
-Generation-lifecycle/batch work is designed, then independently adversarially reviewed before implementation — twice in one case (a design agent's first attempt came back as an unusable placeholder stub; the rescue plan a reviewer wrote to replace it was itself reviewed a second time before anything was implemented).
-
-**Why.** The passes caught real correctness bugs that testing would have missed or attributed elsewhere: stale React closures that would have made the tally never update, a busy-guard wired to an effect dependency array that could never fire, an empty-prompt check against the always-non-empty COMPOSED string (structurally incapable of triggering), a batchTally double-count, and missing genStartedAt persistence — plus a Critical that would have blanked the whole Loom on first render.
-
-### Closed signup and deferred invite links are not reopenable via email  ·  *2026-07-20*
-
-Web signup is closed by design, and invite links were deferred on the same reasoning (2026-07-20). Do not propose email as a way to reopen either.
-
-**Why.** Both rest on the same premise as the no-email decision: a locally hosted install with physical access as the trust anchor does not need — and is not improved by — an outbound mail channel.
+> **The behavioural rules — how a session should WORK here — moved to `CLAUDE.md` on 2026-08-13**
+> (§ Standing rules — how to work here). They live there because CLAUDE.md loads every session and
+> this file does not, so a working rule kept here was a rule not in force. Don't add behavioural
+> rules back to this file.
 
 ### Branding/mascots stays undocumented in the wiki  ·  *2026-07-21*
 
 The wiki backlog is closed, and the branding/mascots page is deliberately never to be written. The README's one-line "make it yours" mention is the intended ceiling of public documentation for this surface. "Do not write that page."
 
+**Needs revisiting once the bundling project is finished** — with default art shipping inside the container, what a user can and should be told about `branding/` changes shape. Get specific then; until then the ceiling stands.
+
 **Why.** The branding surface is itself a hidden-feat trigger field: the Konami Starfall egg, picking the eclipse mark animation, and adding a custom mark file all set feat flags; the per-achievement mascot chain, reward art, and tier-SFX slots are unlock-moment surprises the feat system masks server-side. A wiki page inventorying marks/animations/mascots would put those spoilers directly in the user reading path.
-
-### Element-level verification can be fully green while geometry is broken  ·  *2026-07-22*
-
-Verification of a layout change must include sibling bounding-box comparisons or a real screenshot — not only text content and single-element computed styles. Alongside the layout fix, roughly 30 CSS rules with zero remaining producers were deleted rather than left in place.
-
-**Why.** A stale grid class survived the redesign and auto-placed full-width sections into narrow tiled columns; the owner caught it on the live install as a scrambled, overlapping render. Every per-element check had passed. The dead rules were removed, not annotated, because they encoded the exact wrong mental model that caused the bug. Screenshot capture was unavailable that whole session, which is why nothing caught it.
 
 ### Roast/flavor text: the gate was verified present; the owner still owns the last step  ·  *2026-07-22 · updated 2026-07-28*
 
@@ -78,37 +62,23 @@ The reported leak of uncensored/"spicy" roast lines was deliberately not patched
 
 **Why.** His explicit scope boundary stands. Related standing rule: never audit or sanitize the owner's own product-copy language — the roasts and swearing are deliberate voice.
 
-### Two persona buckets of the archived 2026-07-16 sweep have never been reconciled  ·  *2026-07-22*
+### Where the 2026-07-16 feature-request sweep lives  ·  *2026-07-22*
 
-Only ONE of the three persona buckets in `SWEEP_2026-07-16.md` ("PixAI power user + community member") was ever checked against current code and its live items recovered. The other two — Loom video creator, and gallery curator, roughly 18 more bullets — have never had that check.
+**The file is `docs/archive/SWEEP_2026-07-16.md`** — 28 grounded feature requests across three
+personas (Loom video creator, gallery curator, PixAI power user). It was deleted with the whole
+`docs/archive/` tree on 2026-07-27 (`64ecc21`), but the content is recoverable three ways:
+`git show 64ecc21^:docs/archive/SWEEP_2026-07-16.md`, the owner's Desktop copy in
+`Moonglade MD archive/`, and the tagging artifact where all 28 were owner-tagged on 2026-08-02.
+Everything still live from it now sits in `ROADMAP.md`.
 
-**⚠ UPDATE 2026-08-07 (doc-parity audit + owner status check):** the file `docs/archive/SWEEP_2026-07-16.md` no longer exists — the whole `docs/archive/` tree was deleted 2026-07-27 (`64ecc21`). The sweep is NOT lost: it survives in three places — (1) the owner's Desktop `Moonglade MD archive/SWEEP_2026-07-16.md`, (2) git history via `git show 64ecc21^:docs/archive/SWEEP_2026-07-16.md`, (3) an interactive tagging artifact where the **owner tagged all 28 items** (Shipped / In Development / Scope / Hold) on 2026-08-02. The all-three-buckets tagging IS done. **RESOLVED 2026-08-07:** the owner chose to write the 28 tagged decisions into this file — see the "Feature-request ledger" entry at the end of DECISIONS.md. No longer a loose thread.
-
-**Why (historical).** This was the exact failure the archive rule causes: live, unactioned requests become contractually invisible by being archived with work still in them. The pointer to which buckets remained unmined kept them recoverable — and they were recovered.
-
-### "Earned rewards" display is LIVE — correction, not a TBD  ·  *2026-07-23*
-
-Correction logged 2026-07-23: the "earned rewards" display was wrongly carried as an unbuilt idea. It is a real, shipped section in the Folio of Honors, currently showing **skin** unlocks only. The open item is a build-more question, not a shape question: extend it to cover **banner** and **icon** unlocks plus the easter egg. Standing preference for next time this comes up: **ask the owner to point at it directly rather than re-deriving its location from git history.**
-
-**Why.** The item was mis-tracked as unbuilt across multiple passes. The ask-the-owner instruction exists because re-deriving from history is what produced the wrong entry in the first place.
+**Why.** Recorded because archiving a doc with live work in it is how real asks go invisible —
+it happened to this sweep, and the pointer is what made them recoverable.
 
 ### "Not single-user" was MISAPPLIED to block shipping the owner's own default art  ·  *2026-07-23*
 
 A prior session argued against shipping the owner's own default branding using the "this is a public, not single-user, tool" reasoning. The owner is explicit that this was a **misapplication**: "not single-user" is about building real security/access strength for real external users — it is NOT a reason to withhold the app's OWN default branding from everyone who downloads it. The app ships the owner's default marks/banner by design.
 
 **Why.** The rule exists to make access control genuinely strong, not to strip the product of its identity. Recording the misapplication is what stops the same argument being re-made against default art.
-
-### A stray copy of the repo or its assets is a flag-to-owner, never a silent delete  ·  *2026-07-24*
-
-If another copy of this repo or its assets turns up anywhere on disk, do not assume it's safe to ignore and do not silently delete it — flag it to the owner and confirm which copy is actually live before touching either. (A specific stale duplicate branding folder on the Desktop that once prompted this rule is confirmed gone, so it is no longer a live fact — but the rule stands.)
-
-**Why.** Same caution as the D:/C: drift: the wrong copy can be the live one, and deletion is unrecoverable.
-
-### An imperative DOM copy must reset every attribute it sets, not only set-when-present  ·  *2026-07-24*
-
-The gallery's gating helper always resolves min/max to either the model's real bounds or the field's own default, rather than only writing them when the incoming model declares restrictions.
-
-**Why.** Found live, not by reading source: switching FROM a restricted model TO an unrestricted one left the bounds stuck at the previous model's numbers. The Loom's declarative JSX never had this failure mode because it recomputes fresh every render — this is the class of bug an imperative mutation-based port is structurally prone to, so any future port of a declarative control needs this lens.
 
 ### Cost badge's compact attribute and cost event are public API, not dead code  ·  *2026-07-24*
 
@@ -124,41 +94,11 @@ All Job Tracker sources log to the same out_dir/jobs.jsonl activity feed: Contro
 
 **Why.** Logging is deliberately fail-soft "so a logging hiccup can never break the actual command" — the feed must never be able to take down the work it describes.
 
-### Owner's verdict on the picker after pagination landed: performance is part of the feature  ·  *2026-07-24*
-
-The owner reported scrolling was "still slow and a bit choppy" and called the picker "a step backward in function" after pagination shipped. The follow-up work treated both findings as genuine performance bugs, not correctness bugs.
-
-**Why.** His words, and the lesson attached to them: the first round verified the feature *worked*, not that it worked *well*. The picker has already been rebuilt several times and he is fatigued with it — the speed of the original bounded grid is the benchmark, so any new picker chrome that costs scroll smoothness reads to him as regression regardless of added capability.
-
-### Unsupported model controls are disabled, never hidden — and gating fails open  ·  *2026-07-24*
-
-Advanced fields a model does not honor (negative prompt / steps / CFG) are disabled with a plain tooltip, using the model's real compatibility and min/max restriction data. Unknown or absent capability data leaves everything enabled — only an explicit false disables anything.
-
-**Why.** An editable control that silently did nothing was indistinguishable from one that worked (e.g. one model ignores CFG entirely and runs steps fixed at 16). Disabling teaches; hiding hides the model's nature. Fail-open matches every other gate in this app: incomplete provider data must never lock the owner out of his own controls.
-
 ### Web surfaces register jobs — they never add a second poll loop  ·  *2026-07-24*
 
 Every web generation surface (the gallery's Generate/Edit/Fix/Enhance tabs, the shared Generate drawer, and all four Loom submit paths) registers via Jobs.register() — registration without a second poll loop.
 
 **Why.** Every one of them already owns a private poller hitting /api/task-status, which is the route that writes the authoritative terminal event. A second loop would duplicate traffic and create a competing source of truth.
-
-### Derived constants are served to the client, not hand-ported twice  ·  *2026-07-25*
-
-The upscale pixel ceiling and ratio cap are injected into the two pages that need them via a single marker rather than restated in JS; where a hand port was unavoidable (the drawer's live ratio math) it is pinned to the Python by a Node parity test.
-
-**Why.** Only two of six templates share the base HTML, so a second hand-maintained copy would drift silently. The ratio ceiling is *computed* rather than a constant because the same upscale method allows a different maximum on a different source size.
-
-### Do not build LoRA training as though it is settled  ·  *2026-07-25*
-
-Whether a LoRA-training submit is accepted from an API key is NOT obtainable by reading — only by actually submitting. It is the same question panelplugin failed. Do not build a training feature as though the answer is known.
-
-**Why.** panelplugin already proved a door the website walks through can be shut to an API key, so an unproven submit path is a real risk of building a dead feature. Reading the page yields everything except the one blocking fact.
-
-### Historical records keep the old module names  ·  *2026-07-25*
-
-Only half the docs move with a rename. Live instructions (project CLAUDE.md, the wiki's Backing-Up page, the state doc) change in the same pass or the release ships commands that do not exist. Historical record stays exactly as written: CHANGELOG entries and dated audit docs are not rewritten. Architecture docs and the wiki's Generating page were deferred by owner call.
-
-**Why.** "A v1.9 entry naming pixai_backup.py is TRUE about v1.9." Rewriting history to use current names makes the record lie about what the software was called at the time. Live instructions have the opposite obligation — they must match the shipping commands.
 
 ### Host filesystem paths are withheld from non-local callers  ·  *2026-07-25*
 
@@ -166,49 +106,17 @@ Read endpoints that would reveal server paths return them only to a local sessio
 
 **Why.** Consistent with the existing Control Panel behavior — a LAN viewer is a trusted generator, not someone who should learn the server's directory layout.
 
-### No percentage, progress bar or countdown for a PixAI generation — ever  ·  *2026-07-25*
-
-There is deliberately no percentage, progress bar or countdown for a PixAI generation. What is shown is PixAI's own pre-submit queue estimate, recorded ONCE when a job is first seen queued, displayed as "est. Ns wait" and "Est. wait · Ns (PixAI, when queued)" beneath the live Time Spent — never recomputed as the wait grows, and it disappears once the job starts rather than becoming an implied render ETA.
-
-**Why.** PixAI exposes no progress on a task — probed with a control, and no progress/percent/step/eta/queuePosition fields exist. Anything progress-shaped would be fabricated. The estimate is honestly labelled a WAIT, not a countdown, and must not survive into the render phase where it would read as an ETA.
-
 ### Packaged assets must keep a loose-file override layer  ·  *2026-07-25*
 
-Any sealed asset container must keep an override layer — packaged defaults, loose files winning. Branding is drop-in today (a file dropped into the output branding folder is picked up) and "make it yours" is a shipped, intended feature.
+Any sealed asset container must keep an override layer — packaged defaults, **loose files in `branding/` always win**. Two reasons, both load-bearing: "make it yours" drop-in branding is a shipped feature, and **the branding folder winning is what keeps the hidden achievement earnable** — the trigger fires on a real user-dropped file, which only works if `branding/` stays empty on a fresh install and a file placed there takes precedence over the packed default.
 
 **Why.** Design tension to respect: tidiness must not kill a shipped feature. Without the override layer, packaging silently removes user branding.
-
-### Rename verification must exercise the command surface, not just tests  ·  *2026-07-25*
-
-Verification of a module rename cannot be the test suite alone. Both renamed modules are runnable scripts; a green suite proves imports, not the ~116 documented command invocations, the desktop launcher's child command, or the Panel's subprocess runner. Verify the COMMAND surface separately.
-
-**Why.** A passing test suite creates false confidence for this specific class of change: imports resolve while every documented command line, the launcher, and the Panel's subprocess path can all still be pointing at names that no longer exist.
-
-### Safety documentation is exempt from the doc-debt deferral  ·  *2026-07-25*
-
-All documentation touched by the module renames was frozen until after the naming pass — except `wiki/Deleting.md`, which was updated anyway because it described cloud deletion as task-level only. A safety page that under-describes a live irreversible action gets fixed immediately, deferral or not.
-
-**Why.** Paying the doc cost twice is the reason for the freeze, and that reasoning is sound for command examples and architecture prose. It is not sound for a page a user reads before doing something unrecoverable — the cost of being wrong there is not rework. Stating the carve-out keeps a future freeze from swallowing the same class of page by consistency.
 
 ### The library-path setter never moves, copies or deletes anything  ·  *2026-07-25*
 
 Setting the library folder only repoints configuration. It validates before writing, asks before creating a missing folder, refuses a path that is a file, and is pinned by a test that greps the handler for move/copytree/rename/unlink.
 
 **Why.** Re-pointing a library must never be able to relocate or destroy the owner's archive as a side effect; the grep-test exists so a future convenience feature can't quietly add data movement to this path.
-
-### The achievement ladder is Design Pass scope — its gaps are NOT bugs  ·  *2026-07-28*
-
-The whole achievement/reward system — the ladder, which achievements carry rewards, the mark/skin/banner pairings, unreachable or unearnable entries, missing reward values — is **owner design work reserved for the Design Pass.** It has been scoped and re-explained by the owner many times. Individual gaps in it are **not defects and must not be filed, surfaced, or prioritised as bugs.**
-
-Concretely: "Completionist cannot be earned because two of its required metrics hang off the deleted Enhance surface" is a true observation and a **Design Pass item**, not a bug report. The same goes for blank reward fields, tier mappings that do not cover every track, and any "achievement X is unreachable" finding.
-
-**Why.** A 2026-07-28 automated sweep of this file read those gaps as live defects and put an unearnable achievement at the TOP of a bugs list handed to the owner — who had already deferred it repeatedly. That is the failure this entry exists to stop: the deferral was recorded for *specific* items ([[Toast tier colors — owner called it resolved, but the direction wasn't restated]], [[9-slice tier frames wrap legendary/feat grid tiles too — the answer to "frame or defer"]]) but never for the ladder as a whole, so every fresh reader re-derived it as broken. **The Design Pass keeps receding because each pass widens the frontier instead of clearing the path to it — treat anything achievement-shaped as already-scoped and already-deferred unless the owner says otherwise.**
-
-### 57-vs-60 achievement gap stays open  ·  *2026-07-26*
-
-The gap is still open and that is fine. Owner, verbatim: *"Don't rush me LOL. We are thinking."* Do not re-ask.
-
-**Why.** Owner is deliberately deferring; re-asking reads as pressure. Explicitly marked do-not-re-ask.
 
 ### Do not call PixAI's moderation operations  ·  *2026-07-26*
 
@@ -258,12 +166,6 @@ Owner, 2026-07-26, DECIDED PERMANENTLY: there is no mail path anywhere in the pr
 
 **Why.** Physical access to the server machine IS the out-of-band identity proof — exactly the job an emailed reset link performs in a hosted app, and being at the machine proves it more strongly. The app is locally hosted with closed registration, so that channel already exists. Without an out-of-band channel, a logged-out reset would be a vulnerability rather than a feature: any device on the LAN could trigger a reset against the owner's account. Closing that with email would mean SMTP credentials living in config.json beside the auth secret, deliverability problems on a home network, and a token-expiry surface to get wrong — all to replace walking to the machine.
 
-### No migration code for the branding move — do not add a shim  ·  *2026-07-26*
-
-The branding relocation is a plain default change: no dual-read, no copy step, no fallback path. Owner, 2026-07-26: "I can move my own branding folder after the update."
-
-**Why.** He relocates his own files by hand on the production install once the change ships. Worth stating because the obvious instinct is to write a compatibility shim, and he explicitly does not want one for a single install he controls. Do not add one.
-
 ### No spending mutation may ever be retried  ·  *2026-07-26*
 
 Every mutation that spends credits or changes the PixAI account goes out through the single mutation helper that hard-codes zero retries and offers no retries argument at all, so the unsafe value cannot even be requested. Generate/edit/video/upload/delete-media all ride it. The generic ad-hoc GraphQL path's default was made document-aware as a backstop (0 for a mutation, 3 for a query), and the REST spend paths are pinned single-attempt.
@@ -275,12 +177,6 @@ Every mutation that spends credits or changes the PixAI account goes out through
 Reward assignment is about choosing WHICH achievements carry a reward, not populating all of them. Owner, verbatim: *"We don't give a reward for every fucking one."* The 53 blank reward slots were never a gap to fill.
 
 **Why.** Standing correction of a wrong framing that treated blank reward fields as missing work. Do not resurface the blanks as a completeness gap or generate rewards to fill them.
-
-### Self-healing, not a button  ·  *2026-07-26*
-
-The live mirror must recover from its own gaps automatically — a drop, a stale socket or a restart must not leave generations stranded until someone runs a manual Panel job. Owner's objection is the standard to hold: **"I know theres a fuckin button to do it but the point is... im not suppposed to have to."** The catch-up sweep is bounded and rate-limited so a flapping socket cannot become a request storm, runs off-thread so it never blocks the event loop, only collects tasks whose media is genuinely absent, and spends nothing.
-
-**Why.** A push mirror only sees what completes while its socket is up, and reconnecting did not replay the gap. The existence of a manual repair button is not an answer — automatic recovery is the requirement, and the guardrails exist so automatic recovery cannot itself become an abuse of their servers or the credit balance.
 
 ### The antivirus exclusion is the owner's call, not ours  ·  *2026-07-26*
 
@@ -334,23 +230,11 @@ The persisted `achievements.json` writes `earned_at:{id:iso}` for earned achieve
 
 "Delete from PixAI" shows every file that will go, thumbnailed and grouped by task, with the ones actually picked outlined and imports called out as local-only removals. Counts always describe the whole selection even when the thumbnail strip is capped; an unreachable preview falls back to the prose-only confirm rather than a dead click. The typed DELETE prompt and the localhost gate are unchanged.
 
-**Why.** Cloud deletion is task-level — one selected image takes its whole batch — so the consequence has to be visible. "this makes the consequence visible, it does not replace a guard." The preview endpoint is read-only and makes no network call.
+**Why.** Task-level cloud deletion takes the whole batch, so the consequence has to be visible. "this makes the consequence visible, it does not replace a guard." The preview endpoint is read-only and makes no network call. **Single-media-id deletion now also exists**, so the batch-wide blast radius is no longer the only option — but the preview and guards still apply to the task-level path.
 
-### D:/C: dual-checkout drift is a standing hazard — never mass-commit to "fix" it
+### Every skin reaches every surface
 
-The live gallery server runs from the D: run-copy, a separate checkout from the C: repo, with branding art serving from the D: tree. The two checkouts drift by design. Compare each one's latest commit before assuming they match, and **never mass-commit to "fix" the difference**. Art-in-progress lives in a separate D: scratch area (badge/icon/chibi sheets, the sorted Canva dump, cutouts, banners, stickers, app-icon candidates, plus the animated-webp build scripts); the served branding set stays live and separate from it.
-
-**Why.** The difference between the checkouts is normal operation, not corruption — treating it as a repo to reconcile destroys either the live run-copy or real in-progress work.
-
-### docs/ART.md is the one home for art direction
-
-All art direction — badge style anchor, tier palette, frame direction, slot sizes, and the prompt bank — lives in docs/ART.md. It reconciles against the code, and where the code settles nothing it says so. Do not restate hexes or sizes anywhere else.
-
-**Why.** Duplicated hexes/sizes across docs is exactly how the docs drifted; one home prevents two files describing the same pixel fact differently.
-
-### Every skin reaches both surfaces
-
-The Loom inherits the gallery's design tokens (--panel→--surface0, --ink→--text, --amber→--accent), so switching skin in the gallery header re-colors the Loom. Every skin reaches both surfaces.
+The Loom inherits the gallery's design tokens (--panel→--surface0, --ink→--text, --amber→--accent), so switching skin in the gallery header re-colors the Loom. **A skin must reach ALL surfaces** — not just the two that existed when this was written. Any new surface inherits the same tokens rather than theming itself.
 
 **Why.** One design language across the app rather than per-surface theming.
 
@@ -360,53 +244,17 @@ Pure Loom logic (flat, shotText, shotPayload, tag math, continuity, frameLinked,
 
 **Why.** Keeps the logic Node-testable with no browser or network; pricing can't be pure because it is a server round-trip, so it stays outside the boundary rather than diluting it.
 
-### Marks render too small — a defect, not a taste question
-
-Standing, recurring owner complaint since the beginning: marks render too small everywhere they appear in the app (the header being the current example). Treat this as a real sizing defect to fix alongside any mark-system work — do not relitigate it as a matter of taste or leave it as a cosmetic nice-to-have.
-
-**Why.** The owner has raised it repeatedly and it keeps being deprioritized as cosmetic; classifying it as a defect is what stops that cycle.
-
-### Never assume a model emits alpha
-
-Do not assume Krea2 / ComfyUI / ChatGPT emit alpha — verify per FILE, not per model.
-
-**Why.** Transparency claims are per-output, not per-tool; assuming per-model has burned the pipeline before (AI art ships fake/painted transparency).
-
-### Never write the LOCALHOST route count in prose
-
-The route-tier test is the authority for which routes are LOCALHOST; the prose deliberately carries no number and instructs the reader to trust the test over the prose if they disagree.
-
-**Why.** A hardcoded count there had already drifted twice. Same family as the standing ban on writing the test count in any live doc.
-
-### No visual build from prose alone
-
-The "Locked design" items are closed: "Do not re-litigate these. Build against the named source, and verify against it before calling anything done." This is docs/STANDARDS.md Part 2's rule and it governs ANY user-visible surface — a visual build needs a pixel source (locked mockup artifact / Figma frame), never prose notes, and the verify pass compares against that source.
-
-**Why.** A "locked" marker is a deliverable, not background. Prose-only builds landed off-target before (the Trophy Hall reformat), which is why the rule exists at all.
-
 ### Some maintenance commands are CLI-only by decision, not omission
 
 Read the CLI-only list before filing a "no Panel button" item. The board has twice raised "maintenance commands have no Panel button" and both times the answer was already recorded. The recurring correction, stated once: a modifier (--embed-metadata, --convert) does not want a button; an already-integrated step (--faststart-videos) does not want a second trigger; and a repair tool (--backfill-meta) actively should not have one. reconcile-deleted likewise runs via the Panel's run route and the scheduler but renders no button by design.
 
 **Why.** A button implies you ought to press it. Surfacing a repair tool or a redundant trigger invites users to run operations that either do nothing the sync has not already done, or that are not standalone actions at all.
 
-### State doc is present-tense only — delete, never annotate
-
-The state doc describes only what is true right now. When something stops being true, DELETE the line — "never strike it through, never mark it SUPERSEDED, never write 'was X, now Y', never append a correction beside the thing it corrects." There is no "shipped recently" or "landed on <date>" section. Never write a number a command can answer (test counts, commits-ahead, version strings) — name the command instead. Absolute dates only (2026-07-17), never "today"/"last week". A commit SHA is allowed as an *identifier* riding a present-tense fact, never as the subject of a change-story; prefer symbol names over line numbers. What shipped → CHANGELOG. How a decision was reached → git history + frozen copies in docs/archive/. How it works → architecture doc. Rules → CLAUDE.md.
-
-**Why.** "a list of recent changes only ever grows, and that append-only growth is the exact failure this file exists to avoid." Its predecessor (docs/ROADMAP_LOOM_ACHIEVEMENTS.md, since deleted with the whole `docs/archive/` tree 2026-07-27; a copy survives on the owner's Desktop `Moonglade MD archive/`) died holding 40 stale claims precisely because it was an append-only journal.
-
 ### The default download speed is unpaced — `--delay` reaches the parallel stage only when typed
 
 `--delay` always paces the page listing, the per-task metadata fetch, and single-worker downloads. The multi-worker download stage — the default `--workers 4` path — is paced only when the flag is passed explicitly. Left alone it runs at full connection speed, exactly as it always has.
 
 **Why.** The finding (`M07`) was that the wiki documented `--delay` as applying to downloads and on the default path it did not. Making it always-on at the shipped `0.4` capped the whole pool at one image per 0.4s regardless of worker count — it made `--workers` decorative, made the Panel's own workers selector decorative, and turned a 17,000-image first backup from roughly 35 minutes into nearly two hours. That is a silent 3–6x regression on the tool's single most common command, traded for a throttling problem that has never once been reported. The mismatch was mostly a documentation defect, so the wiki was corrected and the flag made to work when it is actually asked for.
-
-### OBSOLETE: the live audit backlog rule (its file and the archive are both gone)
-
-~~`docs/AUDIT_2026-07-21.md` is the live backlog and must not be moved to `docs/archive/` while it still has work in it.~~ **Obsolete (2026-08-07 doc-parity audit):** both `docs/AUDIT_2026-07-21.md` AND the entire `docs/archive/` tree were deleted 2026-07-27 (`64ecc21`) on purpose — DECISIONS.md is now the sole tracker and does not archive itself. Kept only so an old reference to the audit backlog resolves to "deleted, folded into DECISIONS.md," not a dead hunt.
-
-**Why (historical, still true as a principle).** This was the exact mechanism by which an earlier sweep doc lost three sections of live content: it was archived with work still in it. The lesson stands — don't archive a doc with live work in it — even though the specific files are gone.
 
 ### The pure-stdlib cascade test is not a substitute for a rendering test
 
@@ -425,27 +273,6 @@ The route-tier test enumerates the URL map, fails any route declaring no tier, a
 The Activity tray renders from /api/jobs, never from a poll response. /api/task-status writes `started` into jobs.jsonl, and the tray draws a distinct QUEUED row (mascot with both animations stopped plus an uppercase `queued` pill) that flips to the ordinary spinner when a worker takes the job. The phase is written once per phase change, not once per poll, and the in-process de-dupe entry is dropped at a terminal phase so it stays bounded by in-flight tasks.
 
 **Why.** Four pollers ask every 3s; a per-poll write would bloat the log and keep refreshing the `ts` that the orphan sweep's age check reads. Rendering from the log means the signal reaches both trays with no per-host wiring, since every submit surface's poller calls that one route.
-
-### Start the dev server through the launcher, never `python moonglade_gallery.py` bare
-
-A dev/sandbox server is started by running **`Serve Gallery.pyw`** (under `pythonw`), never by invoking `moonglade_gallery.py` directly. Machine-local flags go in the git-ignored `serve.txt` beside it — on the sandbox checkout that is `--out pixai_backup --port 5057`. The `--out` pin is **not optional here**: the launcher deliberately passes no `--out` so the server can resolve `config.json`'s `LIBRARY_DIR`, and on this machine that value points at the **D: install's library** — an unpinned launch from the C: checkout serves D:.
-
-**Why.** Only the launcher sets `MOONGLADE_SUPERVISED=1` and runs the exit-code-42 relaunch loop, and `/api/server/restart` refuses with a 409 without it. A bare launch therefore silently removes the owner's Restart button from the Control Panel, which is not a cosmetic loss — his stated reason for killing a bare-started server was that he could not restart it. Nothing in the running process advertises that it is unsupervised, so the next session cannot tell by looking; the rule has to be written down.
-
-### Moonglade converts COMPLETELY to React. Not a surface option, not a hybrid, not up for technical debate.  ·  *2026-07-31*
-
-The owner asked about moving the app to React back when the Loom was first built. A session pushed back hard against it — wrongly. He raised it again 2026-07-31, still visibly frustrated, mid-way through the actual conversion effort: **"This is My app."** His own diagnosis of every failure so far: **"Porting a design back and forth is where this went totally to shit."**
-
-The direction: vanilla JS and the `moonglade_gallery.py` Jinja-template monolith (~16.3k lines) are being retired **in full**. Flask becomes a JSON API backend, not a page renderer. Claude Design has been building the complete app UI in React (2026-07-29 → ongoing), working from the real `mg-*` component code + real `DESIGN_TOKENS_CSS` (pushed via the `design-kit` branch + DesignSync), the owner's own Figma work on the Folio, and direct access to this repo — not guessed, not screenshotted-and-approximated. The `gallery-top` branch is kept specifically because the conversion continues there, not as an archive.
-
-**Do not:**
-- Offer "port the design back to vanilla JS," "keep a scoped hybrid for now," or any variant that quietly reopens this — even when it sounds like the lower-risk engineering call. That exact back-and-forth is the named failure mode.
-- Treat this as one option among several because a doc phrased it softly once. If a stack/architecture decision this owner has stated seems hedged or half-implemented in the code, that is something to flag and fix, not evidence it was ever negotiable.
-- Assume "design happens in Claude Design" means no React/UI work happens in this repo. It's the opposite: Claude Design produces the UI, this repo is where it gets implemented, wired to real data, and shipped.
-
-**Why.** Full memory record: [[owner-architecture-calls-are-final]] (Claude Code's own persistent memory, work machine). Real evidence on what "easy" actually means for this conversion — what's already solved vs. genuine remaining work — is banked in the Decisions entry below, *"React conversion: the feasibility map (2026-07-31)."*
-
----
 
 ## Settled constraints
 

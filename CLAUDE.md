@@ -78,6 +78,54 @@ Long sessions get compacted; summaries lose design intent. Standing rule:
    the code, then `docs/architecture.md`. For owner preferences, memory wins. A memory that
    describes code is verified against the code before acting on it.
 
+## Standing rules — how to work here
+
+*Behavioural. Violating one is a mistake, not a preference. Several exist because the owner had
+to say them more than once. (Moved here from `docs/DECISIONS.md` on 2026-08-13 — they only take
+effect if they're in the file that loads every session.)*
+
+- **Verify visual work in a real browser, always.** Live-check through the built-in browser or
+  Claude in Chrome — element-level checks and computed styles are not enough. A stale grid class
+  once auto-placed full-width sections into narrow columns while every per-element assertion
+  passed; the owner caught it on the live install as a scrambled render.
+- **Anything touching a visual surface gets a design or workshopping step first.** Case by case
+  on how much — a full pixel source (Figma frame / Claude Design / locked mockup) for a real
+  surface, a quick workshop for something small — but never build a visual change straight from
+  prose. Verify against whatever that source was.
+- **Treat and launch the dev server the way a plain user would** — through `Serve Gallery.pyw`,
+  never `python moonglade_gallery.py` bare. Only the launcher sets supervised mode, and without
+  it `/api/server/restart` 409s, silently removing the owner's Restart button. Machine-local
+  flags live in the git-ignored `serve.txt` beside it; the `--out` pin matters (an unpinned C:
+  launch resolves `LIBRARY_DIR` and serves the D: install).
+- **The D: install is the owner's domain.** He tests branches live there, so the D: run-copy and
+  the C: repo drift by design — that is normal operation, not corruption. Never mass-commit to
+  "reconcile" them. If D: looks badly behind, **say so and let him drive**; a periodic heads-up is
+  welcome, a fix-up is not.
+- **A stray copy of the repo or its assets is a flag-to-owner, never a silent delete.** The wrong
+  copy can be the live one, and deletion is unrecoverable.
+- **Adversarial review before shipping generation-lifecycle changes.** Design it, then have it
+  independently reviewed before implementing. This has caught real bugs testing would have missed
+  — stale closures, a guard wired so it could never fire, a check structurally incapable of
+  triggering.
+- **Don't archive or consolidate a doc without first moving its live items** into the current
+  trackers (`ROADMAP.md`, GitHub Issues). Archive-then-forget silently deletes real asks; it has
+  happened more than once here.
+- **Historical records keep the old module names.** A v1.9 CHANGELOG entry naming `pixai_backup.py`
+  is TRUE about v1.9 — don't rewrite history to current names. Live instructions (this file, the
+  wiki, command examples) have the opposite duty: they must match what ships today.
+- **Safety documentation is never deferred.** Any page a user reads *before* an irreversible
+  action (deleting, spending) gets corrected immediately, even mid-freeze. Being wrong there
+  costs more than rework.
+- **`docs/ART.md` is the one home for art direction** — badge style, tier palette, slot sizes,
+  prompt bank. Don't restate hexes or sizes anywhere else; duplicated pixel facts are how the
+  docs drifted in the first place.
+- **Never write a count in prose that a command can answer** — test counts, LOCALHOST route
+  counts, commit leads. Name the command or the test instead. Both of those have already drifted
+  twice, and `tests/test_docs_dont_hardcode_counts.py` fails the suite over it.
+- **Broken or unearnable achievements are not app-breaking and are not bugs.** Don't file them,
+  don't put them at the top of a defect list. They're design work; the known-dead ones are
+  already tracked in `ROADMAP.md`.
+
 ## Architecture / request flow
 
 There is no official API for listing your own generations, so a few personal-history
