@@ -90,9 +90,11 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   2026-08-13, with a side-by-side): pill styling, the active-state fill on Generate all, the
   "≈ N cr to finish" phrasing, the rendering-status chip, and ← GALLERY all differ from what
   Claude Design handed down. [Issue #12](https://github.com/Nelnamara/moonglade-athenaeum/issues/12)'s
-  missing Draft-chip glow is one symptom of the same gap. Blocked on locating the desktop Loom
-  design source (no `Loom.dc.html` exists in `design_handoff/` — only Loom Mobile); either the
-  Claude Design frame is recovered or the owner's surviving screenshot gets locked as the mockup.
+  missing Draft-chip glow is one symptom of the same gap. UNBLOCKED 2026-08-13: the owner's
+  8.10 handoff zip carries the desktop frame — the pixel source is
+  `design_handoff/design_handoff_moonglade_suite/The Loom.dc.html` (machine-local, git-ignored),
+  synced into place alongside newer frames (Branding Workshop, Job Tracker Redesign/Fullscreen,
+  Setup Wizard, UI Kit v2) that later design passes should also build against.
 
 ---
 
