@@ -4875,7 +4875,7 @@ __RUNTIME_SCRIPT_BLOCK__
     <p><b>&#9654; Generate shot.</b> Renders the card on PixAI's video engine (V4.0): your cast + frames upload in @-order, the shot text becomes the prompt, and the finished clip lands in the gallery catalog &mdash; free when a V4.0 card covers it. Status shows on the card; "open clip &#8599;" plays it.</p>
     <p><b>Copy shot.</b> The same assembled prompt, to your clipboard &mdash; paste it into any Seedance-style generator. The board is engine-agnostic by design: plan here, render anywhere.</p>
     <p><b>Saving.</b> The board autosaves to the gallery server (survives restarts). Backup .json / export .txt live in the header.</p>
-    <p style="color:var(--subtext);">Full manual: <code>docs/LOOM.md</code> in the repo.</p>
+    <p style="color:var(--subtext);">Full manual: the wiki&rsquo;s <a href="https://github.com/Nelnamara/moonglade-athenaeum/wiki/The-Loom" target="_blank" rel="noopener">The Loom</a> page.</p>
   </div>
 </div>
 </body></html>"""
