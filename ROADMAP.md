@@ -103,16 +103,21 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   near-duplicate generations. Still unanswered.
 - **Reward-marker reconciliation.** The handful of achievements carrying ad-hoc reward markers
   (bare skin id, bare banner boolean) predate the bundle design and must be reconciled INTO
-  bundles, not extended alongside. First deliverable: inventory what is currently PROMISED
-  anywhere in the UI so promises are honoured before new rewards are assigned.
+  bundles, not extended alongside. The promised-rewards inventory (first deliverable, done
+  2026-08-13, extracted from the live roster): **hoardsmith** (epic) → skin `moonlit` ·
+  **reel-director** (epic) → skin `ember` · **menagerie** (epic) → skin `verdant` ·
+  **the-great-library** (legendary) → a bare `banner_reward` boolean with NO banner id wired.
+  Skins `moonglade`/`nightfallen` ship free; the three gated skins are exactly the three epic
+  promises. The bundle ledger in DECISIONS pairs those same themes with marks + banners
+  (Moonwell Eclipse/Vine Crescent/Winged Crescent, banner #100, the Moonlit banner task), but
+  none of the mark/banner halves exist in code — mark gating was never built. Honour these
+  four live promises first; everything else is assignment, which is the workshop's call.
 - **Enhance-achievement retool.** The banked replacement for the three dead achievements:
   "generate on five different base architectures" (DiT.1/DiT.2/DiT.3/SDXL/SD 1.5) at 1/3/5
   rungs. Designed, deliberately not built until the booster fix landed — unblock and build.
 - **Booster gating fix.** PixAI offers boosters PER-MODEL (measured live: Tsubaki.2 offers only
   Quality Tag + To Video, both members-only); our drawer offers all three on everything. The
   proper fix needs a probe of the real per-model booster matrix, then scope.
-- **Similarity-index incremental sync.** Decided: ship an incremental top-up entry point for
-  the embedding index instead of a faster full rebuild. Never built.
 - **Install-folder tidy.** "A tidy install folder says a lot" — achievement/branding files
   still sit loose at the install root. Partly addressed by the container; finish the thought
   (possibly alongside the final naming pass, which may move `branding/` once more).
