@@ -78,6 +78,61 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ---
 
+## Design-pass reworks — owner wants these rescoped, not just built
+
+- **Masked-feats presentation.** Today a masked feat shows its art in full color with name/text
+  withheld. Owner wants to rescope/redesign the whole masked-fields idea, not just keep the
+  old call.
+- **Ladder representative badges.** Ladders currently show their FIRST rung's art (to avoid
+  top-tier spoilers). Owner wants a new design pass on ladder badges.
+- **Roast NSFW gating.** The spicy-roast double gate (server withholds unless the feat is
+  earned + a local preference) needs a rework.
+- **Achievement roster: 57 → 60, possibly more.** The 60 ceiling is under discussion — the
+  roster may grow past it. Folds into the ladder-rung rework.
+- **Community features YES-list revisit.** The 2026-07-26 pick-list (like/react etc.) predates
+  v3.0 — revisit what Moonglade should get now the React app is the whole front end.
+- **Sign-in ⇄ create-account toggle.** The login design showed a mode toggle that was
+  deliberately not shipped (`no_accounts` decides the mode). Owner wants to explore options.
+- **Project export tiers.** Shot list / lightweight backup / full bundle works but may deserve
+  a better shape — scope alternatives.
+
+## Scoped-but-unbuilt — decided once, never executed
+
+- **Generation Flags: scope it or drop it.** Owner, verbatim: "either we keep deferring this
+  or it's actually done. WHAT is the scope." The one concrete near-free version: flag
+  near-duplicate generations. Still unanswered.
+- **Reward-marker reconciliation.** The handful of achievements carrying ad-hoc reward markers
+  (bare skin id, bare banner boolean) predate the bundle design and must be reconciled INTO
+  bundles, not extended alongside. First deliverable: inventory what is currently PROMISED
+  anywhere in the UI so promises are honoured before new rewards are assigned.
+- **Enhance-achievement retool.** The banked replacement for the three dead achievements:
+  "generate on five different base architectures" (DiT.1/DiT.2/DiT.3/SDXL/SD 1.5) at 1/3/5
+  rungs. Designed, deliberately not built until the booster fix landed — unblock and build.
+- **Booster gating fix.** PixAI offers boosters PER-MODEL (measured live: Tsubaki.2 offers only
+  Quality Tag + To Video, both members-only); our drawer offers all three on everything. The
+  proper fix needs a probe of the real per-model booster matrix, then scope.
+- **Similarity-index incremental sync.** Decided: ship an incremental top-up entry point for
+  the embedding index instead of a faster full rebuild. Never built.
+- **Install-folder tidy.** "A tidy install folder says a lot" — achievement/branding files
+  still sit loose at the install root. Partly addressed by the container; finish the thought
+  (possibly alongside the final naming pass, which may move `branding/` once more).
+- **JWT mirror toggle.** Mirroring generations into the PixAI library is a credential switch
+  (browser JWT instead of API key) — proven by a real submission. The toggle was scoped once
+  and the scoping notes were possibly lost in the docs purge (re-derive from git history if
+  needed). Bonus worth probing: the JWT bridge may make some panel apps unreachable to the API
+  key accessible to us.
+- **Community read-only surface.** Scouted data (per-artwork view counts — which dwarf likes —
+  lifetime stats, contest catalog). Much has since shipped in some form; audit what's left
+  worth surfacing before building anything.
+- **Dead-code sweep.** With the React rebuild done, sweep for orphaned code the classic cut
+  left behind (e.g. `--faststart-videos` is deprecated in place; what else is dead?).
+- **Enforce the bundle's unlock split in code.** The decided split (branding slots open on the
+  "Under the Hood" unlock; badges, Konami assets, tier frames, and any file carrying achievement
+  data stay sealed to the achievements that earn them) is NOT yet what the code does — badges,
+  Konami assets and frames are still counted as part of "Branding." Split them out so the
+  branding unlock cannot reach them, and verify the boundary is exactly the documented one
+  (mascots are Flair and open; badges are "the sauce" and sealed).
+
 ## Open questions — need a call before they can be scoped
 
 - **Does the Loom become part of the same app?**
