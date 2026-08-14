@@ -62,18 +62,6 @@ The reported leak of uncensored/"spicy" roast lines was deliberately not patched
 
 **Why.** His explicit scope boundary stands. Related standing rule: never audit or sanitize the owner's own product-copy language — the roasts and swearing are deliberate voice.
 
-### Where the 2026-07-16 feature-request sweep lives  ·  *2026-07-22*
-
-**The file is `docs/archive/SWEEP_2026-07-16.md`** — 28 grounded feature requests across three
-personas (Loom video creator, gallery curator, PixAI power user). It was deleted with the whole
-`docs/archive/` tree on 2026-07-27 (`64ecc21`), but the content is recoverable three ways:
-`git show 64ecc21^:docs/archive/SWEEP_2026-07-16.md`, the owner's Desktop copy in
-`Moonglade MD archive/`, and the tagging artifact where all 28 were owner-tagged on 2026-08-02.
-Everything still live from it now sits in `ROADMAP.md`.
-
-**Why.** Recorded because archiving a doc with live work in it is how real asks go invisible —
-it happened to this sweep, and the pointer is what made them recoverable.
-
 ### "Not single-user" was MISAPPLIED to block shipping the owner's own default art  ·  *2026-07-23*
 
 A prior session argued against shipping the owner's own default branding using the "this is a public, not single-user, tool" reasoning. The owner is explicit that this was a **misapplication**: "not single-user" is about building real security/access strength for real external users — it is NOT a reason to withhold the app's OWN default branding from everyone who downloads it. The app ships the owner's default marks/banner by design.
@@ -189,12 +177,6 @@ Do not add the Defender exclusion for the Pixeltable data directory ourselves. C
 With no feat earned yet, the whole Feats section correctly does not exist at all. Once the first feat lands, the section appears and the unearned feats show as mystery cards. Two states, not one. Owner, verbatim: "The feats are a true mystery until the first lands, then the unearned ones have the mystery card. That way unlocking them really feels like opening a new tier."
 
 **Why.** Recorded rather than left to a code comment because the failure mode here is a HELPFUL fix: a sweep reads "section disappears", finds the mystery-tile art and style sitting right there apparently unused, concludes someone forgot to wire it up, and wires it up — destroying the reveal in the name of consistency. The mystery tile is not unused; it is waiting for the second state.
-
-### V3.0 Lite instant video decline: CLOSED — cause found the same day this warning was written  ·  *2026-07-26 · reconciled 2026-07-28*
-
-The cause was found by following this entry's own instruction (read the raw error and param shape from the log): we sent `generateAudio`/`audioLanguage` to v3.0.2 (V3.0 Lite), which does not take them, and PixAI surfaced that as "This image contains sensitive or NSFW content." Proven by a controlled pair on media id 747704233721405654 — their site submitted the same image WITHOUT the audio fields and it rendered; this app submitted WITH them and was refused. Fixed by `VIDEO_AUDIO_MODELS` (commit c8724b5), gated on both video builders. Two same-day contributors closed alongside: our own re-upload manufacturing content-filter refusals, and 15s offered on non-v4.0 models (now snapped to 10). Owner's test case: V3.0 Lite at 15s should submit at 10s, not decline.
-
-**Why.** The owner's diagnostic instinct (nothing on the account = no task was ever created) was right and drove the fix. Reconciled so the do-not-close warning doesn't outlive the fix it asked for — the fix landed hours before the warning was carried into this file.
 
 ### `started is False`, never `not started` — unknown must stay unknown
 
