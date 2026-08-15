@@ -129,27 +129,50 @@ def test_make_mirror_session_none_when_empty(tmp_path, monkeypatch):
     assert mj.make_mirror_session() is None                   # no state, no bootstrap
 
 
-def test_make_mirror_session_builds_auth_and_skips_refresh_when_fresh(tmp_path, monkeypatch):
+def _fake_make_session(tok):
+    """Stand-in for the app's _make_session -- a JWT-authed Session, offline (the real one
+    validates config + network-resolves USER_ID). The mirror build attaches cookies after."""
+    import requests
+    s = requests.Session()
+    s.headers["Authorization"] = "Bearer " + tok
+    return s
+
+
+def test_make_mirror_session_builds_on_make_session_and_skips_refresh_when_fresh(tmp_path, monkeypatch):
     p = tmp_path / "m.json"
     monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
+    monkeypatch.setattr(mj, "_make_session", _fake_make_session)
     fresh = _jwt_in(27)
     mj.save_mirror_state({"jwt": fresh, "cookies": {"_udt": "u", "_bsid": "b"}})
     monkeypatch.setattr(mj, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
         AssertionError("must not refresh a fresh jwt")))
     s = mj.make_mirror_session()
-    assert s.headers["Authorization"] == "Bearer " + fresh
-    assert {c.name for c in s.cookies} >= {"_udt", "_bsid"}
+    assert s.headers["Authorization"] == "Bearer " + fresh    # built via _make_session(jwt)
+    assert {c.name for c in s.cookies} >= {"_udt", "_bsid"}    # cookie jar attached
 
 
 def test_make_mirror_session_refreshes_when_stale(tmp_path, monkeypatch):
     p = tmp_path / "m.json"
     monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
+    monkeypatch.setattr(mj, "_make_session", _fake_make_session)
     mj.save_mirror_state({"jwt": _jwt_in(2), "cookies": {"_udt": "u"}})   # within cushion
     fresh = _jwt_in(27)
     monkeypatch.setattr(mj, "refresh_jwt", lambda session, current_jwt=None: fresh)
     s = mj.make_mirror_session()
     assert s.headers["Authorization"] == "Bearer " + fresh
     assert mj.load_mirror_state()["jwt"] == fresh              # persisted the fresh one
+
+
+def test_make_mirror_session_refuses_when_no_jwt_never_api_key(tmp_path, monkeypatch):
+    """Review F5: with cookies but no usable JWT even after a failed refresh, refuse
+    (return None) -- NEVER build an API-key session as a fallback while mirroring."""
+    p = tmp_path / "m.json"
+    monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
+    mj.save_mirror_state({"jwt": "", "cookies": {"_udt": "u"}})
+    monkeypatch.setattr(mj, "refresh_jwt", lambda *a, **k: None)          # refresh fails
+    monkeypatch.setattr(mj, "_make_session", lambda tok: (_ for _ in ()).throw(
+        AssertionError("must not build a session without a JWT (F5)")))
+    assert mj.make_mirror_session() is None
 
 
 def test_run_mirror_check_never_prints_the_token(tmp_path, monkeypatch, capsys):

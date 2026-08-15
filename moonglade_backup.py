@@ -4681,11 +4681,15 @@ def _mirror_session_from(cookies, jwt):
 
 
 def make_mirror_session(bootstrap_from_browser=False):
-    """The mirror session, JWT rolled fresh and persisted. Returns None when there is
-    no stored session and none can be read from a local browser.
+    """The mirror submit session: the app's OWN _make_session machinery authed with the
+    browser JWT (not the API key) + the browser cookie jar attached. Returns None when
+    there is no usable JWT even after a refresh -- callers must then refuse and spend
+    nothing, NEVER fall back to an API-key session (review F5).
 
-    NOT wired to any submit path yet -- the spend-lifecycle mirror-submit is gated on
-    the adversarial review + a live capture. This builds/refreshes the session only.
+    Built on _make_session, not a hand-rolled Session, per the banked design ("hand it a
+    JWT-authenticated session is most of the work") -- that guarantees BOTH Apollo CSRF
+    headers (x-apollo-operation-name + apollo-require-preflight); a hand-rolled request
+    that omits x-apollo-operation-name gets a BAD_REQUEST (DECISIONS, "Apollo CSRF").
 
     The whole load->refresh->persist runs under _mirror_lock so concurrent callers can't
     both fire refreshToken or race their writes (review F11)."""
@@ -4699,13 +4703,20 @@ def make_mirror_session(bootstrap_from_browser=False):
                 cookies = fresh
         if not cookies and not jwt:
             return None
-        session = _mirror_session_from(cookies, jwt)
+        # Roll the JWT forward first (a cookies-only session carries the refresh POST;
+        # refresh_jwt sets its own CSRF headers). Owner-adopted renewal path, 2026-08-15.
         if mirror_needs_refresh(jwt):
-            fresh_jwt = refresh_jwt(session, current_jwt=jwt or None)
+            probe = _mirror_session_from(cookies, jwt)
+            fresh_jwt = refresh_jwt(probe, current_jwt=jwt or None)
             if fresh_jwt:
-                session.headers["Authorization"] = "Bearer " + fresh_jwt
-                save_mirror_state({"jwt": fresh_jwt,
-                                   "cookies": {c.name: c.value for c in session.cookies}})
+                jwt = fresh_jwt
+                cookies = {c.name: c.value for c in probe.cookies} or cookies
+                save_mirror_state({"jwt": jwt, "cookies": cookies})
+        if not jwt:
+            return None   # no usable JWT even after refresh -> refuse, never API-key (F5)
+        session = _make_session(jwt)                 # proven machinery, JWT-authed, both CSRF headers
+        for k, v in cookies.items():
+            session.cookies.set(k, v, domain="." + PIXAI_COOKIE_DOMAIN)
         return session
 
 
@@ -4752,10 +4763,13 @@ def run_mirror_check(args):
 # a generation into the pixai.art web LIBRARY, hold ALL of these (2026-08-14 adversarial
 # review; full report banked with the session). This is a SPEND + CREDENTIAL path.
 #
-#  GATE (F2): do NOT wire until a real DevTools capture of a site generation is diffed
-#    against our request -- persisted hash, x-apollo-operation-name (our _GEN_MUTATION
-#    sends a STATIC wrong name today), extra body fields (channel/source/publish), and
-#    whether /v2/kaisuuken/check even accepts the JWT bearer. Unverified = unbuilt.
+#  F2 (largely resolved 2026-08-15, from the legacy record): the submit is the app's OWN
+#    createGenerationTask -- the 2026-06-22 switch was AUTH-ONLY, and a JWT submit was
+#    LIVE-TESTED landing in the pixai.art library (and staying through a refresh) on
+#    2026-07-26 (DECISIONS). Apollo CSRF needs x-apollo-operation-name only PRESENT, not
+#    correct, so _make_session's header is fine. Residual to confirm before ship: free-card
+#    (/v2/kaisuuken/check) consumption under the JWT session -- one card-covered submit +
+#    the kaisuuken log. No fresh DevTools capture needed; the shape is known-working.
 #  1. Single submit: exactly one createGenerationTask per create, at EVERY entry point
 #     (web _gen_session + CLI run_generate/generate_video/reference_video/edit_image +
 #     the loom route's TWO submit calls); the swap changes ONLY the session object.
