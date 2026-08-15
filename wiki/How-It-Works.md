@@ -98,7 +98,7 @@ not part of an `out_dir` backup; a fresh machine rebuilds it rather than restori
 5. **`find_files_for_media_id` recognizes both naming layouts** — but it isn't one shared
    matcher yet. Only the gallery calls it today; resume, the audit, and `--organize` each still
    walk the tree independently with their own exclusion set. Consolidating onto a single matcher
-   is open work, not yet done (see `docs/architecture.md`'s Invariants section for specifics).
+   is open work, not yet done.
 
 ## Testing
 Run `python -m pytest -q` from the repo root — pure functions, filesystem, catalog,

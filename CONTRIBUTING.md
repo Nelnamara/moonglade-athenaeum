@@ -23,8 +23,8 @@ cp config.example.json config.json   # add your own PIXAI_API_KEY
 ```
 
 See the [Setup wiki page](https://github.com/Nelnamara/moonglade-athenaeum/wiki/Setup) for
-the full walkthrough, and [`docs/architecture.md`](docs/architecture.md) for how the four
-modules fit together.
+the full walkthrough, and the [How It Works wiki page](https://github.com/Nelnamara/moonglade-athenaeum/wiki/How-It-Works)
+for how the modules fit together.
 
 ## Running the tests
 
@@ -56,8 +56,7 @@ whole files. A few conventions that matter more than usual here:
   independently with their own exclusion set (a known gap, not a pattern to copy). If you
   add a new file-by-media_id lookup, prefer calling `find_files_for_media_id()` over
   writing another ad-hoc glob, even though the existing code doesn't consistently do that
-  yet. See the Invariants section of [`docs/architecture.md`](docs/architecture.md) for
-  the full list and the current, verified state of each one.
+  yet.
 - **Catalog schema changes** touch three places together: `CATALOG_FIELDS`, the `_CREATE_TABLE`
   DDL, and the `_MIGRATIONS` list (so existing databases pick up the column automatically).
   All three live in `moonglade_gallery.py`.
