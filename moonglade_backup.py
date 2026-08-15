@@ -4720,6 +4720,28 @@ def make_mirror_session(bootstrap_from_browser=False):
         return session
 
 
+def _session_for_create(api_session):
+    """The session the CREATE POST must use: the browser JWT (mirror) when the 'Mirror to
+    PixAI' toggle is on, so the generation lands in the pixai.art web library; else the
+    API-key api_session, exactly as today. The single choke every create site routes
+    through (review F4) -- swap ONLY the create's session, never the poll/collect/media
+    calls (F6), and NEVER fall back to the API key when mirroring: if the mirror session
+    is unavailable, refuse and spend nothing (F5).
+
+    Callers must have already passed _check_read_only, since make_mirror_session may make a
+    refreshToken network call (review F12). free-card (/v2/kaisuuken/check) still runs on the
+    API-key session at the call site -- only the create rides the JWT."""
+    if not mirror_enabled():
+        return api_session
+    m = make_mirror_session()
+    if m is None:
+        raise PixAIError(
+            "Mirror to PixAI is ON but its browser session is expired or unavailable -- "
+            "run `--mirror-check` (or re-bootstrap from a logged-in browser). Nothing was "
+            "submitted and no credits were spent.")
+    return m
+
+
 def run_mirror_check(args):
     """--mirror-check: prove the zero-paste mirror loop WITHOUT ever printing the token.
     Tries the stored session; if none, reads the pixai.art session from a local browser;
@@ -7275,6 +7297,12 @@ def submit_generation(session, params):
     only fires on a PixAIError, which means PixAI answered with a GraphQL error and
     REJECTED the task, so there is nothing created and nothing charged to duplicate."""
     _check_read_only("submit a generation (spends credits)")
+    # Mirror routing (review F4/F5): after the READ_ONLY gate, the create rides the browser
+    # JWT session when the toggle is on (else this is a pass-through, unchanged). submit_
+    # generation is create-only -- it returns the task id and never polls/collects -- so
+    # rebinding the whole session here is safe; the CALLER keeps its API-key session for
+    # download (F6).
+    session = _session_for_create(session)
     params = priority_for_submit(params)   # already known to be turbo-refused? use Low
     try:
         created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
@@ -7539,10 +7567,12 @@ def run_generate_video(args):
     else:
         _check_read_only("submit a video generation (spends credits)")
         print("Submitting VIDEO generation task (this spends credits)...")
-        _apply_kaisuuken(session, params, args)
+        _apply_kaisuuken(session, params, args)   # free-card check on the API-key session
         # gql_mutate, never gql_adhoc: a re-POSTed createGenerationTask is a second
         # (expensive) video and a second charge -- see gql_mutate's docstring.
-        created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
+        # _session_for_create: the CREATE rides the mirror JWT when the toggle is on
+        # (else pass-through); download below stays on the API-key `session` (F6).
+        created = gql_mutate(_session_for_create(session), _GEN_MUTATION, {"parameters": params})
         task_id = (created.get("createGenerationTask") or {}).get("id")
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
@@ -7656,9 +7686,10 @@ def run_reference_video(args):
                             _resolve_refs(session, vids, "VIDEO"),
                             _resolve_refs(session, auds, None))
         print("Submitting REFERENCE VIDEO task (spends credits unless a free card applies)...")
-        _apply_kaisuuken(session, params, args)
+        _apply_kaisuuken(session, params, args)   # free-card check on the API-key session
         # gql_mutate, never gql_adhoc -- a re-POST here is a second charge.
-        created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
+        # _session_for_create: create rides the mirror JWT when on; download stays API-key (F6).
+        created = gql_mutate(_session_for_create(session), _GEN_MUTATION, {"parameters": params})
         task_id = (created.get("createGenerationTask") or {}).get("id")
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
@@ -7751,9 +7782,10 @@ def run_edit_image(args):
                 resolution=cfg["resolution"], aspect_ratio=cfg["aspect_ratio"],
                 quality=cfg["quality"], kaisuuken_id=cfg["kaisuuken_id"])
         print("Submitting EDIT task (spends credits unless a free card applies)...")
-        _apply_kaisuuken(session, params, args)
+        _apply_kaisuuken(session, params, args)   # free-card check on the API-key session
         # gql_mutate, never gql_adhoc -- a re-POST here is a second charge.
-        created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
+        # _session_for_create: create rides the mirror JWT when on; download stays API-key (F6).
+        created = gql_mutate(_session_for_create(session), _GEN_MUTATION, {"parameters": params})
         task_id = (created.get("createGenerationTask") or {}).get("id")
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
