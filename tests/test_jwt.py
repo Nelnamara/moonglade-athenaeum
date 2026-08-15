@@ -151,6 +151,22 @@ def test_make_mirror_session_builds_on_make_session_and_skips_refresh_when_fresh
     assert {c.name for c in s.cookies} >= {"_udt", "_bsid"}    # cookie jar attached
 
 
+def test_mirror_session_presents_web_client_identity(tmp_path, monkeypatch):
+    """The mirror files as the WEB client so PixAI applies the website content policy, not the
+    stricter mobile-app one. The returned session must carry a desktop-browser User-Agent and
+    the pixai.art Origin/Referer (the API-tool UA reads as a non-web client and gets 403s)."""
+    p = tmp_path / "m.json"
+    monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
+    monkeypatch.setattr(mj, "_make_session", _fake_make_session)
+    mj.save_mirror_state({"jwt": _jwt_in(27), "cookies": {"_udt": "u"}})
+    s = mj.make_mirror_session()
+    assert s.headers["User-Agent"] == mj.MIRROR_WEB_USER_AGENT
+    assert "Mozilla/5.0" in s.headers["User-Agent"] and "Chrome/" in s.headers["User-Agent"]
+    assert s.headers["Origin"] == "https://pixai.art"
+    assert s.headers["Referer"].startswith("https://pixai.art")
+    assert "pixai-personal-backup" not in s.headers["User-Agent"]   # not the API-tool UA
+
+
 def test_make_mirror_session_refreshes_when_stale(tmp_path, monkeypatch):
     p = tmp_path / "m.json"
     monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
