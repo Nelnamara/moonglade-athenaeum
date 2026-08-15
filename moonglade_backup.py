@@ -4603,6 +4603,135 @@ def refresh_jwt(session, current_jwt=None):
     return val if isinstance(val, str) and jwt_expiry(val) else None
 
 
+# --- Mirror session state: a dedicated git-ignored store (NOT config.json) --------
+def _mirror_state_path():
+    """Where the rotating mirror session (JWT + cookie jar) lives: a dedicated
+    git-ignored file beside config.json. Deliberately NOT config.json -- the JWT
+    rotates on every refresh, and a write there must never risk clobbering the API
+    key (a test once overwrote the real PIXAI_API_KEY; a separate file can't)."""
+    return _config_path().parent / "mirror_session.json"
+
+
+def load_mirror_state():
+    """The stored mirror session {jwt, cookies:{name:value}} or {} if none. Never
+    raises, never logs a value."""
+    p = _mirror_state_path()
+    if not p.exists():
+        return {}
+    try:
+        with open(p, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (ValueError, OSError):
+        return {}
+
+
+def save_mirror_state(state):
+    """Atomically persist {jwt, cookies} to the git-ignored mirror file (same
+    temp+os.replace pattern as _save_config). Best-effort: True/False, never raises,
+    never logs a value."""
+    p = _mirror_state_path()
+    tmp = p.with_name(p.name + ".tmp-{}".format(os.getpid()))
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"jwt": state.get("jwt", ""),
+                       "cookies": dict(state.get("cookies") or {})}, f, indent=2)
+        os.replace(tmp, p)
+        return True
+    except OSError:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+        return False
+
+
+def mirror_enabled():
+    """Is the Control Panel 'Mirror to PixAI website' toggle on? Reads config fresh
+    (git-ignored MIRROR_TO_PIXAI flag). Default OFF = pure API-key mode. The
+    mirror-SUBMIT path that consumes this is gated on the adversarial review + a live
+    capture; this reader is here for that wiring, it changes no behavior yet."""
+    return bool(_load_config().get("MIRROR_TO_PIXAI"))
+
+
+def _mirror_session_from(cookies, jwt):
+    """A requests.Session authed as the BROWSER (cookie jar + Bearer JWT) on
+    .pixai.art -- the session a mirror submit would use so the generation lands in the
+    pixai.art web library, distinct from _make_session's API-key auth."""
+    session = requests.Session()
+    for k, v in (cookies or {}).items():
+        session.cookies.set(k, v, domain="." + PIXAI_COOKIE_DOMAIN)
+    if jwt:
+        session.headers["Authorization"] = "Bearer " + jwt
+    session.headers.update({"Accept": "application/json",
+                            "apollo-require-preflight": "true"})
+    return session
+
+
+def make_mirror_session(bootstrap_from_browser=False):
+    """The mirror session, JWT rolled fresh and persisted. Returns None when there is
+    no stored session and none can be read from a local browser.
+
+    NOT wired to any submit path yet -- the spend-lifecycle mirror-submit is gated on
+    the adversarial review + a live capture. This builds/refreshes the session only."""
+    state = load_mirror_state()
+    cookies = dict(state.get("cookies") or {})
+    jwt = state.get("jwt") or ""
+    if (not cookies or not jwt) and bootstrap_from_browser:
+        fresh = read_browser_session()
+        if fresh:
+            cookies = fresh
+    if not cookies and not jwt:
+        return None
+    session = _mirror_session_from(cookies, jwt)
+    if mirror_needs_refresh(jwt):
+        fresh_jwt = refresh_jwt(session, current_jwt=jwt or None)
+        if fresh_jwt:
+            session.headers["Authorization"] = "Bearer " + fresh_jwt
+            save_mirror_state({"jwt": fresh_jwt,
+                               "cookies": {c.name: c.value for c in session.cookies}})
+    return session
+
+
+def run_mirror_check(args):
+    """--mirror-check: prove the zero-paste mirror loop WITHOUT ever printing the token.
+    Tries the stored session; if none, reads the pixai.art session from a local browser;
+    calls refreshToken to confirm renewal; reports only days-left + ok/fail and persists
+    the fresh session. This is the owner's step-0 verification -- it renews our own token
+    and spends nothing. If it can't read a browser (e.g. run headless/sandboxed), it says
+    so plainly rather than guessing."""
+    state = load_mirror_state()
+    cookies = dict(state.get("cookies") or {})
+    jwt = state.get("jwt") or ""
+    src = "stored"
+    if not cookies:
+        cookies = read_browser_session()
+        src = "browser"
+    if not cookies and not jwt:
+        print("Mirror: no session. No mirror_session.json, and no readable pixai.art "
+              "cookies in a local browser (is a browser installed and logged in?). "
+              "Enable the mirror to bootstrap, or paste a session.")
+        return {"ok": False, "source": "none"}
+    session = _mirror_session_from(cookies, jwt)
+    before = jwt_days_left(jwt) if jwt else None
+    fresh = refresh_jwt(session, current_jwt=jwt or None)
+    if not fresh:
+        print("Mirror session ({}): refreshToken did NOT return a fresh token -- the "
+              "cookies/JWT are likely expired. Re-open pixai.art logged-in and retry."
+              .format(src))
+        return {"ok": False, "source": src, "renewed": False}
+    after = jwt_days_left(fresh)
+    saved = save_mirror_state({"jwt": fresh,
+                               "cookies": {c.name: c.value for c in session.cookies}})
+    print("Mirror OK (source: {}). refreshToken renewed the JWT -> {} days left{}. "
+          "{} The renewal loop can keep it rolling from here -- no paste needed.".format(
+              src, after,
+              "" if before is None else " (was {})".format(before),
+              "Stored." if saved else "WARNING: could not persist mirror_session.json."))
+    return {"ok": True, "source": src, "renewed": True, "days_left": after}
+
+
 def run_probe(args):
     """Test API connection and resolve full-res media URL for the newest task."""
     session = _make_session(getattr(args, "token", None))
@@ -10966,6 +11095,10 @@ def main():
     ap.add_argument("--cards", action="store_true",
                     help="show your free-generation cards (kaisuuken) + their ids, then exit. "
                          "Read-only; pass an id to a run with --kaisuuken-id")
+    ap.add_argument("--mirror-check", action="store_true",
+                    help="check/bootstrap the 'Mirror to PixAI website' session (reads the "
+                         "pixai.art session from a local browser, refreshes the JWT) and "
+                         "report days-left, then exit. Never prints the token; spends nothing")
     ap.add_argument("--card-history", action="store_true",
                     help="show recent benefit-card usage (redemptions + refunds), then exit. "
                          "Read-only. Pass --card-history-all for the full lifetime card-type "
@@ -11306,6 +11439,9 @@ def main():
             return
         if getattr(args, "cards", False):
             run_cards(args)
+            return
+        if getattr(args, "mirror_check", False):
+            run_mirror_check(args)
             return
         if getattr(args, "card_history", False) or getattr(args, "card_history_all", False):
             run_card_history(args)

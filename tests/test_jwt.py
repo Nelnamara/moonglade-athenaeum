@@ -103,3 +103,77 @@ def test_read_browser_session_degrades_to_empty(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", no_bc3)
     monkeypatch.setattr(mj, "_read_chromium_cookies_windows", lambda: {})
     assert mj.read_browser_session() == {}
+
+
+# ---- mirror session: persistence, session build, refresh, and the check command ----
+import time as _time
+from types import SimpleNamespace
+
+
+def _jwt_in(days):
+    """A JWT expiring `days` from the REAL clock (make_mirror_session uses time.time())."""
+    return _jwt(int(_time.time()) + int(days * 86400))
+
+
+def test_mirror_state_roundtrip(tmp_path, monkeypatch):
+    p = tmp_path / "mirror_session.json"
+    monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
+    assert mj.load_mirror_state() == {}                       # absent -> {}
+    assert mj.save_mirror_state({"jwt": "J", "cookies": {"_udt": "x"}}) is True
+    got = mj.load_mirror_state()
+    assert got["jwt"] == "J" and got["cookies"] == {"_udt": "x"}
+
+
+def test_make_mirror_session_none_when_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(mj, "_mirror_state_path", lambda: tmp_path / "none.json")
+    assert mj.make_mirror_session() is None                   # no state, no bootstrap
+
+
+def test_make_mirror_session_builds_auth_and_skips_refresh_when_fresh(tmp_path, monkeypatch):
+    p = tmp_path / "m.json"
+    monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
+    fresh = _jwt_in(27)
+    mj.save_mirror_state({"jwt": fresh, "cookies": {"_udt": "u", "_bsid": "b"}})
+    monkeypatch.setattr(mj, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("must not refresh a fresh jwt")))
+    s = mj.make_mirror_session()
+    assert s.headers["Authorization"] == "Bearer " + fresh
+    assert {c.name for c in s.cookies} >= {"_udt", "_bsid"}
+
+
+def test_make_mirror_session_refreshes_when_stale(tmp_path, monkeypatch):
+    p = tmp_path / "m.json"
+    monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
+    mj.save_mirror_state({"jwt": _jwt_in(2), "cookies": {"_udt": "u"}})   # within cushion
+    fresh = _jwt_in(27)
+    monkeypatch.setattr(mj, "refresh_jwt", lambda session, current_jwt=None: fresh)
+    s = mj.make_mirror_session()
+    assert s.headers["Authorization"] == "Bearer " + fresh
+    assert mj.load_mirror_state()["jwt"] == fresh              # persisted the fresh one
+
+
+def test_run_mirror_check_never_prints_the_token(tmp_path, monkeypatch, capsys):
+    p = tmp_path / "m.json"
+    monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
+    old, fresh = _jwt_in(2), _jwt_in(27)
+    mj.save_mirror_state({"jwt": old, "cookies": {"_udt": "u"}})
+    monkeypatch.setattr(mj, "refresh_jwt", lambda session, current_jwt=None: fresh)
+    res = mj.run_mirror_check(SimpleNamespace())
+    out = capsys.readouterr().out
+    assert res["ok"] is True and res["renewed"] is True
+    assert old not in out and fresh not in out                # NEVER the token
+    assert "Mirror OK" in out and "days left" in out
+
+
+def test_run_mirror_check_no_session(tmp_path, monkeypatch):
+    monkeypatch.setattr(mj, "_mirror_state_path", lambda: tmp_path / "none.json")
+    monkeypatch.setattr(mj, "read_browser_session", lambda *a, **k: {})
+    res = mj.run_mirror_check(SimpleNamespace())
+    assert res["ok"] is False and res["source"] == "none"
+
+
+def test_mirror_enabled_reads_flag(monkeypatch):
+    monkeypatch.setattr(mj, "_load_config", lambda: {"MIRROR_TO_PIXAI": True})
+    assert mj.mirror_enabled() is True
+    monkeypatch.setattr(mj, "_load_config", lambda: {})
+    assert mj.mirror_enabled() is False
