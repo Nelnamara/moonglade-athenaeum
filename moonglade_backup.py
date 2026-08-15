@@ -4604,6 +4604,13 @@ def refresh_jwt(session, current_jwt=None):
 
 
 # --- Mirror session state: a dedicated git-ignored store (NOT config.json) --------
+# Single-flight lock: serializes load->refresh->persist so two threads (the renewal
+# scheduler + a live use) can't both fire refreshToken and race their writes, and so a
+# rotated cookie pair can't be persisted out of issue-order (adversarial review
+# 2026-08-14, findings F5/F11). The gallery serves threaded=True.
+_mirror_lock = threading.Lock()
+
+
 def _mirror_state_path():
     """Where the rotating mirror session (JWT + cookie jar) lives: a dedicated
     git-ignored file beside config.json. Deliberately NOT config.json -- the JWT
@@ -4631,7 +4638,11 @@ def save_mirror_state(state):
     temp+os.replace pattern as _save_config). Best-effort: True/False, never raises,
     never logs a value."""
     p = _mirror_state_path()
-    tmp = p.with_name(p.name + ".tmp-{}".format(os.getpid()))
+    # Per-WRITE-unique temp (pid + random), not per-process: the gallery is threaded, so a
+    # per-pid temp name lets two concurrent savers interleave into one file then both
+    # os.replace -> corrupt JSON -> load returns {} -> mirror "lost" (review F5). A unique
+    # temp per write + atomic replace makes concurrent saves last-writer-wins, never corrupt.
+    tmp = p.with_name(p.name + ".tmp-{}-{}".format(os.getpid(), secrets.token_hex(6)))
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"jwt": state.get("jwt", ""),
@@ -4674,24 +4685,28 @@ def make_mirror_session(bootstrap_from_browser=False):
     no stored session and none can be read from a local browser.
 
     NOT wired to any submit path yet -- the spend-lifecycle mirror-submit is gated on
-    the adversarial review + a live capture. This builds/refreshes the session only."""
-    state = load_mirror_state()
-    cookies = dict(state.get("cookies") or {})
-    jwt = state.get("jwt") or ""
-    if (not cookies or not jwt) and bootstrap_from_browser:
-        fresh = read_browser_session()
-        if fresh:
-            cookies = fresh
-    if not cookies and not jwt:
-        return None
-    session = _mirror_session_from(cookies, jwt)
-    if mirror_needs_refresh(jwt):
-        fresh_jwt = refresh_jwt(session, current_jwt=jwt or None)
-        if fresh_jwt:
-            session.headers["Authorization"] = "Bearer " + fresh_jwt
-            save_mirror_state({"jwt": fresh_jwt,
-                               "cookies": {c.name: c.value for c in session.cookies}})
-    return session
+    the adversarial review + a live capture. This builds/refreshes the session only.
+
+    The whole load->refresh->persist runs under _mirror_lock so concurrent callers can't
+    both fire refreshToken or race their writes (review F11)."""
+    with _mirror_lock:
+        state = load_mirror_state()
+        cookies = dict(state.get("cookies") or {})
+        jwt = state.get("jwt") or ""
+        if (not cookies or not jwt) and bootstrap_from_browser:
+            fresh = read_browser_session()
+            if fresh:
+                cookies = fresh
+        if not cookies and not jwt:
+            return None
+        session = _mirror_session_from(cookies, jwt)
+        if mirror_needs_refresh(jwt):
+            fresh_jwt = refresh_jwt(session, current_jwt=jwt or None)
+            if fresh_jwt:
+                session.headers["Authorization"] = "Bearer " + fresh_jwt
+                save_mirror_state({"jwt": fresh_jwt,
+                                   "cookies": {c.name: c.value for c in session.cookies}})
+        return session
 
 
 def run_mirror_check(args):
@@ -4730,6 +4745,40 @@ def run_mirror_check(args):
               "" if before is None else " (was {})".format(before),
               "Stored." if saved else "WARNING: could not persist mirror_session.json."))
     return {"ok": True, "source": src, "renewed": True, "days_left": after}
+
+
+# ===========================================================================
+# MIRROR-SUBMIT PATH -- DELIBERATELY NOT BUILT YET. When wiring the submit that files
+# a generation into the pixai.art web LIBRARY, hold ALL of these (2026-08-14 adversarial
+# review; full report banked with the session). This is a SPEND + CREDENTIAL path.
+#
+#  GATE (F2): do NOT wire until a real DevTools capture of a site generation is diffed
+#    against our request -- persisted hash, x-apollo-operation-name (our _GEN_MUTATION
+#    sends a STATIC wrong name today), extra body fields (channel/source/publish), and
+#    whether /v2/kaisuuken/check even accepts the JWT bearer. Unverified = unbuilt.
+#  1. Single submit: exactly one createGenerationTask per create, at EVERY entry point
+#     (web _gen_session + CLI run_generate/generate_video/reference_video/edit_image +
+#     the loom route's TWO submit calls); the swap changes ONLY the session object.
+#  2. No gql_adhoc for spend: route through submit_generation -> gql_mutate (retries=0).
+#     No hand-rolled poster or retry loop. Extend test_spend_no_retry.py by name.
+#  3. READ_ONLY fires BEFORE any mirror network call (refreshToken + /v2 card check),
+#     not just inside submit_generation.
+#  4. No credential emission: never vlog/print/return/echo the JWT, cookies, or raw
+#     response headers; the Panel refuses/warns on plain HTTP; credential only via POST
+#     body, never a URL/query param.
+#  5. No silent API-key fallback: decide refuse-vs-allow pre-submit, OFFLINE, from the
+#     JWT check -- never in an except around the POST. On any mirror-session failure
+#     (None/expired/401) refuse and spend nothing; never build an API-key session while
+#     the mirror is ON. A 401 under the mirror surfaces "mirror expired -- re-bootstrap",
+#     NOT the free-card "Lost to the Void" error.
+#  6. Collect stays on the API-key session: only the create POST uses the mirror session;
+#     poll / collect_generation / GET /v1/media do NOT.
+#  7. Persist rolled cookies on EVERY mirror response (not only on refresh), or verify a
+#     JWT-alone submit works -- else the short cookies die ~1h after last use.
+#  8. Naming (F14): the WS backup collector already owns "mirror" (_watch_mirror in
+#     moonglade_gallery.py). Give the SPEND feature a distinct name (push-to-library /
+#     web-submit) so a future grep-edit can't cross the credential boundary.
+# ===========================================================================
 
 
 def run_probe(args):
