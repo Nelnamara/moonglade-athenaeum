@@ -229,3 +229,19 @@ def test_gitignore_covers_credential_temp_files():
     import pathlib
     gi = (pathlib.Path(mj.__file__).resolve().parent / ".gitignore").read_text(encoding="utf-8")
     assert "mirror_session.json.*" in gi and "config.json.*" in gi
+
+
+def test_session_for_create_routing(monkeypatch):
+    """The single create-routing choke (review F4/F5/F6): OFF is a pure passthrough (no
+    change to existing spend paths); ON returns the mirror session; ON-but-unavailable
+    REFUSES (raises) rather than falling back to the API-key session."""
+    import pytest
+    api, mir = object(), object()
+    monkeypatch.setattr(mj, "mirror_enabled", lambda: False)
+    assert mj._session_for_create(api) is api                 # OFF -> passthrough
+    monkeypatch.setattr(mj, "mirror_enabled", lambda: True)
+    monkeypatch.setattr(mj, "make_mirror_session", lambda: mir)
+    assert mj._session_for_create(api) is mir                 # ON -> the mirror session
+    monkeypatch.setattr(mj, "make_mirror_session", lambda: None)
+    with pytest.raises(mj.PixAIError):                         # ON + unavailable -> refuse (F5)
+        mj._session_for_create(api)
