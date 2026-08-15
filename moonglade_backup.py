@@ -822,6 +822,12 @@ SESSION_COOKIE_NAMES = ("_bsid", "_bsid.sig", "_udt", "_udt.sig")
 # Roll the ~27-day JWT once it drops under this many days left (a box that runs even
 # weekly never lapses).
 MIRROR_REFRESH_WHEN_DAYS_LEFT = 5
+# The localStorage key the pixai.art frontend keeps the live JWT under (confirmed on a
+# logged-in tab 2026-08-15). localStorage is NOT app-bound(v20)-encrypted the way modern
+# Chrome cookies are, so reading THIS is how the mirror bootstraps on a current Chrome
+# where the cookie store can't be decrypted. Note the trailing ":token" is exact -- the
+# sibling ":intercom-user-jwt" key must never be mistaken for it.
+LOCALSTORAGE_JWT_KEY = b"https://api.pixai.art:token"
 # ===========================================================================
 
 # Media URL: https://api.pixai.art/v1/media/<id>
@@ -4563,6 +4569,166 @@ def _chromium_decrypt(enc, key):
     return ""
 
 
+# --- localStorage JWT reader ------------------------------------------------------
+# Modern Chrome (>=127) wraps the cookie store in app-bound "v20" encryption a normal
+# user process can't decrypt, so the cookie path above returns nothing there. But the
+# pixai.art frontend ALSO keeps the live JWT in localStorage, and localStorage's
+# on-disk store (Local Storage/leveldb) is NOT app-bound-encrypted -- so we can read
+# the JWT straight out of it. That's the whole reason "Connect" can work on a current
+# Chrome without a paste. The Bearer JWT alone authenticates the mirror (create rides
+# Authorization: Bearer; refreshToken renews off the Bearer), so cookies are optional.
+#
+# leveldb isn't parsed with a library (no C dep, no snappy): we scan the raw bytes of
+# each .log/.ldb file for the exact localStorage key and lift the JWT that immediately
+# follows it. The freshest write lands in the uncompressed .log, so this is reliable for
+# an actively-used session; older compacted copies in .ldb are a best-effort bonus, and
+# we pick the candidate with the furthest-out `exp` (the most recently refreshed one).
+def _read_file_shared(path):
+    """Read a file Chrome may hold open. Direct read first (Chromium opens leveldb files
+    share-read on Windows); on failure, copy to temp and read the copy. b'' on failure,
+    never raises."""
+    import shutil
+    import tempfile
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        pass
+    tmp = os.path.join(tempfile.gettempdir(),
+                       "mg_ls_%d_%s_%s" % (os.getpid(), secrets.token_hex(4),
+                                           os.path.basename(path)))
+    try:
+        shutil.copy2(path, tmp)
+        with open(tmp, "rb") as f:
+            return f.read()
+    except OSError:
+        return b""
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+# base64url signature length (chars, no padding) per JWT `alg`. A greedy scan can't tell
+# where a signature ends -- the char class runs on into whatever leveldb framing follows the
+# value -- so we trim the third segment to the exact length the header's alg implies. A
+# Bearer with even one trailing junk char is silently rejected by the server, so this must be
+# exact. Every alg the pixai.art token could plausibly use is covered.
+_JWT_SIG_CHARS = {
+    "HS256": 43, "HS384": 64, "HS512": 86,
+    "RS256": 342, "RS384": 512, "RS512": 683,
+    "PS256": 342, "PS384": 512, "PS512": 683,
+    "ES256": 86, "ES384": 128, "ES512": 176, "EdDSA": 86,
+}
+
+
+def _tidy_jwt(cand):
+    """Trim a greedily-matched 'eyJhdr.payload.sig<+junk>' to the exact token. The match has
+    exactly two dots (the char class excludes '.'), so it splits into 3 parts; the signature
+    is trimmed to the length the header alg implies. Returns a clean JWT with a real `exp`, or
+    '' if it isn't one / was cut short of a full signature."""
+    parts = cand.split(".")
+    if len(parts) != 3:
+        return ""
+    h, p, s = parts
+    try:
+        alg = json.loads(_b64url_decode(h)).get("alg")
+    except Exception:
+        alg = None
+    want = _JWT_SIG_CHARS.get(alg)
+    if want is not None:
+        if len(s) < want:
+            return ""          # value ended before a full signature -> not our token
+        s = s[:want]           # cut any framing bytes the greedy scan absorbed
+    jwt = "%s.%s.%s" % (h, p, s)
+    return jwt if jwt_expiry(jwt) is not None else ""
+
+
+def _extract_jwts_from_leveldb_blob(blob):
+    """Every pixai.art-token JWT found in one leveldb file's raw bytes. Locates the exact
+    LOCALSTORAGE_JWT_KEY and lifts the JWT that follows it -- as Latin-1 (encoding byte 0x01,
+    the JWT is pure ASCII) or UTF-16LE (0x00). Works on the uncompressed .log (the freshest
+    write, where the full key is present); prefix-compressed .ldb blocks may not carry the
+    literal key and are simply skipped -- .log is the reliable source. Each candidate is
+    tidied to the exact token via _tidy_jwt. Returns a list; never raises, never logs a value.
+    The window is tight so the sibling :intercom-user-jwt key can't leak in."""
+    out = []
+    key = LOCALSTORAGE_JWT_KEY
+    ascii_re = re.compile(rb"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+")
+    utf16_re = re.compile(r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+")
+    start = 0
+    while True:
+        i = blob.find(key, start)
+        if i < 0:
+            break
+        after = i + len(key)
+        start = after
+        window = blob[after:after + 32]              # value sits within a few bytes of the key
+        a = window.find(b"eyJ")                       # Latin-1 value: ...eyJ...
+        if 0 <= a <= 24:
+            m = ascii_re.match(blob, after + a)
+            if m:
+                tok = _tidy_jwt(m.group(0).decode("ascii"))
+                if tok:
+                    out.append(tok)
+                    continue
+        u = window.find(b"e\x00y\x00J\x00")           # UTF-16LE value: e\0y\0J\0...
+        if 0 <= u <= 24:
+            try:
+                txt = blob[after + u:after + u + 6000].decode("utf-16-le", "ignore")
+            except Exception:
+                txt = ""
+            m = utf16_re.match(txt)
+            if m:
+                tok = _tidy_jwt(m.group(0))
+                if tok:
+                    out.append(tok)
+    return out
+
+
+def read_browser_jwt(browsers=("chrome", "edge", "brave")):
+    """The live pixai.art JWT read from a local browser's localStorage, across ALL profiles
+    (Default, Profile N, ...) of the given Chromium browsers. Returns the freshest JWT (max
+    `exp`) or '' if none. This is what lets 'Connect' bootstrap the mirror on a current
+    Chrome whose cookie store is app-bound-encrypted. NEVER raises, NEVER logs the value."""
+    la = os.environ.get("LOCALAPPDATA", "")
+    roots = {
+        "chrome": os.path.join(la, r"Google\Chrome\User Data"),
+        "edge": os.path.join(la, r"Microsoft\Edge\User Data"),
+        "brave": os.path.join(la, r"BraveSoftware\Brave-Browser\User Data"),
+    }
+    candidates = []
+    for name in browsers:
+        udir = roots.get(name)
+        if not udir or not os.path.isdir(udir):
+            continue
+        try:
+            profiles = os.listdir(udir)
+        except OSError:
+            continue
+        for prof in profiles:
+            ldb = os.path.join(udir, prof, "Local Storage", "leveldb")
+            if not os.path.isdir(ldb):
+                continue
+            try:
+                files = os.listdir(ldb)
+            except OSError:
+                continue
+            for fn in files:
+                if not (fn.endswith(".log") or fn.endswith(".ldb")):
+                    continue
+                blob = _read_file_shared(os.path.join(ldb, fn))
+                if blob:
+                    candidates.extend(_extract_jwts_from_leveldb_blob(blob))
+    best, best_exp = "", -1
+    for j in candidates:
+        e = jwt_expiry(j)
+        if e is not None and e > best_exp:
+            best, best_exp = j, e
+    return best
+
+
 def refresh_jwt(session, current_jwt=None):
     """Call the no-arg refreshToken mutation and return the fresh JWT, or None.
 
@@ -4697,10 +4863,22 @@ def make_mirror_session(bootstrap_from_browser=False):
         state = load_mirror_state()
         cookies = dict(state.get("cookies") or {})
         jwt = state.get("jwt") or ""
-        if (not cookies or not jwt) and bootstrap_from_browser:
-            fresh = read_browser_session()
-            if fresh:
-                cookies = fresh
+        bootstrapped = False
+        if bootstrap_from_browser and (not jwt or not cookies):
+            # The JWT is the credential that matters (Bearer auth carries the create +
+            # refresh); read it from localStorage, which a current Chrome does NOT
+            # app-bound-encrypt. Cookies are a best-effort extra and simply stay empty
+            # when the cookie store is v20-locked -- that's fine, a JWT-only mirror works.
+            if not jwt:
+                bj = read_browser_jwt()
+                if bj:
+                    jwt = bj
+                    bootstrapped = True
+            if not cookies:
+                fresh = read_browser_session()
+                if fresh:
+                    cookies = fresh
+                    bootstrapped = True
         if not cookies and not jwt:
             return None
         # Roll the JWT forward first (a cookies-only session carries the refresh POST;
@@ -4712,8 +4890,13 @@ def make_mirror_session(bootstrap_from_browser=False):
                 jwt = fresh_jwt
                 cookies = {c.name: c.value for c in probe.cookies} or cookies
                 save_mirror_state({"jwt": jwt, "cookies": cookies})
+                bootstrapped = False   # already persisted the rolled session
         if not jwt:
             return None   # no usable JWT even after refresh -> refuse, never API-key (F5)
+        if bootstrapped:
+            # A freshly-read (still-valid, ~27d) browser JWT that didn't need refresh:
+            # persist it so later calls don't have to touch the browser again.
+            save_mirror_state({"jwt": jwt, "cookies": cookies})
         session = _make_session(jwt)                 # proven machinery, JWT-authed, both CSRF headers
         for k, v in cookies.items():
             session.cookies.set(k, v, domain="." + PIXAI_COOKIE_DOMAIN)
@@ -4753,13 +4936,21 @@ def run_mirror_check(args):
     cookies = dict(state.get("cookies") or {})
     jwt = state.get("jwt") or ""
     src = "stored"
+    if not jwt:
+        bj = read_browser_jwt()          # localStorage: works on a v20-cookie Chrome
+        if bj:
+            jwt = bj
+            src = "browser"
     if not cookies:
-        cookies = read_browser_session()
-        src = "browser"
+        bc = read_browser_session()      # cookies: best-effort, empty when v20-locked
+        if bc:
+            cookies = bc
+            if src == "stored":
+                src = "browser"
     if not cookies and not jwt:
         print("Mirror: no session. No mirror_session.json, and no readable pixai.art "
-              "cookies in a local browser (is a browser installed and logged in?). "
-              "Enable the mirror to bootstrap, or paste a session.")
+              "JWT/cookies in a local browser (is a browser installed and logged in to "
+              "pixai.art?). Open pixai.art logged-in, then retry.")
         return {"ok": False, "source": "none"}
     session = _mirror_session_from(cookies, jwt)
     before = jwt_days_left(jwt) if jwt else None

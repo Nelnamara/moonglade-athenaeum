@@ -275,3 +275,110 @@ def test_api_mirror_connect_degrades_without_a_browser(tmp_path, monkeypatch):
     monkeypatch.setattr(mj, "make_mirror_session", lambda **k: None)
     d = login_client(tmp_path).post("/api/mirror/connect", json={}).get_json()
     assert d["ok"] is False and d.get("error")
+
+
+# ---- localStorage JWT reader (Connect on a modern-Chrome/v20-cookie machine) --------
+# The pixai.art JWT lives in Local Storage/leveldb, which is NOT app-bound(v20)-encrypted
+# the way modern Chrome cookies are -- so reading it there is how Connect works without a
+# paste. These prove the raw-bytes extractor lifts the EXACT token (a Bearer with one stray
+# char is silently rejected), never the sibling :intercom-user-jwt, and picks the freshest.
+
+def _jwt_sig(exp, sig_byte=b"S"):
+    """A JWT with a full-length HS256 signature (32 bytes -> 43 b64url chars) so the reader's
+    alg-based signature trim keeps it intact (the module's _jwt with a 3-char '.sig' would be
+    trimmed away as too short -- which is correct, that isn't a real token)."""
+    h = base64.urlsafe_b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()).rstrip(b"=").decode()
+    p = base64.urlsafe_b64encode(json.dumps({"exp": exp, "sub": "u"}).encode()).rstrip(b"=").decode()
+    s = base64.urlsafe_b64encode(sig_byte * 32).rstrip(b"=").decode()
+    return "%s.%s.%s" % (h, p, s)
+
+
+def _varint(n):
+    out = bytearray()
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        out.append(b | 0x80 if n else b)
+        if not n:
+            return bytes(out)
+
+
+def _ls_log_value(jwt):
+    """One localStorage PUT as it sits in a leveldb .log: key + value-length varint + the
+    Latin-1 value (encoding byte 0x01 + the ASCII JWT)."""
+    v = b"\x01" + jwt.encode("ascii")
+    return mj.LOCALSTORAGE_JWT_KEY + _varint(len(v)) + v
+
+
+def test_localstorage_extract_exact_token_and_trims_framing():
+    tok = _jwt_sig(NOW + 27 * 86400, b"N")
+    # value followed by a control byte (next record tag) -> greedy stops cleanly
+    got = mj._extract_jwts_from_leveldb_blob(b"hdr" + _ls_log_value(tok) + b"\x01next")
+    assert got == [tok]
+    # value followed by ALPHANUMERIC framing (a CRC/varint byte) -> greedy overruns, the
+    # alg-based trim must cut it back to the exact token
+    got2 = mj._extract_jwts_from_leveldb_blob(b"pre" + _ls_log_value(tok) + b"ABC123def")
+    assert got2 == [tok]
+
+
+def test_localstorage_extract_ignores_intercom_sibling():
+    tok = _jwt_sig(NOW + 27 * 86400, b"N")
+    intercom = _jwt_sig(NOW + 99 * 86400, b"I")     # later exp, MUST NOT be chosen
+    ikey = b"https://api.pixai.art:intercom-user-jwt"
+    blob = (b"h" + ikey + _varint(len(b"\x01" + intercom.encode())) + b"\x01" + intercom.encode()
+            + b"\x01" + _ls_log_value(tok) + b"\x01z")
+    got = mj._extract_jwts_from_leveldb_blob(blob)
+    assert tok in got and intercom not in got
+
+
+def test_localstorage_extract_utf16_value():
+    tok = _jwt_sig(NOW + 27 * 86400, b"N")
+    v = b"\x00" + tok.encode("utf-16-le")            # encoding byte 0x00 = UTF-16LE
+    blob = b"pre" + mj.LOCALSTORAGE_JWT_KEY + _varint(len(v)) + v + b"\x01x"
+    assert mj._extract_jwts_from_leveldb_blob(blob) == [tok]
+
+
+def test_read_browser_jwt_picks_freshest_across_profiles(tmp_path, monkeypatch):
+    base = int(_time.time())
+    old = _jwt_sig(base + 3 * 86400, b"O")                  # both real-clock; new has furthest exp
+    new = _jwt_sig(base + 40 * 86400, b"N")
+    root = tmp_path / "Google" / "Chrome" / "User Data"
+    for prof, tok, ext in (("Default", old, "log"), ("Profile 1", new, "ldb")):
+        d = root / prof / "Local Storage" / "leveldb"
+        d.mkdir(parents=True)
+        (d / ("000003." + ext)).write_bytes(b"x" + _ls_log_value(tok) + b"\x01")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert mj.read_browser_jwt(browsers=("chrome",)) == new     # freshest exp wins
+    assert mj.read_browser_jwt(browsers=()) == ""               # no browsers -> '' (no raise)
+
+
+def test_make_mirror_session_bootstraps_from_localstorage_jwt_without_cookies(tmp_path, monkeypatch):
+    """The v20-cookie case: cookies can't be decrypted (read_browser_session -> {}), but the
+    JWT reads from localStorage -> a JWT-only mirror session is built AND persisted, so a
+    later call needs no browser. This is exactly what Connect does on a current Chrome."""
+    p = tmp_path / "m.json"
+    monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
+    monkeypatch.setattr(mj, "_make_session", _fake_make_session)
+    fresh = _jwt_in(27)
+    monkeypatch.setattr(mj, "read_browser_jwt", lambda *a, **k: fresh)
+    monkeypatch.setattr(mj, "read_browser_session", lambda *a, **k: {})   # v20: no cookies
+    monkeypatch.setattr(mj, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("a fresh ~27d jwt must not trigger refresh")))
+    s = mj.make_mirror_session(bootstrap_from_browser=True)
+    assert s is not None and s.headers["Authorization"] == "Bearer " + fresh
+    assert mj.load_mirror_state()["jwt"] == fresh                # persisted for next time
+
+
+def test_run_mirror_check_uses_localstorage_jwt(tmp_path, monkeypatch, capsys):
+    """--mirror-check with no stored session and no readable cookies still connects off the
+    localStorage JWT, and still never prints the token."""
+    monkeypatch.setattr(mj, "_mirror_state_path", lambda: tmp_path / "none.json")
+    browser_jwt = _jwt_in(27)
+    fresh = _jwt_in(27)
+    monkeypatch.setattr(mj, "read_browser_jwt", lambda *a, **k: browser_jwt)
+    monkeypatch.setattr(mj, "read_browser_session", lambda *a, **k: {})
+    monkeypatch.setattr(mj, "refresh_jwt", lambda session, current_jwt=None: fresh)
+    res = mj.run_mirror_check(SimpleNamespace())
+    out = capsys.readouterr().out
+    assert res["ok"] is True and res["source"] == "browser"
+    assert browser_jwt not in out and fresh not in out

@@ -9751,10 +9751,9 @@ def create_app(out_dir: Path):
         except Exception as e:
             return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:160]}), 200
         if s is None:
-            return jsonify({"ok": False, "error": "Couldn't establish a mirror session -- "
-                            "no pixai.art cookies in a local browser, or the token refresh "
-                            "failed. Make sure a browser on this machine is signed in to "
-                            "pixai.art, then try again."}), 200
+            return jsonify({"ok": False, "error": "Couldn't read a pixai.art session from a "
+                            "browser on this machine. Sign in to pixai.art in Chrome/Edge/Brave "
+                            "(reload the page once so the token is written), then try again."}), 200
         jwt = (core.load_mirror_state().get("jwt") or "")
         return jsonify({"ok": bool(jwt),
                         "days_left": core.jwt_days_left(jwt) if jwt else None})
