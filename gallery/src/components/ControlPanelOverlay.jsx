@@ -86,28 +86,36 @@ function ledgerResult(j) {
    no credential crosses the network). See moonglade_backup.py's mirror helpers + the
    submit-path invariants. */
 function MirrorTile() {
-  const [st, setSt] = useState(null);      // {enabled, connected, days_left}
+  const [st, setSt] = useState(null);      // {enabled, connected, days_left} — null until loaded
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
-  useEffect(() => {
-    fetch("/api/mirror/status").then((r) => r.json()).then(setSt).catch(() => {});
-  }, []);
+  const refresh = async () => {
+    // Always drive the tile from the SERVER's real state, never a fabricated object -- a
+    // fabricated {connected:true} with no `enabled` key drove the toggle from `undefined`.
+    try { const r = await fetch("/api/mirror/status"); setSt(await r.json()); } catch { /* keep st */ }
+  };
+  useEffect(() => { refresh(); }, []);
   const toggle = async () => {
     if (!st || busy) return;
+    const want = !st.enabled;
+    if (want && !st.connected) {            // never enable the credential switch with no session
+      setMsg("Connect a session first (the button below), then turn this on.");
+      return;
+    }
     setBusy(true); setMsg("");
-    const d = await postJSON("/api/mirror/enable", { enabled: !st.enabled });
+    const d = await postJSON("/api/mirror/enable", { enabled: want });
     setBusy(false);
-    if (d.error) { setMsg("⚠ " + d.error); return; }
-    setSt((s) => ({ ...s, enabled: d.enabled }));
+    if (d && d.error) { setMsg("⚠ " + d.error); return; }
+    await refresh();                        // reflect the real persisted flag
   };
   const connect = async () => {
     if (busy) return;
     setBusy(true); setMsg("Reading this machine's browser session…");
     const d = await postJSON("/api/mirror/connect", {});
     setBusy(false);
-    if (!d.ok) { setMsg("⚠ " + (d.error || "couldn't connect")); return; }
+    if (!d || !d.ok) { setMsg("⚠ " + ((d && d.error) || "couldn't connect")); return; }
     setMsg("Connected.");
-    setSt((s) => ({ ...(s || {}), connected: true, days_left: d.days_left }));
+    await refresh();                        // re-read real status (enabled + connected + days)
   };
   const line = !st ? "…"
     : st.connected ? ("Connected" + (st.days_left != null ? " · " + st.days_left + " days left" : ""))

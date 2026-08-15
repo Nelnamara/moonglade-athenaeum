@@ -247,7 +247,7 @@ ROUTE_TIERS = {
     # connect/bootstrap (server reads its OWN local browser -- no credential crosses
     # the network). LOGIN tier; the spend gate stays on the create path.
     ("api_mirror_status", "GET"): LOGIN,
-    ("api_mirror_enable", "POST"): LOGIN,
+    ("api_mirror_enable", "POST"): LOCALHOST,       # rewrites config.json (holds the auth block)
     ("api_mirror_connect", "POST"): LOGIN,
     ("api_ping", "GET"): LOGIN,
     ("api_similar", "GET"): LOGIN,

@@ -4442,7 +4442,8 @@ def jwt_claims(token):
         parts = str(token or "").split(".")
         if len(parts) != 3:
             return {}
-        return json.loads(_b64url_decode(parts[1]))
+        claims = json.loads(_b64url_decode(parts[1]))
+        return claims if isinstance(claims, dict) else {}   # a non-object payload is not claims
     except Exception:
         return {}
 
@@ -4802,10 +4803,10 @@ def _lvldb_log_entries(data):
             length = data[pos + 4] | (data[pos + 5] << 8)
             rtype = data[pos + 6]
             pos += 7
-            if rtype == 0 or length == 0:        # zero/padding record
-                continue
             chunk = data[pos:pos + length]
-            pos += length
+            pos += length                        # ALWAYS consume the payload, even for a
+            if rtype == 0 or length == 0:        # zero/padding record -- else a kZeroType
+                continue                         # record with a payload desyncs every record
             if rtype == 1:                       # FULL
                 rec = chunk
             elif rtype == 2:                     # FIRST
@@ -4960,15 +4961,18 @@ def read_browser_jwt(browsers=("chrome", "edge", "brave")):
 
 
 def refresh_jwt(session, current_jwt=None):
-    """Call the no-arg refreshToken mutation and return the fresh JWT, or None.
+    """Call the no-arg refreshToken mutation and return a genuinely FRESH JWT, or None.
 
-    `session` is a requests.Session whose cookie jar already holds the .pixai.art
-    session cookies (from read_browser_session or a prior refresh). The new jwt
-    arrives in the `token` response header; the mutation's scalar return is accepted
-    as a fallback shape. Sends the current bearer too when we have one, so this works
-    whether the server renews off the cookie jar alone or off the bearer. Renews our
-    own token only -- it does not spend. On any error returns None and the caller
-    keeps the current jwt until it truly expires."""
+    `session` is a JWT-authed requests.Session (from _mirror_session_from). The new jwt
+    arrives in the `token` response header; the mutation's scalar return is the fallback
+    shape. Renews our own token only -- it does not spend. Returns None (never raises) on any
+    error, so the caller keeps the current jwt until it truly expires.
+
+    Guards against a FALSE "renewed" (review): the gateway rolls the SAME token back in the
+    `token` header on ordinary authenticated responses, and a GraphQL error (e.g.
+    PersistedQueryNotFound after a hash rotation) still answers HTTP 200 carrying that echo.
+    So a renewal requires status 200, NO `errors` array, and a token that DIFFERS from the
+    one we sent -- an unchanged token is not a renewal."""
     headers = {
         "Content-Type": "application/json",
         "apollo-require-preflight": "true",
@@ -4988,23 +4992,35 @@ def refresh_jwt(session, current_jwt=None):
         r = session.post(API_URL, json=body, headers=headers, timeout=30)
     except Exception:
         return None
-    tok = r.headers.get("token")
-    if tok and jwt_expiry(tok):
-        return tok
-    try:
-        data = (r.json() or {}).get("data") or {}
-    except Exception:
+    if r.status_code != 200:
         return None
-    val = data.get("refreshToken")
-    return val if isinstance(val, str) and jwt_expiry(val) else None
+    try:
+        payload = r.json() or {}
+    except Exception:
+        payload = {}
+    if payload.get("errors"):
+        return None                        # error response -> its echoed token is NOT fresh
+    cur = current_jwt or ""
+    tok = r.headers.get("token")
+    if tok and tok != cur and jwt_expiry(tok):
+        return tok
+    val = (payload.get("data") or {}).get("refreshToken")
+    if isinstance(val, str) and val != cur and jwt_expiry(val):
+        return val
+    return None
 
 
 # --- Mirror session state: a dedicated git-ignored store (NOT config.json) --------
-# Single-flight lock: serializes load->refresh->persist so two threads (the renewal
-# scheduler + a live use) can't both fire refreshToken and race their writes, and so a
-# rotated cookie pair can't be persisted out of issue-order (adversarial review
-# 2026-08-14, findings F5/F11). The gallery serves threaded=True.
+# Single-flight lock: serializes the refresh->persist critical section so two threads can't
+# both fire refreshToken and race their writes. The SLOW work (the leveldb/localStorage
+# browser read and the no-network fast path) runs OUTSIDE the lock so a Connect can't block
+# every Generate -- an earlier version held the lock across a ~12 s scan plus a 30 s POST
+# (adversarial review 2026-08-15). The gallery serves threaded=True.
 _mirror_lock = threading.Lock()
+# Backoff so a persistently-failing refresh (rotated hash, expired session, PixAI 5xx) is not
+# re-fired on EVERY create while the JWT sits inside its refresh cushion (review). time-based.
+_mirror_refresh_next_try = 0.0
+_MIRROR_REFRESH_COOLDOWN = 600      # seconds to wait after a failed refresh before retrying
 
 
 def _mirror_state_path():
@@ -5016,8 +5032,8 @@ def _mirror_state_path():
 
 
 def load_mirror_state():
-    """The stored mirror session {jwt, cookies:{name:value}} or {} if none. Never
-    raises, never logs a value."""
+    """The stored mirror session {jwt} or {} if none. (A legacy `cookies` key from older
+    builds is ignored -- the mirror is JWT-only now.) Never raises, never logs a value."""
     p = _mirror_state_path()
     if not p.exists():
         return {}
@@ -5030,9 +5046,11 @@ def load_mirror_state():
 
 
 def save_mirror_state(state):
-    """Atomically persist {jwt, cookies} to the git-ignored mirror file (same
-    temp+os.replace pattern as _save_config). Best-effort: True/False, never raises,
-    never logs a value."""
+    """Atomically persist {jwt} to the git-ignored mirror file. Best-effort: True/False,
+    never raises, never logs a value. JWT-only: cookies are no longer stored -- the Bearer
+    JWT authenticates both the create and the refresh; the short session cookies died ~1 h
+    after issue (so they never survived to a day-22 refresh anyway), and pairing a
+    Default-profile cookie jar with an any-profile JWT risked a cross-identity submit (review)."""
     p = _mirror_state_path()
     # Per-WRITE-unique temp (pid + random), not per-process: the gallery is threaded, so a
     # per-pid temp name lets two concurrent savers interleave into one file then both
@@ -5041,8 +5059,7 @@ def save_mirror_state(state):
     tmp = p.with_name(p.name + ".tmp-{}-{}".format(os.getpid(), secrets.token_hex(6)))
     try:
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"jwt": state.get("jwt", ""),
-                       "cookies": dict(state.get("cookies") or {})}, f, indent=2)
+            json.dump({"jwt": state.get("jwt", "")}, f, indent=2)
         os.replace(tmp, p)
         return True
     except OSError:
@@ -5056,99 +5073,89 @@ def save_mirror_state(state):
 
 def mirror_enabled():
     """Is the Control Panel 'Mirror to PixAI website' toggle on? Reads config fresh
-    (git-ignored MIRROR_TO_PIXAI flag). Default OFF = pure API-key mode. The
-    mirror-SUBMIT path that consumes this is gated on the adversarial review + a live
-    capture; this reader is here for that wiring, it changes no behavior yet."""
+    (git-ignored MIRROR_TO_PIXAI flag). Default OFF = pure API-key mode. When ON, the create
+    POST rides the browser JWT (see _session_for_create) so the generation lands in the
+    pixai.art web library."""
     return bool(_load_config().get("MIRROR_TO_PIXAI"))
 
 
-def _mirror_session_from(cookies, jwt):
-    """A requests.Session authed as the BROWSER (cookie jar + Bearer JWT) on
-    .pixai.art -- the session a mirror submit would use so the generation lands in the
-    pixai.art web library, distinct from _make_session's API-key auth."""
+def _jwt_usable(jwt):
+    """True only when the JWT is present, parseable, and not expired (days_left >= 0). This
+    is the gate for 'can the mirror actually submit with this' -- distinct from merely
+    'a JWT string exists', which is what let an expired stored token block a browser re-read."""
+    if not jwt:
+        return False
+    left = jwt_days_left(jwt)
+    return left is not None and left >= 0
+
+
+def _mirror_session_from(jwt):
+    """A requests.Session authed as the browser JWT (Bearer) and presenting the WEB client
+    identity -- used for BOTH the refreshToken probe and the mirrored create. Built directly,
+    NOT via _make_session, so it never enforces the API-key/U3T precondition the mirror
+    doesn't need and never resolves USER_ID over the browser token (review). JWT-only, no
+    cookies. The web identity makes PixAI apply the website content policy, not the stricter
+    mobile-app one; x-apollo-operation-name is present for Apollo CSRF (value need only be
+    present, not correct)."""
     session = requests.Session()
-    for k, v in (cookies or {}).items():
-        session.cookies.set(k, v, domain="." + PIXAI_COOKIE_DOMAIN)
     if jwt:
         session.headers["Authorization"] = "Bearer " + jwt
-    session.headers.update({"Accept": "application/json",
-                            "apollo-require-preflight": "true"})
+    session.headers.update({
+        "Accept": "application/json",
+        "apollo-require-preflight": "true",
+        "x-apollo-operation-name": OPERATION_NAME,
+        "User-Agent": MIRROR_WEB_USER_AGENT,
+        "Origin": MIRROR_WEB_ORIGIN,
+        "Referer": MIRROR_WEB_ORIGIN + "/",
+        "Sec-Fetch-Site": "same-site",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty",
+    })
     return session
 
 
 def make_mirror_session(bootstrap_from_browser=False):
-    """The mirror submit session: the app's OWN _make_session machinery authed with the
-    browser JWT (not the API key) + the browser cookie jar attached. Returns None when
-    there is no usable JWT even after a refresh -- callers must then refuse and spend
-    nothing, NEVER fall back to an API-key session (review F5).
+    """The mirror submit/refresh session: a requests.Session authed with the browser JWT
+    (Bearer) presenting the WEB client identity. Returns None -- NEVER raises -- when there is
+    no USABLE (present, parseable, unexpired) JWT even after a browser re-read and a refresh;
+    callers must then refuse and spend nothing, never an API-key fallback (review F5).
 
-    Built on _make_session, not a hand-rolled Session, per the banked design ("hand it a
-    JWT-authenticated session is most of the work") -- that guarantees BOTH Apollo CSRF
-    headers (x-apollo-operation-name + apollo-require-preflight); a hand-rolled request
-    that omits x-apollo-operation-name gets a BAD_REQUEST (DECISIONS, "Apollo CSRF").
+    JWT-only, and built via _mirror_session_from (NOT _make_session): the API-key path's
+    precondition/USER_ID-resolution must not run over the browser token (review).
 
-    The whole load->refresh->persist runs under _mirror_lock so concurrent callers can't
-    both fire refreshToken or race their writes (review F11)."""
-    with _mirror_lock:
-        state = load_mirror_state()
-        cookies = dict(state.get("cookies") or {})
-        jwt = state.get("jwt") or ""
-        bootstrapped = False
-        if bootstrap_from_browser and (not jwt or not cookies):
-            # The JWT is the credential that matters (Bearer auth carries the create +
-            # refresh); read it from localStorage, which a current Chrome does NOT
-            # app-bound-encrypt. Cookies are a best-effort extra and simply stay empty
-            # when the cookie store is v20-locked -- that's fine, a JWT-only mirror works.
-            if not jwt:
-                bj = read_browser_jwt()
-                if bj:
-                    jwt = bj
-                    bootstrapped = True
-            if not cookies:
-                fresh = read_browser_session()
-                if fresh:
-                    cookies = fresh
-                    bootstrapped = True
-        if not cookies and not jwt:
-            return None
-        # Roll the JWT forward first (a cookies-only session carries the refresh POST;
-        # refresh_jwt sets its own CSRF headers). Owner-adopted renewal path, 2026-08-15.
-        if mirror_needs_refresh(jwt):
-            probe = _mirror_session_from(cookies, jwt)
-            fresh_jwt = refresh_jwt(probe, current_jwt=jwt or None)
-            if fresh_jwt:
-                jwt = fresh_jwt
-                cookies = {c.name: c.value for c in probe.cookies} or cookies
-                save_mirror_state({"jwt": jwt, "cookies": cookies})
-                bootstrapped = False   # already persisted the rolled session
-        # Refuse a missing / unparseable / already-EXPIRED JWT: building a session around a
-        # dead token would make Connect falsely report success, then fail at submit time.
-        # Refuse and spend nothing, never an API-key fallback (F5). A still-valid token whose
-        # refresh merely failed (e.g. 4 days left) is fine -- only a negative days-left is dead.
-        left = jwt_days_left(jwt) if jwt else None
-        if not jwt or left is None or left < 0:
-            return None
-        if bootstrapped:
-            # A freshly-read (still-valid, ~27d) browser JWT that didn't need refresh:
-            # persist it so later calls don't have to touch the browser again.
-            save_mirror_state({"jwt": jwt, "cookies": cookies})
-        session = _make_session(jwt)                 # proven machinery, JWT-authed, both CSRF headers
-        # Present as the WEB client (desktop browser), so PixAI applies the website content
-        # policy to the mirrored generation and not the stricter mobile-app one. _make_session
-        # sets the API-tool User-Agent, which is right for the API-key path but reads as a
-        # non-web client here; override only on this (mirror) session.
-        session.headers.update({
-            "User-Agent": MIRROR_WEB_USER_AGENT,
-            "Origin": MIRROR_WEB_ORIGIN,
-            "Referer": MIRROR_WEB_ORIGIN + "/",
-            # What a browser sends on a same-site (pixai.art -> api.pixai.art) CORS POST.
-            "Sec-Fetch-Site": "same-site",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Dest": "empty",
-        })
-        for k, v in cookies.items():
-            session.cookies.set(k, v, domain="." + PIXAI_COOKIE_DOMAIN)
-        return session
+    Lock scope: the SLOW browser read runs OUTSIDE _mirror_lock; only the refresh->persist
+    critical section takes the lock (single-flight), and a failed refresh backs off so it is
+    not re-fired on every create (review)."""
+    global _mirror_refresh_next_try
+    jwt = load_mirror_state().get("jwt") or ""
+    # (Re-)bootstrap from the browser whenever the stored JWT is not USABLE -- not merely when
+    # it is absent. Gating on `not jwt` meant an expired stored token could never be replaced,
+    # which left Connect and --mirror-check permanently dead until the file was hand-deleted
+    # (review). The browser read is slow, so it happens before the lock.
+    if bootstrap_from_browser and not _jwt_usable(jwt):
+        bj = read_browser_jwt()
+        if bj:
+            jwt = bj
+            save_mirror_state({"jwt": jwt})
+    # Roll the JWT forward when inside the refresh cushion -- but never under READ_ONLY
+    # (refreshToken is account-mutating), and not more often than the cooldown after a failure.
+    if jwt and mirror_needs_refresh(jwt) and not (READ_ONLY or _read_only_now()):
+        with _mirror_lock:
+            cur = load_mirror_state().get("jwt") or jwt      # a peer thread may have refreshed
+            if mirror_needs_refresh(cur):
+                now = time.time()
+                if now >= _mirror_refresh_next_try:
+                    fresh = refresh_jwt(_mirror_session_from(cur), current_jwt=cur)
+                    if fresh:
+                        cur = fresh
+                        save_mirror_state({"jwt": cur})
+                        _mirror_refresh_next_try = 0.0
+                    else:
+                        _mirror_refresh_next_try = now + _MIRROR_REFRESH_COOLDOWN
+            jwt = cur
+    if not _jwt_usable(jwt):
+        return None                        # absent/expired -> refuse, never API-key (F5)
+    return _mirror_session_from(jwt)
 
 
 def _session_for_create(api_session):
@@ -5179,80 +5186,64 @@ def run_mirror_check(args):
     calls refreshToken to confirm renewal; reports only days-left + ok/fail and persists
     the fresh session. This is the owner's step-0 verification -- it renews our own token
     and spends nothing. If it can't read a browser (e.g. run headless/sandboxed), it says
-    so plainly rather than guessing."""
-    state = load_mirror_state()
-    cookies = dict(state.get("cookies") or {})
-    jwt = state.get("jwt") or ""
+    so plainly rather than guessing. Refused under READ_ONLY (refreshToken is account-mutating)."""
+    if READ_ONLY or _read_only_now():
+        print("Mirror: READ_ONLY is set in config.json -- refusing to refresh the mirror "
+              "token (refreshToken is an account-mutating call). Clear READ_ONLY to run this.")
+        return {"ok": False, "source": "read_only"}
+    jwt = load_mirror_state().get("jwt") or ""
     src = "stored"
-    if not jwt:
+    if not _jwt_usable(jwt):
         bj = read_browser_jwt()          # localStorage: works on a v20-cookie Chrome
         if bj:
             jwt = bj
             src = "browser"
-    if not cookies:
-        bc = read_browser_session()      # cookies: best-effort, empty when v20-locked
-        if bc:
-            cookies = bc
-            if src == "stored":
-                src = "browser"
-    if not cookies and not jwt:
-        print("Mirror: no session. No mirror_session.json, and no readable pixai.art "
-              "JWT/cookies in a local browser (is a browser installed and logged in to "
-              "pixai.art?). Open pixai.art logged-in, then retry.")
+    if not jwt:
+        print("Mirror: no session. No usable JWT in mirror_session.json, and none readable "
+              "from a local browser's pixai.art localStorage (is a browser installed and "
+              "logged in to pixai.art?). Open pixai.art logged-in, then retry.")
         return {"ok": False, "source": "none"}
-    session = _mirror_session_from(cookies, jwt)
-    before = jwt_days_left(jwt) if jwt else None
-    fresh = refresh_jwt(session, current_jwt=jwt or None)
+    before = jwt_days_left(jwt)
+    fresh = refresh_jwt(_mirror_session_from(jwt), current_jwt=jwt)
     if not fresh:
-        print("Mirror session ({}): refreshToken did NOT return a fresh token -- the "
-              "cookies/JWT are likely expired. Re-open pixai.art logged-in and retry."
-              .format(src))
+        # A still-valid JWT whose refresh merely failed (rotated hash, transient 5xx) is
+        # reported distinctly from a truly-dead one, and its jar is NOT wiped.
+        if _jwt_usable(jwt):
+            save_mirror_state({"jwt": jwt})
+            print("Mirror ({}): the stored JWT is still valid ({} days left) but refreshToken "
+                  "did NOT return a fresh token -- renewal may be temporarily unavailable "
+                  "(a PixAI hash rotation or a transient error). It keeps working until it "
+                  "nears expiry; re-run then.".format(src, before))
+            return {"ok": True, "source": src, "renewed": False, "days_left": before}
+        print("Mirror ({}): the JWT is expired and refreshToken did not renew it. Re-open "
+              "pixai.art logged-in, then retry.".format(src))
         return {"ok": False, "source": src, "renewed": False}
     after = jwt_days_left(fresh)
-    saved = save_mirror_state({"jwt": fresh,
-                               "cookies": {c.name: c.value for c in session.cookies}})
-    print("Mirror OK (source: {}). refreshToken renewed the JWT -> {} days left{}. "
-          "{} The renewal loop can keep it rolling from here -- no paste needed.".format(
-              src, after,
-              "" if before is None else " (was {})".format(before),
-              "Stored." if saved else "WARNING: could not persist mirror_session.json."))
+    saved = save_mirror_state({"jwt": fresh})
+    print("Mirror OK (source: {}). refreshToken renewed the JWT -> {} days left{}. {}".format(
+        src, after, "" if before is None else " (was {})".format(before),
+        "Stored." if saved else "WARNING: could not persist mirror_session.json."))
     return {"ok": True, "source": src, "renewed": True, "days_left": after}
 
 
 # ===========================================================================
-# MIRROR-SUBMIT PATH -- DELIBERATELY NOT BUILT YET. When wiring the submit that files
-# a generation into the pixai.art web LIBRARY, hold ALL of these (2026-08-14 adversarial
-# review; full report banked with the session). This is a SPEND + CREDENTIAL path.
-#
-#  F2 (largely resolved 2026-08-15, from the legacy record): the submit is the app's OWN
-#    createGenerationTask -- the 2026-06-22 switch was AUTH-ONLY, and a JWT submit was
-#    LIVE-TESTED landing in the pixai.art library (and staying through a refresh) on
-#    2026-07-26 (DECISIONS). Apollo CSRF needs x-apollo-operation-name only PRESENT, not
-#    correct, so _make_session's header is fine. Residual to confirm before ship: free-card
-#    (/v2/kaisuuken/check) consumption under the JWT session -- one card-covered submit +
-#    the kaisuuken log. No fresh DevTools capture needed; the shape is known-working.
-#  1. Single submit: exactly one createGenerationTask per create, at EVERY entry point
-#     (web _gen_session + CLI run_generate/generate_video/reference_video/edit_image +
-#     the loom route's TWO submit calls); the swap changes ONLY the session object.
-#  2. No gql_adhoc for spend: route through submit_generation -> gql_mutate (retries=0).
-#     No hand-rolled poster or retry loop. Extend test_spend_no_retry.py by name.
-#  3. READ_ONLY fires BEFORE any mirror network call (refreshToken + /v2 card check),
-#     not just inside submit_generation.
-#  4. No credential emission: never vlog/print/return/echo the JWT, cookies, or raw
-#     response headers; the Panel refuses/warns on plain HTTP; credential only via POST
-#     body, never a URL/query param.
-#  5. No silent API-key fallback: decide refuse-vs-allow pre-submit, OFFLINE, from the
-#     JWT check -- never in an except around the POST. On any mirror-session failure
-#     (None/expired/401) refuse and spend nothing; never build an API-key session while
-#     the mirror is ON. A 401 under the mirror surfaces "mirror expired -- re-bootstrap",
-#     NOT the free-card "Lost to the Void" error.
-#  6. Collect stays on the API-key session: only the create POST uses the mirror session;
+# MIRROR-SUBMIT INVARIANTS (upheld by the code above; from the 2026-08-14 adversarial review
+# and the 2026-08-15 ultrareview). This is a SPEND + CREDENTIAL path -- keep all of these:
+#  1. Single submit: exactly one createGenerationTask per create; the create session is
+#     swapped ONLY at the _session_for_create choke, and every credit-spending create routes
+#     through it (image/edit/video/reference-video via submit_generation, AND the /v2 fixer).
+#  2. No gql_adhoc for spend: createGenerationTask goes through gql_mutate (retries=0).
+#  3. READ_ONLY fires before any mirror network call: refreshToken (make_mirror_session,
+#     run_mirror_check, /api/mirror/connect) and the create (submit_generation/submit_fixer).
+#  4. No credential emission: the JWT is never printed/logged/returned; diagnostics report
+#     only days-left + ok/None; the credential travels only in a POST body/Authorization.
+#  5. No silent API-key fallback: make_mirror_session decides refuse-vs-allow OFFLINE from a
+#     usable-JWT check and returns None on failure; _session_for_create raises rather than
+#     using the API key when the mirror is ON.
+#  6. Collect stays on the API-key session: only the create POST rides the mirror JWT;
 #     poll / collect_generation / GET /v1/media do NOT.
-#  7. Persist rolled cookies on EVERY mirror response (not only on refresh), or verify a
-#     JWT-alone submit works -- else the short cookies die ~1h after last use.
-#  8. Naming (F14): the WS backup collector already owns "mirror" (_watch_mirror in
-#     moonglade_gallery.py). Give the SPEND feature a distinct name (push-to-library /
-#     web-submit) so a future grep-edit can't cross the credential boundary.
+#  7. JWT-only: no cookies are stored or paired (they died ~1 h after issue and pairing them
+#     across browser profiles risked a cross-identity submit).
 # ===========================================================================
 
 
@@ -7825,7 +7816,11 @@ def submit_fixer(session, media_id, boxes):
     clean = clean_fix_boxes(boxes)
     if not clean:
         raise PixAIError("fixer needs at least one hand/face box")
-    data = _rest_post(session, "/task/fixer",
+    # The fixer IS a credit-spending create, so it rides the mirror JWT session when the
+    # toggle is on (review F1: the choke belongs at "a create", not only at gql_mutate sites).
+    # Create-only -- the caller polls/collects on its own API-key session (F6); pass-through
+    # when the mirror is off; refuses before spend if the mirror is on but unavailable (F5).
+    data = _rest_post(_session_for_create(session), "/task/fixer",
                       {"mediaId": str(media_id), "boxes": clean}) or {}
     tid = data.get("id")
     if not tid:
@@ -9912,6 +9907,12 @@ def _apply_kaisuuken(session, params, args):
     if getattr(args, "no_card", False):
         print("  --no-card: not using a free card (this WILL spend credits).")
         return ""
+    # The auto-match /v2/kaisuuken/check must run under the SAME identity that will create.
+    # A card reserved on the API-key session does not necessarily apply to a mirror (web-JWT)
+    # create, so a generation previewed as FREE could be billed in real credits (review F2/F8).
+    # _session_for_create is a pass-through when the mirror is off, and refuses (raises) before
+    # any spend when the mirror is on but unavailable (F5).
+    session = _session_for_create(session)
     best = None
     check_err = None
     for attempt in range(2):
