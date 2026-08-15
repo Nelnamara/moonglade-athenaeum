@@ -38,6 +38,7 @@ QUICK START
 __version__ = "3.1.0"
 
 import argparse
+import base64
 import csv
 import datetime
 import getpass
@@ -806,6 +807,21 @@ CLIENT_LIBRARY_ARTWORK = {"name": "@apollo/client", "version": "4.1.4"}
 DELETE_TASK_HASH = _cfg.get("DELETE_TASK_HASH", "") or \
     "9f0c8dd3edfe712a4479d700df0b33faebbbc28c7d2310589ea192e1a35d6ee4"
 DELETE_OPERATION = "deleteGenerationTask"
+# Website-mirror JWT (the Control Panel "Mirror to PixAI" toggle). refreshToken is a
+# no-arg persisted mutation; the fresh JWT comes back in the `token` RESPONSE header
+# (server sends access-control-expose-headers: token,...). Confirmed from a live
+# getMyInfo capture 2026-08-14. The mirror helpers live just after _make_session below.
+# Public hash; override in config.json if it rotates.
+REFRESH_TOKEN_HASH = _cfg.get("REFRESH_TOKEN_HASH", "") or \
+    "ad4ac2d62cbc5ab168a212594fb515c58cca1a101c60233a214fd7e037157546"
+PIXAI_COOKIE_DOMAIN = "pixai.art"
+# Short session cookies the server rolls forward via Set-Cookie on every response
+# (_udt IS the u3t value; ~60m / ~30m lifetimes). Read the whole jar so refreshToken
+# sees the same cookies the browser sends.
+SESSION_COOKIE_NAMES = ("_bsid", "_bsid.sig", "_udt", "_udt.sig")
+# Roll the ~27-day JWT once it drops under this many days left (a box that runs even
+# weekly never lapses).
+MIRROR_REFRESH_WHEN_DAYS_LEFT = 5
 # ===========================================================================
 
 # Media URL: https://api.pixai.art/v1/media/<id>
@@ -4369,6 +4385,222 @@ def _make_session(token_val):
             raise PixAIError("config.json needs USER_ID (or set PIXAI_API_KEY to "
                              "auto-resolve it).")
     return session
+
+
+# ===========================================================================
+# Website-mirror JWT: zero-paste acquisition + self-renewal.
+#
+# The API key files a generation under the account but does NOT make it appear in
+# the pixai.art web LIBRARY -- only a browser-session submission does. The Control
+# Panel "Mirror to PixAI" toggle uses the helpers below to hold a live browser
+# session with NO manual pastes, the way the site keeps itself logged in.
+#
+# Mechanism (confirmed from a live getMyInfo capture 2026-08-14):
+#   - The session rides short cookies on .pixai.art that the server rolls forward
+#     on every response: _bsid (~30m) + _udt (~60m; _udt IS the u3t value) + .sig
+#     pairs (cache-control:no-store, vary:Origin,Authorization).
+#   - The JWT rides as Authorization: Bearer (~27d); a FRESH jwt is returned in the
+#     `token` response header (access-control-expose-headers: token,...).
+#   - refreshToken is a no-arg persisted mutation (REFRESH_TOKEN_HASH).
+# So: read the .pixai.art session from the local browser ONCE (cookies-from-browser),
+# then the cookies self-refresh and refreshToken rolls the JWT -- zero paste. A
+# one-time paste field is the break-glass fallback only.
+#
+# SAFETY: only touched when the mirror toggle is ON (pure API-key mode never calls
+# these). The credential never leaves this machine and is never printed, logged, or
+# committed (same rule as PIXAI_API_KEY); diagnostics report only non-secret
+# derivatives (expiry date, days-left, ok/None). The live "read the real browser +
+# first refreshToken" step self-verifies at runtime on the owner's machine.
+# ===========================================================================
+def _b64url_decode(seg):
+    """Decode one base64url JWT segment, tolerant of missing padding."""
+    seg = seg + "=" * (-len(seg) % 4)
+    return base64.urlsafe_b64decode(seg.encode("ascii"))
+
+
+def jwt_claims(token):
+    """The JWT payload claims as a dict, or {} if unparseable. Decodes the payload
+    ONLY (never verifies the signature -- we don't hold the key and don't need to;
+    PixAI validates it, we just read `exp`). Never raises."""
+    try:
+        parts = str(token or "").split(".")
+        if len(parts) != 3:
+            return {}
+        return json.loads(_b64url_decode(parts[1]))
+    except Exception:
+        return {}
+
+
+def jwt_expiry(token):
+    """Unix `exp` (seconds) or None. Offline."""
+    exp = jwt_claims(token).get("exp")
+    return int(exp) if isinstance(exp, (int, float)) else None
+
+
+def jwt_days_left(token, now=None):
+    """Whole days until the JWT expires, or None. Offline -- what the Panel countdown
+    ('PixAI mirror: N days left') renders, decoded at startup with no network call."""
+    exp = jwt_expiry(token)
+    if exp is None:
+        return None
+    now = time.time() if now is None else now
+    return int((exp - now) // 86400)
+
+
+def mirror_needs_refresh(token, now=None, threshold_days=MIRROR_REFRESH_WHEN_DAYS_LEFT):
+    """True when the JWT is missing, unparseable, expired, or within the cushion --
+    i.e. the renewal loop should call refreshToken. Pure; the scheduler's decision."""
+    left = jwt_days_left(token, now=now)
+    return left is None or left <= threshold_days
+
+
+def read_browser_session(browsers=("chrome", "edge", "brave")):
+    """Read the current .pixai.art session cookies from the local browser store, the
+    way yt-dlp's --cookies-from-browser does. Returns {name: value} for the cookies
+    found, or {} if none could be read. NEVER raises and NEVER logs a value.
+
+    Prefers `browser_cookie3` (handles Chrome/Edge/Brave/Firefox + the Windows DPAPI +
+    AES-GCM decrypt across OSes). Falls back to the native Windows reader below. On a
+    machine with neither a browser nor the dep, returns {} and the caller degrades to
+    the stored session / the break-glass paste."""
+    jar = {}
+    try:
+        import browser_cookie3 as bc3  # optional dep; the robust path
+    except Exception:
+        bc3 = None
+    if bc3 is not None:
+        for name in browsers:
+            loader = getattr(bc3, name, None)
+            if loader is None:
+                continue
+            try:
+                cj = loader(domain_name=PIXAI_COOKIE_DOMAIN)
+                for c in cj:
+                    if PIXAI_COOKIE_DOMAIN in (c.domain or ""):
+                        jar[c.name] = c.value
+                if jar:
+                    return jar
+            except Exception:
+                continue  # locked profile, no such browser, decrypt fail -> try next
+        if jar:
+            return jar
+    try:
+        return _read_chromium_cookies_windows()
+    except Exception:
+        return {}
+
+
+def _read_chromium_cookies_windows():
+    """Native Windows Chrome/Edge cookie read: AES-GCM values decrypted with the
+    profile key from Local State (DPAPI-unprotected). Read-only; copies the
+    share-readable DB to a temp file so an open browser doesn't block it. Returns {}
+    on any failure -- a best-effort fallback, never a hard dependency. No value logged."""
+    import shutil
+    import sqlite3
+    import tempfile
+    la = os.environ.get("LOCALAPPDATA", "")
+    profiles = [
+        os.path.join(la, r"Google\Chrome\User Data"),
+        os.path.join(la, r"Microsoft\Edge\User Data"),
+    ]
+    jar = {}
+    for udir in profiles:
+        ck = os.path.join(udir, "Default", "Network", "Cookies")
+        ls = os.path.join(udir, "Local State")
+        if not (os.path.isfile(ck) and os.path.isfile(ls)):
+            continue
+        try:
+            key = _chromium_aes_key(ls)
+            if not key:
+                continue
+            tmp = os.path.join(tempfile.gettempdir(), "mg_ck_%d.db" % os.getpid())
+            shutil.copy2(ck, tmp)  # native copy succeeds even while the browser holds it
+            try:
+                con = sqlite3.connect(tmp)
+                rows = con.execute(
+                    "SELECT name, encrypted_value FROM cookies WHERE host_key LIKE ?",
+                    ("%" + PIXAI_COOKIE_DOMAIN,),
+                ).fetchall()
+                con.close()
+            finally:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+            for name, enc in rows:
+                val = _chromium_decrypt(enc, key)
+                if val:
+                    jar[name] = val
+            if jar:
+                return jar
+        except Exception:
+            continue
+    return jar
+
+
+def _chromium_aes_key(local_state_path):
+    """The per-profile AES key from Local State, DPAPI-unprotected. Windows only."""
+    try:
+        import win32crypt  # from pywin32
+    except Exception:
+        return None
+    with open(local_state_path, "r", encoding="utf-8") as fh:
+        state = json.load(fh)
+    enc_key = base64.b64decode(state["os_crypt"]["encrypted_key"])
+    enc_key = enc_key[5:]  # strip the "DPAPI" prefix
+    return win32crypt.CryptUnprotectData(enc_key, None, None, None, 0)[1]
+
+
+def _chromium_decrypt(enc, key):
+    """AES-256-GCM decrypt of a Chromium v10/v11 cookie value. '' on failure."""
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        if enc[:3] in (b"v10", b"v11"):
+            nonce, ct = enc[3:15], enc[15:]
+            return AESGCM(key).decrypt(nonce, ct, None).decode("utf-8", "replace")
+    except Exception:
+        pass
+    return ""
+
+
+def refresh_jwt(session, current_jwt=None):
+    """Call the no-arg refreshToken mutation and return the fresh JWT, or None.
+
+    `session` is a requests.Session whose cookie jar already holds the .pixai.art
+    session cookies (from read_browser_session or a prior refresh). The new jwt
+    arrives in the `token` response header; the mutation's scalar return is accepted
+    as a fallback shape. Sends the current bearer too when we have one, so this works
+    whether the server renews off the cookie jar alone or off the bearer. Renews our
+    own token only -- it does not spend. On any error returns None and the caller
+    keeps the current jwt until it truly expires."""
+    headers = {
+        "Content-Type": "application/json",
+        "apollo-require-preflight": "true",
+        "x-apollo-operation-name": "refreshToken",
+    }
+    if current_jwt:
+        headers["Authorization"] = "Bearer " + current_jwt
+    body = {
+        "operationName": "refreshToken",
+        "variables": {},
+        "extensions": {
+            "clientLibrary": CLIENT_LIBRARY,
+            "persistedQuery": {"version": 1, "sha256Hash": REFRESH_TOKEN_HASH},
+        },
+    }
+    try:
+        r = session.post(API_URL, json=body, headers=headers, timeout=30)
+    except Exception:
+        return None
+    tok = r.headers.get("token")
+    if tok and jwt_expiry(tok):
+        return tok
+    try:
+        data = (r.json() or {}).get("data") or {}
+    except Exception:
+        return None
+    val = data.get("refreshToken")
+    return val if isinstance(val, str) and jwt_expiry(val) else None
 
 
 def run_probe(args):
