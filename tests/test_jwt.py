@@ -177,3 +177,32 @@ def test_mirror_enabled_reads_flag(monkeypatch):
     assert mj.mirror_enabled() is True
     monkeypatch.setattr(mj, "_load_config", lambda: {})
     assert mj.mirror_enabled() is False
+
+
+def test_save_mirror_state_atomic_under_concurrency(tmp_path, monkeypatch):
+    """Review F5: a per-PROCESS temp name let concurrent savers interleave into one temp
+    and both os.replace -> corrupt JSON -> load returns {} (mirror 'lost'). With a
+    per-WRITE-unique temp + atomic replace, concurrent saves are last-writer-wins and the
+    loaded record is always ONE complete write (jwt+cookie from the same save)."""
+    import threading as _t
+    p = tmp_path / "mirror_session.json"
+    monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
+    threads = [_t.Thread(target=lambda i=i: mj.save_mirror_state(
+        {"jwt": str(i), "cookies": {"_udt": str(i)}})) for i in range(16)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    got = mj.load_mirror_state()
+    assert got != {}                                             # never lost to corruption
+    assert got.get("jwt") == list(got["cookies"].values())[0]    # one atomic write, not merged
+    assert not list(tmp_path.glob("mirror_session.json.tmp*"))   # no stray temp left behind
+
+
+def test_gitignore_covers_credential_temp_files():
+    """Review F6: a crashed save can leave mirror_session.json.tmp-<pid> (JWT+cookies) or
+    config.json.tmp-<pid> (+ PIXAI_API_KEY) untracked; a git add would commit a live
+    credential. The .gitignore must cover the temp variants, not just the exact names."""
+    import pathlib
+    gi = (pathlib.Path(mj.__file__).resolve().parent / ".gitignore").read_text(encoding="utf-8")
+    assert "mirror_session.json.*" in gi and "config.json.*" in gi
