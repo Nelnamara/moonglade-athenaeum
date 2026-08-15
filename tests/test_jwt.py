@@ -175,6 +175,18 @@ def test_make_mirror_session_refuses_when_no_jwt_never_api_key(tmp_path, monkeyp
     assert mj.make_mirror_session() is None
 
 
+def test_make_mirror_session_refuses_expired_jwt(tmp_path, monkeypatch):
+    """An already-EXPIRED JWT whose refresh also fails must refuse (return None), not build a
+    dead session that makes Connect falsely report success then 401 at submit time."""
+    p = tmp_path / "m.json"
+    monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
+    mj.save_mirror_state({"jwt": _jwt_in(-1), "cookies": {"_udt": "u"}})   # expired yesterday
+    monkeypatch.setattr(mj, "refresh_jwt", lambda *a, **k: None)           # refresh fails
+    monkeypatch.setattr(mj, "_make_session", lambda tok: (_ for _ in ()).throw(
+        AssertionError("must not build a session around an expired JWT")))
+    assert mj.make_mirror_session() is None
+
+
 def test_run_mirror_check_never_prints_the_token(tmp_path, monkeypatch, capsys):
     p = tmp_path / "m.json"
     monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
@@ -191,6 +203,7 @@ def test_run_mirror_check_never_prints_the_token(tmp_path, monkeypatch, capsys):
 def test_run_mirror_check_no_session(tmp_path, monkeypatch):
     monkeypatch.setattr(mj, "_mirror_state_path", lambda: tmp_path / "none.json")
     monkeypatch.setattr(mj, "read_browser_session", lambda *a, **k: {})
+    monkeypatch.setattr(mj, "read_browser_jwt", lambda *a, **k: "")   # no localStorage JWT either
     res = mj.run_mirror_check(SimpleNamespace())
     assert res["ok"] is False and res["source"] == "none"
 
@@ -279,18 +292,12 @@ def test_api_mirror_connect_degrades_without_a_browser(tmp_path, monkeypatch):
 
 # ---- localStorage JWT reader (Connect on a modern-Chrome/v20-cookie machine) --------
 # The pixai.art JWT lives in Local Storage/leveldb, which is NOT app-bound(v20)-encrypted
-# the way modern Chrome cookies are -- so reading it there is how Connect works without a
-# paste. These prove the raw-bytes extractor lifts the EXACT token (a Bearer with one stray
-# char is silently rejected), never the sibling :intercom-user-jwt, and picks the freshest.
-
-def _jwt_sig(exp, sig_byte=b"S"):
-    """A JWT with a full-length HS256 signature (32 bytes -> 43 b64url chars) so the reader's
-    alg-based signature trim keeps it intact (the module's _jwt with a 3-char '.sig' would be
-    trimmed away as too short -- which is correct, that isn't a real token)."""
-    h = base64.urlsafe_b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()).rstrip(b"=").decode()
-    p = base64.urlsafe_b64encode(json.dumps({"exp": exp, "sub": "u"}).encode()).rstrip(b"=").decode()
-    s = base64.urlsafe_b64encode(sig_byte * 32).rstrip(b"=").decode()
-    return "%s.%s.%s" % (h, p, s)
+# the way modern Chrome cookies are. An established profile compacts to .ldb SSTables with
+# PREFIX-COMPRESSED keys and SNAPPY-COMPRESSED blocks, so the reader parses leveldb for
+# real (SSTable + Snappy + WAL) and validates the token's issuer is "pixai". These build
+# genuine leveldb structures to prove the parsers, the iss guard, and freshest-wins.
+# (The end-to-end read against a real browser store self-verifies on the owner's machine.)
+import struct
 
 
 def _varint(n):
@@ -303,53 +310,168 @@ def _varint(n):
             return bytes(out)
 
 
-def _ls_log_value(jwt):
-    """One localStorage PUT as it sits in a leveldb .log: key + value-length varint + the
-    Latin-1 value (encoding byte 0x01 + the ASCII JWT)."""
-    v = b"\x01" + jwt.encode("ascii")
-    return mj.LOCALSTORAGE_JWT_KEY + _varint(len(v)) + v
+def _jwt_iss(exp, iss="pixai", alg="EdDSA", sig_len=86):
+    """A JWT with a given issuer/alg and a signature of `sig_len` base64url chars (pixai's
+    real token is EdDSA / iss='pixai' / 86-char sig). The reader trusts a token only when
+    iss == 'pixai'."""
+    h = base64.urlsafe_b64encode(json.dumps({"alg": alg, "typ": "JWT"}).encode()).rstrip(b"=").decode()
+    p = base64.urlsafe_b64encode(json.dumps({"exp": exp, "iss": iss, "sub": "u"}).encode()).rstrip(b"=").decode()
+    return "%s.%s.%s" % (h, p, "A" * sig_len)
 
 
-def test_localstorage_extract_exact_token_and_trims_framing():
-    tok = _jwt_sig(NOW + 27 * 86400, b"N")
-    # value followed by a control byte (next record tag) -> greedy stops cleanly
-    got = mj._extract_jwts_from_leveldb_blob(b"hdr" + _ls_log_value(tok) + b"\x01next")
-    assert got == [tok]
-    # value followed by ALPHANUMERIC framing (a CRC/varint byte) -> greedy overruns, the
-    # alg-based trim must cut it back to the exact token
-    got2 = mj._extract_jwts_from_leveldb_blob(b"pre" + _ls_log_value(tok) + b"ABC123def")
-    assert got2 == [tok]
+_LS_KEY = b"_https://pixai.art\x00\x01" + mj.LOCALSTORAGE_JWT_KEY   # full leveldb key
 
 
-def test_localstorage_extract_ignores_intercom_sibling():
-    tok = _jwt_sig(NOW + 27 * 86400, b"N")
-    intercom = _jwt_sig(NOW + 99 * 86400, b"I")     # later exp, MUST NOT be chosen
-    ikey = b"https://api.pixai.art:intercom-user-jwt"
-    blob = (b"h" + ikey + _varint(len(b"\x01" + intercom.encode())) + b"\x01" + intercom.encode()
-            + b"\x01" + _ls_log_value(tok) + b"\x01z")
-    got = mj._extract_jwts_from_leveldb_blob(blob)
-    assert tok in got and intercom not in got
+def _ls_value(jwt):
+    return b"\x01" + jwt.encode("ascii")                # encoding byte 0x01 (Latin-1) + JWT
 
 
-def test_localstorage_extract_utf16_value():
-    tok = _jwt_sig(NOW + 27 * 86400, b"N")
-    v = b"\x00" + tok.encode("utf-16-le")            # encoding byte 0x00 = UTF-16LE
-    blob = b"pre" + mj.LOCALSTORAGE_JWT_KEY + _varint(len(v)) + v + b"\x01x"
-    assert mj._extract_jwts_from_leveldb_blob(blob) == [tok]
+def _snappy_literal(data):
+    """A valid all-literal Snappy stream for `data` (no back-references) -- enough to feed a
+    snappy-compressed SSTable block through the real _snappy_decompress path."""
+    out = bytearray(_varint(len(data)))                 # preamble: uncompressed length
+    if data:
+        lm1 = len(data) - 1
+        if lm1 < 60:
+            out.append(lm1 << 2)
+        else:
+            nbytes = (lm1.bit_length() + 7) // 8
+            out.append(((59 + nbytes) << 2))
+            for i in range(nbytes):
+                out.append((lm1 >> (8 * i)) & 0xFF)
+        out += data
+    return bytes(out)
 
 
-def test_read_browser_jwt_picks_freshest_across_profiles(tmp_path, monkeypatch):
+def _lvldb_block(pairs):
+    """A leveldb block (no prefix compression: shared=0 for every entry) + a 1-restart
+    trailer, matching what _lvldb_block_pairs decodes."""
+    body = bytearray()
+    for k, v in pairs:
+        body += _varint(0) + _varint(len(k)) + _varint(len(v)) + k + v
+    body += struct.pack("<I", 0)                         # one restart at offset 0
+    body += struct.pack("<I", 1)                         # num_restarts = 1
+    return bytes(body)
+
+
+def _lvldb_sstable(data_pairs, compress=False):
+    """A minimal but real leveldb .ldb SSTable: one data block, one index entry, a footer.
+    Optionally snappy-compresses the data block (comp type 1)."""
+    dblock = _lvldb_block(data_pairs)
+    stored = _snappy_literal(dblock) if compress else dblock
+    comp = b"\x01" if compress else b"\x00"
+    data_region = stored + comp + b"\x00\x00\x00\x00"    # + 4-byte CRC (unchecked)
+    data_handle = _varint(0) + _varint(len(stored))      # BlockHandle(offset=0, size=stored)
+    iblock = _lvldb_block([(b"\xff" * 4, data_handle)])  # index: one entry -> the data block
+    idx_off = len(data_region)
+    index_region = iblock + b"\x00" + b"\x00\x00\x00\x00"
+    handles = _varint(0) + _varint(0) + _varint(idx_off) + _varint(len(iblock))
+    footer = handles + b"\x00" * (40 - len(handles)) + struct.pack("<Q", mj._LVLDB_SSTABLE_MAGIC)
+    return data_region + index_region + footer
+
+
+def _internal_key(user_key, seq, is_del=False):
+    """A leveldb SSTable internal key: user_key + 8-byte trailer (seq<<8 | type), LE."""
+    trailer = (seq << 8) | (0 if is_del else 1)
+    return user_key + trailer.to_bytes(8, "little")
+
+
+def _lvldb_log(entries, base_seq=1):
+    """A leveldb .log holding one WriteBatch as a single FULL record. `entries` are
+    (key, value, is_del); a deletion is written as kTypeDeletion (tag 0, key only). The
+    batch header carries base_seq; entry i is seq base_seq+i."""
+    batch = bytearray(int(base_seq).to_bytes(8, "little") + struct.pack("<I", len(entries)))
+    for k, v, is_del in entries:
+        if is_del:
+            batch += b"\x00" + _varint(len(k)) + k                       # kTypeDeletion
+        else:
+            batch += b"\x01" + _varint(len(k)) + k + _varint(len(v)) + v  # kTypeValue
+    crc = b"\x00\x00\x00\x00"
+    header = crc + struct.pack("<H", len(batch)) + b"\x01"              # len(2) + type FULL(1)
+    return bytes(header + batch)
+
+
+def test_snappy_decompress_literal_and_copy():
+    assert mj._snappy_decompress(_snappy_literal(b"hello world" * 40)) == b"hello world" * 40
+    # a back-reference: literal "ABC" then copy(len=3, offset=3) -> "ABCABC"
+    # copy tag (2-byte offset, kind=2): (length-1)<<2 | 2, then offset as uint16 LE
+    stream = _varint(6) + bytes([(3 - 1) << 2]) + b"ABC" + bytes([((3 - 1) << 2) | 2]) + b"\x03\x00"
+    assert mj._snappy_decompress(stream) == b"ABCABC"
+    assert mj._snappy_decompress(b"\x05\x00") is None          # claims 5 bytes, delivers 0
+
+
+def test_lvldb_sstable_uncompressed_and_snappy_roundtrip():
+    tok = _jwt_iss(NOW + 20 * 86400)
+    for compress in (False, True):
+        blob = _lvldb_sstable([(_internal_key(_LS_KEY, 100), _ls_value(tok))], compress=compress)
+        entries = list(mj._lvldb_sstable_entries(blob))
+        assert (_LS_KEY, _ls_value(tok), 100, False) in entries   # key/value/seq/type recovered
+        assert mj._pick_pixai_token(entries) == tok
+
+
+def test_lvldb_log_roundtrip_values_and_seq():
+    tok = _jwt_iss(NOW + 20 * 86400)
+    blob = _lvldb_log([(_LS_KEY, _ls_value(tok), False)], base_seq=5)
+    assert (_LS_KEY, _ls_value(tok), 5, False) in list(mj._lvldb_log_entries(blob))
+
+
+def test_pick_pixai_token_iss_guard_and_newest_seq_wins():
+    older = _jwt_iss(NOW + 30 * 86400)                         # higher exp but LOWER seq
+    newer = _jwt_iss(NOW + 3 * 86400)                          # the live write (highest seq)
+    other = _jwt_iss(NOW + 99 * 86400, iss="intercom")         # later exp, WRONG issuer
+    intercom_key = b"_https://pixai.art\x00\x01https://api.pixai.art:intercom-user-jwt"
+    entries = [
+        (_LS_KEY, _ls_value(older), 100, False),
+        (_LS_KEY, _ls_value(newer), 200, False),              # newest write -> wins by SEQ, not exp
+        (intercom_key, _ls_value(other), 300, False),         # right origin, wrong key + iss
+        (b"_https://evil.example\x00\x01ev:token", _ls_value(_jwt_iss(NOW + 999 * 86400)), 999, False),
+    ]
+    assert mj._pick_pixai_token(entries) == newer
+
+
+def test_pick_pixai_token_logout_tombstone_and_relogin():
+    tok = _jwt_iss(NOW + 30 * 86400)
+    # PUT then a later DELETE (logout) -> the newest op is a tombstone -> no token
+    assert mj._pick_pixai_token([
+        (_LS_KEY, _ls_value(tok), 100, False),
+        (_LS_KEY, b"", 200, True),
+    ]) == ""
+    # logout then re-login -> the newest PUT wins over the earlier tombstone
+    fresh = _jwt_iss(NOW + 40 * 86400)
+    assert mj._pick_pixai_token([
+        (_LS_KEY, _ls_value(_jwt_iss(NOW + 3 * 86400)), 100, False),
+        (_LS_KEY, b"", 200, True),
+        (_LS_KEY, _ls_value(fresh), 300, False),
+    ]) == fresh
+
+
+def test_read_browser_jwt_reads_real_sstable_across_profiles(tmp_path, monkeypatch):
     base = int(_time.time())
-    old = _jwt_sig(base + 3 * 86400, b"O")                  # both real-clock; new has furthest exp
-    new = _jwt_sig(base + 40 * 86400, b"N")
+    old = _jwt_iss(base + 3 * 86400)
+    new = _jwt_iss(base + 40 * 86400)                          # furthest exp -> chosen ACROSS profiles
     root = tmp_path / "Google" / "Chrome" / "User Data"
-    for prof, tok, ext in (("Default", old, "log"), ("Profile 1", new, "ldb")):
+    for prof, tok, compress in (("Default", old, False), ("Profile 1", new, True)):
         d = root / prof / "Local Storage" / "leveldb"
         d.mkdir(parents=True)
-        (d / ("000003." + ext)).write_bytes(b"x" + _ls_log_value(tok) + b"\x01")
+        (d / "000005.ldb").write_bytes(
+            _lvldb_sstable([(_internal_key(_LS_KEY, 100), _ls_value(tok))], compress=compress))
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    assert mj.read_browser_jwt(browsers=("chrome",)) == new     # freshest exp wins
-    assert mj.read_browser_jwt(browsers=()) == ""               # no browsers -> '' (no raise)
+    assert mj.read_browser_jwt(browsers=("chrome",)) == new    # freshest live token, incl. a snappy block
+    assert mj.read_browser_jwt(browsers=()) == ""              # no browsers -> '' (no raise)
+
+
+def test_read_browser_jwt_logout_tombstone_across_ldb_and_log(tmp_path, monkeypatch):
+    """Within one profile the .ldb + .log share a sequence space: a value in a compacted
+    SSTable, then a later logout DELETE in the .log, must resolve to '' -- never resurface the
+    logged-out token. (This is the adversarial-review finding the fix closes.)"""
+    tok = _jwt_iss(int(_time.time()) + 20 * 86400)
+    d = tmp_path / "Google" / "Chrome" / "User Data" / "Default" / "Local Storage" / "leveldb"
+    d.mkdir(parents=True)
+    (d / "000005.ldb").write_bytes(
+        _lvldb_sstable([(_internal_key(_LS_KEY, 100), _ls_value(tok))]))       # PUT seq 100
+    (d / "000007.log").write_bytes(_lvldb_log([(_LS_KEY, b"", True)], base_seq=200))  # DELETE seq 200
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert mj.read_browser_jwt(browsers=("chrome",)) == ""     # logged out -> no token
 
 
 def test_make_mirror_session_bootstraps_from_localstorage_jwt_without_cookies(tmp_path, monkeypatch):
