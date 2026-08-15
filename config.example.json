@@ -19,6 +19,11 @@
   "_comment_read_only": "Set true to refuse every credit-spending or account-deleting call outright -- CLI or web, and even with --confirm/--apply/--yes passed. A safety net for a first run, testing, or handing the tool to someone else. See the Trust & Safety wiki page.",
   "READ_ONLY": false,
 
+  "_comment_mirror": "Optional. When true, the Control Panel's 'Mirror to PixAI website' toggle is ON: each new generation also files into your pixai.art web library via your own logged-in browser session (read locally from Chrome/Edge/Brave; the token never leaves this machine). Off by default -- you normally flip it from the Panel (Connect, then the toggle), not by hand.",
+  "MIRROR_TO_PIXAI": false,
+  "_comment_refresh_hash": "Optional override for the baked-in refreshToken persisted-query hash the mirror uses to self-renew its browser session; only set this if that default rotates.",
+  "REFRESH_TOKEN_HASH": "",
+
   "_comment_legacy": "DEPRECATED legacy fallback for users WITHOUT an API key. U3T is the 'u3t' field from a graphql request Payload; the short-lived Bearer token then goes in token.txt / PIXAI_TOKEN / --token and must be re-captured every few hours. Leave blank when using PIXAI_API_KEY (recommended).",
   "U3T": "",
 

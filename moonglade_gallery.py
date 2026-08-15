@@ -9724,19 +9724,34 @@ def create_app(out_dir: Path):
 
     @app.route("/api/mirror/enable", methods=["POST"])
     def api_mirror_enable():
-        """Set the MIRROR_TO_PIXAI toggle in config.json, under _accounts_lock (config
-        holds auth state, so every writer serializes there). This flag alone spends
-        nothing and makes no network call -- it only decides which credential the create
-        POST uses. LOGIN tier."""
+        """Set the MIRROR_TO_PIXAI toggle in config.json. LOCALHOST-ONLY: it rewrites
+        config.json (the file that also holds PIXAI_API_KEY, AUTH_USERS, AUTH_SECRET_KEY),
+        so it is in the same trust class as /api/setup/save-key and /api/branding/shortcut --
+        a logged-in LAN session must not be able to flip the owner's every generation onto
+        the browser JWT. Reads the file DIRECTLY and REFUSES on a present-but-unparseable
+        config rather than clobbering the whole auth block with a one-key stub (the exact
+        wipe _save_config's docstring exists to prevent -- _load_config()'s ValueError->{}
+        cannot tell a corrupt file from an empty one). Serialized on _accounts_lock with the
+        other config writers."""
+        if not _is_local_request():
+            return jsonify({"error": "localhost-only"}), 403
         import moonglade_backup as core
         want = bool((request.get_json(silent=True) or {}).get("enabled"))
-        try:
-            with core._accounts_lock:
-                cfg = core._load_config() or {}
-                cfg["MIRROR_TO_PIXAI"] = want
+        cfg_path = Path(core.__file__).resolve().parent / "config.json"
+        with core._accounts_lock:
+            try:
+                cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
+            except ValueError:
+                return jsonify({"error": "config.json exists but could not be parsed; not "
+                                "overwriting it. Fix or restore the file, then try again."}), 200
+            except OSError as e:
+                return jsonify({"error": "Could not read config.json: {}".format(
+                    _redact_host_paths(str(e)))}), 200
+            cfg["MIRROR_TO_PIXAI"] = want
+            try:
                 core._save_config(cfg)
-        except OSError as e:
-            return jsonify({"error": _redact_host_paths(str(e))[:160]}), 200
+            except OSError as e:
+                return jsonify({"error": _redact_host_paths(str(e))[:160]}), 200
         return jsonify({"enabled": want})
 
     @app.route("/api/mirror/connect", methods=["POST"])
@@ -9747,6 +9762,7 @@ def create_app(out_dir: Path):
         server reads its own local browser store. LOGIN tier."""
         import moonglade_backup as core
         try:
+            core._check_read_only("connect the PixAI mirror")   # refreshToken is account-mutating
             s = core.make_mirror_session(bootstrap_from_browser=True)
         except Exception as e:
             return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:160]}), 200

@@ -42,8 +42,9 @@ def test_needs_refresh_cushion():
 
 
 class _Resp:
-    def __init__(self, headers=None, jd=None, raise_json=False):
+    def __init__(self, headers=None, jd=None, raise_json=False, status_code=200):
         self.headers = headers or {}
+        self.status_code = status_code
         self._jd, self._rj = jd, raise_json
 
     def json(self):
@@ -87,6 +88,15 @@ def test_refresh_returns_none_when_nothing_usable():
     assert mj.refresh_jwt(_Session(raise_post=True)) is None
     # unparseable body + no header -> None
     assert mj.refresh_jwt(_Session(_Resp(headers={}, raise_json=True))) is None
+    fresh = _jwt(NOW + 27 * 86400)
+    # (review) a GraphQL error response still echoes the rolling `token` header -- NOT a renewal
+    assert mj.refresh_jwt(_Session(_Resp(headers={"token": fresh},
+                                         jd={"errors": [{"message": "PersistedQueryNotFound"}]}))) is None
+    # (review) non-200 -> None even with a token header
+    assert mj.refresh_jwt(_Session(_Resp(headers={"token": fresh}, jd={}, status_code=400))) is None
+    # (review) the gateway echoes the SAME token we sent -> not a renewal
+    same = _jwt(NOW + 10 * 86400)
+    assert mj.refresh_jwt(_Session(_Resp(headers={"token": same}, jd={})), current_jwt=same) is None
 
 
 def test_read_browser_session_degrades_to_empty(monkeypatch):
@@ -121,7 +131,7 @@ def test_mirror_state_roundtrip(tmp_path, monkeypatch):
     assert mj.load_mirror_state() == {}                       # absent -> {}
     assert mj.save_mirror_state({"jwt": "J", "cookies": {"_udt": "x"}}) is True
     got = mj.load_mirror_state()
-    assert got["jwt"] == "J" and got["cookies"] == {"_udt": "x"}
+    assert got["jwt"] == "J" and "cookies" not in got         # JWT-only: cookies never stored
 
 
 def test_make_mirror_session_none_when_empty(tmp_path, monkeypatch):
@@ -138,17 +148,22 @@ def _fake_make_session(tok):
     return s
 
 
-def test_make_mirror_session_builds_on_make_session_and_skips_refresh_when_fresh(tmp_path, monkeypatch):
+def test_make_mirror_session_jwt_only_and_skips_refresh_when_fresh(tmp_path, monkeypatch):
+    """A fresh (~27d) JWT is used directly: no refresh, no cookies, and the session is built
+    from the JWT via _mirror_session_from -- NEVER _make_session (which would enforce the
+    API-key precondition and resolve USER_ID over the browser token; review)."""
     p = tmp_path / "m.json"
     monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
-    monkeypatch.setattr(mj, "_make_session", _fake_make_session)
+    monkeypatch.setattr(mj, "_make_session", lambda tok: (_ for _ in ()).throw(
+        AssertionError("mirror must not build via _make_session")))
     fresh = _jwt_in(27)
-    mj.save_mirror_state({"jwt": fresh, "cookies": {"_udt": "u", "_bsid": "b"}})
+    mj.save_mirror_state({"jwt": fresh})
     monkeypatch.setattr(mj, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
         AssertionError("must not refresh a fresh jwt")))
     s = mj.make_mirror_session()
-    assert s.headers["Authorization"] == "Bearer " + fresh    # built via _make_session(jwt)
-    assert {c.name for c in s.cookies} >= {"_udt", "_bsid"}    # cookie jar attached
+    assert s.headers["Authorization"] == "Bearer " + fresh
+    assert s.headers["User-Agent"] == mj.MIRROR_WEB_USER_AGENT   # web identity
+    assert len(s.cookies) == 0                                   # JWT-only, no cookie jar
 
 
 def test_mirror_session_presents_web_client_identity(tmp_path, monkeypatch):
@@ -235,19 +250,20 @@ def test_save_mirror_state_atomic_under_concurrency(tmp_path, monkeypatch):
     """Review F5: a per-PROCESS temp name let concurrent savers interleave into one temp
     and both os.replace -> corrupt JSON -> load returns {} (mirror 'lost'). With a
     per-WRITE-unique temp + atomic replace, concurrent saves are last-writer-wins and the
-    loaded record is always ONE complete write (jwt+cookie from the same save)."""
+    loaded record is always ONE complete write, never corrupt."""
     import threading as _t
     p = tmp_path / "mirror_session.json"
     monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
-    threads = [_t.Thread(target=lambda i=i: mj.save_mirror_state(
-        {"jwt": str(i), "cookies": {"_udt": str(i)}})) for i in range(16)]
+    threads = [_t.Thread(target=lambda i=i: mj.save_mirror_state({"jwt": str(i)}))
+               for i in range(16)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
     got = mj.load_mirror_state()
     assert got != {}                                             # never lost to corruption
-    assert got.get("jwt") == list(got["cookies"].values())[0]    # one atomic write, not merged
+    assert got.get("jwt") in {str(i) for i in range(16)}         # one complete write
+    assert "cookies" not in got                                  # JWT-only
     assert not list(tmp_path.glob("mirror_session.json.tmp*"))   # no stray temp left behind
 
 
@@ -520,3 +536,62 @@ def test_run_mirror_check_uses_localstorage_jwt(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert res["ok"] is True and res["source"] == "browser"
     assert browser_jwt not in out and fresh not in out
+
+
+# ---- ultrareview fixes (2026-08-15) ---------------------------------------------------
+def test_lvldb_log_skips_zero_type_record_without_desync():
+    """Review: a kZeroType record with a payload must have its payload CONSUMED, or the reader
+    resyncs inside it and silently drops every later WAL record (the live token among them)."""
+    tok = _jwt_iss(NOW + 20 * 86400)
+    zero = b"\x00\x00\x00\x00" + struct.pack("<H", 8) + b"\x00" + b"\x00" * 8   # kZeroType, 8B payload
+    blob = zero + _lvldb_log([(_LS_KEY, _ls_value(tok), False)])                # then a real FULL record
+    assert (_LS_KEY, _ls_value(tok), 1, False) in list(mj._lvldb_log_entries(blob))
+
+
+def test_jwt_claims_non_object_payload_never_raises():
+    """Review: a JWT whose payload decodes to a non-object made jwt_expiry/_pick_pixai_token
+    raise AttributeError, breaking their 'never raises' contracts."""
+    tok = "eyJhIjoxfQ.MQ.sig"                    # payload segment "MQ" decodes to the integer 1
+    assert mj.jwt_claims(tok) == {}
+    assert mj.jwt_expiry(tok) is None            # must NOT raise
+    assert mj.jwt_days_left(tok, now=NOW) is None
+    assert mj._pick_pixai_token([(_LS_KEY, b"\x01" + tok.encode(), 1, False)]) == ""
+
+
+def test_make_mirror_session_rebootstraps_when_stored_jwt_expired(tmp_path, monkeypatch):
+    """Review: gating the browser re-read on `not jwt` meant an EXPIRED stored token could
+    never be replaced -- both recovery paths were dead. Re-read whenever it's UNUSABLE."""
+    p = tmp_path / "m.json"
+    monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
+    mj.save_mirror_state({"jwt": _jwt_in(-2)})                    # expired stored token
+    fresh = _jwt_in(27)
+    monkeypatch.setattr(mj, "read_browser_jwt", lambda *a, **k: fresh)
+    monkeypatch.setattr(mj, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("a freshly-read 27d jwt needs no refresh")))
+    s = mj.make_mirror_session(bootstrap_from_browser=True)
+    assert s is not None and s.headers["Authorization"] == "Bearer " + fresh
+    assert mj.load_mirror_state()["jwt"] == fresh
+
+
+def test_make_mirror_session_skips_refresh_under_read_only(tmp_path, monkeypatch):
+    """Review F3: refreshToken is account-mutating -- it must not fire under READ_ONLY. A
+    still-valid stored JWT is used as-is (no network) rather than refused."""
+    p = tmp_path / "m.json"
+    monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
+    monkeypatch.setattr(mj, "READ_ONLY", False)
+    monkeypatch.setattr(mj, "_read_only_now", lambda: True)
+    jwt = _jwt_in(2)                                              # within cushion -> would refresh
+    mj.save_mirror_state({"jwt": jwt})
+    monkeypatch.setattr(mj, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("must not fire refreshToken under READ_ONLY")))
+    s = mj.make_mirror_session()
+    assert s is not None and s.headers["Authorization"] == "Bearer " + jwt
+
+
+def test_run_mirror_check_refused_under_read_only(monkeypatch):
+    monkeypatch.setattr(mj, "READ_ONLY", False)
+    monkeypatch.setattr(mj, "_read_only_now", lambda: True)
+    monkeypatch.setattr(mj, "read_browser_jwt", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("must not read the browser or refresh under READ_ONLY")))
+    res = mj.run_mirror_check(SimpleNamespace())
+    assert res["ok"] is False and res["source"] == "read_only"
