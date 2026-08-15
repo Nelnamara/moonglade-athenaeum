@@ -4992,13 +4992,20 @@ def _account_key(username):
 # The candidate loop below only knows THIS machine's directories, so an error
 # text carrying a path under any OTHER username (a library echoing a foreign
 # path, a message minted on another machine, a mapped drive) sailed through to
-# the browser untouched -- issue #14, caught by a cross-machine test run. The
-# username segment stops at the next separator, so only the home prefix is
-# replaced and the tail of the path stays readable, exactly like the candidate
-# pass. [\\/]+ mirrors the separator-agnostic matching rationale documented in
-# the candidate loop.
+# the browser untouched -- issue #14, caught by a cross-machine test run. Only
+# the home prefix + username is replaced; the tail of the path stays readable.
+#
+# Two corrections from issue #17 (the earlier version half-leaked and over-matched):
+#  - The username segment allows SPACES (a Windows account name commonly has one, e.g.
+#    "John Smith"); it stops at a separator / quote / newline / invalid-filename char, so
+#    the WHOLE name is redacted rather than just its first word.
+#  - The leading (?<![A-Za-z0-9.]) lookbehind stops the POSIX /home|/Users branch from
+#    firing INSIDE an ordinary URL path (api.pixai.art/v1/users/me, example.com/home/docs) --
+#    it only matches a home at a real path boundary (start / whitespace / quote / paren).
 _USER_HOME_RE = re.compile(
-    r'(?:[A-Za-z]:[\\/]+Users[\\/]+|/(?:home|Users)/+)[^\\/\s"\']+',
+    r'(?<![A-Za-z0-9.])'
+    r'(?:[A-Za-z]:[\\/]+Users[\\/]+|/(?:home|Users)/+)'
+    r'[^\\/:"*?<>|\r\n\']+',
     re.IGNORECASE)
 
 
