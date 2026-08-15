@@ -4573,16 +4573,19 @@ def _chromium_decrypt(enc, key):
 # Modern Chrome (>=127) wraps the cookie store in app-bound "v20" encryption a normal
 # user process can't decrypt, so the cookie path above returns nothing there. But the
 # pixai.art frontend ALSO keeps the live JWT in localStorage, and localStorage's
-# on-disk store (Local Storage/leveldb) is NOT app-bound-encrypted -- so we can read
-# the JWT straight out of it. That's the whole reason "Connect" can work on a current
-# Chrome without a paste. The Bearer JWT alone authenticates the mirror (create rides
+# on-disk store (Local Storage/leveldb) is NOT app-bound-encrypted -- so we read the JWT
+# straight out of it. That's the whole reason "Connect" can work on a current Chrome
+# without a paste. The Bearer JWT alone authenticates the mirror (create rides
 # Authorization: Bearer; refreshToken renews off the Bearer), so cookies are optional.
 #
-# leveldb isn't parsed with a library (no C dep, no snappy): we scan the raw bytes of
-# each .log/.ldb file for the exact localStorage key and lift the JWT that immediately
-# follows it. The freshest write lands in the uncompressed .log, so this is reliable for
-# an actively-used session; older compacted copies in .ldb are a best-effort bonus, and
-# we pick the candidate with the furthest-out `exp` (the most recently refreshed one).
+# We parse leveldb properly (a minimal pure-Python reader -- no C dep, no third-party
+# library). A raw byte-scan is NOT enough: an established profile compacts its writes into
+# .ldb SSTables whose keys are PREFIX-COMPRESSED (the literal "https://api.pixai.art:token"
+# never appears contiguously) and whose data blocks are usually SNAPPY-COMPRESSED (the JWT
+# bytes aren't even there in the clear). So we reconstruct real key->value pairs from both
+# the .ldb SSTables and the .log write-ahead log, match the exact localStorage key, and
+# validate the decoded token's issuer is "pixai" before trusting it. The freshest (max
+# `exp`) wins across every file/profile. Read-only; NEVER raises, NEVER logs a value.
 def _read_file_shared(path):
     """Read a file Chrome may hold open. Direct read first (Chromium opens leveldb files
     share-read on Windows); on failure, copy to temp and read the copy. b'' on failure,
@@ -4610,94 +4613,317 @@ def _read_file_shared(path):
             pass
 
 
-# base64url signature length (chars, no padding) per JWT `alg`. A greedy scan can't tell
-# where a signature ends -- the char class runs on into whatever leveldb framing follows the
-# value -- so we trim the third segment to the exact length the header's alg implies. A
-# Bearer with even one trailing junk char is silently rejected by the server, so this must be
-# exact. Every alg the pixai.art token could plausibly use is covered.
-_JWT_SIG_CHARS = {
-    "HS256": 43, "HS384": 64, "HS512": 86,
-    "RS256": 342, "RS384": 512, "RS512": 683,
-    "PS256": 342, "PS384": 512, "PS512": 683,
-    "ES256": 86, "ES384": 128, "ES512": 176, "EdDSA": 86,
-}
-
-
-def _tidy_jwt(cand):
-    """Trim a greedily-matched 'eyJhdr.payload.sig<+junk>' to the exact token. The match has
-    exactly two dots (the char class excludes '.'), so it splits into 3 parts; the signature
-    is trimmed to the length the header alg implies. Returns a clean JWT with a real `exp`, or
-    '' if it isn't one / was cut short of a full signature."""
-    parts = cand.split(".")
-    if len(parts) != 3:
-        return ""
-    h, p, s = parts
-    try:
-        alg = json.loads(_b64url_decode(h)).get("alg")
-    except Exception:
-        alg = None
-    want = _JWT_SIG_CHARS.get(alg)
-    if want is not None:
-        if len(s) < want:
-            return ""          # value ended before a full signature -> not our token
-        s = s[:want]           # cut any framing bytes the greedy scan absorbed
-    jwt = "%s.%s.%s" % (h, p, s)
-    return jwt if jwt_expiry(jwt) is not None else ""
-
-
-def _extract_jwts_from_leveldb_blob(blob):
-    """Every pixai.art-token JWT found in one leveldb file's raw bytes. Locates the exact
-    LOCALSTORAGE_JWT_KEY and lifts the JWT that follows it -- as Latin-1 (encoding byte 0x01,
-    the JWT is pure ASCII) or UTF-16LE (0x00). Works on the uncompressed .log (the freshest
-    write, where the full key is present); prefix-compressed .ldb blocks may not carry the
-    literal key and are simply skipped -- .log is the reliable source. Each candidate is
-    tidied to the exact token via _tidy_jwt. Returns a list; never raises, never logs a value.
-    The window is tight so the sibling :intercom-user-jwt key can't leak in."""
-    out = []
-    key = LOCALSTORAGE_JWT_KEY
-    ascii_re = re.compile(rb"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+")
-    utf16_re = re.compile(r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+")
-    start = 0
+def _lvarint(buf, pos):
+    """Decode a leveldb base-128 varint at buf[pos:]. Returns (value, next_pos). Raises
+    IndexError if it runs off the end (callers treat that as a malformed block)."""
+    result = 0
+    shift = 0
     while True:
-        i = blob.find(key, start)
-        if i < 0:
-            break
-        after = i + len(key)
-        start = after
-        window = blob[after:after + 32]              # value sits within a few bytes of the key
-        a = window.find(b"eyJ")                       # Latin-1 value: ...eyJ...
-        if 0 <= a <= 24:
-            m = ascii_re.match(blob, after + a)
-            if m:
-                tok = _tidy_jwt(m.group(0).decode("ascii"))
-                if tok:
-                    out.append(tok)
-                    continue
-        u = window.find(b"e\x00y\x00J\x00")           # UTF-16LE value: e\0y\0J\0...
-        if 0 <= u <= 24:
+        b = buf[pos]
+        pos += 1
+        result |= (b & 0x7F) << shift
+        if not (b & 0x80):
+            return result, pos
+        shift += 7
+        if shift > 63:
+            raise ValueError("varint too long")
+
+
+def _snappy_decompress(data):
+    """Pure-Python Snappy block decompression (the codec leveldb uses for SSTable blocks).
+    Returns the decompressed bytes, or None on malformed input. No dependency."""
+    try:
+        expect, pos = _lvarint(data, 0)
+        out = bytearray()
+        n = len(data)
+        while pos < n:
+            tag = data[pos]
+            pos += 1
+            kind = tag & 0x03
+            if kind == 0:                       # literal
+                length = tag >> 2
+                if length >= 60:
+                    nbytes = length - 59        # 60->1 .. 63->4 extra length bytes
+                    length = 0
+                    for i in range(nbytes):
+                        length |= data[pos + i] << (8 * i)
+                    pos += nbytes
+                length += 1
+                out += data[pos:pos + length]
+                pos += length
+            else:
+                if kind == 1:                   # copy, 1-byte offset
+                    length = 4 + ((tag >> 2) & 0x07)
+                    offset = ((tag >> 5) << 8) | data[pos]
+                    pos += 1
+                elif kind == 2:                 # copy, 2-byte offset
+                    length = 1 + (tag >> 2)
+                    offset = data[pos] | (data[pos + 1] << 8)
+                    pos += 2
+                else:                           # kind == 3, copy, 4-byte offset
+                    length = 1 + (tag >> 2)
+                    offset = (data[pos] | (data[pos + 1] << 8)
+                              | (data[pos + 2] << 16) | (data[pos + 3] << 24))
+                    pos += 4
+                if offset <= 0 or offset > len(out):
+                    return None
+                start = len(out) - offset
+                for i in range(length):         # byte-by-byte: copies may overlap
+                    out.append(out[start + i])
+        return bytes(out) if len(out) == expect else None
+    except (IndexError, ValueError):
+        return None
+
+
+def _lvldb_decompress_block(data, offset, size):
+    """The block at [offset, offset+size), decompressed per its 1-byte compression-type
+    trailer (0 none, 1 snappy, 2 zlib, 4 zstd). None if unreadable/unknown."""
+    if offset < 0 or offset + size + 1 > len(data):
+        return None
+    raw = data[offset:offset + size]
+    comp = data[offset + size]
+    if comp == 0:
+        return raw
+    if comp == 1:
+        return _snappy_decompress(raw)
+    if comp == 2:
+        try:
+            import zlib
+            return zlib.decompress(raw)
+        except Exception:
+            return None
+    if comp == 4:
+        try:
+            from compression import zstd        # Python 3.14+ stdlib
+            return zstd.decompress(raw)
+        except Exception:
             try:
-                txt = blob[after + u:after + u + 6000].decode("utf-16-le", "ignore")
+                import zstandard                 # optional third-party fallback
+                return zstandard.ZstdDecompressor().decompress(raw)
             except Exception:
-                txt = ""
-            m = utf16_re.match(txt)
-            if m:
-                tok = _tidy_jwt(m.group(0))
-                if tok:
-                    out.append(tok)
-    return out
+                return None
+    return None
+
+
+def _lvldb_block_pairs(block):
+    """Yield (key, value) from one decompressed leveldb block, undoing prefix compression.
+    The block ends with a restart array: [restart offsets...][num_restarts as uint32 LE].
+    A malformed block yields nothing rather than raising."""
+    n = len(block)
+    if n < 4:
+        return
+    try:
+        num_restarts = int.from_bytes(block[n - 4:n], "little")
+        entries_end = n - 4 - num_restarts * 4
+        if entries_end < 0:
+            return
+        pos = 0
+        last_key = b""
+        while pos < entries_end:
+            shared, pos = _lvarint(block, pos)
+            non_shared, pos = _lvarint(block, pos)
+            value_len, pos = _lvarint(block, pos)
+            key = last_key[:shared] + block[pos:pos + non_shared]
+            pos += non_shared
+            value = block[pos:pos + value_len]
+            pos += value_len
+            last_key = key
+            yield key, value
+    except (IndexError, ValueError):
+        return
+
+
+_LVLDB_SSTABLE_MAGIC = 0xDB4775248B80FB57
+
+
+def _lvldb_sstable_entries(data):
+    """Yield (user_key, value, seq, is_deletion) from a leveldb .ldb SSTable. Reads the footer
+    -> index block -> each data block (decompressing as needed) -> prefix-decoded entries. The
+    8-byte internal-key trailer encodes (seq<<8 | type) little-endian; type 0 is a deletion
+    tombstone. Yields nothing on any structural surprise (never raises)."""
+    n = len(data)
+    if n < 48:
+        return
+    try:
+        footer = data[n - 48:n]
+        if int.from_bytes(footer[40:48], "little") != _LVLDB_SSTABLE_MAGIC:
+            return
+        p = 0
+        _, p = _lvarint(footer, p)                # metaindex handle offset (skip)
+        _, p = _lvarint(footer, p)                # metaindex handle size   (skip)
+        idx_off, p = _lvarint(footer, p)
+        idx_size, p = _lvarint(footer, p)
+    except (IndexError, ValueError):
+        return
+    index_block = _lvldb_decompress_block(data, idx_off, idx_size)
+    if index_block is None:
+        return
+    for _sep, handle in _lvldb_block_pairs(index_block):
+        try:
+            b_off, hp = _lvarint(handle, 0)
+            b_size, _hp = _lvarint(handle, hp)
+        except (IndexError, ValueError):
+            continue
+        blk = _lvldb_decompress_block(data, b_off, b_size)
+        if blk is None:
+            continue
+        for key, value in _lvldb_block_pairs(blk):
+            if len(key) >= 8:                    # internal-key trailer = seq<<8 | type
+                trailer = int.from_bytes(key[-8:], "little")
+                yield key[:-8], value, trailer >> 8, (trailer & 0xFF) == 0
+
+
+def _lvldb_log_entries(data):
+    """Yield (key, value, seq, is_deletion) from a leveldb .log write-ahead log. Each
+    WriteBatch header carries the sequence number of its first entry; entry i has seq = base+i.
+    Reassembles physical record fragments across 32 KiB blocks. Deletions are yielded as
+    tombstones (empty value, is_deletion=True) so a later logout can suppress an earlier PUT.
+    Yields nothing on malformed input (never raises)."""
+    BLOCK = 32768
+    n = len(data)
+    pos = 0
+    frag = b""
+    try:
+        while pos + 7 <= n:
+            block_left = BLOCK - (pos % BLOCK)
+            if block_left < 7:                   # zero-padded block trailer -> next block
+                pos += block_left
+                continue
+            length = data[pos + 4] | (data[pos + 5] << 8)
+            rtype = data[pos + 6]
+            pos += 7
+            if rtype == 0 or length == 0:        # zero/padding record
+                continue
+            chunk = data[pos:pos + length]
+            pos += length
+            if rtype == 1:                       # FULL
+                rec = chunk
+            elif rtype == 2:                     # FIRST
+                frag = chunk
+                continue
+            elif rtype == 3:                     # MIDDLE
+                frag += chunk
+                continue
+            elif rtype == 4:                     # LAST
+                rec = frag + chunk
+                frag = b""
+            else:
+                frag = b""
+                continue
+            # WriteBatch: header seq(8)+count(4)=12, then entries; entry i has seq base+i
+            if len(rec) < 12:
+                continue
+            base_seq = int.from_bytes(rec[0:8], "little")
+            rp = 12
+            rn = len(rec)
+            idx = 0
+            while rp < rn:
+                tag = rec[rp]
+                rp += 1
+                if tag == 1:                     # kTypeValue: key, value
+                    klen, rp = _lvarint(rec, rp)
+                    key = rec[rp:rp + klen]
+                    rp += klen
+                    vlen, rp = _lvarint(rec, rp)
+                    value = rec[rp:rp + vlen]
+                    rp += vlen
+                    yield key, value, base_seq + idx, False
+                    idx += 1
+                elif tag == 0:                   # kTypeDeletion: key only
+                    klen, rp = _lvarint(rec, rp)
+                    key = rec[rp:rp + klen]
+                    rp += klen
+                    yield key, b"", base_seq + idx, True
+                    idx += 1
+                else:
+                    break                        # unknown tag -> stop this batch
+    except (IndexError, ValueError):
+        return
+
+
+def _lvldb_value_to_jwt(value):
+    """A Chromium localStorage value (encoding byte + payload) -> JWT string, or ''. 0x00 is
+    UTF-16LE, 0x01 is Latin-1 (a JWT is ASCII, so ours is 0x01)."""
+    if not value:
+        return ""
+    enc, body = value[0], value[1:]
+    try:
+        if enc == 0:
+            s = body.decode("utf-16-le", "ignore")
+        elif enc == 1:
+            s = body.decode("latin-1", "ignore")
+        else:
+            s = value.decode("latin-1", "ignore")
+    except Exception:
+        return ""
+    s = s.strip()
+    return s if s.startswith("eyJ") and s.count(".") == 2 else ""
+
+
+def _pick_pixai_token(entries):
+    """THE pixai.art auth token from ONE profile's leveldb entries, honoring leveldb's own
+    last-writer-wins-by-sequence semantics. `entries` are (user_key, value, seq, is_deletion)
+    tuples from that profile's .ldb + .log (which share one sequence space). Among entries for
+    the token key (ends with LOCALSTORAGE_JWT_KEY, contains 'pixai'), the HIGHEST sequence
+    number is the live state: if it's a deletion tombstone (logout) -> '' (not a stale token);
+    otherwise decode it and require iss=='pixai' (the definitive guard -- the Local Storage
+    store is shared across every origin, so unrelated JWTs live beside it). Returns '' if none.
+    Sequence numbers are unique per write, so ties are effectively impossible; if two values
+    tie (bottom-level seq-zeroing), the later `exp` wins, and any tombstone at the top wins."""
+    best_seq = -1
+    deleted_at_top = False
+    values_at_top = []                           # (exp, jwt) for value entries at best_seq
+    for key, value, seq, is_del in entries:
+        if b"pixai" not in key or not key.endswith(LOCALSTORAGE_JWT_KEY):
+            continue
+        if seq > best_seq:
+            best_seq = seq
+            deleted_at_top = False
+            values_at_top = []
+        if seq == best_seq:
+            if is_del:
+                deleted_at_top = True
+            else:
+                jwt = _lvldb_value_to_jwt(value)
+                if jwt and jwt_claims(jwt).get("iss") == "pixai":
+                    exp = jwt_expiry(jwt)
+                    values_at_top.append((exp if exp is not None else -1, jwt))
+    if best_seq < 0 or deleted_at_top or not values_at_top:
+        return ""
+    values_at_top.sort()
+    return values_at_top[-1][1]                   # freshest value at the top sequence
 
 
 def read_browser_jwt(browsers=("chrome", "edge", "brave")):
     """The live pixai.art JWT read from a local browser's localStorage, across ALL profiles
-    (Default, Profile N, ...) of the given Chromium browsers. Returns the freshest JWT (max
-    `exp`) or '' if none. This is what lets 'Connect' bootstrap the mirror on a current
-    Chrome whose cookie store is app-bound-encrypted. NEVER raises, NEVER logs the value."""
+    (Default, Profile N, ...) of the given Chromium browsers. Each profile is resolved on its
+    own sequence space (a logout tombstone there suppresses that profile's older token); the
+    freshest LIVE token (max `exp`) across profiles wins. Returns '' if none. This is what lets
+    'Connect' bootstrap the mirror on a current Chrome whose cookie store is
+    app-bound-encrypted. NEVER raises, NEVER logs the value."""
     la = os.environ.get("LOCALAPPDATA", "")
     roots = {
         "chrome": os.path.join(la, r"Google\Chrome\User Data"),
         "edge": os.path.join(la, r"Microsoft\Edge\User Data"),
         "brave": os.path.join(la, r"BraveSoftware\Brave-Browser\User Data"),
     }
+
+    def _profile_entries(ldb):
+        try:
+            files = os.listdir(ldb)
+        except OSError:
+            return
+        for fn in files:
+            path = os.path.join(ldb, fn)
+            if fn.endswith(".ldb"):
+                blob = _read_file_shared(path)
+                if blob:
+                    yield from _lvldb_sstable_entries(blob)
+            elif fn.endswith(".log"):
+                blob = _read_file_shared(path)
+                if blob:
+                    yield from _lvldb_log_entries(blob)
+
     candidates = []
     for name in browsers:
         udir = roots.get(name)
@@ -4711,17 +4937,11 @@ def read_browser_jwt(browsers=("chrome", "edge", "brave")):
             ldb = os.path.join(udir, prof, "Local Storage", "leveldb")
             if not os.path.isdir(ldb):
                 continue
-            try:
-                files = os.listdir(ldb)
-            except OSError:
-                continue
-            for fn in files:
-                if not (fn.endswith(".log") or fn.endswith(".ldb")):
-                    continue
-                blob = _read_file_shared(os.path.join(ldb, fn))
-                if blob:
-                    candidates.extend(_extract_jwts_from_leveldb_blob(blob))
-    best, best_exp = "", -1
+            tok = _pick_pixai_token(_profile_entries(ldb))   # per-profile, tombstone-aware
+            if tok:
+                candidates.append(tok)
+
+    best, best_exp = "", -1                       # freshest live token across profiles
     for j in candidates:
         e = jwt_expiry(j)
         if e is not None and e > best_exp:
@@ -4891,8 +5111,13 @@ def make_mirror_session(bootstrap_from_browser=False):
                 cookies = {c.name: c.value for c in probe.cookies} or cookies
                 save_mirror_state({"jwt": jwt, "cookies": cookies})
                 bootstrapped = False   # already persisted the rolled session
-        if not jwt:
-            return None   # no usable JWT even after refresh -> refuse, never API-key (F5)
+        # Refuse a missing / unparseable / already-EXPIRED JWT: building a session around a
+        # dead token would make Connect falsely report success, then fail at submit time.
+        # Refuse and spend nothing, never an API-key fallback (F5). A still-valid token whose
+        # refresh merely failed (e.g. 4 days left) is fine -- only a negative days-left is dead.
+        left = jwt_days_left(jwt) if jwt else None
+        if not jwt or left is None or left < 0:
+            return None
         if bootstrapped:
             # A freshly-read (still-valid, ~27d) browser JWT that didn't need refresh:
             # persist it so later calls don't have to touch the browser again.
