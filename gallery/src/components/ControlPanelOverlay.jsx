@@ -80,6 +80,60 @@ function ledgerResult(j) {
   return { text: j.status || "…", good: false };
 }
 
+/* "Mirror to PixAI website" — the credential-switch toggle. Self-contained: loads its
+   own status (offline days-left, never the token), flips MIRROR_TO_PIXAI, and Connect
+   runs the server-side browser-session bootstrap (the server reads ITS OWN local browser;
+   no credential crosses the network). See moonglade_backup.py's mirror helpers + the
+   submit-path invariants. */
+function MirrorTile() {
+  const [st, setSt] = useState(null);      // {enabled, connected, days_left}
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    fetch("/api/mirror/status").then((r) => r.json()).then(setSt).catch(() => {});
+  }, []);
+  const toggle = async () => {
+    if (!st || busy) return;
+    setBusy(true); setMsg("");
+    const d = await postJSON("/api/mirror/enable", { enabled: !st.enabled });
+    setBusy(false);
+    if (d.error) { setMsg("⚠ " + d.error); return; }
+    setSt((s) => ({ ...s, enabled: d.enabled }));
+  };
+  const connect = async () => {
+    if (busy) return;
+    setBusy(true); setMsg("Reading this machine's browser session…");
+    const d = await postJSON("/api/mirror/connect", {});
+    setBusy(false);
+    if (!d.ok) { setMsg("⚠ " + (d.error || "couldn't connect")); return; }
+    setMsg("Connected.");
+    setSt((s) => ({ ...(s || {}), connected: true, days_left: d.days_left }));
+  };
+  const line = !st ? "…"
+    : st.connected ? ("Connected" + (st.days_left != null ? " · " + st.days_left + " days left" : ""))
+    : "Not connected";
+  return (
+    <div className="mgcp-tile mgcp-tile3">
+      <div className="mgcp-mkick">Mirror to PixAI website</div>
+      <div className="mgcp-tilesmall">
+        {st && st.enabled
+          ? "On — new generations also file into your pixai.art library."
+          : "Off — generations stay in your local backup only."}
+        <br />{line}
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
+        <button type="button" disabled={busy || !st}
+          className={"mgcp-standing-toggle" + (st && st.enabled ? " on" : "")}
+          onClick={toggle}>{st && st.enabled ? "on" : "off"}</button>
+        <button type="button" className="mgcp-smallchip" disabled={busy} onClick={connect}>
+          {st && st.connected ? "Refresh session" : "Connect…"}</button>
+      </div>
+      {msg && <div style={{ fontSize: 10.5, marginTop: 6,
+        color: msg[0] === "⚠" ? "var(--red)" : "var(--emerald)" }}>{msg}</div>}
+    </div>
+  );
+}
+
 export default function ControlPanelOverlay({ onClose, boot, account }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const [tab, setTab] = useState("maint");
@@ -622,6 +676,8 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                       </div>
                       <button type="button" className="mgcp-smallchip">Open…</button>
                     </div>
+
+                    <MirrorTile />
 
                     <div className="mgcp-tile mgcp-tile3">
                       <div className="mgcp-mkick">Catalog &amp; files</div>

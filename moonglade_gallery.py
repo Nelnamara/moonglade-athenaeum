@@ -9712,6 +9712,53 @@ def create_app(out_dir: Path):
             return jsonify({"ok": True, "pokes": pokes, "snapped": pokes >= 5})
         return jsonify({"error": "unknown event"}), 400
 
+    @app.route("/api/mirror/status")
+    def api_mirror_status():
+        """Read-only status of 'Mirror to PixAI website': the toggle flag + the stored
+        JWT's days-left, decoded OFFLINE (no network). NEVER returns the token (review
+        F13). LOGIN tier."""
+        import moonglade_backup as core
+        jwt = (core.load_mirror_state().get("jwt") or "")
+        return jsonify({"enabled": core.mirror_enabled(), "connected": bool(jwt),
+                        "days_left": core.jwt_days_left(jwt) if jwt else None})
+
+    @app.route("/api/mirror/enable", methods=["POST"])
+    def api_mirror_enable():
+        """Set the MIRROR_TO_PIXAI toggle in config.json, under _accounts_lock (config
+        holds auth state, so every writer serializes there). This flag alone spends
+        nothing and makes no network call -- it only decides which credential the create
+        POST uses. LOGIN tier."""
+        import moonglade_backup as core
+        want = bool((request.get_json(silent=True) or {}).get("enabled"))
+        try:
+            with core._accounts_lock:
+                cfg = core._load_config() or {}
+                cfg["MIRROR_TO_PIXAI"] = want
+                core._save_config(cfg)
+        except OSError as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:160]}), 200
+        return jsonify({"enabled": want})
+
+    @app.route("/api/mirror/connect", methods=["POST"])
+    def api_mirror_connect():
+        """Bootstrap/refresh the mirror session: read the pixai.art session from THIS
+        machine's browser, roll the JWT via refreshToken, store it. Reports only ok +
+        days-left -- NEVER the token (review F13). No credential crosses the network: the
+        server reads its own local browser store. LOGIN tier."""
+        import moonglade_backup as core
+        try:
+            s = core.make_mirror_session(bootstrap_from_browser=True)
+        except Exception as e:
+            return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:160]}), 200
+        if s is None:
+            return jsonify({"ok": False, "error": "Couldn't establish a mirror session -- "
+                            "no pixai.art cookies in a local browser, or the token refresh "
+                            "failed. Make sure a browser on this machine is signed in to "
+                            "pixai.art, then try again."}), 200
+        jwt = (core.load_mirror_state().get("jwt") or "")
+        return jsonify({"ok": bool(jwt),
+                        "days_left": core.jwt_days_left(jwt) if jwt else None})
+
     @app.route("/api/branding", methods=["GET", "POST"])
     def api_branding():
         """The banner mark (the icon beside the title) + its animation. GET and POST both

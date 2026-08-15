@@ -245,3 +245,33 @@ def test_session_for_create_routing(monkeypatch):
     monkeypatch.setattr(mj, "make_mirror_session", lambda: None)
     with pytest.raises(mj.PixAIError):                         # ON + unavailable -> refuse (F5)
         mj._session_for_create(api)
+
+
+# ---- the Control Panel mirror routes (status / enable / connect) ----
+def test_api_mirror_status_reports_days_left_never_the_token(tmp_path, monkeypatch):
+    from tests.conftest import login_client
+    monkeypatch.setattr(mj, "_mirror_state_path", lambda: tmp_path / "m.json")
+    mj.save_mirror_state({"jwt": _jwt_in(20), "cookies": {"_udt": "u"}})
+    monkeypatch.setattr(mj, "mirror_enabled", lambda: True)
+    d = login_client(tmp_path).get("/api/mirror/status").get_json()
+    assert d["enabled"] is True and d["connected"] is True and d["days_left"] >= 18
+    import json as _json
+    assert "eyJ" not in _json.dumps(d)                         # never the token
+
+
+def test_api_mirror_enable_writes_the_flag_only(tmp_path, monkeypatch):
+    from tests.conftest import login_client
+    cli = login_client(tmp_path)                                # real login (real config read = auth intact)
+    captured = {}
+    # capture ONLY the flag off the write (never persist, never retain the real config/key)
+    monkeypatch.setattr(mj, "_save_config",
+                        lambda cfg: captured.__setitem__("flag", cfg.get("MIRROR_TO_PIXAI")))
+    d = cli.post("/api/mirror/enable", json={"enabled": True}).get_json()
+    assert d["enabled"] is True and captured.get("flag") is True
+
+
+def test_api_mirror_connect_degrades_without_a_browser(tmp_path, monkeypatch):
+    from tests.conftest import login_client
+    monkeypatch.setattr(mj, "make_mirror_session", lambda **k: None)
+    d = login_client(tmp_path).post("/api/mirror/connect", json={}).get_json()
+    assert d["ok"] is False and d.get("error")
