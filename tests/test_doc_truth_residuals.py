@@ -112,70 +112,11 @@ def test_task_detail_query_docstring_names_its_real_caller_and_the_two_that_bypa
 
 
 # ---------------------------------------------------------------------------
-# P7 residual: false INVARIANT claims in docs/architecture.md and CONTRIBUTING.md.
+# P7 residual: the four architecture.md invariant-claim tests were retired on
+# 2026-08-14 -- docs/architecture.md moved to the private companion repo
+# (../moonglade-internal), which CI does not clone, so they can no longer read
+# their subject. The corrected claims they pinned live on in that file.
 # ---------------------------------------------------------------------------
-
-def test_invariant_1_media_id_of_is_not_documented_as_a_single_source():
-    """media_id_of() is re-implemented inline elsewhere instead of being called --
-    verified by grep: moonglade_gallery.py's own backfill_batches() and moonglade_similar.py's
-    scan_dir both do a bare `stem.split("_")[-1]` rather than calling the shared
-    function. The module table's "single source" claim is false."""
-    arch = _read("docs/architecture.md")
-    idx = arch.index("`media_id_of()`")
-    row = arch[idx:arch.index("\n", idx)]
-    assert "Invariant 1, single source" not in row, (
-        "media_id_of()'s module-table row still claims to be a 'single source' "
-        "unqualified, which is false (see backfill_batches/scan_dir duplicates)")
-    assert "backfill_batches" in row and "scan_dir" in row, (
-        "media_id_of()'s module-table row doesn't name the known inline duplicates "
-        "(backfill_batches in this module, moonglade_similar.py's scan_dir)")
-
-
-def test_invariant_2_resume_ordering_caveats_full_meta_and_sync():
-    """Verified directly in run_download: under --full-meta (and --sync, which is
-    '--update --full-meta' under the hood), task_detail_gql + model_name_gql +
-    resolve_loras all fire for a task BEFORE the per-media on_disk_by_mid resume check,
-    in both the parallel and serial code paths. Invariant 2 as flatly stated
-    ('checked before any network call') is false in that mode."""
-    arch = _read("docs/architecture.md")
-    inv_section = arch[arch.index("## Invariants"):arch.index("## The web suite")]
-    assert "--full-meta" in inv_section, (
-        "Invariant 2 doesn't mention the --full-meta/--sync exception at all")
-    assert not re.search(
-        r"\*\*Resume is keyed on media id, checked before any network call\.\*\*\s*\n\d",
-        inv_section), (
-        "Invariant 2 still states the unconditional claim with nothing qualifying it")
-
-
-def test_invariant_4_catalog_source_of_truth_reconciled_with_filesystem_truth_dedup():
-    """audit_collection()'s own module-table entry calls it a 'Filesystem-truth
-    duplicate audit' -- independent of catalog.db. Invariant 4's blanket 'catalog.db is
-    the source of truth for organize and friends' contradicts that if dedup/audit count
-    as 'friends'. Reconcile: catalog.db governs organize/resume/lookup; dedup/audit are
-    deliberately filesystem-truth and don't consult it."""
-    arch = _read("docs/architecture.md")
-    inv_section = arch[arch.index("## Invariants"):arch.index("## The web suite")]
-    assert "for organize and friends." not in inv_section, (
-        "Invariant 4 still makes the unqualified 'organize and friends' claim that "
-        "contradicts audit_collection()'s own filesystem-truth description")
-    assert re.search(r"audit_collection|filesystem-truth", inv_section, re.I), (
-        "Invariant 4 doesn't reconcile with audit_collection()'s filesystem-truth nature")
-
-
-def test_invariant_7_names_more_than_just_resume_and_audit():
-    """Same underlying fact as batch 2's B11 fix in this sweep: there isn't 'one shared
-    matcher' with two exceptions (resume, audit) -- cmd_organize, run_import_local,
-    duplicate_groups, and the Loom's last-frame resolver each walk the tree
-    independently too. Verified directly via grep for .rglob(/os.walk( call sites and
-    mapping each to its enclosing function."""
-    arch = _read("docs/architecture.md")
-    inv_section = arch[arch.index("## Invariants"):arch.index("## The web suite")]
-    named = ("cmd_organize", "run_import_local", "duplicate_groups")
-    missing = [n for n in named if n not in inv_section]
-    assert not missing, (
-        "Invariant 7 still only names resume+audit as non-callers of "
-        "find_files_for_media_id; missing: {}".format(missing))
-
 
 def test_contributing_md_does_not_harden_the_false_single_matcher_claim():
     """CONTRIBUTING.md said resolution 'goes through find_files_for_media_id() ... never
@@ -186,9 +127,9 @@ def test_contributing_md_does_not_harden_the_false_single_matcher_claim():
     assert "never a new" not in contrib, (
         "CONTRIBUTING.md still states as flat fact that every lookup goes through "
         "find_files_for_media_id() with never a new ad-hoc glob -- false")
-    assert "docs/architecture.md" in contrib, (
-        "CONTRIBUTING.md's media_id guidance should point at docs/architecture.md "
-        "(where the Invariants section actually lives now), not just CLAUDE.md")
+    # (The companion assertion that CONTRIBUTING points at docs/architecture.md was
+    # dropped 2026-08-14: that file moved to the private companion repo, and
+    # CONTRIBUTING now points contributors at the wiki instead.)
 
 
 # ---------------------------------------------------------------------------

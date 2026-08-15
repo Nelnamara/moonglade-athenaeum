@@ -208,6 +208,9 @@ Generate drawer.
 camera, lighting, cast, `@refs`, project look — and puts it on your clipboard for any
 external generator that speaks the same `@reference` grammar. Plan here, render anywhere.
 
+Tip: the gallery's image picker has a **"Copy the image's prompt to the clipboard when
+picking"** checkbox — useful for carrying source-image context along while you cast shots.
+
 ## Storyboards
 
 The top bar's **▾** opens the storyboard switcher, listing every saved board with its shot
@@ -271,10 +274,19 @@ looks finished and desyncs after the first shot, it names the shot and asks you 
 out point (which supplies the length exactly) or fix the file. Since real audio was detected
 somewhere, ffprobe is demonstrably working, so that one file is the suspect.
 
+## A workflow that works
+
+1. Block the whole piece first (acts, shots, durations) until the reel bar reaches the
+   target tick.
+2. Cast your characters/scenes once in Cast & Assets; cite them with `@refs`.
+3. Chain frames (**↳ inherit … close**) across acts for continuity.
+4. Generate the anchor shots first (act openers, hero moments); review; then batch the rest
+   with **▶ Generate all**.
+5. Everything lands in the gallery — rate, collect, and curate clips like images.
+
 ## Where to go next
 
 - The **?** button at the bottom-right of `/loom` is a quick in-page guide.
-- `docs/LOOM.md` in the repo is the full manual — the same ground covered in more depth.
 - [Generating](Generating) covers the credits, free cards, and the simple one-clip Video tab.
 - [Collections](Collections) — bulk-select images in the gallery and **Send to The Loom
   (cast)**.

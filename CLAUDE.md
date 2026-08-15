@@ -6,7 +6,7 @@ This file is committed so it is available on every machine that clones the repo.
 
 ## What this project is
 
-**Moonglade Athenaeum** — *"a library against the Void."* It began as a backup tool for the **owner's own** PixAI.art generations and grew into a full local PixAI **client**: back up · browse · generate · curate. Talks to the same API the browser uses, pages the entire history at full resolution, keeps a searchable SQLite catalog, **creates** new images via the API, and manages both the local archive and the cloud account. See `docs/architecture.md` for the module breakdown, function reference, and catalog schema.
+**Moonglade Athenaeum** — *"a library against the Void."* It began as a backup tool for the **owner's own** PixAI.art generations and grew into a full local PixAI **client**: back up · browse · generate · curate. Talks to the same API the browser uses, pages the entire history at full resolution, keeps a searchable SQLite catalog, **creates** new images via the API, and manages both the local archive and the cloud account. See `../moonglade-internal/architecture.md` for the module breakdown, function reference, and catalog schema.
 
 Built by reverse-engineering site network traffic (catalogued privately in `private/API_OPERATIONS.md`, git-ignored). The `gql_adhoc()` ad-hoc POST path means most operations need no persisted-hash capture. There is no official API for listing your own generations. Be polite to their servers (paced requests). PixAI's terms grant users copyright of their generations. User-facing docs live in `docs/`.
 
@@ -45,6 +45,12 @@ mass commit. Follow this protocol:
 5. **`config.json` + `private/` are git-ignored and machine-local** — they will NOT be on the
    other machine, and that's correct. Don't recreate, commit, or complain about their absence.
 6. **Commits: no `Co-Authored-By: Claude` trailer** (standing preference).
+7. **The internal dev docs live in a PRIVATE companion repo at `../moonglade-internal`**
+   (sibling of this checkout, both machines — `Nelnamara/moonglade-internal`). That's where
+   DECISIONS.md, ART.md, STANDARDS.md, LOOM.md, architecture.md and ROADMAP-internal.md are.
+   Pull it at session start and push it at session end, alongside this repo — same rhythm,
+   both repos. If the clone is absent on this machine, SAY SO rather than guessing at what
+   those documents contain; do not recreate them in this repo.
 
 ## Session checkpoint protocol (anti-compaction drift) — owner-agreed
 
@@ -55,8 +61,11 @@ Long sessions get compacted; summaries lose design intent. Standing rule:
    - **What shipped** → `CHANGELOG.md [Unreleased]`, a dated tagline. Nowhere else.
    - **Planned/outstanding work** → `ROADMAP.md` (Now / Next / Later, with real context).
      When an item ships, **delete it from ROADMAP** and add the CHANGELOG line — moving it, not
-     annotating "done" in place.
-   - **Why a decision was made** → `docs/DECISIONS.md`, reasoning only. If what you're about to
+     annotating "done" in place. **The split rule:** the public `ROADMAP.md` is the DEFAULT home
+     for every item; `../moonglade-internal/ROADMAP-internal.md` may hold ONLY items matching a
+     short list — hidden achievements/easter eggs, reward assignments, security or API probing.
+     An item lives in exactly one file, never both.
+   - **Why a decision was made** → `../moonglade-internal/DECISIONS.md`, reasoning only. If what you're about to
      write contains a status word (shipped/done/deferred/next), it belongs in one of the two
      files above instead.
    - **Bugs** → GitHub Issues (`gh issue create`), not prose in a doc.
@@ -69,7 +78,7 @@ Long sessions get compacted; summaries lose design intent. Standing rule:
    it down now (2026-07-15) so it can't drop again the same way.** If a shipped change is
    user-facing, check whether any `wiki/` page describes the area it touched and update it in
    the same pass — don't let the wiki decay into a separate, forgotten catch-up task.
-2. **After any compaction**, the FIRST act is to re-read **`docs/DECISIONS.md`** and re-open every
+2. **After any compaction**, the FIRST act is to re-read **`../moonglade-internal/DECISIONS.md`** and re-open every
    artifact/doc the next task depends on — never build from the conversation summary alone.
    Say what was re-read before proceeding.
 3. **Flair/user-visible features** name their locked design source (artifact id / doc
@@ -78,19 +87,19 @@ Long sessions get compacted; summaries lose design intent. Standing rule:
 4. **Visual builds require a PIXEL source of truth** (a Figma frame via the Figma plugin's MCP,
    a Claude Design project via DesignSync, or a locked mockup artifact) — never prose alone —
    and the verify pass compares against that source. Restyling a shipped, owner-approved surface
-   needs an explicit owner go. See `docs/STANDARDS.md` Part 2 (originally `docs/DESIGN_WORKFLOW.md`,
+   needs an explicit owner go. See `../moonglade-internal/STANDARDS.md` Part 2 (originally `docs/DESIGN_WORKFLOW.md`,
    added 2026-07-15 `6a0f99d` after the Trophy Hall reformat landed off-target from prose notes;
    merged into STANDARDS.md 2026-07-17).
 5. **Hierarchy when sources disagree:** for a measurable fact (test count, version, branch lead,
    release status) the **code/git/pytest/gh answer wins over every doc** — never trust a number a
-   command can answer. For decisions already taken, `docs/DECISIONS.md` wins. For how it works,
-   the code, then `docs/architecture.md`. For owner preferences, memory wins. A memory that
+   command can answer. For decisions already taken, `../moonglade-internal/DECISIONS.md` wins. For how it works,
+   the code, then `../moonglade-internal/architecture.md`. For owner preferences, memory wins. A memory that
    describes code is verified against the code before acting on it.
 
 ## Standing rules — how to work here
 
 *Behavioural. Violating one is a mistake, not a preference. Several exist because the owner had
-to say them more than once. (Moved here from `docs/DECISIONS.md` on 2026-08-13 — they only take
+to say them more than once. (Moved here from `../moonglade-internal/DECISIONS.md` on 2026-08-13 — they only take
 effect if they're in the file that loads every session.)*
 
 - **Verify visual work in a real browser, always.** Live-check through the built-in browser or
@@ -125,7 +134,7 @@ effect if they're in the file that loads every session.)*
 - **Safety documentation is never deferred.** Any page a user reads *before* an irreversible
   action (deleting, spending) gets corrected immediately, even mid-freeze. Being wrong there
   costs more than rework.
-- **`docs/ART.md` is the one home for art direction** — badge style, tier palette, slot sizes,
+- **`../moonglade-internal/ART.md` is the one home for art direction** — badge style, tier palette, slot sizes,
   prompt bank. Don't restate hexes or sizes anywhere else; duplicated pixel facts are how the
   docs drifted in the first place.
 - **Never write a count in prose that a command can answer** — test counts, LOCALHOST route
@@ -148,10 +157,10 @@ present — fixes corporate/antivirus HTTPS interception.
 > **Reverse-engineering detail (the persisted-query/hash mechanism, pagination internals,
 > `gql_adhoc()` technique, Apollo header requirements) lives in `private/ARCHITECTURE_RE.md`**
 > — git-ignored, not public. Read it there when you need the specifics; this section stays at
-> the same redacted level as the public `docs/architecture.md` on purpose (owner's IP/security
+> the same redacted level as the public `../moonglade-internal/architecture.md` on purpose (owner's IP/security
 > boundary, set 2026-07-04 — public docs describe how to USE the tool, never how it
 > reverse-engineers PixAI). **This section was found duplicating the excised detail verbatim on
-> 2026-07-15 — the 2026-07-04 redaction only touched `docs/architecture.md`, not this file. Do
+> 2026-07-15 — the 2026-07-04 redaction only touched `../moonglade-internal/architecture.md`, not this file. Do
 > not let mechanism detail creep back into this section.**
 
 ---
@@ -159,7 +168,7 @@ present — fixes corporate/antivirus HTTPS interception.
 ## Module map, functions, catalog schema
 
 Four modules, one shared SQLite catalog, on-disk layout, and the full function/helper
-reference all live in **`docs/architecture.md`** — do not restate them here; that's how
+reference all live in **`../moonglade-internal/architecture.md`** — do not restate them here; that's how
 this file drifted (a stale "three-file" table, a wrong function shape) badly enough that
 `tests/test_docs_dont_hardcode_counts.py` had to exist.
 
@@ -170,7 +179,7 @@ this file drifted (a stale "three-file" table, a wrong function shape) badly eno
 The seven numbered invariants (media_id parsing, resume ordering, incomplete-file
 handling, catalog-as-source-of-truth, `--organize` normalization, gallery-thumbnail
 exclusion, and the shared media-id → file matcher) are documented in full, with the
-historical bugs each one prevents, in **`docs/architecture.md`**'s Invariants section.
+historical bugs each one prevents, in **`../moonglade-internal/architecture.md`**'s Invariants section.
 Read them before touching resume, organize, or file-resolution code — they are not
 stylistic preferences, each one is there because breaking it caused a real, previously
 shipped bug.
@@ -222,7 +231,7 @@ shipped bug.
 ## Logging (`-v` / `--verbose`, and the persistent file log)
 
 - `set_verbose()` + `vlog()`: timestamped diagnostics (per-page fetch, per-image resolve/download timing, startup disk-scan time) to stdout. Console output is a no-op until enabled with `-v` / `--verbose`.
-- `moonglade_logging.py` is the persistent baseline: a rotating file at `out_dir/logs/moonglade.log`, always on regardless of `-v` (only the console mirror is verbose-gated). See `docs/architecture.md`'s module reference for the full design.
+- `moonglade_logging.py` is the persistent baseline: a rotating file at `out_dir/logs/moonglade.log`, always on regardless of `-v` (only the console mirror is verbose-gated). See `../moonglade-internal/architecture.md`'s module reference for the full design.
 
 ## Recapture procedure (when PixAI changes their frontend)
 
@@ -235,24 +244,24 @@ recapture is in `private/RE_NOTES.md`.
 
 All creation (generate/video/reference-video/edit/upload/cards) rides one
 `createGenerationTask` mutation over `gql_mutate`, and every credit-spending path is
-preview-only until `--confirm` — see `docs/architecture.md`'s function reference for the
+preview-only until `--confirm` — see `../moonglade-internal/architecture.md`'s function reference for the
 per-command shapes and the **Quick command reference** below for usage. The Flask gallery
 is a full web creation suite (Generate drawer, Picker, The Loom, live-events push, Control
-Panel jobs, branding) — its structure lives in `docs/architecture.md`'s "The web suite"
+Panel jobs, branding) — its structure lives in `../moonglade-internal/architecture.md`'s "The web suite"
 section; dated history in `CHANGELOG.md`. Don't restate feature detail here —
 that's how this file drifted badly enough to need `tests/test_docs_dont_hardcode_counts.py`.
 
 `--sync`'s reconcile step (`run_reconcile_deleted`) is caught with a deliberately **BROAD
 `except Exception`** — do NOT narrow it to `except PixAIError`, or a transient network blip
 during the advisory reconcile scan can crash a sync that already succeeded. Guarded by
-`tests/test_sync.py`; full rationale in `docs/architecture.md`.
+`tests/test_sync.py`; full rationale in `../moonglade-internal/architecture.md`.
 
 Achievement/Folio-of-Honors art direction (badge style anchor, tier palette, prompt bank)
-lives in `docs/ART.md` — don't restate hexes or sizes here.
+lives in `../moonglade-internal/ART.md` — don't restate hexes or sizes here.
 
 ## Test suite
 
-Full run instructions live in `docs/architecture.md`'s Testing section. **Never write the
+Full run instructions live in `../moonglade-internal/architecture.md`'s Testing section. **Never write the
 test count in this or any live doc** — `tests/test_docs_dont_hardcode_counts.py` fails the
 suite if you do; it was wrong in every one of six-plus files it was ever stated in, most
 recently within hours of a "correction." All tests must pass before merging to master.
@@ -268,7 +277,7 @@ its own "delete a fact that stops being true, never annotate" rule existed to pr
 not recreate it, do not cite it, and do not treat any older instruction to checkpoint into
 it as live — an instruction to update `STATE.md` is out of date by definition.
 
-What survived lives in **`docs/DECISIONS.md`** (decisions already taken). Version, branch
+What survived lives in **`../moonglade-internal/DECISIONS.md`** (decisions already taken). Version, branch
 lead, and release status are commands, not prose — ask git/pytest/gh, never a doc. Owner:
 Nelnamara / Kil'jaeden — Balance Druid, WoW addon dev. Branch strategy: feature branches,
 merge to master with `--no-ff`, tag releases.

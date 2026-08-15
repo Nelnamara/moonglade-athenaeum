@@ -508,5 +508,5 @@ frame handoff, and per-shot **Generate** on the same engine. It's a fixed 4-regi
 (Cast & Assets / Footage on the left, the Acts & Shots board center, the Generate drawer
 right, a Timeline drawer across the top) with a "draft generation" mode for exploring a
 look before assigning it to a shot, multiple independently-saved storyboards, project-wide
-Draft-quality rendering, and a two-tier project export. Full manual: `docs/LOOM.md` (or the
-? button on the page).
+Draft-quality rendering, and a two-tier project export. Full manual: [The Loom](The-Loom) (or
+the ? button on the page).
