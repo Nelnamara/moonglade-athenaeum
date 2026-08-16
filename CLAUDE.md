@@ -306,7 +306,8 @@ python moonglade_backup.py --update --workers 8       # incremental + higher con
 python moonglade_backup.py --workers 8 --page-size 500  # fast full backfill
 python moonglade_backup.py --no-full-meta             # faster pull, but rows land with no prompt/seed/model
 python moonglade_backup.py --backfill-full-meta       # fill existing rows
-python moonglade_backup.py --sync                     # ONE-SHOT refresh: pull+full-meta → fix-models → backfill → thumbnails → reconcile-deleted (idempotent)
+python moonglade_backup.py --sync                     # ONE-SHOT refresh: pull+full-meta → backfill → fix-models → thumbnails → reconcile-deleted (idempotent; videos are --sync-videos)
+python moonglade_backup.py --backfill-full-meta --with-surface --workers 8   # give older rows the full generation surface (issue #18); checkpoints as it runs, resumable
 python moonglade_backup.py --organize --dry-run       # preview month-folder normalize
 python moonglade_backup.py --organize                 # normalize into YYYY-MM/ (reversible; --organize-adv is an alias)
 python moonglade_backup.py --catalog-stats            # summarize catalog.db

@@ -11705,11 +11705,12 @@ def main():
                          "Overwrites in place -- the gallery never goes blank.")
     ap.add_argument("--sync", action="store_true",
                     help="One-shot sync, in five steps: incremental pull WITH full metadata "
-                         "(equivalent to --update --full-meta), re-resolve any unlabeled "
-                         "model names, fill any catalog rows still missing "
-                         "prompts/seeds/models, build any missing preview thumbnails, and "
-                         "reconcile rows deleted on PixAI. Every step is idempotent, so "
-                         "re-running on a clean catalog costs almost nothing.")
+                         "(equivalent to --update --full-meta), fill any catalog rows still "
+                         "missing prompts/seeds/models, re-resolve any unlabeled model names, "
+                         "build any missing preview thumbnails, and reconcile rows deleted on "
+                         "PixAI. Every step is idempotent, so re-running on a clean catalog "
+                         "costs almost nothing. (Video tasks are not part of --sync -- run "
+                         "--sync-videos for those.)")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="print timestamped diagnostics (per-page fetch, per-image "
                          "resolve/download timing, disk-scan time) so you can see what a "
