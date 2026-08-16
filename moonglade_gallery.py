@@ -101,6 +101,23 @@ CATALOG_FIELDS = [
     # "upscaled or recompressed version of the same image" pairs that byte-hashing (Class
     # B, identical_file) misses because the bytes differ.
     "phash",
+    # FULL GENERATION SURFACE (2026-08-15, issue #18): fields the getTaskById record carries
+    # that we previously dropped on the floor. All resolved by extract_full_meta from the task
+    # (image + video); steps/sampler/cfg above now also backfill from the model preset when the
+    # task omits them (e.g. Tsubaki.2, whose detailParameters is absent).
+    "inference_profile",   # parameters.inferenceProfile -- quality/speed mode (lite/standard/pro/ultra)
+    "quality_tag",         # parameters.qualityTag.prefix -- the Mio.2-agent quality prefix (e.g. 'Masterpiece')
+    "prompt_helper",       # promptHelper.enable + detected reason, folded to one label
+    "control_nets",        # parameters.controlNets, JSON when non-empty
+    "lora_parameters",     # parameters.loraParameters raw [{versionId,weight}] JSON (loras is the resolved view)
+    "priority",            # parameters.priority (1000 normal / 1500 turbo)
+    "render_seconds",      # outputs.inferenceInfo.stages.pipeline_run_s -- actual render time
+    "backend",             # outputs.inferenceInfo.backend (e.g. 'pdr')
+    "started_at", "ended_at", "updated_at",   # true queue->start->finish timing (created_at is submit)
+    "retry_count",         # task.retryCount
+    "moderation",          # moderationAction.promptsModerationAction (PASS / ...)
+    "video_mode",          # parameters.i2vPro.mode (video tasks)
+    "video_model",         # parameters.i2vPro.model (video tasks)
 ]
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
@@ -154,7 +171,22 @@ CREATE TABLE IF NOT EXISTS catalog (
     blurhash        TEXT DEFAULT '',
     nsfw_scores     TEXT DEFAULT '',
     paid_credit     TEXT DEFAULT '',
-    phash           TEXT DEFAULT ''
+    phash           TEXT DEFAULT '',
+    inference_profile TEXT DEFAULT '',
+    quality_tag       TEXT DEFAULT '',
+    prompt_helper     TEXT DEFAULT '',
+    control_nets      TEXT DEFAULT '',
+    lora_parameters   TEXT DEFAULT '',
+    priority          TEXT DEFAULT '',
+    render_seconds    TEXT DEFAULT '',
+    backend           TEXT DEFAULT '',
+    started_at        TEXT DEFAULT '',
+    ended_at          TEXT DEFAULT '',
+    updated_at        TEXT DEFAULT '',
+    retry_count       TEXT DEFAULT '',
+    moderation        TEXT DEFAULT '',
+    video_mode        TEXT DEFAULT '',
+    video_model       TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
@@ -228,6 +260,22 @@ _MIGRATIONS = [
     # every single run (an in-memory-only marker was tried first and silently discarded by
     # save_catalog, since it isn't a real column -- caught before it shipped).
     "ALTER TABLE catalog ADD COLUMN lineage_checked TEXT DEFAULT ''",
+    # FULL GENERATION SURFACE (2026-08-15, issue #18) -- added to existing catalogs on connect.
+    "ALTER TABLE catalog ADD COLUMN inference_profile TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN quality_tag TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN prompt_helper TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN control_nets TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN lora_parameters TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN priority TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN render_seconds TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN backend TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN started_at TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN ended_at TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN updated_at TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN retry_count TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN moderation TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN video_mode TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN video_model TEXT DEFAULT ''",
 ]
 
 def _connect(db_path):

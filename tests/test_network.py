@@ -883,9 +883,10 @@ def test_fix_models_resolves_numeric_names(tmp_path, mocker):
 
 
 def test_sync_runs_all_three_steps_in_order(tmp_path, mocker, monkeypatch):
-    """Control Panel consolidation: --sync now folds fix-models in between the pull
-    and the metadata backfill (previously just 2 steps), so a synced catalog is always
-    fully labeled without a separate click/action."""
+    """Control Panel consolidation: --sync folds fix-models and the metadata backfill in after
+    the pull (previously just 2 steps), so a synced catalog is always fully labeled without a
+    separate click/action. Backfill precedes fix-models on purpose (audit 2026-08-15): backfill
+    fills model_id for rows that never saw detail, so fix-models then relabels them same-run."""
     calls = []
     seen = {}
     mocker.patch.object(core, "run_download",
@@ -896,7 +897,7 @@ def test_sync_runs_all_three_steps_in_order(tmp_path, mocker, monkeypatch):
 
     core.main()
 
-    assert calls == ["download", "fix_models", "backfill"]
+    assert calls == ["download", "backfill", "fix_models"]
     # the download step must receive args.progress (main() sets it via _make_progress),
     # else the panel's progress bar is blank during the download -- the thing the owner hit.
     assert callable(seen["dl_progress"])

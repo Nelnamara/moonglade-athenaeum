@@ -281,7 +281,8 @@ def test_video_outputs_extracts_video_and_poster():
 
 def test_video_outputs_none_and_empty():
     assert core.video_outputs(None) == ([], {})
-    assert core.video_outputs({"outputs": {}, "parameters": {}}) == ([], {"prompt": "", "duration": "", "i2v_model": ""})
+    assert core.video_outputs({"outputs": {}, "parameters": {}}) == (
+        [], {"prompt": "", "duration": "", "i2v_model": "", "negative_prompt": ""})
 
 
 # ---------------------------------------------------------------------------
