@@ -200,6 +200,40 @@ export function buildPayload(s, promptText) {
 }
 
 export function hasAnyRef(p) { return !!(p.images.length || p.video_refs.length || p.audio_refs.length); }
+
+/* ---- price identity: the settled quote must be FOR the payload Go would submit ------------
+   State alone cannot gate a spend: the badge can hold a settled FREE for a 5s payload while
+   the form already says 15s (a 250ms debounce + one RTT of stale FREE), or hold a price for a
+   payload whose quality/camera has since changed with NO re-price pending at all. So the host
+   records the priceKey of the payload it actually priced, and Go compares it against the
+   priceKey of the payload it is about to submit -- identity, not timing.
+
+   priceKey drops ONLY prompt/negative. Everything else rides the priced request (the whole
+   i2vPro/referenceVideo block is a _PRICE_NESTED field of moonglade_backup.price_task, and
+   modelId a _PRICE_SCALARS one), so a field that does not really move the price (channel,
+   camera) still lives in the key: the cost of over-including is a re-price the change handler
+   already schedules; the cost of under-including is a spend against the wrong quote. Prompt
+   text is excluded because it is the one field the drawer edits without a repaint (imperative
+   contenteditable) and it never prices -- see loom-core.js's PRICE_FIELDS for the same call. */
+export const PRICE_KEY_SKIP = ["prompt", "negative"];
+export function priceKey(payload) {
+  if (!payload || typeof payload !== "object") return "";
+  const keys = Object.keys(payload).filter((k) => PRICE_KEY_SKIP.indexOf(k) === -1).sort();
+  return JSON.stringify(keys.map((k) => [k, payload[k]]));
+}
+// The Go gate. `price` = {settled, pricedKey, pendingTimer}: settled = the badge shows the
+// verdict for pricedKey; pendingTimer = a re-price is scheduled but has not fired (so whatever
+// is on the badge is already known-stale). True only when a settled verdict exists AND nothing
+// is pending AND that verdict was priced off THIS payload.
+export function canSubmit(price, payload) {
+  return !!(price && price.settled && !price.pendingTimer && price.pricedKey != null
+    && price.pricedKey === priceKey(payload));
+}
+// How long the drawer waits on /api/price before aborting into the "couldn't verify" verdict.
+// Go is gated on the fetch settling, so an UNBOUNDED fetch that hangs (browser<->server stall)
+// would leave Go disabled forever with no message. The server's own upstream PixAI calls are
+// bounded at 30s/60s, so 25s here only ever fires on a transport stall, not a slow price.
+export const PRICE_FETCH_TIMEOUT_MS = 25000;
 // FLF with an End Frame but NO Start Frame is a DIFFERENT generation -- one predicate for Go AND
 // the cost badge (pricing what Go would refuse is the split that let a disabled control charge).
 export function flfMissingStart(s) {

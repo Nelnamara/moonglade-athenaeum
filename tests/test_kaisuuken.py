@@ -398,3 +398,287 @@ def test_run_card_history_all_prints_type_catalog(monkeypatch, capsys):
     assert "Tsubaki.2 Only" in out and "Edit Pro Only" in out
     assert "consumed=16" in out and "refunded=1" in out
     assert "kaisuukenId" not in core.build_chat_edit_parameters("x", ["10"])
+
+
+# ---- issue #15: multi-ticket cards. /v2/kaisuuken/check `version: 2` is the site's own
+# matcher (v1 answers `matches: []` for any i2vPro duration >= 10, so >5s videos went out
+# card-less at full price). v2 returns `consumeAmount` = tickets the job COSTS; the server does
+# NOT filter by balance, so coverage (held >= need) is decided in match_kaisuuken and read
+# everywhere through the ONE predicate, card_covers. ----
+
+_ABSENT = object()   # sentinel: leave consumeAmount out of the template entirely
+
+
+def _v2_match(consume=_ABSENT, total=16, tid="tpl-1", kid="tkt-1", exp="2026-09-01T00:00:00Z"):
+    mt = {"templateId": tid, "total": total,
+          "kaisuukens": [{"id": kid, "expiresAt": exp}]}
+    if consume is not _ABSENT:
+        mt["consumeAmount"] = consume
+    return mt
+
+
+def _video_params(duration=15):
+    return {"modelId": "vid-model", "i2vPro": {"duration": duration}}
+
+
+def test_match_sends_version_2_generation_task(monkeypatch):
+    seen = {}
+    def fake_post(s, path, body, **k):
+        seen["body"] = body
+        return {"matches": [_v2_match()], "total": 16}
+    monkeypatch.setattr(core, "_rest_post", fake_post)
+    core.match_kaisuuken(object(), {"modelId": "m"})
+    assert seen["body"]["type"] == "generation-task"
+    assert seen["body"]["version"] == 2 and isinstance(seen["body"]["version"], int)
+
+
+@pytest.mark.parametrize("raw,need", [
+    (_ABSENT, 1),   # absent -> v1 semantic: one job, one ticket
+    (None, 1),      # explicit null
+    (0, 1),         # 0 must never mean "costs nothing"
+    ("2", 2),       # string from a loose serializer
+    (2, 2),
+])
+def test_match_parses_consume_amount_defensively(monkeypatch, raw, need):
+    monkeypatch.setattr(core, "_rest_post",
+                        lambda *a, **k: {"matches": [_v2_match(consume=raw)], "total": 16})
+    best = core.match_kaisuuken(object(), {"modelId": "m"})
+    assert best["consumeAmount"] == need
+
+
+@pytest.mark.parametrize("raw,held", [("5", 5), (None, None), (5, 5)])
+def test_match_parses_total_defensively(monkeypatch, raw, held):
+    mt = _v2_match(consume=1, total=raw)
+    monkeypatch.setattr(core, "_rest_post", lambda *a, **k: {"matches": [mt]})   # no top-level total
+    best = core.match_kaisuuken(object(), {"modelId": "m"})
+    assert best["total"] == held
+
+
+def test_match_covered_when_held_at_least_need(monkeypatch):
+    monkeypatch.setattr(core, "_rest_post",
+                        lambda *a, **k: {"matches": [_v2_match(consume=3, total=3)], "total": 3})
+    best = core.match_kaisuuken(object(), _video_params(15))
+    assert best["covered"] is True and core.card_covers(best)
+
+
+def test_match_not_covered_when_short(monkeypatch):
+    monkeypatch.setattr(core, "_rest_post",
+                        lambda *a, **k: {"matches": [_v2_match(consume=3, total=2)], "total": 2})
+    best = core.match_kaisuuken(object(), _video_params(15))
+    assert best is not None and best["id"] == "tkt-1"      # still named, for the honest note
+    assert best["covered"] is False and not core.card_covers(best)
+    assert best["consumeAmount"] == 3 and best["total"] == 2
+
+
+def test_match_unknown_balance_covers_single_ticket_only(monkeypatch):
+    """Balance unknown: a 1-ticket job stays covered (today's behaviour -- not attaching when
+    covered loses real credits); a multi-ticket VIDEO fails CLOSED (not covered)."""
+    monkeypatch.setattr(core, "_rest_post",
+                        lambda *a, **k: {"matches": [_v2_match(consume=1, total=None)]})
+    assert core.card_covers(core.match_kaisuuken(object(), {"modelId": "m"}))
+    monkeypatch.setattr(core, "_rest_post",
+                        lambda *a, **k: {"matches": [_v2_match(consume=3, total=None)]})
+    best = core.match_kaisuuken(object(), _video_params(15))
+    assert best is not None and not core.card_covers(best)
+
+
+def test_match_prefers_covering_template_over_nearer_expiry(monkeypatch):
+    """A: 2 held, expires SOONER. B: 5 held, expires later. Need 3 -> B, because coverage
+    is decided before nearest-expiry (a short card must never shadow one that covers)."""
+    monkeypatch.setattr(core, "_rest_post", lambda *a, **k: {"matches": [
+        _v2_match(consume=3, total=2, tid="tpl-A", kid="tkt-A", exp="2026-08-20T00:00:00Z"),
+        _v2_match(consume=3, total=5, tid="tpl-B", kid="tkt-B", exp="2026-09-20T00:00:00Z"),
+    ]})
+    best = core.match_kaisuuken(object(), _video_params(15))
+    assert best["id"] == "tkt-B" and best["templateId"] == "tpl-B"
+    assert core.card_covers(best)
+
+
+def test_card_covers_predicate():
+    assert core.card_covers(None) is False
+    assert core.card_covers({"id": "x"}) is True                     # v1 stub: field absent
+    assert core.card_covers({"id": "x", "covered": True}) is True
+    assert core.card_covers({"id": "x", "covered": False}) is False
+
+
+def test_card_short_note_wording():
+    note = core.card_short_note({"consumeAmount": 3, "total": 2, "name": "V4.0 Lite"}, cost=1200)
+    assert "you hold 2 of the 3 V4.0 Lite tickets this needs" in note
+    assert "no card is used" in note and "full ~1,200 credits" in note
+    assert "full credit price" in core.card_short_note({"consumeAmount": 3, "total": 2})
+
+
+# ---- _apply_kaisuuken reads card_covers: attach ONE id when covered, nothing when short ----
+
+def test_apply_covered_multi_ticket_attaches_single_id(monkeypatch, capsys):
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, p, enrich=False, **k: {
+        "id": "tkt-1", "expiresAt": "2026-09-01T00:00:00Z", "templateId": "tpl-1",
+        "total": 5, "consumeAmount": 3, "covered": True, "name": "V4.0 Lite"})
+    params = _video_params(15)
+    assert core._apply_kaisuuken(object(), params, _args()) == "tkt-1"
+    assert params["kaisuukenId"] == "tkt-1" and isinstance(params["kaisuukenId"], str)
+    assert "kaisuukenIds" not in params                       # ONE singular id, never a list
+    out = capsys.readouterr().out
+    assert "uses 3 of 5 cards" in out and "0 credits" in out
+
+
+def test_apply_short_attaches_nothing_and_prints_short_note(monkeypatch, capsys):
+    """Owner ruling: short = SPEND (like the site), attach nothing, say so honestly."""
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, p, enrich=False, **k: {
+        "id": "tkt-1", "expiresAt": "2026-09-01T00:00:00Z", "templateId": "tpl-1",
+        "total": 2, "consumeAmount": 3, "covered": False, "name": "V4.0 Lite"})
+    monkeypatch.setattr(core, "price_task", lambda s, p: 1200)
+    params = _video_params(15)
+    assert core._apply_kaisuuken(object(), params, _args()) == ""
+    assert "kaisuukenId" not in params and "kaisuukenIds" not in params
+    out = capsys.readouterr().out
+    assert "you hold 2 of the 3 V4.0 Lite tickets" in out
+    assert "no card is used" in out and "full ~1,200 credits" in out
+    assert "costs 0 credits" not in out and "free card matches" not in out   # never shown as free
+
+
+# ---- _preview_card_note: the CLI preview must agree with the spend path ----
+
+def test_preview_free_when_covered_names_n_of_h(monkeypatch, capsys):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    seen = {}
+    def fake_match(s, p, enrich=False, **k):
+        seen["enrich"] = enrich
+        return {"id": "tkt-1", "expiresAt": "2026-09-01T00:00:00Z", "templateId": "tpl-1",
+                "total": 5, "consumeAmount": 3, "covered": True, "name": "V4.0 Lite"}
+    monkeypatch.setattr(core, "match_kaisuuken", fake_match)
+    monkeypatch.setattr(core, "price_task", lambda s, p: 1200)
+    core._preview_card_note(_args(token=None), _video_params(15))
+    out = capsys.readouterr().out
+    assert seen["enrich"] is True                              # same template as the spend path
+    assert out.startswith("FREE: V4.0 Lite covers this")
+    assert "uses 3 of 5 cards" in out and "0 credits" in out and "saves ~1,200 credits" in out
+
+
+def test_preview_not_free_when_short(monkeypatch, capsys):
+    """BLOCKER before #15: any match printed FREE, so a short 15s clip was promised free
+    right before --confirm spent the full price."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, p, enrich=False, **k: {
+        "id": "tkt-1", "expiresAt": "2026-09-01T00:00:00Z", "templateId": "tpl-1",
+        "total": 2, "consumeAmount": 3, "covered": False, "name": "V4.0 Lite"})
+    monkeypatch.setattr(core, "price_task", lambda s, p: 1200)
+    core._preview_card_note(_args(token=None), _video_params(15))
+    out = capsys.readouterr().out
+    assert out.startswith("NOT free -- ")
+    assert "you hold 2 of the 3 V4.0 Lite tickets" in out and "no card is used" in out
+    assert "full ~1,200 credits" in out and "--confirm" in out
+    assert "FREE:" not in out
+
+
+def test_run_cards_explains_multi_ticket_videos(monkeypatch, capsys):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "list_kaisuukens", lambda s: [
+        {"name": "V4.0 Preview Lite Only", "count": 2, "category": "Video Card",
+         "task_types": ["i2vpro"], "model_version_id": "", "template_code": "v4-lite",
+         "template_id": "t3", "expires": "2026-09-01T00:00:00Z"}])
+    core.run_cards(SimpleNamespace(token=None))
+    out = capsys.readouterr().out
+    assert "15s clip needs 3" in out and "FULL credit price" in out
+
+
+# ---- 2026-08-16 xhigh review of the #15 branch: the four Python spend-path fixes ----
+
+def test_price_task_fails_soft_on_a_network_error_not_just_pixai_errors(monkeypatch):
+    """price_task caught only (PixAIError, ValueError); a requests.RequestException from the
+    raw session.get escaped -- and it is called from _apply_kaisuuken's SHORT branch, INSIDE
+    the spend path, so a transient timeout there aborted a confirmed submit with a traceback."""
+    import requests
+    def boom(*a, **k):
+        raise requests.exceptions.ConnectionError("reset")
+    monkeypatch.setattr(core, "_rest_get", boom)
+    assert core.price_task(object(), {"modelId": "m", "width": 512}) is None
+
+
+def test_apply_short_branch_never_aborts_the_submit_when_the_cost_lookup_raises(monkeypatch, capsys):
+    """Belt on top of price_task's own fail-soft: the SHORT branch's cost lookup is diagnostic
+    only, so NOTHING it raises may abort the spend it describes -- the number just drops out."""
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, p, enrich=False, **k: {
+        "id": "tkt-1", "expiresAt": "2026-09-01T00:00:00Z", "templateId": "tpl-1",
+        "total": 2, "consumeAmount": 3, "covered": False, "name": "V4.0 Lite"})
+    def boom(s, p):
+        raise RuntimeError("anything at all")
+    monkeypatch.setattr(core, "price_task", boom)
+    params = _video_params(15)
+    assert core._apply_kaisuuken(object(), params, _args()) == ""     # proceeds, does not raise
+    assert "kaisuukenId" not in params
+    out = capsys.readouterr().out
+    assert "you hold 2 of the 3 V4.0 Lite tickets" in out and "full credit price" in out
+
+
+def test_match_never_credits_a_template_with_the_top_level_pool_sum(monkeypatch):
+    """The response's top-level `total` is the SUM across matched templates (_TWO_CARDS: 17+5=22).
+    Falling back to it when a match lacks its own `total` credited every template with the whole
+    pool: a 5-held template read as covering a 6-ticket job, both landed in covered_pool, and
+    nearest-expiry then picked the SHORT one -- manufactured coverage + defeated the
+    coverage-first ordering (review, reproduced). Now: per-match total, else summary count, else
+    None (the unknown-balance policy) -- never the pool sum."""
+    a = _v2_match(consume=6, total=None, tid="tpl-a", kid="a-tkt", exp="2026-09-01T00:00:00Z")
+    a.pop("total")                                            # per-match total ABSENT
+    b = _v2_match(consume=6, total=None, tid="tpl-b", kid="b-tkt", exp="2026-09-09T00:00:00Z")
+    b.pop("total")
+    monkeypatch.setattr(core, "_rest_post", lambda s, path, body, **k: {"matches": [a, b], "total": 22})
+    best = core.match_kaisuuken(object(), _video_params(30))   # no enrich -> no summary count
+    assert best["total"] is None, "the pool sum must NOT become a per-template balance"
+    assert best["balance_unknown"] is True
+    assert best["covered"] is False, "multi-ticket + unknown balance fails CLOSED, never 'covered by the pool sum'"
+
+
+def test_match_per_match_total_null_does_not_fall_to_the_pool_sum_either(monkeypatch):
+    """dict.get's default only fires when the key is ABSENT; an explicit null must behave the
+    same as absent (unknown), and in neither case borrow the top-level sum."""
+    mt = _v2_match(consume=3, total=None)                     # key present, value None
+    monkeypatch.setattr(core, "_rest_post", lambda s, path, body, **k: {"matches": [mt], "total": 22})
+    best = core.match_kaisuuken(object(), _video_params(15))
+    assert best["total"] is None and best["balance_unknown"] is True and best["covered"] is False
+
+
+def test_unknown_balance_is_the_general_rule_not_a_video_special_case(monkeypatch):
+    """A multi-ticket NON-video job with an unread balance must fail closed the same way -- the
+    old code special-cased video (`is_video and need > 1`), so a future multi-ticket edit/batch
+    card would have been marked covered on an unknown balance."""
+    mt = _v2_match(consume=2)
+    mt.pop("total")
+    monkeypatch.setattr(core, "_rest_post", lambda s, path, body, **k: {"matches": [mt]})
+    best = core.match_kaisuuken(object(), {"modelId": "m", "chat": {"modelId": "m"}})   # not video
+    assert best["covered"] is False and best["balance_unknown"] is True
+    # ...and a 1-ticket job on an unknown balance is still covered (the v1 world that always worked).
+    mt1 = _v2_match(consume=1)
+    mt1.pop("total")
+    monkeypatch.setattr(core, "_rest_post", lambda s, path, body, **k: {"matches": [mt1]})
+    assert core.match_kaisuuken(object(), {"modelId": "m"})["covered"] is True
+
+
+def test_short_note_says_unknown_when_the_balance_was_not_read():
+    """'you hold ? ... not enough' asserted a fact nobody read. Unknown is worded as unknown."""
+    note = core.card_short_note({"consumeAmount": 3, "total": None, "balance_unknown": True,
+                                 "name": "V4.0 Lite"}, 82500)
+    assert "couldn't read how many V4.0 Lite tickets you hold" in note
+    assert "not enough" not in note and "?" not in note
+    assert "no card will be attached" in note and "full ~82,500 credits" in note
+    # A genuinely short one still says short.
+    short = core.card_short_note({"consumeAmount": 3, "total": 2, "name": "V4.0 Lite"}, 82500)
+    assert "you hold 2 of the 3 V4.0 Lite tickets" in short and "not enough" in short
+
+
+def test_preview_explicit_kaisuuken_id_does_not_promise_zero_credits(capsys):
+    """--kaisuuken-id is FORCED: attached as given, coverage unchecked. It used to print
+    '-> 0 credits' unconditionally -- a multi-ticket clip on an under-funded template shown as
+    free (review gap sweep). It must say what is and isn't guaranteed."""
+    core._preview_card_note(_args(token=None, kaisuuken_id="tkt-forced"), _video_params(15))
+    out = capsys.readouterr().out
+    assert "-> 0 credits" not in out and "0 credits" not in out
+    assert "Coverage is NOT checked" in out and "full credit price" in out
+
+
+def test_uses_note_only_for_multi_ticket_jobs():
+    """'uses N of H cards' is gated on need > 1 everywhere (matches the web badge), so a
+    1-ticket image reads 'covers this' on the CLI too -- not 'uses 1 of 16 cards'."""
+    assert core._card_uses_note({"consumeAmount": 1, "total": 16}) == ""
+    assert core._card_uses_note({"consumeAmount": 3, "total": 5}) == "uses 3 of 5 cards; "
+    assert core._card_uses_note({"consumeAmount": 3, "total": None}) == "uses 3 of ? cards; "

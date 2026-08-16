@@ -541,17 +541,130 @@ export const shotPayload = (entry, project, imgSrc) => {
 export const PRICE_FIELDS = ["mode", "images", "video_refs", "duration", "quality", "generate_audio", "audio_language"];
 export const priceFingerprint = (payload) => JSON.stringify(PRICE_FIELDS.map((k) => payload[k]));
 
-// {free,paid,credits,unknown} over a list of /api/price responses (nulls = failed/unknown
-// price checks, counted honestly rather than as a false "0 credits"). Shared verbatim by
-// batchGenerate's confirm dialog and the toolbar's standing cost-to-finish pill so there is
-// exactly one place this math lives.
-export const tallyPrices = (prices) => {
-  let free = 0, paid = 0, credits = 0, unknown = 0;
+// ---- multi-ticket free cards (issue #15) ----
+// /api/price's `free` is the server's card_covers() verdict for ONE job priced alone: a
+// card matched AND the tickets held cover that job's consumeAmount. Two honesty problems
+// remain on the client side, both handled here so every Loom surface reads one answer:
+//  (a) SHORT: a card matched but held < needed (`card_short`, with `cards_held` /
+//      `cards_needed` / `card_name` alongside). OWNER RULING: the app still spends -- the
+//      site does the same -- but nothing is attached and the FULL price is charged, so the
+//      confirm must say exactly that and never read as partial application.
+//  (b) POOL: each shot is priced independently against the SAME ticket pool, so a batch of
+//      three 15s shots (3 tickets each) against 5 held prices as three "free" shots when
+//      only the first is really funded. tallyPrices below spends the pool per template in
+//      submission order and reclassifies the overflow as paid at full price -- so a "will
+//      spend" shot is called out BEFORE the confirm, not discovered on the invoice.
+
+// True when the price result is the SHORT case: matched, not covered. `card_short` is the
+// server's own flag; the held/needed comparison is only a fallback for a response that
+// carries the counts but predates the flag, and it can never widen coverage -- `free`
+// (the server's card_covers) is checked first and stays authoritative.
+export const priceIsShort = (pr) => {
+  if (!pr || pr.free) return false;          // the server's card_covers verdict is authoritative
+  if (pr.card_short === true) return true;
+  const held = cardHeld(pr);
+  return held != null && held < cardNeed(pr);
+};
+
+// The one honest sentence for the SHORT case -- the client twin of moonglade_backup.py's
+// card_short_note(): nothing is attached, the FULL price is charged. `subject` names the
+// job in the caller's own words ("this 15s shot", "this").
+export const shortSpendLine = (pr, subject = "this") => {
+  const need = Math.max(1, Number(pr && pr.cards_needed) || 1);
+  const heldN = cardHeld(pr);
+  const name = (pr && pr.card_name) ? `${pr.card_name} ` : "";
+  const tail = (pr && pr.cost != null)
+    ? `It will spend the full ~${Number(pr.cost).toLocaleString()} credits.`
+    : "It will spend the full credit price.";
+  // UNKNOWN balance (server: balance_unknown / cards_held null) is NOT "not enough" -- that
+  // asserts a fact nobody read. Say the balance couldn't be read; the outcome (no card,
+  // full price) is the same, the reason is honest.
+  if (heldN == null || (pr && pr.balance_unknown)) {
+    return `Couldn't read how many free ${name}tickets you hold (${subject} needs ${need}), so no card will be attached. ${tail}`;
+  }
+  return `You hold ${heldN} of the ${need} free ${name}cards ${subject} needs — not enough, so no card is used. ${tail}`;
+};
+
+// Null-safe ticket-count parsers -- ONE definition of "tickets held/needed" for every Loom
+// reader (priceIsShort, shortSpendLine, the tally). `Number(null)` is 0, which is a REAL
+// balance, so a bare Number() turned "unknown" into "zero held" and booked server-FREE shots
+// as paid (review 2026-08-16). null/undefined/'' -> null (unknown); junk -> null.
+export const cardHeld = (pr) => {
+  const v = pr && pr.cards_held;
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+export const cardNeed = (pr) => {
+  const n = Number(pr && pr.cards_needed);
+  return Number.isFinite(n) && n >= 1 ? n : 1;
+};
+
+// Template key a free result draws its tickets from: the server's card_template when it
+// sends one, else the card's display name. Null = the response predates both fields (or is
+// not free), so the pool cannot be tracked and the server's own verdict stands.
+const cardPoolKey = (pr) => (pr && (pr.card_template || pr.card_name)) || null;
+
+// {free,paid,credits,unknown,overflow,pools} over a list of /api/price responses IN
+// SUBMISSION ORDER (nulls = failed/unknown price checks, counted honestly rather than as a
+// false "0 credits"). Template-aware: a shot the server priced free is only counted free
+// while its template's held tickets still fund it; once the pool runs dry the rest of that
+// template's shots are `overflow` -- counted as PAID at their full price, because that is
+// what the site charges when the card comes up short at submit time. `pools` is
+// {key: {name, held, needed}} for the confirm dialog to explain the shortfall.
+export const tallyPricesDetailed = (prices) => {
+  let free = 0, paid = 0, credits = 0, unknown = 0, overflow = 0;
+  const pools = {};
+  const overflowIndexes = [];
+  // Pool balance = the MIN cards_held seen for that template across the list, fail-closed.
+  // Results are priced at different times (the standing cost-to-finish pill mixes cached
+  // entries; a generate in between lowers the real balance), and the old code fixed `held`
+  // from the FIRST result and ignored every later reading -- so a stale-high first read
+  // let later shots count as free that the pool could no longer fund. Pre-pass so order
+  // of arrival can't decide the answer.
   prices.forEach((pr) => {
-    if (pr && pr.free) free++;
+    if (!(pr && pr.free)) return;
+    const key = cardPoolKey(pr), held = cardHeld(pr);
+    if (!key || held == null) return;
+    const pool = pools[key] || (pools[key] = { name: pr.card_name || key, held, needed: 0, left: held });
+    if (held < pool.held) { pool.held = held; pool.left = held; }
+  });
+  prices.forEach((pr, i) => {
+    if (pr && pr.free) {
+      const key = cardPoolKey(pr);
+      const need = cardNeed(pr);
+      const held = cardHeld(pr);
+      // Only a KNOWN balance can be drained. An unknown one (cards_held null -- the server
+      // still said free, e.g. a 1-ticket job on an unread balance) is not a zero balance:
+      // Number(null) is 0 and used to book these server-FREE shots as overflow/paid.
+      if (key && held != null) {
+        const pool = pools[key];
+        pool.needed += need;
+        if (pool.left >= need) { pool.left -= need; free++; return; }
+        // Pool exhausted: the site attaches nothing and charges full price for this one.
+        // NOTE this drains only the template the server chose when pricing this shot ALONE;
+        // if a second template also covers, the submit path (which re-runs coverage live)
+        // may still cover it -- so callers word overflow as an upper bound, not a certainty.
+        overflow++;
+        overflowIndexes.push(i);
+        if (pr.cost != null) { paid++; credits += pr.cost; } else unknown++;
+        return;
+      }
+      free++;                       // no pool info to track against -- the server's verdict stands
+    }
     else if (pr && pr.cost != null) { paid++; credits += pr.cost; }
     else unknown++;
   });
+  Object.values(pools).forEach((p) => { delete p.left; });
+  return { free, paid, credits, unknown, overflow, pools, overflowIndexes };
+};
+
+// {free,paid,credits,unknown} -- the four-bucket shape every existing caller consumes
+// (batchGenerate's dialog, the toolbar's standing cost-to-finish pill, the per-shot
+// previews). Same pool-aware math as tallyPricesDetailed, minus the explanatory fields, so
+// there is exactly one place this math lives.
+export const tallyPrices = (prices) => {
+  const { free, paid, credits, unknown } = tallyPricesDetailed(prices);
   return { free, paid, credits, unknown };
 };
 
