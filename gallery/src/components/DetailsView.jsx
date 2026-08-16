@@ -331,6 +331,18 @@ export default function DetailsView({
               <li className="p-fact"><span>Sampler</span><b>{row.sampler || "—"}</b></li>
               <li className="p-fact"><span>CFG Scale</span><b>{row.cfg_scale || "—"}</b></li>
               {row.clip_skip ? <li className="p-fact"><span>Clip Skip</span><b>{row.clip_skip}</b></li> : null}
+              {/* Full generation surface (issue #18) -- conditional so older rows that predate
+                  capture stay clean; a new gen shows the full record. */}
+              {row.inference_profile ? <li className="p-fact"><span>Mode</span><b>{row.inference_profile}</b></li> : null}
+              {row.quality_tag ? <li className="p-fact"><span>Quality Tag</span><b>{row.quality_tag}</b></li> : null}
+              {row.priority ? <li className="p-fact"><span>Priority</span><b>{row.priority === "1500" ? "turbo (1500)" : row.priority}</b></li> : null}
+              {row.prompt_helper ? <li className="p-fact"><span>Prompt Helper</span><b>{row.prompt_helper}</b></li> : null}
+              {row.moderation ? <li className="p-fact"><span>Moderation</span><b>{row.moderation}</b></li> : null}
+              {row.render_seconds ? <li className="p-fact"><span>Render Time</span><b>{Math.round(parseFloat(row.render_seconds)) + "s"}</b></li> : null}
+              {row.retry_count && row.retry_count !== "0" ? <li className="p-fact"><span>Retries</span><b>{row.retry_count}</b></li> : null}
+              {row.video_mode ? <li className="p-fact"><span>Video Mode</span><b>{row.video_mode}</b></li> : null}
+              {row.video_model ? <li className="p-fact"><span>Video Model</span><b>{row.video_model}</b></li> : null}
+              {row.backend ? <li className="p-fact"><span>Backend</span><b className="mono dim">{row.backend}</b></li> : null}
               <li className={"p-fact" + (copied === "task" ? " copied" : "")}>
                 <span>Task ID</span><b className="mono dim">{row.task_id}</b>
                 {row.task_id ? <button type="button" className="p-copy" title="Copy" aria-label="Copy Task ID"

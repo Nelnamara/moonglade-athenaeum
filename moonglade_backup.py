@@ -2082,6 +2082,12 @@ _FULL_META_FIELDS = (
     "sampler", "cfg_scale", "model_id", "model_name", "loras",
     "negative_prompt", "clip_skip", "paid_credit",
     "source_media_id", "derive_kind",
+    # Full generation surface (issue #18) -- so --backfill-full-meta fills these on existing
+    # rows too. MUST stay in sync with _GEN_SURFACE_FIELDS (both are static; a mismatch just
+    # means a field the row-builders write but the backfill wouldn't, or vice-versa).
+    "inference_profile", "quality_tag", "prompt_helper", "control_nets", "lora_parameters",
+    "priority", "render_seconds", "backend", "started_at", "ended_at", "updated_at",
+    "retry_count", "moderation", "video_mode", "video_model",
 )
 
 
@@ -3493,6 +3499,27 @@ def resolve_model_base_id(session, model_version_id):
         return ""
 
 
+# The full-generation-surface columns (issue #18) extract_full_meta resolves and every
+# row-builder must persist. One list so a new surface field is wired in exactly one place.
+_GEN_SURFACE_FIELDS = (
+    "inference_profile", "quality_tag", "prompt_helper", "control_nets", "lora_parameters",
+    "priority", "render_seconds", "backend", "started_at", "ended_at", "updated_at",
+    "retry_count", "moderation", "video_mode", "video_model",
+)
+
+
+def _prompt_helper_label(params, task):
+    """Fold promptHelper.enable + PixAI's detect verdict into one readable label:
+    'on' / 'off' / 'off (reason)'. '' when the task carries neither."""
+    ph = params.get("promptHelper") if isinstance(params.get("promptHelper"), dict) else {}
+    det = task.get("detectPromptHelperResult") if isinstance(task.get("detectPromptHelperResult"), dict) else {}
+    reason = (det.get("enableReasonCode") or "").strip()
+    if "enable" not in ph and not reason:
+        return ""
+    base = "on" if ph.get("enable") else "off"
+    return "{} ({})".format(base, reason) if reason else base
+
+
 def extract_full_meta(task):
     """Pull the extended fields out of a getTaskById task dict."""
     if not task:
@@ -3501,6 +3528,17 @@ def extract_full_meta(task):
     outputs = task.get("outputs") or {}
     detail = outputs.get("detailParameters") or {}
     extra = params.get("extra") or {}
+    # Full generation surface (issue #18): everything the task record carries that the row used
+    # to drop. All pure reads from the task dict; steps/sampler/cfg get a model-preset fallback
+    # in the caller (needs the network), the rest resolve here.
+    i2v = params.get("i2vPro") if isinstance(params.get("i2vPro"), dict) else {}
+    ii = outputs.get("inferenceInfo") if isinstance(outputs.get("inferenceInfo"), dict) else {}
+    stages = ii.get("stages") if isinstance(ii.get("stages"), dict) else {}
+    qtag = params.get("qualityTag") if isinstance(params.get("qualityTag"), dict) else {}
+    cnets = params.get("controlNets") or []
+    lparams = params.get("loraParameters") or []
+    run_s = stages.get("pipeline_run_s")
+    retry = task.get("retryCount")
     # negativePrompts may live under a few keys depending on PixAI's flow; many
     # newer "structured prompt" tasks have none at all.
     neg = (params.get("negativePrompts") or detail.get("negativePrompts")
@@ -3539,7 +3577,85 @@ def extract_full_meta(task):
         # against a real captured task, 2026-07-04) -- so full-meta/backfill passes
         # recover spend history, not just fresh generations.
         "paid_credit":    _paid_credit_str(task),
+        # Full generation surface (issue #18):
+        "inference_profile": str(params.get("inferenceProfile") or ""),
+        "quality_tag":       str(qtag.get("prefix") or ""),
+        "prompt_helper":     _prompt_helper_label(params, task),
+        "control_nets":      json.dumps(cnets) if cnets else "",
+        "lora_parameters":   json.dumps(lparams) if lparams else "",
+        "priority":          str(params.get("priority") or ""),
+        "render_seconds":    ("{:.1f}".format(run_s) if isinstance(run_s, (int, float)) else ""),
+        "backend":           str(ii.get("backend") or ""),
+        "started_at":        str(task.get("startedAt") or ""),
+        "ended_at":          str(task.get("endAt") or ""),
+        "updated_at":        str(task.get("updatedAt") or ""),
+        "retry_count":       ("" if retry is None else str(retry)),
+        "moderation":        str((task.get("moderationAction") or {}).get("promptsModerationAction") or ""),
+        "video_mode":        str(i2v.get("mode") or ""),
+        "video_model":       str(i2v.get("model") or ""),
     }
+
+
+def _resolve_model_preset(session, version_id, _cache={}):
+    """The model VERSION's default sampling params from getGenerationModelByVersionId's
+    `extra` -> {steps, sampler, cfg_scale}, each '' when the version exposes no default for it.
+    VERSION-accurate (keyed on the exact version the gen used, so no latest-version drift), and
+    cached per version id. Never raises.
+
+    Crucially self-limiting: a flow/DiT model like Tsubaki.2 (AuraFlow) exposes samplingSteps
+    but NO samplingMethod / cfgScale, so those come back '' and an em-dash there stays the
+    honest answer (that model genuinely has no sampler or CFG) -- only a value the model really
+    defaults to is ever filled (issue #18)."""
+    vid = str(version_id or "")
+    if not vid:
+        return {}
+    if vid in _cache:
+        return _cache[vid]
+    preset = {}
+    if MODEL_DETAIL_HASH:
+        try:
+            params = {"operation": "getGenerationModelByVersionId", "u3t": U3T,
+                      "operationName": "getGenerationModelByVersionId",
+                      "variables": json.dumps({"id": vid}, separators=(",", ":")),
+                      "extensions": json.dumps(
+                          {"clientLibrary": CLIENT_LIBRARY,
+                           "persistedQuery": {"version": 1, "sha256Hash": MODEL_DETAIL_HASH}},
+                          separators=(",", ":"))}
+            body = session.get(API_URL, params=params, timeout=60).json()
+            ex = (((body.get("data") or {}).get("generationModelVersion") or {}).get("extra")) or {}
+            steps, sampler, cfg = ex.get("samplingSteps"), ex.get("samplingMethod"), ex.get("cfgScale")
+            preset = {
+                "steps":     ("" if steps is None else str(steps)),
+                "sampler":   (str(sampler) if sampler else ""),
+                "cfg_scale": ("" if cfg is None else str(cfg)),
+            }
+        except Exception:
+            preset = {}
+    _cache[vid] = preset
+    return preset
+
+
+def _fill_preset_defaults(session, fm, task):
+    """Backfill fm's steps/sampler/cfg_scale from the model VERSION preset when the task itself
+    omitted them (issue #18: Tsubaki.2's detailParameters is absent, so the gen ran on the
+    model's baked defaults recorded nowhere in the task). Mutates + returns fm.
+
+    Gated to plain IMAGE diffusion gens: a chat/edit task or an i2v video task carries no image
+    sampling params, so it is skipped and its em-dashes stay. Only fills a field that is blank
+    AND has a non-null preset value -- never overwrites a task-recorded value, never invents one
+    the model has no default for."""
+    if not isinstance(fm, dict):
+        return fm
+    params = (task or {}).get("parameters") or {}
+    if params.get("chat") or params.get("i2vPro"):     # not a plain image diffusion gen
+        return fm
+    if (fm.get("steps") or "").strip() and (fm.get("sampler") or "").strip() and (fm.get("cfg_scale") or "").strip():
+        return fm                                        # nothing missing -> no lookup
+    preset = _resolve_model_preset(session, fm.get("model_id", ""))
+    for k in ("steps", "sampler", "cfg_scale"):
+        if not (fm.get(k) or "").strip() and preset.get(k):
+            fm[k] = preset[k]
+    return fm
 
 
 def resolve_loras(session, task):
@@ -6466,6 +6582,7 @@ def run_generate(args):
     # Prefer the task's actual metadata (authoritative, and the only source when
     # recovering by --task-id); fall back to the params we submitted.
     fm = extract_full_meta(result)
+    _fill_preset_defaults(session, fm, result)   # issue #18: model-preset steps/sampler/cfg
 
     def _pick(fm_key, *param_keys):
         if fm.get(fm_key):
@@ -6527,6 +6644,7 @@ def run_generate(args):
             "width": str((info or {}).get("width") or params.get("width") or ""),
             "height": str((info or {}).get("height") or params.get("height") or ""),
         })
+        full.update({k: fm.get(k, "") for k in _GEN_SURFACE_FIELDS})   # issue #18
         rows.append(full)
         make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
         saved.append(str(path))
@@ -6759,6 +6877,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     fx = fixer_block(result)
     fix_label = _fix_source_label(result, out) if fx is not None else ""
     fm = extract_full_meta(result)
+    _fill_preset_defaults(session, fm, result)   # issue #18: model-preset steps/sampler/cfg
     rows, saved = [], []
     for mid, seed in media:
         url, info = resolve_media(session, mid)
@@ -6811,6 +6930,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
             "width": str((info or {}).get("width") or ""),
             "height": str((info or {}).get("height") or ""),
         })
+        full.update({k: fm.get(k, "") for k in _GEN_SURFACE_FIELDS})   # issue #18
         rows.append(full)
         make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
         saved.append(str(path))
@@ -7058,6 +7178,7 @@ def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_
         dur = probe_video_duration(saved[0]) if saved else None   # real clip length for the reel
         return {"media_ids": mids, "saved": len(saved), "is_video": True, "duration": dur}
     fm = extract_full_meta(result)
+    _fill_preset_defaults(session, fm, result)   # issue #18: model-preset steps/sampler/cfg
     saved = _download_image_task(session, result, task_id, out, a, prompt=fm.get("prompt_full", ""))
     # the real images (batch individuals, not the composite grid)
     mids = [mid for mid, _seed in _task_image_media(result.get("outputs") or {})]
@@ -7349,6 +7470,7 @@ def run_edit_image(args):
     _outputs_or_raise(result, mids, "edit task completed but no media ids found")
 
     fm = extract_full_meta(result)
+    _fill_preset_defaults(session, fm, result)   # issue #18: model-preset steps/sampler/cfg
     chat = (params.get("chat") or {}) if isinstance(params, dict) else {}
     prompt_used = fm.get("prompt_full") or prompt or chat.get("prompts", "")
     # Resolved ONCE for the task, not per output image: the model is a property of the task,
@@ -7386,6 +7508,7 @@ def run_edit_image(args):
             "width": str((info or {}).get("width") or ""),
             "height": str((info or {}).get("height") or ""),
         })
+        full.update({k: fm.get(k, "") for k in _GEN_SURFACE_FIELDS})   # issue #18
         rows.append(full)
         make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
         saved.append(str(path))
@@ -9743,6 +9866,7 @@ def run_backfill_full_meta(args):
         if fm.get("model_id"):
             fm["model_name"] = model_name_gql(session, fm["model_id"])
         fm["loras"] = resolve_loras(session, task_data)
+        _fill_preset_defaults(session, fm, task_data)   # issue #18: model-preset steps/sampler/cfg
         media_obj = (task_data or {}).get("media") or {}
         if media_obj:
             by_v = {str(u.get("variant", "")).upper(): u["url"]
@@ -10237,6 +10361,7 @@ def run_download(args, progress=None):
                             if fm.get("model_id"):
                                 fm["model_name"] = model_name_gql(session, fm["model_id"])
                             fm["loras"] = resolve_loras(session, task_data)
+                            _fill_preset_defaults(session, fm, task_data)   # issue #18
                             _full_meta_cache[tid] = fm
                             time.sleep(args.delay)
                         full_meta = _full_meta_cache.get(tid, {})
@@ -10345,6 +10470,7 @@ def run_download(args, progress=None):
                         if fm.get("model_id"):
                             fm["model_name"] = model_name_gql(session, fm["model_id"])
                         fm["loras"] = resolve_loras(session, task_data)
+                        _fill_preset_defaults(session, fm, task_data)   # issue #18
                         _full_meta_cache[tid] = fm
                         time.sleep(args.delay)
                     full_meta = _full_meta_cache.get(meta["task_id"], {})
