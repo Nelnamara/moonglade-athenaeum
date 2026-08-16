@@ -249,10 +249,11 @@ def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
     owner's objection was the right one: he should not have to press a button for it.
 
     But this is UNATTENDED network activity on his machine, so the guardrails matter as much as
-    the feature. Pinned at source level because _watch_catchup is a closure inside create_app,
-    invoked only from a background thread the test suite deliberately never starts
-    (MOONGLADE_DISABLE_WATCH) -- there is no seam to call it through without refactoring the
-    watcher, and a guard on the intent beats no guard."""
+    the feature. This test pins the guardrails at SOURCE level; its behavioural companion
+    (test_catchup_backfills_absent_media_skips_present_and_rate_limits) drives the same closure
+    through the app.extensions["mg_watch_catchup"] seam and proves the gap-fill / skip / rate-limit
+    actually run. _watch_catchup is invoked only from a background thread the suite never starts
+    (MOONGLADE_DISABLE_WATCH), so both angles are worth keeping."""
     import pathlib as _p
     src = _p.Path(__file__).resolve().parent.parent / "moonglade_gallery.py"
     text = src.read_text(encoding="utf-8")
@@ -292,3 +293,54 @@ def test_catchup_does_not_run_in_the_test_suite():
     which conftest disables via MOONGLADE_DISABLE_WATCH."""
     import os
     assert os.environ.get("MOONGLADE_DISABLE_WATCH") == "1"
+
+
+def test_catchup_backfills_absent_media_skips_present_and_rate_limits(monkeypatch, tmp_path):
+    """BEHAVIOURAL companion to the source-level guard above: actually EXECUTE the self-heal
+    sweep through the mg_watch_catchup seam and prove the recovery the ROADMAP requires —
+    "the piece must appear on its own, no manual sync." It must:
+      - COLLECT a finished task whose media the catalog is missing (the gap-fill);
+      - SKIP a finished task already present (idempotent — re-collecting is pure waste),
+        a non-done task, and a done task with no media;
+      - RATE-LIMIT: a second sweep inside WATCH_CATCHUP_MIN_GAP is a no-op, even though the
+        gap notionally still exists.
+    (The live stop-server / generate-while-down / restart recipe stays the owner's to run;
+    this pins the logic that recipe exercises so it can't silently regress.)"""
+    import time
+    import moonglade_gallery as mg
+    from moonglade_gallery import create_app
+
+    app = create_app(tmp_path)
+    catchup = app.extensions["mg_watch_catchup"]        # the new seam
+
+    # One page of recent tasks: finished+absent (collect), finished+present (skip),
+    # running (skip), finished+no-media (skip).
+    edges = [
+        {"node": {"id": "T_absent", "status": "completed"}},
+        {"node": {"id": "T_present", "status": "completed"}},
+        {"node": {"id": "T_running", "status": "running"}},
+        {"node": {"id": "T_nomedia", "status": "completed"}},
+    ]
+    media = {"T_absent": ["M_absent"], "T_present": ["M_present"],
+             "T_running": ["M_run"], "T_nomedia": []}
+    present = {"M_present"}                             # only this media is already catalogued
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
+    monkeypatch.setattr(core, "gql", lambda *a, **k: {})
+    monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
+    monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
+    monkeypatch.setattr(core, "media_ids_for", lambda node: media.get(str(node.get("id")), []))
+    monkeypatch.setattr(mg, "get_row", lambda db_path, m: (object() if m in present else None))
+    monkeypatch.setattr(time, "sleep", lambda *a, **k: None)   # keep the paced sweep fast
+
+    collected = []
+    monkeypatch.setattr(core, "collect_generation",
+                        lambda s, tid, out, **k: collected.append(str(tid)) or {"saved": 1})
+
+    catchup("startup")
+    assert collected == ["T_absent"]     # ONLY the finished task whose media was missing
+
+    # Rate limit: a second sweep inside WATCH_CATCHUP_MIN_GAP does nothing — the gap still
+    # "exists" (get_row still reports M_absent absent), but the floor suppresses the sweep.
+    catchup("reconnect")
+    assert collected == ["T_absent"]     # no second collection
