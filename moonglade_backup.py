@@ -4922,6 +4922,7 @@ def run_sync_videos(args):
         outs, shared = video_outputs(task)
         detail = ((task or {}).get("outputs") or {}).get("detailParameters") or {}
         params = (task or {}).get("parameters") or {}
+        full_meta = extract_full_meta(task)   # issue #18: the full generation surface (video row)
         rows = []
         for o in outs:
             vmid = o["video_media_id"]
@@ -4958,6 +4959,7 @@ def run_sync_videos(args):
                     "paid_credit": _paid_credit_str(task),   # actual cost, task-level
                     "video_duration": str(shared.get("duration") or ""),
                 })
+                full.update({k: full_meta.get(k, "") for k in _GEN_SURFACE_FIELDS})   # issue #18 (no preset fill: video)
                 _ensure_video_thumb(vmid, o.get("poster_media_id"), path)
                 video_faststart(path)                # iOS needs moov at the front to stream
                 rows.append(full)
@@ -6711,6 +6713,7 @@ def _download_video_task(session, result, task_id, out, args, params):
     outs, shared = video_outputs(result)
     _outputs_or_raise(result, outs, "video task completed but no video outputs found")
     detail = ((result or {}).get("outputs") or {}).get("detailParameters") or {}
+    fm = extract_full_meta(result)   # issue #18: the full generation surface for the video row
     sent = (params.get("i2vPro") or params.get("referenceVideo") or {}) if isinstance(params, dict) else {}
     prompt = shared.get("prompt") or sent.get("prompts") or sent.get("prompt") or ""
 
@@ -6751,6 +6754,7 @@ def _download_video_task(session, result, task_id, out, args, params):
             "width": str(detail.get("width") or ""),
             "height": str(detail.get("height") or ""),
         })
+        full.update({k: fm.get(k, "") for k in _GEN_SURFACE_FIELDS})   # issue #18 (no preset fill: video)
         # Poster thumbnail is COSMETIC -- it must never block cataloging the finished video.
         # A transient Windows lock on the poster's temp file (WinError 32) used to raise from
         # download() right here, before rows.append below, so the clip was pulled to videos/

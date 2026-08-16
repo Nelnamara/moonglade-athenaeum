@@ -91,6 +91,21 @@ def test_preset_fill_skips_chat_and_video(monkeypatch):
         assert fm["steps"] == "" and fm["sampler"] == "" and fm["cfg_scale"] == ""
 
 
+def test_video_row_builders_apply_the_surface_fields():
+    """Regression guard (2026-08-15 adversarial review): the TWO video row-builders must persist
+    the surface fields, or every video row ships them blank -- notably video_mode/video_model,
+    the columns added FOR video, which --backfill can't repair for _download_video_task (its row
+    carries model_id, so _needs() skips it forever). Source-level because these functions do real
+    downloads that no unit test drives."""
+    import pathlib
+    src = pathlib.Path(core.__file__).read_text(encoding="utf-8")
+    for fn in ("def _download_video_task", "def _do_task"):
+        i = src.index(fn)
+        body = src[i:i + 3200]
+        assert "for k in _GEN_SURFACE_FIELDS" in body, \
+            fn + " must apply _GEN_SURFACE_FIELDS to the video row (issue #18)"
+
+
 def test_new_columns_round_trip_through_the_catalog(tmp_path):
     db = str(tmp_path / "catalog.db")
     row = {f: "" for f in CATALOG_FIELDS}
