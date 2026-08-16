@@ -8132,7 +8132,11 @@ def run_generate_video(args):
             i2v.get("model"), i2v.get("mode"), i2v.get("duration"),
             "  +audio" if i2v.get("generateAudio") else "",
             "  (first/last-frame)" if i2v.get("tailMediaId") else ""))
-        print("  A V4.0 5s clip costs ~27,500 credits. Re-run with --confirm to submit.")
+        # No hardcoded reference price here: the line below prints THIS clip's real cost from
+        # /task-price (and the card verdict for it). A fixed "a 5s clip costs ~27,500" used to
+        # sit right above the true "~82,500" for a 15s clip -- two numbers on one screen for
+        # one spend (found running the preview live, 2026-08-16).
+        print("  Re-run with --confirm to submit.")
         _preview_card_note(args, params)
         return {"submitted": False}
 
@@ -10266,7 +10270,13 @@ def _preview_card_note(args, params):
         best = match_kaisuuken(session, params, enrich=True)
         price = price_task(session, params)
     except Exception:
-        return  # offline / no key -- stay silent, preview is still valid
+        # Offline / no key: the preview is still valid, but a spend page must not go SILENT
+        # about cost (the web badge's "couldn't verify" rule). This used to just return,
+        # which -- once the stale hardcoded reference price above it was removed -- would
+        # have left a video preview with no cost line at all.
+        print("Couldn't verify the cost or free-card match right now (offline or no key) -- "
+              "with --confirm this MAY spend credits.")
+        return
     # Three honest branches off the ONE predicate (card_covers). Before issue #15 this said
     # FREE on any match -- with version:2 a short 15s clip now matches, and that would have
     # promised FREE right before --confirm spent the full price.
