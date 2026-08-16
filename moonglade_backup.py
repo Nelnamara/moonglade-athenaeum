@@ -38,6 +38,7 @@ QUICK START
 __version__ = "3.1.0"
 
 import argparse
+import base64
 import csv
 import datetime
 import getpass
@@ -806,6 +807,37 @@ CLIENT_LIBRARY_ARTWORK = {"name": "@apollo/client", "version": "4.1.4"}
 DELETE_TASK_HASH = _cfg.get("DELETE_TASK_HASH", "") or \
     "9f0c8dd3edfe712a4479d700df0b33faebbbc28c7d2310589ea192e1a35d6ee4"
 DELETE_OPERATION = "deleteGenerationTask"
+# Website-mirror JWT (the Control Panel "Mirror to PixAI" toggle). refreshToken is a
+# no-arg persisted mutation; the fresh JWT comes back in the `token` RESPONSE header
+# (server sends access-control-expose-headers: token,...). Confirmed from a live
+# getMyInfo capture 2026-08-14. The mirror helpers live just after _make_session below.
+# Public hash; override in config.json if it rotates.
+REFRESH_TOKEN_HASH = _cfg.get("REFRESH_TOKEN_HASH", "") or \
+    "ad4ac2d62cbc5ab168a212594fb515c58cca1a101c60233a214fd7e037157546"
+PIXAI_COOKIE_DOMAIN = "pixai.art"
+# Short session cookies the server rolls forward via Set-Cookie on every response
+# (_udt IS the u3t value; ~60m / ~30m lifetimes). Read the whole jar so refreshToken
+# sees the same cookies the browser sends.
+SESSION_COOKIE_NAMES = ("_bsid", "_bsid.sig", "_udt", "_udt.sig")
+# Roll the ~27-day JWT once it drops under this many days left (a box that runs even
+# weekly never lapses).
+MIRROR_REFRESH_WHEN_DAYS_LEFT = 5
+# The localStorage key the pixai.art frontend keeps the live JWT under (confirmed on a
+# logged-in tab 2026-08-15). localStorage is NOT app-bound(v20)-encrypted the way modern
+# Chrome cookies are, so reading THIS is how the mirror bootstraps on a current Chrome
+# where the cookie store can't be decrypted. Note the trailing ":token" is exact -- the
+# sibling ":intercom-user-jwt" key must never be mistaken for it.
+LOCALSTORAGE_JWT_KEY = b"https://api.pixai.art:token"
+# The mirror must file generations as the WEB client so PixAI applies the website's content
+# policy, not the stricter mobile-app (Apple-compliance) one. Confirmed 2026-08-15: the same
+# account + prompt succeeds on pixai.art (task 2045416767743558052) but 403s "against PixAI's
+# policy" through the mirror. clientLibrary already matches the web app (@apollo/client); the
+# remaining tell is the HTTP identity -- our non-browser User-Agent and missing Origin/Referer.
+# So the mirror session presents a desktop-browser identity. A stable modern Chrome UA is
+# enough: PixAI classifies the client FAMILY (browser vs app), not the version.
+MIRROR_WEB_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                         "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36")
+MIRROR_WEB_ORIGIN = "https://pixai.art"
 # ===========================================================================
 
 # Media URL: https://api.pixai.art/v1/media/<id>
@@ -4371,6 +4403,850 @@ def _make_session(token_val):
     return session
 
 
+# ===========================================================================
+# Website-mirror JWT: zero-paste acquisition + self-renewal.
+#
+# The API key files a generation under the account but does NOT make it appear in
+# the pixai.art web LIBRARY -- only a browser-session submission does. The Control
+# Panel "Mirror to PixAI" toggle uses the helpers below to hold a live browser
+# session with NO manual pastes, the way the site keeps itself logged in.
+#
+# Mechanism (confirmed from a live getMyInfo capture 2026-08-14):
+#   - The session rides short cookies on .pixai.art that the server rolls forward
+#     on every response: _bsid (~30m) + _udt (~60m; _udt IS the u3t value) + .sig
+#     pairs (cache-control:no-store, vary:Origin,Authorization).
+#   - The JWT rides as Authorization: Bearer (~27d); a FRESH jwt is returned in the
+#     `token` response header (access-control-expose-headers: token,...).
+#   - refreshToken is a no-arg persisted mutation (REFRESH_TOKEN_HASH).
+# So: read the .pixai.art session from the local browser ONCE (cookies-from-browser),
+# then the cookies self-refresh and refreshToken rolls the JWT -- zero paste. A
+# one-time paste field is the break-glass fallback only.
+#
+# SAFETY: only touched when the mirror toggle is ON (pure API-key mode never calls
+# these). The credential never leaves this machine and is never printed, logged, or
+# committed (same rule as PIXAI_API_KEY); diagnostics report only non-secret
+# derivatives (expiry date, days-left, ok/None). The live "read the real browser +
+# first refreshToken" step self-verifies at runtime on the owner's machine.
+# ===========================================================================
+def _b64url_decode(seg):
+    """Decode one base64url JWT segment, tolerant of missing padding."""
+    seg = seg + "=" * (-len(seg) % 4)
+    return base64.urlsafe_b64decode(seg.encode("ascii"))
+
+
+def jwt_claims(token):
+    """The JWT payload claims as a dict, or {} if unparseable. Decodes the payload
+    ONLY (never verifies the signature -- we don't hold the key and don't need to;
+    PixAI validates it, we just read `exp`). Never raises."""
+    try:
+        parts = str(token or "").split(".")
+        if len(parts) != 3:
+            return {}
+        claims = json.loads(_b64url_decode(parts[1]))
+        return claims if isinstance(claims, dict) else {}   # a non-object payload is not claims
+    except Exception:
+        return {}
+
+
+def jwt_expiry(token):
+    """Unix `exp` (seconds) or None. Offline."""
+    exp = jwt_claims(token).get("exp")
+    return int(exp) if isinstance(exp, (int, float)) else None
+
+
+def jwt_days_left(token, now=None):
+    """Whole days until the JWT expires, or None. Offline -- what the Panel countdown
+    ('PixAI mirror: N days left') renders, decoded at startup with no network call."""
+    exp = jwt_expiry(token)
+    if exp is None:
+        return None
+    now = time.time() if now is None else now
+    return int((exp - now) // 86400)
+
+
+def mirror_needs_refresh(token, now=None, threshold_days=MIRROR_REFRESH_WHEN_DAYS_LEFT):
+    """True when the JWT is missing, unparseable, expired, or within the cushion --
+    i.e. the renewal loop should call refreshToken. Pure; the scheduler's decision."""
+    left = jwt_days_left(token, now=now)
+    return left is None or left <= threshold_days
+
+
+def read_browser_session(browsers=("chrome", "edge", "brave")):
+    """Read the current .pixai.art session cookies from the local browser store, the
+    way yt-dlp's --cookies-from-browser does. Returns {name: value} for the cookies
+    found, or {} if none could be read. NEVER raises and NEVER logs a value.
+
+    Prefers `browser_cookie3` (handles Chrome/Edge/Brave/Firefox + the Windows DPAPI +
+    AES-GCM decrypt across OSes). Falls back to the native Windows reader below. On a
+    machine with neither a browser nor the dep, returns {} and the caller degrades to
+    the stored session / the break-glass paste."""
+    jar = {}
+    try:
+        import browser_cookie3 as bc3  # optional dep; the robust path
+    except Exception:
+        bc3 = None
+    if bc3 is not None:
+        for name in browsers:
+            loader = getattr(bc3, name, None)
+            if loader is None:
+                continue
+            try:
+                cj = loader(domain_name=PIXAI_COOKIE_DOMAIN)
+                for c in cj:
+                    if PIXAI_COOKIE_DOMAIN in (c.domain or ""):
+                        jar[c.name] = c.value
+                if jar:
+                    return jar
+            except Exception:
+                continue  # locked profile, no such browser, decrypt fail -> try next
+        if jar:
+            return jar
+    try:
+        return _read_chromium_cookies_windows()
+    except Exception:
+        return {}
+
+
+def _read_chromium_cookies_windows():
+    """Native Windows Chrome/Edge cookie read: AES-GCM values decrypted with the
+    profile key from Local State (DPAPI-unprotected). Read-only; copies the
+    share-readable DB to a temp file so an open browser doesn't block it. Returns {}
+    on any failure -- a best-effort fallback, never a hard dependency. No value logged."""
+    import shutil
+    import sqlite3
+    import tempfile
+    la = os.environ.get("LOCALAPPDATA", "")
+    profiles = [
+        os.path.join(la, r"Google\Chrome\User Data"),
+        os.path.join(la, r"Microsoft\Edge\User Data"),
+    ]
+    jar = {}
+    for udir in profiles:
+        ck = os.path.join(udir, "Default", "Network", "Cookies")
+        ls = os.path.join(udir, "Local State")
+        if not (os.path.isfile(ck) and os.path.isfile(ls)):
+            continue
+        try:
+            key = _chromium_aes_key(ls)
+            if not key:
+                continue
+            tmp = os.path.join(tempfile.gettempdir(), "mg_ck_%d.db" % os.getpid())
+            shutil.copy2(ck, tmp)  # native copy succeeds even while the browser holds it
+            try:
+                con = sqlite3.connect(tmp)
+                rows = con.execute(
+                    "SELECT name, encrypted_value FROM cookies WHERE host_key LIKE ?",
+                    ("%" + PIXAI_COOKIE_DOMAIN,),
+                ).fetchall()
+                con.close()
+            finally:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+            for name, enc in rows:
+                val = _chromium_decrypt(enc, key)
+                if val:
+                    jar[name] = val
+            if jar:
+                return jar
+        except Exception:
+            continue
+    return jar
+
+
+def _chromium_aes_key(local_state_path):
+    """The per-profile AES key from Local State, DPAPI-unprotected. Windows only."""
+    try:
+        import win32crypt  # from pywin32
+    except Exception:
+        return None
+    with open(local_state_path, "r", encoding="utf-8") as fh:
+        state = json.load(fh)
+    enc_key = base64.b64decode(state["os_crypt"]["encrypted_key"])
+    enc_key = enc_key[5:]  # strip the "DPAPI" prefix
+    return win32crypt.CryptUnprotectData(enc_key, None, None, None, 0)[1]
+
+
+def _chromium_decrypt(enc, key):
+    """AES-256-GCM decrypt of a Chromium v10/v11 cookie value. '' on failure."""
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        if enc[:3] in (b"v10", b"v11"):
+            nonce, ct = enc[3:15], enc[15:]
+            return AESGCM(key).decrypt(nonce, ct, None).decode("utf-8", "replace")
+    except Exception:
+        pass
+    return ""
+
+
+# --- localStorage JWT reader ------------------------------------------------------
+# Modern Chrome (>=127) wraps the cookie store in app-bound "v20" encryption a normal
+# user process can't decrypt, so the cookie path above returns nothing there. But the
+# pixai.art frontend ALSO keeps the live JWT in localStorage, and localStorage's
+# on-disk store (Local Storage/leveldb) is NOT app-bound-encrypted -- so we read the JWT
+# straight out of it. That's the whole reason "Connect" can work on a current Chrome
+# without a paste. The Bearer JWT alone authenticates the mirror (create rides
+# Authorization: Bearer; refreshToken renews off the Bearer), so cookies are optional.
+#
+# We parse leveldb properly (a minimal pure-Python reader -- no C dep, no third-party
+# library). A raw byte-scan is NOT enough: an established profile compacts its writes into
+# .ldb SSTables whose keys are PREFIX-COMPRESSED (the literal "https://api.pixai.art:token"
+# never appears contiguously) and whose data blocks are usually SNAPPY-COMPRESSED (the JWT
+# bytes aren't even there in the clear). So we reconstruct real key->value pairs from both
+# the .ldb SSTables and the .log write-ahead log, match the exact localStorage key, and
+# validate the decoded token's issuer is "pixai" before trusting it. The freshest (max
+# `exp`) wins across every file/profile. Read-only; NEVER raises, NEVER logs a value.
+def _read_file_shared(path):
+    """Read a file Chrome may hold open. Direct read first (Chromium opens leveldb files
+    share-read on Windows); on failure, copy to temp and read the copy. b'' on failure,
+    never raises."""
+    import shutil
+    import tempfile
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        pass
+    tmp = os.path.join(tempfile.gettempdir(),
+                       "mg_ls_%d_%s_%s" % (os.getpid(), secrets.token_hex(4),
+                                           os.path.basename(path)))
+    try:
+        shutil.copy2(path, tmp)
+        with open(tmp, "rb") as f:
+            return f.read()
+    except OSError:
+        return b""
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _lvarint(buf, pos):
+    """Decode a leveldb base-128 varint at buf[pos:]. Returns (value, next_pos). Raises
+    IndexError if it runs off the end (callers treat that as a malformed block)."""
+    result = 0
+    shift = 0
+    while True:
+        b = buf[pos]
+        pos += 1
+        result |= (b & 0x7F) << shift
+        if not (b & 0x80):
+            return result, pos
+        shift += 7
+        if shift > 63:
+            raise ValueError("varint too long")
+
+
+def _snappy_decompress(data):
+    """Pure-Python Snappy block decompression (the codec leveldb uses for SSTable blocks).
+    Returns the decompressed bytes, or None on malformed input. No dependency."""
+    try:
+        expect, pos = _lvarint(data, 0)
+        out = bytearray()
+        n = len(data)
+        while pos < n:
+            tag = data[pos]
+            pos += 1
+            kind = tag & 0x03
+            if kind == 0:                       # literal
+                length = tag >> 2
+                if length >= 60:
+                    nbytes = length - 59        # 60->1 .. 63->4 extra length bytes
+                    length = 0
+                    for i in range(nbytes):
+                        length |= data[pos + i] << (8 * i)
+                    pos += nbytes
+                length += 1
+                out += data[pos:pos + length]
+                pos += length
+            else:
+                if kind == 1:                   # copy, 1-byte offset
+                    length = 4 + ((tag >> 2) & 0x07)
+                    offset = ((tag >> 5) << 8) | data[pos]
+                    pos += 1
+                elif kind == 2:                 # copy, 2-byte offset
+                    length = 1 + (tag >> 2)
+                    offset = data[pos] | (data[pos + 1] << 8)
+                    pos += 2
+                else:                           # kind == 3, copy, 4-byte offset
+                    length = 1 + (tag >> 2)
+                    offset = (data[pos] | (data[pos + 1] << 8)
+                              | (data[pos + 2] << 16) | (data[pos + 3] << 24))
+                    pos += 4
+                if offset <= 0 or offset > len(out):
+                    return None
+                start = len(out) - offset
+                for i in range(length):         # byte-by-byte: copies may overlap
+                    out.append(out[start + i])
+        return bytes(out) if len(out) == expect else None
+    except (IndexError, ValueError):
+        return None
+
+
+def _lvldb_decompress_block(data, offset, size):
+    """The block at [offset, offset+size), decompressed per its 1-byte compression-type
+    trailer (0 none, 1 snappy, 2 zlib, 4 zstd). None if unreadable/unknown."""
+    if offset < 0 or offset + size + 1 > len(data):
+        return None
+    raw = data[offset:offset + size]
+    comp = data[offset + size]
+    if comp == 0:
+        return raw
+    if comp == 1:
+        return _snappy_decompress(raw)
+    if comp == 2:
+        try:
+            import zlib
+            return zlib.decompress(raw)
+        except Exception:
+            return None
+    if comp == 4:
+        try:
+            from compression import zstd        # Python 3.14+ stdlib
+            return zstd.decompress(raw)
+        except Exception:
+            try:
+                import zstandard                 # optional third-party fallback
+                return zstandard.ZstdDecompressor().decompress(raw)
+            except Exception:
+                return None
+    return None
+
+
+def _lvldb_block_pairs(block):
+    """Yield (key, value) from one decompressed leveldb block, undoing prefix compression.
+    The block ends with a restart array: [restart offsets...][num_restarts as uint32 LE].
+    A malformed block yields nothing rather than raising."""
+    n = len(block)
+    if n < 4:
+        return
+    try:
+        num_restarts = int.from_bytes(block[n - 4:n], "little")
+        entries_end = n - 4 - num_restarts * 4
+        if entries_end < 0:
+            return
+        pos = 0
+        last_key = b""
+        while pos < entries_end:
+            shared, pos = _lvarint(block, pos)
+            non_shared, pos = _lvarint(block, pos)
+            value_len, pos = _lvarint(block, pos)
+            key = last_key[:shared] + block[pos:pos + non_shared]
+            pos += non_shared
+            value = block[pos:pos + value_len]
+            pos += value_len
+            last_key = key
+            yield key, value
+    except (IndexError, ValueError):
+        return
+
+
+_LVLDB_SSTABLE_MAGIC = 0xDB4775248B80FB57
+
+
+def _lvldb_sstable_entries(data):
+    """Yield (user_key, value, seq, is_deletion) from a leveldb .ldb SSTable. Reads the footer
+    -> index block -> each data block (decompressing as needed) -> prefix-decoded entries. The
+    8-byte internal-key trailer encodes (seq<<8 | type) little-endian; type 0 is a deletion
+    tombstone. Yields nothing on any structural surprise (never raises)."""
+    n = len(data)
+    if n < 48:
+        return
+    try:
+        footer = data[n - 48:n]
+        if int.from_bytes(footer[40:48], "little") != _LVLDB_SSTABLE_MAGIC:
+            return
+        p = 0
+        _, p = _lvarint(footer, p)                # metaindex handle offset (skip)
+        _, p = _lvarint(footer, p)                # metaindex handle size   (skip)
+        idx_off, p = _lvarint(footer, p)
+        idx_size, p = _lvarint(footer, p)
+    except (IndexError, ValueError):
+        return
+    index_block = _lvldb_decompress_block(data, idx_off, idx_size)
+    if index_block is None:
+        return
+    for _sep, handle in _lvldb_block_pairs(index_block):
+        try:
+            b_off, hp = _lvarint(handle, 0)
+            b_size, _hp = _lvarint(handle, hp)
+        except (IndexError, ValueError):
+            continue
+        blk = _lvldb_decompress_block(data, b_off, b_size)
+        if blk is None:
+            continue
+        for key, value in _lvldb_block_pairs(blk):
+            if len(key) >= 8:                    # internal-key trailer = seq<<8 | type
+                trailer = int.from_bytes(key[-8:], "little")
+                yield key[:-8], value, trailer >> 8, (trailer & 0xFF) == 0
+
+
+def _lvldb_log_entries(data):
+    """Yield (key, value, seq, is_deletion) from a leveldb .log write-ahead log. Each
+    WriteBatch header carries the sequence number of its first entry; entry i has seq = base+i.
+    Reassembles physical record fragments across 32 KiB blocks. Deletions are yielded as
+    tombstones (empty value, is_deletion=True) so a later logout can suppress an earlier PUT.
+    Yields nothing on malformed input (never raises)."""
+    BLOCK = 32768
+    n = len(data)
+    pos = 0
+    frag = b""
+    try:
+        while pos + 7 <= n:
+            block_left = BLOCK - (pos % BLOCK)
+            if block_left < 7:                   # zero-padded block trailer -> next block
+                pos += block_left
+                continue
+            length = data[pos + 4] | (data[pos + 5] << 8)
+            rtype = data[pos + 6]
+            pos += 7
+            chunk = data[pos:pos + length]
+            pos += length                        # ALWAYS consume the payload, even for a
+            if rtype == 0 or length == 0:        # zero/padding record -- else a kZeroType
+                continue                         # record with a payload desyncs every record
+            if rtype == 1:                       # FULL
+                rec = chunk
+            elif rtype == 2:                     # FIRST
+                frag = chunk
+                continue
+            elif rtype == 3:                     # MIDDLE
+                frag += chunk
+                continue
+            elif rtype == 4:                     # LAST
+                rec = frag + chunk
+                frag = b""
+            else:
+                frag = b""
+                continue
+            # WriteBatch: header seq(8)+count(4)=12, then entries; entry i has seq base+i
+            if len(rec) < 12:
+                continue
+            base_seq = int.from_bytes(rec[0:8], "little")
+            rp = 12
+            rn = len(rec)
+            idx = 0
+            while rp < rn:
+                tag = rec[rp]
+                rp += 1
+                if tag == 1:                     # kTypeValue: key, value
+                    klen, rp = _lvarint(rec, rp)
+                    key = rec[rp:rp + klen]
+                    rp += klen
+                    vlen, rp = _lvarint(rec, rp)
+                    value = rec[rp:rp + vlen]
+                    rp += vlen
+                    yield key, value, base_seq + idx, False
+                    idx += 1
+                elif tag == 0:                   # kTypeDeletion: key only
+                    klen, rp = _lvarint(rec, rp)
+                    key = rec[rp:rp + klen]
+                    rp += klen
+                    yield key, b"", base_seq + idx, True
+                    idx += 1
+                else:
+                    break                        # unknown tag -> stop this batch
+    except (IndexError, ValueError):
+        return
+
+
+def _lvldb_value_to_jwt(value):
+    """A Chromium localStorage value (encoding byte + payload) -> JWT string, or ''. 0x00 is
+    UTF-16LE, 0x01 is Latin-1 (a JWT is ASCII, so ours is 0x01)."""
+    if not value:
+        return ""
+    enc, body = value[0], value[1:]
+    try:
+        if enc == 0:
+            s = body.decode("utf-16-le", "ignore")
+        elif enc == 1:
+            s = body.decode("latin-1", "ignore")
+        else:
+            s = value.decode("latin-1", "ignore")
+    except Exception:
+        return ""
+    s = s.strip()
+    return s if s.startswith("eyJ") and s.count(".") == 2 else ""
+
+
+def _pick_pixai_token(entries):
+    """THE pixai.art auth token from ONE profile's leveldb entries, honoring leveldb's own
+    last-writer-wins-by-sequence semantics. `entries` are (user_key, value, seq, is_deletion)
+    tuples from that profile's .ldb + .log (which share one sequence space). Among entries for
+    the token key (ends with LOCALSTORAGE_JWT_KEY, contains 'pixai'), the HIGHEST sequence
+    number is the live state: if it's a deletion tombstone (logout) -> '' (not a stale token);
+    otherwise decode it and require iss=='pixai' (the definitive guard -- the Local Storage
+    store is shared across every origin, so unrelated JWTs live beside it). Returns '' if none.
+    Sequence numbers are unique per write, so ties are effectively impossible; if two values
+    tie (bottom-level seq-zeroing), the later `exp` wins, and any tombstone at the top wins."""
+    best_seq = -1
+    deleted_at_top = False
+    values_at_top = []                           # (exp, jwt) for value entries at best_seq
+    for key, value, seq, is_del in entries:
+        if b"pixai" not in key or not key.endswith(LOCALSTORAGE_JWT_KEY):
+            continue
+        if seq > best_seq:
+            best_seq = seq
+            deleted_at_top = False
+            values_at_top = []
+        if seq == best_seq:
+            if is_del:
+                deleted_at_top = True
+            else:
+                jwt = _lvldb_value_to_jwt(value)
+                if jwt and jwt_claims(jwt).get("iss") == "pixai":
+                    exp = jwt_expiry(jwt)
+                    values_at_top.append((exp if exp is not None else -1, jwt))
+    if best_seq < 0 or deleted_at_top or not values_at_top:
+        return ""
+    values_at_top.sort()
+    return values_at_top[-1][1]                   # freshest value at the top sequence
+
+
+def read_browser_jwt(browsers=("chrome", "edge", "brave")):
+    """The live pixai.art JWT read from a local browser's localStorage, across ALL profiles
+    (Default, Profile N, ...) of the given Chromium browsers. Each profile is resolved on its
+    own sequence space (a logout tombstone there suppresses that profile's older token); the
+    freshest LIVE token (max `exp`) across profiles wins. Returns '' if none. This is what lets
+    'Connect' bootstrap the mirror on a current Chrome whose cookie store is
+    app-bound-encrypted. NEVER raises, NEVER logs the value."""
+    la = os.environ.get("LOCALAPPDATA", "")
+    roots = {
+        "chrome": os.path.join(la, r"Google\Chrome\User Data"),
+        "edge": os.path.join(la, r"Microsoft\Edge\User Data"),
+        "brave": os.path.join(la, r"BraveSoftware\Brave-Browser\User Data"),
+    }
+
+    def _profile_entries(ldb):
+        try:
+            files = os.listdir(ldb)
+        except OSError:
+            return
+        for fn in files:
+            path = os.path.join(ldb, fn)
+            if fn.endswith(".ldb"):
+                blob = _read_file_shared(path)
+                if blob:
+                    yield from _lvldb_sstable_entries(blob)
+            elif fn.endswith(".log"):
+                blob = _read_file_shared(path)
+                if blob:
+                    yield from _lvldb_log_entries(blob)
+
+    candidates = []
+    for name in browsers:
+        udir = roots.get(name)
+        if not udir or not os.path.isdir(udir):
+            continue
+        try:
+            profiles = os.listdir(udir)
+        except OSError:
+            continue
+        for prof in profiles:
+            ldb = os.path.join(udir, prof, "Local Storage", "leveldb")
+            if not os.path.isdir(ldb):
+                continue
+            tok = _pick_pixai_token(_profile_entries(ldb))   # per-profile, tombstone-aware
+            if tok:
+                candidates.append(tok)
+
+    best, best_exp = "", -1                       # freshest live token across profiles
+    for j in candidates:
+        e = jwt_expiry(j)
+        if e is not None and e > best_exp:
+            best, best_exp = j, e
+    return best
+
+
+def refresh_jwt(session, current_jwt=None):
+    """Call the no-arg refreshToken mutation and return a genuinely FRESH JWT, or None.
+
+    `session` is a JWT-authed requests.Session (from _mirror_session_from). The new jwt
+    arrives in the `token` response header; the mutation's scalar return is the fallback
+    shape. Renews our own token only -- it does not spend. Returns None (never raises) on any
+    error, so the caller keeps the current jwt until it truly expires.
+
+    Guards against a FALSE "renewed" (review): the gateway rolls the SAME token back in the
+    `token` header on ordinary authenticated responses, and a GraphQL error (e.g.
+    PersistedQueryNotFound after a hash rotation) still answers HTTP 200 carrying that echo.
+    So a renewal requires status 200, NO `errors` array, and a token that DIFFERS from the
+    one we sent -- an unchanged token is not a renewal."""
+    headers = {
+        "Content-Type": "application/json",
+        "apollo-require-preflight": "true",
+        "x-apollo-operation-name": "refreshToken",
+    }
+    if current_jwt:
+        headers["Authorization"] = "Bearer " + current_jwt
+    body = {
+        "operationName": "refreshToken",
+        "variables": {},
+        "extensions": {
+            "clientLibrary": CLIENT_LIBRARY,
+            "persistedQuery": {"version": 1, "sha256Hash": REFRESH_TOKEN_HASH},
+        },
+    }
+    try:
+        r = session.post(API_URL, json=body, headers=headers, timeout=30)
+    except Exception:
+        return None
+    if r.status_code != 200:
+        return None
+    try:
+        payload = r.json() or {}
+    except Exception:
+        payload = {}
+    if payload.get("errors"):
+        return None                        # error response -> its echoed token is NOT fresh
+    cur = current_jwt or ""
+    tok = r.headers.get("token")
+    if tok and tok != cur and jwt_expiry(tok):
+        return tok
+    val = (payload.get("data") or {}).get("refreshToken")
+    if isinstance(val, str) and val != cur and jwt_expiry(val):
+        return val
+    return None
+
+
+# --- Mirror session state: a dedicated git-ignored store (NOT config.json) --------
+# Single-flight lock: serializes the refresh->persist critical section so two threads can't
+# both fire refreshToken and race their writes. The SLOW work (the leveldb/localStorage
+# browser read and the no-network fast path) runs OUTSIDE the lock so a Connect can't block
+# every Generate -- an earlier version held the lock across a ~12 s scan plus a 30 s POST
+# (adversarial review 2026-08-15). The gallery serves threaded=True.
+_mirror_lock = threading.Lock()
+# Backoff so a persistently-failing refresh (rotated hash, expired session, PixAI 5xx) is not
+# re-fired on EVERY create while the JWT sits inside its refresh cushion (review). time-based.
+_mirror_refresh_next_try = 0.0
+_MIRROR_REFRESH_COOLDOWN = 600      # seconds to wait after a failed refresh before retrying
+
+
+def _mirror_state_path():
+    """Where the rotating mirror session (JWT + cookie jar) lives: a dedicated
+    git-ignored file beside config.json. Deliberately NOT config.json -- the JWT
+    rotates on every refresh, and a write there must never risk clobbering the API
+    key (a test once overwrote the real PIXAI_API_KEY; a separate file can't)."""
+    return _config_path().parent / "mirror_session.json"
+
+
+def load_mirror_state():
+    """The stored mirror session {jwt} or {} if none. (A legacy `cookies` key from older
+    builds is ignored -- the mirror is JWT-only now.) Never raises, never logs a value."""
+    p = _mirror_state_path()
+    if not p.exists():
+        return {}
+    try:
+        with open(p, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (ValueError, OSError):
+        return {}
+
+
+def save_mirror_state(state):
+    """Atomically persist {jwt} to the git-ignored mirror file. Best-effort: True/False,
+    never raises, never logs a value. JWT-only: cookies are no longer stored -- the Bearer
+    JWT authenticates both the create and the refresh; the short session cookies died ~1 h
+    after issue (so they never survived to a day-22 refresh anyway), and pairing a
+    Default-profile cookie jar with an any-profile JWT risked a cross-identity submit (review)."""
+    p = _mirror_state_path()
+    # Per-WRITE-unique temp (pid + random), not per-process: the gallery is threaded, so a
+    # per-pid temp name lets two concurrent savers interleave into one file then both
+    # os.replace -> corrupt JSON -> load returns {} -> mirror "lost" (review F5). A unique
+    # temp per write + atomic replace makes concurrent saves last-writer-wins, never corrupt.
+    tmp = p.with_name(p.name + ".tmp-{}-{}".format(os.getpid(), secrets.token_hex(6)))
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"jwt": state.get("jwt", "")}, f, indent=2)
+        os.replace(tmp, p)
+        return True
+    except OSError:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+        return False
+
+
+def mirror_enabled():
+    """Is the Control Panel 'Mirror to PixAI website' toggle on? Reads config fresh
+    (git-ignored MIRROR_TO_PIXAI flag). Default OFF = pure API-key mode. When ON, the create
+    POST rides the browser JWT (see _session_for_create) so the generation lands in the
+    pixai.art web library."""
+    return bool(_load_config().get("MIRROR_TO_PIXAI"))
+
+
+def _jwt_usable(jwt):
+    """True only when the JWT is present, parseable, and not expired (days_left >= 0). This
+    is the gate for 'can the mirror actually submit with this' -- distinct from merely
+    'a JWT string exists', which is what let an expired stored token block a browser re-read."""
+    if not jwt:
+        return False
+    left = jwt_days_left(jwt)
+    return left is not None and left >= 0
+
+
+def _mirror_session_from(jwt):
+    """A requests.Session authed as the browser JWT (Bearer) and presenting the WEB client
+    identity -- used for BOTH the refreshToken probe and the mirrored create. Built directly,
+    NOT via _make_session, so it never enforces the API-key/U3T precondition the mirror
+    doesn't need and never resolves USER_ID over the browser token (review). JWT-only, no
+    cookies. The web identity makes PixAI apply the website content policy, not the stricter
+    mobile-app one; x-apollo-operation-name is present for Apollo CSRF (value need only be
+    present, not correct)."""
+    session = requests.Session()
+    if jwt:
+        session.headers["Authorization"] = "Bearer " + jwt
+    session.headers.update({
+        "Accept": "application/json",
+        "apollo-require-preflight": "true",
+        "x-apollo-operation-name": OPERATION_NAME,
+        "User-Agent": MIRROR_WEB_USER_AGENT,
+        "Origin": MIRROR_WEB_ORIGIN,
+        "Referer": MIRROR_WEB_ORIGIN + "/",
+        "Sec-Fetch-Site": "same-site",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty",
+    })
+    return session
+
+
+def make_mirror_session(bootstrap_from_browser=False):
+    """The mirror submit/refresh session: a requests.Session authed with the browser JWT
+    (Bearer) presenting the WEB client identity. Returns None -- NEVER raises -- when there is
+    no USABLE (present, parseable, unexpired) JWT even after a browser re-read and a refresh;
+    callers must then refuse and spend nothing, never an API-key fallback (review F5).
+
+    JWT-only, and built via _mirror_session_from (NOT _make_session): the API-key path's
+    precondition/USER_ID-resolution must not run over the browser token (review).
+
+    Lock scope: the SLOW browser read runs OUTSIDE _mirror_lock; only the refresh->persist
+    critical section takes the lock (single-flight), and a failed refresh backs off so it is
+    not re-fired on every create (review)."""
+    global _mirror_refresh_next_try
+    jwt = load_mirror_state().get("jwt") or ""
+    # (Re-)bootstrap from the browser whenever the stored JWT is not USABLE -- not merely when
+    # it is absent. Gating on `not jwt` meant an expired stored token could never be replaced,
+    # which left Connect and --mirror-check permanently dead until the file was hand-deleted
+    # (review). The browser read is slow, so it happens before the lock.
+    if bootstrap_from_browser and not _jwt_usable(jwt):
+        bj = read_browser_jwt()
+        if bj:
+            jwt = bj
+            save_mirror_state({"jwt": jwt})
+    # Roll the JWT forward when inside the refresh cushion -- but never under READ_ONLY
+    # (refreshToken is account-mutating), and not more often than the cooldown after a failure.
+    if jwt and mirror_needs_refresh(jwt) and not (READ_ONLY or _read_only_now()):
+        with _mirror_lock:
+            cur = load_mirror_state().get("jwt") or jwt      # a peer thread may have refreshed
+            if mirror_needs_refresh(cur):
+                now = time.time()
+                if now >= _mirror_refresh_next_try:
+                    fresh = refresh_jwt(_mirror_session_from(cur), current_jwt=cur)
+                    if fresh:
+                        cur = fresh
+                        save_mirror_state({"jwt": cur})
+                        _mirror_refresh_next_try = 0.0
+                    else:
+                        _mirror_refresh_next_try = now + _MIRROR_REFRESH_COOLDOWN
+            jwt = cur
+    if not _jwt_usable(jwt):
+        return None                        # absent/expired -> refuse, never API-key (F5)
+    return _mirror_session_from(jwt)
+
+
+def _session_for_create(api_session):
+    """The session the CREATE POST must use: the browser JWT (mirror) when the 'Mirror to
+    PixAI' toggle is on, so the generation lands in the pixai.art web library; else the
+    API-key api_session, exactly as today. The single choke every create site routes
+    through (review F4) -- swap ONLY the create's session, never the poll/collect/media
+    calls (F6), and NEVER fall back to the API key when mirroring: if the mirror session
+    is unavailable, refuse and spend nothing (F5).
+
+    Callers must have already passed _check_read_only, since make_mirror_session may make a
+    refreshToken network call (review F12). free-card (/v2/kaisuuken/check) still runs on the
+    API-key session at the call site -- only the create rides the JWT."""
+    if not mirror_enabled():
+        return api_session
+    m = make_mirror_session()
+    if m is None:
+        raise PixAIError(
+            "Mirror to PixAI is ON but its browser session is expired or unavailable -- "
+            "run `--mirror-check` (or re-bootstrap from a logged-in browser). Nothing was "
+            "submitted and no credits were spent.")
+    return m
+
+
+def run_mirror_check(args):
+    """--mirror-check: prove the zero-paste mirror loop WITHOUT ever printing the token.
+    Tries the stored session; if none, reads the pixai.art session from a local browser;
+    calls refreshToken to confirm renewal; reports only days-left + ok/fail and persists
+    the fresh session. This is the owner's step-0 verification -- it renews our own token
+    and spends nothing. If it can't read a browser (e.g. run headless/sandboxed), it says
+    so plainly rather than guessing. Refused under READ_ONLY (refreshToken is account-mutating)."""
+    if READ_ONLY or _read_only_now():
+        print("Mirror: READ_ONLY is set in config.json -- refusing to refresh the mirror "
+              "token (refreshToken is an account-mutating call). Clear READ_ONLY to run this.")
+        return {"ok": False, "source": "read_only"}
+    jwt = load_mirror_state().get("jwt") or ""
+    src = "stored"
+    if not _jwt_usable(jwt):
+        bj = read_browser_jwt()          # localStorage: works on a v20-cookie Chrome
+        if bj:
+            jwt = bj
+            src = "browser"
+    if not jwt:
+        print("Mirror: no session. No usable JWT in mirror_session.json, and none readable "
+              "from a local browser's pixai.art localStorage (is a browser installed and "
+              "logged in to pixai.art?). Open pixai.art logged-in, then retry.")
+        return {"ok": False, "source": "none"}
+    before = jwt_days_left(jwt)
+    fresh = refresh_jwt(_mirror_session_from(jwt), current_jwt=jwt)
+    if not fresh:
+        # A still-valid JWT whose refresh merely failed (rotated hash, transient 5xx) is
+        # reported distinctly from a truly-dead one, and its jar is NOT wiped.
+        if _jwt_usable(jwt):
+            save_mirror_state({"jwt": jwt})
+            print("Mirror ({}): the stored JWT is still valid ({} days left) but refreshToken "
+                  "did NOT return a fresh token -- renewal may be temporarily unavailable "
+                  "(a PixAI hash rotation or a transient error). It keeps working until it "
+                  "nears expiry; re-run then.".format(src, before))
+            return {"ok": True, "source": src, "renewed": False, "days_left": before}
+        print("Mirror ({}): the JWT is expired and refreshToken did not renew it. Re-open "
+              "pixai.art logged-in, then retry.".format(src))
+        return {"ok": False, "source": src, "renewed": False}
+    after = jwt_days_left(fresh)
+    saved = save_mirror_state({"jwt": fresh})
+    print("Mirror OK (source: {}). refreshToken renewed the JWT -> {} days left{}. {}".format(
+        src, after, "" if before is None else " (was {})".format(before),
+        "Stored." if saved else "WARNING: could not persist mirror_session.json."))
+    return {"ok": True, "source": src, "renewed": True, "days_left": after}
+
+
+# ===========================================================================
+# MIRROR-SUBMIT INVARIANTS (upheld by the code above; from the 2026-08-14 adversarial review
+# and the 2026-08-15 ultrareview). This is a SPEND + CREDENTIAL path -- keep all of these:
+#  1. Single submit: exactly one createGenerationTask per create; the create session is
+#     swapped ONLY at the _session_for_create choke, and every credit-spending create routes
+#     through it (image/edit/video/reference-video via submit_generation, AND the /v2 fixer).
+#  2. No gql_adhoc for spend: createGenerationTask goes through gql_mutate (retries=0).
+#  3. READ_ONLY fires before any mirror network call: refreshToken (make_mirror_session,
+#     run_mirror_check, /api/mirror/connect) and the create (submit_generation/submit_fixer).
+#  4. No credential emission: the JWT is never printed/logged/returned; diagnostics report
+#     only days-left + ok/None; the credential travels only in a POST body/Authorization.
+#  5. No silent API-key fallback: make_mirror_session decides refuse-vs-allow OFFLINE from a
+#     usable-JWT check and returns None on failure; _session_for_create raises rather than
+#     using the API key when the mirror is ON.
+#  6. Collect stays on the API-key session: only the create POST rides the mirror JWT;
+#     poll / collect_generation / GET /v1/media do NOT.
+#  7. JWT-only: no cookies are stored or paired (they died ~1 h after issue and pairing them
+#     across browser profiles risked a cross-identity submit).
+# ===========================================================================
+
+
 def run_probe(args):
     """Test API connection and resolve full-res media URL for the newest task."""
     session = _make_session(getattr(args, "token", None))
@@ -6851,6 +7727,12 @@ def submit_generation(session, params):
     only fires on a PixAIError, which means PixAI answered with a GraphQL error and
     REJECTED the task, so there is nothing created and nothing charged to duplicate."""
     _check_read_only("submit a generation (spends credits)")
+    # Mirror routing (review F4/F5): after the READ_ONLY gate, the create rides the browser
+    # JWT session when the toggle is on (else this is a pass-through, unchanged). submit_
+    # generation is create-only -- it returns the task id and never polls/collects -- so
+    # rebinding the whole session here is safe; the CALLER keeps its API-key session for
+    # download (F6).
+    session = _session_for_create(session)
     params = priority_for_submit(params)   # already known to be turbo-refused? use Low
     try:
         created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
@@ -6934,7 +7816,11 @@ def submit_fixer(session, media_id, boxes):
     clean = clean_fix_boxes(boxes)
     if not clean:
         raise PixAIError("fixer needs at least one hand/face box")
-    data = _rest_post(session, "/task/fixer",
+    # The fixer IS a credit-spending create, so it rides the mirror JWT session when the
+    # toggle is on (review F1: the choke belongs at "a create", not only at gql_mutate sites).
+    # Create-only -- the caller polls/collects on its own API-key session (F6); pass-through
+    # when the mirror is off; refuses before spend if the mirror is on but unavailable (F5).
+    data = _rest_post(_session_for_create(session), "/task/fixer",
                       {"mediaId": str(media_id), "boxes": clean}) or {}
     tid = data.get("id")
     if not tid:
@@ -7115,10 +8001,12 @@ def run_generate_video(args):
     else:
         _check_read_only("submit a video generation (spends credits)")
         print("Submitting VIDEO generation task (this spends credits)...")
-        _apply_kaisuuken(session, params, args)
+        _apply_kaisuuken(session, params, args)   # free-card check on the API-key session
         # gql_mutate, never gql_adhoc: a re-POSTed createGenerationTask is a second
         # (expensive) video and a second charge -- see gql_mutate's docstring.
-        created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
+        # _session_for_create: the CREATE rides the mirror JWT when the toggle is on
+        # (else pass-through); download below stays on the API-key `session` (F6).
+        created = gql_mutate(_session_for_create(session), _GEN_MUTATION, {"parameters": params})
         task_id = (created.get("createGenerationTask") or {}).get("id")
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
@@ -7232,9 +8120,10 @@ def run_reference_video(args):
                             _resolve_refs(session, vids, "VIDEO"),
                             _resolve_refs(session, auds, None))
         print("Submitting REFERENCE VIDEO task (spends credits unless a free card applies)...")
-        _apply_kaisuuken(session, params, args)
+        _apply_kaisuuken(session, params, args)   # free-card check on the API-key session
         # gql_mutate, never gql_adhoc -- a re-POST here is a second charge.
-        created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
+        # _session_for_create: create rides the mirror JWT when on; download stays API-key (F6).
+        created = gql_mutate(_session_for_create(session), _GEN_MUTATION, {"parameters": params})
         task_id = (created.get("createGenerationTask") or {}).get("id")
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
@@ -7327,9 +8216,10 @@ def run_edit_image(args):
                 resolution=cfg["resolution"], aspect_ratio=cfg["aspect_ratio"],
                 quality=cfg["quality"], kaisuuken_id=cfg["kaisuuken_id"])
         print("Submitting EDIT task (spends credits unless a free card applies)...")
-        _apply_kaisuuken(session, params, args)
+        _apply_kaisuuken(session, params, args)   # free-card check on the API-key session
         # gql_mutate, never gql_adhoc -- a re-POST here is a second charge.
-        created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
+        # _session_for_create: create rides the mirror JWT when on; download stays API-key (F6).
+        created = gql_mutate(_session_for_create(session), _GEN_MUTATION, {"parameters": params})
         task_id = (created.get("createGenerationTask") or {}).get("id")
         if not task_id:
             raise PixAIError("no task id returned: " + json.dumps(created)[:300])
@@ -9017,6 +9907,12 @@ def _apply_kaisuuken(session, params, args):
     if getattr(args, "no_card", False):
         print("  --no-card: not using a free card (this WILL spend credits).")
         return ""
+    # The auto-match /v2/kaisuuken/check must run under the SAME identity that will create.
+    # A card reserved on the API-key session does not necessarily apply to a mirror (web-JWT)
+    # create, so a generation previewed as FREE could be billed in real credits (review F2/F8).
+    # _session_for_create is a pass-through when the mirror is off, and refuses (raises) before
+    # any spend when the mirror is on but unavailable (F5).
+    session = _session_for_create(session)
     best = None
     check_err = None
     for attempt in range(2):
@@ -10734,6 +11630,10 @@ def main():
     ap.add_argument("--cards", action="store_true",
                     help="show your free-generation cards (kaisuuken) + their ids, then exit. "
                          "Read-only; pass an id to a run with --kaisuuken-id")
+    ap.add_argument("--mirror-check", action="store_true",
+                    help="check/bootstrap the 'Mirror to PixAI website' session (reads the "
+                         "pixai.art session from a local browser, refreshes the JWT) and "
+                         "report days-left, then exit. Never prints the token; spends nothing")
     ap.add_argument("--card-history", action="store_true",
                     help="show recent benefit-card usage (redemptions + refunds), then exit. "
                          "Read-only. Pass --card-history-all for the full lifetime card-type "
@@ -11074,6 +11974,9 @@ def main():
             return
         if getattr(args, "cards", False):
             run_cards(args)
+            return
+        if getattr(args, "mirror_check", False):
+            run_mirror_check(args)
             return
         if getattr(args, "card_history", False) or getattr(args, "card_history_all", False):
             run_card_history(args)

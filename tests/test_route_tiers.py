@@ -243,6 +243,12 @@ ROUTE_TIERS = {
     # the local catalog, and the composer's own gates still stand between a
     # prefill and a paid generate -- same tier reasoning as api_model_version.
     ("api_task_params", "GET"): LOGIN,
+    # Mirror-to-PixAI: status (offline, no token), the toggle flag write, and the
+    # connect/bootstrap (server reads its OWN local browser -- no credential crosses
+    # the network). LOGIN tier; the spend gate stays on the create path.
+    ("api_mirror_status", "GET"): LOGIN,
+    ("api_mirror_enable", "POST"): LOCALHOST,       # rewrites config.json (holds the auth block)
+    ("api_mirror_connect", "POST"): LOGIN,
     ("api_ping", "GET"): LOGIN,
     ("api_similar", "GET"): LOGIN,
     # Catalog totals + backup coverage for fetch()-driven headers: the same
