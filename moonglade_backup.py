@@ -6592,9 +6592,18 @@ def run_generate(args):
     vouts, _vshared = video_outputs(result)
     _outputs_or_raise(result, mids or vouts, "task completed but no media ids found")
 
-    # Prefer the task's actual metadata (authoritative, and the only source when
-    # recovering by --task-id); fall back to the params we submitted.
+    # Prefer the task's actual metadata (authoritative, and the only source when recovering by
+    # --task-id); fall back to the params we submitted -- EXCEPT the sampling fields, see below.
     fm = extract_full_meta(result)
+    # steps/sampler/cfg_scale follow the MODEL, not the submit. A task that recorded none ran on
+    # the model's baked defaults, so the VERSION preset is their truth -- and where the model
+    # genuinely has no sampler/CFG (AuraFlow, e.g. Tsubaki.2) the honest answer is a blank, not
+    # the samplingSteps/cfgScale we happened to send and the model ignored. So these three read
+    # from `fm` below (task-echoed -> preset -> blank) and NEVER fall back to the submitted value
+    # (owner ruling 2026-08-15). _fill_preset_defaults populates fm's blanks from the preset; it
+    # used to sit here and let the preset preempt _pick's submitted fallback for `steps` only,
+    # while `cfg` still leaked the submitted 7.0 -- an inconsistency this removes. Matches
+    # _download_image_task, the sibling downloader, which already reads these straight from fm.
     _fill_preset_defaults(session, fm, result)   # issue #18: model-preset steps/sampler/cfg
 
     def _pick(fm_key, *param_keys):
@@ -6633,8 +6642,11 @@ def run_generate(args):
             "prompt_preview": (prompt or "")[:100],
             "negative_prompt": _pick("negative_prompt", "negativePrompts"),
             "seed": seeds.get(mid) or _pick("seed", "seed"),   # per-image seed on a batch
-            "steps": _pick("steps", "samplingSteps"),
-            "cfg_scale": _pick("cfg_scale", "cfgScale"),
+            # Model's truth, not the submit: fm holds task-echoed -> preset -> blank. No
+            # _pick here on purpose -- a submitted samplingSteps/cfgScale the model ignored
+            # must not stand in for the model's real behavior (owner ruling; see above).
+            "steps": fm.get("steps", ""),
+            "cfg_scale": fm.get("cfg_scale", ""),
             "model_id": _pick("model_id", "modelId"),
             # Resolved here, not just in the backfill. extract_full_meta only fills
             # model_name for a CHAT task (from the local EDIT_MODELS table); every ordinary
