@@ -45,10 +45,12 @@ python moonglade_backup.py --workers 8 --page-size 500 # fast full backfill
 ```
 
 - `--sync` is the one-shot refresh: incremental pull **with** full metadata (same as
-  `--update --full-meta`), then re-resolve unlabeled model names, fill any rows still
-  missing prompts/seeds/models, build missing thumbnails, and flag rows deleted on the
+  `--update --full-meta`), then fill any rows still missing prompts/seeds/models,
+  re-resolve unlabeled model names, build missing thumbnails, and flag rows deleted on the
   website. Every step is idempotent, so re-running it on a clean catalog costs almost
-  nothing. `--update` on its own is the narrower primitive.
+  nothing. `--update` on its own is the narrower primitive. **Videos aren't part of
+  `--sync`** — videos you make *in* Moonglade are caught the moment they finish, but ones
+  generated on the PixAI website need the separate `--sync-videos` pass (below).
 - `--workers N` (default 4) = how many images download at once. 6–8 saturates most
   connections; composes with every flag.
 - `--update` stops after `--update-grace` consecutive already-on-disk pages (default
@@ -77,7 +79,46 @@ python moonglade_backup.py --catalog-stats        # how much is already filled i
 
 Captures the complete prompt, seed, steps, sampler, CFG, human-readable model name,
 LoRAs, and the generation's actual credit cost (`paid_credit`; `0` = free via a card
-or the daily free tier).
+or the daily free tier) — plus **the full generation surface**: everything PixAI records
+about a run that the catalog used to drop. That's the inference profile (quality mode),
+quality-tag prefix, prompt-helper state, control nets, LoRA parameters, priority, how many
+seconds it took to render and on which backend, the run's own started / ended / updated
+timestamps, retry count, the moderation result, and for a video its mode and model. Derived
+pictures and videos also record their **source image** and how they were made (edit,
+upscale, image-to-video) — that's what powers Image Details' LINEAGE panel.
+
+All of this is captured **as a generation happens**, so a picture you make in Moonglade
+arrives complete — no backfill needed for new work.
+
+**Steps / Sampler / CFG on models that don't report them.** Some models (Tsubaki.2 and other
+AuraFlow models) run on their own baked-in defaults and don't write those numbers into the
+run. Moonglade fills them from the model's own preset instead — so a Tsubaki.2 picture shows
+its real step count. Where the model genuinely *has* no sampler or CFG, the field stays an
+em-dash: that's the honest answer, not a gap.
+
+### Giving older pictures the full surface
+
+Rows captured before this existed already have their prompt and model, so the normal
+backfill leaves them alone. To bring your history up to the same standard:
+
+```bash
+python moonglade_backup.py --backfill-full-meta --with-surface --workers 8
+```
+
+- It re-fetches each older run once and fills in everything above. On a big library that's
+  a long run — tens of thousands of pictures is an hour or more — so it's opt-in rather than
+  something an ordinary `--sync` springs on you.
+- **It's safe to interrupt.** The backfill saves its progress as it goes, so a Ctrl-C, a
+  dropped connection, or a laptop going to sleep loses at most a minute or two of work. Run
+  the same command again and it picks up where it stopped — the first line it prints tells
+  you exactly how many runs are still to do.
+- Once it reports **"Nothing to backfill,"** your whole history has the full surface, and
+  ordinary `--sync` runs won't touch those rows again. If a small number keeps showing up
+  on later `--with-surface` runs, those are runs you've since deleted on PixAI (or the odd
+  one PixAI returns without a timestamp) — harmless, and nothing to fix.
+- Spends nothing: it's all reads.
+
+The two older opt-ins work the same way for their own columns:
 
 - `--backfill-full-meta --with-loras` widens the backfill to rows that already have
   full meta but no LoRA data yet (older images predate LoRA capture) — a long run,
