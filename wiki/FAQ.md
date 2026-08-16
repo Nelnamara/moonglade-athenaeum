@@ -17,7 +17,11 @@ for a genuinely empty account. They look identical and mean opposite things, and
 that matters is the one where a ready reward is sitting there waiting. Nothing is claimed
 either way. Generation spends your own credits: the CLI always asks
 (`--confirm` is required to submit), while the web Generate drawer submits on click and
-shows a live price estimate up front instead. For the full, precise list of what this
+shows a live price estimate up front instead. One thing to know about video cards: they are
+books of tickets, a clip costs one per 5 seconds, and if you don't hold enough for the
+duration no card is used and the clip is charged in full — the preview says so plainly, and
+Generate still spends if you click (see [Generating → Free cards and
+videos](Generating#free-cards-and-videos)). For the full, precise list of what this
 tool can and can't do to your account — plus a `READ_ONLY` config flag that refuses
 every spend/delete path outright — see **[Trust & Safety](Trust-and-Safety)**.
 

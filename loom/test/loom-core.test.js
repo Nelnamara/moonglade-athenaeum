@@ -4,7 +4,8 @@ import {
   CONNECT, CONTINUITY_PHRASE, actLetter,
   maxTagNum, nextTag, frameLinked, connectMeta, continuityLinked,
   flat, shotText, castMissingImages, shotPayload, durOf, reelStats, effectivePrompt,
-  priceFingerprint, tallyPrices, formatCostEstimate, costTooltip,
+  priceFingerprint, tallyPrices, tallyPricesDetailed, priceIsShort, shortSpendLine,
+  formatCostEstimate, costTooltip,
 } from "../src/loom-core.js";
 
 /* ---------- fixtures ---------- */
@@ -363,6 +364,84 @@ describe("priceFingerprint / tallyPrices / formatCostEstimate", () => {
   test("formatCostEstimate distinguishes a settled zero-cost paid shot from 'nothing settled'", () => {
     assert.equal(formatCostEstimate({ paid: 1, credits: 0 }), "0 cr");
     assert.equal(formatCostEstimate({}), "…");
+  });
+});
+
+// issue #15: multi-ticket free cards. A 15s i2vPro shot costs 3 tickets; /api/price's `free`
+// is the server's card_covers() (held >= needed) for ONE job priced alone, and it also
+// reports card_short / cards_held / cards_needed / card_name / card_template. OWNER RULING:
+// short still spends (like the site) -- the client's whole duty is honesty: say nothing
+// attaches and the FULL price is charged, and count the batch's tickets against the held
+// pool BEFORE the confirm so a "will spend" shot never surprises anyone.
+describe("multi-ticket cards: priceIsShort / shortSpendLine / tallyPricesDetailed", () => {
+  const short15 = { free: false, cost: 1200, card_short: true, cards_held: 2, cards_needed: 3,
+    card_name: "Video Pro", card_template: "tpl-video" };
+  test("priceIsShort: only a matched-but-short result; never a covered or unmatched one, never null", () => {
+    assert.equal(priceIsShort(short15), true);
+    assert.equal(priceIsShort({ free: true, cards_held: 5, cards_needed: 3 }), false, "covered is never short");
+    assert.equal(priceIsShort({ free: false, cost: 900 }), false, "no card matched at all -- the plain 'no free card' case");
+    assert.equal(priceIsShort(null), false);
+    // fallback for a response carrying counts but predating the flag -- still gated on free:false
+    assert.equal(priceIsShort({ free: false, cost: 900, cards_held: 1, cards_needed: 3 }), true);
+    assert.equal(priceIsShort({ free: true, cards_held: 1, cards_needed: 3 }), false, "free stays authoritative");
+  });
+  test("shortSpendLine says exactly what happens: no card is used, the FULL price is charged", () => {
+    const line = shortSpendLine(short15, "this 15s shot");
+    assert.equal(line,
+      "You hold 2 of the 3 free Video Pro cards this 15s shot needs — not enough, so no card is used. It will spend the full ~1,200 credits.");
+    // never partial application, never "covers 2 of 3"
+    assert.doesNotMatch(line, /covers 2/);
+    assert.doesNotMatch(line, /rest|remaining/);
+    // unknown price still says FULL price, and an unnamed card still reads as a sentence
+    assert.equal(shortSpendLine({ free: false, card_short: true, cards_held: 0, cards_needed: 2 }, "this"),
+      "You hold 0 of the 2 free cards this needs — not enough, so no card is used. It will spend the full credit price.");
+  });
+  test("tally: 5 held, three 15s shots x 3 needed -> 1 free, 2 paid at full price (pool spent in submission order)", () => {
+    const pr = (i) => ({ free: true, cost: 1200, cards_held: 5, cards_needed: 3, card_name: "Video Pro", card_template: "tpl-video", i });
+    const t = tallyPricesDetailed([pr(1), pr(2), pr(3)]);
+    assert.equal(t.free, 1);
+    assert.equal(t.paid, 2);
+    assert.equal(t.credits, 2400, "overflow shots are counted at their FULL price, never a partial one");
+    assert.equal(t.unknown, 0);
+    assert.equal(t.overflow, 2);
+    assert.deepEqual(t.pools, { "tpl-video": { name: "Video Pro", held: 5, needed: 9 } });
+    // the four-bucket tallyPrices every existing caller reads gives the SAME answer
+    assert.deepEqual(tallyPrices([pr(1), pr(2), pr(3)]), { free: 1, paid: 2, credits: 2400, unknown: 0 });
+  });
+  test("tally: pools are per template -- another template's tickets are not drawn down", () => {
+    const vid = { free: true, cost: 1200, cards_held: 3, cards_needed: 3, card_template: "tpl-video", card_name: "Video Pro" };
+    const img = { free: true, cost: 100, cards_held: 1, cards_needed: 1, card_template: "tpl-image", card_name: "Image" };
+    const t = tallyPricesDetailed([vid, img, vid]);
+    assert.equal(t.free, 2);
+    assert.equal(t.paid, 1);
+    assert.equal(t.credits, 1200);
+    assert.equal(t.overflow, 1);
+  });
+  test("tally: a leftover ticket still funds a later 1-ticket shot after a 3-ticket one is refused (submission order, not greedy re-sort)", () => {
+    const big = { free: true, cost: 1200, cards_held: 4, cards_needed: 3, card_template: "tpl-video" };
+    const small = { free: true, cost: 400, cards_held: 4, cards_needed: 1, card_template: "tpl-video" };
+    const t = tallyPricesDetailed([big, big, small]);
+    assert.deepEqual([t.free, t.paid, t.credits, t.overflow], [2, 1, 1200, 1]);
+  });
+  test("tally: falls back to card_name as the pool key when card_template is absent", () => {
+    const pr = { free: true, cost: 1200, cards_held: 3, cards_needed: 3, card_name: "Video Pro" };
+    const t = tallyPricesDetailed([pr, pr]);
+    assert.deepEqual([t.free, t.paid, t.overflow], [1, 1, 1]);
+    assert.deepEqual(t.pools, { "Video Pro": { name: "Video Pro", held: 3, needed: 6 } });
+  });
+  test("tally: a free result with no pool info (older server / unknown balance) keeps the server's verdict", () => {
+    const t = tallyPricesDetailed([{ free: true }, { free: true, cost: 50 }]);
+    assert.deepEqual([t.free, t.paid, t.overflow], [2, 0, 0]);
+    assert.deepEqual(t.pools, {});
+  });
+  test("tally: server-flagged short shots are plain paid (they never draw from the pool) and nulls stay unknown", () => {
+    const t = tallyPricesDetailed([short15, null, { free: false, cost: 900 }]);
+    assert.deepEqual(t, { free: 0, paid: 2, credits: 2100, unknown: 1, overflow: 0, pools: {} });
+  });
+  test("tally: an overflow shot whose cost is unknown buckets as unknown, never as free", () => {
+    const pr = (cost) => ({ free: true, cost, cards_held: 1, cards_needed: 1, card_template: "t" });
+    const t = tallyPricesDetailed([pr(100), pr(null)]);
+    assert.deepEqual([t.free, t.paid, t.unknown, t.overflow], [1, 0, 1, 1]);
   });
 });
 

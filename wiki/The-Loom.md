@@ -157,7 +157,11 @@ happens:
 4. The finished mp4 downloads and is cataloged into your gallery like any other generation.
 
 **It's free when a V4.0 video card covers it** — cards auto-apply, same as everywhere else
-in the suite; otherwise the credit price applies. See [Generating](Generating).
+in the suite; otherwise the credit price applies. A video card is a book of **tickets**, and
+a shot costs one per 5 seconds (5s = 1, 10s = 2, 15s = 3): the drawer's cost line reads
+"uses N of H cards", and if you hold fewer than the shot needs, no card is used, the shot
+costs the full credit price, and it says so before you press Generate — which, matching the
+website, still spends if you do. See [Generating → Free cards and videos](Generating#free-cards-and-videos).
 
 Other controls in the top bar:
 
@@ -165,7 +169,9 @@ Other controls in the top bar:
   the animatic in Draft, then turn it off and re-generate the keepers.
 - **▶ Generate all (N)** — renders every shot that isn't done yet, one after another, with a
   running batch tally. The pill beside it is a standing cost-to-finish estimate (click to
-  refresh).
+  refresh). The batch confirm counts each shot's tickets against the pool you hold, in order,
+  so a batch that outruns your cards is called out shot by shot — "this one will spend" — before
+  you confirm, rather than after the tally comes up short.
 - **💾 Use an existing video instead** (Video tab) — skip generation entirely and attach a
   video you already have as this shot's clip.
 

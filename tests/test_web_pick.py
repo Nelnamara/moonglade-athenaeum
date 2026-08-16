@@ -440,6 +440,46 @@ def test_price_route_video_mode(tmp_path, monkeypatch):
     assert i2v["generateAudio"] is True
 
 
+def test_price_route_free_only_when_the_card_covers_the_whole_job(tmp_path, monkeypatch):
+    """Issue #15: /api/price's `free` is core.card_covers(best), NOT bool(best). A 15s video
+    can MATCH a multi-ticket card the account holds too few tickets of; the site attaches
+    nothing and charges the full price, so the badge must never say FREE for it. The route
+    also reports the ticket accounting (cards_needed / cards_held / card_short) the badge
+    renders honestly, and keeps `cards` (= held) for the existing "(N left)" wording."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "price_task", lambda s, params: 27500)
+    body = {"mode": "I2V", "images": ["55"], "prompt": "pan", "duration": 15,
+            "video_model": "v3.2"}
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2025-01-01T00:00:00")])
+
+    # Covered: holds 9, needs 3 -> free, and the counts ride along.
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: {
+        "id": "c1", "total": 9, "consumeAmount": 3, "covered": True,
+        "name": "Video Pro", "expiresAt": "2027-01-01T00:00:00Z"})
+    d = cli.post("/api/price", json=body).get_json()
+    assert d["free"] is True and d["card_short"] is False
+    assert d["cards"] == 9 and d["cards_held"] == 9 and d["cards_needed"] == 3
+    assert d["cost"] == 27500 and d["card_name"] == "Video Pro"
+
+    # Short: holds 2, needs 3 -> NOT free (bool(best) would have said it was), card_short
+    # flagged, full price still reported so the badge can say "costs the full ~27,500".
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: {
+        "id": "c1", "total": 2, "consumeAmount": 3, "covered": False,
+        "name": "Video Pro", "expiresAt": "2027-01-01T00:00:00Z"})
+    d = cli.post("/api/price", json=body).get_json()
+    assert d["free"] is False, "a short card must never price as free (got {})".format(d)
+    assert d["card_short"] is True
+    assert d["cards"] == 2 and d["cards_held"] == 2 and d["cards_needed"] == 3
+    assert d["cost"] == 27500
+
+    # No card at all: not free AND not short -- short means "matched but under-funded" only.
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
+    d = cli.post("/api/price", json=body).get_json()
+    assert d["free"] is False and d["card_short"] is False
+    assert d["cards"] is None and d["cards_held"] is None and d["cards_needed"] is None
+
+
 def test_price_route_reads_generate_audio_key_too(tmp_path, monkeypatch):
     """The Loom sends `generate_audio` (matching /api/loom/generate's own key); the older
     `audio` key is the web drawer's. /api/price must accept either -- it used to only read

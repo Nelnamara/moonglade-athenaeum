@@ -11,7 +11,8 @@ import {
   usesCloseFrame,
   pickTarget, pickVideoTarget, positionTag, durOf,
   reelStats, effectivePrompt,
-  priceFingerprint, tallyPrices, formatCostEstimate, costTooltip, bundleMissingReport,
+  priceFingerprint, tallyPrices, tallyPricesDetailed, priceIsShort, shortSpendLine,
+  formatCostEstimate, costTooltip, bundleMissingReport,
   shotPayload as buildShotPayload,
 } from "./src/loom-core.js";
 // Pure project-tree mutators + response-shape classifiers (Phase 2, composed-
@@ -6252,7 +6253,15 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     } catch { pr = null; }
     if (pr && pr.free) return true;                                    // a free card covers it: no spend, no prompt
     if (pr && !pr.free && pr.cost != null) {
-      return window.confirm(`${label}\n\nNo free card covers it — it will spend ~${pr.cost.toLocaleString()} credits.\n\nGenerate anyway?`);
+      // `free` is the server's card_covers(): false for BOTH "no card matched" and "a card
+      // matched but you hold fewer tickets than it costs" (issue #15). The second case
+      // must not be told "no free card covers it" -- one does match, it just comes up
+      // short, and the site then attaches nothing and charges the FULL price. Same wording
+      // as the CLI's card_short_note, via shortSpendLine (loom-core.js).
+      const line = priceIsShort(pr)
+        ? shortSpendLine(pr, "this")
+        : `No free card covers it — it will spend ~${pr.cost.toLocaleString()} credits.`;
+      return window.confirm(`${label}\n\n${line}\n\nGenerate anyway?`);
     }
     return window.confirm(`${label}\n\nCouldn't verify the cost or free-card coverage — it may spend credits.\n\nGenerate anyway?`);
   };
@@ -6295,7 +6304,13 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     if (!opts.skipConfirm) {
       const pr = await priceShot(entry);
       if (pr && !pr.free && pr.cost != null) {
-        if (!window.confirm(`No free card covers this shot — it will spend ~${pr.cost.toLocaleString()} credits.\n\nGenerate anyway?`)) return { ok: false, reason: "cancelled" };
+        // Short (a card matched, tickets held < tickets this duration costs -- issue #15)
+        // is worded as exactly what happens: no card attaches, the FULL price is charged.
+        // Not-matched keeps the original sentence. See confirmSpend's note above.
+        const line = priceIsShort(pr)
+          ? shortSpendLine(pr, `this ${p.duration ? `${p.duration}s ` : ""}shot`)
+          : `No free card covers this shot — it will spend ~${pr.cost.toLocaleString()} credits.`;
+        if (!window.confirm(`${line}\n\nGenerate anyway?`)) return { ok: false, reason: "cancelled" };
       } else if (!pr || !pr.free) {
         if (!window.confirm("Couldn't verify this shot's cost or free-card coverage — it may spend credits.\n\nGenerate anyway?")) return { ok: false, reason: "cancelled" };
       }
@@ -6718,10 +6733,22 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     // Price every shot FIRST so the confirm shows real cost + card coverage — no silent spend.
     setBatching(true);
     const prices = await Promise.all(todo.map((e) => priceShot(e)));
-    // tallyPrices (loom-core.js) fails closed the same way this loop always did (a failed
-    // price check buckets as "unknown", never a false "0 credits") -- now the one shared
-    // implementation instead of a copy hand-rolled here.
-    const { free, paid, credits, unknown } = tallyPrices(prices);
+    // tallyPricesDetailed (loom-core.js) fails closed the same way this loop always did (a
+    // failed price check buckets as "unknown", never a false "0 credits") -- the one shared
+    // implementation instead of a copy hand-rolled here. It is also POOL-aware (issue #15):
+    // every shot above was priced alone against the same ticket pool, so three 15s shots
+    // (3 tickets each) against 5 held come back as three "free" results when only the
+    // first is really funded. The tally spends the pool per card template in this exact
+    // submission order and reclassifies the rest as PAID at full price -- OWNER RULING:
+    // the batch still spends when a card comes up short (the site does the same), but it
+    // says so HERE, before the confirm, never after the invoice.
+    const { free, paid, credits, unknown, overflow, pools } = tallyPricesDetailed(prices);
+    const shortPools = Object.values(pools).filter((pl) => pl.needed > pl.held);
+    const overflowNote = overflow
+      ? `\n⚠ ${overflow} of those priced free on their own, but the batch needs more tickets than you hold ` +
+        `(${shortPools.map((pl) => `${pl.name}: ${pl.held} held, ${pl.needed} needed`).join("; ")}) — ` +
+        `once the cards run out, no card is used and each remaining shot spends its full price.`
+      : "";
     // Soft warning, not a hard filter -- flagged shots still generate (matches generateShot's
     // own !hasInput behavior: a visible per-card error at submit time, not silently vanishing
     // from the count). Checked against the shot's own freeform field via effectivePrompt(),
@@ -6730,9 +6757,10 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     // can never fire regardless of whether the shot's real prompt is blank (found in review).
     const emptyPromptShots = todo.filter((e) => !effectivePrompt(e.c).trim());
     const msg = `Generate ${todo.length} shot(s)?\n\n` +
-      `🎫 ${free} covered by a free card\n` +
+      `🎫 ${free} covered by free cards\n` +
       `≈ ${paid} will spend credits — about ${credits.toLocaleString()} total` +
       (unknown ? `\n⚠ ${unknown} shot(s)' cost couldn't be verified — they may also spend credits.` : ".") +
+      overflowNote +
       (emptyPromptShots.length ? `\n⚠ ${emptyPromptShots.length} shot(s) have no prompt text yet: ${emptyPromptShots.map((e) => e.code).join(", ")}` : "");
     if (!window.confirm(msg)) { setBatching(false); return; }
     // Reset ONLY after the confirm is accepted -- resetting before it and leaving batchTally

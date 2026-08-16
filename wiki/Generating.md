@@ -154,7 +154,8 @@ into `videos/` and catalog as `is_video`.
 **Web:** the Generate drawer's **Video** tab — pick a source image, set model / duration
 (5/6/10/15s; 15 is V4.0-only, see below) / mode (Basic cheaper, Professional), optional
 audio, optional end frame for first/last-frame interpolation, then submit (the cost +
-free-card check show first).
+free-card check show first — for a video that check counts **tickets**, see
+[Free cards and videos](#free-cards-and-videos) below).
 
 ```bash
 # preview (free): prints the exact request + the ~credit cost
@@ -193,6 +194,9 @@ Notes:
   submit a combination PixAI would reject.
 - **Free cards are V4.0-specific.** V3.0 Flash and V2.7 always cost real credits — the
   drawer's cost badge correctly reads "no card" for them; that's expected, not a bug.
+- **A longer clip costs more tickets.** A video card is a book of tickets and a clip uses
+  one per 5 seconds (5s = 1, 10s = 2, 15s = 3), so "you have a V4.0 card" is not the whole
+  question — see [Free cards and videos](#free-cards-and-videos).
 - **15s is exclusive to the V4.0 pair.** Every other model caps at 10s, and the web
   drawer disables + hides the 15s option entirely once you pick a capped model (rather
   than letting you choose it and fail at submit); the CLI has no equivalent guard, so a
@@ -346,7 +350,8 @@ instead of a single start frame. You cite each reference in the prompt with `@im
 python moonglade_backup.py --reference-video \
     --ref-image <id1> --ref-image "C:\pics\pose.png" \
     --prompt "@image1 in the outfit from @image2, slow orbit"
-# really generate — a matching V4.0 card is auto-applied (0 credits); --no-card to pay instead:
+# really generate — a matching V4.0 card is auto-applied (0 credits) when you hold enough
+# tickets for the duration; --no-card to pay instead:
 python moonglade_backup.py --reference-video --ref-image <id1> --ref-image <id2> \
     --prompt "@image1 ... @image2 ..." --confirm
 ```
@@ -356,7 +361,7 @@ python moonglade_backup.py --reference-video --ref-image <id1> --ref-image <id2>
 | `--ref-image` / `--ref-video` | a reference (media_id **or** a local file, uploaded for you), **repeatable** — `@image1`, `@image2`, … |
 | `--ref-audio` | a reference — **media_id only**, *not* a local file, **repeatable**. PixAI's uploader takes images and videos only, so there's nothing to upload a bare audio file as. To use audio from your own machine, put it into a video (even just a still image with the audio track) and pass that with `--ref-video`. |
 | `--prompt` | cite refs by `@imageN` / `@videoN` / `@audioN` |
-| `--duration` / `--video-mode` / `--audio` | as with `--generate-video` (15s uses 3 V4.0 cards) |
+| `--duration` / `--video-mode` / `--audio` | as with `--generate-video` (15s uses 3 V4.0 tickets — see [Free cards and videos](#free-cards-and-videos)) |
 | `--confirm` | **required** to submit |
 
 ## Upload a local image (`--upload`)
@@ -400,9 +405,9 @@ and events. Each is **locked to one model**.
 
 > **✅ Cards auto-apply — just generate.** On `--confirm`, the tool asks PixAI which of your
 > cards matches this generation (the same `check` call the website makes), attaches the
-> nearest-expiry one, and that generation costs **0 credits**. The **preview** tells you
-> up-front whether it'll be free — and the **real credit cost** (via PixAI's `task-price`
-> estimate, which spends nothing):
+> nearest-expiry one that covers it, and that generation costs **0 credits**. The **preview**
+> tells you up-front whether it'll be free — and the **real credit cost** (via PixAI's
+> `task-price` estimate, which spends nothing):
 >
 > ```
 > FREE: a matching card covers this -- with --confirm it costs 0 credits (saves ~1,600 credits) …
@@ -410,7 +415,7 @@ and events. Each is **locked to one model**.
 > ```
 
 ```bash
-python moonglade_backup.py --cards        # read-only: your cards, counts, model, expiry
+python moonglade_backup.py --cards        # read-only: your cards, held counts, model, expiry
 ```
 
 Just generate on a model you have a card for — the match is automatic:
@@ -420,10 +425,27 @@ Just generate on a model you have a card for — the match is automatic:
 | **Tsubaki.2** | `--generate` (default model) |
 | **Edit Pro** | `--edit-image` (default model) |
 | **Reference Pro** | `--generate --model 1948514378441961474` |
-| **V4.0 video** | `--generate-video` / `--reference-video` (5s = 1 card, 15s = 3) |
+| **V4.0 video** | `--generate-video` / `--reference-video` (5s = 1 ticket, 10s = 2, 15s = 3 — see below) |
 
 Overrides: **`--no-card`** forces paying credits even when a card matches; **`--kaisuuken-id <id>`**
 forces a specific card. Cards closest to expiry are used first.
+
+### Free cards and videos
+
+An image or edit card is one card, one generation. A **video card is a book of tickets**, and a
+clip costs **one ticket per 5 seconds** — 5s = 1, 10s = 2, 15s = 3 — all taken from the same
+V4.0 card. So the question the preview answers for a video is not "do I have a card" but "do I
+hold enough tickets for this duration". It says so in those terms: **"uses N of H cards"**
+(N this clip needs, H you hold), and `--cards` shows the held count per card.
+
+If you don't hold enough — say 2 tickets and a 15s clip — **no card is used at all** and the
+clip costs the **full credit price**; nothing is partially applied and nothing is topped up. The
+preview states this plainly ("you hold 2 of the 3 tickets this needs — not enough, so no card is
+used — this costs the full ~N credits"), and then, matching the website, **Generate still spends
+if you click**. It is not refused — you may well want the clip anyway — the point is that you
+are never told a paid clip is free. Shorten the clip to what your tickets cover, or wait for
+your next card, if you'd rather not pay. See [Trust & Safety](Trust-and-Safety#what-it-can-do)
+for the wider guarantee this sits under.
 
 ## Contests (`--contests`)
 
@@ -466,8 +488,10 @@ what *is* restricted to the server's own machine.
   believing all six were still attached.
 - **Video** — first-frame / first+last / multi-reference shots; pick reference images straight
   from your own gallery (badged `@image1…`, removable, hover to preview); typing `@image1` in
-  the prompt turns into a chip; model + duration + audio; live cost shows **FREE + how many
-  video cards you have left** when a card covers it.
+  the prompt turns into a chip; model + duration + audio; live cost shows **FREE + "uses N of
+  H cards"** when a card covers it — and when it doesn't (a longer clip than your tickets
+  cover), it says no card is used and shows the full price, which Generate then spends if you
+  click. See [Free cards and videos](#free-cards-and-videos).
   Multi-Reference keeps its picks in their own bank, and First Frame / First & Last have
   nowhere to display them — so leaving Multi-Reference empties those slots on screen. It used
   to happen wordlessly, and worst of all when you hadn't asked for it: Multi-Reference only

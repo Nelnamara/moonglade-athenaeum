@@ -761,6 +761,9 @@ body.privacy-blur .mg-gallery-picker .mg-pk-cell:hover img {
   font-size: 11px;
   color: var(--overlay0, #6a6088);
 }
+.cost-badge[data-short] .mgc-sub {
+  color: inherit;
+}
 .cost-badge.compact .mgc-sub {
   display: inline;
   margin: 0;

@@ -541,17 +541,88 @@ export const shotPayload = (entry, project, imgSrc) => {
 export const PRICE_FIELDS = ["mode", "images", "video_refs", "duration", "quality", "generate_audio", "audio_language"];
 export const priceFingerprint = (payload) => JSON.stringify(PRICE_FIELDS.map((k) => payload[k]));
 
-// {free,paid,credits,unknown} over a list of /api/price responses (nulls = failed/unknown
-// price checks, counted honestly rather than as a false "0 credits"). Shared verbatim by
-// batchGenerate's confirm dialog and the toolbar's standing cost-to-finish pill so there is
-// exactly one place this math lives.
-export const tallyPrices = (prices) => {
-  let free = 0, paid = 0, credits = 0, unknown = 0;
+// ---- multi-ticket free cards (issue #15) ----
+// /api/price's `free` is the server's card_covers() verdict for ONE job priced alone: a
+// card matched AND the tickets held cover that job's consumeAmount. Two honesty problems
+// remain on the client side, both handled here so every Loom surface reads one answer:
+//  (a) SHORT: a card matched but held < needed (`card_short`, with `cards_held` /
+//      `cards_needed` / `card_name` alongside). OWNER RULING: the app still spends -- the
+//      site does the same -- but nothing is attached and the FULL price is charged, so the
+//      confirm must say exactly that and never read as partial application.
+//  (b) POOL: each shot is priced independently against the SAME ticket pool, so a batch of
+//      three 15s shots (3 tickets each) against 5 held prices as three "free" shots when
+//      only the first is really funded. tallyPrices below spends the pool per template in
+//      submission order and reclassifies the overflow as paid at full price -- so a "will
+//      spend" shot is called out BEFORE the confirm, not discovered on the invoice.
+
+// True when the price result is the SHORT case: matched, not covered. `card_short` is the
+// server's own flag; the held/needed comparison is only a fallback for a response that
+// carries the counts but predates the flag, and it can never widen coverage -- `free`
+// (the server's card_covers) is checked first and stays authoritative.
+export const priceIsShort = (pr) => {
+  if (!pr || pr.free) return false;
+  if (pr.card_short === true) return true;
+  const need = Number(pr.cards_needed), held = Number(pr.cards_held);
+  return Number.isFinite(need) && Number.isFinite(held) && held < need;
+};
+
+// The one honest sentence for the SHORT case -- the client twin of moonglade_backup.py's
+// card_short_note(): nothing is attached, the FULL price is charged. `subject` names the
+// job in the caller's own words ("this 15s shot", "this").
+export const shortSpendLine = (pr, subject = "this") => {
+  const need = Math.max(1, Number(pr && pr.cards_needed) || 1);
+  const held = (pr && pr.cards_held != null && Number.isFinite(Number(pr.cards_held))) ? Number(pr.cards_held) : "?";
+  const name = (pr && pr.card_name) ? `${pr.card_name} ` : "";
+  const tail = (pr && pr.cost != null)
+    ? `It will spend the full ~${Number(pr.cost).toLocaleString()} credits.`
+    : "It will spend the full credit price.";
+  return `You hold ${held} of the ${need} free ${name}cards ${subject} needs — not enough, so no card is used. ${tail}`;
+};
+
+// Template key a free result draws its tickets from: the server's card_template when it
+// sends one, else the card's display name. Null = the response predates both fields (or is
+// not free), so the pool cannot be tracked and the server's own verdict stands.
+const cardPoolKey = (pr) => (pr && (pr.card_template || pr.card_name)) || null;
+
+// {free,paid,credits,unknown,overflow,pools} over a list of /api/price responses IN
+// SUBMISSION ORDER (nulls = failed/unknown price checks, counted honestly rather than as a
+// false "0 credits"). Template-aware: a shot the server priced free is only counted free
+// while its template's held tickets still fund it; once the pool runs dry the rest of that
+// template's shots are `overflow` -- counted as PAID at their full price, because that is
+// what the site charges when the card comes up short at submit time. `pools` is
+// {key: {name, held, needed}} for the confirm dialog to explain the shortfall.
+export const tallyPricesDetailed = (prices) => {
+  let free = 0, paid = 0, credits = 0, unknown = 0, overflow = 0;
+  const pools = {};
   prices.forEach((pr) => {
-    if (pr && pr.free) free++;
+    if (pr && pr.free) {
+      const key = cardPoolKey(pr);
+      const need = Math.max(1, Number(pr.cards_needed) || 1);
+      const held = Number(pr.cards_held);
+      if (key && Number.isFinite(held)) {
+        const pool = pools[key] || (pools[key] = { name: pr.card_name || key, held, needed: 0, left: held });
+        pool.needed += need;
+        if (pool.left >= need) { pool.left -= need; free++; return; }
+        // Pool exhausted: the site attaches nothing and charges full price for this one.
+        overflow++;
+        if (pr.cost != null) { paid++; credits += pr.cost; } else unknown++;
+        return;
+      }
+      free++;                       // no pool info to track against -- the server's verdict stands
+    }
     else if (pr && pr.cost != null) { paid++; credits += pr.cost; }
     else unknown++;
   });
+  Object.values(pools).forEach((p) => { delete p.left; });
+  return { free, paid, credits, unknown, overflow, pools };
+};
+
+// {free,paid,credits,unknown} -- the four-bucket shape every existing caller consumes
+// (batchGenerate's dialog, the toolbar's standing cost-to-finish pill, the per-shot
+// previews). Same pool-aware math as tallyPricesDetailed, minus the explanatory fields, so
+// there is exactly one place this math lives.
+export const tallyPrices = (prices) => {
+  const { free, paid, credits, unknown } = tallyPricesDetailed(prices);
   return { free, paid, credits, unknown };
 };
 
