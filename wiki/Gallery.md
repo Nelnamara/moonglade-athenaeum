@@ -115,6 +115,20 @@ images and videos with the arrow keys without leaving the overlay.
   metadata (incl. negative + clip-skip), Copy Prompt, **Find Similar (model)** — a filter
   link to every image from the same model — View Batch, Edit Prompt. Keys: `←` `→`
   prev-next, **`Esc` / `↑` back to gallery**, `F` focus mode.
+
+  The facts list shows **the whole generation record**, not just the recipe: alongside
+  prompt, seed, steps, sampler, CFG, model and LoRAs you'll see the inference profile
+  (quality mode), quality-tag prefix, prompt-helper state, control nets, priority, how
+  many seconds the render took and on which backend, the run's started / ended
+  timestamps, retry count, and the moderation result; a video adds its mode and model.
+  A row is only shown when the run actually recorded it. **A `—` is honest, not a
+  hole:** some models (Tsubaki.2 and other AuraFlow models) run on baked-in defaults and
+  don't report a sampler or CFG — their step count is filled from the model's own preset,
+  and the fields the model genuinely doesn't have stay blank. If your *older* pictures
+  show fewer of these rows, run the one-time
+  `--backfill-full-meta --with-surface` pass described in [Backing up](Backing-Up).
+  **LINEAGE** shows where a derived picture came from — its source image and whether it
+  was an edit, an upscale, or turned into a video.
 - **✧ Similar** — lookalikes by *eye* rather than by model, and a different control from
   *Find Similar (model)* above: right-click any image card, or **✧ Similar** in the
   lightbox, for the 48 closest images in your catalog. Images only. Needs the optional
