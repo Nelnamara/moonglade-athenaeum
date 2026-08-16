@@ -5,6 +5,7 @@ import CostBadge from "./CostBadge.jsx";
 import {
   MODELS, MODEL_VMODES, MODEL_MAXDUR, MODE_LBL, MODE_PH, CHANNEL_CAP,
   friendlyGenErr, refItem, primaryBank, setPrimaryBank, buildPayload, hasAnyRef,
+  priceKey, canSubmit, PRICE_FETCH_TIMEOUT_MS,
   applyMode as applyModeState,
   applyModelGating as gateModelState,
   applySetRefs as applySetRefsState,
@@ -72,7 +73,14 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     modeNote: "",
     rendering: false,
     hostBusy: false,
+    // The price verdict's IDENTITY (videoDrawerCore.canSubmit reads exactly this shape): settled
+    // = the badge shows the verdict for pricedKey; pricedKey = priceKey() of the payload that was
+    // priced; pendingTimer = a debCost re-price is scheduled and not yet fired. Go is disabled
+    // unless the payload it would submit has this same key -- state alone can't say that.
+    // Seeded once below: the badge's initial idle hint IS the verdict for the initial empty form.
+    price: null,
   });
+  if (!st.current.price) st.current.price = { settled: true, pricedKey: priceKey(buildPayload(st.current, "")), pendingTimer: false };
   const [, force] = useState(0);
   const rerender = useCallback(() => force((n) => n + 1), []);
 
@@ -300,30 +308,83 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   const payload = () => buildPayload(st.current, promptText());
   const flfMissingStart = () => flfMissingStartOf(st.current);
 
-  const debCost = () => {
+  const debCost = (force) => {
+    // SHORT-CIRCUIT when nothing that prices has changed: if the payload's price identity
+    // equals the SETTLED key, the quote on the badge is still exactly right, so leave it (and
+    // Go) alone. This is what makes a prompt/negative keystroke harmless -- those fields are
+    // outside priceKey ("never prices"), yet their handlers call debCost, and before this every
+    // typing pause blanked the badge, disabled Generate for 250ms+RTT, discarded any in-flight
+    // quote, and re-POSTed /api/price (three PixAI calls) for a byte-identical payload (review
+    // 2026-08-16). Fixing it HERE, at the mechanism, covers every non-pricing caller, present
+    // and future, instead of auditing handlers one by one. Un-settled/pending states still
+    // fall through so a genuine re-price is never suppressed.
+    //
+    // `force` bypasses the short-circuit for the ONE case where the payload is identical but the
+    // verdict is stale anyway: right after a submit debited the tickets. Identity-by-payload
+    // cannot see a balance change, so the post-submit re-price must not be swallowed here.
+    const pr = st.current.price;
+    if (!force && pr && pr.settled && pr.pricedKey != null && !pr.pendingTimer
+        && pr.pricedKey === priceKey(buildPayload(st.current, ""))) {
+      return;
+    }
+    // Blank the number FIRST, synchronously (mirrors useGenerate's refreshPrice): an old quote
+    // next to new settings is the one thing worse than no quote. Before this, setChecking only
+    // ran 250ms later inside costNow, so a settled FREE for 5s stayed on the badge -- and Go
+    // stayed live -- for the debounce plus one RTT after the user picked 15s. Dropping the
+    // verdict identity here (settled=false, pendingTimer=true) is what disables Go; bumping
+    // costSeq drops any answer already in flight, since it was priced off the payload that just
+    // stopped being true. Every debCost caller repaints, so canGo re-reads this on the next render.
+    const cost = costRef.current;
+    if (cost && cost.setChecking) cost.setChecking();
+    st.current.price = { settled: false, pricedKey: null, pendingTimer: true };
+    costSeq.current++;
     clearTimeout(costTimer.current);
     costTimer.current = setTimeout(costNow, 250);
+    rerender();
   };
   // The HOST half of CostBadge's contract: owns the /api/price call, the 250ms debounce, and the
-  // _costSeq stale-response guard; the badge owns every state's wording/colour.
+  // _costSeq stale-response guard; the badge owns every state's wording/colour. It is ALSO the
+  // only writer of a settled price identity: every exit records priceKey(p) for the payload it
+  // just judged (the idle hints are verdicts too -- "nothing to price" keeps Go live so its own
+  // "Pick a source image first" error stays reachable; doGenerate refuses those before any spend).
   const costNow = () => {
+    // The timer has FIRED: clear pendingTimer before anything can bail, or an early return
+    // (no badge ref) leaves {pendingTimer:true} forever and canSubmit never passes (review).
+    st.current.price = { settled: false, pricedKey: null, pendingTimer: false };
     const cost = costRef.current;
     if (!cost) return;
     const s = st.current, p = payload();
+    const settle = (key) => { st.current.price = { settled: true, pricedKey: key, pendingTimer: false }; rerender(); };
     // Mode-dependent idle label is delivered through clear()'s one-shot hint override (the badge
     // has no setHint -- the idle state shows note||hint, and clear(h) sets that h).
     const idleHint = (s.mode === "r2v") ? "Pick at least one reference to see the cost." : "Pick a source image to see the cost.";
-    if (!hasAnyRef(p)) { setWarn(""); cost.clear(idleHint); return; }
-    if (flfMissingStart()) { setWarn(""); cost.clear("Pick a Start Frame — the End Frame alone can’t drive First & Last."); return; }
+    if (!hasAnyRef(p)) { setWarn(""); cost.clear(idleHint); settle(priceKey(p)); return; }
+    if (flfMissingStart()) { setWarn(""); cost.clear("Pick a Start Frame — the End Frame alone can’t drive First & Last."); settle(priceKey(p)); return; }
     // v4.0 full is ~2.5x Lite (14k/s -> 210k for a 15s clip). The badge shows `warn` only in the
     // `paid` state; the red (not amber) colour is re-asserted by gen-drawer.css's own override.
     setWarn(p.video_model === "v4.0" ? "V4.0 full — ~2.5× Lite" : "");
     cost.setChecking();
     const mine = ++costSeq.current;
-    fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) })
+    // The identity is recorded ONLY under the costSeq guard, off the SAME p that was priced. A
+    // failed check settles too: the badge's red "couldn't verify — may spend" IS this payload's
+    // verdict (same call the image drawer makes), whereas a verdict for a different payload is
+    // exactly what canSubmit refuses.
+    // BOUNDED: Go is hard-gated on this fetch settling, and a HUNG request (transport stall --
+    // a LAN tablet dropping Wi-Fi mid-request) fires neither .then nor .catch, so settle()
+    // never ran, canSubmit stayed false forever, and the badge sat on a muted "Checking cost…"
+    // with no error and no way out short of changing a priced field (review 2026-08-16).
+    // Before the identity gate a hung price left Go LIVE (fail-open); the gate made it
+    // fail-silent-closed. An abort after PRICE_FETCH_TIMEOUT_MS rejects into the existing
+    // .catch, which already paints the red "couldn't verify — may spend" and settles, so the
+    // state machine reaches its documented error verdict and Go returns to its pre-gate,
+    // fail-closed-but-live behaviour. The server's own PixAI calls carry timeouts (30s/60s),
+    // so this only ever fires on a browser<->server stall.
+    const ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    const abortTimer = ctrl ? setTimeout(() => ctrl.abort(), PRICE_FETCH_TIMEOUT_MS) : 0;
+    fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p), signal: ctrl ? ctrl.signal : undefined })
       .then((r) => r.json())
-      .then((d) => { if (mine === costSeq.current && costRef.current) costRef.current.setPrice(d); })
-      .catch(() => { if (mine === costSeq.current && costRef.current) costRef.current.setPrice(null); });
+      .then((d) => { clearTimeout(abortTimer); if (mine === costSeq.current && costRef.current) { costRef.current.setPrice(d); settle(priceKey(p)); } })
+      .catch(() => { clearTimeout(abortTimer); if (mine === costSeq.current && costRef.current) { costRef.current.setPrice(null); settle(priceKey(p)); } });
   };
 
   // ---- submit -> poll -> result (concurrent; each submission its own line + poll loop) --------
@@ -342,6 +403,24 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     }
     if (flfMissingStart()) {
       pushLine({ kind: "error", text: "Pick a Start Frame first — the End Frame alone can’t drive First & Last." });
+      return;
+    }
+    // PAYLOAD IDENTITY gate (the button is already disabled on it via canGo; this is the click
+    // that slips through a stale render). The quote on the badge must have been priced off THIS
+    // payload -- a settled FREE for 5s must never carry a 15s submit, and a quality/camera change
+    // must not ride a price it never saw. Never a silent drop: say so and re-price.
+    if (!canSubmit(s.price, p)) {
+      pushLine({ kind: "status", text: "Re-checking the cost… try again when the badge settles." });
+      // Only kick a NEW re-price when nothing is already in flight for this payload. Calling
+      // debCost() unconditionally here bumped costSeq (discarding a quote about to settle) and
+      // restarted the debounce, so fast repeated clicks could keep the badge from ever settling
+      // (review: refusal-path starvation). If a check is pending, just refuse and let it land.
+      // A check is "in flight" when the debounce timer is pending or a fetch is out
+      // (unsettled with no key). In both cases the answer for THIS payload is already
+      // coming -- don't discard it. Otherwise (settled-but-stale key) re-price.
+      const pr = s.price || {};
+      const checkInFlight = !!pr.pendingTimer || (!pr.settled && pr.pricedKey == null);
+      if (!checkInFlight) debCost();
       return;
     }
     const id = pushLine({ kind: "status", moon: true, text: "Submitting…" });
@@ -364,6 +443,14 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
         }
         emit("mg-submit", { task_id: d.task_id, payload: p });
         updateLine(id, { kind: "status", moon: true, text: "Queued — running…" });
+        // The submit just DEBITED tickets, so the settled verdict is stale even though the
+        // payload is byte-identical -- identity-by-payload cannot see a balance change caused
+        // by the drawer's own submit. Without this, a second click on the unchanged form passed
+        // canSubmit on the same key and submitted under a FREE badge for a clip the server now
+        // found SHORT and charged in full (review: post-submit stale FREE, the exact #15 shape).
+        // FORCED: the payload is byte-identical to the settled key, so an unforced debCost would
+        // short-circuit as "nothing changed" -- but the balance did.
+        debCost(true);
         poll(d.task_id, id);
       })
       .catch(() => { unlock(); updateLine(id, { kind: "error", text: "network error", moon: false }); emit("mg-error", { error: "network error" }); });
@@ -490,7 +577,11 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   const maxDur = MODEL_MAXDUR[s.model] || 10;
   const chosenModel = MODELS.find((m) => m.value === s.model);
   const isR2v = s.mode === "r2v";
-  const canGo = !s.hostBusy && !s.rendering;
+  // Go is DISABLED (not awaited) until the badge's settled verdict is for the payload this form
+  // would submit right now -- an await here would add PixAI RTTs after the click and land after
+  // the rendering latch, a double-submit window. Prompt text is outside priceKey, so the payload
+  // is keyed off the form state alone here (no DOM read in render).
+  const canGo = !s.hostBusy && !s.rendering && canSubmit(s.price, buildPayload(s, ""));
 
   const SEG = [["i2v", "First Frame"], ["flf", "First & Last Frames"], ["r2v", "Multi-Reference"]];
 
@@ -630,7 +721,10 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       <div className="mgd-row">
         <div className="mgd-cam-wrap">
           <div className="mgd-lbl">Camera</div>
-          <select className="mgd-sel mgd-cam" value={s.camera} onChange={(e) => { st.current.camera = e.target.value; rerender(); }}>
+          {/* Camera and quality both ride the priced payload (i2vPro.cameraMovement / .mode), so
+              each change re-prices like every other priced field -- without it a settled quote
+              sat next to a payload it was never for, with no re-check pending at all. */}
+          <select className="mgd-sel mgd-cam" value={s.camera} onChange={(e) => { st.current.camera = e.target.value; rerender(); debCost(); }}>
             <option value="unset">Unset</option>
             <option value="horizontal">Side-to-side move</option>
             <option value="vertical-pan">Vertical Pan</option>
@@ -642,7 +736,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
         </div>
         <div className="mgd-quality-wrap">
           <div className="mgd-lbl">Basic / Professional</div>
-          <select className="mgd-sel mgd-quality" value={s.quality} onChange={(e) => { st.current.quality = e.target.value; rerender(); }}>
+          <select className="mgd-sel mgd-quality" value={s.quality} onChange={(e) => { st.current.quality = e.target.value; rerender(); debCost(); }}>
             <option value="basic">Basic</option>
             <option value="professional">Professional</option>
           </select>

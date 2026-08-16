@@ -8132,7 +8132,11 @@ def run_generate_video(args):
             i2v.get("model"), i2v.get("mode"), i2v.get("duration"),
             "  +audio" if i2v.get("generateAudio") else "",
             "  (first/last-frame)" if i2v.get("tailMediaId") else ""))
-        print("  A V4.0 5s clip costs ~27,500 credits. Re-run with --confirm to submit.")
+        # No hardcoded reference price here: the line below prints THIS clip's real cost from
+        # /task-price (and the card verdict for it). A fixed "a 5s clip costs ~27,500" used to
+        # sit right above the true "~82,500" for a 15s clip -- two numbers on one screen for
+        # one spend (found running the preview live, 2026-08-16).
+        print("  Re-run with --confirm to submit.")
         _preview_card_note(args, params)
         return {"submitted": False}
 
@@ -9700,13 +9704,23 @@ def _target_model_id(parameters):
                or (parameters.get("chat") or {}).get("modelId") or "").strip()
 
 
+# The /kaisuuken/check protocol version the site sends. 1 (or omitted) = single-ticket-only
+# matcher; 2 = multi-ticket, returns consumeAmount. Named so a future bump is one edit.
+_KAISUUKEN_CHECK_VERSION = 2
+
+
 def match_kaisuuken(session, parameters, enrich=False, raise_on_error=False):
-    """POST /v2/kaisuuken/check with a generation's `parameters` and return the single
-    nearest-expiry matching TICKET as {id, expiresAt, templateId, total} -- or None when
-    no card matches. READ-ONLY: this only *checks*; the card is consumed later, when the
-    task is submitted with the returned id attached. Fails soft (returns None) by default
-    -- fine for every read-only/preview/display caller, where a glitched check should not
-    block the UI.
+    """POST /v2/kaisuuken/check (protocol version 2, see _KAISUUKEN_CHECK_VERSION) with a
+    generation's `parameters` and return the best matching TICKET as
+      {id, expiresAt, templateId, total, consumeAmount, covered, balance_unknown, name?}
+    -- or None when no card matches. `total` = tickets HELD on that template (int, or None
+    when the balance could not be read); `consumeAmount` = tickets this job COSTS (>=1);
+    `covered` = the ONE coverage verdict every caller reads via card_covers(); `balance_unknown`
+    tells a not-covered result apart from a genuinely short one so surfaces word it honestly.
+    Selection is coverage-first, then model preference (enrich), then nearest expiry.
+    READ-ONLY: this only *checks*; the card is consumed later, when the task is submitted with
+    the returned id attached. Fails soft (returns None) by default -- fine for every
+    read-only/preview/display caller, where a glitched check should not block the UI.
 
     `raise_on_error=True` re-raises instead of swallowing the failure into None. The one
     caller that needs this is `_apply_kaisuuken`'s spend-time check: there, a transient
@@ -9721,8 +9735,16 @@ def match_kaisuuken(session, parameters, enrich=False, raise_on_error=False):
     if not parameters:
         return None
     try:
+        # `version: 2` is load-bearing (issue #15, live-verified 2026-08-16). Without it PixAI
+        # runs its v1 matcher, which knows only single-ticket cards and answers `matches: []`
+        # for any i2vPro duration >= 10 -- so every >5s video went out card-less at full price
+        # for as long as this app existed. v2 (the site's own useKaisuukenMatch shape) returns
+        # the multi-ticket match plus `consumeAmount` = tickets this job COSTS. NOTE the server
+        # does NOT filter by balance: a 15s job comes back matched even when held < needed, so
+        # coverage is decided HERE (see `covered` below), the one place every caller reads it.
         data = _rest_post(session, "/kaisuuken/check",
-                          {"type": "generation-task", "parameters": parameters}) or {}
+                          {"type": "generation-task", "parameters": parameters,
+                           "version": _KAISUUKEN_CHECK_VERSION}) or {}
     except (PixAIError, ValueError):
         if raise_on_error:
             raise
@@ -9731,12 +9753,56 @@ def match_kaisuuken(session, parameters, enrich=False, raise_on_error=False):
     if not matches:
         return None
     by_tid = {c.get("template_id"): c for c in list_kaisuukens(session)} if enrich else {}
+    # Per-template need/held/covered, computed ONCE per template (not re-derived per ticket
+    # inside the expiry loop) and parsed defensively: a null/0/"2" consumeAmount must never
+    # collapse into "costs nothing" (0 -> always covered) or a TypeError inside the spend
+    # path. Absent consumeAmount is the v1 semantic: one job, one ticket.
+    #
+    # `held` comes from the match's OWN `total`, else (when enriched) the summary count for
+    # that template, else None = UNKNOWN. It deliberately does NOT fall back to the response's
+    # top-level `total`: that scalar is the SUM across all matched templates (the repo's own
+    # _TWO_CARDS fixture: 17 + 5 = 22), so using it credited every template with the whole
+    # pool, let a 5-held template read as covering a 6-ticket job, and -- because both then
+    # landed in covered_pool -- let nearest-expiry pick the SHORT one over the 17-held one,
+    # defeating the coverage-first ordering below (review 2026-08-16, reproduced).
+    def _facts(mt):
+        try:
+            need = int(mt.get("consumeAmount") or 1)
+        except (TypeError, ValueError):
+            need = 1
+        need = max(need, 1)
+        held = None
+        raw_held = mt.get("total")
+        if raw_held is None and enrich:               # summary count as a second opinion
+            raw_held = (by_tid.get(mt.get("templateId")) or {}).get("count")
+        if raw_held is not None:
+            try:
+                held = int(raw_held)
+            except (TypeError, ValueError):
+                held = None
+        # Unknown balance is a distinct state, not "short": for a 1-ticket job assume covered
+        # (not attaching when actually covered loses real credits, and 1 ticket is the v1
+        # world that always worked). For ANY multi-ticket job fail CLOSED -- the general rule,
+        # not a video special-case, so a future multi-ticket non-video card gets the same
+        # protection. Being wrong here costs the full clip price either way; fail-closed is
+        # chosen over an unverified under-funded attach, and callers word it as UNKNOWN
+        # ("couldn't read your balance"), never as "not enough" (which asserts an unread fact).
+        unknown = held is None
+        covered = (need <= 1) if unknown else (held >= need)
+        return need, held, covered, unknown
+
+    facts = {id(mt): _facts(mt) for mt in matches}
+    # (A0) Coverage FIRST, then preference, then nearest expiry: a short template (2 held,
+    # needs 3) must never shadow one that covers (9 held) just because it expires sooner --
+    # the old order (nearest-expiry across the whole pool) did exactly that. If NO template
+    # covers, fall back to the full pool so the honest short message can still name a card.
+    covered_pool = [mt for mt in matches if facts[id(mt)][2]]
+    pool = covered_pool or matches
     # (A) When several cards are eligible, prefer the one whose model IS this generation's
     # model; fall back to the full set if none match (or we didn't enrich).
     want = _target_model_id(parameters)
-    pool = matches
-    if enrich and want and len(matches) > 1:
-        preferred = [mt for mt in matches
+    if enrich and want and len(pool) > 1:
+        preferred = [mt for mt in pool
                      if str((by_tid.get(mt.get("templateId")) or {}).get("model_version_id") or "") == want]
         if preferred:
             pool = preferred
@@ -9749,14 +9815,66 @@ def match_kaisuuken(session, parameters, enrich=False, raise_on_error=False):
             # ISO8601 sorts chronologically; treat never-expire (null) as far future.
             exp = k.get("expiresAt") or "9999-12-31"
             if best is None or exp < best["_exp"]:
+                need, held, covered, unknown = facts[id(mt)]
                 best = {"id": kid, "expiresAt": k.get("expiresAt"),
-                        "templateId": mt.get("templateId"), "total": mt.get("total"),
+                        "templateId": mt.get("templateId"), "total": held,
+                        "consumeAmount": need, "covered": covered,
+                        "balance_unknown": unknown,
                         "_exp": exp}
     if best:
         best.pop("_exp", None)
         if enrich:                                     # (B) name the card for honest UI
             best["name"] = (by_tid.get(best["templateId"]) or {}).get("name")
     return best
+
+
+def card_covers(best):
+    """THE coverage predicate every caller reads -- CLI preview, _apply_kaisuuken, /api/price.
+    True iff a card matched AND it covers the whole job (held >= consumeAmount). Defaults to
+    covered when the result predates the field (older test stubs / v1 responses), which is the
+    v1 one-job-one-ticket semantic. One home so the three surfaces can never disagree -- the
+    CLI preview said FREE while the apply path charged full price precisely because each
+    derived 'free' on its own (issue #15)."""
+    return bool(best) and bool(best.get("covered", True))
+
+
+def _card_uses_note(best):
+    """The ONE 'uses N of H cards; ' phrase for a COVERED multi-ticket job (empty string for a
+    1-ticket job, so an ordinary image reads 'covers this' on every surface exactly as before).
+    Shared by the CLI preview and the spend log so they can't drift (they did)."""
+    b = best or {}
+    try:
+        need = int(b.get("consumeAmount") or 1)
+    except (TypeError, ValueError):
+        need = 1
+    if need <= 1:
+        return ""
+    held = b.get("total")
+    return "uses {} of {} cards; ".format(need, held if held is not None else "?")
+
+
+def card_short_note(best, cost=None):
+    """The one honest sentence for the NOT-COVERED-but-matched case. Wording is deliberate:
+    nothing is attached and the FULL price is charged, so it must never read as partial
+    application ('covers 2 of 3, the rest costs N' was rejected in review for exactly that).
+    Two sub-cases, told apart honestly (review 2026-08-16):
+      SHORT   -- the balance was read and it is < needed: "you hold 2 of the 3 ... not enough".
+      UNKNOWN -- the balance could NOT be read (no per-template total, no summary count) and the
+                 job needs >1 ticket, so we fail closed. This must NOT say "not enough" -- that
+                 asserts a fact nobody read; a user holding 9 tickets would be told they hold
+                 too few. It says the balance couldn't be read and no card will be attached.
+    `cost` = the full credit price if known."""
+    b = best or {}
+    need = int(b.get("consumeAmount") or 1)
+    held = b.get("total")
+    name = b.get("name") or "card"
+    tail = (" -- this costs the full ~{:,} credits".format(int(cost)) if cost is not None
+            else " -- this costs the full credit price")
+    if b.get("balance_unknown") or held is None:
+        return ("couldn't read how many {} tickets you hold (this needs {}), so no card will "
+                "be attached".format(name, need) + tail)
+    return ("you hold {} of the {} {} tickets this needs -- not enough, so no card is used"
+            .format(held, need, name) + tail)
 
 
 # GET /v2/task-price computes a generation's credit cost WITHOUT creating it (mirrors the
@@ -9796,7 +9914,12 @@ def price_task(session, params):
         return None
     try:
         data = _rest_get(session, "/task-price", params=q) or {}
-    except (PixAIError, ValueError):
+    except (PixAIError, requests.RequestException, ValueError):
+        # "Fails soft" has to mean EVERY way this call can fail (list_kaisuukens' own rule):
+        # _rest_get only converts a non-2xx into a PixAIError; a ConnectionError / ReadTimeout
+        # comes straight out of the raw session.get. This is called from _apply_kaisuuken's
+        # SHORT branch, INSIDE the spend path, purely to put a number in a sentence -- a network
+        # blip there used to escape and abort a confirmed submit with a raw traceback.
         return None
     ap = data.get("actualPrice")
     return int(ap) if ap is not None else None
@@ -10044,6 +10167,9 @@ def _apply_kaisuuken(session, params, args):
     web client. Precedence: explicit --kaisuuken-id > --no-card (skip) > auto-match via
     /v2/kaisuuken/check. Returns the attached id ('' if none). The card is only consumed
     when the task is actually submitted; this just picks the id. Logs what it did.
+    A card is attached ONLY when `card_covers(best)` -- a match that is SHORT (multi-ticket
+    video, held < consumeAmount) attaches nothing, prints `card_short_note`, and spends the
+    full price, exactly as the site does (owner ruling, issue #15).
 
     The auto-match check retries once on failure, then ABORTS (raises PixAIError) rather
     than falling through to "no card -> pay credits". match_kaisuuken's normal fail-soft
@@ -10085,12 +10211,28 @@ def _apply_kaisuuken(session, params, args):
         raise PixAIError(
             "Lost to the Void -- the free-card check didn't come back before submitting, "
             "so nothing was spent. Wait a moment and try again. ({})".format(check_err))
-    if best and best.get("id"):
+    if best and best.get("id") and card_covers(best):
+        # ONE singular kaisuukenId, even for a multi-ticket job (site-verified): the server
+        # debits consumeAmount tickets off that one template itself. Never a list.
         params["kaisuukenId"] = best["id"]
-        print("  free card matches ({}) -> attaching it; this costs 0 credits "
-              "(card expires {}).".format(best.get("name") or "card",
+        print("  free card matches ({}) -> attaching it; {}this costs 0 credits "
+              "(card expires {}).".format(best.get("name") or "card", _card_uses_note(best),
                                           (best.get("expiresAt") or "never")[:10]))
         return best["id"]
+    if best and best.get("id"):
+        # SHORT: matched, but held < needed. Owner ruling (issue #15): SPEND, matching the
+        # site -- attach nothing, say plainly that the FULL price is charged, then proceed.
+        # No refusal here; the honesty is the obligation. The cost lookup is diagnostic only
+        # -- it exists to put a number in the sentence -- so it is wrapped so that NOTHING it
+        # can raise ever aborts the submit it describes (price_task fails soft too, but this
+        # is the one place a cosmetic lookup sits inside the spend path, so it gets its own
+        # belt; review 2026-08-16). A missing number just drops from the wording.
+        try:
+            cost = price_task(session, params)
+        except Exception:                                  # noqa: BLE001 -- diagnostic, never fatal
+            cost = None
+        print("  " + card_short_note(best, cost) + ".")
+        return ""
     print("  no matching free card -> this will spend credits.")
     return ""
 
@@ -10111,18 +10253,44 @@ def _preview_card_note(args, params):
         return
     explicit = (getattr(args, "kaisuuken_id", "") or "").strip()
     if explicit:
-        print("A free card (--kaisuuken-id) will be attached on --confirm -> 0 credits.")
+        # An explicit id is FORCED: it is attached as given, with no coverage check on its
+        # template (review 2026-08-16 -- this used to promise "-> 0 credits" unconditionally,
+        # which for a multi-ticket clip on an under-funded template is a paid clip shown as
+        # free). Say plainly what is and isn't guaranteed.
+        print("A free card (--kaisuuken-id) will be attached on --confirm as given. Coverage "
+              "is NOT checked for a forced id: if that card's template holds fewer tickets "
+              "than this job needs, PixAI charges the full credit price (or refuses). Drop "
+              "--kaisuuken-id to let the auto-match pick a card that covers.")
         return
     try:
         session = _make_session(getattr(args, "token", None))
-        best = match_kaisuuken(session, params)
+        # enrich=True, same as _apply_kaisuuken: the preview must name the SAME template
+        # the spend will pick (model preference only applies when enriched), or the two
+        # could disagree about which card -- and whether it covers.
+        best = match_kaisuuken(session, params, enrich=True)
         price = price_task(session, params)
     except Exception:
-        return  # offline / no key -- stay silent, preview is still valid
-    if best and best.get("id"):
+        # Offline / no key: the preview is still valid, but a spend page must not go SILENT
+        # about cost (the web badge's "couldn't verify" rule). This used to just return,
+        # which -- once the stale hardcoded reference price above it was removed -- would
+        # have left a video preview with no cost line at all.
+        print("Couldn't verify the cost or free-card match right now (offline or no key) -- "
+              "with --confirm this MAY spend credits.")
+        return
+    # Three honest branches off the ONE predicate (card_covers). Before issue #15 this said
+    # FREE on any match -- with version:2 a short 15s clip now matches, and that would have
+    # promised FREE right before --confirm spent the full price.
+    if card_covers(best) and best.get("id"):
         saved = " (saves {})".format(_fmt(price)) if price else ""
-        print("FREE: a matching card covers this -- with --confirm it costs 0 credits{} "
-              "(card expires {}).".format(saved, (best.get("expiresAt") or "never")[:10]))
+        # "uses N of H cards" only when the job costs MORE than one ticket -- the same gate the
+        # web badge applies, so a 1-ticket image reads the same everywhere ("covers this",
+        # not "uses 1 of 16 cards"; review: CLI/badge wording drift).
+        uses = _card_uses_note(best)
+        print("FREE: {} covers this -- {}with --confirm it costs 0 credits{} "
+              "(card expires {}).".format(best.get("name") or "a matching card", uses, saved,
+                                          (best.get("expiresAt") or "never")[:10]))
+    elif best and best.get("id"):
+        print("NOT free -- " + card_short_note(best, price) + " with --confirm.")
     else:
         print("NO FREE CARD matches -- with --confirm this will cost {}.".format(_fmt(price)))
 
@@ -10138,7 +10306,9 @@ def run_cards(args):
         print("No free cards found (read-only; nothing was spent).")
         return {"cards": 0}
     print("Free-generation cards (kaisuuken) -- model-locked. Auto-applied on --confirm; a\n"
-          "matching card makes that generation cost 0 credits (use --no-card to opt out):\n")
+          "matching card makes that generation cost 0 credits (use --no-card to opt out).\n"
+          "Videos can need MORE THAN ONE ticket (a 15s clip needs 3): if you hold fewer than\n"
+          "the job needs, no card is used and it costs the FULL credit price.\n")
     total = 0
     for c in cards:
         total += int(c.get("count") or 0)
@@ -10146,8 +10316,10 @@ def run_cards(args):
         print("  {:>3}x  {:<22} {:<13} model={:<20} exp {}".format(
             c.get("count") or 0, c.get("name"), "[" + c["category"] + "]",
             model, str(c["expires"])[:10]))
-    print("\n{} free generations total. The matching card is attached automatically when you\n"
-          "generate on its model (nearest-expiry first):".format(total))
+    # "tickets", not "generations": a video ticket is one per 5 seconds, so 16 video tickets
+    # is 5 fifteen-second clips, not 16 (the header above says so; this line used to contradict it).
+    print("\n{} tickets total (one image or 5s of video each). The matching card is attached\n"
+          "automatically when you generate on its model (nearest-expiry first):".format(total))
     print("  Tsubaki.2 card  -> --generate         (default model already matches)")
     print("  Edit Pro card   -> --edit-image       (default model already matches)")
     print("  Reference Pro   -> --generate --model 1948514378441961474")

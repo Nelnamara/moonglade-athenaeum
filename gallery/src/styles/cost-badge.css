@@ -120,6 +120,10 @@
 }
 .cost-badge.compact:hover .mgc-tip { opacity: 1; transform: translateY(0); }
 .cost-badge .mgc-sub { display: block; margin-top: 2px; font-size: 11px; color: var(--overlay0, #6a6088); }
+/* card-short note (issue #15): the "you hold H of the N cards this needs" sentence rides in the
+   sub slot under the price; it is the point of the amber state, so it keeps the amber ink
+   rather than the muted expiry grey. */
+.cost-badge[data-short] .mgc-sub { color: inherit; }
 /* On one line in compact, so it needs its own separator — without the ::before the expiry
    butts straight against the label with no space at all (caught in the harness 2026-07-21).
    The block form gets its gap from the line break instead. No margin: the chip's own flex

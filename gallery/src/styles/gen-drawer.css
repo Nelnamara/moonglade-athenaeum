@@ -52,6 +52,14 @@
    consolidation. Host class + element + two attributes beats the badge's own rule on
    specificity. If red-vs-amber is ever settled the other way, DELETE this rule. */
 .gen-drawer .cost-badge[data-state="paid"][data-warn]{border-color:var(--red,#f38ba8);color:var(--red,#f38ba8);}
+/* ...EXCEPT the free-card SHORT state (issue #15). Short is a SETTLED paid price -- "you hold
+   2 of the 3 cards this needs, no card is used, full price" -- not a could-not-verify, and it
+   rides data-warn for the badge's amber treatment. The red rule above outranked the badge's
+   amber on specificity, so every real short badge (video is the only host where multi-ticket
+   short occurs, and it lives in this drawer) painted red -- identical to the error state,
+   collapsing the settled-vs-unverified distinction exactly where it matters (review
+   2026-08-16). Re-assert amber for short at higher specificity, after the red rule. */
+.gen-drawer .cost-badge[data-state="paid"][data-warn][data-short]{border-color:var(--peach,#fab387);color:var(--peach,#fab387);}
 .gen-drawer .cost-badge.mgd-cost{margin-top:10px;}
 /* Metallic spec: skin-aware accentMetal on the primary Generate action. Disabled (busy) is the
    MUTED state -- the metal stays and desaturates/darkens, never a flat opacity fade. */

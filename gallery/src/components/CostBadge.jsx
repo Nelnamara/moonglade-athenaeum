@@ -23,7 +23,13 @@ import "../styles/cost-badge.css";
      idle      not priced yet — nothing to price, or the server said so (`note`). Muted.
      checking  a price request is in flight. Muted. (Transient; hosts may skip it.)
      free      a free card (kaisuuken) covers it -> 0 credits spent. Emerald.
-     paid      settled credit cost, card or no card. Neutral, or amber via `warn`.
+     paid      settled credit cost, card or no card. Neutral, or amber via `warn` — and amber
+               for the SHORT case (issue #15): a card matched but the account holds fewer
+               tickets than this job needs, so NO card is attached and the FULL price is
+               charged, exactly like the site. The badge derives that note itself from the
+               response's cards_needed/cards_held (data-short="1"); hosts never hand-write
+               it, and their single-slot `warn` keeps its own place beside it. Amber, not red:
+               short is a SETTLED paid price, not a could-not-verify.
      error     could NOT verify — fetch failed, server errored, or the response carried
                neither a cost nor a note. RED, worded so a host reading it aloud still warns
                the user that generating may spend. Never silently neutral: the fail-closed
@@ -46,7 +52,8 @@ import "../styles/cost-badge.css";
                   hover billing tooltip) instead of the full-width bar. Purely presentational.
      cardLabel  — fallback name for the covering card when the server didn't send one.
      onCost     — called on every state push with the old mg-cost detail
-                  {state, settled, cost, free, cards, card_name, card_expires, text, raw}.
+                  {state, settled, cost, free, cards, card_name, card_expires, text, raw}
+                  plus card_short (true only on the paid-because-short case above).
      id / className / style — passed to the root (className is appended after "cost-badge").
    Imperative handle (a host sets data; the badge never goes and gets it):
      setPrice(resp) — feed the PARSED /api/price response. Pass null/undefined when the fetch
@@ -80,6 +87,27 @@ function expiryNote(v) {
   return { text: when, title: new Date(t).toLocaleString(), days };
 }
 
+// A finite non-negative integer from the /api/price card fields, or null when absent/junk.
+function cardCount(v) {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return (isFinite(n) && n >= 0) ? Math.floor(n) : null;
+}
+
+// The SHORT case (issue #15): the server matched a card but the account holds fewer tickets
+// than this job costs -> nothing is attached, the FULL price is charged. The server's
+// `card_short` flag (= matched and NOT card_covers) is THE verdict, and `free` (= card_covers)
+// stays authoritative the other way: a response is never short when the server said free.
+// This used to also re-derive held<needed as a "belt" that could override free:true -- but
+// cards_held/cards_needed and card_short shipped in the same commit (no response ever carried
+// the counts without the flag), and the belt made THIS badge disagree with the Loom's
+// priceIsShort (which defers to free) on the identical response: two spend surfaces, two
+// verdicts, one page (review 2026-08-16). One rule now, same as loom-core: server decides.
+function isShort(d) {
+  if (!d || d.free) return false;
+  return d.card_short === true;
+}
+
 // The setPrice branch logic, verbatim: resp === null/undefined means THE CHECK ITSELF FAILED
 // (fetch threw, JSON unparseable) — the could-not-verify state on purpose. A host that wants
 // "not priced yet" calls clear() instead. Conflating the two is the bug this exists to prevent.
@@ -87,7 +115,11 @@ function classify(resp) {
   const d = (resp && typeof resp === "object") ? resp : null;
   if (!d) return { state: "error", note: "", msg: "", raw: null };
   if (d.error) return { state: "error", note: "", msg: String(d.error), raw: d };
-  if (d.free) return { state: "free", note: "", msg: "", raw: d };
+  // `free` and `card_short` are mutually exclusive on the wire (free = card_covers, short =
+  // matched-and-not-covered), and isShort() defers to free -- so a free response renders free
+  // and a short one can never reach this branch. FREE while the submit charges was the exact
+  // bug of issue #15; the guard is the server verdict, read once, the same way loom-core reads it.
+  if (d.free && !isShort(d)) return { state: "free", note: "", msg: "", raw: d };
   // Checked BEFORE `note` so a response carrying both can never hide a real cost behind a hint.
   if (d.cost != null && isFinite(Number(d.cost))) return { state: "paid", note: "", msg: "", raw: d };
   if (d.note) return { state: "idle", note: String(d.note), msg: "", raw: d };
@@ -103,29 +135,55 @@ function build(view, props) {
   const d = raw || {};
   const warn = (props.warn || "").trim();
   const compact = !!props.compact;
-  let main = "", sub = null, title = "", val = "", lab = "", tip = "", dot = false;
+  let main = "", sub = null, title = "", val = "", lab = "", tip = "", dot = false, short = false;
+  // Ticket accounting from the response: `cards`/`cards_held` = tickets HELD, `cards_needed` =
+  // tickets this job COSTS (absent = 1, the one-job-one-ticket case every image is).
+  const heldN = cardCount(d.cards_held != null ? d.cards_held : d.cards);
+  const needN = cardCount(d.cards_needed);
   if (state === "free") {
     const card = d.card_name || (props.cardLabel || "").trim() || "a free card";
-    const leftN = (d.cards != null && isFinite(Number(d.cards))) ? fmt(d.cards) + " left" : "";
+    const leftN = (heldN != null) ? fmt(heldN) + " left" : "";
+    // Multi-ticket job (a >5s video): say how many of the held tickets it consumes. A 1-ticket
+    // job keeps the original "(N left)" so every image badge reads exactly as before.
+    const usesN = (needN != null && needN > 1)
+      ? "uses " + fmt(needN) + " of " + (heldN != null ? fmt(heldN) : "your") + " cards" : "";
     const savesN = (d.cost != null && isFinite(Number(d.cost))) ? fmt(d.cost) : "";
-    main = "🎫 FREE — " + card + " covers this" + (leftN ? " (" + leftN + ")" : "")
+    main = "🎫 FREE — " + card + " covers this"
+      + (usesN ? " — " + usesN : (leftN ? " (" + leftN + ")" : ""))
       + (savesN ? " · saves ~" + savesN + " credits" : "");
     sub = expiryNote(d.card_expires);
-    title = "A free card is applied automatically at submit — this generation spends 0 credits.";
+    title = usesN
+      ? "A free card is applied automatically at submit — this generation spends 0 credits and "
+        + usesN + "."
+      : "A free card is applied automatically at submit — this generation spends 0 credits.";
     val = "FREE";
-    lab = card + (leftN ? " · " + leftN : "");
+    lab = card + (usesN ? " · " + usesN : (leftN ? " · " + leftN : ""));
     tip = title + (savesN ? " Saves ~" + savesN + " credits." : "");
     if (sub) { tip += " Card " + sub.text + " — " + sub.title + "."; dot = sub.days <= 7; }
   } else if (state === "paid") {
     const n = Number(d.cost);
+    // Short (issue #15): a card matched but held < needed. Rendered as PAID at the full
+    // price with the amber warn treatment — nothing is attached, so no partial-application
+    // wording, ever. The note is derived HERE from the counts (hosts never hand-write it), and
+    // the host's single-slot `warn` keeps its prefix beside it. A settled zero can't be short.
+    short = (n !== 0) && isShort(d);
+    const shortNote = short
+      ? "You hold " + (heldN != null ? fmt(heldN) : "?") + " of the "
+        + (needN != null ? fmt(needN) : "?") + " cards this needs — not enough, so no card "
+        + "is used. Costs the full ~" + fmt(n) + " credits."
+      : "";
     // A settled ZERO is real (nothing to spend) but is NOT the free-card state — it must not
     // borrow its wording or its emerald.
     main = (n === 0) ? "0 credits — this spends nothing"
-      : (warn ? "⚠ " + warn + " · " : "") + "≈ " + fmt(n) + " credits";
+      : (warn ? "⚠ " + warn + " · " : (short ? "⚠ " : "")) + "≈ " + fmt(n) + " credits";
     title = (n === 0) ? "Priced at zero credits. No free card was involved."
-      : "No free card covers this — generating spends credits.";
-    val = (n === 0) ? "0" : (warn ? "⚠ " : "") + "≈ " + fmt(n);
-    lab = (n === 0) ? "credits — spends nothing" : "credits";
+      : short ? shortNote
+        : "No free card covers this — generating spends credits.";
+    // The short sentence takes the note line under the price (block form); the chip has no
+    // room for it, so there it rides in the label + billing tooltip instead.
+    if (short && !compact) sub = { text: shortNote, title: shortNote, days: null };
+    val = (n === 0) ? "0" : (warn || short ? "⚠ " : "") + "≈ " + fmt(n);
+    lab = (n === 0) ? "credits — spends nothing" : short ? "credits · card short" : "credits";
     tip = (n !== 0 && warn) ? "⚠ " + warn + ". " + title : title;
   } else if (state === "error") {
     main = "⚠ " + (msg || ERR_TEXT);
@@ -137,7 +195,7 @@ function build(view, props) {
     main = note || (props.hint || "").trim() || DEFAULT_HINT;
   }
   const text = main + (sub ? " · " + sub.text : "");
-  return { state, warn, compact, main, sub, title, val, lab, tip, dot, text, d };
+  return { state, warn, compact, short, main, sub, title, val, lab, tip, dot, text, d };
 }
 
 function detailOf(m) {
@@ -147,6 +205,7 @@ function detailOf(m) {
     settled: m.state === "free" || m.state === "paid",
     cost: (d.cost != null && isFinite(Number(d.cost))) ? Number(d.cost) : null,
     free: m.state === "free",
+    card_short: !!m.short,
     cards: d.cards != null ? d.cards : null,
     card_name: d.card_name != null ? d.card_name : null,
     card_expires: d.card_expires != null ? d.card_expires : null,
@@ -198,7 +257,10 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
 
   const m = build(view, { hint, warn, compact, cardLabel });
   mRef.current = m;
-  const dataWarn = (m.state === "paid" && m.warn) ? "1" : undefined;
+  // Short borrows the amber warn treatment (settled paid, flagged) and adds its own attribute so
+  // a host or test can tell "card short" from "host warned" without parsing the sentence.
+  const dataWarn = (m.state === "paid" && (m.warn || m.short)) ? "1" : undefined;
+  const dataShort = (m.state === "paid" && m.short) ? "1" : undefined;
   // The chip's billing tooltip REPLACES the native title (two tooltips on one hover
   // otherwise); the block form keeps the native title exactly as before.
   const nativeTitle = (m.title && !(m.compact && m.tip)) ? m.title : undefined;
@@ -210,6 +272,7 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
       className={"cost-badge" + (m.compact ? " compact" : "") + (className ? " " + className : "")}
       data-state={m.state}
       data-warn={dataWarn}
+      data-short={dataShort}
       role="status"
       aria-live="polite"
       title={nativeTitle}

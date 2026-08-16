@@ -185,15 +185,81 @@ var LoomBundle = (() => {
   };
   var PRICE_FIELDS = ["mode", "images", "video_refs", "duration", "quality", "generate_audio", "audio_language"];
   var priceFingerprint = (payload) => JSON.stringify(PRICE_FIELDS.map((k) => payload[k]));
-  var tallyPrices = (prices) => {
-    let free = 0, paid = 0, credits = 0, unknown = 0;
+  var priceIsShort = (pr) => {
+    if (!pr || pr.free) return false;
+    if (pr.card_short === true) return true;
+    const held = cardHeld(pr);
+    return held != null && held < cardNeed(pr);
+  };
+  var shortSpendLine = (pr, subject = "this") => {
+    const need = Math.max(1, Number(pr && pr.cards_needed) || 1);
+    const heldN = cardHeld(pr);
+    const name = pr && pr.card_name ? `${pr.card_name} ` : "";
+    const tail = pr && pr.cost != null ? `It will spend the full ~${Number(pr.cost).toLocaleString()} credits.` : "It will spend the full credit price.";
+    if (heldN == null || pr && pr.balance_unknown) {
+      return `Couldn't read how many free ${name}tickets you hold (${subject} needs ${need}), so no card will be attached. ${tail}`;
+    }
+    return `You hold ${heldN} of the ${need} free ${name}cards ${subject} needs \u2014 not enough, so no card is used. ${tail}`;
+  };
+  var cardHeld = (pr) => {
+    const v = pr && pr.cards_held;
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  var cardNeed = (pr) => {
+    const n = Number(pr && pr.cards_needed);
+    return Number.isFinite(n) && n >= 1 ? n : 1;
+  };
+  var cardPoolKey = (pr) => pr && (pr.card_template || pr.card_name) || null;
+  var tallyPricesDetailed = (prices) => {
+    let free = 0, paid = 0, credits = 0, unknown = 0, overflow = 0;
+    const pools = {};
+    const overflowIndexes = [];
     prices.forEach((pr) => {
-      if (pr && pr.free) free++;
-      else if (pr && pr.cost != null) {
+      if (!(pr && pr.free)) return;
+      const key = cardPoolKey(pr), held = cardHeld(pr);
+      if (!key || held == null) return;
+      const pool = pools[key] || (pools[key] = { name: pr.card_name || key, held, needed: 0, left: held });
+      if (held < pool.held) {
+        pool.held = held;
+        pool.left = held;
+      }
+    });
+    prices.forEach((pr, i) => {
+      if (pr && pr.free) {
+        const key = cardPoolKey(pr);
+        const need = cardNeed(pr);
+        const held = cardHeld(pr);
+        if (key && held != null) {
+          const pool = pools[key];
+          pool.needed += need;
+          if (pool.left >= need) {
+            pool.left -= need;
+            free++;
+            return;
+          }
+          overflow++;
+          overflowIndexes.push(i);
+          if (pr.cost != null) {
+            paid++;
+            credits += pr.cost;
+          } else unknown++;
+          return;
+        }
+        free++;
+      } else if (pr && pr.cost != null) {
         paid++;
         credits += pr.cost;
       } else unknown++;
     });
+    Object.values(pools).forEach((p) => {
+      delete p.left;
+    });
+    return { free, paid, credits, unknown, overflow, pools, overflowIndexes };
+  };
+  var tallyPrices = (prices) => {
+    const { free, paid, credits, unknown } = tallyPricesDetailed(prices);
     return { free, paid, credits, unknown };
   };
   var formatCostEstimate = ({ free = 0, paid = 0, credits = 0, unknown = 0, pending = 0 } = {}) => {
@@ -1970,11 +2036,20 @@ ${"=".repeat(48)}
     const when = days < 0 ? "expired" : days === 0 ? "expires today" : days === 1 ? "expires tomorrow" : "expires in " + days + " days";
     return { text: when, title: new Date(t).toLocaleString(), days };
   }
+  function cardCount(v) {
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    return isFinite(n) && n >= 0 ? Math.floor(n) : null;
+  }
+  function isShort(d) {
+    if (!d || d.free) return false;
+    return d.card_short === true;
+  }
   function classify(resp) {
     const d = resp && typeof resp === "object" ? resp : null;
     if (!d) return { state: "error", note: "", msg: "", raw: null };
     if (d.error) return { state: "error", note: "", msg: String(d.error), raw: d };
-    if (d.free) return { state: "free", note: "", msg: "", raw: d };
+    if (d.free && !isShort(d)) return { state: "free", note: "", msg: "", raw: d };
     if (d.cost != null && isFinite(Number(d.cost))) return { state: "paid", note: "", msg: "", raw: d };
     if (d.note) return { state: "idle", note: String(d.note), msg: "", raw: d };
     return { state: "error", note: "", msg: "", raw: d };
@@ -1984,16 +2059,19 @@ ${"=".repeat(48)}
     const d = raw || {};
     const warn = (props.warn || "").trim();
     const compact = !!props.compact;
-    let main = "", sub = null, title = "", val = "", lab = "", tip = "", dot = false;
+    let main = "", sub = null, title = "", val = "", lab = "", tip = "", dot = false, short = false;
+    const heldN = cardCount(d.cards_held != null ? d.cards_held : d.cards);
+    const needN = cardCount(d.cards_needed);
     if (state === "free") {
       const card = d.card_name || (props.cardLabel || "").trim() || "a free card";
-      const leftN = d.cards != null && isFinite(Number(d.cards)) ? fmt2(d.cards) + " left" : "";
+      const leftN = heldN != null ? fmt2(heldN) + " left" : "";
+      const usesN = needN != null && needN > 1 ? "uses " + fmt2(needN) + " of " + (heldN != null ? fmt2(heldN) : "your") + " cards" : "";
       const savesN = d.cost != null && isFinite(Number(d.cost)) ? fmt2(d.cost) : "";
-      main = "\u{1F3AB} FREE \u2014 " + card + " covers this" + (leftN ? " (" + leftN + ")" : "") + (savesN ? " \xB7 saves ~" + savesN + " credits" : "");
+      main = "\u{1F3AB} FREE \u2014 " + card + " covers this" + (usesN ? " \u2014 " + usesN : leftN ? " (" + leftN + ")" : "") + (savesN ? " \xB7 saves ~" + savesN + " credits" : "");
       sub = expiryNote(d.card_expires);
-      title = "A free card is applied automatically at submit \u2014 this generation spends 0 credits.";
+      title = usesN ? "A free card is applied automatically at submit \u2014 this generation spends 0 credits and " + usesN + "." : "A free card is applied automatically at submit \u2014 this generation spends 0 credits.";
       val = "FREE";
-      lab = card + (leftN ? " \xB7 " + leftN : "");
+      lab = card + (usesN ? " \xB7 " + usesN : leftN ? " \xB7 " + leftN : "");
       tip = title + (savesN ? " Saves ~" + savesN + " credits." : "");
       if (sub) {
         tip += " Card " + sub.text + " \u2014 " + sub.title + ".";
@@ -2001,10 +2079,13 @@ ${"=".repeat(48)}
       }
     } else if (state === "paid") {
       const n = Number(d.cost);
-      main = n === 0 ? "0 credits \u2014 this spends nothing" : (warn ? "\u26A0 " + warn + " \xB7 " : "") + "\u2248 " + fmt2(n) + " credits";
-      title = n === 0 ? "Priced at zero credits. No free card was involved." : "No free card covers this \u2014 generating spends credits.";
-      val = n === 0 ? "0" : (warn ? "\u26A0 " : "") + "\u2248 " + fmt2(n);
-      lab = n === 0 ? "credits \u2014 spends nothing" : "credits";
+      short = n !== 0 && isShort(d);
+      const shortNote = short ? "You hold " + (heldN != null ? fmt2(heldN) : "?") + " of the " + (needN != null ? fmt2(needN) : "?") + " cards this needs \u2014 not enough, so no card is used. Costs the full ~" + fmt2(n) + " credits." : "";
+      main = n === 0 ? "0 credits \u2014 this spends nothing" : (warn ? "\u26A0 " + warn + " \xB7 " : short ? "\u26A0 " : "") + "\u2248 " + fmt2(n) + " credits";
+      title = n === 0 ? "Priced at zero credits. No free card was involved." : short ? shortNote : "No free card covers this \u2014 generating spends credits.";
+      if (short && !compact) sub = { text: shortNote, title: shortNote, days: null };
+      val = n === 0 ? "0" : (warn || short ? "\u26A0 " : "") + "\u2248 " + fmt2(n);
+      lab = n === 0 ? "credits \u2014 spends nothing" : short ? "credits \xB7 card short" : "credits";
       tip = n !== 0 && warn ? "\u26A0 " + warn + ". " + title : title;
     } else if (state === "error") {
       main = "\u26A0 " + (msg || ERR_TEXT);
@@ -2016,7 +2097,7 @@ ${"=".repeat(48)}
       main = note || (props.hint || "").trim() || DEFAULT_HINT;
     }
     const text = main + (sub ? " \xB7 " + sub.text : "");
-    return { state, warn, compact, main, sub, title, val, lab, tip, dot, text, d };
+    return { state, warn, compact, short, main, sub, title, val, lab, tip, dot, text, d };
   }
   function detailOf(m) {
     const d = m.d || {};
@@ -2025,6 +2106,7 @@ ${"=".repeat(48)}
       settled: m.state === "free" || m.state === "paid",
       cost: d.cost != null && isFinite(Number(d.cost)) ? Number(d.cost) : null,
       free: m.state === "free",
+      card_short: !!m.short,
       cards: d.cards != null ? d.cards : null,
       card_name: d.card_name != null ? d.card_name : null,
       card_expires: d.card_expires != null ? d.card_expires : null,
@@ -2086,7 +2168,8 @@ ${"=".repeat(48)}
     }, [view]);
     const m = build(view, { hint, warn, compact, cardLabel });
     mRef.current = m;
-    const dataWarn = m.state === "paid" && m.warn ? "1" : void 0;
+    const dataWarn = m.state === "paid" && (m.warn || m.short) ? "1" : void 0;
+    const dataShort = m.state === "paid" && m.short ? "1" : void 0;
     const nativeTitle = m.title && !(m.compact && m.tip) ? m.title : void 0;
     const showChip = m.compact && m.val;
     return /* @__PURE__ */ react_global_shim_default.createElement(
@@ -2096,6 +2179,7 @@ ${"=".repeat(48)}
         className: "cost-badge" + (m.compact ? " compact" : "") + (className ? " " + className : ""),
         "data-state": m.state,
         "data-warn": dataWarn,
+        "data-short": dataShort,
         role: "status",
         "aria-live": "polite",
         title: nativeTitle,
@@ -2241,6 +2325,16 @@ ${"=".repeat(48)}
   function hasAnyRef(p) {
     return !!(p.images.length || p.video_refs.length || p.audio_refs.length);
   }
+  var PRICE_KEY_SKIP = ["prompt", "negative"];
+  function priceKey(payload) {
+    if (!payload || typeof payload !== "object") return "";
+    const keys = Object.keys(payload).filter((k) => PRICE_KEY_SKIP.indexOf(k) === -1).sort();
+    return JSON.stringify(keys.map((k) => [k, payload[k]]));
+  }
+  function canSubmit(price, payload) {
+    return !!(price && price.settled && !price.pendingTimer && price.pricedKey != null && price.pricedKey === priceKey(payload));
+  }
+  var PRICE_FETCH_TIMEOUT_MS = 25e3;
   function flfMissingStart(s) {
     return s.mode === "flf" && !(s.slots[0] && s.slots[0].media_id) && !!(s.slots[1] && s.slots[1].media_id);
   }
@@ -2286,8 +2380,15 @@ ${"=".repeat(48)}
       negative: "",
       modeNote: "",
       rendering: false,
-      hostBusy: false
+      hostBusy: false,
+      // The price verdict's IDENTITY (videoDrawerCore.canSubmit reads exactly this shape): settled
+      // = the badge shows the verdict for pricedKey; pricedKey = priceKey() of the payload that was
+      // priced; pendingTimer = a debCost re-price is scheduled and not yet fired. Go is disabled
+      // unless the payload it would submit has this same key -- state alone can't say that.
+      // Seeded once below: the badge's initial idle hint IS the verdict for the initial empty form.
+      price: null
     });
+    if (!st.current.price) st.current.price = { settled: true, pricedKey: priceKey(buildPayload(st.current, "")), pendingTimer: false };
     const [, force] = useState(0);
     const rerender = useCallback(() => force((n) => n + 1), []);
     const [results, setResults] = useState([]);
@@ -2541,32 +2642,58 @@ ${"=".repeat(48)}
     };
     const payload = () => buildPayload(st.current, promptText());
     const flfMissingStart2 = () => flfMissingStart(st.current);
-    const debCost = () => {
+    const debCost = (force2) => {
+      const pr = st.current.price;
+      if (!force2 && pr && pr.settled && pr.pricedKey != null && !pr.pendingTimer && pr.pricedKey === priceKey(buildPayload(st.current, ""))) {
+        return;
+      }
+      const cost = costRef.current;
+      if (cost && cost.setChecking) cost.setChecking();
+      st.current.price = { settled: false, pricedKey: null, pendingTimer: true };
+      costSeq.current++;
       clearTimeout(costTimer.current);
       costTimer.current = setTimeout(costNow, 250);
+      rerender();
     };
     const costNow = () => {
+      st.current.price = { settled: false, pricedKey: null, pendingTimer: false };
       const cost = costRef.current;
       if (!cost) return;
       const s2 = st.current, p = payload();
+      const settle = (key) => {
+        st.current.price = { settled: true, pricedKey: key, pendingTimer: false };
+        rerender();
+      };
       const idleHint = s2.mode === "r2v" ? "Pick at least one reference to see the cost." : "Pick a source image to see the cost.";
       if (!hasAnyRef(p)) {
         setWarn("");
         cost.clear(idleHint);
+        settle(priceKey(p));
         return;
       }
       if (flfMissingStart2()) {
         setWarn("");
         cost.clear("Pick a Start Frame \u2014 the End Frame alone can\u2019t drive First & Last.");
+        settle(priceKey(p));
         return;
       }
       setWarn(p.video_model === "v4.0" ? "V4.0 full \u2014 ~2.5\xD7 Lite" : "");
       cost.setChecking();
       const mine = ++costSeq.current;
-      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) }).then((r) => r.json()).then((d) => {
-        if (mine === costSeq.current && costRef.current) costRef.current.setPrice(d);
+      const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+      const abortTimer = ctrl ? setTimeout(() => ctrl.abort(), PRICE_FETCH_TIMEOUT_MS) : 0;
+      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p), signal: ctrl ? ctrl.signal : void 0 }).then((r) => r.json()).then((d) => {
+        clearTimeout(abortTimer);
+        if (mine === costSeq.current && costRef.current) {
+          costRef.current.setPrice(d);
+          settle(priceKey(p));
+        }
       }).catch(() => {
-        if (mine === costSeq.current && costRef.current) costRef.current.setPrice(null);
+        clearTimeout(abortTimer);
+        if (mine === costSeq.current && costRef.current) {
+          costRef.current.setPrice(null);
+          settle(priceKey(p));
+        }
       });
     };
     const pushLine = (line) => {
@@ -2583,6 +2710,13 @@ ${"=".repeat(48)}
       }
       if (flfMissingStart2()) {
         pushLine({ kind: "error", text: "Pick a Start Frame first \u2014 the End Frame alone can\u2019t drive First & Last." });
+        return;
+      }
+      if (!canSubmit(s2.price, p)) {
+        pushLine({ kind: "status", text: "Re-checking the cost\u2026 try again when the badge settles." });
+        const pr = s2.price || {};
+        const checkInFlight = !!pr.pendingTimer || !pr.settled && pr.pricedKey == null;
+        if (!checkInFlight) debCost();
         return;
       }
       const id = pushLine({ kind: "status", moon: true, text: "Submitting\u2026" });
@@ -2602,6 +2736,7 @@ ${"=".repeat(48)}
         }
         emit3("mg-submit", { task_id: d.task_id, payload: p });
         updateLine(id, { kind: "status", moon: true, text: "Queued \u2014 running\u2026" });
+        debCost(true);
         poll2(d.task_id, id);
       }).catch(() => {
         unlock();
@@ -2714,7 +2849,7 @@ ${"=".repeat(48)}
     const maxDur = MODEL_MAXDUR[s.model] || 10;
     const chosenModel = MODELS.find((m) => m.value === s.model);
     const isR2v = s.mode === "r2v";
-    const canGo = !s.hostBusy && !s.rendering;
+    const canGo = !s.hostBusy && !s.rendering && canSubmit(s.price, buildPayload(s, ""));
     const SEG = [["i2v", "First Frame"], ["flf", "First & Last Frames"], ["r2v", "Multi-Reference"]];
     const slotBox = (item, i, bank, placeholder, tag) => /* @__PURE__ */ react_global_shim_default.createElement(
       "div",
@@ -2850,9 +2985,11 @@ ${"=".repeat(48)}
     ))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-row" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-cam-wrap" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Camera"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-cam", value: s.camera, onChange: (e) => {
       st.current.camera = e.target.value;
       rerender();
+      debCost();
     } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "unset" }, "Unset"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "horizontal" }, "Side-to-side move"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "vertical-pan" }, "Vertical Pan"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "zoom" }, "Zoom in or out"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "pan" }, "Camera sweep"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "tilt" }, "Tilt up or down"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "roll" }, "Camera spin"))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-quality-wrap" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Basic / Professional"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-quality", value: s.quality, onChange: (e) => {
       st.current.quality = e.target.value;
       rerender();
+      debCost();
     } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "basic" }, "Basic"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "professional" }, "Professional"))), /* @__PURE__ */ react_global_shim_default.createElement("div", null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Channel"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-channel", value: s.channel, onChange: (e) => {
       st.current.channel = e.target.value;
       rerender();
@@ -9271,9 +9408,10 @@ Your currently-open board is left untouched.`)) return;
       }
       if (pr && pr.free) return true;
       if (pr && !pr.free && pr.cost != null) {
+        const line = priceIsShort(pr) ? shortSpendLine(pr, "this") : `No free card covers it \u2014 it will spend ~${pr.cost.toLocaleString()} credits.`;
         return window.confirm(`${label}
 
-No free card covers it \u2014 it will spend ~${pr.cost.toLocaleString()} credits.
+${line}
 
 Generate anyway?`);
       }
@@ -9294,7 +9432,8 @@ Generate anyway?`);
       if (!opts.skipConfirm) {
         const pr = await priceShot(entry);
         if (pr && !pr.free && pr.cost != null) {
-          if (!window.confirm(`No free card covers this shot \u2014 it will spend ~${pr.cost.toLocaleString()} credits.
+          const line = priceIsShort(pr) ? shortSpendLine(pr, `this ${p.duration ? `${p.duration}s ` : ""}shot`) : `No free card covers this shot \u2014 it will spend ~${pr.cost.toLocaleString()} credits.`;
+          if (!window.confirm(`${line}
 
 Generate anyway?`)) return { ok: false, reason: "cancelled" };
         } else if (!pr || !pr.free) {
@@ -9604,13 +9743,17 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       if (!todo.length) return;
       setBatching(true);
       const prices = await Promise.all(todo.map((e) => priceShot(e)));
-      const { free, paid, credits, unknown } = tallyPrices(prices);
+      const { free, paid, credits, unknown, overflow, pools, overflowIndexes } = tallyPricesDetailed(prices);
+      const shortPools = Object.values(pools).filter((pl) => pl.needed > pl.held);
+      const overflowCodes = (overflowIndexes || []).map((i) => todo[i] && todo[i].code).filter(Boolean);
+      const overflowNote = overflow ? `
+\u26A0 Up to ${overflow} of those priced free on their own may spend credits instead \u2014 the batch needs more tickets than you hold (${shortPools.map((pl) => `${pl.name}: ${pl.held} held, ${pl.needed} needed`).join("; ")}). Once the cards run out, no card is used and each remaining shot spends its full price` + (overflowCodes.length ? `: ${overflowCodes.join(", ")}` : "") + `.` : "";
       const emptyPromptShots = todo.filter((e) => !effectivePrompt(e.c).trim());
       const msg = `Generate ${todo.length} shot(s)?
 
-\u{1F3AB} ${free} covered by a free card
+\u{1F3AB} ${free} covered by free cards
 \u2248 ${paid} will spend credits \u2014 about ${credits.toLocaleString()} total` + (unknown ? `
-\u26A0 ${unknown} shot(s)' cost couldn't be verified \u2014 they may also spend credits.` : ".") + (emptyPromptShots.length ? `
+\u26A0 ${unknown} shot(s)' cost couldn't be verified \u2014 they may also spend credits.` : ".") + overflowNote + (emptyPromptShots.length ? `
 \u26A0 ${emptyPromptShots.length} shot(s) have no prompt text yet: ${emptyPromptShots.map((e) => e.code).join(", ")}` : "");
       if (!window.confirm(msg)) {
         setBatching(false);

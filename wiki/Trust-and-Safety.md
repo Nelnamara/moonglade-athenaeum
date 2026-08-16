@@ -10,13 +10,24 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   behind it). Nothing spends silently in the background. (The **art filters** on the Edit tab are
   not in this list: they are gradient composites applied in your own browser, and they make no
   network request and cost nothing.)
+
+  **A free card is used when it covers the whole job, and the price you see is the price you
+  pay.** Image and edit cards cover one generation each; a video card is a book of tickets and a
+  clip costs one per 5 seconds (5s = 1, 10s = 2, 15s = 3). When you hold enough, the clip is free
+  and the preview reads "uses N of H cards". When you don't, **no card is used and the clip costs
+  the full credit price** — nothing is partly applied — and the preview says exactly that. It is
+  not refused: matching the website, Generate still spends if you click, and The Loom's batch
+  confirm counts tickets against your pool and names which shots will spend before you confirm.
+  The guarantee is honesty, not refusal: a paid clip is never shown as free. Details and the
+  exact preview wording are in [Generating → Free cards and videos](Generating#free-cards-and-videos).
 - **Delete a task from your PixAI account** — irreversible on PixAI's side. Gated behind
   `--apply` plus typing the word `delete` on the CLI (skippable with `--yes` only if you pass
   it explicitly), or typing `DELETE` in the gallery's confirm dialog.
 - **Claim your own daily rewards** (credits/stamina) — a routine entitlement, not something
   that costs you anything, but it's still a real account change, so it's covered by the same
   guarantees below.
-- **Read** your generation history, account/credit balance, and free-card status.
+- **Read** your generation history, account/credit balance, and free-card status (including
+  how many video tickets each card holds — `--cards`).
 
 ## What it will never do
 
