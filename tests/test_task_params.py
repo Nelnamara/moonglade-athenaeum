@@ -173,8 +173,17 @@ def test_redactor_scrubs_foreign_user_homes_any_os(tmp_path):
     assert "gwilkins" not in red("open C:/Users/gwilkins/secret/x failed")
     assert "alice" not in red("read /home/alice/library/img.png: denied")
     assert "bob" not in red("stat /Users/bob/backup: no such file")
+    # Issue #17: a username WITH A SPACE must be fully redacted, not just its first word,
+    # and the readable tail must survive.
     out = red(r"D:\Users\Someone Else\place blew up")
-    assert "Someone" not in out and "blew up" in out       # prefix only
+    assert "Someone" not in out and "Else" not in out
+    assert "place" in out and "blew up" in out
+    assert "jane" not in red("/home/mary jane/lib/x.png denied")
+    # Issue #17: the home pass must NOT fire inside an ordinary URL path (it used to match
+    # /users/ and /home/ mid-URL and mangle the message).
+    for url in ("GET https://api.pixai.art/v1/users/me returned 500",
+                "see https://example.com/home/docs/page for help"):
+        assert red(url) == url
     # Ordinary prose with no user-home path is untouched.
     msg = "retry in 0.5s (attempt 2 of 3): connection reset by Users of the API"
     assert red(msg) == msg
