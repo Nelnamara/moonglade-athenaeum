@@ -1,7 +1,9 @@
 """--sync one-shot pipeline: main() must wire the full chain in order --
-pull(+full-meta) -> fix-models -> backfill -> thumbnails -> reconcile -- set the
+pull(+full-meta) -> backfill -> fix-models -> thumbnails -> reconcile -- set the
 update/full-meta flags, and treat reconcile as advisory (a reconcile failure is a
-warning, never a whole-sync failure). Fully mocked; no network, no disk beyond tmp."""
+warning, never a whole-sync failure). backfill precedes fix-models on purpose: it fills
+model_id for rows that never saw detail, so fix-models then gets to relabel those same-run
+rather than next-run (audit 2026-08-15). Fully mocked; no network, no disk beyond tmp."""
 import sys
 
 import pytest
@@ -41,7 +43,7 @@ def test_sync_runs_full_chain_in_order(monkeypatch, tmp_path):
     _patch_chain(monkeypatch, calls)
     monkeypatch.setattr(sys, "argv", ["prog", "--sync", "--out", str(tmp_path)])
     core.main()
-    assert calls == ["download", "fix_models", "backfill", "thumbnails", "reconcile"]
+    assert calls == ["download", "backfill", "fix_models", "thumbnails", "reconcile"]
 
 
 def test_sync_sets_update_and_full_meta(monkeypatch, tmp_path):
@@ -72,7 +74,7 @@ def test_sync_survives_reconcile_failure(monkeypatch, tmp_path, capsys, exc):
     _patch_chain(monkeypatch, calls, reconcile_exc=exc)
     monkeypatch.setattr(sys, "argv", ["prog", "--sync", "--out", str(tmp_path)])
     core.main()   # must NOT raise / sys.exit, regardless of the exception type
-    assert calls == ["download", "fix_models", "backfill", "thumbnails", "reconcile"]
+    assert calls == ["download", "backfill", "fix_models", "thumbnails", "reconcile"]
     out = capsys.readouterr().out
     assert "reconcile skipped" in out
     assert "Sync complete." in out

@@ -2385,6 +2385,11 @@ def video_outputs(task):
         "prompt": src.get("prompt") or src.get("prompts") or "",
         "duration": src.get("duration", ""),
         "i2v_model": src.get("model", ""),
+        # A video's negative prompt lives INSIDE this block, never at params top level, so
+        # extract_full_meta's neg (which reads params.negativePrompts) always came back blank
+        # for video and --sync-videos dropped it. Surfaced here so both video row-builders read
+        # one source (audit 2026-08-15); _download_video_task already read the same key directly.
+        "negative_prompt": src.get("negativePrompts") or "",
     }
     outs = []
     for v in ((task.get("outputs") or {}).get("videos") or []):
@@ -3506,6 +3511,11 @@ _GEN_SURFACE_FIELDS = (
     "priority", "render_seconds", "backend", "started_at", "ended_at", "updated_at",
     "retry_count", "moderation", "video_mode", "video_model",
 )
+# What EVERY create-time row-builder copies from extract_full_meta: the surface fields PLUS
+# lineage (source_media_id/derive_kind). The builders used to spread only _GEN_SURFACE_FIELDS,
+# so a freshly captured DERIVED image/video landed with a blank lineage panel until a separate
+# --backfill-lineage ran (audit 2026-08-15). extract_full_meta already resolves both.
+_TASK_ROW_FIELDS = _GEN_SURFACE_FIELDS + ("source_media_id", "derive_kind")
 
 
 def _prompt_helper_label(params, task):
@@ -4953,13 +4963,14 @@ def run_sync_videos(args):
                     "width": str(detail.get("width") or ""),
                     "height": str(detail.get("height") or ""),
                     "model_id": str(params.get("modelId") or ""),
+                    "negative_prompt": shared.get("negative_prompt", ""),   # video block, not top level
                     "status": "completed",
                     "is_video": "1",
                     "poster_media_id": o.get("poster_media_id", ""),
                     "paid_credit": _paid_credit_str(task),   # actual cost, task-level
                     "video_duration": str(shared.get("duration") or ""),
                 })
-                full.update({k: full_meta.get(k, "") for k in _GEN_SURFACE_FIELDS})   # issue #18 (no preset fill: video)
+                full.update({k: full_meta.get(k, "") for k in _TASK_ROW_FIELDS})   # issue #18 (no preset fill: video)
                 _ensure_video_thumb(vmid, o.get("poster_media_id"), path)
                 video_faststart(path)                # iOS needs moov at the front to stream
                 rows.append(full)
@@ -6646,7 +6657,7 @@ def run_generate(args):
             "width": str((info or {}).get("width") or params.get("width") or ""),
             "height": str((info or {}).get("height") or params.get("height") or ""),
         })
-        full.update({k: fm.get(k, "") for k in _GEN_SURFACE_FIELDS})   # issue #18
+        full.update({k: fm.get(k, "") for k in _TASK_ROW_FIELDS})   # issue #18
         rows.append(full)
         make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
         saved.append(str(path))
@@ -6754,7 +6765,7 @@ def _download_video_task(session, result, task_id, out, args, params):
             "width": str(detail.get("width") or ""),
             "height": str(detail.get("height") or ""),
         })
-        full.update({k: fm.get(k, "") for k in _GEN_SURFACE_FIELDS})   # issue #18 (no preset fill: video)
+        full.update({k: fm.get(k, "") for k in _TASK_ROW_FIELDS})   # issue #18 (no preset fill: video)
         # Poster thumbnail is COSMETIC -- it must never block cataloging the finished video.
         # A transient Windows lock on the poster's temp file (WinError 32) used to raise from
         # download() right here, before rows.append below, so the clip was pulled to videos/
@@ -6934,7 +6945,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
             "width": str((info or {}).get("width") or ""),
             "height": str((info or {}).get("height") or ""),
         })
-        full.update({k: fm.get(k, "") for k in _GEN_SURFACE_FIELDS})   # issue #18
+        full.update({k: fm.get(k, "") for k in _TASK_ROW_FIELDS})   # issue #18
         rows.append(full)
         make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
         saved.append(str(path))
@@ -7512,7 +7523,7 @@ def run_edit_image(args):
             "width": str((info or {}).get("width") or ""),
             "height": str((info or {}).get("height") or ""),
         })
-        full.update({k: fm.get(k, "") for k in _GEN_SURFACE_FIELDS})   # issue #18
+        full.update({k: fm.get(k, "") for k in _TASK_ROW_FIELDS})   # issue #18
         rows.append(full)
         make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
         saved.append(str(path))
@@ -7896,14 +7907,17 @@ def source_media_of_task(task):
     so it is readable back from getTaskById for history as well as recordable going
     forward. The three real shapes (see build_video_parameters / build_chat_edit_parameters
     / the upscale block):
-      * img2video      -> parameters.i2v.mediaId          (kind "video")
+      * img2video      -> parameters.i2vPro.mediaId        (kind "video"; legacy tasks: i2v)
       * edit/reference -> parameters.chat.mediaId         (kind "edit")
       * upscale/hires  -> parameters.mediaId + upscale|enlarge ratio  (kind "upscale")
     A plain txt2img has no input image and returns (None, None)."""
     params = ((task or {}).get("parameters") or {})
     if not isinstance(params, dict):
         return (None, None)
-    i2v = params.get("i2v")
+    # i2vPro is the current image-to-video submit shape; `i2v` is the legacy key older
+    # tasks carry. Reading only `i2v` meant EVERY modern i2v task returned (None,None), so
+    # video lineage was never captured -- create-time OR --backfill-lineage (audit 2026-08-15).
+    i2v = params.get("i2vPro") or params.get("i2v")
     if isinstance(i2v, dict) and i2v.get("mediaId"):
         return (str(i2v["mediaId"]), "video")
     chat = params.get("chat")
@@ -9791,10 +9805,20 @@ def run_backfill_meta(args):
 
 
 def run_backfill_full_meta(args):
-    """Fill in prompt_full/natural_prompt/seed/steps/sampler/cfg_scale/model_id/model_name
-    for catalog rows missing them, using getTaskById + getGenerationModelByVersionId.
-    Also fills url/width/height from the task's media object as a free side effect.
-    Safe to re-run -- skips rows that already have prompt_full."""
+    """Fill catalog rows from getTaskById + getGenerationModelByVersionId: the core
+    prompt_full/natural_prompt/seed/steps/sampler/cfg_scale/model_id/model_name, plus
+    url/width/height from the task's media object as a free side effect. steps/sampler/cfg
+    also fall back to the model VERSION preset when the task recorded none (issue #18).
+
+    Re-fetch is gated by _needs() (see below), which is why the extra surfaces are opt-in --
+    each widens the set of already-detailed rows that get re-fetched:
+      --with-loras    rows missing the `loras` column (predate LoRA tracking)
+      --with-credit   rows missing `paid_credit` (predate cost tracking)
+      --with-surface  rows missing the 15 issue-#18 surface columns (inference_profile,
+                      quality_tag, render_seconds, backend, retry_count, moderation, ...) --
+                      the ONLY way a pre-#18 row that already has prompt + model ever gains
+                      them, since it otherwise passes every _needs() gate and is skipped.
+    Safe to re-run -- each pass skips rows already carrying what it targets."""
     out = Path(args.out)
     db_path = _ensure_db(out)
     session = _make_session(getattr(args, "token", None))
@@ -9811,6 +9835,7 @@ def run_backfill_full_meta(args):
     rows = load_catalog(db_path)
     with_loras = getattr(args, "with_loras", False)
     with_credit = getattr(args, "with_credit", False)
+    with_surface = getattr(args, "with_surface", False)
 
     # Work per unique task_id (one API call covers all media in that task).
     # --with-loras also re-processes rows that have full meta but a blank `loras`
@@ -9841,19 +9866,45 @@ def run_backfill_full_meta(args):
             return True
         if with_credit and r.get("task_id") and not r.get("paid_credit"):
             return True
+        # --with-surface is the same opt-in pattern for the 15 issue-#18 surface columns
+        # (inference_profile, quality_tag, render_seconds, backend, retry_count, moderation,
+        # ...). A pre-#18 row that DID reach detail (it has prompt_full + a model id) passes
+        # every gate above and so was skipped forever, never gaining a single surface column
+        # -- exactly the rows the whole surface capture exists to enrich. `updated_at` is the
+        # sentinel: it is one of the 15, every real getTaskById carries it, and nothing wrote
+        # it before #18, so a blank updated_at on a row that has a task_id means "this row
+        # predates surface capture." A row already enriched has it set and is skipped; a task
+        # that genuinely returns no updatedAt re-fetches each run (bounded, idempotent -- the
+        # same deal the _DETAIL_ONLY sweep already makes). Opt-in because on a big historical
+        # catalog it re-fetches nearly every task once.
+        if with_surface and r.get("task_id") and not (r.get("updated_at") or "").strip():
+            return True
         return False
     needs_fill = [r for r in rows if _needs(r)]
     # Named separately in the count below because it is the case that used to be invisible.
     stalled = [r for r in needs_fill
                if r.get("prompt_full")
                and not any((r.get(c) or "").strip() for c in _DETAIL_ONLY)]
+    # The surface-only re-admits: rows that already reached detail (prompt + model) yet carry
+    # no surface columns. Called out for the same reason `stalled` is -- it is the population
+    # --with-surface exists to reach, and staying silent about its size hid whether the flag did
+    # anything on a given catalog.
+    surface_only = [r for r in needs_fill
+                    if with_surface and r.get("task_id") and r.get("prompt_full")
+                    and any((r.get(c) or "").strip() for c in _DETAIL_ONLY)
+                    and not (r.get("updated_at") or "").strip()]
     task_ids = list(dict.fromkeys(r["task_id"] for r in needs_fill if r.get("task_id")))
-    print("Found {:,} rows to fill across {:,} unique tasks{}{}.".format(
+    print("Found {:,} rows to fill across {:,} unique tasks{}{}{}.".format(
         len(needs_fill), len(task_ids), " (incl. LoRAs)" if with_loras else "",
-        " (incl. credit costs)" if with_credit else ""))
+        " (incl. credit costs)" if with_credit else "",
+        " (incl. #18 surface)" if with_surface else ""))
     if stalled:
         print("  {:,} of them have a prompt but no model/steps/sampler/CFG -- these were "
               "skipped by every earlier backfill.".format(len(stalled)))
+    if surface_only:
+        print("  {:,} of them already had prompt + model but no #18 surface data (profile, "
+              "quality tag, render time, backend, moderation...) -- re-fetched for it.".format(
+                  len(surface_only)))
     if not task_ids:
         print("Nothing to backfill.")
         return
@@ -10832,6 +10883,11 @@ def main():
                     help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
                          "no recorded credit cost yet (recovers the paid_credit column for older "
                          "generations from the task record; long run)")
+    ap.add_argument("--with-surface", action="store_true",
+                    help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
+                         "none of the issue-#18 surface columns yet (inference profile, quality "
+                         "tag, render time, backend, moderation, retry count...); the only way a "
+                         "pre-#18 generation gains them. Long run on a big historical catalog.")
     ap.add_argument("--backfill-lineage", action="store_true",
                     help="fill in source_media_id/derive_kind (which image an edit/upscale/"
                          "video was made FROM) for rows that predate lineage tracking, via "
@@ -10854,7 +10910,10 @@ def main():
                          "(videoMediaId) into a videos/ folder")
     ap.add_argument("--sync-videos", action="store_true",
                     help="back up your image-to-video generations: find i2v tasks, download "
-                         "each mp4 into videos/, and catalog them (is_video), then exit")
+                         "each mp4 into videos/, and catalog them (is_video), then exit. This is "
+                         "the video-side complement of --sync, which skips video tasks: run it to "
+                         "capture videos made on the PixAI website (app-made videos are already "
+                         "caught when generated). Full-history scan, so it's a separate pass.")
     ap.add_argument("--faststart-videos", dest="faststart_videos", action="store_true",
                     help="losslessly move every video's moov atom to the front (ffmpeg "
                          "-c copy +faststart) so iOS/Safari can play them over HTTP, then exit")
@@ -11279,12 +11338,30 @@ def main():
             return
         if getattr(args, "sync", False):
             # Sync = the "it should just happen" pipeline: incremental pull that
-            # arrives WITH metadata, re-resolve any model ids that came back
-            # blank/numeric, fill anything still blank, rebuild any missing preview
-            # thumbnails, then reconcile rows deleted on the website. Every step is
-            # idempotent/self-limiting (backfill skips rows that already have
+            # arrives WITH metadata, fill anything still blank (which is what fills a
+            # model_id for a row that never reached detail), THEN re-resolve any model
+            # ids that came back blank/numeric into clean names, rebuild any missing
+            # preview thumbnails, then reconcile rows deleted on the website. Every step
+            # is idempotent/self-limiting (backfill skips rows that already have
             # prompt_full; build_thumbnails skips thumbs already on disk), so
             # re-running --sync on a clean catalog costs almost nothing extra.
+            #
+            # Order note (2026-08-15): backfill runs BEFORE fix-models on purpose.
+            # fix-models can only relabel a row that already HAS a model_id; backfill is
+            # what fills model_id for a row that never saw task detail. Running backfill
+            # first hands those freshly-filled ids to fix-models in the SAME sync, instead
+            # of leaving a numeric/blank name (backfill's own model_name_gql soft-fail) to
+            # be cleaned only on the next run. Both steps are independent and idempotent, so
+            # the swap is safe -- it just closes the loop one sync sooner.
+            #
+            # VIDEO scope (2026-08-15): --sync intentionally does NOT run the video
+            # backfill. run_download skips video task nodes by design (a video's poster is
+            # not a standalone image), and app-path videos are already captured the moment
+            # they are made (run_generate_video / --task-id recovery / _download_video_task).
+            # The only videos --sync can't reach are ones generated on the PixAI WEBSITE.
+            # Capturing those means a FULL-history feed walk plus a getTaskById per i2v task
+            # every run -- the opposite of --sync's cheap-idempotent-rerun contract -- so it
+            # stays the separate, deliberate `--sync-videos` pass rather than being folded in.
             args.update = True
             args.full_meta = True
             # cli-<uuid> job: parity with the Control Panel's own panel-<uuid> logging for
@@ -11299,10 +11376,10 @@ def main():
                 # explicitly -- otherwise the panel's progress bar is blank during the
                 # download step (fix_models/backfill already read args.progress themselves).
                 dl = run_download(args, progress=getattr(args, "progress", None))
-                print("\nSync: resolving any unlabeled model names...")
-                run_fix_models(args)
-                print("Sync: filling any rows still missing metadata...")
+                print("\nSync: filling any rows still missing metadata...")
                 run_backfill_full_meta(args)
+                print("Sync: resolving any unlabeled model names...")
+                run_fix_models(args)
                 print("Sync: building any missing preview thumbnails...")
                 thumb_dir = out / "gallery" / "thumbs"
                 thumb_dir.mkdir(parents=True, exist_ok=True)
