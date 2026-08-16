@@ -215,6 +215,24 @@ def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp
             t + " must be filled and persisted"
 
 
+def test_run_generate_reads_sampling_fields_from_the_model_not_the_submit():
+    """Owner ruling 2026-08-15: for the sampling fields (steps/sampler/cfg_scale), the MODEL's
+    truth wins over what we submitted. A task that recorded none ran on the model's baked
+    defaults, so the row must read them from fm (task-echoed -> preset -> blank), never fall
+    back to the submitted samplingSteps/cfgScale (which an AuraFlow model like Tsubaki.2
+    ignores -- its honest CFG is a blank, not the 7.0 we sent). _pick's submitted fallback used
+    to preempt this for `steps` and leak the submitted value for `cfg`; source-level because the
+    run_generate builder does real downloads no unit test drives."""
+    import pathlib
+    src = pathlib.Path(core.__file__).read_text(encoding="utf-8")
+    region = src[src.index("def run_generate("):src.index("def _download_video_task(")]
+    for f in ("steps", "cfg_scale", "sampler"):
+        assert '"{0}": fm.get("{0}"'.format(f) in region, \
+            f + " must be read from the model surface (fm), not _pick's submitted fallback"
+        assert '_pick("{}"'.format(f) not in region, \
+            f + " must NOT fall back to the submitted value (owner ruling)"
+
+
 def test_new_columns_round_trip_through_the_catalog(tmp_path):
     db = str(tmp_path / "catalog.db")
     row = {f: "" for f in CATALOG_FIELDS}
