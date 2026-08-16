@@ -97,13 +97,21 @@ test("confirmSpend and generateShot branch short-vs-unmatched, and still fail cl
 });
 
 test("batchGenerate tallies tickets against the held pool (tallyPricesDetailed) and words the overflow before the confirm", () => {
-  assert.match(src, /const \{ free, paid, credits, unknown, overflow, pools \} = tallyPricesDetailed\(prices\);/,
-    "the batch confirm must use the pool-aware tally, not the per-shot buckets");
+  assert.match(src, /const \{ free, paid, credits, unknown, overflow, pools, overflowIndexes \} = tallyPricesDetailed\(prices\);/,
+    "the batch confirm must use the pool-aware tally (incl. overflowIndexes), not the per-shot buckets");
   assert.match(src, /🎫 \$\{free\} covered by free cards\\n` \+\s*\n\s*`≈ \$\{paid\} will spend credits — about \$\{credits\.toLocaleString\(\)\} total`/,
     "the batch confirm must state covered vs will-spend with the credit total");
   assert.match(src, /overflowNote \+/, "the overflow explanation must be part of the confirm message");
-  assert.match(src, /once the cards run out, no card is used and each remaining shot spends its full price/,
+  assert.match(src, /Once the cards run out, no card is used and each remaining shot spends its full price/,
     "overflow wording must say nothing attaches and the FULL price is charged -- never partial application");
+  // Review 2026-08-16: the docs promise 'shot by shot' -- the confirm must NAME the shots that
+  // may spend (overflowIndexes -> shot codes), and word it as an UPPER bound ('Up to N ... may'),
+  // because the tally drains only the card each shot was priced against alone and a second
+  // covering card can still fund one at submit time.
+  assert.match(src, /overflowIndexes \|\| \[\]\)\.map\(\(i\) => todo\[i\] && todo\[i\]\.code\)/,
+    "the confirm must map overflowIndexes to shot codes");
+  assert.match(src, /Up to \$\{overflow\} of those priced free on their own may spend credits/,
+    "overflow must be worded as an upper bound, not a certainty");
   // No refusal was added: the confirm is still the only gate and submission order is unchanged.
   assert.match(src, /if \(!window\.confirm\(msg\)\) \{ setBatching\(false\); return; \}/);
   assert.match(src, /for \(const e of todo\) \{[\s\S]*?try \{ r = await generateShot\(e, \{ skipConfirm: true \}\); \}/);

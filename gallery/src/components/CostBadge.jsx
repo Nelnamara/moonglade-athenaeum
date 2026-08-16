@@ -95,14 +95,17 @@ function cardCount(v) {
 }
 
 // The SHORT case (issue #15): the server matched a card but the account holds fewer tickets
-// than this job costs -> nothing is attached, the FULL price is charged. The server's own
-// `card_short` flag is authoritative; the held<needed re-check is a belt against a response
-// that carries the counts but predates the flag. Either way this must win over `free`.
+// than this job costs -> nothing is attached, the FULL price is charged. The server's
+// `card_short` flag (= matched and NOT card_covers) is THE verdict, and `free` (= card_covers)
+// stays authoritative the other way: a response is never short when the server said free.
+// This used to also re-derive held<needed as a "belt" that could override free:true -- but
+// cards_held/cards_needed and card_short shipped in the same commit (no response ever carried
+// the counts without the flag), and the belt made THIS badge disagree with the Loom's
+// priceIsShort (which defers to free) on the identical response: two spend surfaces, two
+// verdicts, one page (review 2026-08-16). One rule now, same as loom-core: server decides.
 function isShort(d) {
-  if (!d) return false;
-  if (d.card_short) return true;
-  const need = cardCount(d.cards_needed), held = cardCount(d.cards_held);
-  return need != null && held != null && held < need;
+  if (!d || d.free) return false;
+  return d.card_short === true;
 }
 
 // The setPrice branch logic, verbatim: resp === null/undefined means THE CHECK ITSELF FAILED
@@ -112,9 +115,10 @@ function classify(resp) {
   const d = (resp && typeof resp === "object") ? resp : null;
   if (!d) return { state: "error", note: "", msg: "", raw: null };
   if (d.error) return { state: "error", note: "", msg: String(d.error), raw: d };
-  // `free` can NEVER be produced for a short card: even a server that said free:true with
-  // held < needed is rendered as paid (falls through to the cost branch, or to error when
-  // there is no cost to show). FREE while the submit charges is the exact bug of issue #15.
+  // `free` and `card_short` are mutually exclusive on the wire (free = card_covers, short =
+  // matched-and-not-covered), and isShort() defers to free -- so a free response renders free
+  // and a short one can never reach this branch. FREE while the submit charges was the exact
+  // bug of issue #15; the guard is the server verdict, read once, the same way loom-core reads it.
   if (d.free && !isShort(d)) return { state: "free", note: "", msg: "", raw: d };
   // Checked BEFORE `note` so a response carrying both can never hide a real cost behind a hint.
   if (d.cost != null && isFinite(Number(d.cost))) return { state: "paid", note: "", msg: "", raw: d };

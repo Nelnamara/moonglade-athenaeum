@@ -436,7 +436,31 @@ describe("multi-ticket cards: priceIsShort / shortSpendLine / tallyPricesDetaile
   });
   test("tally: server-flagged short shots are plain paid (they never draw from the pool) and nulls stay unknown", () => {
     const t = tallyPricesDetailed([short15, null, { free: false, cost: 900 }]);
-    assert.deepEqual(t, { free: 0, paid: 2, credits: 2100, unknown: 1, overflow: 0, pools: {} });
+    assert.deepEqual([t.free, t.paid, t.credits, t.unknown, t.overflow], [0, 2, 2100, 1, 0]);
+    assert.deepEqual(t.pools, {});
+    assert.deepEqual(t.overflowIndexes, []);
+  });
+  test("tally: a server-FREE shot with an UNKNOWN balance (cards_held null) stays free -- Number(null) is 0, not unknown", () => {
+    // Review 2026-08-16: Number(null)===0 is finite, so a bare Number() booked these
+    // server-FREE shots as overflow/paid with 'held 0'. Unknown must not drain a pool.
+    const t = tallyPricesDetailed([{ free: true, cost: 100, cards_held: null, cards_needed: 1, card_name: "Image", card_template: "tpl-img" }]);
+    assert.deepEqual([t.free, t.paid, t.overflow], [1, 0, 0]);
+    assert.deepEqual(t.pools, {}, "an unknown balance opens no pool");
+  });
+  test("tally: the pool balance is the MIN cards_held seen, not the first (results priced at different times)", () => {
+    // Review 2026-08-16: pool.held was fixed from the FIRST result and later readings ignored,
+    // so a stale-high first read let later shots count free that the pool couldn't fund.
+    const t = tallyPricesDetailed([
+      { free: true, cost: 9, cards_held: 5, cards_needed: 3, card_template: "T" },
+      { free: true, cost: 9, cards_held: 2, cards_needed: 3, card_template: "T" },
+    ]);
+    assert.equal(t.pools.T.held, 2, "MIN held wins (fail-closed)");
+    assert.deepEqual([t.free, t.overflow], [0, 2], "with 2 held, neither 3-ticket shot is fundable");
+  });
+  test("tally: overflowIndexes names WHICH entries will spend, in submission order", () => {
+    const pr = () => ({ free: true, cost: 9, cards_held: 5, cards_needed: 3, card_template: "A" });
+    const t = tallyPricesDetailed([pr(), pr(), pr()]);
+    assert.deepEqual(t.overflowIndexes, [1, 2], "5 held / 3 per shot: the first is funded, the next two overflow");
   });
   test("tally: an overflow shot whose cost is unknown buckets as unknown, never as free", () => {
     const pr = (cost) => ({ free: true, cost, cards_held: 1, cards_needed: 1, card_template: "t" });

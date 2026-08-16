@@ -229,6 +229,11 @@ export function canSubmit(price, payload) {
   return !!(price && price.settled && !price.pendingTimer && price.pricedKey != null
     && price.pricedKey === priceKey(payload));
 }
+// How long the drawer waits on /api/price before aborting into the "couldn't verify" verdict.
+// Go is gated on the fetch settling, so an UNBOUNDED fetch that hangs (browser<->server stall)
+// would leave Go disabled forever with no message. The server's own upstream PixAI calls are
+// bounded at 30s/60s, so 25s here only ever fires on a transport stall, not a slow price.
+export const PRICE_FETCH_TIMEOUT_MS = 25000;
 // FLF with an End Frame but NO Start Frame is a DIFFERENT generation -- one predicate for Go AND
 // the cost badge (pricing what Go would refuse is the split that let a disabled control charge).
 export function flfMissingStart(s) {

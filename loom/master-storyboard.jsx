@@ -6742,12 +6742,19 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     // submission order and reclassifies the rest as PAID at full price -- OWNER RULING:
     // the batch still spends when a card comes up short (the site does the same), but it
     // says so HERE, before the confirm, never after the invoice.
-    const { free, paid, credits, unknown, overflow, pools } = tallyPricesDetailed(prices);
+    const { free, paid, credits, unknown, overflow, pools, overflowIndexes } = tallyPricesDetailed(prices);
     const shortPools = Object.values(pools).filter((pl) => pl.needed > pl.held);
+    // NAME the shots that will spend (the docs promise "shot by shot", and the tally knows
+    // exactly which entries overflowed -- review 2026-08-16), and word it as an UPPER bound:
+    // the tally drains only the card each shot was priced against on its own, and the submit
+    // path re-runs coverage live, so a second card that also covers can still fund one of
+    // these. "Up to N" is the honest claim; "these N will" was not.
+    const overflowCodes = (overflowIndexes || []).map((i) => todo[i] && todo[i].code).filter(Boolean);
     const overflowNote = overflow
-      ? `\n⚠ ${overflow} of those priced free on their own, but the batch needs more tickets than you hold ` +
-        `(${shortPools.map((pl) => `${pl.name}: ${pl.held} held, ${pl.needed} needed`).join("; ")}) — ` +
-        `once the cards run out, no card is used and each remaining shot spends its full price.`
+      ? `\n⚠ Up to ${overflow} of those priced free on their own may spend credits instead — the batch needs more tickets than you hold ` +
+        `(${shortPools.map((pl) => `${pl.name}: ${pl.held} held, ${pl.needed} needed`).join("; ")}). ` +
+        `Once the cards run out, no card is used and each remaining shot spends its full price` +
+        (overflowCodes.length ? `: ${overflowCodes.join(", ")}` : "") + `.`
       : "";
     // Soft warning, not a hard filter -- flagged shots still generate (matches generateShot's
     // own !hasInput behavior: a visible per-card error at submit time, not silently vanishing

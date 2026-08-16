@@ -134,8 +134,11 @@ describe("canSubmit: the Go gate is payload identity, not timing", () => {
 /* ---- source guards on the host wiring (no React harness in this suite) ---- */
 
 function fnBody(name) {
-  const i = src.indexOf("const " + name + " = () => {");
-  assert.ok(i >= 0, "expected to find " + name + "() in VideoDrawer.jsx");
+  // Accept any parameter list -- debCost grew a `force` flag; a signature change must not
+  // silently turn these guards into a false pass/fail.
+  const m = new RegExp("const " + name + " = \\([^)]*\\) => \\{").exec(src);
+  assert.ok(m, "expected to find " + name + "(...) in VideoDrawer.jsx");
+  const i = m.index;
   const end = src.indexOf("\n  };", i);   // component-level 2-space indent closes it
   return src.slice(i, end);
 }
@@ -151,6 +154,47 @@ describe("<VideoDrawer> host wiring of the price identity gate", () => {
     assert.match(body, /settled:\s*false/, "debCost must un-settle the verdict");
     assert.match(body, /pendingTimer:\s*true/, "debCost must mark the re-price pending");
     assert.match(body, /costSeq\.current\+\+/, "debCost must invalidate any answer already in flight");
+  });
+
+  test("debCost() SHORT-CIRCUITS when the priced payload is unchanged, unless forced (post-submit)", () => {
+    // Review 2026-08-16: prompt/negative are outside priceKey ('never prices') yet their handlers
+    // call debCost, so every typing pause blanked the badge, disabled Go and re-POSTed /api/price
+    // for a byte-identical payload. Fixed at the mechanism: an unchanged settled key returns
+    // early. `force` exists for the ONE case where the payload is identical but the verdict is
+    // stale anyway -- right after a submit debited the tickets -- so that re-price is not swallowed.
+    const body = fnBody("debCost");
+    assert.match(body, /const debCost = \(force\) =>/, "debCost takes a `force` flag");
+    assert.match(body, /!force && pr && pr\.settled && pr\.pricedKey != null && !pr\.pendingTimer[\s\S]{0,120}pr\.pricedKey === priceKey\(buildPayload\(st\.current, ""\)\)/,
+      "the short-circuit compares the SETTLED key against the current payload's priceKey and is bypassed by force");
+    const sc = body.indexOf("if (!force &&");
+    const check = body.indexOf("setChecking()");
+    assert.ok(sc >= 0 && check >= 0 && sc < check, "the short-circuit must come BEFORE setChecking()");
+  });
+
+  test("doGenerate() re-prices (FORCED) right after a successful submit -- the balance changed, the payload did not", () => {
+    // Review 2026-08-16, the most serious finding: nothing re-priced after the drawer's own submit
+    // consumed the tickets, so a settled FREE for the unchanged payload passed canSubmit and a
+    // second click submitted under a FREE badge for a clip the server now found SHORT and charged
+    // in full -- the exact #15 shape the identity gate exists to stop.
+    const body = fnBody("doGenerate");
+    const submit = body.indexOf('emit("mg-submit"');
+    const reprice = body.indexOf("debCost(true)");
+    assert.ok(submit >= 0, "the success path emits mg-submit");
+    assert.ok(reprice >= 0, "the success path must call debCost(true)");
+    assert.ok(reprice > submit, "the forced re-price sits in the SUCCESS branch after mg-submit");
+  });
+
+  test("costNow() clears pendingTimer BEFORE any early bail, and bounds the fetch with a timeout", () => {
+    // Review 2026-08-16: (a) `if (!cost) return` ran before the price-state write, leaving
+    // {pendingTimer:true} forever so canSubmit never passed; (b) an unbounded fetch that hung left
+    // Go disabled forever on a muted 'Checking cost…' with no error -- fail-silent-closed.
+    const body = fnBody("costNow");
+    const write = body.indexOf("st.current.price = { settled: false, pricedKey: null, pendingTimer: false }");
+    const bail = body.indexOf("if (!cost) return;");
+    assert.ok(write >= 0 && bail >= 0 && write < bail, "pendingTimer must be cleared before the no-badge bail");
+    assert.match(body, /AbortController/, "the price fetch must be abortable");
+    assert.match(body, /PRICE_FETCH_TIMEOUT_MS/, "the abort must use the shared timeout constant");
+    assert.match(body, /signal: ctrl \? ctrl\.signal : undefined/, "the fetch must carry the abort signal");
   });
 
   test("doGenerate() gates the submit on canSubmit() and never silently drops the click", () => {
@@ -196,12 +240,26 @@ describe("<VideoDrawer> host wiring of the price identity gate", () => {
     // Every `st.current.<field> = ` assignment inside a JSX onChange for a buildPayload input
     // must be followed by debCost() on the same line. imgSlots/vidSlots `.push(null)` adds an
     // EMPTY slot (payload unchanged) and is exempt by construction.
-    const priced = ["negative", "model", "duration", "camera", "quality", "channel", "audioGen", "audioLanguage", "audSlot"];
+    // `negative` is NOT here on purpose: it is in PRICE_KEY_SKIP ("never prices"), so listing it
+    // as priced contradicted priceKey (review 2026-08-16). Its handler may still call debCost --
+    // harmlessly, because debCost now short-circuits on an unchanged settled key.
+    const priced = ["model", "duration", "camera", "quality", "channel", "audioGen", "audioLanguage", "audSlot"];
     const lines = src.split("\n").filter((l) => /onChange=|onClick=/.test(l));
     priced.forEach((f) => {
       lines.filter((l) => new RegExp("st\\.current\\." + f + " = ").test(l)).forEach((l) => {
         assert.match(l, /debCost\(\)/, "handler writing st.current." + f + " must call debCost(): " + l.trim());
       });
     });
+  });
+
+  test("the fields priceKey SKIPS are exactly the ones a keystroke must not un-settle", () => {
+    // Guards the contract from both ends: PRICE_KEY_SKIP names prompt/negative, and the drawer's
+    // debCost short-circuit is what makes editing them harmless. If someone adds a field to
+    // PRICE_KEY_SKIP that a handler writes WITHOUT the short-circuit protecting it, this trips.
+    const coreSrc = readFileSync(path.join(__dirname, "../../gallery/src/gen/videoDrawerCore.js"), "utf8");
+    assert.match(coreSrc, /export const PRICE_KEY_SKIP = \["prompt", "negative"\];/,
+      "PRICE_KEY_SKIP is exactly prompt + negative");
+    const body = fnBody("debCost");
+    assert.match(body, /if \(!force && pr && pr\.settled/, "debCost's short-circuit protects every non-pricing caller");
   });
 });

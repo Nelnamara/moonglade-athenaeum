@@ -5,7 +5,7 @@ import CostBadge from "./CostBadge.jsx";
 import {
   MODELS, MODEL_VMODES, MODEL_MAXDUR, MODE_LBL, MODE_PH, CHANNEL_CAP,
   friendlyGenErr, refItem, primaryBank, setPrimaryBank, buildPayload, hasAnyRef,
-  priceKey, canSubmit,
+  priceKey, canSubmit, PRICE_FETCH_TIMEOUT_MS,
   applyMode as applyModeState,
   applyModelGating as gateModelState,
   applySetRefs as applySetRefsState,
@@ -308,7 +308,25 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   const payload = () => buildPayload(st.current, promptText());
   const flfMissingStart = () => flfMissingStartOf(st.current);
 
-  const debCost = () => {
+  const debCost = (force) => {
+    // SHORT-CIRCUIT when nothing that prices has changed: if the payload's price identity
+    // equals the SETTLED key, the quote on the badge is still exactly right, so leave it (and
+    // Go) alone. This is what makes a prompt/negative keystroke harmless -- those fields are
+    // outside priceKey ("never prices"), yet their handlers call debCost, and before this every
+    // typing pause blanked the badge, disabled Generate for 250ms+RTT, discarded any in-flight
+    // quote, and re-POSTed /api/price (three PixAI calls) for a byte-identical payload (review
+    // 2026-08-16). Fixing it HERE, at the mechanism, covers every non-pricing caller, present
+    // and future, instead of auditing handlers one by one. Un-settled/pending states still
+    // fall through so a genuine re-price is never suppressed.
+    //
+    // `force` bypasses the short-circuit for the ONE case where the payload is identical but the
+    // verdict is stale anyway: right after a submit debited the tickets. Identity-by-payload
+    // cannot see a balance change, so the post-submit re-price must not be swallowed here.
+    const pr = st.current.price;
+    if (!force && pr && pr.settled && pr.pricedKey != null && !pr.pendingTimer
+        && pr.pricedKey === priceKey(buildPayload(st.current, ""))) {
+      return;
+    }
     // Blank the number FIRST, synchronously (mirrors useGenerate's refreshPrice): an old quote
     // next to new settings is the one thing worse than no quote. Before this, setChecking only
     // ran 250ms later inside costNow, so a settled FREE for 5s stayed on the badge -- and Go
@@ -330,11 +348,13 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // just judged (the idle hints are verdicts too -- "nothing to price" keeps Go live so its own
   // "Pick a source image first" error stays reachable; doGenerate refuses those before any spend).
   const costNow = () => {
+    // The timer has FIRED: clear pendingTimer before anything can bail, or an early return
+    // (no badge ref) leaves {pendingTimer:true} forever and canSubmit never passes (review).
+    st.current.price = { settled: false, pricedKey: null, pendingTimer: false };
     const cost = costRef.current;
     if (!cost) return;
     const s = st.current, p = payload();
     const settle = (key) => { st.current.price = { settled: true, pricedKey: key, pendingTimer: false }; rerender(); };
-    st.current.price = { settled: false, pricedKey: null, pendingTimer: false };
     // Mode-dependent idle label is delivered through clear()'s one-shot hint override (the badge
     // has no setHint -- the idle state shows note||hint, and clear(h) sets that h).
     const idleHint = (s.mode === "r2v") ? "Pick at least one reference to see the cost." : "Pick a source image to see the cost.";
@@ -349,10 +369,22 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     // failed check settles too: the badge's red "couldn't verify — may spend" IS this payload's
     // verdict (same call the image drawer makes), whereas a verdict for a different payload is
     // exactly what canSubmit refuses.
-    fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) })
+    // BOUNDED: Go is hard-gated on this fetch settling, and a HUNG request (transport stall --
+    // a LAN tablet dropping Wi-Fi mid-request) fires neither .then nor .catch, so settle()
+    // never ran, canSubmit stayed false forever, and the badge sat on a muted "Checking cost…"
+    // with no error and no way out short of changing a priced field (review 2026-08-16).
+    // Before the identity gate a hung price left Go LIVE (fail-open); the gate made it
+    // fail-silent-closed. An abort after PRICE_FETCH_TIMEOUT_MS rejects into the existing
+    // .catch, which already paints the red "couldn't verify — may spend" and settles, so the
+    // state machine reaches its documented error verdict and Go returns to its pre-gate,
+    // fail-closed-but-live behaviour. The server's own PixAI calls carry timeouts (30s/60s),
+    // so this only ever fires on a browser<->server stall.
+    const ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    const abortTimer = ctrl ? setTimeout(() => ctrl.abort(), PRICE_FETCH_TIMEOUT_MS) : 0;
+    fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p), signal: ctrl ? ctrl.signal : undefined })
       .then((r) => r.json())
-      .then((d) => { if (mine === costSeq.current && costRef.current) { costRef.current.setPrice(d); settle(priceKey(p)); } })
-      .catch(() => { if (mine === costSeq.current && costRef.current) { costRef.current.setPrice(null); settle(priceKey(p)); } });
+      .then((d) => { clearTimeout(abortTimer); if (mine === costSeq.current && costRef.current) { costRef.current.setPrice(d); settle(priceKey(p)); } })
+      .catch(() => { clearTimeout(abortTimer); if (mine === costSeq.current && costRef.current) { costRef.current.setPrice(null); settle(priceKey(p)); } });
   };
 
   // ---- submit -> poll -> result (concurrent; each submission its own line + poll loop) --------
@@ -379,7 +411,16 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     // must not ride a price it never saw. Never a silent drop: say so and re-price.
     if (!canSubmit(s.price, p)) {
       pushLine({ kind: "status", text: "Re-checking the cost… try again when the badge settles." });
-      debCost();
+      // Only kick a NEW re-price when nothing is already in flight for this payload. Calling
+      // debCost() unconditionally here bumped costSeq (discarding a quote about to settle) and
+      // restarted the debounce, so fast repeated clicks could keep the badge from ever settling
+      // (review: refusal-path starvation). If a check is pending, just refuse and let it land.
+      // A check is "in flight" when the debounce timer is pending or a fetch is out
+      // (unsettled with no key). In both cases the answer for THIS payload is already
+      // coming -- don't discard it. Otherwise (settled-but-stale key) re-price.
+      const pr = s.price || {};
+      const checkInFlight = !!pr.pendingTimer || (!pr.settled && pr.pricedKey == null);
+      if (!checkInFlight) debCost();
       return;
     }
     const id = pushLine({ kind: "status", moon: true, text: "Submitting…" });
@@ -402,6 +443,14 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
         }
         emit("mg-submit", { task_id: d.task_id, payload: p });
         updateLine(id, { kind: "status", moon: true, text: "Queued — running…" });
+        // The submit just DEBITED tickets, so the settled verdict is stale even though the
+        // payload is byte-identical -- identity-by-payload cannot see a balance change caused
+        // by the drawer's own submit. Without this, a second click on the unchanged form passed
+        // canSubmit on the same key and submitted under a FREE badge for a clip the server now
+        // found SHORT and charged in full (review: post-submit stale FREE, the exact #15 shape).
+        // FORCED: the payload is byte-identical to the settled key, so an unforced debCost would
+        // short-circuit as "nothing changed" -- but the balance did.
+        debCost(true);
         poll(d.task_id, id);
       })
       .catch(() => { unlock(); updateLine(id, { kind: "error", text: "network error", moon: false }); emit("mg-error", { error: "network error" }); });
