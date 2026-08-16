@@ -111,6 +111,13 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   placeholder render. Low ROI; revisit if it matters.
 - **Loom preview / placement follow-ups.** A handful of small Loom tweaks on a surface the owner
   already likes. Low priority, deliberately unscoped — owner to walk it.
+- **Split the two megamodules (`moonglade_backup.py` / `moonglade_gallery.py`).** They are the
+  repo's two largest, highest-complexity, most-churned modules — the top regression-risk / hotspot
+  / refactor targets (Flare tracks the live scores). Split into cohesive modules to cut the risk.
+  This is SPEND-PATH code, so it's **its own project with a design + adversarial review, NOT a side
+  effect of the naming/tidy pass** — naming is a moving axis, this is a splitting axis. The smaller
+  god-files (`loom-core.js`, `loom-mutations.js`, `CostBadge.jsx`, `UpscalePanel.jsx`,
+  `videoDrawerCore.js`) can ride a structural pass instead; these two are banked as their own effort.
 
 ---
 

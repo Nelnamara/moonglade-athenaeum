@@ -2,6 +2,9 @@
 token.txt
 .env
 config.json
+config.json.*
+mirror_session.json
+mirror_session.json.*
 serve.txt
 serve.log
 
