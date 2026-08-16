@@ -3,6 +3,7 @@ drop, plus the model-preset fallback for steps/sampler/cfg on models (e.g. Tsuba
 whose task omits detailParameters. Pure/mocked -- no network, no account."""
 import json
 import tempfile
+import types
 
 import moonglade_backup as core
 from moonglade_gallery import CATALOG_FIELDS, save_catalog, load_catalog
@@ -102,8 +103,69 @@ def test_video_row_builders_apply_the_surface_fields():
     for fn in ("def _download_video_task", "def _do_task"):
         i = src.index(fn)
         body = src[i:i + 3200]
-        assert "for k in _GEN_SURFACE_FIELDS" in body, \
-            fn + " must apply _GEN_SURFACE_FIELDS to the video row (issue #18)"
+        assert "for k in _TASK_ROW_FIELDS" in body, \
+            fn + " must apply _TASK_ROW_FIELDS to the video row (issue #18 + lineage)"
+
+
+def test_task_row_fields_carry_lineage():
+    """Create-time row-builders spread _TASK_ROW_FIELDS, not the bare surface list, so a freshly
+    captured derived image/video lands with source_media_id/derive_kind already filled (audit
+    2026-08-15) instead of waiting on a separate --backfill-lineage pass."""
+    assert core._TASK_ROW_FIELDS[:len(core._GEN_SURFACE_FIELDS)] == core._GEN_SURFACE_FIELDS
+    for f in ("source_media_id", "derive_kind"):
+        assert f in core._TASK_ROW_FIELDS, f + " missing from _TASK_ROW_FIELDS"
+        assert f in CATALOG_FIELDS, f + " missing from CATALOG_FIELDS"
+
+
+def test_with_surface_gate_readmits_pre18_rows(monkeypatch, tmp_path):
+    """--with-surface is the ONLY way a pre-#18 row -- one that already reached detail (it has
+    prompt_full + a model_id, so every core _needs() gate passes) but carries none of the 15
+    surface columns -- gets re-fetched to gain them. Without the flag such a row is skipped
+    forever; with it, the blank-updated_at sentinel re-admits it, and once filled it is skipped
+    again (idempotent). This is the highest-leverage audit fix (2026-08-15)."""
+    db = tmp_path / "catalog.db"
+    row = {f: "" for f in CATALOG_FIELDS}
+    row.update({"media_id": "m0", "task_id": "t0", "filename": "f0.png",
+                "prompt_full": "a cat", "model_id": "V1"})   # detailed, but no surface data
+    save_catalog(db, [row])
+
+    fetched = []
+
+    def detail(session, tid):
+        fetched.append(tid)
+        return {"parameters": {"modelId": "V1", "inferenceProfile": "lite"},
+                "outputs": {}, "updatedAt": "2026-08-01T00:00:00Z",
+                "moderationAction": {"promptsModerationAction": "PASS"}}
+
+    monkeypatch.setattr(core, "TASK_DETAIL_HASH", "hash")            # gate guard: must be truthy
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "task_detail_gql", detail)
+    monkeypatch.setattr(core, "model_name_gql", lambda s, mid: "My Model")
+    monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")
+    monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, t: fm)
+
+    args = types.SimpleNamespace(out=str(tmp_path), token=None, workers=1, delay=0.0,
+                                 progress=None, with_loras=False, with_credit=False,
+                                 with_surface=False)
+
+    # 1) WITHOUT the flag: the row passes every core gate, so nothing is fetched or changed.
+    core.run_backfill_full_meta(args)
+    assert fetched == []
+    assert not {r["task_id"]: r for r in load_catalog(db)}["t0"].get("updated_at")
+
+    # 2) WITH the flag: re-admitted, fetched once, and the surface columns land.
+    args.with_surface = True
+    core.run_backfill_full_meta(args)
+    assert fetched == ["t0"]
+    got = {r["task_id"]: r for r in load_catalog(db)}["t0"]
+    assert got["updated_at"] == "2026-08-01T00:00:00Z"
+    assert got["inference_profile"] == "lite"
+    assert got["moderation"] == "PASS"
+
+    # 3) Re-run WITH the flag: updated_at is now set, so the sentinel no longer matches -> skip.
+    fetched.clear()
+    core.run_backfill_full_meta(args)
+    assert fetched == []
 
 
 def test_new_columns_round_trip_through_the_catalog(tmp_path):

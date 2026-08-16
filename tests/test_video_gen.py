@@ -877,7 +877,8 @@ def test_video_outputs_reads_a_plain_i2v_not_just_reference_video():
     """
     i2v_task = {
         "parameters": {"i2vPro": {"model": "v4.0", "prompts": "a cat on a wall",
-                                  "duration": "10", "mediaId": "src1"}},
+                                  "duration": "10", "mediaId": "src1",
+                                  "negativePrompts": "blurry"}},
         "outputs": {"videos": [{"mediaId": "vid1", "thumbnailMediaId": "th1", "seed": "7"}]},
     }
     outs, shared = core.video_outputs(i2v_task)
@@ -885,6 +886,9 @@ def test_video_outputs_reads_a_plain_i2v_not_just_reference_video():
     assert shared["prompt"] == "a cat on a wall", "an i2v prompt must not be dropped"
     assert shared["duration"] == "10"
     assert shared["i2v_model"] == "v4.0"
+    # A video's negative prompt lives in this block, not at params top level -- surfaced here so
+    # --sync-videos catalogs it instead of dropping it (audit 2026-08-15).
+    assert shared["negative_prompt"] == "blurry"
 
     # The reference-video shape still wins where both could apply, and still uses `prompt`.
     rv_task = {
@@ -895,10 +899,11 @@ def test_video_outputs_reads_a_plain_i2v_not_just_reference_video():
     _outs2, shared2 = core.video_outputs(rv_task)
     assert shared2["prompt"] == "@image1 walks"
     assert shared2["duration"] == "5"
+    assert shared2["negative_prompt"] == ""      # none in this block -> blank, not missing
 
     # A task with neither block still returns the empty shape rather than raising.
     assert core.video_outputs({"parameters": {}, "outputs": {}}) == ([], {
-        "prompt": "", "duration": "", "i2v_model": ""})
+        "prompt": "", "duration": "", "i2v_model": "", "negative_prompt": ""})
 
 
 def test_mode_can_never_ride_absent_on_the_video_spend_path():
