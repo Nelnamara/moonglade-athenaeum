@@ -65,11 +65,11 @@ That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everyt
 
 | | |
 |---|---|
-| **Back up everything** | Full-resolution downloads past the gallery limit · fast parallel workers · instant incremental `--update` · deduplicated SQLite catalog · image-to-video backup · published-artwork sync |
+| **Back up everything** | Full-resolution downloads past the gallery limit · fast parallel workers · instant incremental `--update` · deduplicated SQLite catalog holding the **whole generation record** (prompt, seed, model, LoRAs, render time, quality mode, moderation, lineage — captured as each piece is made) · image-to-video backup · published-artwork sync |
 | **Browse & search** | Local web gallery: wildcard prompt search, model/LoRA/tag/rating filters, date pickers, lightbox, ZIP export, saved views, privacy blur, mobile/PWA |
 | **Generate** | Full creation suite in the **web gallery** (dockable drawer: image · edit/enhance/fix · video with gallery-picked references), plus a matching CLI — model + LoRA pickers, live cost preview, and **free generation cards auto-apply** so covered gens cost 0 credits; results drop straight into your catalog. **The Loom** is a full video storyboard tool built on top of it, for multi-shot sequences with continuity |
 | **Curate** | **Collections** (group images/videos without moving files) · **Select mode** with drag-paint multi-select · star ratings · inline prompt edit · bulk find/replace · the **Folio of Honors** tracks achievements as your archive grows |
-| **Stay in sync** | Instant incremental updates · live **event watch** (`--watch --watch-backup` auto-collects finishing gens) · bulk delete locally or cloud-side · `--reconcile-deleted` for cloud-deleted orphans · Collection Health dashboard |
+| **Stay in sync** | Instant incremental updates · live **event watch** (`--watch --watch-backup` auto-collects finishing gens) · optional **Mirror to PixAI website** files what you make in Moonglade into your pixai.art library too (rides your own browser session; off by default) · bulk delete locally or cloud-side · `--reconcile-deleted` for cloud-deleted orphans · Collection Health dashboard |
 | **Run & control** | Web **Control Panel**: one-click maintenance jobs with a real progress bar and a Stop button, scheduled auto-backups, and **server Stop/Restart from the browser** · double-click `Serve Gallery` launcher · **make it yours**: drop your own header marks into the app's own `branding/marks/` folder and pick one + its animation, then set the Desktop launcher icon to match (none ship — bring your own art) |
 
 ---

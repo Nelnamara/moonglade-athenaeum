@@ -153,6 +153,38 @@ finishes: connected or reconnecting, when the last event arrived, and how many i
 mirrored this session. It's read-only, free, and always on while the server runs — which is
 why `--update` is a fallback rather than the only way new work lands locally.
 
+> Not to be confused with **Mirror to PixAI website** (Maintenance tab, below), which goes the
+> *other* direction. Live Mirror pulls what you make on PixAI *into* your local library;
+> Mirror to PixAI website files what you make *in Moonglade* out to your PixAI web library.
+
+## Mirror to PixAI website
+
+*(Maintenance tab.)* Off by default. When it's on, each new generation you make in Moonglade
+is also filed into your **pixai.art web library** — the same place things land when you
+generate on the website — instead of living only in your local backup. Handy if you like
+having your work visible in your PixAI account too. When it's off, nothing changes.
+
+It works by riding your own logged-in browser session:
+
+1. Click **Connect…**. Moonglade reads the session from a browser signed in to PixAI **on
+   the server machine** (Chrome, Edge, or Brave). Nothing is pasted, and the credential
+   never leaves that machine — the tile shows *Connected · N days left*, never the token.
+2. Flip the toggle to **on**. It refuses to turn on until a session is connected, and tells
+   you so.
+3. From then on it renews itself; you'll only need **Refresh session** if you sign out of
+   PixAI in the browser or the tile drops back to *Not connected*.
+
+Things worth knowing:
+
+- Generations filed this way follow the **website's** content policy, not the stricter
+  mobile-app one — the same rules as generating on pixai.art in a browser.
+- **Every spend guard still applies.** `READ_ONLY` blocks it like everything else, it's a
+  single create per submit, and if the session isn't usable it **refuses and spends
+  nothing** rather than quietly falling back to your API key. See
+  [Trust & Safety](Trust-and-Safety).
+- `python moonglade_backup.py --mirror-check` verifies the renewal loop from the command
+  line without spending anything.
+
 ## Server
 
 - **↻ Restart server** — needs the managed **`Serve Gallery`** launcher (it relaunches the
