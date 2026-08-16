@@ -59,6 +59,48 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   The "☆ Shortlist" staging step shipped. The larger workbench — deadline tracking, submission
   management — is still just wanted, not scoped.
 
+- **Bonjour / mDNS advertising: the server announces itself on the LAN**
+  Today a LAN device reaches the gallery only by a name the owner already knows and types
+  (`http://<pc-name>.local:5000`, which works because every modern OS resolves `.local` on its
+  own — that part needs no code). What's missing is *discovery*: the server registering an
+  `_http._tcp` DNS-SD service (the `zeroconf` library, one new dependency) so a phone, tablet, or
+  Bonjour-aware browser just **sees "Moonglade" on the network and taps it** — and so the app can
+  own its advertised name (`moonglade.local`) instead of borrowing the PC's. Owner already runs a
+  production server on `--host 0.0.0.0` under the machine name and wants this on top of it.
+  **What it touches:** the `moonglade_gallery.py` startup path (register on start, unregister
+  cleanly on stop/restart so a stale record doesn't linger after a `/api/server/restart`), and
+  `Serve Gallery.pyw`. **Constraints already settled by reading the code:** (1) register only when
+  the bind is a real LAN address (`--host 0.0.0.0` / a non-loopback host) — advertising a
+  loopback-only server announces something no other device can reach; (2) it widens **reachability
+  only, never trust** — the LAN gate is `_is_authorized_request()` (login on every path, no
+  loopback bypass), so a discovered `moonglade.local` still has to sign in, and that must stay
+  true; (3) `--https` currently uses Werkzeug's `"adhoc"` self-signed cert, which won't carry the
+  advertised name — a discovered HTTPS service therefore needs a proper cert with the `.local`
+  name in its SAN (mkcert-style), or the advertise step is HTTP-only until that lands. Pick one
+  deliberately, don't ship a name that throws a cert warning on tap. **Design step first** — it's
+  user-visible (what name/label appears in a device's discovery list, whether the mobile/QR access
+  flow adopts it) — quick workshop, not a full pixel pass.
+
+- **Generate drawer History: a real, scrolling 7-day run history with day markers** ([#13](https://github.com/Nelnamara/moonglade-athenaeum/issues/13))
+  The `History` button in the Runs reel is hollow: it flips a flag and relabels the header
+  "grouped by day," but the reel only ever holds `today` + `yesterday` from a 24-hour activity trail
+  (`jobs.jsonl`), so there's never more than a day *to* group and older runs are compacted off disk.
+  That two-bucket shape is a **literal port of the design prototype's demo limitation** — the spec
+  (`design_handoff/design_handoff_moonglade_suite/generate-runs-spec.md`) was an in-memory demo with
+  fake runs and names "back it with the actual generation-history API" as its own known gap. The
+  gap was never closed. **Owner requirement:** History opens a *scrolling 7-day history with day
+  markers*. **Build direction (decided, not a candidate):** catalog-backed — page 7 days of real
+  finished generations out of the catalog (`created_at`), grouped by day with markers, scrolling;
+  the live `jobs.jsonl` window covers only in-flight / just-finished runs layered on top. Reuse-
+  prefill already works from a bare `media_id`, so no new storage, nothing to expire, and it survives
+  every restart. Bumping `JOBS_KEEP`/`JOBS_MAX_AGE` instead is rejected (a second record drifting
+  from the catalog; can't give a real 7-day scroll). Pairs with the full-metadata capture (richer
+  recipes to prefill from) and with Remix (#4), which rides the same prefill path. **What it
+  touches:** `RunsReel.jsx` (day grouping/markers/scroll), `GenerateDrawer.jsx` (the History
+  toggle), a catalog-backed history route in `moonglade_gallery.py`. **Design step first** — the
+  spec already provides the tile/cluster/sharpen-in reveal, so the delta is the day-marker
+  treatment and scroll behaviour: quick workshop, not a full pixel pass.
+
 ---
 
 ## Design-pass reworks — rescope, don't just build
