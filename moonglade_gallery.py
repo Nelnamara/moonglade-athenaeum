@@ -10642,9 +10642,24 @@ def create_app(out_dir: Path):
                 return jsonify({"cost": None, "free": False, "note": note})
             cost = core.price_task(gsession, params)
             best = None if no_card else core.match_kaisuuken(gsession, params, enrich=True)
-            return jsonify({"cost": cost, "free": bool(best),
+            # `free` is core.card_covers(best), NOT bool(best): a multi-ticket video can MATCH
+            # a card the account holds too few tickets of (issue #15), and that case is paid
+            # at the full price -- the site attaches nothing. One predicate shared with the
+            # CLI preview and _apply_kaisuuken so this badge can never say FREE while the
+            # submit charges. `cards` is the HELD count (kept under its old name for the
+            # badge's "(N left)"); the job's ticket cost is `cards_needed`, and `card_short`
+            # is the honest flag the badge renders as "not enough -- costs the full price".
+            covered = core.card_covers(best)
+            return jsonify({"cost": cost, "free": covered,
                             "cards": (best or {}).get("total"),
+                            "cards_held": (best or {}).get("total"),
+                            "cards_needed": (best or {}).get("consumeAmount"),
+                            "card_short": bool(best) and not covered,
                             "card_name": (best or {}).get("name"),
+                            # The Loom's batch tally keys its per-template ticket pool on
+                            # this (falls back to card_name when absent) -- see
+                            # loom-core.js tallyPricesDetailed.
+                            "card_template": (best or {}).get("templateId"),
                             "card_expires": (best or {}).get("expiresAt")})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "cost": None}), 200

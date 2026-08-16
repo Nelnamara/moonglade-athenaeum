@@ -73,3 +73,38 @@ test("confirmSpend's window.confirm gate is UNCHANGED and still runs at submit t
   assert.match(src, /return window\.confirm\(`\$\{label\}/,
     "confirmSpend itself must still fall through to a real window.confirm");
 });
+
+// issue #15 (multi-ticket free cards): /api/price's `free` is now the server's card_covers()
+// -- false BOTH when no card matched and when one matched but the tickets held fall short
+// of what the duration costs. The old flat "No free card covers ... it will spend ~N" was a
+// FALSE sentence for the second case. OWNER RULING: the app still spends when short (the
+// site does), but every surface must say exactly what happens -- nothing attaches, the
+// FULL price is charged -- and the batch must count tickets against the held pool BEFORE
+// its confirm. Wording lives in loom-core.js (priceIsShort / shortSpendLine /
+// tallyPricesDetailed) and is unit-tested there; these pins prove the .jsx actually
+// routes its confirms through them, keeping the fail-closed structure above intact.
+test("confirmSpend and generateShot branch short-vs-unmatched, and still fail closed on an unverified price", () => {
+  assert.match(src, /priceIsShort, shortSpendLine,/, "the .jsx must import the shared short-case helpers");
+  // confirmSpend: `${label}\n\n${line}` where line is short OR the original not-matched sentence
+  assert.match(src, /const line = priceIsShort\(pr\)\s*\n\s*\? shortSpendLine\(pr, "this"\)\s*\n\s*: `No free card covers it — it will spend ~\$\{pr\.cost\.toLocaleString\(\)\} credits\.`;\s*\n\s*return window\.confirm\(`\$\{label\}\\n\\n\$\{line\}\\n\\nGenerate anyway\?`\);/,
+    "confirmSpend must word the short case honestly and keep the not-matched sentence otherwise");
+  // generateShot (video): names the shot's duration in the short sentence
+  assert.match(src, /const line = priceIsShort\(pr\)\s*\n\s*\? shortSpendLine\(pr, `this \$\{p\.duration \? `\$\{p\.duration\}s ` : ""\}shot`\)\s*\n\s*: `No free card covers this shot — it will spend ~\$\{pr\.cost\.toLocaleString\(\)\} credits\.`;/,
+    "generateShot must word the short case honestly and keep the not-matched sentence otherwise");
+  // fail-closed shape untouched: both gates still ask on a null/unverified price
+  assert.match(src, /return window\.confirm\(`\$\{label\}\\n\\nCouldn't verify the cost or free-card coverage — it may spend credits\./);
+  assert.match(src, /\} else if \(!pr \|\| !pr\.free\) \{\s*\n\s*if \(!window\.confirm\("Couldn't verify this shot's cost or free-card coverage/);
+});
+
+test("batchGenerate tallies tickets against the held pool (tallyPricesDetailed) and words the overflow before the confirm", () => {
+  assert.match(src, /const \{ free, paid, credits, unknown, overflow, pools \} = tallyPricesDetailed\(prices\);/,
+    "the batch confirm must use the pool-aware tally, not the per-shot buckets");
+  assert.match(src, /🎫 \$\{free\} covered by free cards\\n` \+\s*\n\s*`≈ \$\{paid\} will spend credits — about \$\{credits\.toLocaleString\(\)\} total`/,
+    "the batch confirm must state covered vs will-spend with the credit total");
+  assert.match(src, /overflowNote \+/, "the overflow explanation must be part of the confirm message");
+  assert.match(src, /once the cards run out, no card is used and each remaining shot spends its full price/,
+    "overflow wording must say nothing attaches and the FULL price is charged -- never partial application");
+  // No refusal was added: the confirm is still the only gate and submission order is unchanged.
+  assert.match(src, /if \(!window\.confirm\(msg\)\) \{ setBatching\(false\); return; \}/);
+  assert.match(src, /for \(const e of todo\) \{[\s\S]*?try \{ r = await generateShot\(e, \{ skipConfirm: true \}\); \}/);
+});
