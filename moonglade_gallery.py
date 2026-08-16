@@ -5843,6 +5843,12 @@ def create_app(out_dir: Path):
             _log.warning("live mirror: catch-up after %s failed: %s: %s",
                          reason, type(e).__name__, _redact_host_paths(str(e))[:200])
 
+    # Test seam (same rationale as mg_watch_mirror above): the self-heal sweep is a closure
+    # only ever called from the watcher thread, which the suite disables (MOONGLADE_DISABLE_WATCH).
+    # Exposing it lets a test drive the gap-fill / skip / rate-limit BEHAVIOUR end to end, not
+    # just grep the source for its guardrails.
+    app.extensions["mg_watch_catchup"] = _watch_catchup
+
     def _periodic_catchup():
         """Backstop for _watch_catchup's other two triggers (startup, reconnect), both of
         which fire off a WS lifecycle event -- so a connection that stays nominally
