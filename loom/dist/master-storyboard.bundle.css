@@ -1041,6 +1041,10 @@ body.privacy-blur .mg-gallery-picker .mg-pk-cell:hover img {
   border-color: var(--red,#f38ba8);
   color: var(--red,#f38ba8);
 }
+.gen-drawer .cost-badge[data-state=paid][data-warn][data-short] {
+  border-color: var(--peach,#fab387);
+  color: var(--peach,#fab387);
+}
 .gen-drawer .cost-badge.mgd-cost {
   margin-top: 10px;
 }

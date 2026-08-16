@@ -410,9 +410,17 @@ and events. Each is **locked to one model**.
 > `task-price` estimate, which spends nothing):
 >
 > ```
-> FREE: a matching card covers this -- with --confirm it costs 0 credits (saves ~1,600 credits) …
+> FREE: Tsubaki.2 Only covers this -- with --confirm it costs 0 credits (saves ~1,600 credits) …
+> FREE: V4.0 Preview Lite Only covers this -- uses 3 of 5 cards; with --confirm it costs 0 credits …
+> NOT free -- you hold 2 of the 3 V4.0 Preview Lite Only tickets this needs -- not enough, so no card is used -- this costs the full ~82,500 credits with --confirm.
 > NO FREE CARD matches -- with --confirm this will cost ~27,500 credits.
 > ```
+>
+> The second and third lines are the video case: a video card is spent one ticket per 5 seconds
+> (a 15-second clip needs 3), the preview names how many of yours it uses, and if you don't hold
+> enough it says so plainly — no card is attached and the clip costs its full price. If your
+> ticket balance can't be read at all, it says *that* rather than guessing ("couldn't read how
+> many … tickets you hold … so no card will be attached").
 
 ```bash
 python moonglade_backup.py --cards        # read-only: your cards, held counts, model, expiry

@@ -188,27 +188,51 @@ var LoomBundle = (() => {
   var priceIsShort = (pr) => {
     if (!pr || pr.free) return false;
     if (pr.card_short === true) return true;
-    const need = Number(pr.cards_needed), held = Number(pr.cards_held);
-    return Number.isFinite(need) && Number.isFinite(held) && held < need;
+    const held = cardHeld(pr);
+    return held != null && held < cardNeed(pr);
   };
   var shortSpendLine = (pr, subject = "this") => {
     const need = Math.max(1, Number(pr && pr.cards_needed) || 1);
-    const held = pr && pr.cards_held != null && Number.isFinite(Number(pr.cards_held)) ? Number(pr.cards_held) : "?";
+    const heldN = cardHeld(pr);
     const name = pr && pr.card_name ? `${pr.card_name} ` : "";
     const tail = pr && pr.cost != null ? `It will spend the full ~${Number(pr.cost).toLocaleString()} credits.` : "It will spend the full credit price.";
-    return `You hold ${held} of the ${need} free ${name}cards ${subject} needs \u2014 not enough, so no card is used. ${tail}`;
+    if (heldN == null || pr && pr.balance_unknown) {
+      return `Couldn't read how many free ${name}tickets you hold (${subject} needs ${need}), so no card will be attached. ${tail}`;
+    }
+    return `You hold ${heldN} of the ${need} free ${name}cards ${subject} needs \u2014 not enough, so no card is used. ${tail}`;
+  };
+  var cardHeld = (pr) => {
+    const v = pr && pr.cards_held;
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  var cardNeed = (pr) => {
+    const n = Number(pr && pr.cards_needed);
+    return Number.isFinite(n) && n >= 1 ? n : 1;
   };
   var cardPoolKey = (pr) => pr && (pr.card_template || pr.card_name) || null;
   var tallyPricesDetailed = (prices) => {
     let free = 0, paid = 0, credits = 0, unknown = 0, overflow = 0;
     const pools = {};
+    const overflowIndexes = [];
     prices.forEach((pr) => {
+      if (!(pr && pr.free)) return;
+      const key = cardPoolKey(pr), held = cardHeld(pr);
+      if (!key || held == null) return;
+      const pool = pools[key] || (pools[key] = { name: pr.card_name || key, held, needed: 0, left: held });
+      if (held < pool.held) {
+        pool.held = held;
+        pool.left = held;
+      }
+    });
+    prices.forEach((pr, i) => {
       if (pr && pr.free) {
         const key = cardPoolKey(pr);
-        const need = Math.max(1, Number(pr.cards_needed) || 1);
-        const held = Number(pr.cards_held);
-        if (key && Number.isFinite(held)) {
-          const pool = pools[key] || (pools[key] = { name: pr.card_name || key, held, needed: 0, left: held });
+        const need = cardNeed(pr);
+        const held = cardHeld(pr);
+        if (key && held != null) {
+          const pool = pools[key];
           pool.needed += need;
           if (pool.left >= need) {
             pool.left -= need;
@@ -216,6 +240,7 @@ var LoomBundle = (() => {
             return;
           }
           overflow++;
+          overflowIndexes.push(i);
           if (pr.cost != null) {
             paid++;
             credits += pr.cost;
@@ -231,7 +256,7 @@ var LoomBundle = (() => {
     Object.values(pools).forEach((p) => {
       delete p.left;
     });
-    return { free, paid, credits, unknown, overflow, pools };
+    return { free, paid, credits, unknown, overflow, pools, overflowIndexes };
   };
   var tallyPrices = (prices) => {
     const { free, paid, credits, unknown } = tallyPricesDetailed(prices);
@@ -2017,10 +2042,8 @@ ${"=".repeat(48)}
     return isFinite(n) && n >= 0 ? Math.floor(n) : null;
   }
   function isShort(d) {
-    if (!d) return false;
-    if (d.card_short) return true;
-    const need = cardCount(d.cards_needed), held = cardCount(d.cards_held);
-    return need != null && held != null && held < need;
+    if (!d || d.free) return false;
+    return d.card_short === true;
   }
   function classify(resp) {
     const d = resp && typeof resp === "object" ? resp : null;
@@ -2311,6 +2334,7 @@ ${"=".repeat(48)}
   function canSubmit(price, payload) {
     return !!(price && price.settled && !price.pendingTimer && price.pricedKey != null && price.pricedKey === priceKey(payload));
   }
+  var PRICE_FETCH_TIMEOUT_MS = 25e3;
   function flfMissingStart(s) {
     return s.mode === "flf" && !(s.slots[0] && s.slots[0].media_id) && !!(s.slots[1] && s.slots[1].media_id);
   }
@@ -2618,7 +2642,11 @@ ${"=".repeat(48)}
     };
     const payload = () => buildPayload(st.current, promptText());
     const flfMissingStart2 = () => flfMissingStart(st.current);
-    const debCost = () => {
+    const debCost = (force2) => {
+      const pr = st.current.price;
+      if (!force2 && pr && pr.settled && pr.pricedKey != null && !pr.pendingTimer && pr.pricedKey === priceKey(buildPayload(st.current, ""))) {
+        return;
+      }
       const cost = costRef.current;
       if (cost && cost.setChecking) cost.setChecking();
       st.current.price = { settled: false, pricedKey: null, pendingTimer: true };
@@ -2628,6 +2656,7 @@ ${"=".repeat(48)}
       rerender();
     };
     const costNow = () => {
+      st.current.price = { settled: false, pricedKey: null, pendingTimer: false };
       const cost = costRef.current;
       if (!cost) return;
       const s2 = st.current, p = payload();
@@ -2635,7 +2664,6 @@ ${"=".repeat(48)}
         st.current.price = { settled: true, pricedKey: key, pendingTimer: false };
         rerender();
       };
-      st.current.price = { settled: false, pricedKey: null, pendingTimer: false };
       const idleHint = s2.mode === "r2v" ? "Pick at least one reference to see the cost." : "Pick a source image to see the cost.";
       if (!hasAnyRef(p)) {
         setWarn("");
@@ -2652,12 +2680,16 @@ ${"=".repeat(48)}
       setWarn(p.video_model === "v4.0" ? "V4.0 full \u2014 ~2.5\xD7 Lite" : "");
       cost.setChecking();
       const mine = ++costSeq.current;
-      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) }).then((r) => r.json()).then((d) => {
+      const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+      const abortTimer = ctrl ? setTimeout(() => ctrl.abort(), PRICE_FETCH_TIMEOUT_MS) : 0;
+      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p), signal: ctrl ? ctrl.signal : void 0 }).then((r) => r.json()).then((d) => {
+        clearTimeout(abortTimer);
         if (mine === costSeq.current && costRef.current) {
           costRef.current.setPrice(d);
           settle(priceKey(p));
         }
       }).catch(() => {
+        clearTimeout(abortTimer);
         if (mine === costSeq.current && costRef.current) {
           costRef.current.setPrice(null);
           settle(priceKey(p));
@@ -2682,7 +2714,9 @@ ${"=".repeat(48)}
       }
       if (!canSubmit(s2.price, p)) {
         pushLine({ kind: "status", text: "Re-checking the cost\u2026 try again when the badge settles." });
-        debCost();
+        const pr = s2.price || {};
+        const checkInFlight = !!pr.pendingTimer || !pr.settled && pr.pricedKey == null;
+        if (!checkInFlight) debCost();
         return;
       }
       const id = pushLine({ kind: "status", moon: true, text: "Submitting\u2026" });
@@ -2702,6 +2736,7 @@ ${"=".repeat(48)}
         }
         emit3("mg-submit", { task_id: d.task_id, payload: p });
         updateLine(id, { kind: "status", moon: true, text: "Queued \u2014 running\u2026" });
+        debCost(true);
         poll2(d.task_id, id);
       }).catch(() => {
         unlock();
@@ -9708,10 +9743,11 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       if (!todo.length) return;
       setBatching(true);
       const prices = await Promise.all(todo.map((e) => priceShot(e)));
-      const { free, paid, credits, unknown, overflow, pools } = tallyPricesDetailed(prices);
+      const { free, paid, credits, unknown, overflow, pools, overflowIndexes } = tallyPricesDetailed(prices);
       const shortPools = Object.values(pools).filter((pl) => pl.needed > pl.held);
+      const overflowCodes = (overflowIndexes || []).map((i) => todo[i] && todo[i].code).filter(Boolean);
       const overflowNote = overflow ? `
-\u26A0 ${overflow} of those priced free on their own, but the batch needs more tickets than you hold (${shortPools.map((pl) => `${pl.name}: ${pl.held} held, ${pl.needed} needed`).join("; ")}) \u2014 once the cards run out, no card is used and each remaining shot spends its full price.` : "";
+\u26A0 Up to ${overflow} of those priced free on their own may spend credits instead \u2014 the batch needs more tickets than you hold (${shortPools.map((pl) => `${pl.name}: ${pl.held} held, ${pl.needed} needed`).join("; ")}). Once the cards run out, no card is used and each remaining shot spends its full price` + (overflowCodes.length ? `: ${overflowCodes.join(", ")}` : "") + `.` : "";
       const emptyPromptShots = todo.filter((e) => !effectivePrompt(e.c).trim());
       const msg = `Generate ${todo.length} shot(s)?
 

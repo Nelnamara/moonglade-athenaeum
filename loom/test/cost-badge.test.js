@@ -90,10 +90,16 @@ test("classify: card_short can NEVER produce the free state -- short is paid, at
   // the submit charged full price).
   assert.match(src, /if \(d\.free && !isShort\(d\)\) return \{ state: "free"/,
     "the free branch must be guarded by isShort()");
-  assert.match(src, /function isShort\(d\)[\s\S]{0,400}if \(d\.card_short\) return true;/,
-    "the server's card_short flag is authoritative");
-  assert.match(src, /return need != null && held != null && held < need;/,
-    "held < needed is the belt for a response carrying counts but no flag");
+  // isShort reads the SERVER verdict only (card_short), and defers to `free`. It used to also
+  // re-derive held<needed as a "belt" that could override free:true -- which made this badge
+  // disagree with loom-core's priceIsShort (which defers to free) on the identical response:
+  // two spend surfaces, two verdicts, one page (review 2026-08-16). One rule now: server decides.
+  assert.match(src, /function isShort\(d\)[\s\S]{0,300}if \(!d \|\| d\.free\) return false;/,
+    "isShort must defer to the server's free verdict first");
+  assert.match(src, /function isShort\(d\)[\s\S]{0,400}return d\.card_short === true;/,
+    "the server's card_short flag is THE short verdict");
+  assert.doesNotMatch(src, /function isShort\(d\)[\s\S]{0,500}held < need/,
+    "no client re-derivation of held<needed inside isShort -- it can only disagree with the server");
   const isShortIdx = src.indexOf("function isShort(");
   const classifyIdx = src.indexOf("function classify(");
   assert.ok(isShortIdx > -1 && classifyIdx > -1 && isShortIdx < classifyIdx);
@@ -126,4 +132,19 @@ test("the CSS pins the short note in the amber ink (data-short), not the muted e
   const css = readFileSync(path.join(__dirname, "../../gallery/src/styles/cost-badge.css"), "utf8");
   assert.match(css, /\.cost-badge\[data-short\] \.mgc-sub \{ color: inherit; \}/);
   assert.match(css, /\.cost-badge\[data-state="paid"\]\[data-warn\]/, "the amber warn rule short rides on still exists");
+});
+
+test("the VIDEO drawer's CSS does not paint the short state red -- short is settled-paid (amber), red means could-not-verify", () => {
+  // Review 2026-08-16: gen-drawer.css overrides paid+data-warn to RED for the V4.0-full caution,
+  // at higher specificity than the badge's amber. Video is the ONLY host where multi-ticket short
+  // occurs and it lives in this drawer -- so every real short badge painted red, identical to the
+  // error state, collapsing the settled-vs-unverified distinction exactly where it matters. The
+  // fix re-asserts amber for [data-short] AFTER the red rule at higher specificity. The old test
+  // only read cost-badge.css and so never saw this.
+  const css = readFileSync(path.join(__dirname, "../../gallery/src/styles/gen-drawer.css"), "utf8");
+  const red = css.indexOf('.gen-drawer .cost-badge[data-state="paid"][data-warn]{border-color:var(--red');
+  const amber = css.indexOf('.gen-drawer .cost-badge[data-state="paid"][data-warn][data-short]{border-color:var(--peach');
+  assert.ok(red >= 0, "the drawer's red V4.0-full override still exists");
+  assert.ok(amber >= 0, "the drawer must re-assert amber for [data-short]");
+  assert.ok(amber > red, "the amber short rule must come AFTER the red rule so it wins the cascade");
 });
