@@ -49,7 +49,7 @@ def test_sync_logs_a_cli_job_that_completes(monkeypatch, tmp_path):
 
     core.main()
 
-    assert calls == ["download", "fix_models", "backfill", "thumbnails", "reconcile"]
+    assert calls == ["download", "backfill", "fix_models", "thumbnails", "reconcile"]
     jobs = _cli_jobs(tmp_path, "Library sync")
     assert len(jobs) == 1
     job = jobs[0]
@@ -282,7 +282,7 @@ def test_panel_spawned_run_does_not_double_log_a_cli_job(monkeypatch, tmp_path):
 
     core.main()
 
-    assert calls == ["download", "fix_models", "backfill", "thumbnails", "reconcile"]
+    assert calls == ["download", "backfill", "fix_models", "thumbnails", "reconcile"]
     assert core.read_jobs(tmp_path) == []               # no cli-* job written
 
 

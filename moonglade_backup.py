@@ -2114,6 +2114,12 @@ _FULL_META_FIELDS = (
     "sampler", "cfg_scale", "model_id", "model_name", "loras",
     "negative_prompt", "clip_skip", "paid_credit",
     "source_media_id", "derive_kind",
+    # Full generation surface (issue #18) -- so --backfill-full-meta fills these on existing
+    # rows too. MUST stay in sync with _GEN_SURFACE_FIELDS (both are static; a mismatch just
+    # means a field the row-builders write but the backfill wouldn't, or vice-versa).
+    "inference_profile", "quality_tag", "prompt_helper", "control_nets", "lora_parameters",
+    "priority", "render_seconds", "backend", "started_at", "ended_at", "updated_at",
+    "retry_count", "moderation", "video_mode", "video_model",
 )
 
 
@@ -2411,6 +2417,11 @@ def video_outputs(task):
         "prompt": src.get("prompt") or src.get("prompts") or "",
         "duration": src.get("duration", ""),
         "i2v_model": src.get("model", ""),
+        # A video's negative prompt lives INSIDE this block, never at params top level, so
+        # extract_full_meta's neg (which reads params.negativePrompts) always came back blank
+        # for video and --sync-videos dropped it. Surfaced here so both video row-builders read
+        # one source (audit 2026-08-15); _download_video_task already read the same key directly.
+        "negative_prompt": src.get("negativePrompts") or "",
     }
     outs = []
     for v in ((task.get("outputs") or {}).get("videos") or []):
@@ -3525,6 +3536,32 @@ def resolve_model_base_id(session, model_version_id):
         return ""
 
 
+# The full-generation-surface columns (issue #18) extract_full_meta resolves and every
+# row-builder must persist. One list so a new surface field is wired in exactly one place.
+_GEN_SURFACE_FIELDS = (
+    "inference_profile", "quality_tag", "prompt_helper", "control_nets", "lora_parameters",
+    "priority", "render_seconds", "backend", "started_at", "ended_at", "updated_at",
+    "retry_count", "moderation", "video_mode", "video_model",
+)
+# What EVERY create-time row-builder copies from extract_full_meta: the surface fields PLUS
+# lineage (source_media_id/derive_kind). The builders used to spread only _GEN_SURFACE_FIELDS,
+# so a freshly captured DERIVED image/video landed with a blank lineage panel until a separate
+# --backfill-lineage ran (audit 2026-08-15). extract_full_meta already resolves both.
+_TASK_ROW_FIELDS = _GEN_SURFACE_FIELDS + ("source_media_id", "derive_kind")
+
+
+def _prompt_helper_label(params, task):
+    """Fold promptHelper.enable + PixAI's detect verdict into one readable label:
+    'on' / 'off' / 'off (reason)'. '' when the task carries neither."""
+    ph = params.get("promptHelper") if isinstance(params.get("promptHelper"), dict) else {}
+    det = task.get("detectPromptHelperResult") if isinstance(task.get("detectPromptHelperResult"), dict) else {}
+    reason = (det.get("enableReasonCode") or "").strip()
+    if "enable" not in ph and not reason:
+        return ""
+    base = "on" if ph.get("enable") else "off"
+    return "{} ({})".format(base, reason) if reason else base
+
+
 def extract_full_meta(task):
     """Pull the extended fields out of a getTaskById task dict."""
     if not task:
@@ -3533,6 +3570,17 @@ def extract_full_meta(task):
     outputs = task.get("outputs") or {}
     detail = outputs.get("detailParameters") or {}
     extra = params.get("extra") or {}
+    # Full generation surface (issue #18): everything the task record carries that the row used
+    # to drop. All pure reads from the task dict; steps/sampler/cfg get a model-preset fallback
+    # in the caller (needs the network), the rest resolve here.
+    i2v = params.get("i2vPro") if isinstance(params.get("i2vPro"), dict) else {}
+    ii = outputs.get("inferenceInfo") if isinstance(outputs.get("inferenceInfo"), dict) else {}
+    stages = ii.get("stages") if isinstance(ii.get("stages"), dict) else {}
+    qtag = params.get("qualityTag") if isinstance(params.get("qualityTag"), dict) else {}
+    cnets = params.get("controlNets") or []
+    lparams = params.get("loraParameters") or []
+    run_s = stages.get("pipeline_run_s")
+    retry = task.get("retryCount")
     # negativePrompts may live under a few keys depending on PixAI's flow; many
     # newer "structured prompt" tasks have none at all.
     neg = (params.get("negativePrompts") or detail.get("negativePrompts")
@@ -3571,7 +3619,85 @@ def extract_full_meta(task):
         # against a real captured task, 2026-07-04) -- so full-meta/backfill passes
         # recover spend history, not just fresh generations.
         "paid_credit":    _paid_credit_str(task),
+        # Full generation surface (issue #18):
+        "inference_profile": str(params.get("inferenceProfile") or ""),
+        "quality_tag":       str(qtag.get("prefix") or ""),
+        "prompt_helper":     _prompt_helper_label(params, task),
+        "control_nets":      json.dumps(cnets) if cnets else "",
+        "lora_parameters":   json.dumps(lparams) if lparams else "",
+        "priority":          str(params.get("priority") or ""),
+        "render_seconds":    ("{:.1f}".format(run_s) if isinstance(run_s, (int, float)) else ""),
+        "backend":           str(ii.get("backend") or ""),
+        "started_at":        str(task.get("startedAt") or ""),
+        "ended_at":          str(task.get("endAt") or ""),
+        "updated_at":        str(task.get("updatedAt") or ""),
+        "retry_count":       ("" if retry is None else str(retry)),
+        "moderation":        str((task.get("moderationAction") or {}).get("promptsModerationAction") or ""),
+        "video_mode":        str(i2v.get("mode") or ""),
+        "video_model":       str(i2v.get("model") or ""),
     }
+
+
+def _resolve_model_preset(session, version_id, _cache={}):
+    """The model VERSION's default sampling params from getGenerationModelByVersionId's
+    `extra` -> {steps, sampler, cfg_scale}, each '' when the version exposes no default for it.
+    VERSION-accurate (keyed on the exact version the gen used, so no latest-version drift), and
+    cached per version id. Never raises.
+
+    Crucially self-limiting: a flow/DiT model like Tsubaki.2 (AuraFlow) exposes samplingSteps
+    but NO samplingMethod / cfgScale, so those come back '' and an em-dash there stays the
+    honest answer (that model genuinely has no sampler or CFG) -- only a value the model really
+    defaults to is ever filled (issue #18)."""
+    vid = str(version_id or "")
+    if not vid:
+        return {}
+    if vid in _cache:
+        return _cache[vid]
+    preset = {}
+    if MODEL_DETAIL_HASH:
+        try:
+            params = {"operation": "getGenerationModelByVersionId", "u3t": U3T,
+                      "operationName": "getGenerationModelByVersionId",
+                      "variables": json.dumps({"id": vid}, separators=(",", ":")),
+                      "extensions": json.dumps(
+                          {"clientLibrary": CLIENT_LIBRARY,
+                           "persistedQuery": {"version": 1, "sha256Hash": MODEL_DETAIL_HASH}},
+                          separators=(",", ":"))}
+            body = session.get(API_URL, params=params, timeout=60).json()
+            ex = (((body.get("data") or {}).get("generationModelVersion") or {}).get("extra")) or {}
+            steps, sampler, cfg = ex.get("samplingSteps"), ex.get("samplingMethod"), ex.get("cfgScale")
+            preset = {
+                "steps":     ("" if steps is None else str(steps)),
+                "sampler":   (str(sampler) if sampler else ""),
+                "cfg_scale": ("" if cfg is None else str(cfg)),
+            }
+        except Exception:
+            preset = {}
+    _cache[vid] = preset
+    return preset
+
+
+def _fill_preset_defaults(session, fm, task):
+    """Backfill fm's steps/sampler/cfg_scale from the model VERSION preset when the task itself
+    omitted them (issue #18: Tsubaki.2's detailParameters is absent, so the gen ran on the
+    model's baked defaults recorded nowhere in the task). Mutates + returns fm.
+
+    Gated to plain IMAGE diffusion gens: a chat/edit task or an i2v video task carries no image
+    sampling params, so it is skipped and its em-dashes stay. Only fills a field that is blank
+    AND has a non-null preset value -- never overwrites a task-recorded value, never invents one
+    the model has no default for."""
+    if not isinstance(fm, dict):
+        return fm
+    params = (task or {}).get("parameters") or {}
+    if params.get("chat") or params.get("i2vPro"):     # not a plain image diffusion gen
+        return fm
+    if (fm.get("steps") or "").strip() and (fm.get("sampler") or "").strip() and (fm.get("cfg_scale") or "").strip():
+        return fm                                        # nothing missing -> no lookup
+    preset = _resolve_model_preset(session, fm.get("model_id", ""))
+    for k in ("steps", "sampler", "cfg_scale"):
+        if not (fm.get(k) or "").strip() and preset.get(k):
+            fm[k] = preset[k]
+    return fm
 
 
 def resolve_loras(session, task):
@@ -5682,6 +5808,7 @@ def run_sync_videos(args):
         outs, shared = video_outputs(task)
         detail = ((task or {}).get("outputs") or {}).get("detailParameters") or {}
         params = (task or {}).get("parameters") or {}
+        full_meta = extract_full_meta(task)   # issue #18: the full generation surface (video row)
         rows = []
         for o in outs:
             vmid = o["video_media_id"]
@@ -5712,12 +5839,14 @@ def run_sync_videos(args):
                     "width": str(detail.get("width") or ""),
                     "height": str(detail.get("height") or ""),
                     "model_id": str(params.get("modelId") or ""),
+                    "negative_prompt": shared.get("negative_prompt", ""),   # video block, not top level
                     "status": "completed",
                     "is_video": "1",
                     "poster_media_id": o.get("poster_media_id", ""),
                     "paid_credit": _paid_credit_str(task),   # actual cost, task-level
                     "video_duration": str(shared.get("duration") or ""),
                 })
+                full.update({k: full_meta.get(k, "") for k in _TASK_ROW_FIELDS})   # issue #18 (no preset fill: video)
                 _ensure_video_thumb(vmid, o.get("poster_media_id"), path)
                 video_faststart(path)                # iOS needs moov at the front to stream
                 rows.append(full)
@@ -7339,9 +7468,19 @@ def run_generate(args):
     vouts, _vshared = video_outputs(result)
     _outputs_or_raise(result, mids or vouts, "task completed but no media ids found")
 
-    # Prefer the task's actual metadata (authoritative, and the only source when
-    # recovering by --task-id); fall back to the params we submitted.
+    # Prefer the task's actual metadata (authoritative, and the only source when recovering by
+    # --task-id); fall back to the params we submitted -- EXCEPT the sampling fields, see below.
     fm = extract_full_meta(result)
+    # steps/sampler/cfg_scale follow the MODEL, not the submit. A task that recorded none ran on
+    # the model's baked defaults, so the VERSION preset is their truth -- and where the model
+    # genuinely has no sampler/CFG (AuraFlow, e.g. Tsubaki.2) the honest answer is a blank, not
+    # the samplingSteps/cfgScale we happened to send and the model ignored. So these three read
+    # from `fm` below (task-echoed -> preset -> blank) and NEVER fall back to the submitted value
+    # (owner ruling 2026-08-15). _fill_preset_defaults populates fm's blanks from the preset; it
+    # used to sit here and let the preset preempt _pick's submitted fallback for `steps` only,
+    # while `cfg` still leaked the submitted 7.0 -- an inconsistency this removes. Matches
+    # _download_image_task, the sibling downloader, which already reads these straight from fm.
+    _fill_preset_defaults(session, fm, result)   # issue #18: model-preset steps/sampler/cfg
 
     def _pick(fm_key, *param_keys):
         if fm.get(fm_key):
@@ -7379,8 +7518,11 @@ def run_generate(args):
             "prompt_preview": (prompt or "")[:100],
             "negative_prompt": _pick("negative_prompt", "negativePrompts"),
             "seed": seeds.get(mid) or _pick("seed", "seed"),   # per-image seed on a batch
-            "steps": _pick("steps", "samplingSteps"),
-            "cfg_scale": _pick("cfg_scale", "cfgScale"),
+            # Model's truth, not the submit: fm holds task-echoed -> preset -> blank. No
+            # _pick here on purpose -- a submitted samplingSteps/cfgScale the model ignored
+            # must not stand in for the model's real behavior (owner ruling; see above).
+            "steps": fm.get("steps", ""),
+            "cfg_scale": fm.get("cfg_scale", ""),
             "model_id": _pick("model_id", "modelId"),
             # Resolved here, not just in the backfill. extract_full_meta only fills
             # model_name for a CHAT task (from the local EDIT_MODELS table); every ordinary
@@ -7403,6 +7545,7 @@ def run_generate(args):
             "width": str((info or {}).get("width") or params.get("width") or ""),
             "height": str((info or {}).get("height") or params.get("height") or ""),
         })
+        full.update({k: fm.get(k, "") for k in _TASK_ROW_FIELDS})   # issue #18
         rows.append(full)
         make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
         saved.append(str(path))
@@ -7469,6 +7612,7 @@ def _download_video_task(session, result, task_id, out, args, params):
     outs, shared = video_outputs(result)
     _outputs_or_raise(result, outs, "video task completed but no video outputs found")
     detail = ((result or {}).get("outputs") or {}).get("detailParameters") or {}
+    fm = extract_full_meta(result)   # issue #18: the full generation surface for the video row
     sent = (params.get("i2vPro") or params.get("referenceVideo") or {}) if isinstance(params, dict) else {}
     prompt = shared.get("prompt") or sent.get("prompts") or sent.get("prompt") or ""
 
@@ -7509,6 +7653,7 @@ def _download_video_task(session, result, task_id, out, args, params):
             "width": str(detail.get("width") or ""),
             "height": str(detail.get("height") or ""),
         })
+        full.update({k: fm.get(k, "") for k in _TASK_ROW_FIELDS})   # issue #18 (no preset fill: video)
         # Poster thumbnail is COSMETIC -- it must never block cataloging the finished video.
         # A transient Windows lock on the poster's temp file (WinError 32) used to raise from
         # download() right here, before rows.append below, so the clip was pulled to videos/
@@ -7635,6 +7780,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     fx = fixer_block(result)
     fix_label = _fix_source_label(result, out) if fx is not None else ""
     fm = extract_full_meta(result)
+    _fill_preset_defaults(session, fm, result)   # issue #18: model-preset steps/sampler/cfg
     rows, saved = [], []
     for mid, seed in media:
         url, info = resolve_media(session, mid)
@@ -7687,6 +7833,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
             "width": str((info or {}).get("width") or ""),
             "height": str((info or {}).get("height") or ""),
         })
+        full.update({k: fm.get(k, "") for k in _TASK_ROW_FIELDS})   # issue #18
         rows.append(full)
         make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
         saved.append(str(path))
@@ -7944,6 +8091,7 @@ def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_
         dur = probe_video_duration(saved[0]) if saved else None   # real clip length for the reel
         return {"media_ids": mids, "saved": len(saved), "is_video": True, "duration": dur}
     fm = extract_full_meta(result)
+    _fill_preset_defaults(session, fm, result)   # issue #18: model-preset steps/sampler/cfg
     saved = _download_image_task(session, result, task_id, out, a, prompt=fm.get("prompt_full", ""))
     # the real images (batch individuals, not the composite grid)
     mids = [mid for mid, _seed in _task_image_media(result.get("outputs") or {})]
@@ -8239,6 +8387,7 @@ def run_edit_image(args):
     _outputs_or_raise(result, mids, "edit task completed but no media ids found")
 
     fm = extract_full_meta(result)
+    _fill_preset_defaults(session, fm, result)   # issue #18: model-preset steps/sampler/cfg
     chat = (params.get("chat") or {}) if isinstance(params, dict) else {}
     prompt_used = fm.get("prompt_full") or prompt or chat.get("prompts", "")
     # Resolved ONCE for the task, not per output image: the model is a property of the task,
@@ -8276,6 +8425,7 @@ def run_edit_image(args):
             "width": str((info or {}).get("width") or ""),
             "height": str((info or {}).get("height") or ""),
         })
+        full.update({k: fm.get(k, "") for k in _TASK_ROW_FIELDS})   # issue #18
         rows.append(full)
         make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
         saved.append(str(path))
@@ -8659,14 +8809,17 @@ def source_media_of_task(task):
     so it is readable back from getTaskById for history as well as recordable going
     forward. The three real shapes (see build_video_parameters / build_chat_edit_parameters
     / the upscale block):
-      * img2video      -> parameters.i2v.mediaId          (kind "video")
+      * img2video      -> parameters.i2vPro.mediaId        (kind "video"; legacy tasks: i2v)
       * edit/reference -> parameters.chat.mediaId         (kind "edit")
       * upscale/hires  -> parameters.mediaId + upscale|enlarge ratio  (kind "upscale")
     A plain txt2img has no input image and returns (None, None)."""
     params = ((task or {}).get("parameters") or {})
     if not isinstance(params, dict):
         return (None, None)
-    i2v = params.get("i2v")
+    # i2vPro is the current image-to-video submit shape; `i2v` is the legacy key older
+    # tasks carry. Reading only `i2v` meant EVERY modern i2v task returned (None,None), so
+    # video lineage was never captured -- create-time OR --backfill-lineage (audit 2026-08-15).
+    i2v = params.get("i2vPro") or params.get("i2v")
     if isinstance(i2v, dict) and i2v.get("mediaId"):
         return (str(i2v["mediaId"]), "video")
     chat = params.get("chat")
@@ -10559,11 +10712,27 @@ def run_backfill_meta(args):
     print("Done. Updated {:,} rows, {:,} still missing.".format(updated, failed))
 
 
+# How many completed tasks between catalog flushes in run_backfill_full_meta. Small enough that
+# an interrupted 36k-image run loses at most this many tasks of work (~1-2 min at normal pace),
+# large enough that the flush I/O stays a rounding error next to the getTaskById fetch time.
+_BACKFILL_CHECKPOINT_TASKS = 500
+
+
 def run_backfill_full_meta(args):
-    """Fill in prompt_full/natural_prompt/seed/steps/sampler/cfg_scale/model_id/model_name
-    for catalog rows missing them, using getTaskById + getGenerationModelByVersionId.
-    Also fills url/width/height from the task's media object as a free side effect.
-    Safe to re-run -- skips rows that already have prompt_full."""
+    """Fill catalog rows from getTaskById + getGenerationModelByVersionId: the core
+    prompt_full/natural_prompt/seed/steps/sampler/cfg_scale/model_id/model_name, plus
+    url/width/height from the task's media object as a free side effect. steps/sampler/cfg
+    also fall back to the model VERSION preset when the task recorded none (issue #18).
+
+    Re-fetch is gated by _needs() (see below), which is why the extra surfaces are opt-in --
+    each widens the set of already-detailed rows that get re-fetched:
+      --with-loras    rows missing the `loras` column (predate LoRA tracking)
+      --with-credit   rows missing `paid_credit` (predate cost tracking)
+      --with-surface  rows missing the 15 issue-#18 surface columns (inference_profile,
+                      quality_tag, render_seconds, backend, retry_count, moderation, ...) --
+                      the ONLY way a pre-#18 row that already has prompt + model ever gains
+                      them, since it otherwise passes every _needs() gate and is skipped.
+    Safe to re-run -- each pass skips rows already carrying what it targets."""
     out = Path(args.out)
     db_path = _ensure_db(out)
     session = _make_session(getattr(args, "token", None))
@@ -10580,6 +10749,7 @@ def run_backfill_full_meta(args):
     rows = load_catalog(db_path)
     with_loras = getattr(args, "with_loras", False)
     with_credit = getattr(args, "with_credit", False)
+    with_surface = getattr(args, "with_surface", False)
 
     # Work per unique task_id (one API call covers all media in that task).
     # --with-loras also re-processes rows that have full meta but a blank `loras`
@@ -10610,19 +10780,45 @@ def run_backfill_full_meta(args):
             return True
         if with_credit and r.get("task_id") and not r.get("paid_credit"):
             return True
+        # --with-surface is the same opt-in pattern for the 15 issue-#18 surface columns
+        # (inference_profile, quality_tag, render_seconds, backend, retry_count, moderation,
+        # ...). A pre-#18 row that DID reach detail (it has prompt_full + a model id) passes
+        # every gate above and so was skipped forever, never gaining a single surface column
+        # -- exactly the rows the whole surface capture exists to enrich. `updated_at` is the
+        # sentinel: it is one of the 15, every real getTaskById carries it, and nothing wrote
+        # it before #18, so a blank updated_at on a row that has a task_id means "this row
+        # predates surface capture." A row already enriched has it set and is skipped; a task
+        # that genuinely returns no updatedAt re-fetches each run (bounded, idempotent -- the
+        # same deal the _DETAIL_ONLY sweep already makes). Opt-in because on a big historical
+        # catalog it re-fetches nearly every task once.
+        if with_surface and r.get("task_id") and not (r.get("updated_at") or "").strip():
+            return True
         return False
     needs_fill = [r for r in rows if _needs(r)]
     # Named separately in the count below because it is the case that used to be invisible.
     stalled = [r for r in needs_fill
                if r.get("prompt_full")
                and not any((r.get(c) or "").strip() for c in _DETAIL_ONLY)]
+    # The surface-only re-admits: rows that already reached detail (prompt + model) yet carry
+    # no surface columns. Called out for the same reason `stalled` is -- it is the population
+    # --with-surface exists to reach, and staying silent about its size hid whether the flag did
+    # anything on a given catalog.
+    surface_only = [r for r in needs_fill
+                    if with_surface and r.get("task_id") and r.get("prompt_full")
+                    and any((r.get(c) or "").strip() for c in _DETAIL_ONLY)
+                    and not (r.get("updated_at") or "").strip()]
     task_ids = list(dict.fromkeys(r["task_id"] for r in needs_fill if r.get("task_id")))
-    print("Found {:,} rows to fill across {:,} unique tasks{}{}.".format(
+    print("Found {:,} rows to fill across {:,} unique tasks{}{}{}.".format(
         len(needs_fill), len(task_ids), " (incl. LoRAs)" if with_loras else "",
-        " (incl. credit costs)" if with_credit else ""))
+        " (incl. credit costs)" if with_credit else "",
+        " (incl. #18 surface)" if with_surface else ""))
     if stalled:
         print("  {:,} of them have a prompt but no model/steps/sampler/CFG -- these were "
               "skipped by every earlier backfill.".format(len(stalled)))
+    if surface_only:
+        print("  {:,} of them already had prompt + model but no #18 surface data (profile, "
+              "quality tag, render time, backend, moderation...) -- re-fetched for it.".format(
+                  len(surface_only)))
     if not task_ids:
         print("Nothing to backfill.")
         return
@@ -10639,6 +10835,7 @@ def run_backfill_full_meta(args):
         if fm.get("model_id"):
             fm["model_name"] = model_name_gql(session, fm["model_id"])
         fm["loras"] = resolve_loras(session, task_data)
+        _fill_preset_defaults(session, fm, task_data)   # issue #18: model-preset steps/sampler/cfg
         media_obj = (task_data or {}).get("media") or {}
         if media_obj:
             by_v = {str(u.get("variant", "")).upper(): u["url"]
@@ -10651,7 +10848,6 @@ def run_backfill_full_meta(args):
             fm["_media_height"] = str(media_obj.get("height") or "")
         return fm
 
-    task_cache = {}  # task_id -> full meta dict
     fetched = failed = 0
     _prog = getattr(args, "progress", None)
     # Failures are counted BY REASON. A bare total is unactionable: the same "16,044 failed"
@@ -10666,36 +10862,66 @@ def run_backfill_full_meta(args):
 
     errored = 0
 
+    # Index the catalog by task id ONCE so each task's meta applies straight to its own rows as
+    # it streams back -- no whole-catalog task_cache held across the run. The rows already carry
+    # their load-time local columns (they came from load_catalog), so re-saving one preserves
+    # its rating/collections/art_tags/etc.
+    rows_by_task = {}
+    for row in rows:
+        rows_by_task.setdefault(str(row.get("task_id") or ""), []).append(row)
+
+    def _apply(tid, fm):
+        """Fill one task's catalog rows from its full meta; return the rows it actually changed
+        (so only those get written at the next checkpoint)."""
+        changed = []
+        for row in rows_by_task.get(str(tid), ()):
+            hit = False
+            for f in _FULL_META_FIELDS:
+                if not row.get(f) and fm.get(f):
+                    row[f] = fm[f]; hit = True
+            # Backfill url/width/height from task media as bonus
+            if not row.get("url") and fm.get("_media_url"):
+                row["url"] = fm["_media_url"]; hit = True
+            if not row.get("width") and fm.get("_media_width"):
+                row["width"] = fm["_media_width"]; hit = True
+            if not row.get("height") and fm.get("_media_height"):
+                row["height"] = fm["_media_height"]; hit = True
+            if hit:
+                changed.append(row)
+        return changed
+
+    # Persist AS WE GO, not once at the very end. A 36k-image catalog is tens of thousands of
+    # getTaskById calls -- an hour-plus run -- and the old single end-save meant a Ctrl-C or a
+    # dropped connection at minute 50 wrote NOTHING, so the whole run was lost. Now every
+    # _BACKFILL_CHECKPOINT_TASKS completed tasks the rows filled so far are flushed, so an
+    # interrupted run keeps its progress and a rerun resumes where it stopped (the rows already
+    # filled now fail _needs() and are skipped). Only backfill-CHANGED rows are written, never
+    # the untouched majority -- so an image the owner just rated in the gallery mid-run is not
+    # re-saved from a stale snapshot, which NARROWS the concurrent-edit window the end-save had.
+    pending = []
+
+    def _checkpoint():
+        if pending:
+            save_catalog(db_path, pending)
+            pending.clear()
+
     for tid, fm in _parallel_map(task_ids, _fetch_task, workers, _prog, delay=args.delay,
                                  on_error=_note_error):
         fm = fm or {}
-        task_cache[tid] = fm
         if fm.get("prompt_full"):
             fetched += 1
         else:
             failed += 1
+        pending.extend(_apply(tid, fm))
+        if (fetched + failed) % _BACKFILL_CHECKPOINT_TASKS == 0:
+            _checkpoint()
         if not _prog and workers <= 1:
             sys.stdout.write("\r  Tasks {:,}/{:,}  fetched {:,}  failed {:,}  ".format(
                 fetched + failed, len(task_ids), fetched, failed))
             sys.stdout.flush()
 
-    print("\nApplying to {:,} catalog rows...".format(len(rows)))
-    for row in rows:
-        fm = task_cache.get(row.get("task_id"), {})
-        if not fm:
-            continue
-        for f in _FULL_META_FIELDS:
-            if not row.get(f) and fm.get(f):
-                row[f] = fm[f]
-        # Backfill url/width/height from task media as bonus
-        if not row.get("url") and fm.get("_media_url"):
-            row["url"] = fm["_media_url"]
-        if not row.get("width") and fm.get("_media_width"):
-            row["width"] = fm["_media_width"]
-        if not row.get("height") and fm.get("_media_height"):
-            row["height"] = fm["_media_height"]
-
-    save_catalog(db_path, rows)
+    _checkpoint()   # flush the final partial batch
+    print()         # end the \r progress line before the summary below
     # "failed" used to mean two unrelated things at once: the fetch threw, or it returned
     # fine and simply carried no prompt (a deleted task, or a kind that records none). Those
     # have completely different answers, and reporting one number for both had us guessing
@@ -11133,6 +11359,7 @@ def run_download(args, progress=None):
                             if fm.get("model_id"):
                                 fm["model_name"] = model_name_gql(session, fm["model_id"])
                             fm["loras"] = resolve_loras(session, task_data)
+                            _fill_preset_defaults(session, fm, task_data)   # issue #18
                             _full_meta_cache[tid] = fm
                             time.sleep(args.delay)
                         full_meta = _full_meta_cache.get(tid, {})
@@ -11241,6 +11468,7 @@ def run_download(args, progress=None):
                         if fm.get("model_id"):
                             fm["model_name"] = model_name_gql(session, fm["model_id"])
                         fm["loras"] = resolve_loras(session, task_data)
+                        _fill_preset_defaults(session, fm, task_data)   # issue #18
                         _full_meta_cache[tid] = fm
                         time.sleep(args.delay)
                     full_meta = _full_meta_cache.get(meta["task_id"], {})
@@ -11598,6 +11826,11 @@ def main():
                     help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
                          "no recorded credit cost yet (recovers the paid_credit column for older "
                          "generations from the task record; long run)")
+    ap.add_argument("--with-surface", action="store_true",
+                    help="with --backfill-full-meta, ALSO re-fetch rows that have full meta but "
+                         "none of the issue-#18 surface columns yet (inference profile, quality "
+                         "tag, render time, backend, moderation, retry count...); the only way a "
+                         "pre-#18 generation gains them. Long run on a big historical catalog.")
     ap.add_argument("--backfill-lineage", action="store_true",
                     help="fill in source_media_id/derive_kind (which image an edit/upscale/"
                          "video was made FROM) for rows that predate lineage tracking, via "
@@ -11620,7 +11853,10 @@ def main():
                          "(videoMediaId) into a videos/ folder")
     ap.add_argument("--sync-videos", action="store_true",
                     help="back up your image-to-video generations: find i2v tasks, download "
-                         "each mp4 into videos/, and catalog them (is_video), then exit")
+                         "each mp4 into videos/, and catalog them (is_video), then exit. This is "
+                         "the video-side complement of --sync, which skips video tasks: run it to "
+                         "capture videos made on the PixAI website (app-made videos are already "
+                         "caught when generated). Full-history scan, so it's a separate pass.")
     ap.add_argument("--faststart-videos", dest="faststart_videos", action="store_true",
                     help="losslessly move every video's moov atom to the front (ffmpeg "
                          "-c copy +faststart) so iOS/Safari can play them over HTTP, then exit")
@@ -12052,12 +12288,30 @@ def main():
             return
         if getattr(args, "sync", False):
             # Sync = the "it should just happen" pipeline: incremental pull that
-            # arrives WITH metadata, re-resolve any model ids that came back
-            # blank/numeric, fill anything still blank, rebuild any missing preview
-            # thumbnails, then reconcile rows deleted on the website. Every step is
-            # idempotent/self-limiting (backfill skips rows that already have
+            # arrives WITH metadata, fill anything still blank (which is what fills a
+            # model_id for a row that never reached detail), THEN re-resolve any model
+            # ids that came back blank/numeric into clean names, rebuild any missing
+            # preview thumbnails, then reconcile rows deleted on the website. Every step
+            # is idempotent/self-limiting (backfill skips rows that already have
             # prompt_full; build_thumbnails skips thumbs already on disk), so
             # re-running --sync on a clean catalog costs almost nothing extra.
+            #
+            # Order note (2026-08-15): backfill runs BEFORE fix-models on purpose.
+            # fix-models can only relabel a row that already HAS a model_id; backfill is
+            # what fills model_id for a row that never saw task detail. Running backfill
+            # first hands those freshly-filled ids to fix-models in the SAME sync, instead
+            # of leaving a numeric/blank name (backfill's own model_name_gql soft-fail) to
+            # be cleaned only on the next run. Both steps are independent and idempotent, so
+            # the swap is safe -- it just closes the loop one sync sooner.
+            #
+            # VIDEO scope (2026-08-15): --sync intentionally does NOT run the video
+            # backfill. run_download skips video task nodes by design (a video's poster is
+            # not a standalone image), and app-path videos are already captured the moment
+            # they are made (run_generate_video / --task-id recovery / _download_video_task).
+            # The only videos --sync can't reach are ones generated on the PixAI WEBSITE.
+            # Capturing those means a FULL-history feed walk plus a getTaskById per i2v task
+            # every run -- the opposite of --sync's cheap-idempotent-rerun contract -- so it
+            # stays the separate, deliberate `--sync-videos` pass rather than being folded in.
             args.update = True
             args.full_meta = True
             # cli-<uuid> job: parity with the Control Panel's own panel-<uuid> logging for
@@ -12072,10 +12326,10 @@ def main():
                 # explicitly -- otherwise the panel's progress bar is blank during the
                 # download step (fix_models/backfill already read args.progress themselves).
                 dl = run_download(args, progress=getattr(args, "progress", None))
-                print("\nSync: resolving any unlabeled model names...")
-                run_fix_models(args)
-                print("Sync: filling any rows still missing metadata...")
+                print("\nSync: filling any rows still missing metadata...")
                 run_backfill_full_meta(args)
+                print("Sync: resolving any unlabeled model names...")
+                run_fix_models(args)
                 print("Sync: building any missing preview thumbnails...")
                 thumb_dir = out / "gallery" / "thumbs"
                 thumb_dir.mkdir(parents=True, exist_ok=True)
