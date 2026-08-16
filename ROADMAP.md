@@ -59,6 +59,28 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   The "☆ Shortlist" staging step shipped. The larger workbench — deadline tracking, submission
   management — is still just wanted, not scoped.
 
+- **Bonjour / mDNS advertising: the server announces itself on the LAN**
+  Today a LAN device reaches the gallery only by a name the owner already knows and types
+  (`http://<pc-name>.local:5000`, which works because every modern OS resolves `.local` on its
+  own — that part needs no code). What's missing is *discovery*: the server registering an
+  `_http._tcp` DNS-SD service (the `zeroconf` library, one new dependency) so a phone, tablet, or
+  Bonjour-aware browser just **sees "Moonglade" on the network and taps it** — and so the app can
+  own its advertised name (`moonglade.local`) instead of borrowing the PC's. Owner already runs a
+  production server on `--host 0.0.0.0` under the machine name and wants this on top of it.
+  **What it touches:** the `moonglade_gallery.py` startup path (register on start, unregister
+  cleanly on stop/restart so a stale record doesn't linger after a `/api/server/restart`), and
+  `Serve Gallery.pyw`. **Constraints already settled by reading the code:** (1) register only when
+  the bind is a real LAN address (`--host 0.0.0.0` / a non-loopback host) — advertising a
+  loopback-only server announces something no other device can reach; (2) it widens **reachability
+  only, never trust** — the LAN gate is `_is_authorized_request()` (login on every path, no
+  loopback bypass), so a discovered `moonglade.local` still has to sign in, and that must stay
+  true; (3) `--https` currently uses Werkzeug's `"adhoc"` self-signed cert, which won't carry the
+  advertised name — a discovered HTTPS service therefore needs a proper cert with the `.local`
+  name in its SAN (mkcert-style), or the advertise step is HTTP-only until that lands. Pick one
+  deliberately, don't ship a name that throws a cert warning on tap. **Design step first** — it's
+  user-visible (what name/label appears in a device's discovery list, whether the mobile/QR access
+  flow adopts it) — quick workshop, not a full pixel pass.
+
 ---
 
 ## Design-pass reworks — rescope, don't just build
