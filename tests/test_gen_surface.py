@@ -168,6 +168,53 @@ def test_with_surface_gate_readmits_pre18_rows(monkeypatch, tmp_path):
     assert fetched == []
 
 
+def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp_path):
+    """A big backfill (a 36k-image catalog is tens of thousands of getTaskById calls) must
+    persist AS IT GOES, so a Ctrl-C or dropped connection partway keeps its progress instead of
+    writing nothing. With the checkpoint interval forced to 1, each fetched task flushes its own
+    save -- provable by counting save_catalog calls (a single end-save would be exactly one)."""
+    db = tmp_path / "catalog.db"
+    rows = []
+    for i in range(3):
+        r = {f: "" for f in CATALOG_FIELDS}
+        r.update({"media_id": "m%d" % i, "task_id": "t%d" % i, "filename": "f%d.png" % i,
+                  "prompt_full": "p", "model_id": "V1"})   # pre-#18: detailed but no surface
+        rows.append(r)
+    save_catalog(db, rows)
+
+    def detail(session, tid):
+        return {"parameters": {"modelId": "V1", "inferenceProfile": "lite", "prompts": "a cat"},
+                "outputs": {}, "updatedAt": "2026-08-1" + tid[-1]}
+
+    monkeypatch.setattr(core, "TASK_DETAIL_HASH", "hash")
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "task_detail_gql", detail)
+    monkeypatch.setattr(core, "model_name_gql", lambda s, mid: "M")
+    monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")
+    monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, t: fm)
+    monkeypatch.setattr(core, "_BACKFILL_CHECKPOINT_TASKS", 1)     # flush after every task
+
+    saves = {"n": 0}
+    real_save = core.save_catalog
+
+    def counting_save(dbp, rws):
+        saves["n"] += 1
+        return real_save(dbp, rws)
+
+    monkeypatch.setattr(core, "save_catalog", counting_save)
+
+    args = types.SimpleNamespace(out=str(tmp_path), token=None, workers=1, delay=0.0,
+                                 progress=None, with_loras=False, with_credit=False,
+                                 with_surface=True)
+    core.run_backfill_full_meta(args)
+
+    assert saves["n"] >= 3, "each task should checkpoint its own save, not batch to one end-save"
+    got = {r["task_id"]: r for r in load_catalog(db)}
+    for t in ("t0", "t1", "t2"):
+        assert got[t]["updated_at"] and got[t]["inference_profile"] == "lite", \
+            t + " must be filled and persisted"
+
+
 def test_new_columns_round_trip_through_the_catalog(tmp_path):
     db = str(tmp_path / "catalog.db")
     row = {f: "" for f in CATALOG_FIELDS}

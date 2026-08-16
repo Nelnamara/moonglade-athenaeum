@@ -9804,6 +9804,12 @@ def run_backfill_meta(args):
     print("Done. Updated {:,} rows, {:,} still missing.".format(updated, failed))
 
 
+# How many completed tasks between catalog flushes in run_backfill_full_meta. Small enough that
+# an interrupted 36k-image run loses at most this many tasks of work (~1-2 min at normal pace),
+# large enough that the flush I/O stays a rounding error next to the getTaskById fetch time.
+_BACKFILL_CHECKPOINT_TASKS = 500
+
+
 def run_backfill_full_meta(args):
     """Fill catalog rows from getTaskById + getGenerationModelByVersionId: the core
     prompt_full/natural_prompt/seed/steps/sampler/cfg_scale/model_id/model_name, plus
@@ -9934,7 +9940,6 @@ def run_backfill_full_meta(args):
             fm["_media_height"] = str(media_obj.get("height") or "")
         return fm
 
-    task_cache = {}  # task_id -> full meta dict
     fetched = failed = 0
     _prog = getattr(args, "progress", None)
     # Failures are counted BY REASON. A bare total is unactionable: the same "16,044 failed"
@@ -9949,36 +9954,66 @@ def run_backfill_full_meta(args):
 
     errored = 0
 
+    # Index the catalog by task id ONCE so each task's meta applies straight to its own rows as
+    # it streams back -- no whole-catalog task_cache held across the run. The rows already carry
+    # their load-time local columns (they came from load_catalog), so re-saving one preserves
+    # its rating/collections/art_tags/etc.
+    rows_by_task = {}
+    for row in rows:
+        rows_by_task.setdefault(str(row.get("task_id") or ""), []).append(row)
+
+    def _apply(tid, fm):
+        """Fill one task's catalog rows from its full meta; return the rows it actually changed
+        (so only those get written at the next checkpoint)."""
+        changed = []
+        for row in rows_by_task.get(str(tid), ()):
+            hit = False
+            for f in _FULL_META_FIELDS:
+                if not row.get(f) and fm.get(f):
+                    row[f] = fm[f]; hit = True
+            # Backfill url/width/height from task media as bonus
+            if not row.get("url") and fm.get("_media_url"):
+                row["url"] = fm["_media_url"]; hit = True
+            if not row.get("width") and fm.get("_media_width"):
+                row["width"] = fm["_media_width"]; hit = True
+            if not row.get("height") and fm.get("_media_height"):
+                row["height"] = fm["_media_height"]; hit = True
+            if hit:
+                changed.append(row)
+        return changed
+
+    # Persist AS WE GO, not once at the very end. A 36k-image catalog is tens of thousands of
+    # getTaskById calls -- an hour-plus run -- and the old single end-save meant a Ctrl-C or a
+    # dropped connection at minute 50 wrote NOTHING, so the whole run was lost. Now every
+    # _BACKFILL_CHECKPOINT_TASKS completed tasks the rows filled so far are flushed, so an
+    # interrupted run keeps its progress and a rerun resumes where it stopped (the rows already
+    # filled now fail _needs() and are skipped). Only backfill-CHANGED rows are written, never
+    # the untouched majority -- so an image the owner just rated in the gallery mid-run is not
+    # re-saved from a stale snapshot, which NARROWS the concurrent-edit window the end-save had.
+    pending = []
+
+    def _checkpoint():
+        if pending:
+            save_catalog(db_path, pending)
+            pending.clear()
+
     for tid, fm in _parallel_map(task_ids, _fetch_task, workers, _prog, delay=args.delay,
                                  on_error=_note_error):
         fm = fm or {}
-        task_cache[tid] = fm
         if fm.get("prompt_full"):
             fetched += 1
         else:
             failed += 1
+        pending.extend(_apply(tid, fm))
+        if (fetched + failed) % _BACKFILL_CHECKPOINT_TASKS == 0:
+            _checkpoint()
         if not _prog and workers <= 1:
             sys.stdout.write("\r  Tasks {:,}/{:,}  fetched {:,}  failed {:,}  ".format(
                 fetched + failed, len(task_ids), fetched, failed))
             sys.stdout.flush()
 
-    print("\nApplying to {:,} catalog rows...".format(len(rows)))
-    for row in rows:
-        fm = task_cache.get(row.get("task_id"), {})
-        if not fm:
-            continue
-        for f in _FULL_META_FIELDS:
-            if not row.get(f) and fm.get(f):
-                row[f] = fm[f]
-        # Backfill url/width/height from task media as bonus
-        if not row.get("url") and fm.get("_media_url"):
-            row["url"] = fm["_media_url"]
-        if not row.get("width") and fm.get("_media_width"):
-            row["width"] = fm["_media_width"]
-        if not row.get("height") and fm.get("_media_height"):
-            row["height"] = fm["_media_height"]
-
-    save_catalog(db_path, rows)
+    _checkpoint()   # flush the final partial batch
+    print()         # end the \r progress line before the summary below
     # "failed" used to mean two unrelated things at once: the fetch threw, or it returned
     # fine and simply carried no prompt (a deleted task, or a kind that records none). Those
     # have completely different answers, and reporting one number for both had us guessing
