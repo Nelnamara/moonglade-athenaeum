@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { FIX_COLORS, FIX_MAX_BOXES, FIX_MIN_PX, scaleBoxes } from "../gen/editCore.js";
 import { submitTask, useResultLines } from "../gen/submitTask.js";
-import { askPicker } from "./PickerHost.jsx";
 import { ResultLines } from "./EditTab.jsx";
 import CostBadge from "./CostBadge.jsx";
 
@@ -12,9 +12,32 @@ import CostBadge from "./CostBadge.jsx";
      price is quoted in the confirm before anything is submitted;
    - boxes are drawn in DISPLAY pixels but submitted in ORIGINAL-image pixels;
      the server does not rescale, so the scale factor decides which part of the
-     picture is actually repaired. */
-export default function FixTab({ visible }) {
-  const [source, setSource] = useState("");
+     picture is actually repaired.
+
+   `dock` (Generate dock, 2026-08-16 fidelity pass -- the DC's ONE footer on
+   every tab, genLabel '✦ Fix <kind>'): when given ({ topEl, promptEl, goEl,
+   resultsEl, balance, expanded }), the CostBadge + Fix button render into the
+   dock footer's right column, the tab's status line into the composer's prompt
+   slot (a Fix has no prompt) and the result lines under the settings grid via
+   portals -- SAME costRef, SAME run() with its spend confirm.
+
+   THE SOURCE IS SHARED (dock fidelity stage 3): `source` comes from the drawer's
+   Edit state, picked in slab 1 -- the DC's SOURCE list serves Edit, Fixer and
+   Enhance alike (Frontend Gallery.dc.html 1445-1468, 1501 'the source'), so a
+   picture picked on the Edit sub-tab is the one the Fixer boxes. Boxes are in
+   that picture's DISPLAY pixels, so they reset whenever the source changes.
+
+   WHAT THIS RENDERS: slab 2 (REGION, DC 1470-1471 + 1499-1508) of the Edit grid,
+   verbatim: the 'REGION' heading (1471 + 2931 editSlabLabel), then the DC's flex
+   column (1500, gap 8) -- the always-visible instruction 'Drag a box over the hand
+   or face on the source.' (1501), the Face / Hand segmented track (1502-1505,
+   segStyle 2834-2835 -- the sub-tab strip's own container + segments) and the peach
+   money-honesty note (1506). Beneath those, REAL-DATA EXTRAS the DC never drew
+   (checklist region 3, DOCUMENTED -- not defects): the box-drawing canvas over the
+   source (boxes are what /api/fix repairs; the DC only says 'Drag a box…' as copy)
+   and a 'Clear N' button. The DC's own per-tab Pick/Change is NOT here any more:
+   the source is slab 1's (SourceSlab), exactly as the DC has it. */
+export default function FixTab({ visible, dock, source }) {
   const [tag, setTag] = useState("face");
   const [boxes, setBoxes] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -28,6 +51,29 @@ export default function FixTab({ visible }) {
   const seq = useRef(0);
   const timer = useRef(0);
   const costVal = useRef(null);   // the settled figure, for the confirm dialog
+
+  // Boxes are display-pixel rectangles over ONE picture: a new source (picked in slab 1
+  // on any sub-tab, or handed in from the lightbox) invalidates every one of them.
+  useEffect(() => { setBoxes([]); }, [source]);
+
+  /* The ▲-collapsed dock hides the settings grid with display:none (DC 1209), and a
+     hidden <img> reports clientWidth 0 -- scaleBoxes would then fall back to scale 1
+     and SUBMIT DISPLAY PIXELS AS ORIGINAL PIXELS, repairing the wrong region. So the
+     last real measurement (natural / client width, taken whenever the picture is laid
+     out) is remembered and stands in for the element while it is hidden. The dock's
+     width does not change between collapsed and expanded, so the remembered scale is
+     the live one. */
+  const measured = useRef(null);
+  const scaleEl = () => {
+    const img = imgRef.current;
+    // live only once the picture is both laid out AND decoded (naturalWidth 0 = not
+    // loaded yet -- a scale of 0 would zero every box)
+    if (img && img.clientWidth && img.naturalWidth) {
+      measured.current = { naturalWidth: img.naturalWidth, clientWidth: img.clientWidth };
+      return img;
+    }
+    return measured.current;
+  };
 
   /* ---- price: own debounce + seq, like every other cost surface ----
      `pending` holds the in-flight quote's promise. A Fix's ONLY safety net is
@@ -51,7 +97,7 @@ export default function FixTab({ visible }) {
     if (badge && badge.setChecking) badge.setChecking();
     const p = fetch("/api/price", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "fix", source, boxes: scaleBoxes(boxes, imgRef.current) }),
+      body: JSON.stringify({ mode: "fix", source, boxes: scaleBoxes(boxes, scaleEl()) }),
     })
       .then((r) => r.json())
       .then((d) => {
@@ -69,10 +115,14 @@ export default function FixTab({ visible }) {
     return p;
   }, [source, boxes]);
 
+  // Re-prices on source/box changes AND on each return to this sub-tab (DC 2927: picking
+  // a sub-tab re-prices): the badge is portaled into the footer and unmounts with the tab,
+  // so it comes back idle and must be primed again. Hidden, it does not price.
   useEffect(() => {
+    if (!visible) return;
     clearTimeout(timer.current);
     timer.current = setTimeout(fireCost, 250);
-  }, [fireCost]);
+  }, [fireCost, visible]);
 
   /* ---- the canvas: draw, paint, resize ---- */
   const paint = useCallback(() => {
@@ -80,6 +130,7 @@ export default function FixTab({ visible }) {
     if (!c || !img) return;
     const w = img.clientWidth, h = img.clientHeight;
     if (!w || !h) return;
+    if (img.naturalWidth) measured.current = { naturalWidth: img.naturalWidth, clientWidth: w };
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
     const ctx = c.getContext("2d");
     ctx.clearRect(0, 0, w, h);
@@ -95,7 +146,11 @@ export default function FixTab({ visible }) {
     if (drag.current) draw({ ...drag.current, tag });
   }, [boxes, tag]);
 
-  useEffect(() => { paint(); }, [paint]);
+  // (re)paint on box/tag changes and whenever the ▲ settings re-open: while the grid was
+  // display:none the picture had no size, so a source picked or handed in meanwhile
+  // never got its canvas sized -- the first visible layout does it.
+  const expandedNow = dock ? dock.expanded : undefined;
+  useEffect(() => { paint(); }, [paint, expandedNow]);
   useEffect(() => {
     const onResize = () => paint();
     window.addEventListener("resize", onResize);
@@ -143,11 +198,6 @@ export default function FixTab({ visible }) {
     paint();
   };
 
-  const pickSource = async () => {
-    const m = await askPicker({ type: "image" });
-    if (m) { setSource(m.media_id); setBoxes([]); }
-  };
-
   const run = async () => {
     if (busyRef.current || !source || !boxes.length) return;
     // Flush a pending debounce so a click right after the last box doesn't
@@ -165,57 +215,129 @@ export default function FixTab({ visible }) {
     busyRef.current = true; setBusy(true);
     const emit = openLine("Submitting…");
     await submitTask("/api/fix",
-      { source, boxes: scaleBoxes(boxes, imgRef.current) },
+      { source, boxes: scaleBoxes(boxes, scaleEl()) },
       { label: "Fixed", emit });
     busyRef.current = false; setBusy(false);
   };
 
   if (!visible) return null;
+
+  // The footer pieces (dock mode) -- one definition each, mounted inline or portaled.
+  const inDock = !!dock;
+  // genTitle -- REAL COPY (owner ruling 2026-08-16, checklist region 3 'Fixer submit
+  // title / ready gating'): the DC's genTitle (3685) is one string pair for every tab --
+  // 'Pick a model and write a prompt first' / 'Submit — this spends credits or a card' --
+  // image-gen copy that is not tab-aware and, for a Fix, false twice over (no model, no
+  // prompt; and no card can EVER cover a Fix). Same shape, true words: the not-ready
+  // titles name the real gate (a source, then at least one box -- boxes are what /api/fix
+  // repairs), the ready title says what the DC's says minus the card.
+  const goTitle = !source ? "Pick a source image first"
+    : !boxes.length ? "Drag at least one box first"
+    : "Submit — this spends credits (a Fix is never card-covered)";
+  const goOff = !source || !boxes.length || busy;
+  const costLine = (
+    /* no cardLabel: a Fix can never be card-covered */
+    <CostBadge ref={costRef} hint="Drag a box over a hand or face to see the cost."
+      stack={inDock || undefined} balance={inDock ? dock.balance : undefined} />
+  );
+  const goButton = inDock ? (
+    <button type="button" className={"mgdock-gen" + (goOff ? " off" : "")} disabled={goOff}
+      title={goTitle} onClick={run}><span>&#10022; Fix {tag}</span></button>
+  ) : (
+    <button className="gen" disabled={goOff} title={goTitle} onClick={run}>&#10022; Fix</button>
+  );
+  // The composer's line (a Fix has no prompt) -- the slab itself carries the DC's own
+  // instruction copy (1501), so this only says where things stand.
+  const statusNote = !source ? "Pick a source image in SOURCE, then drag a box over each hand or face to repair."
+    : !boxes.length ? "Drag a box over a hand or face on the source — Face / Hand sets which."
+    : "";
+  // Composer top row (DC 1557-1562: pip · summary) + the prompt slot: a Fix has no prompt,
+  // so the composer carries the tab's own status line instead of an empty box.
+  const topRow = inDock ? (
+    <>
+      <span className="mgdock-modelchip static" title="Fixer — PixAI repairs what is inside your boxes">
+        {source ? <img src={"/thumbs/" + encodeURIComponent(source) + ".jpg"} alt="" /> : <span className="mgdock-chipph" />}
+        <span>Fixer</span>
+      </span>
+      <span className="mgdock-frames">{tag} · {boxes.length} {boxes.length === 1 ? "box" : "boxes"} · always spends</span>
+    </>
+  ) : null;
+  const composerMsg = inDock ? (
+    <div className="mgdock-composer-msg">
+      {statusNote || ("Repairing " + boxes.length + (boxes.length === 1 ? " area" : " areas") + " — no prompt needed; the confirm quotes the price.")}
+    </div>
+  ) : null;
+
+  // The result lines live OUTSIDE the ▲-gated grid in dock mode (a submit from the
+  // collapsed footer must still be able to answer, incl. the "task MAY exist" warning).
+  const results = lines.length ? <ResultLines lines={lines} /> : null;
+
   return (
-    <div className="gd-body">
-      <div className="gd-row">
-        <button className="card" onClick={pickSource}>
-          {source ? "▨ Change" : "▨ Pick"}
-        </button>
-        {["face", "hand"].map((t) => (
-          <button key={t} className={"gd-chip" + (tag === t ? " on" : "")}
-            style={tag === t ? { borderColor: FIX_COLORS[t], color: FIX_COLORS[t] } : null}
-            onClick={() => setTag(t)}>{t}</button>
-        ))}
-        <button className="gd-mini" onClick={() => setBoxes([])} disabled={!boxes.length}>
-          Clear{boxes.length ? " " + boxes.length : ""}
-        </button>
-      </div>
-
-      {source ? (
-        <div className="gd-fixwrap" ref={wrapRef}>
-          <img ref={imgRef} src={"/full/" + encodeURIComponent(source)} alt=""
-            onLoad={paint} draggable={false} />
-          <canvas ref={canvasRef}
-            onPointerDown={onDown} onPointerMove={onMove}
-            onPointerUp={onUp} onPointerLeave={onUp} />
+    <div className="mgdock-slab" style={{ animationDelay: "60ms" }}>
+      {inDock && dock.topEl ? createPortal(topRow, dock.topEl) : null}
+      {inDock && dock.promptEl ? createPortal(composerMsg, dock.promptEl) : null}
+      {inDock && dock.goEl ? createPortal(<>{costLine}{goButton}</>, dock.goEl) : null}
+      {inDock && dock.resultsEl ? createPortal(results, dock.resultsEl) : null}
+      {/* DC 1471 + 2931: editSlabLabel = 'REGION' under the Fixer sub-tab */}
+      <div className="mgdock-lbl">REGION</div>
+      {/* DC 1500-1507, verbatim: flex column gap 8 -> instruction copy (1501, 10.5px/1.5
+          subtext, always visible) · Face / Hand segmented track (1502-1505: the same
+          container + segStyle as the sub-tab strip; the pick is `tag`, DC fixKind, default
+          'face') · the peach note (1506). The segments carry no per-tag colour -- the DC's
+          segStyle has none; the tag colours (FIX_COLORS) live on the canvas strokes below,
+          where they tell the boxes apart. */}
+      <div className="mgdock-fixcol">
+        <div className="mgdock-fixcopy">Drag a box over the hand or face on the source.</div>
+        <div className="mgdock-segs" role="tablist" aria-label="Region kind">
+          {[["face", "Face"], ["hand", "Hand"]].map(([t, l]) => (
+            <button key={t} type="button" role="tab" aria-selected={tag === t}
+              className={"mgdock-seg" + (tag === t ? " on" : "")}
+              onClick={() => setTag(t)}>{l}</button>
+          ))}
         </div>
-      ) : (
-        <div className="gd-note">Pick an image, then drag a box over each hand or face to repair.</div>
-      )}
-      {source && !boxes.length && (
-        <div className="gd-note">Drag a box over a hand or face — the tag button above sets which.</div>
-      )}
+        <div className="mgdock-peachnote">A fix can't be card-covered — it always spends, and always asks first.</div>
 
-      <div className="gd-go">
-        {/* no cardLabel: a Fix can never be card-covered */}
-        <span className="gd-cost">
-          <CostBadge ref={costRef} hint="Drag a box over a hand or face to see the cost." />
-        </span>
-        <span className="sp" />
-        <button className="gen" disabled={!source || !boxes.length || busy}
-          title={!source ? "Pick an image first"
-               : !boxes.length ? "Drag at least one box"
-               : "Submit the repair — always spends"}
-          onClick={run}>&#10022; Fix</button>
+        {/* REAL-DATA EXTRAS (documented, not in the DC): the box canvas over the shared
+            source -- boxes are the request (/api/fix {source, boxes}); drawn in display
+            pixels, submitted in original pixels via scaleBoxes -- and the Clear button.
+            The frame borrows the DC's preview-box chrome (fcPreviewBoxStyle 2948: radius
+            10, 1px surface1, var(--base)) minus the square aspect: the picture must keep its
+            own aspect because the boxes are laid out on it. */}
+        {source ? (
+          <div className="mgdock-fixwrap" ref={wrapRef}>
+            <img ref={imgRef} src={"/full/" + encodeURIComponent(source)} alt=""
+              onLoad={paint} draggable={false} />
+            <canvas ref={canvasRef}
+              onPointerDown={onDown} onPointerMove={onMove}
+              onPointerUp={onUp} onPointerLeave={onUp} />
+          </div>
+        ) : null}
+        {source ? (
+          <div className="mgdock-fixrow">
+            <span className="mgdock-note-sm">
+              {boxes.length ? boxes.length + (boxes.length === 1 ? " box" : " boxes") + " · at most " + FIX_MAX_BOXES : "no boxes yet"}
+            </span>
+            <span className="sp" />
+            <button type="button" className="gd-mini" onClick={() => setBoxes([])} disabled={!boxes.length}
+              title="Remove every box">
+              Clear{boxes.length ? " " + boxes.length : ""}
+            </button>
+          </div>
+        ) : null}
       </div>
+      {/* the status line lives in the dock composer in dock mode (composerMsg above) */}
+      {!inDock && statusNote && <div className="gd-note">{statusNote}</div>}
 
-      <ResultLines lines={lines} />
+      {!inDock && (
+        <>
+          <div className="gd-go">
+            <span className="gd-cost">{costLine}</span>
+            <span className="sp" />
+            {goButton}
+          </div>
+          <ResultLines lines={lines} />
+        </>
+      )}
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
-  applyMode, applyModelGating, buildPayload, hasAnyRef, heldRefsNotice,
+  applyMode, applyModelGating, buildPayload, hasAnyRef, heldRefsNotice, bankView,
 } from "../../gallery/src/gen/videoDrawerCore.js";
 
 // M27 -- changing the Model dropdown silently emptied every Multi-Reference pick.
@@ -31,6 +31,14 @@ import {
 // SAME functions the React <VideoDrawer> drives. So this file executes the real transition against
 // a plain state object -- no source extraction, no DOM stubs -- which is a stronger check than the
 // pre-port version that regex-extracted the vanilla <mg-generate-drawer> class methods.
+//
+// COPY (dock fidelity pass, 2026-08-16): the notice text is the design of record's, Frontend
+// Gallery.dc.html pickShot 2225-2227 ('Still held for Multi-Reference: <held, comma-joined>.
+// Nothing was deleted.') and pickVideoModel 2232-2246 ('<engine> has no <mode>, so the shot mode
+// switched to <mode>.' + ' Still held: .... Nothing was deleted.'). The audio ref rides in the held
+// list because this drawer has an audio bank (the DC does not). What these tests pin is unchanged
+// by the wording: the banks stay untouched, the priced slots stay empty, and only a user gesture
+// speaks.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function ref(id) { return { media_id: String(id), thumb: "/thumbs/" + id + ".jpg" }; }
@@ -57,7 +65,7 @@ describe("leaving Multi-Reference names what is held and prices nothing (M27)", 
       audSlot: { media_id: "301", filename: "waves.wav" },
     });
     applyMode(d, "i2v", true);
-    assert.match(note(d), /Still held for Multi-Reference: 4 image refs, 1 video ref and the audio ref\./,
+    assert.equal(note(d), "Still held for Multi-Reference: 4 image refs, 1 video ref, the audio ref. Nothing was deleted.",
       "the refs that can't travel were dropped without a word: " + JSON.stringify(note(d)));
     assert.notEqual(note(d), "", "the notice was written but left empty");
     // The half that matters for money: the Start Frame is the primary input of a paid render.
@@ -70,9 +78,12 @@ describe("leaving Multi-Reference names what is held and prices nothing (M27)", 
   test("the notice does not promise a return trip gating can refuse", () => {
     const d = drawer({ imgSlots: [ref(101)] });
     applyMode(d, "i2v", true);
-    assert.match(note(d), /on a model that offers it/,
-      "the notice tells the user to switch back without saying the button may be hidden");
-    assert.match(note(d), /Nothing was deleted/);
+    // The DC copy makes no return-trip promise at all -- it names what is held and that nothing
+    // was deleted. A "switch back and it is all there" line would be a promise a dimmed
+    // Multi-Reference segment cannot keep.
+    assert.doesNotMatch(note(d), /switch back/i,
+      "the notice tells the user to switch back without saying the segment may be dimmed");
+    assert.match(note(d), /Nothing was deleted\./);
     assert.doesNotMatch(note(d), /only appl/i,
       "the notice makes a capability claim about the refs that the drawer cannot back up");
   });
@@ -81,14 +92,13 @@ describe("leaving Multi-Reference names what is held and prices nothing (M27)", 
     const d = drawer({ imgSlots: [ref(101), ref(102), ref(103)] });
     applyMode(d, "flf", true);
     assert.deepEqual(d.slots, [null, null], "the flf frames were filled from a bank flf cannot submit");
-    assert.match(note(d), /First & Last Frames has nowhere to show that/);
-    assert.match(note(d), /Still held for Multi-Reference: 3 image refs\./);
+    assert.equal(note(d), "Still held for Multi-Reference: 3 image refs. Nothing was deleted.");
   });
 
   test("one ref reads as singular", () => {
     const d = drawer({ imgSlots: [ref(101)], vidSlots: [ref(201)] });
     applyMode(d, "i2v", true);
-    assert.match(note(d), /1 image ref and 1 video ref\./);   // not "1 image refs"
+    assert.match(note(d), /1 image ref, 1 video ref\./);   // not "1 image refs"
   });
 
   test("a Start Frame the user already picked is neither overwritten nor re-priced", () => {
@@ -141,7 +151,7 @@ describe("leaving Multi-Reference names what is held and prices nothing (M27)", 
       audSlot: { media_id: "301", filename: "waves.wav" },
     });
     applyMode(d, "i2v", true);
-    assert.match(note(d), /^Still held for Multi-Reference: 2 video refs and the audio ref\./);
+    assert.match(note(d), /^Still held for Multi-Reference: 2 video refs, the audio ref\./);
   });
 
   test("switching between i2v and flf never invents a notice (r2v isn't involved)", () => {
@@ -167,10 +177,12 @@ describe("the model-gating path itself -- the way M27 was actually hit", () => {
       vidSlots: [ref(201)],
       audSlot: { media_id: "301", filename: "waves.wav" },
     });
-    applyModelGating(d, true);                       // what the Model <select>'s change listener does
+    applyModelGating(d, true);                       // what the engine palette's pick does
     assert.equal(d.mode, "i2v", "gating no longer forces an unsupported mode off r2v");
-    assert.match(note(d), /Still held for Multi-Reference: 4 image refs, 1 video ref and the audio ref\./,
-      "changing the Model dropdown still empties the drawer without a word");
+    // DC pickVideoModel 2232-2246: the engine change explains itself AND names what is held.
+    assert.equal(note(d), "V3.0 Flash has no Multi-Reference, so the shot mode switched to First Frame. "
+      + "Still held: 4 image refs, 1 video ref, the audio ref. Nothing was deleted.",
+      "changing the engine still empties the drawer without a word");
     assert.deepEqual(d.slots, [null],
       "a model change armed the Start Frame of a paid render on its own");
     assert.equal(priced(d), false);
@@ -187,6 +199,14 @@ describe("the model-gating path itself -- the way M27 was actually hit", () => {
       "a host-driven re-sync narrated itself as a choice the user made");
   });
 
+  test("an engine change that drops the shot mode explains itself even with nothing held", () => {
+    // DC 2240-2241: the sentence is unconditional on a mode drop; only the held tail is optional.
+    const d = drawer({ model: "v3.2", imgSlots: [null], vidSlots: [] });
+    applyModelGating(d, true);
+    assert.equal(d.mode, "flf", "the DC lands on the engine's LAST supported mode (V3.2: First & Last)");
+    assert.equal(note(d), "V3.2 has no Multi-Reference, so the shot mode switched to First & Last.");
+  });
+
   test("picking a model that still supports r2v changes nothing", () => {
     const d = drawer({ model: "v4.0", imgSlots: [ref(101), ref(102)] });
     applyModelGating(d, true);
@@ -198,11 +218,14 @@ describe("the model-gating path itself -- the way M27 was actually hit", () => {
 
 // Adversarial-review fixes (2026-08-08, commit after 134dcb9). See the review ledger.
 describe("model gating clamps duration even when it ALSO switches an unsupported mode (review #1)", () => {
-  test("v4.0/r2v/15s -> pick v3.0 (i2v-only, 10s cap): mode drops to i2v AND duration clamps to 10", () => {
+  test("v4.0/r2v/15s -> pick v3.0 (i2v+flf, 10s cap): mode drops to flf AND duration clamps to 10", () => {
     const d = drawer({ model: "v4.0", mode: "r2v", duration: 15, imgSlots: [ref(101)] });
     d.model = "v3.0";
     applyModelGating(d, true);
-    assert.equal(d.mode, "i2v", "r2v isn't supported by v3.0, so the mode must switch");
+    // r2v isn't supported by v3.0, so the mode must switch -- to the engine's LAST supported
+    // mode (DC pickVideoModel: m.modes[m.modes.length - 1]), First & Last on the V3.0 trio.
+    assert.equal(d.mode, "flf", "r2v isn't supported by v3.0, so the mode must switch (to the DC's last-supported)");
+    assert.deepEqual(d.slots, [null, null], "the switch filled a priced frame from the r2v bank");
     assert.equal(d.duration, 10,
       "the over-cap duration must STILL clamp to the new model's cap -- an early return after the " +
       "mode switch used to skip this and ship duration:15 to a 10s engine in the priced/submitted payload");
@@ -236,12 +259,17 @@ describe("entering Multi-Reference normalizes the video bank so the first +add w
     applyMode(d, "r2v", true);
     assert.deepEqual(d.vidSlots, [ref(201)]);
   });
-  test("the video '+ add' handler also seeds two when the backing bank is empty (covers the prefill path)", () => {
-    // The prefill path can set vidSlots=[] AFTER applyMode (host video_refs:[]), so the handler
-    // itself must handle the empty case, matching the vanilla's render-time normalization.
-    const drawerSrc = readFileSync(path.join(__dirname, "../../gallery/src/components/VideoDrawer.jsx"), "utf8");
-    assert.match(drawerSrc, /if \(!cur\.vidSlots\.length\) cur\.vidSlots = \[null, null\]; else cur\.vidSlots\.push\(null\);/,
-      "the video '+ add' onClick must seed [null, null] when the bank is empty, not a bare push");
+  test("the trailing empty slot targets a REAL index whatever shape the backing bank is in", () => {
+    // The DC has no '+ add' control: the paint is the filled picks plus ONE trailing empty slot
+    // (bankView). The prefill path can leave vidSlots=[] AFTER applyMode (host video_refs:[]), a
+    // fresh r2v leaves [null], a removal splices -- the trailing slot's pick must land at a real
+    // index in every one of those, never a fabricated one (the old first-click no-op).
+    assert.deepEqual(bankView([], 3), { filled: [], nextIndex: 0 });
+    assert.deepEqual(bankView([null], 3), { filled: [], nextIndex: 0 });
+    assert.deepEqual(bankView([ref(201)], 3), { filled: [{ item: ref(201), index: 0 }], nextIndex: 1 });
+    assert.deepEqual(bankView([ref(201), ref(202), ref(203)], 3).nextIndex, -1, "at the cap there is no trailing slot");
+    assert.equal(bankView([ref(1), ref(2), ref(3), ref(4), ref(5), ref(6)], 6).nextIndex, -1);
+    assert.equal(bankView([ref(1), ref(2), ref(3), ref(4), ref(5)], 6).nextIndex, 5);
   });
 });
 

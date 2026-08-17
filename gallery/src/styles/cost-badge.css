@@ -54,6 +54,39 @@
 .cost-badge.compact[data-state="idle"],
 .cost-badge.compact[data-state="checking"] { filter: saturate(.6) brightness(.82); }
 
+/* stack: the Generate dock's bare two-line cost (Frontend Gallery.dc.html 1571-1575 —
+   costText `11.5px; tabular-nums; transition color .3s` over costSubLine `9.5px; overlay0;
+   tabular-nums`, right-aligned, NO box). The state colour rules above still apply (border
+   is 0 here, so only the ink changes): free emerald, host-warn/short peach, error red —
+   the badge's honesty grammar over the DC's costColor (3679: green when settled & free,
+   otherwise var(--text) — so idle/checking read in --text here, not the bar's subtext). */
+.cost-badge.stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font: inherit;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  transition: color .3s;
+}
+.cost-badge.stack[data-state="idle"],
+.cost-badge.stack[data-state="checking"] { color: var(--text, #d6d2e2); }
+.cost-badge.stack .mgc-main { display: block; }
+.cost-badge.stack .mgc-line {
+  display: block;
+  font-size: 9.5px;
+  color: var(--overlay0, #6a6088);
+  font-variant-numeric: tabular-nums;
+}
+.cost-badge.stack .mgc-sub { display: block; margin-top: 1px; font-size: 9.5px; }
+.cost-badge.stack .mgc-pip { margin-right: 5px; }
+
 /* value · divider · label — the chip's internal anatomy */
 .cost-badge .mgc-val {
   font-size: 15.5px;

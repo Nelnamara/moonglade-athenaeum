@@ -2097,7 +2097,24 @@ ${"=".repeat(48)}
       main = note || (props.hint || "").trim() || DEFAULT_HINT;
     }
     const text = main + (sub ? " \xB7 " + sub.text : "");
-    return { state, warn, compact, short, main, sub, title, val, lab, tip, dot, text, d };
+    const stack = !!props.stack;
+    let line = "";
+    if (stack) {
+      const parts = [];
+      const countN = cardCount(props.count);
+      if (state === "free") {
+        const card = d.card_name || (props.cardLabel || "").trim() || "a free card";
+        parts.push(/\bcard\b/i.test(card) ? card : card + " card");
+        if (countN != null && countN > 1) parts.push(fmt2(countN) + " images");
+        if (sub) parts.push(sub.text);
+      } else if (state === "paid" && countN != null && countN > 1) {
+        parts.push(fmt2(countN) + " images");
+      }
+      const balanceN = props.balance != null && props.balance !== "" && isFinite(Number(props.balance)) ? Number(props.balance) : null;
+      if (balanceN != null) parts.push(fmt2(balanceN) + " credits");
+      line = parts.join(" \xB7 ");
+    }
+    return { state, warn, compact, stack, short, main, sub, title, val, lab, tip, dot, text, line, d };
   }
   function detailOf(m) {
     const d = m.d || {};
@@ -2116,7 +2133,7 @@ ${"=".repeat(48)}
   }
   var IDLE = { state: "idle", note: "", msg: "", raw: null };
   var CostBadge = forwardRef(function CostBadge2(props, ref) {
-    const { hint, warn, compact, cardLabel, onCost, id, className, style } = props;
+    const { hint, warn, compact, stack, count, balance, cardLabel, onCost, id, className, style } = props;
     const [view, setView] = useState(IDLE);
     const viewRef = useRef(view);
     const propsRef = useRef(props);
@@ -2166,7 +2183,7 @@ ${"=".repeat(48)}
         propsRef.current.onCost(detailOf(build(viewRef.current, propsRef.current)));
       }
     }, [view]);
-    const m = build(view, { hint, warn, compact, cardLabel });
+    const m = build(view, { hint, warn, compact, stack, count, balance, cardLabel });
     mRef.current = m;
     const dataWarn = m.state === "paid" && (m.warn || m.short) ? "1" : void 0;
     const dataShort = m.state === "paid" && m.short ? "1" : void 0;
@@ -2176,7 +2193,7 @@ ${"=".repeat(48)}
       "div",
       {
         id,
-        className: "cost-badge" + (m.compact ? " compact" : "") + (className ? " " + className : ""),
+        className: "cost-badge" + (m.compact ? " compact" : "") + (m.stack ? " stack" : "") + (className ? " " + className : ""),
         "data-state": m.state,
         "data-warn": dataWarn,
         "data-short": dataShort,
@@ -2185,11 +2202,26 @@ ${"=".repeat(48)}
         title: nativeTitle,
         style
       },
-      showChip ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-val" }, m.val), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-div" }), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-lab" }, m.lab), m.sub ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub" }, m.sub.text) : null, m.dot ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-dot", "aria-hidden": "true" }, "!") : null) : m.state === "checking" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, m.main, m.sub ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.sub.title }, m.sub.text) : null),
+      showChip ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-val" }, m.val), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-div" }), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-lab" }, m.lab), m.sub ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub" }, m.sub.text) : null, m.dot ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-dot", "aria-hidden": "true" }, "!") : null) : m.stack ? (
+        /* the dock's two-line stack: main line (state colour) over the DC costSubLine; the
+           card-short note keeps its own amber line beneath -- the honesty content of that
+           state is not something a tighter layout gets to hide */
+        /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-main" }, m.state === "checking" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : m.main), m.line ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-line" }, m.line) : null, m.sub && m.short ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.sub.title }, m.sub.text) : null)
+      ) : m.state === "checking" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, m.main, m.sub ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.sub.title }, m.sub.text) : null),
       m.compact && m.tip ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-tip", "aria-hidden": "true" }, m.tip) : null
     );
   });
   var CostBadge_default = CostBadge;
+
+  // scripts/react-dom-global-shim.js
+  var ReactDOM = window.ReactDOM;
+  var createPortal = ReactDOM.createPortal;
+  var flushSync = ReactDOM.flushSync;
+  var createRoot = ReactDOM.createRoot;
+  var hydrateRoot = ReactDOM.hydrateRoot;
+  var render = ReactDOM.render;
+  var unmountComponentAtNode = ReactDOM.unmountComponentAtNode;
+  var findDOMNode = ReactDOM.findDOMNode;
 
   // ../gallery/src/gen/videoDrawerCore.js
   var MODELS = [
@@ -2201,6 +2233,19 @@ ${"=".repeat(48)}
     { value: "v3.0.1", label: "V3.0 Flash", caps: ["multi-shot", "hires", "fastest", "no card"] },
     { value: "v2.7", label: "V2.7 (High Dynamics)", caps: ["camera moves", "dynamic", "no card"] }
   ];
+  var DEFAULT_MODEL = "v4.0.1";
+  var MODEL_CARD = { "v3.0.1": false, "v2.7": false };
+  var CAP_KIND = { "top quality": "crown", "cheap": "hot", "fastest": "hot", "default": "hot" };
+  function modelCaps(v) {
+    const m = MODELS.find((x) => x.value === v);
+    const caps = (m ? m.caps : []).map((c) => [c, CAP_KIND[c] || ""]);
+    if (v === DEFAULT_MODEL) caps.push(["default", "hot"]);
+    return caps;
+  }
+  function modelMeta(v) {
+    return (MODEL_MAXDUR[v] || 10) + "s max \xB7 " + (MODEL_CARD[v] === false ? "never card-covered" : "V4.0 cards apply");
+  }
+  var SHOT_LABEL = { i2v: "First Frame", flf: "First & Last", r2v: "Multi-Reference" };
   var MODEL_VMODES = {
     "v4.0": ["i2v", "flf", "r2v"],
     "v4.0.1": ["i2v", "flf", "r2v"],
@@ -2211,7 +2256,7 @@ ${"=".repeat(48)}
     "v2.7": ["i2v"]
   };
   var MODEL_MAXDUR = { "v4.0": 15, "v4.0.1": 15 };
-  var MODE_LBL = { i2v: "Start Frame", flf: "Start Frame", r2v: "Image references" };
+  var MODE_LBL = { i2v: "Start frame", flf: "Start frame", r2v: "Image references" };
   var MODE_PH = {
     i2v: "Describe the motion \u2014 \u2018slow cinematic pan right, gentle waves\u2026\u2019",
     flf: "Describe the transition from start frame to end frame\u2026",
@@ -2221,15 +2266,27 @@ ${"=".repeat(48)}
     normal: "Please keep creations SFW",
     enhanced: "\u{1F451} Enhanced \u2014 for professional creators"
   };
+  var CAMERA_OPTS = [
+    ["unset", "Unset"],
+    ["horizontal", "Horizontal"],
+    ["pan", "Pan"],
+    ["roll", "Roll"],
+    ["tilt", "Tilt"],
+    ["vertical-pan", "Vertical pan"],
+    ["zoom", "Zoom"]
+  ];
+  var AUDIO_LANGS = [
+    ["english", "English"],
+    ["japanese", "Japanese"],
+    ["chinese", "Chinese"],
+    ["korean", "Korean"],
+    ["none", "SE only (no dialogue)"]
+  ];
   var DURATIONS = [5, 6, 10, 15];
   function snapDuration(d) {
     d = Number(d);
     if (!isFinite(d)) return 5;
     return DURATIONS.reduce((best, v) => Math.abs(v - d) < Math.abs(best - d) ? v : best);
-  }
-  function joinAnd(parts) {
-    if (parts.length < 2) return parts[0] || "";
-    return parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1];
   }
   function refItem(r) {
     const mid = String(r.media_id || r.mid);
@@ -2242,15 +2299,29 @@ ${"=".repeat(48)}
     if (s.mode === "r2v") s.imgSlots = arr;
     else s.slots = arr;
   }
-  function heldRefsNotice(s, m) {
+  function bankView(arr, max) {
+    const filled = [];
+    let hole = -1;
+    (arr || []).forEach((item, index) => {
+      if (item && item.media_id) filled.push({ item, index });
+      else if (hole < 0) hole = index;
+    });
+    const nextIndex = filled.length >= max ? -1 : hole >= 0 ? hole : (arr || []).length;
+    return { filled, nextIndex };
+  }
+  function heldList(s) {
     const imgs = s.imgSlots.filter((x) => x && x.media_id).length;
     const vids = s.vidSlots.filter((x) => x && x.media_id).length;
     const held = [];
     if (imgs) held.push(imgs + (imgs === 1 ? " image ref" : " image refs"));
     if (vids) held.push(vids + (vids === 1 ? " video ref" : " video refs"));
     if (s.audSlot && s.audSlot.media_id) held.push("the audio ref");
+    return held;
+  }
+  function heldRefsNotice(s, _m) {
+    const held = heldList(s);
     if (!held.length) return "";
-    return "Still held for Multi-Reference: " + joinAnd(held) + ". Nothing was deleted \u2014 " + (m === "flf" ? "First & Last Frames" : "First Frame") + " has nowhere to show that. Switch back to Multi-Reference, on a model that offers it, and it is all still there.";
+    return "Still held for Multi-Reference: " + held.join(", ") + ". Nothing was deleted.";
   }
   function applyMode(s, m, userDriven) {
     const from = s.mode;
@@ -2265,7 +2336,15 @@ ${"=".repeat(48)}
   }
   function applyModelGating(s, userDriven) {
     const allowed = MODEL_VMODES[s.model] || ["i2v", "flf", "r2v"];
-    if (allowed.indexOf(s.mode) === -1) applyMode(s, allowed[0], userDriven);
+    if (allowed.indexOf(s.mode) === -1) {
+      const from = s.mode, to = allowed[allowed.length - 1];
+      applyMode(s, to, userDriven);
+      if (userDriven) {
+        const m = MODELS.find((x) => x.value === s.model);
+        const held = heldList(s);
+        s.modeNote = (m ? m.label : s.model) + " has no " + (SHOT_LABEL[from] || from) + ", so the shot mode switched to " + SHOT_LABEL[to] + "." + (held.length ? " Still held: " + held.join(", ") + ". Nothing was deleted." : "");
+      }
+    }
     const maxDur = MODEL_MAXDUR[s.model] || 10;
     if (s.duration > maxDur) s.duration = maxDur;
   }
@@ -2288,6 +2367,7 @@ ${"=".repeat(48)}
     if (o.is_private != null) s.channel = o.is_private ? "enhanced" : "normal";
     if (o.audio != null) s.audioGen = !!o.audio;
     if (o.audio_language != null) s.audioLanguage = o.audio_language;
+    if (o.prompt_helper != null) s.videoHelper = !!o.prompt_helper;
     if (o.negative != null) s.negative = o.negative;
     const imgList = Array.isArray(o.images) ? o.images : Array.isArray(o.refs) ? o.refs : null;
     if (imgList && s.mode === "flf" && imgList.length <= 2) {
@@ -2319,7 +2399,12 @@ ${"=".repeat(48)}
       camera_movement: s.mode !== "r2v" ? s.camera : "",
       quality: s.quality,
       audio_language: s.audioLanguage,
-      is_private: s.channel === "enhanced"
+      is_private: s.channel === "enhanced",
+      // The DC's 'Video prompt helper' switch (DC 2921, off by default -- the opposite of image
+      // gen). Rides the payload -> i2vPro.usePromptsHelper on the server (I2V/FLF only; the
+      // verified referenceVideo shape has no such field), and so lives in priceKey like every
+      // other submitted field.
+      prompt_helper: !!s.videoHelper
     };
   }
   function hasAnyRef(p) {
@@ -2358,8 +2443,18 @@ ${"=".repeat(48)}
 
   // ../gallery/src/components/VideoDrawer.jsx
   var lineSeq = 0;
+  var ENGINE_TINTS = [
+    "linear-gradient(150deg, #33236d 0%, #1b1733 100%)",
+    "linear-gradient(150deg, #3a3460 0%, #17142b 100%)",
+    "linear-gradient(150deg, #643aac 0%, #241f5b 100%)",
+    "linear-gradient(150deg, #2a4a58 0%, #171f38 100%)",
+    "linear-gradient(150deg, #4a3a6e 0%, #1f1a36 100%)",
+    "linear-gradient(150deg, #3a2b63 0%, #191338 100%)",
+    "linear-gradient(150deg, #5a3a72 0%, #221a3e 100%)"
+  ];
   var VideoDrawer = forwardRef(function VideoDrawer2(props, ref) {
-    const { loomCtx, style, className } = props;
+    const { loomCtx, style, className, dock } = props;
+    const inDock = !!dock;
     const st = useRef({
       mode: "i2v",
       slots: [null],
@@ -2370,13 +2465,15 @@ ${"=".repeat(48)}
       // r2v video bank (max 3)
       audSlot: null,
       // {media_id, filename} | null
-      model: "v4.0.1",
+      model: DEFAULT_MODEL,
       duration: 5,
       camera: "unset",
       quality: "professional",
       channel: "normal",
       audioGen: false,
       audioLanguage: "english",
+      videoHelper: false,
+      // DC 1919: 'Video prompt helper' off by default (the opposite of image gen)
       negative: "",
       modeNote: "",
       rendering: false,
@@ -2393,6 +2490,8 @@ ${"=".repeat(48)}
     const rerender = useCallback(() => force((n) => n + 1), []);
     const [results, setResults] = useState([]);
     const [warn, setWarnState] = useState("");
+    const [pal, setPal] = useState(null);
+    const [palQuery, setPalQuery] = useState("");
     const setWarn = useCallback((w) => setWarnState(w), []);
     const ceRef = useRef(null);
     const previewRef = useRef(null);
@@ -2640,6 +2739,29 @@ ${"=".repeat(48)}
         rerender();
       });
     };
+    const openPalette = () => {
+      const r = rootRef.current ? rootRef.current.getBoundingClientRect() : null;
+      const vh = window.innerHeight || 800;
+      let bottom = r ? Math.round(vh - r.top + 12) : 250;
+      bottom = Math.max(14, Math.min(bottom, Math.round(vh * 0.54) - 14));
+      setPalQuery("");
+      setPal({ bottom });
+    };
+    const closePalette = useCallback(() => {
+      setPal(null);
+      setPalQuery("");
+    }, []);
+    useEffect(() => {
+      if (!pal) return void 0;
+      const onKey = (e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          closePalette();
+        }
+      };
+      window.addEventListener("keydown", onKey, true);
+      return () => window.removeEventListener("keydown", onKey, true);
+    }, [pal, closePalette]);
     const payload = () => buildPayload(st.current, promptText());
     const flfMissingStart2 = () => flfMissingStart(st.current);
     const debCost = (force2) => {
@@ -2831,6 +2953,10 @@ ${"=".repeat(48)}
       st.current.hostBusy = !!isBusy;
       rerender();
     };
+    const insertText = (t) => {
+      const cur = promptText();
+      promptSet((cur ? cur.replace(/,\s*$/, "") + ", " : "") + String(t || ""));
+    };
     useImperativeHandle(ref, () => {
       const node = rootRef.current;
       if (node && !node._mgWired) {
@@ -2840,6 +2966,8 @@ ${"=".repeat(48)}
         node.flushPromptEdit = flushPromptEdit;
         node.setBusy = setBusy;
         node.payload = payload;
+        node.insertText = insertText;
+        node.promptText = promptText;
         Object.defineProperty(node, "mode", { configurable: true, get: () => st.current.mode });
       }
       return node;
@@ -2850,77 +2978,194 @@ ${"=".repeat(48)}
     const chosenModel = MODELS.find((m) => m.value === s.model);
     const isR2v = s.mode === "r2v";
     const canGo = !s.hostBusy && !s.rendering && canSubmit(s.price, buildPayload(s, ""));
-    const SEG = [["i2v", "First Frame"], ["flf", "First & Last Frames"], ["r2v", "Multi-Reference"]];
-    const slotBox = (item, i, bank, placeholder, tag) => /* @__PURE__ */ react_global_shim_default.createElement(
-      "div",
-      {
-        key: bank + i,
-        className: "mgd-slot" + (bank === "vid" ? " dashed" : "") + (item ? "" : ""),
-        "data-nsfw": item && item.is_nsfw ? "1" : void 0,
-        style: item && bank === "vid" ? { borderStyle: "solid" } : void 0,
-        onClick: () => requestPick(bank, i),
-        onMouseEnter: item ? (e) => showPreview(item.media_id, e.currentTarget) : void 0,
-        onMouseLeave: item ? () => hidePreview() : void 0
-      },
-      item ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("img", { src: item.thumb, alt: "" }), bank === "vid" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-vidbadge" }, "\u25B6") : null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-slot-tag" }, tag), /* @__PURE__ */ react_global_shim_default.createElement(
-        "button",
-        {
-          type: "button",
-          className: "mgd-vs-x",
-          onClick: (e) => {
-            e.stopPropagation();
-            hidePreview();
-            const cur = st.current;
-            if (bank === "vid") {
-              cur.vidSlots.splice(i, 1);
-              if (!cur.vidSlots.length) cur.vidSlots = [null];
-            } else if (cur.mode === "r2v") {
-              let arr = cur.imgSlots;
-              arr.splice(i, 1);
-              if (!arr.length) arr = [null];
-              cur.imgSlots = arr;
-            } else cur.slots[i] = null;
-            rerender();
-            debCost();
-          }
-        },
-        "\xD7"
-      )) : placeholder
-    );
-    const primArr = primary();
-    const mainArr = s.mode === "flf" ? [primArr[0]] : primArr;
-    let refN = 0;
-    const primSlots = mainArr.map((item, i) => {
-      let tag = "";
-      if (item) {
-        refN++;
-        tag = s.mode === "flf" ? "start" : "@image" + refN;
-      }
-      const ph = s.mode === "flf" || s.mode === "i2v" ? "+ start" : "+ pick";
-      return slotBox(item, i, "primary", ph, tag);
+    const shotModes = ["i2v", "flf", "r2v"].map((v) => {
+      const ok = allowedModes.indexOf(v) >= 0;
+      return { v, ok, label: SHOT_LABEL[v], title: ok ? SHOT_LABEL[v] : SHOT_LABEL[v] + " needs the V4.0 pair" };
     });
-    let vidN = 0;
-    const vidArr = s.vidSlots.length ? s.vidSlots : [null];
-    return /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: setRoot, className: "gen-drawer" + (className ? " " + className : ""), style, "data-loom-ctx": loomCtx ? "" : void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "tablist" }, SEG.map(([v, lbl]) => allowedModes.indexOf(v) === -1 ? null : /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", className: s.mode === v ? "on" : "", onClick: () => userSetMode(v) }, lbl))), s.modeNote ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-modenote" }, s.modeNote) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl mgd-slots-lbl" }, MODE_LBL[s.mode]), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slots mgd-imgslots" }, primSlots, s.mode === "r2v" && primArr.length < 6 ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-slot-add", onClick: () => {
-      st.current.imgSlots.push(null);
-      rerender();
-    } }, "+ add") : null), s.mode === "flf" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "End Frame ", /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-note" }, "(Optional)")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slots" }, slotBox(s.slots[1], 1, "primary", "+ end", "end"))) : null, isR2v ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Video references ", /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-note" }, "\xB7 up to 3 \xB7 2\u201315s each, 15s total")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slots" }, vidArr.map((item, i) => {
-      let tag = "";
-      if (item) {
-        vidN++;
-        tag = "@video" + vidN;
-      }
-      return slotBox(item, i, "vid", "+ video", tag);
-    }), s.vidSlots.length < 3 ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-slot-add", onClick: () => {
+    const removeSlot = (bank, i) => {
       const cur = st.current;
-      if (!cur.vidSlots.length) cur.vidSlots = [null, null];
-      else cur.vidSlots.push(null);
-      rerender();
-    } }, "+ add") : null), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Audio reference ", /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-note" }, "\xB7 WAV \u226415MB")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-audiorow" }, s.audSlot && s.audSlot.uploading ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-note" }, "Uploading ", s.audSlot.uploading, "\u2026") : s.audSlot ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-audiochip" }, "\u266A @audio1 \xB7 ", s.audSlot.filename, " ", /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", onClick: () => {
-      st.current.audSlot = null;
+      if (bank === "vid") {
+        cur.vidSlots.splice(i, 1);
+        if (!cur.vidSlots.length) cur.vidSlots = [null];
+      } else if (cur.mode === "r2v") {
+        let arr = cur.imgSlots;
+        arr.splice(i, 1);
+        if (!arr.length) arr = [null];
+        cur.imgSlots = arr;
+      } else cur.slots[i] = null;
       rerender();
       debCost();
-    } }, "\xD7")) : /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-audioadd", onClick: () => audFileRef.current && audFileRef.current.click() }, "+ Audio"))) : null, /* @__PURE__ */ react_global_shim_default.createElement(
+    };
+    const slotBox = ({ key, item, bank, index, caption, badge, title }) => /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        key,
+        className: "mgd-slot" + (item ? " filled" : ""),
+        title,
+        "data-nsfw": item && item.is_nsfw ? "1" : void 0,
+        onClick: () => item ? removeSlot(bank, index) : requestPick(bank, index)
+      },
+      item ? /* @__PURE__ */ react_global_shim_default.createElement("img", { src: item.thumb, alt: "" }) : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slotcap" }, caption),
+      item && badge ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slot-tag" }, badge) : null
+    );
+    const banks = [];
+    if (isR2v) {
+      const iv = bankView(s.imgSlots, 6);
+      const imgs = iv.filled.map(({ item, index }, n) => slotBox({
+        key: "img" + index,
+        item,
+        bank: "primary",
+        index,
+        badge: "@image" + (n + 1),
+        title: "Image reference " + (n + 1)
+      }));
+      if (iv.nextIndex >= 0) imgs.push(slotBox({ key: "img+", item: null, bank: "primary", index: iv.nextIndex, caption: "+ image", title: "Pick from your gallery" }));
+      banks.push({ label: MODE_LBL.r2v, note: "up to 6", slots: imgs });
+      const vv = bankView(s.vidSlots, 3);
+      const vids = vv.filled.map(({ item, index }, n) => slotBox({
+        key: "vid" + index,
+        item,
+        bank: "vid",
+        index,
+        badge: "@video" + (n + 1),
+        title: "Video reference " + (n + 1)
+      }));
+      if (vv.nextIndex >= 0) vids.push(slotBox({ key: "vid+", item: null, bank: "vid", index: vv.nextIndex, caption: "+ video", title: "Pick from your gallery" }));
+      banks.push({ label: "Video references", note: "up to 3", slots: vids });
+    } else {
+      banks.push({ label: MODE_LBL[s.mode], note: "", slots: [slotBox({
+        key: "start",
+        item: s.slots[0],
+        bank: "primary",
+        index: 0,
+        caption: "pick",
+        title: s.slots[0] ? "Start frame" : "Pick from your gallery"
+      })] });
+      if (s.mode === "flf") banks.push({ label: "End frame", note: "optional", slots: [slotBox({
+        key: "end",
+        item: s.slots[1],
+        bank: "primary",
+        index: 1,
+        caption: "pick",
+        title: s.slots[1] ? "End frame" : "Pick from your gallery"
+      })] });
+    }
+    const palQ = palQuery.trim().toLowerCase();
+    const palItems = MODELS.filter((m) => !palQ || m.label.toLowerCase().indexOf(palQ) >= 0);
+    const engineIdx = Math.max(0, MODELS.findIndex((m) => m.value === s.model));
+    const promptField = /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        ref: ceRef,
+        className: "mgd-ce" + (inDock ? " mgdock-prompt-ce" : ""),
+        contentEditable: true,
+        suppressContentEditableWarning: true,
+        "data-placeholder": MODE_PH[s.mode],
+        onInput: onCeInput,
+        onBlur: onCeBlur
+      }
+    );
+    const negativeField = /* @__PURE__ */ react_global_shim_default.createElement(
+      "textarea",
+      {
+        className: inDock ? "mgdock-neg" : "mgd-neg",
+        rows: inDock ? 1 : void 0,
+        placeholder: "blurry, extra fingers, watermark",
+        value: s.negative,
+        onChange: (e) => {
+          st.current.negative = e.target.value;
+          rerender();
+          debCost();
+        }
+      }
+    );
+    const costLine = /* @__PURE__ */ react_global_shim_default.createElement(
+      CostBadge_default,
+      {
+        ref: costRef,
+        className: "mgd-cost",
+        warn,
+        cardLabel: "a video card",
+        hint: "Pick a source image to see the cost.",
+        stack: inDock || void 0,
+        balance: inDock ? dock.balance : void 0
+      }
+    );
+    const goButton = inDock ? /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        className: "mgdock-gen" + (canGo ? "" : " off"),
+        disabled: !canGo,
+        onClick: doGenerate,
+        title: s.rendering ? "Rendering\u2026" : canGo ? "Submit \u2014 this spends credits or a card" : "Waiting for the cost to settle for these settings"
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("span", null, s.rendering ? "Rendering\u2026" : "\u2726 Generate video")
+    ) : /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-go", disabled: !canGo, onClick: doGenerate }, s.rendering ? "Rendering\u2026" : "Generate video");
+    const topRow = inDock ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-modelchip static", title: "Video engine \u2014 set in the video settings" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-chipph" }), /* @__PURE__ */ react_global_shim_default.createElement("span", null, chosenModel ? chosenModel.label : s.model)), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-frames" }, SHOT_LABEL[s.mode] || s.mode, " \xB7 ", s.duration, "s")) : null;
+    const layerHost = rootRef.current && rootRef.current.closest && rootRef.current.closest(".mgx-dock-host") || document.body;
+    const palette = pal ? createPortal(
+      /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palscrim", onClick: closePalette }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-pal", style: { bottom: pal.bottom }, role: "dialog", "aria-label": "Video engine" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palhd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-paltitle" }, "Video engine"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palsub" }, "Shot type follows the engine \u2014 unsupported modes switch on pick"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palsp" }), /* @__PURE__ */ react_global_shim_default.createElement(
+        "input",
+        {
+          className: "mgd-palq",
+          value: palQuery,
+          placeholder: "Search",
+          autoFocus: true,
+          onChange: (e) => setPalQuery(e.target.value)
+        }
+      ), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-palx", onClick: closePalette, title: "Close" }, "\xD7")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palgrid" }, palItems.map((m) => {
+        const i = MODELS.indexOf(m);
+        const modes = (MODEL_VMODES[m.value] || ["i2v", "flf", "r2v"]).map((x) => SHOT_LABEL[x]).join(" \xB7 ");
+        return /* @__PURE__ */ react_global_shim_default.createElement(
+          "button",
+          {
+            key: m.value,
+            type: "button",
+            className: "mgd-palitem" + (m.value === s.model ? " on" : ""),
+            title: m.caps.join(" \xB7 "),
+            onClick: () => {
+              st.current.model = m.value;
+              applyModelGating2(true);
+              debCost();
+              closePalette();
+            }
+          },
+          /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palcover", style: { background: ENGINE_TINTS[i % ENGINE_TINTS.length] } }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-paloff" }, "Official")),
+          /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palbody" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palname" }, m.label), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palmeta" }, /* @__PURE__ */ react_global_shim_default.createElement("span", null, modes), /* @__PURE__ */ react_global_shim_default.createElement("span", null, MODEL_MAXDUR[m.value] || 10, "s max")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palcost" }, MODEL_CARD[m.value] === false ? "no card" : "card"))
+        );
+      })))),
+      layerHost
+    ) : null;
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: setRoot, className: "gen-drawer" + (inDock ? " mgd-dock" : "") + (inDock && dock.expanded === false ? " mgd-collapsed" : "") + (className ? " " + className : ""), style, "data-loom-ctx": loomCtx ? "" : void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slabwrap" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slabs" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "0ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "SHOT MODE"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "tablist" }, shotModes.map((sm) => /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        key: sm.v,
+        type: "button",
+        role: "tab",
+        "aria-selected": s.mode === sm.v,
+        "aria-disabled": !sm.ok,
+        className: (s.mode === sm.v ? "on" : "") + (sm.ok ? "" : " off"),
+        title: sm.title,
+        onClick: () => {
+          if (sm.ok) userSetMode(sm.v);
+        }
+      },
+      sm.label
+    ))), s.modeNote ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-modenote" }, s.modeNote) : null, banks.map((b) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: b.label, className: "mgd-bank" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-bankhd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-banklbl" }, b.label), b.note ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-banknote" }, b.note) : null), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slots" }, b.slots))), isR2v ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-bank" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-bankhd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-banklbl" }, "Audio reference"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-banknote" }, "WAV \u226415MB")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slots" }, s.audSlot && s.audSlot.uploading ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slot", title: "Uploading " + s.audSlot.uploading }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slotcap" }, "uploading\u2026")) : s.audSlot ? /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        className: "mgd-slot filled audio",
+        title: "Audio reference \u2014 " + s.audSlot.filename,
+        onClick: () => {
+          st.current.audSlot = null;
+          rerender();
+          debCost();
+        }
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slotcap" }, "\u266A"),
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slot-tag" }, "@audio1")
+    ) : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slot", title: "Upload a WAV (\u226415MB)", onClick: () => audFileRef.current && audFileRef.current.click() }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slotcap" }, "+ audio")))) : null, /* @__PURE__ */ react_global_shim_default.createElement(
       "input",
       {
         ref: audFileRef,
@@ -2934,67 +3179,43 @@ ${"=".repeat(48)}
           if (f) uploadAudio(f);
         }
       }
-    ), /* @__PURE__ */ react_global_shim_default.createElement(
-      "div",
-      {
-        ref: ceRef,
-        className: "mgd-ce",
-        contentEditable: true,
-        suppressContentEditableWarning: true,
-        "data-placeholder": MODE_PH[s.mode],
-        onInput: onCeInput,
-        onBlur: onCeBlur
-      }
-    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Negative prompt"), /* @__PURE__ */ react_global_shim_default.createElement(
-      "textarea",
-      {
-        className: "mgd-neg",
-        placeholder: "blurry, extra fingers, watermark",
-        value: s.negative,
-        onChange: (e) => {
-          st.current.negative = e.target.value;
-          rerender();
-          debCost();
-        }
-      }
-    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-row" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "grow" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Model"), /* @__PURE__ */ react_global_shim_default.createElement(
-      "select",
-      {
-        className: "mgd-sel mgd-model",
-        value: s.model,
-        onChange: (e) => {
-          st.current.model = e.target.value;
-          applyModelGating2(true);
-          debCost();
-        }
-      },
-      MODELS.map((m) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: m.value, value: m.value }, m.label))
-    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-caps mgd-modelcaps" }, (chosenModel ? chosenModel.caps : []).map((t) => /* @__PURE__ */ react_global_shim_default.createElement("span", { key: t, className: "mgd-cap hot" }, t)))), /* @__PURE__ */ react_global_shim_default.createElement("div", null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Duration (s)"), /* @__PURE__ */ react_global_shim_default.createElement(
-      "select",
-      {
-        className: "mgd-sel mgd-dur",
-        value: String(s.duration),
-        onChange: (e) => {
-          st.current.duration = +e.target.value;
-          rerender();
-          debCost();
-          emit3("mg-duration-commit", { duration: +e.target.value });
-        }
-      },
-      [5, 6, 10, 15].map((d) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: d, value: d, disabled: d > maxDur, hidden: d > maxDur }, d))
-    ))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-row" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-cam-wrap" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Camera"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-cam", value: s.camera, onChange: (e) => {
+    )), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "60ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "ENGINE"), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-engine", onClick: openPalette, title: "Browse the video engines" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-engthumb", style: { background: ENGINE_TINTS[engineIdx % ENGINE_TINTS.length] } }), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-engbody" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-engname" }, chosenModel ? chosenModel.label : s.model), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-engmeta" }, modelMeta(s.model))), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-engbrowse" }, "browse")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-caps mgd-modelcaps" }, modelCaps(s.model).map(([t, kind]) => /* @__PURE__ */ react_global_shim_default.createElement("span", { key: t, className: "mgd-cap" + (kind ? " " + kind : "") }, t))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-durhd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "DURATION"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-durval" }, s.duration, "s")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-stops mgd-dur", role: "radiogroup", "aria-label": "Duration" }, [5, 6, 10, 15].map((d) => {
+      const ok = d <= maxDur;
+      return /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          key: d,
+          type: "button",
+          role: "radio",
+          "aria-checked": d === s.duration,
+          "aria-disabled": !ok,
+          className: "mgd-stop" + (d === s.duration ? " on" : "") + (ok ? "" : " off"),
+          title: d + " seconds" + (ok ? "" : " \u2014 not on this engine"),
+          onClick: () => {
+            if (!ok || d === st.current.duration) return;
+            st.current.duration = d;
+            rerender();
+            debCost();
+            emit3("mg-duration-commit", { duration: d });
+          }
+        },
+        d
+      );
+    })), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-cam-wrap" + (isR2v ? " hid" : ""), "aria-hidden": isR2v || void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "CAMERA"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-cam", value: s.camera, tabIndex: isR2v ? -1 : void 0, onChange: (e) => {
       st.current.camera = e.target.value;
       rerender();
       debCost();
-    } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "unset" }, "Unset"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "horizontal" }, "Side-to-side move"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "vertical-pan" }, "Vertical Pan"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "zoom" }, "Zoom in or out"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "pan" }, "Camera sweep"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "tilt" }, "Tilt up or down"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "roll" }, "Camera spin"))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-quality-wrap" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Basic / Professional"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-quality", value: s.quality, onChange: (e) => {
-      st.current.quality = e.target.value;
+    } }, CAMERA_OPTS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "120ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "MODE & CHANNEL"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg mgd-quality-wrap", role: "radiogroup", "aria-label": "Mode" }, [["basic", "Basic"], ["professional", "Professional"]].map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", role: "radio", "aria-checked": s.quality === v, className: "mgd-quality" + (s.quality === v ? " on" : ""), onClick: () => {
+      if (st.current.quality === v) return;
+      st.current.quality = v;
       rerender();
       debCost();
-    } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "basic" }, "Basic"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "professional" }, "Professional"))), /* @__PURE__ */ react_global_shim_default.createElement("div", null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Channel"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-channel", value: s.channel, onChange: (e) => {
-      st.current.channel = e.target.value;
+    } }, l))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "radiogroup", "aria-label": "Channel" }, [["normal", "Normal"], ["enhanced", "Enhanced"]].map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", role: "radio", "aria-checked": s.channel === v, className: "mgd-channel" + (s.channel === v ? " on" : ""), onClick: () => {
+      if (st.current.channel === v) return;
+      st.current.channel = v;
       rerender();
       debCost();
-    } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "normal" }, "Normal"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "enhanced" }, "Enhanced")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-caps mgd-chancap" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-cap" + (s.channel === "enhanced" ? " crown" : "") }, CHANNEL_CAP[s.channel])))), /* @__PURE__ */ react_global_shim_default.createElement("label", { className: "mgd-check" }, /* @__PURE__ */ react_global_shim_default.createElement(
+    } }, l))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-chancap" }, CHANNEL_CAP[s.channel]), /* @__PURE__ */ react_global_shim_default.createElement("label", { className: "mgd-sw", title: "Spoken lines in the prompt become voiceover" }, /* @__PURE__ */ react_global_shim_default.createElement(
       "input",
       {
         type: "checkbox",
@@ -3007,11 +3228,24 @@ ${"=".repeat(48)}
           emit3("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage });
         }
       }
-    ), " ", "Generate audio ", /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-note" }, "(spoken lines in the prompt become voiceover)")), s.audioGen ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lang-wrap", style: { marginTop: 4 } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Audio language"), /* @__PURE__ */ react_global_shim_default.createElement(
+    ), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swtrack" }, /* @__PURE__ */ react_global_shim_default.createElement("i", null)), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swlab" }, "Generate audio")), /* @__PURE__ */ react_global_shim_default.createElement("label", { className: "mgd-sw", title: "Off by default \u2014 the opposite of image gen" }, /* @__PURE__ */ react_global_shim_default.createElement(
+      "input",
+      {
+        type: "checkbox",
+        className: "mgd-helper",
+        checked: s.videoHelper,
+        onChange: (e) => {
+          st.current.videoHelper = e.target.checked;
+          rerender();
+          debCost();
+        }
+      }
+    ), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swtrack" }, /* @__PURE__ */ react_global_shim_default.createElement("i", null)), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swlab" }, "Video prompt helper")), s.audioGen ? /* @__PURE__ */ react_global_shim_default.createElement(
       "select",
       {
         className: "mgd-sel mgd-lang",
         value: s.audioLanguage,
+        "aria-label": "Audio language",
         onChange: (e) => {
           st.current.audioLanguage = e.target.value;
           rerender();
@@ -3019,21 +3253,8 @@ ${"=".repeat(48)}
           emit3("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value });
         }
       },
-      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "english" }, "English"),
-      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "japanese" }, "Japanese"),
-      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "chinese" }, "Chinese"),
-      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "korean" }, "Korean"),
-      /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "none" }, "SE only (no dialogue)")
-    )) : null, /* @__PURE__ */ react_global_shim_default.createElement(
-      CostBadge_default,
-      {
-        ref: costRef,
-        className: "mgd-cost",
-        warn,
-        cardLabel: "a video card",
-        hint: "Pick a source image to see the cost."
-      }
-    ), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-go", disabled: !canGo, onClick: doGenerate }, s.rendering ? "Rendering\u2026" : "Generate video"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-result" + (results.length ? " has" : "") }, results.map((l) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: l.id, className: "mgd-result-line" }, l.kind === "result" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { style: { color: "var(--emerald,#4fc99a)", fontSize: 12, marginBottom: 6 } }, "\u2713 Rendered \u2014 ", l.cost === 0 ? "free (card used)" : Number(l.cost || 0).toLocaleString() + " credits", ". Added to your gallery."), (l.mediaIds || []).map((mid) => /* @__PURE__ */ react_global_shim_default.createElement(
+      AUDIO_LANGS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))
+    ) : null))), inDock ? dock.promptEl ? createPortal(promptField, dock.promptEl) : null : promptField, inDock ? dock.negativeEl ? createPortal(negativeField, dock.negativeEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Negative prompt"), negativeField), inDock && dock.topEl ? createPortal(topRow, dock.topEl) : null, inDock ? dock.goEl ? createPortal(/* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), dock.goEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-result" + (results.length ? " has" : "") }, results.map((l) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: l.id, className: "mgd-result-line" }, l.kind === "result" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { style: { color: "var(--emerald,#4fc99a)", fontSize: 12, marginBottom: 6 } }, "\u2713 Rendered \u2014 ", l.cost === 0 ? "free (card used)" : Number(l.cost || 0).toLocaleString() + " credits", ". Added to your gallery."), (l.mediaIds || []).map((mid) => /* @__PURE__ */ react_global_shim_default.createElement(
       "a",
       {
         key: mid,
@@ -3045,7 +3266,7 @@ ${"=".repeat(48)}
         }
       },
       /* @__PURE__ */ react_global_shim_default.createElement("img", { src: "/thumbs/" + encodeURIComponent(mid) + ".jpg", alt: "result", loading: "lazy" })
-    ))) : l.kind === "error" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--red,#f38ba8)", fontSize: 12 } }, l.text) : l.kind === "plain" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--subtext,#9a93ab)", fontSize: 12 } }, l.text) : /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: l.amber ? "var(--amber,#f9d38c)" : "var(--subtext,#9a93ab)", fontSize: 12 } }, l.moon ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-moon" }) : null, l.text)))), /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: previewRef, className: "mgd-preview", "aria-hidden": "true" }));
+    ))) : l.kind === "error" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--red,#f38ba8)", fontSize: 12 } }, l.text) : l.kind === "plain" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--subtext,#9a93ab)", fontSize: 12 } }, l.text) : /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: l.amber ? "var(--amber,#f9d38c)" : "var(--subtext,#9a93ab)", fontSize: 12 } }, l.moon ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-moon" }) : null, l.text)))), /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: previewRef, className: "mgd-preview", "aria-hidden": "true" }), palette);
   });
   var VideoDrawer_default = VideoDrawer;
 
@@ -3620,16 +3841,6 @@ ${"=".repeat(48)}
       }
     };
   }
-
-  // scripts/react-dom-global-shim.js
-  var ReactDOM = window.ReactDOM;
-  var createPortal = ReactDOM.createPortal;
-  var flushSync = ReactDOM.flushSync;
-  var createRoot = ReactDOM.createRoot;
-  var hydrateRoot = ReactDOM.hydrateRoot;
-  var render = ReactDOM.render;
-  var unmountComponentAtNode = ReactDOM.unmountComponentAtNode;
-  var findDOMNode = ReactDOM.findDOMNode;
 
   // ../gallery/src/notify/ToastHost.jsx
   function ToastHost() {

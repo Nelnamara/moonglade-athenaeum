@@ -35,7 +35,16 @@ export const editCaps = (model) => EDIT_CAPS[model] || EDIT_CAPS[DEFAULT_EDIT_MO
 export const refTag = (i) => "@image" + (i + 2);
 
 /* editPayload -- the SAME object goes to /api/price and /api/edit, so a quote
-   can never describe a different edit than the submit. `no_card` is never sent. */
+   can never describe a different edit than the submit. `no_card` is never sent.
+   `quality` goes out as "" for a model with no quality knob (Reference Pro --
+   core.clamp_edit_config would blank it anyway): the user's Low/Medium/High
+   choice stays in STATE across a Reference Pro detour, exactly as the DC keeps
+   editQuality (Frontend Gallery.dc.html 2248-2258 never touches it), but the
+   wire only ever names a knob the model has. NO priority / prompt-helper /
+   negative fields: PixAI's instruct-edit `chat` params carry none (moonglade_
+   backup.py build_chat_edit_parameters -- modelConfig is resolution / aspect /
+   quality only), so the DC's QUALITY-slab switches and NEGATIVE row (image-gen
+   state, not tab-aware) have nothing to drive here. */
 export function buildEditPayload(s) {
   const prim = (s.source || "").trim();
   return {
@@ -46,7 +55,7 @@ export function buildEditPayload(s) {
     instruction: (s.instruction || "").trim(),
     preset: s.preset || "",
     resolution: s.resolution,
-    quality: s.quality || "",
+    quality: editCaps(s.model).qualities.length ? (s.quality || "") : "",
     aspect: s.aspect,
   };
 }
@@ -83,8 +92,22 @@ export const EDIT_DEFAULTS = {
   aspect: EDIT_CAPS[DEFAULT_EDIT_MODEL].def.aspect,
 };
 
-/* Switching model re-defaults res/quality/aspect and TRIMS refs over the new
-   cap, with the classic's own wording (the count includes the primary). */
+/* Switching model TRIMS refs over the new cap and snaps the knobs the new model
+   cannot take -- the DC's pickEditModel (Frontend Gallery.dc.html 2248-2258):
+   the current resolution is KEPT when the new model offers it, else corrected to
+   the model's first and said so inline (clampEditNote 2256-2257, '<Label> offers
+   1K/2K only — resolution corrected to <res>.'). Aspect follows the same keep-or-
+   correct rule with the same wording shape: the real per-model aspect lists
+   differ (Edit Pro's 1:3 / 3:1, Reference Pro's 21:9 -- editCore EDIT_CAPS), a
+   case the DC's fixed four aspects never met. Quality is left alone (see
+   buildEditPayload) except that a model WITH a knob gets a valid value.
+
+   `notice.note` is the same dropped-refs fact in the DC's one-line droppedNote
+   shape (2252, 'Only N reference images kept — X of your Y were left out.') for
+   the SOURCE slab's inline amber line; title/msg stay for the toast surfaces
+   (mobile). The counts are the build's honest ones: references EXCLUDING the
+   picture being edited, which the slab's own refNote already says counts as one.
+   `clamp` is the clampEditNote string ('' when nothing was corrected). */
 export function switchEditModel(s, next) {
   const caps = editCaps(next);
   const maxAdd = Math.max(0, caps.max_refs - ((s.source || "").trim() ? 1 : 0));
@@ -97,15 +120,25 @@ export function switchEditModel(s, next) {
       msg: caps.label + " takes up to " + caps.max_refs +
            " images in total (the one being edited counts as one) — " +
            dropped + " of your " + had + " references were left out.",
+      note: "Only " + maxAdd + " reference image" + (maxAdd === 1 ? "" : "s") + " kept — " +
+            dropped + " of your " + had + " were left out.",
     };
   }
+  const resolution = caps.resolutions.indexOf(s.resolution) >= 0 ? s.resolution : caps.def.resolution;
+  const aspect = caps.aspects.indexOf(s.aspect) >= 0 ? s.aspect : caps.def.aspect;
+  const quality = caps.qualities.length && caps.qualities.indexOf(s.quality) < 0
+    ? caps.def.quality : s.quality;
+  const clamp = [
+    resolution !== s.resolution
+      ? caps.label + " offers " + caps.resolutions.join("/") + " only — resolution corrected to " + resolution + "."
+      : "",
+    aspect !== s.aspect
+      ? caps.label + " has no " + s.aspect + " — aspect corrected to " + aspect + "."
+      : "",
+  ].filter(Boolean).join(" ");
   return {
-    next: {
-      ...s, model: next, refs,
-      resolution: caps.def.resolution,
-      quality: caps.def.quality,
-      aspect: caps.def.aspect,
-    },
+    next: { ...s, model: next, refs, resolution, quality, aspect },
     notice,
+    clamp,
   };
 }

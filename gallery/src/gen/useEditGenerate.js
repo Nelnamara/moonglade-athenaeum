@@ -70,8 +70,10 @@ export default function useEditGenerate({ costRef }) {
   // as-is rather than redesigned).
   useEffect(() => { refreshPrice(); }, [s, refreshPrice]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* Switching model re-defaults resolution/quality/aspect and trims refs over
-     the new cap -- editCore.js's own switchEditModel, same as desktop. */
+  /* Switching model keeps the knobs the new model can take, corrects the rest
+     (`clamp` names what changed -- desktop shows it inline, DC 1517-1519; here
+     the mobile Advanced sheet simply reads the corrected values) and trims refs
+     over the new cap -- editCore.js's own switchEditModel, same as desktop. */
   const chooseModel = useCallback((next) => {
     const { next: patched, notice } = switchEditModel(s, next);
     setS(patched);

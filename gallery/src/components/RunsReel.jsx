@@ -1,8 +1,17 @@
 import React, { useState } from "react";
+import { costColor, costText } from "../gen/historyCore.js";
+import { RunningFace, ClusterFace, tipEnter } from "./HistoryStrip.jsx";
 
 /* The dock's RUNS REEL (design spec C3a, Frontend Gallery.dc.html ~1845-2060),
    rebuilt against the real click/prefill/batch behavior spec (2026-08-02) --
    bound to REAL /api/jobs data, never the DC's SEEDED demo runs.
+
+   TODAY ONLY (History pass, 2026-08-17): the 7-day, per-day timeline is HistoryStrip.jsx
+   (its own dock mode, GET /api/next/history); this reel is the DC's single unlabeled
+   'today' bucket. Running tiles carry the same mascot + halo + shimmer as History's
+   (RunningFace / ClusterFace, shared), cost strings come from historyCore's ONE
+   formatter, and the tooltip on every single tile is hoisted to the dock (`onTip`) --
+   no native `title` on a tile.
 
    Job record fields used (moonglade_backup.read_jobs shape): job_id, status
    ('running' | 'done' | 'failed' | 'done_with_errors' | 'stale'), ts,
@@ -64,33 +73,38 @@ function cellsFor(j) {
   }));
 }
 
-export default function RunsReel({ jobs, historyOpen, reelH, onPrefill }) {
+// The job record as a tooltip row (historyCore.tipLines shape): the log carries no
+// model / dims / prompt, so those lines simply are not written; the tag is the job's,
+// the time its start, the cost its settled paid_credit.
+function tipRow(j, c) {
+  // the reel's own verdict (a stale job is terminal here, see isRunningJob)
+  const state = c.kind === "running" ? "running" : c.kind === "done" ? "done" : "failed";
+  return {
+    task_id: j.job_id, media_id: c.mid || null, kind: "image", state,
+    ts: Number(j.started_at || j.ts || 0), w: null, h: null, prompt: null, model: null,
+    paid_credit: typeof j.paid_credit === "number" ? j.paid_credit : null,
+  };
+}
+
+export default function RunsReel({ jobs, reelH, onPrefill, onTip }) {
   const [hover, setHover] = useState(null);
 
+  // the DC's single unlabeled 'today' bucket (groupDefs 2681 `[['', 'today']]`)
   const midnight = new Date();
   midnight.setHours(0, 0, 0, 0);
   const t0 = midnight.getTime() / 1000;
-
-  const today = [], yesterday = [];
-  jobs.forEach((j) => {
-    const ts = Number(j.started_at || j.ts || 0);
-    if (ts >= t0) today.push(j);
-    else if (ts >= t0 - 86400) yesterday.push(j);
-  });
-
-  const groups = [{ key: "today", label: null, runs: today }];
-  if (historyOpen && yesterday.length) {
-    groups.push({ key: "yesterday", label: "Yesterday", runs: yesterday });
-  }
-  const empty = !today.length && (!historyOpen || !yesterday.length);
+  const today = jobs.filter((j) => Number(j.started_at || j.ts || 0) >= t0);
+  const empty = !today.length;
 
   const th = Math.max(44, reelH || 132);
   // Aspect-true would need per-run w/h; the job log has none, so every tile
   // takes the DC's fallback ratio (832×1216).
   const tw = Math.max(44, Math.round(th * (832 / 1216)));
 
+  const leave = () => { setHover(null); if (onTip) onTip(null); };
+
   return (
-    <div className={"mgdock-reel" + (historyOpen ? " wrap" : "")}>
+    <div className="mgdock-reel">
       {empty && (
         <div className="mgdock-reelempty">
           <div className="mgdock-firstrun" style={{ height: th }}>first run</div>
@@ -100,51 +114,33 @@ export default function RunsReel({ jobs, historyOpen, reelH, onPrefill }) {
           </div>
         </div>
       )}
-      {!empty && groups.map((grp) => (
-        <div className="mgdock-reelgrp" key={grp.key}>
-          {grp.label && (
-            <div className="mgdock-daydiv">
-              <i />
-              <span>{grp.label}</span>
-              <i />
-            </div>
-          )}
-          {grp.runs.flatMap(cellsFor).map((c) => {
+      {!empty && (
+        <div className="mgdock-reelgrp">
+          {today.flatMap(cellsFor).map((c) => {
             const j = c.job;
             const running = c.kind === "running";
+            const cluster = running && c.count > 1;
             const done = c.kind === "done";
             const failed = c.kind === "fail" || c.kind === "done-empty";
             const hoverKey = c.key;
             const clickable = done;
+            const enter = cluster ? undefined : tipEnter(onTip, tipRow(j, c));
             const tile = (
               <div
                 className={"mgdock-tile" + (done ? " done" : "") + (running ? " running" : "") + (failed ? " fail" : "")}
                 style={{ width: tw, height: th, cursor: clickable ? "pointer" : "default" }}
-                onMouseEnter={() => setHover(hoverKey)}
-                onMouseLeave={() => setHover(null)}
-                onClick={clickable ? () => onPrefill(j.job_id, c.mid) : undefined}
-                title={running
-                  ? "Generating " + c.tag + (c.count > 1 ? " · " + c.count + " images" : "")
-                  : failed
-                  ? (j.error || j.status || "failed")
-                  : "Reuse prompt & core settings from " + c.tag + (c.total > 1 ? " · image " + (c.idx + 1) + "/" + c.total : "")}
+                onMouseEnter={cluster ? undefined : (ev) => { setHover(hoverKey); enter(ev); }}
+                onMouseLeave={cluster ? undefined : leave}
+                onClick={clickable ? () => { if (onTip) onTip(null); onPrefill(j.job_id, c.mid); } : undefined}
               >
                 {done ? (
                   <img className="mgdock-tileimg" src={"/thumbs/" + encodeURIComponent(c.mid) + ".jpg"} alt="" />
                 ) : null}
-                {running && c.count > 1 ? (
-                  <div className="mgdock-batchgrid">
-                    {Array.from({ length: c.count }).map((_, i) => (
-                      <i key={i}><span className="mgdock-eclipse sm"><span /></span></i>
-                    ))}
-                  </div>
-                ) : running ? (
-                  <span className="mgdock-eclipse lg"><span /></span>
-                ) : null}
+                {cluster ? <ClusterFace count={c.count} /> : running ? <RunningFace /> : null}
                 {failed && <span className="mgdock-tilefail">⚠</span>}
                 {done && (
                   <div className={"mgdock-tilehint" + (hover === hoverKey ? " show" : "")}>
-                    <span>Reuse prompt &amp; settings →</span>
+                    <span>Use these settings →</span>
                   </div>
                 )}
               </div>
@@ -153,22 +149,22 @@ export default function RunsReel({ jobs, historyOpen, reelH, onPrefill }) {
             // job, on its first tile, rather than repeated per tile where it
             // would read as if each image cost that much on its own.
             const showCost = c.idx === undefined || c.idx === 0;
+            const state = running ? "running" : done ? "done" : "failed";
+            const cost = showCost && !cluster ? costText(typeof j.paid_credit === "number" ? j.paid_credit : null, state) : "";
             return (
               <div className="mgdock-run" key={c.key} style={{ width: tw }}>
                 {tile}
                 <div className="mgdock-runcap">
                   <span className="mgdock-runtag">{c.tag}{c.total > 1 ? "·" + (c.idx + 1) : ""}</span>
-                  {showCost && typeof j.paid_credit === "number" && isFinite(j.paid_credit) ? (
-                    j.paid_credit === 0
-                      ? <span className="mgdock-runcost free">free card</span>
-                      : <span className="mgdock-runcost">~{Math.round(j.paid_credit).toLocaleString()} cr</span>
+                  {cost ? (
+                    <span className="mgdock-runcost" style={{ color: costColor(j.paid_credit, state, "caption") }}>{cost}</span>
                   ) : null}
                 </div>
               </div>
             );
           })}
         </div>
-      ))}
+      )}
     </div>
   );
 }
