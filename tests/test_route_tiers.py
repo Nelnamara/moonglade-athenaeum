@@ -245,6 +245,11 @@ ROUTE_TIERS = {
     # the local catalog, and the composer's own gates still stand between a
     # prefill and a paid generate -- same tier reasoning as api_model_version.
     ("api_task_params", "GET"): LOGIN,
+    # "↺ Remix for videos" (SCOPE_2026-08-17 §2): the video sibling of api_task_params.
+    # Same tier for the same reasons -- read-only, membership-checked against the local
+    # catalog, prefill-only; the Video composer's price-identity gate stands between a
+    # prefill and a paid generate.
+    ("api_video_task_params", "GET"): LOGIN,
     # Mirror-to-PixAI: status (offline, no token), the toggle flag write, and the
     # connect/bootstrap (server reads its OWN local browser -- no credential crosses
     # the network). LOGIN tier; the spend gate stays on the create path.

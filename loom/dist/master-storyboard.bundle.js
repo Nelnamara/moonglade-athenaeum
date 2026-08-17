@@ -2369,6 +2369,7 @@ ${"=".repeat(48)}
     if (o.audio_language != null) s.audioLanguage = o.audio_language;
     if (o.prompt_helper != null) s.videoHelper = !!o.prompt_helper;
     if (o.negative != null) s.negative = o.negative;
+    if (o.camera != null) s.camera = o.camera;
     const imgList = Array.isArray(o.images) ? o.images : Array.isArray(o.refs) ? o.refs : null;
     if (imgList && s.mode === "flf" && imgList.length <= 2) {
       const flfSlots = imgList.map((r) => r ? refItem(r) : null);
@@ -2490,6 +2491,7 @@ ${"=".repeat(48)}
     const rerender = useCallback(() => force((n) => n + 1), []);
     const [results, setResults] = useState([]);
     const [warn, setWarnState] = useState("");
+    const [reuse, setReuseChip] = useState(null);
     const [pal, setPal] = useState(null);
     const [palQuery, setPalQuery] = useState("");
     const setWarn = useCallback((w) => setWarnState(w), []);
@@ -2842,6 +2844,7 @@ ${"=".repeat(48)}
         return;
       }
       const id = pushLine({ kind: "status", moon: true, text: "Submitting\u2026" });
+      setReuseChip(null);
       st.current.rendering = true;
       rerender();
       const unlock = () => {
@@ -2957,6 +2960,7 @@ ${"=".repeat(48)}
       const cur = promptText();
       promptSet((cur ? cur.replace(/,\s*$/, "") + ", " : "") + String(t || ""));
     };
+    const setReuse = (info) => setReuseChip(info || null);
     useImperativeHandle(ref, () => {
       const node = rootRef.current;
       if (node && !node._mgWired) {
@@ -2968,6 +2972,7 @@ ${"=".repeat(48)}
         node.payload = payload;
         node.insertText = insertText;
         node.promptText = promptText;
+        node.setReuse = setReuse;
         Object.defineProperty(node, "mode", { configurable: true, get: () => st.current.mode });
       }
       return node;
@@ -3102,7 +3107,20 @@ ${"=".repeat(48)}
       },
       /* @__PURE__ */ react_global_shim_default.createElement("span", null, s.rendering ? "Rendering\u2026" : "\u2726 Generate video")
     ) : /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-go", disabled: !canGo, onClick: doGenerate }, s.rendering ? "Rendering\u2026" : "Generate video");
-    const topRow = inDock ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-modelchip static", title: "Video engine \u2014 set in the video settings" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-chipph" }), /* @__PURE__ */ react_global_shim_default.createElement("span", null, chosenModel ? chosenModel.label : s.model)), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-frames" }, SHOT_LABEL[s.mode] || s.mode, " \xB7 ", s.duration, "s")) : null;
+    const topRow = inDock ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-modelchip static", title: "Video engine \u2014 set in the video settings" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-chipph" }), /* @__PURE__ */ react_global_shim_default.createElement("span", null, chosenModel ? chosenModel.label : s.model)), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-frames" }, SHOT_LABEL[s.mode] || s.mode, " \xB7 ", s.duration, "s"), reuse && /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        className: "mgdock-reusefrom" + (reuse.partial ? " warn" : ""),
+        onClick: () => setReuseChip(null),
+        title: reuse.partial ? "PARTIAL recipe from " + reuse.tag + ": " + reuse.partial + " \u2014 click to clear" : "Video recipe prefilled from run " + reuse.tag + " \u2014 click to clear"
+      },
+      "\u21BA from ",
+      reuse.tag,
+      reuse.partial ? " \u26A0" : "",
+      " ",
+      /* @__PURE__ */ react_global_shim_default.createElement("span", null, "\xD7")
+    )) : null;
     const layerHost = rootRef.current && rootRef.current.closest && rootRef.current.closest(".mgx-dock-host") || document.body;
     const palette = pal ? createPortal(
       /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palscrim", onClick: closePalette }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-pal", style: { bottom: pal.bottom }, role: "dialog", "aria-label": "Video engine" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palhd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-paltitle" }, "Video engine"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palsub" }, "Shot type follows the engine \u2014 unsupported modes switch on pick"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palsp" }), /* @__PURE__ */ react_global_shim_default.createElement(

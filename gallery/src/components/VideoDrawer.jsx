@@ -118,6 +118,13 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
 
   const [results, setResults] = useState([]);   // concurrent result lines
   const [warn, setWarnState] = useState("");     // CostBadge caution clause (paid-state only)
+  // The ↺-from chip (SCOPE_2026-08-17 §2): "prefilled from run #NNNN", the video mirror of the
+  // dock's image chip (GenerateDrawer.reuseFrom). {tag, partial} | null -- `partial` is the amber
+  // "recipe from the catalog only / camera unknown / …" disclosure (§2.4). Set imperatively by the
+  // host's prefillVideoFromRun via node.setReuse; cleared on the user's × click and on submit
+  // (a new render's recipe is no longer "from" the old run). Plain React state -- it is not a
+  // spend-critical form field, so the st.current/rerender discipline the payload needs is overkill.
+  const [reuse, setReuseChip] = useState(null);
   // The ENGINE palette (DC 1612-1640 + 2795-2804: 'Video engine' picker cards over the real
   // roster). {bottom} = its viewport anchor, measured off this drawer's top when it opens so it
   // floats just above the form in every host (dock / Loom / mobile) the way the DC's sits above
@@ -482,6 +489,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       return;
     }
     const id = pushLine({ kind: "status", moon: true, text: "Submitting…" });
+    setReuseChip(null);   // a new submission goes out -- the recipe is no longer "from" the old run
     st.current.rendering = true;
     rerender();
     const unlock = () => { st.current.rendering = false; rerender(); };
@@ -615,6 +623,8 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     const cur = promptText();
     promptSet((cur ? cur.replace(/,\s*$/, "") + ", " : "") + String(t || ""));
   };
+  // The video ↺-from chip's setter, exposed to the dock's prefillVideoFromRun. Null clears it.
+  const setReuse = (info) => setReuseChip(info || null);
 
   // The vanilla was a CUSTOM ELEMENT: hosts held the DOM node itself and called node.prefill(),
   // node.setRefs(), read node.mode, and node.addEventListener('mg-*'). To stay a drop-in, the ref
@@ -633,6 +643,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       node.payload = payload;
       node.insertText = insertText;
       node.promptText = promptText;
+      node.setReuse = setReuse;
       Object.defineProperty(node, "mode", { configurable: true, get: () => st.current.mode });
     }
     return node;
@@ -749,6 +760,15 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
         <span>{chosenModel ? chosenModel.label : s.model}</span>
       </span>
       <span className="mgdock-frames">{SHOT_LABEL[s.mode] || s.mode} · {s.duration}s</span>
+      {reuse && (
+        <button type="button" className={"mgdock-reusefrom" + (reuse.partial ? " warn" : "")}
+          onClick={() => setReuseChip(null)}
+          title={reuse.partial
+            ? "PARTIAL recipe from " + reuse.tag + ": " + reuse.partial + " — click to clear"
+            : "Video recipe prefilled from run " + reuse.tag + " — click to clear"}>
+          ↺ from {reuse.tag}{reuse.partial ? " ⚠" : ""} <span>&times;</span>
+        </button>
+      )}
     </>
   ) : null;
 
