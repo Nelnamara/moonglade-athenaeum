@@ -50,6 +50,16 @@ import "../styles/cost-badge.css";
                   amber. Empty/absent = no warning.
      compact    — render as the credits chip (value · divider · label, expiry, gold "!" dot,
                   hover billing tooltip) instead of the full-width bar. Purely presentational.
+     stack      — render as the Generate dock's bare two-line cost stack (Frontend
+                  Gallery.dc.html 1571-1575: costText 11.5px tabular over costSubLine 9.5px
+                  overlay0, right-aligned, NO box). Same five states, same wording, same
+                  colour grammar as the bar; only the presentation changes. The second line
+                  is the DC's costSubLine (3609 + 2766-2768), derived from the SAME response
+                  the first line reads: '<card> card' when free, '· N images' when the host
+                  says the job makes more than one (`count`), '· <balance> credits' when the
+                  host passes `balance`. Hosts still never hand-write cost text.
+     count      — (stack) how many images this job makes; >1 is named on the sub line.
+     balance    — (stack) the account's credit balance, named last on the sub line.
      cardLabel  — fallback name for the covering card when the server didn't send one.
      onCost     — called on every state push with the old mg-cost detail
                   {state, settled, cost, free, cards, card_name, card_expires, text, raw}
@@ -195,7 +205,29 @@ function build(view, props) {
     main = note || (props.hint || "").trim() || DEFAULT_HINT;
   }
   const text = main + (sub ? " · " + sub.text : "");
-  return { state, warn, compact, short, main, sub, title, val, lab, tip, dot, text, d };
+  // The stack's second line (DC costSubLine): settled facts first ('<card> card', 'N images',
+  // the free card's expiry), the balance last. Read off the same `d` as the main line -- the
+  // card name is the server's, the count and balance are the host's own real data. Idle,
+  // checking and error carry only the balance (the DC: costSubText is '' unless settled).
+  const stack = !!props.stack;
+  let line = "";
+  if (stack) {
+    const parts = [];
+    const countN = cardCount(props.count);
+    if (state === "free") {
+      const card = d.card_name || (props.cardLabel || "").trim() || "a free card";
+      parts.push(/\bcard\b/i.test(card) ? card : card + " card");
+      if (countN != null && countN > 1) parts.push(fmt(countN) + " images");
+      if (sub) parts.push(sub.text);           // the expiry stays visible, on this line
+    } else if (state === "paid" && countN != null && countN > 1) {
+      parts.push(fmt(countN) + " images");
+    }
+    const balanceN = (props.balance != null && props.balance !== "" && isFinite(Number(props.balance)))
+      ? Number(props.balance) : null;
+    if (balanceN != null) parts.push(fmt(balanceN) + " credits");
+    line = parts.join(" · ");
+  }
+  return { state, warn, compact, stack, short, main, sub, title, val, lab, tip, dot, text, line, d };
 }
 
 function detailOf(m) {
@@ -217,7 +249,7 @@ function detailOf(m) {
 const IDLE = { state: "idle", note: "", msg: "", raw: null };
 
 const CostBadge = forwardRef(function CostBadge(props, ref) {
-  const { hint, warn, compact, cardLabel, onCost, id, className, style } = props;
+  const { hint, warn, compact, stack, count, balance, cardLabel, onCost, id, className, style } = props;
   const [view, setView] = useState(IDLE);
 
   // Latest view/props/text for the imperative getters and the onCost effect (which fire
@@ -255,7 +287,7 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
     }
   }, [view]);
 
-  const m = build(view, { hint, warn, compact, cardLabel });
+  const m = build(view, { hint, warn, compact, stack, count, balance, cardLabel });
   mRef.current = m;
   // Short borrows the amber warn treatment (settled paid, flagged) and adds its own attribute so
   // a host or test can tell "card short" from "host warned" without parsing the sentence.
@@ -269,7 +301,7 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
   return (
     <div
       id={id}
-      className={"cost-badge" + (m.compact ? " compact" : "") + (className ? " " + className : "")}
+      className={"cost-badge" + (m.compact ? " compact" : "") + (m.stack ? " stack" : "") + (className ? " " + className : "")}
       data-state={m.state}
       data-warn={dataWarn}
       data-short={dataShort}
@@ -285,6 +317,17 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
           <span className="mgc-lab">{m.lab}</span>
           {m.sub ? <span className="mgc-sub">{m.sub.text}</span> : null}
           {m.dot ? <span className="mgc-dot" aria-hidden="true">!</span> : null}
+        </>
+      ) : m.stack ? (
+        /* the dock's two-line stack: main line (state colour) over the DC costSubLine; the
+           card-short note keeps its own amber line beneath -- the honesty content of that
+           state is not something a tighter layout gets to hide */
+        <>
+          <span className="mgc-main">
+            {m.state === "checking" ? <><span className="mgc-pip" />Checking cost…</> : m.main}
+          </span>
+          {m.line ? <span className="mgc-line">{m.line}</span> : null}
+          {m.sub && m.short ? <span className="mgc-sub" title={m.sub.title}>{m.sub.text}</span> : null}
         </>
       ) : m.state === "checking" ? (
         <><span className="mgc-pip" />Checking cost…</>

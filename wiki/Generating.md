@@ -521,6 +521,22 @@ what *is* restricted to the server's own machine.
   before you spend. Desktop for now.
 - Results are downloaded and cataloged automatically (`source='api'`; videos into `videos/`),
   so everything you make lands in your own library the moment it finishes.
+- **Runs** — the strip across the top of the dock is *today's* runs: each finished picture is
+  a tile as soon as it lands (blur → sharp), a batch still cooking shows as one 2×2 cluster,
+  and a running tile carries the mascot and a moving bar rather than a made-up percentage
+  (PixAI reports no per-image progress, so none is shown). Click any finished tile to load
+  its settings back into the composer.
+- **History** — the **History** button turns the strip into a **seven-day timeline** read from
+  your own catalog (not just this session): one column per day, newest first, two rows deep so
+  a busy day reads as a compact block, empty days say "No runs", and **Load N older days ⌄** at
+  the end pages further back for as long as there is history. Tiles keep their real shape,
+  video tiles carry a ▶ tag, and hovering any tile shows what it is — tag and time, model,
+  size (or length for a video), the prompt, and what it actually cost. Anything still running
+  today sits at the top of the same timeline. History has its own room (the dock may grow to
+  the top of the window while it's open) and it composes with the ▲ settings: open both and
+  the timeline sits above the settings. Click a finished picture to reuse its settings — that
+  closes History and opens the composer on the recipe. Escape closes one layer at a time:
+  settings, then History, then the dock.
 
 **The numbers are bounded on the server, and you're told when one moved.** Because the
 drawer is login-tier, the sliders and number boxes in your browser are the only limit a

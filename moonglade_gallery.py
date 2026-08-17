@@ -10544,7 +10544,8 @@ def create_app(out_dir: Path):
                     quality=(p.get("quality") or "professional"),
                     audio_language=(p.get("audio_language") or "english"),
                     negative=(p.get("negative") or "").strip(),
-                    is_private=bool(p.get("is_private")))
+                    is_private=bool(p.get("is_private")),
+                    use_prompt_helper=bool(p.get("prompt_helper")))
             except core.PixAIError as e:
                 return None, bool(p.get("no_card")), _redact_host_paths(str(e))[:140]
             return params, bool(p.get("no_card")), None
@@ -11210,6 +11211,230 @@ __DESIGN_TOKENS__
             "siblings": _batch_sibling_count(row.get("task_id")),
         })
 
+    def _history_ts(created_at):
+        """Epoch seconds for a stored created_at, or None. Tolerant of the three forms
+        the catalog holds: PixAI's 24-char `2026-08-17T06:14:10.545Z`, the 20-char
+        no-millis `…Z` fallback, and 6 legacy local-import rows that are 19-char naive
+        (`2026-07-29T21:47:44`) -- read as UTC, which is what they were written as."""
+        from datetime import datetime, timezone
+        s = str(created_at or "").strip()
+        if s.endswith("Z"):
+            s = s[:-1]
+        try:
+            base = datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+        frac = s[19:]
+        ms = 0.0
+        if frac.startswith(".") and frac[1:].isdigit():
+            ms = float("0" + frac)
+        return base.timestamp() + ms
+
+    @app.route("/api/next/history")
+    def api_next_history():
+        """Read-only feed for the Generate dock's History mode: the last `days` LOCAL
+        calendar days of finished runs (catalog rows by created_at, newest first, empty
+        days included as [] = "No runs"), with the live job log merged on top -- a
+        running/stale/failed generate job that has no catalog rows yet becomes one
+        synthetic row in its day; a done job is dropped (its media ARE catalog rows,
+        saved before the done event ever lands), and a running job whose task already
+        has rows in the window is dropped too (catalog wins). One indexed range query
+        (`created_at >= ? AND created_at < ?`, no functions on the column) plus one
+        seek for the paging cursor; core.read_jobs() DIRECTLY -- never /api/jobs's
+        helpers, which reconcile against PixAI and rewrite the log. No network, no
+        spend path, no _check_read_only: a local SQLite SELECT and a local file read.
+
+        Params: days (1..31, default 7) · before (YYYY-MM-DD local, EXCLUSIVE cursor;
+        absent = today is the newest bucket) · tz (minutes EAST of UTC, JS
+        `-new Date().getTimezoneOffset()`; default = this server's local offset) ·
+        source (online|api|local) · media (image|video) -- the last two in
+        _build_where's own idiom. Day boundaries are computed HERE so the indexed
+        window is exactly N local days and the empty days / `next_before` cursor are
+        deterministic (and pytest-able) rather than a client-side guess."""
+        import moonglade_backup as core
+        from collections import Counter
+        from datetime import datetime, timedelta, timezone
+        try:
+            days = max(1, min(int(request.args.get("days") or 7), 31))
+        except ValueError:
+            days = 7
+        try:
+            tz_min = int(request.args.get("tz") or "")
+        except ValueError:
+            tz_min = int(round((datetime.now().astimezone().utcoffset()
+                                or timedelta(0)).total_seconds() / 60))
+        tz_min = max(-14 * 60, min(tz_min, 14 * 60))
+        tzinfo = timezone(timedelta(minutes=tz_min))
+        before = (request.args.get("before") or "").strip()
+        if before:
+            try:
+                end_local = datetime.strptime(before, "%Y-%m-%d").replace(tzinfo=tzinfo)
+            except ValueError:
+                return jsonify({"error": "before must be YYYY-MM-DD"}), 400
+        else:
+            today = datetime.now(tzinfo).date()
+            end_local = datetime(today.year, today.month, today.day,
+                                 tzinfo=tzinfo) + timedelta(days=1)
+        start_local = end_local - timedelta(days=days)
+        media = (request.args.get("media") or "").strip().lower()
+        media = media if media in ("image", "video") else ""
+        source = (request.args.get("source") or "").strip().lower()
+        source = source if source in ("online", "api", "local") else ""
+
+        def utc_iso(dt):
+            return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+        def local_date(ts):
+            return datetime.fromtimestamp(ts, tzinfo).date()
+
+        def as_int(s):
+            s = str(s or "").strip()
+            if not s:
+                return None
+            try:
+                return int(float(s))
+            except ValueError:
+                return None
+
+        where, params = _build_where("", "", "", "", media_type=media, source=source)
+        since_utc, until_utc = utc_iso(start_local), utc_iso(end_local)
+        con = _connect(db_path)
+        try:
+            rows = con.execute(
+                "SELECT media_id, task_id, is_video, created_at, width, height, model_id, "
+                "COALESCE(NULLIF(model_name,''), NULLIF(video_model,''), model_id, '') AS model, "
+                "SUBSTR(COALESCE(NULLIF(prompt_full,''), prompt_preview, ''), 1, 300) AS prompt, "
+                "video_duration, paid_credit, source "
+                "FROM catalog WHERE {} AND created_at >= ? AND created_at < ? "
+                "ORDER BY created_at DESC, media_id DESC".format(where),
+                params + [since_utc, until_utc]).fetchall()
+            # Paging cursor: the NEWEST row older than this window, so the next page
+            # opens on a day that has runs instead of a run of empty days.
+            older = con.execute(
+                "SELECT created_at FROM catalog WHERE {} AND created_at < ? "
+                "ORDER BY created_at DESC LIMIT 1".format(where),
+                params + [since_utc]).fetchone()
+            next_before, older_days = None, 0
+            older_ts = _history_ts(older[0]) if older else None
+            if older_ts is not None:
+                nb_date = local_date(older_ts) + timedelta(days=1)
+                nb_local = datetime(nb_date.year, nb_date.month, nb_date.day, tzinfo=tzinfo)
+                next_before = nb_date.isoformat()
+                older_days = len({
+                    local_date(t) for t in (
+                        _history_ts(r[0]) for r in con.execute(
+                            "SELECT created_at FROM catalog WHERE {} AND created_at >= ? "
+                            "AND created_at < ?".format(where),
+                            params + [utc_iso(nb_local - timedelta(days=days)),
+                                      utc_iso(nb_local)]).fetchall())
+                    if t is not None})
+        finally:
+            con.close()
+
+        buckets = {}
+        for i in range(days):
+            d = end_local - timedelta(days=i + 1)
+            buckets[d.date().isoformat()] = []
+        task_counts = Counter(str(r["task_id"] or "") for r in rows)
+        for r in rows:
+            ts = _history_ts(r["created_at"])
+            if ts is None:
+                continue
+            key = local_date(ts).isoformat()
+            if key not in buckets:
+                continue
+            mid = str(r["media_id"] or "")
+            tid = str(r["task_id"] or "")
+            is_video = str(r["is_video"] or "") == "1"
+            pc = str(r["paid_credit"] or "").strip()
+            duration = None
+            if is_video:
+                try:
+                    duration = float(r["video_duration"]) if str(r["video_duration"] or "").strip() else None
+                except ValueError:
+                    duration = None
+            buckets[key].append({
+                "media_id": mid,
+                "task_id": tid,
+                "kind": "video" if is_video else "image",
+                "state": "done",
+                "created_at": str(r["created_at"] or ""),
+                "ts": ts,
+                "w": as_int(r["width"]),
+                "h": as_int(r["height"]),
+                "thumb": "/thumbs/{}.jpg".format(mid),
+                "media_url": ("/video-file/{}" if is_video else "/full/{}").format(mid),
+                "model": str(r["model"] or ""),
+                "model_id": str(r["model_id"] or ""),
+                "prompt": str(r["prompt"] or ""),
+                "duration": duration,
+                "paid_credit": as_int(pc) if pc else None,
+                "source": str(r["source"] or ""),
+                "count_in_task": task_counts[tid] if tid else 1,
+            })
+
+        # Live jobs on top, deduped against the catalog by task_id (== job_id for a
+        # generate job). Jobs are always the dock's own runs (source 'api'), so a
+        # feed narrowed to backed-up or imported rows has no live rows to add.
+        try:
+            jobs = core.read_jobs(out_dir)
+        except Exception:
+            jobs = []
+        tasks_in_window = {str(r["task_id"] or "") for r in rows if r["task_id"]}
+        for j in jobs:
+            if j.get("type") != "generate":
+                continue
+            if j.get("status") not in ("running", "stale", "failed"):
+                continue
+            jid = str(j.get("job_id") or "")
+            if not jid or jid in tasks_in_window:
+                continue
+            is_video = bool(j.get("is_video"))
+            if (media == "video" and not is_video) or (media == "image" and is_video):
+                continue
+            if source in ("online", "local"):
+                continue
+            try:
+                ts = float(j.get("started_at") or j.get("ts") or 0)
+            except (TypeError, ValueError):
+                continue
+            key = local_date(ts).isoformat()
+            if key not in buckets:
+                continue
+            pc = j.get("paid_credit")
+            try:
+                count = max(1, int(j.get("count") or 1))
+            except (TypeError, ValueError):
+                count = 1
+            buckets[key].append({
+                "job_id": jid,
+                "task_id": jid,
+                "media_id": None,
+                "kind": "video" if is_video else "image",
+                "state": j.get("status"),
+                "ts": ts,
+                "created_at": datetime.fromtimestamp(ts, timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%S.000Z"),
+                "count": count,
+                "label": j.get("label"),
+                "error": j.get("error"),
+                "eta_seconds": j.get("eta_seconds"),
+                "started": j.get("started"),
+                "paid_credit": (int(pc) if isinstance(pc, (int, float))
+                                and not isinstance(pc, bool) else None),
+                "w": None, "h": None, "thumb": None, "prompt": None, "model": None,
+            })
+        for key in buckets:
+            buckets[key].sort(key=lambda x: (x["ts"], str(x.get("media_id") or "")),
+                              reverse=True)
+        return jsonify({
+            "tz": tz_min,
+            "days": [{"date": d, "label_hint": None, "rows": buckets[d]} for d in buckets],
+            "next_before": next_before,
+            "has_more": next_before is not None,
+            "older_days": older_days,
+        })
+
     @app.route("/loom/vendor/<path:fname>")
     def loom_vendor(fname):
         """Serve the Loom's vendored JS (React/ReactDOM UMD builds) from
@@ -11581,7 +11806,8 @@ __DESIGN_TOKENS__
                     quality=(p.get("quality") or "professional"),
                     audio_language=(p.get("audio_language") or "english"),
                     negative=(p.get("negative") or "").strip(),
-                    is_private=bool(p.get("is_private")))
+                    is_private=bool(p.get("is_private")),
+                    use_prompt_helper=bool(p.get("prompt_helper")))
 
             def _card(prm):
                 core._apply_kaisuuken(

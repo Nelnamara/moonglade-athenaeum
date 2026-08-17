@@ -6827,7 +6827,8 @@ def _snap_video_duration(d, model=""):
 def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=(),
                             *, duration=5, generate_audio=False, model="",
                             audio_language="english", camera_movement="",
-                            quality="professional", negative="", is_private=False):
+                            quality="professional", negative="", is_private=False,
+                            use_prompt_helper=False):
     """PixAI video PROVIDER ADAPTER: map a Loom shot (mode + prompt + @-ordered ref
     media_ids) to createGenerationTask video params. This is the SEAM a future Seedance/
     other provider mirrors -- same shot spec in, provider-native params out. I2V/FLF ->
@@ -6836,7 +6837,9 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
 
     `negative` only reaches i2vPro (I2V/FLF) -- the referenceVideo submit shape captured
     2026-07-02 has no negativePrompts field at all. A genuine PixAI API gap, not an
-    oversight here -- R2V/V2V shots silently ignore a negative prompt if one is set."""
+    oversight here -- R2V/V2V shots silently ignore a negative prompt if one is set.
+    `use_prompt_helper` (the Generate dock's 'Video prompt helper' switch, off by default)
+    likewise only reaches i2vPro.usePromptsHelper -- referenceVideo has no such field."""
     m = (mode or "R2V").upper()
     # Both submit shapes cap the prompt, under different field names
     # (i2vPro.prompts / referenceVideo.prompt), so check once here where they converge.
@@ -6858,13 +6861,15 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
                                       mode=qual, generate_audio=generate_audio,
                                       audio_language=audio_language,
                                       camera_movement=camera_movement, model_id=mid_num,
-                                      negative=negative, is_private=is_private)
+                                      negative=negative, is_private=is_private,
+                                      use_prompt_helper=bool(use_prompt_helper))
     if m == "FLF" and len(imgs) >= 2:
         return build_video_parameters(prompt, imgs[0], model=mdl, tail_media_id=imgs[1],
                                       duration=dur, mode=qual, generate_audio=generate_audio,
                                       audio_language=audio_language,
                                       camera_movement=camera_movement, model_id=mid_num,
-                                      negative=negative, is_private=is_private)
+                                      negative=negative, is_private=is_private,
+                                      use_prompt_helper=bool(use_prompt_helper))
     if imgs or vids or auds:                       # R2V / V2V / any mode carrying references
         return build_reference_video_parameters(prompt, image_media_ids=imgs,
                                                  video_media_ids=vids, audio_media_ids=auds,

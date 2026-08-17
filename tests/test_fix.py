@@ -364,7 +364,12 @@ def test_badge_and_submit_send_the_same_boxes():
     i = core_src.index("export function scaleBoxes(")
     assert "naturalWidth" in core_src[i:i + 400]
     src = _src("components/FixTab.jsx")
-    assert src.count("scaleBoxes(boxes, imgRef.current)") == 2, (
+    # Since the dock fidelity pass (2026-08-16) the element handed to scaleBoxes is
+    # scaleEl() -- the live <img> when it is laid out, else the last real measurement
+    # (the ▲-collapsed dock hides the picture with display:none, and a 0-wide element
+    # would submit display pixels as original pixels). Same invariant: ONE scaler, the
+    # SAME element expression, in the price body and the submit body alike.
+    assert src.count("scaleBoxes(boxes, scaleEl())") == 2, (
         "the price body and the submit body no longer share the one scaleBoxes call each "
         "-- the badge would price a request the server never receives")
 
