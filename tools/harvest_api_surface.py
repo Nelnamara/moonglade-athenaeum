@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Harvest PixAI's entire GraphQL operation surface from their own JavaScript.
 
-    python tools/harvest_api_surface.py fetch      # crawl every JS chunk (cached)
+    python tools/harvest_api_surface.py fetch      # crawl every JS chunk (cached per build)
     python tools/harvest_api_surface.py extract    # mine ASTs -> operations + DERIVED hashes
     python tools/harvest_api_surface.py show       # print the catalog
     python tools/harvest_api_surface.py doc <op>   # print one operation's full GraphQL
-    python tools/harvest_api_surface.py diff       # what changed since the last harvest
+    python tools/harvest_api_surface.py diff       # what changed since last harvest (chunks + ops)
     python tools/harvest_api_surface.py replay <op>  # ONE read-only op, explicit
 
 WHY THIS EXISTS
@@ -13,17 +13,30 @@ Every layer we peeled by hand revealed another. Bookmarks took a browser session
 capture and three probes, and the answer was in their bundle the whole time. This gets the whole
 surface at once, offline, without a single call to their GraphQL endpoint.
 
-WHAT WAS MEASURED (2026-07-25/26) -- none of this is assumed
+WHAT WAS MEASURED (2026-07-25/26, revised 2026-08-16) -- none of this is assumed
   * pixai.art is a React Router app bundled with Rolldown. NOT Next.js: no `_next`, no buildId,
     no webpackChunk. Two earlier attempts in this very file failed on that assumption.
-  * Its JS is not served from pixai.art at all, but from a VERSIONED CDN path:
+  * Its JS is not served from pixai.art at all, but from a LABELLED CDN path:
         https://cdn.pixai.art/artifacts/app-1.0.2605/assets/<name>-<HASH>.js
-    referenced by <link rel="modulepreload">, 526 of them on the homepage alone. The
-    `app-1.0.2605` segment is a build fingerprint, so `diff` can say "they shipped a new build"
-    instead of only "a hash moved".
+    referenced by <link rel="modulepreload">, 526 of them on the homepage alone (195 on
+    2026-08-16 -- the count moves with the build; the crawl follows imports regardless).
+  * **The `app-1.0.2605` label is NOT a build fingerprint** (measured 2026-08-16). The label
+    stayed `app-1.0.2605` from 2026-07-25 through 2026-08-16 while only 65 of 967 chunk
+    filenames overlapped -- new builds ship under the same label. The chunk NAMES are the
+    fingerprint: `<name>-<HASH>.js` is content-hashed, so the build IS the sorted set of chunk
+    filenames the homepage references. `fetch` hashes that set (sha256, 12 hex) and `diff`
+    compares chunk sets, not labels. (Of the 65 shared names, 64 were byte-identical and one
+    differed only by an appended `//# sourceMappingURL` comment -- so a same-named chunk from
+    an earlier crawl is safe to reuse instead of re-downloading.)
   * Chunks import each other, so the crawl follows imports transitively. That is the point: an
     earlier pass scanned "all 204 chunks on the enhancement page" and concluded a value did not
     exist, when it was simply in a LAZY chunk that page never loaded.
+  * The chunk cache is partitioned PER CRAWL: private/harvest/chunks/<fingerprint>/. Before
+    that (2026-07) `fetch` never cleared a flat chunks/ and `extract` mined all of it: by
+    2026-08 it held 2617 chunks from >=3 builds -- three different `utils-*.js` each carrying
+    `listUserBookmarks` -- and the catalog was a multi-build union in which "first chunk wins"
+    could pick a stale document over the current one. `extract` now mines only the crawl that
+    `fetch` last recorded in build.json.
   * **The sha256 hashes are NOT in the bundle.** Zero 64-hex strings across 868 chunks / 16 MB.
     Apollo computes them at runtime from the query document.
   * **But the documents ARE, as pre-parsed AST literals** -- `{kind:"Document",definitions:[..]}`
@@ -53,18 +66,21 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 OUT = ROOT / "private" / "harvest"
-CHUNKS = OUT / "chunks"
+CHUNKS = OUT / "chunks"                 # one sub-dir per crawl: chunks/<fingerprint>/
 CATALOG = OUT / "operations.json"
 PREVIOUS = OUT / "operations.prev.json"
-BUILD_FILE = OUT / "build.txt"
+BUILD_JSON = OUT / "build.json"         # the crawl `extract` mines: label, fingerprint, chunk set
+LEGACY_BUILD_TXT = OUT / "build.txt"    # pre-2026-08-16 pointer (label only); superseded
 
 SITE = "https://pixai.art"
 DELAY = 0.2
@@ -96,8 +112,47 @@ RE_ASSET = re.compile(r'assets/([A-Za-z0-9._~-]+\.js)')
 RE_BASE = re.compile(r'(https?://[^"\'\s]+?/artifacts/app-[0-9.]+)/assets/')
 
 
+def _fingerprint(names):
+    """The build's identity: sha256 of the sorted, de-duplicated chunk filenames the homepage
+    references, first 12 hex. Chunk names are content-hashed, so this changes exactly when
+    the build does -- which the CDN label (`app-1.0.2605`) measurably does not."""
+    return _sha("\n".join(sorted(set(names))))[:12]
+
+
+def _safe_name(name):
+    return re.sub(r"[^A-Za-z0-9._-]", "_", name)
+
+
+def _read_build_json():
+    if not BUILD_JSON.exists():
+        return None
+    try:
+        return json.loads(BUILD_JSON.read_text(encoding="utf-8"))
+    except ValueError:
+        return None
+
+
+def _reuse_cached(fname, dest, sibling_dirs):
+    """Chunk names are content-hashed, so a same-named file anywhere in the cache is the same
+    chunk (measured: 64/65 shared names byte-identical, the 65th differed only by a trailing
+    sourceMappingURL comment). Reuse it rather than ask the CDN again. A loose file directly
+    under chunks/ is a leftover of the pre-partition flat layout with no crawl of its own, so
+    it is MOVED into this crawl; a sibling crawl's file is COPIED, leaving that crawl whole.
+    Returns True if `dest` was populated."""
+    loose = CHUNKS / fname
+    if loose.is_file() and loose.stat().st_size:
+        loose.replace(dest)
+        return True
+    for d in sibling_dirs:
+        cand = d / fname
+        if cand.is_file() and cand.stat().st_size:
+            shutil.copyfile(cand, dest)
+            return True
+    return False
+
+
 def cmd_fetch(args):
-    """Crawl the whole JS asset graph into a local cache. Makes no GraphQL calls."""
+    """Crawl the whole JS asset graph into a per-build cache. Makes no GraphQL calls."""
     import requests
     OUT.mkdir(parents=True, exist_ok=True)
     CHUNKS.mkdir(parents=True, exist_ok=True)
@@ -112,24 +167,40 @@ def cmd_fetch(args):
         sys.exit("no /artifacts/app-*/assets/ base found -- their build layout changed. Open the "
                  "site, copy one script URL, and update RE_BASE.")
     base = max(set(bases), key=bases.count)
-    build = base.rsplit("/", 1)[-1]
-    print("   base  : {}/assets/".format(base))
-    print("   build : {}".format(build))
+    label = base.rsplit("/", 1)[-1]
+    referenced = sorted(set(RE_ASSET.findall(html)))
+    fp = _fingerprint(referenced)
+    crawl_dir = CHUNKS / fp
+    print("   base        : {}/assets/".format(base))
+    print("   label       : {}   (a CDN path segment -- NOT a build fingerprint)".format(label))
+    print("   fingerprint : {}   ({} chunks referenced by the page)".format(fp, len(referenced)))
+    prev = _read_build_json()
+    if prev and prev.get("fingerprint") and prev["fingerprint"] != fp:
+        print("   NEW BUILD: previous crawl was {} (label {})".format(
+            prev["fingerprint"], prev.get("label")))
+    elif prev and prev.get("fingerprint") == fp:
+        print("   same fingerprint as the previous crawl -- cache is warm")
 
-    queue = sorted(set(RE_ASSET.findall(html)))
-    print("2. {} chunks referenced by the page; following imports from there".format(len(queue)))
+    crawl_dir.mkdir(parents=True, exist_ok=True)
+    siblings = sorted(d for d in CHUNKS.iterdir() if d.is_dir() and d != crawl_dir)
+    queue = list(referenced)
+    print("2. following imports from those {} chunks -> {}".format(len(queue), crawl_dir))
 
-    seen, got, cached, failed = set(), 0, 0, 0
+    seen, got, cached, reused, failed = set(), 0, 0, 0, 0
     while queue and len(seen) < args.max_chunks:
         name = queue.pop(0)
         if name in seen:
             continue
         seen.add(name)
-        dest = CHUNKS / re.sub(r"[^A-Za-z0-9._-]", "_", name)
+        fname = _safe_name(name)
+        dest = crawl_dir / fname
         text = None
         if dest.exists() and dest.stat().st_size:
             text = dest.read_text(encoding="utf-8", errors="replace")
             cached += 1
+        elif _reuse_cached(fname, dest, siblings):
+            text = dest.read_text(encoding="utf-8", errors="replace")
+            reused += 1
         else:
             try:
                 r = s.get("{}/assets/{}".format(base, name), timeout=60)
@@ -152,10 +223,24 @@ def cmd_fetch(args):
     if queue:
         print("   (!) stopped at --max-chunks={}; {} still queued.".format(
             args.max_chunks, len(queue)))
-    print("   crawled {} chunks: fetched {}  already-cached {}  failed {}".format(
-        len(seen), got, cached, failed))
-    BUILD_FILE.parent.mkdir(parents=True, exist_ok=True)
-    BUILD_FILE.write_text(build + "\n", encoding="utf-8")
+    print("   crawled {} chunks: fetched {}  already-cached {}  reused-by-name {}  failed {}"
+          .format(len(seen), got, cached, reused, failed))
+    loose = sum(1 for p in CHUNKS.glob("*.js"))
+    if loose:
+        print("   note: {} loose chunks directly under {} are left over from the pre-partition "
+              "cache and are not part of this build; extract ignores them (safe to delete)."
+              .format(loose, CHUNKS))
+
+    on_disk = sorted(p.name for p in crawl_dir.glob("*.js"))
+    BUILD_JSON.write_text(json.dumps({
+        "label": label, "fingerprint": fp, "base": base,
+        "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "referenced": referenced,          # what the fingerprint is computed over
+        "crawled": len(on_disk), "failed": failed, "stopped_early": bool(queue),
+    }, indent=2), encoding="utf-8")
+    if LEGACY_BUILD_TXT.exists():          # this tool's own pre-2026-08-16 pointer; superseded
+        LEGACY_BUILD_TXT.unlink()
+    print("   -> {}".format(BUILD_JSON))
     print("\nNext: python tools/harvest_api_surface.py extract")
 
 
@@ -431,12 +516,19 @@ def _scan_documents(text):
 
 
 def cmd_extract(args):
-    if not CHUNKS.is_dir():
-        sys.exit("no chunk cache -- run `fetch` first")
-    files = sorted(CHUNKS.glob("*.js"))
-    print("mining {} cached chunks for GraphQL document ASTs".format(len(files)))
+    build = _read_build_json()
+    if not build or not build.get("fingerprint"):
+        sys.exit("no build.json -- run `fetch` first. (Since 2026-08-16 chunks are cached per "
+                 "crawl under chunks/<fingerprint>/ and extract mines only the crawl fetch "
+                 "recorded there; a flat chunks/ from before that is not mined.)")
+    crawl_dir = CHUNKS / build["fingerprint"]
+    files = sorted(crawl_dir.glob("*.js"))          # THIS crawl only -- never the siblings
+    if not files:
+        sys.exit("crawl {} has no chunks -- run `fetch` first".format(crawl_dir))
+    print("mining {} chunks from crawl {} (label {}) for GraphQL document ASTs".format(
+        len(files), build["fingerprint"], build.get("label")))
 
-    docs, frags, anon = {}, 0, 0
+    docs, frags, anon, conflicts = {}, 0, 0, []
     for f in files:
         try:
             t = f.read_text(encoding="utf-8", errors="replace")
@@ -454,8 +546,15 @@ def cmd_extract(args):
                 anon += 1
             elif nm not in docs:
                 docs[nm] = (doc, f.name)
+            elif docs[nm][0] != doc:
+                # Same name, different document, SAME build. First chunk wins, as before -- but
+                # inside one crawl that is a curiosity worth a look, not a stale-cache artefact.
+                conflicts.append(nm)
     print("  {} named operations, {} fragment definitions, {} anonymous".format(
         len(docs), frags, anon))
+    if conflicts:
+        print("  (!) {} same-name/different-document conflicts within this crawl (first chunk "
+              "kept): {}".format(len(conflicts), ", ".join(sorted(set(conflicts)))))
     if not docs:
         sys.exit("no documents found -- their bundle format changed; re-inspect a chunk.")
 
@@ -501,13 +600,16 @@ def cmd_extract(args):
     OUT.mkdir(parents=True, exist_ok=True)
     if CATALOG.exists():
         PREVIOUS.write_text(CATALOG.read_text(encoding="utf-8"), encoding="utf-8")
-    build = BUILD_FILE.read_text(encoding="utf-8").strip() if BUILD_FILE.exists() else "?"
+    # The chunk list rides in the catalog so `diff` (which compares operations.json against
+    # operations.prev.json) can say how much of the BUILD changed, not just how many hashes.
+    build_block = {"label": build.get("label"), "fingerprint": build["fingerprint"],
+                   "fetched_at": build.get("fetched_at"), "chunks": [f.name for f in files]}
     CATALOG.write_text(json.dumps(
-        {"site": SITE, "build": build, "derivation": winner[0] if winner else None,
+        {"site": SITE, "build": build_block, "derivation": winner[0] if winner else None,
          "hashes_proven": bool(winner), "operations": catalog}, indent=2), encoding="utf-8")
     q = sum(1 for c in catalog if c["kind"] == "query")
     print("\n  {} operations ({} queries, {} mutations/subscriptions) from build {}".format(
-        len(catalog), q, len(catalog) - q, build))
+        len(catalog), q, len(catalog) - q, _build_tag(_build_info({"build": build_block}))))
     print("  -> {}".format(CATALOG))
     print("\nNext: python tools/harvest_api_surface.py show --grep lora")
 
@@ -524,6 +626,20 @@ def _load():
     return json.loads(CATALOG.read_text(encoding="utf-8"))
 
 
+def _build_info(data):
+    """Normalize a catalog's build block. Catalogs written before 2026-08-16 carry only the CDN
+    label as a bare string (and no chunk list); newer ones carry a dict."""
+    b = data.get("build")
+    if isinstance(b, dict):
+        return {"label": b.get("label"), "fingerprint": b.get("fingerprint"),
+                "chunks": b.get("chunks")}
+    return {"label": b, "fingerprint": None, "chunks": None}
+
+
+def _build_tag(info):
+    return "{} [{}]".format(info["label"] or "?", info["fingerprint"] or "no fingerprint")
+
+
 def cmd_show(args):
     data = _load()
     ops = data["operations"]
@@ -531,7 +647,7 @@ def cmd_show(args):
         g = args.grep.lower()
         ops = [o for o in ops if g in o["name"].lower() or g in json.dumps(o["variables"]).lower()]
     print("build {}   hashes {}   showing {}/{} operations".format(
-        data.get("build"), "PROVEN" if data.get("hashes_proven") else "UNPROVEN",
+        _build_tag(_build_info(data)), "PROVEN" if data.get("hashes_proven") else "UNPROVEN",
         len(ops), len(data["operations"])))
     for kind in ("query", "mutation", "subscription"):
         group = [o for o in ops if o["kind"] == kind]
@@ -568,8 +684,29 @@ def cmd_diff(args):
     new, old = _load(), json.loads(PREVIOUS.read_text(encoding="utf-8"))
     now = {o["name"]: o for o in new["operations"]}
     then = {o["name"]: o for o in old["operations"]}
-    if new.get("build") != old.get("build"):
-        print("BUILD CHANGED: {} -> {}".format(old.get("build"), new.get("build")))
+
+    # --- build identity is the chunk set, never the CDN label (measured 2026-08-16: label
+    #     unchanged across a build in which 902 of 967 chunks were new).
+    nb, ob = _build_info(new), _build_info(old)
+    if nb["fingerprint"] and ob["fingerprint"]:
+        if nb["fingerprint"] != ob["fingerprint"]:
+            print("BUILD CHANGED: {} -> {}{}".format(
+                _build_tag(ob), _build_tag(nb),
+                "   (same label -- the label is not a fingerprint)"
+                if nb["label"] == ob["label"] else ""))
+        else:
+            print("build unchanged: {}".format(_build_tag(nb)))
+    else:
+        print("build      : {} -> {}   (a catalog from before 2026-08-16 carries no "
+              "fingerprint; label alone cannot say whether the build changed)".format(
+                  _build_tag(ob), _build_tag(nb)))
+    if nb["chunks"] is not None and ob["chunks"] is not None:
+        a, b = set(ob["chunks"]), set(nb["chunks"])
+        print("chunks     ({} changed): {} kept, {} new, {} gone   [{} now, {} before]".format(
+            len(a ^ b), len(a & b), len(b - a), len(a - b), len(b), len(a)))
+    else:
+        print("chunks     : n/a -- previous catalog carries no chunk list")
+
     added, gone = sorted(set(now) - set(then)), sorted(set(then) - set(now))
     moved = [n for n in sorted(set(now) & set(then)) if now[n]["hash"] != then[n]["hash"]]
     print("added      ({}): {}".format(len(added), ", ".join(added) or "-"))
