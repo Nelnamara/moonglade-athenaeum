@@ -9,7 +9,8 @@
 
    Motion: mgDockIn .44s cubic-bezier(.2,.9,.24,1) / mgDockOut .36s
    cubic-bezier(.4,0,.2,1) come from shell.css (identical keyframes, shared);
-   the dock-only keyframes (mgEclipse/mgPop/mgSettle/mgSlab/mgFade) live here.
+   the dock-only keyframes (mgEclipse/mgPop/mgSettle/mgSlab/mgFade/mgSharpen/
+   mgNelHalo/mgShimmer) live here.
 
    Z: component band only — dock 7, expanded scrim 6, model flyout / filters
    panel keep their existing 305/306 (the 300-band the overlays already own).
@@ -30,6 +31,10 @@
    to interpolate against. */
 @keyframes mgSharpen { from { filter: blur(9px) saturate(.55); opacity: .38; }
   to { filter: blur(0) saturate(1); opacity: 1; } }
+/* the running tile's mascot halo (DC 39) + the indeterminate shimmer (Respec 18) -- the
+   only progress signals: PixAI reports no per-image progress, so there is no % to draw */
+@keyframes mgNelHalo { 0%, 100% { opacity: .3; transform: scale(.9); } 50% { opacity: .8; transform: scale(1.08); } }
+@keyframes mgShimmer { 0% { transform: translateX(-120%); } 100% { transform: translateX(340%); } }
 
 /* ============================= DOCK SHELL =================================== */
 .mgdock {
@@ -107,35 +112,63 @@
   overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
 
 /* ============================== RUNS REEL =================================== */
+/* DC reelStyle 3534. The same element is the HISTORY timeline in History mode
+   (HistoryStrip.jsx): one .mgdock-reelgrp per day, sideways scroll, never wraps. */
 .mgdock-reel { position: relative; flex: none; display: flex; gap: 14px;
   overflow-x: auto; overflow-y: visible; padding: 11px 18px 7px;
   align-items: flex-start; flex-wrap: nowrap; }
-.mgdock-reel.wrap { flex-wrap: wrap; }
 .mgdock-reelgrp { display: flex; align-items: stretch; gap: 12px; flex: none; }
-.mgdock-reel.wrap .mgdock-reelgrp { flex-wrap: wrap; }
 
+/* the day divider (DC 1125-1128) -- ONE divider style, evolved for History */
 .mgdock-daydiv { display: flex; flex-direction: column; align-items: center;
-  gap: 4px; flex: none; }
+  justify-content: center; gap: 6px; flex: none; padding-right: 4px; }
 .mgdock-daydiv i { flex: 1 1 auto; width: 1px;
   background: linear-gradient(to bottom, rgba(58, 52, 96, 0), rgba(58, 52, 96, .9), rgba(58, 52, 96, 0)); }
 .mgdock-daydiv span { font-size: 9px; font-weight: 700; letter-spacing: .1em;
   text-transform: uppercase; color: var(--overlay0);
   writing-mode: vertical-rl; transform: rotate(180deg); }
+/* History: the per-day 2-row column-flow grid (DC 2770) + the empty day (DC 1132) */
+.mgdock-histgrid { display: grid; grid-auto-flow: column; grid-template-rows: repeat(2, auto);
+  gap: 10px 12px; align-items: start; }
+.mgdock-noruns { display: flex; align-items: center; font-size: 10.5px; color: var(--overlay0);
+  padding: 0 6px; white-space: nowrap; }
 
 .mgdock-run { flex: none; display: flex; flex-direction: column; gap: 6px;
   animation: mgPop .58s cubic-bezier(.2, 1.06, .3, 1) both; }
+/* History rows already on disk when the strip opened: no pop, no sharpen (DC 2696 pops
+   only `age === 'now'`; the settle/sharpen is the landing moment, not a first paint) */
+.mgdock-run.still, .mgdock-run.still .mgdock-tileimg { animation: none; }
+/* DC tileStyle 2698-2701: radius 13, done = lavender border + pointer, running = surface1
+   + default cursor, one dim ground for both; no hover rule (the hint + tooltip are the
+   hover feedback) */
 .mgdock-tile { position: relative; border-radius: 13px; overflow: hidden;
   border: 1px solid var(--surface1); background: rgba(12, 10, 28, .9);
   display: grid; place-items: center;
   transition: border-color .3s, transform .25s cubic-bezier(.2, .9, .24, 1); }
 .mgdock-tile.done { border-color: rgba(182, 146, 230, .42); }
-.mgdock-tile.done:hover { border-color: rgba(182, 146, 230, .8); }
-.mgdock-tile.running { background: rgba(12, 10, 28, .96); }
 .mgdock-tile.fail { border-color: color-mix(in srgb, var(--red) 45%, transparent); }
 .mgdock-tileimg { position: absolute; inset: 0; width: 100%; height: 100%;
   object-fit: cover;
   animation: mgSharpen .42s cubic-bezier(.22, 1, .36, 1) both; }
 .mgdock-tilefail { font-size: 15px; color: var(--red); }
+/* the video ▶ tag (DC 1160) */
+.mgdock-vtag { position: absolute; left: 5px; bottom: 5px; z-index: 2; font-size: 8.5px;
+  padding: 1px 5px; border-radius: 4px; background: rgba(5, 4, 13, .74); color: var(--mauve);
+  white-space: nowrap; }
+/* the RUNNING face (DC 1162-1169 + Respec 88-90): a 40×40 mascot centred over the dim
+   ground, a pulsing lavender halo 7px beyond it, and a 2px indeterminate shimmer track
+   inset 8px from the sides, 6px from the bottom -- no % anywhere. */
+.mgdock-runface { position: absolute; inset: 0; display: grid; place-items: center; }
+.mgdock-runmascotwrap { position: relative; width: 40px; height: 40px; }
+.mgdock-runhalo { position: absolute; inset: -7px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(182, 146, 230, .5), transparent 66%);
+  animation: mgNelHalo 1.6s ease-in-out infinite; }
+.mgdock-runmascot { position: relative; z-index: 2; width: 40px; height: 40px;
+  border-radius: 50%; object-fit: cover; display: block; }
+.mgdock-shim { position: absolute; left: 8px; right: 8px; bottom: 6px; height: 2px;
+  border-radius: 999px; background: rgba(255, 255, 255, .14); overflow: hidden; }
+.mgdock-shim > i { position: absolute; top: 0; bottom: 0; width: 40%; border-radius: 999px;
+  background: var(--mauve); animation: mgShimmer 1.8s ease-in-out infinite; }
 /* a running job submitted with count>1 -- one reel slot, an NxN grid of
    indeterminate placeholders sized by how many images were requested (capped
    at 4). No per-cell progress: our job model has no partial-batch state (see
@@ -145,6 +178,15 @@
   grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); gap: 3px; }
 .mgdock-batchgrid i { border-radius: 7px; background: rgba(255, 255, 255, .05);
   display: grid; place-items: center; font-style: normal; }
+/* the cluster's footer (DC 1144-1145): the 16px round mascot chip + the same shimmer */
+.mgdock-clusterfoot { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 8px;
+  display: flex; align-items: center; gap: 6px; z-index: 2;
+  background: linear-gradient(to top, rgba(5, 4, 13, .85), rgba(5, 4, 13, 0)); }
+.mgdock-mascotchip { position: relative; display: block; width: 16px; height: 16px;
+  border-radius: 50%; flex: none;
+  background: rgba(20, 16, 40, .6) url(/branding/mascots/gen_nel.png) center / 80% no-repeat; }
+.mgdock-clusterfoot .mgdock-shim { position: relative; left: auto; right: auto; bottom: auto;
+  flex: 1 1 auto; }
 .mgdock-tilehint { position: absolute; inset: 0; display: flex; align-items: flex-end;
   padding: 9px; transition: opacity .22s; opacity: 0; pointer-events: none;
   background: linear-gradient(to top, rgba(5, 4, 13, .9) 0%, rgba(5, 4, 13, 0) 62%); }
@@ -154,9 +196,37 @@
 .mgdock-runcap { display: flex; align-items: baseline; gap: 6px; padding: 0 2px; }
 .mgdock-runtag { font-size: 9.5px; font-weight: 700; color: var(--overlay0);
   font-variant-numeric: tabular-nums; }
+/* colour comes from costColor() inline (free green / paid overlay0 / resolving subtext);
+   the ellipsis is ours: "still resolving…" is wider than a 66px portrait column */
 .mgdock-runcost { font-size: 9.5px; color: var(--overlay0);
-  font-variant-numeric: tabular-nums; }
-.mgdock-runcost.free { color: var(--green, var(--emerald)); }
+  font-variant-numeric: tabular-nums; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+
+/* "Load N older days ⌄" (DC 1198): last child of the strip, dashed, lavender */
+.mgdock-older { flex: none; align-self: center; font-size: 10.5px; font-weight: 600;
+  padding: 6px 12px; border-radius: 8px; border: 1px dashed var(--surface1);
+  color: var(--lavender); cursor: pointer; white-space: nowrap; transition: border-color .2s;
+  background: transparent; font-family: inherit; }
+.mgdock-older:hover { border-color: var(--accent); }
+.mgdock-older:disabled { cursor: default; border-color: var(--surface1); }
+
+/* the run TOOLTIP (DC runTipStyle 3530 + 1594-1605): fixed, anchored at the tile's
+   top-centre and popped UP by its own height + 8px, opaque #0a0818, lavender rim, z 300.
+   Rendered as a SIBLING of the .mgdock aside (the dock's transform would otherwise be
+   the containing block for position: fixed) -- see GenerateDrawer.jsx. */
+.mgdock-runtip { position: fixed; z-index: 300;
+  transform: translate(-50%, calc(-100% - 8px)); display: flex; flex-direction: column;
+  gap: 3px; padding: 8px 10px; border-radius: 8px;
+  background: #0a0818; border: 1px solid rgba(182, 146, 230, .4);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .5); pointer-events: none; }
+.mgdock-runtip .row { display: flex; align-items: baseline; gap: 8px; }
+.mgdock-runtip .tag { font-size: 10.5px; font-weight: 700; color: var(--text); white-space: nowrap; }
+.mgdock-runtip .time { font-size: 9.5px; color: var(--overlay0); white-space: nowrap; }
+.mgdock-runtip .model { font-size: 10px; font-weight: 600; color: var(--subtext); white-space: nowrap; }
+.mgdock-runtip .dims { font-size: 9.5px; color: var(--overlay0); white-space: nowrap; }
+.mgdock-runtip .prompt { font-size: 9.5px; color: var(--subtext); max-width: 250px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgdock-runtip .cost { font-size: 9.5px; font-weight: 600; white-space: nowrap; }
 
 .mgdock-reelempty { display: flex; align-items: center; gap: 14px; }
 .mgdock-firstrun { width: 108px; border-radius: 12px;
@@ -749,7 +819,10 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
 @media (prefers-reduced-motion: reduce) {
   .mgdock, .mgdock-run, .mgdock-slab, .mgdock-peek, .mgdock-tab.on,
   .mgdock-expand, .mgdock-gen, .mgdock-eclipse > span,
-  .mgdock-tileimg, .mgdock-reusefrom { animation: none; }
+  .mgdock-tileimg, .mgdock-reusefrom,
+  .mgdock-runhalo, .mgdock-shim > i { animation: none; }
+  .mgdock-runhalo { opacity: .55; }
+  .mgdock-shim > i { left: 30%; }
   .mgx-dock-host.open .mgdock, .mgx-dock-host.closing .mgdock { animation: none; }
 }
 

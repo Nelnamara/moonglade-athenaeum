@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
-  dockLayout, PROMPT_FLOOR, PROMPT_CAP, SLAB_CHROME, REEL_MIN_ROOM,
+  dockLayout, PROMPT_FLOOR, PROMPT_CAP, SLAB_CHROME, REEL_MIN_ROOM, HISTORY_STRIP,
 } from "../../gallery/src/gen/dockLayout.js";
 
 // The Generate dock's HEIGHT PASS -- owner calls 08-16d/e/f, drift-report §43,
@@ -14,8 +14,8 @@ import {
 //
 //   1. the prompt's resting floor is 6 rows (was 2); it grows with the text to the
 //      room-driven cap, max 14; past that the TEXTAREA scrolls, never the panel;
-//   2. standard stays content-sized under the separator ceiling; ▲ / long prompt may
-//      grow to 100vh − 28;
+//   2. standard stays content-sized under the separator ceiling; ▲ / long prompt /
+//      History may grow to 100vh − 28 (History's strip is its own chrome term);
 //   3. ▲ keeps the reel visible above the settings slabs -- tiles tier to 84/104, the
 //      reel's room is measured against ▲'s own ceiling less the ~330px of slab chrome,
 //      and the reel hides only when a short window leaves it under 60px;
@@ -76,6 +76,14 @@ describe("standard: content-sized under the separator ceiling", () => {
   test("▲ lifts the clamp to 100vh − 28", () => {
     const L = dockLayout({ ...desk, expanded: true, promptLen: 0, promptFocus: false });
     assert.equal(L.capH, desk.vh - 28);
+  });
+  test("History alone lifts the clamp too -- its own dock mode (DC dockStyle 3505-3506)", () => {
+    const L = dockLayout({ ...desk, historyOpen: true, promptLen: 0, promptFocus: false });
+    assert.equal(L.capH, desk.vh - 28);
+    // and the prompt cap counts the 2-row strip, not the one-row reel term
+    assert.equal(HISTORY_STRIP, 260);
+    const chrome = 46 + HISTORY_STRIP + 96;
+    assert.equal(L.promptMax, Math.min(PROMPT_CAP, Math.floor((L.capH - chrome) / 25)));
   });
 });
 
