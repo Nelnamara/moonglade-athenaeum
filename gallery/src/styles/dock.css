@@ -568,14 +568,15 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
 .mgdock-prompt:focus-visible, .mgdock-neg:focus-visible { outline: none; }
 /* the VIDEO prompt: VideoDrawer's own contenteditable (@image/@video/@audio chips,
    MODE_PH placeholder) portaled into the composer -- same DC prompt skin; grows with
-   the text, 2 lines at rest, capped by the dock's promptMax (--mg-prompt-max) exactly
+   the text, 6 lines at rest (the composer's one prompt floor, DC promptRows 3561 --
+   owner calls 08-16d/f), capped by the dock's promptMax (--mg-prompt-max) exactly
    like promptRows caps the textarea. Chip rules mirror gen-drawer.css's .mgd-chip,
    which is scoped to .gen-drawer and so does not reach the portal. */
 .mgdock-composer .mgd-ce { width: 100%; box-sizing: border-box; background: transparent;
   border: none; outline: none; color: var(--text); font-family: inherit;
   font-size: 16px; line-height: 1.5; font-weight: 300; padding: 0;
-  white-space: pre-wrap; overflow-y: auto; min-height: 3em;
-  max-height: calc(var(--mg-prompt-max, 6) * 1.5em); }
+  white-space: pre-wrap; overflow-y: auto; min-height: 9em;
+  max-height: calc(max(var(--mg-prompt-max, 8), 6) * 1.5em); }
 .mgdock-composer .mgd-ce:empty::before { content: attr(data-placeholder);
   color: var(--overlay0); pointer-events: none; }
 .mgdock-composer .mgd-chip { display: inline-flex; align-items: center; gap: 4px;
@@ -584,9 +585,11 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
   margin: 0 2px; vertical-align: -3px; cursor: default; user-select: none; }
 .mgdock-composer .mgd-chip img { width: 16px; height: 16px; border-radius: 3px;
   object-fit: cover; }
-/* Fixer / Enhance have no prompt: the composer carries the tab's own line instead */
+/* Fixer / Enhance have no prompt: the composer carries the tab's own line instead --
+   held at the prompt's 6-row resting height (16px * 1.5 * 6 = 144px) so the composer,
+   and the dock, do not jump between sub-tabs. */
 .mgdock-composer-msg { font-size: 12.5px; line-height: 1.5; font-weight: 300;
-  color: var(--subtext); min-height: 3em; }
+  color: var(--subtext); min-height: 144px; }
 
 /* NEGATIVE row (DC 1575-1577): flex-start, label 9px/700/.1em overlay0 padded 4px down,
    transparent 12.5px/1.5 subtext textarea padded 2px down */

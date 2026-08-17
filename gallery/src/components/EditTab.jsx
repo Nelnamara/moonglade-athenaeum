@@ -145,11 +145,11 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
 
   // The footer pieces (dock mode) -- one definition each, mounted inline or portaled.
   const inDock = !!dock;
-  // Dock rows follow the DC's promptRows rule (3558-3559: grows with the text, 2 at rest,
-  // one more while it has focus, capped by the dock's own room -- `promptMax` /
-  // `promptFocus` from the dock's measurement and its composer focus ring).
+  // Dock rows follow the DC's promptRows rule (3561, 08-16d/f: grows with the text,
+  // 6 at rest, one more while it has focus, capped by the dock's own room --
+  // `promptMax` / `promptFocus` from the dock's measurement and its composer focus ring).
   const dockRows = inDock
-    ? Math.max(2, Math.min(dock.promptMax || 6,
+    ? Math.max(6, Math.min(dock.promptMax || 8,
         Math.ceil(((s.instruction || "").length || 1) / 76) + (dock.promptFocus ? 1 : 0)))
     : 3;
   // The field itself is the DC's composer prompt (promptStyle 3561 = .mgdock-prompt, no

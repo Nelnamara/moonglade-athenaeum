@@ -10,6 +10,7 @@ import VideoDrawer from "./VideoDrawer.jsx";
 import EditTab, { SourceSlab } from "./EditTab.jsx";
 import FixTab from "./FixTab.jsx";
 import { EDIT_DEFAULTS } from "../gen/editCore.js";
+import { dockLayout } from "../gen/dockLayout.js";
 import FilterCompare from "./FilterCompare.jsx";
 import RunsReel, { isRunningJob } from "./RunsReel.jsx";
 import { askPicker, isPickerOpen } from "./PickerHost.jsx";
@@ -251,7 +252,14 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
 
   /* ---- measurement (DC measureDock/fitReel: a layout contract, not
      decoration). The dock never rises above the separator bar EXCEPT when
-     expanded or the prompt is long, when it may grow to 100vh-28. ---- */
+     expanded or the prompt is long, when it may grow to 100vh-28.
+     The height pass (owner calls 08-16d/e/f, drift §43): standard stays
+     content-sized under the separator ceiling; the prompt's resting floor is
+     6 rows (grows with the text to the room-driven cap, max 14; past that the
+     textarea scrolls, never the panel); ▲ keeps the reel visible above the
+     settings slabs (tiles tier to 84/104, reel-room measured against ▲'s own
+     100vh-28 ceiling minus the ~330px slab chrome, auto-hide only under 60px);
+     ▲ and History compose. ---- */
   const [metrics, setMetrics] = useState({ sepBottom: 260, vh: 800 });
   useEffect(() => {
     const measure = () => {
@@ -274,20 +282,12 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
     };
   }, [open]);
 
-  const promptLines = Math.ceil((s.prompt || "").length / 76);
-  const longPrompt = promptLines > 4;
-  const capH = (expanded || longPrompt)
-    ? metrics.vh - 28
-    : metrics.vh - metrics.sepBottom - 14;
-  const reelRoom = (metrics.vh - metrics.sepBottom - 14) - 56 - 118 - 46;
-  const reelTier = expanded
-    ? (metrics.vh < 760 ? 84 : 104)
-    : (metrics.vh < 620 ? 64 : metrics.vh < 820 ? 96 : 132);
-  const reelH = Math.max(44, Math.min(reelTier, reelRoom));
-  const reelVisible = !expanded && reelRoom >= 60;
-  const chrome = 46 + (expanded ? 0 : reelH + 46) + (expanded ? 330 : 0) + 96;
-  const promptMax = Math.max(2, Math.min(14, Math.floor((capH - chrome) / 25)));
-  const promptRows = Math.max(2, Math.min(promptMax, promptLines + (promptFocus ? 1 : 0)));
+  // The arithmetic itself is gen/dockLayout.js (DC measureDock / fitReel / promptRows,
+  // one pure function) so the tests run exactly what renders here.
+  const { capH, reelH, reelVisible, promptMax, promptRows } = dockLayout({
+    vh: metrics.vh, sepBottom: metrics.sepBottom, expanded, historyOpen,
+    promptLen: (s.prompt || "").length, promptFocus,
+  });
 
   /* Prime the cost chip on each Image-tab entry. The image <CostBadge> sits in the
      dock footer's right column under `tab === "image"`, so it mounts and unmounts
@@ -356,7 +356,8 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   }, [open]);
 
   /* Escape closes the TOPMOST layer only: picker → filters → flyout →
-     collapse the settings → the dock (the DC's Esc chain, innermost first). */
+     collapse the settings → close History → the dock (the DC's Esc chain
+     1977-1984, innermost first; ▲ and History compose, so each is its own step). */
   useEffect(() => {
     if (!open) return;
     const onKey = (e) => {
@@ -365,11 +366,12 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
       if (filtersOpen) { setFiltersOpen(false); return; }
       if (flyOpen) { setFlyOpen(false); return; }
       if (expanded) { setExpanded(false); return; }
+      if (historyOpen) { setHistoryOpen(false); return; }
       closeDrawer();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, filtersOpen, flyOpen, expanded, closeDrawer]);
+  }, [open, filtersOpen, flyOpen, expanded, historyOpen, closeDrawer]);
 
   const onBasePick = useCallback((row) => {
     setFlyOpen(false);                          // single-select closes, classic
