@@ -13,6 +13,7 @@ import { EDIT_DEFAULTS } from "../gen/editCore.js";
 import { dockLayout } from "../gen/dockLayout.js";
 import FilterCompare from "./FilterCompare.jsx";
 import RunsReel, { isRunningJob } from "./RunsReel.jsx";
+import HistoryStrip, { RunTip } from "./HistoryStrip.jsx";
 import { askPicker, isPickerOpen } from "./PickerHost.jsx";
 import "../styles/dock.css";
 
@@ -110,6 +111,9 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   // backend concept exists for it), set at prefill time and cleared the moment
   // a new submission goes out. See prefillFromRun below + the composer chip.
   const [reuseFrom, setReuseFrom] = useState(null);   // {jobId, tag, partial}
+  // The run tooltip (DC runTip 1936 / 2711-2723): ONE tooltip for the reel and History,
+  // {x, y, lines} from the hovered tile's viewport rect. Rendered OUTSIDE the aside (below).
+  const [runTip, setRunTip] = useState(null);
   // Prefill epoch + busy gate (adversarial review 2026-08-13, findings 1.3 +
   // 2.2): the epoch retires an older in-flight prefill wholesale the moment a
   // newer one starts (no chimera recipes), and the busy flag holds the
@@ -510,7 +514,10 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
         }
       }
       setTab("image");
+      // DC prefill 2321 `expanded: true, historyOpen: false`: a prefill from any tile
+      // exits History INTO the expanded composer (DECISIONS 2551/2562).
       setExpanded(true);
+      setHistoryOpen(false);
       // A reel click has a jobId; a Remix doesn't -- fall back to the row's own
       // task id so the chip still reads "↺ from #NNNN" either way. `partial`
       // rides the chip so an incomplete recipe stays visibly incomplete until
@@ -611,10 +618,12 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
     }
   };
 
-  const reelLabel = runningCount ? "Making" : "Runs";
+  // DC 3509-3512: the label reads "History" in History (over "Making"); the live
+  // "N image(s) resolving" note wins over either mode's note while anything runs.
+  const reelLabel = historyOpen ? "History" : (runningCount ? "Making" : "Runs");
   const reelNote = runningCount
     ? runningCount + (runningCount === 1 ? " image resolving — it sharpens as it lands" : " images resolving — they sharpen as they land")
-    : (historyOpen ? "grouped by day · click any run to reuse its settings" : "today · click any run to reuse its settings");
+    : (historyOpen ? "7 days · newest first · click any run to reuse its settings" : "today · click any run to reuse its settings");
 
   const stepsVal = s.steps === "" ? 25 : Number(s.steps);
   const cfgVal = s.cfg === "" ? 7 : Number(s.cfg);
@@ -666,21 +675,24 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
                 onClick={() => setTab(k)}>{l}</button>
             ))}
           </div>
-          {/* DC 3452 historyBtnStyle: History belongs to the reel -- hidden with it */}
+          {/* DC 3518 historyBtnStyle: History belongs to the reel -- hidden with it.
+              No title (DC 1115 has none; the header note carries the copy). */}
           <button type="button" className={"mgdock-hist" + (historyOpen ? " on" : "")}
             style={reelVisible ? null : { display: "none" }}
-            onClick={() => setHistoryOpen((v) => !v)}
-            title="Fold yesterday's runs into the reel">
+            onClick={() => setHistoryOpen((v) => !v)}>
             {historyOpen ? "Hide history" : "History"}
           </button>
           <button type="button" className="mgdock-x" onClick={closeDrawer}
             title="Close the dock — runs keep going">×</button>
         </div>
 
-        {/* ---- DOCK BODY: reel · per-tab surface. Safety-valve scroll for
-             short windows only — the composer footer never scrolls. ---- */}
+        {/* ---- DOCK BODY: reel (or the 7-day History strip in its place -- the same
+             slot, ABOVE the ▲ slabs, DC 1119-1207) · per-tab surface. Safety-valve
+             scroll for short windows only — the composer footer never scrolls. ---- */}
         <div className="mgdock-body">
-          {reelVisible && <RunsReel jobs={jobs} historyOpen={historyOpen} reelH={reelH} onPrefill={prefillFromRun} />}
+          {reelVisible && (historyOpen
+            ? <HistoryStrip onPrefill={prefillFromRun} onTip={setRunTip} />
+            : <RunsReel jobs={jobs} reelH={reelH} onPrefill={prefillFromRun} onTip={setRunTip} />)}
 
           {tab === "image" && expanded && (
             <div className="mgdock-slabs">
@@ -1177,6 +1189,11 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
           overlay has no picker of its own). */}
       <FilterCompare open={filtersOpen} onClose={() => setFiltersOpen(false)}
         source={editS.source} onSendToEdit={sendToEdit} />
+      {/* The run tooltip (DC 1594-1605): a SIBLING of the dock, never inside it -- the
+          aside's transform: translateX(-50%) (+ the mgDockIn/Out transforms) would make
+          it the containing block for position: fixed and re-anchor viewport coords into
+          dock-local space. Same fragment as the flyout / compare overlay above. */}
+      {open && <RunTip tip={runTip} />}
     </>
   );
 }

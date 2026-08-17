@@ -174,6 +174,8 @@ ROUTE_TIERS = {
     ("next_gallery", "GET"): LOGIN,
     ("api_next_library", "GET"): LOGIN,
     ("api_next_detail", "GET"): LOGIN,
+    # The Generate dock's History feed: catalog rows + jobs.jsonl, a pure local read.
+    ("api_next_history", "GET"): LOGIN,
 
     # library mutation (local only in effect, but LAN-authorized by design)
     ("rate", "POST"): LOGIN,

@@ -23,29 +23,35 @@
 // reel whenever it is SHOWN -- the DC's own invariant ("never the panel") -- which can
 // only lower the cap in ▲, never the 6-row floor.
 
+import { HISTORY_STRIP } from "./historyCore.js";
+
 export const PROMPT_FLOOR = 6;     // rows at rest (08-16d/f)
 export const PROMPT_CAP = 14;      // rows, room permitting
 export const PROMPT_COLS = 76;     // chars per row the DC counts with
 export const LONG_PROMPT_ROWS = 4; // past this the dock may leave the separator ceiling
 export const REEL_MIN_ROOM = 60;   // px of room below which the reel hides
 export const SLAB_CHROME = 330;    // px the ▲ settings slabs take from the reel's room
+export { HISTORY_STRIP };          // px the 2-row History strip takes (historyCore.js)
 
 export function dockLayout({ vh, sepBottom, expanded, historyOpen, promptLen, promptFocus }) {
   const promptLines = Math.ceil((promptLen || 1) / PROMPT_COLS);
   const longPrompt = promptLines > LONG_PROMPT_ROWS;
-  // the dock's clamp: the separator ceiling, or 100vh − 28 in ▲ / with a long prompt
-  const capH = (expanded || longPrompt) ? vh - 28 : vh - sepBottom - 14;
-  // fitReel: the reel's room under ITS ceiling (▲'s own when expanded), less header ·
-  // footer · caption + padding, less the slabs in ▲
-  const reelCap = expanded ? vh - 28 : vh - sepBottom - 14;
+  // the dock's clamp (DC dockStyle 3505-3506): the separator ceiling, or 100vh − 28 in ▲ /
+  // with a long prompt / in History -- History is its own dock mode
+  const capH = (expanded || longPrompt || historyOpen) ? vh - 28 : vh - sepBottom - 14;
+  // fitReel: the reel's room under ITS ceiling (▲'s / History's own when open), less
+  // header · footer · caption + padding, less the slabs in ▲
+  const reelCap = (expanded || historyOpen) ? vh - 28 : vh - sepBottom - 14;
   const reelRoom = reelCap - 56 - 118 - 46 - (expanded ? SLAB_CHROME : 0);
   const reelTier = expanded
     ? (vh < 760 ? 84 : 104)
     : (vh < 620 ? 64 : vh < 820 ? 96 : 132);
   const reelH = Math.max(44, Math.min(reelTier, reelRoom));
   const reelVisible = !!historyOpen || reelRoom >= REEL_MIN_ROOM;
-  // measureDock: how many prompt rows the dock can actually show
-  const chrome = 46 + (reelVisible ? reelH + 46 : 0) + (expanded ? SLAB_CHROME : 0) + 96;
+  // measureDock: how many prompt rows the dock can actually show. In History the strip
+  // (2 rows of fixed 96px tiles) replaces the reel's one-row term.
+  const chrome = 46 + (historyOpen ? HISTORY_STRIP : (reelVisible ? reelH + 46 : 0))
+    + (expanded ? SLAB_CHROME : 0) + 96;
   const promptMax = Math.max(2, Math.min(PROMPT_CAP, Math.floor((capH - chrome) / 25)));
   const promptRows = Math.max(PROMPT_FLOOR,
     Math.min(promptMax, promptLines + (promptFocus ? 1 : 0)));
