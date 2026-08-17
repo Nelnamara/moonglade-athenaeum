@@ -50,10 +50,11 @@ export default function GridContextMenu({ target, onClose, actions }) {
   const items = [
     ["✎", "Edit", () => actions.onEdit(target.mid)],
     ["▶", "Send to Video", () => actions.onVideo(target.mid, target.thumb)],
-    // Remix is an image-recipe action -- a video row's recipe belongs to the
-    // video pipeline, so the item simply isn't offered there (same reason the
-    // Details footer hides its Remix button on videos).
-    ...(target.isVideo ? [] : [["↺", "Remix", () => actions.onRemix(target.mid)]]),
+    // Remix works for videos now too (SCOPE_2026-08-17 §2): the drawer routes a video's
+    // recipe to the Video tab and an image's to the Image tab (GenerateDrawer.prefillRun),
+    // so the item is offered on every row -- the same reason the Details footer no longer
+    // hides its Remix button on videos.
+    ["↺", "Remix", () => actions.onRemix(target.mid)],
     ["✧", "Find similar", () => actions.onSimilar(target.mid)],
     ["⧉", "Copy id", () => actions.onCopyId(target.mid)],
     ["⤢", "Open details", () => actions.onDetails(target.mid)],

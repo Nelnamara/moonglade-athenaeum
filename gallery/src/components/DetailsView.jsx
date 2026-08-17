@@ -127,7 +127,7 @@ function playReveal(root) {
    classic, file-existence isn't precomputed server-side -- the <img>/<video>
    onError below gets the same "not found" message for free. */
 export default function DetailsView({
-  mediaId, onClose, onNavigate, onRate, onEdit, onRemix, onDeleted,
+  mediaId, onClose, onNavigate, onRate, onEdit, onRemix, onVideo, onDeleted,
   onFilterByModel, onFilterByBatch, advParams,
   items, onOpenLightbox, onPublish,
 }) {
@@ -443,13 +443,28 @@ export default function DetailsView({
               )}
               <button className="btn" disabled={suggestBusy} onClick={runSuggest}>{suggestBusy ? "Reading…" : "✎ Suggest prompt"}</button>
               <button className="btn" onClick={() => { onClose(); onEdit(row.media_id); }}>✧ Edit this</button>
-              {/* Remix (issue #4): the full recipe -- prompt/negative/size/steps/cfg/
-                  seed/model + LoRAs by exact version id -- into the Generate drawer.
-                  Prefill only; the video path stays "▶ Send to Video". */}
-              {row.is_video !== "1" && (
-                <button className="btn" title="Load this picture's full recipe into Generate"
-                  onClick={() => { onClose(); onRemix && onRemix(row.media_id); }}>↺ Remix</button>
-              )}
+              {/* Remix (issue #4, extended to video by SCOPE_2026-08-17 §2): the full
+                  recipe into the Generate drawer -- an image's prompt/negative/size/
+                  steps/cfg/seed/model + LoRAs into the Image tab, a video's engine/
+                  duration/mode/camera/audio/prompt into the Video tab. Prefill only;
+                  the drawer routes by kind (GenerateDrawer.prefillRun). Ordered
+                  Remix · Send to Video per the respec's action row (§2.6 default). */}
+              <button className="btn" title={row.is_video === "1"
+                ? "Load this video's full recipe into the Video composer"
+                : "Load this picture's full recipe into Generate"}
+                onClick={() => { onClose(); onRemix && onRemix(row.media_id); }}>↺ Remix</button>
+              {/* Send to Video: an image sends ITSELF as the first frame; a video sends its
+                  own SOURCE frame (source_media_id), never the clip -- a clip is not a valid
+                  i2v input. Hidden when a video has no recorded source frame (r2v shots). */}
+              {(() => {
+                const svid = row.is_video === "1" ? (row.source_media_id || "") : row.media_id;
+                return svid ? (
+                  <button className="btn" title={row.is_video === "1"
+                    ? "Send this video's source frame to the Video composer"
+                    : "Send this picture to the Video composer as the first frame"}
+                    onClick={() => { onClose(); onVideo && onVideo(svid, "/thumbs/" + encodeURIComponent(svid) + ".jpg"); }}>▶ Send to Video</button>
+                ) : null;
+              })()}
               <button className={"btn" + (upscaleOpen ? " btn-primary" : "")} onClick={toggleUpscale}>⇱ Upscale</button>
               {row.batch ? <button className="btn" onClick={() => onFilterByBatch(row.batch)}>View Batch</button> : null}
               <button className="btn" onClick={() => setEditingPrompt((v) => !v)}>Edit Prompt</button>
