@@ -124,13 +124,14 @@ export default function RunsReel({ jobs, reelH, onPrefill, onTip }) {
             const failed = c.kind === "fail" || c.kind === "done-empty";
             const hoverKey = c.key;
             // Video jobs reach this reel too (the dock's video submits register as
-            // type:"generate" -- App.jsx / notify/jobs.js), and a video run's recipe
-            // belongs to the Video tab, not the Image prefill path prefillFromRun drives.
-            // Excluding is_video here converts the wrong-tab misfire into "not clickable
-            // yet", exactly as History's own guard already does (HistoryStrip.jsx). The
-            // full video-remix path (History / Details / context menu) routes videos to
-            // the Video tab; the reel stays image-only.
-            const clickable = done && !j.is_video;
+            // type:"generate" -- App.jsx / notify/jobs.js). onPrefill IS prefillRun, the
+            // kind-routing dispatcher (GenerateDrawer): a finished video tile routes to
+            // prefillVideoFromRun -> the Video tab, an image tile to prefillFromRun. So a
+            // done video is remixable straight from the reel, exactly as it is from History
+            // -- the old wrong-tab misfire (§2.1) is gone now that the click routes by kind,
+            // not because video is excluded. The reel IS the live history; a video that
+            // can't be reopened there isn't a history.
+            const clickable = done;
             const enter = cluster ? undefined : tipEnter(onTip, tipRow(j, c));
             const tile = (
               <div

@@ -226,8 +226,10 @@ describe("host wiring source guards (no React harness in this suite)", () => {
   const ctx = src("gallery/src/components/GridContextMenu.jsx");
   const details = src("gallery/src/components/DetailsView.jsx");
 
-  test("RunsReel excludes video from the (image) prefill path -- the §2.1 defect fix", () => {
-    assert.match(reel, /const clickable = done && !j\.is_video;/);
+  test("RunsReel is OPENED UP: a done video is clickable and routes by kind via prefillRun (§2.1 handled by routing, not exclusion)", () => {
+    assert.match(reel, /const clickable = done;/);          // video no longer excluded
+    assert.doesNotMatch(reel, /!j\.is_video/);              // the old wrong-tab guard is gone
+    assert.match(reel, /onPrefill\(j\.job_id, c\.mid\)/);   // onPrefill IS prefillRun, the kind-routing dispatcher
   });
 
   test("HistoryStrip is OPENED UP: a done video tile is clickable and routes by kind", () => {
