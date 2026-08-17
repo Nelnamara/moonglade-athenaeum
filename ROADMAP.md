@@ -81,26 +81,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   user-visible (what name/label appears in a device's discovery list, whether the mobile/QR access
   flow adopts it) — quick workshop, not a full pixel pass.
 
-- **Generate drawer History: a real, scrolling 7-day run history with day markers** ([#13](https://github.com/Nelnamara/moonglade-athenaeum/issues/13))
-  The `History` button in the Runs reel is hollow: it flips a flag and relabels the header
-  "grouped by day," but the reel only ever holds `today` + `yesterday` from a 24-hour activity trail
-  (`jobs.jsonl`), so there's never more than a day *to* group and older runs are compacted off disk.
-  That two-bucket shape is a **literal port of the design prototype's demo limitation** — the spec
-  (`design_handoff/design_handoff_moonglade_suite/generate-runs-spec.md`) was an in-memory demo with
-  fake runs and names "back it with the actual generation-history API" as its own known gap. The
-  gap was never closed. **Owner requirement:** History opens a *scrolling 7-day history with day
-  markers*. **Build direction (decided, not a candidate):** catalog-backed — page 7 days of real
-  finished generations out of the catalog (`created_at`), grouped by day with markers, scrolling;
-  the live `jobs.jsonl` window covers only in-flight / just-finished runs layered on top. Reuse-
-  prefill already works from a bare `media_id`, so no new storage, nothing to expire, and it survives
-  every restart. Bumping `JOBS_KEEP`/`JOBS_MAX_AGE` instead is rejected (a second record drifting
-  from the catalog; can't give a real 7-day scroll). Pairs with the full-metadata capture (richer
-  recipes to prefill from) and with Remix (#4), which rides the same prefill path. **What it
-  touches:** `RunsReel.jsx` (day grouping/markers/scroll), `GenerateDrawer.jsx` (the History
-  toggle), a catalog-backed history route in `moonglade_gallery.py`. **Design step first** — the
-  spec already provides the tile/cluster/sharpen-in reveal, so the delta is the day-marker
-  treatment and scroll behaviour: quick workshop, not a full pixel pass.
-
 ---
 
 ## Design-pass reworks — rescope, don't just build
