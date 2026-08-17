@@ -496,7 +496,9 @@ what *is* restricted to the server's own machine.
   believing all six were still attached.
 - **Video** — first-frame / first+last / multi-reference shots; pick reference images straight
   from your own gallery (badged `@image1…`, removable, hover to preview); typing `@image1` in
-  the prompt turns into a chip; model + duration + audio; live cost shows **FREE + "uses N of
+  the prompt turns into a chip; model + duration + audio, and a **Video prompt helper**
+  switch (off by default — on, PixAI expands your motion prompt the way the image helper
+  does); live cost shows **FREE + "uses N of
   H cards"** when a card covers it — and when it doesn't (a longer clip than your tickets
   cover), it says no card is used and shows the full price, which Generate then spends if you
   click. See [Free cards and videos](#free-cards-and-videos).
