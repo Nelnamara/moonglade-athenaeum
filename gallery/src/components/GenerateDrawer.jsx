@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useGenerate from "../gen/useGenerate.js";
 import {
   ASPECTS, MODES, SIZES, dims, goGate, loraIncompat, loraRange, loraStep,
@@ -26,14 +26,20 @@ import "../styles/dock.css";
    videoPrefill hand-off all keep firing exactly as before — this file only
    re-shells the chrome around them.
 
+   ONE FOOTER (fidelity pass 2026-08-16, DC 1541-1591 + handoff §2): the ▲ toggle,
+   the composer box and the cost stack + Generate render at the DOCK level, on
+   every tab. Video / Edit / Fixer do NOT get a second submit path: each keeps its
+   own prompt, CostBadge and Generate button and PORTALS them into the footer's
+   slots (their `dock` prop) -- same state, same gate, same handler, new place.
+
    THE DRAWER IS NEVER UNMOUNTED. It hides with CSS (the host's open/closing
    classes on .mgx-dock-host drive mgDockIn/mgDockOut), because VideoDrawer's
    unmount effect sweeps its poll timers -- unmounting on close would orphan an
    in-flight (already charged) video task from every surface, and a v4.0 15s
    render is ~210,000 credits. */
 
-function VideoTab({ visible, prefillRequest }) {
-  const el = useRef(null);
+function VideoTab({ visible, prefillRequest, drawerRef, dock }) {
+  const el = drawerRef;
   // The lightbox's "To Video" hand-off (classic's Gen.addVideoRefs): a single
   // image reference always prefills as i2v (first-frame), matching classic's
   // refs.length>1?'r2v':'i2v' for the one-image case. VideoDrawer's ref resolves
@@ -42,11 +48,25 @@ function VideoTab({ visible, prefillRequest }) {
   useEffect(() => {
     if (!prefillRequest || !el.current || typeof el.current.prefill !== "function") return;
     el.current.prefill(prefillRequest);
-  }, [prefillRequest]);
+  }, [prefillRequest]); // eslint-disable-line react-hooks/exhaustive-deps
+  // `dock` = the footer slots (see the DOCK MODE note in VideoDrawer.jsx): the drawer's
+  // own prompt / negative / CostBadge / Generate portal into the dock's shared footer.
   return (
     <div className="mgdock-videohost" style={{ display: visible ? "" : "none" }}>
-      <VideoDrawer ref={el} />
+      <VideoDrawer ref={el} dock={dock} />
     </div>
+  );
+}
+
+/* The ▲ toggle -- ONE component, in the footer, on every tab (handoff 2026-08-16 §2:
+   "▲ Expand gets one home"). Titles verbatim from the DC's expandTitle (3541);
+   the metallic 38×38 face + rotating caret are expandBtnStyle/caretStyle (3542-3544). */
+function ExpandToggle({ expanded, onToggle }) {
+  return (
+    <button type="button" className="mgdock-expand" onClick={onToggle}
+      title={expanded ? "Collapse the settings" : "Open model, frame and tuning"}>
+      <span className={"mgdock-caret" + (expanded ? " flip" : "")}>▲</span>
+    </button>
   );
 }
 
@@ -87,6 +107,26 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   const { s, set } = g;
   const loraCap = account && account.lora_cap != null ? account.lora_cap : null;
   const gate = goGate(s, loraCap);
+  const balance = account && account.credits != null ? account.credits : null;
+
+  /* ---- THE ONE FOOTER (Frontend Gallery.dc.html 1551-1591): expand · composer ·
+     cost stack + Generate, rendered at the DOCK level, on every tab. The Image tab's
+     pieces are this component's own (useGenerate state); Video / Edit / Fixer keep
+     owning THEIR prompt, cost badge and submit gate and portal them into the slots
+     below (VideoDrawer / EditTab / FixTab `dock` prop). The slots are React state
+     (setState IS the ref callback -- stable identity, fires on mount/unmount only) so
+     the tab components re-render once the slot node exists. Per-tab slot wrappers
+     stay MOUNTED and hide by display, so a tab's portal content -- notably the video
+     prompt's imperative contenteditable -- survives tab switches intact. ---- */
+  const videoRef = useRef(null);                       // VideoDrawer's root node handle
+  const [videoTopEl, setVideoTopEl] = useState(null);
+  const [videoPromptEl, setVideoPromptEl] = useState(null);
+  const [videoNegEl, setVideoNegEl] = useState(null);
+  const [videoGoEl, setVideoGoEl] = useState(null);
+  const [editTopEl, setEditTopEl] = useState(null);
+  const [editPromptEl, setEditPromptEl] = useState(null);
+  const [editGoEl, setEditGoEl] = useState(null);
+  const editPromptApi = useRef(null);                  // { insert(t), read() } while EditTab is up
 
   /* Prompt snippets manager -- the real per-account store (/api/snippets), replacing the
      4 hardcoded demo chips. Ports classic's Snips popover: save-current / insert / delete
@@ -114,15 +154,38 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
       .catch(() => setSnipErr("Network error — not saved."));
   };
   const snipTrunc = (t) => (String(t).length > 44 ? String(t).slice(0, 44) + "…" : t);
+  /* The composer (and so ★ Snippets) is shared by every tab now: read/insert against
+     the ACTIVE tab's prompt -- the image draft here, the video drawer's contenteditable
+     through its node handle, the Edit instruction through EditTab's registered api.
+     Fixer/Enhance have no prompt, so the Snippets toggle is not offered there. */
+  const readActivePrompt = () => {
+    if (tab === "video") {
+      const el = videoRef.current;
+      return el && typeof el.promptText === "function" ? el.promptText() : "";
+    }
+    if (tab === "edit") return editPromptApi.current ? editPromptApi.current.read() : "";
+    return s.prompt || "";
+  };
   const saveCurrentSnip = () => {
-    const v = (s.prompt || "").trim();
+    const v = readActivePrompt().trim();
     if (!v || (snips || []).includes(v)) return;
     persistSnips([v, ...(snips || [])].slice(0, 200));
   };
-  const insertSnip = (sn) =>
+  const insertSnip = (sn) => {
+    if (tab === "video") {
+      const el = videoRef.current;
+      if (el && typeof el.insertText === "function") el.insertText(sn);
+      return;
+    }
+    if (tab === "edit") {
+      if (editPromptApi.current) editPromptApi.current.insert(sn);
+      return;
+    }
     // trim FIRST (matches the +words button and classic), so stray leading/trailing
     // whitespace on the prompt never leaks a "text , snippet" stray space before the comma.
     set({ prompt: (s.prompt.trim() ? s.prompt.trim().replace(/,\s*$/, "") + ", " : "") + sn });
+  };
+  const snippetsAvail = tab === "image" || tab === "video" || (tab === "edit" && sub === "edit");
   const delSnip = (i) => {
     const list = snips || [];
     if (!list[i]) return;
@@ -210,12 +273,12 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   const promptMax = Math.max(2, Math.min(14, Math.floor((capH - chrome) / 25)));
   const promptRows = Math.max(2, Math.min(promptMax, promptLines + (promptFocus ? 1 : 0)));
 
-  /* Prime the cost chip on each Image-tab entry. The <CostBadge> lives in the
-     composer footer, which renders only while tab === "image", so it mounts and
-     unmounts with the tab; its ref is live at commit, and refreshPrice() re-prices
-     the current draft whenever the tab is (re)entered — the badge starts idle on
-     each remount, exactly as the old re-created element did. (Unchanged machinery;
-     g intentionally out of the deps so this fires on entry, not every keystroke.) */
+  /* Prime the cost chip on each Image-tab entry. The image <CostBadge> sits in the
+     dock footer's right column under `tab === "image"`, so it mounts and unmounts
+     with the tab; its ref is live at commit, and refreshPrice() re-prices the
+     current draft whenever the tab is (re)entered — the badge starts idle on each
+     remount, exactly as the old re-created element did. (Unchanged machinery; g
+     intentionally out of the deps so this fires on entry, not every keystroke.) */
   useEffect(() => {
     if (open && tab === "image") g.refreshPrice();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -473,7 +536,41 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   const modeName = (MODES.find(([v]) => v === s.mode) || ["", s.mode])[1];
   const frameSummary = (m ? "" : "pick a model · ") + d.width + "×" + d.height + " · " + modeName
     + (s.count > 1 ? " · ×" + s.count : "");
-  const modelShort = m ? (m.resolving ? "Resolving…" : m.title) : "Pick a model";
+  // DC 3573-3576: the slab's model row says 'none — browse models', the composer pip
+  // 'browse models' (in lavender) while no model is picked. 'Resolving…' is the
+  // build's own transient (a real async version resolve the DC has no equivalent for).
+  const modelName = m ? (m.resolving ? "Resolving…" : m.title) : "none — browse models";
+  const modelShort = m ? (m.resolving ? "Resolving…" : m.title) : "browse models";
+
+  /* Composer focus ring (DC composerStyle 3548-3550: accent border + glow while the
+     prompt has focus). One native focusin/focusout pair on the composer box covers the
+     image textarea AND the portaled video/edit prompts alike -- React's synthetic focus
+     events bubble through the React tree, and a portal's React parent is its tab
+     component, not this box. */
+  const composerRef = useRef(null);
+  useEffect(() => {
+    const node = composerRef.current;
+    if (!node) return;
+    const isPrompt = (t) => !!(t && t.matches && t.matches("textarea, [contenteditable]"));
+    const onIn = (e) => { if (isPrompt(e.target)) setPromptFocus(true); };
+    const onOut = (e) => { if (isPrompt(e.target)) setPromptFocus(false); };
+    node.addEventListener("focusin", onIn);
+    node.addEventListener("focusout", onOut);
+    return () => {
+      node.removeEventListener("focusin", onIn);
+      node.removeEventListener("focusout", onOut);
+    };
+  }, []);
+
+  // The footer slot contracts handed to the tab components (memoized so a render of this
+  // component doesn't hand them a new object for no reason).
+  const videoDock = useMemo(() => ({
+    topEl: videoTopEl, promptEl: videoPromptEl, negativeEl: videoNegEl, goEl: videoGoEl, balance,
+  }), [videoTopEl, videoPromptEl, videoNegEl, videoGoEl, balance]);
+  const editDock = useMemo(() => ({
+    topEl: editTopEl, promptEl: editPromptEl, goEl: editGoEl, balance,
+    promptApi: editPromptApi, promptMax,
+  }), [editTopEl, editPromptEl, editGoEl, balance, promptMax]);
 
   /* The peek pill can only OPEN the dock through the host's own toggle verbs;
      the drawer has no openDock prop, so it forwards the click to a real
@@ -489,7 +586,7 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   const reelLabel = runningCount ? "Making" : "Runs";
   const reelNote = runningCount
     ? runningCount + (runningCount === 1 ? " image resolving — it sharpens as it lands" : " images resolving — they sharpen as they land")
-    : (historyOpen ? "grouped by day — click any run to reuse its settings" : "today — click any run to reuse its settings");
+    : (historyOpen ? "grouped by day · click any run to reuse its settings" : "today · click any run to reuse its settings");
 
   const stepsVal = s.steps === "" ? 25 : Number(s.steps);
   const cfgVal = s.cfg === "" ? 7 : Number(s.cfg);
@@ -526,16 +623,24 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
           <span className="mgdock-runslabel" style={reelVisible ? null : { display: "none" }}>{reelLabel}</span>
           <span className="mgdock-runsnote" style={reelVisible ? null : { display: "none" }}>{reelNote}</span>
           <span className="sp" />
+          {/* The notice ("Pick a model first" …) -- handoff 2026-08-16 §2: no row of its
+              own; inline beside the tab strip, rendered only while true. */}
+          {tab === "image" && gate && (
+            <span className="mgdock-notice" role="status">{gate}</span>
+          )}
           <div className="mgdock-tabs">
-            {[["image", "Image", "Generate images"],
-              ["edit", "Edit", "Edit · Fixer · Enhance"],
-              ["video", "Video", "Generate video"]].map(([k, l, t]) => (
+            {/* titles per DC 2819: label + ' generation' */}
+            {[["image", "Image", "Image generation"],
+              ["edit", "Edit", "Edit generation"],
+              ["video", "Video", "Video generation"]].map(([k, l, t]) => (
               <button key={k} type="button" title={t}
                 className={"mgdock-tab" + (tab === k ? " on" : "")}
                 onClick={() => setTab(k)}>{l}</button>
             ))}
           </div>
+          {/* DC 3452 historyBtnStyle: History belongs to the reel -- hidden with it */}
           <button type="button" className={"mgdock-hist" + (historyOpen ? " on" : "")}
+            style={reelVisible ? null : { display: "none" }}
             onClick={() => setHistoryOpen((v) => !v)}
             title="Fold yesterday's runs into the reel">
             {historyOpen ? "Hide history" : "History"}
@@ -558,7 +663,7 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
                   onClick={() => { setFiltersOpen(false); setFlyKind("base"); setFlyOpen(!flyOpen); }}
                   title="Browse the model catalog">
                   {m && m.thumb ? <img className="mgdock-modelthumb" src={m.thumb} alt="" /> : <span className="mgdock-modelthumb ph" />}
-                  <span className="mgdock-modelname">{modelShort}</span>
+                  <span className="mgdock-modelname">{modelName}</span>
                   <span className="sp" />
                   <span className="mgdock-browse">browse</span>
                 </button>
@@ -753,8 +858,6 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
             </div>
           )}
 
-          {tab === "image" && gate && <div className="mgdock-note">{gate}</div>}
-
           {tab === "image" && g.results.length > 0 && (
             <div className="gd-results mgdock-results">
               {g.results.map((r) => (
@@ -784,8 +887,8 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
                     onClick={() => setSub(k)}>{l}</button>
                 ))}
               </div>
-              <EditTab visible={tab === "edit" && sub === "edit"} initialSource={editSource} />
-              <FixTab visible={tab === "edit" && sub === "fix"} />
+              <EditTab visible={tab === "edit" && sub === "edit"} initialSource={editSource} dock={editDock} />
+              <FixTab visible={tab === "edit" && sub === "fix"} dock={editDock} />
               {tab === "edit" && sub === "enhance" && (
                 <div className="mgdock-slab mgdock-enhance">
                   <div className="mgdock-lbl">ART FILTERS · FREE, NO GENERATION</div>
@@ -801,103 +904,162 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
               )}
           </div>
 
-          <VideoTab visible={tab === "video"} prefillRequest={videoPrefill} />
+          <VideoTab visible={tab === "video"} prefillRequest={videoPrefill} drawerRef={videoRef} dock={videoDock} />
         </div>
 
-        {/* ---- COMPOSER FOOTER (image tab): expand · composer · cost+Generate.
-             Edit/Fixer/Enhance and Video keep their own submit rows — their
-             machinery (EditTab/FixTab/the shared video component) owns them. */}
-        {tab === "image" && (
-          <div className="mgdock-foot">
-            <button type="button" className="mgdock-expand"
-              onClick={() => setExpanded((v) => !v)}
-              title={expanded ? "Collapse the settings" : "Expand the settings"}>
-              <span className={"mgdock-caret" + (expanded ? " flip" : "")}>▲</span>
-            </button>
-            <div className={"mgdock-composer" + (promptFocus ? " focus" : "")}>
-              <div className="mgdock-composer-top">
-                <button type="button" className={"mgdock-modelchip" + (m ? "" : " empty")}
-                  onClick={() => { setFiltersOpen(false); setFlyKind("base"); setFlyOpen(!flyOpen); }}
-                  title="Pick the base model">
-                  {m && m.thumb ? <img src={m.thumb} alt="" /> : <span className="mgdock-chipph" />}
-                  <span>{modelShort}</span>
-                </button>
-                <span className="mgdock-frames">{frameSummary}</span>
-                {reuseFrom && (
-                  <button type="button" className={"mgdock-reusefrom" + (reuseFrom.partial ? " warn" : "")}
-                    onClick={() => setReuseFrom(null)}
-                    title={reuseFrom.partial
-                      ? "PARTIAL recipe from " + reuseFrom.tag + ": " + reuseFrom.partial + " — click to clear"
-                      : "Prompt & core settings prefilled from run " + reuseFrom.tag + " — click to clear"}>
-                    ↺ from {reuseFrom.tag}{reuseFrom.partial ? " ⚠" : ""} <span>&times;</span>
+        {/* ---- THE FOOTER (DC 1551-1591) -- at the DOCK level, AFTER the per-tab
+             body, so it renders on EVERY tab: ▲ expand · the composer box · the
+             cost stack + Generate. Image content is inline; Video / Edit / Fixer
+             content arrives through the per-tab slots (portals, see the slot state
+             above); Enhance's is inline too. genLabel per DC 3682-3684:
+             '✦ Generate' / '✦ Generate video' / '✦ Edit' / '✦ Fix <kind>' /
+             'Save to library'. ---- */}
+        <div className="mgdock-foot">
+          <ExpandToggle expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
+
+          <div ref={composerRef} className={"mgdock-composer" + (promptFocus ? " focus" : "")}
+            style={{ "--mg-prompt-max": promptMax }}>
+            {/* top row (DC 1557-1565): model pip · frame summary · spacer · ★ Snippets */}
+            <div className="mgdock-composer-top">
+              {tab === "image" && (
+                <>
+                  <button type="button" className={"mgdock-modelchip" + (m ? "" : " empty")}
+                    onClick={() => { setFiltersOpen(false); setFlyKind("base"); setFlyOpen(!flyOpen); }}>
+                    {m && m.thumb ? <img src={m.thumb} alt="" /> : <span className="mgdock-chipph" />}
+                    <span>{modelShort}</span>
                   </button>
-                )}
-                <span className="sp" />
-                {/* Frontend Gallery.dc.html:1218 -- the ★ Snippets toggle, right-aligned
-                    at the end of the composer's header row. */}
+                  <span className="mgdock-frames">{frameSummary}</span>
+                  {reuseFrom && (
+                    <button type="button" className={"mgdock-reusefrom" + (reuseFrom.partial ? " warn" : "")}
+                      onClick={() => setReuseFrom(null)}
+                      title={reuseFrom.partial
+                        ? "PARTIAL recipe from " + reuseFrom.tag + ": " + reuseFrom.partial + " — click to clear"
+                        : "Prompt & core settings prefilled from run " + reuseFrom.tag + " — click to clear"}>
+                      ↺ from {reuseFrom.tag}{reuseFrom.partial ? " ⚠" : ""} <span>&times;</span>
+                    </button>
+                  )}
+                </>
+              )}
+              <div ref={setVideoTopEl} className="mgdock-slot" style={{ display: tab === "video" ? "contents" : "none" }} />
+              <div ref={setEditTopEl} className="mgdock-slot" style={{ display: tab === "edit" && sub !== "enhance" ? "contents" : "none" }} />
+              {tab === "edit" && sub === "enhance" && (
+                <>
+                  <span className="mgdock-modelchip static" title="Art filters — free, in your browser">
+                    <span className="mgdock-chipph" /><span>Art filters</span>
+                  </span>
+                  <span className="mgdock-frames">free · composites in your browser</span>
+                </>
+              )}
+              <span className="sp" />
+              {/* DC 1564 -- the ★ Snippets toggle, right-aligned at the end of the row.
+                  Only where there is a prompt to insert into (Fixer/Enhance have none). */}
+              {snippetsAvail && (
                 <button type="button" className={"mgdock-snipbtn" + (snippetsOpen ? " on" : "")}
                   onClick={() => setSnippetsOpen((v) => !v)}>★ Snippets</button>
-              </div>
+              )}
+            </div>
+
+            {/* the prompt (DC 1566): the image draft here; the video contenteditable and
+                the edit instruction portal into their slots; Fixer/Enhance carry a line
+                of copy instead of an empty box */}
+            {tab === "image" && (
               <textarea className="mgdock-prompt" rows={promptRows} value={s.prompt}
                 placeholder="Describe your image…"
-                onChange={(e) => set({ prompt: e.target.value })}
-                onFocus={() => setPromptFocus(true)}
-                onBlur={() => setPromptFocus(false)} />
-              {snippetsOpen && (
-                <div className="mgdock-snippanel">
-                  <div className="mgdock-sniphead">
-                    <span>Snippets</span>
-                    <button type="button" className="mgdock-snipx" disabled={!s.prompt.trim()}
-                      onClick={saveCurrentSnip}>+ save current</button>
-                  </div>
-                  {snipUndo && (
-                    <div className="mgdock-snipundo">
-                      <span>Deleted "{snipTrunc(snipUndo.text)}"</span>
-                      <button type="button" className="mgdock-snipx" onClick={undoSnip}>Undo</button>
-                    </div>
-                  )}
-                  {snips === null ? (
-                    <div className="mgdock-snipempty">loading…</div>
-                  ) : snips.length === 0 ? (
-                    <div className="mgdock-snipempty">No saved snippets yet — build a prompt, then “+ save current”.</div>
-                  ) : (
-                    snips.map((sn, i) => (
-                      <div className="mgdock-snipitem" key={sn + " " + i}>
-                        <button type="button" className="mgdock-snipins" title="Insert into the prompt"
-                          onClick={() => insertSnip(sn)}>{sn}</button>
-                        <button type="button" className="mgdock-snipdel" title="Delete (Undo appears at the top)"
-                          onClick={() => delSnip(i)}>×</button>
-                      </div>
-                    ))
-                  )}
-                  {snipErr && <div className="mgdock-sniperr">⚠ {snipErr}</div>}
-                </div>
-              )}
-              {expanded && (
-                <div className="mgdock-negrow">
-                  <span className="mgdock-lbl">NEGATIVE</span>
+                onChange={(e) => set({ prompt: e.target.value })} />
+            )}
+            <div ref={setVideoPromptEl} className="mgdock-slot" style={{ display: tab === "video" ? "" : "none" }} />
+            <div ref={setEditPromptEl} className="mgdock-slot" style={{ display: tab === "edit" && sub !== "enhance" ? "" : "none" }} />
+            {tab === "edit" && sub === "enhance" && (
+              <div className="mgdock-composer-msg">
+                Filters need no prompt — open the panel, compare against the original, then save to your library.
+              </div>
+            )}
+
+            {/* ★ Snippets open (DC 1567-1573): the WRAPPING chip row, mgSlab entrance.
+                The real per-account store's affordances ride the same row: '+ save
+                current' leads, a one-level Undo appears after a delete, each chip
+                inserts on click and carries its own ×. */}
+            {snippetsOpen && snippetsAvail && (
+              <div className="mgdock-sniprow">
+                <button type="button" className="mgdock-snip act"
+                  disabled={tab === "image" && !s.prompt.trim()}
+                  title="Save the current prompt as a snippet"
+                  onClick={saveCurrentSnip}>+ save current</button>
+                {snipUndo && (
+                  <button type="button" className="mgdock-snip act" onClick={undoSnip}
+                    title={"Restore “" + snipTrunc(snipUndo.text) + "”"}>↺ Undo delete</button>
+                )}
+                {snips === null ? (
+                  <span className="mgdock-snipempty">loading…</span>
+                ) : snips.length === 0 ? (
+                  <span className="mgdock-snipempty">No saved snippets yet — build a prompt, then “+ save current”.</span>
+                ) : (
+                  snips.map((sn, i) => (
+                    <span className="mgdock-snip" key={sn + " " + i}>
+                      <button type="button" className="mgdock-snipins" title={"Insert: " + sn}
+                        onClick={() => insertSnip(sn)}>{snipTrunc(sn)}</button>
+                      <button type="button" className="mgdock-snipdel" title="Delete (Undo appears first in the row)"
+                        onClick={() => delSnip(i)}>×</button>
+                    </span>
+                  ))
+                )}
+                {snipErr && <span className="mgdock-sniperr">⚠ {snipErr}</span>}
+              </div>
+            )}
+
+            {/* NEGATIVE (DC 1574-1579): inside the composer, only while expanded */}
+            {expanded && (tab === "image" || tab === "video") && (
+              <div className="mgdock-negrow">
+                <span className="mgdock-lbl">NEGATIVE</span>
+                {tab === "image" && (
                   <textarea className="mgdock-neg" rows={1} value={s.negative}
                     placeholder="lowres, text"
                     disabled={m && m.compat_neg === false}
                     onChange={(e) => set({ negative: e.target.value })} />
-                </div>
-              )}
-            </div>
-            <div className="mgdock-gocol">
-              <span className="gd-cost"><CostBadge ref={costRef} /></span>
-              {account && account.credits != null && (
-                <span className="mgdock-subline">{Number(account.credits).toLocaleString()} credits</span>
-              )}
-              <button type="button" className={"mgdock-gen" + (gate || g.busy || prefillBusy ? " off" : "")}
-                disabled={!!gate || g.busy || prefillBusy}
-                title={prefillBusy ? "Restoring the recipe…"
-                  : gate ? "Pick a model and write a prompt first" : "Submit — this spends credits or a card"}
-                onClick={() => { setReuseFrom(null); g.generate(loraCap); }}>
-                <span>&#10022; Generate</span>
-              </button>
-            </div>
+                )}
+                <div ref={setVideoNegEl} className="mgdock-slot" style={{ display: tab === "video" ? "contents" : "none" }} />
+              </div>
+            )}
           </div>
-        )}
+
+          {/* right column (DC 1582-1590): the cost stack over the Generate button.
+              CostBadge is THE cost renderer on every tab -- the DC's bare two-line
+              stack is its `stack` presentation (count / balance are the host's own
+              data; the card sentence stays the badge's). */}
+          <div className="mgdock-gocol">
+            {tab === "image" && (
+              <>
+                {/* idle here == no model (useGenerate clears the badge only when there is
+                    no version_id to price), so the DC's nomodel sentence (3674) is the
+                    idle hint -- via the badge's own hint API, never hand-written text */}
+                <CostBadge ref={costRef} stack count={s.count} balance={balance}
+                  hint="Pick a model to see the cost." />
+                <button type="button" className={"mgdock-gen" + (gate || g.busy || prefillBusy ? " off" : "")}
+                  disabled={!!gate || g.busy || prefillBusy}
+                  title={prefillBusy ? "Restoring the recipe…"
+                    : gate ? "Pick a model and write a prompt first" : "Submit — this spends credits or a card"}
+                  onClick={() => { setReuseFrom(null); g.generate(loraCap); }}>
+                  <span>&#10022; Generate</span>
+                </button>
+              </>
+            )}
+            <div ref={setVideoGoEl} className="mgdock-slot" style={{ display: tab === "video" ? "contents" : "none" }} />
+            <div ref={setEditGoEl} className="mgdock-slot" style={{ display: tab === "edit" && sub !== "enhance" ? "contents" : "none" }} />
+            {tab === "edit" && sub === "enhance" && (
+              <>
+                <CostBadge stack balance={balance} hint="Nothing to price — art filters run in your browser." />
+                {/* DC genLabel 'Save to library': saving happens in the filters panel
+                    (it owns the source, the chosen filter and the POST), so the footer
+                    action opens it -- never a second save path. */}
+                <button type="button" className="mgdock-gen"
+                  title="Compare and save in the filters panel — this opens it"
+                  onClick={() => { setFlyOpen(false); setFiltersOpen(true); }}>
+                  <span>Save to library</span>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       </aside>
 
       {/* Floating overlays live OUTSIDE the aside: the dock's backdrop-filter

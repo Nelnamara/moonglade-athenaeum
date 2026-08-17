@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { FIX_COLORS, FIX_MAX_BOXES, FIX_MIN_PX, scaleBoxes } from "../gen/editCore.js";
 import { submitTask, useResultLines } from "../gen/submitTask.js";
 import { askPicker } from "./PickerHost.jsx";
@@ -12,8 +13,14 @@ import CostBadge from "./CostBadge.jsx";
      price is quoted in the confirm before anything is submitted;
    - boxes are drawn in DISPLAY pixels but submitted in ORIGINAL-image pixels;
      the server does not rescale, so the scale factor decides which part of the
-     picture is actually repaired. */
-export default function FixTab({ visible }) {
+     picture is actually repaired.
+
+   `dock` (Generate dock, 2026-08-16 fidelity pass -- the DC's ONE footer on
+   every tab, genLabel '✦ Fix <kind>'): when given ({ topEl, promptEl, goEl,
+   balance }), the CostBadge + Fix button render into the dock footer's right
+   column and the tab's status line into the composer's prompt slot (a Fix has
+   no prompt) via portals -- SAME costRef, SAME run() with its spend confirm. */
+export default function FixTab({ visible, dock }) {
   const [source, setSource] = useState("");
   const [tag, setTag] = useState("face");
   const [boxes, setBoxes] = useState([]);
@@ -171,8 +178,49 @@ export default function FixTab({ visible }) {
   };
 
   if (!visible) return null;
+
+  // The footer pieces (dock mode) -- one definition each, mounted inline or portaled.
+  const inDock = !!dock;
+  const goTitle = !source ? "Pick an image first"
+    : !boxes.length ? "Drag at least one box"
+    : "Submit the repair — always spends";
+  const goOff = !source || !boxes.length || busy;
+  const costLine = (
+    /* no cardLabel: a Fix can never be card-covered */
+    <CostBadge ref={costRef} hint="Drag a box over a hand or face to see the cost."
+      stack={inDock || undefined} balance={inDock ? dock.balance : undefined} />
+  );
+  const goButton = inDock ? (
+    <button type="button" className={"mgdock-gen" + (goOff ? " off" : "")} disabled={goOff}
+      title={goTitle} onClick={run}><span>&#10022; Fix {tag}</span></button>
+  ) : (
+    <button className="gen" disabled={goOff} title={goTitle} onClick={run}>&#10022; Fix</button>
+  );
+  const statusNote = !source ? "Pick an image, then drag a box over each hand or face to repair."
+    : !boxes.length ? "Drag a box over a hand or face — the tag button above sets which."
+    : "";
+  // Composer top row (DC 1557-1562: pip · summary) + the prompt slot: a Fix has no prompt,
+  // so the composer carries the tab's own status line instead of an empty box.
+  const topRow = inDock ? (
+    <>
+      <span className="mgdock-modelchip static" title="Fixer — PixAI repairs what is inside your boxes">
+        {source ? <img src={"/thumbs/" + encodeURIComponent(source) + ".jpg"} alt="" /> : <span className="mgdock-chipph" />}
+        <span>Fixer</span>
+      </span>
+      <span className="mgdock-frames">{tag} · {boxes.length} {boxes.length === 1 ? "box" : "boxes"} · always spends</span>
+    </>
+  ) : null;
+  const composerMsg = inDock ? (
+    <div className="mgdock-composer-msg">
+      {statusNote || ("Repairing " + boxes.length + (boxes.length === 1 ? " area" : " areas") + " — no prompt needed; the confirm quotes the price.")}
+    </div>
+  ) : null;
+
   return (
     <div className="gd-body">
+      {inDock && dock.topEl ? createPortal(topRow, dock.topEl) : null}
+      {inDock && dock.promptEl ? createPortal(composerMsg, dock.promptEl) : null}
+      {inDock && dock.goEl ? createPortal(<>{costLine}{goButton}</>, dock.goEl) : null}
       <div className="gd-row">
         <button className="card" onClick={pickSource}>
           {source ? "▨ Change" : "▨ Pick"}
@@ -195,25 +243,17 @@ export default function FixTab({ visible }) {
             onPointerDown={onDown} onPointerMove={onMove}
             onPointerUp={onUp} onPointerLeave={onUp} />
         </div>
-      ) : (
-        <div className="gd-note">Pick an image, then drag a box over each hand or face to repair.</div>
-      )}
-      {source && !boxes.length && (
-        <div className="gd-note">Drag a box over a hand or face — the tag button above sets which.</div>
-      )}
+      ) : null}
+      {/* the status line lives in the dock composer in dock mode (composerMsg above) */}
+      {!inDock && statusNote && <div className="gd-note">{statusNote}</div>}
 
-      <div className="gd-go">
-        {/* no cardLabel: a Fix can never be card-covered */}
-        <span className="gd-cost">
-          <CostBadge ref={costRef} hint="Drag a box over a hand or face to see the cost." />
-        </span>
-        <span className="sp" />
-        <button className="gen" disabled={!source || !boxes.length || busy}
-          title={!source ? "Pick an image first"
-               : !boxes.length ? "Drag at least one box"
-               : "Submit the repair — always spends"}
-          onClick={run}>&#10022; Fix</button>
-      </div>
+      {!inDock && (
+        <div className="gd-go">
+          <span className="gd-cost">{costLine}</span>
+          <span className="sp" />
+          {goButton}
+        </div>
+      )}
 
       <ResultLines lines={lines} />
     </div>

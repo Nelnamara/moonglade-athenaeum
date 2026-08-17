@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   buildEditPayload, editCaps, editGate, EDIT_CAPS, EDIT_DEFAULTS,
   refTag, switchEditModel,
@@ -9,8 +10,16 @@ import CostBadge from "./CostBadge.jsx";
 
 /* The Edit tab: Edit Pro / Reference Pro against /api/edit, with the toolbox
    preset bank. @image1 is the image being edited; extra references number from
-   @image2 -- the instruction refers to them by those tags. */
-export default function EditTab({ visible, initialSource }) {
+   @image2 -- the instruction refers to them by those tags.
+
+   `dock` (Generate dock, 2026-08-16 fidelity pass -- Frontend Gallery.dc.html
+   1541-1591 draws ONE composer footer shared by every tab): when given
+   ({ topEl, promptEl, goEl, insertRef, balance, promptRows }), the instruction
+   textarea, the CostBadge and the '✦ Edit' button render into the dock's footer
+   slots via portals -- SAME state, SAME costRef, SAME run()/gate; only where
+   they mount changes. insertRef receives the dock's ★ Snippets insert function
+   while this tab is visible. Without `dock` the tab renders its own submit row. */
+export default function EditTab({ visible, initialSource, dock }) {
   const [s, setS] = useState(EDIT_DEFAULTS);
   const [presets, setPresets] = useState({});
   const [importTask, setImportTask] = useState("");
@@ -107,9 +116,68 @@ export default function EditTab({ visible, initialSource }) {
     busyRef.current = false; setBusy(false);
   };
 
+  // Dock ★ Snippets <-> the instruction: insert (functional update, no stale closure) and
+  // read (for "+ save current"). Registered only while this tab is the visible one.
+  const promptApi = dock ? dock.promptApi : null;
+  const sRef = useRef(s);
+  sRef.current = s;
+  useEffect(() => {
+    if (!promptApi || !visible) return;
+    const api = {
+      insert: (t) => setS((old) => ({
+        ...old,
+        instruction: (old.instruction.trim() ? old.instruction.trim().replace(/,\s*$/, "") + ", " : "") + String(t || ""),
+      })),
+      read: () => sRef.current.instruction || "",
+    };
+    promptApi.current = api;
+    return () => { if (promptApi.current === api) promptApi.current = null; };
+  }, [promptApi, visible]);
+
   if (!visible) return null;
+
+  // The footer pieces (dock mode) -- one definition each, mounted inline or portaled.
+  const inDock = !!dock;
+  // Dock rows follow the DC's promptRows rule (3558: grows with the text, 2 at rest,
+  // capped by the dock's own room -- `promptMax` from the dock's measurement).
+  const dockRows = inDock
+    ? Math.max(2, Math.min(dock.promptMax || 6, Math.ceil((s.instruction || "").length / 76)))
+    : 3;
+  const instructionField = (
+    <textarea className={inDock ? "mgdock-prompt" : "gd-prompt"} rows={dockRows}
+      value={s.instruction}
+      placeholder="make it night · put @image2's outfit on @image1 …"
+      onChange={(e) => set({ instruction: e.target.value })} />
+  );
+  const costLine = (
+    <CostBadge ref={costRef} hint="Pick an image to edit to see the cost."
+      stack={inDock || undefined} balance={inDock ? dock.balance : undefined} />
+  );
+  const goButton = inDock ? (
+    <button type="button" className={"mgdock-gen" + (gate || busy ? " off" : "")}
+      disabled={!!gate || busy} title={gate || "Submit — this spends credits or a card"}
+      onClick={run}><span>&#10022; Edit</span></button>
+  ) : (
+    <button className="gen" disabled={!!gate || busy} title={gate || "Submit the edit"}
+      onClick={run}>&#10022; Edit</button>
+  );
+  // Composer top row (DC 1557-1562: pip · summary): the edit model as the pip -- with the
+  // picture being edited as its thumb -- and refs · resolution · aspect as the summary.
+  const topRow = inDock ? (
+    <>
+      <span className="mgdock-modelchip static" title="Edit model — set in the Edit settings">
+        {s.source ? <img src={"/thumbs/" + s.source + ".jpg"} alt="" /> : <span className="mgdock-chipph" />}
+        <span>{EDIT_CAPS[s.model] ? EDIT_CAPS[s.model].label : s.model}</span>
+      </span>
+      <span className="mgdock-frames">{used}/{caps.max_refs} refs · {s.resolution} · {s.aspect}</span>
+    </>
+  ) : null;
+
   return (
     <div className="gd-body">
+      {inDock && dock.topEl ? createPortal(topRow, dock.topEl) : null}
+      {inDock && dock.promptEl ? createPortal(instructionField, dock.promptEl) : null}
+      {inDock && dock.goEl ? createPortal(<>{costLine}{goButton}</>, dock.goEl) : null}
       <div className="gd-row">
         {Object.keys(EDIT_CAPS).map((k) => (
           <button key={k} className={"card" + (s.model === k ? " on" : "")}
@@ -163,10 +231,12 @@ export default function EditTab({ visible, initialSource }) {
         </button>
       </div>
 
-      <label className="gd-lbl">Instruction</label>
-      <textarea className="gd-prompt" rows={3} value={s.instruction}
-        placeholder="make it night · put @image2's outfit on @image1 …"
-        onChange={(e) => set({ instruction: e.target.value })} />
+      {!inDock && (
+        <>
+          <label className="gd-lbl">Instruction</label>
+          {instructionField}
+        </>
+      )}
 
       <div className="gd-row">
         <span className="gd-lbl">Res</span>
@@ -187,14 +257,13 @@ export default function EditTab({ visible, initialSource }) {
         </select>
       </div>
 
-      <div className="gd-go">
-        <span className="gd-cost">
-          <CostBadge ref={costRef} hint="Pick an image to edit to see the cost." />
-        </span>
-        <span className="sp" />
-        <button className="gen" disabled={!!gate || busy} title={gate || "Submit the edit"}
-          onClick={run}>&#10022; Edit</button>
-      </div>
+      {!inDock && (
+        <div className="gd-go">
+          <span className="gd-cost">{costLine}</span>
+          <span className="sp" />
+          {goButton}
+        </div>
+      )}
       {gate && <div className="gd-note">{gate}</div>}
 
       <ResultLines lines={lines} />

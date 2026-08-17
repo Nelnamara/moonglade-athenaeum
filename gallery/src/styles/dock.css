@@ -295,11 +295,17 @@
 .mgdock-swlab { font-size: 10.5px; color: var(--subtext); }
 .mgdock-sw input:checked ~ .mgdock-swlab { color: var(--text); }
 
-/* amber note bar */
+/* amber note bar (DC 1545-1547) -- for adjustment notes only; the no-model gate
+   is NOT one of them any more (handoff 2026-08-16 §2: it moved inline beside the
+   tab strip, .mgdock-notice in the header). Kept for the adjustment-note case. */
 .mgdock-note { margin: 10px 18px 0; font-size: 10.5px; line-height: 1.5;
   color: #f9d38c; background: rgba(249, 211, 140, .08);
   border: 1px solid rgba(249, 211, 140, .32); border-radius: 10px;
   padding: 8px 11px; animation: mgFade .3s ease both; flex: none; }
+/* the inline notice beside the tab strip -- same amber ink, no box, no row of its own;
+   only rendered while true */
+.mgdock-notice { font-size: 10.5px; color: #f9d38c; white-space: nowrap;
+  animation: mgFade .3s ease both; }
 
 .mgdock-results { padding: 6px 18px 8px; }
 
@@ -327,9 +333,17 @@
 /* the shared video web component's host */
 .mgdock-videohost { padding: 4px 14px 10px; min-height: 0; overflow-y: auto; }
 
-/* ============================ COMPOSER FOOTER =============================== */
+/* ============================ COMPOSER FOOTER ===============================
+   Frontend Gallery.dc.html 1551-1591 -- ONE footer at the dock level, on every
+   tab. Values below are the DC's own inline styles (expandBtnStyle 3542, caretStyle
+   3543, composerStyle 3548, promptStyle 3561, snippetBtnStyle 3566, modelPipStyle
+   3581, genStyle 3688). Per-tab content that another component owns (the video
+   prompt/badge/button, the edit instruction/badge/button) is PORTALED into
+   .mgdock-slot wrappers, which are display:contents while their tab is up so the
+   portaled nodes lay out as if they were the composer's own children. */
 .mgdock-foot { position: relative; flex: none; display: flex; align-items: flex-end;
   gap: 11px; padding: 7px 18px 9px; }
+.mgdock-slot { min-width: 0; }
 
 /* expand button (38×38 metallic) */
 .mgdock-expand { flex: none; width: 38px; height: 38px; display: grid;
@@ -345,10 +359,11 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), inset 0 -3px 5px rgba(40, 20, 70, .45),
     0 7px 18px rgba(0, 0, 0, .45);
   transition: filter .2s; }
-.mgdock-expand:hover { filter: brightness(1.06); }
+/* (no :hover rule -- the DC's expandBtnStyle has none; `transition: filter .2s` is all) */
 .mgdock-caret { font-size: 10px; color: #22143c;
   text-shadow: 0 1px 0 rgba(255, 255, 255, .4);
-  transition: transform .3s cubic-bezier(.2, .9, .24, 1), color .22s; }
+  transition: transform .3s cubic-bezier(.2, .9, .24, 1), color .22s;
+  transform: rotate(0deg); }
 .mgdock-caret.flip { transform: rotate(180deg); }
 
 /* composer */
@@ -360,19 +375,25 @@
   box-shadow: 0 0 0 3px rgba(182, 146, 230, .13), 0 16px 40px rgba(100, 58, 172, .26); }
 .mgdock-composer-top { display: flex; align-items: center; gap: 9px;
   padding-bottom: 6px; }
+/* model pip (DC modelPipStyle 3581-3584 + modelColor 3576): thumb + short name in a
+   pill; lavender name + accent-tinted border while no model is picked; the empty
+   thumb is the plain dark disc (rgba(12,10,28,.9), no border). `.static` = the same
+   pill as a read-only summary (Video engine / Edit model / Fixer) -- no click. */
 .mgdock-modelchip { display: flex; align-items: center; gap: 7px;
   padding: 3px 10px 3px 4px; border-radius: 999px; cursor: pointer;
-  font-family: inherit; min-width: 0;
+  font-family: inherit; min-width: 0; transition: border-color .2s;
   border: 1px solid var(--surface1); background: rgba(33, 31, 58, .6); }
 .mgdock-modelchip.empty { border-color: rgba(182, 146, 230, .45); }
+.mgdock-modelchip.static { cursor: default; }
 .mgdock-modelchip img, .mgdock-chipph { width: 26px; height: 26px; border-radius: 50%;
   object-fit: cover; flex: none; display: block; }
-.mgdock-chipph { background: rgba(12, 10, 28, .8); border: 1px dashed var(--surface1); }
-.mgdock-modelchip span { font-size: 10.5px; font-weight: 600; color: var(--text);
+.mgdock-chipph { background: rgba(12, 10, 28, .9); }
+/* (22ch ellipsis is a real-data nicety -- catalog titles run long; the DC's demo names don't) */
+.mgdock-modelchip > span:not(.mgdock-chipph) { font-size: 10.5px; font-weight: 600; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 22ch; }
-.mgdock-modelchip.empty span { color: var(--mauve); }
-.mgdock-frames { font-size: 10px; color: var(--overlay0);
-  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mgdock-modelchip.empty > span:not(.mgdock-chipph) { color: var(--lavender); }
+/* frameSummary (DC 1562): 10px overlay0 -- nothing else */
+.mgdock-frames { font-size: 10px; color: var(--overlay0); }
 /* Lineage chip: "reusing settings from run #N" -- a LOCAL annotation only
    (GenerateDrawer's reuseFrom state), set when a done reel tile is clicked and
    cleared the moment a new submission goes out. */
@@ -390,9 +411,12 @@
 .mgdock-reusefrom.warn:hover { border-color: rgba(233, 190, 110, .85); }
 .mgdock-composer-top .sp { flex: 1 1 auto; }
 
-/* ★ Snippets -- Frontend Gallery.dc.html:2827-2829 (button, accent border + text
-   color while open) and :1222-1224 (the chip row, mgSlab entrance, chips hover to
-   accent). Literal values from the DC's own inline styles. */
+/* ★ Snippets -- Frontend Gallery.dc.html:3566-3568 (button, accent border + text
+   color while open) and :1568-1570 (the WRAPPING chip row, mgSlab .3s entrance,
+   chips 10px / 4px 9px / radius 7 / surface1 border / rgba(33,31,58,.7), hover to
+   accent). Literal values from the DC's own inline styles. The real per-account
+   store's affordances ride the same row as chips: '+ save current' and 'Undo delete'
+   are `.act` chips, and each snippet chip holds its insert button + a bare ×. */
 button.mgdock-snipbtn { font-size: 10px; font-weight: 600; padding: 4px 9px;
   border-radius: 7px; cursor: pointer; font-family: inherit; white-space: nowrap;
   transition: border-color .2s, color .2s;
@@ -400,63 +424,78 @@ button.mgdock-snipbtn { font-size: 10px; font-weight: 600; padding: 4px 9px;
   color: var(--subtext); }
 button.mgdock-snipbtn.on { border-color: var(--accent); color: var(--text); }
 .mgdock-sniprow { display: flex; flex-wrap: wrap; gap: 5px; padding-top: 8px;
+  align-items: center;
   animation: mgSlab .3s cubic-bezier(.22, 1, .36, 1) both; }
-button.mgdock-snip { font-size: 10px; padding: 4px 9px; border-radius: 7px;
+.mgdock-snip { display: inline-flex; align-items: center; gap: 0;
+  font-size: 10px; padding: 4px 9px; border-radius: 7px;
   border: 1px solid var(--surface1); background: rgba(33, 31, 58, .7);
-  color: var(--subtext); cursor: pointer; font-family: inherit;
+  color: var(--subtext); cursor: pointer; font-family: inherit; max-width: 100%;
   transition: border-color .18s, color .18s; }
-button.mgdock-snip:hover { border-color: var(--accent); color: var(--text); }
-
-/* Snippets manager (real /api/snippets store): save-current / insert / delete + undo. */
-.mgdock-snippanel { display: flex; flex-direction: column; gap: 4px; padding-top: 8px;
-  max-height: 260px; overflow-y: auto;
-  animation: mgSlab .3s cubic-bezier(.22, 1, .36, 1) both; }
-.mgdock-sniphead { display: flex; align-items: center; justify-content: space-between;
-  font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
-  color: var(--overlay0); padding-bottom: 2px; }
-button.mgdock-snipx { font-size: 9.5px; font-weight: 600; padding: 2px 8px; border-radius: 6px;
-  border: 1px solid var(--surface1); background: rgba(33, 31, 58, .7); color: var(--subtext);
-  cursor: pointer; font-family: inherit; white-space: nowrap; }
-button.mgdock-snipx:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
-button.mgdock-snipx:disabled { opacity: .4; cursor: default; }
-.mgdock-snipundo { display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  font-size: 10px; color: var(--subtext); padding: 4px 8px; border-radius: 7px;
-  border: 1px dashed var(--surface1); background: rgba(212, 175, 55, .06); }
-.mgdock-snipundo span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mgdock-snipempty { font-size: 10px; color: var(--overlay0); padding: 6px 2px; }
-.mgdock-snipitem { display: flex; align-items: stretch; gap: 4px; }
-button.mgdock-snipins { flex: 1 1 auto; min-width: 0; text-align: left; font-size: 10px;
-  padding: 5px 9px; border-radius: 7px; border: 1px solid var(--surface1);
-  background: rgba(33, 31, 58, .7); color: var(--subtext); cursor: pointer; font-family: inherit;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: border-color .18s, color .18s; }
-button.mgdock-snipins:hover { border-color: var(--accent); color: var(--text); }
-button.mgdock-snipdel { flex: none; width: 24px; font-size: 12px; border-radius: 7px;
-  border: 1px solid var(--surface1); background: rgba(33, 31, 58, .7); color: var(--overlay0);
-  cursor: pointer; font-family: inherit; transition: border-color .18s, color .18s; }
-button.mgdock-snipdel:hover { border-color: var(--red, #f38ba8); color: var(--red, #f38ba8); }
+.mgdock-snip:hover { border-color: var(--accent); color: var(--text); }
+button.mgdock-snip.act { font-weight: 600; }
+button.mgdock-snip.act:disabled { opacity: .4; cursor: default; }
+button.mgdock-snip.act:disabled:hover { border-color: var(--surface1); color: var(--subtext); }
+button.mgdock-snipins { background: none; border: 0; padding: 0; margin: 0;
+  font: inherit; color: inherit; cursor: pointer; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.mgdock-snipdel { background: none; border: 0; padding: 0 0 0 7px; margin: 0;
+  font-size: 12px; line-height: 1; color: var(--overlay0); cursor: pointer;
+  font-family: inherit; transition: color .18s; }
+button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
+.mgdock-snipempty { font-size: 10px; color: var(--overlay0); padding: 4px 2px; }
 .mgdock-sniperr { font-size: 9.5px; color: var(--red, #f38ba8); padding: 2px 2px; }
 
-.mgdock-prompt { width: 100%; background: transparent; border: none; outline: none;
-  resize: none; overflow-y: auto; color: var(--text); font-family: inherit;
-  font-size: 16px; line-height: 1.5; font-weight: 300; padding: 0;
+/* the prompt (DC promptStyle 3561) -- the image tab's own textarea, and the same skin
+   for the portaled Edit instruction */
+.mgdock-prompt { width: 100%; box-sizing: border-box; background: transparent;
+  border: none; outline: none; resize: none; overflow-y: auto; color: var(--text);
+  font-family: inherit; font-size: 16px; line-height: 1.5; font-weight: 300; padding: 0;
   transition: height .28s cubic-bezier(.2, .9, .24, 1); }
 .mgdock-prompt::placeholder { color: var(--overlay0); }
+/* the VIDEO prompt: VideoDrawer's own contenteditable (@image/@video/@audio chips,
+   MODE_PH placeholder) portaled into the composer -- same DC prompt skin; grows with
+   the text, 2 lines at rest, capped by the dock's promptMax (--mg-prompt-max) exactly
+   like promptRows caps the textarea. Chip rules mirror gen-drawer.css's .mgd-chip,
+   which is scoped to .gen-drawer and so does not reach the portal. */
+.mgdock-composer .mgd-ce { width: 100%; box-sizing: border-box; background: transparent;
+  border: none; outline: none; color: var(--text); font-family: inherit;
+  font-size: 16px; line-height: 1.5; font-weight: 300; padding: 0;
+  white-space: pre-wrap; overflow-y: auto; min-height: 3em;
+  max-height: calc(var(--mg-prompt-max, 6) * 1.5em); }
+.mgdock-composer .mgd-ce:empty::before { content: attr(data-placeholder);
+  color: var(--overlay0); pointer-events: none; }
+.mgdock-composer .mgd-chip { display: inline-flex; align-items: center; gap: 4px;
+  background: var(--surface1); border: 1px solid var(--overlay0); border-radius: 5px;
+  padding: 1px 6px 1px 2px; font-size: 12px; font-weight: 500; color: var(--lavender);
+  margin: 0 2px; vertical-align: -3px; cursor: default; user-select: none; }
+.mgdock-composer .mgd-chip img { width: 16px; height: 16px; border-radius: 3px;
+  object-fit: cover; }
+/* Fixer / Enhance have no prompt: the composer carries the tab's own line instead */
+.mgdock-composer-msg { font-size: 12.5px; line-height: 1.5; font-weight: 300;
+  color: var(--subtext); min-height: 3em; }
 
-.mgdock-negrow { display: flex; align-items: baseline; gap: 9px;
+/* NEGATIVE row (DC 1575-1577): flex-start, label 9px/700/.1em overlay0 padded 4px down,
+   transparent 12.5px/1.5 subtext textarea padded 2px down */
+.mgdock-negrow { display: flex; align-items: flex-start; gap: 9px;
   border-top: 1px solid rgba(58, 52, 96, .6); margin-top: 9px; padding-top: 8px; }
-.mgdock-negrow .mgdock-lbl { font-size: 9px; flex: none; }
-.mgdock-neg { flex: 1 1 auto; min-width: 0; background: transparent; border: none;
-  outline: none; resize: none; color: var(--subtext); font-family: inherit;
-  font-size: 12.5px; line-height: 1.5; padding: 0; }
+.mgdock-negrow .mgdock-lbl { font-size: 9px; flex: none; padding-top: 4px; }
+.mgdock-neg { flex: 1 1 auto; min-width: 0; box-sizing: border-box; background: transparent;
+  border: none; outline: none; resize: none; color: var(--subtext); font-family: inherit;
+  font-size: 12.5px; line-height: 1.5; padding: 2px 0 0; }
 .mgdock-neg::placeholder { color: var(--overlay0); }
 .mgdock-neg:disabled { opacity: .45; }
 
-/* cost + generate column */
+/* cost stack + Generate column (DC 1582-1590). The stack is CostBadge's `stack`
+   presentation (cost-badge.css); it wraps inside the column's width. */
 .mgdock-gocol { flex: none; display: flex; flex-direction: column;
   align-items: flex-end; gap: 8px; padding-bottom: 2px; max-width: 240px; }
-.mgdock-gocol .gd-cost { min-height: 20px; text-align: right; }
-.mgdock-subline { font-size: 9.5px; color: var(--overlay0);
-  font-variant-numeric: tabular-nums; }
+.mgdock-gocol .cost-badge.stack { max-width: 100%; }
+/* The video drawer's badge keeps ITS red for the V4.0-full caution when it lives in
+   this column (gen-drawer.css's `.gen-drawer .cost-badge…` override cannot reach the
+   portal): red for the host warn, amber re-asserted for the settled card-short case --
+   the same two rules, same order, same reasoning as gen-drawer.css. */
+.mgdock-gocol .cost-badge.mgd-cost[data-state="paid"][data-warn] { color: var(--red, #f38ba8); }
+.mgdock-gocol .cost-badge.mgd-cost[data-state="paid"][data-warn][data-short] { color: var(--peach, #fab387); }
 
 .mgdock-gen { position: relative; overflow: hidden; flex: none;
   padding: 13px 26px; border-radius: 12px; font-size: 13px; font-weight: 800;
