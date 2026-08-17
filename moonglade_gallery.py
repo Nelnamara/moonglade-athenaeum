@@ -10544,7 +10544,8 @@ def create_app(out_dir: Path):
                     quality=(p.get("quality") or "professional"),
                     audio_language=(p.get("audio_language") or "english"),
                     negative=(p.get("negative") or "").strip(),
-                    is_private=bool(p.get("is_private")))
+                    is_private=bool(p.get("is_private")),
+                    use_prompt_helper=bool(p.get("prompt_helper")))
             except core.PixAIError as e:
                 return None, bool(p.get("no_card")), _redact_host_paths(str(e))[:140]
             return params, bool(p.get("no_card")), None
@@ -11581,7 +11582,8 @@ __DESIGN_TOKENS__
                     quality=(p.get("quality") or "professional"),
                     audio_language=(p.get("audio_language") or "english"),
                     negative=(p.get("negative") or "").strip(),
-                    is_private=bool(p.get("is_private")))
+                    is_private=bool(p.get("is_private")),
+                    use_prompt_helper=bool(p.get("prompt_helper")))
 
             def _card(prm):
                 core._apply_kaisuuken(

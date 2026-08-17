@@ -441,64 +441,11 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
   border-radius: 50%; border: none; background: rgba(21, 19, 28, .85); color: var(--subtext);
   font-size: 11px; line-height: 1; padding: 0; }
 
-/* ---- Fix tab: the box canvas ---- */
-.gd-fixwrap { position: relative; line-height: 0; border-radius: 10px; overflow: hidden;
-  border: 1px solid var(--surface1); }
-.gd-fixwrap img { width: 100%; height: auto; display: block; user-select: none; }
-.gd-fixwrap canvas { position: absolute; inset: 0; width: 100%; height: 100%;
-  cursor: crosshair; touch-action: none; }
+/* (The Fix tab's box canvas, .gd-fixwrap, moved to styles/dock.css as .mgdock-fixwrap on
+   2026-08-16 -- FixTab.jsx renders inside the dock's REGION slab now.) */
 
-/* ---- Art filters: a FLOATING panel beside the drawer (matches classic's
-   #filters-flyout) -- NOT a tab body. Nested inside <aside class="gd"> like
-   .mfly below -- safe because .gd's translateX is cleared by .gd.open, the
-   only state either panel is ever shown in. Position (left/top/width) is
-   written directly by FiltersPanel.jsx's place(): dock left of the drawer if
-   there's room for a real side-by-side comparison, else centre over the
-   viewport (see the component for the room-math reasoning). */
-.af-panel { position: fixed; z-index: 306; display: flex; flex-direction: column;
-  background: var(--mantle); border: 1px solid var(--surface1); border-radius: 12px;
-  box-shadow: 0 22px 60px rgba(0, 0, 0, .6); overflow: hidden; padding: 11px 13px 13px;
-  gap: 9px; animation: gd-rise .28s cubic-bezier(.2, .8, .3, 1) both; }
-.af-panel .gd-head { flex: 0 0 auto; }
-/* Three columns: Original, Preview, then the palette rail. `flex-wrap` degrades to a
-   stack rather than squeezing all three to unusable. The two image columns take an
-   EXPLICIT flex-basis, never auto: with auto a column's base size is the image's
-   intrinsic (max-content) width, which overflows the panel and drags the rail under
-   the pictures at every width a typical generation could render at. */
-.af-wrap { display: flex; gap: 14px; align-items: stretch; flex-wrap: wrap; overflow: auto; }
-.af-col { flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; }
-.af-rail { flex: 0 0 236px; display: flex; flex-direction: column; gap: 4px; }
-/* stretch + flex:1 on the frame fills the panel with the tall rail (swatches +
-   sliders + actions) rather than leaving the pictures pinned to the top corner. */
-.af-frame { flex: 1; display: flex; align-items: center; justify-content: center;
-  background: var(--base); border: 1px solid var(--surface0); border-radius: 10px;
-  padding: 6px; min-height: 120px; }
-.af-frame img { max-width: 100%; max-height: 52vh; width: auto; height: auto; display: block; }
-.af-cap { font-size: 11px; color: var(--subtext); text-align: center; margin-top: 6px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.af-cap b { color: var(--text); font-weight: 600; }
-/* the stage is MgArtFilters' preview host: it stacks overlay divs at inset:0 over
-   the <img>, so its box has to be the image's box exactly -- not width:100% +
-   object-fit:contain, which would letterbox the picture and let the overlays paint
-   across the bars too. */
-.af-stage { position: relative; display: inline-block; line-height: 0; border-radius: 9px;
-  overflow: hidden; max-width: 100%; }
-.af-grp { font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase;
-  color: var(--overlay0); margin: 11px 0 5px; display: flex; align-items: center; gap: 6px; }
-.af-grp:first-child { margin-top: 0; }
-.af-grp::after { content: ""; flex: 1; height: 1px; background: var(--surface0); }
-.af-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.af-tile { cursor: pointer; background: none; border: none; padding: 0; display: block; }
-.af-tile .sw { width: 100%; aspect-ratio: 1; border-radius: 7px; border: 2px solid var(--surface1); }
-.af-tile.on .sw { border-color: var(--lavender, var(--accent));
-  box-shadow: 0 0 9px color-mix(in srgb, var(--lavender, var(--accent)) 60%, transparent); }
-.af-tile .cap { font-size: 9.5px; color: var(--subtext); text-align: center; margin-top: 2px;
-  line-height: 1.25; overflow-wrap: anywhere; }
-.af-tile.on .cap { color: var(--text); }
-.af-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 11px; }
-.af-acts button { width: 100%; padding: 7px 4px; font-size: 11.5px; }
-.af-acts button[disabled] { opacity: .45; cursor: not-allowed; }
-.af-msg { font-size: 11px; color: var(--subtext); margin-top: 7px; min-height: 14px; }
+/* (The art-filters compare panel's .af-* rules lived here until 2026-08-16; the panel
+   is FilterCompare.jsx now, styled in styles/dock.css as .mgfc-* to the DC's overlay.) */
 
 /* the model/LoRA browser panel, left of the drawer */
 .mfly { position: fixed; top: 0; right: var(--drawer-w); bottom: 0; z-index: 305;
@@ -742,7 +689,7 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
    .placard-frame past its 1fr track and out of .detail-wrap's 1100px cap
    (confirmed live: body 2154px vs viewport 1935px, .placard-frame measured
    1726px against a 1100px container) -- the exact same class of bug the
-   Filters panel's .af-col already carries this fix for. */
+   art-filters compare grid's columns (dock.css .mgfc-grid > *) carry this fix for. */
 .placard-frame, .placard-record { min-width: 0; }
 
 .placard-frame { position: relative; border-radius: 12px; overflow: hidden;

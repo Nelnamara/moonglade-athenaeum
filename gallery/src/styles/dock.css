@@ -309,29 +309,136 @@
 
 .mgdock-results { padding: 6px 18px 8px; }
 
-/* ============================ EDIT TAB WRAP ================================= */
-.mgdock-editwrap { display: flex; flex-direction: column; gap: 8px;
-  padding: 6px 18px 10px; min-height: 0; }
-.mgdock-subtabs { display: flex; gap: 3px; padding: 3px; border-radius: 9px;
-  background: rgba(12, 10, 28, .7); border: 1px solid var(--surface1);
-  align-self: flex-start; }
-.mgdock-seg { flex: 1 1 0; padding: 6px 14px; text-align: center; border-radius: 7px;
-  font-size: 10.5px; font-weight: 700; cursor: pointer; border: 0;
+/* ============================== EDIT TAB ===================================
+   Frontend Gallery.dc.html 1444-1541: the Edit surface IS the expanded three-slab
+   grid (.mgdock-slabs, DC 1209-1210) -- slab 1 SOURCE (label · the Edit/Fixer/Enhance
+   strip · refNote · slot row · droppedNote), slab 2 EDIT MODEL / REGION / ART FILTERS,
+   slab 3 QUALITY -- over the shared footer. Values verbatim from the DC's inline styles
+   (1446-1466) and getters (subTabs 2928, slotBox 2842-2843, slab 2876). */
+.mgdock-edithost { min-height: 0; }
+/* ▲ collapsed: the grid is hidden with CSS (DC 1209 renders the settings only while
+   expanded); EditTab/FixTab stay mounted underneath -- their footer portals, state and
+   result lines survive (mirrors .mgdock-videohost.collapsed / .mgd-collapsed). */
+.mgdock-editslabs.collapsed { display: none; }
+/* Edit / Fix result lines, portaled OUT of the gated grid; take no room while empty */
+.mgdock-editresults { padding: 0 18px 8px; }
+.mgdock-editresults:not(:has(.gd-res)) { display: none; }
+
+/* the sub-tab strip INSIDE the SOURCE slab (DC 1447): stretches the slab, no align-self */
+.mgdock-subtabs { display: flex; gap: 4px; padding: 3px; border-radius: 9px;
+  background: rgba(12, 10, 28, .6); border: 1px solid var(--surface1); }
+/* segments (DC subTabs style 2928-2929) */
+.mgdock-seg { flex: 1 1 0; min-width: 0; padding: 6px 4px; text-align: center;
+  border-radius: 7px; font-size: 10.5px; font-weight: 700; cursor: pointer; border: 0;
   font-family: inherit; transition: background .2s, color .2s;
   background: transparent; color: var(--subtext); }
 .mgdock-seg.on { background: rgba(182, 146, 230, .2); color: var(--text); }
 
-/* the nested EditTab/FixTab bodies keep their gd-* skin; just fit the dock */
-.mgdock .gd-body { padding: 0; }
-.mgdock-enhance { max-width: 460px; }
+/* refNote (DC 1452): its own 9.5px overlay0 line, upright */
+.mgdock-refnote { font-size: 9.5px; color: var(--overlay0); }
+/* the slot row (DC 1453) + slotBox (DC 2842-2843): 54px, radius 9, grid-centred; empty =
+   dashed on rgba(12,10,28,.7) with the 9.5px subtext caption (DC 1457); filled = solid
+   rim over the real thumbnail (the DC's tint is a demo stand-in for the picture),
+   pointer on both because a click on a filled slot removes it (DC 2868) */
+.mgdock-srcslots { display: flex; flex-wrap: wrap; gap: 6px; }
+.mgdock-srcslot { position: relative; width: 54px; height: 54px; border-radius: 9px;
+  display: grid; place-items: center; overflow: hidden; cursor: pointer; padding: 0;
+  font-family: inherit; border: 1px dashed var(--surface1); background: rgba(12, 10, 28, .7); }
+.mgdock-srcslot.filled { border-style: solid; }
+.mgdock-srcslot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mgdock-srcslot .cap { font-size: 9.5px; color: var(--subtext); text-align: center; }
+/* the badge (DC 1460): 8.5px mauve on rgba(5,4,13,.74), radius 3, bottom-left */
+.mgdock-srcslot .tag { position: absolute; bottom: 3px; left: 3px; font-size: 8.5px;
+  padding: 1px 4px; border-radius: 3px; background: rgba(5, 4, 13, .74); color: var(--mauve); }
+/* the in-slab amber note (DC 1466 droppedNote / 1518 clampEditNote) */
+.mgdock-editnote { font-size: 10px; line-height: 1.45; color: #f9d38c;
+  background: rgba(249, 211, 140, .08); border: 1px solid rgba(249, 211, 140, .32);
+  border-radius: 8px; padding: 7px 9px; }
+
+/* ---- slab 2 EDIT MODEL (DC 1470-1520) + slab 3 QUALITY (DC 1522-1540) ---- */
+/* the edit-model <select> (DC 1473 inline style, verbatim) */
+.mgdock-editmodel { width: 100%; box-sizing: border-box; background: rgba(12, 10, 28, .8);
+  color: var(--text); border: 1px solid var(--surface1); border-radius: 8px;
+  padding: 6px 7px; font-size: 11.5px; font-family: inherit; cursor: pointer;
+  color-scheme: dark; }
+/* RESOLUTION / ASPECT: the two-column row (DC 1479), each column (1480/1488) a 9px
+   overlay0 caption (1481/1489 -- no weight, no tracking) over a full-width select
+   (1482/1490, verbatim: radius 7, 5px 6px, 11px) */
+.mgdock-editcols { display: flex; gap: 8px; }
+.mgdock-editcol { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.mgdock-editcap { font-size: 9px; color: var(--overlay0); }
+.mgdock-editsel { width: 100%; box-sizing: border-box; background: rgba(12, 10, 28, .8);
+  color: var(--text); border: 1px solid var(--surface1); border-radius: 7px;
+  padding: 5px 6px; font-size: 11px; font-family: inherit; cursor: pointer;
+  color-scheme: dark; }
+/* (color-scheme: dark is a rendering nicety for the NATIVE option list -- the DC's
+   stand-in never opened one; the drawn control is the DC's exactly) */
+/* the Toolbox preset row (real capability, restyled -- see EditTab.jsx): the preset
+   select takes the width, the task-id field is the same skin sized to a task id,
+   '+ bank' is a small quiet button in the slab's own vocabulary */
+.mgdock-presetrow { display: flex; align-items: center; gap: 6px; }
+.mgdock-presetrow .mgdock-editsel { flex: 1 1 0; min-width: 0; width: auto; }
+.mgdock-presetrow .mgdock-taskid { flex: 0 0 96px; cursor: text;
+  font-variant-numeric: tabular-nums; }
+.mgdock-presetrow .mgdock-taskid:focus { border-color: var(--accent); outline: none; }
+.mgdock-bank { flex: none; padding: 5px 8px; border-radius: 7px; font-size: 10.5px;
+  font-weight: 600; cursor: pointer; font-family: inherit; white-space: nowrap;
+  border: 1px solid var(--surface1); background: transparent; color: var(--subtext);
+  transition: border-color .2s, color .2s; }
+.mgdock-bank:hover { border-color: var(--accent); color: var(--text); }
+/* QUALITY: the segmented control's container (DC 1525) is the sub-tab strip's (1447)
+   to the letter; the segments are .mgdock-seg (segStyle 2834-2835 == subTabs 2928) */
+.mgdock-segs { display: flex; gap: 4px; padding: 3px; border-radius: 9px;
+  background: rgba(12, 10, 28, .6); border: 1px solid var(--surface1); }
+/* the no-quality-knob help line (DC 1532: 10px / 1.45 subtext) */
+.mgdock-editcopy { font-size: 10px; line-height: 1.45; color: var(--subtext); }
+
+/* ---- slab 2 under the FIXER sub-tab: REGION (DC 1499-1508) ---- */
+/* the DC's column (1500): flex col, gap 8 */
+.mgdock-fixcol { display: flex; flex-direction: column; gap: 8px; }
+/* the instruction (1501): 10.5px / 1.5 subtext, always shown */
+.mgdock-fixcopy { font-size: 10.5px; line-height: 1.5; color: var(--subtext); }
+/* (the Face / Hand track is .mgdock-segs + .mgdock-seg -- DC 1502-1505 == segStyle) */
+/* the peach money-honesty note (1506) */
+.mgdock-peachnote { font-size: 10px; line-height: 1.45; color: var(--peach);
+  background: rgba(250, 179, 135, .08); border: 1px solid rgba(250, 179, 135, .3);
+  border-radius: 8px; padding: 7px 9px; }
+/* the box canvas (real-data, not in the DC): the picture at its own aspect under a
+   crosshair canvas; frame chrome = the DC's preview box (2948) minus the square */
+.mgdock-fixwrap { position: relative; line-height: 0; border-radius: 10px; overflow: hidden;
+  border: 1px solid var(--surface1); background: var(--base); }
+.mgdock-fixwrap img { width: 100%; height: auto; display: block; user-select: none; }
+.mgdock-fixwrap canvas { position: absolute; inset: 0; width: 100%; height: 100%;
+  cursor: crosshair; touch-action: none; }
+.mgdock-fixrow { display: flex; align-items: center; gap: 8px; }
+.mgdock-fixrow .sp { flex: 1 1 auto; }
+
+/* ---- slab 2 under the ENHANCE sub-tab: ART FILTERS (DC 1509-1516) ---- */
+/* the DC's column (1510): flex col, gap 9 */
+.mgdock-enhancecol { display: flex; flex-direction: column; gap: 9px; }
+/* the sub-label (1511): 9px 700 .1em overlay0 -- NO text-transform, its tail is
+   lowercase in the DC ('ART FILTERS · free, no generation') */
+.mgdock-enhancesub { font-size: 9px; font-weight: 700; letter-spacing: .1em;
+  color: var(--overlay0); }
+/* ◉ Open filters (1512, openFiltersBtnStyle 2947) */
 .mgdock-openfilters { text-align: center; padding: 10px; border-radius: 10px;
   font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit;
   border: 1px solid var(--surface1); background: rgba(182, 146, 230, .14);
   color: var(--accent); }
-.mgdock-enhancecopy { font-size: 10.5px; line-height: 1.55; color: var(--subtext); }
+/* paragraph 1 (1513): 10px / 1.55 subtext, <b> in var(--text) */
+.mgdock-enhancecopy { font-size: 10px; line-height: 1.55; color: var(--subtext); }
+.mgdock-enhancecopy b { color: var(--text); font-weight: 700; }
+/* paragraph 2 (1514): 10px / 1.55 overlay0, <b> in var(--subtext) */
+.mgdock-enhancecopy2 { font-size: 10px; line-height: 1.55; color: var(--overlay0); }
+.mgdock-enhancecopy2 b { color: var(--subtext); font-weight: 700; }
 
-/* the shared video web component's host */
-.mgdock-videohost { padding: 4px 14px 10px; min-height: 0; overflow-y: auto; }
+/* the shared <VideoDrawer>'s host: the DC's expanded-settings grid padding (DC 1209-1210
+   '4px 18px 8px'); the drawer's own .mgd-slabs draws the three slabs inside it. */
+.mgdock-videohost { padding: 4px 18px 8px; min-height: 0; overflow-y: auto; }
+/* ▲ collapsed: the slabs are hidden (DC 1209 -- settings render only while expanded), so
+   the host takes no vertical room unless the drawer's result lines have something to say. */
+.mgdock-videohost.collapsed { padding-top: 0; padding-bottom: 0; }
+.mgdock-videohost.collapsed .mgd-result.has { padding: 4px 0 8px; }
 
 /* ============================ COMPOSER FOOTER ===============================
    Frontend Gallery.dc.html 1551-1591 -- ONE footer at the dock level, on every
@@ -519,6 +626,86 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
   animation: none; color: var(--overlay0); text-shadow: none;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06); }
 
+/* ======================= ART FILTERS COMPARE OVERLAY ========================
+   Frontend Gallery.dc.html 591-658 + getters 2948-2978 (FilterCompare.jsx). Values are
+   the DC's inline styles verbatim; z sits in the dock's overlay band (the 300s the
+   model flyout already owns), toasts/celebrations (510+) stay above. */
+.mgfc-scrim { position: fixed; inset: 0; z-index: 305; background: rgba(5, 4, 13, .72);
+  backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px); }
+.mgfc-layer { position: fixed; inset: 0; z-index: 306; display: grid; place-items: center;
+  pointer-events: none; padding: 20px; box-sizing: border-box; }
+.mgfc-panel { pointer-events: auto; box-sizing: border-box;
+  width: min(1100px, calc(100vw - 40px)); max-height: 92vh; overflow-y: auto;
+  border-radius: 16px; border: 1px solid var(--surface1); background: var(--surface0);
+  box-shadow: 0 34px 80px -18px rgba(0, 0, 0, .75); padding: 16px 20px 20px; }
+/* header (595-599) */
+.mgfc-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.mgfc-head .sp { flex: 1 1 auto; }
+.mgfc-title { font-size: 15px; font-weight: 800; color: var(--text); }
+.mgfc-x { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px;
+  border: 1px solid var(--surface1); background: rgba(33, 31, 58, .6); cursor: pointer;
+  color: var(--subtext); font-family: inherit; font-size: 12px; padding: 0; }
+.mgfc-empty { font-size: 10.5px; color: var(--subtext); }
+/* the grid (600): Original · Preview · 220px rail; min-width 0 so a wide picture can
+   never push its column past its 1fr track */
+.mgfc-grid { display: grid; grid-template-columns: 1fr 1fr 220px; gap: 16px; align-items: start; }
+.mgfc-grid > * { min-width: 0; }
+/* the preview boxes (fcPreviewBoxStyle 2948) with cover images (602/607) */
+.mgfc-box { position: relative; width: 100%; aspect-ratio: 1; border-radius: 10px;
+  overflow: hidden; background: var(--base); border: 1px solid var(--surface1);
+  display: grid; place-items: center; }
+.mgfc-box > img { position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; display: block; }
+/* the engine's preview host: overlays at inset 0 over the <img>, so it IS the box's
+   area (two classes to outrank the engine's injected .mgaf-stage{display:inline-block}) */
+.mgfc-box > .mgfc-stage { position: absolute; inset: 0; display: block; line-height: 0; }
+.mgfc-box > .mgfc-stage > img { position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; display: block; }
+/* the image-slot placeholder text while there is no source (602/607 'source image') */
+.mgfc-ph { font-size: 9.5px; color: var(--subtext); }
+/* captions (603/610) */
+.mgfc-cap { font-size: 10.5px; color: var(--subtext); text-align: center; padding-top: 6px; }
+/* the rail (612) */
+.mgfc-rail { display: flex; flex-direction: column; gap: 12px; }
+/* group heading (fcGroupLabelStyle 2952) -- the real labels ('Moonglade' / 'PixAI')
+   render in the DC's caps */
+.mgfc-grp { font-size: 9px; font-weight: 700; letter-spacing: .12em; color: var(--overlay0);
+  margin-bottom: 5px; text-transform: uppercase; }
+.mgfc-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+/* a tile (2958): relative flex col gap 3, radius 8, padding 3, 1px border -- accent when
+   selected, transparent otherwise */
+.mgfc-tile { position: relative; display: flex; flex-direction: column; gap: 3px;
+  cursor: pointer; border-radius: 8px; padding: 3px; border: 1px solid transparent;
+  min-width: 0; }
+.mgfc-tile.on { border-color: var(--accent); }
+.mgfc-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* the swatch (2959): square, radius 6 -- painted by AF.renderSwatch (the real layers) */
+.mgfc-sw { width: 100%; aspect-ratio: 1; border-radius: 6px; }
+/* the name (fcNameStyle 2953) */
+.mgfc-name { font-size: 8.5px; text-align: center; padding: 2px 1px; color: var(--subtext);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the hover tip (tipStyle 2957): left of the tile */
+.mgfc-tip { position: absolute; right: calc(100% + 9px); top: 50%; transform: translateY(-50%);
+  z-index: 5; white-space: nowrap; pointer-events: none; font-size: 10.5px; font-weight: 600;
+  padding: 6px 10px; border-radius: 8px; color: var(--text); background: rgba(9, 7, 22, .96);
+  border: 1px solid rgba(182, 146, 230, .4); box-shadow: 0 10px 26px rgba(0, 0, 0, .6); }
+/* the slider labels (fcSliderLabelStyle 2966) + ranges (639/643: 100%, 3px, pointer) */
+.mgfc-sliderlbl { font-size: 9px; font-weight: 700; letter-spacing: .08em; color: var(--overlay0);
+  margin-bottom: 4px; }
+.mgfc-sliderlbl b { color: var(--text); }
+.mgfc-range { width: 100%; height: 3px; cursor: pointer; accent-color: var(--accent);
+  margin: 0; display: block; }
+/* the two button rows (645-652): secondary (2972) / primary (2973) */
+.mgfc-btnrow { display: flex; gap: 6px; }
+.mgfc-btn { flex: 1; text-align: center; padding: 9px; border-radius: 9px; font-size: 11.5px;
+  font-weight: 700; cursor: pointer; font-family: inherit;
+  border: 1px solid var(--surface1); background: rgba(33, 31, 58, .6); color: var(--text); }
+.mgfc-btn.primary { border-color: rgba(255, 255, 255, .3); background: var(--accent);
+  color: #14102a; }
+.mgfc-btn:disabled { opacity: .45; cursor: not-allowed; }
+/* the spend note (653) */
+.mgfc-spend { font-size: 10px; color: var(--overlay0); text-align: center; }
+
 /* ============================== PEEK PILL =================================== */
 .mgdock-peek { position: fixed; z-index: 7; right: 18px; bottom: 18px;
   display: flex; align-items: center; gap: 9px; padding: 11px 18px;
@@ -559,4 +746,10 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
 /* narrow viewports: the three slabs stack */
 @media (max-width: 860px) {
   .mgdock-slabs { grid-template-columns: 1fr; }
+}
+/* narrow viewports the DC never drew (its dock is desktop-only): the compare grid keeps
+   the two pictures side by side and drops the rail beneath them, full width */
+@media (max-width: 720px) {
+  .mgfc-grid { grid-template-columns: 1fr 1fr; }
+  .mgfc-rail { grid-column: 1 / -1; }
 }

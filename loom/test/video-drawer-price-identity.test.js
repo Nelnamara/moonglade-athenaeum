@@ -227,13 +227,15 @@ describe("<VideoDrawer> host wiring of the price identity gate", () => {
     assert.match(body, /cost\.clear\(idleHint\); settle\(priceKey\(p\)\); return;/);
   });
 
-  test("canGo reads canSubmit, and Quality + Camera onChange re-price like every other priced field", () => {
+  test("canGo reads canSubmit, and Quality + Camera handlers re-price like every other priced field", () => {
     assert.match(src, /const canGo = !s\.hostBusy && !s\.rendering && canSubmit\(s\.price, buildPayload\(s, ""\)\);/);
     const cam = src.match(/className="mgd-sel mgd-cam"[^\n]*onChange=\{\(e\) => \{([^\n]*)\}\}/);
-    const qual = src.match(/className="mgd-sel mgd-quality"[^\n]*onChange=\{\(e\) => \{([^\n]*)\}\}/);
-    assert.ok(cam && qual, "expected the Camera and Quality selects");
+    // Quality is the DC's Basic|Professional segmented pair (2026-08-16 fidelity pass), so its
+    // handler is the segment's onClick rather than a <select>'s onChange -- same guard.
+    const qual = src.match(/className=\{"mgd-quality"[^\n]*onClick=\{\(\) => \{([^\n]*)\}\}/);
+    assert.ok(cam && qual, "expected the Camera select and the Quality segment");
     assert.match(cam[1], /debCost\(\)/, "Camera onChange must debCost -- cameraMovement is priced");
-    assert.match(qual[1], /debCost\(\)/, "Quality onChange must debCost -- i2vPro.mode is priced");
+    assert.match(qual[1], /debCost\(\)/, "Quality onClick must debCost -- i2vPro.mode is priced");
   });
 
   test("every handler that writes a priced form field schedules a re-price", () => {
@@ -243,7 +245,7 @@ describe("<VideoDrawer> host wiring of the price identity gate", () => {
     // `negative` is NOT here on purpose: it is in PRICE_KEY_SKIP ("never prices"), so listing it
     // as priced contradicted priceKey (review 2026-08-16). Its handler may still call debCost --
     // harmlessly, because debCost now short-circuits on an unchanged settled key.
-    const priced = ["model", "duration", "camera", "quality", "channel", "audioGen", "audioLanguage", "audSlot"];
+    const priced = ["model", "duration", "camera", "quality", "channel", "audioGen", "audioLanguage", "videoHelper", "audSlot"];
     const lines = src.split("\n").filter((l) => /onChange=|onClick=/.test(l));
     priced.forEach((f) => {
       lines.filter((l) => new RegExp("st\\.current\\." + f + " = ").test(l)).forEach((l) => {

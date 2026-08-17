@@ -6,6 +6,10 @@
 
 // Full site roster, in PixAI's real model-picker order -- newest first, V2.7 last
 // (private/VIDEO_MODELS.md, owner screenshots 2026-07-18). All seven are selectable.
+// This REAL roster is the data source (drift 22): the DC's demo VIDEO_MODELS (rates, demo caps)
+// is the visual spec for the ENGINE card / chips / palette only, never swapped in here. The
+// '~2.5× cost' chip on V4.0 Preview is not in the DC's caps (fidelity checklist, EXTRA) -- kept:
+// it is the roster's own cost caution for the dearest engine, and the roster is the source.
 export const MODELS = [
   { value: "v4.0", label: "V4.0 Preview", caps: ["multi-ref", "audio", "15s", "top quality", "~2.5× cost"] },
   { value: "v4.0.1", label: "V4.0 Lite Preview", caps: ["multi-ref", "audio", "15s", "end-frame"] },
@@ -15,6 +19,28 @@ export const MODELS = [
   { value: "v3.0.1", label: "V3.0 Flash", caps: ["multi-shot", "hires", "fastest", "no card"] },
   { value: "v2.7", label: "V2.7 (High Dynamics)", caps: ["camera moves", "dynamic", "no card"] },
 ];
+// The engine the drawer opens on. The DC marks it with an emerald 'default' chip (DC 1846 V4.0
+// Lite caps end with ['default','hot']); modelCaps() appends that chip to THIS engine's real caps.
+export const DEFAULT_MODEL = "v4.0.1";
+// Free-card eligibility per engine (real roster: the two 'no card' engines). Absent => cards
+// apply. Static capability knowledge for the ENGINE card's meta line (DC 2900 videoModelMeta) --
+// the PRICE, and whether a card actually covers THIS clip, stays CostBadge's truth.
+export const MODEL_CARD = { "v3.0.1": false, "v2.7": false };
+// The DC's capStyle kind tiers (DC 1877-1880): 'hot' = emerald, 'crown' = pink, else plain.
+// Mapped by cap TEXT so the real caps above stay plain strings.
+export const CAP_KIND = { "top quality": "crown", "cheap": "hot", "fastest": "hot", "default": "hot" };
+// [label, kind] pairs for the chip row: the engine's real caps, plus 'default' on DEFAULT_MODEL.
+export function modelCaps(v) {
+  const m = MODELS.find((x) => x.value === v);
+  const caps = (m ? m.caps : []).map((c) => [c, CAP_KIND[c] || ""]);
+  if (v === DEFAULT_MODEL) caps.push(["default", "hot"]);
+  return caps;
+}
+// DC 2900: videoModelMeta = maxDur + 's max · ' + (card ? 'V4.0 cards apply' : 'never card-covered').
+export function modelMeta(v) {
+  return (MODEL_MAXDUR[v] || 10) + "s max · " + (MODEL_CARD[v] === false ? "never card-covered" : "V4.0 cards apply");
+}
+export const SHOT_LABEL = { i2v: "First Frame", flf: "First & Last", r2v: "Multi-Reference" };
 
 // Per-model reference/frame-mode gating -- which of the i2v/flf/r2v vmode buttons a given model
 // supports (private/GENERATOR_SURFACE.md, owner screenshots 2026-07-18): Multi-Reference (r2v)
@@ -35,7 +61,8 @@ export const MODEL_VMODES = {
 // engines, at ~84,000 credits for a V2.7 clip with no card to cover it.
 export const MODEL_MAXDUR = { "v4.0": 15, "v4.0.1": 15 };
 
-export const MODE_LBL = { i2v: "Start Frame", flf: "Start Frame", r2v: "Image references" };
+// The primary bank's label per mode (DC 2851/2858 bank.label; casing is the DC's).
+export const MODE_LBL = { i2v: "Start frame", flf: "Start frame", r2v: "Image references" };
 export const MODE_PH = {
   i2v: "Describe the motion — ‘slow cinematic pan right, gentle waves…’",
   flf: "Describe the transition from start frame to end frame…",
@@ -45,6 +72,19 @@ export const CHANNEL_CAP = {
   normal: "Please keep creations SFW",
   enhanced: "👑 Enhanced — for professional creators",
 };
+// The CAMERA <select>'s options, value + label, in the DC's exact order (DC 1405-1411). The
+// values are PixAI's i2vPro.cameraMovement keys (unchanged); the labels are the DC's.
+export const CAMERA_OPTS = [
+  ["unset", "Unset"], ["horizontal", "Horizontal"], ["pan", "Pan"], ["roll", "Roll"],
+  ["tilt", "Tilt"], ["vertical-pan", "Vertical pan"], ["zoom", "Zoom"],
+];
+// The audio-language <select>'s options (DC 1435-1438 draws the first four). 'none' = SE only
+// is a REAL PixAI value (moonglade_backup.VIDEO_AUDIO_LANGS), so it stays -- real capability
+// over the DC's demo list, the same call as the engine roster; owner to rule if it should go.
+export const AUDIO_LANGS = [
+  ["english", "English"], ["japanese", "Japanese"], ["chinese", "Chinese"], ["korean", "Korean"],
+  ["none", "SE only (no dialogue)"],
+];
 
 // Matches the server's VIDEO_DURATIONS / _snap_video_duration -- prefill() snaps to the nearest
 // so an out-of-range shot duration (a hand-typed "8") never lands the <select> on a value with
@@ -71,7 +111,8 @@ export function refItem(r) {
 
 /* ---- PURE spend-critical state transitions -------------------------------------------------
    These operate on a plain drawer-state object -- {mode, slots, imgSlots, vidSlots, audSlot,
-   model, duration, camera, quality, channel, audioGen, audioLanguage, negative, modeNote} -- with
+   model, duration, camera, quality, channel, audioGen, audioLanguage, videoHelper, negative,
+   modeNote} -- with
    NO DOM and NO React. They are the SAME functions the <VideoDrawer> component drives AND the loom
    node-tests hit directly (med-mg-generate-drawer-mode-carry, med2-mg-generate-drawer-prefill-leak,
    ...), so the money-bug regressions they pin -- one shot's media reaching another shot's PAID
@@ -87,19 +128,45 @@ export function refItem(r) {
 export function primaryBank(s) { return s.mode === "r2v" ? s.imgSlots : s.slots; }
 export function setPrimaryBank(s, arr) { if (s.mode === "r2v") s.imgSlots = arr; else s.slots = arr; }
 
-// The notice shown when a USER gesture leaves Multi-Reference for a mode that can't display its
-// picks: NAME what is held (nothing is destroyed -- the r2v banks are untouched), never carry it.
-export function heldRefsNotice(s, m) {
+// The DC's Multi-Reference bank shape (DC 2847-2856): the FILLED slots plus ONE trailing empty
+// '+ image' / '+ video' slot auto-appended while under the cap -- no separate add control, and
+// never two empty slots at once. The backing arrays may still carry an explicit null (the [null]
+// seed applyMode/prefill leave), so this maps the paint back onto real indices: `filled` are the
+// picks with the index a remove/re-pick must address; `nextIndex` is where the trailing slot's
+// pick lands (the first hole, else the end), or -1 at the cap.
+export function bankView(arr, max) {
+  const filled = [];
+  let hole = -1;
+  (arr || []).forEach((item, index) => {
+    if (item && item.media_id) filled.push({ item, index });
+    else if (hole < 0) hole = index;
+  });
+  const nextIndex = filled.length >= max ? -1 : (hole >= 0 ? hole : (arr || []).length);
+  return { filled, nextIndex };
+}
+
+// What the Multi-Reference banks are holding, as the DC phrases it (DC 2222-2226): comma-joined
+// '<n> image ref(s)', '<n> video ref(s)'. The audio ref rides along when one is held -- the DC has
+// no audio bank to name, but this drawer does (owner-locked PixAI parity), and a notice that
+// stays silent about a held audio ref is the M27 shape again.
+export function heldList(s) {
   const imgs = s.imgSlots.filter((x) => x && x.media_id).length;
   const vids = s.vidSlots.filter((x) => x && x.media_id).length;
   const held = [];
   if (imgs) held.push(imgs + (imgs === 1 ? " image ref" : " image refs"));
   if (vids) held.push(vids + (vids === 1 ? " video ref" : " video refs"));
   if (s.audSlot && s.audSlot.media_id) held.push("the audio ref");
+  return held;
+}
+
+// The notice shown when a USER gesture leaves Multi-Reference for a mode that can't display its
+// picks: NAME what is held (nothing is destroyed -- the r2v banks are untouched), never carry it.
+// Copy is the DC's pickShot heldNote verbatim (DC 2225-2227). `_m` (the target mode) is kept for
+// the call signature; the DC copy does not name it.
+export function heldRefsNotice(s, _m) {
+  const held = heldList(s);
   if (!held.length) return "";
-  return "Still held for Multi-Reference: " + joinAnd(held) + ". Nothing was deleted — "
-    + (m === "flf" ? "First & Last Frames" : "First Frame") + " has nowhere to show that. Switch "
-    + "back to Multi-Reference, on a model that offers it, and it is all still there.";
+  return "Still held for Multi-Reference: " + held.join(", ") + ". Nothing was deleted.";
 }
 
 // Slot-bank transition for a mode change. `userDriven` gates ONLY the held-refs notice: a real
@@ -121,11 +188,26 @@ export function applyMode(s, m, userDriven) {
   s.modeNote = (userDriven && from === "r2v" && m !== "r2v") ? heldRefsNotice(s, m) : "";
 }
 
-// Shows/hides modes a model doesn't support (MODEL_VMODES) + switches off an invalid one; clamps
-// duration to the model's cap. `userDriven` only forwards to applyMode's notice gate.
+// Dims modes a model doesn't support (MODEL_VMODES) + switches off an invalid one; clamps
+// duration to the model's cap. `userDriven` gates the notice: a real engine pick that drops the
+// shot mode explains itself in the DC's pickVideoModel words (DC 2232-2246) -- '<engine> has no
+// <dropped mode>, so the shot mode switched to <new mode>.' + what the r2v banks still hold; a
+// host re-sync (prefill) stays silent. The target is the LAST supported mode, as the DC picks
+// it (V3.2 from Multi-Reference lands on First & Last, not First Frame). Spend-safe either way:
+// applyMode only ever re-shapes the i2v/flf `slots` bank the user filled; the r2v banks are
+// never carried into it.
 export function applyModelGating(s, userDriven) {
   const allowed = MODEL_VMODES[s.model] || ["i2v", "flf", "r2v"];
-  if (allowed.indexOf(s.mode) === -1) applyMode(s, allowed[0], userDriven);
+  if (allowed.indexOf(s.mode) === -1) {
+    const from = s.mode, to = allowed[allowed.length - 1];
+    applyMode(s, to, userDriven);
+    if (userDriven) {
+      const m = MODELS.find((x) => x.value === s.model);
+      const held = heldList(s);
+      s.modeNote = (m ? m.label : s.model) + " has no " + (SHOT_LABEL[from] || from) + ", so the shot mode switched to "
+        + SHOT_LABEL[to] + "." + (held.length ? " Still held: " + held.join(", ") + ". Nothing was deleted." : "");
+    }
+  }
   // Clamp duration to the model's cap UNCONDITIONALLY -- the vanilla _applyModelGating fell
   // through to this after the mode switch. An earlier `return` right after applyMode() skipped it,
   // so switching from a V4.0/15s state to a 10s-cap engine (its mode ALSO unsupported, e.g.
@@ -164,6 +246,7 @@ export function applyPrefill(s, o) {
   if (o.is_private != null) s.channel = o.is_private ? "enhanced" : "normal";
   if (o.audio != null) s.audioGen = !!o.audio;
   if (o.audio_language != null) s.audioLanguage = o.audio_language;
+  if (o.prompt_helper != null) s.videoHelper = !!o.prompt_helper;
   if (o.negative != null) s.negative = o.negative;
   const imgList = Array.isArray(o.images) ? o.images : (Array.isArray(o.refs) ? o.refs : null);
   if (imgList && s.mode === "flf" && imgList.length <= 2) {
@@ -196,6 +279,11 @@ export function buildPayload(s, promptText) {
     quality: s.quality,
     audio_language: s.audioLanguage,
     is_private: (s.channel === "enhanced"),
+    // The DC's 'Video prompt helper' switch (DC 2921, off by default -- the opposite of image
+    // gen). Rides the payload -> i2vPro.usePromptsHelper on the server (I2V/FLF only; the
+    // verified referenceVideo shape has no such field), and so lives in priceKey like every
+    // other submitted field.
+    prompt_helper: !!s.videoHelper,
   };
 }
 

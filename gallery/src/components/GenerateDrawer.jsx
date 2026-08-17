@@ -7,9 +7,10 @@ import {
 import ModelFlyout from "./ModelFlyout.jsx";
 import CostBadge from "./CostBadge.jsx";
 import VideoDrawer from "./VideoDrawer.jsx";
-import EditTab from "./EditTab.jsx";
+import EditTab, { SourceSlab } from "./EditTab.jsx";
 import FixTab from "./FixTab.jsx";
-import FiltersPanel from "./FiltersPanel.jsx";
+import { EDIT_DEFAULTS } from "../gen/editCore.js";
+import FilterCompare from "./FilterCompare.jsx";
 import RunsReel, { isRunningJob } from "./RunsReel.jsx";
 import { askPicker, isPickerOpen } from "./PickerHost.jsx";
 import "../styles/dock.css";
@@ -52,7 +53,7 @@ function VideoTab({ visible, prefillRequest, drawerRef, dock }) {
   // `dock` = the footer slots (see the DOCK MODE note in VideoDrawer.jsx): the drawer's
   // own prompt / negative / CostBadge / Generate portal into the dock's shared footer.
   return (
-    <div className="mgdock-videohost" style={{ display: visible ? "" : "none" }}>
+    <div className={"mgdock-videohost" + (dock && dock.expanded === false ? " collapsed" : "")} style={{ display: visible ? "" : "none" }}>
       <VideoDrawer ref={el} dock={dock} />
     </div>
   );
@@ -72,20 +73,34 @@ function ExpandToggle({ expanded, onToggle }) {
 
 export default function GenerateDrawer({ open, onClose, account, request }) {
   const [tab, setTab] = useState("image");
-  const [sub, setSub] = useState("edit");          // edit | fix | enhance
+  const [sub, setSub] = useState("edit");          // edit | fixer | enhance (DC 1917 / 2925 keys)
   const [expanded, setExpanded] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [promptFocus, setPromptFocus] = useState(false);
   const [snippetsOpen, setSnippetsOpen] = useState(false); // ★ Snippets chip row toggle
-  // {mid, n} -- the counter makes every hand-off a NEW object, so EditTab's
-  // [initialSource] effect re-fires even when the SAME image is sent twice
-  // (a bare string is a same-value setState -> React bails, the effect never
-  // re-runs, and a cleared source silently stays empty; App.jsx's request
-  // nonce protected the first hop but was dropped at this one). Found by the
-  // 2026-08-07 branch review.
-  const [editSource, setEditSource] = useState(null);
-  const editNonce = useRef(0);
-  const sendToEdit = (mid) => setEditSource({ mid, n: ++editNonce.current });
+  /* THE EDIT TAB'S STATE LIVES HERE (dock fidelity stage 3, 2026-08-16): the DC's own
+     model -- one component holds editRefs / editModel / resolution / … for all three
+     sub-tabs (Frontend Gallery.dc.html 1917-1922) -- so the SOURCE slab (the picture
+     being edited + its references, DC 1445-1468, NOT gated by `sub`) is ONE list that
+     Edit, Fixer and Enhance all read. EditTab / FixTab take it as props and keep owning
+     their pricing, gates and submit paths unchanged. `droppedNote` is the slab's inline
+     amber line (DC 1465-1467), set by a model switch that trims references, cleared by
+     removing a slot. */
+  const [editS, setEditS] = useState(EDIT_DEFAULTS);
+  const [droppedNote, setDroppedNote] = useState("");
+  // The Edit hand-off (lightbox Edit, #edit deep link with a mid, the filters panel's
+  // send): land on the Edit sub-tab with that picture as the source. Setting the shared
+  // state directly re-applies even when the SAME image is sent twice after a clear (the
+  // 2026-08-07 nonce dance is not needed any more -- there is no child effect to re-fire).
+  // A hand-off also OPENS the settings, as the video prefill does (the DC's own prefill
+  // precedent, 2321 `expanded: true`): the slot this just filled must be visible.
+  const sendToEdit = (mid) => {
+    if (!mid) return;
+    setEditS((o) => ({ ...o, source: mid }));
+    setTab("edit");
+    setSub("edit");
+    setExpanded(true);
+  };
   const [videoPrefill, setVideoPrefill] = useState(null);
   const [flyOpen, setFlyOpen] = useState(false);
   const [flyKind, setFlyKind] = useState("base");
@@ -126,6 +141,7 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   const [editTopEl, setEditTopEl] = useState(null);
   const [editPromptEl, setEditPromptEl] = useState(null);
   const [editGoEl, setEditGoEl] = useState(null);
+  const [editResultsEl, setEditResultsEl] = useState(null); // Edit/Fix result lines, under the grid
   const editPromptApi = useRef(null);                  // { insert(t), read() } while EditTab is up
 
   /* Prompt snippets manager -- the real per-account store (/api/snippets), replacing the
@@ -293,13 +309,17 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   useEffect(() => {
     if (!request) return;
     if (request.tab === "edit") {
+      // A midless request is the #edit deep link: land on the tab, touch nothing else.
       setTab("edit");
       setSub("edit");
-      sendToEdit(request.mid);
+      if (request.mid) sendToEdit(request.mid);
     } else if (request.tab === "video") {
       setTab("video");
       // A midless request is the #video deep link: land on the tab, prefill nothing.
-      if (request.mid) setVideoPrefill({ mode: "i2v", images: [{ media_id: request.mid, thumb: request.thumb }] });
+      // A prefill also OPENS the settings (the DC's own prefill precedent, 2321 `expanded:
+      // true`): the video slabs live behind ▲ now, and the frame this hand-off just
+      // filled must be visible, not hidden behind a collapsed grid.
+      if (request.mid) { setVideoPrefill({ mode: "i2v", images: [{ media_id: request.mid, thumb: request.thumb }] }); setExpanded(true); }
     } else if (request.tab === "remix") {
       // Remix (issue #4): the picture's FULL recipe into the Image tab -- the
       // same prefill the Runs reel's reuse click performs, reached from the
@@ -564,13 +584,19 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
 
   // The footer slot contracts handed to the tab components (memoized so a render of this
   // component doesn't hand them a new object for no reason).
+  // `expanded` rides along: the video settings slabs show only while ▲ is open, exactly as
+  // the DC's settings grid does on every tab (DC 1209 `sc-if expanded`); the drawer hides
+  // them with CSS and stays mounted (its poll timers / portals / prompt content survive).
   const videoDock = useMemo(() => ({
-    topEl: videoTopEl, promptEl: videoPromptEl, negativeEl: videoNegEl, goEl: videoGoEl, balance,
-  }), [videoTopEl, videoPromptEl, videoNegEl, videoGoEl, balance]);
+    topEl: videoTopEl, promptEl: videoPromptEl, negativeEl: videoNegEl, goEl: videoGoEl, balance, expanded,
+  }), [videoTopEl, videoPromptEl, videoNegEl, videoGoEl, balance, expanded]);
+  // `expanded` rides along for the Fixer too (its canvas re-measures when the grid re-opens).
+  // `promptFocus` too: the portaled instruction grows a row while focused, the DC's
+  // promptRows rule (3558-3559) that the image prompt above already follows.
   const editDock = useMemo(() => ({
-    topEl: editTopEl, promptEl: editPromptEl, goEl: editGoEl, balance,
-    promptApi: editPromptApi, promptMax,
-  }), [editTopEl, editPromptEl, editGoEl, balance, promptMax]);
+    topEl: editTopEl, promptEl: editPromptEl, goEl: editGoEl, resultsEl: editResultsEl, balance,
+    promptApi: editPromptApi, promptMax, promptFocus, expanded,
+  }), [editTopEl, editPromptEl, editGoEl, editResultsEl, balance, promptMax, promptFocus, expanded]);
 
   /* The peek pill can only OPEN the dock through the host's own toggle verbs;
      the drawer has no openDock prop, so it forwards the click to a real
@@ -873,35 +899,88 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
             </div>
           )}
 
-          {/* EditTab/FixTab stay MOUNTED across tab switches (their `visible`
-              prop toggles a null return) so a half-built edit survives a
-              detour to Image/Video — the pre-reshell contract. Only the wrap
-              chrome hides. */}
-          <div className="mgdock-editwrap" style={{ display: tab === "edit" ? "" : "none" }}>
-              <div className="mgdock-subtabs">
-                {[["edit", "Edit", "Edit Pro / Reference Pro — instruction edits"],
-                  ["fix", "Fixer", "Box a hand or face — PixAI repairs it (always spends)"],
-                  ["enhance", "Enhance", "Art filters — free, in your browser"]].map(([k, l, t]) => (
-                  <button key={k} type="button" title={t}
-                    className={"mgdock-seg" + (sub === k ? " on" : "")}
-                    onClick={() => setSub(k)}>{l}</button>
-                ))}
-              </div>
-              <EditTab visible={tab === "edit" && sub === "edit"} initialSource={editSource} dock={editDock} />
-              <FixTab visible={tab === "edit" && sub === "fix"} dock={editDock} />
+          {/* ---- THE EDIT TAB (DC 1444-1541): the SAME expanded 3-slab grid as the
+               image tab (DC 1209-1210 -> .mgdock-slabs), behind ▲ -- SOURCE · EDIT MODEL /
+               REGION / ART FILTERS · QUALITY -- plus the shared footer below. Gated on
+               `expanded` the way stage 2 gated the video slabs: the grid hides with CSS
+               (.collapsed) and everything stays MOUNTED -- EditTab/FixTab keep their state
+               and their footer portals (instruction / CostBadge / ✦ Edit·Fix) alive while
+               collapsed, and a half-built edit survives a detour to Image/Video (their
+               `visible` prop toggles a null return; the host hides by display). The
+               result lines render OUTSIDE the grid so a submit from the collapsed footer
+               can still answer. */}
+          <div className="mgdock-edithost" style={{ display: tab === "edit" ? "" : "none" }}>
+            <div className={"mgdock-slabs mgdock-editslabs" + (expanded ? "" : " collapsed")}>
+              {/* SLAB 1 -- SOURCE, for every sub-tab (the sub-tab strip lives inside it) */}
+              <SourceSlab s={editS} setS={setEditS} sub={sub} onSub={setSub}
+                droppedNote={droppedNote} onDroppedNote={setDroppedNote} />
+              {/* SLABS 2 + 3 -- Edit: EDIT MODEL + QUALITY (EditTab); Fixer: REGION (FixTab)
+                  + the QUALITY shell; Enhance: ART FILTERS + the QUALITY shell */}
+              <EditTab visible={tab === "edit" && sub === "edit"} s={editS} setS={setEditS}
+                onDroppedNote={setDroppedNote} dock={editDock} />
+              <FixTab visible={tab === "edit" && sub === "fixer"} dock={editDock}
+                source={editS.source} />
               {tab === "edit" && sub === "enhance" && (
-                <div className="mgdock-slab mgdock-enhance">
-                  <div className="mgdock-lbl">ART FILTERS · FREE, NO GENERATION</div>
-                  <button type="button" className="mgdock-openfilters" onClick={toggleFilters}>
-                    ◉ Open filters
-                  </button>
-                  <div className="mgdock-enhancecopy">
-                    Filters composite in your browser over the original — no
-                    credits, no request, works offline. Compare against the
-                    original, then save to your library or send to image gen.
+                /* slab 2 under Enhance -- DC 1471 + 2931 editSlabLabel 'ART FILTERS', then
+                   DC 1509-1516 verbatim: a flex column (gap 9) holding the 9px sub-label
+                   'ART FILTERS · free, no generation' (1511 -- lowercase kept, it is not the
+                   slab heading), the ◉ Open filters button (1512, openFiltersBtnStyle 2947),
+                   paragraph 1 (1513, 10px/1.55 subtext, <b> in var(--text)) and paragraph 2
+                   (1514, 10px/1.55 overlay0, <b> in var(--subtext)).
+                   PARAGRAPH 2's LAST CLAUSE IS REAL-DATA (owner ruling 2026-08-16): the DC
+                   says 'Upscale and Hires on the Generate tab's Upscale row' -- this build
+                   has no such row (DECISIONS 2026-07-25 'Upscale belongs on the image view,
+                   not in the generate drawer': the Off/Upscale/Hires segment was removed;
+                   Upscale is the lightbox's flyout / the details page's panel, hires is the
+                   Generate tab's 'Enhance Details' booster), so the sentence names where
+                   those really live. Everything before it is the DC's copy word for word. */
+                <div className="mgdock-slab" style={{ animationDelay: "60ms" }}>
+                  <div className="mgdock-lbl">ART FILTERS</div>
+                  <div className="mgdock-enhancecol">
+                    <div className="mgdock-enhancesub">ART FILTERS · free, no generation</div>
+                    <button type="button" className="mgdock-openfilters" onClick={toggleFilters}>
+                      ◉ Open filters
+                    </button>
+                    <div className="mgdock-enhancecopy">
+                      PixAI's seven art filters are gradient overlays, not AI — so they are applied
+                      right here in the browser: <b>no credits, no request, works offline</b>. Pick a
+                      source image above, then open the panel to compare and save.
+                    </div>
+                    <div className="mgdock-enhancecopy2">
+                      Still pixai.art only: their one-click ComfyUI workflows (background removal,
+                      line art, sketch colouring, relight). Submitted with an API key those queue
+                      and are cancelled unstarted about an hour later, so this app can't offer them.
+                      But run one on their site and the result still lands in your library
+                      automatically — only the submit button is missing, never the collecting. What
+                      also works: <b>Upscale</b> from the lightbox or Image Details, and <b>Enhance
+                      Details</b> (PixAI's hires pass) among the Generate tab's tuning chips (plain
+                      generation settings, not workflows), and <b>Fix</b> on the Fixer sub-tab for
+                      hands and faces.
+                    </div>
                   </div>
                 </div>
               )}
+              {tab === "edit" && sub !== "edit" && (
+                /* slab 3 under Fixer / Enhance -- the DC draws QUALITY here regardless of sub
+                   (1522-1540: the EDIT model's Low/Medium/High + the image tab's switches --
+                   content that is not tab-aware: the same editQuality state rides along
+                   whichever sub-tab is up). REAL CAPABILITY (owner ruling 2026-08-16): a Fix
+                   has no quality knob (/api/fix takes {source, boxes}, priced flat) and the art
+                   filters have none (they composite at full resolution in the browser), so
+                   showing the Edit model's segments here would offer a control that changes
+                   nothing. The slab keeps the DC's heading and says so in the DC's own
+                   no-knob line (1531-1533, 'Reference Pro has no quality knob — …' style). */
+                <div className="mgdock-slab" style={{ animationDelay: "120ms" }}>
+                  <div className="mgdock-lbl">QUALITY</div>
+                  <div className="mgdock-editcopy">
+                    {sub === "fixer"
+                      ? "A Fix has no quality knob — PixAI repairs what is inside your boxes at one flat rate."
+                      : "Art filters have no quality knob — they composite at the picture's full resolution, in your browser."}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div ref={setEditResultsEl} className="mgdock-editresults" />
           </div>
 
           <VideoTab visible={tab === "video"} prefillRequest={videoPrefill} drawerRef={videoRef} dock={videoDock} />
@@ -1007,7 +1086,11 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
               </div>
             )}
 
-            {/* NEGATIVE (DC 1574-1579): inside the composer, only while expanded */}
+            {/* NEGATIVE (DC 1574-1579): inside the composer, only while expanded. Image and
+                Video only: the DC's composer is not tab-aware, but PixAI's instruct-edit
+                params carry no negative prompt (editCore.js buildEditPayload) and the Fixer /
+                art filters have no prompt at all -- real capability wins (owner ruling
+                2026-08-16), so the Edit tab's composer never grows a NEGATIVE row. */}
             {expanded && (tab === "image" || tab === "video") && (
               <div className="mgdock-negrow">
                 <span className="mgdock-lbl">NEGATIVE</span>
@@ -1047,12 +1130,24 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
             <div ref={setEditGoEl} className="mgdock-slot" style={{ display: tab === "edit" && sub !== "enhance" ? "contents" : "none" }} />
             {tab === "edit" && sub === "enhance" && (
               <>
-                <CostBadge stack balance={balance} hint="Nothing to price — art filters run in your browser." />
-                {/* DC genLabel 'Save to library': saving happens in the filters panel
-                    (it owns the source, the chosen filter and the POST), so the footer
-                    action opens it -- never a second save path. */}
-                <button type="button" className="mgdock-gen"
-                  title="Compare and save in the filters panel — this opens it"
+                {/* DC 3673 costText for enhance: 'Free — art filters composite in your
+                    browser.' -- NOT rendered as written: CostBadge is the one cost renderer
+                    and its rule (inherited from loom-core's formatCostEstimate) is that a
+                    displayed 'Free' / '0 credits' means ONLY a settled zero from the price
+                    route; nothing was priced here (nothing is sent), so the badge stays in
+                    its idle state with the DC's sentence minus the word. costSubLine (3680,
+                    the balance) is the badge's own second line. Documented divergence. */}
+                <CostBadge stack balance={balance} hint="Nothing to price — art filters composite in your browser." />
+                {/* DC genLabel 'Save to library' (3683); genReady = editRefs.length > 0
+                    (2874) -> gated on the shared source. Saving happens in the compare
+                    overlay (it owns the chosen filter, its strength/angle and the POST), so
+                    the footer action OPENS it -- never a second save path. The titles are
+                    real copy: the DC's genTitle pair is image-gen wording (owner ruling). */}
+                <button type="button" className={"mgdock-gen" + (editS.source ? "" : " off")}
+                  disabled={!editS.source}
+                  title={editS.source
+                    ? "Compare and save in the art filters overlay — this opens it"
+                    : "Pick a source image first"}
                   onClick={() => { setFlyOpen(false); setFiltersOpen(true); }}>
                   <span>Save to library</span>
                 </button>
@@ -1074,8 +1169,12 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
         onBasePick={onBasePick} onLoraPick={onLoraPick}
         onClose={() => setFlyOpen(false)}
       />
-      <FiltersPanel open={filtersOpen} onClose={() => setFiltersOpen(false)} drawerRef={drawerRef}
-        onSendToEdit={(mid) => { sendToEdit(mid); setTab("edit"); setSub("edit"); }} />
+      {/* The art-filters compare overlay (DC 591-658): a full-viewport scrim + centred
+          panel, so it no longer needs the dock's rect. It reads slab 1's SOURCE (DC 1513
+          'Pick a source image above' -- the same editS.source Edit and the Fixer use; the
+          overlay has no picker of its own). */}
+      <FilterCompare open={filtersOpen} onClose={() => setFiltersOpen(false)}
+        source={editS.source} onSendToEdit={sendToEdit} />
     </>
   );
 }

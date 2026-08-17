@@ -4,7 +4,8 @@ import React, {
 import { createPortal } from "react-dom";
 import CostBadge from "./CostBadge.jsx";
 import {
-  MODELS, MODEL_VMODES, MODEL_MAXDUR, MODE_LBL, MODE_PH, CHANNEL_CAP,
+  MODELS, MODEL_VMODES, MODEL_MAXDUR, MODE_LBL, MODE_PH, CHANNEL_CAP, CAMERA_OPTS, AUDIO_LANGS,
+  DEFAULT_MODEL, MODEL_CARD, SHOT_LABEL, modelCaps, modelMeta, bankView,
   friendlyGenErr, refItem, primaryBank, setPrimaryBank, buildPayload, hasAnyRef,
   priceKey, canSubmit, PRICE_FETCH_TIMEOUT_MS,
   applyMode as applyModeState,
@@ -55,15 +56,29 @@ import "../styles/gen-drawer.css";
    box, NEGATIVE row (while expanded), cost stack + Generate -- shared by every tab. Rather
    than a second submit path in the dock, THIS component keeps owning its prompt, negative,
    CostBadge and Generate button and simply RENDERS them into the dock's footer slots via React
-   portals: `dock = { topEl, promptEl, negativeEl, goEl, balance }`, each *El a DOM node the
-   dock owns (null until mounted -- nothing renders for that slot until it exists; in dock
-   mode the pieces never render inline, so the contenteditable prompt mounts exactly once and
-   its imperative content survives tab switches). The Generate button in the footer is the
+   portals: `dock = { topEl, promptEl, negativeEl, goEl, balance, expanded }`, each *El a DOM
+   node the dock owns (null until mounted -- nothing renders for that slot until it exists; in
+   dock mode the pieces never render inline, so the contenteditable prompt mounts exactly once
+   and its imperative content survives tab switches); `expanded` is the dock's ▲ state -- the
+   three settings slabs hide (CSS only) while it is false, as the DC's settings grid does
+   (DC 1209). The Generate button in the footer is the
    SAME button: same `canGo` (price-identity gate), same doGenerate, same "Rendering…" latch;
    the CostBadge in the footer is the SAME instance costRef drives (debCost/costNow untouched).
    Without `dock` (the Loom, mobile Video mode) everything renders inline exactly as before. */
 
 let lineSeq = 0;
+
+// The DC's TINTS (Frontend Gallery.dc.html 1648-1656): the engine card's thumb + the palette
+// covers are tinted by roster index (videoThumbStyle 2901) -- the real roster carries no art.
+const ENGINE_TINTS = [
+  "linear-gradient(150deg, #33236d 0%, #1b1733 100%)",
+  "linear-gradient(150deg, #3a3460 0%, #17142b 100%)",
+  "linear-gradient(150deg, #643aac 0%, #241f5b 100%)",
+  "linear-gradient(150deg, #2a4a58 0%, #171f38 100%)",
+  "linear-gradient(150deg, #4a3a6e 0%, #1f1a36 100%)",
+  "linear-gradient(150deg, #3a2b63 0%, #191338 100%)",
+  "linear-gradient(150deg, #5a3a72 0%, #221a3e 100%)",
+];
 
 const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // `style`/`className` pass through to the root so a host can position/hide the node exactly as
@@ -78,13 +93,14 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     imgSlots: [null],    // r2v image bank (max 6)
     vidSlots: [],        // r2v video bank (max 3)
     audSlot: null,       // {media_id, filename} | null
-    model: "v4.0.1",
+    model: DEFAULT_MODEL,
     duration: 5,
     camera: "unset",
     quality: "professional",
     channel: "normal",
     audioGen: false,
     audioLanguage: "english",
+    videoHelper: false,  // DC 1919: 'Video prompt helper' off by default (the opposite of image gen)
     negative: "",
     modeNote: "",
     rendering: false,
@@ -102,6 +118,12 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
 
   const [results, setResults] = useState([]);   // concurrent result lines
   const [warn, setWarnState] = useState("");     // CostBadge caution clause (paid-state only)
+  // The ENGINE palette (DC 1612-1640 + 2795-2804: 'Video engine' picker cards over the real
+  // roster). {bottom} = its viewport anchor, measured off this drawer's top when it opens so it
+  // floats just above the form in every host (dock / Loom / mobile) the way the DC's sits above
+  // the dock's settings. null = closed. `palQuery` is its Search box.
+  const [pal, setPal] = useState(null);
+  const [palQuery, setPalQuery] = useState("");
   const setWarn = useCallback((w) => setWarnState(w), []);
   const ceRef = useRef(null);                    // the contenteditable prompt
   const previewRef = useRef(null);
@@ -317,6 +339,26 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       })
       .catch(() => { renderError("audio upload failed (network)"); st.current.audSlot = null; rerender(); });
   };
+
+  // ---- the ENGINE palette (open / close / Escape) ------------------------------------------
+  const openPalette = () => {
+    const r = rootRef.current ? rootRef.current.getBoundingClientRect() : null;
+    const vh = window.innerHeight || 800;
+    // Sit just above the drawer (DC: above the dock's settings), clamped so the 46vh panel fits.
+    let bottom = r ? Math.round(vh - r.top + 12) : 250;
+    bottom = Math.max(14, Math.min(bottom, Math.round(vh * 0.54) - 14));
+    setPalQuery("");
+    setPal({ bottom });
+  };
+  const closePalette = useCallback(() => { setPal(null); setPalQuery(""); }, []);
+  useEffect(() => {
+    if (!pal) return undefined;
+    // Capture-phase so this innermost layer takes Escape before a host's own window listener
+    // (the dock's Esc chain collapses settings / closes the dock on the bubble phase).
+    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); closePalette(); } };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [pal, closePalette]);
 
   // ---- payload + live cost -------------------------------------------------------------------
   // payload/hasAnyRef/flfMissingStart are the PURE spend-gate predicates (videoDrawerCore.js); the
@@ -608,57 +650,70 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // is keyed off the form state alone here (no DOM read in render).
   const canGo = !s.hostBusy && !s.rendering && canSubmit(s.price, buildPayload(s, ""));
 
-  const SEG = [["i2v", "First Frame"], ["flf", "First & Last Frames"], ["r2v", "Multi-Reference"]];
-
-  const slotBox = (item, i, bank, placeholder, tag) => (
-    <div
-      key={bank + i} className={"mgd-slot" + (bank === "vid" ? " dashed" : "") + (item ? "" : "")}
-      data-nsfw={item && item.is_nsfw ? "1" : undefined}
-      style={item && bank === "vid" ? { borderStyle: "solid" } : undefined}
-      onClick={() => requestPick(bank, i)}
-      onMouseEnter={item ? (e) => showPreview(item.media_id, e.currentTarget) : undefined}
-      onMouseLeave={item ? () => hidePreview() : undefined}
-    >
-      {item ? (
-        <>
-          <img src={item.thumb} alt="" />
-          {bank === "vid" ? <span className="mgd-vidbadge">▶</span> : null}
-          <span className="mgd-slot-tag">{tag}</span>
-          <button
-            type="button" className="mgd-vs-x"
-            onClick={(e) => {
-              e.stopPropagation(); hidePreview();
-              const cur = st.current;
-              if (bank === "vid") { cur.vidSlots.splice(i, 1); if (!cur.vidSlots.length) cur.vidSlots = [null]; }
-              else if (cur.mode === "r2v") { let arr = cur.imgSlots; arr.splice(i, 1); if (!arr.length) arr = [null]; cur.imgSlots = arr; }
-              else cur.slots[i] = null;
-              rerender(); debCost();
-            }}
-          >×</button>
-        </>
-      ) : placeholder}
-    </div>
-  );
-
-  // primary bank slots
-  const primArr = primary();
-  const mainArr = s.mode === "flf" ? [primArr[0]] : primArr;
-  let refN = 0;
-  const primSlots = mainArr.map((item, i) => {
-    let tag = "";
-    if (item) { refN++; tag = s.mode === "flf" ? "start" : "@image" + refN; }
-    const ph = (s.mode === "flf" || s.mode === "i2v") ? "+ start" : "+ pick";
-    return slotBox(item, i, "primary", ph, tag);
+  // ---- SHOT MODE + the ref/frame banks (DC 1346-1376, getters 2842-2895) ----------------
+  // ALL three segments always render; one the engine lacks is dimmed (opacity .35, not-allowed,
+  // title '<label> needs the V4.0 pair'), never removed -- the DC's shotModes.
+  const shotModes = ["i2v", "flf", "r2v"].map((v) => {
+    const ok = allowedModes.indexOf(v) >= 0;
+    return { v, ok, label: SHOT_LABEL[v], title: ok ? SHOT_LABEL[v] : SHOT_LABEL[v] + " needs the V4.0 pair" };
   });
 
-  let vidN = 0;
-  const vidArr = (s.vidSlots.length ? s.vidSlots : [null]);
+  // Removing a pick is the click on the filled slot itself (DC slot.onClick filters it out; no
+  // separate × control). Splices the r2v banks (re-seeding the [null] the state layer keeps),
+  // nulls an i2v/flf frame in place. Every removal re-prices -- the pick was a priced input.
+  const removeSlot = (bank, i) => {
+    const cur = st.current;
+    if (bank === "vid") { cur.vidSlots.splice(i, 1); if (!cur.vidSlots.length) cur.vidSlots = [null]; }
+    else if (cur.mode === "r2v") { let arr = cur.imgSlots; arr.splice(i, 1); if (!arr.length) arr = [null]; cur.imgSlots = arr; }
+    else cur.slots[i] = null;
+    rerender(); debCost();
+  };
+  // One reference / frame slot: DC slotBox (54px, radius 9, dashed while empty, solid once
+  // filled), the empty caption, and the '@imageN' / '@videoN' badge Multi-Reference alone carries.
+  const slotBox = ({ key, item, bank, index, caption, badge, title }) => (
+    <div key={key} className={"mgd-slot" + (item ? " filled" : "")} title={title}
+      data-nsfw={item && item.is_nsfw ? "1" : undefined}
+      onClick={() => (item ? removeSlot(bank, index) : requestPick(bank, index))}>
+      {item ? <img src={item.thumb} alt="" /> : <div className="mgd-slotcap">{caption}</div>}
+      {item && badge ? <div className="mgd-slot-tag">{badge}</div> : null}
+    </div>
+  );
+  // The banks the current shot mode shows (DC videoBanks): Multi-Reference = Image references
+  // (up to 6) + Video references (up to 3), each the filled picks plus ONE trailing empty slot
+  // while under the cap; otherwise Start frame (+ End frame, optional, on First & Last).
+  const banks = [];
+  if (isR2v) {
+    const iv = bankView(s.imgSlots, 6);
+    const imgs = iv.filled.map(({ item, index }, n) => slotBox({ key: "img" + index, item, bank: "primary", index,
+      badge: "@image" + (n + 1), title: "Image reference " + (n + 1) }));
+    if (iv.nextIndex >= 0) imgs.push(slotBox({ key: "img+", item: null, bank: "primary", index: iv.nextIndex, caption: "+ image", title: "Pick from your gallery" }));
+    banks.push({ label: MODE_LBL.r2v, note: "up to 6", slots: imgs });
+    const vv = bankView(s.vidSlots, 3);
+    const vids = vv.filled.map(({ item, index }, n) => slotBox({ key: "vid" + index, item, bank: "vid", index,
+      badge: "@video" + (n + 1), title: "Video reference " + (n + 1) }));
+    if (vv.nextIndex >= 0) vids.push(slotBox({ key: "vid+", item: null, bank: "vid", index: vv.nextIndex, caption: "+ video", title: "Pick from your gallery" }));
+    banks.push({ label: "Video references", note: "up to 3", slots: vids });
+  } else {
+    banks.push({ label: MODE_LBL[s.mode], note: "", slots: [slotBox({ key: "start", item: s.slots[0], bank: "primary", index: 0,
+      caption: "pick", title: s.slots[0] ? "Start frame" : "Pick from your gallery" })] });
+    if (s.mode === "flf") banks.push({ label: "End frame", note: "optional", slots: [slotBox({ key: "end", item: s.slots[1], bank: "primary", index: 1,
+      caption: "pick", title: s.slots[1] ? "End frame" : "Pick from your gallery" })] });
+  }
+
+  // The engine palette's cards over the REAL roster (DC 2795-2804: name · shot modes · duration
+  // cap · caps as the tooltip). No per-second rate: the price is CostBadge's to say.
+  const palQ = palQuery.trim().toLowerCase();
+  const palItems = MODELS.filter((m) => !palQ || m.label.toLowerCase().indexOf(palQ) >= 0);
+  const engineIdx = Math.max(0, MODELS.findIndex((m) => m.value === s.model));
 
   // ---- the pieces that live in the dock's footer in dock mode (inline otherwise) ----------
   // ONE definition each; only WHERE they mount differs. The prompt is the same contenteditable
   // (ceRef, chips, MODE_PH placeholder), the negative the same field, the badge the same
   // costRef instance, the button the same canGo/doGenerate. Dock-mode classes take the DC's
   // composer/footer skin (dock.css); the label is the DC's genLabel for this tab (3611).
+  // The 'Rendering…' label swap is NOT drawn (the DC's generate() never relabels) -- kept
+  // deliberately: it is the visible half of the submit lock (rendering latch, unlocked on the
+  // server's answer), the double-submit guard on a ~210k-credit action.
   const promptField = (
     <div ref={ceRef} className={"mgd-ce" + (inDock ? " mgdock-prompt-ce" : "")} contentEditable suppressContentEditableWarning
       data-placeholder={MODE_PH[s.mode]} onInput={onCeInput} onBlur={onCeBlur} />
@@ -693,70 +748,197 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
         <span className="mgdock-chipph" />
         <span>{chosenModel ? chosenModel.label : s.model}</span>
       </span>
-      <span className="mgdock-frames">{(SEG.find(([v]) => v === s.mode) || ["", s.mode])[1]} · {s.duration}s</span>
+      <span className="mgdock-frames">{SHOT_LABEL[s.mode] || s.mode} · {s.duration}s</span>
     </>
   ) : null;
 
+  // The ENGINE palette (DC 1608-1640; items DC 2795-2804; paletteStyle 3701): a scrim + a
+  // 720px card grid, PORTALED OUT of this drawer so no host's overflow/transform can clip or
+  // re-anchor it (the dock's .mgdock is transformed + overflow:hidden). Target: the dock host
+  // (.mgx-dock-host, display:contents -- the same place the dock's model flyout lives) so the
+  // dock's outside-click closer still sees the click as INSIDE the dock; <body> elsewhere.
+  const layerHost = (rootRef.current && rootRef.current.closest && rootRef.current.closest(".mgx-dock-host")) || document.body;
+  const palette = pal ? createPortal(
+    <>
+      <div className="mgd-palscrim" onClick={closePalette} />
+      <div className="mgd-pal" style={{ bottom: pal.bottom }} role="dialog" aria-label="Video engine">
+        <div className="mgd-palhd">
+          <div className="mgd-paltitle">Video engine</div>
+          <div className="mgd-palsub">Shot type follows the engine — unsupported modes switch on pick</div>
+          <div className="mgd-palsp" />
+          <input className="mgd-palq" value={palQuery} placeholder="Search" autoFocus
+            onChange={(e) => setPalQuery(e.target.value)} />
+          <button type="button" className="mgd-palx" onClick={closePalette} title="Close">×</button>
+        </div>
+        <div className="mgd-palgrid">
+          {palItems.map((m) => {
+            const i = MODELS.indexOf(m);
+            const modes = (MODEL_VMODES[m.value] || ["i2v", "flf", "r2v"]).map((x) => SHOT_LABEL[x]).join(" · ");
+            return (
+              <button key={m.value} type="button" className={"mgd-palitem" + (m.value === s.model ? " on" : "")}
+                title={m.caps.join(" · ")}
+                onClick={() => { st.current.model = m.value; applyModelGating(true); debCost(); closePalette(); }}>
+                <div className="mgd-palcover" style={{ background: ENGINE_TINTS[i % ENGINE_TINTS.length] }}>
+                  <span className="mgd-paloff">Official</span>
+                </div>
+                <div className="mgd-palbody">
+                  <div className="mgd-palname">{m.label}</div>
+                  <div className="mgd-palmeta"><span>{modes}</span><span>{(MODEL_MAXDUR[m.value] || 10)}s max</span></div>
+                  <div className="mgd-palcost">{MODEL_CARD[m.value] === false ? "no card" : "card"}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </>, layerHost) : null;
+
   return (
-    <div ref={setRoot} className={"gen-drawer" + (className ? " " + className : "")} style={style} data-loom-ctx={loomCtx ? "" : undefined}>
-      <div className="mgd-seg" role="tablist">
-        {SEG.map(([v, lbl]) => (
-          allowedModes.indexOf(v) === -1 ? null : (
-            <button key={v} type="button" className={s.mode === v ? "on" : ""} onClick={() => userSetMode(v)}>{lbl}</button>
-          )
-        ))}
-      </div>
-      {s.modeNote ? <div className="mgd-modenote">{s.modeNote}</div> : null}
+    <div ref={setRoot} className={"gen-drawer" + (inDock ? " mgd-dock" : "") + (inDock && dock.expanded === false ? " mgd-collapsed" : "") + (className ? " " + className : "")} style={style} data-loom-ctx={loomCtx ? "" : undefined}>
+      {/* The DC's expanded Video settings: three slabs (DC 1209-1210 grid; slab(i) 2876) --
+          SHOT MODE + banks · ENGINE + chips + DURATION + CAMERA · MODE & CHANNEL + switches.
+          In dock mode they show only while the dock's ▲ settings are expanded (DC 1209 wraps
+          the whole grid in `expanded`); `dock.expanded === false` hides the wrap with CSS --
+          the drawer itself stays mounted (poll timers, portals, the prompt's imperative
+          content all survive), and the result lines below keep showing. */}
+      <div className="mgd-slabwrap">
+      <div className="mgd-slabs">
+        <div className="mgd-slab" style={{ animationDelay: "0ms" }}>
+          <div className="mgd-sec">SHOT MODE</div>
+          <div className="mgd-seg" role="tablist">
+            {shotModes.map((sm) => (
+              <button key={sm.v} type="button" role="tab" aria-selected={s.mode === sm.v} aria-disabled={!sm.ok}
+                className={(s.mode === sm.v ? "on" : "") + (sm.ok ? "" : " off")} title={sm.title}
+                onClick={() => { if (sm.ok) userSetMode(sm.v); }}>{sm.label}</button>
+            ))}
+          </div>
+          {s.modeNote ? <div className="mgd-modenote">{s.modeNote}</div> : null}
+          {banks.map((b) => (
+            <div key={b.label} className="mgd-bank">
+              <div className="mgd-bankhd">
+                <div className="mgd-banklbl">{b.label}</div>
+                {b.note ? <div className="mgd-banknote">{b.note}</div> : null}
+              </div>
+              <div className="mgd-slots">{b.slots}</div>
+            </div>
+          ))}
+          {/* Audio reference (Multi-Reference only). NOT in the DC's videoBanks -- kept as a real
+              PixAI capability this drawer already ships end to end (owner-locked "Video Tab — Full
+              Parity Mockup v1", CHANGELOG 2026-07-18: 6 image + 3 video + 1 audio ref; uploads
+              direct to /api/upload since audio is not catalogued; audio_refs ride the payload and
+              the Loom's shot prefill carries audio_ref). Drawn as one more DC bank/slot. Owner to
+              rule; drop this block + the audSlot plumbing together if ruled out. */}
+          {isR2v ? (
+            <div className="mgd-bank">
+              <div className="mgd-bankhd">
+                <div className="mgd-banklbl">Audio reference</div>
+                <div className="mgd-banknote">WAV ≤15MB</div>
+              </div>
+              <div className="mgd-slots">
+                {s.audSlot && s.audSlot.uploading ? (
+                  <div className="mgd-slot" title={"Uploading " + s.audSlot.uploading}><div className="mgd-slotcap">uploading…</div></div>
+                ) : s.audSlot ? (
+                  <div className="mgd-slot filled audio" title={"Audio reference — " + s.audSlot.filename}
+                    onClick={() => { st.current.audSlot = null; rerender(); debCost(); }}>
+                    <div className="mgd-slotcap">♪</div>
+                    <div className="mgd-slot-tag">@audio1</div>
+                  </div>
+                ) : (
+                  <div className="mgd-slot" title="Upload a WAV (≤15MB)" onClick={() => audFileRef.current && audFileRef.current.click()}>
+                    <div className="mgd-slotcap">+ audio</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
+          <input ref={audFileRef} type="file" className="mgd-audiofile" accept="audio/*" style={{ display: "none" }}
+            onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadAudio(f); }} />
+        </div>
 
-      <div className="mgd-lbl mgd-slots-lbl">{MODE_LBL[s.mode]}</div>
-      <div className="mgd-slots mgd-imgslots">
-        {primSlots}
-        {s.mode === "r2v" && primArr.length < 6 ? (
-          <button type="button" className="mgd-slot-add" onClick={() => { st.current.imgSlots.push(null); rerender(); }}>+ add</button>
-        ) : null}
-      </div>
-
-      {s.mode === "flf" ? (
-        <>
-          <div className="mgd-lbl">End Frame <span className="mgd-note">(Optional)</span></div>
-          <div className="mgd-slots">{slotBox(s.slots[1], 1, "primary", "+ end", "end")}</div>
-        </>
-      ) : null}
-
-      {isR2v ? (
-        <>
-          <div className="mgd-lbl">Video references <span className="mgd-note">· up to 3 · 2–15s each, 15s total</span></div>
-          <div className="mgd-slots">
-            {vidArr.map((item, i) => {
-              let tag = "";
-              if (item) { vidN++; tag = "@video" + vidN; }
-              return slotBox(item, i, "vid", "+ video", tag);
+        <div className="mgd-slab" style={{ animationDelay: "60ms" }}>
+          <div className="mgd-sec">ENGINE</div>
+          {/* DC 1380-1387 modelRowStyle: thumb · name + meta ('<maxDur>s max · V4.0 cards apply /
+              never card-covered', from the REAL roster's caps) · browse -> the engine palette. */}
+          <button type="button" className="mgd-engine" onClick={openPalette} title="Browse the video engines">
+            <span className="mgd-engthumb" style={{ background: ENGINE_TINTS[engineIdx % ENGINE_TINTS.length] }} />
+            <span className="mgd-engbody">
+              <span className="mgd-engname">{chosenModel ? chosenModel.label : s.model}</span>
+              <span className="mgd-engmeta">{modelMeta(s.model)}</span>
+            </span>
+            <span className="mgd-engbrowse">browse</span>
+          </button>
+          <div className="mgd-caps mgd-modelcaps">
+            {modelCaps(s.model).map(([t, kind]) => <span key={t} className={"mgd-cap" + (kind ? " " + kind : "")}>{t}</span>)}
+          </div>
+          {/* DURATION (DC 1393-1401 + durationStops 2906-2911): the label with a live 'Ns'
+              readout, then four segmented stops. A stop above the REAL engine cap
+              (MODEL_MAXDUR -- the spend gate applyModelGating clamps to) stays visible but
+              dimmed, not-allowed, titled, and its click is ignored -- never removed. */}
+          <div className="mgd-durhd">
+            <div className="mgd-sec">DURATION</div>
+            <div className="mgd-durval">{s.duration}s</div>
+          </div>
+          <div className="mgd-stops mgd-dur" role="radiogroup" aria-label="Duration">
+            {[5, 6, 10, 15].map((d) => {
+              const ok = d <= maxDur;
+              return (
+                <button key={d} type="button" role="radio" aria-checked={d === s.duration} aria-disabled={!ok}
+                  className={"mgd-stop" + (d === s.duration ? " on" : "") + (ok ? "" : " off")}
+                  title={d + " seconds" + (ok ? "" : " — not on this engine")}
+                  onClick={() => { if (!ok || d === st.current.duration) return; st.current.duration = d; rerender(); debCost(); emit("mg-duration-commit", { duration: d }); }}>{d}</button>
+              );
             })}
-            {s.vidSlots.length < 3 ? (
-              <button type="button" className="mgd-slot-add" onClick={() => {
-                // When the backing bank is empty the render shows ONE fabricated slot (vidArr's
-                // `|| [null]` fallback), so a plain push([null]) would re-derive that same single
-                // slot -- a no-op first click. Seed two so the first click genuinely adds a slot.
-                const cur = st.current;
-                if (!cur.vidSlots.length) cur.vidSlots = [null, null]; else cur.vidSlots.push(null);
-                rerender();
-              }}>+ add</button>
-            ) : null}
           </div>
-          <div className="mgd-lbl">Audio reference <span className="mgd-note">· WAV ≤15MB</span></div>
-          <div className="mgd-audiorow">
-            {s.audSlot && s.audSlot.uploading ? (
-              <span className="mgd-note">Uploading {s.audSlot.uploading}…</span>
-            ) : s.audSlot ? (
-              <span className="mgd-audiochip">♪ @audio1 · {s.audSlot.filename} <button type="button" onClick={() => { st.current.audSlot = null; rerender(); debCost(); }}>×</button></span>
-            ) : (
-              <button type="button" className="mgd-audioadd" onClick={() => audFileRef.current && audFileRef.current.click()}>+ Audio</button>
-            )}
+          {/* CAMERA (DC 1402-1412): below DURATION in this slab; in Multi-Reference the block
+              keeps its space but goes invisible (cameraVis 2912) -- the payload already drops
+              camera_movement for r2v. Camera and quality both ride the priced payload
+              (i2vPro.cameraMovement / .mode), so each change re-prices like every other priced
+              field -- without it a settled quote sat next to a payload it was never for, with
+              no re-check pending at all. */}
+          <div className={"mgd-cam-wrap" + (isR2v ? " hid" : "")} aria-hidden={isR2v || undefined}>
+            <div className="mgd-sec">CAMERA</div>
+            <select className="mgd-sel mgd-cam" value={s.camera} tabIndex={isR2v ? -1 : undefined} onChange={(e) => { st.current.camera = e.target.value; rerender(); debCost(); }}>
+              {CAMERA_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
           </div>
-        </>
-      ) : null}
-      <input ref={audFileRef} type="file" className="mgd-audiofile" accept="audio/*" style={{ display: "none" }}
-        onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadAudio(f); }} />
+        </div>
+
+        {/* MODE & CHANNEL (DC 1416-1441): Basic|Professional seg -> Normal|Enhanced seg ->
+            plain caption -> the two pill switches -> (audio on) the bare language select. */}
+        <div className="mgd-slab" style={{ animationDelay: "120ms" }}>
+          <div className="mgd-sec">MODE &amp; CHANNEL</div>
+          <div className="mgd-seg mgd-quality-wrap" role="radiogroup" aria-label="Mode">
+            {[["basic", "Basic"], ["professional", "Professional"]].map(([v, l]) => (
+              <button key={v} type="button" role="radio" aria-checked={s.quality === v} className={"mgd-quality" + (s.quality === v ? " on" : "")} onClick={() => { if (st.current.quality === v) return; st.current.quality = v; rerender(); debCost(); }}>{l}</button>
+            ))}
+          </div>
+          <div className="mgd-seg" role="radiogroup" aria-label="Channel">
+            {[["normal", "Normal"], ["enhanced", "Enhanced"]].map(([v, l]) => (
+              <button key={v} type="button" role="radio" aria-checked={s.channel === v} className={"mgd-channel" + (s.channel === v ? " on" : "")} onClick={() => { if (st.current.channel === v) return; st.current.channel = v; rerender(); debCost(); }}>{l}</button>
+            ))}
+          </div>
+          <div className="mgd-chancap">{CHANNEL_CAP[s.channel]}</div>
+          <label className="mgd-sw" title="Spoken lines in the prompt become voiceover">
+            <input type="checkbox" className="mgd-audio" checked={s.audioGen}
+              onChange={(e) => { st.current.audioGen = e.target.checked; rerender(); debCost(); emit("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage }); }} />
+            <span className="mgd-swtrack"><i /></span>
+            <span className="mgd-swlab">Generate audio</span>
+          </label>
+          <label className="mgd-sw" title="Off by default — the opposite of image gen">
+            <input type="checkbox" className="mgd-helper" checked={s.videoHelper}
+              onChange={(e) => { st.current.videoHelper = e.target.checked; rerender(); debCost(); }} />
+            <span className="mgd-swtrack"><i /></span>
+            <span className="mgd-swlab">Video prompt helper</span>
+          </label>
+          {s.audioGen ? (
+            <select className="mgd-sel mgd-lang" value={s.audioLanguage} aria-label="Audio language"
+              onChange={(e) => { st.current.audioLanguage = e.target.value; rerender(); debCost(); emit("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value }); }}>
+              {AUDIO_LANGS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          ) : null}
+        </div>
+      </div>
+      </div>
 
       {/* contenteditable prompt -- imperative content, React never touches its children.
           Dock mode: portaled into the dock composer's prompt slot (see promptField). */}
@@ -770,80 +952,6 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       )}
       {inDock && dock.topEl ? createPortal(topRow, dock.topEl) : null}
 
-      <div className="mgd-row">
-        <div className="grow">
-          <div className="mgd-lbl">Model</div>
-          <select className="mgd-sel mgd-model" value={s.model}
-            onChange={(e) => { st.current.model = e.target.value; applyModelGating(true); debCost(); }}>
-            {MODELS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-          </select>
-          <div className="mgd-caps mgd-modelcaps">
-            {(chosenModel ? chosenModel.caps : []).map((t) => <span key={t} className="mgd-cap hot">{t}</span>)}
-          </div>
-        </div>
-        <div>
-          <div className="mgd-lbl">Duration (s)</div>
-          <select className="mgd-sel mgd-dur" value={String(s.duration)}
-            onChange={(e) => { st.current.duration = +e.target.value; rerender(); debCost(); emit("mg-duration-commit", { duration: +e.target.value }); }}>
-            {[5, 6, 10, 15].map((d) => <option key={d} value={d} disabled={d > maxDur} hidden={d > maxDur}>{d}</option>)}
-          </select>
-        </div>
-      </div>
-
-      <div className="mgd-row">
-        <div className="mgd-cam-wrap">
-          <div className="mgd-lbl">Camera</div>
-          {/* Camera and quality both ride the priced payload (i2vPro.cameraMovement / .mode), so
-              each change re-prices like every other priced field -- without it a settled quote
-              sat next to a payload it was never for, with no re-check pending at all. */}
-          <select className="mgd-sel mgd-cam" value={s.camera} onChange={(e) => { st.current.camera = e.target.value; rerender(); debCost(); }}>
-            <option value="unset">Unset</option>
-            <option value="horizontal">Side-to-side move</option>
-            <option value="vertical-pan">Vertical Pan</option>
-            <option value="zoom">Zoom in or out</option>
-            <option value="pan">Camera sweep</option>
-            <option value="tilt">Tilt up or down</option>
-            <option value="roll">Camera spin</option>
-          </select>
-        </div>
-        <div className="mgd-quality-wrap">
-          <div className="mgd-lbl">Basic / Professional</div>
-          <select className="mgd-sel mgd-quality" value={s.quality} onChange={(e) => { st.current.quality = e.target.value; rerender(); debCost(); }}>
-            <option value="basic">Basic</option>
-            <option value="professional">Professional</option>
-          </select>
-        </div>
-        <div>
-          <div className="mgd-lbl">Channel</div>
-          <select className="mgd-sel mgd-channel" value={s.channel} onChange={(e) => { st.current.channel = e.target.value; rerender(); debCost(); }}>
-            <option value="normal">Normal</option>
-            <option value="enhanced">Enhanced</option>
-          </select>
-          <div className="mgd-caps mgd-chancap">
-            <span className={"mgd-cap" + (s.channel === "enhanced" ? " crown" : "")}>{CHANNEL_CAP[s.channel]}</span>
-          </div>
-        </div>
-      </div>
-
-      <label className="mgd-check">
-        <input type="checkbox" className="mgd-audio" checked={s.audioGen}
-          onChange={(e) => { st.current.audioGen = e.target.checked; rerender(); debCost(); emit("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage }); }} />
-        {" "}Generate audio <span className="mgd-note">(spoken lines in the prompt become voiceover)</span>
-      </label>
-      {s.audioGen ? (
-        <div className="mgd-lang-wrap" style={{ marginTop: 4 }}>
-          <div className="mgd-lbl">Audio language</div>
-          <select className="mgd-sel mgd-lang" value={s.audioLanguage}
-            onChange={(e) => { st.current.audioLanguage = e.target.value; rerender(); debCost(); emit("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value }); }}>
-            <option value="english">English</option>
-            <option value="japanese">Japanese</option>
-            <option value="chinese">Chinese</option>
-            <option value="korean">Korean</option>
-            <option value="none">SE only (no dialogue)</option>
-          </select>
-        </div>
-      ) : null}
-
       {/* cost + Generate: the dock footer's right column in dock mode (one badge, one button,
           one gate -- see the DOCK MODE note above); inline for every other host. */}
       {inDock ? (dock.goEl ? createPortal(<>{costLine}{goButton}</>, dock.goEl) : null) : (
@@ -853,6 +961,10 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
         </>
       )}
 
+      {/* Result / status lines. Not drawn in the DC (it routes runs into the RUNS reel, and the
+          dock's reel does list these submits via Jobs.register) -- kept because this is the
+          ONLY home for the drawer's own refusals and submit-time errors ('Pick a source image
+          first.', 'Re-checking the cost…', a rejected submit), which never reach the reel. */}
       <div className={"mgd-result" + (results.length ? " has" : "")}>
         {results.map((l) => (
           <div key={l.id} className="mgd-result-line">
@@ -886,6 +998,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       </div>
 
       <div ref={previewRef} className="mgd-preview" aria-hidden="true" />
+      {palette}
     </div>
   );
 });
