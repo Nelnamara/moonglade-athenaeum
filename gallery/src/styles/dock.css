@@ -559,6 +559,13 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
   font-family: inherit; font-size: 16px; line-height: 1.5; font-weight: 300; padding: 0;
   transition: height .28s cubic-bezier(.2, .9, .24, 1); }
 .mgdock-prompt::placeholder { color: var(--overlay0); }
+/* The composer's border IS the focus ring (.mgdock-composer.focus, DC). The global
+   :focus-visible ring in styles.css is emitted AFTER this sheet (main.jsx imports
+   App.jsx before styles.css) and ties .mgdock-prompt on specificity, so on focus it
+   won and drew a second, offset box around the textarea. The video prompt escaped
+   only because .mgdock-composer .mgd-ce outranks it. Same rank here, for the image
+   prompt, the portaled Edit instruction and the NEGATIVE textarea. */
+.mgdock-prompt:focus-visible, .mgdock-neg:focus-visible { outline: none; }
 /* the VIDEO prompt: VideoDrawer's own contenteditable (@image/@video/@audio chips,
    MODE_PH placeholder) portaled into the composer -- same DC prompt skin; grows with
    the text, 2 lines at rest, capped by the dock's promptMax (--mg-prompt-max) exactly
