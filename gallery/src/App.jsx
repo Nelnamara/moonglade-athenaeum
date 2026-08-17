@@ -215,7 +215,7 @@ export default function App({ boot }) {
   /* Deep links: #image | #edit | #video open the dock on that tab, then the
      hash is stripped (history.replaceState) so reloads don't re-trigger.
      #edit rides the drawer's one-shot request contract with an empty source
-     (safe: EditTab ignores a falsy initialSource). #video rides the same
+     (safe: the drawer skips the source hand-off for a falsy mid). #video rides the same
      contract -- the drawer now skips the i2v prefill for a midless request,
      so the deep link lands on the Video tab with clean slots
      in the shared video component — the GenerateDock retab owns fixing that. */

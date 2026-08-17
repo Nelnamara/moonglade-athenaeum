@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  buildEditPayload, editCaps, editGate, EDIT_CAPS, EDIT_DEFAULTS,
+  buildEditPayload, editCaps, editGate, EDIT_CAPS,
   refTag, switchEditModel,
 } from "../gen/editCore.js";
 import { submitTask, useResultLines } from "../gen/submitTask.js";
@@ -12,15 +12,28 @@ import CostBadge from "./CostBadge.jsx";
    preset bank. @image1 is the image being edited; extra references number from
    @image2 -- the instruction refers to them by those tags.
 
+   STATE LIVES IN THE DRAWER (dock fidelity stage 3, 2026-08-16 -- the DC's own
+   model, Frontend Gallery.dc.html 1917-1922: one component holds editRefs /
+   editModel / resolution / … for all three sub-tabs). `s` / `setS` arrive as
+   props (EDIT_DEFAULTS shape, editCore.js) so the SOURCE slab -- the picture
+   being edited plus its references -- is ONE list shared by Edit, Fixer and
+   Enhance (DC 1445-1468 is not gated by `sub`). Everything else is unchanged:
+   this component still OWNS its price debounce, its CostBadge instance, its
+   editGate and its run() -> submitTask('/api/edit', buildEditPayload(s)).
+
    `dock` (Generate dock, 2026-08-16 fidelity pass -- Frontend Gallery.dc.html
    1541-1591 draws ONE composer footer shared by every tab): when given
-   ({ topEl, promptEl, goEl, insertRef, balance, promptRows }), the instruction
-   textarea, the CostBadge and the '✦ Edit' button render into the dock's footer
-   slots via portals -- SAME state, SAME costRef, SAME run()/gate; only where
-   they mount changes. insertRef receives the dock's ★ Snippets insert function
-   while this tab is visible. Without `dock` the tab renders its own submit row. */
-export default function EditTab({ visible, initialSource, dock }) {
-  const [s, setS] = useState(EDIT_DEFAULTS);
+   ({ topEl, promptEl, goEl, resultsEl, balance, promptApi, promptMax }), the
+   instruction textarea, the CostBadge, the '✦ Edit' button and the result lines
+   render into the dock's slots via portals -- SAME state, SAME costRef, SAME
+   run()/gate; only where they mount changes. promptApi receives the dock's
+   ★ Snippets insert/read pair while this tab is visible. Without `dock` the
+   tab renders its own instruction field, submit row and results inline.
+
+   WHAT THIS RENDERS: slab 2 (EDIT MODEL) and slab 3 (QUALITY) of the DC's
+   three-slab Edit grid (DC 1470-1540). Slab 1 (SOURCE) is <SourceSlab> below,
+   mounted by the drawer for every sub-tab. */
+export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
   const [presets, setPresets] = useState({});
   const [importTask, setImportTask] = useState("");
   const [busy, setBusy] = useState(false);
@@ -34,13 +47,6 @@ export default function EditTab({ visible, initialSource, dock }) {
   const used = ((s.source || "").trim() ? 1 : 0) + s.refs.length;
 
   const set = (patch) => setS((old) => ({ ...old, ...patch }));
-
-  // An entry point (lightbox / filters panel) hands us {mid, n} -- a fresh object
-  // per hand-off, so re-sending the SAME image still re-applies after the user
-  // cleared or swapped the source (see GenerateDrawer's editSource comment).
-  useEffect(() => {
-    if (initialSource && initialSource.mid) set({ source: initialSource.mid });
-  }, [initialSource]);
 
   // presets load lazily, once, when the tab is first shown
   useEffect(() => {
@@ -65,25 +71,26 @@ export default function EditTab({ visible, initialSource, dock }) {
       .catch(() => { if (mine === seq.current && costRef.current) costRef.current.setPrice(null); });
   }, [s]);
 
+  // Re-prices on any field change AND on each return to this sub-tab: the badge is
+  // portaled into the footer and unmounts with the tab (returns null below), so it
+  // comes back idle and must be primed again -- the image tab's own entry rule.
+  // Hidden, it does not price at all (the shared source can change from the Fixer).
   useEffect(() => {
+    if (!visible) return;
     clearTimeout(timer.current);
     timer.current = setTimeout(fireCost, 250);
-  }, [fireCost]);
+  }, [fireCost, visible]);
 
-  const pickSource = async () => {
-    const m = await askPicker({ type: "image" });
-    if (m) set({ source: m.media_id });
-  };
-  const addRef = async () => {
-    const m = await askPicker({ type: "image" });
-    if (m) setS((old) => ({ ...old, refs: old.refs.concat([{ media_id: m.media_id, thumb: m.thumb }]) }));
-  };
-  const dropRef = (i) => setS((old) => ({ ...old, refs: old.refs.filter((_, k) => k !== i) }));
-
+  // clampEditNote (DC 1517-1519 / 2255-2258): set by a model switch that had to correct
+  // the resolution (or, real caps, the aspect); replaced by the next switch, like the DC's.
+  const [clampNote, setClampNote] = useState("");
   const chooseModel = (k) => {
-    const { next, notice } = switchEditModel(s, k);
+    const { next, notice, clamp } = switchEditModel(s, k);
     setS(next);
-    if (notice && window.Toast) window.Toast.show({ kind: "err", ...notice });
+    // The dropped-references note is the SOURCE slab's inline amber line (DC 1465-1467),
+    // not a toast -- the drawer holds it beside the shared source state.
+    if (onDroppedNote) onDroppedNote(notice ? notice.note : "");
+    setClampNote(clamp || "");
   };
 
   const bankPreset = async () => {
@@ -132,17 +139,24 @@ export default function EditTab({ visible, initialSource, dock }) {
     };
     promptApi.current = api;
     return () => { if (promptApi.current === api) promptApi.current = null; };
-  }, [promptApi, visible]);
+  }, [promptApi, visible, setS]);
 
   if (!visible) return null;
 
   // The footer pieces (dock mode) -- one definition each, mounted inline or portaled.
   const inDock = !!dock;
-  // Dock rows follow the DC's promptRows rule (3558: grows with the text, 2 at rest,
-  // capped by the dock's own room -- `promptMax` from the dock's measurement).
+  // Dock rows follow the DC's promptRows rule (3558-3559: grows with the text, 2 at rest,
+  // one more while it has focus, capped by the dock's own room -- `promptMax` /
+  // `promptFocus` from the dock's measurement and its composer focus ring).
   const dockRows = inDock
-    ? Math.max(2, Math.min(dock.promptMax || 6, Math.ceil((s.instruction || "").length / 76)))
+    ? Math.max(2, Math.min(dock.promptMax || 6,
+        Math.ceil(((s.instruction || "").length || 1) / 76) + (dock.promptFocus ? 1 : 0)))
     : 3;
+  // The field itself is the DC's composer prompt (promptStyle 3561 = .mgdock-prompt, no
+  // label of its own). PLACEHOLDER IS REAL-DATA (owner ruling 2026-08-16): the DC's
+  // promptPlaceholder (3560) is one constant for every tab, 'Describe your image…' --
+  // image-gen copy, not tab-aware; an edit instruction refers to its pictures by PixAI's
+  // @imageN tags (the SOURCE slab's badges), so the placeholder teaches that syntax.
   const instructionField = (
     <textarea className={inDock ? "mgdock-prompt" : "gd-prompt"} rows={dockRows}
       value={s.instruction}
@@ -172,101 +186,214 @@ export default function EditTab({ visible, initialSource, dock }) {
       <span className="mgdock-frames">{used}/{caps.max_refs} refs · {s.resolution} · {s.aspect}</span>
     </>
   ) : null;
+  // The result lines (Submitting… / Queued / ✔ done / ✕ error, incl. the "task MAY exist"
+  // transport warning) live OUTSIDE the ▲-gated grid in dock mode -- a submit from the
+  // collapsed footer must still be able to answer.
+  const results = lines.length ? <ResultLines lines={lines} /> : null;
 
   return (
-    <div className="gd-body">
+    <>
       {inDock && dock.topEl ? createPortal(topRow, dock.topEl) : null}
       {inDock && dock.promptEl ? createPortal(instructionField, dock.promptEl) : null}
       {inDock && dock.goEl ? createPortal(<>{costLine}{goButton}</>, dock.goEl) : null}
-      <div className="gd-row">
-        {Object.keys(EDIT_CAPS).map((k) => (
-          <button key={k} className={"card" + (s.model === k ? " on" : "")}
-            onClick={() => chooseModel(k)}>{EDIT_CAPS[k].label}</button>
-        ))}
-      </div>
+      {inDock && dock.resultsEl ? createPortal(results, dock.resultsEl) : null}
 
-      <label className="gd-lbl">Editing image</label>
-      <div className="gd-row">
-        <button className="card" onClick={pickSource}>
-          {s.source
-            ? <img className="gd-refthumb" src={"/thumbs/" + s.source + ".jpg"} alt="" />
-            : "▨ Pick"}
-        </button>
-        {s.source && <button className="gd-mini" onClick={() => set({ source: "" })}>✕</button>}
-        <span className="gd-note">· {used}/{caps.max_refs} (@image1 = the image being edited)</span>
-      </div>
-
-      <div className="gd-refs">
-        {s.source ? (
-          <div className="gd-slot">
-            <img src={"/thumbs/" + s.source + ".jpg"} alt="" />
-            <span className="gd-slottag">@image1</span>
-          </div>
-        ) : null}
-        {s.refs.map((r, i) => (
-          <div className="gd-slot" key={r.media_id + i}>
-            <img src={r.thumb} alt="" />
-            <span className="gd-slottag">{refTag(i)}</span>
-            <button className="gd-slotx" onClick={() => dropRef(i)}>×</button>
-          </div>
-        ))}
-        {used < caps.max_refs && (
-          <button className="gd-slot dashed" onClick={addRef}>+ ref</button>
-        )}
-      </div>
-
-      <label className="gd-lbl">Toolbox preset</label>
-      <div className="gd-row">
-        <select className="gd-sel" value={s.preset} onChange={(e) => set({ preset: e.target.value })}>
-          <option value="">None — custom instruction</option>
-          {Object.entries(presets).map(([name, p]) => (
-            <option key={name} value={name}>{p.label || name}</option>
+      {/* SLAB 2 -- EDIT MODEL (Frontend Gallery.dc.html 1470-1520): the heading (1471,
+          editSlabLabel 'EDIT MODEL' under the Edit sub-tab), the model <select> (1473-1476;
+          option labels are the REAL edit-model list, EDIT_CAPS -- the same two the DC drew),
+          the RESOLUTION / ASPECT two-column row (1479-1497; option lists are the real per-
+          model caps, a documented divergence: the DC's fixed four aspects vs the probe's
+          eleven / ten) and the clampEditNote (1517-1519). Styles are the DC's inline
+          strings, one class each (dock.css .mgdock-editmodel / -editcols / -editcol /
+          -editcap / -editsel / -editnote). */}
+      <div className="mgdock-slab" style={{ animationDelay: "60ms" }}>
+        <div className="mgdock-lbl">EDIT MODEL</div>
+        <select className="mgdock-editmodel" value={s.model} title="Edit model"
+          onChange={(e) => chooseModel(e.target.value)}>
+          {Object.keys(EDIT_CAPS).map((k) => (
+            <option key={k} value={k}>{EDIT_CAPS[k].label}</option>
           ))}
         </select>
-        <input className="gd-num wide" placeholder="pixai task id" value={importTask}
-          onChange={(e) => setImportTask(e.target.value.replace(/\D/g, ""))} />
-        <button className="gd-mini" onClick={bankPreset}
-          title="Bank the prompt from one of your pixai.art tasks as a reusable preset">
-          + bank
-        </button>
-      </div>
-
-      {!inDock && (
-        <>
-          <label className="gd-lbl">Instruction</label>
-          {instructionField}
-        </>
-      )}
-
-      <div className="gd-row">
-        <span className="gd-lbl">Res</span>
-        <select className="gd-sel" value={s.resolution} onChange={(e) => set({ resolution: e.target.value })}>
-          {caps.resolutions.map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
-        {caps.qualities.length > 0 && (
-          <>
-            <span className="gd-lbl">Quality</span>
-            <select className="gd-sel" value={s.quality} onChange={(e) => set({ quality: e.target.value })}>
-              {caps.qualities.map((q) => <option key={q} value={q}>{q}</option>)}
+        <div className="mgdock-editcols">
+          <div className="mgdock-editcol">
+            <div className="mgdock-editcap">RESOLUTION</div>
+            <select className="mgdock-editsel" value={s.resolution}
+              onChange={(e) => set({ resolution: e.target.value })}>
+              {caps.resolutions.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
+          </div>
+          <div className="mgdock-editcol">
+            <div className="mgdock-editcap">ASPECT</div>
+            <select className="mgdock-editsel" value={s.aspect}
+              onChange={(e) => set({ aspect: e.target.value })}>
+              {caps.aspects.map((a) => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* EXTRA -- REAL CAPABILITY, KEPT (owner ruling 2026-08-16; checklist region 2
+            'Toolbox preset row'): the DC never drew a preset picker, but the server has one
+            (/api/presets, per-account banked Toolbox prompts; a preset satisfies the
+            instruction gate and pins its own model -- moonglade_gallery.py
+            _edit_params_from_payload). Restyled to the DC's look: the RESOLUTION-style
+            caption + the DC's small-select skin, in the slab whose model it overrides. */}
+        <div className="mgdock-editcol">
+          <div className="mgdock-editcap">TOOLBOX PRESET</div>
+          <div className="mgdock-presetrow">
+            <select className="mgdock-editsel" value={s.preset}
+              title="A banked pixai.art Toolbox prompt — used instead of the instruction, and it pins its own model"
+              onChange={(e) => set({ preset: e.target.value })}>
+              <option value="">None — custom instruction</option>
+              {Object.entries(presets).map(([name, p]) => (
+                <option key={name} value={name}>{p.label || name}</option>
+              ))}
+            </select>
+            <input className="mgdock-editsel mgdock-taskid" placeholder="pixai task id" value={importTask}
+              inputMode="numeric"
+              onChange={(e) => setImportTask(e.target.value.replace(/\D/g, ""))} />
+            <button type="button" className="mgdock-bank" onClick={bankPreset}
+              title="Bank the prompt from one of your pixai.art tasks as a reusable preset">
+              + bank
+            </button>
+          </div>
+        </div>
+
+        {!inDock && (
+          <>
+            <label className="gd-lbl">Instruction</label>
+            {instructionField}
           </>
         )}
-        <span className="gd-lbl">Aspect</span>
-        <select className="gd-sel" value={s.aspect} onChange={(e) => set({ aspect: e.target.value })}>
-          {caps.aspects.map((a) => <option key={a} value={a}>{a}</option>)}
-        </select>
+
+        {clampNote ? <div className="mgdock-editnote">{clampNote}</div> : null}
       </div>
 
-      {!inDock && (
-        <div className="gd-go">
-          <span className="gd-cost">{costLine}</span>
-          <span className="sp" />
-          {goButton}
-        </div>
-      )}
-      {gate && <div className="gd-note">{gate}</div>}
+      {/* SLAB 3 -- QUALITY (DC 1522-1540): the heading (1523); for a model with a quality
+          knob the Low / Medium / High segmented control (1524-1530, segStyle 2834-2835 --
+          the same container + segment as the sub-tab strip; labels are the real qualities
+          list, capitalised as the DC labels them, 2940); for one without, the DC's help
+          line (1531-1533) built from the real caps ('Reference Pro has no quality knob —
+          it offers 2K/4K only.', word for word for Reference Pro).
 
-      <ResultLines lines={lines} />
+          NOT RENDERED -- the DC's {{switches}} (1534-1539, 'High priority' / 'Prompt
+          helper'): that is the IMAGE tab's state (3657-3660, s.priority / s.helper), drawn
+          here because the DC's composer/settings getters are not tab-aware. PixAI's
+          instruct-edit `chat` params carry no priority and no prompt helper (moonglade_
+          backup.py build_chat_edit_parameters; /api/edit reads none), so an edit has no
+          such switch to flip -- real capability wins (owner ruling 2026-08-16). */}
+      <div className="mgdock-slab" style={{ animationDelay: "120ms" }}>
+        <div className="mgdock-lbl">QUALITY</div>
+        {caps.qualities.length > 0 ? (
+          <div className="mgdock-segs">
+            {caps.qualities.map((q) => (
+              <button key={q} type="button"
+                className={"mgdock-seg" + (s.quality === q ? " on" : "")}
+                onClick={() => set({ quality: q })}>
+                {q.charAt(0).toUpperCase() + q.slice(1)}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="mgdock-editcopy">
+            {caps.label} has no quality knob — it offers {caps.resolutions.join("/")} only.
+          </div>
+        )}
+        {!inDock && (
+          <>
+            <div className="gd-go">
+              <span className="gd-cost">{costLine}</span>
+              <span className="sp" />
+              {goButton}
+            </div>
+            {gate && <div className="gd-note">{gate}</div>}
+            <ResultLines lines={lines} />
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+/* SLAB 1 -- SOURCE (Frontend Gallery.dc.html 1445-1468, getters 2842-2843 slotBox,
+   2866-2871 editRefSlots, 2925-2932 subTabs/refNote). Rendered by the drawer for EVERY
+   Edit sub-tab (the DC does not gate it on `sub`): the 'SOURCE' label, the Edit / Fixer /
+   Enhance sub-tab strip INSIDE the slab, the refNote line, the slot row, and the
+   dropped-references note.
+
+   The DC's editRefs is ONE flat list -- index 0 is the picture being edited, the rest
+   are references -- and its slot rules follow from that: one empty slot at a time
+   (caption 'pick' until there is a source, '+ ref' after), the first pick becomes the
+   source, further picks become references, you cannot hold references without a
+   source, and clicking a filled slot removes it (removing the source promotes the next
+   reference, exactly as filtering index 0 out of the DC's list does) and clears the
+   dropped note. Here that list is the build's {source, refs} pair, read the same way.
+
+   REAL-DATA DIVERGENCE (documented, checklist region 1): the badges read '@image1' /
+   '@image2' … (refTag, editCore.js) rather than the DC's 'source' / '@2' -- these are the
+   literal tags PixAI's instruction syntax refers to, so the slot must show the tag the
+   user will type. Restyled to the DC's badge (8.5px mauve on rgba(5,4,13,.74), radius 3).
+   The DC's filled tint is a demo stand-in for the picture: the real thumbnail fills it. */
+export function SourceSlab({ s, setS, sub, onSub, droppedNote, onDroppedNote }) {
+  const caps = editCaps(s.model);
+  const source = (s.source || "").trim();
+  const used = (source ? 1 : 0) + s.refs.length;
+
+  const pick = async () => {
+    const m = await askPicker({ type: "image" });
+    if (!m || !m.media_id) return;
+    setS((old) => {
+      const has = !!(old.source || "").trim();
+      if (!has) return { ...old, source: m.media_id };
+      if (1 + old.refs.length >= editCaps(old.model).max_refs) return old;
+      return { ...old, refs: old.refs.concat([{ media_id: m.media_id, thumb: m.thumb }]) };
+    });
+  };
+  const removeSource = () => {
+    setS((old) => {
+      const [first, ...rest] = old.refs;
+      return { ...old, source: first ? first.media_id : "", refs: rest };
+    });
+    if (onDroppedNote) onDroppedNote("");
+  };
+  const removeRef = (i) => {
+    setS((old) => ({ ...old, refs: old.refs.filter((_, k) => k !== i) }));
+    if (onDroppedNote) onDroppedNote("");
+  };
+
+  return (
+    <div className="mgdock-slab" style={{ animationDelay: "0ms" }}>
+      <div className="mgdock-lbl">SOURCE</div>
+      <div className="mgdock-subtabs" role="tablist">
+        {/* DC 2925-2929: labels + titles 'Edit' / 'Fixer' / 'Enhance'; keys per DC 1917 */}
+        {[["edit", "Edit"], ["fixer", "Fixer"], ["enhance", "Enhance"]].map(([k, l]) => (
+          <button key={k} type="button" role="tab" aria-selected={sub === k} title={l}
+            className={"mgdock-seg" + (sub === k ? " on" : "")}
+            onClick={() => onSub(k)}>{l}</button>
+        ))}
+      </div>
+      <div className="mgdock-refnote">{used} / {caps.max_refs} · the picture being edited counts as one</div>
+      <div className="mgdock-srcslots">
+        {source ? (
+          <button type="button" className="mgdock-srcslot filled" title="The picture being edited"
+            onClick={removeSource}>
+            <img src={"/thumbs/" + source + ".jpg"} alt="" />
+            <span className="tag">@image1</span>
+          </button>
+        ) : null}
+        {s.refs.map((r, i) => (
+          <button type="button" className="mgdock-srcslot filled" key={r.media_id + i}
+            title={"Reference " + (i + 2)} onClick={() => removeRef(i)}>
+            <img src={r.thumb} alt="" />
+            <span className="tag">{refTag(i)}</span>
+          </button>
+        ))}
+        {used < caps.max_refs && (
+          <button type="button" className="mgdock-srcslot" title="Pick from your gallery" onClick={pick}>
+            <span className="cap">{used ? "+ ref" : "pick"}</span>
+          </button>
+        )}
+      </div>
+      {droppedNote ? <div className="mgdock-editnote">{droppedNote}</div> : null}
     </div>
   );
 }
