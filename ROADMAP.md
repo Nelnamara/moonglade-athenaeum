@@ -15,7 +15,11 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Now — active
 
-*(the current active thread is internal design work — see Next for what's queued)*
+- **↺ Remix for videos** — decided and scoped (see *Next*); the next build. Its one-line prerequisite
+  (a finished video in the runs strip is clickable and lands on the Image tab) goes with it.
+- Everything else queued is in *Next*. **Recently shipped is not listed here** — the Generate dock's
+  design pass and its catalog-backed 7-day **History** ([#13](https://github.com/Nelnamara/moonglade-athenaeum/issues/13))
+  landed on master and moved to `CHANGELOG.md` under *Unreleased*, per the rule at the top of this file.
 
 ---
 
@@ -56,7 +60,11 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   An old rule said never show progress because PixAI exposes none — that's wrong: the site shows
   graphical progress. Worth probing what's actually available and surfacing it honestly. The one
   hard constraint that stands: never *fabricate* progress, and never let a queue-wait estimate
-  read as a render ETA.
+  read as a render ETA. **Probe update (2026-08-16):** the site calls `/v2/task/wait-time` on the
+  generate surface — that is a **queue-wait** figure, i.e. exactly the thing the constraint above
+  says must never be dressed as render progress. It may still be worth showing *as what it is*
+  ("about N minutes before this starts"). The dock's running tiles ship the honest treatment in the
+  meantime: mascot + indeterminate shimmer, no percentage.
 
 - **Confirm the live mirror really self-heals**
   The mirror is supposed to recover its own gaps automatically after a drop, stale socket or
