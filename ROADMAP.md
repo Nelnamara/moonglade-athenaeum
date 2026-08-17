@@ -21,7 +21,19 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Next — scoped, not started
 
-- **Stack by batch (gallery grid)**
+- **↺ Remix for videos** *(decided; scoped 2026-08-17)*
+  Image Remix loads a picture's full recipe back into the composer; videos have no equivalent, and
+  the Remix button is hidden on a video everywhere it appears. Video Details gets a true ↺ Remix —
+  engine, duration, shot mode, camera, audio, prompt and the reference frames back into the Video
+  tab — and the dock's History video tiles (shipped look-only for this reason) become clickable with
+  it. **Two things the build has to face:** most of what a video remix needs is *not* in the catalog
+  (mode, camera, audio, channel and every reference live only in the task record — measured: of 34
+  video rows in a real library, only 7 carry even the engine and lineage columns, because the
+  capture path reads the single-image shape and most shots are multi-reference), so it needs a
+  video-side task-recipe read; and whatever can't be recovered has to be *said*, the way the image
+  path's amber "partial recipe" chip already does. **Related defect, fixable on its own:** a finished
+  **video** in the runs strip is clickable today and routes into the *image* recipe path, landing the
+  video's prompt on the Image tab — one guard fixes that ahead of the feature.
   Collapse the grid into per-batch/per-task stacks instead of one flat wall. Related surfaces exist
   but don't cover it: a batch-filter drill-down and the Image Details lineage-siblings section. The
   grid-stacking itself is unbuilt.
