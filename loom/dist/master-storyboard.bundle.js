@@ -2097,7 +2097,24 @@ ${"=".repeat(48)}
       main = note || (props.hint || "").trim() || DEFAULT_HINT;
     }
     const text = main + (sub ? " \xB7 " + sub.text : "");
-    return { state, warn, compact, short, main, sub, title, val, lab, tip, dot, text, d };
+    const stack = !!props.stack;
+    let line = "";
+    if (stack) {
+      const parts = [];
+      const countN = cardCount(props.count);
+      if (state === "free") {
+        const card = d.card_name || (props.cardLabel || "").trim() || "a free card";
+        parts.push(/\bcard\b/i.test(card) ? card : card + " card");
+        if (countN != null && countN > 1) parts.push(fmt2(countN) + " images");
+        if (sub) parts.push(sub.text);
+      } else if (state === "paid" && countN != null && countN > 1) {
+        parts.push(fmt2(countN) + " images");
+      }
+      const balanceN = props.balance != null && props.balance !== "" && isFinite(Number(props.balance)) ? Number(props.balance) : null;
+      if (balanceN != null) parts.push(fmt2(balanceN) + " credits");
+      line = parts.join(" \xB7 ");
+    }
+    return { state, warn, compact, stack, short, main, sub, title, val, lab, tip, dot, text, line, d };
   }
   function detailOf(m) {
     const d = m.d || {};
@@ -2116,7 +2133,7 @@ ${"=".repeat(48)}
   }
   var IDLE = { state: "idle", note: "", msg: "", raw: null };
   var CostBadge = forwardRef(function CostBadge2(props, ref) {
-    const { hint, warn, compact, cardLabel, onCost, id, className, style } = props;
+    const { hint, warn, compact, stack, count, balance, cardLabel, onCost, id, className, style } = props;
     const [view, setView] = useState(IDLE);
     const viewRef = useRef(view);
     const propsRef = useRef(props);
@@ -2166,7 +2183,7 @@ ${"=".repeat(48)}
         propsRef.current.onCost(detailOf(build(viewRef.current, propsRef.current)));
       }
     }, [view]);
-    const m = build(view, { hint, warn, compact, cardLabel });
+    const m = build(view, { hint, warn, compact, stack, count, balance, cardLabel });
     mRef.current = m;
     const dataWarn = m.state === "paid" && (m.warn || m.short) ? "1" : void 0;
     const dataShort = m.state === "paid" && m.short ? "1" : void 0;
@@ -2176,7 +2193,7 @@ ${"=".repeat(48)}
       "div",
       {
         id,
-        className: "cost-badge" + (m.compact ? " compact" : "") + (className ? " " + className : ""),
+        className: "cost-badge" + (m.compact ? " compact" : "") + (m.stack ? " stack" : "") + (className ? " " + className : ""),
         "data-state": m.state,
         "data-warn": dataWarn,
         "data-short": dataShort,
@@ -2185,11 +2202,26 @@ ${"=".repeat(48)}
         title: nativeTitle,
         style
       },
-      showChip ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-val" }, m.val), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-div" }), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-lab" }, m.lab), m.sub ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub" }, m.sub.text) : null, m.dot ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-dot", "aria-hidden": "true" }, "!") : null) : m.state === "checking" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, m.main, m.sub ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.sub.title }, m.sub.text) : null),
+      showChip ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-val" }, m.val), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-div" }), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-lab" }, m.lab), m.sub ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub" }, m.sub.text) : null, m.dot ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-dot", "aria-hidden": "true" }, "!") : null) : m.stack ? (
+        /* the dock's two-line stack: main line (state colour) over the DC costSubLine; the
+           card-short note keeps its own amber line beneath -- the honesty content of that
+           state is not something a tighter layout gets to hide */
+        /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-main" }, m.state === "checking" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : m.main), m.line ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-line" }, m.line) : null, m.sub && m.short ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.sub.title }, m.sub.text) : null)
+      ) : m.state === "checking" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, m.main, m.sub ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.sub.title }, m.sub.text) : null),
       m.compact && m.tip ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-tip", "aria-hidden": "true" }, m.tip) : null
     );
   });
   var CostBadge_default = CostBadge;
+
+  // scripts/react-dom-global-shim.js
+  var ReactDOM = window.ReactDOM;
+  var createPortal = ReactDOM.createPortal;
+  var flushSync = ReactDOM.flushSync;
+  var createRoot = ReactDOM.createRoot;
+  var hydrateRoot = ReactDOM.hydrateRoot;
+  var render = ReactDOM.render;
+  var unmountComponentAtNode = ReactDOM.unmountComponentAtNode;
+  var findDOMNode = ReactDOM.findDOMNode;
 
   // ../gallery/src/gen/videoDrawerCore.js
   var MODELS = [
@@ -2359,7 +2391,8 @@ ${"=".repeat(48)}
   // ../gallery/src/components/VideoDrawer.jsx
   var lineSeq = 0;
   var VideoDrawer = forwardRef(function VideoDrawer2(props, ref) {
-    const { loomCtx, style, className } = props;
+    const { loomCtx, style, className, dock } = props;
+    const inDock = !!dock;
     const st = useRef({
       mode: "i2v",
       slots: [null],
@@ -2831,6 +2864,10 @@ ${"=".repeat(48)}
       st.current.hostBusy = !!isBusy;
       rerender();
     };
+    const insertText = (t) => {
+      const cur = promptText();
+      promptSet((cur ? cur.replace(/,\s*$/, "") + ", " : "") + String(t || ""));
+    };
     useImperativeHandle(ref, () => {
       const node = rootRef.current;
       if (node && !node._mgWired) {
@@ -2840,6 +2877,8 @@ ${"=".repeat(48)}
         node.flushPromptEdit = flushPromptEdit;
         node.setBusy = setBusy;
         node.payload = payload;
+        node.insertText = insertText;
+        node.promptText = promptText;
         Object.defineProperty(node, "mode", { configurable: true, get: () => st.current.mode });
       }
       return node;
@@ -2901,6 +2940,56 @@ ${"=".repeat(48)}
     });
     let vidN = 0;
     const vidArr = s.vidSlots.length ? s.vidSlots : [null];
+    const promptField = /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        ref: ceRef,
+        className: "mgd-ce" + (inDock ? " mgdock-prompt-ce" : ""),
+        contentEditable: true,
+        suppressContentEditableWarning: true,
+        "data-placeholder": MODE_PH[s.mode],
+        onInput: onCeInput,
+        onBlur: onCeBlur
+      }
+    );
+    const negativeField = /* @__PURE__ */ react_global_shim_default.createElement(
+      "textarea",
+      {
+        className: inDock ? "mgdock-neg" : "mgd-neg",
+        rows: inDock ? 1 : void 0,
+        placeholder: "blurry, extra fingers, watermark",
+        value: s.negative,
+        onChange: (e) => {
+          st.current.negative = e.target.value;
+          rerender();
+          debCost();
+        }
+      }
+    );
+    const costLine = /* @__PURE__ */ react_global_shim_default.createElement(
+      CostBadge_default,
+      {
+        ref: costRef,
+        className: "mgd-cost",
+        warn,
+        cardLabel: "a video card",
+        hint: "Pick a source image to see the cost.",
+        stack: inDock || void 0,
+        balance: inDock ? dock.balance : void 0
+      }
+    );
+    const goButton = inDock ? /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        className: "mgdock-gen" + (canGo ? "" : " off"),
+        disabled: !canGo,
+        onClick: doGenerate,
+        title: s.rendering ? "Rendering\u2026" : canGo ? "Submit \u2014 this spends credits or a card" : "Waiting for the cost to settle for these settings"
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("span", null, s.rendering ? "Rendering\u2026" : "\u2726 Generate video")
+    ) : /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-go", disabled: !canGo, onClick: doGenerate }, s.rendering ? "Rendering\u2026" : "Generate video");
+    const topRow = inDock ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-modelchip static", title: "Video engine \u2014 set in the video settings" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-chipph" }), /* @__PURE__ */ react_global_shim_default.createElement("span", null, chosenModel ? chosenModel.label : s.model)), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-frames" }, (SEG.find(([v]) => v === s.mode) || ["", s.mode])[1], " \xB7 ", s.duration, "s")) : null;
     return /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: setRoot, className: "gen-drawer" + (className ? " " + className : ""), style, "data-loom-ctx": loomCtx ? "" : void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "tablist" }, SEG.map(([v, lbl]) => allowedModes.indexOf(v) === -1 ? null : /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", className: s.mode === v ? "on" : "", onClick: () => userSetMode(v) }, lbl))), s.modeNote ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-modenote" }, s.modeNote) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl mgd-slots-lbl" }, MODE_LBL[s.mode]), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slots mgd-imgslots" }, primSlots, s.mode === "r2v" && primArr.length < 6 ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-slot-add", onClick: () => {
       st.current.imgSlots.push(null);
       rerender();
@@ -2934,30 +3023,7 @@ ${"=".repeat(48)}
           if (f) uploadAudio(f);
         }
       }
-    ), /* @__PURE__ */ react_global_shim_default.createElement(
-      "div",
-      {
-        ref: ceRef,
-        className: "mgd-ce",
-        contentEditable: true,
-        suppressContentEditableWarning: true,
-        "data-placeholder": MODE_PH[s.mode],
-        onInput: onCeInput,
-        onBlur: onCeBlur
-      }
-    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Negative prompt"), /* @__PURE__ */ react_global_shim_default.createElement(
-      "textarea",
-      {
-        className: "mgd-neg",
-        placeholder: "blurry, extra fingers, watermark",
-        value: s.negative,
-        onChange: (e) => {
-          st.current.negative = e.target.value;
-          rerender();
-          debCost();
-        }
-      }
-    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-row" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "grow" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Model"), /* @__PURE__ */ react_global_shim_default.createElement(
+    ), inDock ? dock.promptEl ? createPortal(promptField, dock.promptEl) : null : promptField, inDock ? dock.negativeEl ? createPortal(negativeField, dock.negativeEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Negative prompt"), negativeField), inDock && dock.topEl ? createPortal(topRow, dock.topEl) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-row" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "grow" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Model"), /* @__PURE__ */ react_global_shim_default.createElement(
       "select",
       {
         className: "mgd-sel mgd-model",
@@ -3024,16 +3090,7 @@ ${"=".repeat(48)}
       /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "chinese" }, "Chinese"),
       /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "korean" }, "Korean"),
       /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "none" }, "SE only (no dialogue)")
-    )) : null, /* @__PURE__ */ react_global_shim_default.createElement(
-      CostBadge_default,
-      {
-        ref: costRef,
-        className: "mgd-cost",
-        warn,
-        cardLabel: "a video card",
-        hint: "Pick a source image to see the cost."
-      }
-    ), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-go", disabled: !canGo, onClick: doGenerate }, s.rendering ? "Rendering\u2026" : "Generate video"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-result" + (results.length ? " has" : "") }, results.map((l) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: l.id, className: "mgd-result-line" }, l.kind === "result" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { style: { color: "var(--emerald,#4fc99a)", fontSize: 12, marginBottom: 6 } }, "\u2713 Rendered \u2014 ", l.cost === 0 ? "free (card used)" : Number(l.cost || 0).toLocaleString() + " credits", ". Added to your gallery."), (l.mediaIds || []).map((mid) => /* @__PURE__ */ react_global_shim_default.createElement(
+    )) : null, inDock ? dock.goEl ? createPortal(/* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), dock.goEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-result" + (results.length ? " has" : "") }, results.map((l) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: l.id, className: "mgd-result-line" }, l.kind === "result" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { style: { color: "var(--emerald,#4fc99a)", fontSize: 12, marginBottom: 6 } }, "\u2713 Rendered \u2014 ", l.cost === 0 ? "free (card used)" : Number(l.cost || 0).toLocaleString() + " credits", ". Added to your gallery."), (l.mediaIds || []).map((mid) => /* @__PURE__ */ react_global_shim_default.createElement(
       "a",
       {
         key: mid,
@@ -3620,16 +3677,6 @@ ${"=".repeat(48)}
       }
     };
   }
-
-  // scripts/react-dom-global-shim.js
-  var ReactDOM = window.ReactDOM;
-  var createPortal = ReactDOM.createPortal;
-  var flushSync = ReactDOM.flushSync;
-  var createRoot = ReactDOM.createRoot;
-  var hydrateRoot = ReactDOM.hydrateRoot;
-  var render = ReactDOM.render;
-  var unmountComponentAtNode = ReactDOM.unmountComponentAtNode;
-  var findDOMNode = ReactDOM.findDOMNode;
 
   // ../gallery/src/notify/ToastHost.jsx
   function ToastHost() {

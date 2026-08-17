@@ -1,6 +1,7 @@
 import React, {
   forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState,
 } from "react";
+import { createPortal } from "react-dom";
 import CostBadge from "./CostBadge.jsx";
 import {
   MODELS, MODEL_VMODES, MODEL_MAXDUR, MODE_LBL, MODE_PH, CHANNEL_CAP,
@@ -45,15 +46,30 @@ import "../styles/gen-drawer.css";
      (the .mgd-closing exit), and the poll checks a "connected" ref, so an in-flight ~210k-credit
      video render is never orphaned by a view closing.
 
-   Only prop: `loomCtx` (hide the drawer's own Camera/quality -- the Loom owns equivalents). All
-   host communication is through the ref's methods and the bubbling DOM events above. */
+   Props: `loomCtx` (hide the drawer's own Camera/quality -- the Loom owns equivalents) and
+   `dock` (below). All other host communication is through the ref's methods and the bubbling
+   DOM events above.
+
+   DOCK MODE (`dock` prop, Generate dock only -- 2026-08-16 fidelity pass, Frontend
+   Gallery.dc.html 1541-1591). The DC draws ONE composer footer at the dock level -- prompt
+   box, NEGATIVE row (while expanded), cost stack + Generate -- shared by every tab. Rather
+   than a second submit path in the dock, THIS component keeps owning its prompt, negative,
+   CostBadge and Generate button and simply RENDERS them into the dock's footer slots via React
+   portals: `dock = { topEl, promptEl, negativeEl, goEl, balance }`, each *El a DOM node the
+   dock owns (null until mounted -- nothing renders for that slot until it exists; in dock
+   mode the pieces never render inline, so the contenteditable prompt mounts exactly once and
+   its imperative content survives tab switches). The Generate button in the footer is the
+   SAME button: same `canGo` (price-identity gate), same doGenerate, same "Rendering…" latch;
+   the CostBadge in the footer is the SAME instance costRef drives (debCost/costNow untouched).
+   Without `dock` (the Loom, mobile Video mode) everything renders inline exactly as before. */
 
 let lineSeq = 0;
 
 const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // `style`/`className` pass through to the root so a host can position/hide the node exactly as
   // it did the custom element (the Loom mounts it once and toggles style.display by tab).
-  const { loomCtx, style, className } = props;
+  const { loomCtx, style, className, dock } = props;
+  const inDock = !!dock;
 
   // ---- mutable form state (the vanilla's this._* fields), one ref + a forceUpdate ----------
   const st = useRef({
@@ -550,6 +566,13 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     st.current.hostBusy = !!isBusy;
     rerender();
   };
+  // Dock ★ Snippets -> this prompt: append a snippet after the existing text (the dock's own
+  // comma rule for its image prompt), through promptSet so @image chips re-chipify and the
+  // usual (short-circuiting) re-price runs. Prompt text never prices, so no verdict moves.
+  const insertText = (t) => {
+    const cur = promptText();
+    promptSet((cur ? cur.replace(/,\s*$/, "") + ", " : "") + String(t || ""));
+  };
 
   // The vanilla was a CUSTOM ELEMENT: hosts held the DOM node itself and called node.prefill(),
   // node.setRefs(), read node.mode, and node.addEventListener('mg-*'). To stay a drop-in, the ref
@@ -566,6 +589,8 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       node.flushPromptEdit = flushPromptEdit;
       node.setBusy = setBusy;
       node.payload = payload;
+      node.insertText = insertText;
+      node.promptText = promptText;
       Object.defineProperty(node, "mode", { configurable: true, get: () => st.current.mode });
     }
     return node;
@@ -629,6 +654,49 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   let vidN = 0;
   const vidArr = (s.vidSlots.length ? s.vidSlots : [null]);
 
+  // ---- the pieces that live in the dock's footer in dock mode (inline otherwise) ----------
+  // ONE definition each; only WHERE they mount differs. The prompt is the same contenteditable
+  // (ceRef, chips, MODE_PH placeholder), the negative the same field, the badge the same
+  // costRef instance, the button the same canGo/doGenerate. Dock-mode classes take the DC's
+  // composer/footer skin (dock.css); the label is the DC's genLabel for this tab (3611).
+  const promptField = (
+    <div ref={ceRef} className={"mgd-ce" + (inDock ? " mgdock-prompt-ce" : "")} contentEditable suppressContentEditableWarning
+      data-placeholder={MODE_PH[s.mode]} onInput={onCeInput} onBlur={onCeBlur} />
+  );
+  const negativeField = (
+    <textarea className={inDock ? "mgdock-neg" : "mgd-neg"} rows={inDock ? 1 : undefined}
+      placeholder="blurry, extra fingers, watermark" value={s.negative}
+      onChange={(e) => { st.current.negative = e.target.value; rerender(); debCost(); }} />
+  );
+  const costLine = (
+    <CostBadge ref={costRef} className="mgd-cost" warn={warn} cardLabel="a video card"
+      hint="Pick a source image to see the cost."
+      stack={inDock || undefined} balance={inDock ? dock.balance : undefined} />
+  );
+  const goButton = inDock ? (
+    <button type="button" className={"mgdock-gen" + (canGo ? "" : " off")} disabled={!canGo} onClick={doGenerate}
+      title={s.rendering ? "Rendering…" : canGo ? "Submit — this spends credits or a card"
+        : "Waiting for the cost to settle for these settings"}>
+      <span>{s.rendering ? "Rendering…" : "✦ Generate video"}</span>
+    </button>
+  ) : (
+    <button type="button" className="mgd-go" disabled={!canGo} onClick={doGenerate}>
+      {s.rendering ? "Rendering…" : "Generate video"}
+    </button>
+  );
+  // The composer's top row on the Video tab (DC 1557-1562: pip · summary): the engine as the
+  // pip, shot mode · duration as the summary. Read-only here -- the ENGINE controls stay in
+  // the drawer body.
+  const topRow = inDock ? (
+    <>
+      <span className="mgdock-modelchip static" title="Video engine — set in the video settings">
+        <span className="mgdock-chipph" />
+        <span>{chosenModel ? chosenModel.label : s.model}</span>
+      </span>
+      <span className="mgdock-frames">{(SEG.find(([v]) => v === s.mode) || ["", s.mode])[1]} · {s.duration}s</span>
+    </>
+  ) : null;
+
   return (
     <div ref={setRoot} className={"gen-drawer" + (className ? " " + className : "")} style={style} data-loom-ctx={loomCtx ? "" : undefined}>
       <div className="mgd-seg" role="tablist">
@@ -690,13 +758,17 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       <input ref={audFileRef} type="file" className="mgd-audiofile" accept="audio/*" style={{ display: "none" }}
         onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadAudio(f); }} />
 
-      {/* contenteditable prompt -- imperative content, React never touches its children */}
-      <div ref={ceRef} className="mgd-ce" contentEditable suppressContentEditableWarning
-        data-placeholder={MODE_PH[s.mode]} onInput={onCeInput} onBlur={onCeBlur} />
+      {/* contenteditable prompt -- imperative content, React never touches its children.
+          Dock mode: portaled into the dock composer's prompt slot (see promptField). */}
+      {inDock ? (dock.promptEl ? createPortal(promptField, dock.promptEl) : null) : promptField}
 
-      <div className="mgd-lbl">Negative prompt</div>
-      <textarea className="mgd-neg" placeholder="blurry, extra fingers, watermark" value={s.negative}
-        onChange={(e) => { st.current.negative = e.target.value; rerender(); debCost(); }} />
+      {inDock ? (dock.negativeEl ? createPortal(negativeField, dock.negativeEl) : null) : (
+        <>
+          <div className="mgd-lbl">Negative prompt</div>
+          {negativeField}
+        </>
+      )}
+      {inDock && dock.topEl ? createPortal(topRow, dock.topEl) : null}
 
       <div className="mgd-row">
         <div className="grow">
@@ -772,12 +844,14 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
         </div>
       ) : null}
 
-      <CostBadge ref={costRef} className="mgd-cost" warn={warn} cardLabel="a video card"
-        hint="Pick a source image to see the cost." />
-
-      <button type="button" className="mgd-go" disabled={!canGo} onClick={doGenerate}>
-        {s.rendering ? "Rendering…" : "Generate video"}
-      </button>
+      {/* cost + Generate: the dock footer's right column in dock mode (one badge, one button,
+          one gate -- see the DOCK MODE note above); inline for every other host. */}
+      {inDock ? (dock.goEl ? createPortal(<>{costLine}{goButton}</>, dock.goEl) : null) : (
+        <>
+          {costLine}
+          {goButton}
+        </>
+      )}
 
       <div className={"mgd-result" + (results.length ? " has" : "")}>
         {results.map((l) => (
