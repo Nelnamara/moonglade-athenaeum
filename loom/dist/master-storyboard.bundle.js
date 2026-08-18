@@ -2444,15 +2444,6 @@ ${"=".repeat(48)}
 
   // ../gallery/src/components/VideoDrawer.jsx
   var lineSeq = 0;
-  var ENGINE_TINTS = [
-    "linear-gradient(150deg, #33236d 0%, #1b1733 100%)",
-    "linear-gradient(150deg, #3a3460 0%, #17142b 100%)",
-    "linear-gradient(150deg, #643aac 0%, #241f5b 100%)",
-    "linear-gradient(150deg, #2a4a58 0%, #171f38 100%)",
-    "linear-gradient(150deg, #4a3a6e 0%, #1f1a36 100%)",
-    "linear-gradient(150deg, #3a2b63 0%, #191338 100%)",
-    "linear-gradient(150deg, #5a3a72 0%, #221a3e 100%)"
-  ];
   var VideoDrawer = forwardRef(function VideoDrawer2(props, ref) {
     const { loomCtx, style, className, dock } = props;
     const inDock = !!dock;
@@ -2492,8 +2483,6 @@ ${"=".repeat(48)}
     const [results, setResults] = useState([]);
     const [warn, setWarnState] = useState("");
     const [reuse, setReuseChip] = useState(null);
-    const [pal, setPal] = useState(null);
-    const [palQuery, setPalQuery] = useState("");
     const setWarn = useCallback((w) => setWarnState(w), []);
     const ceRef = useRef(null);
     const previewRef = useRef(null);
@@ -2741,29 +2730,11 @@ ${"=".repeat(48)}
         rerender();
       });
     };
-    const openPalette = () => {
-      const r = rootRef.current ? rootRef.current.getBoundingClientRect() : null;
-      const vh = window.innerHeight || 800;
-      let bottom = r ? Math.round(vh - r.top + 12) : 250;
-      bottom = Math.max(14, Math.min(bottom, Math.round(vh * 0.54) - 14));
-      setPalQuery("");
-      setPal({ bottom });
+    const pickVideoModel = (v) => {
+      st.current.model = v;
+      applyModelGating2(true);
+      debCost();
     };
-    const closePalette = useCallback(() => {
-      setPal(null);
-      setPalQuery("");
-    }, []);
-    useEffect(() => {
-      if (!pal) return void 0;
-      const onKey = (e) => {
-        if (e.key === "Escape") {
-          e.stopPropagation();
-          closePalette();
-        }
-      };
-      window.addEventListener("keydown", onKey, true);
-      return () => window.removeEventListener("keydown", onKey, true);
-    }, [pal, closePalette]);
     const payload = () => buildPayload(st.current, promptText());
     const flfMissingStart2 = () => flfMissingStart(st.current);
     const debCost = (force2) => {
@@ -3055,9 +3026,6 @@ ${"=".repeat(48)}
         title: s.slots[1] ? "End frame" : "Pick from your gallery"
       })] });
     }
-    const palQ = palQuery.trim().toLowerCase();
-    const palItems = MODELS.filter((m) => !palQ || m.label.toLowerCase().indexOf(palQ) >= 0);
-    const engineIdx = Math.max(0, MODELS.findIndex((m) => m.value === s.model));
     const promptField = /* @__PURE__ */ react_global_shim_default.createElement(
       "div",
       {
@@ -3121,40 +3089,6 @@ ${"=".repeat(48)}
       " ",
       /* @__PURE__ */ react_global_shim_default.createElement("span", null, "\xD7")
     )) : null;
-    const layerHost = rootRef.current && rootRef.current.closest && rootRef.current.closest(".mgx-dock-host") || document.body;
-    const palette = pal ? createPortal(
-      /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palscrim", onClick: closePalette }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-pal", style: { bottom: pal.bottom }, role: "dialog", "aria-label": "Video engine" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palhd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-paltitle" }, "Video engine"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palsub" }, "Shot type follows the engine \u2014 unsupported modes switch on pick"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palsp" }), /* @__PURE__ */ react_global_shim_default.createElement(
-        "input",
-        {
-          className: "mgd-palq",
-          value: palQuery,
-          placeholder: "Search",
-          autoFocus: true,
-          onChange: (e) => setPalQuery(e.target.value)
-        }
-      ), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-palx", onClick: closePalette, title: "Close" }, "\xD7")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palgrid" }, palItems.map((m) => {
-        const i = MODELS.indexOf(m);
-        const modes = (MODEL_VMODES[m.value] || ["i2v", "flf", "r2v"]).map((x) => SHOT_LABEL[x]).join(" \xB7 ");
-        return /* @__PURE__ */ react_global_shim_default.createElement(
-          "button",
-          {
-            key: m.value,
-            type: "button",
-            className: "mgd-palitem" + (m.value === s.model ? " on" : ""),
-            title: m.caps.join(" \xB7 "),
-            onClick: () => {
-              st.current.model = m.value;
-              applyModelGating2(true);
-              debCost();
-              closePalette();
-            }
-          },
-          /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palcover", style: { background: ENGINE_TINTS[i % ENGINE_TINTS.length] } }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-paloff" }, "Official")),
-          /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palbody" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palname" }, m.label), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palmeta" }, /* @__PURE__ */ react_global_shim_default.createElement("span", null, modes), /* @__PURE__ */ react_global_shim_default.createElement("span", null, MODEL_MAXDUR[m.value] || 10, "s max")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-palcost" }, MODEL_CARD[m.value] === false ? "no card" : "card"))
-        );
-      })))),
-      layerHost
-    ) : null;
     return /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: setRoot, className: "gen-drawer" + (inDock ? " mgd-dock" : "") + (inDock && dock.expanded === false ? " mgd-collapsed" : "") + (className ? " " + className : ""), style, "data-loom-ctx": loomCtx ? "" : void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slabwrap" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slabs" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "0ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "SHOT MODE"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "tablist" }, shotModes.map((sm) => /* @__PURE__ */ react_global_shim_default.createElement(
       "button",
       {
@@ -3197,33 +3131,27 @@ ${"=".repeat(48)}
           if (f) uploadAudio(f);
         }
       }
-    )), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "60ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "ENGINE"), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-engine", onClick: openPalette, title: "Browse the video engines" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-engthumb", style: { background: ENGINE_TINTS[engineIdx % ENGINE_TINTS.length] } }), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-engbody" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-engname" }, chosenModel ? chosenModel.label : s.model), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-engmeta" }, modelMeta(s.model))), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-engbrowse" }, "browse")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-caps mgd-modelcaps" }, modelCaps(s.model).map(([t, kind]) => /* @__PURE__ */ react_global_shim_default.createElement("span", { key: t, className: "mgd-cap" + (kind ? " " + kind : "") }, t))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-durhd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "DURATION"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-durval" }, s.duration, "s")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-stops mgd-dur", role: "radiogroup", "aria-label": "Duration" }, [5, 6, 10, 15].map((d) => {
-      const ok = d <= maxDur;
-      return /* @__PURE__ */ react_global_shim_default.createElement(
-        "button",
-        {
-          key: d,
-          type: "button",
-          role: "radio",
-          "aria-checked": d === s.duration,
-          "aria-disabled": !ok,
-          className: "mgd-stop" + (d === s.duration ? " on" : "") + (ok ? "" : " off"),
-          title: d + " seconds" + (ok ? "" : " \u2014 not on this engine"),
-          onClick: () => {
-            if (!ok || d === st.current.duration) return;
-            st.current.duration = d;
-            rerender();
-            debCost();
-            emit3("mg-duration-commit", { duration: d });
-          }
-        },
-        d
-      );
-    })), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-cam-wrap" + (isR2v ? " hid" : ""), "aria-hidden": isR2v || void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "CAMERA"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-cam", value: s.camera, tabIndex: isR2v ? -1 : void 0, onChange: (e) => {
+    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-cam-wrap" + (isR2v ? " hid" : ""), "aria-hidden": isR2v || void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "CAMERA"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-cam", value: s.camera, tabIndex: isR2v ? -1 : void 0, onChange: (e) => {
       st.current.camera = e.target.value;
       rerender();
       debCost();
-    } }, CAMERA_OPTS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "120ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "MODE & CHANNEL"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg mgd-quality-wrap", role: "radiogroup", "aria-label": "Mode" }, [["basic", "Basic"], ["professional", "Professional"]].map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", role: "radio", "aria-checked": s.quality === v, className: "mgd-quality" + (s.quality === v ? " on" : ""), onClick: () => {
+    } }, CAMERA_OPTS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "60ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enghd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "ENGINE"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-engcur" }, chosenModel ? chosenModel.label : s.model)), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enggrid", role: "radiogroup", "aria-label": "Video engine" }, MODELS.map((m) => {
+      const sel = m.value === s.model;
+      const modes = (MODEL_VMODES[m.value] || ["i2v", "flf", "r2v"]).map((x) => SHOT_LABEL[x]).join(" / ");
+      return /* @__PURE__ */ react_global_shim_default.createElement(
+        "div",
+        {
+          key: m.value,
+          role: "radio",
+          "aria-checked": sel,
+          className: "mgd-engchip" + (sel ? " sel" : ""),
+          title: m.label + " \u2014 " + modes + " \xB7 " + (MODEL_MAXDUR[m.value] || 10) + "s max \xB7 " + (MODEL_CARD[m.value] === false ? "no card" : "card"),
+          onClick: () => pickVideoModel(m.value)
+        },
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-engdot" }),
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-englabel" }, m.label)
+      );
+    })), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-engmeta" }, /* @__PURE__ */ react_global_shim_default.createElement("span", null, modelMeta(s.model)), modelCaps(s.model).map(([t, kind]) => /* @__PURE__ */ react_global_shim_default.createElement("span", { key: t, className: "mgd-cap" + (kind ? " " + kind : "") }, t)))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "120ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "MODE & CHANNEL"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg mgd-quality-wrap", role: "radiogroup", "aria-label": "Mode" }, [["basic", "Basic"], ["professional", "Professional"]].map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", role: "radio", "aria-checked": s.quality === v, className: "mgd-quality" + (s.quality === v ? " on" : ""), onClick: () => {
       if (st.current.quality === v) return;
       st.current.quality = v;
       rerender();
@@ -3272,7 +3200,29 @@ ${"=".repeat(48)}
         }
       },
       AUDIO_LANGS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))
-    ) : null))), inDock ? dock.promptEl ? createPortal(promptField, dock.promptEl) : null : promptField, inDock ? dock.negativeEl ? createPortal(negativeField, dock.negativeEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Negative prompt"), negativeField), inDock && dock.topEl ? createPortal(topRow, dock.topEl) : null, inDock ? dock.goEl ? createPortal(/* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), dock.goEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-result" + (results.length ? " has" : "") }, results.map((l) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: l.id, className: "mgd-result-line" }, l.kind === "result" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { style: { color: "var(--emerald,#4fc99a)", fontSize: 12, marginBottom: 6 } }, "\u2713 Rendered \u2014 ", l.cost === 0 ? "free (card used)" : Number(l.cost || 0).toLocaleString() + " credits", ". Added to your gallery."), (l.mediaIds || []).map((mid) => /* @__PURE__ */ react_global_shim_default.createElement(
+    ) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-durhd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "DURATION"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-durval" }, s.duration, "s")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-stops mgd-dur", role: "radiogroup", "aria-label": "Duration" }, [5, 6, 10, 15].map((d) => {
+      const ok = d <= maxDur;
+      return /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          key: d,
+          type: "button",
+          role: "radio",
+          "aria-checked": d === s.duration,
+          "aria-disabled": !ok,
+          className: "mgd-stop" + (d === s.duration ? " on" : "") + (ok ? "" : " off"),
+          title: d + " seconds" + (ok ? "" : " \u2014 not on this engine"),
+          onClick: () => {
+            if (!ok || d === st.current.duration) return;
+            st.current.duration = d;
+            rerender();
+            debCost();
+            emit3("mg-duration-commit", { duration: d });
+          }
+        },
+        d
+      );
+    }))))), inDock ? dock.promptEl ? createPortal(promptField, dock.promptEl) : null : promptField, inDock ? dock.negativeEl ? createPortal(negativeField, dock.negativeEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Negative prompt"), negativeField), inDock && dock.topEl ? createPortal(topRow, dock.topEl) : null, inDock ? dock.goEl ? createPortal(/* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), dock.goEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-result" + (results.length ? " has" : "") }, results.map((l) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: l.id, className: "mgd-result-line" }, l.kind === "result" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { style: { color: "var(--emerald,#4fc99a)", fontSize: 12, marginBottom: 6 } }, "\u2713 Rendered \u2014 ", l.cost === 0 ? "free (card used)" : Number(l.cost || 0).toLocaleString() + " credits", ". Added to your gallery."), (l.mediaIds || []).map((mid) => /* @__PURE__ */ react_global_shim_default.createElement(
       "a",
       {
         key: mid,
@@ -3284,7 +3234,7 @@ ${"=".repeat(48)}
         }
       },
       /* @__PURE__ */ react_global_shim_default.createElement("img", { src: "/thumbs/" + encodeURIComponent(mid) + ".jpg", alt: "result", loading: "lazy" })
-    ))) : l.kind === "error" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--red,#f38ba8)", fontSize: 12 } }, l.text) : l.kind === "plain" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--subtext,#9a93ab)", fontSize: 12 } }, l.text) : /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: l.amber ? "var(--amber,#f9d38c)" : "var(--subtext,#9a93ab)", fontSize: 12 } }, l.moon ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-moon" }) : null, l.text)))), /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: previewRef, className: "mgd-preview", "aria-hidden": "true" }), palette);
+    ))) : l.kind === "error" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--red,#f38ba8)", fontSize: 12 } }, l.text) : l.kind === "plain" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--subtext,#9a93ab)", fontSize: 12 } }, l.text) : /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: l.amber ? "var(--amber,#f9d38c)" : "var(--subtext,#9a93ab)", fontSize: 12 } }, l.moon ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-moon" }) : null, l.text)))), /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: previewRef, className: "mgd-preview", "aria-hidden": "true" }));
   });
   var VideoDrawer_default = VideoDrawer;
 
