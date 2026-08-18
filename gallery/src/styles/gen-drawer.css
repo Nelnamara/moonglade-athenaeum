@@ -95,39 +95,26 @@
 .gen-drawer .mgd-sw input:focus-visible+.mgd-swtrack{box-shadow:0 0 0 2px rgba(182,146,230,.35);}
 .gen-drawer .mgd-swlab{font-size:11px;color:var(--subtext,#9a93ab);}
 .gen-drawer .mgd-sw input:checked~.mgd-swlab{color:var(--text,#d6d2e2);}
-/* ENGINE card (DC 1380-1387 modelRowStyle 3577 + videoThumbStyle 2901): thumb · name/meta · browse. */
-.gen-drawer .mgd-engine{display:flex;align-items:center;gap:10px;width:100%;box-sizing:border-box;padding:8px 10px;border-radius:11px;cursor:pointer;text-align:left;font-family:inherit;color:inherit;transition:border-color .22s,background .22s;border:1px solid var(--surface1,#3a3460);background:rgba(33,31,58,.5);}
-.gen-drawer .mgd-engine:hover{border-color:rgba(182,146,230,.45);}
-.gen-drawer .mgd-engthumb{flex:none;width:36px;height:36px;border-radius:9px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.07);}
-.gen-drawer .mgd-engbody{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;}
-.gen-drawer .mgd-engname{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.gen-drawer .mgd-engmeta{font-size:9.5px;color:var(--overlay0,#6a6088);}
-.gen-drawer .mgd-engbrowse{flex:none;font-size:9.5px;color:var(--lavender,#b692e6);}
+/* ENGINE chip grid (§45 drift; DC 1433-1451, videoChips 2992-3001): a header (ENGINE label +
+   the selected engine's label, ellipsised) over a 2-column grid of the 7 engine chips, over a
+   meta row (the selected engine's 'Ns max · card/no card' line + its capability chips). Each
+   chip is a radio dot + the wrapping engine name; the selected/unselected accent-vs-surface1
+   look mirrors the DURATION-stops pattern. Replaces the retired model/LoRA flyout's engine card. */
+.gen-drawer .mgd-enghd{display:flex;align-items:baseline;gap:7px;}
+.gen-drawer .mgd-engcur{flex:1 1 auto;min-width:0;font-size:11px;font-weight:600;color:var(--text,#d6d2e2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.gen-drawer .mgd-enggrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.gen-drawer .mgd-engchip{display:flex;align-items:center;gap:7px;min-width:0;padding:7px 9px;border-radius:9px;cursor:pointer;transition:border-color .2s,background .2s;border:1px solid var(--surface1,#3a3460);background:rgba(33,31,58,.5);}
+.gen-drawer .mgd-engchip:hover{border-color:var(--lavender,#b692e6);}
+.gen-drawer .mgd-engchip.sel{border-color:var(--accent,#b692e6);background:rgba(182,146,230,.13);}
+.gen-drawer .mgd-engdot{flex:none;width:12px;height:12px;border-radius:50%;box-sizing:border-box;border:2px solid var(--surface1,#3a3460);background:transparent;transition:border-color .2s,background .2s;}
+.gen-drawer .mgd-engchip.sel .mgd-engdot{border-color:var(--accent,#b692e6);background:var(--accent,#b692e6);}
+.gen-drawer .mgd-englabel{flex:1 1 auto;min-width:0;font-size:11px;font-weight:700;color:var(--text,#d6d2e2);line-height:1.15;}
+.gen-drawer .mgd-engmeta{display:flex;flex-wrap:wrap;align-items:center;gap:5px;font-size:9.5px;color:var(--overlay0,#6a6088);}
 /* Capability chips (DC 1388 row; capStyle 1877-1880 kind tiers: hot=emerald, crown=pink, plain). */
 .gen-drawer .mgd-caps{display:flex;flex-wrap:wrap;gap:4px;}
 .gen-drawer .mgd-cap{font-size:8.5px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;border:1px solid var(--surface1,#3a3460);background:rgba(33,31,58,.6);color:var(--subtext,#9a93ab);}
 .gen-drawer .mgd-cap.hot{border-color:rgba(79,201,154,.45);background:rgba(79,201,154,.14);color:var(--emerald,#4fc99a);}
 .gen-drawer .mgd-cap.crown{border-color:rgba(224,143,214,.45);background:rgba(224,143,214,.14);color:#e08fd6;}
-/* The ENGINE palette (DC 1608-1640; paletteStyle 3701; items 2795-2804), portaled to <body>. */
-.mgd-palscrim{position:fixed;inset:0;z-index:590;background:rgba(5,4,13,.5);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);animation:mgdFade .25s ease both;}
-.mgd-pal{position:fixed;z-index:591;left:0;right:0;margin:0 auto;width:min(720px,calc(100vw - 48px));max-height:46vh;display:flex;flex-direction:column;min-height:0;border-radius:16px;border:1px solid var(--surface1,#3a3460);background:linear-gradient(180deg,rgba(18,14,42,.97) 0%,rgba(10,8,24,.98) 100%);box-shadow:0 34px 96px rgba(0,0,0,.72);overflow:hidden;animation:mgdSlab .42s cubic-bezier(.2,.9,.24,1) both;font:13px/1.4 system-ui,sans-serif;color:var(--text,#d6d2e2);}
-.mgd-palhd{flex:none;display:flex;align-items:center;gap:10px;padding:13px 15px;border-bottom:1px solid var(--surface1,#3a3460);}
-.mgd-paltitle{font-size:12.5px;font-weight:700;}
-.mgd-palsub{font-size:10.5px;color:var(--overlay0,#6a6088);}
-.mgd-palsp{flex:1 1 auto;}
-.mgd-palq{width:165px;box-sizing:border-box;background:rgba(12,10,28,.85);color:var(--text,#d6d2e2);border:1px solid var(--surface1,#3a3460);border-radius:8px;padding:6px 9px;font-size:11.5px;font-family:inherit;transition:border-color .2s;}
-.mgd-palq:focus{border-color:var(--accent,#b692e6);outline:none;}
-.mgd-palx{width:24px;height:24px;display:grid;place-items:center;border-radius:7px;border:1px solid var(--surface1,#3a3460);background:transparent;color:var(--subtext,#9a93ab);font-size:13px;cursor:pointer;padding:0;font-family:inherit;}
-.mgd-palgrid{flex:1 1 auto;overflow:auto;min-height:0;padding:13px 15px 15px;display:grid;grid-template-columns:repeat(auto-fill,minmax(124px,1fr));gap:11px;align-content:start;}
-.mgd-palitem{display:block;padding:0;text-align:left;font-family:inherit;color:inherit;background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);border-radius:11px;overflow:hidden;cursor:pointer;transition:border-color .2s,transform .2s;}
-.mgd-palitem.on{border-color:var(--accent,#b692e6);}
-.mgd-palitem:hover{transform:translateY(-1px);}
-.mgd-palcover{position:relative;aspect-ratio:1/1;}
-.mgd-paloff{position:absolute;top:5px;left:5px;font-size:8.5px;font-weight:600;padding:2px 5px;border-radius:4px;background:rgba(182,146,230,.26);border:1px solid rgba(182,146,230,.5);color:var(--mauve,#c4a6f0);}
-.mgd-palbody{padding:7px 8px 8px;display:flex;flex-direction:column;gap:3px;}
-.mgd-palname{font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.mgd-palmeta{font-size:9.5px;color:var(--subtext,#9a93ab);display:flex;gap:6px;flex-wrap:wrap;}
-.mgd-palcost{font-size:9.5px;color:var(--overlay0,#6a6088);font-variant-numeric:tabular-nums;}
 /* The cost line is the React <CostBadge> (.cost-badge). This drawer has always painted the
    V4.0-full caution RED (not the badge's default amber): the loudest cost warning in the app
    (a 15s V4.0-full clip is ~210,000 credits) must not get quieter as a side effect of the
@@ -149,7 +136,7 @@
 .gen-drawer .mgd-go:disabled{filter:saturate(.6) brightness(.82);cursor:not-allowed;}
 @keyframes mgMetal{0%{background-position:0% 50%;}50%{background-position:100% 50%;}100%{background-position:0% 50%;}}
 @media (max-width:640px){.gen-drawer .mgd-go{border-radius:10px;padding:12px;}}
-@media (prefers-reduced-motion:reduce){.gen-drawer .mgd-slab,.mgd-pal,.mgd-palscrim{animation:none;}}
+@media (prefers-reduced-motion:reduce){.gen-drawer .mgd-slab{animation:none;}}
 .gen-drawer .mgd-result{margin-top:12px;display:none;}
 .gen-drawer .mgd-result.has{display:block;}
 .gen-drawer .mgd-result img{width:100%;border-radius:10px;display:block;margin-bottom:6px;}
