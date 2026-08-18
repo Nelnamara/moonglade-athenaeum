@@ -15,8 +15,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Now — active
 
-- **↺ Remix for videos** — decided and scoped (see *Next*); the next build. Its one-line prerequisite
-  (a finished video in the runs strip is clickable and lands on the Image tab) goes with it.
 - Everything else queued is in *Next*. **Recently shipped is not listed here** — the Generate dock's
   design pass and its catalog-backed 7-day **History** ([#13](https://github.com/Nelnamara/moonglade-athenaeum/issues/13))
   landed on master and moved to `CHANGELOG.md` under *Unreleased*, per the rule at the top of this file.
@@ -25,22 +23,38 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Next — scoped, not started
 
-- **↺ Remix for videos** *(decided; scoped 2026-08-17)*
-  Image Remix loads a picture's full recipe back into the composer; videos have no equivalent, and
-  the Remix button is hidden on a video everywhere it appears. Video Details gets a true ↺ Remix —
-  engine, duration, shot mode, camera, audio, prompt and the reference frames back into the Video
-  tab — and the dock's History video tiles (shipped look-only for this reason) become clickable with
-  it. **Two things the build has to face:** most of what a video remix needs is *not* in the catalog
-  (mode, camera, audio, channel and every reference live only in the task record — measured: of 34
-  video rows in a real library, only 7 carry even the engine and lineage columns, because the
-  capture path reads the single-image shape and most shots are multi-reference), so it needs a
-  video-side task-recipe read; and whatever can't be recovered has to be *said*, the way the image
-  path's amber "partial recipe" chip already does. **Related defect, fixable on its own:** a finished
-  **video** in the runs strip is clickable today and routes into the *image* recipe path, landing the
-  video's prompt on the Image tab — one guard fixes that ahead of the feature.
+- **Per-batch / per-task grid stacking**
   Collapse the grid into per-batch/per-task stacks instead of one flat wall. Related surfaces exist
   but don't cover it: a batch-filter drill-down and the Image Details lineage-siblings section. The
-  grid-stacking itself is unbuilt.
+  grid-stacking itself is unbuilt. (The 2026-08-17 persona sweep's **Group-by / sectioned** layout
+  generalizes this — batch becomes one axis among several; see the Gallery layout switcher item.)
+
+- **Gallery layout switcher** *(new; Hero layout in design workshop, 2026-08-17)*
+  The main gallery has had exactly one layout — **Masonry** — since the React UI rebuild. Add a
+  user switcher offering three, with room to grow:
+    - **Masonry** — the current wall (default, unchanged).
+    - **Grid** — a throwback to the original pre-rebuild gallery, for those who prefer the simple
+      uniform grid.
+    - **Hero** — a new layout style, being workshopped on the design side now.
+  Owner is **open to further layout suggestions** — the 2026-08-17 persona sweep (7 archetypes;
+  full ranked brief in `../moonglade-internal/PERSONA_SWEEP_2026-08-17.md` §1) surfaced strong
+  candidates, ranked by cross-persona convergence:
+    - **Timeline** — date-sectioned bands (sticky YYYY-MM / Today), jump-to-month rail. *Unanimous
+      across all six personas*; `created_at` is already on every row. The standout net-new pick.
+    - **Group-by / sectioned** — collapse the wall into labelled sections by a user-picked axis
+      (model / rating / collection / source). Generalizes the roadmapped per-batch stacking.
+    - **Justified rows** — uniform-height, aspect-true, no crop, stable reading order; a third
+      geometry distinct from Masonry and Grid, and the lowest-effort net-new one.
+    - **Filmstrip / focus-review** — the lightbox promoted from a modal to a *persistent* big-image
+      + neighbour-strip layout, keyboard advance + inline rate.
+    - **Live density / "proof" mode** — an ultra-dense chrome-free triage grid, plus a thumb-size
+      slider that rescales whichever layout is active.
+    - **Data-table / Ledger** — the catalog as a sortable spreadsheet (model/seed/steps/cost…),
+      read-only; plus a **Compare / recipe-diff** view (2–9 up, differing fields called out).
+  Two constraints the sweep flagged: **Hero needs concrete shapes** (live "latest drop", cover+strip,
+  phone full-bleed — it's in the workshop now); and the **switcher must ship on mobile too** (a
+  separate locked-2-column component today), with per-device layout memory. Design-first
+  (user-visible surface); the switcher control + per-layout render are the build.
 
 - **Loom per-project spend ledger (historical)**
   The live *cost-to-finish* roll-up shipped; what's missing is a per-Loom-project record of what a
@@ -105,6 +119,10 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Design-pass reworks — rescope, don't just build
 
+- **Video-tab Model Picker rework.** The Video drawer's model selector reuses the *image*
+  model-picker frame — overkill for the handful of video engines, with no thumbnail and no
+  notable info. Owner has an improved design plan for a proper video-model selector (incoming
+  with the Bridge handoff return, ~2026-08-17). Rescope, don't reuse.
 - **Ladder representative badges.** Ladders currently show their FIRST rung's art. A new design
   pass on ladder badges is wanted.
 - **Community features YES-list revisit.** The 2026-07-26 pick-list (like/react etc.) predates
@@ -176,3 +194,39 @@ it's actionable. Listed so they aren't lost, not because they're ready.
 - **Mobile:** Remix and Send to Video on the mobile details sheet — both need their own
   wiring into CreateMobile's composer (the sheet has no dock hand-off; Send to Video is
   already a disclosed stub there, Remix now ships desktop-only the same way).
+
+From the **2026-08-17 persona sweep** (7 archetypes; full ranked brief + rationale in
+`../moonglade-internal/PERSONA_SWEEP_2026-08-17.md` §2), the net-new asks not already covered
+above, tagged "Scope":
+
+- **Power / workflow:** a keyboard + `Ctrl/Cmd-K` command-palette layer with a one-click "↻ Again —
+  new seed" re-roll · wildcards / prompt-variable expansion (`{a|b|c}`, `__lists__`) · a saved
+  **default negative prompt** · composer-recipe persistence (restore-last + named "Styles" presets) ·
+  a quick-pick chip row for recent/favourite models & LoRAs · an in-UI raw-recipe inspector (copy
+  JSON / copy-as-CLI). **Spend constraint (from the red-team):** any fan-out submit — matrix,
+  wildcard, bulk re-gen — MUST show an aggregate credit + free-card confirm before it fires; never
+  spend a batch on the strength of a per-image badge.
+- **Curator:** a personal metadata layer (user tags / keeper-reject flags / notes, searchable) · a
+  full per-file archive-integrity pass (zero-byte / truncated / missing-thumb + a "last verified"
+  stamp, beyond today's missing/orphan tiles) · bulk rate + bulk tag from a selection · keyboard
+  rating hotkeys (1–5) · storage breakdown (space by collection / model / type) · a round-trippable
+  curation-only sidecar export.
+- **Completionist:** quantified Folio progress ("N to go" on every visible ladder/milestone, sorted
+  fewest-remaining, each with a jump to the surface that advances it) · a spoiler-safe grand
+  completion meter · a "closest to earning" unearned-sort · a pinnable single-goal tracker chip · a
+  persistent Vigil day-streak chip · an exportable Honors card (PNG). *(Roster-growth and new-rung
+  specifics are internal — `../moonglade-internal/ROADMAP-internal.md`.)*
+- **Loom:** cast a collection as an ordered shot-sequence scaffold · manual ordering within a
+  collection · a cross-storyboard (series) cast library · find-in-storyboard search · a continuity
+  ribbon (each shot's close frame beside the next shot's open frame).
+- **Mobile:** the layout switcher on phone (column density + per-device memory) · pull-to-refresh +
+  optional infinite scroll · a single-column full-bleed reading feed · a data-saver mode
+  (medium-first, full-res on tap) · proper landscape handling · a "new since last visit" marker +
+  jump-to-newest · an opt-in "remember this device" longer LAN session (still authenticated) ·
+  QR-connect onboarding (URL only, login gate unchanged).
+
+Small integrity fixes the sweep surfaced (issue-candidates, not features): the mobile Details
+"k of N" index counts one loaded page, not the true result total; Contact Sheet Mobile renders
+placeholder thumbs where real art exists; `deleted_remote` (archive-only) pieces aren't badged and
+can be swept by a bulk quarantine; Loom Draft-vs-professional quality isn't marked on rendered
+shots. Detail in the sweep doc §3.
