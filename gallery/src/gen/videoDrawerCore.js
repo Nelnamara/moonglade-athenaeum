@@ -248,6 +248,11 @@ export function applyPrefill(s, o) {
   if (o.audio_language != null) s.audioLanguage = o.audio_language;
   if (o.prompt_helper != null) s.videoHelper = !!o.prompt_helper;
   if (o.negative != null) s.negative = o.negative;
+  // camera (i2vPro.cameraMovement) rides the priced payload, so a video Remix that recovers it
+  // must set it here -- BEFORE the model-gating call below, which stays last. It is meaningless
+  // in r2v (buildPayload sends "" there), and gating never touches camera, so ordering only has
+  // to keep it out from behind gating's mode switch, not react to it.
+  if (o.camera != null) s.camera = o.camera;
   const imgList = Array.isArray(o.images) ? o.images : (Array.isArray(o.refs) ? o.refs : null);
   if (imgList && s.mode === "flf" && imgList.length <= 2) {
     const flfSlots = imgList.map((r) => (r ? refItem(r) : null));

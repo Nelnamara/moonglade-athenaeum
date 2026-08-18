@@ -179,9 +179,10 @@ export default function HistoryStrip({ onPrefill, onTip }) {
                 const running1 = c.kind === "running";
                 const cluster = c.kind === "cluster";
                 const failed = c.kind === "fail";
-                // a DONE image tile prefills; video tiles are tooltip + ▶ only (Remix is the
-                // next task), running / failed / clusters have no click action
-                const clickable = done && !c.video;
+                // a DONE tile prefills -- images into the Image tab, videos into the Video tab
+                // (the host's onPrefill routes by kind, SCOPE_2026-08-17 §2); running / failed /
+                // clusters have no click action
+                const clickable = done;
                 const single = !cluster;
                 const enter = single ? tipEnter(onTip, r) : undefined;
                 return (
