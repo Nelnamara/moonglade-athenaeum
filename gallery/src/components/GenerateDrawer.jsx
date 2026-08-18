@@ -9,6 +9,7 @@ import CostBadge from "./CostBadge.jsx";
 import VideoDrawer from "./VideoDrawer.jsx";
 import EditTab, { SourceSlab } from "./EditTab.jsx";
 import FixTab from "./FixTab.jsx";
+import EnhanceTab from "./EnhanceTab.jsx";
 import { EDIT_DEFAULTS } from "../gen/editCore.js";
 import { videoRemixFromRow } from "../gen/videoRemixCore.js";
 import { dockLayout } from "../gen/dockLayout.js";
@@ -108,6 +109,20 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   const [flyOpen, setFlyOpen] = useState(false);
   const [flyKind, setFlyKind] = useState("base");
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // Mirror-armed status drives the Bridge's §2 OFF=invisible rule for the Enhance sub-tab:
+  // the AI Presets slab (EnhanceTab) mounts ONLY when the mirror is armed -- off, it does not
+  // exist in the UI, only the free art filters show (as today). Read from the same
+  // /api/mirror/status the Control Panel tile uses; refetched on open and on landing on the
+  // Enhance sub-tab (the owner may have armed it in the Control Panel while the drawer sat open).
+  const [mirrorArmed, setMirrorArmed] = useState(false);
+  useEffect(() => {
+    if (!open) return undefined;
+    let live = true;
+    fetch("/api/mirror/status").then((r) => r.json())
+      .then((d) => { if (live) setMirrorArmed(!!(d && d.enabled)); })
+      .catch(() => { /* leave prior state */ });
+    return () => { live = false; };
+  }, [open, sub]);
   // Lineage: "reusing settings from run #N" -- a LOCAL annotation only (no
   // backend concept exists for it), set at prefill time and cleared the moment
   // a new submission goes out. See prefillFromRun below + the composer chip.
@@ -1025,6 +1040,11 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
                 onDroppedNote={setDroppedNote} dock={editDock} />
               <FixTab visible={tab === "edit" && sub === "fixer"} dock={editDock}
                 source={editS.source} />
+              {/* The Bridge §3 -- the six panelplugin AI presets, ABOVE the free art filters
+                  and ONLY when the mirror is armed (§2 OFF=invisible). Shares slab 1's source. */}
+              {tab === "edit" && sub === "enhance" && mirrorArmed && (
+                <EnhanceTab source={editS.source} />
+              )}
               {tab === "edit" && sub === "enhance" && (
                 /* slab 2 under Enhance -- DC 1471 + 2931 editSlabLabel 'ART FILTERS', then
                    DC 1509-1516 verbatim: a flex column (gap 9) holding the 9px sub-label
@@ -1032,13 +1052,14 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
                    slab heading), the ◉ Open filters button (1512, openFiltersBtnStyle 2947),
                    paragraph 1 (1513, 10px/1.55 subtext, <b> in var(--text)) and paragraph 2
                    (1514, 10px/1.55 overlay0, <b> in var(--subtext)).
-                   PARAGRAPH 2's LAST CLAUSE IS REAL-DATA (owner ruling 2026-08-16): the DC
-                   says 'Upscale and Hires on the Generate tab's Upscale row' -- this build
-                   has no such row (DECISIONS 2026-07-25 'Upscale belongs on the image view,
-                   not in the generate drawer': the Off/Upscale/Hires segment was removed;
-                   Upscale is the lightbox's flyout / the details page's panel, hires is the
-                   Generate tab's 'Enhance Details' booster), so the sentence names where
-                   those really live. Everything before it is the DC's copy word for word. */
+                   PARAGRAPH 2 -- the DC's panelplugin apology ("submitted with an API key those
+                   queue and are cancelled... so this app can't offer them") was DELETED here: the
+                   Bridge restores those six presets in the AI PRESETS slab above (mirror-armed), so
+                   the apology became false on ship (The Bridge.dc.html §3, "the old apology copy is
+                   deleted"). What remains is REAL-DATA (owner ruling 2026-08-16): where Upscale
+                   (the lightbox's flyout / the details page's panel -- the drawer's Off/Upscale/
+                   Hires segment was removed, DECISIONS 2026-07-25), Enhance Details (the Generate
+                   tab's hires booster) and Fix actually live. */
                 <div className="mgdock-slab" style={{ animationDelay: "60ms" }}>
                   <div className="mgdock-lbl">ART FILTERS</div>
                   <div className="mgdock-enhancecol">
@@ -1052,12 +1073,7 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
                       source image above, then open the panel to compare and save.
                     </div>
                     <div className="mgdock-enhancecopy2">
-                      Still pixai.art only: their one-click ComfyUI workflows (background removal,
-                      line art, sketch colouring, relight). Submitted with an API key those queue
-                      and are cancelled unstarted about an hour later, so this app can't offer them.
-                      But run one on their site and the result still lands in your library
-                      automatically — only the submit button is missing, never the collecting. What
-                      also works: <b>Upscale</b> from the lightbox or Image Details, and <b>Enhance
+                      Also here: <b>Upscale</b> from the lightbox or Image Details, and <b>Enhance
                       Details</b> (PixAI's hires pass) among the Generate tab's tuning chips (plain
                       generation settings, not workflows), and <b>Fix</b> on the Fixer sub-tab for
                       hands and faces.

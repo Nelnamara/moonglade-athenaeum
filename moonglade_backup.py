@@ -3186,6 +3186,29 @@ def _bookmarks_persisted(session, variables, want_lora, lbt, kw, after, limit):
     return ((body.get("data") or {}).get("me") or {}).get("bookmarkedGenerationModels") or {}
 
 
+def workflow_catalog(session, first=80):
+    """List PixAI enhance/panelplugin WORKFLOWS via the `workflows` GraphQL connection ->
+    [{id, name, type, cover_media_id}]. `id` is the numeric workflowId that
+    build_panelplugin_parameters wants. Covers upscale / remove-background / line-art /
+    sketch-colorizer / inpaint / outpaint / style converters / etc. Read-only.
+
+    Restored 2026-08-18 for the Bridge tier (drift §44). NOTE: a live probe (2026-08-16/17)
+    found this connection returns ZERO entries on our credential, so the six mirror-gated
+    Enhance presets do NOT self-populate from it -- they are addressed by hardcoded workflow
+    ids/names in the /api/enhance caller. This is kept for /api/workflows parity and so the
+    picker self-updates the day PixAI opens the connection to us."""
+    q = "query($n:Int){ workflows(first:$n){ edges { node { id name type coverMediaId } } } }"
+    d = gql_adhoc(session, q, {"n": int(first)}) or {}
+    out = []
+    for e in (d.get("workflows") or {}).get("edges") or []:
+        n = e.get("node") or {}
+        if not n.get("id"):
+            continue
+        out.append({"id": str(n["id"]), "name": n.get("name") or "",
+                    "type": n.get("type") or "", "cover_media_id": str(n.get("coverMediaId") or "")})
+    return out
+
+
 def _empty_version_meta():
     return {"version_id": "", "model_type": "", "lora_base_model_type": "",
             "trigger_words": "", "negative_prompt": "", "sampling_method": "",
@@ -6934,17 +6957,86 @@ def extract_last_frame(video_path, out_png, at_seconds=None):
         return None
 
 
-# The whole --enhance command is gone, both halves of it, and neither is coming back.
+def build_panelplugin_parameters(media_id, workflow_id="", *, workflow_name="",
+                                 strength=None, extra_inputs=None, priority=1000,
+                                 is_private=False, kaisuuken_id=""):
+    """Enhance via a PixAI panelplugin WORKFLOW (face-fix / bg-remove / handfix / lineart ...).
+    VERIFIED shape (2026-07-02): model 'pixai-panelplugin', `inputs.image = {type:'media',
+    media_id}` (+ optional strength / per-plugin args). A workflow is addressed by either a
+    numeric `workflowId` (VERIFIED path) OR a `workflowName` like 'mymusise/hand-fix' (mined
+    from the app). Produces an image output. Builder spends nothing.
+
+    Restored 2026-08-18 for the Bridge tier (drift §44 / SCOPE §3). The 2026-07-24 deletion
+    was correct about the API KEY -- PixAI reaps an API-key panelplugin submit unstarted at
+    ~60 min -- but overshot to "impossible". A panelplugin task submitted on the BROWSER JWT
+    (the mirror) dispatches in seconds. So the ONLY safe caller is one gated on an armed
+    mirror: /api/enhance refuses unless make_mirror_session() is live, and submit_generation
+    routes the create through _session_for_create onto that JWT. This builder itself is
+    credential-agnostic; the gate lives at the route."""
+    inputs = {"image": {"type": "media", "media_id": str(media_id)}}
+    if strength is not None:
+        inputs["strength"] = float(strength)
+    if extra_inputs:
+        inputs.update(extra_inputs)
+    params = {
+        "priority": int(priority),
+        "model": "pixai-panelplugin",
+        "inputs": inputs,
+        "isPrivate": bool(is_private),
+        "enablePreview": True,
+        "hidePrompts": False,
+    }
+    if workflow_name:
+        params["workflowName"] = str(workflow_name)
+    elif workflow_id:
+        params["workflowId"] = str(workflow_id)
+    else:
+        raise PixAIError("panelplugin needs a workflow_id or workflow_name")
+    if kaisuuken_id:
+        params["kaisuukenId"] = str(kaisuuken_id)
+    return params
+
+
+# The six mirror-gated Bridge Enhance presets (the DC set, drift §44), each PINNED to its
+# addressing. This is the canonical record because Branch C is confirmed: the live `workflows`
+# GraphQL connection returns ZERO entries on our credential (probed 2026-08-16/17), so the DC's
+# "self-populates from workflow_catalog" cannot happen -- the presets are hardcoded, not
+# discovered. Each is addressed by exactly ONE of workflow_id (numeric) OR workflow_name
+# (author/workflow) and passed straight to build_panelplugin_parameters via /api/enhance.
 #
-# The panelplugin half (--workflow-id: upscale / remove-background / line-art / relight, plus
-# workflow_catalog and the web routes that drove them): the submit shape was right -- captured
-# from a real task -- but PixAI never assigns a worker to a panelplugin task when the client
-# authenticated with an API key. It accepts the submit, queues it, charges for it, then cancels
-# it at roughly 60 minutes with outputs.reason "waiting timeout" and refunds. Measured
-# 2026-07-24 and isolated by elimination: their own official preset workflow ids behave
-# identically while their web client runs the same workflow in 1-3 seconds, and a taskKind=chat
-# fixer submit from this app dispatched in one second minutes earlier. No workflow id, input key
-# or payload change reaches a runner.
+# PROVENANCE (honest about where each id/name came from):
+#   * Convert to Line Art / Sketch Coloring -- numeric ids recovered VERBATIM from the b93ce1e
+#     enh-card onclicks ("To line art" / "Sketch colorizer").
+#   * Background Remover -- workflowName supplied by the Bridge scope (SCOPE §3.2), the one
+#     preset whose name was independently known.
+#   * Handfix -- workflowName attested by the b93ce1e DELETED test (build_panelplugin_parameters
+#     "M", workflow_name="mymusise/hand-fix") AND private/GENERATOR_SURFACE.md.
+#   * Face Enhance / Change Emotion -- NOT present in the b93ce1e diff at all. Their workflowNames
+#     come from private/GENERATOR_SURFACE.md's `constants.imageEnhancementPlugins` mining
+#     (face-detailer / emotion), the same source+family as Handfix. PARTIALLY de-risked
+#     2026-08-18: GET /v2/task-price quoted BOTH (kyo/face-detailer 3000cr, kyo/emotionlab
+#     2000cr) -- task-price does not quote a nonexistent workflow, so PixAI recognizes both
+#     addresses as valid priceable workflows. NOT yet run-verified (no paid submit of either);
+#     Change Emotion also has a per-preset control (emotion thumbnail) the numeric-id presets don't.
+BRIDGE_ENHANCE_PRESETS = (
+    {"key": "handfix",     "label": "Handfix",           "workflow_name": "mymusise/hand-fix"},
+    {"key": "face",        "label": "Face Enhance",      "workflow_name": "kyo/face-detailer"},
+    {"key": "emotion",     "label": "Change Emotion",    "workflow_name": "kyo/emotionlab",
+     "has_control": True},
+    {"key": "bg_remove",   "label": "Background Remover", "workflow_name": "mymusise/39a2c67c:unet-0.1.3.2"},
+    {"key": "line_art",    "label": "Convert to Line Art", "workflow_id": "1796053397111789217"},
+    {"key": "sketch_color", "label": "Sketch Coloring",  "workflow_id": "1793447160259872021"},
+)
+
+
+# The CLI --enhance command stays gone -- both halves of it. Only the WEB /api/enhance route
+# is restored (mirror-gated), never the CLI flag or run_enhance; see build_panelplugin_parameters
+# above for the reversal, and tests/test_enhance.py for the guards.
+#
+# The panelplugin half's CLI entry (--workflow-id and run_enhance): NOT restored. The Bridge is
+# web-only -- its mirror gate is a route concern, and a bare CLI --workflow-id could submit a
+# panelplugin task on the API key (the reaped-at-60-min bug). tests/test_enhance.py keeps the
+# flag unparseable.
 #
 # The art-filter half (build_filter_parameters, --filter-id): that one worked, and was still
 # the wrong thing to do. PixAI's 7 "art filters" are not inference at all -- each is two or
@@ -6957,10 +7049,12 @@ def extract_last_frame(video_path, out_png, at_seconds=None):
 # offline, for nothing, so the paid path is deleted rather than left as a strictly worse
 # second option.
 #
-# Guarded by tests/test_enhance.py, which drives the parser to prove the flags are unaccepted
-# and greps for the two literals a submit could not do without -- the filter model's id and the
-# `inputs` key that named a filter. Neither appears above on purpose: as with "panelplugin",
-# the CONCEPT is named in prose so the exact strings stay a reliable tripwire.
+# Guarded by tests/test_enhance.py, which drives the parser to prove the --filter-id flag is
+# unaccepted and greps for the two literals a FILTER submit could not do without -- the filter
+# model's id and the filter-inputs key. Neither exact string appears above on purpose: the
+# CONCEPT is named in prose so the strings themselves stay a reliable tripwire. (The panelplugin
+# model literal and its workflow-id key DO appear now, in the restored, mirror-gated builder
+# above -- test_enhance.py asserts their PRESENCE, not their absence.)
 
 
 def _gen_video_parameters(args):
@@ -8816,11 +8910,12 @@ def source_media_of_task(task):
     This is the data behind Image Details' LINEAGE panel. Every derive path already puts
     its input image's mediaId in the submit parameters, and PixAI persists it on the task,
     so it is readable back from getTaskById for history as well as recordable going
-    forward. The three real shapes (see build_video_parameters / build_chat_edit_parameters
-    / the upscale block):
-      * img2video      -> parameters.i2vPro.mediaId        (kind "video"; legacy tasks: i2v)
-      * edit/reference -> parameters.chat.mediaId         (kind "edit")
-      * upscale/hires  -> parameters.mediaId + upscale|enlarge ratio  (kind "upscale")
+    forward. The four real shapes (see build_video_parameters / build_chat_edit_parameters
+    / build_panelplugin_parameters / the upscale block):
+      * img2video       -> parameters.i2vPro.mediaId        (kind "video"; legacy tasks: i2v)
+      * edit/reference  -> parameters.chat.mediaId          (kind "edit")
+      * enhance/plugin  -> parameters.inputs.image.media_id (kind "enhance")
+      * upscale/hires   -> parameters.mediaId + upscale|enlarge ratio  (kind "upscale")
     A plain txt2img has no input image and returns (None, None)."""
     params = ((task or {}).get("parameters") or {})
     if not isinstance(params, dict):
@@ -8834,6 +8929,23 @@ def source_media_of_task(task):
     chat = params.get("chat")
     if isinstance(chat, dict) and chat.get("mediaId"):
         return (str(chat["mediaId"]), "edit")
+    # Enhance (panelplugin workflow -- handfix / bg-remove / line-art / sketch-coloring / ...):
+    # the source image is nested at inputs.image.media_id in the b93ce1e submit shape
+    # (build_panelplugin_parameters). This MUST be checked BEFORE the top-level `mediaId`
+    # branch below: a Bridge result carries no top-level mediaId, so without this branch it
+    # files as an ORIGINAL generation with no source (catalog lineage correctness, not polish).
+    # VERIFIED 2026-08-18 against a real completed panelplugin task (bg-remove, task
+    # 2046466559401368536): getTaskById reads the source back as inputs.image.media_id in
+    # snake_case -- PixAI does NOT camelCase it to mediaId on persist. So `media_id` is the
+    # live read-back shape and the `mediaId` fallback below is defensive-only (kept in case a
+    # future submit/persist shape change flips it).
+    inputs = params.get("inputs")
+    if isinstance(inputs, dict):
+        img = inputs.get("image")
+        if isinstance(img, dict):
+            emid = img.get("media_id") or img.get("mediaId")
+            if emid:
+                return (str(emid), "enhance")
     mid = params.get("mediaId")
     if mid:
         ratio = params.get("upscale") or params.get("enlarge")

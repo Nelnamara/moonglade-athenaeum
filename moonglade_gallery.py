@@ -5201,6 +5201,15 @@ def create_app(out_dir: Path):
     # ever referenced this run. Losing it on restart just re-uploads, which is free.
     _ref_upload_cache = {}
 
+    # Bridge/enhance telemetry is DEFERRED to terminal success (see /api/enhance and
+    # /api/task-status): submit_generation returns at createGenerationTask ACCEPTANCE, before a
+    # panelplugin job starts, and such a job can be accepted-then-reaped. So /api/enhance records
+    # {task_id -> workflow identity submitted} here, and the poll's done-branch fires the three
+    # producers exactly once and drops the entry. Process-lifetime, tiny, bounded by in-flight
+    # enhance tasks (dropped on done OR failed). A lost entry on restart just skips one bump.
+    _enhance_pending = {}
+    _enhance_pending_lock = threading.Lock()
+
     # The asset container's first-run fetch (2026-08-10, docs/DECISIONS.md "The
     # asset container, re-scoped from scratch"). A real streamed-download job,
     # not a subprocess like PANEL_ACTIONS below -- one instance per server
@@ -9920,6 +9929,13 @@ def create_app(out_dir: Path):
             except OSError as e:
                 return jsonify({"error": "Could not read config.json: {}".format(
                     _redact_host_paths(str(e)))}), 200
+            # [MAJOR] Only ARM (true-write) when a usable browser JWT actually exists: arming the
+            # mirror with no live session lets every Bridge/enhance submit hit the mirror-ON gate,
+            # fail make_mirror_session(), and refuse -- an armed toggle that can run nothing. The
+            # DISARM (false-write) is always allowed, so the owner can always turn it back off.
+            if want and not core._jwt_usable(core.load_mirror_state().get("jwt") or ""):
+                return jsonify({"error": "Connect the mirror first — not armed",
+                                "enabled": False}), 200
             cfg["MIRROR_TO_PIXAI"] = want
             try:
                 core._save_config(cfg)
@@ -10661,6 +10677,16 @@ def create_app(out_dir: Path):
             except core.PixAIError as e:
                 return None, bool(p.get("no_card")), _redact_host_paths(str(e))[:140]
             return params, bool(p.get("no_card")), None
+        if p.get("mode") == "enhance":
+            # [MAJOR] An enhance/panelplugin task is priced by its workflow id, which is
+            # deliberately NOT in core._PRICE_SCALARS: pricing the workflow-less shape that would
+            # survive the allowlist returns a confident WRONG number. So we do NOT call price_task
+            # for enhance -- we return (None, ...) here, which api_price renders as cost:None
+            # ("couldn't verify the cost"). Adding the workflow-id scalar to the allowlist needs a
+            # live measurement first (a separately authorized step); until then, no number is the
+            # honest answer. Returning here also keeps an enhance payload from ever reaching the
+            # pricing endpoint (test_web_pick.py's enhance-price guard).
+            return None, bool(p.get("no_card")), "couldn't verify the cost of an AI preset yet"
         args = _gen_args_from_payload(p)
         if not args.model:
             return None, args.no_card, "pick a model"
@@ -10890,12 +10916,105 @@ def create_app(out_dir: Path):
             return jsonify({"error": _log_gen_failure(
                 "/api/edit", e, locals().get("params"))[:300]}), 200
 
-    # /api/enhance is gone. It submitted a panelplugin task, which PixAI accepts, queues,
-    # charges for and then cancels unstarted at roughly 60 minutes ("waiting timeout") whenever
-    # the client authenticated with an API key -- their own official preset workflow ids
-    # included. Nothing about the payload changes that, so the route could only ever bill an
-    # hour of waiting for no output. See the Enhance sub-tab's markup for the full measurement;
-    # tests/test_enhance.py guards against it coming back.
+    # Process cache for the Bridge preset prices: they are flat per workflow and account-
+    # stable (source- AND priority-independent, verified live 2026-08-18), so a slab mount
+    # need not be a dozen live REST calls. Only a REAL (mirror-reached) result is cached; a
+    # null-priced result is not, so it retries once the mirror is back. TTL in seconds.
+    _enh_price_cache = {"at": 0.0, "presets": None}
+    _ENH_PRICE_TTL = 3600.0
+
+    @app.route("/api/enhance/presets")
+    def api_enhance_presets():
+        """The six Bridge Enhance presets + LIVE per-preset cost (price + free-card), so the
+        drawer's cost chips are honest rather than baked (the same 'fetch, don't bake' rule Fix
+        follows). Cost comes from PixAI's own /v2/task-price + /v2/kaisuuken/check through the
+        MIRROR session -- the identity that actually runs an enhance -- priced against a
+        PLACEHOLDER media id (task-price prices the request SHAPE, not a specific owned image;
+        verified 2026-08-18). No free card covers any panelplugin task on this account, so
+        free_card comes back False across the board unless PixAI ever adds such a card, in which
+        case this reports it truthfully. Fails soft: price=null when the mirror can't be reached
+        (the slab only renders armed, but a price probe must never 500). LOGIN tier; read-only,
+        spends nothing."""
+        import moonglade_backup as core
+        now = time.time()
+        cached = _enh_price_cache["presets"]
+        if cached is not None and (now - _enh_price_cache["at"]) < _ENH_PRICE_TTL:
+            return jsonify({"presets": cached})
+        s = core.make_mirror_session()          # stored session (no bootstrap) -- as the gate uses
+        out, priced_ok = [], s is not None
+        for pr in core.BRIDGE_ENHANCE_PRESETS:
+            row = {"key": pr.get("key"), "label": pr.get("label"),
+                   "workflow_id": pr.get("workflow_id", ""),
+                   "workflow_name": pr.get("workflow_name", ""),
+                   "has_control": bool(pr.get("has_control")), "price": None, "free_card": False}
+            if s is not None:
+                try:
+                    params = core.build_panelplugin_parameters(
+                        "1", row["workflow_id"], workflow_name=row["workflow_name"])
+                    row["price"] = core.price_task(s, params)
+                    row["free_card"] = bool(core.match_kaisuuken(s, params))
+                    if row["price"] is None:
+                        priced_ok = False
+                except Exception:
+                    priced_ok = False
+            out.append(row)
+        if priced_ok:                            # only cache a fully-real result
+            _enh_price_cache["presets"] = out
+            _enh_price_cache["at"] = now
+        return jsonify({"presets": out})
+
+    @app.route("/api/enhance", methods=["POST"])
+    def api_enhance():
+        """One-click AI preset (PixAI panelplugin workflow) on the Edit tab's source image --
+        the mirror-gated Bridge tier (drift §44 / SCOPE §3). Accepts `workflow_id` OR
+        `workflow_name`. Login required. Returns {task_id}; telemetry is DEFERRED to terminal
+        success (see /api/task-status), never fired at submit-acceptance.
+
+        A panelplugin task submitted on the API KEY is accepted, queued, CHARGED, then reaped
+        unstarted at ~60 min -- so this route REFUSES unless the PixAI mirror is armed and has a
+        live browser session, the only credential that dispatches one. The gate is the FIRST
+        thing here, before any input upload / card check / builder / submit, so a mirror-off
+        request creates nothing and spends nothing."""
+        import moonglade_backup as core
+        # [BLOCKER] Backend mirror gate, before _input_media_id / build_panelplugin_parameters /
+        # _apply_kaisuuken / submit_generation. Do NOT lean on submit_generation's own
+        # _session_for_create gate: its mirror-OFF branch intentionally falls back to the API-key
+        # session (the paid-panelplugin-reaped-at-60-min bug this surface was deleted for, plus an
+        # invariant-#7 cross-identity violation). mirror_enabled() catches OFF; make_mirror_session()
+        # is None catches ON-but-no-usable-session. make_mirror_session is READ_ONLY-guarded and
+        # never raises, so it is safe to call as a gate.
+        if not core.mirror_enabled() or core.make_mirror_session() is None:
+            return jsonify({"error": "Mirror to PixAI must be armed to run AI presets — "
+                                     "nothing was submitted, no credits spent"}), 409
+        try:
+            from types import SimpleNamespace
+            core, session = _gen_session()
+            p = request.get_json(silent=True) or {}
+            src = _input_media_id(core, session, str(p.get("source") or "").strip())
+            wid = str(p.get("workflow_id") or "").strip()
+            wname = str(p.get("workflow_name") or "").strip()
+            if not src:
+                return jsonify({"error": "pick an image first"}), 400
+            if not (wid or wname):
+                return jsonify({"error": "pick an AI preset"}), 400
+            # workflow_name wins inside the builder when both are set; a preset is pinned to
+            # exactly one of the two (numeric id OR author/workflow name) in the caller.
+            params = core.build_panelplugin_parameters(src, wid, workflow_name=wname)
+            core._apply_kaisuuken(session, params,
+                                  SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
+            task_id = core.submit_generation(session, params)
+            # [BLOCKER] Telemetry is DEFERRED, not fired here: submit_generation returns the id at
+            # createGenerationTask ACCEPTANCE (before start/completion), and a panelplugin job can
+            # be accepted then reaped. Record the identity ACTUALLY submitted (workflowName when a
+            # name preset, else the numeric id) so telem_set_add -- which skips falsy values --
+            # counts a workflowName preset too. The three producers fire from /api/task-status's
+            # terminal-success branch via _fire_enhance_telemetry.
+            with _enhance_pending_lock:
+                _enhance_pending[str(task_id)] = wname or wid
+            return jsonify({"task_id": task_id})
+        except Exception as e:
+            return jsonify({"error": _log_gen_failure(
+                "/api/enhance", e, locals().get("params"))[:300]}), 200
 
     @app.route("/api/fix", methods=["POST"])
     def api_fix():
@@ -12530,6 +12649,35 @@ __DESIGN_TOKENS__
         with _gen_phase_lock:
             _gen_phase_seen.pop(tid, None)
 
+    def _fire_enhance_telemetry(tid):
+        """Fire the three enhance-achievement producers exactly once, on TERMINAL SUCCESS (a
+        done phase WITH output) of an enhance task THIS server submitted. Deferred from
+        /api/enhance -- which only sees createGenerationTask ACCEPTANCE -- so a task that is
+        accepted, charged, then reaped unstarted (or fails) never counts. A no-op for any
+        task id that was not a pending enhance (normal generate/edit/video collect here too).
+
+        Swallows EVERY failure: by the time this runs the credit has already been spent and the
+        result collected, so a telemetry error must not propagate into api_task_status's except
+        handler -- that would report a false 'failed'/'running' and, worse, prompt a re-poll
+        that re-collects. Mirrors api_generate's LoRA-telemetry try/except."""
+        with _enhance_pending_lock:
+            identity = _enhance_pending.pop(str(tid), None)
+        if identity is None:
+            return
+        try:
+            telem_bump("enhances", out_dir=out_dir)                        # first-enhance milestone
+            telem_set_add("tools", "enhance", out_dir=out_dir)             # Full Toolbox
+            telem_set_add("enhance_workflows", identity, out_dir=out_dir)  # Enhance Adept: distinct rituals
+        except Exception:                                                  # noqa: BLE001
+            pass
+
+    def _drop_enhance_pending(tid):
+        """Forget a pending enhance without firing telemetry -- for a terminal FAILURE (reaped,
+        cancelled, or done-but-empty). Keeps the map from leaking and guarantees a failed run
+        never bumps a counter."""
+        with _enhance_pending_lock:
+            _enhance_pending.pop(str(tid), None)
+
     @app.route("/api/task-status")
     def api_task_status():
         """Poll a submitted task: {phase: running|done|failed}. On 'done' it downloads +
@@ -12560,12 +12708,17 @@ __DESIGN_TOKENS__
                 _log_job(tid, status="done", media_ids=got["media_ids"],
                          is_video=got.get("is_video", False),
                          paid_credit=st.get("paid_credit"))
+                # TERMINAL SUCCESS with output: the ONLY point an enhance is allowed to count
+                # (deferred from /api/enhance's submit-acceptance). No-op for non-enhance tasks;
+                # swallows its own errors so a post-charge telemetry blip can't fail this poll.
+                _fire_enhance_telemetry(tid)
                 return jsonify({"phase": "done", "media_ids": got["media_ids"],
                                 "is_video": got.get("is_video", False),
                                 "duration": got.get("duration"),
                                 "paid_credit": st["paid_credit"]})
             if st["phase"] == "failed":
                 _forget_gen_phase(tid)
+                _drop_enhance_pending(tid)   # a reaped/cancelled enhance must NOT count
                 # Carry PixAI's OWN reason (outputs.reason, e.g. "waiting timeout") into
                 # both the job log and the response. This branch already fired correctly
                 # for the owner's five reaped enhances -- it just logged the bare status,
@@ -12593,6 +12746,7 @@ __DESIGN_TOKENS__
             # 'failed' -- without it the job spins on 'running' in the Jobs card
             # forever. (Observed: an enhance submitted with an unusable input media id
             # sat at 'running' indefinitely while PixAI considered it long finished.)
+            _drop_enhance_pending(tid)   # done-but-empty is a failure: it must NOT count
             _log_job(tid, status="failed", error=_redact_host_paths(str(e))[:200])
             return jsonify({"phase": "failed", "error": _redact_host_paths(str(e))[:200]}), 200
         except (TypeError, AttributeError, NameError, KeyError, IndexError) as e:
@@ -12700,9 +12854,18 @@ __DESIGN_TOKENS__
             _log_job(jid, dismissed=True)
         return jsonify({"ok": True})
 
-    # /api/workflows is gone too: its only consumer was the Enhance sub-tab's ComfyUI catalog
-    # search, and every id it returned addressed a panelplugin task PixAI will not run for an
-    # API-key client (see /api/enhance's note above).
+    @app.route("/api/workflows")
+    def api_workflows():
+        """Live enhance-workflow catalog (id + name + type) for the Bridge picker. Read-only;
+        login required (uses the owner's key). Restored 2026-08-18 for parity -- NOTE: this
+        connection returns ZERO entries on our credential (probed 2026-08-16/17), so the six
+        Bridge Enhance presets are hardcoded in the drawer, not sourced from here. Kept so the
+        picker self-updates the day PixAI opens the connection to us."""
+        try:
+            core, session = _gen_session()
+            return jsonify({"workflows": core.workflow_catalog(session)})
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200], "workflows": []}), 200
 
     @app.after_request
     def _gzip_html(resp):

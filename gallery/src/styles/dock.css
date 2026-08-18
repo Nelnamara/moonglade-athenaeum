@@ -502,6 +502,37 @@
 .mgdock-enhancecopy2 { font-size: 10px; line-height: 1.55; color: var(--overlay0); }
 .mgdock-enhancecopy2 b { color: var(--subtext); font-weight: 700; }
 
+/* ---- The Bridge §3: the AI PRESETS slab (EnhanceTab), mounted ABOVE the free art filters
+   and ONLY when the mirror is armed (§2 OFF=invisible). The Bridge.dc.html §3 -- emerald
+   "via the Bridge" header + "runs on the mirror", a 2-col grid of one-click preset tiles, each
+   with a LIVE cost chip (◆ N spend / ✦ free card) fed by /api/enhance/presets. ---- */
+.mgdock-ailbl { display: flex; align-items: center; gap: 8px; color: var(--emerald); }
+/* .sp is scoped per-container in this file (.mgdock-head/.mgdock-fixrow); the header's
+   spacer needs its own rule or "runs on the mirror" won't right-align. */
+.mgdock-ailbl .sp { flex: 1 1 auto; }
+/* the header's tail spans are mixed-case in the DC; undo the .mgdock-lbl uppercase on them */
+.mgdock-aivia { color: var(--overlay0); font-weight: 700; text-transform: none; }
+.mgdock-aimirror { font-size: 9px; font-weight: 700; letter-spacing: .02em;
+  text-transform: none; color: var(--emerald); white-space: nowrap; }
+.mgdock-aigrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mgdock-aitile { display: flex; flex-direction: column; gap: 7px; align-items: flex-start;
+  text-align: left; padding: 11px; border-radius: 10px; cursor: pointer; font-family: inherit;
+  border: 1px solid color-mix(in oklab, var(--emerald) 26%, var(--surface1));
+  background: rgba(79, 201, 154, .05);
+  transition: filter .16s, border-color .16s, background .16s; }
+.mgdock-aitile:hover:not(:disabled) { filter: brightness(1.14); }
+/* Change Emotion (has_control) -- lavender tint, matching the DC's control-preset accent */
+.mgdock-aitile.ctl { border-color: color-mix(in oklab, var(--lavender) 34%, var(--surface1));
+  background: rgba(182, 146, 230, .07); }
+.mgdock-aitile:disabled { cursor: default; opacity: .55; }
+.mgdock-aitile.busy { opacity: .7; }
+.mgdock-ainame { font-size: 11.5px; font-weight: 700; color: var(--text); line-height: 1.2; }
+.mgdock-aicost { display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+  font-family: ui-monospace, monospace; font-size: 9px; font-weight: 800; letter-spacing: .02em;
+  color: var(--gold); }
+.mgdock-aictl { font-size: 8.5px; font-weight: 800; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--lavender); }
+
 /* the shared <VideoDrawer>'s host: the DC's expanded-settings grid padding (DC 1209-1210
    '4px 18px 8px'); the drawer's own .mgd-slabs draws the three slabs inside it. */
 .mgdock-videohost { padding: 4px 18px 8px; min-height: 0; overflow-y: auto; }

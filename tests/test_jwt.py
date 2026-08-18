@@ -317,15 +317,37 @@ def test_api_mirror_status_reports_days_left_never_the_token(tmp_path, monkeypat
     assert "eyJ" not in _json.dumps(d)                         # never the token
 
 
-def test_api_mirror_enable_writes_the_flag_only(tmp_path, monkeypatch):
+def test_api_mirror_enable_arms_only_with_a_usable_jwt(tmp_path, monkeypatch):
+    """/api/mirror/enable writes ONLY the MIRROR_TO_PIXAI flag (never clobbering the auth
+    block). [MAJOR, Bridge change #6] It now ARMS (true-write) only when a usable browser JWT
+    exists: arming with no live session would leave every Bridge/enhance submit hitting the
+    mirror gate and refusing -- an armed toggle that can run nothing. DISARM is always allowed."""
     from tests.conftest import login_client
     cli = login_client(tmp_path)                                # real login (real config read = auth intact)
     captured = {}
     # capture ONLY the flag off the write (never persist, never retain the real config/key)
     monkeypatch.setattr(mj, "_save_config",
                         lambda cfg: captured.__setitem__("flag", cfg.get("MIRROR_TO_PIXAI")))
+
+    # ARM with a usable JWT -> the flag is written True. (_jwt_usable is mocked so the gate is
+    # deterministic and never depends on a real mirror_session.json on the test machine.)
+    monkeypatch.setattr(mj, "_jwt_usable", lambda jwt: True)
     d = cli.post("/api/mirror/enable", json={"enabled": True}).get_json()
     assert d["enabled"] is True and captured.get("flag") is True
+
+    # ARM with NO usable JWT -> refused, and the flag is NOT written.
+    captured.clear()
+    monkeypatch.setattr(mj, "_jwt_usable", lambda jwt: False)
+    d = cli.post("/api/mirror/enable", json={"enabled": True}).get_json()
+    assert d.get("enabled") is False
+    assert "Connect the mirror first" in (d.get("error") or "")
+    assert "flag" not in captured, "armed with no usable JWT still wrote the flag"
+
+    # DISARM is ALWAYS allowed, even with no usable JWT -> writes False (the false-write is
+    # never gated, so the owner can always turn the mirror back off).
+    captured.clear()
+    d = cli.post("/api/mirror/enable", json={"enabled": False}).get_json()
+    assert d["enabled"] is False and captured.get("flag") is False
 
 
 def test_api_mirror_connect_degrades_without_a_browser(tmp_path, monkeypatch):

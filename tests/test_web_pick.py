@@ -1628,12 +1628,14 @@ def test_generate_drawer_blocks_submit_on_unresolved_lora():
     assert "onToggle && onToggle({ ...entry, failed: true }, true);" in picker_jsx
 
 
-def test_price_no_longer_has_an_enhance_mode(tmp_path, monkeypatch):
-    """/api/price used to accept mode=enhance and build panelplugin params for it. That
-    branch went with the surface: pricing a task PixAI will never dispatch only ever
-    produced a credible-looking number for an hour of queuing. The payload now falls
-    through to the ordinary image-generation branch, which answers "pick a model" -- an
-    honest refusal, and NOT a price."""
+def test_price_enhance_mode_returns_no_cost(tmp_path, monkeypatch):
+    """[MAJOR] The Bridge restored an enhance surface, but /api/price still must NOT quote a
+    number for it. An enhance/panelplugin task is priced by its workflow id, which is
+    deliberately NOT in core._PRICE_SCALARS -- price_task would price the workflow-less shape
+    that survives the allowlist and return a confident WRONG number. So the enhance branch
+    short-circuits to cost:None ("couldn't verify the cost"): price_task is never called, and
+    no misleading price is shown. (Adding the workflow-id scalar needs a live measurement first
+    -- a separately authorized step.)"""
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
@@ -1642,7 +1644,7 @@ def test_price_no_longer_has_an_enhance_mode(tmp_path, monkeypatch):
     r = cli.post("/api/price", json={"mode": "enhance", "source": "55",
                                      "workflow_id": "1794855217667308480"})
     assert r.get_json().get("cost") is None
-    assert not seen, "a removed mode still reached the pricing endpoint"
+    assert not seen, "enhance must not reach the pricing endpoint (it can't be priced yet)"
 
 
 def test_import_task_by_id(tmp_path, monkeypatch):

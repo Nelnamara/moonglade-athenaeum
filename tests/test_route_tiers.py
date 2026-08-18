@@ -212,6 +212,16 @@ ROUTE_TIERS = {
     ("api_generate", "POST"): LOGIN,
     ("api_edit", "POST"): LOGIN,
     ("api_fix", "POST"): LOGIN,
+    # The Bridge tier's mirror-gated Enhance submit. LOGIN, like every other spend route:
+    # spending the owner's credits from a signed-in LAN session is allowed; the panelplugin
+    # safety (never on the API key) is the route's own mirror gate, not a URL-tier question.
+    ("api_enhance", "POST"): LOGIN,
+    # The Bridge Enhance preset list + LIVE per-preset cost (price + free-card). Read-only,
+    # owner's key, spends nothing -- same tier as api_workflows below and the other read-only feeds.
+    ("api_enhance_presets", "GET"): LOGIN,
+    # The Bridge Enhance-workflow catalog. Read-only, owner's key -- same tier as the other
+    # read-only picker feeds (api_model_search etc.).
+    ("api_workflows", "GET"): LOGIN,
     ("loom_generate", "POST"): LOGIN,
     ("api_upload", "POST"): LOGIN,
     ("api_price", "POST"): LOGIN,
