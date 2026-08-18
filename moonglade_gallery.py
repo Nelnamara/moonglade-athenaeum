@@ -10941,8 +10941,8 @@ def create_app(out_dir: Path):
         if cached is not None and (now - _enh_price_cache["at"]) < _ENH_PRICE_TTL:
             return jsonify({"presets": cached})
         s = core.make_mirror_session()          # stored session (no bootstrap) -- as the gate uses
-        out, priced_ok = [], s is not None
-        for pr in core.BRIDGE_ENHANCE_PRESETS:
+
+        def _row(pr):
             row = {"key": pr.get("key"), "label": pr.get("label"),
                    "workflow_id": pr.get("workflow_id", ""),
                    "workflow_name": pr.get("workflow_name", ""),
@@ -10953,12 +10953,23 @@ def create_app(out_dir: Path):
                         "1", row["workflow_id"], workflow_name=row["workflow_name"])
                     row["price"] = core.price_task(s, params)
                     row["free_card"] = bool(core.match_kaisuuken(s, params))
-                    if row["price"] is None:
-                        priced_ok = False
                 except Exception:
-                    priced_ok = False
-            out.append(row)
-        if priced_ok:                            # only cache a fully-real result
+                    row["price"] = None
+            return row
+
+        # Price the six presets CONCURRENTLY. Each is two sequential PixAI round-trips (task-price
+        # + kaisuuken-check), so done serially they stacked to ~5s and blocked the drawer's Enhance
+        # slab from rendering at all (owner-reported). A small thread pool collapses that to about
+        # one round-trip's latency; the result is cached (TTL above), so every later open -- and
+        # every other user -- is instant. requests.Session is fine under concurrent GET/POST here
+        # (it mutates no shared session state), and this is one small burst per cache-miss.
+        if s is not None:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=len(core.BRIDGE_ENHANCE_PRESETS)) as ex:
+                out = list(ex.map(_row, core.BRIDGE_ENHANCE_PRESETS))
+        else:
+            out = [_row(pr) for pr in core.BRIDGE_ENHANCE_PRESETS]
+        if s is not None and all(r["price"] is not None for r in out):   # cache only a fully-real result
             _enh_price_cache["presets"] = out
             _enh_price_cache["at"] = now
         return jsonify({"presets": out})
