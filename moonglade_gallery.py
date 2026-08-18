@@ -8092,6 +8092,118 @@ def create_app(out_dir: Path):
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
+    @app.route("/api/video-task-params/<task_id>")
+    def api_video_task_params(task_id):
+        """A VIDEO task's submit parameters, reduced to what "↺ Remix for videos"
+        (SCOPE_2026-08-17 §2) needs: the shot kind (i2v / flf / r2v) and every
+        recipe field the Video composer can set -- engine, duration, quality,
+        camera, audio(+language), prompt-helper, negative, prompt, channel -- plus
+        the source/reference media ids, each flagged in_lib against the local
+        catalog so the client restores only what it actually holds.
+
+        A deliberate SIBLING of /api/task-params rather than a widening of it: that
+        route refuses videos (`not an image-generation task`) and its refusal test
+        pins exactly that (tests/test_task_params.py). Widening it would blur the
+        two recipes' shapes; a sibling keeps each honest. Same contract otherwise:
+        read-only (nothing here submits or spends; the composer's own price-identity
+        gate still stands between a prefill and a paid generate), membership-checked
+        against the catalog (finding 4.3 -- no free probing of arbitrary task ids),
+        retries=1 (a prefill, not a lost generation -- finding 4.1), and
+        host-path-redacted errors.
+
+        Refuses (mirroring the image sibling, inverted): an IMAGE row (its recipe
+        belongs to /api/task-params) and a CHAT task -- both `not a video task`,
+        400. task_detail_gql returning None (its NETWORK-failure value, not a raise)
+        answers {"error": ...}, never a success-shaped empty recipe."""
+        tid = (task_id or "").strip()
+        if not tid:
+            return jsonify({"error": "task id required"}), 400
+        crow = get_row_by_task(db_path, tid)
+        if not crow:
+            return jsonify({"error": "no such task in this library"}), 404
+        if str(crow.get("is_video") or "") != "1":
+            return jsonify({"error": "not a video task"}), 400
+        try:
+            core, session = _gen_session()
+            task = core.task_detail_gql(session, tid, retries=1)
+            if not task:
+                return jsonify({"error": "couldn't read the task from PixAI"}), 200
+            params = task.get("parameters") or {}
+            if not isinstance(params, dict):
+                params = {}
+            if isinstance(params.get("chat"), dict):
+                return jsonify({"error": "not a video task"}), 400
+
+            def _mref(mid):
+                mid = str(mid or "")
+                if not mid:
+                    return None
+                return {"media_id": mid, "in_lib": bool(get_row(db_path, mid))}
+
+            def _mrefs(ids):
+                out = []
+                for mid in (ids or []):
+                    r = _mref(mid)
+                    if r:
+                        out.append(r)
+                return out
+
+            def _dur(v):
+                # i2vPro.duration is a string ("5"), referenceVideo.duration an int -- normalize
+                # to a clean int (or None) so the client never has to guess the type.
+                try:
+                    return int(float(v))
+                except (TypeError, ValueError):
+                    return None
+
+            out = {
+                "task_id": tid,
+                "model_id": str(params.get("modelId") or ""),
+                "is_private": bool(params.get("isPrivate")),
+            }
+            rv = params.get("referenceVideo")
+            i2v = params.get("i2vPro") or params.get("i2v")
+            if isinstance(rv, dict):
+                out.update({
+                    "kind": "r2v",
+                    "video_model": str(rv.get("model") or ""),
+                    "duration": _dur(rv.get("duration")),
+                    "quality": str(rv.get("mode") or ""),
+                    "camera": "",
+                    "audio": bool(rv.get("generateAudio")),
+                    "audio_language": str(rv.get("audioLanguage") or ""),
+                    "prompt_helper": False,
+                    "negative": "",                      # r2v carries no negative (builder omits it)
+                    "prompt": str(rv.get("prompt") or ""),
+                    "start": None, "end": None,
+                    "image_refs": _mrefs(rv.get("referenceImageMediaIds")),
+                    "video_refs": _mrefs(rv.get("referenceVideoMediaIds")),
+                    "audio_refs": _mrefs(rv.get("referenceAudioMediaIds")),
+                })
+            elif isinstance(i2v, dict):
+                tail = str(i2v.get("tailMediaId") or "")
+                out.update({
+                    "kind": "flf" if tail else "i2v",
+                    "video_model": str(i2v.get("model") or ""),
+                    "duration": _dur(i2v.get("duration")),
+                    "quality": str(i2v.get("mode") or ""),
+                    "camera": str(i2v.get("cameraMovement") or ""),
+                    "audio": bool(i2v.get("generateAudio")),
+                    "audio_language": str(i2v.get("audioLanguage") or ""),
+                    "prompt_helper": bool(i2v.get("usePromptsHelper")),
+                    "negative": str(i2v.get("negativePrompts") or ""),
+                    "prompt": str(i2v.get("prompts") or ""),
+                    "start": _mref(i2v.get("mediaId")),
+                    "end": _mref(tail),
+                    "image_refs": [], "video_refs": [], "audio_refs": [],
+                })
+            else:
+                # A video ROW whose task has neither block: nothing safe to prefill from.
+                return jsonify({"error": "not a video task"}), 400
+            return jsonify(out)
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
+
     @app.route("/api/image-meta/<media_id>")
     def api_image_meta(media_id):
         """The one catalog row the Upscale panel needs, by media_id. Read-only, no network.

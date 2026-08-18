@@ -10,6 +10,7 @@ import VideoDrawer from "./VideoDrawer.jsx";
 import EditTab, { SourceSlab } from "./EditTab.jsx";
 import FixTab from "./FixTab.jsx";
 import { EDIT_DEFAULTS } from "../gen/editCore.js";
+import { videoRemixFromRow } from "../gen/videoRemixCore.js";
 import { dockLayout } from "../gen/dockLayout.js";
 import FilterCompare from "./FilterCompare.jsx";
 import RunsReel, { isRunningJob } from "./RunsReel.jsx";
@@ -325,12 +326,13 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
       // filled must be visible, not hidden behind a collapsed grid.
       if (request.mid) { setVideoPrefill({ mode: "i2v", images: [{ media_id: request.mid, thumb: request.thumb }] }); setExpanded(true); }
     } else if (request.tab === "remix") {
-      // Remix (issue #4): the picture's FULL recipe into the Image tab -- the
-      // same prefill the Runs reel's reuse click performs, reached from the
-      // grid context menu / Details footer. prefillFromRun is deliberately NOT
-      // in the dep array: its identity changes every render (it closes over
-      // `g`), and [request] alone is the one-shot-nonce contract above.
-      if (request.mid) prefillFromRun("", request.mid);
+      // Remix (issue #4, extended to video by SCOPE_2026-08-17 §2): the picture's
+      // FULL recipe into the Generate drawer -- an image into the Image tab, a
+      // video into the Video tab -- reached from the grid context menu / Details
+      // footer. prefillRun routes by the row's kind. It is deliberately NOT in the
+      // dep array: its identity changes every render (it closes over `g`), and
+      // [request] alone is the one-shot-nonce contract above.
+      if (request.mid) prefillRun("", request.mid);
     }
   }, [request]);
 
@@ -533,6 +535,95 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
     }
   }, [g]);
 
+  /* VIDEO REMIX (SCOPE_2026-08-17 §2): the video sibling of prefillFromRun. Mirrors its
+     epoch/busy discipline EXACTLY -- the same prefillSeq epoch retires an older in-flight
+     prefill wholesale, the same prefillBusy holds Generate until the whole recipe has
+     settled -- but lands on the VIDEO tab and drives the <VideoDrawer> imperative handle.
+
+     Two reads: the catalog row (/api/next/detail, prompt/duration/engine fallback + the
+     numeric engine id) and the task recipe (/api/video-task-params, the authoritative
+     shot kind + every recipe field). The pure videoRemixFromRow merges them -- so the
+     mapping matrix (§2.2) is loom-testable without React -- and returns the prefill object
+     the drawer consumes plus the amber disclosure notes (§2.4). A task that can't be read
+     is NOT fatal: videoRemixFromRow falls back to the catalog row and discloses it.
+
+     Spend safety: this only prefill()s the drawer, which ends in debCost(); it never
+     submits. Every priced field it writes moves the drawer's priceKey, so a remix cannot
+     arm a stale price (pinned by loom video-drawer-price-identity). */
+  const prefillVideoFromRun = useCallback(async (taskId, mediaId) => {
+    if (!mediaId) return;
+    const my = ++prefillSeq.current;
+    const live = () => prefillSeq.current === my;   // stale flows stop applying, wholesale
+    setPrefillBusy(true);
+    try {
+      let row;
+      try {
+        const r = await fetch("/api/next/detail/" + encodeURIComponent(mediaId));
+        const d = await r.json();
+        if (d.error || !d.row) {
+          if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that run's settings", msg: d.error || "" });
+          return;
+        }
+        row = d.row;
+      } catch {
+        if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that run's settings", msg: "Network error." });
+        return;
+      }
+      if (!live()) return;
+      // The task recipe. A read failure (network, delisted, unreadable) is soft: the pure
+      // mapping falls back to the catalog row and discloses "no task record" itself.
+      let taskParams = null;
+      const tid = taskId || row.task_id || "";
+      if (tid) {
+        try {
+          const rt = await fetch("/api/video-task-params/" + encodeURIComponent(tid));
+          const dt = await rt.json();
+          if (!live()) return;
+          if (!dt.error) taskParams = dt;
+        } catch { /* soft-fail -> catalog-only prefill, disclosed by videoRemixFromRow */ }
+      }
+      if (!live()) return;
+      const { prefill, notes } = videoRemixFromRow(row, taskParams);
+      // Land on the Video tab with the settings open (DC 2321: expanded, historyOpen false).
+      setTab("video");
+      setExpanded(true);
+      setHistoryOpen(false);
+      setReuseFrom(null);            // the image chip is tab-gated -- clear so it can't linger
+      const el = videoRef.current;
+      if (el && typeof el.prefill === "function") el.prefill(prefill);
+      // The video ↺-from chip lives in the VideoDrawer's own top row (cleared on submit
+      // there); it carries the partial-recipe disclosure exactly as the image chip does.
+      const tagId = taskId || row.task_id || mediaId;
+      const partial = notes.join("; ");
+      if (el && typeof el.setReuse === "function") {
+        el.setReuse({ tag: "#" + String(tagId || "").slice(-4), partial });
+      }
+      if (partial && window.Toast) {
+        window.Toast.show({ kind: "info", title: "Remix is partial", msg: partial + " — review before generating." });
+      }
+    } finally {
+      if (live()) setPrefillBusy(false);
+    }
+  }, [g]);
+
+  /* The reel / History / Details / remix-request all funnel through here: route BY the
+     catalog row's kind (a pure local read) so a video lands on the Video tab and an image
+     on the Image tab, no matter which surface asked. The reel keeps a video off the image
+     path with its own is_video guard (RunsReel.jsx); this is what actively routes the three
+     surfaces that DO offer video remix. A detail read failure falls through to the image
+     path, which re-fetches and surfaces its own error. */
+  const prefillRun = useCallback(async (idHint, mediaId) => {
+    if (!mediaId) return;
+    try {
+      const r = await fetch("/api/next/detail/" + encodeURIComponent(mediaId));
+      const d = await r.json();
+      if (d && d.row && String(d.row.is_video) === "1") {
+        return prefillVideoFromRun(idHint || (d.row && d.row.task_id) || "", mediaId);
+      }
+    } catch { /* fall through -- prefillFromRun re-fetches and reports its own error */ }
+    return prefillFromRun(idHint, mediaId);
+  }, [prefillFromRun, prefillVideoFromRun]);
+
   /* multi picker contract: (model, selected). The picker owns its own highlight
      state, so honor its verdict instead of second-guessing from ours. */
   const onLoraPick = useCallback((model, selected) => {
@@ -691,8 +782,8 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
              scroll for short windows only — the composer footer never scrolls. ---- */}
         <div className="mgdock-body">
           {reelVisible && (historyOpen
-            ? <HistoryStrip onPrefill={prefillFromRun} onTip={setRunTip} />
-            : <RunsReel jobs={jobs} reelH={reelH} onPrefill={prefillFromRun} onTip={setRunTip} />)}
+            ? <HistoryStrip onPrefill={prefillRun} onTip={setRunTip} />
+            : <RunsReel jobs={jobs} reelH={reelH} onPrefill={prefillRun} onTip={setRunTip} />)}
 
           {tab === "image" && expanded && (
             <div className="mgdock-slabs">

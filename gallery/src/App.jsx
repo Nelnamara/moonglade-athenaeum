@@ -644,7 +644,7 @@ export default function App({ boot }) {
           createPortal(
             <DetailsView
               mediaId={detailsFor} onClose={closeDetails} onNavigate={openDetails}
-              onRate={rate} onEdit={requestEdit} onRemix={requestRemix} onPublish={openPublish}
+              onRate={rate} onEdit={requestEdit} onRemix={requestRemix} onVideo={requestVideo} onPublish={openPublish}
               onDeleted={() => { closeDetails(); load(1, true); }}
               onFilterByModel={filterByModel} onFilterByBatch={filterByBatch}
               advParams={detailsAdvParams}
