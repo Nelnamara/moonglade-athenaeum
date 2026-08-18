@@ -28,6 +28,21 @@
 # line-ending-normalized (overrides the `*.js text` rule above; more specific wins).
 loom/vendor/*.js binary
 
+# Committed build artifacts in the dist/ dirs are GENERATED (vite/esbuild output), not
+# hand-edited source: the bundlers emit LF, a Windows checkout's core.autocrlf=true wants CRLF
+# for `text` files, and that mismatch leaves them PERMANENTLY "modified" with an EMPTY diff that
+# no `git add` can ever clear (two weeks of phantom churn on loom/dist/master-storyboard.bundle.css,
+# and the same latent trap on gallery/dist/app.css|app.js). Mark them byte-for-byte so git never
+# EOL-normalizes generated output -- same rule, same reason as loom/vendor above. The blobs are
+# already LF; this only stops the CRLF round-trip. More specific than the `*.css`/`*.js text` rules
+# above, so it wins for these paths.
+gallery/dist/*.css   -text
+gallery/dist/*.js    -text
+gallery/dist/*.html  -text
+gallery/dist/*.json  -text
+loom/dist/*.css      -text
+loom/dist/*.js       -text
+
 # Binary — git must never touch these
 *.png   binary
 *.jpg   binary
