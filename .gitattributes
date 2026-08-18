@@ -1,7 +1,8 @@
-# Normalize line endings in the REPO so different machines (home Windows,
-# work cloud/Linux) can't disagree and produce phantom "everything changed"
-# diffs. `* text=auto` stores all text as LF in git; Windows still checks out
-# CRLF locally, but git compares against the normalized blob, so no churn.
+# Normalize line endings in the REPO so the home and work machines (both
+# Windows 11) can't disagree and produce phantom "everything changed" diffs.
+# `* text=auto` stores all text as LF in git; Windows still checks out CRLF
+# locally, but git compares against the normalized blob, so no churn. (Exception:
+# the generated dist/ bundles below are pinned byte-for-byte -- see that note.)
 * text=auto
 
 # Explicit text types (belt and suspenders)
