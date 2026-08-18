@@ -257,8 +257,9 @@
   background: rgba(7, 5, 18, .5); }
 .mgx-size-lab { font-size: 8.5px; font-weight: 700; letter-spacing: .14em;
   color: rgba(214, 210, 226, .45); }
-.mgx-size input[type=range] { width: 78px; height: 3px; cursor: pointer;
-  accent-color: var(--accent); }
+/* Custom Slider slot (drift §48): the compact slider replaced the native range;
+   this fixes its track length to the old 78px feel (thumb overhang included). */
+.mgx-size-slot { width: 84px; }
 
 /* ---- Activity control (Claude Design handoff 2026-08-09, drift item 39) ----
    The old ambient-only .mgx-act/.mgx-actdot/.mgx-acttxt cluster (a static dot+text, no

@@ -94,14 +94,29 @@ export default function App({ boot }) {
   };
 
   /* ---- SIZE slider: thumb size for the grid; max = 4-across of the grid's
-     real width (DC formula), measured live. ---- */
+     real width (DC formula), measured live. Persists under mg_gallery_density
+     (drift §48 — the Custom Slider density control); reads the legacy mg_thumb
+     key as a fallback so a size saved before the rename survives. ---- */
   const [thumb, setThumbState] = useState(() => {
-    const v = parseInt(localStorage.getItem("mg_thumb") || "", 10);
+    const raw = localStorage.getItem("mg_gallery_density") || localStorage.getItem("mg_thumb");
+    const v = parseInt(raw || "", 10);
     return isFinite(v) && v >= 152 ? v : 210;
   });
   const setThumb = (v) => {
-    localStorage.setItem("mg_thumb", String(v));
+    localStorage.setItem("mg_gallery_density", String(v));
     setThumbState(v);
+  };
+
+  /* ---- gallery layout (drift §46/§47): masonry (current) · grid · hero ·
+     timeline. Persists in mg_gallery_layout, default masonry. Selecting only
+     re-lays the SAME cards Grid already holds — no refetch. ---- */
+  const [layout, setLayoutState] = useState(() => {
+    const v = localStorage.getItem("mg_gallery_layout");
+    return ["masonry", "grid", "hero", "timeline"].includes(v) ? v : "masonry";
+  });
+  const setLayout = (v) => {
+    localStorage.setItem("mg_gallery_layout", v);
+    setLayoutState(v);
   };
   const [thumbMax, setThumbMax] = useState(320);
   const mainRef = useRef(null);
@@ -111,6 +126,26 @@ export default function App({ boot }) {
     const ro = new ResizeObserver(() => {
       setThumbMax(Math.max(200, Math.floor((el.clientWidth - 36 - 33) / 4)));
     });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Timeline's internal-scroll pane sizes off the LIVE sticky-chrome height, not a hardcoded
+  // guess: the banner swings clamp(150px,22vw,300px) <-> slim 62px, and slim is OFF by default,
+  // so a fixed 150px let the window scroll and slid the sticky band headers behind the banner
+  // (gallery-build-review, major). Publish the header height as --mgx-chrome-h; grid.css sizes
+  // the timeline pane to calc(100vh - var(--mgx-chrome-h)) so its sticky headers clear the chrome.
+  const headerRef = useRef(null);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const apply = () => document.documentElement.style.setProperty("--mgx-chrome-h", el.offsetHeight + "px");
+    apply();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", apply);
+      return () => window.removeEventListener("resize", apply);
+    }
+    const ro = new ResizeObserver(apply);
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -591,7 +626,7 @@ export default function App({ boot }) {
       {/* Banner + separator ride together in one sticky band. The old
           collapsing-sticky mg-head is retired: hero/slim is now an explicit
           state, toggled from the separator bar. */}
-      <header className="mgx-hdr">
+      <header className="mgx-hdr" ref={headerRef}>
         <Banner
           boot={boot}
           slim={slim}
@@ -617,6 +652,7 @@ export default function App({ boot }) {
               flyOpen={flyOpen} setFlyOpen={setFlyOpen}
               applyAdvanced={applyAdvanced}
               onGenerate={openDock}
+              layout={layout} setLayout={setLayout}
             />
           }
         />
@@ -661,6 +697,7 @@ export default function App({ boot }) {
             goToPage={(p) => load(p, true)}
             blur={blur}
             thumb={thumb}
+            layout={layout}
             selectMode={selectMode} selected={selected} toggleSelected={toggleSelected}
             openLightbox={setLbIndex}
             onRate={rate}

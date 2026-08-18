@@ -44,6 +44,27 @@
   background: color-mix(in srgb, var(--accent) 30%, rgba(12, 10, 28, .55));
   color: var(--text); }
 
+/* ---- LAYOUT icon picker (drift §46): its OWN full-width row at the head of the
+   tray, above the cycle-chips. "icons not a menu" -- four glyph buttons that
+   re-lay the same cards. flex:1 1 100% forces the wrap onto its own line since
+   .mgl-tray is flex-wrap. ---- */
+.mgl-layoutrow { flex: 1 1 100%; display: flex; align-items: center; gap: 8px; }
+.mgl-laylabel { font-size: 8.5px; font-weight: 800; letter-spacing: .12em;
+  color: rgba(214, 210, 226, .5); flex: none; }
+.mgl-laypick { display: flex; gap: 6px; flex: 1 1 auto; }
+.mgl-laybtn { flex: 1 1 0; display: flex; flex-direction: column; align-items: center;
+  gap: 3px; padding: 7px 4px; border-radius: 9px; cursor: pointer;
+  font-family: inherit; user-select: none;
+  border: 1px solid var(--surface1); background: rgba(12, 10, 28, .5);
+  color: rgba(214, 210, 226, .78);
+  transition: border-color .15s, background .15s, color .15s, filter .15s; }
+.mgl-laybtn:hover { filter: brightness(1.2); }
+.mgl-laybtn.on { border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, rgba(12, 10, 28, .5));
+  color: var(--text); }
+.mgl-layglyph { font-size: 17px; line-height: 1; }
+.mgl-laylbl { font-size: 9px; font-weight: 700; }
+
 /* ---- the bar row: NEVER wraps (drift §10) ---- */
 .mgl-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; }
 
@@ -120,5 +141,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .mgl-tray, .mgl-tray.closing, .mgl-menu, .mgl-menu.closing { animation: none; }
-  .mgl-scaret, .mgl-chip, .mgl-pill { transition: none; }
+  .mgl-scaret, .mgl-chip, .mgl-pill, .mgl-laybtn { transition: none; }
 }
