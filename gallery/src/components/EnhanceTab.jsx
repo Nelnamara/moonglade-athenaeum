@@ -9,16 +9,18 @@ import { ResultLines } from "./EditTab.jsx";
    free art filters (§2). Cost chips are live (/api/enhance/presets); tiles paint instantly
    from SKELETON and fill in when the priced list lands. */
 
-// Real preset thumbnails, captured from pixai.art. Source lives in gallery/public/bridge/*.png;
-// vite copies it to gallery/dist/bridge/, and the app serves dist via /next/assets/<path> (the
-// same base app.js/app.css load from), so the served URL is /next/assets/bridge/*.png.
+// Real preset thumbnails, packaged like every other branding-class asset in this app: NOT
+// committed to the repo -- they live in the shipped asset container (moonglade.dat) as
+// bridge/preset_*.webp, resolved loose-then-container and served via /branding/<path>. On a box
+// without the container (or a fresh install before its download), the route 404s and onError
+// hides the <img> so the tile still reads (name + cost), matching the branding contract.
 const THUMB = {
-  handfix: "/next/assets/bridge/preset_handfix.png",
-  face: "/next/assets/bridge/preset_face-enhance.png",
-  emotion: "/next/assets/bridge/preset_change-emotion.png",
-  bg_remove: "/next/assets/bridge/preset_background-remover.png",
-  line_art: "/next/assets/bridge/preset_line-art.png",
-  sketch_color: "/next/assets/bridge/preset_sketch-coloring.png",
+  handfix: "/branding/bridge/preset_handfix.webp",
+  face: "/branding/bridge/preset_face-enhance.webp",
+  emotion: "/branding/bridge/preset_change-emotion.webp",
+  bg_remove: "/branding/bridge/preset_background-remover.webp",
+  line_art: "/branding/bridge/preset_line-art.webp",
+  sketch_color: "/branding/bridge/preset_sketch-coloring.webp",
 };
 const SKELETON = [
   { key: "handfix", label: "Handfix" }, { key: "face", label: "Face Enhance" },
@@ -100,7 +102,8 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
               <button key={p.key} type="button"
                 className={"mgdock-aitile" + (sel === p.key ? " on" : "")}
                 onClick={() => setSel(p.key)} title={p.label}>
-                <img className="mgdock-aithumb" src={THUMB[p.key]} alt="" loading="lazy" />
+                <img className="mgdock-aithumb" src={THUMB[p.key]} alt="" loading="lazy"
+                  onError={(e) => { e.currentTarget.style.display = "none"; }} />
                 <span className="mgdock-aimeta">
                   <span className="mgdock-ainame">{p.label}</span>
                   <span className={"mgdock-aicost" + (loading ? " ph" : "")}>{loading ? "◆ ·····" : cost(p)}</span>
