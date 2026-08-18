@@ -231,17 +231,19 @@ def test_panel_job_events_carry_action_and_rc(tmp_path, monkeypatch):
     cli = _authed_client(tmp_path)
     cli.post("/api/panel/run", json={"action": "sync"})
     import time
-    for _ in range(50):
-        d = cli.get("/api/panel/status").get_json()
-        if d["status"] != "running":
+    import moonglade_backup as core
+    # Wait for the TERMINAL event (rc + status) to actually land in jobs.jsonl -- not just for
+    # /api/panel/status to flip to "done". On a loaded runner the status flips a beat before the
+    # terminal line is flushed, and read_jobs would then see rc=None (the flaky CI race).
+    job = None
+    for _ in range(200):                      # up to ~4s; breaks the instant the terminal event lands
+        jobs = [j for j in core.read_jobs(tmp_path) if j.get("type") == "panel"]
+        if jobs and jobs[0].get("rc") is not None:
+            job = jobs[0]
             break
         time.sleep(0.02)
-    assert d["status"] == "done"
-
-    import moonglade_backup as core
-    jobs = [j for j in core.read_jobs(tmp_path) if j.get("type") == "panel"]
-    assert jobs, "the panel run never reached jobs.jsonl"
-    job = jobs[0]
+    assert cli.get("/api/panel/status").get_json()["status"] == "done"
+    assert job is not None, "the panel terminal event (with rc) never reached jobs.jsonl"
     assert job.get("action") == "sync", "start event lost the machine action key"
     assert job.get("rc") == 0, "terminal event lost the exit code"
     assert job.get("status") == "done"

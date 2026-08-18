@@ -7,8 +7,21 @@ account — the live "read the real browser + call refreshToken" step self-verif
 owner's machine (an agent sandbox can't reach the browser)."""
 import base64
 import json
+import sys
+
+import pytest
 
 import moonglade_backup as mj
+
+# read_browser_jwt / read_browser_session resolve *Windows* browser profiles (LOCALAPPDATA +
+# backslash Chrome/Edge/Brave paths). Tests that build a real on-disk profile layout and call the
+# un-mocked reader are Windows-only by construction: on a Linux runner the backslash path is
+# malformed, so the reader finds nothing and returns ''. Guard those rather than fail CI's Linux
+# runner. (Tests that MOCK the reader stay cross-platform and are deliberately left unguarded.)
+WINDOWS_ONLY = pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="reads Windows browser profiles (LOCALAPPDATA + Windows Chrome paths); Windows-only",
+)
 
 
 def _b64(d):
@@ -477,6 +490,7 @@ def test_pick_pixai_token_logout_tombstone_and_relogin():
     ]) == fresh
 
 
+@WINDOWS_ONLY
 def test_read_browser_jwt_reads_real_sstable_across_profiles(tmp_path, monkeypatch):
     base = int(_time.time())
     old = _jwt_iss(base + 3 * 86400)
@@ -492,6 +506,7 @@ def test_read_browser_jwt_reads_real_sstable_across_profiles(tmp_path, monkeypat
     assert mj.read_browser_jwt(browsers=()) == ""              # no browsers -> '' (no raise)
 
 
+@WINDOWS_ONLY
 def test_read_browser_jwt_logout_tombstone_across_ldb_and_log(tmp_path, monkeypatch):
     """Within one profile the .ldb + .log share a sequence space: a value in a compacted
     SSTable, then a later logout DELETE in the .log, must resolve to '' -- never resurface the
