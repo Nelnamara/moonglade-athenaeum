@@ -35,6 +35,40 @@ const SORT_LABELS = {
 };
 const PER_CYCLE = [50, 100, 200];
 
+/* Layout icon picker (drift §46). Owner: "icons not a menu" — so this is four
+   glyph buttons at the HEAD of the Filters tray, not a dropdown. Timeline (§47)
+   is the fourth. Titles are the workshop's verbatim. The chosen mode persists in
+   mg_gallery_layout (App owns the state); selecting only re-lays the same cards. */
+const LAYOUTS = [
+  ["masonry", "Masonry", "▦", "Masonry — Aspect-true, no crop"],
+  ["grid", "Grid", "▤", "Grid — 4:3, smart-cropped"],
+  ["hero", "Hero", "▧", "Hero — Feature + grid"],
+  ["timeline", "Timeline", "≣", "Timeline — Date-banded, newest first"],
+];
+
+function LayoutPicker({ layout, setLayout }) {
+  return (
+    <div className="mgl-layoutrow">
+      <span className="mgl-laylabel">LAYOUT</span>
+      <div className="mgl-laypick">
+        {LAYOUTS.map(([key, label, glyph, title]) => (
+          <button
+            key={key}
+            type="button"
+            className={"mgl-laybtn" + (layout === key ? " on" : "")}
+            title={title}
+            aria-pressed={layout === key}
+            onClick={() => setLayout(key)}
+          >
+            <span className="mgl-layglyph" aria-hidden="true">{glyph}</span>
+            <span className="mgl-laylbl">{label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Chip({ label, active, onClick, title }) {
   return (
     <button type="button" className={"mgl-chip" + (active ? " on" : "")}
@@ -53,7 +87,7 @@ function cycleNext(list, cur) {
    Commits ride applyAdvanced — App.jsx's existing one-patch commit path — so
    every chip reuses the exact mechanism the Advanced flyout already commits
    through (media/shelf/perPage keys included). */
-export function FilterTray({ closing, media, shelf, perPage, adv, collections, models, commit }) {
+export function FilterTray({ closing, media, shelf, perPage, adv, collections, models, commit, layout, setLayout }) {
   const srcLabel = (SOURCE_CYCLE.find((s) => s[0] === (adv.source || "")) || SOURCE_CYCLE[0])[1];
   const mediaLabel = (MEDIA_CYCLE.find((m) => m[0] === (media || "")) || MEDIA_CYCLE[0])[1];
   const shelfOpts = [""].concat(collections || []);
@@ -86,6 +120,7 @@ export function FilterTray({ closing, media, shelf, perPage, adv, collections, m
   const modelLabel = adv.model ? (adv.model.length > 18 ? adv.model.slice(0, 17) + "…" : adv.model) : "any";
   return (
     <div className={"mgl-tray" + (closing ? " closing" : "")}>
+      {setLayout ? <LayoutPicker layout={layout} setLayout={setLayout} /> : null}
       <span ref={modelBtn}>
         <Chip label={"Model · " + modelLabel} active={!!adv.model}
           title="Filter by the model that made it"
@@ -139,6 +174,7 @@ export function LibraryBar({
   adv, advCount, flyOpen, setFlyOpen, applyAdvanced,
   onGenerate, // eslint-disable-line no-unused-vars
   onSendVideo, onMutated,
+  layout, setLayout,
 }) {
   const [trayOpen, setTrayOpen] = useState(false);
   const [trayClosing, setTrayClosing] = useState(false);
@@ -201,6 +237,7 @@ export function LibraryBar({
           collections={collections}
           models={boot.models || []}
           commit={applyAdvanced}
+          layout={layout} setLayout={setLayout}
         />
       )}
       <div className="mgl-bar">

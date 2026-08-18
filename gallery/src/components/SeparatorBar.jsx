@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import NavSpine from "./NavSpine.jsx";
 import CostBadge from "./CostBadge.jsx";
+import CustomSlider from "./CustomSlider.jsx";
 import ActivityChip from "../notify/ActivityChip.jsx";
 import ActivityPanel from "../notify/ActivityPanel.jsx";
 import useActivity from "../notify/useActivity.js";
@@ -137,12 +138,20 @@ export default function SeparatorBar({
           </svg>
         </button>
 
-        {/* SIZE pill — drives the grid's --thumb var (152 … 4-across max) */}
+        {/* SIZE pill — drives the grid's --thumb var (152 … 4-across max). The
+            native <input type=range> was swapped for the shared Custom Slider
+            (drift §48) in its `compact` skin; onChange hands back the numeric
+            value, persisted as mg_gallery_density up in App. */}
         <div className="mgx-size" title="Thumbnail size">
           <span className="mgx-size-lab">SIZE</span>
-          <input type="range" min={152} max={thumbMax} step={4} value={thumb}
-            onChange={(e) => onThumb(parseInt(e.target.value, 10))}
-            aria-label="Thumbnail size" />
+          <div className="mgx-size-slot">
+            <CustomSlider
+              compact
+              min={152} max={thumbMax} step={4} value={thumb}
+              onChange={(v) => onThumb(Math.round(v))}
+              ariaLabel="Thumbnail size"
+            />
+          </div>
         </div>
       </div>
 
