@@ -364,8 +364,10 @@ export function SourceSlab({ s, setS, sub, onSub, droppedNote, onDroppedNote }) 
     <div className="mgdock-slab" style={{ animationDelay: "0ms" }}>
       <div className="mgdock-lbl">SOURCE</div>
       <div className="mgdock-subtabs" role="tablist">
-        {/* DC 2925-2929: labels + titles 'Edit' / 'Fixer' / 'Enhance'; keys per DC 1917 */}
-        {[["edit", "Edit"], ["fixer", "Fixer"], ["enhance", "Enhance"]].map(([k, l]) => (
+        {/* Edit / Enhance. The old box-coordinate 'Fixer' sub-tab was removed (owner, 2026-08-18):
+            it had been broken a while and the panelplugin Handfix/Face-Enhance presets on Enhance
+            (mirror-gated) do that job now. */}
+        {[["edit", "Edit"], ["enhance", "Enhance"]].map(([k, l]) => (
           <button key={k} type="button" role="tab" aria-selected={sub === k} title={l}
             className={"mgdock-seg" + (sub === k ? " on" : "")}
             onClick={() => onSub(k)}>{l}</button>

@@ -2,27 +2,30 @@ import React, { useEffect, useRef, useState } from "react";
 import { submitTask, useResultLines } from "../gen/submitTask.js";
 import { ResultLines } from "./EditTab.jsx";
 
-/* The Enhance sub-tab, built to The Bridge.dc.html §3 ("Enhance — home, in the drawer"):
-   ONE slab that, when the mirror is armed, stacks the six panelplugin AI presets, the Change
-   Emotion thumbnail control, a "dispatches in seconds" note, then the free art-filter swatches
-   and the compare-view button. Mirror OFF -> only the free filters show (§2, "as it does
-   today"). Cost chips are LIVE and honest (from /api/enhance/presets); the six tiles render
-   INSTANTLY as skeletons and the prices fill in when the fetch lands, so the slab never blocks. */
+/* The Enhance sub-tab, built to PixAI's real Enhance surface (labeled capture
+   `enhance__preset-tab.png`) adapted to the drawer: a grid of the six panelplugin presets
+   with their REAL thumbnails, SELECTABLE (not submit-on-click), then one "Generate ✦ <cost>"
+   button that runs the selected preset on the SOURCE image (slab 1). Mirror off -> only the
+   free art filters (§2). Cost chips are live (/api/enhance/presets); tiles paint instantly
+   from SKELETON and fill in when the priced list lands. */
 
-// Rendered instantly so the slab has its shape with zero wait; the fetch replaces this with the
-// live-priced list. Labels/keys/has_control only -- no addressing here, so a tile can't be
-// submitted until the real (priced) list arrives (tiles stay disabled until then).
+// Real preset thumbnails, captured from pixai.art. Source lives in gallery/public/bridge/*.png;
+// vite copies it to gallery/dist/bridge/, and the app serves dist via /next/assets/<path> (the
+// same base app.js/app.css load from), so the served URL is /next/assets/bridge/*.png.
+const THUMB = {
+  handfix: "/next/assets/bridge/preset_handfix.png",
+  face: "/next/assets/bridge/preset_face-enhance.png",
+  emotion: "/next/assets/bridge/preset_change-emotion.png",
+  bg_remove: "/next/assets/bridge/preset_background-remover.png",
+  line_art: "/next/assets/bridge/preset_line-art.png",
+  sketch_color: "/next/assets/bridge/preset_sketch-coloring.png",
+};
 const SKELETON = [
-  { key: "handfix", label: "Handfix", has_control: false },
-  { key: "face", label: "Face Enhance", has_control: false },
-  { key: "emotion", label: "Change Emotion", has_control: true },
-  { key: "bg_remove", label: "Background Remover", has_control: false },
-  { key: "line_art", label: "Convert to Line Art", has_control: false },
-  { key: "sketch_color", label: "Sketch Coloring", has_control: false },
+  { key: "handfix", label: "Handfix" }, { key: "face", label: "Face Enhance" },
+  { key: "emotion", label: "Change Emotion" }, { key: "bg_remove", label: "Background Remover" },
+  { key: "line_art", label: "Convert to Line Art" }, { key: "sketch_color", label: "Sketch Coloring" },
 ];
-
-// The comp's twelve free-filter swatches (enhanceFilters) -- a visual teaser; the real
-// compare/apply panel opens via onOpenFilters (the existing FilterCompare overlay).
+// The comp's free-filter swatch teaser; the real compare/apply panel opens via onOpenFilters.
 const FREE_FILTERS = [
   ["Moonglade", "#b692e6", "#4fc99a"], ["Nightfallen", "#a678f0", "#33236d"],
   ["Moonlit", "#8fb8e8", "#cfe1f5"], ["Ember", "#e8935f", "#ffcf7a"],
@@ -32,17 +35,13 @@ const FREE_FILTERS = [
   ["M6", "#e88a6b", "#f7c59f"], ["M7", "#a8c5f0", "#dbe8ff"],
 ];
 
-const EMOTIONS = ["Happy", "Sad", "Angry", "Surprised", "Shy"];
-
 export default function EnhanceTab({ source, armed, onOpenFilters }) {
   const [presets, setPresets] = useState(null);   // null = loading; [] = load failed
+  const [sel, setSel] = useState("handfix");       // Handfix selected by default, like the real surface
   const [lines, openLine] = useResultLines();
-  const [busyKey, setBusyKey] = useState("");
-  const [emo, setEmo] = useState("Happy");
+  const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
 
-  // Price only when armed (the fetch needs the mirror). Parallelized + cached server-side, so
-  // this lands in ~1s and the tiles are already on screen from SKELETON meanwhile.
   useEffect(() => {
     if (!armed) { setPresets(null); return undefined; }
     let live = true;
@@ -55,37 +54,39 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
 
   const loading = presets === null;
   const rows = presets && presets.length ? presets : SKELETON;
+  const selRow = rows.find((p) => p.key === sel) || rows[0];
+  const priced = presets ? presets.find((p) => p.key === sel) : null;  // carries price + addressing
 
-  const costLabel = (p) =>
-    p.free_card ? "✦ free card"
-      : p.price != null ? "◆ " + Number(p.price).toLocaleString()
-        : "spends";
+  const cost = (p) => !p ? ""
+    : p.free_card ? "✦ free card"
+      : p.price != null ? "◆ " + Number(p.price).toLocaleString() : "";
 
-  const run = async (p) => {
-    if (busyRef.current || loading) return;              // needs the priced list (has addressing)
+  const run = async () => {
+    if (busyRef.current || loading || !priced) return;
     if (!source) {
       if (window.Toast) {
         window.Toast.show({ kind: "err", title: "Pick a source first",
-          msg: "Choose an image in SOURCE above, then run an AI preset on it." });
+          msg: "Add an image in SOURCE above, then Generate." });
       }
       return;
     }
-    const quote = p.free_card ? "a free card covers it — 0 credits"
-      : p.price != null ? "this will spend " + Number(p.price).toLocaleString() + " credits"
+    const q = priced.free_card ? "a free card covers it — 0 credits"
+      : priced.price != null ? "this will spend " + Number(priced.price).toLocaleString() + " credits"
         : "this spends credits";
-    if (!window.confirm(p.label + " on your source?\n\n" + quote +
-        " — AI presets run on the PixAI mirror.")) return;
-    busyRef.current = true; setBusyKey(p.key);
-    const emit = openLine("Submitting " + p.label + "…");
-    const body = p.workflow_name
-      ? { source, workflow_name: p.workflow_name }
-      : { source, workflow_id: p.workflow_id };
-    await submitTask("/api/enhance", body, { label: p.label, emit });
-    busyRef.current = false; setBusyKey("");
+    if (!window.confirm(priced.label + " on your source?\n\n" + q + " — runs on the PixAI mirror.")) return;
+    busyRef.current = true; setBusy(true);
+    const emit = openLine("Submitting " + priced.label + "…");
+    const body = priced.workflow_name
+      ? { source, workflow_name: priced.workflow_name }
+      : { source, workflow_id: priced.workflow_id };
+    await submitTask("/api/enhance", body, { label: priced.label, emit });
+    busyRef.current = false; setBusy(false);
   };
 
+  const genOff = !source || loading || busy || !priced;
+
   return (
-    <div className="mgdock-slab mgdock-enhslab" style={{ animationDelay: "40ms" }}>
+    <div className="mgdock-slab mgdock-enhslab">
       {armed && (
         <>
           <div className="mgdock-ailbl">
@@ -97,43 +98,33 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
           <div className="mgdock-aigrid">
             {rows.map((p) => (
               <button key={p.key} type="button"
-                className={"mgdock-aitile" + (p.has_control ? " ctl" : "") + (busyKey === p.key ? " busy" : "")}
-                disabled={loading || !!busyKey}
-                onClick={() => run(p)}
-                title={loading ? "Pricing…" : source ? p.label : "Pick a source image first"}>
-                <span className="mgdock-ainame">{p.label}</span>
-                <span className="mgdock-aicostrow">
-                  <span className={"mgdock-aicost" + (loading ? " ph" : "")}>{loading ? "◆ ·····" : costLabel(p)}</span>
-                  {p.has_control ? <span className="mgdock-aictl">+ control</span> : null}
+                className={"mgdock-aitile" + (sel === p.key ? " on" : "")}
+                onClick={() => setSel(p.key)} title={p.label}>
+                <img className="mgdock-aithumb" src={THUMB[p.key]} alt="" loading="lazy" />
+                <span className="mgdock-aimeta">
+                  <span className="mgdock-ainame">{p.label}</span>
+                  <span className={"mgdock-aicost" + (loading ? " ph" : "")}>{loading ? "◆ ·····" : cost(p)}</span>
                 </span>
               </button>
             ))}
           </div>
 
-          {/* Change Emotion — thumbnail selector (§3, lines 212-223) */}
-          <div className="mgdock-emoctl">
-            <div className="mgdock-emolbl">CHANGE EMOTION · thumbnail selector</div>
-            <div className="mgdock-emogrid">
-              {EMOTIONS.map((e) => (
-                <button key={e} type="button"
-                  className={"mgdock-emotile" + (emo === e ? " on" : "")}
-                  onClick={() => setEmo(e)}>
-                  <span className="mgdock-emoslot">{e[0]}</span>
-                  <span className="mgdock-emoname">{e}</span>
-                </button>
-              ))}
-            </div>
-            <div className="mgdock-emonote">Drop your mascot's emotion set here — or PixAI's preset
-              thumbnails. Five shown; the set stays catalog-driven.</div>
-          </div>
+          <button type="button" className={"mgdock-enhgen" + (genOff ? " off" : "")} disabled={genOff}
+            title={!source ? "Add a source image in SOURCE above"
+              : loading ? "Pricing…" : "Generate " + selRow.label + " — runs on the mirror"}
+            onClick={run}>
+            <span>&#10022; Generate {selRow ? selRow.label : ""}</span>
+            <span className="mgdock-enhgencost">{loading ? "…" : cost(priced)}</span>
+          </button>
 
           <div className="mgdock-enhsecs">Dispatches in <b>seconds</b> — the gate was the
             credential, not the feature.</div>
+          <ResultLines lines={lines} />
           <div className="mgdock-enhdiv" />
         </>
       )}
 
-      {/* FREE FILTERS — always (§3 lines 228-234); mirror-independent, offline, no credits */}
+      {/* FREE FILTERS — always; mirror-independent, offline, no credits */}
       <div className="mgdock-enhsub">FREE FILTERS · offline, no credits</div>
       <div className="mgdock-swgrid">
         {FREE_FILTERS.map(([label, a, b]) => (
@@ -142,11 +133,6 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
         ))}
       </div>
       <button type="button" className="mgdock-enhcompare" onClick={onOpenFilters}>◐ Open compare view — M1–M7</button>
-
-      {armed && !source ? (
-        <div className="mgdock-enhpick">Pick a source image in SOURCE above, then tap a preset to run it.</div>
-      ) : null}
-      <ResultLines lines={lines} />
     </div>
   );
 }

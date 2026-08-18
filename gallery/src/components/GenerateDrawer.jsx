@@ -1217,29 +1217,9 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
             <div ref={setVideoGoEl} className="mgdock-slot" style={{ display: tab === "video" ? "contents" : "none" }} />
             <div ref={setEditGoEl} className="mgdock-slot" style={{ display: tab === "edit" && sub !== "enhance" ? "contents" : "none" }} />
             {tab === "edit" && sub === "enhance" && (
-              <>
-                {/* DC 3673 costText for enhance: 'Free — art filters composite in your
-                    browser.' -- NOT rendered as written: CostBadge is the one cost renderer
-                    and its rule (inherited from loom-core's formatCostEstimate) is that a
-                    displayed 'Free' / '0 credits' means ONLY a settled zero from the price
-                    route; nothing was priced here (nothing is sent), so the badge stays in
-                    its idle state with the DC's sentence minus the word. costSubLine (3680,
-                    the balance) is the badge's own second line. Documented divergence. */}
-                <CostBadge stack balance={balance} hint="Nothing to price — art filters composite in your browser." />
-                {/* DC genLabel 'Save to library' (3683); genReady = editRefs.length > 0
-                    (2874) -> gated on the shared source. Saving happens in the compare
-                    overlay (it owns the chosen filter, its strength/angle and the POST), so
-                    the footer action OPENS it -- never a second save path. The titles are
-                    real copy: the DC's genTitle pair is image-gen wording (owner ruling). */}
-                <button type="button" className={"mgdock-gen" + (editS.source ? "" : " off")}
-                  disabled={!editS.source}
-                  title={editS.source
-                    ? "Compare and save in the art filters overlay — this opens it"
-                    : "Pick a source image first"}
-                  onClick={() => { setFlyOpen(false); setFiltersOpen(true); }}>
-                  <span>Save to library</span>
-                </button>
-              </>
+              /* Enhance's actions live in the slab now (EnhanceTab): the preset "Generate ✦ cost"
+                 button and the art-filters "Open compare view". The footer just carries the balance. */
+              <CostBadge stack balance={balance} hint="Pick a preset above, or open the filters to compare." />
             )}
           </div>
         </div>
