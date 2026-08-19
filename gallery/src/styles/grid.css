@@ -192,8 +192,72 @@
     0 8px 24px rgba(0, 0, 0, .4);
 }
 
+/* ======================= LAYOUT MODES (drift §46/§47) =========================
+   Masonry/Grid/Hero all render into the SAME .mgg-grid above — the per-cell
+   colspan and row-span are written inline by Grid.jsx, so those three need no
+   extra CSS (uniform 4:3 / 3:2 sizing is just a different span value, and the
+   top-center crop rides the existing `cell.crop` → object-position rule on
+   .mgg-art). Only Timeline needs its own scaffold. */
+
+/* ---- Timeline (drift §47): the flat wall broken into chronological bands under
+   sticky headers, newest first, with an edge JUMP-TO rail. The tiles pane is its
+   OWN vertical scroll context so the sticky band headers and the sticky rail have
+   something to stick against that clears the app's own sticky header — the
+   workshop's internal-scroll pattern. Tiles within a band reuse .mgg-grid wholes-
+   ale (aspect-true, no crop), so a band is just a masonry wall with a heading. */
+.mgg-timeline { display: flex; gap: 14px; align-items: flex-start; padding: 0 12px; }
+.mgg-tl-cols {
+  flex: 1 1 auto; min-width: 0; position: relative;
+  max-height: calc(100vh - var(--mgx-chrome-h, 150px)); overflow-y: auto; overflow-x: hidden;
+}
+.mgg-tl-band { margin-bottom: 16px; }
+.mgg-tl-band:last-child { margin-bottom: 0; }
+
+/* sticky band header: label · per-band count · hairline rule. Flush-left so it
+   lines up with the tiles (the band grid carries no side padding here — the
+   12px gutter lives on .mgg-timeline, and Grid.jsx's colW math knows it). */
+.mgg-tl-head {
+  position: sticky; top: 0; z-index: 3;
+  display: flex; align-items: baseline; gap: 10px; padding: 7px 0 8px;
+  background: linear-gradient(180deg, var(--base) 62%, transparent);
+}
+.mgg-tl-title { font-size: 14px; font-weight: 800; color: var(--text); }
+.mgg-tl-count {
+  font-size: 10px; font-weight: 700; letter-spacing: .06em;
+  color: var(--overlay0, rgba(214, 210, 226, .5));
+}
+.mgg-tl-rule { flex: 1 1 auto; height: 1px; background: var(--surface1); }
+
+/* the band's tile grid: same masonry cell grammar, no side padding (the pane
+   already insets, and the header aligns to the tiles' left edge) */
+.mgg-tl-grid { padding: 0; }
+
+/* edge JUMP-TO rail — sticky vertical band list, ~92px (workshop markup) */
+.mgg-tl-rail {
+  flex: none; width: 92px; position: sticky; top: 0; align-self: flex-start;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.mgg-tl-railhead {
+  font-size: 8px; font-weight: 800; letter-spacing: .12em;
+  color: var(--overlay0, rgba(214, 210, 226, .5)); padding: 2px 6px 4px;
+}
+.mgg-tl-jump {
+  font-size: 10px; font-weight: 700; text-align: center; padding: 6px;
+  border-radius: 7px; cursor: pointer; white-space: nowrap; font-family: inherit;
+  color: var(--subtext, rgba(214, 210, 226, .78));
+  border: 1px solid var(--surface1); background: transparent;
+  overflow: hidden; text-overflow: ellipsis;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.mgg-tl-jump:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.mgg-tl-jump.on {
+  background: var(--accent); color: var(--base); border-color: var(--accent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mgg-card, .mgg-art, .mgg-top, .mgg-cap { transition: none; }
   .mgg-card:hover { transform: none; }
   .mgg-card:hover .mgg-art { transform: none; }
+  .mgg-tl-jump { transition: none; }
+  .mgg-tl-cols { scroll-behavior: auto; }
 }
