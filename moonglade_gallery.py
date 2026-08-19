@@ -919,778 +919,84 @@ def catalog_counts(db_path):
 # has already been *toasted* for, plus the active skin) persists to
 # out_dir/achievements.json. See ACHIEVEMENTS/SKINS below for the catalog.
 # ---------------------------------------------------------------------------
-ACHIEVEMENTS = [
-    {
-     'id': 'first-light',
-     'name': 'First Light',
-     'icon': '🌑',
-     'desc': '[redacted]',
-     'metric': 'images',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'ladder',
-     'track': 'archive', 'rung': 1, 'rungs_total': 5,
-     'roast': "[redacted]",
-     'roast_nsfw': '[redacted]',
-    },
-    {
-     'id': 'archivist',
-     'name': 'Archivist',
-     'icon': '📚',
-     'desc': '[redacted]',
-     'metric': 'images',
-     'threshold': 1000,
-     'tier': 'rare',
-     'bucket': 'ladder',
-     'track': 'archive', 'rung': 2, 'rungs_total': 5,
-     'roast': '[redacted]'ve officially crossed from "hobby" into "someone should keep an eye on this one." The shelves groan. So do we.',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'hoardsmith',
-     'name': 'Hoardsmith',
-     'icon': '🐉',
-     'desc': "[redacted]",
-     'metric': 'images',
-     'threshold': 10000,
-     'tier': 'epic',
-     'bucket': 'ladder',
-     'track': 'archive', 'rung': 3, 'rungs_total': 5,
-     'skin': 'moonlit',
-     'roast': "[redacted]",
-     'roast_nsfw': '[redacted]'s a bit much." Here\'s a shiny new skin, you magnificent pack rat. Now go outside. (You won\'t.)',
-    },
-    {
-     'id': 'loremaster',
-     'name': 'Loremaster',
-     'icon': '👑',
-     'desc': '[redacted]',
-     'metric': 'images',
-     'threshold': 25000,
-     'tier': 'legendary',
-     'bucket': 'ladder',
-     'track': 'archive', 'rung': 4, 'rungs_total': 5,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'the-great-library',
-     'name': 'The Great Library',
-     'icon': '🏛',
-     'desc': '[redacted]',
-     'metric': 'images',
-     'threshold': 50000,
-     'tier': 'legendary',
-     'bucket': 'ladder',
-     'track': 'archive', 'rung': 5, 'rungs_total': 5,
-     'banner_reward': True,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'first-frame',
-     'name': 'First Frame',
-     'icon': '🎞',
-     'desc': '[redacted]',
-     'metric': 'videos',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'ladder',
-     'track': 'loom', 'rung': 1, 'rungs_total': 4,
-     'roast': '[redacted]',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'moonweaver',
-     'name': 'Moonweaver',
-     'icon': '🌙',
-     'desc': '[redacted]',
-     'metric': 'videos',
-     'threshold': 10,
-     'tier': 'rare',
-     'bucket': 'ladder',
-     'track': 'loom', 'rung': 2, 'rungs_total': 4,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'reel-director',
-     'name': 'Reel Director',
-     'icon': '🎬',
-     'desc': '[redacted]',
-     'metric': 'videos',
-     'threshold': 50,
-     'tier': 'epic',
-     'bucket': 'ladder',
-     'track': 'loom', 'rung': 3, 'rungs_total': 4,
-     'skin': 'ember',
-     'roast': '[redacted]',
-     'roast_nsfw': '[redacted]'s your skin. Yell "action" one more time and we\'re revoking your parking spot.',
-    },
-    {
-     'id': 'cinematheque',
-     'name': 'Cinematheque',
-     'icon': '🎥',
-     'desc': '[redacted]',
-     'metric': 'videos',
-     'threshold': 100,
-     'tier': 'legendary',
-     'bucket': 'ladder',
-     'track': 'loom', 'rung': 4, 'rungs_total': 4,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'first-spark',
-     'name': 'First Spark',
-     'icon': '✨',
-     'desc': '[redacted]',
-     'metric': 'local_gens',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'ladder',
-     'track': 'forge', 'rung': 1, 'rungs_total': 4,
-     'roast': "[redacted]",
-     'roast_nsfw': '[redacted]',
-    },
-    {
-     'id': 'apprentice-smith',
-     'name': 'Apprentice of the Forge',
-     'icon': '⚒',
-     'desc': '[redacted]',
-     'metric': 'local_gens',
-     'threshold': 100,
-     'tier': 'rare',
-     'bucket': 'ladder',
-     'track': 'forge', 'rung': 2, 'rungs_total': 4,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'forgemaster',
-     'name': 'Forgemaster',
-     'icon': '🔨',
-     'desc': '[redacted]',
-     'metric': 'local_gens',
-     'threshold': 500,
-     'tier': 'epic',
-     'bucket': 'ladder',
-     'track': 'forge', 'rung': 3, 'rungs_total': 4,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'starsmith',
-     'name': 'Starsmith',
-     'icon': '🌟',
-     'desc': '[redacted]',
-     'metric': 'local_gens',
-     'threshold': 1000,
-     'tier': 'legendary',
-     'bucket': 'ladder',
-     'track': 'forge', 'rung': 4, 'rungs_total': 4,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'curator',
-     'name': 'Curator',
-     'icon': '🗂',
-     'desc': '[redacted]',
-     'metric': 'collections',
-     'threshold': 10,
-     'tier': 'rare',
-     'bucket': 'ladder',
-     'track': 'vault', 'rung': 1, 'rungs_total': 2,
-     'roast': "[redacted]",
-     'roast_nsfw': '[redacted]',
-    },
-    {
-     'id': 'grand-curator',
-     'name': 'Grand Curator',
-     'icon': '🗄',
-     'desc': '[redacted]',
-     'metric': 'collections',
-     'threshold': 50,
-     'tier': 'epic',
-     'bucket': 'ladder',
-     'track': 'vault', 'rung': 2, 'rungs_total': 2,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'menagerie',
-     'name': 'Menagerie',
-     'icon': '🎭',
-     'desc': '[redacted]',
-     'metric': 'models',
-     'threshold': 25,
-     'tier': 'epic',
-     'bucket': 'ladder',
-     'track': 'menagerie', 'rung': 1, 'rungs_total': 2,
-     'skin': 'verdant',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'conclave',
-     'name': 'Conclave of Hands',
-     'icon': '🐲',
-     'desc': '[redacted]',
-     'metric': 'models',
-     'threshold': 75,
-     'tier': 'legendary',
-     'bucket': 'ladder',
-     'track': 'menagerie', 'rung': 2, 'rungs_total': 2,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'tag-scribe',
-     'name': 'Tag Scribe',
-     'icon': '✒',
-     'desc': '[redacted]',
-     'metric': 'tagged',
-     'threshold': 50,
-     'tier': 'common',
-     'bucket': 'ladder',
-     'track': 'index', 'rung': 1, 'rungs_total': 3,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'tagsmith',
-     'name': 'Tagsmith',
-     'icon': '🏷',
-     'desc': '[redacted] Nothing in the Athenaeum goes unnamed.',
-     'metric': 'tagged',
-     'threshold': 500,
-     'tier': 'epic',
-     'bucket': 'ladder',
-     'track': 'index', 'rung': 2, 'rungs_total': 3,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'catalogus-magnus',
-     'name': 'Catalogus Magnus',
-     'icon': '📜',
-     'desc': '[redacted]',
-     'metric': 'tagged',
-     'threshold': 2500,
-     'tier': 'legendary',
-     'bucket': 'ladder',
-     'track': 'index', 'rung': 3, 'rungs_total': 3,
-     'roast': "[redacted]",
-     'roast_nsfw': '[redacted]'ve tagged more than most museums and you did it for FUN. There\'s no word for what you are. "Catalogus Magnus" is us being polite.',
-    },
-    {
-     'id': 'gallery-opening',
-     'name': 'Gallery Opening',
-     'icon': '🖼',
-     'desc': '[redacted]',
-     'metric': 'published',
-     'threshold': 10,
-     'tier': 'rare',
-     'bucket': 'ladder',
-     'track': 'gallery', 'rung': 1, 'rungs_total': 2,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'vernissage',
-     'name': 'Vernissage',
-     'icon': '🥂',
-     'desc': '[redacted]',
-     'metric': 'published',
-     'threshold': 100,
-     'tier': 'epic',
-     'bucket': 'ladder',
-     'track': 'gallery', 'rung': 2, 'rungs_total': 2,
-     'roast': "[redacted]",
-     'roast_nsfw': '[redacted]'ve made "look at my art" a full-time bit. The crowd\'s fake, the wine\'s fake, and your confidence is somehow REAL. Terrifying. Cheers.',
-    },
-    {
-     'id': 'restorer',
-     'name': 'Restorer',
-     'icon': '🖌',
-     'desc': '[redacted]',
-     'metric': 'edits',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'ladder',
-     'track': 'restoration', 'rung': 1, 'rungs_total': 3,
-     'roast': "[redacted]",
-     'roast_nsfw': '[redacted]'s the spirit — nothing\'s ever done, nothing\'s ever good enough. Welcome to the disease, Restorer.',
-    },
-    {
-     'id': 'restitcher',
-     'name': 'Restitcher',
-     'icon': '🧵',
-     'desc': '[redacted]',
-     'metric': 'edits',
-     'threshold': 50,
-     'tier': 'rare',
-     'bucket': 'ladder',
-     'track': 'restoration', 'rung': 2, 'rungs_total': 3,
-     'roast': '[redacted]'t accept "finished" anymore. Everything\'s a draft. Everything can be fixed. This is a problem. It\'s also art.',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'masterworker',
-     'name': 'Masterworker',
-     'icon': '🎨',
-     'desc': '[redacted]',
-     'metric': 'edits',
-     'threshold': 200,
-     'tier': 'epic',
-     'bucket': 'ladder',
-     'track': 'restoration', 'rung': 3, 'rungs_total': 3,
-     'roast': '[redacted]',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'first-cull',
-     'name': 'First Cull',
-     'icon': '🧹',
-     'desc': '[redacted]',
-     'metric': 'culled',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'ladder',
-     'track': 'sweep', 'rung': 1, 'rungs_total': 2,
-     'roast': '[redacted]',
-     'roast_nsfw': '[redacted]',
-    },
-    {
-     'id': 'the-winnowing',
-     'name': 'The Winnowing',
-     'icon': '🌪',
-     'desc': '[redacted]',
-     'metric': 'culled',
-     'threshold': 100,
-     'tier': 'rare',
-     'bucket': 'ladder',
-     'track': 'sweep', 'rung': 2, 'rungs_total': 2,
-     'roast': "[redacted]",
-     'roast_nsfw': '[redacted]',
-    },
-    {
-     'id': 'night-keeper',
-     'name': 'Night Keeper',
-     'icon': '🕯',
-     'desc': '[redacted]',
-     'metric': 'days_used',
-     'threshold': 7,
-     'tier': 'common',
-     'bucket': 'ladder',
-     'track': 'vigil', 'rung': 1, 'rungs_total': 2,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'moonwatch',
-     'name': 'Moonwatch',
-     'icon': '🌖',
-     'desc': '[redacted]',
-     'metric': 'days_used',
-     'threshold': 30,
-     'tier': 'rare',
-     'bucket': 'ladder',
-     'track': 'vigil', 'rung': 2, 'rungs_total': 2,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'keeper-of-order',
-     'name': 'Keeper of Order',
-     'icon': '🗃',
-     'desc': '[redacted]',
-     'metric': 'organize_runs',
-     'threshold': 1,
-     'tier': 'rare',
-     'bucket': 'milestone',
-     'roast': '[redacted]',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'interior-decorator',
-     'name': 'Interior Decorator',
-     'icon': '🛋',
-     'desc': '[redacted]',
-     'metric': 'skin_changed_runs',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'milestone',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'first-enhance',
-     'name': "Refiner's Touch",
-     'icon': '💫',
-     'desc': '[redacted]',
-     'metric': 'enhances',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'milestone',
-     'roast': '[redacted]',
-     'roast_nsfw': '[redacted]'t good enough for you, was it. Never is. Keep chasing that dragon, you gloss-addicted gremlin.',
-    },
-    {
-     'id': 'first-lora',
-     'name': 'Woven In',
-     'icon': '🧬',
-     'desc': '[redacted]',
-     'metric': 'lora_used',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'milestone',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'first-upload',
-     'name': 'Brought From Afar',
-     'icon': '📤',
-     'desc': '[redacted]',
-     'metric': 'uploads',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'milestone',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'storyweaver',
-     'name': 'Storyweaver',
-     'icon': '🕸',
-     'desc': '[redacted]',
-     'metric': 'storyboards',
-     'threshold': 1,
-     'tier': 'rare',
-     'bucket': 'milestone',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'kindred-spirits',
-     'name': 'Kindred Spirits',
-     'icon': '👥',
-     'desc': '[redacted]',
-     'metric': 'similar_uses',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'milestone',
-     'roast': '[redacted]'ve taught the void to fetch. Good void. Good crawler.',
-     'roast_nsfw': '[redacted]'ve got the machine sniffing out your type now, you predictable little goblin. It knows what you like. It\'s a bit worried, honestly.',
-    },
-    {
-     'id': 'claimant',
-     'name': 'Claimant',
-     'icon': '🎁',
-     'desc': '[redacted]',
-     'metric': 'claims',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'milestone',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'master-of-the-loom',
-     'name': 'Master of the Loom',
-     'icon': '🧶',
-     'desc': '[redacted]',
-     'metric': 'video_modes_used',
-     'threshold': 3,
-     'tier': 'epic',
-     'bucket': 'mastery',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'full-toolbox',
-     'name': 'The Full Toolbox',
-     'icon': '🧰',
-     'desc': '[redacted]',
-     'metric': 'tools_used',
-     'threshold': 3,
-     'tier': 'rare',
-     'bucket': 'mastery',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'stacked-deck',
-     'name': 'Stacked Deck',
-     'icon': '🃏',
-     'desc': '[redacted]',
-     'metric': 'lora_stacked',
-     'threshold': 3,
-     'tier': 'epic',
-     'bucket': 'mastery',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'polyglot-of-sigils',
-     'name': 'Polyglot of Sigils',
-     'icon': '🔣',
-     'desc': '[redacted]',
-     'metric': 'lora_distinct',
-     'threshold': 15,
-     'tier': 'rare',
-     'bucket': 'mastery',
-     'roast': '[redacted]',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'skin-changer',
-     'name': 'Skin-Changer',
-     'icon': '🦎',
-     'desc': '[redacted]',
-     'metric': 'skins_unlocked',
-     'threshold': 5,
-     'tier': 'rare',
-     'bucket': 'mastery',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'enhance-adept',
-     'name': 'Enhance Adept',
-     'icon': '🔮',
-     'desc': '[redacted]',
-     'metric': 'enhance_workflows_distinct',
-     'threshold': 5,
-     'tier': 'epic',
-     'bucket': 'mastery',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'thrifty-archivist',
-     'name': 'Thrifty Archivist',
-     'icon': '💰',
-     'desc': '[redacted]',
-     'metric': 'free_cards_applied',
-     'threshold': 50,
-     'tier': 'rare',
-     'bucket': 'mastery',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'under-the-hood',
-     'name': 'Under the Hood',
-     'icon': '🔧',
-     'desc': '[redacted]',
-     'metric': 'branding_custom_file',
-     'threshold': 1,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'the-konami-code',
-     'name': 'The Konami Code',
-     'icon': '🌠',
-     'desc': '[redacted]',
-     'metric': 'konami_triggered',
-     'threshold': 1,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'against-the-void',
-     'name': 'Against the Void',
-     'icon': '🕳',
-     'desc': '[redacted]',
-     'metric': 'recover_events',
-     'threshold': 1,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': '[redacted]',
-     'roast_nsfw': '[redacted]'s just you, you grave-robbing legend.',
-    },
-    {
-     'id': 'night-owl',
-     'name': 'Night Owl',
-     'icon': '🦉',
-     'desc': '[redacted]',
-     'metric': 'session_hour',
-     'threshold': 1,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'marathon',
-     'name': 'The Long Night',
-     'icon': '🏃',
-     'desc': '[redacted]',
-     'metric': 'gens_in_a_day',
-     'threshold': 100,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': '[redacted]',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'eclipse',
-     'name': 'Eclipse',
-     'icon': '🌗',
-     'desc': '[redacted]',
-     'metric': 'eclipse_anim_triggered',
-     'threshold': 1,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': '[redacted]',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'time-capsule',
-     'name': 'Time Capsule',
-     'icon': '⏳',
-     'desc': '[redacted]',
-     'metric': 'old_piece_backed_up',
-     'threshold': 1,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': '[redacted]',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'completionist',
-     'name': 'Master of the Athenaeum',
-     'icon': '💯',
-     'desc': '[redacted]',
-     'metric': 'all_non_feat_earned',
-     'threshold': 1,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'triggered',
-     'name': 'Triggered',
-     'icon': '😈',
-     'desc': "[redacted]",
-     'metric': 'narrator_pokes',
-     'threshold': 5,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'for-the-viewers',
-     'name': 'For the Viewers',
-     'icon': '📣',
-     'desc': '[redacted]',
-     'metric': 'published',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'milestone',
-     'roast': '[redacted]',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'read-the-manual',
-     'name': 'Read the Manual',
-     'icon': '📖',
-     'desc': '[redacted]',
-     'metric': 'docs_opened',
-     'threshold': 1,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': '[redacted]'s pet.',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'the-lexicon',
-     'name': 'The Lexicon',
-     'icon': '🔤',
-     'desc': '[redacted]',
-     'metric': 'distinct_keywords',
-     'threshold': 100,
-     'tier': 'rare',
-     'bucket': 'mastery',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'since-the-first-floor',
-     'name': 'Since the First Floor',
-     'icon': '🏗',
-     'desc': '[redacted]',
-     'metric': 'days_used',
-     'threshold': 100,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-]
+# ACHIEVEMENTS roster: SEALED into moonglade.dat (see _sealed_defs below). Read via _roster().
 
-SKINS = [
-    {"id": "moonglade",   "name": "Moonglade",     "free": True,
-     "desc": "[redacted]"},
-    {"id": "nightfallen", "name": "Nightfallen",   "free": True,
-     "desc": "Void-touched violet and star-ash."},
-    {"id": "moonlit",     "name": "Moonlit Silver", "free": False,
-     "desc": "Cold silver and glacier blue."},
-    {"id": "ember",       "name": "Embercourt",    "free": False,
-     "desc": "[redacted]"},
-    {"id": "verdant",     "name": "Verdant Grove", "free": False,
-     "desc": "[redacted]"},
-]
-_SKIN_IDS = {s["id"] for s in SKINS}
-
-# Real unlock text per locked skin, matching Control Panel.dc.html:453-457 exactly --
-# each name/threshold names the real achievement that actually grants it (hoardsmith/
-# reel-director/menagerie, see their 'skin' field above). Free skins carry no entry.
-_SKIN_UNLOCK_TEXT = {
-    "moonlit": "Unlock: Hoardsmith (10,000 images)",
-    "ember":   "Unlock: Reel Director (50 videos)",
-    "verdant": "Unlock: Menagerie (25 distinct models)",
+# ---------------------------------------------------------------------------
+# The achievement roster + its ancillary tables (skins, skin-unlock text, the
+# closed-set criteria labels, ladder-track names) are DEFINITIONS. They used to sit
+# inline here, readable in a public `git clone`; they now live SEALED in
+# moonglade.dat's "achievements" payload (a dict), built from the private donor
+# ../moonglade-internal/achievements_sealed_donor.json by tools/build_container.py.
+# Loaded LAZILY + cached (out_dir -- so the container path -- is not known at import).
+# A container-less install degrades to the free-skins-only fallback (empty Folio,
+# like missing art), never a crash. See ACHIEVEMENT_SEALING_SPEC.md; this is what
+# lets the /api/achievements ??? masking finally protect something.
+# The free skins are the app's DEFAULT dress (not rewards), so their non-spoiler
+# names stay public as the no-container fallback.
+_FALLBACK_DEFS = {
+    "roster": [], "skin_unlock": {}, "ach_criteria": {}, "ladder_tracks": [],
+    "skins": [
+        {"id": "moonglade",   "name": "Moonglade",   "free": True,
+         "desc": "The default -- lavender leads, emerald magic."},
+        {"id": "nightfallen", "name": "Nightfallen", "free": True,
+         "desc": "Void-touched violet and star-ash."},
+    ],
 }
+_sealed_cache = {"path": None, "mtime": None, "defs": None}
+_sealed_lock = threading.Lock()
 
-# The 10 Evolution Ladder tracks each ladder achievement's 'track' field points at
-# (see ACHIEVEMENTS' 'track'/'rung'/'rungs_total' fields; the roster.tracks these came
-# from lived in the owner's off-repo achievements_roster_57.json, whose committed copy
-# was scrubbed 2026-07-27 -- the live roster is now the inline ACHIEVEMENTS list above).
-# Single source of truth for ladder display names -- the Folio of Honors' carousel/
-# ladder-grid groups by this, not a second hand-maintained id->name map in the frontend.
-LADDER_TRACKS = [
-    {"id": "archive",     "name": "The Archive",           "metric": "images"},
-    {"id": "loom",        "name": "The Loom",               "metric": "videos"},
-    {"id": "forge",       "name": "The Moonforge",          "metric": "local_gens"},
-    {"id": "vault",       "name": "The Stacks",             "metric": "collections"},
-    {"id": "menagerie",   "name": "The Menagerie",          "metric": "models"},
-    {"id": "index",       "name": "The Index",              "metric": "tagged"},
-    {"id": "gallery",     "name": "The Gallery",            "metric": "published"},
-    {"id": "restoration", "name": "The Restoration Wing",   "metric": "edits"},
-    {"id": "sweep",       "name": "The Great Sweep",        "metric": "culled"},
-    {"id": "vigil",       "name": "The Vigil",              "metric": "days_used"},
-]
+
+def _sealed_defs():
+    """The sealed achievement definitions {roster, skins, skin_unlock, ach_criteria,
+    ladder_tracks} from moonglade.dat's "achievements" payload, plus the derived id /
+    hidden / rung / skin-id sets computed ONCE. Cached per (container path, mtime);
+    fallback (free skins only) when there is no valid container -- the Folio degrades,
+    never 500s."""
+    p = _container_path()
+    try:
+        mtime = p.stat().st_mtime
+    except OSError:
+        mtime = None
+    with _sealed_lock:
+        c = _sealed_cache
+        if c["path"] == p and c["mtime"] == mtime and c["defs"] is not None:
+            return c["defs"]
+    defs = None
+    box = _get_container()
+    raw = box.payload("achievements") if box is not None else None
+    if raw:
+        try:
+            d = json.loads(raw)
+            if isinstance(d, dict) and "roster" in d:
+                defs = d
+        except ValueError:
+            defs = None
+    if defs is None:
+        defs = _FALLBACK_DEFS
+    roster = defs.get("roster") or []
+    defs = dict(defs)
+    defs.setdefault("skins", [])
+    defs.setdefault("skin_unlock", {})
+    defs.setdefault("ach_criteria", {})
+    defs.setdefault("ladder_tracks", [])
+    defs["_ach_ids"] = frozenset(a["id"] for a in roster)
+    defs["_ach_hidden"] = frozenset(a["id"] for a in roster if a.get("hidden"))
+    defs["_ach_rung"] = _build_ach_rung(roster)
+    defs["_skin_ids"] = {s["id"] for s in defs["skins"]}
+    with _sealed_lock:
+        _sealed_cache.update(path=p, mtime=mtime, defs=defs)
+    return defs
+
+
+def _roster():        return _sealed_defs()["roster"]          # noqa: E704
+def _skins():         return _sealed_defs()["skins"]           # noqa: E704
+def _skin_unlock():   return _sealed_defs()["skin_unlock"]     # noqa: E704
+def _ach_criteria():  return _sealed_defs()["ach_criteria"]    # noqa: E704
+def _ladder_tracks(): return _sealed_defs()["ladder_tracks"]   # noqa: E704
+def _ach_ids():       return _sealed_defs()["_ach_ids"]        # noqa: E704
+def _ach_hidden():    return _sealed_defs()["_ach_hidden"]     # noqa: E704
+def _ach_rung():      return _sealed_defs()["_ach_rung"]       # noqa: E704
+def _skin_ids():      return _sealed_defs()["_skin_ids"]       # noqa: E704
 
 # ---------------------------------------------------------------------------
 # Branding: the banner mark (the animated icon beside the title) is one of the
@@ -1832,8 +1138,8 @@ def _branding_mtime(rel):
 # 404, indistinguishable from "no such file", so the route is not an oracle
 # for what art exists.
 # ---------------------------------------------------------------------------
-_ACH_IDS = frozenset(a["id"] for a in ACHIEVEMENTS)
-_ACH_HIDDEN = frozenset(a["id"] for a in ACHIEVEMENTS if a.get("hidden"))
+# Earned-art gate ids come from the SEALED roster via _ach_ids()/_ach_hidden() (below),
+# not a module-level frozenset -- the roster is no longer in this source.
 
 
 def _seal_rule(rel):
@@ -1850,12 +1156,12 @@ def _seal_rule(rel):
         aid = rel[len("badges/"):]
         if aid.endswith(".png"):
             aid = aid[:-4]
-        if "/" not in aid and aid in _ACH_IDS:
+        if "/" not in aid and aid in _ach_ids():
             return ("earned", aid)    # full-res master: the celebration fetches it AT earn time
         return ("deny", None)         # the whole bucket is sauce; unknown files stay sealed
     if rel.startswith("mascots/ach/"):
         aid = rel[len("mascots/ach/"):].rsplit(".", 1)[0]
-        if "/" not in aid and aid in _ACH_IDS:
+        if "/" not in aid and aid in _ach_ids():
             return ("earned", aid)
         return ("deny", None)
     if rel.startswith("ee_"):
@@ -2667,7 +1973,7 @@ def _build_ach_rung(roster):
     return rung
 
 
-_ACH_RUNG = _build_ach_rung(ACHIEVEMENTS)
+# The rung map is derived from the sealed roster once per load; read via _ach_rung().
 
 
 def achievement_points(a):
@@ -2676,7 +1982,7 @@ def achievement_points(a):
     hidden feat."""
     if a.get("tier") == "feat":
         return 0
-    return _TIER_POINTS.get(a.get("tier"), 0) + 5 * (_ACH_RUNG.get(a["id"], 1) - 1)
+    return _TIER_POINTS.get(a.get("tier"), 0) + 5 * (_ach_rung().get(a["id"], 1) - 1)
 
 
 # Closed-universe set achievements -> a per-criterion checklist (WHICH members are done),
@@ -2684,11 +1990,8 @@ def achievement_points(a):
 # [(member, label)] universe). ONLY closed sets belong here; open-ended distinct-counts
 # (loras, enhance_workflows) have no finite universe and stay count-only. `video_modes`
 # tracks only i2v/flf/r2v (V2V is deliberately not counted -- see the loom/generate bump).
-_ACH_CRITERIA = {
-    "full-toolbox":       ("tools",       [("edit", "Edit"), ("enhance", "Enhance"), ("fix", "Fix")]),
-    "master-of-the-loom": ("video_modes", [("i2v", "Image (I2V)"), ("flf", "First→Last (FLF)"),
-                                           ("r2v", "Reference (R2V)")]),
-}
+# The closed-set criteria labels are SEALED in the container too; read via _ach_criteria()
+# -> {aid: [set_key, [[member, label], ...]]} (JSON tuples arrive as lists, unpacked below).
 
 
 def achievement_criteria(sets):
@@ -2697,7 +2000,7 @@ def achievement_criteria(sets):
     {achievement_id: [{"key","label","done"}, ...]}. Pure + fail-soft: a missing or
     non-list set reads as 'nothing done' rather than raising."""
     out = {}
-    for aid, (set_key, universe) in _ACH_CRITERIA.items():
+    for aid, (set_key, universe) in _ach_criteria().items():
         have = sets.get(set_key) if isinstance(sets, dict) else None
         have = set(have) if isinstance(have, list) else set()
         out[aid] = [{"key": k, "label": lbl, "done": k in have} for k, lbl in universe]
@@ -2721,7 +2024,7 @@ def compute_achievements(metrics, seen=(), sets=None):
     crit = achievement_criteria(sets) if sets is not None else {}
     earned_skins = set()
     achs = []
-    for a in ACHIEVEMENTS:
+    for a in _roster():
         cur = int(metrics.get(a["metric"], 0) or 0)
         earned = cur >= a["threshold"]
         if earned and a.get("skin"):
@@ -2745,7 +2048,7 @@ def compute_achievements(metrics, seen=(), sets=None):
     # post-pass: Skin Changer counts unlocked skins (free ones + this pass's earns)
     sc = by_id.get("skin-changer")
     if sc:
-        n = sum(1 for s in SKINS if s.get("free") or s["id"] in earned_skins)
+        n = sum(1 for s in _skins() if s.get("free") or s["id"] in earned_skins)
         sc["current"] = n
         sc["earned"] = n >= sc["threshold"]
     # post-pass: Completionist = every non-feat, non-banner achievement earned
@@ -2757,12 +2060,12 @@ def compute_achievements(metrics, seen=(), sets=None):
         comp["earned"] = done == len(pool)
     skins = [{"id": s["id"], "name": s["name"], "desc": s["desc"],
               "earned": bool(s.get("free")) or s["id"] in earned_skins,
-              "unlock": _SKIN_UNLOCK_TEXT.get(s["id"])}
-             for s in SKINS]
+              "unlock": _skin_unlock().get(s["id"])}
+             for s in _skins()]
     newly = [a["id"] for a in achs if a["earned"] and a["id"] not in seen]
     earned_points = sum(x["points"] for x in achs if x["earned"])
     possible_points = sum(x["points"] for x in achs)
-    return {"achievements": achs, "skins": skins, "ladders": LADDER_TRACKS, "newly": newly,
+    return {"achievements": achs, "skins": skins, "ladders": _ladder_tracks(), "newly": newly,
             "earned_points": earned_points, "possible_points": possible_points}
 
 
@@ -2777,7 +2080,7 @@ def load_ach_state(out_dir):
     try:
         d = json.loads(_ach_state_path(out_dir).read_text(encoding="utf-8"))
         seen = [s for s in (d.get("seen") or []) if isinstance(s, str)]
-        skin = d.get("skin") if d.get("skin") in _SKIN_IDS else "moonglade"
+        skin = d.get("skin") if d.get("skin") in _skin_ids() else "moonglade"
         earned_at = {k: v for k, v in (d.get("earned_at") or {}).items()
                      if isinstance(k, str) and isinstance(v, str)}
         return {"seen": seen, "skin": skin, "earned_at": earned_at}
@@ -8412,7 +7715,7 @@ def create_app(out_dir: Path):
         # this public source -- so an unearned hidden feat's badge must not be
         # fishable by id here either (thumbs for VISIBLE unearned achievements
         # keep serving; the Folio's locked tiles show their art by design).
-        if aid in _ACH_HIDDEN and aid not in _earned_achievement_ids(
+        if aid in _ach_hidden() and aid not in _earned_achievement_ids(
                 out_dir, db_path, need=aid):
             abort(404)
         p = _badge_thumb(out_dir, aid)
@@ -9853,7 +9156,7 @@ def create_app(out_dir: Path):
         out_dir/achievements.json. Cosmetic + local-only, no spend."""
         body = request.get_json(silent=True) or {}
         skin = str(body.get("skin") or "").strip()
-        if skin not in _SKIN_IDS:
+        if skin not in _skin_ids():
             return jsonify({"error": "unknown skin"}), 400
         result = compute_achievements(achievement_metrics(db_path))
         earned = {s["id"] for s in result["skins"] if s["earned"]}

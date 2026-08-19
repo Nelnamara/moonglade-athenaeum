@@ -70,6 +70,11 @@ def main():
                          "(repeatable, tried in order). Omit to leave the "
                          "existing manifest's urls untouched; the manifest's "
                          "urls start empty if none has ever been written.")
+    ap.add_argument("--donor", default=None,
+                    help="path to the SEALED achievement-definitions JSON (roster + "
+                         "ancillary tables). Default: the private sibling repo "
+                         "../moonglade-internal/achievements_sealed_donor.json -- the "
+                         "definitions no longer live in this public tree.")
     args = ap.parse_args()
 
     root = g.branding_root()
@@ -80,7 +85,21 @@ def main():
     assets = gather(root)
     if not assets:
         sys.exit("branding/ at %s is empty -- refusing to build an empty container." % root)
-    payloads = {"achievements": json.dumps(g.ACHIEVEMENTS).encode("utf-8")}
+    # Pack the SEALED achievement definitions from the PRIVATE donor -- NOT from source
+    # (the roster no longer lives in this public tree). Same class as config.json: a file
+    # the public build reads but the public repo does not carry.
+    donor_path = Path(args.donor) if args.donor else (
+        Path(__file__).resolve().parents[2] / "moonglade-internal"
+        / "achievements_sealed_donor.json")
+    if not donor_path.is_file():
+        sys.exit("Sealed-definitions donor missing at %s -- can't build the achievements "
+                 "payload. Pass --donor, or clone the private companion repo." % donor_path)
+    defs = json.loads(donor_path.read_text(encoding="utf-8"))
+    missing = [k for k in ("roster", "skins", "skin_unlock", "ach_criteria", "ladder_tracks")
+               if k not in defs]
+    if missing:
+        sys.exit("Donor %s is missing required keys: %s" % (donor_path, ", ".join(missing)))
+    payloads = {"achievements": json.dumps(defs, separators=(",", ":")).encode("utf-8")}
 
     n_assets, n_payloads = mc.write_container(out_path, assets, payloads)
 

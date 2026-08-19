@@ -5,10 +5,17 @@ import datetime as _dt
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
-from tests.conftest import login_client
+from tests.conftest import login_client, _SEALED_DONOR
+
+# The 57-roster is sealed in the container (built from the private donor), not in source.
+# Skip these roster tests when the companion repo isn't checked out (public CI).
+pytestmark = pytest.mark.skipif(not _SEALED_DONOR.is_file(),
+                                reason="sealed-definitions donor (private repo) not present")
 
 
 class _FixedNoon(_dt.datetime):

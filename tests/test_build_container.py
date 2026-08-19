@@ -50,8 +50,24 @@ def _seed_branding(files):
     return root
 
 
+# A minimal sealed-definitions donor so these tests don't depend on the private companion
+# repo -- the roster no longer lives in source, so build_container reads it from a donor.
+_TEST_DONOR = {
+    "roster": [{"id": "first-light", "name": "First Light", "icon": "*", "desc": "d",
+                "metric": "images", "threshold": 1, "tier": "common", "bucket": "milestone"}],
+    "skins": [{"id": "moonglade", "name": "Moonglade", "free": True, "desc": "d"}],
+    "skin_unlock": {}, "ach_criteria": {}, "ladder_tracks": [],
+}
+
+
 def _run(monkeypatch, *argv):
-    """Invoke the tool's main() with argv, the way the CLI would."""
+    """Invoke the tool's main() with argv, the way the CLI would. Auto-supplies a test
+    donor (so the build never reaches for the private repo) unless argv sets one."""
+    argv = list(argv)
+    if "--donor" not in argv:
+        donor_file = g.branding_root().parent / "_test_donor.json"
+        donor_file.write_text(json.dumps(_TEST_DONOR), encoding="utf-8")
+        argv += ["--donor", str(donor_file)]
     monkeypatch.setattr(bc.sys, "argv", ["build_container.py", *argv])
     return bc.main()
 
@@ -94,8 +110,9 @@ def test_build_writes_a_verified_container_and_manifest(monkeypatch):
     assert box is not None
     assert box.get("banner.png") == PNG_1PX
     assert box.get("marks/marks.json") == b'{"marks":[]}'
-    # The tool always packs the live achievement definitions as a reserved payload.
-    assert box.payload("achievements") == json.dumps(g.ACHIEVEMENTS).encode("utf-8")
+    # The tool packs the SEALED achievement definitions (from the donor) as a reserved
+    # payload -- the roster no longer lives in source, so this is the donor, byte-for-byte.
+    assert box.payload("achievements") == json.dumps(_TEST_DONOR, separators=(",", ":")).encode("utf-8")
 
     # Manifest describes the WHOLE FILE (what the downloader fetches + verifies),
     # version "1" on a fresh manifest, and no urls until one is supplied.
@@ -143,6 +160,7 @@ def test_refuses_missing_branding(monkeypatch):
 
 def test_refuses_empty_branding(monkeypatch):
     g.branding_root().mkdir(parents=True, exist_ok=True)          # exists but empty
+    _out_path().unlink(missing_ok=True)   # drop the conftest fixture's seed container first
     with pytest.raises(SystemExit):
         _run(monkeypatch)
     assert not _out_path().exists()

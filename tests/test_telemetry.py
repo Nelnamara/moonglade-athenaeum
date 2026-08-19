@@ -8,10 +8,17 @@ import datetime as _dt
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
-from tests.conftest import login_client
+from tests.conftest import login_client, _SEALED_DONOR
+
+# The 57-roster is sealed in the container (built from the private donor), not in source.
+# Skip these roster tests when the companion repo isn't checked out (public CI).
+pytestmark = pytest.mark.skipif(not _SEALED_DONOR.is_file(),
+                                reason="sealed-definitions donor (private repo) not present")
 
 
 class _FixedNoon(_dt.datetime):
@@ -72,12 +79,12 @@ def test_store_corrupt_and_unset_fail_soft(tmp_path):
 # ---- the 57 roster + compute post-passes ------------------------------------
 
 def test_roster_shape():
-    assert len(g.ACHIEVEMENTS) == 57
-    feats = [a for a in g.ACHIEVEMENTS if a["tier"] == "feat"]
+    assert len(g._roster()) == 57
+    feats = [a for a in g._roster() if a["tier"] == "feat"]
     assert len(feats) == 11 and all(a.get("hidden") for a in feats)
-    assert sum(1 for a in g.ACHIEVEMENTS if a.get("banner_reward")) == 1
-    assert all(a["threshold"] >= 1 for a in g.ACHIEVEMENTS)
-    assert all(a.get("roast") and a.get("roast_nsfw") for a in g.ACHIEVEMENTS)
+    assert sum(1 for a in g._roster() if a.get("banner_reward")) == 1
+    assert all(a["threshold"] >= 1 for a in g._roster())
+    assert all(a.get("roast") and a.get("roast_nsfw") for a in g._roster())
 
 
 def test_skin_changer_counts_unlocked_skins():
@@ -93,7 +100,7 @@ def test_skin_changer_counts_unlocked_skins():
 
 def test_completionist_requires_every_non_feat():
     # every non-feat, non-banner achievement satisfied -> completionist earns
-    full = {a["metric"]: 10 ** 9 for a in g.ACHIEVEMENTS}
+    full = {a["metric"]: 10 ** 9 for a in g._roster()}
     out = g.compute_achievements(full, [])
     by = {a["id"]: a for a in out["achievements"]}
     assert by["completionist"]["earned"]
@@ -124,9 +131,9 @@ def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
     # (2026-08-13): the payload must not reveal how many remain undiscovered --
     # previously the array carried one hidden-feat-N entry per secret, so its
     # length counted them for anyone reading devtools
-    n_hidden = sum(1 for a in g.ACHIEVEMENTS if a.get("hidden"))
+    n_hidden = sum(1 for a in g._roster() if a.get("hidden"))
     assert n_hidden > 1                     # the collapse is genuinely collapsing
-    assert len(d["achievements"]) == len(g.ACHIEVEMENTS) - n_hidden + 1
+    assert len(d["achievements"]) == len(g._roster()) - n_hidden + 1
     hidden = [a for a in d["achievements"] if a["tier"] == "feat" and not a["earned"]]
     assert len(hidden) == 1 and hidden[0]["name"] == "???"
     # devtools must not spoil the secrets: no real id/metric on the masked card,
@@ -146,20 +153,20 @@ def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
 
 
 def test_points_rung_scaled_feats_zero_and_aggregates():
-    from moonglade_gallery import compute_achievements, achievement_points, ACHIEVEMENTS
-    by_id = {a["id"]: a for a in ACHIEVEMENTS}
+    from moonglade_gallery import compute_achievements, achievement_points, _roster
+    by_id = {a["id"]: a for a in _roster()}
     # the Archive (images) ladder reproduces the owner's locked example exactly
     seq = ["first-light", "archivist", "hoardsmith", "loremaster", "the-great-library"]
     assert [achievement_points(by_id[i]) for i in seq] == [5, 15, 35, 65, 70]
     # every feat scores 0 (pure flair; keeps the points total from hinting at hidden feats)
-    assert all(achievement_points(a) == 0 for a in ACHIEVEMENTS if a["tier"] == "feat")
+    assert all(achievement_points(a) == 0 for a in _roster() if a["tier"] == "feat")
     # a single-step milestone/mastery = flat tier base (rung 1)
     assert achievement_points(by_id["master-of-the-loom"]) == 25   # epic
     assert achievement_points(by_id["keeper-of-order"]) == 10       # rare
     # compute emits per-achievement points + self-consistent aggregates
     r = compute_achievements({}, seen=())
     assert all("points" in a for a in r["achievements"])
-    assert r["possible_points"] == sum(achievement_points(a) for a in ACHIEVEMENTS) == 960
+    assert r["possible_points"] == sum(achievement_points(a) for a in _roster()) == 960
     assert r["earned_points"] == sum(a["points"] for a in r["achievements"] if a["earned"])
 
 
