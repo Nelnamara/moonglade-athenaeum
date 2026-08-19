@@ -84,3 +84,20 @@ def test_missing_and_foreign_files(tmp_path):
     foreign = tmp_path / "foreign.dat"
     foreign.write_bytes(b"just some other file's bytes, not a container" * 8)
     assert mc.open_container(foreign) is None
+
+
+def test_writer_stamps_the_current_reader_version(tmp_path):
+    """The writer and the running reader must always agree on the format version: a fresh
+    build stamps mc.VERSION in the header and open_container accepts it. This is the
+    tripwire for the 'v1 file under a v2 reader -> empty Folio' class -- if someone bumps
+    mc.VERSION without keeping the writer/reader in step, a fresh build stops round-tripping
+    here, LOUDLY, instead of a rebuilt-but-still-rejected container reaching an install.
+    (It cannot police the DELIVERED release asset -- that's the deploy lockstep's job:
+    rebuild the .dat, republish it, bump moonglade_manifest.json, all with the merge.)"""
+    p = tmp_path / "v.dat"
+    mc.write_container(p, {"a.png": b"x"}, {"achievements": b'{"roster":[]}'})
+    raw = p.read_bytes()
+    assert raw[:4] == b"MGC1"                         # magic
+    (ver,) = struct.unpack_from("<H", raw, 4)         # format version, header offset 4
+    assert ver == mc.VERSION
+    assert mc.open_container(p) is not None            # and the current reader accepts it

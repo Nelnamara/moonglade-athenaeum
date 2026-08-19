@@ -11474,8 +11474,13 @@ def run_backfill_phash(args):
 def _check_time_capsule(created_at, out_dir):
     """A hidden anniversary feat: fires when a NEWLY-downloaded piece is old enough,
     only on the download event, never on a full-catalog rescan (old rows already
-    on disk must not earn it). Fail-soft; never slows the download loop. (The feat's
-    name/threshold are sealed in the container; only this detection code is public.)"""
+    on disk must not earn it). Fail-soft; never slows the download loop.
+
+    The feat's NAME, roast, criteria label and points are sealed in the container. The
+    trigger's comparison constant (below) and its flag name are NOT -- they run in the
+    public download loop with no container, so they are an accepted, un-sealable residual
+    plaintext leak (recorded as such in the sealing definition-of-done). Do not describe
+    them as sealed; the spoiler-leak guard can't catch a bare integer either."""
     try:
         from datetime import datetime
         s = str(created_at or "")[:19]

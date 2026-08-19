@@ -949,30 +949,49 @@ _sealed_lock = threading.Lock()
 def _sealed_defs():
     """The sealed achievement definitions {roster, skins, skin_unlock, ach_criteria,
     ladder_tracks} from moonglade.dat's "achievements" payload, plus the derived id /
-    hidden / rung / skin-id sets computed ONCE. Cached per (container path, mtime);
-    fallback (free skins only) when there is no valid container -- the Folio degrades,
-    never 500s."""
+    hidden / rung / skin-id sets. Cached per (container path, mtime) and computed UNDER
+    the lock, so a cold-cache race (N workers hitting /api/achievements at once) decodes
+    it once, not once per request. Fallback (free skins only) when there is no valid
+    container OR the sealed roster is malformed -- the Folio degrades, never 500s."""
     p = _container_path()
     try:
         mtime = p.stat().st_mtime
     except OSError:
         mtime = None
+    # Open the container OUTSIDE _sealed_lock (it has its own _container_lock). The
+    # decode+derive below runs UNDER _sealed_lock -- it re-enters neither lock, so holding
+    # it here just serializes concurrent cold misses instead of decoding the payload N
+    # times (box.payload does XOR + zlib.decompress; a few ms, not free).
+    box = _get_container()
     with _sealed_lock:
         c = _sealed_cache
         if c["path"] == p and c["mtime"] == mtime and c["defs"] is not None:
             return c["defs"]
-    defs = None
-    box = _get_container()
-    raw = box.payload("achievements") if box is not None else None
-    if raw:
+        defs = None
+        raw = box.payload("achievements") if box is not None else None
+        if raw:
+            try:
+                d = json.loads(raw)
+                if isinstance(d, dict) and "roster" in d:
+                    defs = d
+            except ValueError:
+                defs = None
+        # A checksum-valid but MALFORMED roster (valid JSON, but "roster" not a list of
+        # well-shaped entries) must degrade like a missing one, not 500 the whole Folio:
+        # derive from it, and on any shape error fall back to the free-skins defaults.
         try:
-            d = json.loads(raw)
-            if isinstance(d, dict) and "roster" in d:
-                defs = d
-        except ValueError:
-            defs = None
-    if defs is None:
-        defs = _FALLBACK_DEFS
+            computed = _derive_sealed(defs if defs is not None else _FALLBACK_DEFS)
+        except (KeyError, TypeError, AttributeError):
+            computed = _derive_sealed(_FALLBACK_DEFS)
+        _sealed_cache.update(path=p, mtime=mtime, defs=computed)
+        return computed
+
+
+def _derive_sealed(defs):
+    """Normalize a raw sealed-defs dict and attach the derived id / hidden / rung /
+    skin-id sets. Raises (KeyError/TypeError/AttributeError) on a malformed roster so
+    _sealed_defs can catch it and fall back to the free-skins defaults. _FALLBACK_DEFS is
+    well-formed, so _derive_sealed(_FALLBACK_DEFS) is the guaranteed-safe last resort."""
     roster = defs.get("roster") or []
     defs = dict(defs)
     defs.setdefault("skins", [])
@@ -983,8 +1002,6 @@ def _sealed_defs():
     defs["_ach_hidden"] = frozenset(a["id"] for a in roster if a.get("hidden"))
     defs["_ach_rung"] = _build_ach_rung(roster)
     defs["_skin_ids"] = {s["id"] for s in defs["skins"]}
-    with _sealed_lock:
-        _sealed_cache.update(path=p, mtime=mtime, defs=defs)
     return defs
 
 
