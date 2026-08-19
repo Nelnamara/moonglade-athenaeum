@@ -18,6 +18,7 @@ import ImportOverlay from "./components/ImportOverlay.jsx";
 import ControlPanelOverlay from "./components/ControlPanelOverlay.jsx";
 import ContactSheetOverlay from "./components/ContactSheetOverlay.jsx";
 import FolioOverlay from "./components/FolioOverlay.jsx";
+import AiToolsModal from "./components/AiToolsModal.jsx";
 import GenerateDrawer from "./components/GenerateDrawer.jsx";
 import PickerHost, { isPickerOpen } from "./components/PickerHost.jsx";
 import ClaimModal from "./components/ClaimModal.jsx";
@@ -144,6 +145,17 @@ export default function App({ boot }) {
   const openContactSheet = useCallback((ids, collectionName) => {
     setContactSheetTarget({ ids: ids || [], collectionName: collectionName || "" });
     setOverlay("contactsheet");
+  }, []);
+  // Bridge §4→§5 hand-off: picking a scene in the AI Tools catalog closes the browse
+  // modal and hands the scene to the gen drawer's generator. The generator surface (the
+  // per-scene control row + Generate) is the next slice; until it lands, acknowledge the
+  // pick honestly rather than dropping it silently.
+  const onPickScene = useCallback((scene) => {
+    setOverlay(null);
+    if (window.Toast) {
+      window.Toast.show({ kind: "ok", title: scene.name,
+        msg: "Scene selected — its generator lands in the next slice." });
+    }
   }, []);
   // Esc closes the overlay FIRST (capture beats the drawer's own Esc ladder) --
   // EXCEPT where a layer on top owns its own Escape ladder: the Control Panel
@@ -757,6 +769,9 @@ export default function App({ boot }) {
       )}
       {overlay === "folio" && (
         <FolioOverlay onClose={() => setOverlay(null)} />
+      )}
+      {overlay === "aitools" && (
+        <AiToolsModal open onClose={() => setOverlay(null)} onPick={onPickScene} />
       )}
 
       {/* the Generate dock host: the wrapper carries the outside-click anchor

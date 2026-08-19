@@ -92,7 +92,15 @@ function MirrorTile() {
   const refresh = async () => {
     // Always drive the tile from the SERVER's real state, never a fabricated object -- a
     // fabricated {connected:true} with no `enabled` key drove the toggle from `undefined`.
-    try { const r = await fetch("/api/mirror/status"); setSt(await r.json()); } catch { /* keep st */ }
+    try {
+      const r = await fetch("/api/mirror/status");
+      const j = await r.json();
+      setSt(j);
+      // The always-mounted destinations nav reveals "✦ AI Tools" only while armed, but it
+      // can't see this overlay's state. Announce every status read on a window event so
+      // NavSpine refetches and the entry appears/vanishes the instant the mirror flips.
+      window.dispatchEvent(new CustomEvent("mg-mirror-changed", { detail: j }));
+    } catch { /* keep st */ }
   };
   useEffect(() => { refresh(); }, []);
   const toggle = async () => {
