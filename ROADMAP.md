@@ -15,75 +15,72 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Now — active
 
-- Everything else queued is in *Next*. **Recently shipped is not listed here** — the Generate dock's
-  design pass and its catalog-backed 7-day **History** ([#13](https://github.com/Nelnamara/moonglade-athenaeum/issues/13))
-  landed on master and moved to `CHANGELOG.md` under *Unreleased*, per the rule at the top of this file.
+- **Seal ALL achievement code + definitions into `moonglade.dat`** *(owner's #1, 2026-08-19)*
+  A `git clone` of this PUBLIC repo exposes every feat's name, metric, threshold, and both roasts —
+  hard-coded in source; the `/api/achievements` masking is defeated by just reading the `.py`. Move
+  all achievement / feat / ladder **definitions**, spoiler strings, and spoiler art into the sealed
+  container, leaving only opaque ids + metric keys public. Per the red-team sequencing this runs
+  **with** the ladder-rung redefinition + 57→60 roster growth, and it **absorbs the earned-rewards
+  item** below. Owner prereqs in progress: `branding/` folder cleared, Under-the-Hood nearly ready,
+  and the enhance-picker preset/scene thumbnails still to be added to the bundle. Scope underway
+  (full codebase sweep of every achievement/feat/spoiler surface + the container mechanism).
+
+- **Recently shipped is not listed here** — this session's Bridge AI-Tools tier + Enhance-preset fix,
+  the gallery layout switcher, and the video-drawer cleanup all landed on master and moved to
+  `CHANGELOG.md` under *Unreleased*, per the rule at the top of this file.
 
 ---
 
 ## Next — scoped, not started
 
-- **Per-batch / per-task grid stacking**
-  Collapse the grid into per-batch/per-task stacks instead of one flat wall. Related surfaces exist
-  but don't cover it: a batch-filter drill-down and the Image Details lineage-siblings section. The
-  grid-stacking itself is unbuilt. (The 2026-08-17 persona sweep's **Group-by / sectioned** layout
-  generalizes this — batch becomes one axis among several; see the Gallery layout switcher item.)
+- **Per-batch / per-task grid stacking** *(orphaned — fold or drop)*
+  Collapse the grid so a multi-image generation shows as **one stack** instead of N flat tiles. It
+  was going to ride the layout switcher's **Group-by/sectioned** axis, but that follow-on was cut
+  (below), leaving this standalone and thin. Owner call pending: fold into a future Group-by, or drop.
 
-- **Gallery layout switcher** *(new; Hero layout in design workshop, 2026-08-17)*
-  The main gallery has had exactly one layout — **Masonry** — since the React UI rebuild. Add a
-  user switcher offering three, with room to grow:
-    - **Masonry** — the current wall (default, unchanged).
-    - **Grid** — a throwback to the original pre-rebuild gallery, for those who prefer the simple
-      uniform grid.
-    - **Hero** — a new layout style, being workshopped on the design side now.
-  Owner is **open to further layout suggestions** — the 2026-08-17 persona sweep (7 archetypes;
-  full ranked brief in `../moonglade-internal/PERSONA_SWEEP_2026-08-17.md` §1) surfaced strong
-  candidates, ranked by cross-persona convergence:
-    - **Timeline** — date-sectioned bands (sticky YYYY-MM / Today), jump-to-month rail. *Unanimous
-      across all six personas*; `created_at` is already on every row. The standout net-new pick.
-    - **Group-by / sectioned** — collapse the wall into labelled sections by a user-picked axis
-      (model / rating / collection / source). Generalizes the roadmapped per-batch stacking.
-    - **Justified rows** — uniform-height, aspect-true, no crop, stable reading order; a third
-      geometry distinct from Masonry and Grid, and the lowest-effort net-new one.
-    - **Filmstrip / focus-review** — the lightbox promoted from a modal to a *persistent* big-image
-      + neighbour-strip layout, keyboard advance + inline rate.
-    - **Live density / "proof" mode** — an ultra-dense chrome-free triage grid, plus a thumb-size
-      slider that rescales whichever layout is active.
-    - **Data-table / Ledger** — the catalog as a sortable spreadsheet (model/seed/steps/cost…),
-      read-only; plus a **Compare / recipe-diff** view (2–9 up, differing fields called out).
-  Two constraints the sweep flagged: **Hero needs concrete shapes** (live "latest drop", cover+strip,
-  phone full-bleed — it's in the workshop now); and the **switcher must ship on mobile too** (a
-  separate locked-2-column component today), with per-device layout memory. Design-first
-  (user-visible surface); the switcher control + per-layout render are the build.
+- **Gallery layout switcher — mobile pass only (maybe)** *(desktop base shipped 2026-08-19)*
+  The desktop switcher (**Masonry / Grid / Timeline**) shipped and moved to `CHANGELOG.md`; the owner
+  has minor visual fixes queued on top. The persona-sweep follow-on layouts (Group-by, Justified,
+  Filmstrip, density/proof, data-table) are **CUT** — not worth the payoff (owner, 2026-08-19). What
+  *may* remain is a **mobile** switcher (column density + per-device memory), but the owner is
+  skeptical these layouts are even viable on a phone — so this is a maybe pending a look, not a
+  committed build.
 
 - **Loom per-project spend ledger (historical)**
   The live *cost-to-finish* roll-up shipped; what's missing is a per-Loom-project record of what a
   project has *already* spent. Only the global account credit ledger tracks historical spend today.
   Low priority, but needs scoping before build.
 
-- **Marks render too small, everywhere they appear**
-  A recurring complaint since the beginning that keeps getting deprioritised as cosmetic. It is a
-  real sizing defect, not a taste question — fix it alongside any mark-system work. The header is
-  the current worst example.
+- **Marks render too small, everywhere they appear** *(scope + workshop the right size — owner, 2026-08-19)*
+  A recurring, real sizing defect ("song as old as time"), long deprioritised as cosmetic. The header
+  is the worst example. Owner call: **workshop it and settle the right size**, then apply everywhere
+  marks appear — don't spot-fix one surface.
 
-- **Earned rewards: extend beyond skins**
-  The Folio's "earned rewards" section is real and shipped, but only shows **skin** unlocks. Extend
-  it to cover **banner** and **icon** unlocks. Build-more, not a reshape.
+- **Earned rewards: extend beyond skins** *(owner's own reward-tier scheme — folds into the achievement/ladder work)*
+  The Folio's earned-rewards section shows only **skin** unlocks, but the owner's tier scheme is
+  `low→icon / epic→skin / legendary→banner` — so the **icon** and **banner** unlocks it defines are
+  unshown. Not a stray ask: it completes that scheme. Two open calls block it (DECISIONS): not every
+  ladder track reaches legendary (some can't earn a banner without added rungs), and whether `rare`
+  gets its own reward kind. Both are ladder-rung decisions → build this **inside** the Now item's
+  achievement-sealing + ladder-rung rework, not standalone.
 
-- **Real generation progress, if PixAI exposes it**
-  An old rule said never show progress because PixAI exposes none — that's wrong: the site shows
-  graphical progress. Worth probing what's actually available and surfacing it honestly. The one
-  hard constraint that stands: never *fabricate* progress, and never let a queue-wait estimate
-  read as a render ETA. **Probe update (2026-08-16):** the site calls `/v2/task/wait-time` on the
+- **Real generation progress — build the honest "starts in ~N" from the wait estimate** *(owner call, 2026-08-19)*
+  PixAI does **not** expose true render progress. It once showed the image taking shape (a blurred
+  wireframe resolving into focus), but that's gone; today it gives only a **start time + an estimated
+  wait**. Our own honest treatment (mascot + indeterminate shimmer, no fabricated %) already ships.
+  The build: surface a clearly-labelled "**about N minutes before this starts**" from that start-time
+  + estimated-wait — a QUEUE wait, never dressed as a render ETA. **Probe (2026-08-16):** the site calls `/v2/task/wait-time` on the
   generate surface — that is a **queue-wait** figure, i.e. exactly the thing the constraint above
   says must never be dressed as render progress. It may still be worth showing *as what it is*
   ("about N minutes before this starts"). The dock's running tiles ship the honest treatment in the
   meantime: mascot + indeterminate shimmer, no percentage.
 
-- **Confirm the live mirror really self-heals**
+- **Confirm the live mirror really self-heals** *(RUN the banked recipe — owner, 2026-08-19: "why is it just sitting")*
   The mirror is supposed to recover its own gaps automatically after a drop, stale socket or
   restart — no manual Panel job. That was the requirement ("im not suppposed to have to"), but it
-  hasn't been re-confirmed lately. **Test recipe:** create the gap on purpose — stop the server,
+  hasn't been re-confirmed lately. This is a **verification, not a build** — run the recipe and
+  report; it has been sitting only because nothing scheduled it. **Test recipe:** create the gap on
+  purpose — stop the server,
   complete one generation while it's down (site or CLI from another window; or kill the network
   for a minute mid-generation instead), start it back up. The piece must appear in the gallery on
   its own within the sweep interval, with no manual sync. If the button has to be pressed, it
@@ -93,7 +90,7 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   The "☆ Shortlist" staging step shipped. The larger workbench — deadline tracking, submission
   management — is still just wanted, not scoped.
 
-- **Bonjour / mDNS advertising: the server announces itself on the LAN**
+- **Bonjour / mDNS advertising: the server announces itself on the LAN** *(greenlit to scope + prep — owner, 2026-08-19)*
   Today a LAN device reaches the gallery only by a name the owner already knows and types
   (`http://<pc-name>.local:5000`, which works because every modern OS resolves `.local` on its
   own — that part needs no code). What's missing is *discovery*: the server registering an
@@ -119,10 +116,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Design-pass reworks — rescope, don't just build
 
-- **Video-tab Model Picker rework.** The Video drawer's model selector reuses the *image*
-  model-picker frame — overkill for the handful of video engines, with no thumbnail and no
-  notable info. Owner has an improved design plan for a proper video-model selector (incoming
-  with the Bridge handoff return, ~2026-08-17). Rescope, don't reuse.
 - **Ladder representative badges.** Ladders currently show their FIRST rung's art. A new design
   pass on ladder badges is wanted.
 - **Community features YES-list revisit.** The 2026-07-26 pick-list (like/react etc.) predates
