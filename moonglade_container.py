@@ -3,45 +3,45 @@ own MPQ.
 
 WHAT THIS IS. One opaque file carrying the app's default identity: every branding
 asset (marks, banners, mascots, badges, rewards) plus reserved payload slots for
-non-file data. Built by tools/build_container.py from a real branding/ tree; read
-at runtime by moonglade_gallery.py's loose-then-container resolution layer, where
-a real file on disk always wins over the container (branding drop-in is a shipped
-feature and the discovery mechanic depends on it).
+non-file data (e.g. the achievement roster). Built by tools/build_container.py from
+a real branding/ tree; read at runtime by moonglade_gallery.py's loose-then-container
+resolution layer, where a real file on disk always wins over the container (branding
+drop-in is a shipped feature and the discovery mechanic depends on it).
 
-WHY A CUSTOM FORMAT (decided 2026-08-10, docs/DECISIONS.md "The asset container,
-re-scoped from scratch"): the protection bar is WoW-MPQ-class -- a normal user
-sees an unrecognized binary blob no tool opens; a power user who studies this
-public source can write an extractor, and that is accepted. Rejected alternatives
-and why: encrypted SQLite (a free viewer opens it once the key is read from this
-repo), AES-zip (the file listing stays readable with no password at all). This
-format is the only shape where the crack requires actually writing code.
+OBFUSCATION, NOT SECRECY -- read this before "improving" it. This is a self-hosted,
+open-source app: the running server must decode the container, so the decode path
+lives in this public module, so a DETERMINED reader can always write an extractor.
+We do not pretend otherwise. What v2 buys over v1 is ANNOYANCE, deliberately: the
+working key is no longer a single grep-able constant (it is assembled from scattered
+fragments and stretched through a slow KDF), payloads are compressed so `strings`
+finds nothing, and the sensitive payloads (the roster) sit behind a SECOND,
+independently-derived layer -- so cracking the art layer does not hand over the
+roster. The bar moves from "copy _KEY, run ten lines" to "trace the derivation,
+implement scrypt with the right params, reverse two layers, decompress." That is the
+whole and only goal; the real protection for spoilers is that they no longer sit in
+plaintext anywhere in the public repo (see ACHIEVEMENT_SEALING_SPEC.md). Do NOT
+present this as cryptographic protection anywhere.
 
-THE OBFUSCATION IS DELIBERATELY NOT SECRECY. The key below is committed to a
-public repo, exactly as MPQ's algorithm was public. What the browser renders, the
-browser has. The point is opacity to casual inspection, not cryptographic
-protection -- do not "upgrade" this to real key management, and do not present it
-as security anywhere.
-
-FORMAT (v1, little-endian):
-    header  32 bytes: magic 'MGC1' | u16 version | u16 flags | u64 toc_off
+FORMAT (v2, little-endian):
+    header  32 bytes: magic 'MGC1' | u16 version(=2) | u16 flags | u64 toc_off
                       | u64 toc_size | 8 reserved
-    body    asset blobs back-to-back, each XOR-obfuscated with the keystream
-    toc     JSON {"assets": {relpath: [off, size, sha256hex]},
-                  "payloads": {name: [off, size, sha256hex]}}
-            zlib-compressed then keystream-obfuscated, at toc_off
+    body    asset blobs back-to-back, each XOR-obfuscated with the keystream at its
+            absolute file offset (UNCHANGED from v1 -- art needs fast random access);
+            then payload blobs, each zlib-compressed (and, for a SEALED payload, XOR'd
+            with the second keystream) before the same offset-aligned obfuscation.
+    toc     JSON {"assets": {relpath: [off, size, sha256hex_of_original]},
+                  "payloads": {name: [off, on_disk_size, sha256hex_of_original]}}
+            zlib-compressed then obfuscated, at toc_off.
 The keystream is SHAKE-256 counter blocks (64 KiB each) aligned to ABSOLUTE file
-offsets (block = offset // 65536), so any byte range decodes independently --
-random access and future HTTP-Range serving need no full-file pass. The XOR runs
-as one big-integer operation per call (C speed, ~GB/s): a 392 MB pack takes
-seconds and a 3 MB per-request read costs single-digit milliseconds, measured --
-the first cut used 32-byte SHA-256 blocks with a per-byte Python loop and packed
-at ~3 MB/s, which would have made every gallery image a ~1 s read. Pure stdlib;
-no deps.
+offsets (block = offset // 65536), so any byte range decodes independently -- random
+access and HTTP-Range serving of art need no full-file pass. The XOR runs as one
+big-integer op per call (C speed, ~GB/s). Pure stdlib; no deps.
 
-Read-side contract: open_container() returns None (never raises) for a missing,
-truncated, or corrupt file, and Container.get() returns None on a checksum
-mismatch -- callers degrade to "asset absent", the same behaviour a missing loose
-file already has. A broken container must never 500 the gallery.
+Read-side contract (UNCHANGED): open_container() returns None (never raises) for a
+missing, truncated, corrupt, or foreign/old-version file, and Container.get()/payload()
+return None on a checksum mismatch -- callers degrade to "asset absent", exactly as a
+missing loose file already does. A broken container must never 500 the gallery. A v1
+container reads as None under v2 (version mismatch) -- rebuild required, by design.
 """
 import hashlib
 import json
@@ -50,56 +50,114 @@ import zlib
 from pathlib import Path
 
 MAGIC = b"MGC1"
-VERSION = 1
+VERSION = 2
 _HEADER = struct.Struct("<4sHHQQ8s")   # 32 bytes
 HEADER_SIZE = _HEADER.size
-
-# Public-by-design (see the module docstring). Changing this orphans every
-# container built before the change -- version-bump the format if it ever must.
-_KEY = bytes.fromhex(
-    "6d6f6f6e676c6164652d617468656e6165756d2d61727465666163742d763101")
-
 _BLOCK = 65536
 
+# ---- key material -----------------------------------------------------------------
+# The working keys are DERIVED, not stored. Fragments are scattered on purpose (see the
+# module docstring: annoyance, not secrecy). scrypt stretches them so a reader must run
+# the KDF, not copy a constant; the cost is paid ONCE at import and cached below.
+_FRAG_A = b"moonglade"
+_SCRYPT = {"n": 1 << 14, "r": 8, "p": 1, "dklen": 32, "maxmem": 64 * 1024 * 1024}
 
-def _xor_at(data, file_offset):
-    """XOR `data` with the keystream as laid at absolute position `file_offset`.
-    Involutive: applying it twice is identity, so this is both encode and decode.
-    Block alignment is to the FILE, not the blob, so a slice read mid-blob still
-    decodes -- the property that makes random access free.
 
-    Speed is load-bearing here (see the module docstring): the pad is generated
-    64 KiB at a time by SHAKE-256 (one C-level call per block) and the XOR is a
-    single big-integer op over the whole range -- no Python byte loop anywhere."""
+def _blend(*parts):
+    return b"\x1f".join(parts)
+
+
+_FRAG_B = b"athenaeum"
+_FRAG_C = bytes(reversed(b"tcafetra"))   # -> b"artefact", assembled not spelled
+
+
+def _derive(tag):
+    """A 32-byte key for `tag`, assembled from the scattered fragments + the format
+    identity and stretched through scrypt. Deliberately not a lookup of one constant."""
+    material = _blend(_FRAG_A, _FRAG_B, _FRAG_C, bytes(MAGIC),
+                      struct.pack("<H", VERSION), tag)
+    salt = hashlib.sha256(_blend(bytes(MAGIC), tag, _FRAG_C)).digest()
+    return hashlib.scrypt(material, salt=salt, **_SCRYPT)
+
+
+_KEY = _derive(b"general")     # the art / toc / payload container layer
+_KEY2 = _derive(b"roster")     # the SECOND layer, over sealed payloads only
+
+# Payload names that get the second, independently-keyed layer. The roster is the crown
+# jewel; everything else in the container is art (already binary) or non-sensitive.
+_SEALED = frozenset({"achievements"})
+
+
+def _keystream(key, first_block, n_blocks):
+    return b"".join(hashlib.shake_256(key + struct.pack("<Q", b)).digest(_BLOCK)
+                    for b in range(first_block, first_block + n_blocks))
+
+
+def _xor_at(data, file_offset, key=_KEY):
+    """XOR `data` with the keystream as laid at absolute `file_offset`. Involutive
+    (encode == decode). Block-aligned to the FILE so a mid-blob slice still decodes --
+    the property that keeps art random-access free. One big-int op, no byte loop."""
     n = len(data)
     if n == 0:
         return b""
     first = file_offset // _BLOCK
     last = (file_offset + n - 1) // _BLOCK
-    pads = [hashlib.shake_256(_KEY + struct.pack("<Q", b)).digest(_BLOCK)
-            for b in range(first, last + 1)]
+    pad = _keystream(key, first, last - first + 1)
     start = file_offset - first * _BLOCK
-    pad = b"".join(pads)[start:start + n]
+    pad = pad[start:start + n]
     return (int.from_bytes(data, "little")
             ^ int.from_bytes(pad, "little")).to_bytes(n, "little")
 
 
+def _xor_whole(data, key):
+    """Whole-blob keystream from position 0 -- the second layer for sealed payloads,
+    which are always read in full (no random access needed, so no offset alignment)."""
+    n = len(data)
+    if n == 0:
+        return b""
+    pad = _keystream(key, 0, (n - 1) // _BLOCK + 1)[:n]
+    return (int.from_bytes(data, "little")
+            ^ int.from_bytes(pad, "little")).to_bytes(n, "little")
+
+
+def _pack_payload(name, raw):
+    """Compress; a SEALED payload also gets the second-layer XOR. Returns the bytes to
+    lay in the body (before the outer offset-aligned obfuscation)."""
+    blob = zlib.compress(raw, 9)
+    if name in _SEALED:
+        blob = _xor_whole(blob, _KEY2)
+    return blob
+
+
+def _unpack_payload(name, blob):
+    """Reverse of _pack_payload (after the outer layer is already undone)."""
+    if name in _SEALED:
+        blob = _xor_whole(blob, _KEY2)
+    return zlib.decompress(blob)
+
+
 def write_container(out_path, assets, payloads=None):
     """Pack {relpath: bytes} (+ optional {name: bytes} payloads) into out_path.
-    Returns (n_assets, n_payloads). Deterministic layout (sorted keys) so two
-    builds from identical inputs are byte-identical -- diffable and testable."""
+    Returns (n_assets, n_payloads). Deterministic layout (sorted keys) so two builds
+    from identical inputs are byte-identical -- diffable and testable. Assets are laid
+    exactly as v1 (offset XOR, uncompressed -- art); payloads are compressed and, when
+    sealed, second-layer XOR'd, before the outer obfuscation."""
     out_path = Path(out_path)
     toc = {"assets": {}, "payloads": {}}
     with open(out_path, "wb") as fh:
         fh.write(b"\0" * HEADER_SIZE)                 # placeholder header
         off = HEADER_SIZE
-        for section, table in (("assets", assets), ("payloads", payloads or {})):
-            for name in sorted(table):
-                raw = table[name]
-                toc[section][name] = [off, len(raw),
-                                      hashlib.sha256(raw).hexdigest()]
-                fh.write(_xor_at(raw, off))
-                off += len(raw)
+        for name in sorted(assets):
+            raw = assets[name]
+            toc["assets"][name] = [off, len(raw), hashlib.sha256(raw).hexdigest()]
+            fh.write(_xor_at(raw, off))
+            off += len(raw)
+        for name in sorted(payloads or {}):
+            raw = payloads[name]
+            disk = _xor_at(_pack_payload(name, raw), off)
+            toc["payloads"][name] = [off, len(disk), hashlib.sha256(raw).hexdigest()]
+            fh.write(disk)
+            off += len(disk)
         toc_raw = _xor_at(zlib.compress(
             json.dumps(toc, separators=(",", ":")).encode("utf-8"), 9), off)
         fh.write(toc_raw)
@@ -110,9 +168,9 @@ def write_container(out_path, assets, payloads=None):
 
 class Container:
     """Read handle over one container file. The TOC loads once; each get() is a
-    seek + read + XOR + checksum of just that blob. Instances hold no open file
-    descriptor between calls, so the .dat can be atomically replaced (the
-    downloader's swap) without Windows file-locking fights."""
+    seek + read + decode + checksum of just that blob. Holds no open fd between calls,
+    so the .dat can be atomically replaced (the downloader's swap) without Windows
+    file-locking fights."""
 
     def __init__(self, path, toc):
         self.path = Path(path)
@@ -131,9 +189,16 @@ class Container:
             return None
         if len(raw) != size:
             return None
-        data = _xor_at(raw, off)
+        outer = _xor_at(raw, off)
+        if section == "payloads":
+            try:
+                data = _unpack_payload(name, outer)
+            except (zlib.error, ValueError):
+                return None            # corrupt/foreign -> "absent", never garbage
+        else:
+            data = outer               # asset: laid raw, uncompressed
         if hashlib.sha256(data).hexdigest() != sha:
-            return None            # truncated/corrupt -> "absent", never garbage
+            return None                # truncated/corrupt -> "absent"
         return data
 
     def has(self, relpath):
@@ -153,7 +218,7 @@ class Container:
 
 
 def open_container(path):
-    """Container for `path`, or None for missing/corrupt/foreign files. All
+    """Container for `path`, or None for missing/corrupt/foreign/old-version files. All
     failure modes collapse to None on purpose -- see the module docstring."""
     path = Path(path)
     try:
