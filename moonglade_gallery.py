@@ -10725,6 +10725,14 @@ def create_app(out_dir: Path):
             import logging as _logging
             shape = ""
             if params:
+                # A miswired caller that hands us a bare str/id instead of a params dict must
+                # still LOG, not silently skip: dict("<a-string>") raises ValueError, which the
+                # outer `except: pass` below would swallow -- taking the logging.error() with it,
+                # since it sits after this block in the same try. That is exactly how the
+                # /api/scene handler was blinded (adversarial review 2026-08-18). Coerce first so
+                # the diagnostic this function exists to guarantee can never be killed by its arg.
+                if not isinstance(params, dict):
+                    params = {"value": params}
                 # Truncate the PROMPT separately, then serialise. A flat [:700] on the whole
                 # dict let a long prompt consume the entire budget and cut off isPrivate,
                 # modelId, duration and mode -- the structural fields that ARE the diagnosis.
@@ -11114,8 +11122,14 @@ def create_app(out_dir: Path):
                 selector_values=(p.get("selector_values") or p.get("selectorValues") or []))
             return jsonify({"task_id": task_id})
         except Exception as e:
+            # Pass the submit SHAPE as a dict (not the bare scene_id str) so _log_gen_failure
+            # records the diagnosis -- the /api/enhance sibling passes locals().get("params")
+            # the same way. submit_scene has no single builder-params dict at this site, so name
+            # the shape explicitly (scene, preset, source count).
             return jsonify({"error": _log_gen_failure(
-                "/api/scene", e, locals().get("scene_id"))[:300]}), 200
+                "/api/scene", e, {"scene_id": locals().get("scene_id"),
+                                  "preset": (p.get("preset") if "p" in locals() else None),
+                                  "media_ct": len(locals().get("media") or [])})[:300]}), 200
 
     @app.route("/api/fix", methods=["POST"])
     def api_fix():
