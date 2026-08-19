@@ -432,3 +432,90 @@ button.mgcp-pwr-ghost { display: inline-block; white-space: nowrap; margin-top: 
   .mgcp-runspin, .mgcp-runbar i.indeterminate {
     animation: none; }
 }
+
+/* ===== The Bridge §1 · the Control Panel Mirror tile (The Bridge.dc.html 65-135, renderVals
+   386-432) — the credential-mirror gate rebuilt to the comp: an armed-driven glyph tile with an
+   OFFLINE JWT-days ring (emerald >7 / peach <=7 / ruby <=0 / grey off), a pill toggle, a Connect/
+   Refresh button, and the 6/28 "what arming unlocks" cards. Spans the maint tile grid. ===== */
+@keyframes mgbrHalo { 0%, 100% { opacity: .3; transform: scale(.96); } 50% { opacity: .72; transform: scale(1.05); } }
+@keyframes mgbrPulse { 0%, 100% { opacity: .5; transform: scale(1); } 50% { opacity: 1; transform: scale(1.28); } }
+
+.mgcp-bridge { grid-column: span 12; display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 18px; align-items: stretch; }
+@media (max-width: 720px) { .mgcp-bridge { grid-template-columns: 1fr; } }
+
+.mgbr-tile { position: relative; overflow: hidden; border-radius: 18px; padding: 18px; display: flex;
+  flex-direction: column; gap: 16px; border: 1px solid var(--surface1);
+  background: linear-gradient(155deg, rgba(33, 31, 58, .5), rgba(10, 8, 24, .85));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04); transition: border-color .5s, background .5s, box-shadow .5s; }
+.mgbr-tile.armed { border-color: color-mix(in oklab, var(--emerald) 46%, var(--surface1));
+  background: linear-gradient(155deg, rgba(79, 201, 154, .12), rgba(10, 8, 24, .85));
+  box-shadow: 0 0 42px rgba(79, 201, 154, .16), inset 0 1px 0 rgba(255, 255, 255, .05); }
+.mgbr-halo { position: absolute; inset: 0; pointer-events: none; }
+.mgbr-tile.armed .mgbr-halo { inset: -30% -30% auto auto; width: 60%; height: 60%; border-radius: 50%;
+  background: radial-gradient(circle, rgba(79, 201, 154, .4), transparent 66%); animation: mgbrHalo 4.4s ease-in-out infinite; }
+
+.mgbr-head { position: relative; display: flex; align-items: flex-start; gap: 13px; }
+.mgbr-glyph { position: relative; flex: none; width: 46px; height: 46px; border-radius: 12px; display: grid;
+  place-items: center; color: var(--overlay0); border: 1px solid var(--surface1);
+  background: linear-gradient(150deg, rgba(58, 52, 96, .5), rgba(10, 8, 24, .6));
+  transition: color .5s, background .5s, border-color .5s; }
+.mgbr-glyph span { font-family: var(--serif, Georgia, "Times New Roman", serif); font-size: 26px; font-style: italic; }
+.mgbr-tile.armed .mgbr-glyph { color: var(--emerald); border-color: color-mix(in oklab, var(--emerald) 46%, var(--surface1));
+  background: linear-gradient(150deg, rgba(79, 201, 154, .28), rgba(10, 8, 24, .6)); }
+.mgbr-dot { position: absolute; top: -3px; right: -3px; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--overlay0); border: 2px solid #0a0818; }
+.mgbr-tile.armed .mgbr-dot { background: var(--emerald); animation: mgbrPulse 1.9s ease-in-out infinite; }
+.mgbr-titlewrap { flex: 1 1 auto; min-width: 0; }
+.mgbr-title { font-size: 15.5px; font-weight: 800; color: var(--text); letter-spacing: -.01em; }
+.mgbr-status { font-size: 11.5px; font-weight: 600; color: var(--overlay0); }
+.mgbr-tile.armed .mgbr-status { color: var(--emerald); }
+.mgbr-pill { flex: none; width: 46px; height: 26px; border-radius: 999px; padding: 3px; cursor: pointer; border: none;
+  display: flex; align-items: center; justify-content: flex-start; background: var(--surface1);
+  transition: background .35s, justify-content .35s; }
+.mgbr-pill.on { justify-content: flex-end; background: var(--emerald); }
+.mgbr-pill i { width: 20px; height: 20px; border-radius: 50%; background: #0a0818; box-shadow: 0 1px 4px rgba(0, 0, 0, .5); }
+.mgbr-pill:disabled { cursor: default; opacity: .7; }
+
+.mgbr-ringrow { display: flex; align-items: center; gap: 15px; }
+.mgbr-ring { position: relative; width: 62px; height: 62px; flex: none; }
+.mgbr-ring svg { width: 62px; height: 62px; transform: rotate(-90deg); }
+.mgbr-ring-bg { fill: none; stroke: rgba(255, 255, 255, .08); stroke-width: 5; }
+.mgbr-ring-fg { fill: none; stroke-width: 5; stroke-linecap: round; transition: stroke-dashoffset .6s, stroke .4s; }
+.mgbr-ring.healthy .mgbr-ring-fg { stroke: var(--emerald); } .mgbr-ring.healthy .mgbr-days { color: var(--emerald); }
+.mgbr-ring.low .mgbr-ring-fg { stroke: var(--peach); } .mgbr-ring.low .mgbr-days { color: var(--peach); }
+.mgbr-ring.expired .mgbr-ring-fg { stroke: var(--ruby); } .mgbr-ring.expired .mgbr-days { color: var(--ruby); }
+.mgbr-ring.off .mgbr-ring-fg { stroke: var(--overlay0); } .mgbr-ring.off .mgbr-days { color: var(--overlay0); }
+.mgbr-ring-c { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.mgbr-days { font-size: 16px; font-weight: 800; line-height: 1; }
+.mgbr-dayslbl { font-size: 8px; letter-spacing: .08em; text-transform: uppercase; color: var(--overlay0); }
+.mgbr-session { flex: 1 1 auto; min-width: 0; }
+.mgbr-session-lbl { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--overlay0); }
+.mgbr-session-sub { font-size: 12.5px; margin-top: 2px; line-height: 1.4; color: var(--subtext); }
+.mgbr-session-sub.low { color: var(--peach); }
+.mgbr-session-sub.expired { color: var(--ruby); }
+.mgbr-session-sub.off { color: var(--overlay0); }
+
+.mgbr-connectrow { display: flex; gap: 8px; margin-top: auto; }
+.mgbr-connect { flex: none; padding: 8px 14px; border-radius: 10px; font-size: 11.5px; font-weight: 700; cursor: pointer;
+  font-family: inherit; color: #14102a; background: var(--lavender); border: 1px solid transparent; }
+.mgbr-connect.armed { color: var(--emerald); background: transparent; border-color: color-mix(in oklab, var(--emerald) 40%, transparent); }
+.mgbr-connect:disabled { opacity: .6; cursor: default; }
+.mgbr-jwtnote { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; font-size: 11px;
+  color: var(--overlay0); border: 1px dashed var(--surface1); border-radius: 10px; padding: 8px; text-align: center; }
+.mgbr-msg { font-size: 11px; color: var(--emerald); }
+.mgbr-msg.err { color: var(--red, #f38ba8); }
+
+.mgbr-unlocks { display: flex; flex-direction: column; gap: 10px; justify-content: center; }
+.mgbr-unlock { display: flex; align-items: center; gap: 14px; padding: 13px 15px; border-radius: 13px;
+  border: 1px solid var(--surface1); background: rgba(33, 31, 58, .35); transition: border-color .4s, background .4s; }
+.mgbr-unlock.armed { border-color: color-mix(in oklab, var(--emerald) 30%, var(--surface1)); background: rgba(79, 201, 154, .06); }
+.mgbr-unum { font-size: 26px; font-weight: 800; line-height: 1; color: var(--overlay0); flex: none; }
+.mgbr-unlock.armed .mgbr-unum { color: var(--emerald); }
+.mgbr-utext { font-size: 12.5px; color: var(--subtext); }
+.mgbr-utext b { color: var(--text); }
+.mgbr-verdict { font-size: 11.5px; line-height: 1.55; color: var(--overlay0); padding: 2px 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mgbr-tile.armed .mgbr-halo, .mgbr-tile.armed .mgbr-dot { animation: none; }
+}
