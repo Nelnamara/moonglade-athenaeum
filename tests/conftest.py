@@ -99,7 +99,7 @@ def _isolated_asset_manifest(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _sealed_roster_container(tmp_path):
+def _sealed_roster_container(request, tmp_path):
     """Ship the sealed achievement roster to every test. The definitions live in
     moonglade.dat now (not source), so without a container the roster is empty and every
     roster-dependent test fails. _isolated_branding points branding_root() at
@@ -108,7 +108,14 @@ def _sealed_roster_container(tmp_path):
     (public CI without the companion repo): roster tests then see the empty fallback and
     are expected to skip, not fail. The sealed-defs cache is cleared around each test so no
     roster leaks between them (and test_build_container, which rebuilds this same path via
-    main(), just overwrites the seed)."""
+    main(), just overwrites the seed).
+
+    EXCEPTION: the asset-downloader tests (test_assets.py) test downloading a container TO
+    this exact path and assert on its presence/absence -- pre-seeding it there breaks them,
+    so they opt out."""
+    if "test_assets" in request.node.nodeid:
+        yield
+        return
     if _SEALED_DONOR.is_file():
         defs = json.loads(_SEALED_DONOR.read_text(encoding="utf-8"))
         _mc.write_container(tmp_path / "moonglade.dat", {"_seed.txt": b"x"},
