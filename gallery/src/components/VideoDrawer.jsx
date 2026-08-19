@@ -68,18 +68,6 @@ import "../styles/gen-drawer.css";
 
 let lineSeq = 0;
 
-// The DC's TINTS (Frontend Gallery.dc.html 1648-1656): the engine card's thumb + the palette
-// covers are tinted by roster index (videoThumbStyle 2901) -- the real roster carries no art.
-const ENGINE_TINTS = [
-  "linear-gradient(150deg, #33236d 0%, #1b1733 100%)",
-  "linear-gradient(150deg, #3a3460 0%, #17142b 100%)",
-  "linear-gradient(150deg, #643aac 0%, #241f5b 100%)",
-  "linear-gradient(150deg, #2a4a58 0%, #171f38 100%)",
-  "linear-gradient(150deg, #4a3a6e 0%, #1f1a36 100%)",
-  "linear-gradient(150deg, #3a2b63 0%, #191338 100%)",
-  "linear-gradient(150deg, #5a3a72 0%, #221a3e 100%)",
-];
-
 const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // `style`/`className` pass through to the root so a host can position/hide the node exactly as
   // it did the custom element (the Loom mounts it once and toggles style.display by tab).
@@ -125,12 +113,6 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // (a new render's recipe is no longer "from" the old run). Plain React state -- it is not a
   // spend-critical form field, so the st.current/rerender discipline the payload needs is overkill.
   const [reuse, setReuseChip] = useState(null);
-  // The ENGINE palette (DC 1612-1640 + 2795-2804: 'Video engine' picker cards over the real
-  // roster). {bottom} = its viewport anchor, measured off this drawer's top when it opens so it
-  // floats just above the form in every host (dock / Loom / mobile) the way the DC's sits above
-  // the dock's settings. null = closed. `palQuery` is its Search box.
-  const [pal, setPal] = useState(null);
-  const [palQuery, setPalQuery] = useState("");
   const setWarn = useCallback((w) => setWarnState(w), []);
   const ceRef = useRef(null);                    // the contenteditable prompt
   const previewRef = useRef(null);
@@ -347,25 +329,12 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       .catch(() => { renderError("audio upload failed (network)"); st.current.audSlot = null; rerender(); });
   };
 
-  // ---- the ENGINE palette (open / close / Escape) ------------------------------------------
-  const openPalette = () => {
-    const r = rootRef.current ? rootRef.current.getBoundingClientRect() : null;
-    const vh = window.innerHeight || 800;
-    // Sit just above the drawer (DC: above the dock's settings), clamped so the 46vh panel fits.
-    let bottom = r ? Math.round(vh - r.top + 12) : 250;
-    bottom = Math.max(14, Math.min(bottom, Math.round(vh * 0.54) - 14));
-    setPalQuery("");
-    setPal({ bottom });
-  };
-  const closePalette = useCallback(() => { setPal(null); setPalQuery(""); }, []);
-  useEffect(() => {
-    if (!pal) return undefined;
-    // Capture-phase so this innermost layer takes Escape before a host's own window listener
-    // (the dock's Esc chain collapses settings / closes the dock on the bubble phase).
-    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); closePalette(); } };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [pal, closePalette]);
+  // ---- the ENGINE chip pick (§45 drift) ----------------------------------------------------
+  // The inline chip grid replaced the retired model/LoRA flyout, but the PICK transition is
+  // unchanged from what the flyout's onClick ran: set the model, gate it (applyModelGating
+  // adjusts the shot mode to a supported one and clamps duration to the engine's cap), then
+  // re-price. userDriven=true so a dropped shot mode explains itself (DC pickVideoModel note).
+  const pickVideoModel = (v) => { st.current.model = v; applyModelGating(true); debCost(); };
 
   // ---- payload + live cost -------------------------------------------------------------------
   // payload/hasAnyRef/flfMissingStart are the PURE spend-gate predicates (videoDrawerCore.js); the
@@ -711,12 +680,6 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       caption: "pick", title: s.slots[1] ? "End frame" : "Pick from your gallery" })] });
   }
 
-  // The engine palette's cards over the REAL roster (DC 2795-2804: name · shot modes · duration
-  // cap · caps as the tooltip). No per-second rate: the price is CostBadge's to say.
-  const palQ = palQuery.trim().toLowerCase();
-  const palItems = MODELS.filter((m) => !palQ || m.label.toLowerCase().indexOf(palQ) >= 0);
-  const engineIdx = Math.max(0, MODELS.findIndex((m) => m.value === s.model));
-
   // ---- the pieces that live in the dock's footer in dock mode (inline otherwise) ----------
   // ONE definition each; only WHERE they mount differs. The prompt is the same contenteditable
   // (ceRef, chips, MODE_PH placeholder), the negative the same field, the badge the same
@@ -772,51 +735,11 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     </>
   ) : null;
 
-  // The ENGINE palette (DC 1608-1640; items DC 2795-2804; paletteStyle 3701): a scrim + a
-  // 720px card grid, PORTALED OUT of this drawer so no host's overflow/transform can clip or
-  // re-anchor it (the dock's .mgdock is transformed + overflow:hidden). Target: the dock host
-  // (.mgx-dock-host, display:contents -- the same place the dock's model flyout lives) so the
-  // dock's outside-click closer still sees the click as INSIDE the dock; <body> elsewhere.
-  const layerHost = (rootRef.current && rootRef.current.closest && rootRef.current.closest(".mgx-dock-host")) || document.body;
-  const palette = pal ? createPortal(
-    <>
-      <div className="mgd-palscrim" onClick={closePalette} />
-      <div className="mgd-pal" style={{ bottom: pal.bottom }} role="dialog" aria-label="Video engine">
-        <div className="mgd-palhd">
-          <div className="mgd-paltitle">Video engine</div>
-          <div className="mgd-palsub">Shot type follows the engine — unsupported modes switch on pick</div>
-          <div className="mgd-palsp" />
-          <input className="mgd-palq" value={palQuery} placeholder="Search" autoFocus
-            onChange={(e) => setPalQuery(e.target.value)} />
-          <button type="button" className="mgd-palx" onClick={closePalette} title="Close">×</button>
-        </div>
-        <div className="mgd-palgrid">
-          {palItems.map((m) => {
-            const i = MODELS.indexOf(m);
-            const modes = (MODEL_VMODES[m.value] || ["i2v", "flf", "r2v"]).map((x) => SHOT_LABEL[x]).join(" · ");
-            return (
-              <button key={m.value} type="button" className={"mgd-palitem" + (m.value === s.model ? " on" : "")}
-                title={m.caps.join(" · ")}
-                onClick={() => { st.current.model = m.value; applyModelGating(true); debCost(); closePalette(); }}>
-                <div className="mgd-palcover" style={{ background: ENGINE_TINTS[i % ENGINE_TINTS.length] }}>
-                  <span className="mgd-paloff">Official</span>
-                </div>
-                <div className="mgd-palbody">
-                  <div className="mgd-palname">{m.label}</div>
-                  <div className="mgd-palmeta"><span>{modes}</span><span>{(MODEL_MAXDUR[m.value] || 10)}s max</span></div>
-                  <div className="mgd-palcost">{MODEL_CARD[m.value] === false ? "no card" : "card"}</div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </>, layerHost) : null;
-
   return (
     <div ref={setRoot} className={"gen-drawer" + (inDock ? " mgd-dock" : "") + (inDock && dock.expanded === false ? " mgd-collapsed" : "") + (className ? " " + className : "")} style={style} data-loom-ctx={loomCtx ? "" : undefined}>
-      {/* The DC's expanded Video settings: three slabs (DC 1209-1210 grid; slab(i) 2876) --
-          SHOT MODE + banks · ENGINE + chips + DURATION + CAMERA · MODE & CHANNEL + switches.
+      {/* The DC's expanded Video settings: three slabs (DC 1209-1210 grid; slab(i) 2876),
+          rebalanced by §45 -- SHOT MODE + banks + CAMERA · ENGINE chip grid (alone) ·
+          MODE & CHANNEL + switches + DURATION.
           In dock mode they show only while the dock's ▲ settings are expanded (DC 1209 wraps
           the whole grid in `expanded`); `dock.expanded === false` hides the wrap with CSS --
           the drawer itself stays mounted (poll timers, portals, the prompt's imperative
@@ -873,53 +796,50 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
           ) : null}
           <input ref={audFileRef} type="file" className="mgd-audiofile" accept="audio/*" style={{ display: "none" }}
             onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadAudio(f); }} />
-        </div>
-
-        <div className="mgd-slab" style={{ animationDelay: "60ms" }}>
-          <div className="mgd-sec">ENGINE</div>
-          {/* DC 1380-1387 modelRowStyle: thumb · name + meta ('<maxDur>s max · V4.0 cards apply /
-              never card-covered', from the REAL roster's caps) · browse -> the engine palette. */}
-          <button type="button" className="mgd-engine" onClick={openPalette} title="Browse the video engines">
-            <span className="mgd-engthumb" style={{ background: ENGINE_TINTS[engineIdx % ENGINE_TINTS.length] }} />
-            <span className="mgd-engbody">
-              <span className="mgd-engname">{chosenModel ? chosenModel.label : s.model}</span>
-              <span className="mgd-engmeta">{modelMeta(s.model)}</span>
-            </span>
-            <span className="mgd-engbrowse">browse</span>
-          </button>
-          <div className="mgd-caps mgd-modelcaps">
-            {modelCaps(s.model).map(([t, kind]) => <span key={t} className={"mgd-cap" + (kind ? " " + kind : "")}>{t}</span>)}
-          </div>
-          {/* DURATION (DC 1393-1401 + durationStops 2906-2911): the label with a live 'Ns'
-              readout, then four segmented stops. A stop above the REAL engine cap
-              (MODEL_MAXDUR -- the spend gate applyModelGating clamps to) stays visible but
-              dimmed, not-allowed, titled, and its click is ignored -- never removed. */}
-          <div className="mgd-durhd">
-            <div className="mgd-sec">DURATION</div>
-            <div className="mgd-durval">{s.duration}s</div>
-          </div>
-          <div className="mgd-stops mgd-dur" role="radiogroup" aria-label="Duration">
-            {[5, 6, 10, 15].map((d) => {
-              const ok = d <= maxDur;
-              return (
-                <button key={d} type="button" role="radio" aria-checked={d === s.duration} aria-disabled={!ok}
-                  className={"mgd-stop" + (d === s.duration ? " on" : "") + (ok ? "" : " off")}
-                  title={d + " seconds" + (ok ? "" : " — not on this engine")}
-                  onClick={() => { if (!ok || d === st.current.duration) return; st.current.duration = d; rerender(); debCost(); emit("mg-duration-commit", { duration: d }); }}>{d}</button>
-              );
-            })}
-          </div>
-          {/* CAMERA (DC 1402-1412): below DURATION in this slab; in Multi-Reference the block
-              keeps its space but goes invisible (cameraVis 2912) -- the payload already drops
-              camera_movement for r2v. Camera and quality both ride the priced payload
-              (i2vPro.cameraMovement / .mode), so each change re-prices like every other priced
-              field -- without it a settled quote sat next to a payload it was never for, with
-              no re-check pending at all. */}
+          {/* CAMERA (§45 drift): moved to the foot of the left slab, under SHOT MODE + the ref
+              banks (was in the ENGINE slab) -- DC 1419-1430. In Multi-Reference the block keeps
+              its space but goes invisible (cameraVis: visibility:hidden) -- the payload already
+              drops camera_movement for r2v. Camera rides the priced payload (i2vPro.cameraMovement),
+              so each change re-prices like every other priced field. */}
           <div className={"mgd-cam-wrap" + (isR2v ? " hid" : "")} aria-hidden={isR2v || undefined}>
             <div className="mgd-sec">CAMERA</div>
             <select className="mgd-sel mgd-cam" value={s.camera} tabIndex={isR2v ? -1 : undefined} onChange={(e) => { st.current.camera = e.target.value; rerender(); debCost(); }}>
               {CAMERA_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
+          </div>
+        </div>
+
+        {/* ENGINE (§45 drift): the retired model/LoRA flyout is replaced by an inline 2-column
+            chip grid of the 7 engines (DC 1433-1451; videoChips/videoModelMeta 2987-3001).
+            Header = ENGINE label + the selected engine's label (single line, ellipsis). Each chip
+            is a radio dot + the wrapping engine name; picking one runs pickVideoModel -> the same
+            applyModelGating(true) + re-price the flyout ran (adjusts shot mode + clamps duration
+            to the engine's caps). The meta row beneath is the selected engine's
+            'Ns max · card/no card' line plus its capability chips. DURATION + CAMERA left this
+            slab in the rebalance (§45): CAMERA under SHOT MODE, DURATION under MODE & CHANNEL. */}
+        <div className="mgd-slab" style={{ animationDelay: "60ms" }}>
+          <div className="mgd-enghd">
+            <div className="mgd-sec">ENGINE</div>
+            <div className="mgd-engcur">{chosenModel ? chosenModel.label : s.model}</div>
+          </div>
+          <div className="mgd-enggrid" role="radiogroup" aria-label="Video engine">
+            {MODELS.map((m) => {
+              const sel = m.value === s.model;
+              const modes = (MODEL_VMODES[m.value] || ["i2v", "flf", "r2v"]).map((x) => SHOT_LABEL[x]).join(" / ");
+              return (
+                <div key={m.value} role="radio" aria-checked={sel}
+                  className={"mgd-engchip" + (sel ? " sel" : "")}
+                  title={m.label + " — " + modes + " · " + (MODEL_MAXDUR[m.value] || 10) + "s max · " + (MODEL_CARD[m.value] === false ? "no card" : "card")}
+                  onClick={() => pickVideoModel(m.value)}>
+                  <span className="mgd-engdot" />
+                  <span className="mgd-englabel">{m.label}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mgd-engmeta">
+            <span>{modelMeta(s.model)}</span>
+            {modelCaps(s.model).map(([t, kind]) => <span key={t} className={"mgd-cap" + (kind ? " " + kind : "")}>{t}</span>)}
           </div>
         </div>
 
@@ -956,6 +876,26 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
               {AUDIO_LANGS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           ) : null}
+          {/* DURATION (§45 drift): moved to the foot of the right slab, under MODE & CHANNEL
+              (was in the ENGINE slab) -- DC 1479-1487. Label + live 'Ns' readout, then four
+              segmented stops. A stop above the REAL engine cap (MODEL_MAXDUR -- the spend gate
+              applyModelGating clamps to) stays visible but dimmed, not-allowed, titled, and its
+              click is ignored -- never removed. */}
+          <div className="mgd-durhd">
+            <div className="mgd-sec">DURATION</div>
+            <div className="mgd-durval">{s.duration}s</div>
+          </div>
+          <div className="mgd-stops mgd-dur" role="radiogroup" aria-label="Duration">
+            {[5, 6, 10, 15].map((d) => {
+              const ok = d <= maxDur;
+              return (
+                <button key={d} type="button" role="radio" aria-checked={d === s.duration} aria-disabled={!ok}
+                  className={"mgd-stop" + (d === s.duration ? " on" : "") + (ok ? "" : " off")}
+                  title={d + " seconds" + (ok ? "" : " — not on this engine")}
+                  onClick={() => { if (!ok || d === st.current.duration) return; st.current.duration = d; rerender(); debCost(); emit("mg-duration-commit", { duration: d }); }}>{d}</button>
+              );
+            })}
+          </div>
         </div>
       </div>
       </div>
@@ -981,44 +921,51 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
         </>
       )}
 
-      {/* Result / status lines. Not drawn in the DC (it routes runs into the RUNS reel, and the
-          dock's reel does list these submits via Jobs.register) -- kept because this is the
-          ONLY home for the drawer's own refusals and submit-time errors ('Pick a source image
-          first.', 'Re-checking the cost…', a rejected submit), which never reach the reel. */}
-      <div className={"mgd-result" + (results.length ? " has" : "")}>
-        {results.map((l) => (
-          <div key={l.id} className="mgd-result-line">
-            {l.kind === "result" ? (
-              <>
-                <div style={{ color: "var(--emerald,#4fc99a)", fontSize: 12, marginBottom: 6 }}>
-                  ✓ Rendered — {l.cost === 0 ? "free (card used)" : (Number(l.cost || 0).toLocaleString() + " credits")}. Added to your gallery.
-                </div>
-                {(l.mediaIds || []).map((mid) => (
-                  <a key={mid} href={"/?image=" + encodeURIComponent(mid)}
-                    onClick={(e) => {
-                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
-                      e.preventDefault();
-                      document.dispatchEvent(new CustomEvent("mg-open-details", { bubbles: true, composed: true, detail: { mid } }));
-                    }}>
-                    <img src={"/thumbs/" + encodeURIComponent(mid) + ".jpg"} alt="result" loading="lazy" />
-                  </a>
-                ))}
-              </>
-            ) : l.kind === "error" ? (
-              <span style={{ color: "var(--red,#f38ba8)", fontSize: 12 }}>{l.text}</span>
-            ) : l.kind === "plain" ? (
-              <span style={{ color: "var(--subtext,#9a93ab)", fontSize: 12 }}>{l.text}</span>
-            ) : (
-              <span style={{ color: l.amber ? "var(--amber,#f9d38c)" : "var(--subtext,#9a93ab)", fontSize: 12 }}>
-                {l.moon ? <span className="mgd-moon" /> : null}{l.text}
-              </span>
-            )}
+      {/* Result / status lines. IN THE DOCK (the gallery's Generate dock) the redesign routes runs
+          into the RUNS reel and completed videos into History -- mg-submit/mg-result feed the reel,
+          the History strip and the banner -- so the drawer's own inline PROGRESS and result-media are
+          redundant there and are suppressed; only its refusals / submit-time errors ('Pick a source
+          image first.', a rejected submit), which never reach the reel, still show (owner 2026-08-18).
+          The Loom and mobile Video mode render inline WITHOUT a reel, so they keep the full lines.
+          Every mg-* event is emitted regardless above -- this only gates the inline RENDER. */}
+      {(() => {
+        const shown = inDock ? results.filter((l) => l.kind === "error") : results;
+        return (
+          <div className={"mgd-result" + (shown.length ? " has" : "")}>
+            {shown.map((l) => (
+              <div key={l.id} className="mgd-result-line">
+                {l.kind === "result" ? (
+                  <>
+                    <div style={{ color: "var(--emerald,#4fc99a)", fontSize: 12, marginBottom: 6 }}>
+                      ✓ Rendered — {l.cost === 0 ? "free (card used)" : (Number(l.cost || 0).toLocaleString() + " credits")}. Added to your gallery.
+                    </div>
+                    {(l.mediaIds || []).map((mid) => (
+                      <a key={mid} href={"/?image=" + encodeURIComponent(mid)}
+                        onClick={(e) => {
+                          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                          e.preventDefault();
+                          document.dispatchEvent(new CustomEvent("mg-open-details", { bubbles: true, composed: true, detail: { mid } }));
+                        }}>
+                        <img src={"/thumbs/" + encodeURIComponent(mid) + ".jpg"} alt="result" loading="lazy" />
+                      </a>
+                    ))}
+                  </>
+                ) : l.kind === "error" ? (
+                  <span style={{ color: "var(--red,#f38ba8)", fontSize: 12 }}>{l.text}</span>
+                ) : l.kind === "plain" ? (
+                  <span style={{ color: "var(--subtext,#9a93ab)", fontSize: 12 }}>{l.text}</span>
+                ) : (
+                  <span style={{ color: l.amber ? "var(--amber,#f9d38c)" : "var(--subtext,#9a93ab)", fontSize: 12 }}>
+                    {l.moon ? <span className="mgd-moon" /> : null}{l.text}
+                  </span>
+                )}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        );
+      })()}
 
       <div ref={previewRef} className="mgd-preview" aria-hidden="true" />
-      {palette}
     </div>
   );
 });
