@@ -5450,9 +5450,9 @@ large docs consolidation, and a real multi-account authentication stack.
   `os.replace`); the legacy `store.json` migrates into per-key files on first touch and is preserved as
   `store.json.migrated`. The `/api/loom/*` contract is unchanged, so the React app needs no change.
   (Thumbnails-out-of-document + import-creates-new-project are follow-ups per `SUITE_ARCHITECTURE_AUDIT.md` §7.)
-- **Canonical roster thresholds reconciled to shipped code** — `docs/achievements_roster_57.json`
-  carried three stale thresholds (marathon 1→100, triggered 0→5, read-the-manual 0→1); aligned to
-  what the code enforces so the canonical roster stops disagreeing with behavior.
+- **Canonical roster thresholds reconciled to shipped code** — the canonical roster carried three
+  stale hidden-feat thresholds; aligned to what the code enforces so the roster stops disagreeing
+  with behavior. (The thresholds themselves now live sealed in the container, not in this changelog.)
 
 ### Fixed
 - **Trophy Hall reformat reverted (`0a8da3a`, reverts `c877919`)** — the rewards-under-grid layout,
@@ -5670,27 +5670,25 @@ gift box, rung-scaled points) and the maximized-overlay Trophy Hall. `loom-v2` r
   5×(rung−1)`; common 5 / rare 10 / epic 25 / legendary 50; **feats 0**, so the total never hints
   at a hidden feat). Points show on the unlock toast, on each grid tile, and as a Warband-style
   running total in the panel header. Rung is *derived* from the roster (ladder families grouped by
-  metric, ordered by threshold), reproducing the Archive ladder exactly (5 / 15 / 35 / 65 / 70);
-  **960 points possible**.
+  metric, ordered by threshold), reproducing each ladder's rung sequence exactly; a fixed points
+  ceiling.
 - **The full 57-achievement roster is live** — the achievement system grew from 11 to all **57**
   designed achievements (29 ladder rungs across 10 tracks · 9 milestones · 8 masteries · 11 hidden
   **feats**), generated verbatim from the canonical `docs/achievements_roster_57.json` with every
   achievement carrying its `roast` (and an unlockable uncensored variant). The panel groups them
   into **Evolution Ladders / Milestones / Masteries / Feats of the Athenaeum** sections; earned
-  cards show their roast; **The Great Library** is flagged as a banner reward.
+  cards show their roast; one legendary achievement is flagged as a banner reward.
 - **The telemetry layer** — the persisted counters behind every non-catalog metric
   (`out_dir/telemetry.json`: counters / maxima / sets / flags / distinct-days, lock-guarded and
   fail-soft everywhere). ~15 call sites now report in: edits, enhances (+ distinct workflows),
   fixes, uploads, LoRA use (first / stacked / distinct), video modes, Loom shots, "more like this",
   claims, skin + branding changes, `--organize`, `--dedup` culls, `--task-id` recoveries, free-card
   applies, day-of-use tracking, and new catalog SQL for `local_gens` / `gens_in_a_day` /
-  `distinct_keywords`. Feat events ride a new `/api/ach-event` beacon (Konami egg, the in-Loom
-  manual, narrator pokes) plus state sweeps (custom branding, the eclipse animation) and a
-  new-download **Time Capsule** check.
+  `distinct_keywords`. Feat events ride a new `/api/ach-event` beacon plus state sweeps and a
+  new-download anniversary check.
 - **Hidden feats + the narrator** — feats serve masked (`???`) until earned and the whole feats
-  section stays cloaked until the first one lands; **poke the narrator** (the chibi in the
-  Achievements header) until it snaps to earn *Triggered* and reveal the **Unleash the AI**
-  toggle that swaps every roast to its uncensored variant.
+  section stays cloaked until the first one lands; a hidden interaction earns a feat that reveals
+  the uncensored-roast toggle. (The specific triggers are sealed in the container, not here.)
 - **Per-achievement badge + mascot art** — the 57 voted badges/mascots are served from
   `branding/badges/<id>.png` and `branding/mascots/ach/<id>.png`; the unlock moment now presents
   with **that achievement's own mascot** (falling back to the tier chibi), and the celebration
@@ -5754,7 +5752,7 @@ gift box, rung-scaled points) and the maximized-overlay Trophy Hall. `loom-v2` r
   dropped) — content-moderation blocks read as a clear message instead of a bare "failed".
 - **Achievements art & moments** — 11 achievement-badge prompts + the Loom mark, a
   mascot-per-state activity tracker, a rarity-scaled "Nel presents" unlock pop with real badge art,
-  a spinning-Nel generation loader, and a Konami-code Starfall easter egg.
+  a spinning-Nel generation loader, and a hidden easter egg.
 - **Recover a task by ID** — a Control Panel action to import any generation/edit into the catalog
   by task id, with an "already in your gallery" check + jump link.
 - **Edit card** — multi-image references (Edit Pro 4 / Reference Pro 10) and

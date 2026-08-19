@@ -7746,7 +7746,7 @@ def run_generate(args):
             print("  The clip is still on PixAI and costs nothing to re-fetch: "
                   "`--generate-video --task-id {}`".format(task_id))
 
-    # Against the Void: a stranded task pulled back by id. Counted once per RECOVERY, whatever
+    # A hidden recovery feat: a stranded task pulled back by id. Counted once per RECOVERY, whatever
     # kind of output it turned out to hold -- this used to live inside `if rows:`, so a
     # video-only task (rows is empty by construction for one) recovered nothing as far as the
     # ledger was concerned, and the achievement that exists to reward exactly that rescue
@@ -11472,9 +11472,10 @@ def run_backfill_phash(args):
 
 
 def _check_time_capsule(created_at, out_dir):
-    """Time Capsule feat: a NEWLY-downloaded piece created >2 years ago. Fires
+    """A hidden anniversary feat: fires when a NEWLY-downloaded piece is old enough,
     only on the download event, never on a full-catalog rescan (old rows already
-    on disk must not earn it). Fail-soft; never slows the download loop."""
+    on disk must not earn it). Fail-soft; never slows the download loop. (The feat's
+    name/threshold are sealed in the container; only this detection code is public.)"""
     try:
         from datetime import datetime
         s = str(created_at or "")[:19]

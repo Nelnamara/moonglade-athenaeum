@@ -21,7 +21,7 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   all achievement / feat / ladder **definitions**, spoiler strings, and spoiler art into the sealed
   container, leaving only opaque ids + metric keys public. Per the red-team sequencing this runs
   **with** the ladder-rung redefinition + 57→60 roster growth, and it **absorbs the earned-rewards
-  item** below. Owner prereqs in progress: `branding/` folder cleared, Under-the-Hood nearly ready,
+  item** below. Owner prereqs in progress: `branding/` folder cleared, the hidden branding surface nearly ready,
   and the enhance-picker preset/scene thumbnails still to be added to the bundle. Scope underway
   (full codebase sweep of every achievement/feat/spoiler surface + the container mechanism).
 
