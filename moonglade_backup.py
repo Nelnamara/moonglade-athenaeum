@@ -7001,31 +7001,37 @@ def build_panelplugin_parameters(media_id, workflow_id="", *, workflow_name="",
 # addressing. This is the canonical record because Branch C is confirmed: the live `workflows`
 # GraphQL connection returns ZERO entries on our credential (probed 2026-08-16/17), so the DC's
 # "self-populates from workflow_catalog" cannot happen -- the presets are hardcoded, not
-# discovered. Each is addressed by exactly ONE of workflow_id (numeric) OR workflow_name
-# (author/workflow) and passed straight to build_panelplugin_parameters via /api/enhance.
+# discovered. Each is addressed by a workflow_name = "<author/workflow>:<version>", passed
+# straight to build_panelplugin_parameters via /api/enhance.
 #
-# PROVENANCE (honest about where each id/name came from):
-#   * Convert to Line Art / Sketch Coloring -- numeric ids recovered VERBATIM from the b93ce1e
-#     enh-card onclicks ("To line art" / "Sketch colorizer").
-#   * Background Remover -- workflowName supplied by the Bridge scope (SCOPE §3.2), the one
-#     preset whose name was independently known.
-#   * Handfix -- workflowName attested by the b93ce1e DELETED test (build_panelplugin_parameters
-#     "M", workflow_name="mymusise/hand-fix") AND private/GENERATOR_SURFACE.md.
-#   * Face Enhance / Change Emotion -- NOT present in the b93ce1e diff at all. Their workflowNames
-#     come from private/GENERATOR_SURFACE.md's `constants.imageEnhancementPlugins` mining
-#     (face-detailer / emotion), the same source+family as Handfix. PARTIALLY de-risked
-#     2026-08-18: GET /v2/task-price quoted BOTH (kyo/face-detailer 3000cr, kyo/emotionlab
-#     2000cr) -- task-price does not quote a nonexistent workflow, so PixAI recognizes both
-#     addresses as valid priceable workflows. NOT yet run-verified (no paid submit of either);
-#     Change Emotion also has a per-preset control (emotion thumbnail) the numeric-id presets don't.
+# ADDRESSES ARE AUTHORITATIVE + DISPATCH-PROVEN (2026-08-18). All six were pulled from PixAI's
+# live public config -- GET https://api.pixai.art/config/constants -> imageEnhancementPlugins,
+# which gives {workflowName, workflowVersion, args} per plugin -- then each was submitted FOR
+# REAL through the mirror JWT and confirmed to DISPATCH and complete (startedAt set, status
+# completed). This replaced four rotted guesses that /v2/task-price had falsely blessed:
+#   * handfix / face -- the bare names ("mymusise/hand-fix", "kyo/face-detailer") 404'd at
+#     createGenerationTask ("No workflow matched by the name"). The real addresses carry the
+#     :version suffix the config supplies (:v1, :v4.0).
+#   * line_art / sketch_color -- the old numeric workflow_ids (1796.../1793..., recovered from
+#     the b93ce1e enh-card onclicks) were ACCEPTED and CHARGED but never dispatched -- no worker
+#     picked them up, reaped unstarted at ~60min (the owner hit this live on line_art). The real
+#     workflows are name-addressed: pixai-official/image-to-lineart, .../sketch-coloring-workflow.
+#   * bg_remove / emotion were already dispatch-proven earlier and kept as-is.
+# LESSON (why the earlier "task-price de-risked it" note was wrong): /v2/task-price validates the
+# request SHAPE and prices it, NOT that a live worker exists for the workflow -- it quoted all six,
+# including the four dead ones. Only a real JWT submit proves dispatch. See memory
+# bridge-enhance-presets-rotted. `args` (per-plugin defaults like handfix strength / a face-detailer
+# prompt / the emotion radios) are applied server-side when omitted -- a bare name:version submits.
 BRIDGE_ENHANCE_PRESETS = (
-    {"key": "handfix",     "label": "Handfix",           "workflow_name": "mymusise/hand-fix"},
-    {"key": "face",        "label": "Face Enhance",      "workflow_name": "kyo/face-detailer"},
+    {"key": "handfix",     "label": "Handfix",           "workflow_name": "mymusise/hand-fix:v1"},
+    {"key": "face",        "label": "Face Enhance",      "workflow_name": "kyo/face-detailer:v4.0"},
     {"key": "emotion",     "label": "Change Emotion",    "workflow_name": "kyo/emotionlab",
      "has_control": True},
     {"key": "bg_remove",   "label": "Background Remover", "workflow_name": "mymusise/39a2c67c:unet-0.1.3.2"},
-    {"key": "line_art",    "label": "Convert to Line Art", "workflow_id": "1796053397111789217"},
-    {"key": "sketch_color", "label": "Sketch Coloring",  "workflow_id": "1793447160259872021"},
+    {"key": "line_art",    "label": "Convert to Line Art",
+     "workflow_name": "pixai-official/image-to-lineart:0a59dd67"},
+    {"key": "sketch_color", "label": "Sketch Coloring",
+     "workflow_name": "pixai-official/sketch-coloring-workflow:d40e38f8"},
 )
 
 
