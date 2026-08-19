@@ -68,17 +68,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   ("about N minutes before this starts"). The dock's running tiles ship the honest treatment in the
   meantime: mascot + indeterminate shimmer, no percentage.
 
-- **Confirm the live mirror really self-heals** *(RUN the banked recipe — owner, 2026-08-19: "why is it just sitting")*
-  The mirror is supposed to recover its own gaps automatically after a drop, stale socket or
-  restart — no manual Panel job. That was the requirement ("im not suppposed to have to"), but it
-  hasn't been re-confirmed lately. This is a **verification, not a build** — run the recipe and
-  report; it has been sitting only because nothing scheduled it. **Test recipe:** create the gap on
-  purpose — stop the server,
-  complete one generation while it's down (site or CLI from another window; or kill the network
-  for a minute mid-generation instead), start it back up. The piece must appear in the gallery on
-  its own within the sweep interval, with no manual sync. If the button has to be pressed, it
-  failed.
-
 - **Contest workbench (beyond Shortlist)**
   The "☆ Shortlist" staging step shipped. The larger workbench — deadline tracking, submission
   management — is still just wanted, not scoped.
