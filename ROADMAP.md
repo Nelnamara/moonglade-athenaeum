@@ -33,10 +33,11 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Next — scoped, not started
 
-- **Per-batch / per-task grid stacking** *(orphaned — fold or drop)*
-  Collapse the grid so a multi-image generation shows as **one stack** instead of N flat tiles. It
-  was going to ride the layout switcher's **Group-by/sectioned** axis, but that follow-on was cut
-  (below), leaving this standalone and thin. Owner call pending: fold into a future Group-by, or drop.
+- **Per-batch / per-task grid stacking** *(standalone — kept, owner 2026-08-19)*
+  Collapse the gallery wall so a multi-image generation (a batch of, say, 4) shows as **one
+  stack/card** instead of N flat tiles — de-cluttering the grid for batch gens. Kept as its own
+  item after the layout follow-ons (including Group-by, which would have generalized it) were cut.
+  Design-first (user-visible surface); the stack render + expand-to-see-the-batch interaction are the build.
 
 - **Gallery layout switcher — mobile pass only (maybe)** *(desktop base shipped 2026-08-19)*
   The desktop switcher (**Masonry / Grid / Timeline**) shipped and moved to `CHANGELOG.md`; the owner
@@ -55,14 +56,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   A recurring, real sizing defect ("song as old as time"), long deprioritised as cosmetic. The header
   is the worst example. Owner call: **workshop it and settle the right size**, then apply everywhere
   marks appear — don't spot-fix one surface.
-
-- **Earned rewards: extend beyond skins** *(owner's own reward-tier scheme — folds into the achievement/ladder work)*
-  The Folio's earned-rewards section shows only **skin** unlocks, but the owner's tier scheme is
-  `low→icon / epic→skin / legendary→banner` — so the **icon** and **banner** unlocks it defines are
-  unshown. Not a stray ask: it completes that scheme. Two open calls block it (DECISIONS): not every
-  ladder track reaches legendary (some can't earn a banner without added rungs), and whether `rare`
-  gets its own reward kind. Both are ladder-rung decisions → build this **inside** the Now item's
-  achievement-sealing + ladder-rung rework, not standalone.
 
 - **Real generation progress — build the honest "starts in ~N" from the wait estimate** *(owner call, 2026-08-19)*
   PixAI does **not** expose true render progress. It once showed the image taking shape (a blurred
