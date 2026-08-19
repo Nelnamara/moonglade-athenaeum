@@ -11027,6 +11027,96 @@ def create_app(out_dir: Path):
             return jsonify({"error": _log_gen_failure(
                 "/api/enhance", e, locals().get("params"))[:300]}), 200
 
+    # The AI-Tools scene catalog (PixAI 'chat editing scenes'). Like the Enhance preset prices,
+    # the list is fetched LIVE (not baked) so it self-updates the day PixAI adds/retires a scene,
+    # and cached because it is account-stable. TTL in seconds.
+    _scene_cache = {"at": 0.0, "scenes": None}
+    _SCENE_TTL = 3600.0
+
+    def _scene_label(key):
+        """A display label for a preset/selector key -- PixAI's own `name` is the full workflow
+        prompt (tarot) or an i18n key, so the human-readable form is the title-cased key
+        ('the-sun' -> 'The Sun', 'facing-hug' -> 'Facing Hug')."""
+        return (str(key or "").replace("-", " ").replace("_", " ").strip().title())
+
+    def _scene_row(sc):
+        """One raw chatEditingScene -> the control schema the drawer's scene generator renders:
+        the preset chips, the selector dropdowns (language / aspect-ratio), whether it takes a
+        custom text field, and how many source images it needs (1 for most, 2 for dual)."""
+        presets = [{"key": p.get("key"), "label": _scene_label(p.get("key"))}
+                   for p in (sc.get("presets") or []) if p.get("key")]
+        selectors = [{"id": x.get("id"), "label": x.get("label") or _scene_label(x.get("id")),
+                      "default": x.get("defaultKey"),
+                      "options": [{"key": o.get("key"),
+                                   "label": o.get("label") or _scene_label(o.get("key"))}
+                                  for o in (x.get("options") or []) if o.get("key")]}
+                     for x in (sc.get("selectors") or []) if x.get("id")]
+        refs = sc.get("refImages") or {}
+        ref_min = int(refs.get("minCount") or 1)
+        ref_max = int(refs.get("maxCount") or max(ref_min, 1))
+        return {"sceneId": sc.get("sceneId"), "modelId": sc.get("modelId"),
+                "tier": (sc.get("permission") or {}).get("membershipTier"),
+                "refMin": ref_min, "refMax": ref_max,
+                "presets": presets, "selectors": selectors,
+                "custom": bool(sc.get("custom"))}
+
+    @app.route("/api/scenes")
+    def api_scenes():
+        """The AI-Tools scene catalog + each scene's control schema, so the nav modal browses
+        and the gen drawer renders the right form. 'Fetch, don't bake': the list is pulled LIVE
+        from listChatEditingScenes through the mirror session (the identity that runs a scene),
+        cleaned to what the UI needs, and cached. Mirror-gated exactly like /api/enhance -- the
+        AI-Tools tier only exists when the Bridge is armed. LOGIN tier; read-only, spends
+        nothing."""
+        import moonglade_backup as core
+        if not core.mirror_enabled() or core.make_mirror_session() is None:
+            return jsonify({"error": "Mirror to PixAI must be armed to browse AI Tools"}), 409
+        now = time.time()
+        cached = _scene_cache["scenes"]
+        if cached is not None and (now - _scene_cache["at"]) < _SCENE_TTL:
+            return jsonify({"scenes": cached})
+        try:
+            raw = core.chat_editing_scenes(core.make_mirror_session())
+        except Exception as e:
+            return jsonify({"error": _log_gen_failure("/api/scenes", e, None)[:200]}), 200
+        out = [_scene_row(sc) for sc in raw if sc.get("sceneId")]
+        if out:
+            _scene_cache["scenes"] = out
+            _scene_cache["at"] = now
+        return jsonify({"scenes": out})
+
+    @app.route("/api/scene", methods=["POST"])
+    def api_scene():
+        """Generate one AI-Tools scene (createChatEditingSceneTask) on the picked source
+        image(s). Mirror-gated FIRST, before any upload/build/submit: a scene task submitted on
+        the API key is accepted, CHARGED, then reaped unstarted at ~60min (same reap as the
+        panelplugin presets), so this refuses unless the mirror is armed with a live session and
+        routes the submit through the JWT. Body: {scene_id, media_ids[], preset, custom?,
+        selector_values?}. Login required; returns {task_id}."""
+        import moonglade_backup as core
+        if not core.mirror_enabled() or core.make_mirror_session() is None:
+            return jsonify({"error": "Mirror to PixAI must be armed to run AI Tools — "
+                                     "nothing was submitted, no credits spent"}), 409
+        try:
+            core, session = _gen_session()
+            p = request.get_json(silent=True) or {}
+            scene_id = str(p.get("scene_id") or p.get("sceneId") or "").strip()
+            media = [_input_media_id(core, session, str(m).strip())
+                     for m in (p.get("media_ids") or p.get("mediaIds") or []) if str(m).strip()]
+            media = [m for m in media if m]
+            if not scene_id:
+                return jsonify({"error": "pick an AI tool"}), 400
+            if not media:
+                return jsonify({"error": "pick a source image"}), 400
+            task_id = core.submit_scene(
+                core.make_mirror_session(), scene_id, media,
+                preset=str(p.get("preset") or "random"), custom=p.get("custom"),
+                selector_values=(p.get("selector_values") or p.get("selectorValues") or []))
+            return jsonify({"task_id": task_id})
+        except Exception as e:
+            return jsonify({"error": _log_gen_failure(
+                "/api/scene", e, locals().get("scene_id"))[:300]}), 200
+
     @app.route("/api/fix", methods=["POST"])
     def api_fix():
         """Submit a hand/face fixer task from the Edit-tab canvas. `boxes` are original-image

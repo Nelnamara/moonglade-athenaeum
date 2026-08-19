@@ -7063,6 +7063,65 @@ BRIDGE_ENHANCE_PRESETS = (
 # above -- test_enhance.py asserts their PRESENCE, not their absence.)
 
 
+# The Bridge §4/§5 -- "AI Tools" = PixAI "chat editing scenes". A DIFFERENT surface from the
+# panelplugin Enhance presets above: browse via listChatEditingScenes (read-only), generate via
+# createChatEditingSceneTask (mutation). Captured + dispatch-proven live 2026-08-18 -- all 28
+# scenes run on the mirror JWT. Browse UI: AiToolsModal.jsx; generate UI: the gen drawer's scene
+# generator (§5). The submit shape was read from PixAI's own /ai-tools/<slug> page:
+#   CreateChatEditingSceneTaskInput = {sceneId, mediaIds[], preset ("random" | <preset key> |
+#     "custom"), custom?, selectorValues:[{id, value}]}
+# with a client-side guard mediaIds.length >= (refImages.minCount or 1) -- every scene transforms
+# at least one source image; dual-character needs exactly two. Like the panelplugin Enhance path,
+# this is web-only: a scene task submitted on the API key is accepted, CHARGED, then reaped
+# unstarted at ~60min -- it must ride the browser JWT, so the /api/scene route mirror-gates it
+# and passes make_mirror_session() straight in (no _session_for_create -- that helper is for the
+# createGenerationTask path; scenes always use the JWT session the caller hands them).
+_SCENE_LIST_Q = """query listChatEditingScenes {
+  chatEditingScenes {
+    sceneId modelId title name description tutorial tags
+    presets { name key i18nKey }
+    custom { label description placeholder }
+    images { background demo }
+    permission { membershipTier }
+    refImages { minCount maxCount slotLabels presetMediaIds }
+    selectors { id label options { key label icon } defaultKey }
+    overrideParameters
+  }
+}"""
+_SCENE_SUBMIT_M = ("mutation createChatEditingSceneTask($input: CreateChatEditingSceneTaskInput!)"
+                   " { createChatEditingSceneTask(input: $input) { id } }")
+
+
+def chat_editing_scenes(session):
+    """List PixAI's AI-Tools 'chat editing scenes' -- the browse half of the Bridge AI-Tools
+    tier. Read-only: returns the raw scene configs (each carries sceneId, modelId, presets,
+    selectors, custom, refImages, permission.membershipTier). The gen drawer reads each scene's
+    control schema from here to render its form. Runs on the mirror JWT (a website surface);
+    pass make_mirror_session()."""
+    d = gql_adhoc(session, _SCENE_LIST_Q, {}) or {}
+    return d.get("chatEditingScenes") or []
+
+
+def submit_scene(session, scene_id, media_ids, preset="random", custom=None, selector_values=None):
+    """Submit a chat-editing scene task (createChatEditingSceneTask) -> task id. The generate
+    half of the Bridge AI-Tools tier. SPENDS, so it goes through gql_mutate (SINGLE attempt, no
+    retry -- a re-POST after a lost response pays twice) and MUST run on the mirror JWT; the
+    caller passes _check_read_only first at the route choke, exactly like /api/enhance ->
+    submit_generation. `preset` is a preset key, "random", or "custom" (with `custom` text);
+    `selector_values` is [{id, value}] for the scene's selectors (e.g. aspect-ratio)."""
+    _check_read_only("submit chat-editing scene")
+    inp = {"sceneId": str(scene_id),
+           "mediaIds": [str(m) for m in (media_ids or []) if m],
+           "preset": str(preset or "random")}
+    if custom is not None and str(custom).strip():
+        inp["custom"] = str(custom)
+    if selector_values:
+        inp["selectorValues"] = [{"id": str(s["id"]), "value": s["value"]}
+                                 for s in selector_values if s.get("id")]
+    d = gql_mutate(session, _SCENE_SUBMIT_M, {"input": inp})
+    return ((d or {}).get("createChatEditingSceneTask") or {}).get("id")
+
+
 def _gen_video_parameters(args):
     """Build the i2v `parameters` from CLI/GUI args (thin wrapper over
     build_video_parameters). `--params-json` overrides everything.
