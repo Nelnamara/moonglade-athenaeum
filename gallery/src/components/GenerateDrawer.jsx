@@ -10,6 +10,7 @@ import VideoDrawer from "./VideoDrawer.jsx";
 import EditTab, { SourceSlab } from "./EditTab.jsx";
 import FixTab from "./FixTab.jsx";
 import EnhanceTab from "./EnhanceTab.jsx";
+import SceneTab from "./SceneTab.jsx";
 import { EDIT_DEFAULTS } from "../gen/editCore.js";
 import { videoRemixFromRow } from "../gen/videoRemixCore.js";
 import { dockLayout } from "../gen/dockLayout.js";
@@ -77,7 +78,10 @@ function ExpandToggle({ expanded, onToggle }) {
 
 export default function GenerateDrawer({ open, onClose, account, request }) {
   const [tab, setTab] = useState("image");
-  const [sub, setSub] = useState("edit");          // edit | fixer | enhance (DC 1917 / 2925 keys)
+  const [sub, setSub] = useState("edit");          // edit | fixer | enhance | scene (scene = the
+  // Bridge §5 AI-Tools generator, reached ONLY via the "✦ AI Tools" nav modal's pick, never a
+  // sub-tab button; sceneActive carries the picked scene {name, slug, shape, tier, detail}.
+  const [sceneActive, setSceneActive] = useState(null);
   const [expanded, setExpanded] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [promptFocus, setPromptFocus] = useState(false);
@@ -333,6 +337,15 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
       setTab("edit");
       setSub("edit");
       if (request.mid) sendToEdit(request.mid);
+    } else if (request.tab === "scene") {
+      // The Bridge §5 hand-off: a scene picked in the "✦ AI Tools" nav modal opens the drawer
+      // onto its own scene generator (sub "scene") with the picked scene loaded. Lands on the
+      // Edit tab (it shares slab 1's SourceSlab) and OPENS the settings so the generator shows,
+      // the same expanded:true courtesy the Edit/video hand-offs give the slot they just filled.
+      setTab("edit");
+      setSub("scene");
+      setSceneActive(request.scene || null);
+      setExpanded(true);
     } else if (request.tab === "video") {
       setTab("video");
       // A midless request is the #video deep link: land on the tab, prefill nothing.
@@ -1047,6 +1060,12 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
                   Shares slab 1's source; onOpenFilters opens the existing FilterCompare overlay. */}
               {tab === "edit" && sub === "enhance" && (
                 <EnhanceTab source={editS.source} armed={mirrorArmed} onOpenFilters={toggleFilters} />
+              )}
+              {/* The Bridge §5 AI-Tools scene generator: the surface a scene picked in the nav
+                  modal lands on. Shares slab 1's source like EnhanceTab; renders the picked
+                  scene's own control row (chips / selectors / text / 2nd ref) from /api/scenes. */}
+              {tab === "edit" && sub === "scene" && (
+                <SceneTab scene={sceneActive} source={editS.source} armed={mirrorArmed} />
               )}
               {tab === "edit" && sub === "fixer" && (
                 /* slab 3 under Fixer / Enhance -- the DC draws QUALITY here regardless of sub

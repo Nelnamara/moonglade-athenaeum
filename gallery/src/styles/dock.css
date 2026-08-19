@@ -549,6 +549,64 @@
 .mgdock-enhsub { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
 .mgdock-swgrid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; }
 .mgdock-sw { aspect-ratio: 1 / 1; border-radius: 5px; border: 1px solid var(--surface1); }
+
+/* ---- Bridge §5 · the AI-Tools scene generator (SceneTab) --------------------------------
+   The surface a scene picked in the "✦ AI Tools" nav modal lands on. Same drawer visual
+   language as EnhanceTab, but the AI-Tools tier's identity is EMERALD (matching the nav entry),
+   where Enhance is lavender -- so its Generate reads as "a different room". */
+.mgdock-scslab { gap: 11px; }
+.mgdock-schead { display: flex; align-items: center; gap: 10px; }
+.mgdock-scthumb { width: 42px; height: 42px; flex: none; border-radius: 9px; object-fit: cover;
+  border: 1px solid var(--surface1); background: linear-gradient(160deg, var(--surface0), var(--mantle)); }
+.mgdock-sctt { min-width: 0; }
+.mgdock-scname { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 800;
+  color: var(--text); line-height: 1.1; }
+.mgdock-sctier { font-family: ui-monospace, monospace; font-size: 8px; font-weight: 800;
+  letter-spacing: .04em; text-transform: uppercase; color: var(--mauve);
+  background: rgba(20, 14, 42, .85); border: 1px solid color-mix(in oklab, var(--mauve) 40%, transparent);
+  border-radius: 5px; padding: 2px 5px; }
+.mgdock-scsub { display: flex; align-items: center; gap: 6px; margin-top: 3px; font-size: 10px;
+  font-weight: 700; color: var(--emerald); }
+.mgdock-scsub .dot { color: var(--overlay0); }
+.mgdock-scsub .mir { color: var(--emerald); }
+
+.mgdock-sclbl { font-family: ui-monospace, monospace; font-size: 9px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--overlay0); margin: 4px 1px -3px; }
+
+/* preset / language chips (lavender selection, like the picker tiers) */
+.mgdock-scchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.mgdock-scchip { font-size: 11px; font-weight: 600; padding: 6px 11px; border-radius: 8px;
+  cursor: pointer; font-family: inherit; color: var(--subtext); background: rgba(12, 10, 28, .7);
+  border: 1px solid var(--surface1); transition: border-color .14s, color .14s; }
+.mgdock-scchip:hover { border-color: color-mix(in oklab, var(--lavender) 45%, var(--surface1)); color: var(--text); }
+.mgdock-scchip.on { color: #14102a; font-weight: 800; background: var(--lavender); border-color: transparent; }
+
+/* selector segmented control (sapphire selection -- language / aspect ratio) */
+.mgdock-scseg { display: inline-flex; gap: 3px; padding: 3px; border-radius: 9px;
+  background: rgba(12, 10, 28, .6); border: 1px solid var(--surface1); }
+.mgdock-scsegb { font-size: 11px; font-weight: 600; padding: 5px 12px; border-radius: 7px;
+  cursor: pointer; font-family: inherit; color: var(--subtext); background: transparent; border: none; }
+.mgdock-scsegb.on { color: #14102a; font-weight: 800; background: var(--sapphire); }
+
+/* custom text field */
+.mgdock-sctxt { width: 100%; background: rgba(12, 10, 28, .8); border: 1px solid var(--surface1);
+  border-radius: 10px; color: var(--text); font: inherit; font-size: 12.5px; padding: 9px 11px; outline: none; }
+.mgdock-sctxt:focus { border-color: color-mix(in oklab, var(--emerald) 55%, var(--surface1)); }
+.mgdock-sctxt::placeholder { color: var(--overlay0); }
+
+/* dual: the 2nd source slot */
+.mgdock-scslot { width: 88px; height: 88px; padding: 0; border-radius: 11px; overflow: hidden;
+  cursor: pointer; display: grid; place-items: center; font-family: inherit;
+  border: 1px dashed var(--surface1); background: linear-gradient(160deg, var(--surface0), var(--mantle)); }
+.mgdock-scslot.on { border-style: solid; border-color: color-mix(in oklab, var(--emerald) 50%, var(--surface1)); }
+.mgdock-scslot img { width: 100%; height: 100%; object-fit: cover; }
+.mgdock-scplus { font-size: 10px; font-weight: 700; color: var(--overlay0); text-align: center; padding: 0 6px; }
+
+/* AI-Tools Generate: emerald, vs Enhance's lavender */
+.mgdock-scgen { justify-content: center; gap: 9px;
+  background: linear-gradient(135deg, var(--emerald), color-mix(in oklab, var(--emerald) 60%, var(--sapphire)));
+  color: #05231a; box-shadow: 0 8px 20px color-mix(in srgb, var(--emerald) 28%, transparent); }
+.mgdock-scnote { font-size: 10.5px; line-height: 1.4; color: var(--overlay0); }
 .mgdock-enhcompare { display: block; width: 100%; text-align: center; font-family: inherit;
   font-size: 10px; color: var(--subtext); border: 1px solid var(--surface1); border-radius: 8px;
   padding: 8px; background: rgba(33, 31, 58, .4); cursor: pointer;
