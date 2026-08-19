@@ -18,6 +18,7 @@ import ImportOverlay from "./components/ImportOverlay.jsx";
 import ControlPanelOverlay from "./components/ControlPanelOverlay.jsx";
 import ContactSheetOverlay from "./components/ContactSheetOverlay.jsx";
 import FolioOverlay from "./components/FolioOverlay.jsx";
+import AiToolsModal from "./components/AiToolsModal.jsx";
 import GenerateDrawer from "./components/GenerateDrawer.jsx";
 import PickerHost, { isPickerOpen } from "./components/PickerHost.jsx";
 import ClaimModal from "./components/ClaimModal.jsx";
@@ -145,6 +146,9 @@ export default function App({ boot }) {
     setContactSheetTarget({ ids: ids || [], collectionName: collectionName || "" });
     setOverlay("contactsheet");
   }, []);
+  // Bridge §4->§5 hand-off lives in requestScene (below, beside requestEdit/Video/Remix):
+  // picking a scene in the AI Tools nav modal closes the modal and opens the gen drawer onto
+  // that scene's generator, riding the same one-shot genRequest contract the other hand-offs use.
   // Esc closes the overlay FIRST (capture beats the drawer's own Esc ladder) --
   // EXCEPT where a layer on top owns its own Escape ladder: the Control Panel
   // closes its Users/Trash sub-overlay first and deliberately refuses while the
@@ -550,6 +554,15 @@ export default function App({ boot }) {
     openDock();
     setGenRequest({ tab: "remix", mid, nonce: Math.random() });
   };
+  /* Bridge §5: a scene picked in the "✦ AI Tools" nav modal -- close the modal, open the dock,
+     and hand the drawer the picked scene so it lands on its scene generator. Same one-shot
+     genRequest shape as the Edit/Video/Remix hand-offs (a fresh nonce re-fires for the same
+     scene twice). */
+  const requestScene = (scene) => {
+    setOverlay(null);
+    openDock();
+    setGenRequest({ tab: "scene", scene, nonce: Math.random() });
+  };
 
   // Grid right-click context menu (the 5 classic actions; owner picked all five).
   const [ctxMenu, setCtxMenu] = useState(null);     // {mid, thumb, x, y} | null
@@ -757,6 +770,9 @@ export default function App({ boot }) {
       )}
       {overlay === "folio" && (
         <FolioOverlay onClose={() => setOverlay(null)} />
+      )}
+      {overlay === "aitools" && (
+        <AiToolsModal open onClose={() => setOverlay(null)} onPick={requestScene} />
       )}
 
       {/* the Generate dock host: the wrapper carries the outside-click anchor

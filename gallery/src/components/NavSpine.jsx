@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import "../styles/shell.css";
 
 /* The glyph-spine nav — the DC separator-bar pills (Frontend Gallery.dc.html
@@ -46,7 +46,39 @@ function Gear() {
   );
 }
 
+/* Bridge §2 "The reveal" (The Bridge.dc.html 137-190): the destinations row IS the
+   floating-overlay row -- every entry opens an overlay via onOverlay(). AI Tools is a
+   floating overlay too (AiToolsModal), so it belongs here, not in the Generate/Loom
+   launcher cluster (owner call, 2026-08-18). It is armed-gated: NO entry, no hint while
+   the mirror is off (§2 "no entry, no hint"); when armed it materialises LEADING the row
+   in emerald with a one-time NEW flag. The nav is always mounted while the arming toggle
+   lives in the Control Panel overlay, so we can't read that state directly -- we fetch
+   /api/mirror/status on mount and refetch on the `mg-mirror-changed` window event the
+   MirrorTile fires on every arm/disarm/connect. */
+const AITOOLS_SEEN = "mg_bridge_aitools_seen";
+
 export default function NavSpine({ boot, onOverlay }) {
+  const [armed, setArmed] = useState(false);
+  const [isNew, setIsNew] = useState(() => {
+    try { return !window.localStorage.getItem(AITOOLS_SEEN); } catch { return true; }
+  });
+  useEffect(() => {
+    let alive = true;
+    const read = () => {
+      fetch("/api/mirror/status")
+        .then((r) => r.json())
+        .then((d) => { if (alive) setArmed(!!(d && d.enabled)); })
+        .catch(() => {});
+    };
+    read();
+    window.addEventListener("mg-mirror-changed", read);
+    return () => { alive = false; window.removeEventListener("mg-mirror-changed", read); };
+  }, []);
+  const openAiTools = () => {
+    setIsNew(false);
+    try { window.localStorage.setItem(AITOOLS_SEEN, "1"); } catch { /* private mode -- flag just re-shows */ }
+    if (onOverlay) onOverlay("aitools");
+  };
   /* Log Out (2026-08-02): the real JSON POST /api/login's sibling, per
      docs/DECISIONS.md's 2026-07-31 feasibility map ("A SPA needs real
      POST /api/login -> JSON and a JSON logout"). Mirrors classic /logout's
@@ -73,6 +105,15 @@ export default function NavSpine({ boot, onOverlay }) {
 
   return (
     <nav className="mgx-navspine" aria-label="Destinations">
+      {armed ? (
+        <button type="button" className="mgx-nav ai" onClick={openAiTools}>
+          <span className="mgx-nav-mark ai" aria-hidden="true">✦</span>
+          <span>AI Tools</span>
+          {isNew ? <span className="mgx-nav-new">New</span> : null}
+          <span className="mgx-nav-underline ai" aria-hidden="true" />
+          <span className="mgx-nav-tip" role="tooltip">PixAI tools — browse the 28, run in the drawer</span>
+        </button>
+      ) : null}
       {NAV.map((it) => {
         if (it.localOnly && !boot.is_true_local) return null;
         if (it.logout && !boot.user) return null;

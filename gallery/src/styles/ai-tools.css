@@ -1,0 +1,63 @@
+/* The Bridge §4 · AI Tools catalog modal (The Bridge.dc.html 247-293). Its own room: a scrim +
+   centred panel (header · scene grid · tally footer), reusing the picker-modal chrome. Browse the
+   28; pick hands off to the gen drawer. */
+.mgai-scrim { position: fixed; inset: 0; z-index: 400; display: flex; align-items: center; justify-content: center;
+  padding: 24px; background: rgba(5, 4, 13, .72); backdrop-filter: blur(4px); animation: mgaiIn .16s ease both; }
+@keyframes mgaiIn { from { opacity: 0; } to { opacity: 1; } }
+.mgai-modal { width: min(980px, 100%); max-height: min(720px, 92vh); display: flex; flex-direction: column;
+  border: 1px solid var(--surface1); border-radius: 16px; overflow: hidden; background: rgba(8, 6, 20, .98);
+  box-shadow: 0 40px 100px rgba(0, 0, 0, .6); }
+
+/* header */
+.mgai-head { display: flex; align-items: center; gap: 12px; padding: 15px 18px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--surface1); background: rgba(12, 10, 28, .5); }
+.mgai-title { font-size: 16px; font-weight: 800; color: var(--text); }
+.mgai-armed { font-size: 10px; font-weight: 700; color: var(--emerald); white-space: nowrap;
+  background: color-mix(in oklab, var(--emerald) 13%, transparent);
+  border: 1px solid color-mix(in oklab, var(--emerald) 32%, transparent); border-radius: 999px; padding: 3px 9px; }
+.mgai-search { flex: 1 1 auto; min-width: 140px; max-width: 320px; display: flex; align-items: center; gap: 8px;
+  background: rgba(12, 10, 28, .8); border: 1px solid var(--surface1); border-radius: 10px; padding: 7px 11px; }
+.mgai-search span { color: var(--overlay0); font-size: 13px; }
+.mgai-search input { flex: 1 1 auto; min-width: 0; background: none; border: none; outline: none; color: var(--text);
+  font: inherit; font-size: 12.5px; }
+.mgai-search input::placeholder { color: var(--overlay0); }
+.mgai-tiers { display: flex; gap: 4px; padding: 3px; border-radius: 9px; background: rgba(12, 10, 28, .6); border: 1px solid var(--surface1); }
+.mgai-tier { padding: 6px 12px; border-radius: 7px; font-size: 11px; font-weight: 500; cursor: pointer; border: none;
+  font-family: inherit; color: var(--subtext); background: transparent; }
+.mgai-tier.on { font-weight: 700; color: #14102a; background: var(--lavender); }
+.mgai-x { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--surface1); background: transparent; color: var(--subtext); font-size: 13px; font-family: inherit;
+  transition: border-color .16s, color .16s; }
+.mgai-x:hover { border-color: var(--lavender); color: var(--text); }
+
+/* scene grid */
+.mgai-grid { flex: 1 1 auto; padding: 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 11px; overflow-y: auto; align-content: start; }
+.mgai-card { display: flex; flex-direction: column; text-align: left; padding: 0; cursor: pointer; font-family: inherit;
+  border: 1px solid var(--surface1); border-radius: 12px; overflow: hidden; background: var(--surface0);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .28); transition: border-color .16s, transform .16s; }
+.mgai-card:hover { border-color: var(--lavender); transform: translateY(-2px); }
+.mgai-thumb { position: relative; height: 94px; display: grid; place-items: center; overflow: hidden;
+  background: linear-gradient(160deg, var(--surface0), var(--mantle)); }
+.mgai-initial { font-family: var(--serif, Georgia, "Times New Roman", serif); font-size: 34px; font-style: italic;
+  color: color-mix(in oklab, var(--lavender) 38%, transparent); }
+.mgai-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.mgai-tierbadge { position: absolute; top: 7px; left: 7px; font-family: ui-monospace, monospace; font-size: 8px;
+  font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--mauve);
+  background: rgba(20, 14, 42, .85); border: 1px solid color-mix(in oklab, var(--mauve) 40%, transparent);
+  border-radius: 5px; padding: 2px 6px; }
+.mgai-shapedot { position: absolute; bottom: 7px; right: 7px; width: 8px; height: 8px; border-radius: 50%; }
+.mgai-meta { padding: 9px 10px; display: flex; flex-direction: column; gap: 6px; }
+.mgai-name { font-size: 12px; font-weight: 700; color: var(--text); line-height: 1.2; }
+.mgai-chip { align-self: flex-start; font-family: ui-monospace, monospace; font-size: 9px; font-weight: 800;
+  letter-spacing: .05em; text-transform: uppercase; padding: 3px 7px; border-radius: 5px;
+  background: color-mix(in oklab, currentColor 16%, transparent); border: 1px solid; }
+.mgai-detail { font-size: 9.5px; color: var(--overlay0); line-height: 1.3; }
+.mgai-empty { grid-column: 1 / -1; text-align: center; color: var(--overlay0); font-size: 13px; padding: 40px 0; }
+
+/* tally footer */
+.mgai-foot { display: flex; flex-wrap: wrap; gap: 14px; padding: 12px 18px; border-top: 1px solid var(--surface1);
+  background: rgba(12, 10, 28, .5); font-size: 11px; }
+.mgai-foot b { color: var(--text); }
+.mgai-foot > span { color: var(--subtext); }
+.mgai-tally { color: var(--overlay0); }

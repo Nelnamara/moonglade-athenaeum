@@ -92,7 +92,15 @@ function MirrorTile() {
   const refresh = async () => {
     // Always drive the tile from the SERVER's real state, never a fabricated object -- a
     // fabricated {connected:true} with no `enabled` key drove the toggle from `undefined`.
-    try { const r = await fetch("/api/mirror/status"); setSt(await r.json()); } catch { /* keep st */ }
+    try {
+      const r = await fetch("/api/mirror/status");
+      const j = await r.json();
+      setSt(j);
+      // The always-mounted destinations nav reveals "✦ AI Tools" only while armed, but it
+      // can't see this overlay's state. Announce every status read on a window event so
+      // NavSpine refetches and the entry appears/vanishes the instant the mirror flips.
+      window.dispatchEvent(new CustomEvent("mg-mirror-changed", { detail: j }));
+    } catch { /* keep st */ }
   };
   useEffect(() => { refresh(); }, []);
   const toggle = async () => {
@@ -117,27 +125,69 @@ function MirrorTile() {
     setMsg("Connected.");
     await refresh();                        // re-read real status (enabled + connected + days)
   };
-  const line = !st ? "…"
-    : st.connected ? ("Connected" + (st.days_left != null ? " · " + st.days_left + " days left" : ""))
-    : "Not connected";
+  // §1 "The gate" (The Bridge.dc.html 65-135, renderVals 386-432): armed drives the chrome;
+  // the ring reads the JWT's days-left, colour-coded emerald>7 / peach<=7 / ruby<=0 / grey when off.
+  const armed = !!(st && st.enabled);
+  const days = st && st.days_left != null ? Math.max(0, Math.min(40, st.days_left)) : 0;
+  const C = 163.4;  // 2*pi*26
+  let ringMod, sessionSub, connectLabel = "Refresh session";
+  if (!st) { ringMod = "off"; sessionSub = "…"; connectLabel = "Connect"; }
+  else if (!armed) { ringMod = "off"; sessionSub = "Not connected — Connect to arm the tier."; connectLabel = "Connect"; }
+  else if (days <= 0) { ringMod = "expired"; sessionSub = "Session expired — reconnect to keep tools live."; connectLabel = "Reconnect"; }
+  else if (days <= 7) { ringMod = "low"; sessionSub = "Expires soon — " + days + " day" + (days === 1 ? "" : "s") + " left."; }
+  else { ringMod = "healthy"; sessionSub = "Healthy — decoded offline, no re-auth needed."; }
+  const ringOffset = armed ? (C * (1 - days / 40)).toFixed(1) : C;
+
   return (
-    <div className="mgcp-tile mgcp-tile3">
-      <div className="mgcp-mkick">Mirror to PixAI website</div>
-      <div className="mgcp-tilesmall">
-        {st && st.enabled
-          ? "On — new generations also file into your pixai.art library."
-          : "Off — generations stay in your local backup only."}
-        <br />{line}
+    <div className="mgcp-bridge">
+      <div className={"mgbr-tile" + (armed ? " armed" : "")}>
+        <span className="mgbr-halo" aria-hidden="true" />
+        <div className="mgbr-head">
+          <div className="mgbr-glyph"><span>M</span><i className="mgbr-dot" /></div>
+          <div className="mgbr-titlewrap">
+            <div className="mgbr-title">Mirror to PixAI</div>
+            <div className="mgbr-status">{armed ? "Armed · tier live" : "Off · tier hidden"}</div>
+          </div>
+          <button type="button" className={"mgbr-pill" + (armed ? " on" : "")} onClick={toggle}
+            disabled={busy || !st} title="Arm or disarm the mirror" aria-pressed={armed}><i /></button>
+        </div>
+
+        <div className="mgbr-ringrow">
+          <div className={"mgbr-ring " + ringMod}>
+            <svg viewBox="0 0 62 62" aria-hidden="true">
+              <circle cx="31" cy="31" r="26" className="mgbr-ring-bg" />
+              <circle cx="31" cy="31" r="26" className="mgbr-ring-fg"
+                strokeDasharray="163.4" strokeDashoffset={ringOffset} />
+            </svg>
+            <div className="mgbr-ring-c"><div className="mgbr-days">{days}</div><div className="mgbr-dayslbl">days</div></div>
+          </div>
+          <div className="mgbr-session">
+            <div className="mgbr-session-lbl">Web session</div>
+            <div className={"mgbr-session-sub " + ringMod}>{sessionSub}</div>
+          </div>
+        </div>
+
+        <div className="mgbr-connectrow">
+          <button type="button" className={"mgbr-connect" + (armed ? " armed" : "")}
+            onClick={connect} disabled={busy}>↻ {connectLabel}</button>
+          <div className="mgbr-jwtnote">re-reads the browser JWT</div>
+        </div>
+        {msg && <div className={"mgbr-msg" + (msg[0] === "⚠" ? " err" : "")}>{msg}</div>}
       </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
-        <button type="button" disabled={busy || !st}
-          className={"mgcp-standing-toggle" + (st && st.enabled ? " on" : "")}
-          onClick={toggle}>{st && st.enabled ? "on" : "off"}</button>
-        <button type="button" className="mgcp-smallchip" disabled={busy} onClick={connect}>
-          {st && st.connected ? "Refresh session" : "Connect…"}</button>
+
+      <div className="mgbr-unlocks">
+        <div className={"mgbr-unlock" + (armed ? " armed" : "")}>
+          <div className="mgbr-unum">6</div>
+          <div className="mgbr-utext">Enhance presets return to the <b>generate drawer</b></div>
+        </div>
+        <div className={"mgbr-unlock" + (armed ? " armed" : "")}>
+          <div className="mgbr-unum">28</div>
+          <div className="mgbr-utext">AI-Tools scenes open in a <b>new catalog modal</b></div>
+        </div>
+        <div className="mgbr-verdict">{armed
+          ? "Live now — 34 surfaces reachable through one engine."
+          : "All hidden. The toggle is the only way anyone finds this — which is exactly what the discovery achievement will reward."}</div>
       </div>
-      {msg && <div style={{ fontSize: 10.5, marginTop: 6,
-        color: msg[0] === "⚠" ? "var(--red)" : "var(--emerald)" }}>{msg}</div>}
     </div>
   );
 }

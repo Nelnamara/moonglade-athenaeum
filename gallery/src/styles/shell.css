@@ -228,6 +228,29 @@
 .mgx-nav:hover .mgx-nav-tip, .mgx-nav:focus-visible .mgx-nav-tip {
   opacity: 1; transform: translateX(-50%) translateY(0); }
 
+/* ---- Bridge §2 · the armed "✦ AI Tools" destination -----------------------------------
+   The one emerald entry in a row of grey — revealed only when the mirror is armed, so the
+   colour itself does the reveal. It carries a faint standing underline the grey siblings
+   don't, so it reads as "live/unlocked" even before hover, and a one-time NEW flag. */
+.mgx-nav.ai { color: color-mix(in oklab, var(--emerald) 78%, #f4eeff); }
+.mgx-nav.ai:hover, .mgx-nav.ai:focus-visible {
+  color: var(--emerald);
+  text-shadow: 0 0 15px color-mix(in srgb, var(--emerald) 70%, transparent); }
+.mgx-nav-mark.ai { color: var(--emerald);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--emerald) 55%, transparent)); }
+.mgx-nav.ai:hover .mgx-nav-mark.ai, .mgx-nav.ai:focus-visible .mgx-nav-mark.ai {
+  transform: rotate(90deg) scale(1.12); color: var(--emerald); }
+.mgx-nav-underline.ai {
+  background: linear-gradient(90deg, var(--emerald), color-mix(in oklab, var(--emerald) 55%, var(--sapphire))); }
+.mgx-nav.ai .mgx-nav-underline.ai { transform: scaleX(1); opacity: .45; }
+.mgx-nav.ai:hover .mgx-nav-underline.ai, .mgx-nav.ai:focus-visible .mgx-nav-underline.ai {
+  opacity: 1; box-shadow: 0 0 12px color-mix(in srgb, var(--emerald) 85%, transparent); }
+.mgx-nav-new { font-size: 8px; font-weight: 800; letter-spacing: .1em; line-height: 1;
+  text-transform: uppercase; color: #052018; background: var(--emerald);
+  border-radius: 4px; padding: 2px 4px; animation: mgxNewPulse 2.4s ease-in-out infinite; }
+@keyframes mgxNewPulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+@media (prefers-reduced-motion: reduce) { .mgx-nav-new { animation: none; } }
+
 /* ---- 26px square utility toggles (slim, blur) ---- */
 .mgx-sqbtn { display: grid; place-items: center; width: 26px; height: 26px;
   border-radius: 8px; cursor: pointer; background: rgba(7, 5, 18, .46);

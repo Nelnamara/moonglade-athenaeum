@@ -9,6 +9,8 @@ import CostBadge from "./CostBadge.jsx";
 import VideoDrawer from "./VideoDrawer.jsx";
 import EditTab, { SourceSlab } from "./EditTab.jsx";
 import FixTab from "./FixTab.jsx";
+import EnhanceTab from "./EnhanceTab.jsx";
+import SceneTab from "./SceneTab.jsx";
 import { EDIT_DEFAULTS } from "../gen/editCore.js";
 import { videoRemixFromRow } from "../gen/videoRemixCore.js";
 import { dockLayout } from "../gen/dockLayout.js";
@@ -76,7 +78,10 @@ function ExpandToggle({ expanded, onToggle }) {
 
 export default function GenerateDrawer({ open, onClose, account, request }) {
   const [tab, setTab] = useState("image");
-  const [sub, setSub] = useState("edit");          // edit | fixer | enhance (DC 1917 / 2925 keys)
+  const [sub, setSub] = useState("edit");          // edit | fixer | enhance | scene (scene = the
+  // Bridge §5 AI-Tools generator, reached ONLY via the "✦ AI Tools" nav modal's pick, never a
+  // sub-tab button; sceneActive carries the picked scene {name, slug, shape, tier, detail}.
+  const [sceneActive, setSceneActive] = useState(null);
   const [expanded, setExpanded] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [promptFocus, setPromptFocus] = useState(false);
@@ -108,6 +113,20 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   const [flyOpen, setFlyOpen] = useState(false);
   const [flyKind, setFlyKind] = useState("base");
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // Mirror-armed status drives the Bridge's §2 OFF=invisible rule for the Enhance sub-tab:
+  // the AI Presets slab (EnhanceTab) mounts ONLY when the mirror is armed -- off, it does not
+  // exist in the UI, only the free art filters show (as today). Read from the same
+  // /api/mirror/status the Control Panel tile uses; refetched on open and on landing on the
+  // Enhance sub-tab (the owner may have armed it in the Control Panel while the drawer sat open).
+  const [mirrorArmed, setMirrorArmed] = useState(false);
+  useEffect(() => {
+    if (!open) return undefined;
+    let live = true;
+    fetch("/api/mirror/status").then((r) => r.json())
+      .then((d) => { if (live) setMirrorArmed(!!(d && d.enabled)); })
+      .catch(() => { /* leave prior state */ });
+    return () => { live = false; };
+  }, [open, sub]);
   // Lineage: "reusing settings from run #N" -- a LOCAL annotation only (no
   // backend concept exists for it), set at prefill time and cleared the moment
   // a new submission goes out. See prefillFromRun below + the composer chip.
@@ -318,6 +337,15 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
       setTab("edit");
       setSub("edit");
       if (request.mid) sendToEdit(request.mid);
+    } else if (request.tab === "scene") {
+      // The Bridge §5 hand-off: a scene picked in the "✦ AI Tools" nav modal opens the drawer
+      // onto its own scene generator (sub "scene") with the picked scene loaded. Lands on the
+      // Edit tab (it shares slab 1's SourceSlab) and OPENS the settings so the generator shows,
+      // the same expanded:true courtesy the Edit/video hand-offs give the slot they just filled.
+      setTab("edit");
+      setSub("scene");
+      setSceneActive(request.scene || null);
+      setExpanded(true);
     } else if (request.tab === "video") {
       setTab("video");
       // A midless request is the #video deep link: land on the tab, prefill nothing.
@@ -1025,47 +1053,21 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
                 onDroppedNote={setDroppedNote} dock={editDock} />
               <FixTab visible={tab === "edit" && sub === "fixer"} dock={editDock}
                 source={editS.source} />
+              {/* The Bridge §3 "Enhance — home, in the drawer" (The Bridge.dc.html 192-235):
+                  EnhanceTab is the WHOLE Enhance sub-tab. Armed, it stacks the 6 AI presets, the
+                  Change Emotion thumbnail control, the "dispatches in seconds" note, then the free
+                  art-filter swatches + compare button; off, only the free filters (§2, "as today").
+                  Shares slab 1's source; onOpenFilters opens the existing FilterCompare overlay. */}
               {tab === "edit" && sub === "enhance" && (
-                /* slab 2 under Enhance -- DC 1471 + 2931 editSlabLabel 'ART FILTERS', then
-                   DC 1509-1516 verbatim: a flex column (gap 9) holding the 9px sub-label
-                   'ART FILTERS · free, no generation' (1511 -- lowercase kept, it is not the
-                   slab heading), the ◉ Open filters button (1512, openFiltersBtnStyle 2947),
-                   paragraph 1 (1513, 10px/1.55 subtext, <b> in var(--text)) and paragraph 2
-                   (1514, 10px/1.55 overlay0, <b> in var(--subtext)).
-                   PARAGRAPH 2's LAST CLAUSE IS REAL-DATA (owner ruling 2026-08-16): the DC
-                   says 'Upscale and Hires on the Generate tab's Upscale row' -- this build
-                   has no such row (DECISIONS 2026-07-25 'Upscale belongs on the image view,
-                   not in the generate drawer': the Off/Upscale/Hires segment was removed;
-                   Upscale is the lightbox's flyout / the details page's panel, hires is the
-                   Generate tab's 'Enhance Details' booster), so the sentence names where
-                   those really live. Everything before it is the DC's copy word for word. */
-                <div className="mgdock-slab" style={{ animationDelay: "60ms" }}>
-                  <div className="mgdock-lbl">ART FILTERS</div>
-                  <div className="mgdock-enhancecol">
-                    <div className="mgdock-enhancesub">ART FILTERS · free, no generation</div>
-                    <button type="button" className="mgdock-openfilters" onClick={toggleFilters}>
-                      ◉ Open filters
-                    </button>
-                    <div className="mgdock-enhancecopy">
-                      PixAI's seven art filters are gradient overlays, not AI — so they are applied
-                      right here in the browser: <b>no credits, no request, works offline</b>. Pick a
-                      source image above, then open the panel to compare and save.
-                    </div>
-                    <div className="mgdock-enhancecopy2">
-                      Still pixai.art only: their one-click ComfyUI workflows (background removal,
-                      line art, sketch colouring, relight). Submitted with an API key those queue
-                      and are cancelled unstarted about an hour later, so this app can't offer them.
-                      But run one on their site and the result still lands in your library
-                      automatically — only the submit button is missing, never the collecting. What
-                      also works: <b>Upscale</b> from the lightbox or Image Details, and <b>Enhance
-                      Details</b> (PixAI's hires pass) among the Generate tab's tuning chips (plain
-                      generation settings, not workflows), and <b>Fix</b> on the Fixer sub-tab for
-                      hands and faces.
-                    </div>
-                  </div>
-                </div>
+                <EnhanceTab source={editS.source} armed={mirrorArmed} onOpenFilters={toggleFilters} />
               )}
-              {tab === "edit" && sub !== "edit" && (
+              {/* The Bridge §5 AI-Tools scene generator: the surface a scene picked in the nav
+                  modal lands on. Shares slab 1's source like EnhanceTab; renders the picked
+                  scene's own control row (chips / selectors / text / 2nd ref) from /api/scenes. */}
+              {tab === "edit" && sub === "scene" && (
+                <SceneTab scene={sceneActive} source={editS.source} armed={mirrorArmed} />
+              )}
+              {tab === "edit" && sub === "fixer" && (
                 /* slab 3 under Fixer / Enhance -- the DC draws QUALITY here regardless of sub
                    (1522-1540: the EDIT model's Low/Medium/High + the image tab's switches --
                    content that is not tab-aware: the same editQuality state rides along
@@ -1234,29 +1236,9 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
             <div ref={setVideoGoEl} className="mgdock-slot" style={{ display: tab === "video" ? "contents" : "none" }} />
             <div ref={setEditGoEl} className="mgdock-slot" style={{ display: tab === "edit" && sub !== "enhance" ? "contents" : "none" }} />
             {tab === "edit" && sub === "enhance" && (
-              <>
-                {/* DC 3673 costText for enhance: 'Free — art filters composite in your
-                    browser.' -- NOT rendered as written: CostBadge is the one cost renderer
-                    and its rule (inherited from loom-core's formatCostEstimate) is that a
-                    displayed 'Free' / '0 credits' means ONLY a settled zero from the price
-                    route; nothing was priced here (nothing is sent), so the badge stays in
-                    its idle state with the DC's sentence minus the word. costSubLine (3680,
-                    the balance) is the badge's own second line. Documented divergence. */}
-                <CostBadge stack balance={balance} hint="Nothing to price — art filters composite in your browser." />
-                {/* DC genLabel 'Save to library' (3683); genReady = editRefs.length > 0
-                    (2874) -> gated on the shared source. Saving happens in the compare
-                    overlay (it owns the chosen filter, its strength/angle and the POST), so
-                    the footer action OPENS it -- never a second save path. The titles are
-                    real copy: the DC's genTitle pair is image-gen wording (owner ruling). */}
-                <button type="button" className={"mgdock-gen" + (editS.source ? "" : " off")}
-                  disabled={!editS.source}
-                  title={editS.source
-                    ? "Compare and save in the art filters overlay — this opens it"
-                    : "Pick a source image first"}
-                  onClick={() => { setFlyOpen(false); setFiltersOpen(true); }}>
-                  <span>Save to library</span>
-                </button>
-              </>
+              /* Enhance's actions live in the slab now (EnhanceTab): the preset "Generate ✦ cost"
+                 button and the art-filters "Open compare view". The footer just carries the balance. */
+              <CostBadge stack balance={balance} hint="Pick a preset above, or open the filters to compare." />
             )}
           </div>
         </div>
