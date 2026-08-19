@@ -921,41 +921,49 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
         </>
       )}
 
-      {/* Result / status lines. Not drawn in the DC (it routes runs into the RUNS reel, and the
-          dock's reel does list these submits via Jobs.register) -- kept because this is the
-          ONLY home for the drawer's own refusals and submit-time errors ('Pick a source image
-          first.', 'Re-checking the cost…', a rejected submit), which never reach the reel. */}
-      <div className={"mgd-result" + (results.length ? " has" : "")}>
-        {results.map((l) => (
-          <div key={l.id} className="mgd-result-line">
-            {l.kind === "result" ? (
-              <>
-                <div style={{ color: "var(--emerald,#4fc99a)", fontSize: 12, marginBottom: 6 }}>
-                  ✓ Rendered — {l.cost === 0 ? "free (card used)" : (Number(l.cost || 0).toLocaleString() + " credits")}. Added to your gallery.
-                </div>
-                {(l.mediaIds || []).map((mid) => (
-                  <a key={mid} href={"/?image=" + encodeURIComponent(mid)}
-                    onClick={(e) => {
-                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
-                      e.preventDefault();
-                      document.dispatchEvent(new CustomEvent("mg-open-details", { bubbles: true, composed: true, detail: { mid } }));
-                    }}>
-                    <img src={"/thumbs/" + encodeURIComponent(mid) + ".jpg"} alt="result" loading="lazy" />
-                  </a>
-                ))}
-              </>
-            ) : l.kind === "error" ? (
-              <span style={{ color: "var(--red,#f38ba8)", fontSize: 12 }}>{l.text}</span>
-            ) : l.kind === "plain" ? (
-              <span style={{ color: "var(--subtext,#9a93ab)", fontSize: 12 }}>{l.text}</span>
-            ) : (
-              <span style={{ color: l.amber ? "var(--amber,#f9d38c)" : "var(--subtext,#9a93ab)", fontSize: 12 }}>
-                {l.moon ? <span className="mgd-moon" /> : null}{l.text}
-              </span>
-            )}
+      {/* Result / status lines. IN THE DOCK (the gallery's Generate dock) the redesign routes runs
+          into the RUNS reel and completed videos into History -- mg-submit/mg-result feed the reel,
+          the History strip and the banner -- so the drawer's own inline PROGRESS and result-media are
+          redundant there and are suppressed; only its refusals / submit-time errors ('Pick a source
+          image first.', a rejected submit), which never reach the reel, still show (owner 2026-08-18).
+          The Loom and mobile Video mode render inline WITHOUT a reel, so they keep the full lines.
+          Every mg-* event is emitted regardless above -- this only gates the inline RENDER. */}
+      {(() => {
+        const shown = inDock ? results.filter((l) => l.kind === "error") : results;
+        return (
+          <div className={"mgd-result" + (shown.length ? " has" : "")}>
+            {shown.map((l) => (
+              <div key={l.id} className="mgd-result-line">
+                {l.kind === "result" ? (
+                  <>
+                    <div style={{ color: "var(--emerald,#4fc99a)", fontSize: 12, marginBottom: 6 }}>
+                      ✓ Rendered — {l.cost === 0 ? "free (card used)" : (Number(l.cost || 0).toLocaleString() + " credits")}. Added to your gallery.
+                    </div>
+                    {(l.mediaIds || []).map((mid) => (
+                      <a key={mid} href={"/?image=" + encodeURIComponent(mid)}
+                        onClick={(e) => {
+                          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                          e.preventDefault();
+                          document.dispatchEvent(new CustomEvent("mg-open-details", { bubbles: true, composed: true, detail: { mid } }));
+                        }}>
+                        <img src={"/thumbs/" + encodeURIComponent(mid) + ".jpg"} alt="result" loading="lazy" />
+                      </a>
+                    ))}
+                  </>
+                ) : l.kind === "error" ? (
+                  <span style={{ color: "var(--red,#f38ba8)", fontSize: 12 }}>{l.text}</span>
+                ) : l.kind === "plain" ? (
+                  <span style={{ color: "var(--subtext,#9a93ab)", fontSize: 12 }}>{l.text}</span>
+                ) : (
+                  <span style={{ color: l.amber ? "var(--amber,#f9d38c)" : "var(--subtext,#9a93ab)", fontSize: 12 }}>
+                    {l.moon ? <span className="mgd-moon" /> : null}{l.text}
+                  </span>
+                )}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        );
+      })()}
 
       <div ref={previewRef} className="mgd-preview" aria-hidden="true" />
     </div>

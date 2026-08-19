@@ -3222,19 +3222,22 @@ ${"=".repeat(48)}
         },
         d
       );
-    }))))), inDock ? dock.promptEl ? createPortal(promptField, dock.promptEl) : null : promptField, inDock ? dock.negativeEl ? createPortal(negativeField, dock.negativeEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Negative prompt"), negativeField), inDock && dock.topEl ? createPortal(topRow, dock.topEl) : null, inDock ? dock.goEl ? createPortal(/* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), dock.goEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-result" + (results.length ? " has" : "") }, results.map((l) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: l.id, className: "mgd-result-line" }, l.kind === "result" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { style: { color: "var(--emerald,#4fc99a)", fontSize: 12, marginBottom: 6 } }, "\u2713 Rendered \u2014 ", l.cost === 0 ? "free (card used)" : Number(l.cost || 0).toLocaleString() + " credits", ". Added to your gallery."), (l.mediaIds || []).map((mid) => /* @__PURE__ */ react_global_shim_default.createElement(
-      "a",
-      {
-        key: mid,
-        href: "/?image=" + encodeURIComponent(mid),
-        onClick: (e) => {
-          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
-          e.preventDefault();
-          document.dispatchEvent(new CustomEvent("mg-open-details", { bubbles: true, composed: true, detail: { mid } }));
-        }
-      },
-      /* @__PURE__ */ react_global_shim_default.createElement("img", { src: "/thumbs/" + encodeURIComponent(mid) + ".jpg", alt: "result", loading: "lazy" })
-    ))) : l.kind === "error" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--red,#f38ba8)", fontSize: 12 } }, l.text) : l.kind === "plain" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--subtext,#9a93ab)", fontSize: 12 } }, l.text) : /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: l.amber ? "var(--amber,#f9d38c)" : "var(--subtext,#9a93ab)", fontSize: 12 } }, l.moon ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-moon" }) : null, l.text)))), /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: previewRef, className: "mgd-preview", "aria-hidden": "true" }));
+    }))))), inDock ? dock.promptEl ? createPortal(promptField, dock.promptEl) : null : promptField, inDock ? dock.negativeEl ? createPortal(negativeField, dock.negativeEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Negative prompt"), negativeField), inDock && dock.topEl ? createPortal(topRow, dock.topEl) : null, inDock ? dock.goEl ? createPortal(/* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), dock.goEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), (() => {
+      const shown = inDock ? results.filter((l) => l.kind === "error") : results;
+      return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-result" + (shown.length ? " has" : "") }, shown.map((l) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: l.id, className: "mgd-result-line" }, l.kind === "result" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { style: { color: "var(--emerald,#4fc99a)", fontSize: 12, marginBottom: 6 } }, "\u2713 Rendered \u2014 ", l.cost === 0 ? "free (card used)" : Number(l.cost || 0).toLocaleString() + " credits", ". Added to your gallery."), (l.mediaIds || []).map((mid) => /* @__PURE__ */ react_global_shim_default.createElement(
+        "a",
+        {
+          key: mid,
+          href: "/?image=" + encodeURIComponent(mid),
+          onClick: (e) => {
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+            e.preventDefault();
+            document.dispatchEvent(new CustomEvent("mg-open-details", { bubbles: true, composed: true, detail: { mid } }));
+          }
+        },
+        /* @__PURE__ */ react_global_shim_default.createElement("img", { src: "/thumbs/" + encodeURIComponent(mid) + ".jpg", alt: "result", loading: "lazy" })
+      ))) : l.kind === "error" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--red,#f38ba8)", fontSize: 12 } }, l.text) : l.kind === "plain" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--subtext,#9a93ab)", fontSize: 12 } }, l.text) : /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: l.amber ? "var(--amber,#f9d38c)" : "var(--subtext,#9a93ab)", fontSize: 12 } }, l.moon ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-moon" }) : null, l.text))));
+    })(), /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: previewRef, className: "mgd-preview", "aria-hidden": "true" }));
   });
   var VideoDrawer_default = VideoDrawer;
 
