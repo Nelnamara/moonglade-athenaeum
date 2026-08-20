@@ -7,8 +7,6 @@
 @keyframes lbxIn { from { opacity: 0; transform: scale(.965); } to { opacity: 1; transform: none; } }
 @keyframes lbxOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(.965); } }
 @keyframes lbxFade { from { opacity: 1; } to { opacity: 0; } }
-@keyframes lbxRise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
-@keyframes lbxSink { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(12px); } }
 @keyframes lbxSlide { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes lbxMetal { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
 
@@ -102,46 +100,34 @@
 .lbx-prev { left: 18px; }
 .lbx-next { right: 18px; }
 .lbx-herowrap { position: relative; height: 100%; display: grid; place-items: center; min-width: 0; }
-.lbx-hero { position: relative; height: min(100%, 78vh);
-  max-width: calc(100vw - 36px); border-radius: 14px; overflow: hidden;
+/* Classic's rule, restored (owner, 2026-08-19 "whatever makes it feel like Classic again"):
+   the picture is measured against the SCREEN -- 94vw x 86vh, both axes in viewport units --
+   not against whatever the chrome leaves over. The pre-refit source read
+   `#lb-img { max-width: 94vw; max-height: 86vh; object-fit: contain; }`. The `min(100%, ...)`
+   term stays only so the hero can never overflow its grid row; with the prompt slab gone the
+   stage row is large enough that 86vh is what actually binds. */
+.lbx-hero { position: relative; height: min(100%, 86vh);
+  max-width: 94vw; border-radius: 14px; overflow: hidden;
   border: 1px solid rgba(255,255,255,.12);
   box-shadow: 0 40px 110px rgba(0,0,0,.75), 0 0 90px rgba(100,58,172,.22);
   background: var(--surface0); }
 .lbx-hero img, .lbx-hero video { position: absolute; inset: 0; width: 100%; height: 100%;
-  object-fit: contain; -webkit-user-drag: none; }
+  object-fit: contain; -webkit-user-drag: none;
+  transition: transform .22s cubic-bezier(.2,.9,.24,1); }
+/* classic's double-tap 2x (579d008^: `im.style.transform = 'scale(2)'`) */
+.lbx-hero img.zoomed { transform: scale(2); }
+@media (prefers-reduced-motion: reduce) { .lbx-hero img, .lbx-hero video { transition: none; } }
 /* an item with no recorded size cannot carry aspect-ratio: the media sizes the frame */
 .lbx-hero.noar img, .lbx-hero.noar video { position: static; width: auto; height: 100%;
-  max-width: calc(100vw - 160px); }
+  max-width: 94vw; }
 /* slideshow progress: 2px accent fill pinned to the hero's bottom edge */
 .lbx-slidetrack { position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
   background: rgba(5,4,13,.5); overflow: hidden; z-index: 2; }
 .lbx-slidefill { height: 100%; width: 100%; transform-origin: 0 50%;
   background: var(--accent); animation: lbxSlide 4.2s linear both; }
 
-/* ---- bottom: prompt slab + filmstrip ---- */
+/* ---- bottom: filmstrip (the prompt slab moved to Image Details, 2026-08-19) ---- */
 .lbx-bottom { display: flex; flex-direction: column; gap: 10px; padding: 10px 18px 14px; }
-.lbx-slab { padding: 10px 13px; border-radius: 11px; cursor: pointer;
-  transition: border-color .2s, background .2s;
-  border: 1px solid rgba(255,255,255,.08); background: rgba(9,7,22,.6); }
-.lbx-slab.open { border-color: rgba(182,146,230,.4); }
-.lbx-slab-line { display: flex; align-items: baseline; gap: 9px; }
-.lbx-kicker { font-size: 9.5px; font-weight: 700; letter-spacing: .14em; color: var(--overlay0); flex: none; }
-.lbx-slab-text { flex: 1 1 auto; min-width: 0; font-size: 11.5px; line-height: 1.6;
-  color: rgba(226,222,238,.78); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lbx-slab-text.full { overflow: visible; text-overflow: clip; white-space: normal; }
-.lbx-slab-toggle { font-size: 9.5px; color: var(--lavender); flex: none; }
-.lbx-slab-rows { display: flex; flex-direction: column; gap: 7px; padding-top: 10px; margin-top: 9px;
-  border-top: 1px solid var(--surface1);
-  animation: lbxRise .28s cubic-bezier(.2,.9,.24,1) both; }
-.lbx-slab-rows.closing { animation: lbxSink .34s cubic-bezier(.4,0,.2,1) both; }
-.lbx-srow { display: flex; gap: 10px; }
-.lbx-srow span { font-size: 9.5px; font-weight: 700; letter-spacing: .12em; color: var(--overlay0);
-  width: 62px; flex: none; text-align: right; }
-.lbx-srow i { flex: 1 1 auto; font-style: normal; font-size: 11px; line-height: 1.6;
-  color: rgba(214,210,226,.72); overflow-wrap: anywhere; }
-.lbx-srow i.neg { color: rgba(214,210,226,.6); }
-.lbx-srow i.mono { font-family: ui-monospace, monospace; }
-
 .lbx-striprow { display: flex; align-items: center; gap: 12px; }
 .lbx-strip { display: flex; gap: 7px; overflow-x: auto; padding: 2px; flex: 1 1 auto; min-width: 0; }
 .lbx-strip::-webkit-scrollbar { height: 8px; }

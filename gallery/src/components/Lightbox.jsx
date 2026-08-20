@@ -49,16 +49,12 @@ export default function Lightbox({
   const [similarFor, setSimilarFor] = useState(null);
   const [slideOn, setSlideOn] = useState(false);
   const [closing, setClosing] = useState(false);
-  const [promptOpen, setPromptOpen] = useState(false);
-  const [promptClosing, setPromptClosing] = useState(false);
   const [dragDX, setDragDX] = useState(0);
-  const [, bumpDetail] = useState(0); // re-render tick when a detail row lands
+  const [zoom, setZoom] = useState(false);   // classic's double-tap 2x
   const upEl = useRef(null);
   const closingRef = useRef(false);
-  const promptT = useRef(null);
-  const detailCache = useRef(new Map()); // media_id -> detail row (negative/loras/seed)
   const drag = useRef({ active: false, moved: false });
-  const touch = useRef({ x0: 0, dx: 0, live: false });
+  const touch = useRef({ x0: 0, dx: 0, live: false, lastTap: 0 });
   const stripRef = useRef(null);
 
   const closeUpscale = useCallback(() => { if (upEl.current) upEl.current.close(); }, []);
@@ -101,19 +97,6 @@ export default function Lightbox({
     window.setTimeout(onClose, 340);
   }, [onClose]);
 
-  const foldPrompt = useCallback(() => {
-    if (!promptOpen || promptClosing) return;
-    clearTimeout(promptT.current);
-    setPromptClosing(true);
-    promptT.current = setTimeout(() => { setPromptOpen(false); setPromptClosing(false); }, 340);
-  }, [promptOpen, promptClosing]);
-
-  const togglePrompt = () => {
-    if (!promptOpen) { clearTimeout(promptT.current); setPromptClosing(false); setPromptOpen(true); return; }
-    if (promptClosing) { clearTimeout(promptT.current); setPromptClosing(false); return; } // reopen mid-exit
-    foldPrompt();
-  };
-
   useEffect(() => {
     const onKey = (e) => {
       if (closingRef.current) return;
@@ -132,13 +115,15 @@ export default function Lightbox({
       else if (e.key === "ArrowLeft") step(-1);
       else if (e.key === "f" || e.key === "F") setSlideOn((v) => !v);
       else if (e.key === "Escape") {
-        if (slideOn || (promptOpen && !promptClosing)) { setSlideOn(false); foldPrompt(); }
+        // innermost-first still, with the prompt slab gone: a running slideshow or a
+        // double-tap zoom cancels on the first Esc, the page closes on the next.
+        if (slideOn || zoom) { setSlideOn(false); setZoom(false); }
         else close();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [close, step, foldPrompt, similarFor, slideOn, promptOpen, promptClosing]);
+  }, [close, step, similarFor, slideOn, zoom]);
 
   /* 4200ms per slide (DC). A timeout keyed on the index, not an interval, so a
      manual step/filmstrip jump restarts the clock -- and the 2px progress bar
@@ -149,24 +134,12 @@ export default function Lightbox({
     return () => clearTimeout(t);
   }, [slideOn, index, step]);
 
-  /* The prompt slab's NEGATIVE / LORAS / SEED live only on the full detail row
-     (/api/next/detail) -- fetched lazily on first open, cached per media_id.
-     A failed fetch caches {} so the slab settles on em dashes, not a retry loop. */
-  useEffect(() => {
-    if (!mid || !promptOpen || detailCache.current.has(mid)) return;
-    let dead = false;
-    fetch("/api/next/detail/" + encodeURIComponent(mid))
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        detailCache.current.set(mid, (d && d.row) || {});
-        if (!dead) bumpDetail((n) => n + 1);
-      })
-      .catch(() => {
-        detailCache.current.set(mid, {});
-        if (!dead) bumpDetail((n) => n + 1);
-      });
-    return () => { dead = true; };
-  }, [mid, promptOpen]);
+  // Record fields (prompt/negative/loras/seed) belong to Image Details, not here --
+  // the viewer no longer calls /api/next/detail at all. Owner, 2026-08-19: the slab was
+  // never in the classic lightbox; it arrived via a mis-attribution in this file's own
+  // header comment. See design_handoff/.../Lightbox.dc.html (amended in the same pass).
+
+  useEffect(() => { setZoom(false); }, [mid]);   // classic reset zoom on navigate
 
   // the upscale flyout must never outlive the picture it was opened for
   useEffect(() => { closeUpscale(); }, [mid]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -221,7 +194,12 @@ export default function Lightbox({
     const dx = touch.current.dx;
     touch.current.live = false;
     setDragDX(0);
-    if (Math.abs(dx) > 70) step(dx < 0 ? 1 : -1);
+    if (Math.abs(dx) > 70) { step(dx < 0 ? 1 : -1); return; }
+    // Classic's double-tap-to-zoom, restored (was lost in THE CLASSIC CUT, 579d008):
+    // two taps inside 300ms with no meaningful travel toggles a 2x view.
+    const now = Date.now();
+    if (now - touch.current.lastTap < 300) { setZoom((z) => !z); touch.current.lastTap = 0; }
+    else touch.current.lastTap = now;
   };
   // the empty stage around the hero is the backdrop: a clean click there closes
   const stageClick = (e) => {
@@ -235,11 +213,6 @@ export default function Lightbox({
   const hasAR = W > 0 && H > 0;
   const rating = Number(it.rating) || 0;
   const dragging = dragDX !== 0;
-  const row = detailCache.current.get(mid) || null;
-  const pending = promptOpen && !detailCache.current.has(mid);
-  const field = (v) => (pending ? "…" : (v == null || v === "" ? "—" : v));
-  const promptText = (row && row.prompt_full) || it.prompt || "—";
-  const promptUp = promptOpen && !promptClosing;
 
   return (
     <div className={"lbx" + (closing ? " closing" : "")} role="dialog" aria-modal="true">
@@ -318,7 +291,8 @@ export default function Lightbox({
                   style={{ viewTransitionName: "vt-reveal" }} />
               ) : (
                 <img key={it.media_id} src={"/full/" + it.media_id} alt="" draggable={false}
-                  decoding="async" style={{ viewTransitionName: "vt-reveal" }} />
+                  decoding="async" className={zoom ? "zoomed" : ""}
+                  style={{ viewTransitionName: "vt-reveal" }} />
               )}
               {slideOn ? (
                 <div className="lbx-slidetrack" aria-hidden="true">
@@ -330,21 +304,6 @@ export default function Lightbox({
         </div>
 
         <div className="lbx-bottom">
-          <div className={"lbx-slab" + (promptUp ? " open" : "")} onClick={togglePrompt}>
-            <div className="lbx-slab-line">
-              <span className="lbx-kicker">PROMPT</span>
-              <span className={"lbx-slab-text" + (promptOpen ? " full" : "")}>{promptText}</span>
-              <span className="lbx-slab-toggle">{promptUp ? "less" : "more"}</span>
-            </div>
-            {promptOpen ? (
-              <div className={"lbx-slab-rows" + (promptClosing ? " closing" : "")}>
-                <div className="lbx-srow"><span>NEGATIVE</span><i className="neg">{field(row && row.negative_prompt)}</i></div>
-                <div className="lbx-srow"><span>LORAS</span><i>{field(row && row.loras)}</i></div>
-                <div className="lbx-srow"><span>SEED</span><i className="mono">{field(row && row.seed)}</i></div>
-              </div>
-            ) : null}
-          </div>
-
           <div className="lbx-striprow">
             <div className="lbx-strip" ref={stripRef}>
               {items.map((sh, k) => {
@@ -362,7 +321,7 @@ export default function Lightbox({
                 );
               })}
             </div>
-            <div className="lbx-hint">← → to browse · F slideshow · Esc closes · swipe on tablet</div>
+            <div className="lbx-hint">← → to browse · F slideshow · Esc closes · swipe or double-tap on tablet</div>
           </div>
         </div>
       </div>
