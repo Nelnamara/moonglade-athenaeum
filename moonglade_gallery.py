@@ -11018,7 +11018,13 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "pick an AI preset"}), 400
             # workflow_name wins inside the builder when both are set; a preset is pinned to
             # exactly one of the two (numeric id OR author/workflow name) in the caller.
-            params = core.build_panelplugin_parameters(src, wid, workflow_name=wname)
+            # Change Emotion carries a control: pass the picked expression, and ONLY for that
+            # preset (an unknown input on the others would be a stray arg on a spend submit).
+            emotion = str(p.get("emotion") or "").strip()
+            extra = ({core.ENHANCE_EMOTION_ARG: emotion}
+                     if emotion and wname == core.ENHANCE_EMOTION_WORKFLOW else None)
+            params = core.build_panelplugin_parameters(src, wid, workflow_name=wname,
+                                                       extra_inputs=extra)
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
             task_id = core.submit_generation(session, params)
@@ -11034,6 +11040,29 @@ def create_app(out_dir: Path):
         except Exception as e:
             return jsonify({"error": _log_gen_failure(
                 "/api/enhance", e, locals().get("params"))[:300]}), 200
+
+    @app.route("/api/enhance/emotions")
+    def api_enhance_emotions():
+        """The staged Change-Emotion options: each branding/bridge/emotion/<key>.<img>
+        (loose OR packed in the container), keyed by filename stem. The picker self-populates
+        from whatever art is staged -- adding an emotion is dropping an image, no code change.
+        LOGIN tier; read-only, spends nothing."""
+        exts = (".webp", ".png", ".jpg", ".jpeg")
+        found = {}
+        box = _get_container()
+        if box is not None:
+            for rel in box.paths():
+                low = rel.lower()
+                if low.startswith("bridge/emotion/") and low.endswith(exts):
+                    found.setdefault(Path(rel).stem, "/branding/" + rel)
+        edir = branding_root() / "bridge" / "emotion"
+        if edir.is_dir():
+            for p in sorted(edir.iterdir()):
+                if p.is_file() and p.suffix.lower() in exts:
+                    found[p.stem] = "/branding/bridge/emotion/" + p.name   # loose overrides packed
+        emotions = [{"key": k, "label": k.replace("-", " ").replace("_", " ").strip().title(),
+                     "img": v} for k, v in sorted(found.items())]
+        return jsonify({"emotions": emotions})
 
     # The AI-Tools scene catalog (PixAI 'chat editing scenes'). Like the Enhance preset prices,
     # the list is fetched LIVE (not baked) so it self-updates the day PixAI adds/retires a scene,

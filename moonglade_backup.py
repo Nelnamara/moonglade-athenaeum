@@ -7034,6 +7034,19 @@ BRIDGE_ENHANCE_PRESETS = (
      "workflow_name": "pixai-official/sketch-coloring-workflow:d40e38f8"},
 )
 
+# Change Emotion is the one preset with a control (has_control): the user picks a target
+# expression. The workflow_name is derived from the preset row so it can't drift.
+ENHANCE_EMOTION_WORKFLOW = next(
+    p["workflow_name"] for p in BRIDGE_ENHANCE_PRESETS if p["key"] == "emotion")
+# The panelplugin input key emotionlab reads the chosen expression from, passed via
+# build_panelplugin_parameters(extra_inputs=...). ISOLATED here on purpose: it is the ONE
+# part of this wiring NOT dispatch-proven -- PixAI's emotion options live in their
+# login-gated frontend, not the public /config/constants (which lists only the 6 plugin
+# keys). Verify against a live emotionlab submit before trusting the effect; if PixAI's key
+# differs, this single line is the only change. The value sent is the option key (the staged
+# image's filename stem, e.g. "happy").
+ENHANCE_EMOTION_ARG = "emotion"
+
 
 # The CLI --enhance command stays gone -- both halves of it. Only the WEB /api/enhance route
 # is restored (mirror-gated), never the CLI flag or run_enhance; see build_panelplugin_parameters
