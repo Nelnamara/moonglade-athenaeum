@@ -331,13 +331,18 @@ There is no CLI flag for this — it's a browser-side composite, and the old cre
 `--enhance --filter-id` submit was removed rather than kept as a worse way to get the same
 pixels.
 
-> **PixAI's one-click *workflow* tools are not available here.** Their tiled upscale,
-> background removal, line-art and relight presets run only on pixai.art itself: a task
-> submitted with an API key is accepted and queued, then cancelled about an hour later without
-> ever being started. There is no `--workflow-id`, and the web drawer's **Enhance** sub-tab
-> says the same thing. For hands and faces, use the **Fixer** instead — it goes through a
-> different endpoint and works. Plain **Upscale** and **Hires** do work: they're ordinary
-> generation settings on the Generate tab, not workflows.
+> **PixAI's one-click *workflow* tools now work here — when the mirror is armed.** Background
+> removal, line-art, sketch coloring, hand-fix, face-enhance and change-emotion are PixAI
+> "panelplugin" workflows that dispatch only on a logged-in browser identity, never a bare API
+> key (submitted with a key they are accepted, queued, then cancelled about an hour later
+> without ever starting). So the Generate drawer's **Enhance** sub-tab offers them as
+> selectable presets that run **only while _Mirror to PixAI_ is turned on** (Control Panel →
+> Maintenance) — with the mirror off, the sub-tab says so and points you at the toggle. Each
+> spends credits and **no free card covers a panelplugin task**, so the price shows before you
+> generate. There is still no CLI `--workflow-id`: these are web-only and mirror-gated.
+> Separately, the box-coordinate hand/face **Fixer** (Edit → Fix) works on any credential and
+> always has, and plain **Upscale** and **Hires** are ordinary generation settings on the
+> Generate tab, not workflows.
 
 ## Multi-reference video (`--reference-video`)
 
