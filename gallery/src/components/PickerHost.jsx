@@ -42,6 +42,7 @@ export default function PickerHost() {
   // onPick with the media, onClose with null -- both close the singleton.
   const done = (m) => { const r = open.resolve; setOpen(null); r(m); };
   return (
-    <GalleryPicker defaultType={open.type} showType onPick={done} onClose={() => done(null)} />
+    <GalleryPicker defaultType={open.type} showType showUpload={open.type === "image"}
+      onPick={done} onClose={() => done(null)} />
   );
 }
