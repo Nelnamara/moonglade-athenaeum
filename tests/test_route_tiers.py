@@ -219,6 +219,9 @@ ROUTE_TIERS = {
     # The Bridge Enhance preset list + LIVE per-preset cost (price + free-card). Read-only,
     # owner's key, spends nothing -- same tier as api_workflows below and the other read-only feeds.
     ("api_enhance_presets", "GET"): LOGIN,
+    # The Change-Emotion picker options (staged branding/bridge/emotion art). Read-only, spends
+    # nothing -- LOGIN like the rest of the Enhance surface.
+    ("api_enhance_emotions", "GET"): LOGIN,
     # The Bridge AI-Tools scene catalog (browse) + scene submit (generate). GET is read-only;
     # POST spends. LOGIN like the Enhance pair -- the panelplugin-style safety (never on the API
     # key) is each route's own mirror gate, not a URL-tier question.

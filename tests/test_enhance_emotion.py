@@ -20,11 +20,17 @@ def test_emotions_endpoint_self_populates_from_staged_art(tmp_path):
     cli = _client(tmp_path)
     assert cli.get("/api/enhance/emotions").get_json()["emotions"] == []   # none staged yet
     _stage("happy")
+    _stage("aroused")
     _stage("sad-eyes")
     by = {e["key"]: e for e in cli.get("/api/enhance/emotions").get_json()["emotions"]}
-    assert set(by) == {"happy", "sad-eyes"}
+    assert set(by) == {"happy", "aroused", "sad-eyes"}
     assert by["happy"]["label"] == "Happy" and by["sad-eyes"]["label"] == "Sad Eyes"
     assert by["happy"]["img"] == "/branding/bridge/emotion/happy.webp"
+    # membership gating surfaces per PixAI's config: "happy" is free, "aroused" is gated,
+    # an unknown custom stem defaults to not-gated.
+    assert by["happy"]["membership"] is False
+    assert by["aroused"]["membership"] is True
+    assert by["sad-eyes"]["membership"] is False
 
 
 def _arm(monkeypatch):
@@ -49,7 +55,10 @@ def test_picked_emotion_reaches_submit_only_for_the_emotion_preset(tmp_path, mon
     cli.post("/api/enhance", json={"source": "srcABC",
                                    "workflow_name": core.ENHANCE_EMOTION_WORKFLOW,
                                    "emotion": "happy"})
-    assert calls["params"]["inputs"].get(core.ENHANCE_EMOTION_ARG) == "happy"
+    # the picked KEY is translated to emotionlab's danbooru TAG string on the `prompt` arg
+    assert core.ENHANCE_EMOTION_ARG == "prompt"
+    assert calls["params"]["inputs"].get(core.ENHANCE_EMOTION_ARG) == "smile"
+    assert core.ENHANCE_EMOTION_PROMPTS["happy"] == "smile"
     # a DIFFERENT preset never gets the stray arg, even if an emotion is sent
     calls["params"] = None
     cli.post("/api/enhance", json={"source": "srcABC",

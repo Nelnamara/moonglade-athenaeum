@@ -142,9 +142,11 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
                   {emotions.map((e) => (
                     <button key={e.key} type="button"
                       className={"mgdock-aitile" + (emotionKey === e.key ? " on" : "")}
-                      onClick={() => setEmotionKey(e.key)} title={e.label}>
+                      onClick={() => setEmotionKey(e.key)}
+                      title={e.membership ? e.label + " — needs a PixAI membership" : e.label}>
                       <img className="mgdock-aithumb" src={e.img} alt="" loading="lazy"
                         onError={(ev) => { ev.currentTarget.style.display = "none"; }} />
+                      {e.membership && <span className="mgdock-aigate" title="Membership required">★</span>}
                       <span className="mgdock-aimeta"><span className="mgdock-ainame">{e.label}</span></span>
                     </button>
                   ))}

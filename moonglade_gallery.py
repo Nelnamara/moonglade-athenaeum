@@ -11020,9 +11020,12 @@ def create_app(out_dir: Path):
             # exactly one of the two (numeric id OR author/workflow name) in the caller.
             # Change Emotion carries a control: pass the picked expression, and ONLY for that
             # preset (an unknown input on the others would be a stray arg on a spend submit).
-            emotion = str(p.get("emotion") or "").strip()
-            extra = ({core.ENHANCE_EMOTION_ARG: emotion}
-                     if emotion and wname == core.ENHANCE_EMOTION_WORKFLOW else None)
+            # The picker sends the option KEY (filename stem); emotionlab's `prompt` arg wants the
+            # danbooru TAG STRING, so translate key->tag here (unknown key falls back to itself).
+            emotion_key = str(p.get("emotion") or "").strip()
+            emotion_tag = core.ENHANCE_EMOTION_PROMPTS.get(emotion_key, emotion_key)
+            extra = ({core.ENHANCE_EMOTION_ARG: emotion_tag}
+                     if emotion_tag and wname == core.ENHANCE_EMOTION_WORKFLOW else None)
             params = core.build_panelplugin_parameters(src, wid, workflow_name=wname,
                                                        extra_inputs=extra)
             core._apply_kaisuuken(session, params,
@@ -11046,7 +11049,9 @@ def create_app(out_dir: Path):
         """The staged Change-Emotion options: each branding/bridge/emotion/<key>.<img>
         (loose OR packed in the container), keyed by filename stem. The picker self-populates
         from whatever art is staged -- adding an emotion is dropping an image, no code change.
+        Each option is flagged `membership` when PixAI gates it behind a paid tier.
         LOGIN tier; read-only, spends nothing."""
+        import moonglade_backup as core
         exts = (".webp", ".png", ".jpg", ".jpeg")
         found = {}
         box = _get_container()
@@ -11060,8 +11065,9 @@ def create_app(out_dir: Path):
             for p in sorted(edir.iterdir()):
                 if p.is_file() and p.suffix.lower() in exts:
                     found[p.stem] = "/branding/bridge/emotion/" + p.name   # loose overrides packed
+        gated = getattr(core, "ENHANCE_EMOTION_MEMBERSHIP", frozenset())
         emotions = [{"key": k, "label": k.replace("-", " ").replace("_", " ").strip().title(),
-                     "img": v} for k, v in sorted(found.items())]
+                     "img": v, "membership": k in gated} for k, v in sorted(found.items())]
         return jsonify({"emotions": emotions})
 
     # The AI-Tools scene catalog (PixAI 'chat editing scenes'). Like the Enhance preset prices,

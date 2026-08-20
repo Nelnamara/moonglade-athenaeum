@@ -514,9 +514,14 @@
 
 /* SELECTABLE preset grid — each tile a real thumbnail + name + cost */
 .mgdock-aigrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.mgdock-aitile { display: flex; flex-direction: column; overflow: hidden; padding: 0; cursor: pointer;
+.mgdock-aitile { position: relative; display: flex; flex-direction: column; overflow: hidden;
+  padding: 0; cursor: pointer;
   font-family: inherit; text-align: left; border-radius: 10px; border: 1px solid var(--surface1);
   background: rgba(33, 31, 58, .4); transition: border-color .16s, box-shadow .16s; }
+.mgdock-aigate { position: absolute; top: 4px; right: 4px; z-index: 1; font-size: 10px; line-height: 1;
+  color: var(--gold); background: color-mix(in oklab, var(--mantle) 78%, transparent);
+  border: 1px solid color-mix(in oklab, var(--gold) 40%, transparent); border-radius: 5px;
+  padding: 2px 4px; pointer-events: none; }
 .mgdock-aitile:hover { border-color: color-mix(in oklab, var(--accent) 45%, var(--surface1)); }
 .mgdock-aitile.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .mgdock-aithumb { display: block; width: 100%; height: 74px; object-fit: cover; background: var(--mantle); }
