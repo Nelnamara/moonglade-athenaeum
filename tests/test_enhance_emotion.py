@@ -11,7 +11,9 @@ def _client(tmp_path):
 
 
 def _stage(key):
-    d = g.branding_root() / "bridge" / "emotion"
+    # Staged art lives in the CODED emotion dir (bundle-v2: paths built from the
+    # role map, never retyped); the emitted URL stays the public role form.
+    d = g._role_dir("emotion")
     d.mkdir(parents=True, exist_ok=True)
     (d / (key + ".webp")).write_bytes(b"fake-webp-bytes")   # endpoint lists by extension
 

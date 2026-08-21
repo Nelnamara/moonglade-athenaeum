@@ -80,19 +80,23 @@ def _out_path():
 # gather(): the _thumbs exclusion
 # ---------------------------------------------------------------------------
 def test_gather_excludes_thumbs_at_any_depth():
+    # Seed rels are CODED (built from the ROLE_CODE map -- the real tree gather()
+    # packs is coded end to end); _thumbs stays a LITERAL name at any depth.
     root = _seed_branding({
         "banner.png": PNG_1PX,
-        "marks/marks.json": b'{"marks":[]}',
-        "marks/mark_4.png": PNG_1PX,
-        "badges/first-light.png": PNG_1PX,
-        "_thumbs/cache.png": b"REGENERABLE",         # top-level cache dir
-        "marks/_thumbs/mark_4.png": b"REGENERABLE",  # nested cache dir
+        g._role_rel("marks", "marks.json"): b'{"marks":[]}',
+        g._role_rel("marks", "mark_4.png"): PNG_1PX,
+        g._role_rel("badges", "first-light.png"): PNG_1PX,
+        "_thumbs/cache.png": b"REGENERABLE",                          # top-level cache dir
+        g._role_rel("marks", "_thumbs", "mark_4.png"): b"REGENERABLE",  # nested cache dir
     })
     got = bc.gather(root)
-    assert set(got) == {"banner.png", "marks/marks.json", "marks/mark_4.png",
-                        "badges/first-light.png"}
+    assert set(got) == {"banner.png",
+                        g._role_rel("marks", "marks.json"),
+                        g._role_rel("marks", "mark_4.png"),
+                        g._role_rel("badges", "first-light.png")}
     assert all("_thumbs" not in rel for rel in got)
-    assert got["marks/mark_4.png"] == PNG_1PX        # real bytes, posix keys
+    assert got[g._role_rel("marks", "mark_4.png")] == PNG_1PX  # real bytes, posix keys
 
 
 # ---------------------------------------------------------------------------
@@ -100,8 +104,8 @@ def test_gather_excludes_thumbs_at_any_depth():
 # ---------------------------------------------------------------------------
 def test_build_writes_a_verified_container_and_manifest(monkeypatch):
     _seed_branding({"banner.png": PNG_1PX,
-                    "marks/marks.json": b'{"marks":[]}',
-                    "marks/mark_4.png": PNG_1PX})
+                    g._role_rel("marks", "marks.json"): b'{"marks":[]}',
+                    g._role_rel("marks", "mark_4.png"): PNG_1PX})
     _run(monkeypatch)                                 # no args -> defaults
 
     out = _out_path()
@@ -109,7 +113,7 @@ def test_build_writes_a_verified_container_and_manifest(monkeypatch):
     box = mc.open_container(out)
     assert box is not None
     assert box.get("banner.png") == PNG_1PX
-    assert box.get("marks/marks.json") == b'{"marks":[]}'
+    assert box.get(g._role_rel("marks", "marks.json")) == b'{"marks":[]}'
     # The tool packs the SEALED achievement definitions (from the donor) as a reserved
     # payload -- the roster no longer lives in source, so this is the donor, byte-for-byte.
     assert box.payload("achievements") == json.dumps(_TEST_DONOR, separators=(",", ":")).encode("utf-8")

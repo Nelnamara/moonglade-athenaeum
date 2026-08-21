@@ -207,7 +207,9 @@ def test_earn_dates_stamped_persisted_and_no_leak(tmp_path):
 
 def test_badge_thumb_cache(tmp_path):
     from PIL import Image
-    bdir = tmp_path / "branding" / "badges"; bdir.mkdir(parents=True)
+    # bundle-v2: badge masters live at the CODED badges dir (built via
+    # g._role_dir, never a hardcoded hex literal)
+    bdir = g._role_dir("badges"); bdir.mkdir(parents=True)
     Image.new("RGBA", (2000, 2000), (10, 20, 30, 255)).save(bdir / "loremaster.png")
     p = g._badge_thumb(tmp_path, "loremaster", size=256)
     assert p and Path(p).exists() and max(Image.open(p).size) <= 256
