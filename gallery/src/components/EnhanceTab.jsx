@@ -135,8 +135,8 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
               {emotions === null ? (
                 <div className="mgdock-enhsecs">Loading expressions…</div>
               ) : emotions.length === 0 ? (
-                <div className="mgdock-enhsecs">No expression art staged yet — drop images into
-                  {" "}<b>branding/bridge/emotion/</b> (one per emotion).</div>
+                <div className="mgdock-enhsecs">No expression art staged yet — expression
+                  thumbnails ship in the app's asset bundle.</div>
               ) : (
                 <div className="mgdock-aigrid">
                   {emotions.map((e) => (

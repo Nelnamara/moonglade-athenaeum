@@ -1145,8 +1145,8 @@ def _public_rel_to_coded(rel):
         return _role_rel("bridge", f)
     if rel.startswith("mascots/"):                                # rule 5
         f = rel[len("mascots/"):]
-        if f.startswith("ach/"):
-            return _role_rel("mascots_ach", f[len("ach/"):])
+        if f[:4].lower() == "ach/":   # case-insensitive: the seal is too (Windows FS)
+            return _role_rel("mascots_ach", f[4:])
         return _role_rel("mascots", f)
     for role in ("marks", "badges", "rewards", "mystery", "banner_main",
                  "banner_login", "banner_loom", "earned_banners"):  # rule 6
@@ -1271,45 +1271,53 @@ def _seal_rule(rel):
     first). Every prefix here is DERIVED from ROLE_CODE, never retyped -- an
     unmatched rel falls through to open, so a hand-typed prefix that drifts
     from the map would silently LEAK sealed art, not 404 it."""
-    rew = ROLE_CODE["rewards"]
-    if rel in (rew + "/claim.png", rew + "/gift.png"):
+    # The filesystem this guards is case-INSENSITIVE on Windows, so the seal is
+    # too: decide on a lowercased copy of the rel and compare against lowercased
+    # prefixes. Otherwise a case-variant of a sealed path (e.g. mascots/ACH/<id>)
+    # dodges a case-sensitive prefix check, falls through to the fail-open
+    # default, and the case-insensitive FS serves the real sealed file anyway.
+    # Achievement ids are lowercase, so a lowercased stem matches _ach_ids()
+    # directly. (bundle-v2 adversarial-review HIGH finding, 2026-08-21.)
+    low = rel.lower()
+    rew = ROLE_CODE["rewards"].lower()
+    if low in (rew + "/claim.png", rew + "/gift.png"):
         # The D8 exception: the two reward UI icons notify.css fetches for the
         # claim toast/modal -- chrome, not prizes, so they stay open while the
         # rest of the bucket seals (an open pair beats a physical move, which
         # would change the public URLs and force a dist rebuild).
         return ("open", None)
-    if rel.startswith(rew + "/") or rel == rew:
+    if low.startswith(rew + "/") or low == rew:
         # rewards/ is pure achievement data with no live front-end consumer (the
         # reward-marker reconciliation is tracked work; gate per-achievement when
         # it lands).
         return ("deny", None)
-    if rel.startswith("_thumbs/") or rel == "_thumbs":
+    if low.startswith("_thumbs/") or low == "_thumbs":
         # _thumbs/ is the badge-thumb cache -- /badge-thumb/ is the one
         # sanctioned path so its own hidden-feat gate can't be walked around.
         return ("deny", None)
-    badges = ROLE_CODE["badges"]
-    if rel.startswith(badges + "/"):
-        aid = rel[len(badges) + 1:]
+    badges = ROLE_CODE["badges"].lower()
+    if low.startswith(badges + "/"):
+        aid = low[len(badges) + 1:]
         if aid.endswith(".png"):
             aid = aid[:-4]
         if "/" not in aid and aid in _ach_ids():
             return ("earned", aid)    # full-res master: the celebration fetches it AT earn time
         return ("deny", None)         # the whole bucket is sauce; unknown files stay sealed
-    mascots_ach = ROLE_CODE["mascots_ach"]
-    if rel.startswith(mascots_ach + "/"):
-        aid = rel[len(mascots_ach) + 1:].rsplit(".", 1)[0]
+    mascots_ach = ROLE_CODE["mascots_ach"].lower()
+    if low.startswith(mascots_ach + "/"):
+        aid = low[len(mascots_ach) + 1:].rsplit(".", 1)[0]
         if "/" not in aid and aid in _ach_ids():
             return ("earned", aid)
         return ("deny", None)
-    if rel.startswith(ROLE_CODE["starfall"] + "/"):
+    if low.startswith(ROLE_CODE["starfall"].lower() + "/"):
         # The whole Starfall bucket -- art, audio, AND the GONK breadcrumb
         # inside it (ROLE_CODE['breadcrumb'] nests under starfall, so this
         # prefix covers it without its own branch).
         return ("earned", "the-konami-code")
-    earned_b = ROLE_CODE["earned_banners"]
-    if rel == earned_b + "/great_library.png":
+    earned_b = ROLE_CODE["earned_banners"].lower()
+    if low == earned_b + "/great_library.png":
         return ("earned", "the-great-library")
-    if rel.startswith(earned_b + "/") or rel == earned_b:
+    if low.startswith(earned_b + "/") or low == earned_b:
         # The rest of the bucket (void_banner.png) is an UNWIRED future reward
         # (achievements #57-60) -- sealed shut until its achievement exists.
         return ("deny", None)
@@ -1793,6 +1801,16 @@ def _migrate_legacy_branding_root():
         old.rmdir()
     except OSError:
         pass
+    # Anything left behind was unrecognized (not a role folder, not a flat/system
+    # /ee_ file) so it stayed put by design -- but surface it rather than let it
+    # 404 silently, so the owner can move a stray by hand. (Re-logs each start
+    # while the leftover remains; that is a persistent, accurate nudge.)
+    if old.is_dir():
+        leftovers = [str(p.relative_to(old)) for p in old.rglob("*") if p.is_file()]
+        if leftovers:
+            log.warning("branding migration: %d file(s) left unmigrated in the old "
+                        "branding/ folder (unrecognized -- move by hand if wanted): %s",
+                        len(leftovers), ", ".join(sorted(leftovers)[:20]))
 
 
 def ensure_branding_discovery_tree():
@@ -9723,7 +9741,8 @@ def create_app(out_dir: Path):
         (banner_main ratio 4:1 -> 1920x480), so the applied banner can't
         differ from an uploaded one in shape or size. LOGIN tier, mirroring
         /api/branding/mark/custom."""
-        body = request.get_json(silent=True) or {}
+        body = request.get_json(silent=True)
+        body = body if isinstance(body, dict) else {}   # a JSON array/string/number -> 400, not 500
         if str(body.get("id") or "") != "great_library":
             return jsonify({"error": "unknown banner"}), 400
         if not _mark_earned(out_dir, db_path, "the-great-library"):

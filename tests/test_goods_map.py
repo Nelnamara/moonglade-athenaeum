@@ -217,6 +217,41 @@ def test_seal_table_round_trip(monkeypatch):
         assert g._seal_rule(rel) == want, rel
 
 
+def test_seal_is_case_insensitive_no_leak(monkeypatch):
+    """HIGH regression (adversarial review 2026-08-21): the guarded filesystem is
+    case-INSENSITIVE on Windows, so the seal must be too. A case-variant of a
+    sealed path must NEVER fall through to the fail-open ('open', None). The
+    reported hole: GET /branding/mascots/ACH/<id> translated to A02/ACH/... and
+    dodged a case-sensitive A02/ach/ prefix check, and the FS served it anyway."""
+    monkeypatch.setattr(g, "_ach_ids", lambda: frozenset({"first-light"}))
+    rr = g._role_rel
+
+    # (a) the exact reported vector, end to end: public mascots/<case>/id -> seal
+    for pub in ("mascots/ach/first-light.webp", "mascots/ACH/first-light.webp",
+                "mascots/Ach/first-light.webp"):
+        assert g._seal_rule(g._public_rel_to_coded(pub)) == ("earned", "first-light"), pub
+
+    # (b) case-variants applied straight to the coded rel, for every sealed bucket:
+    # upper-case the folder segments (mimicking a request the FS would still
+    # resolve) -- none may return open.
+    def upper_head(rel):
+        head, _, tail = rel.rpartition("/")
+        return head.upper() + "/" + tail
+
+    sealed = [
+        (rr("mascots_ach", "first-light.webp"), ("earned", "first-light")),
+        (rr("badges", "first-light.png"), ("earned", "first-light")),
+        (rr("rewards", "secret.png"), ("deny", None)),
+        (rr("earned_banners", "great_library.png"), ("earned", "the-great-library")),
+        (rr("earned_banners", "void_banner.png"), ("deny", None)),
+        (rr("starfall", "ee_nelstarfall.png"), ("earned", "the-konami-code")),
+    ]
+    for rel, want in sealed:
+        assert g._seal_rule(rel) == want, rel                     # canonical
+        assert g._seal_rule(upper_head(rel)) == want, rel         # mixed-case folders
+        assert g._seal_rule(rel.upper()) != ("open", None), rel   # never leaks fully-cased
+
+
 # ---- the flat-default fallback (translation rule 8, a SERVING rule) ---------
 
 def test_flats_fall_back_to_the_shipped_slot_defaults(tmp_path):
