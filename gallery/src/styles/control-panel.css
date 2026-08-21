@@ -134,7 +134,6 @@ button.mgcp-run { margin-left: auto; color: var(--accent); font-size: 11px; curs
 .mgcp-tile.click { cursor: pointer; transition: border-color .2s; }
 .mgcp-tile.click:hover { border-color: var(--accent); }
 /* Mobile Branding entry, pre-unlock (handoff-2026-08-09-branding-integration.md). */
-.mgcp-tile-locked { border-style: dashed; opacity: .6; }
 .mgcp-tile2 { grid-column: span 2; } .mgcp-tile3 { grid-column: span 3; }
 .mgcp-tile4 { grid-column: span 4; } .mgcp-tile5 { grid-column: span 5; } .mgcp-tile7 { grid-column: span 7; }
 @media (max-width: 900px) { .mgcp-tile2, .mgcp-tile3, .mgcp-tile4, .mgcp-tile5, .mgcp-tile7 { grid-column: span 12; } }

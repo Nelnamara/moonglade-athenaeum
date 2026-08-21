@@ -63,3 +63,27 @@ def test_no_sealed_roast_leaks_into_public_files():
     assert not leaks, (
         "SEALED roast text found in public source -- scrub it (it belongs only in the "
         "container):\n  " + "\n  ".join(sorted(set(leaks))))
+
+
+# Hidden-feat NAMES are deliberately not needles above (common words, false positives in
+# prose). The BUILT bundles are different: comments are stripped, so a hidden feat's name
+# there is a user-facing string by construction. This pins the one such leak the sealing
+# review found (HIGH #2): ControlMobile's locked Branding tile read "Unlocks with Under the
+# Hood" to every signed-in user. Owner call 2026-08-21: the tile is invisible until earned,
+# like the desktop tab -- the feat is discovered, never announced.
+_BUNDLES = ["gallery/dist/app.js", "gallery/dist/app.css", "loom/dist/master-storyboard.bundle.js"]
+_HIDDEN_FEAT_UI_NEEDLES = ["Unlocks with Under the Hood", "Under the Hood"]
+
+
+def test_built_bundles_do_not_name_the_branding_feat():
+    leaks = []
+    for rel in _BUNDLES:
+        path = _REPO / rel
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for needle in _HIDDEN_FEAT_UI_NEEDLES:
+            if needle in text:
+                leaks.append("%s: %r" % (rel, needle))
+    assert not leaks, ("a hidden feat is named in a built bundle -- rebuild from src after "
+                       "removing the string: " + "; ".join(leaks))

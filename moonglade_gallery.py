@@ -1065,7 +1065,10 @@ def branding_root():
 # SINGLE source of truth for the coded tree -- _seal_rule, the resolver
 # callers, the discovery scaffold and the migration all DERIVE their paths
 # from it, never retype them (a retyped prefix is how a seal silently fails
-# open). _thumbs stays a LITERAL top-level name: never coded, never packed.
+# open). `_thumbs` is a LEGACY literal: the badge-thumb cache now lives OUTSIDE
+# the tree (badge_cache_dir(): out_dir/gallery/cache/_badges/); the _thumbs/ seal
+# deny + the builder's exclusion stay as belt-and-braces for a stale cache left
+# behind by an older build -- never coded, never packed, never served.
 # ---------------------------------------------------------------------------
 _GOODS_ROOT_NAME = "0x676F6F6473"      # hex "goods" -- the on-disk branding root folder name
 _GOODS_MID = "3f/00100100"             # 0x3F "?" / Bender's apartment -- shared middle
@@ -1292,8 +1295,10 @@ def _seal_rule(rel):
         # it lands).
         return ("deny", None)
     if low.startswith("_thumbs/") or low == "_thumbs":
-        # _thumbs/ is the badge-thumb cache -- /badge-thumb/ is the one
-        # sanctioned path so its own hidden-feat gate can't be walked around.
+        # _thumbs/ was the badge-thumb cache before it moved out to
+        # badge_cache_dir(); a stale one may linger in an older install's tree.
+        # /badge-thumb/ is the one sanctioned path so its own hidden-feat gate
+        # can't be walked around -- keep denying it here.
         return ("deny", None)
     badges = ROLE_CODE["badges"].lower()
     if low.startswith(badges + "/"):
@@ -2389,17 +2394,29 @@ def save_ach_state(out_dir, state):
         return False
 
 
+def badge_cache_dir(out_dir):
+    """Where the regenerable badge-thumb cache lives: `out_dir/gallery/cache/_badges/`.
+    OUTSIDE the coded branding tree on purpose (SCOPE_bundle-v2-branding constraint 3:
+    the tree must keep reading as the empty scaffold + breadcrumb -- a folder of PNGs
+    named by achievement id beside the coded folders gave the tree's purpose away), and
+    under `gallery/`, which every filesystem walker already skips wholesale (organize,
+    import, audit, dedup -- Invariant 6), so the cache can never be catalogued as art.
+    `gallery/cache/` is the general home for regenerable caches (owner, 2026-08-21: a
+    cache container may follow); add siblings beside `_badges`, not elsewhere."""
+    return Path(out_dir) / "gallery" / "cache" / "_badges"
+
+
 def _badge_thumb(out_dir, aid, size=256):
     """Lazily cache a ~size px copy of a badge master and return its Path. The 57
     badge masters are 2000px (~300 MB total); the Folio of Honors renders these thumbs so
     a full open doesn't pull the masters. Masters stay the source of truth; the cache
     self-heals when a master is re-cut (mtime check). Falls back to the master on any
-    trouble, so a tile always resolves to *something*."""
+    trouble, so a tile always resolves to *something*. Cache home: badge_cache_dir()."""
     rel = _role_rel("badges", aid + ".png")
     if not _branding_exists(rel):
         return None
     src = _role_dir("badges") / (aid + ".png")
-    dst = branding_root() / "_thumbs" / (aid + ".png")   # _thumbs stays a literal top-level name
+    dst = badge_cache_dir(out_dir) / (aid + ".png")
     src_mtime = _branding_mtime(rel)   # loose master's own mtime, or the container file's
     try:
         if dst.is_file() and src_mtime is not None and dst.stat().st_mtime >= src_mtime:

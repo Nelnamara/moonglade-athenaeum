@@ -215,6 +215,13 @@ def test_badge_thumb_cache(tmp_path):
     assert p and Path(p).exists() and max(Image.open(p).size) <= 256
     assert g._badge_thumb(tmp_path, "loremaster") == p     # cached copy reused
     assert g._badge_thumb(tmp_path, "does-not-exist") is None
+    # The cache lives OUTSIDE the coded branding tree (SCOPE_bundle-v2-branding
+    # constraint 3: the tree must keep reading as the empty scaffold), under
+    # out_dir/gallery/cache/_badges/ -- gallery/ being what every walker skips.
+    assert Path(p) == g.badge_cache_dir(tmp_path) / "loremaster.png"
+    assert Path(p).parent == tmp_path / "gallery" / "cache" / "_badges"
+    assert g.branding_root() not in Path(p).parents
+    assert not (g.branding_root() / "_thumbs").exists()
 
 
 @needs_donor
