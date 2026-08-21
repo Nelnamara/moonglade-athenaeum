@@ -1,23 +1,31 @@
 #!/usr/bin/env python3
-"""Build the Moonglade asset container (moonglade.dat) from the real branding/ tree.
+"""Build the Moonglade asset container (moonglade.dat) from the coded branding source tree.
 
-    python tools/build_container.py                    # -> <app root>/moonglade.dat
-    python tools/build_container.py --out path/to.dat  # explicit output
+    python tools/build_container.py                      # branding_root() -> <app root>/moonglade.dat
+    python tools/build_container.py --root path/to/tree  # pack a source tree that lives elsewhere
+    python tools/build_container.py --out path/to.dat    # explicit output
 
-Packs every file under branding_root() EXCEPT _thumbs/ (a regenerable cache) into
-the custom container format (moonglade_container.py -- format rationale and the
-protection bar live in that module's docstring, decision record in
-docs/DECISIONS.md "The asset container, re-scoped from scratch", 2026-08-10).
+Packs every file under the source tree -- default: branding_root(), the app's own
+coded branding location -- EXCEPT _thumbs/ (a regenerable cache) into the custom
+container format (moonglade_container.py -- format rationale and the protection bar
+live in that module's docstring, decision record in docs/DECISIONS.md "The asset
+container, re-scoped from scratch", 2026-08-10). Files are keyed by their path
+relative to the root exactly as found, so the tree's coded folder names seal in
+untouched -- and what those names mean is deliberately documented nowhere public,
+this file included.
 
-Also packs the achievement definitions as a reserved payload ("achievements",
-JSON). The app does NOT read this payload yet -- wiring it up requires moving the
-definitions out of committed source, and how far that removal goes is an open
-owner decision. The slot exists so the container format never needs a version
-bump for it; the packer fills it so a built container is already complete.
+Also packs the achievement definitions as a payload ("achievements", JSON). The
+app reads this payload for real now (_sealed_defs() in moonglade_gallery.py --
+the roster no longer lives in committed source), so a container built without it
+would leave the app running on its bare fallback defaults; the packer fills it
+from the private donor so a built container is already complete.
 
 The built .dat is deliberately NOT committed (git-ignored): delivery is a GitHub
 Release asset fetched on first run -- decided 2026-08-10, same record. This tool
-runs on the machine that has the real art; `gh release upload` publishes what it
+runs on the machine that has the real art -- and since the source tree is not
+required to sit beside the code (it usually doesn't; the app grows its own at the
+install, and the owner's master copy lives elsewhere), --root points the build
+straight at wherever it actually is. `gh release upload` publishes what it
 produces.
 
 ALSO writes/refreshes moonglade_manifest.json (via moonglade_assets.py) --
@@ -60,8 +68,14 @@ def gather(root):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--root", default=None,
+                    help="the branding source tree to pack (default: the app's own "
+                         "branding_root()). Point it at the owner's real source tree "
+                         "when it lives away from the code; files are keyed relative "
+                         "to this root either way, so the layout seals in as found.")
     ap.add_argument("--out", default=None,
-                    help="output path (default: <app root>/moonglade.dat)")
+                    help="output path (default: <app root>/moonglade.dat, even when "
+                         "--root points elsewhere -- that is where the app looks)")
     ap.add_argument("--version", default=None,
                     help="manifest version string (default: bump the current "
                          "manifest's integer version by 1, or '1' if none exists)")
@@ -77,14 +91,17 @@ def main():
                          "definitions no longer live in this public tree.")
     args = ap.parse_args()
 
-    root = g.branding_root()
+    root = Path(args.root).resolve() if args.root else g.branding_root()
     if not root.is_dir():
-        sys.exit("No branding/ folder at %s -- nothing to pack." % root)
-    out_path = Path(args.out) if args.out else root.parent / "moonglade.dat"
+        sys.exit("No source tree at %s -- nothing to pack." % root)
+    # Output defaults to the APP root even when --root points elsewhere: that is
+    # where _container_path() looks for the .dat, and the manifest written below
+    # describes that file. --out overrides for anything unusual.
+    out_path = Path(args.out) if args.out else g.branding_root().parent / "moonglade.dat"
 
     assets = gather(root)
     if not assets:
-        sys.exit("branding/ at %s is empty -- refusing to build an empty container." % root)
+        sys.exit("Source tree at %s is empty -- refusing to build an empty container." % root)
     # Pack the SEALED achievement definitions from the PRIVATE donor -- NOT from source
     # (the roster no longer lives in this public tree). Same class as config.json: a file
     # the public build reads but the public repo does not carry.

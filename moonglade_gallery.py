@@ -1048,8 +1048,111 @@ def branding_root():
     in a package boundary gets treated as code by something eventually.
 
     Every caller goes through here. Nine sites used to derive this path independently, which is
-    exactly how the out_dir coupling above went unnoticed."""
-    return Path(__file__).resolve().parent / "branding"
+    exactly how the out_dir coupling above went unnoticed.
+
+    Renamed to the coded goods root 2026-08-21 (the bundle-v2 rewire,
+    SCOPE_bundle-v2-contract.md): the on-disk tree a tinkerer finds is coded end
+    to end -- role names never appear as folder names -- while the browser keeps
+    requesting the friendly /branding/<role>/... URLs and the serve route
+    translates once at the boundary (_public_rel_to_coded below)."""
+    return Path(__file__).resolve().parent / _GOODS_ROOT_NAME
+
+
+# ---------------------------------------------------------------------------
+# The role -> coded-folder map (bundle-v2, 2026-08-21). Codes exist ONLY on
+# disk and inside moonglade.dat; the public URL contract stays /branding/
+# <role>/... and every emitted URL keeps the role vocabulary. This dict is the
+# SINGLE source of truth for the coded tree -- _seal_rule, the resolver
+# callers, the discovery scaffold and the migration all DERIVE their paths
+# from it, never retype them (a retyped prefix is how a seal silently fails
+# open). _thumbs stays a LITERAL top-level name: never coded, never packed.
+# ---------------------------------------------------------------------------
+_GOODS_ROOT_NAME = "0x676F6F6473"      # hex "goods" -- the on-disk branding root folder name
+_GOODS_MID = "3f/00100100"             # 0x3F "?" / Bender's apartment -- shared middle
+
+ROLE_CODE = {
+    # role            -> coded folder rel-from-root (POSIX, no trailing slash)
+    "banner_main":    _GOODS_MID + "/001",
+    "banner_login":   _GOODS_MID + "/009",
+    "banner_loom":    _GOODS_MID + "/019",
+    "mystery":        _GOODS_MID + "/01473",
+    "marks":          _GOODS_MID + "/101",
+    "rewards":        _GOODS_MID + "/109",
+    "system":         _GOODS_MID + "/5S5",
+    "bridge":         _GOODS_MID + "/0xB01",
+    "enhance":        _GOODS_MID + "/0xB01/0x534958",
+    "emotion":        _GOODS_MID + "/0xB01/0x656d6f7465",
+    "badges":         _GOODS_MID + "/A01",
+    "mascots":        _GOODS_MID + "/A02",
+    "mascots_ach":    _GOODS_MID + "/A02/ach",
+    "earned_banners": _GOODS_MID + "/B0N",
+    "starfall":       "ABBA/a2c/0x53746172",
+    "breadcrumb":     "ABBA/a2c/0x53746172/GONK",
+}
+
+
+def _role_rel(role, *tail):
+    """posix rel-from-root for a role file: _role_rel('marks','marks.json') ->
+    '3f/00100100/101/marks.json'. No tail -> the role folder's own rel."""
+    return "/".join((ROLE_CODE[role],) + tail)
+
+
+def _role_dir(role):
+    """Path: branding_root() / coded role folder."""
+    return branding_root() / ROLE_CODE[role]
+
+
+# The top-level system files rule 2 of the translation maps into the system
+# role -- the app's chrome, requested by bare public name since before the
+# coded tree existed.
+_SYSTEM_TOP_FILES = frozenset({"logo.png", "favicon.png", "favicon.ico",
+                               "nel_spinner.png", "login_nel.webp", "login_nel.png"})
+
+
+def _public_rel_to_coded(rel):
+    """Translate ONE incoming public /branding/ rel to its coded on-disk /
+    container rel. Applied exactly once, at the serve boundary (the
+    /branding/<path:fname> route); everything downstream -- seal, loose file,
+    container key -- operates on the CODED rel only, so loose disk path ==
+    container key always. First matching rule wins; the order is the contract
+    (SCOPE_bundle-v2-contract.md section 2):
+
+      1. the three banner flats -- loose-only at the coded root, returned as-is
+         (their shipped-default fallback is a SERVING rule, not a translation)
+      2. top-level system files -> system/<name>
+      3. bare ee_* filenames -> starfall/<name>
+      4. bridge/emotion/<f> -> emotion ; bridge/preset_<f> -> enhance ;
+         bridge/<f> -> bridge (the SIX subfolder holds the presets on disk,
+         but the front-end asks for them flat under bridge/ -- filename rule)
+      5. mascots/ach/<f> -> mascots_ach ; mascots/<f> -> mascots
+      6. the single-segment role prefixes -> their coded folder + remainder
+      7. _thumbs/<f>, sfx/<f> (no shipped sfx role -- absent -> 404 -> the
+         synth-chime fallback) and anything unmatched: returned as-is. A probe
+         that guesses a coded path lands here unchanged, so the seal still
+         judges it."""
+    if rel in _BANNER_FLAT.values():                              # rule 1
+        return rel
+    if rel in _SYSTEM_TOP_FILES:                                  # rule 2
+        return _role_rel("system", rel)
+    if "/" not in rel and rel.startswith("ee_"):                  # rule 3
+        return _role_rel("starfall", rel)
+    if rel.startswith("bridge/"):                                 # rule 4
+        f = rel[len("bridge/"):]
+        if f.startswith("emotion/"):
+            return _role_rel("emotion", f[len("emotion/"):])
+        if f.startswith("preset_"):
+            return _role_rel("enhance", f)
+        return _role_rel("bridge", f)
+    if rel.startswith("mascots/"):                                # rule 5
+        f = rel[len("mascots/"):]
+        if f.startswith("ach/"):
+            return _role_rel("mascots_ach", f[len("ach/"):])
+        return _role_rel("mascots", f)
+    for role in ("marks", "badges", "rewards", "mystery", "banner_main",
+                 "banner_login", "banner_loom", "earned_banners"):  # rule 6
+        if rel.startswith(role + "/"):
+            return _role_rel(role, rel[len(role) + 1:])
+    return rel                                                    # rule 7
 
 
 def _branding_path(out_dir):
@@ -1162,27 +1265,54 @@ def _branding_mtime(rel):
 def _seal_rule(rel):
     """(mode, achievement_id) for one branding_root()-relative posix path:
     'open' (serve normally), 'deny' (never serve), or 'earned' (serve only once
-    the named achievement is earned)."""
-    if rel.startswith(("rewards/", "_thumbs/")) or rel in ("rewards", "_thumbs"):
+    the named achievement is earned).
+
+    Operates on the CODED rel (the serve route translates the public form
+    first). Every prefix here is DERIVED from ROLE_CODE, never retyped -- an
+    unmatched rel falls through to open, so a hand-typed prefix that drifts
+    from the map would silently LEAK sealed art, not 404 it."""
+    rew = ROLE_CODE["rewards"]
+    if rel in (rew + "/claim.png", rew + "/gift.png"):
+        # The D8 exception: the two reward UI icons notify.css fetches for the
+        # claim toast/modal -- chrome, not prizes, so they stay open while the
+        # rest of the bucket seals (an open pair beats a physical move, which
+        # would change the public URLs and force a dist rebuild).
+        return ("open", None)
+    if rel.startswith(rew + "/") or rel == rew:
         # rewards/ is pure achievement data with no live front-end consumer (the
         # reward-marker reconciliation is tracked work; gate per-achievement when
-        # it lands). _thumbs/ is the badge-thumb cache -- /badge-thumb/ is the one
+        # it lands).
+        return ("deny", None)
+    if rel.startswith("_thumbs/") or rel == "_thumbs":
+        # _thumbs/ is the badge-thumb cache -- /badge-thumb/ is the one
         # sanctioned path so its own hidden-feat gate can't be walked around.
         return ("deny", None)
-    if rel.startswith("badges/"):
-        aid = rel[len("badges/"):]
+    badges = ROLE_CODE["badges"]
+    if rel.startswith(badges + "/"):
+        aid = rel[len(badges) + 1:]
         if aid.endswith(".png"):
             aid = aid[:-4]
         if "/" not in aid and aid in _ach_ids():
             return ("earned", aid)    # full-res master: the celebration fetches it AT earn time
         return ("deny", None)         # the whole bucket is sauce; unknown files stay sealed
-    if rel.startswith("mascots/ach/"):
-        aid = rel[len("mascots/ach/"):].rsplit(".", 1)[0]
+    mascots_ach = ROLE_CODE["mascots_ach"]
+    if rel.startswith(mascots_ach + "/"):
+        aid = rel[len(mascots_ach) + 1:].rsplit(".", 1)[0]
         if "/" not in aid and aid in _ach_ids():
             return ("earned", aid)
         return ("deny", None)
-    if rel.startswith("ee_"):
+    if rel.startswith(ROLE_CODE["starfall"] + "/"):
+        # The whole Starfall bucket -- art, audio, AND the GONK breadcrumb
+        # inside it (ROLE_CODE['breadcrumb'] nests under starfall, so this
+        # prefix covers it without its own branch).
         return ("earned", "the-konami-code")
+    earned_b = ROLE_CODE["earned_banners"]
+    if rel == earned_b + "/great_library.png":
+        return ("earned", "the-great-library")
+    if rel.startswith(earned_b + "/") or rel == earned_b:
+        # The rest of the bucket (void_banner.png) is an UNWIRED future reward
+        # (achievements #57-60) -- sealed shut until its achievement exists.
+        return ("deny", None)
     return ("open", None)
 
 
@@ -1248,7 +1378,7 @@ def list_marks(out_dir):
     shipped defaults show up even though branding/ itself is deliberately empty
     on a fresh install -- and still empty on a truly bare install with no
     container at all. Tombstoned ids (_MARK_TOMBSTONES) never list."""
-    raw = _branding_bytes("marks/marks.json")
+    raw = _branding_bytes(_role_rel("marks", "marks.json"))
     if raw is None:
         return []
     try:
@@ -1264,11 +1394,13 @@ def list_marks(out_dir):
         mid = str(m.get("id") or "")
         if mid in _MARK_TOMBSTONES:
             continue
-        if mid and _branding_exists("marks/%s.png" % mid):
+        # Disk/container lookups are coded; the emitted URL stays the PUBLIC
+        # role form (the /branding/ route translates on the way back in).
+        if mid and _branding_exists(_role_rel("marks", mid + ".png")):
             out.append({"id": mid, "label": m.get("label") or mid,
                         "kind": m.get("kind") or "tile",
                         "png": "/branding/marks/%s.png" % mid,
-                        "ico": _branding_exists("marks/%s.ico" % mid)})
+                        "ico": _branding_exists(_role_rel("marks", mid + ".ico"))})
     return out
 
 
@@ -1300,7 +1432,10 @@ BRANDING_SLOTS = ("banner_main", "banner_login", "banner_loom")
 
 
 def _slot_dir(slot):
-    return branding_root() / slot
+    # Slot names double as ROLE_CODE keys, so the coded folder falls straight
+    # out of the map -- the LOGICAL slot key ("banner_main") stays the JSON/API
+    # vocabulary everywhere above this line.
+    return _role_dir(slot)
 
 
 def _asset_transform(it):
@@ -1333,7 +1468,7 @@ def list_slot_assets(out_dir, slot):
     its zoom/cropX/cropY transform (normalized, legacy crop migrated)."""
     if slot not in BRANDING_SLOTS:
         return []
-    raw = _branding_bytes("%s/manifest.json" % slot)
+    raw = _branding_bytes(_role_rel(slot, "manifest.json"))
     if raw is None:
         return []
     try:
@@ -1347,7 +1482,7 @@ def list_slot_assets(out_dir, slot):
         if not isinstance(it, dict):
             continue
         iid = str(it.get("id") or "")
-        if iid and _branding_exists("%s/%s.png" % (slot, iid)):
+        if iid and _branding_exists(_role_rel(slot, iid + ".png")):
             out.append({"id": iid, **_asset_transform(it),
                         "png": "/branding/%s/%s.png" % (slot, iid)})
     return out
@@ -1399,7 +1534,7 @@ def add_slot_asset(out_dir, slot, png_bytes, zoom=100, cropx=50, cropy=50):
     sdir.mkdir(parents=True, exist_ok=True)
     # First write against a container-dressed slot: promote the shipped manifest
     # loose first, or this upload would shadow every default out of the picker.
-    _seed_loose_manifest("%s/manifest.json" % slot)
+    _seed_loose_manifest(_role_rel(slot, "manifest.json"))
     try:
         data = json.loads((sdir / "manifest.json").read_text(encoding="utf-8"))
         items = list(data.get("items") or []) if isinstance(data, dict) else []
@@ -1428,7 +1563,7 @@ def set_slot_crop(out_dir, slot, item_id, zoom=None, cropx=None, cropy=None):
     # Adjusting a shipped default's crop is a WRITE -- promote the manifest
     # loose first so the edit lands on a real file (P3-review lesson: without
     # this, retuning a container-shipped banner just failed).
-    _seed_loose_manifest("%s/manifest.json" % slot)
+    _seed_loose_manifest(_role_rel(slot, "manifest.json"))
     try:
         data = json.loads((sdir / "manifest.json").read_text(encoding="utf-8"))
         items = data.get("items") if isinstance(data, dict) else None
@@ -1503,9 +1638,9 @@ def add_custom_mark(out_dir, png_bytes, label="Custom mark"):
     second upload REPLACES the first -- any existing kind:'upload' entry (and
     its .png) is dropped here first, rather than accumulating orphaned marks
     the picker would need de-duping logic to hide."""
-    mdir = branding_root() / "marks"
+    mdir = _role_dir("marks")
     mdir.mkdir(parents=True, exist_ok=True)
-    _seed_loose_manifest("marks/marks.json")   # keep shipped defaults in the picker
+    _seed_loose_manifest(_role_rel("marks", "marks.json"))   # keep shipped defaults in the picker
     try:
         data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
         marks = list(data.get("marks") or []) if isinstance(data, dict) else []
@@ -1533,7 +1668,7 @@ def remove_custom_mark(out_dir, mark_id):
     uploaded one, but this guard makes that true at the data layer too, not just
     the UI. Reverts the active mark back to the default logo if the removed one
     was the one currently worn."""
-    mdir = branding_root() / "marks"
+    mdir = _role_dir("marks")
     try:
         data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
         marks = list(data.get("marks") or []) if isinstance(data, dict) else []
@@ -1574,29 +1709,117 @@ def branding_slots_payload(out_dir):
 # never be "use the Branding tab's own upload API" -- that tab sits BEHIND
 # this exact unlock -- so this has to work by scanning raw filesystem drops,
 # not by extending the authenticated upload routes above.
+# Fallback breadcrumb text ONLY (container absent): the real README content
+# (cryptic Nel ASCII + this line) is a SEALED asset materialized by
+# ensure_branding_discovery_tree -- spoiler hygiene keeps it out of this
+# public source.
 _BRANDING_README = "Maybe something goes in here.\n"
 # mascots/rewards are listed here EXPLICITLY even though they are no longer
 # BRANDING_SLOTS (the 2026-08-13 unlock-split enforcement): their empty folders
 # are part of the tinkerer-discovery landscape and existing installs have them,
-# so the on-disk breadcrumb tree stays exactly what it was. A drop there still
-# does nothing (the sweep only ever adopts from _SWEEPABLE_SLOTS + marks).
+# so the on-disk breadcrumb tree keeps the same six roles (now coded). A drop
+# there still does nothing (the sweep only ever adopts from _SWEEPABLE_SLOTS +
+# marks).
 _BRANDING_DISCOVERY_SLOTS = BRANDING_SLOTS + ("mascots", "rewards", "marks")
 
 
+def _migrate_legacy_branding_root():
+    """One-time move of an existing install's OLD role-named `branding/` tree
+    into the coded goods tree (bundle-v2, SCOPE_bundle-v2-contract.md section
+    5). MOVE only, NEVER delete -- renaming the root would otherwise orphan
+    every real upload an existing install has (custom marks, banner slots, the
+    rendered flats). Rules:
+
+      - the six role folders' files -> their coded dirs (recursive, so the old
+        mascots/ach/ nesting lands under the coded ach folder too);
+      - old top-level loose files route through _public_rel_to_coded: the
+        three banner flats stay top-level at the coded root, system files /
+        ee_* land in their coded homes (leaving them at the coded top would
+        strand a working override where the resolver no longer looks);
+      - anything unrecognized STAYS PUT (flag-to-owner territory, per the
+        standing stray-copy rule), and a destination that already exists is
+        never overwritten -- the source stays put and is logged;
+      - emptied old folders are removed; the old root goes only if COMPLETELY
+        empty. One log line per move via the standard logger.
+
+    A no-op on fresh installs (no old root at all)."""
+    import logging as _logging
+    import shutil
+    old = branding_root().parent / "branding"
+    if not old.is_dir():
+        return
+    log = _logging.getLogger(__name__)
+
+    def _move(src, dst):
+        if dst.exists():
+            log.warning("branding migration: NOT moving %s (destination %s already exists)",
+                        src, dst)
+            return
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+            log.info("branding migration: moved %s -> %s", src, dst)
+        except OSError:
+            log.warning("branding migration: failed to move %s -> %s",
+                        src, dst, exc_info=True)
+
+    for role in ("banner_main", "banner_login", "banner_loom",
+                 "marks", "mascots", "rewards"):
+        src_dir = old / role
+        if not src_dir.is_dir():
+            continue
+        for p in sorted(src_dir.rglob("*")):
+            if p.is_file():
+                _move(p, _role_dir(role) / p.relative_to(src_dir))
+    try:
+        top = sorted(old.iterdir())
+    except OSError:
+        top = []
+    for p in top:
+        if not p.is_file():
+            continue
+        coded = _public_rel_to_coded(p.name)
+        if p.name in _BANNER_FLAT.values() or coded != p.name:
+            _move(p, branding_root() / coded)
+        # else: unrecognized (the old README.txt, stray notes) -- stays put.
+    # Sweep away what emptied, deepest-first; rmdir refuses anything non-empty,
+    # which is exactly the "removed only if left completely empty" contract.
+    for d in sorted((q for q in old.rglob("*") if q.is_dir()), reverse=True):
+        try:
+            d.rmdir()
+        except OSError:
+            pass
+    try:
+        old.rmdir()
+    except OSError:
+        pass
+
+
 def ensure_branding_discovery_tree():
-    """Create the empty, nested slot folders + the one breadcrumb README, so
-    there is actually something for a tinkerer to find. Idempotent and additive
-    only -- never touches a folder or file that already exists, so it is safe
-    to call on every server start regardless of what's already on disk (the
-    owner's own real branding/, a returning install with real uploads, ...).
-    Called once at app startup (create_app), not per-request."""
-    root = branding_root()
+    """Create the empty, coded slot folders + the one GONK breadcrumb, so there
+    is actually something for a tinkerer to find. Idempotent and additive only
+    -- never touches a folder or file that already exists, so it is safe to
+    call on every server start regardless of what's already on disk (the
+    owner's own real tree, a returning install with real uploads, ...). Runs
+    the one-time legacy migration first so an old install's real files land in
+    the coded dirs before the empties go down. The README's content is
+    materialized from the SEALED asset (spoiler hygiene: the cryptic Nel ASCII
+    never appears in this public source); a container-less install gets the
+    plain one-liner. The old root-level README is no longer written. Called
+    once at app startup (create_app), not per-request."""
+    _migrate_legacy_branding_root()
     for slot in _BRANDING_DISCOVERY_SLOTS:
-        (root / slot).mkdir(parents=True, exist_ok=True)
-    readme = root / "README.txt"
+        _role_dir(slot).mkdir(parents=True, exist_ok=True)
+    crumb_dir = _role_dir("breadcrumb")
+    readme = crumb_dir / "README.txt"
     if not readme.exists():
         try:
-            readme.write_text(_BRANDING_README, encoding="utf-8")
+            crumb_dir.mkdir(parents=True, exist_ok=True)
+            raw = _branding_bytes(_role_rel("breadcrumb", "README.txt"))
+            if raw is not None:
+                readme.write_bytes(raw)
+            else:
+                readme.write_text(_BRANDING_README, encoding="utf-8")
         except OSError:
             pass
 
@@ -1624,14 +1847,14 @@ def _adopt_mark(out_dir, raw_stem, png_bytes):
     auto-adopt (marks predate BRANDING_SLOTS and keep their own established
     list_marks()/marks.json shape rather than being folded into the newer
     per-slot manifest convention)."""
-    mdir = branding_root() / "marks"
+    mdir = _role_dir("marks")
     mid = re.sub(r"[^a-z0-9_-]+", "-", raw_stem.lower()).strip("-")[:40] or "custom"
     # Tombstoned ids count as taken: adopting a drop AS a tombstoned id would
     # register a mark list_marks() then refuses to show.
     have = {m["id"] for m in list_marks(out_dir)} | set(_MARK_TOMBSTONES)
     if mid in have:
         mid = (mid + "-" + secrets.token_hex(3))[:40]
-    _seed_loose_manifest("marks/marks.json")   # keep shipped defaults in the picker
+    _seed_loose_manifest(_role_rel("marks", "marks.json"))   # keep shipped defaults in the picker
     try:
         data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
         marks = list(data.get("marks") or []) if isinstance(data, dict) else []
@@ -1656,9 +1879,9 @@ def _adopt_mark(out_dir, raw_stem, png_bytes):
 # mascots/rewards get a real design (named-role overrides, most likely, not
 # a manifest-of-many-pick-one-active gallery like the other two slots), the
 # sweep only ever touches the two slots that map cleanly onto a real,
-# already-established single flat file: banner_main -> branding/banner.png
-# and banner_login -> branding/login-banner.png (WIRED to write those exact
-# paths as of 2026-08-06 -- see _write_banner_flat below; owner call: "Yes,
+# already-established single flat file: banner_main -> the root flat
+# banner.png and banner_login -> login-banner.png (WIRED to write those exact
+# files as of 2026-08-06 -- see _write_banner_flat below; owner call: "Yes,
 # seems obvious").
 _SWEEPABLE_SLOTS = ("banner_main", "banner_login", "banner_loom")
 
@@ -1670,6 +1893,19 @@ _SWEEPABLE_SLOTS = ("banner_main", "banner_login", "banner_loom")
 # re-renders its slot's flat.
 _BANNER_FLAT = {"banner_main": "banner.png", "banner_login": "login-banner.png",
                 "banner_loom": "banner-loom.png"}
+# The SHIPPED default banner per slot -- a sealed container asset inside the
+# slot's own coded folder, served only when no loose flat exists (bundle-v2:
+# the coded tree ships real default banners; the old repo tree shipped the
+# slots empty, so brand_context's flat-only check left a fresh install bare).
+# Filenames as the tree actually carries them -- banner_loom's is hyphenated.
+_BANNER_FLAT_DEFAULT = {"banner_main": "banner_main.png",
+                        "banner_login": "banner_login.png",
+                        "banner_loom": "banner-loom.png"}
+
+
+def _flat_default_rel(slot):
+    """Coded rel of one slot's shipped default banner (the rule-8 fallback)."""
+    return _role_rel(slot, _BANNER_FLAT_DEFAULT[slot])
 # The output aspect each banner flat is cropped to (width / height). banner_loom
 # is the 12:1 workspace strip added with the Branding-tab rebuild.
 _BANNER_RATIO = {"banner_main": 4.0, "banner_login": 4.0, "banner_loom": 12.0}
@@ -1734,34 +1970,25 @@ def _banner_window(w, h, target_ar, zoom, cropx, cropy):
     return (li, ti, li + wi, ti + hi)
 
 
-def _write_banner_flat(out_dir, slot):
-    """Render a banner slot's ACTIVE asset over its real flat file, baking the
-    stored zoom/cropX/cropY transform in via _banner_window (the design's own
-    preview math). That is what makes the banner sliders REAL -- the transform
-    was stored metadata nothing rendered before. Fails soft (False), never a
-    500: a banner that fails to render leaves the previous flat in place, which
-    still displays -- strictly better than a broken header image."""
+def _render_banner_flat(slot, raw, zoom=100, cropx=50, cropy=50):
+    """The ratio/size pipeline itself: bake raw image bytes into `slot`'s flat
+    file via _banner_window (the design's own preview math) at the slot's
+    canonical output size. Shared by _write_banner_flat (the active-asset path)
+    and the earned-banner apply route (sealed bytes straight from the
+    container) so the two writers can never drift. The rendered FLAT is always
+    written loose at the coded ROOT's top level: it's derived per-install
+    state, not shipped art. Fails soft (False), never a 500."""
     name = _BANNER_FLAT.get(slot)
-    if not name:
-        return False
-    active_id = load_slot_active(out_dir).get(slot)
-    a = next((x for x in list_slot_assets(out_dir, slot) if x["id"] == active_id), None)
-    if not a:
+    if not name or raw is None:
         return False
     try:
         import io
         from PIL import Image
-        # The active asset may be a shipped default living only in the container
-        # -- read via the resolution layer, not a raw path. The rendered FLAT is
-        # always written loose: it's derived per-install state, not shipped art.
-        raw = _branding_bytes("%s/%s.png" % (slot, a["id"]))
-        if raw is None:
-            return False
         im = Image.open(io.BytesIO(raw))
         im.load()
         w, hh = im.size
         ar = _BANNER_RATIO.get(slot, 4.0)
-        box = _banner_window(w, hh, ar, a.get("zoom", 100), a.get("cropX", 50), a.get("cropY", 50))
+        box = _banner_window(w, hh, ar, zoom, cropx, cropy)
         crop = im.crop(box)
         ow, oh = _BANNER_OUT.get(slot, (1920, int(round(1920 / ar))))
         crop = crop.resize((ow, oh), Image.LANCZOS)
@@ -1770,6 +1997,26 @@ def _write_banner_flat(out_dir, slot):
         return True
     except Exception:
         return False
+
+
+def _write_banner_flat(out_dir, slot):
+    """Render a banner slot's ACTIVE asset over its real flat file, baking the
+    stored zoom/cropX/cropY transform in via _render_banner_flat above. That is
+    what makes the banner sliders REAL -- the transform was stored metadata
+    nothing rendered before. Fails soft (False), never a 500: a banner that
+    fails to render leaves the previous flat in place, which still displays --
+    strictly better than a broken header image."""
+    if slot not in _BANNER_FLAT:
+        return False
+    active_id = load_slot_active(out_dir).get(slot)
+    a = next((x for x in list_slot_assets(out_dir, slot) if x["id"] == active_id), None)
+    if not a:
+        return False
+    # The active asset may be a shipped default living only in the container --
+    # read via the resolution layer (coded rel), not a raw path.
+    raw = _branding_bytes(_role_rel(slot, a["id"] + ".png"))
+    return _render_banner_flat(slot, raw, a.get("zoom", 100),
+                               a.get("cropX", 50), a.get("cropY", 50))
 
 
 def sweep_branding_drops(out_dir):
@@ -1810,7 +2057,7 @@ def sweep_branding_drops(out_dir):
                 pass
             add_slot_asset(out_dir, slot, png_bytes)   # neutral transform (zoom 100, centered)
             adopted = True
-    mdir = branding_root() / "marks"
+    mdir = _role_dir("marks")
     if mdir.is_dir():
         known = {m["id"] for m in list_marks(out_dir)}
         try:
@@ -1869,7 +2116,11 @@ def brand_context(out_dir):
     processor, so old installs with only logo.png render exactly as before)."""
     cfg = load_branding(out_dir)
     marks = {m["id"]: m for m in list_marks(out_dir)}
-    has_banner = _branding_exists("banner.png")
+    # A banner shows when the per-install loose flat exists OR the shipped
+    # sealed default does (the serve route's rule-8 fallback renders the
+    # latter, so this flag has to agree with what /branding/banner.png serves).
+    has_banner = (_branding_exists("banner.png")
+                  or _branding_exists(_flat_default_rel("banner_main")))
     if cfg["mark"] in marks:
         m = marks[cfg["mark"]]
         return {"mark_url": m["png"], "mark_anim": cfg["anim"], "mark_kind": m["kind"],
@@ -1888,12 +2139,14 @@ def make_launcher_shortcut(out_dir, mark_id):
     chosen mark's .ico, targeting Serve Gallery.pyw via pythonw. Returns the
     .lnk path. Machine-local action -- caller must gate to localhost."""
     import subprocess
-    ico = branding_root() / "marks" / (str(mark_id) + ".ico")
+    ico = _role_dir("marks") / (str(mark_id) + ".ico")
     if not ico.exists():
         # A container-shipped .ico must become a REAL file: PowerShell's
         # CreateShortcut reads IconLocation straight off disk, servable bytes
         # aren't enough. Materialized into a git-ignored cache, regenerable.
-        raw = _branding_bytes("marks/%s.ico" % mark_id)
+        # (The cache subfolder keeps its plain 'marks' name -- it lives outside
+        # the goods root, so it is not part of the coded tree.)
+        raw = _branding_bytes(_role_rel("marks", str(mark_id) + ".ico"))
         if raw is not None:
             cache = branding_root().parent / "_container_cache" / "marks"
             try:
@@ -2124,11 +2377,11 @@ def _badge_thumb(out_dir, aid, size=256):
     a full open doesn't pull the masters. Masters stay the source of truth; the cache
     self-heals when a master is re-cut (mtime check). Falls back to the master on any
     trouble, so a tile always resolves to *something*."""
-    rel = "badges/%s.png" % aid
+    rel = _role_rel("badges", aid + ".png")
     if not _branding_exists(rel):
         return None
-    src = branding_root() / "badges" / (aid + ".png")
-    dst = branding_root() / "_thumbs" / (aid + ".png")
+    src = _role_dir("badges") / (aid + ".png")
+    dst = branding_root() / "_thumbs" / (aid + ".png")   # _thumbs stays a literal top-level name
     src_mtime = _branding_mtime(rel)   # loose master's own mtime, or the container file's
     try:
         if dst.is_file() and src_mtime is not None and dst.stat().st_mtime >= src_mtime:
@@ -2373,7 +2626,7 @@ def _has_loose_marks():
     defeated the discovery feat once before (caught by adversarial review,
     2026-08-09) -- keep this filesystem-only, same contract the sweep/adopt
     functions hold."""
-    mdir = branding_root() / "marks"
+    mdir = _role_dir("marks")
     try:
         data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -7686,10 +7939,16 @@ def create_app(out_dir: Path):
 
     @app.route("/branding/<path:fname>")
     def branding(fname):
-        """Serve branding art: a loose drop-in file under branding_root() first,
-        the shipped container second (the loose-then-container contract every
-        read path holds). Absent in both -> 404 so the header's onerror simply
-        removes the <img>. Path-safe."""
+        """Serve branding art. The URL vocabulary is PUBLIC role names
+        (/branding/marks/..., /branding/bridge/emotion/...); the on-disk tree
+        and the container keys are CODED -- this route is the ONE place the
+        two meet (_public_rel_to_coded, applied exactly once to the incoming
+        rel). After translation: seal check, then a loose file under
+        branding_root() first, the shipped container second (the loose-then-
+        container contract every read path holds), and for the three banner
+        flats a last fallback onto the slot's SHIPPED sealed default so a
+        fresh install is dressed before its first crop. Absent everywhere ->
+        404 so the header's onerror simply removes the <img>. Path-safe."""
         from flask import send_from_directory, abort
         import mimetypes
         bdir = branding_root().resolve()
@@ -7698,25 +7957,34 @@ def create_app(out_dir: Path):
             target.relative_to(bdir)          # reject path traversal
         except (ValueError, OSError):
             abort(404)
-        # The unlock split, enforced (see _seal_rule): achievement-bound art
-        # only serves once its achievement is earned, whether the bytes would
-        # come from a loose file or the container.
-        mode, seal_aid = _seal_rule(target.relative_to(bdir).as_posix())
+        coded = _public_rel_to_coded(target.relative_to(bdir).as_posix())
+        # The unlock split, enforced (see _seal_rule, which judges the CODED
+        # rel -- a probe that guesses a coded path passes through translation
+        # unchanged, so it faces the same verdict): achievement-bound art only
+        # serves once its achievement is earned, whether the bytes would come
+        # from a loose file or the container.
+        mode, seal_aid = _seal_rule(coded)
         if mode == "deny":
             abort(404)
         if mode == "earned" and seal_aid not in _earned_achievement_ids(
                 out_dir, db_path, need=seal_aid):
             abort(404)
-        if target.is_file():
-            resp = send_from_directory(str(bdir), fname)
+        if (bdir / coded).is_file():
+            resp = send_from_directory(str(bdir), coded)
             resp.headers["Cache-Control"] = "no-cache, must-revalidate"   # branding art gets re-cut; never serve a stale copy
             return resp
-        # Container fallback keys on the SAME already-traversal-checked relative
-        # path (posix separators -- the container's native addressing).
-        raw = _branding_bytes(target.relative_to(bdir).as_posix())
+        # Container fallback keys on the CODED rel (posix separators -- the
+        # container's native addressing; loose path == container key, always).
+        raw = _branding_bytes(coded)
+        if raw is None and coded in _BANNER_FLAT.values():
+            # Rule-8 flat fallback: no per-install loose flat rendered yet ->
+            # the slot's shipped sealed default (loose flat wins when present;
+            # translation itself never rewrites the flat names).
+            slot = next(s for s, n in _BANNER_FLAT.items() if n == coded)
+            raw = _branding_bytes(_flat_default_rel(slot))
         if raw is None:
             abort(404)
-        mime = mimetypes.guess_type(fname)[0] or "application/octet-stream"
+        mime = mimetypes.guess_type(coded)[0] or "application/octet-stream"
         resp = app.response_class(raw, mimetype=mime)
         resp.headers["Cache-Control"] = "no-cache, must-revalidate"
         return resp
@@ -9429,6 +9697,42 @@ def create_app(out_dir: Path):
         cfg = load_branding(out_dir)
         return jsonify({"mark": cfg["mark"], "marks": list_marks(out_dir)})
 
+    @app.route("/api/branding/banners/earned")
+    def api_branding_banners_earned():
+        """The earned-banner picks BannerEditor's locked/earned tile row renders.
+        One entry today (great_library, gated on the-great-library); void_banner
+        is deliberately NOT listed -- it rewards a future achievement (#57-60)
+        and stays invisible until that lands. The png URL is the public role
+        form and is itself seal-gated by the /branding/ route, so a locked
+        banner's art can't be previewed by fetching the URL directly. LOGIN
+        tier, mirroring /api/branding/mark/custom."""
+        return jsonify({"banners": [{
+            "id": "great_library",
+            "label": "The Great Library",
+            "earned": _mark_earned(out_dir, db_path, "the-great-library"),
+            "png": "/branding/earned_banners/great_library.png",
+        }]})
+
+    @app.route("/api/branding/banner/earned", methods=["POST"])
+    def api_branding_banner_earned():
+        """Apply an earned banner as the banner_main flat. Server gate is
+        authoritative (the UI's locked tile is cosmetic): 403 until the
+        achievement is really earned, same _mark_earned check the custom-mark
+        upload runs. On success the SEALED earned_banners bytes go through the
+        exact _render_banner_flat pipeline every other banner write uses
+        (banner_main ratio 4:1 -> 1920x480), so the applied banner can't
+        differ from an uploaded one in shape or size. LOGIN tier, mirroring
+        /api/branding/mark/custom."""
+        body = request.get_json(silent=True) or {}
+        if str(body.get("id") or "") != "great_library":
+            return jsonify({"error": "unknown banner"}), 400
+        if not _mark_earned(out_dir, db_path, "the-great-library"):
+            return jsonify({"error": "banner locked"}), 403
+        raw = _branding_bytes(_role_rel("earned_banners", "great_library.png"))
+        if raw is None or not _render_banner_flat("banner_main", raw):
+            return jsonify({"error": "banner art unavailable"}), 400
+        return jsonify({"ok": True})
+
     @app.route("/api/branding/shortcut", methods=["POST"])
     def api_branding_shortcut():
         """Write/refresh the Desktop launcher shortcut with the chosen mark's
@@ -10366,21 +10670,25 @@ def create_app(out_dir: Path):
 
     @app.route("/api/enhance/emotions")
     def api_enhance_emotions():
-        """The staged Change-Emotion options: each branding/bridge/emotion/<key>.<img>
+        """The staged Change-Emotion options: each emotion-role <key>.<img>
         (loose OR packed in the container), keyed by filename stem. The picker self-populates
         from whatever art is staged -- adding an emotion is dropping an image, no code change.
         Each option is flagged `membership` when PixAI gates it behind a paid tier.
-        LOGIN tier; read-only, spends nothing."""
+        LOGIN tier; read-only, spends nothing. Disk/container scans are CODED;
+        the emitted URLs keep the PUBLIC /branding/bridge/emotion/ form the
+        front-end knows (the /branding/ route translates them back)."""
         import moonglade_backup as core
         exts = (".webp", ".png", ".jpg", ".jpeg")
+        emo_prefix = (_role_rel("emotion") + "/").lower()
         found = {}
         box = _get_container()
         if box is not None:
             for rel in box.paths():
                 low = rel.lower()
-                if low.startswith("bridge/emotion/") and low.endswith(exts):
-                    found.setdefault(Path(rel).stem, "/branding/" + rel)
-        edir = branding_root() / "bridge" / "emotion"
+                if low.startswith(emo_prefix) and low.endswith(exts):
+                    found.setdefault(Path(rel).stem,
+                                     "/branding/bridge/emotion/" + Path(rel).name)
+        edir = _role_dir("emotion")
         if edir.is_dir():
             for p in sorted(edir.iterdir()):
                 if p.is_file() and p.suffix.lower() in exts:
