@@ -62,12 +62,12 @@
 .ach-m2 .m2-mote{position:absolute;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle,#fff4d1,#e8cb7c 60%,transparent 76%);box-shadow:0 0 7px 1px rgba(232,203,124,.85);}
 .ach-m2 .m2-flameglow{position:absolute;inset:-16px;border-radius:50%;pointer-events:none;z-index:0;background:radial-gradient(circle,rgba(255,120,60,.55),rgba(224,53,94,.4) 45%,transparent 72%);filter:blur(8px);animation:m2flameflicker 1.3s ease-in-out infinite;}
 @keyframes m2flameflicker{0%,100%{opacity:.33;transform:scale(1);}18%{opacity:.54;transform:scale(1.06);}34%{opacity:.24;transform:scale(.95);}52%{opacity:.57;transform:scale(1.1);}68%{opacity:.3;transform:scale(.98);}84%{opacity:.48;transform:scale(1.04);}}
-.ach-m2 .m2-runeA{position:absolute;top:50%;left:50%;width:148px;height:148px;margin:-74px 0 0 -74px;border-radius:50%;border:1.5px dashed rgba(224,53,94,.6);pointer-events:none;z-index:0;animation:m2runespinA 9s linear infinite;}
+.ach-m2 .m2-runeA{position:absolute;top:50%;left:50%;width:148px;height:148px;margin:-74px 0 0 -74px;border-radius:50%;border:1.5px dashed rgba(224,53,94,.36);pointer-events:none;z-index:0;animation:m2runespinA 9s linear infinite;}
 @keyframes m2runespinA{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
-.ach-m2 .m2-runeB{position:absolute;top:50%;left:50%;width:164px;height:164px;margin:-82px 0 0 -82px;border-radius:50%;border:1px dotted rgba(138,147,162,.55);pointer-events:none;z-index:0;animation:m2runespinB 14s linear infinite;}
+.ach-m2 .m2-runeB{position:absolute;top:50%;left:50%;width:164px;height:164px;margin:-82px 0 0 -82px;border-radius:50%;border:1px dotted rgba(138,147,162,.33);pointer-events:none;z-index:0;animation:m2runespinB 14s linear infinite;}
 @keyframes m2runespinB{from{transform:rotate(360deg);}to{transform:rotate(0deg);}}
 .ach-m2 .m2-wisp{position:absolute;bottom:-2px;border-radius:50%;background:radial-gradient(circle,rgba(255,178,90,.95),rgba(255,90,50,.8) 40%,rgba(224,53,94,.55) 65%,transparent 78%);filter:blur(1.5px);pointer-events:none;animation-name:m2flamewisp;animation-timing-function:ease-in;animation-iteration-count:infinite;}
-@keyframes m2flamewisp{0%{opacity:0;transform:translate(0,0) scale(.5) rotate(0deg);}18%{opacity:.95;}55%{opacity:.9;transform:translate(var(--sway,10px),-50px) scale(1.2) rotate(var(--rot,10deg));}100%{opacity:0;transform:translate(calc(var(--sway,10px) * 1.7),-104px) scale(.25) rotate(var(--rot,10deg));}}
+@keyframes m2flamewisp{0%{opacity:0;transform:translate(0,0) scale(.5) rotate(0deg);}18%{opacity:.57;}55%{opacity:.54;transform:translate(var(--sway,10px),-50px) scale(1.2) rotate(var(--rot,10deg));}100%{opacity:0;transform:translate(calc(var(--sway,10px) * 1.7),-104px) scale(.25) rotate(var(--rot,10deg));}}
 @media (prefers-reduced-motion: reduce){ .ach-m2 .m2-halo,.ach-m2 .m2-motewrap,.ach-m2 .m2-flameglow,.ach-m2 .m2-runeA,.ach-m2 .m2-runeB,.ach-m2 .m2-wisp{animation:none!important;} }
 .ach-m2 .tbody{min-width:0;flex:1;}
 .ach-m2 .tbody .u{font:700 10px/1 sans-serif;letter-spacing:.22em;text-transform:uppercase;color:var(--tc);opacity:0;}
