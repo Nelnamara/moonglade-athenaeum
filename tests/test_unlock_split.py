@@ -181,6 +181,22 @@ def test_badge_thumb_hidden_gate(tmp_path):
     assert cli.get("/badge-thumb/the-konami-code.png").status_code == 200
 
 
+
+def test_badge_thumb_hidden_gate_is_case_insensitive(tmp_path):
+    """A case-variant URL must not skip the hidden-feat gate: the resolve is on a
+    case-insensitive FS, so UNDER-THE-HOOD.png would read the real sealed master
+    while the lowercase id-set membership missed it (fail-open). Regression for
+    the 2026-08-22 badge_thumb casefold (mirrors _seal_rule's own casefold)."""
+    from PIL import Image
+    cli = _client(tmp_path)
+    hid = "under-the-hood" if "under-the-hood" in g._ach_hidden() else sorted(g._ach_hidden())[0]
+    bdir = g._role_dir("badges"); bdir.mkdir(parents=True, exist_ok=True)
+    Image.new("RGBA", (64, 64), (7, 22, 30, 255)).save(bdir / (hid + ".png"))
+    assert cli.get("/badge-thumb/" + hid + ".png").status_code == 404
+    assert cli.get("/badge-thumb/" + hid.upper() + ".png").status_code == 404
+    assert cli.get("/badge-thumb/" + hid.title() + ".png").status_code == 404
+
+
 # ---- the Branding-slot boundary ---------------------------------------------
 
 def test_branding_slots_are_banners_only(tmp_path):

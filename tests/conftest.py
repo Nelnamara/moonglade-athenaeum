@@ -122,9 +122,14 @@ def _sealed_roster_container(request, tmp_path):
                             {"achievements": json.dumps(defs, separators=(",", ":")).encode("utf-8")})
     gallery._sealed_cache.update(path=None, mtime=None, defs=None)
     gallery._container_cache.update(path=None, mtime=None, box=None)
+    # The earned-ids cache is a 5s-TTL module global keyed on nothing (out_dir is
+    # not part of the key), so without a reset one test's earned set can answer
+    # another test's seal check inside the window. Clear it around each test too.
+    gallery._earned_ids_cache.update(t=0.0, ids=frozenset())
     yield
     gallery._sealed_cache.update(path=None, mtime=None, defs=None)
     gallery._container_cache.update(path=None, mtime=None, box=None)
+    gallery._earned_ids_cache.update(t=0.0, ids=frozenset())
 
 
 @pytest.fixture()

@@ -8031,6 +8031,13 @@ def create_app(out_dir: Path):
         from flask import send_from_directory, abort
         if not aid or "/" in aid or "\\" in aid or ".." in aid:
             abort(404)
+        # Achievement ids are canonically lowercase-kebab; the underlying resolve
+        # is on a case-insensitive FS, so a case-variant (UNDER-THE-HOOD.png)
+        # would otherwise skip the hidden-feat gate below (a frozenset of
+        # lowercase ids) yet still read the real sealed master -- the same
+        # fail-open leak _seal_rule casefolds against. Normalise once here so the
+        # gate, _earned_achievement_ids, and the cache key all agree.
+        aid = aid.lower()
         # Hidden feats are masked in /api/achievements, but their ids sit in
         # this public source -- so an unearned hidden feat's badge must not be
         # fishable by id here either (thumbs for VISIBLE unearned achievements
