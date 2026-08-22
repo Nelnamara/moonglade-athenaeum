@@ -134,7 +134,7 @@ images and videos with the arrow keys without leaving the overlay.
   lightbox, for the 48 closest images in your catalog. Images only. Needs the optional
   CLIP index — `pip install pixeltable`, then build it once with
   `python moonglade_backup.py --rebuild-similar` (run that while the gallery isn't
-  serving Similar queries — both use the same embedded database). Without the index the
+  serving Similar queries — both use the same embedded database). To top up an existing index with only the images it lacks rather than rebuilding from scratch, use `--sync-similar` (the incremental counterpart). Without the index the
   panel just tells you so; nothing else breaks.
 
 Scroll position and your selections are preserved when you open an image and come

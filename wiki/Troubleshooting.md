@@ -1,5 +1,12 @@
 # Troubleshooting
 
+## Seeing more detail (`-v` / `--verbose`)
+
+Add `-v` (or `--verbose`) to any command for a fuller running commentary — per-item
+progress, why a step was skipped, and (for `--faststart-videos`) ffmpeg's own message when
+it refuses a file. It's the first thing to reach for when a run does something you don't
+expect.
+
 ## "PersistedQueryNotFound" / "Cannot query field … on type Query"
 A built-in identifier went stale after a PixAI frontend update. These ship with the
 app and are shared by everyone, so when one breaks it breaks for all users.

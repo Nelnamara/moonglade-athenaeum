@@ -33,7 +33,6 @@ MODEL = "openai/clip-vit-base-patch32"
 _DIR = "moonglade"
 _TBL = f"{_DIR}.images"
 _IDX = "img_clip"          # explicit index name -> if_exists='ignore' can recognize it
-_DIM = 512
 
 _model_lock = threading.Lock()
 _model: dict = {}          # lazy: {'mdl','proc','dev'}

@@ -90,6 +90,11 @@ upscale, image-to-video) — that's what powers Image Details' LINEAGE panel.
 All of this is captured **as a generation happens**, so a picture you make in Moonglade
 arrives complete — no backfill needed for new work.
 
+**Skipping metadata for speed (`--no-full-meta`).** The per-task metadata call is what
+captures a row's prompt, seed and model, and it runs by default. On a first backup of a
+very large history you can pass `--no-full-meta` for a faster pull — the rows it writes
+carry no prompt, seed or model until a later `--backfill-full-meta` fills them in.
+
 **Steps / Sampler / CFG on models that don't report them.** Some models (Tsubaki.2 and other
 AuraFlow models) run on their own baked-in defaults and don't write those numbers into the
 run. Moonglade fills them from the model's own preset instead — so a Tsubaki.2 picture shows
@@ -205,6 +210,8 @@ Organizing never breaks the gallery — file lookup is by `media_id`, so images 
 live in any subfolder. (This is also why [Collections](Collections) survive
 Organize.)
 
+`--organize-adv` is a back-compat alias for `--organize`; `--undo-organize` reverts the last run either way.
+
 ## Duplicate audit & dedup
 
 ```bash
@@ -217,6 +224,8 @@ python moonglade_backup.py --verify-dupes   # confirm quarantine is safe to dele
 `--verify-dupes` is read-only — unless you add `--restore-orphans`, which moves any
 quarantined file whose keeper no longer exists back into `images/`.
 
+Two modifiers: `--dedup-delete` (with `--dedup --apply`) deletes the redundant copies outright instead of moving them to `_duplicates/`; `--no-content` (with `--audit`/`--dedup`) skips the slower content-hash pass and does only the fast same-`media_id` location dedup.
+
 ## Catalog repair one-shots
 
 Each runs its pass and exits; all are idempotent and safe to re-run.
@@ -226,6 +235,8 @@ Each runs its pass and exits; all are idempotent and safe to re-run.
 | `--fix-model-names` | re-resolves catalog rows whose model name is blank or a raw numeric id (one API call per distinct model). Also runs inside `--sync`. |
 | `--fix-model-names --relabel-removed` | additionally labels ids that **PixAI answered about and had no name for** (deleted models) as "Unknown or removed model" instead of leaving the raw number. An id whose lookup simply *failed* — timeout, 5xx, a dropped connection — is a different thing, and is now left exactly as it was and reported as `not checked`, so the next run picks it up. It used to get the "Unknown or removed model" label too, which is a permanent-looking answer to a temporary problem: a re-run then read the row as already resolved and never came back for it. |
 | `--backfill-meta` | fills missing url/width/height only (see [Full metadata](#full-metadata) for the full-meta variant) |
+| `--backfill-lineage` | fills in `source_media_id`/`derive_kind` (which image an edit, upscale or video was made **from**) for rows that predate lineage tracking, via `getTaskById`; powers Image Details' LINEAGE panel. Idempotent. |
+| `--backfill-phash` | computes a perceptual difference-hash (dHash) for every image row that lacks one, powering the near-duplicate ("upscaled or recompressed copy") tier of the duplicates finder. Local Pillow work, no network. |
 | `--faststart-videos` | losslessly rewrites every video so iOS/Safari can stream it over HTTP (`ffmpeg -c copy +faststart`; needs ffmpeg on PATH; skips already-fixed files; safe to run while the gallery or a live watch is collecting — each remux uses its own unique temp file) |
 
 **Every clip the faststart sweep walks lands in exactly one of *rewritten*, *already OK*
@@ -237,6 +248,29 @@ a refusal is called out as it happens and listed again at the end as
 `still not faststart:` with its full path, so you can go and look at it. Add `-v` and each
 failure carries ffmpeg's own reason for refusing, which is the only thing that tells you
 whether the file is salvageable.
+
+## Account: credits, coupons & cards (read-only)
+
+Quick CLI views of your PixAI account state. Each one prints and exits; none of them spend
+or change anything.
+
+```bash
+python moonglade_backup.py --credit-log      # full credit ledger: purchases, claims, gifts, spend, refunds
+python moonglade_backup.py --coupons         # Credit Boost coupons you currently hold
+python moonglade_backup.py --card-history    # recent benefit-card usage (redemptions + refunds)
+```
+
+| Modifier | Applies to | Effect |
+|---|---|---|
+| `--credit-log-count N` | `--credit-log` | how many recent entries to show (default 30) |
+| `--credit-log-reason TYPE` | `--credit-log` | filter to one raw type (e.g. `task_cost`, `daily`, `event_gift`, `extra_package`) |
+| `--credit-log-before CURSOR` | `--credit-log` | page further back using a cursor printed by a previous run |
+| `--coupons-history` | `--coupons` | show the past (redeemed + expired) view instead of what you hold now |
+| `--card-history-all` | `--card-history` | page all the way back and print every card TYPE ever used |
+| `--card-history-count N` | `--card-history` | how many recent records to show (default 20) |
+
+The same information is in the Control Panel's **PixAI account** view — see
+[Control Panel](Control-Panel).
 
 ## Reclaiming disk space
 

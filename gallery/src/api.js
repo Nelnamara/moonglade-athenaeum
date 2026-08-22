@@ -12,17 +12,6 @@ export async function fetchLibrary(params = {}) {
   return r.json();
 }
 
-// Classic form-POST routes (collection add/remove, deletes, replace). They answer
-// with a redirect back to the classic page; fetch follows it harmlessly -- what
-// matters is the mutation, and the pilot refreshes its own grid afterwards.
-export async function postForm(action, fields, idList) {
-  const fd = new FormData();
-  for (const [k, v] of Object.entries(fields || {})) fd.append(k, v);
-  for (const mid of idList || []) fd.append("media_ids", mid);
-  const r = await fetch(action, { method: "POST", body: fd });
-  return r.ok;
-}
-
 // JSON POST to an /api/ route. Fail-soft to {error} (never throws) so callers can branch
 // on d.error uniformly. Replaces the classic redirect-answering form routes with their
 // JSON twins for the desktop grid actions (2026-08-07).
