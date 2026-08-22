@@ -202,7 +202,7 @@ function _mkMoment(a, opts) {
   return { m, tw };
 }
 
-/* Adaptive seating: whatever padding the source image carries, seat the mascot so ~75% of its
+/* Adaptive seating: whatever padding the source image carries, seat the mascot so ~85% of its
    OPAQUE artwork rises above the toast band. Reads the alpha bounding box off a small canvas
    sample; any failure leaves the CSS defaults. */
 function _seatMascot(img) {
@@ -219,7 +219,7 @@ function _seatMascot(img) {
   const BAND = 158, TARGET = 150;                // ~150px of visible character
   const h = Math.max(140, Math.min(260, TARGET / opFrac));
   img.style.height = h + "px";
-  img.style.top = (BAND - h * topFrac - 0.75 * (h * opFrac)).toFixed(1) + "px";
+  img.style.top = (BAND - h * topFrac - 0.85 * (h * opFrac)).toFixed(1) + "px";
 }
 
 /* Legendary + feat fanfare: the ROOM blows up around the toast (screen-level star rain +

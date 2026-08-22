@@ -26,7 +26,7 @@
 .ach-m2.go{opacity:1;}
 .ach-m2.out{opacity:0;transition:opacity .5s;}
 .ach-m2 .tstage{width:min(680px,94vw);}
-.ach-m2 .tw{position:relative;padding-top:170px;cursor:pointer;}
+.ach-m2 .tw{position:relative;padding-top:158px;cursor:pointer;}
 .ach-m2 .t-common{--tc:#9fbad6;--tcl:#dbe8f5;--tcd:#5f7c9e;}
 .ach-m2 .t-rare{--tc:#7fb0f4;--tcl:#d2e4ff;--tcd:#4a72b8;}
 .ach-m2 .t-epic{--tc:#c69cff;--tcl:#ead9ff;--tcd:#8a5cc4;}
