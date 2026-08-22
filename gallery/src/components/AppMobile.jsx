@@ -538,7 +538,7 @@ export default function AppMobile({ boot }) {
         {account && account.claim_credits ? (
           <button type="button" className="glm-hero-claim" onClick={claimModal.claim}
             disabled={claimModal.claiming}>
-            ◈ {claimModal.claiming ? "claiming…" : "+" + Number(account.claim_credits).toLocaleString() + " claim"}
+            <i className="glm-claimribbon" aria-hidden="true" /> {claimModal.claiming ? "claiming…" : "+" + Number(account.claim_credits).toLocaleString() + " claim"}
           </button>
         ) : null}
       </header>

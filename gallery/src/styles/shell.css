@@ -362,7 +362,8 @@ button.mgx-claim { display: inline-flex; align-items: center; gap: 6px; font-siz
   animation: mgxClaimPulse 2.6s ease-in-out infinite; white-space: nowrap; }
 button.mgx-claim:hover:not(:disabled) { background: rgba(79,201,154,.26); }
 button.mgx-claim:disabled { opacity: .7; cursor: default; animation: none; }
-button.mgx-claim .coin { font-size: 13px; }
+button.mgx-claim .mgx-claimribbon { display: inline-block; width: 14px; height: 14px;
+  background: url(/branding/rewards/claim.png) center/contain no-repeat; }
 
 /* <mg-cost-badge compact> host — hidden until a dock/composer pushes its first
    price (its idle hint would otherwise sit in the bar as permanent noise) */
