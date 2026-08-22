@@ -8055,10 +8055,19 @@ def create_app(out_dir: Path):
         # fail-open leak _seal_rule casefolds against. Normalise once here so the
         # gate, _earned_achievement_ids, and the cache key all agree.
         aid = aid.lower()
+        # Fail CLOSED, matching _seal_rule's badge branch. Only serve a thumb for
+        # an id that IS in the roster; an unknown id -- OR ANY id when the roster
+        # is unavailable (no/invalid container -> _ach_ids() empty) -- is denied.
+        # Without this, _ach_hidden() also goes empty in that state, the hidden
+        # gate below silently passes, and an unearned hidden feat's master serves
+        # by id (the fail-open _seal_rule was written to avoid; the parallel gate
+        # here missed it -- adversarial, 2026-08-22). Visible feats' thumbs still
+        # serve unearned (the Folio's locked tiles show art by design).
+        if aid not in _ach_ids():
+            abort(404)
         # Hidden feats are masked in /api/achievements, but their ids sit in
         # this public source -- so an unearned hidden feat's badge must not be
-        # fishable by id here either (thumbs for VISIBLE unearned achievements
-        # keep serving; the Folio's locked tiles show their art by design).
+        # fishable by id here either.
         if aid in _ach_hidden() and aid not in _earned_achievement_ids(
                 out_dir, db_path, need=aid):
             abort(404)

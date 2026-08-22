@@ -182,6 +182,22 @@ def test_badge_thumb_hidden_gate(tmp_path, sealed_donor_present):
 
 
 
+def test_badge_thumb_fails_closed_when_roster_unavailable(tmp_path, monkeypatch):
+    """/badge-thumb must deny when the roster can't be read (no/invalid container ->
+    _ach_ids() empty). Otherwise _ach_hidden() is also empty, the hidden gate passes,
+    and a loose hidden-feat master would serve by id -- the fail-open _seal_rule's
+    badge branch already avoids (adversarial, 2026-08-22). Also denies an unknown id."""
+    from PIL import Image
+    cli = _client(tmp_path)
+    bdir = g._role_dir("badges"); bdir.mkdir(parents=True, exist_ok=True)
+    Image.new("RGBA", (64, 64), (7, 22, 30, 255)).save(bdir / "under-the-hood.png")
+    Image.new("RGBA", (64, 64), (7, 22, 30, 255)).save(bdir / "totally-made-up.png")
+    monkeypatch.setattr(g, "_ach_ids", lambda: frozenset())      # roster unavailable
+    monkeypatch.setattr(g, "_ach_hidden", lambda: frozenset())   # ...so hidden set is empty too
+    assert cli.get("/badge-thumb/under-the-hood.png").status_code == 404   # fail closed
+    assert cli.get("/badge-thumb/totally-made-up.png").status_code == 404  # unknown id denied
+
+
 def test_badge_thumb_hidden_gate_is_case_insensitive(tmp_path, sealed_donor_present):
     """A case-variant URL must not skip the hidden-feat gate: the resolve is on a
     case-insensitive FS, so UNDER-THE-HOOD.png would read the real sealed master

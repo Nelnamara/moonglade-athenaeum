@@ -20,6 +20,7 @@ _SCAN_GLOBS = [
     "*.md", "docs/**/*.md", "wiki/**/*.md",
     "moonglade_*.py", "tools/*.py",
     "gallery/src/**/*.jsx", "gallery/src/**/*.js", "gallery/dist/*.js",
+    "gallery/dist/*.css", "gallery/dist/*.html", "gallery/dist/*.json",
     "loom/src/**/*.js", "loom/dist/*.js",
 ]
 
@@ -67,23 +68,37 @@ def test_no_sealed_roast_leaks_into_public_files():
 
 # Hidden-feat NAMES are deliberately not needles above (common words, false positives in
 # prose). The BUILT bundles are different: comments are stripped, so a hidden feat's name
-# there is a user-facing string by construction. This pins the one such leak the sealing
-# review found (HIGH #2): ControlMobile's locked Branding tile read "Unlocks with Under the
-# Hood" to every signed-in user. Owner call 2026-08-21: the tile is invisible until earned,
-# like the desktop tab -- the feat is discovered, never announced.
+# there is a user-facing string by construction. This pins the class of leak the sealing
+# review found (HIGH #2): a locked-tile label named a hidden feat to every signed-in user.
+# Owner call 2026-08-21: such surfaces are invisible until earned -- the feat is discovered,
+# never announced. The needles are DERIVED from the private donor (the hidden feats' display
+# names + the "Unlocks with <name>" phrasing), NOT hardcoded here -- a public guard that
+# spelled the secret out would itself be the leak (adversarial P2, 2026-08-22). Donor-gated,
+# same as the roast scan above.
 _BUNDLES = ["gallery/dist/app.js", "gallery/dist/app.css", "loom/dist/master-storyboard.bundle.js"]
-_HIDDEN_FEAT_UI_NEEDLES = ["Unlocks with Under the Hood", "Under the Hood"]
 
 
-def test_built_bundles_do_not_name_the_branding_feat():
+@pytest.mark.skipif(not _SEALED_DONOR.is_file(),
+                    reason="sealed-definitions donor (private repo) not present")
+def test_built_bundles_do_not_name_a_hidden_feat():
+    defs = json.loads(_SEALED_DONOR.read_text(encoding="utf-8"))
+    names = [(a.get("name") or "").strip() for a in defs.get("roster", []) if a.get("hidden")]
+    names = [n for n in names if len(n) >= 4]           # skip trivially-short names
+    # Guard the SPOILER PHRASING ("Unlocks with <name>"), not the bare name: several
+    # hidden feats' display names double as legitimately-visible UI labels (e.g. a mark
+    # animation, an achievement CATEGORY, the app's own tagline), so a bare-name scan
+    # false-positives. The leak class HIGH #2 found was a locked-tile label tying a feat
+    # name to its unlock state on a user-visible surface -- that phrasing must never ship.
+    needles = ["Unlocks with " + n for n in names]
+    assert needles, "no hidden-feat names in the donor -- guard would be a no-op; check the donor"
     leaks = []
     for rel in _BUNDLES:
         path = _REPO / rel
         if not path.is_file():
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        for needle in _HIDDEN_FEAT_UI_NEEDLES:
+        for needle in needles:
             if needle in text:
-                leaks.append("%s: %r" % (rel, needle))
+                leaks.append("%s: names a hidden feat" % rel)   # never echo the secret itself
     assert not leaks, ("a hidden feat is named in a built bundle -- rebuild from src after "
-                       "removing the string: " + "; ".join(leaks))
+                       "removing the string: " + "; ".join(sorted(set(leaks))))

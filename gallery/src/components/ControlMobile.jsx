@@ -194,12 +194,12 @@ export default function ControlMobile({ account }) {
 
       {/* Branding is INVISIBLE until earned -- exactly like the desktop Control
           Panel, which hides the whole tab (ControlPanelOverlay: brandingUnlocked &&).
-          The 2026-08-09 branding-integration handoff had drawn a locked tile here
-          ("Unlocks with Under the Hood"); that named a HIDDEN feat on a surface every
-          signed-in user sees, the one real spoiler the sealing review found in the
-          front-end (HIGH #2). Owner call 2026-08-21: no tile, no hint -- the feat is
-          discovered, never announced. Sits directly under "At a glance" so, once
-          earned, its presence reads first, matching the desktop tab pair. */}
+          The 2026-08-09 branding-integration handoff had drawn a locked tile here whose
+          label NAMED the hidden feat that unlocks it, to every signed-in user -- the one
+          real spoiler the sealing review found in the front-end (HIGH #2; the feat's name
+          stays out of this source by design). Owner call 2026-08-21: no tile, no hint --
+          the feat is discovered, never announced. Sits directly under "At a glance" so,
+          once earned, its presence reads first, matching the desktop tab pair. */}
       {brandingUnlocked && (
         <div className="ctm-sec">
           <div className="mgcp-tile click" onClick={openBrand}>

@@ -128,19 +128,32 @@ def test_build_writes_a_verified_container_and_manifest(monkeypatch):
     assert man["urls"] == []
 
 
-def test_version_bumps_and_urls_carry_forward(monkeypatch):
-    # A prior manifest with a real integer version and a mirror URL already set.
+def test_changed_bytes_without_url_fails_closed(monkeypatch):
+    """Release-integrity guard (adversarial, 2026-08-22): if the container bytes change
+    (new sha256) but no --url is given, the prior manifest's URL still points at the OLD
+    file -- a fresh install would download bytes that fail the new checksum and end up
+    undressed. The builder must refuse rather than write that impossible manifest."""
     ma.write_manifest("3", "deadbeef" * 8, 123, ["https://old.example/moonglade.dat"])
     _seed_branding({"banner.png": PNG_1PX})
-    _run(monkeypatch)                                 # no --version, no --url
-
+    with pytest.raises(SystemExit):
+        _run(monkeypatch)                             # new bytes, no --url -> refuse
+    # the prior manifest is left untouched (NOT bumped to a broken state)
     man = ma.read_manifest()
-    assert man["version"] == "4"                                   # 3 -> 4
-    assert man["urls"] == ["https://old.example/moonglade.dat"]    # carried forward
-    # ...and sha/size now describe the NEW file, not the prior stub.
-    out = _out_path()
-    assert man["sha256"] == hashlib.sha256(out.read_bytes()).hexdigest()
-    assert man["sha256"] != "deadbeef" * 8
+    assert man["version"] == "3" and man["sha256"] == "deadbeef" * 8
+
+
+def test_version_bumps_and_urls_carry_forward_on_identical_bytes(monkeypatch):
+    """Carry the prior URL forward ONLY when the rebuild is byte-identical (same sha) --
+    then the existing URL genuinely still serves those bytes. First build sets the URL;
+    an identical rebuild with no --url keeps it and bumps the version."""
+    _seed_branding({"banner.png": PNG_1PX})
+    _run(monkeypatch, "--url", "https://old.example/moonglade.dat")   # establishes url + real sha
+    v1 = ma.read_manifest()
+    _run(monkeypatch)                                 # rebuild identical bytes, no --url
+    man = ma.read_manifest()
+    assert man["urls"] == ["https://old.example/moonglade.dat"]    # carried forward (same bytes)
+    assert man["sha256"] == v1["sha256"]                          # identical
+    assert int(man["version"]) == int(v1["version"]) + 1          # still bumps
 
 
 def test_explicit_version_and_urls_override(monkeypatch):

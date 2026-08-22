@@ -151,7 +151,27 @@ def main():
         version = str(int(prior["version"]) + 1)
     else:
         version = "1"
-    urls = args.url if args.url else (prior.get("urls") if prior else [])
+    # URL selection -- fail CLOSED on the one combination that ships a broken release:
+    # bytes CHANGED (new sha256) but no --url given, so the prior manifest's URL(s) still
+    # point at the OLD file. A fresh install would then download bytes that fail the new
+    # checksum and end up permanently undressed with no fallback. Carry the prior URL
+    # forward ONLY when the bytes are byte-identical (same sha) -- then the existing URL
+    # genuinely still serves them. (Adversarial release-integrity finding, 2026-08-22.)
+    if args.url:
+        urls = list(args.url)
+    elif prior and prior.get("urls"):
+        if whole_sha256 == prior.get("sha256"):
+            urls = prior["urls"]
+        else:
+            sys.exit(
+                "Container bytes changed (sha256 %s, was %s) but no --url was given.\n"
+                "The manifest's existing URL(s) point at the OLD file, so a fresh install "
+                "would download bytes that fail the new checksum and end up undressed.\n"
+                "Pass --url <new release asset URL> for this build, or rebuild identical "
+                "bytes. The manifest was NOT written." % (
+                    whole_sha256[:12], str(prior.get("sha256"))[:12]))
+    else:
+        urls = []
     ma.write_manifest(version, whole_sha256, size, urls)
 
     print("Wrote %s (%d assets, %d payload(s), %.1f MB) -- verified byte-for-byte."

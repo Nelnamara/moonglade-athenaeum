@@ -148,3 +148,9 @@ static/_mockup_*.html
 # it is a snapshot of defects, and a stale copy in the repo would be exactly the kind of
 # contradictory state doc this review was scoped to avoid.
 /bugreview.md
+
+# Local-only working dirs that can hold pre-seal plaintext (an old roster) or bulk
+# art output -- never committed. Belt-and-suspenders against a stray `git add`
+# sweeping a spoiler or a large binary into this PUBLIC repo (adversarial, 2026-08-22).
+/_backups/
+/_2000/
