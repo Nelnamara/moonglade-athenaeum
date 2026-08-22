@@ -52,6 +52,47 @@ describe("resolveEngine: name passes, numeric maps, unknown passes through", () 
   });
 });
 
+describe("videoRemixFromRow: unrecoverable refs CLEAR the bank (no wrong-shot spend)", () => {
+  // The money bug: Remix A (refs in library) fills the drawer; then Remix B, whose refs were
+  // uploads (in_lib:false), must NOT inherit A's tiles into B's PAID payload. Every branch has
+  // to emit its ref keys even when empty, so applyPrefill clears the matching bank.
+  test("r2v with all-upload refs emits empty keys AND clears a drawer holding A's refs", () => {
+    const { prefill, notes } = videoRemixFromRow(row({}), tp({
+      kind: "r2v",
+      image_refs: [{ media_id: "u1", in_lib: false }, { media_id: "u2", in_lib: false }],
+      video_refs: [{ media_id: "uv", in_lib: false }],
+      audio_refs: [{ media_id: "ua", in_lib: false }],
+    }));
+    assert.deepEqual(prefill.images, []);        // present + empty, not omitted
+    assert.deepEqual(prefill.video_refs, []);
+    assert.equal(prefill.audio_ref, null);
+    assert.ok(notes.some((n) => /pick them again|pick it again/.test(n)));
+    // end to end: a drawer still holding shot A's r2v picks must come out EMPTY after B's prefill
+    const s = { mode: "r2v", slots: [null], imgSlots: [REF("A1"), REF("A2")], vidSlots: [REF("AV")],
+                audSlot: { media_id: "AA", filename: "a" }, model: "v4.0.1", duration: 5,
+                camera: "unset", quality: "professional", channel: "normal", audioGen: false,
+                audioLanguage: "english", videoHelper: false, negative: "", modeNote: "" };
+    applyPrefill(s, prefill);
+    const payload = buildPayload(s, prefill.prompt || "");
+    assert.deepEqual(payload.images, []);        // A's images gone
+    assert.deepEqual(payload.video_refs, []);    // A's video ref gone
+    assert.deepEqual(payload.audio_refs, []);    // A's audio ref gone
+  });
+  test("i2v with an upload start frame clears the start slot (empty list, never [null])", () => {
+    const { prefill } = videoRemixFromRow(row({}), tp({
+      kind: "i2v", start: { media_id: "u1", in_lib: false },
+    }));
+    assert.deepEqual(prefill.images, []);
+    const s = { mode: "i2v", slots: [REF("A1")], imgSlots: [null], vidSlots: [], audSlot: null,
+                model: "v4.0.1", duration: 5, camera: "unset", quality: "professional",
+                channel: "normal", audioGen: false, audioLanguage: "english", videoHelper: false,
+                negative: "", modeNote: "" };
+    applyPrefill(s, prefill);
+    assert.deepEqual(buildPayload(s, "").images, []);   // A's start frame gone
+  });
+});
+
+
 describe("videoRemixFromRow: the full-task shapes (§2.2 matrix)", () => {
   test("i2v: every recipe field maps, the in-lib start frame restores, no notes", () => {
     const { prefill, notes } = videoRemixFromRow(row({ prompt_full: "catalog fallback" }), tp({
