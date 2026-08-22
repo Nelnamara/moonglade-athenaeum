@@ -106,7 +106,7 @@ def test_reward_ui_icons_open_rest_of_rewards_sealed(tmp_path):
     assert cli.get("/branding/rewards/trophy.png").status_code == 404
 
 
-def test_sealed_paths_serve_once_earned(tmp_path):
+def test_sealed_paths_serve_once_earned(tmp_path, sealed_donor_present):
     cli = _client(tmp_path)   # 1 image -> first-light IS earned
     _seed(tmp_path, g._role_rel("badges", "first-light.png"))
     _seed(tmp_path, g._role_rel("mascots_ach", "first-light.png"))
@@ -129,7 +129,7 @@ def test_sealed_paths_serve_once_earned(tmp_path):
     assert cli.get("/branding/" + crumb).status_code == 200
 
 
-def test_earned_banner_gated_and_void_banner_never_serves(tmp_path):
+def test_earned_banner_gated_and_void_banner_never_serves(tmp_path, sealed_donor_present):
     """great_library.png (the earned-banner reward art) denies until
     the-great-library is earned, then serves at the UNCHANGED public role URL;
     void_banner.png is an UNWIRED future reward (achievements #57-60) and
@@ -165,7 +165,7 @@ def test_system_chrome_stays_open(tmp_path):
         assert cli.get("/branding/" + public).status_code == 200, public
 
 
-def test_badge_thumb_hidden_gate(tmp_path):
+def test_badge_thumb_hidden_gate(tmp_path, sealed_donor_present):
     """Hidden feats' ids sit in this public source, so /badge-thumb/ must not
     serve an UNEARNED hidden feat's art by id -- while visible-but-unearned
     achievements keep their thumbs (the Folio's locked tiles show art)."""
@@ -182,7 +182,7 @@ def test_badge_thumb_hidden_gate(tmp_path):
 
 
 
-def test_badge_thumb_hidden_gate_is_case_insensitive(tmp_path):
+def test_badge_thumb_hidden_gate_is_case_insensitive(tmp_path, sealed_donor_present):
     """A case-variant URL must not skip the hidden-feat gate: the resolve is on a
     case-insensitive FS, so UNDER-THE-HOOD.png would read the real sealed master
     while the lowercase id-set membership missed it (fail-open). Regression for
@@ -283,6 +283,25 @@ def test_sweep_never_adopts_a_tombstoned_marks_file(tmp_path):
     data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
     assert [m["id"] for m in data["marks"]] == ["mark_12"]   # nothing adopted
     assert g.telemetry_metrics(tmp_path).get("branding_custom_file", 0) == 0
+
+
+def test_mark_74_tombstoned_not_adopted_on_upgrade(tmp_path):
+    """bundle-v2 renamed mark_74 (Winged Crescent) to mark_nightfallen. Every
+    full-tree install the owner ran before that still has a loose mark_74.png;
+    on upgrade the sweep must NOT adopt it as a fresh drop -- doing so would
+    delete the original, register a custom mark, and FALSELY fire the branding
+    feat. Same guard as the mark_12 near-miss (2026-08-13)."""
+    from PIL import Image
+    cli = _client(tmp_path)
+    mdir = g._role_dir("marks"); mdir.mkdir(parents=True, exist_ok=True)
+    Image.new("RGBA", (8, 8), (1, 2, 3, 255)).save(mdir / "mark_74.png")
+    assert g.sweep_branding_drops(tmp_path) is False       # not adopted
+    assert (mdir / "mark_74.png").exists()                 # not eaten
+    assert g.telemetry_metrics(tmp_path).get("branding_custom_file", 0) == 0  # feat NOT fired
+    # and it never shows in the picker even if a loose manifest carries it
+    _cut_marks(tmp_path, ["mark_4", "mark_74"])
+    d = cli.get("/api/branding").get_json()
+    assert "mark_74" not in {m["id"] for m in d["marks"]}
 
 
 def test_adopt_never_reuses_a_tombstoned_id(tmp_path):

@@ -1375,14 +1375,19 @@ def _seed_loose_manifest(rel):
         pass
 
 
-# Marks the owner has REMOVED from the roster (mark_12 "Gem Tome", ruled
-# 2026-07-23). A tombstone rather than a container rebuild alone because the
-# rebuild can't reach everywhere: _seed_loose_manifest promotes the container's
-# marks.json to a loose file on first customization, and loose wins forever
-# after -- so an install that already seeded keeps a removed mark in its picker
-# no matter what a new container ships. The filter here is what makes the
-# removal stick on every install.
-_MARK_TOMBSTONES = frozenset({"mark_12"})
+# Marks the owner has REMOVED from the roster: mark_12 "Gem Tome" (ruled
+# 2026-07-23), and mark_74 (the Winged Crescent, remade as mark_nightfallen for
+# bundle-v2 -- the old id's loose file lingers on every full-tree install the
+# owner ran before the rename). A tombstone rather than a container rebuild alone
+# because the rebuild can't reach everywhere: _seed_loose_manifest promotes the
+# container's marks.json to a loose file on first customization, and loose wins
+# forever after -- so an install that already seeded keeps a removed mark in its
+# picker no matter what a new container ships. Just as important, a tombstoned
+# stem reads as KNOWN to sweep_branding_drops, so a still-on-disk loose file is
+# NOT re-adopted as a fresh hand-drop (which would delete the original, register
+# a custom mark, AND fire the branding feat -- the mark_12 near-miss of
+# 2026-08-13, which mark_74 would have repeated on the owner's own upgrade).
+_MARK_TOMBSTONES = frozenset({"mark_12", "mark_74"})
 
 
 def list_marks(out_dir):

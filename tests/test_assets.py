@@ -106,14 +106,30 @@ def test_needs_download_missing_file_is_true(tmp_path):
     assert ma.needs_download(tmp_path / "missing.dat", manifest) is True
 
 
-def test_needs_download_present_no_marker_is_false(tmp_path):
-    """A container that exists but has never been through the downloader
-    (hand-copied, pre-downloader install) counts as satisfied -- it dresses
-    the app; only a confirmed version mismatch re-triggers a fetch."""
+def test_needs_download_present_no_marker_but_readable_is_false(tmp_path):
+    """A REAL container that exists but never went through the downloader
+    (hand-copied, pre-downloader install) counts as satisfied -- it opens and
+    dresses the app; only a version mismatch re-triggers a fetch."""
+    import moonglade_container as mc
     c = tmp_path / "c.dat"
-    c.write_bytes(REAL_BYTES)
-    manifest = _manifest_for(REAL_BYTES)
+    mc.write_container(str(c), {"_seed.txt": b"x"}, {})
+    manifest = _manifest_for(c.read_bytes())
+    assert ma._read_marker(c) is None
+    assert ma._container_readable(c) is True
     assert ma.needs_download(c, manifest) is False
+
+
+def test_needs_download_present_no_marker_but_unreadable_is_true(tmp_path):
+    """A present-but-UNREADABLE `.dat` with no marker -- a stale hand-copied
+    pack from an older container format (a v1 pack under the v2 reader) or a
+    truncated file -- must re-trigger the fetch, not leave the app silently
+    undressed forever with no signal (adversarial finding, 2026-08-22)."""
+    c = tmp_path / "c.dat"
+    c.write_bytes(b"MGC0 old-format, not this build's container" + bytes(300))
+    manifest = _manifest_for(c.read_bytes())   # marker-less: sha is not consulted
+    assert ma._read_marker(c) is None
+    assert ma._container_readable(c) is False
+    assert ma.needs_download(c, manifest) is True
 
 
 def test_needs_download_marker_matches_is_false(tmp_path):

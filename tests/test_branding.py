@@ -402,7 +402,7 @@ def test_discovery_tree_never_overwrites_real_content(tmp_path):
     assert (mdir / "mark_4.png").exists()
 
 
-def test_dropped_file_in_a_new_slot_is_adopted_and_earns_the_achievement(tmp_path):
+def test_dropped_file_in_a_new_slot_is_adopted_and_earns_the_achievement(tmp_path, sealed_donor_present):
     cli = _client(tmp_path)
     # The drop lands in the CODED slot folder -- that's the tree a tinkerer
     # actually finds on disk now, and the tree the sweep scans.
