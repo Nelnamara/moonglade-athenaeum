@@ -2433,7 +2433,7 @@ def _badge_thumb(out_dir, aid, size=256):
     if not _branding_exists(rel):
         return None
     src = _role_dir("badges") / (aid + ".png")
-    dst = badge_cache_dir(out_dir) / (aid + ".png")
+    dst = badge_cache_dir(out_dir) / ((aid + ".png") if size == 256 else (aid + "." + str(size) + ".png"))
     src_mtime = _branding_mtime(rel)   # loose master's own mtime, or the container file's
     try:
         if dst.is_file() and src_mtime is not None and dst.stat().st_mtime >= src_mtime:
@@ -8076,7 +8076,11 @@ def create_app(out_dir: Path):
         if aid in _ach_hidden() and aid not in _earned_achievement_ids(
                 out_dir, db_path, need=aid):
             abort(404)
-        p = _badge_thumb(out_dir, aid)
+        # The celebration toast asks for 384px so the enlarged medallion stays crisp
+        # on HiDPI; the Folio grid keeps the 256 default. Allowlisted to those two so
+        # the cache can't be spammed into unbounded sizes.
+        size = 384 if request.args.get("size") == "384" else 256
+        p = _badge_thumb(out_dir, aid, size)
         if isinstance(p, (bytes, bytearray)):
             # cache unwritable -> _badge_thumb handed us the image in memory
             resp = app.response_class(bytes(p), mimetype="image/png")

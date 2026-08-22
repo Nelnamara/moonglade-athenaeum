@@ -3611,7 +3611,7 @@ ${"=".repeat(48)}
         e.textContent = a.icon || "\u{1F3C6}";
         if (this.parentNode) this.parentNode.replaceChild(e, this);
       };
-      b.src = "/badge-thumb/" + encodeURIComponent(a.id) + ".png";
+      b.src = "/badge-thumb/" + encodeURIComponent(a.id) + ".png?size=384";
       cap.appendChild(b);
       const ring = document.createElement("div");
       ring.className = "ring";
