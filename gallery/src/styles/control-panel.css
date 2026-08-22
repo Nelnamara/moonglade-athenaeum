@@ -134,7 +134,6 @@ button.mgcp-run { margin-left: auto; color: var(--accent); font-size: 11px; curs
 .mgcp-tile.click { cursor: pointer; transition: border-color .2s; }
 .mgcp-tile.click:hover { border-color: var(--accent); }
 /* Mobile Branding entry, pre-unlock (handoff-2026-08-09-branding-integration.md). */
-.mgcp-tile-locked { border-style: dashed; opacity: .6; }
 .mgcp-tile2 { grid-column: span 2; } .mgcp-tile3 { grid-column: span 3; }
 .mgcp-tile4 { grid-column: span 4; } .mgcp-tile5 { grid-column: span 5; } .mgcp-tile7 { grid-column: span 7; }
 @media (max-width: 900px) { .mgcp-tile2, .mgcp-tile3, .mgcp-tile4, .mgcp-tile5, .mgcp-tile7 { grid-column: span 12; } }
@@ -211,7 +210,10 @@ button.mgcp-markbig img { width: 100%; height: 100%; object-fit: cover; }
   border-radius: 4px 0 0 0; background: var(--gold); color: #241a05; font-size: 10px; font-weight: 800;
   line-height: 15px; text-align: center; }
 /* Locked (pre-unlock) + upload tiles share the marks-tile geometry above. */
-.mgcp-markbig.locked { border-style: dashed; opacity: .55; cursor: default; font-size: 16px; }
+/* Locked tiles (the Earned banner pick, the custom-mark slot) wear the mystery mask at full
+   strength -- the dashed border + disabled state say "locked"; dimming the mask killed its
+   character (owner, 2026-08-22). */
+.mgcp-markbig.locked { border-style: dashed; opacity: 1; cursor: default; font-size: 16px; }
 label.mgcp-markbig.upload { border-style: dashed; color: var(--subtext); font-size: 18px; }
 label.mgcp-markbig.upload:hover { border-color: var(--accent); color: var(--text); }
 .mgcp-markreplace { display: flex; gap: 8px; margin-top: 8px; }

@@ -91,6 +91,8 @@ import threading
 
 import pytest
 
+from tests.conftest import _SEALED_DONOR
+
 import moonglade_backup as core
 from moonglade_gallery import (
     CATALOG_FIELDS, create_app, load_catalog, save_catalog,
@@ -947,17 +949,23 @@ def test_control_panel_runs_real_jobs_and_manages_a_real_account(logged_in_page,
 
     # --- Branding tab: a REAL POST /api/branding, picking a real animation from the
     # real MARK_ANIMS list this harness's own out_dir/branding.json now persists.
-    # (The tab is achievement-gated -- see render_server's telem_flag seeding.) ---
-    _dismiss_any_achievement_toast(page)
-    page.click('button:has-text("✦ Branding")')
-    page.wait_for_selector(".mgcp-brandgrid")
-    # The 2026-08-06 rebuild: anims are Title-cased chips in the default
-    # "Icons, marks & animation" section (Control Panel.dc.html:922-927's chip form
-    # over the real MARK_ANIMS values -- "glow" renders as "Glow").
-    page.click('.mgcp-animchip:has-text("Glow")')
-    page.wait_for_function(
-        "() => { const el = document.querySelector('.mgcp-animchip.on'); "
-        "return el && el.textContent === 'Glow'; }")
+    # The tab is achievement-gated (brandingUnlocked = "under-the-hood" earned; the
+    # harness seeds branding_custom_file to earn it). Since bundle-v2 the roster is
+    # SEALED in moonglade.dat, so that gate can only resolve when the private donor is
+    # present -- donor-absent (public CI) the tab never renders. Gate just this block
+    # so the rest of this test (jobs, account, trash, power modal) still renders in CI;
+    # the branding path stays covered on any donor-present run. ---
+    if _SEALED_DONOR.is_file():
+        _dismiss_any_achievement_toast(page)
+        page.click('button:has-text("✦ Branding")')
+        page.wait_for_selector(".mgcp-brandgrid")
+        # The 2026-08-06 rebuild: anims are Title-cased chips in the default
+        # "Icons, marks & animation" section (Control Panel.dc.html:922-927's chip form
+        # over the real MARK_ANIMS values -- "glow" renders as "Glow").
+        page.click('.mgcp-animchip:has-text("Glow")')
+        page.wait_for_function(
+            "() => { const el = document.querySelector('.mgcp-animchip.on'); "
+            "return el && el.textContent === 'Glow'; }")
 
     # --- Power modal: the client-side ping-poll reconnect logic (ported from classic's
     # real _watchServer()), proven against STUBBED /api/server/restart + /api/ping --

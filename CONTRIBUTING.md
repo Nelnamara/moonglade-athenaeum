@@ -41,8 +41,9 @@ The Loom's pure-logic modules have their own suite:
 cd loom && node --test
 ```
 
-**All tests must pass before a PR merges.** CI runs both suites on every push and pull
-request — you can run them locally first with the commands above.
+**All tests must pass before a PR merges.** CI runs both suites on every pull request and
+on pushes to `master` — you can (and should) run them locally first with the commands above,
+since a feature-branch push alone does not trigger CI.
 
 ## Code style
 

@@ -1390,6 +1390,11 @@ def test_export_csv_honours_the_gallery_filters(tmp_path):
 
 
 def test_branding_absent_is_404(tmp_path):
+    """Bundle-v2 note: an absent loose banner.png now falls back to the slot's
+    SHIPPED sealed default (translation rule 8 -> _flat_default_rel('banner_main')
+    inside the container) before 404ing. The conftest roster container carries no
+    banner defaults and this test renders no loose flat, so absent-everywhere is
+    still 404 -- exactly the fresh-install-without-container case."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.get("/branding/banner.png").status_code == 404      # onerror removes the img

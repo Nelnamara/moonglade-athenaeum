@@ -68,7 +68,7 @@ pixai_backup/
 ├─ 2024-03/           organize: month folders, descriptive names
 ├─ videos/  imported/ backed-up + imported media
 ├─ gallery/thumbs/    768px JPEG thumbnails (immutable cache)
-├─ branding/          marks, frames, badge thumbs (machine-local)
+├─ gallery/cache/     regenerable caches — e.g. Folio badge thumbnails (machine-local)
 ├─ loom/              the Loom's storyboard store + exports
 ├─ _duplicates/       quarantine from --dedup (reversible)
 ├─ _deleted/          quarantine from a gallery delete (reversible)

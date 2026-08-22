@@ -919,778 +919,101 @@ def catalog_counts(db_path):
 # has already been *toasted* for, plus the active skin) persists to
 # out_dir/achievements.json. See ACHIEVEMENTS/SKINS below for the catalog.
 # ---------------------------------------------------------------------------
-ACHIEVEMENTS = [
-    {
-     'id': 'first-light',
-     'name': 'First Light',
-     'icon': '🌑',
-     'desc': '[redacted]',
-     'metric': 'images',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'ladder',
-     'track': 'archive', 'rung': 1, 'rungs_total': 5,
-     'roast': "[redacted]",
-     'roast_nsfw': '[redacted]',
-    },
-    {
-     'id': 'archivist',
-     'name': 'Archivist',
-     'icon': '📚',
-     'desc': '[redacted]',
-     'metric': 'images',
-     'threshold': 1000,
-     'tier': 'rare',
-     'bucket': 'ladder',
-     'track': 'archive', 'rung': 2, 'rungs_total': 5,
-     'roast': '[redacted]'ve officially crossed from "hobby" into "someone should keep an eye on this one." The shelves groan. So do we.',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'hoardsmith',
-     'name': 'Hoardsmith',
-     'icon': '🐉',
-     'desc': "[redacted]",
-     'metric': 'images',
-     'threshold': 10000,
-     'tier': 'epic',
-     'bucket': 'ladder',
-     'track': 'archive', 'rung': 3, 'rungs_total': 5,
-     'skin': 'moonlit',
-     'roast': "[redacted]",
-     'roast_nsfw': '[redacted]'s a bit much." Here\'s a shiny new skin, you magnificent pack rat. Now go outside. (You won\'t.)',
-    },
-    {
-     'id': 'loremaster',
-     'name': 'Loremaster',
-     'icon': '👑',
-     'desc': '[redacted]',
-     'metric': 'images',
-     'threshold': 25000,
-     'tier': 'legendary',
-     'bucket': 'ladder',
-     'track': 'archive', 'rung': 4, 'rungs_total': 5,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'the-great-library',
-     'name': 'The Great Library',
-     'icon': '🏛',
-     'desc': '[redacted]',
-     'metric': 'images',
-     'threshold': 50000,
-     'tier': 'legendary',
-     'bucket': 'ladder',
-     'track': 'archive', 'rung': 5, 'rungs_total': 5,
-     'banner_reward': True,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'first-frame',
-     'name': 'First Frame',
-     'icon': '🎞',
-     'desc': '[redacted]',
-     'metric': 'videos',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'ladder',
-     'track': 'loom', 'rung': 1, 'rungs_total': 4,
-     'roast': '[redacted]',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'moonweaver',
-     'name': 'Moonweaver',
-     'icon': '🌙',
-     'desc': '[redacted]',
-     'metric': 'videos',
-     'threshold': 10,
-     'tier': 'rare',
-     'bucket': 'ladder',
-     'track': 'loom', 'rung': 2, 'rungs_total': 4,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'reel-director',
-     'name': 'Reel Director',
-     'icon': '🎬',
-     'desc': '[redacted]',
-     'metric': 'videos',
-     'threshold': 50,
-     'tier': 'epic',
-     'bucket': 'ladder',
-     'track': 'loom', 'rung': 3, 'rungs_total': 4,
-     'skin': 'ember',
-     'roast': '[redacted]',
-     'roast_nsfw': '[redacted]'s your skin. Yell "action" one more time and we\'re revoking your parking spot.',
-    },
-    {
-     'id': 'cinematheque',
-     'name': 'Cinematheque',
-     'icon': '🎥',
-     'desc': '[redacted]',
-     'metric': 'videos',
-     'threshold': 100,
-     'tier': 'legendary',
-     'bucket': 'ladder',
-     'track': 'loom', 'rung': 4, 'rungs_total': 4,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'first-spark',
-     'name': 'First Spark',
-     'icon': '✨',
-     'desc': '[redacted]',
-     'metric': 'local_gens',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'ladder',
-     'track': 'forge', 'rung': 1, 'rungs_total': 4,
-     'roast': "[redacted]",
-     'roast_nsfw': '[redacted]',
-    },
-    {
-     'id': 'apprentice-smith',
-     'name': 'Apprentice of the Forge',
-     'icon': '⚒',
-     'desc': '[redacted]',
-     'metric': 'local_gens',
-     'threshold': 100,
-     'tier': 'rare',
-     'bucket': 'ladder',
-     'track': 'forge', 'rung': 2, 'rungs_total': 4,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'forgemaster',
-     'name': 'Forgemaster',
-     'icon': '🔨',
-     'desc': '[redacted]',
-     'metric': 'local_gens',
-     'threshold': 500,
-     'tier': 'epic',
-     'bucket': 'ladder',
-     'track': 'forge', 'rung': 3, 'rungs_total': 4,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'starsmith',
-     'name': 'Starsmith',
-     'icon': '🌟',
-     'desc': '[redacted]',
-     'metric': 'local_gens',
-     'threshold': 1000,
-     'tier': 'legendary',
-     'bucket': 'ladder',
-     'track': 'forge', 'rung': 4, 'rungs_total': 4,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'curator',
-     'name': 'Curator',
-     'icon': '🗂',
-     'desc': '[redacted]',
-     'metric': 'collections',
-     'threshold': 10,
-     'tier': 'rare',
-     'bucket': 'ladder',
-     'track': 'vault', 'rung': 1, 'rungs_total': 2,
-     'roast': "[redacted]",
-     'roast_nsfw': '[redacted]',
-    },
-    {
-     'id': 'grand-curator',
-     'name': 'Grand Curator',
-     'icon': '🗄',
-     'desc': '[redacted]',
-     'metric': 'collections',
-     'threshold': 50,
-     'tier': 'epic',
-     'bucket': 'ladder',
-     'track': 'vault', 'rung': 2, 'rungs_total': 2,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'menagerie',
-     'name': 'Menagerie',
-     'icon': '🎭',
-     'desc': '[redacted]',
-     'metric': 'models',
-     'threshold': 25,
-     'tier': 'epic',
-     'bucket': 'ladder',
-     'track': 'menagerie', 'rung': 1, 'rungs_total': 2,
-     'skin': 'verdant',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'conclave',
-     'name': 'Conclave of Hands',
-     'icon': '🐲',
-     'desc': '[redacted]',
-     'metric': 'models',
-     'threshold': 75,
-     'tier': 'legendary',
-     'bucket': 'ladder',
-     'track': 'menagerie', 'rung': 2, 'rungs_total': 2,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'tag-scribe',
-     'name': 'Tag Scribe',
-     'icon': '✒',
-     'desc': '[redacted]',
-     'metric': 'tagged',
-     'threshold': 50,
-     'tier': 'common',
-     'bucket': 'ladder',
-     'track': 'index', 'rung': 1, 'rungs_total': 3,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'tagsmith',
-     'name': 'Tagsmith',
-     'icon': '🏷',
-     'desc': '[redacted] Nothing in the Athenaeum goes unnamed.',
-     'metric': 'tagged',
-     'threshold': 500,
-     'tier': 'epic',
-     'bucket': 'ladder',
-     'track': 'index', 'rung': 2, 'rungs_total': 3,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'catalogus-magnus',
-     'name': 'Catalogus Magnus',
-     'icon': '📜',
-     'desc': '[redacted]',
-     'metric': 'tagged',
-     'threshold': 2500,
-     'tier': 'legendary',
-     'bucket': 'ladder',
-     'track': 'index', 'rung': 3, 'rungs_total': 3,
-     'roast': "[redacted]",
-     'roast_nsfw': '[redacted]'ve tagged more than most museums and you did it for FUN. There\'s no word for what you are. "Catalogus Magnus" is us being polite.',
-    },
-    {
-     'id': 'gallery-opening',
-     'name': 'Gallery Opening',
-     'icon': '🖼',
-     'desc': '[redacted]',
-     'metric': 'published',
-     'threshold': 10,
-     'tier': 'rare',
-     'bucket': 'ladder',
-     'track': 'gallery', 'rung': 1, 'rungs_total': 2,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'vernissage',
-     'name': 'Vernissage',
-     'icon': '🥂',
-     'desc': '[redacted]',
-     'metric': 'published',
-     'threshold': 100,
-     'tier': 'epic',
-     'bucket': 'ladder',
-     'track': 'gallery', 'rung': 2, 'rungs_total': 2,
-     'roast': "[redacted]",
-     'roast_nsfw': '[redacted]'ve made "look at my art" a full-time bit. The crowd\'s fake, the wine\'s fake, and your confidence is somehow REAL. Terrifying. Cheers.',
-    },
-    {
-     'id': 'restorer',
-     'name': 'Restorer',
-     'icon': '🖌',
-     'desc': '[redacted]',
-     'metric': 'edits',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'ladder',
-     'track': 'restoration', 'rung': 1, 'rungs_total': 3,
-     'roast': "[redacted]",
-     'roast_nsfw': '[redacted]'s the spirit — nothing\'s ever done, nothing\'s ever good enough. Welcome to the disease, Restorer.',
-    },
-    {
-     'id': 'restitcher',
-     'name': 'Restitcher',
-     'icon': '🧵',
-     'desc': '[redacted]',
-     'metric': 'edits',
-     'threshold': 50,
-     'tier': 'rare',
-     'bucket': 'ladder',
-     'track': 'restoration', 'rung': 2, 'rungs_total': 3,
-     'roast': '[redacted]'t accept "finished" anymore. Everything\'s a draft. Everything can be fixed. This is a problem. It\'s also art.',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'masterworker',
-     'name': 'Masterworker',
-     'icon': '🎨',
-     'desc': '[redacted]',
-     'metric': 'edits',
-     'threshold': 200,
-     'tier': 'epic',
-     'bucket': 'ladder',
-     'track': 'restoration', 'rung': 3, 'rungs_total': 3,
-     'roast': '[redacted]',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'first-cull',
-     'name': 'First Cull',
-     'icon': '🧹',
-     'desc': '[redacted]',
-     'metric': 'culled',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'ladder',
-     'track': 'sweep', 'rung': 1, 'rungs_total': 2,
-     'roast': '[redacted]',
-     'roast_nsfw': '[redacted]',
-    },
-    {
-     'id': 'the-winnowing',
-     'name': 'The Winnowing',
-     'icon': '🌪',
-     'desc': '[redacted]',
-     'metric': 'culled',
-     'threshold': 100,
-     'tier': 'rare',
-     'bucket': 'ladder',
-     'track': 'sweep', 'rung': 2, 'rungs_total': 2,
-     'roast': "[redacted]",
-     'roast_nsfw': '[redacted]',
-    },
-    {
-     'id': 'night-keeper',
-     'name': 'Night Keeper',
-     'icon': '🕯',
-     'desc': '[redacted]',
-     'metric': 'days_used',
-     'threshold': 7,
-     'tier': 'common',
-     'bucket': 'ladder',
-     'track': 'vigil', 'rung': 1, 'rungs_total': 2,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'moonwatch',
-     'name': 'Moonwatch',
-     'icon': '🌖',
-     'desc': '[redacted]',
-     'metric': 'days_used',
-     'threshold': 30,
-     'tier': 'rare',
-     'bucket': 'ladder',
-     'track': 'vigil', 'rung': 2, 'rungs_total': 2,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'keeper-of-order',
-     'name': 'Keeper of Order',
-     'icon': '🗃',
-     'desc': '[redacted]',
-     'metric': 'organize_runs',
-     'threshold': 1,
-     'tier': 'rare',
-     'bucket': 'milestone',
-     'roast': '[redacted]',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'interior-decorator',
-     'name': 'Interior Decorator',
-     'icon': '🛋',
-     'desc': '[redacted]',
-     'metric': 'skin_changed_runs',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'milestone',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'first-enhance',
-     'name': "Refiner's Touch",
-     'icon': '💫',
-     'desc': '[redacted]',
-     'metric': 'enhances',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'milestone',
-     'roast': '[redacted]',
-     'roast_nsfw': '[redacted]'t good enough for you, was it. Never is. Keep chasing that dragon, you gloss-addicted gremlin.',
-    },
-    {
-     'id': 'first-lora',
-     'name': 'Woven In',
-     'icon': '🧬',
-     'desc': '[redacted]',
-     'metric': 'lora_used',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'milestone',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'first-upload',
-     'name': 'Brought From Afar',
-     'icon': '📤',
-     'desc': '[redacted]',
-     'metric': 'uploads',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'milestone',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'storyweaver',
-     'name': 'Storyweaver',
-     'icon': '🕸',
-     'desc': '[redacted]',
-     'metric': 'storyboards',
-     'threshold': 1,
-     'tier': 'rare',
-     'bucket': 'milestone',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'kindred-spirits',
-     'name': 'Kindred Spirits',
-     'icon': '👥',
-     'desc': '[redacted]',
-     'metric': 'similar_uses',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'milestone',
-     'roast': '[redacted]'ve taught the void to fetch. Good void. Good crawler.',
-     'roast_nsfw': '[redacted]'ve got the machine sniffing out your type now, you predictable little goblin. It knows what you like. It\'s a bit worried, honestly.',
-    },
-    {
-     'id': 'claimant',
-     'name': 'Claimant',
-     'icon': '🎁',
-     'desc': '[redacted]',
-     'metric': 'claims',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'milestone',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'master-of-the-loom',
-     'name': 'Master of the Loom',
-     'icon': '🧶',
-     'desc': '[redacted]',
-     'metric': 'video_modes_used',
-     'threshold': 3,
-     'tier': 'epic',
-     'bucket': 'mastery',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'full-toolbox',
-     'name': 'The Full Toolbox',
-     'icon': '🧰',
-     'desc': '[redacted]',
-     'metric': 'tools_used',
-     'threshold': 3,
-     'tier': 'rare',
-     'bucket': 'mastery',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'stacked-deck',
-     'name': 'Stacked Deck',
-     'icon': '🃏',
-     'desc': '[redacted]',
-     'metric': 'lora_stacked',
-     'threshold': 3,
-     'tier': 'epic',
-     'bucket': 'mastery',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'polyglot-of-sigils',
-     'name': 'Polyglot of Sigils',
-     'icon': '🔣',
-     'desc': '[redacted]',
-     'metric': 'lora_distinct',
-     'threshold': 15,
-     'tier': 'rare',
-     'bucket': 'mastery',
-     'roast': '[redacted]',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'skin-changer',
-     'name': 'Skin-Changer',
-     'icon': '🦎',
-     'desc': '[redacted]',
-     'metric': 'skins_unlocked',
-     'threshold': 5,
-     'tier': 'rare',
-     'bucket': 'mastery',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'enhance-adept',
-     'name': 'Enhance Adept',
-     'icon': '🔮',
-     'desc': '[redacted]',
-     'metric': 'enhance_workflows_distinct',
-     'threshold': 5,
-     'tier': 'epic',
-     'bucket': 'mastery',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'thrifty-archivist',
-     'name': 'Thrifty Archivist',
-     'icon': '💰',
-     'desc': '[redacted]',
-     'metric': 'free_cards_applied',
-     'threshold': 50,
-     'tier': 'rare',
-     'bucket': 'mastery',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'under-the-hood',
-     'name': 'Under the Hood',
-     'icon': '🔧',
-     'desc': '[redacted]',
-     'metric': 'branding_custom_file',
-     'threshold': 1,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'the-konami-code',
-     'name': 'The Konami Code',
-     'icon': '🌠',
-     'desc': '[redacted]',
-     'metric': 'konami_triggered',
-     'threshold': 1,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'against-the-void',
-     'name': 'Against the Void',
-     'icon': '🕳',
-     'desc': '[redacted]',
-     'metric': 'recover_events',
-     'threshold': 1,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': '[redacted]',
-     'roast_nsfw': '[redacted]'s just you, you grave-robbing legend.',
-    },
-    {
-     'id': 'night-owl',
-     'name': 'Night Owl',
-     'icon': '🦉',
-     'desc': '[redacted]',
-     'metric': 'session_hour',
-     'threshold': 1,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'marathon',
-     'name': 'The Long Night',
-     'icon': '🏃',
-     'desc': '[redacted]',
-     'metric': 'gens_in_a_day',
-     'threshold': 100,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': '[redacted]',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'eclipse',
-     'name': 'Eclipse',
-     'icon': '🌗',
-     'desc': '[redacted]',
-     'metric': 'eclipse_anim_triggered',
-     'threshold': 1,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': '[redacted]',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'time-capsule',
-     'name': 'Time Capsule',
-     'icon': '⏳',
-     'desc': '[redacted]',
-     'metric': 'old_piece_backed_up',
-     'threshold': 1,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': '[redacted]',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'completionist',
-     'name': 'Master of the Athenaeum',
-     'icon': '💯',
-     'desc': '[redacted]',
-     'metric': 'all_non_feat_earned',
-     'threshold': 1,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'triggered',
-     'name': 'Triggered',
-     'icon': '😈',
-     'desc': "[redacted]",
-     'metric': 'narrator_pokes',
-     'threshold': 5,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'for-the-viewers',
-     'name': 'For the Viewers',
-     'icon': '📣',
-     'desc': '[redacted]',
-     'metric': 'published',
-     'threshold': 1,
-     'tier': 'common',
-     'bucket': 'milestone',
-     'roast': '[redacted]',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'read-the-manual',
-     'name': 'Read the Manual',
-     'icon': '📖',
-     'desc': '[redacted]',
-     'metric': 'docs_opened',
-     'threshold': 1,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': '[redacted]'s pet.',
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'the-lexicon',
-     'name': 'The Lexicon',
-     'icon': '🔤',
-     'desc': '[redacted]',
-     'metric': 'distinct_keywords',
-     'threshold': 100,
-     'tier': 'rare',
-     'bucket': 'mastery',
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-    {
-     'id': 'since-the-first-floor',
-     'name': 'Since the First Floor',
-     'icon': '🏗',
-     'desc': '[redacted]',
-     'metric': 'days_used',
-     'threshold': 100,
-     'tier': 'feat',
-     'bucket': 'feat',
-     'hidden': True,
-     'roast': "[redacted]",
-     'roast_nsfw': "[redacted]",
-    },
-]
+# ACHIEVEMENTS roster: SEALED into moonglade.dat (see _sealed_defs below). Read via _roster().
 
-SKINS = [
-    {"id": "moonglade",   "name": "Moonglade",     "free": True,
-     "desc": "[redacted]"},
-    {"id": "nightfallen", "name": "Nightfallen",   "free": True,
-     "desc": "Void-touched violet and star-ash."},
-    {"id": "moonlit",     "name": "Moonlit Silver", "free": False,
-     "desc": "Cold silver and glacier blue."},
-    {"id": "ember",       "name": "Embercourt",    "free": False,
-     "desc": "[redacted]"},
-    {"id": "verdant",     "name": "Verdant Grove", "free": False,
-     "desc": "[redacted]"},
-]
-_SKIN_IDS = {s["id"] for s in SKINS}
-
-# Real unlock text per locked skin, matching Control Panel.dc.html:453-457 exactly --
-# each name/threshold names the real achievement that actually grants it (hoardsmith/
-# reel-director/menagerie, see their 'skin' field above). Free skins carry no entry.
-_SKIN_UNLOCK_TEXT = {
-    "moonlit": "Unlock: Hoardsmith (10,000 images)",
-    "ember":   "Unlock: Reel Director (50 videos)",
-    "verdant": "Unlock: Menagerie (25 distinct models)",
+# ---------------------------------------------------------------------------
+# The achievement roster + its ancillary tables (skins, skin-unlock text, the
+# closed-set criteria labels, ladder-track names) are DEFINITIONS. They used to sit
+# inline here, readable in a public `git clone`; they now live SEALED in
+# moonglade.dat's "achievements" payload (a dict), built from the private donor
+# ../moonglade-internal/achievements_sealed_donor.json by tools/build_container.py.
+# Loaded LAZILY + cached (out_dir -- so the container path -- is not known at import).
+# A container-less install degrades to the free-skins-only fallback (empty Folio,
+# like missing art), never a crash. See ACHIEVEMENT_SEALING_SPEC.md; this is what
+# lets the /api/achievements ??? masking finally protect something.
+# The free skins are the app's DEFAULT dress (not rewards), so their non-spoiler
+# names stay public as the no-container fallback.
+_FALLBACK_DEFS = {
+    "roster": [], "skin_unlock": {}, "ach_criteria": {}, "ladder_tracks": [],
+    "skins": [
+        {"id": "moonglade",   "name": "Moonglade",   "free": True,
+         "desc": "The default -- lavender leads, emerald magic."},
+        {"id": "nightfallen", "name": "Nightfallen", "free": True,
+         "desc": "Void-touched violet and star-ash."},
+    ],
 }
+_sealed_cache = {"path": None, "mtime": None, "defs": None}
+_sealed_lock = threading.Lock()
 
-# The 10 Evolution Ladder tracks each ladder achievement's 'track' field points at
-# (see ACHIEVEMENTS' 'track'/'rung'/'rungs_total' fields; the roster.tracks these came
-# from lived in the owner's off-repo achievements_roster_57.json, whose committed copy
-# was scrubbed 2026-07-27 -- the live roster is now the inline ACHIEVEMENTS list above).
-# Single source of truth for ladder display names -- the Folio of Honors' carousel/
-# ladder-grid groups by this, not a second hand-maintained id->name map in the frontend.
-LADDER_TRACKS = [
-    {"id": "archive",     "name": "The Archive",           "metric": "images"},
-    {"id": "loom",        "name": "The Loom",               "metric": "videos"},
-    {"id": "forge",       "name": "The Moonforge",          "metric": "local_gens"},
-    {"id": "vault",       "name": "The Stacks",             "metric": "collections"},
-    {"id": "menagerie",   "name": "The Menagerie",          "metric": "models"},
-    {"id": "index",       "name": "The Index",              "metric": "tagged"},
-    {"id": "gallery",     "name": "The Gallery",            "metric": "published"},
-    {"id": "restoration", "name": "The Restoration Wing",   "metric": "edits"},
-    {"id": "sweep",       "name": "The Great Sweep",        "metric": "culled"},
-    {"id": "vigil",       "name": "The Vigil",              "metric": "days_used"},
-]
+
+def _sealed_defs():
+    """The sealed achievement definitions {roster, skins, skin_unlock, ach_criteria,
+    ladder_tracks} from moonglade.dat's "achievements" payload, plus the derived id /
+    hidden / rung / skin-id sets. Cached per (container path, mtime) and computed UNDER
+    the lock, so a cold-cache race (N workers hitting /api/achievements at once) decodes
+    it once, not once per request. Fallback (free skins only) when there is no valid
+    container OR the sealed roster is malformed -- the Folio degrades, never 500s."""
+    p = _container_path()
+    try:
+        mtime = p.stat().st_mtime
+    except OSError:
+        mtime = None
+    # Open the container OUTSIDE _sealed_lock (it has its own _container_lock). The
+    # decode+derive below runs UNDER _sealed_lock -- it re-enters neither lock, so holding
+    # it here just serializes concurrent cold misses instead of decoding the payload N
+    # times (box.payload does XOR + zlib.decompress; a few ms, not free).
+    box = _get_container()
+    with _sealed_lock:
+        c = _sealed_cache
+        if c["path"] == p and c["mtime"] == mtime and c["defs"] is not None:
+            return c["defs"]
+        defs = None
+        raw = box.payload("achievements") if box is not None else None
+        if raw:
+            try:
+                d = json.loads(raw)
+                if isinstance(d, dict) and "roster" in d:
+                    defs = d
+            except ValueError:
+                defs = None
+        # A checksum-valid but MALFORMED roster (valid JSON, but "roster" not a list of
+        # well-shaped entries) must degrade like a missing one, not 500 the whole Folio:
+        # derive from it, and on any shape error fall back to the free-skins defaults.
+        try:
+            computed = _derive_sealed(defs if defs is not None else _FALLBACK_DEFS)
+        except (KeyError, TypeError, AttributeError):
+            computed = _derive_sealed(_FALLBACK_DEFS)
+        _sealed_cache.update(path=p, mtime=mtime, defs=computed)
+        return computed
+
+
+def _derive_sealed(defs):
+    """Normalize a raw sealed-defs dict and attach the derived id / hidden / rung /
+    skin-id sets. Raises (KeyError/TypeError/AttributeError) on a malformed roster so
+    _sealed_defs can catch it and fall back to the free-skins defaults. _FALLBACK_DEFS is
+    well-formed, so _derive_sealed(_FALLBACK_DEFS) is the guaranteed-safe last resort."""
+    roster = defs.get("roster") or []
+    defs = dict(defs)
+    defs.setdefault("skins", [])
+    defs.setdefault("skin_unlock", {})
+    defs.setdefault("ach_criteria", {})
+    defs.setdefault("ladder_tracks", [])
+    defs["_ach_ids"] = frozenset(a["id"] for a in roster)
+    defs["_ach_hidden"] = frozenset(a["id"] for a in roster if a.get("hidden"))
+    defs["_ach_rung"] = _build_ach_rung(roster)
+    defs["_skin_ids"] = {s["id"] for s in defs["skins"]}
+    return defs
+
+
+def _roster():        return _sealed_defs()["roster"]          # noqa: E704
+def _skins():         return _sealed_defs()["skins"]           # noqa: E704
+def _skin_unlock():   return _sealed_defs()["skin_unlock"]     # noqa: E704
+def _ach_criteria():  return _sealed_defs()["ach_criteria"]    # noqa: E704
+def _ladder_tracks(): return _sealed_defs()["ladder_tracks"]   # noqa: E704
+def _ach_ids():       return _sealed_defs()["_ach_ids"]        # noqa: E704
+def _ach_hidden():    return _sealed_defs()["_ach_hidden"]     # noqa: E704
+def _ach_rung():      return _sealed_defs()["_ach_rung"]       # noqa: E704
+def _skin_ids():      return _sealed_defs()["_skin_ids"]       # noqa: E704
 
 # ---------------------------------------------------------------------------
 # Branding: the banner mark (the animated icon beside the title) is one of the
@@ -1725,8 +1048,114 @@ def branding_root():
     in a package boundary gets treated as code by something eventually.
 
     Every caller goes through here. Nine sites used to derive this path independently, which is
-    exactly how the out_dir coupling above went unnoticed."""
-    return Path(__file__).resolve().parent / "branding"
+    exactly how the out_dir coupling above went unnoticed.
+
+    Renamed to the coded goods root 2026-08-21 (the bundle-v2 rewire,
+    SCOPE_bundle-v2-contract.md): the on-disk tree a tinkerer finds is coded end
+    to end -- role names never appear as folder names -- while the browser keeps
+    requesting the friendly /branding/<role>/... URLs and the serve route
+    translates once at the boundary (_public_rel_to_coded below)."""
+    return Path(__file__).resolve().parent / _GOODS_ROOT_NAME
+
+
+# ---------------------------------------------------------------------------
+# The role -> coded-folder map (bundle-v2, 2026-08-21). Codes exist ONLY on
+# disk and inside moonglade.dat; the public URL contract stays /branding/
+# <role>/... and every emitted URL keeps the role vocabulary. This dict is the
+# SINGLE source of truth for the coded tree -- _seal_rule, the resolver
+# callers, the discovery scaffold and the migration all DERIVE their paths
+# from it, never retype them (a retyped prefix is how a seal silently fails
+# open). `_thumbs` is a LEGACY literal: the badge-thumb cache now lives OUTSIDE
+# the tree (badge_cache_dir(): out_dir/gallery/cache/_badges/); the _thumbs/ seal
+# deny + the builder's exclusion stay as belt-and-braces for a stale cache left
+# behind by an older build -- never coded, never packed, never served.
+# ---------------------------------------------------------------------------
+_GOODS_ROOT_NAME = "0x676F6F6473"      # hex "goods" -- the on-disk branding root folder name
+_GOODS_MID = "3f/00100100"             # 0x3F "?" / Bender's apartment -- shared middle
+
+ROLE_CODE = {
+    # role            -> coded folder rel-from-root (POSIX, no trailing slash)
+    "banner_main":    _GOODS_MID + "/001",
+    "banner_login":   _GOODS_MID + "/009",
+    "banner_loom":    _GOODS_MID + "/019",
+    "mystery":        _GOODS_MID + "/01473",
+    "marks":          _GOODS_MID + "/101",
+    "rewards":        _GOODS_MID + "/109",
+    "system":         _GOODS_MID + "/5S5",
+    "bridge":         _GOODS_MID + "/0xB01",
+    "enhance":        _GOODS_MID + "/0xB01/0x534958",
+    "emotion":        _GOODS_MID + "/0xB01/0x656d6f7465",
+    "badges":         _GOODS_MID + "/A01",
+    "mascots":        _GOODS_MID + "/A02",
+    "mascots_ach":    _GOODS_MID + "/A02/ach",
+    "earned_banners": _GOODS_MID + "/B0N",
+    "starfall":       "ABBA/a2c/0x53746172",
+    "breadcrumb":     "ABBA/a2c/0x53746172/GONK",
+}
+
+
+def _role_rel(role, *tail):
+    """posix rel-from-root for a role file: _role_rel('marks','marks.json') ->
+    '3f/00100100/101/marks.json'. No tail -> the role folder's own rel."""
+    return "/".join((ROLE_CODE[role],) + tail)
+
+
+def _role_dir(role):
+    """Path: branding_root() / coded role folder."""
+    return branding_root() / ROLE_CODE[role]
+
+
+# The top-level system files rule 2 of the translation maps into the system
+# role -- the app's chrome, requested by bare public name since before the
+# coded tree existed.
+_SYSTEM_TOP_FILES = frozenset({"logo.png", "favicon.png", "favicon.ico",
+                               "nel_spinner.png", "login_nel.webp", "login_nel.png"})
+
+
+def _public_rel_to_coded(rel):
+    """Translate ONE incoming public /branding/ rel to its coded on-disk /
+    container rel. Applied exactly once, at the serve boundary (the
+    /branding/<path:fname> route); everything downstream -- seal, loose file,
+    container key -- operates on the CODED rel only, so loose disk path ==
+    container key always. First matching rule wins; the order is the contract
+    (SCOPE_bundle-v2-contract.md section 2):
+
+      1. the three banner flats -- loose-only at the coded root, returned as-is
+         (their shipped-default fallback is a SERVING rule, not a translation)
+      2. top-level system files -> system/<name>
+      3. bare ee_* filenames -> starfall/<name>
+      4. bridge/emotion/<f> -> emotion ; bridge/preset_<f> -> enhance ;
+         bridge/<f> -> bridge (the SIX subfolder holds the presets on disk,
+         but the front-end asks for them flat under bridge/ -- filename rule)
+      5. mascots/ach/<f> -> mascots_ach ; mascots/<f> -> mascots
+      6. the single-segment role prefixes -> their coded folder + remainder
+      7. _thumbs/<f>, sfx/<f> (no shipped sfx role -- absent -> 404 -> the
+         synth-chime fallback) and anything unmatched: returned as-is. A probe
+         that guesses a coded path lands here unchanged, so the seal still
+         judges it."""
+    if rel in _BANNER_FLAT.values():                              # rule 1
+        return rel
+    if rel in _SYSTEM_TOP_FILES:                                  # rule 2
+        return _role_rel("system", rel)
+    if "/" not in rel and rel.startswith("ee_"):                  # rule 3
+        return _role_rel("starfall", rel)
+    if rel.startswith("bridge/"):                                 # rule 4
+        f = rel[len("bridge/"):]
+        if f.startswith("emotion/"):
+            return _role_rel("emotion", f[len("emotion/"):])
+        if f.startswith("preset_"):
+            return _role_rel("enhance", f)
+        return _role_rel("bridge", f)
+    if rel.startswith("mascots/"):                                # rule 5
+        f = rel[len("mascots/"):]
+        if f[:4].lower() == "ach/":   # case-insensitive: the seal is too (Windows FS)
+            return _role_rel("mascots_ach", f[4:])
+        return _role_rel("mascots", f)
+    for role in ("marks", "badges", "rewards", "mystery", "banner_main",
+                 "banner_login", "banner_loom", "earned_banners"):  # rule 6
+        if rel.startswith(role + "/"):
+            return _role_rel(role, rel[len(role) + 1:])
+    return rel                                                    # rule 7
 
 
 def _branding_path(out_dir):
@@ -1832,34 +1261,71 @@ def _branding_mtime(rel):
 # 404, indistinguishable from "no such file", so the route is not an oracle
 # for what art exists.
 # ---------------------------------------------------------------------------
-_ACH_IDS = frozenset(a["id"] for a in ACHIEVEMENTS)
-_ACH_HIDDEN = frozenset(a["id"] for a in ACHIEVEMENTS if a.get("hidden"))
+# Earned-art gate ids come from the SEALED roster via _ach_ids()/_ach_hidden() (below),
+# not a module-level frozenset -- the roster is no longer in this source.
 
 
 def _seal_rule(rel):
     """(mode, achievement_id) for one branding_root()-relative posix path:
     'open' (serve normally), 'deny' (never serve), or 'earned' (serve only once
-    the named achievement is earned)."""
-    if rel.startswith(("rewards/", "_thumbs/")) or rel in ("rewards", "_thumbs"):
+    the named achievement is earned).
+
+    Operates on the CODED rel (the serve route translates the public form
+    first). Every prefix here is DERIVED from ROLE_CODE, never retyped -- an
+    unmatched rel falls through to open, so a hand-typed prefix that drifts
+    from the map would silently LEAK sealed art, not 404 it."""
+    # The filesystem this guards is case-INSENSITIVE on Windows, so the seal is
+    # too: decide on a lowercased copy of the rel and compare against lowercased
+    # prefixes. Otherwise a case-variant of a sealed path (e.g. mascots/ACH/<id>)
+    # dodges a case-sensitive prefix check, falls through to the fail-open
+    # default, and the case-insensitive FS serves the real sealed file anyway.
+    # Achievement ids are lowercase, so a lowercased stem matches _ach_ids()
+    # directly. (bundle-v2 adversarial-review HIGH finding, 2026-08-21.)
+    low = rel.lower()
+    rew = ROLE_CODE["rewards"].lower()
+    if low in (rew + "/claim.png", rew + "/gift.png"):
+        # The D8 exception: the two reward UI icons notify.css fetches for the
+        # claim toast/modal -- chrome, not prizes, so they stay open while the
+        # rest of the bucket seals (an open pair beats a physical move, which
+        # would change the public URLs and force a dist rebuild).
+        return ("open", None)
+    if low.startswith(rew + "/") or low == rew:
         # rewards/ is pure achievement data with no live front-end consumer (the
         # reward-marker reconciliation is tracked work; gate per-achievement when
-        # it lands). _thumbs/ is the badge-thumb cache -- /badge-thumb/ is the one
-        # sanctioned path so its own hidden-feat gate can't be walked around.
+        # it lands).
         return ("deny", None)
-    if rel.startswith("badges/"):
-        aid = rel[len("badges/"):]
+    if low.startswith("_thumbs/") or low == "_thumbs":
+        # _thumbs/ was the badge-thumb cache before it moved out to
+        # badge_cache_dir(); a stale one may linger in an older install's tree.
+        # /badge-thumb/ is the one sanctioned path so its own hidden-feat gate
+        # can't be walked around -- keep denying it here.
+        return ("deny", None)
+    badges = ROLE_CODE["badges"].lower()
+    if low.startswith(badges + "/"):
+        aid = low[len(badges) + 1:]
         if aid.endswith(".png"):
             aid = aid[:-4]
-        if "/" not in aid and aid in _ACH_IDS:
+        if "/" not in aid and aid in _ach_ids():
             return ("earned", aid)    # full-res master: the celebration fetches it AT earn time
         return ("deny", None)         # the whole bucket is sauce; unknown files stay sealed
-    if rel.startswith("mascots/ach/"):
-        aid = rel[len("mascots/ach/"):].rsplit(".", 1)[0]
-        if "/" not in aid and aid in _ACH_IDS:
+    mascots_ach = ROLE_CODE["mascots_ach"].lower()
+    if low.startswith(mascots_ach + "/"):
+        aid = low[len(mascots_ach) + 1:].rsplit(".", 1)[0]
+        if "/" not in aid and aid in _ach_ids():
             return ("earned", aid)
         return ("deny", None)
-    if rel.startswith("ee_"):
+    if low.startswith(ROLE_CODE["starfall"].lower() + "/"):
+        # The whole Starfall bucket -- art, audio, AND the GONK breadcrumb
+        # inside it (ROLE_CODE['breadcrumb'] nests under starfall, so this
+        # prefix covers it without its own branch).
         return ("earned", "the-konami-code")
+    earned_b = ROLE_CODE["earned_banners"].lower()
+    if low == earned_b + "/great_library.png":
+        return ("earned", "the-great-library")
+    if low.startswith(earned_b + "/") or low == earned_b:
+        # The rest of the bucket (void_banner.png) is an UNWIRED future reward
+        # (achievements #57-60) -- sealed shut until its achievement exists.
+        return ("deny", None)
     return ("open", None)
 
 
@@ -1909,14 +1375,19 @@ def _seed_loose_manifest(rel):
         pass
 
 
-# Marks the owner has REMOVED from the roster (mark_12 "Gem Tome", ruled
-# 2026-07-23). A tombstone rather than a container rebuild alone because the
-# rebuild can't reach everywhere: _seed_loose_manifest promotes the container's
-# marks.json to a loose file on first customization, and loose wins forever
-# after -- so an install that already seeded keeps a removed mark in its picker
-# no matter what a new container ships. The filter here is what makes the
-# removal stick on every install.
-_MARK_TOMBSTONES = frozenset({"mark_12"})
+# Marks the owner has REMOVED from the roster: mark_12 "Gem Tome" (ruled
+# 2026-07-23), and mark_74 (the Winged Crescent, remade as mark_nightfallen for
+# bundle-v2 -- the old id's loose file lingers on every full-tree install the
+# owner ran before the rename). A tombstone rather than a container rebuild alone
+# because the rebuild can't reach everywhere: _seed_loose_manifest promotes the
+# container's marks.json to a loose file on first customization, and loose wins
+# forever after -- so an install that already seeded keeps a removed mark in its
+# picker no matter what a new container ships. Just as important, a tombstoned
+# stem reads as KNOWN to sweep_branding_drops, so a still-on-disk loose file is
+# NOT re-adopted as a fresh hand-drop (which would delete the original, register
+# a custom mark, AND fire the branding feat -- the mark_12 near-miss of
+# 2026-08-13, which mark_74 would have repeated on the owner's own upgrade).
+_MARK_TOMBSTONES = frozenset({"mark_12", "mark_74"})
 
 
 def list_marks(out_dir):
@@ -1925,7 +1396,7 @@ def list_marks(out_dir):
     shipped defaults show up even though branding/ itself is deliberately empty
     on a fresh install -- and still empty on a truly bare install with no
     container at all. Tombstoned ids (_MARK_TOMBSTONES) never list."""
-    raw = _branding_bytes("marks/marks.json")
+    raw = _branding_bytes(_role_rel("marks", "marks.json"))
     if raw is None:
         return []
     try:
@@ -1941,11 +1412,13 @@ def list_marks(out_dir):
         mid = str(m.get("id") or "")
         if mid in _MARK_TOMBSTONES:
             continue
-        if mid and _branding_exists("marks/%s.png" % mid):
+        # Disk/container lookups are coded; the emitted URL stays the PUBLIC
+        # role form (the /branding/ route translates on the way back in).
+        if mid and _branding_exists(_role_rel("marks", mid + ".png")):
             out.append({"id": mid, "label": m.get("label") or mid,
                         "kind": m.get("kind") or "tile",
                         "png": "/branding/marks/%s.png" % mid,
-                        "ico": _branding_exists("marks/%s.ico" % mid)})
+                        "ico": _branding_exists(_role_rel("marks", mid + ".ico"))})
     return out
 
 
@@ -1977,7 +1450,10 @@ BRANDING_SLOTS = ("banner_main", "banner_login", "banner_loom")
 
 
 def _slot_dir(slot):
-    return branding_root() / slot
+    # Slot names double as ROLE_CODE keys, so the coded folder falls straight
+    # out of the map -- the LOGICAL slot key ("banner_main") stays the JSON/API
+    # vocabulary everywhere above this line.
+    return _role_dir(slot)
 
 
 def _asset_transform(it):
@@ -2010,7 +1486,7 @@ def list_slot_assets(out_dir, slot):
     its zoom/cropX/cropY transform (normalized, legacy crop migrated)."""
     if slot not in BRANDING_SLOTS:
         return []
-    raw = _branding_bytes("%s/manifest.json" % slot)
+    raw = _branding_bytes(_role_rel(slot, "manifest.json"))
     if raw is None:
         return []
     try:
@@ -2024,7 +1500,7 @@ def list_slot_assets(out_dir, slot):
         if not isinstance(it, dict):
             continue
         iid = str(it.get("id") or "")
-        if iid and _branding_exists("%s/%s.png" % (slot, iid)):
+        if iid and _branding_exists(_role_rel(slot, iid + ".png")):
             out.append({"id": iid, **_asset_transform(it),
                         "png": "/branding/%s/%s.png" % (slot, iid)})
     return out
@@ -2076,7 +1552,7 @@ def add_slot_asset(out_dir, slot, png_bytes, zoom=100, cropx=50, cropy=50):
     sdir.mkdir(parents=True, exist_ok=True)
     # First write against a container-dressed slot: promote the shipped manifest
     # loose first, or this upload would shadow every default out of the picker.
-    _seed_loose_manifest("%s/manifest.json" % slot)
+    _seed_loose_manifest(_role_rel(slot, "manifest.json"))
     try:
         data = json.loads((sdir / "manifest.json").read_text(encoding="utf-8"))
         items = list(data.get("items") or []) if isinstance(data, dict) else []
@@ -2105,7 +1581,7 @@ def set_slot_crop(out_dir, slot, item_id, zoom=None, cropx=None, cropy=None):
     # Adjusting a shipped default's crop is a WRITE -- promote the manifest
     # loose first so the edit lands on a real file (P3-review lesson: without
     # this, retuning a container-shipped banner just failed).
-    _seed_loose_manifest("%s/manifest.json" % slot)
+    _seed_loose_manifest(_role_rel(slot, "manifest.json"))
     try:
         data = json.loads((sdir / "manifest.json").read_text(encoding="utf-8"))
         items = data.get("items") if isinstance(data, dict) else None
@@ -2180,9 +1656,9 @@ def add_custom_mark(out_dir, png_bytes, label="Custom mark"):
     second upload REPLACES the first -- any existing kind:'upload' entry (and
     its .png) is dropped here first, rather than accumulating orphaned marks
     the picker would need de-duping logic to hide."""
-    mdir = branding_root() / "marks"
+    mdir = _role_dir("marks")
     mdir.mkdir(parents=True, exist_ok=True)
-    _seed_loose_manifest("marks/marks.json")   # keep shipped defaults in the picker
+    _seed_loose_manifest(_role_rel("marks", "marks.json"))   # keep shipped defaults in the picker
     try:
         data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
         marks = list(data.get("marks") or []) if isinstance(data, dict) else []
@@ -2210,7 +1686,7 @@ def remove_custom_mark(out_dir, mark_id):
     uploaded one, but this guard makes that true at the data layer too, not just
     the UI. Reverts the active mark back to the default logo if the removed one
     was the one currently worn."""
-    mdir = branding_root() / "marks"
+    mdir = _role_dir("marks")
     try:
         data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
         marks = list(data.get("marks") or []) if isinstance(data, dict) else []
@@ -2251,29 +1727,127 @@ def branding_slots_payload(out_dir):
 # never be "use the Branding tab's own upload API" -- that tab sits BEHIND
 # this exact unlock -- so this has to work by scanning raw filesystem drops,
 # not by extending the authenticated upload routes above.
+# Fallback breadcrumb text ONLY (container absent): the real README content
+# (cryptic Nel ASCII + this line) is a SEALED asset materialized by
+# ensure_branding_discovery_tree -- spoiler hygiene keeps it out of this
+# public source.
 _BRANDING_README = "Maybe something goes in here.\n"
 # mascots/rewards are listed here EXPLICITLY even though they are no longer
 # BRANDING_SLOTS (the 2026-08-13 unlock-split enforcement): their empty folders
 # are part of the tinkerer-discovery landscape and existing installs have them,
-# so the on-disk breadcrumb tree stays exactly what it was. A drop there still
-# does nothing (the sweep only ever adopts from _SWEEPABLE_SLOTS + marks).
+# so the on-disk breadcrumb tree keeps the same six roles (now coded). A drop
+# there still does nothing (the sweep only ever adopts from _SWEEPABLE_SLOTS +
+# marks).
 _BRANDING_DISCOVERY_SLOTS = BRANDING_SLOTS + ("mascots", "rewards", "marks")
 
 
+def _migrate_legacy_branding_root():
+    """One-time move of an existing install's OLD role-named `branding/` tree
+    into the coded goods tree (bundle-v2, SCOPE_bundle-v2-contract.md section
+    5). MOVE only, NEVER delete -- renaming the root would otherwise orphan
+    every real upload an existing install has (custom marks, banner slots, the
+    rendered flats). Rules:
+
+      - the six role folders' files -> their coded dirs (recursive, so the old
+        mascots/ach/ nesting lands under the coded ach folder too);
+      - old top-level loose files route through _public_rel_to_coded: the
+        three banner flats stay top-level at the coded root, system files /
+        ee_* land in their coded homes (leaving them at the coded top would
+        strand a working override where the resolver no longer looks);
+      - anything unrecognized STAYS PUT (flag-to-owner territory, per the
+        standing stray-copy rule), and a destination that already exists is
+        never overwritten -- the source stays put and is logged;
+      - emptied old folders are removed; the old root goes only if COMPLETELY
+        empty. One log line per move via the standard logger.
+
+    A no-op on fresh installs (no old root at all)."""
+    import logging as _logging
+    import shutil
+    old = branding_root().parent / "branding"
+    if not old.is_dir():
+        return
+    log = _logging.getLogger(__name__)
+
+    def _move(src, dst):
+        if dst.exists():
+            log.warning("branding migration: NOT moving %s (destination %s already exists)",
+                        src, dst)
+            return
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+            log.info("branding migration: moved %s -> %s", src, dst)
+        except OSError:
+            log.warning("branding migration: failed to move %s -> %s",
+                        src, dst, exc_info=True)
+
+    for role in ("banner_main", "banner_login", "banner_loom",
+                 "marks", "mascots", "rewards"):
+        src_dir = old / role
+        if not src_dir.is_dir():
+            continue
+        for p in sorted(src_dir.rglob("*")):
+            if p.is_file():
+                _move(p, _role_dir(role) / p.relative_to(src_dir))
+    try:
+        top = sorted(old.iterdir())
+    except OSError:
+        top = []
+    for p in top:
+        if not p.is_file():
+            continue
+        coded = _public_rel_to_coded(p.name)
+        if p.name in _BANNER_FLAT.values() or coded != p.name:
+            _move(p, branding_root() / coded)
+        # else: unrecognized (the old README.txt, stray notes) -- stays put.
+    # Sweep away what emptied, deepest-first; rmdir refuses anything non-empty,
+    # which is exactly the "removed only if left completely empty" contract.
+    for d in sorted((q for q in old.rglob("*") if q.is_dir()), reverse=True):
+        try:
+            d.rmdir()
+        except OSError:
+            pass
+    try:
+        old.rmdir()
+    except OSError:
+        pass
+    # Anything left behind was unrecognized (not a role folder, not a flat/system
+    # /ee_ file) so it stayed put by design -- but surface it rather than let it
+    # 404 silently, so the owner can move a stray by hand. (Re-logs each start
+    # while the leftover remains; that is a persistent, accurate nudge.)
+    if old.is_dir():
+        leftovers = [str(p.relative_to(old)) for p in old.rglob("*") if p.is_file()]
+        if leftovers:
+            log.warning("branding migration: %d file(s) left unmigrated in the old "
+                        "branding/ folder (unrecognized -- move by hand if wanted): %s",
+                        len(leftovers), ", ".join(sorted(leftovers)[:20]))
+
+
 def ensure_branding_discovery_tree():
-    """Create the empty, nested slot folders + the one breadcrumb README, so
-    there is actually something for a tinkerer to find. Idempotent and additive
-    only -- never touches a folder or file that already exists, so it is safe
-    to call on every server start regardless of what's already on disk (the
-    owner's own real branding/, a returning install with real uploads, ...).
-    Called once at app startup (create_app), not per-request."""
-    root = branding_root()
+    """Create the empty, coded slot folders + the one GONK breadcrumb, so there
+    is actually something for a tinkerer to find. Idempotent and additive only
+    -- never touches a folder or file that already exists, so it is safe to
+    call on every server start regardless of what's already on disk (the
+    owner's own real tree, a returning install with real uploads, ...). Runs
+    the one-time legacy migration first so an old install's real files land in
+    the coded dirs before the empties go down. The README's content is
+    materialized from the SEALED asset (spoiler hygiene: the cryptic Nel ASCII
+    never appears in this public source); a container-less install gets the
+    plain one-liner. The old root-level README is no longer written. Called
+    once at app startup (create_app), not per-request."""
+    _migrate_legacy_branding_root()
     for slot in _BRANDING_DISCOVERY_SLOTS:
-        (root / slot).mkdir(parents=True, exist_ok=True)
-    readme = root / "README.txt"
+        _role_dir(slot).mkdir(parents=True, exist_ok=True)
+    crumb_dir = _role_dir("breadcrumb")
+    readme = crumb_dir / "README.txt"
     if not readme.exists():
         try:
-            readme.write_text(_BRANDING_README, encoding="utf-8")
+            crumb_dir.mkdir(parents=True, exist_ok=True)
+            raw = _branding_bytes(_role_rel("breadcrumb", "README.txt"))
+            if raw is not None:
+                readme.write_bytes(raw)
+            else:
+                readme.write_text(_BRANDING_README, encoding="utf-8")
         except OSError:
             pass
 
@@ -2301,14 +1875,14 @@ def _adopt_mark(out_dir, raw_stem, png_bytes):
     auto-adopt (marks predate BRANDING_SLOTS and keep their own established
     list_marks()/marks.json shape rather than being folded into the newer
     per-slot manifest convention)."""
-    mdir = branding_root() / "marks"
+    mdir = _role_dir("marks")
     mid = re.sub(r"[^a-z0-9_-]+", "-", raw_stem.lower()).strip("-")[:40] or "custom"
     # Tombstoned ids count as taken: adopting a drop AS a tombstoned id would
     # register a mark list_marks() then refuses to show.
     have = {m["id"] for m in list_marks(out_dir)} | set(_MARK_TOMBSTONES)
     if mid in have:
         mid = (mid + "-" + secrets.token_hex(3))[:40]
-    _seed_loose_manifest("marks/marks.json")   # keep shipped defaults in the picker
+    _seed_loose_manifest(_role_rel("marks", "marks.json"))   # keep shipped defaults in the picker
     try:
         data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
         marks = list(data.get("marks") or []) if isinstance(data, dict) else []
@@ -2333,9 +1907,9 @@ def _adopt_mark(out_dir, raw_stem, png_bytes):
 # mascots/rewards get a real design (named-role overrides, most likely, not
 # a manifest-of-many-pick-one-active gallery like the other two slots), the
 # sweep only ever touches the two slots that map cleanly onto a real,
-# already-established single flat file: banner_main -> branding/banner.png
-# and banner_login -> branding/login-banner.png (WIRED to write those exact
-# paths as of 2026-08-06 -- see _write_banner_flat below; owner call: "Yes,
+# already-established single flat file: banner_main -> the root flat
+# banner.png and banner_login -> login-banner.png (WIRED to write those exact
+# files as of 2026-08-06 -- see _write_banner_flat below; owner call: "Yes,
 # seems obvious").
 _SWEEPABLE_SLOTS = ("banner_main", "banner_login", "banner_loom")
 
@@ -2347,6 +1921,19 @@ _SWEEPABLE_SLOTS = ("banner_main", "banner_login", "banner_loom")
 # re-renders its slot's flat.
 _BANNER_FLAT = {"banner_main": "banner.png", "banner_login": "login-banner.png",
                 "banner_loom": "banner-loom.png"}
+# The SHIPPED default banner per slot -- a sealed container asset inside the
+# slot's own coded folder, served only when no loose flat exists (bundle-v2:
+# the coded tree ships real default banners; the old repo tree shipped the
+# slots empty, so brand_context's flat-only check left a fresh install bare).
+# Filenames as the tree actually carries them -- banner_loom's is hyphenated.
+_BANNER_FLAT_DEFAULT = {"banner_main": "banner_main.png",
+                        "banner_login": "banner_login.png",
+                        "banner_loom": "banner-loom.png"}
+
+
+def _flat_default_rel(slot):
+    """Coded rel of one slot's shipped default banner (the rule-8 fallback)."""
+    return _role_rel(slot, _BANNER_FLAT_DEFAULT[slot])
 # The output aspect each banner flat is cropped to (width / height). banner_loom
 # is the 12:1 workspace strip added with the Branding-tab rebuild.
 _BANNER_RATIO = {"banner_main": 4.0, "banner_login": 4.0, "banner_loom": 12.0}
@@ -2411,34 +1998,25 @@ def _banner_window(w, h, target_ar, zoom, cropx, cropy):
     return (li, ti, li + wi, ti + hi)
 
 
-def _write_banner_flat(out_dir, slot):
-    """Render a banner slot's ACTIVE asset over its real flat file, baking the
-    stored zoom/cropX/cropY transform in via _banner_window (the design's own
-    preview math). That is what makes the banner sliders REAL -- the transform
-    was stored metadata nothing rendered before. Fails soft (False), never a
-    500: a banner that fails to render leaves the previous flat in place, which
-    still displays -- strictly better than a broken header image."""
+def _render_banner_flat(slot, raw, zoom=100, cropx=50, cropy=50):
+    """The ratio/size pipeline itself: bake raw image bytes into `slot`'s flat
+    file via _banner_window (the design's own preview math) at the slot's
+    canonical output size. Shared by _write_banner_flat (the active-asset path)
+    and the earned-banner apply route (sealed bytes straight from the
+    container) so the two writers can never drift. The rendered FLAT is always
+    written loose at the coded ROOT's top level: it's derived per-install
+    state, not shipped art. Fails soft (False), never a 500."""
     name = _BANNER_FLAT.get(slot)
-    if not name:
-        return False
-    active_id = load_slot_active(out_dir).get(slot)
-    a = next((x for x in list_slot_assets(out_dir, slot) if x["id"] == active_id), None)
-    if not a:
+    if not name or raw is None:
         return False
     try:
         import io
         from PIL import Image
-        # The active asset may be a shipped default living only in the container
-        # -- read via the resolution layer, not a raw path. The rendered FLAT is
-        # always written loose: it's derived per-install state, not shipped art.
-        raw = _branding_bytes("%s/%s.png" % (slot, a["id"]))
-        if raw is None:
-            return False
         im = Image.open(io.BytesIO(raw))
         im.load()
         w, hh = im.size
         ar = _BANNER_RATIO.get(slot, 4.0)
-        box = _banner_window(w, hh, ar, a.get("zoom", 100), a.get("cropX", 50), a.get("cropY", 50))
+        box = _banner_window(w, hh, ar, zoom, cropx, cropy)
         crop = im.crop(box)
         ow, oh = _BANNER_OUT.get(slot, (1920, int(round(1920 / ar))))
         crop = crop.resize((ow, oh), Image.LANCZOS)
@@ -2447,6 +2025,26 @@ def _write_banner_flat(out_dir, slot):
         return True
     except Exception:
         return False
+
+
+def _write_banner_flat(out_dir, slot):
+    """Render a banner slot's ACTIVE asset over its real flat file, baking the
+    stored zoom/cropX/cropY transform in via _render_banner_flat above. That is
+    what makes the banner sliders REAL -- the transform was stored metadata
+    nothing rendered before. Fails soft (False), never a 500: a banner that
+    fails to render leaves the previous flat in place, which still displays --
+    strictly better than a broken header image."""
+    if slot not in _BANNER_FLAT:
+        return False
+    active_id = load_slot_active(out_dir).get(slot)
+    a = next((x for x in list_slot_assets(out_dir, slot) if x["id"] == active_id), None)
+    if not a:
+        return False
+    # The active asset may be a shipped default living only in the container --
+    # read via the resolution layer (coded rel), not a raw path.
+    raw = _branding_bytes(_role_rel(slot, a["id"] + ".png"))
+    return _render_banner_flat(slot, raw, a.get("zoom", 100),
+                               a.get("cropX", 50), a.get("cropY", 50))
 
 
 def sweep_branding_drops(out_dir):
@@ -2487,7 +2085,7 @@ def sweep_branding_drops(out_dir):
                 pass
             add_slot_asset(out_dir, slot, png_bytes)   # neutral transform (zoom 100, centered)
             adopted = True
-    mdir = branding_root() / "marks"
+    mdir = _role_dir("marks")
     if mdir.is_dir():
         known = {m["id"] for m in list_marks(out_dir)}
         try:
@@ -2546,7 +2144,11 @@ def brand_context(out_dir):
     processor, so old installs with only logo.png render exactly as before)."""
     cfg = load_branding(out_dir)
     marks = {m["id"]: m for m in list_marks(out_dir)}
-    has_banner = _branding_exists("banner.png")
+    # A banner shows when the per-install loose flat exists OR the shipped
+    # sealed default does (the serve route's rule-8 fallback renders the
+    # latter, so this flag has to agree with what /branding/banner.png serves).
+    has_banner = (_branding_exists("banner.png")
+                  or _branding_exists(_flat_default_rel("banner_main")))
     if cfg["mark"] in marks:
         m = marks[cfg["mark"]]
         return {"mark_url": m["png"], "mark_anim": cfg["anim"], "mark_kind": m["kind"],
@@ -2565,12 +2167,14 @@ def make_launcher_shortcut(out_dir, mark_id):
     chosen mark's .ico, targeting Serve Gallery.pyw via pythonw. Returns the
     .lnk path. Machine-local action -- caller must gate to localhost."""
     import subprocess
-    ico = branding_root() / "marks" / (str(mark_id) + ".ico")
+    ico = _role_dir("marks") / (str(mark_id) + ".ico")
     if not ico.exists():
         # A container-shipped .ico must become a REAL file: PowerShell's
         # CreateShortcut reads IconLocation straight off disk, servable bytes
         # aren't enough. Materialized into a git-ignored cache, regenerable.
-        raw = _branding_bytes("marks/%s.ico" % mark_id)
+        # (The cache subfolder keeps its plain 'marks' name -- it lives outside
+        # the goods root, so it is not part of the coded tree.)
+        raw = _branding_bytes(_role_rel("marks", str(mark_id) + ".ico"))
         if raw is not None:
             cache = branding_root().parent / "_container_cache" / "marks"
             try:
@@ -2667,7 +2271,7 @@ def _build_ach_rung(roster):
     return rung
 
 
-_ACH_RUNG = _build_ach_rung(ACHIEVEMENTS)
+# The rung map is derived from the sealed roster once per load; read via _ach_rung().
 
 
 def achievement_points(a):
@@ -2676,7 +2280,7 @@ def achievement_points(a):
     hidden feat."""
     if a.get("tier") == "feat":
         return 0
-    return _TIER_POINTS.get(a.get("tier"), 0) + 5 * (_ACH_RUNG.get(a["id"], 1) - 1)
+    return _TIER_POINTS.get(a.get("tier"), 0) + 5 * (_ach_rung().get(a["id"], 1) - 1)
 
 
 # Closed-universe set achievements -> a per-criterion checklist (WHICH members are done),
@@ -2684,11 +2288,8 @@ def achievement_points(a):
 # [(member, label)] universe). ONLY closed sets belong here; open-ended distinct-counts
 # (loras, enhance_workflows) have no finite universe and stay count-only. `video_modes`
 # tracks only i2v/flf/r2v (V2V is deliberately not counted -- see the loom/generate bump).
-_ACH_CRITERIA = {
-    "full-toolbox":       ("tools",       [("edit", "Edit"), ("enhance", "Enhance"), ("fix", "Fix")]),
-    "master-of-the-loom": ("video_modes", [("i2v", "Image (I2V)"), ("flf", "First→Last (FLF)"),
-                                           ("r2v", "Reference (R2V)")]),
-}
+# The closed-set criteria labels are SEALED in the container too; read via _ach_criteria()
+# -> {aid: [set_key, [[member, label], ...]]} (JSON tuples arrive as lists, unpacked below).
 
 
 def achievement_criteria(sets):
@@ -2697,7 +2298,7 @@ def achievement_criteria(sets):
     {achievement_id: [{"key","label","done"}, ...]}. Pure + fail-soft: a missing or
     non-list set reads as 'nothing done' rather than raising."""
     out = {}
-    for aid, (set_key, universe) in _ACH_CRITERIA.items():
+    for aid, (set_key, universe) in _ach_criteria().items():
         have = sets.get(set_key) if isinstance(sets, dict) else None
         have = set(have) if isinstance(have, list) else set()
         out[aid] = [{"key": k, "label": lbl, "done": k in have} for k, lbl in universe]
@@ -2721,7 +2322,7 @@ def compute_achievements(metrics, seen=(), sets=None):
     crit = achievement_criteria(sets) if sets is not None else {}
     earned_skins = set()
     achs = []
-    for a in ACHIEVEMENTS:
+    for a in _roster():
         cur = int(metrics.get(a["metric"], 0) or 0)
         earned = cur >= a["threshold"]
         if earned and a.get("skin"):
@@ -2745,7 +2346,7 @@ def compute_achievements(metrics, seen=(), sets=None):
     # post-pass: Skin Changer counts unlocked skins (free ones + this pass's earns)
     sc = by_id.get("skin-changer")
     if sc:
-        n = sum(1 for s in SKINS if s.get("free") or s["id"] in earned_skins)
+        n = sum(1 for s in _skins() if s.get("free") or s["id"] in earned_skins)
         sc["current"] = n
         sc["earned"] = n >= sc["threshold"]
     # post-pass: Completionist = every non-feat, non-banner achievement earned
@@ -2757,12 +2358,12 @@ def compute_achievements(metrics, seen=(), sets=None):
         comp["earned"] = done == len(pool)
     skins = [{"id": s["id"], "name": s["name"], "desc": s["desc"],
               "earned": bool(s.get("free")) or s["id"] in earned_skins,
-              "unlock": _SKIN_UNLOCK_TEXT.get(s["id"])}
-             for s in SKINS]
+              "unlock": _skin_unlock().get(s["id"])}
+             for s in _skins()]
     newly = [a["id"] for a in achs if a["earned"] and a["id"] not in seen]
     earned_points = sum(x["points"] for x in achs if x["earned"])
     possible_points = sum(x["points"] for x in achs)
-    return {"achievements": achs, "skins": skins, "ladders": LADDER_TRACKS, "newly": newly,
+    return {"achievements": achs, "skins": skins, "ladders": _ladder_tracks(), "newly": newly,
             "earned_points": earned_points, "possible_points": possible_points}
 
 
@@ -2777,7 +2378,19 @@ def load_ach_state(out_dir):
     try:
         d = json.loads(_ach_state_path(out_dir).read_text(encoding="utf-8"))
         seen = [s for s in (d.get("seen") or []) if isinstance(s, str)]
-        skin = d.get("skin") if d.get("skin") in _SKIN_IDS else "moonglade"
+        # Preserve the stored skin id verbatim -- do NOT coerce it to the default
+        # just because it isn't in the CURRENT _skin_ids(). That set comes from the
+        # sealed container, so during an undressed window (the pack still
+        # downloading, or briefly unreadable) it collapses to the two free skins;
+        # coercing here would rewrite a legitimately-earned skin to "moonglade" and
+        # the next save_ach_state would PERSIST that reset -- permanent loss for a
+        # purely cosmetic value the container has nothing to do with. Every skin's
+        # CSS is hard-coded server-side (html[data-skin=...]) and applied client-
+        # side, so an id we can't validate right now still renders correctly; a
+        # genuinely unknown id just renders the default tokens, harmlessly. The
+        # write gate (/api/skin: earned + known) is what refuses a bogus/locked
+        # skin -- read is trust, write is checked. (Adversarial M1, 2026-08-22.)
+        skin = d.get("skin") if isinstance(d.get("skin"), str) and d.get("skin") else "moonglade"
         earned_at = {k: v for k, v in (d.get("earned_at") or {}).items()
                      if isinstance(k, str) and isinstance(v, str)}
         return {"seen": seen, "skin": skin, "earned_at": earned_at}
@@ -2798,17 +2411,29 @@ def save_ach_state(out_dir, state):
         return False
 
 
+def badge_cache_dir(out_dir):
+    """Where the regenerable badge-thumb cache lives: `out_dir/gallery/cache/_badges/`.
+    OUTSIDE the coded branding tree on purpose (SCOPE_bundle-v2-branding constraint 3:
+    the tree must keep reading as the empty scaffold + breadcrumb -- a folder of PNGs
+    named by achievement id beside the coded folders gave the tree's purpose away), and
+    under `gallery/`, which every filesystem walker already skips wholesale (organize,
+    import, audit, dedup -- Invariant 6), so the cache can never be catalogued as art.
+    `gallery/cache/` is the general home for regenerable caches (owner, 2026-08-21: a
+    cache container may follow); add siblings beside `_badges`, not elsewhere."""
+    return Path(out_dir) / "gallery" / "cache" / "_badges"
+
+
 def _badge_thumb(out_dir, aid, size=256):
     """Lazily cache a ~size px copy of a badge master and return its Path. The 57
     badge masters are 2000px (~300 MB total); the Folio of Honors renders these thumbs so
     a full open doesn't pull the masters. Masters stay the source of truth; the cache
     self-heals when a master is re-cut (mtime check). Falls back to the master on any
-    trouble, so a tile always resolves to *something*."""
-    rel = "badges/%s.png" % aid
+    trouble, so a tile always resolves to *something*. Cache home: badge_cache_dir()."""
+    rel = _role_rel("badges", aid + ".png")
     if not _branding_exists(rel):
         return None
-    src = branding_root() / "badges" / (aid + ".png")
-    dst = branding_root() / "_thumbs" / (aid + ".png")
+    src = _role_dir("badges") / (aid + ".png")
+    dst = badge_cache_dir(out_dir) / (aid + ".png")
     src_mtime = _branding_mtime(rel)   # loose master's own mtime, or the container file's
     try:
         if dst.is_file() and src_mtime is not None and dst.stat().st_mtime >= src_mtime:
@@ -3053,7 +2678,7 @@ def _has_loose_marks():
     defeated the discovery feat once before (caught by adversarial review,
     2026-08-09) -- keep this filesystem-only, same contract the sweep/adopt
     functions hold."""
-    mdir = branding_root() / "marks"
+    mdir = _role_dir("marks")
     try:
         data = json.loads((mdir / "marks.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -8366,10 +7991,16 @@ def create_app(out_dir: Path):
 
     @app.route("/branding/<path:fname>")
     def branding(fname):
-        """Serve branding art: a loose drop-in file under branding_root() first,
-        the shipped container second (the loose-then-container contract every
-        read path holds). Absent in both -> 404 so the header's onerror simply
-        removes the <img>. Path-safe."""
+        """Serve branding art. The URL vocabulary is PUBLIC role names
+        (/branding/marks/..., /branding/bridge/emotion/...); the on-disk tree
+        and the container keys are CODED -- this route is the ONE place the
+        two meet (_public_rel_to_coded, applied exactly once to the incoming
+        rel). After translation: seal check, then a loose file under
+        branding_root() first, the shipped container second (the loose-then-
+        container contract every read path holds), and for the three banner
+        flats a last fallback onto the slot's SHIPPED sealed default so a
+        fresh install is dressed before its first crop. Absent everywhere ->
+        404 so the header's onerror simply removes the <img>. Path-safe."""
         from flask import send_from_directory, abort
         import mimetypes
         bdir = branding_root().resolve()
@@ -8378,25 +8009,34 @@ def create_app(out_dir: Path):
             target.relative_to(bdir)          # reject path traversal
         except (ValueError, OSError):
             abort(404)
-        # The unlock split, enforced (see _seal_rule): achievement-bound art
-        # only serves once its achievement is earned, whether the bytes would
-        # come from a loose file or the container.
-        mode, seal_aid = _seal_rule(target.relative_to(bdir).as_posix())
+        coded = _public_rel_to_coded(target.relative_to(bdir).as_posix())
+        # The unlock split, enforced (see _seal_rule, which judges the CODED
+        # rel -- a probe that guesses a coded path passes through translation
+        # unchanged, so it faces the same verdict): achievement-bound art only
+        # serves once its achievement is earned, whether the bytes would come
+        # from a loose file or the container.
+        mode, seal_aid = _seal_rule(coded)
         if mode == "deny":
             abort(404)
         if mode == "earned" and seal_aid not in _earned_achievement_ids(
                 out_dir, db_path, need=seal_aid):
             abort(404)
-        if target.is_file():
-            resp = send_from_directory(str(bdir), fname)
+        if (bdir / coded).is_file():
+            resp = send_from_directory(str(bdir), coded)
             resp.headers["Cache-Control"] = "no-cache, must-revalidate"   # branding art gets re-cut; never serve a stale copy
             return resp
-        # Container fallback keys on the SAME already-traversal-checked relative
-        # path (posix separators -- the container's native addressing).
-        raw = _branding_bytes(target.relative_to(bdir).as_posix())
+        # Container fallback keys on the CODED rel (posix separators -- the
+        # container's native addressing; loose path == container key, always).
+        raw = _branding_bytes(coded)
+        if raw is None and coded in _BANNER_FLAT.values():
+            # Rule-8 flat fallback: no per-install loose flat rendered yet ->
+            # the slot's shipped sealed default (loose flat wins when present;
+            # translation itself never rewrites the flat names).
+            slot = next(s for s, n in _BANNER_FLAT.items() if n == coded)
+            raw = _branding_bytes(_flat_default_rel(slot))
         if raw is None:
             abort(404)
-        mime = mimetypes.guess_type(fname)[0] or "application/octet-stream"
+        mime = mimetypes.guess_type(coded)[0] or "application/octet-stream"
         resp = app.response_class(raw, mimetype=mime)
         resp.headers["Cache-Control"] = "no-cache, must-revalidate"
         return resp
@@ -8408,11 +8048,27 @@ def create_app(out_dir: Path):
         from flask import send_from_directory, abort
         if not aid or "/" in aid or "\\" in aid or ".." in aid:
             abort(404)
+        # Achievement ids are canonically lowercase-kebab; the underlying resolve
+        # is on a case-insensitive FS, so a case-variant (UNDER-THE-HOOD.png)
+        # would otherwise skip the hidden-feat gate below (a frozenset of
+        # lowercase ids) yet still read the real sealed master -- the same
+        # fail-open leak _seal_rule casefolds against. Normalise once here so the
+        # gate, _earned_achievement_ids, and the cache key all agree.
+        aid = aid.lower()
+        # Fail CLOSED, matching _seal_rule's badge branch. Only serve a thumb for
+        # an id that IS in the roster; an unknown id -- OR ANY id when the roster
+        # is unavailable (no/invalid container -> _ach_ids() empty) -- is denied.
+        # Without this, _ach_hidden() also goes empty in that state, the hidden
+        # gate below silently passes, and an unearned hidden feat's master serves
+        # by id (the fail-open _seal_rule was written to avoid; the parallel gate
+        # here missed it -- adversarial, 2026-08-22). Visible feats' thumbs still
+        # serve unearned (the Folio's locked tiles show art by design).
+        if aid not in _ach_ids():
+            abort(404)
         # Hidden feats are masked in /api/achievements, but their ids sit in
         # this public source -- so an unearned hidden feat's badge must not be
-        # fishable by id here either (thumbs for VISIBLE unearned achievements
-        # keep serving; the Folio's locked tiles show their art by design).
-        if aid in _ACH_HIDDEN and aid not in _earned_achievement_ids(
+        # fishable by id here either.
+        if aid in _ach_hidden() and aid not in _earned_achievement_ids(
                 out_dir, db_path, need=aid):
             abort(404)
         p = _badge_thumb(out_dir, aid)
@@ -9853,7 +9509,7 @@ def create_app(out_dir: Path):
         out_dir/achievements.json. Cosmetic + local-only, no spend."""
         body = request.get_json(silent=True) or {}
         skin = str(body.get("skin") or "").strip()
-        if skin not in _SKIN_IDS:
+        if skin not in _skin_ids():
             return jsonify({"error": "unknown skin"}), 400
         result = compute_achievements(achievement_metrics(db_path))
         earned = {s["id"] for s in result["skins"] if s["earned"]}
@@ -10108,6 +9764,43 @@ def create_app(out_dir: Path):
             return jsonify({"error": "unknown custom mark"}), 400
         cfg = load_branding(out_dir)
         return jsonify({"mark": cfg["mark"], "marks": list_marks(out_dir)})
+
+    @app.route("/api/branding/banners/earned")
+    def api_branding_banners_earned():
+        """The earned-banner picks BannerEditor's locked/earned tile row renders.
+        One entry today (great_library, gated on the-great-library); void_banner
+        is deliberately NOT listed -- it rewards a future achievement (#57-60)
+        and stays invisible until that lands. The png URL is the public role
+        form and is itself seal-gated by the /branding/ route, so a locked
+        banner's art can't be previewed by fetching the URL directly. LOGIN
+        tier, mirroring /api/branding/mark/custom."""
+        return jsonify({"banners": [{
+            "id": "great_library",
+            "label": "The Great Library",
+            "earned": _mark_earned(out_dir, db_path, "the-great-library"),
+            "png": "/branding/earned_banners/great_library.png",
+        }]})
+
+    @app.route("/api/branding/banner/earned", methods=["POST"])
+    def api_branding_banner_earned():
+        """Apply an earned banner as the banner_main flat. Server gate is
+        authoritative (the UI's locked tile is cosmetic): 403 until the
+        achievement is really earned, same _mark_earned check the custom-mark
+        upload runs. On success the SEALED earned_banners bytes go through the
+        exact _render_banner_flat pipeline every other banner write uses
+        (banner_main ratio 4:1 -> 1920x480), so the applied banner can't
+        differ from an uploaded one in shape or size. LOGIN tier, mirroring
+        /api/branding/mark/custom."""
+        body = request.get_json(silent=True)
+        body = body if isinstance(body, dict) else {}   # a JSON array/string/number -> 400, not 500
+        if str(body.get("id") or "") != "great_library":
+            return jsonify({"error": "unknown banner"}), 400
+        if not _mark_earned(out_dir, db_path, "the-great-library"):
+            return jsonify({"error": "banner locked"}), 403
+        raw = _branding_bytes(_role_rel("earned_banners", "great_library.png"))
+        if raw is None or not _render_banner_flat("banner_main", raw):
+            return jsonify({"error": "banner art unavailable"}), 400
+        return jsonify({"ok": True})
 
     @app.route("/api/branding/shortcut", methods=["POST"])
     def api_branding_shortcut():
@@ -11018,7 +10711,16 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "pick an AI preset"}), 400
             # workflow_name wins inside the builder when both are set; a preset is pinned to
             # exactly one of the two (numeric id OR author/workflow name) in the caller.
-            params = core.build_panelplugin_parameters(src, wid, workflow_name=wname)
+            # Change Emotion carries a control: pass the picked expression, and ONLY for that
+            # preset (an unknown input on the others would be a stray arg on a spend submit).
+            # The picker sends the option KEY (filename stem); emotionlab's `prompt` arg wants the
+            # danbooru TAG STRING, so translate key->tag here (unknown key falls back to itself).
+            emotion_key = str(p.get("emotion") or "").strip()
+            emotion_tag = core.ENHANCE_EMOTION_PROMPTS.get(emotion_key, emotion_key)
+            extra = ({core.ENHANCE_EMOTION_ARG: emotion_tag}
+                     if emotion_tag and wname == core.ENHANCE_EMOTION_WORKFLOW else None)
+            params = core.build_panelplugin_parameters(src, wid, workflow_name=wname,
+                                                       extra_inputs=extra)
             core._apply_kaisuuken(session, params,
                                   SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
             task_id = core.submit_generation(session, params)
@@ -11034,6 +10736,36 @@ def create_app(out_dir: Path):
         except Exception as e:
             return jsonify({"error": _log_gen_failure(
                 "/api/enhance", e, locals().get("params"))[:300]}), 200
+
+    @app.route("/api/enhance/emotions")
+    def api_enhance_emotions():
+        """The staged Change-Emotion options: each emotion-role <key>.<img>
+        (loose OR packed in the container), keyed by filename stem. The picker self-populates
+        from whatever art is staged -- adding an emotion is dropping an image, no code change.
+        Each option is flagged `membership` when PixAI gates it behind a paid tier.
+        LOGIN tier; read-only, spends nothing. Disk/container scans are CODED;
+        the emitted URLs keep the PUBLIC /branding/bridge/emotion/ form the
+        front-end knows (the /branding/ route translates them back)."""
+        import moonglade_backup as core
+        exts = (".webp", ".png", ".jpg", ".jpeg")
+        emo_prefix = (_role_rel("emotion") + "/").lower()
+        found = {}
+        box = _get_container()
+        if box is not None:
+            for rel in box.paths():
+                low = rel.lower()
+                if low.startswith(emo_prefix) and low.endswith(exts):
+                    found.setdefault(Path(rel).stem,
+                                     "/branding/bridge/emotion/" + Path(rel).name)
+        edir = _role_dir("emotion")
+        if edir.is_dir():
+            for p in sorted(edir.iterdir()):
+                if p.is_file() and p.suffix.lower() in exts:
+                    found[p.stem] = "/branding/bridge/emotion/" + p.name   # loose overrides packed
+        gated = getattr(core, "ENHANCE_EMOTION_MEMBERSHIP", frozenset())
+        emotions = [{"key": k, "label": k.replace("-", " ").replace("_", " ").strip().title(),
+                     "img": v, "membership": k in gated} for k, v in sorted(found.items())]
+        return jsonify({"emotions": emotions})
 
     # The AI-Tools scene catalog (PixAI 'chat editing scenes'). Like the Enhance preset prices,
     # the list is fetched LIVE (not baked) so it self-updates the day PixAI adds/retires a scene,

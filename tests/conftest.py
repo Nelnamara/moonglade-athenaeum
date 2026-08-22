@@ -1,12 +1,20 @@
 """Shared fixtures for the pixai-gallery-backup test suite."""
+import json
 import os
 import re
+from pathlib import Path
 
 import pytest
 
 import moonglade_assets
 import moonglade_backup as core
+import moonglade_container as _mc
 import moonglade_gallery as gallery
+
+# The sealed achievement-definitions donor (private companion repo). The roster no longer
+# lives in source, so roster tests need a container built from this.
+_SEALED_DONOR = (Path(__file__).resolve().parents[1].parent
+                 / "moonglade-internal" / "achievements_sealed_donor.json")
 
 
 @pytest.fixture(autouse=True)
@@ -88,6 +96,48 @@ def _isolated_asset_manifest(tmp_path, monkeypatch):
     after this fixture has already pointed the resolver at their own tmp_path."""
     monkeypatch.setattr(moonglade_assets, "manifest_path",
                         lambda: tmp_path / "moonglade_manifest.json")
+
+
+@pytest.fixture(autouse=True)
+def _sealed_roster_container(request, tmp_path):
+    """Ship the sealed achievement roster to every test. The definitions live in
+    moonglade.dat now (not source), so without a container the roster is empty and every
+    roster-dependent test fails. _isolated_branding points branding_root() at
+    tmp_path/branding, so _container_path() resolves to tmp_path/moonglade.dat -- write a
+    sealed container there from the private donor. Skips silently when the donor is absent
+    (public CI without the companion repo): roster tests then see the empty fallback and
+    are expected to skip, not fail. The sealed-defs cache is cleared around each test so no
+    roster leaks between them (and test_build_container, which rebuilds this same path via
+    main(), just overwrites the seed).
+
+    EXCEPTION: the asset-downloader tests (test_assets.py) test downloading a container TO
+    this exact path and assert on its presence/absence -- pre-seeding it there breaks them,
+    so they opt out."""
+    if "test_assets" in request.node.nodeid:
+        yield
+        return
+    if _SEALED_DONOR.is_file():
+        defs = json.loads(_SEALED_DONOR.read_text(encoding="utf-8"))
+        _mc.write_container(tmp_path / "moonglade.dat", {"_seed.txt": b"x"},
+                            {"achievements": json.dumps(defs, separators=(",", ":")).encode("utf-8")})
+    gallery._sealed_cache.update(path=None, mtime=None, defs=None)
+    gallery._container_cache.update(path=None, mtime=None, box=None)
+    # The earned-ids cache is a 5s-TTL module global keyed on nothing (out_dir is
+    # not part of the key), so without a reset one test's earned set can answer
+    # another test's seal check inside the window. Clear it around each test too.
+    gallery._earned_ids_cache.update(t=0.0, ids=frozenset())
+    yield
+    gallery._sealed_cache.update(path=None, mtime=None, defs=None)
+    gallery._container_cache.update(path=None, mtime=None, box=None)
+    gallery._earned_ids_cache.update(t=0.0, ids=frozenset())
+
+
+@pytest.fixture()
+def sealed_donor_present():
+    """Skip a test when the private sealed-definitions donor isn't checked out (public
+    CI). Use on tests that assert specific roster content (ids, thresholds, the ladder)."""
+    if not _SEALED_DONOR.is_file():
+        pytest.skip("sealed-definitions donor (private repo) not present")
 
 
 @pytest.fixture(autouse=True)

@@ -93,12 +93,24 @@ def _write_marker(container_path, manifest):
         {"version": manifest["version"], "sha256": manifest["sha256"]}), encoding="utf-8")
 
 
+def _container_readable(container_path):
+    """Cheap header+TOC probe: True only if the file opens as a container this
+    build understands. A v1/foreign/corrupt `.dat` opens as None. Reads the
+    header and table of contents, never the whole payload."""
+    try:
+        import moonglade_container as _mc
+        return _mc.open_container(str(container_path)) is not None
+    except Exception:
+        return False
+
+
 def needs_download(container_path, manifest=None):
-    """True if `container_path` should be (re)fetched: missing entirely, or
-    its version marker disagrees with the current manifest. A container with
-    NO marker but that DOES exist (hand-copied, pre-downloader) counts as
-    satisfied -- it dresses the app; only a confirmed version mismatch
-    re-triggers a fetch, never a guess."""
+    """True if `container_path` should be (re)fetched: missing entirely, its
+    version marker disagrees with the current manifest, or it is present-but-
+    UNREADABLE by this build (a hand-copied `.dat` from an older container
+    format -- e.g. a v1 pack under the v2 reader). A container with NO marker
+    that DOES open counts as satisfied -- it dresses the app; only a confirmed
+    version mismatch or an unreadable file re-triggers a fetch, never a guess."""
     manifest = manifest if manifest is not None else read_manifest()
     if manifest is None:
         return False           # nothing to compare against -- nothing to fetch
@@ -106,7 +118,10 @@ def needs_download(container_path, manifest=None):
         return True
     marker = _read_marker(container_path)
     if marker is None:
-        return False           # present, unverified -- treated as satisfied
+        # Present, unverified. Trust it ONLY if it actually opens under this
+        # build -- otherwise a stale hand-copied pack leaves the app silently
+        # undressed forever with no re-fetch (adversarial 2026-08-22).
+        return not _container_readable(container_path)
     return marker.get("sha256") != manifest["sha256"]
 
 

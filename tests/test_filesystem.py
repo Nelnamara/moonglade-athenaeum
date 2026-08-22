@@ -314,19 +314,28 @@ def test_run_faststart_videos_no_ffmpeg(tmp_path, monkeypatch):
 
 
 def test_import_local_skips_branding_folder(tmp_path, monkeypatch):
-    """The branding folder (banner/logo/marks) is app chrome, NOT gallery content —
-    a backup scan must never sweep it into the catalog, or the gallery fills with UI art."""
+    """The branding tree (banner/logo/marks) is app chrome, NOT gallery content —
+    a backup scan must never sweep it into the catalog, or the gallery fills with UI art.
+
+    Re-pinned for bundle-v2 (SCOPE_bundle-v2-contract.md): marks now live in their
+    CODED dir under branding_root() — seeded via g._role_dir, never a retyped hex
+    path — while the banner flat stays loose at the root's top level (translation
+    rule 1). run_import_local's exclusion is the literal out/"branding" (kept for
+    legacy installs); it covers the whole tree here because conftest's
+    _isolated_branding redirects branding_root() to tmp_path/"branding"."""
+    import moonglade_gallery as g
     from moonglade_gallery import load_catalog
     monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
-    (tmp_path / "branding" / "marks").mkdir(parents=True)
-    (tmp_path / "branding" / "banner.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
-    (tmp_path / "branding" / "marks" / "m1.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
+    g._role_dir("marks").mkdir(parents=True)
+    (g.branding_root() / "banner.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
+    (g._role_dir("marks") / "m1.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "v.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
     res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
     assert res["imported"] == 1                       # only the video, not the 2 branding pngs
     files = [r.get("filename", "") for r in load_catalog(tmp_path / "catalog.db")]
-    assert not any("branding" in f for f in files)     # branding stayed out of the gallery
+    root_name = g.branding_root().name                 # derived, not retyped
+    assert not any(root_name in f for f in files)      # branding stayed out of the gallery
     assert any(f.endswith("v.mp4") for f in files)
 
 

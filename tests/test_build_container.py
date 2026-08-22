@@ -50,8 +50,24 @@ def _seed_branding(files):
     return root
 
 
+# A minimal sealed-definitions donor so these tests don't depend on the private companion
+# repo -- the roster no longer lives in source, so build_container reads it from a donor.
+_TEST_DONOR = {
+    "roster": [{"id": "first-light", "name": "First Light", "icon": "*", "desc": "d",
+                "metric": "images", "threshold": 1, "tier": "common", "bucket": "milestone"}],
+    "skins": [{"id": "moonglade", "name": "Moonglade", "free": True, "desc": "d"}],
+    "skin_unlock": {}, "ach_criteria": {}, "ladder_tracks": [],
+}
+
+
 def _run(monkeypatch, *argv):
-    """Invoke the tool's main() with argv, the way the CLI would."""
+    """Invoke the tool's main() with argv, the way the CLI would. Auto-supplies a test
+    donor (so the build never reaches for the private repo) unless argv sets one."""
+    argv = list(argv)
+    if "--donor" not in argv:
+        donor_file = g.branding_root().parent / "_test_donor.json"
+        donor_file.write_text(json.dumps(_TEST_DONOR), encoding="utf-8")
+        argv += ["--donor", str(donor_file)]
     monkeypatch.setattr(bc.sys, "argv", ["build_container.py", *argv])
     return bc.main()
 
@@ -64,19 +80,23 @@ def _out_path():
 # gather(): the _thumbs exclusion
 # ---------------------------------------------------------------------------
 def test_gather_excludes_thumbs_at_any_depth():
+    # Seed rels are CODED (built from the ROLE_CODE map -- the real tree gather()
+    # packs is coded end to end); _thumbs stays a LITERAL name at any depth.
     root = _seed_branding({
         "banner.png": PNG_1PX,
-        "marks/marks.json": b'{"marks":[]}',
-        "marks/mark_4.png": PNG_1PX,
-        "badges/first-light.png": PNG_1PX,
-        "_thumbs/cache.png": b"REGENERABLE",         # top-level cache dir
-        "marks/_thumbs/mark_4.png": b"REGENERABLE",  # nested cache dir
+        g._role_rel("marks", "marks.json"): b'{"marks":[]}',
+        g._role_rel("marks", "mark_4.png"): PNG_1PX,
+        g._role_rel("badges", "first-light.png"): PNG_1PX,
+        "_thumbs/cache.png": b"REGENERABLE",                          # top-level cache dir
+        g._role_rel("marks", "_thumbs", "mark_4.png"): b"REGENERABLE",  # nested cache dir
     })
     got = bc.gather(root)
-    assert set(got) == {"banner.png", "marks/marks.json", "marks/mark_4.png",
-                        "badges/first-light.png"}
+    assert set(got) == {"banner.png",
+                        g._role_rel("marks", "marks.json"),
+                        g._role_rel("marks", "mark_4.png"),
+                        g._role_rel("badges", "first-light.png")}
     assert all("_thumbs" not in rel for rel in got)
-    assert got["marks/mark_4.png"] == PNG_1PX        # real bytes, posix keys
+    assert got[g._role_rel("marks", "mark_4.png")] == PNG_1PX  # real bytes, posix keys
 
 
 # ---------------------------------------------------------------------------
@@ -84,8 +104,8 @@ def test_gather_excludes_thumbs_at_any_depth():
 # ---------------------------------------------------------------------------
 def test_build_writes_a_verified_container_and_manifest(monkeypatch):
     _seed_branding({"banner.png": PNG_1PX,
-                    "marks/marks.json": b'{"marks":[]}',
-                    "marks/mark_4.png": PNG_1PX})
+                    g._role_rel("marks", "marks.json"): b'{"marks":[]}',
+                    g._role_rel("marks", "mark_4.png"): PNG_1PX})
     _run(monkeypatch)                                 # no args -> defaults
 
     out = _out_path()
@@ -93,9 +113,10 @@ def test_build_writes_a_verified_container_and_manifest(monkeypatch):
     box = mc.open_container(out)
     assert box is not None
     assert box.get("banner.png") == PNG_1PX
-    assert box.get("marks/marks.json") == b'{"marks":[]}'
-    # The tool always packs the live achievement definitions as a reserved payload.
-    assert box.payload("achievements") == json.dumps(g.ACHIEVEMENTS).encode("utf-8")
+    assert box.get(g._role_rel("marks", "marks.json")) == b'{"marks":[]}'
+    # The tool packs the SEALED achievement definitions (from the donor) as a reserved
+    # payload -- the roster no longer lives in source, so this is the donor, byte-for-byte.
+    assert box.payload("achievements") == json.dumps(_TEST_DONOR, separators=(",", ":")).encode("utf-8")
 
     # Manifest describes the WHOLE FILE (what the downloader fetches + verifies),
     # version "1" on a fresh manifest, and no urls until one is supplied.
@@ -107,19 +128,32 @@ def test_build_writes_a_verified_container_and_manifest(monkeypatch):
     assert man["urls"] == []
 
 
-def test_version_bumps_and_urls_carry_forward(monkeypatch):
-    # A prior manifest with a real integer version and a mirror URL already set.
+def test_changed_bytes_without_url_fails_closed(monkeypatch):
+    """Release-integrity guard (adversarial, 2026-08-22): if the container bytes change
+    (new sha256) but no --url is given, the prior manifest's URL still points at the OLD
+    file -- a fresh install would download bytes that fail the new checksum and end up
+    undressed. The builder must refuse rather than write that impossible manifest."""
     ma.write_manifest("3", "deadbeef" * 8, 123, ["https://old.example/moonglade.dat"])
     _seed_branding({"banner.png": PNG_1PX})
-    _run(monkeypatch)                                 # no --version, no --url
-
+    with pytest.raises(SystemExit):
+        _run(monkeypatch)                             # new bytes, no --url -> refuse
+    # the prior manifest is left untouched (NOT bumped to a broken state)
     man = ma.read_manifest()
-    assert man["version"] == "4"                                   # 3 -> 4
-    assert man["urls"] == ["https://old.example/moonglade.dat"]    # carried forward
-    # ...and sha/size now describe the NEW file, not the prior stub.
-    out = _out_path()
-    assert man["sha256"] == hashlib.sha256(out.read_bytes()).hexdigest()
-    assert man["sha256"] != "deadbeef" * 8
+    assert man["version"] == "3" and man["sha256"] == "deadbeef" * 8
+
+
+def test_version_bumps_and_urls_carry_forward_on_identical_bytes(monkeypatch):
+    """Carry the prior URL forward ONLY when the rebuild is byte-identical (same sha) --
+    then the existing URL genuinely still serves those bytes. First build sets the URL;
+    an identical rebuild with no --url keeps it and bumps the version."""
+    _seed_branding({"banner.png": PNG_1PX})
+    _run(monkeypatch, "--url", "https://old.example/moonglade.dat")   # establishes url + real sha
+    v1 = ma.read_manifest()
+    _run(monkeypatch)                                 # rebuild identical bytes, no --url
+    man = ma.read_manifest()
+    assert man["urls"] == ["https://old.example/moonglade.dat"]    # carried forward (same bytes)
+    assert man["sha256"] == v1["sha256"]                          # identical
+    assert int(man["version"]) == int(v1["version"]) + 1          # still bumps
 
 
 def test_explicit_version_and_urls_override(monkeypatch):
@@ -143,6 +177,7 @@ def test_refuses_missing_branding(monkeypatch):
 
 def test_refuses_empty_branding(monkeypatch):
     g.branding_root().mkdir(parents=True, exist_ok=True)          # exists but empty
+    _out_path().unlink(missing_ok=True)   # drop the conftest fixture's seed container first
     with pytest.raises(SystemExit):
         _run(monkeypatch)
     assert not _out_path().exists()

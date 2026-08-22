@@ -15,6 +15,8 @@ git tags. Full prose notes for tagged versions live on
 > commits reached master as part of **v2.0.0**, which does). There is **no v1.7.x** (1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- **The branding folders go incognito** (2026-08-21). The on-disk branding tree no longer wears its purposes as folder names: the app now lays out — and packs its default art from — a deliberately coded arrangement, translated through one internal map, and what those names mean is documented nowhere public, this file included. Nothing user-visible moves: every address the app itself asks for (`/branding/…`) is exactly what it was, and your own dropped-in files still win over the packed defaults. An existing install is carried across on its next launch — files in the old `branding/` folder are moved into the new arrangement automatically (moved, never deleted: anything unrecognized stays where it lies, and every move is logged). Riding along: **The Great Library**, the first banner you *earn* — once its achievement unlocks, an Earned row in the Branding tab's banner editor sets it as your main banner in one click; until then the tile stays masked, and the art itself won't serve early any more than badge art does. Also fixed on the way: the two reward icons (the claim ribbon and the gift) had been blocked by the very guard that keeps reward art unspoiled — a quiet, long-standing 404 wherever the app asked for them — and are served again; and the Change Emotion picker's expression thumbnails ship as lightweight WebP. The Folio's badge thumbnails — a regenerable cache the app builds on first open — now live under the library's own `gallery/cache/` rather than beside the branding art, so the branding tree stays exactly what ships and nothing else (an older install's leftover cache there is simply ignored). And on the phone, the Control Panel's Branding entry no longer shows a locked placeholder before it's unlocked: like the desktop tab, it appears when it's yours. And the mystery mask on a hidden, unearned honor — in the Folio and on the locked banner pick — now shows at full strength instead of grayed out: the name and text are what's withheld, not the icon's character.
+- **Change Emotion (Enhance) now actually changes the emotion.** The one Enhance preset with a control was wired three ways wrong: it addressed a *versionless* workflow, and passed the picked expression under the wrong input name and as the wrong value — so it charged 2,000 credits (refunded at the hour) and came back unchanged, every time. The real shape, recaptured from PixAI's own live config and proven end to end against completed website submits: emotionlab is addressed `kyo/emotionlab:633acbbb`, reads its target from an `inputs.prompt` **danbooru tag string** (Upset → `sad, crying`, Aroused → `sexy, steam, half-closed eyes, torogao, heavy breathing`), not an option key. The full **35-expression** set is now mapped key→tag, and the **25 that require a PixAI membership** are marked in the picker.
 - **The Bridge — AI Tools.** A browsable catalog of PixAI's 28 one-image "scenes" — turn a character into a plushie, a tarot card, an SSR gacha pull, a magazine cover, an acrylic standee, a giant statue, a visual-novel screen, and more. A new **✦ AI Tools** entry appears in the nav **only when the Mirror is armed** (off, there's no entry and no hint); it opens a searchable, tier-tabbed modal of all 28. Pick one and it hands off to the Generate drawer's own **scene generator**, built live for that scene — a one-click tool just Generates; others offer their real presets (tarot's Major Arcana, the fantasy classes), a language choice, a name/caption field, or a **second character** (the duo generator). Each runs on the PixAI mirror — the same credential the website uses, the only one these tools dispatch on — and the runs/History reel shows the result and its real cost. The scene list and every control come **live from PixAI**, so the catalog self-updates as PixAI adds or retires a tool. Alongside: the six **Enhance** presets are now all dispatch-verified — four had pointed at stale PixAI workflow addresses (accepted and charged but never run, or rejected outright); their real current addresses were recaptured from PixAI's own live config and each re-proven end to end.
 - **↺ Remix for videos.** Remix now works on videos, not just images. Video Details — and the dock's History and runs-reel video tiles — carry a working ↺ that loads a clip's full recipe (engine, duration, shot mode, camera, audio, prompt, and the reference frames) back into the Video tab. Most of what a video needs lives only in its own task record, not the catalog, so a remix reads the clip's task recipe and, where a field genuinely can't be recovered, *says so* the way the image path's amber “partial recipe” chip already does. Fixed alongside: a finished video in the runs strip used to route into the *image* recipe path and drop its prompt on the Image tab — it now opens on the Video tab where it belongs. Wiki: [Generating → The Generate drawer](https://github.com/Nelnamara/moonglade-athenaeum/wiki/Generating#the-generate-drawer-web-gallery-v190).
 - **History in the Generate dock.** The **History** button now turns the runs strip into a **seven-day timeline read from your own catalog** — not just this session's jobs — one column per day, newest first, two rows deep so a busy day reads as a compact block, empty days say "No runs", and **Load N older days ⌄** at the end pages further back for as long as there is history. Tiles keep their real shape (a video tile is 16:9 with a ▶ tag), anything still cooking today sits at the top of the same timeline with the mascot and a moving bar (PixAI reports no per-image progress, so no percentage is invented), and hovering any tile shows what it is — tag and time, model, size or clip length, the prompt, and **what it actually cost** (PixAI's own recorded spend for that run, or "free card"). Click a finished picture to load its recipe into the composer. History has its own room (the dock may grow to the top of the window while it's open) and composes with the ▲ settings — open both and the timeline sits above them; Escape closes one layer at a time. It's a pure local read: one indexed query over your catalog plus the live job log, no network. Video tiles show and tell but don't yet act — clicking one becomes Remix in the next pass. Wiki: [Generating → The Generate drawer](https://github.com/Nelnamara/moonglade-athenaeum/wiki/Generating#the-generate-drawer-web-gallery-v190).
@@ -40,6 +42,7 @@ git tags. Full prose notes for tagged versions live on
 - First-run setup: once the first sync has pulled in a few dozen items you can now leave the sync screen with "Browse the gallery" instead of waiting for the whole library — the sync keeps running in the background (a real help when the first sync is tens of thousands of images).
 - Fixed: milestone unlocks tied to your first sync (First Light and the like) no longer fire seconds into that first sync — they now wait until the first full sync actually finishes, so they land as a real moment rather than mid-progress. Existing libraries are unaffected.
 - Under the hood: closed the two asset-container test gaps that were deliberately held until the bundle shipped. The container builder (`tools/build_container.py`, which produces the packed default-art file and its download manifest) now has real coverage — including that a failed byte-for-byte verification deletes the output and writes no manifest — and the container's multi-block read path (what a large mascot spanning several 64 KiB blocks exercises on every read) is now unit-tested for correct random-access decoding, which every prior sub-4 KiB test had left untouched. No behaviour change.
+- Under the hood: the packed `moonglade.dat` container now carries more of the app's built-in data than just the default art, and its on-disk format was hardened against casual tampering. The app reads it exactly as before and your own `branding/` files still take precedence, so there's no visible change — this only moves data that used to sit loose in the source tree into the same packed file the default art already ships in.
 
 ## [3.1.0] - 2026-08-12 — Dressed out of the box: the default look ships with the app and fetches itself on first run
 - **The app now dresses itself out of the box.** Its default look — marks, banners, mascots, and badge art — ships in one packed asset file (`moonglade.dat`) and displays on a fresh install with no setup at all. Your own files in `branding/` always take precedence over the packed defaults, exactly as before. (Built with `python tools/build_container.py`; the file rides alongside the app rather than living in the repository.)
@@ -5450,9 +5453,9 @@ large docs consolidation, and a real multi-account authentication stack.
   `os.replace`); the legacy `store.json` migrates into per-key files on first touch and is preserved as
   `store.json.migrated`. The `/api/loom/*` contract is unchanged, so the React app needs no change.
   (Thumbnails-out-of-document + import-creates-new-project are follow-ups per `SUITE_ARCHITECTURE_AUDIT.md` §7.)
-- **Canonical roster thresholds reconciled to shipped code** — `docs/achievements_roster_57.json`
-  carried three stale thresholds (marathon 1→100, triggered 0→5, read-the-manual 0→1); aligned to
-  what the code enforces so the canonical roster stops disagreeing with behavior.
+- **Canonical roster thresholds reconciled to shipped code** — the canonical roster carried three
+  stale hidden-feat thresholds; aligned to what the code enforces so the roster stops disagreeing
+  with behavior. (The thresholds themselves now live sealed in the container, not in this changelog.)
 
 ### Fixed
 - **Trophy Hall reformat reverted (`0a8da3a`, reverts `c877919`)** — the rewards-under-grid layout,
@@ -5670,27 +5673,25 @@ gift box, rung-scaled points) and the maximized-overlay Trophy Hall. `loom-v2` r
   5×(rung−1)`; common 5 / rare 10 / epic 25 / legendary 50; **feats 0**, so the total never hints
   at a hidden feat). Points show on the unlock toast, on each grid tile, and as a Warband-style
   running total in the panel header. Rung is *derived* from the roster (ladder families grouped by
-  metric, ordered by threshold), reproducing the Archive ladder exactly (5 / 15 / 35 / 65 / 70);
-  **960 points possible**.
+  metric, ordered by threshold), reproducing each ladder's rung sequence exactly; a fixed points
+  ceiling.
 - **The full 57-achievement roster is live** — the achievement system grew from 11 to all **57**
   designed achievements (29 ladder rungs across 10 tracks · 9 milestones · 8 masteries · 11 hidden
   **feats**), generated verbatim from the canonical `docs/achievements_roster_57.json` with every
   achievement carrying its `roast` (and an unlockable uncensored variant). The panel groups them
   into **Evolution Ladders / Milestones / Masteries / Feats of the Athenaeum** sections; earned
-  cards show their roast; **The Great Library** is flagged as a banner reward.
+  cards show their roast; one legendary achievement is flagged as a banner reward.
 - **The telemetry layer** — the persisted counters behind every non-catalog metric
   (`out_dir/telemetry.json`: counters / maxima / sets / flags / distinct-days, lock-guarded and
   fail-soft everywhere). ~15 call sites now report in: edits, enhances (+ distinct workflows),
   fixes, uploads, LoRA use (first / stacked / distinct), video modes, Loom shots, "more like this",
   claims, skin + branding changes, `--organize`, `--dedup` culls, `--task-id` recoveries, free-card
   applies, day-of-use tracking, and new catalog SQL for `local_gens` / `gens_in_a_day` /
-  `distinct_keywords`. Feat events ride a new `/api/ach-event` beacon (Konami egg, the in-Loom
-  manual, narrator pokes) plus state sweeps (custom branding, the eclipse animation) and a
-  new-download **Time Capsule** check.
+  `distinct_keywords`. Feat events ride a new `/api/ach-event` beacon plus state sweeps and a
+  new-download anniversary check.
 - **Hidden feats + the narrator** — feats serve masked (`???`) until earned and the whole feats
-  section stays cloaked until the first one lands; **poke the narrator** (the chibi in the
-  Achievements header) until it snaps to earn *Triggered* and reveal the **Unleash the AI**
-  toggle that swaps every roast to its uncensored variant.
+  section stays cloaked until the first one lands; a hidden interaction earns a feat that reveals
+  the uncensored-roast toggle. (The specific triggers are sealed in the container, not here.)
 - **Per-achievement badge + mascot art** — the 57 voted badges/mascots are served from
   `branding/badges/<id>.png` and `branding/mascots/ach/<id>.png`; the unlock moment now presents
   with **that achievement's own mascot** (falling back to the tier chibi), and the celebration
@@ -5754,7 +5755,7 @@ gift box, rung-scaled points) and the maximized-overlay Trophy Hall. `loom-v2` r
   dropped) — content-moderation blocks read as a clear message instead of a bare "failed".
 - **Achievements art & moments** — 11 achievement-badge prompts + the Loom mark, a
   mascot-per-state activity tracker, a rarity-scaled "Nel presents" unlock pop with real badge art,
-  a spinning-Nel generation loader, and a Konami-code Starfall easter egg.
+  a spinning-Nel generation loader, and a hidden easter egg.
 - **Recover a task by ID** — a Control Panel action to import any generation/edit into the catalog
   by task id, with an "already in your gallery" check + jump link.
 - **Edit card** — multi-image references (Edit Pro 4 / Reference Pro 10) and

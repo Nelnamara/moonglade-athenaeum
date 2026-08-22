@@ -390,7 +390,12 @@ export default function App({ boot }) {
       fetch("/api/ach-event", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ event: "konami" }),
-      }).catch(() => {}).then(() => {
+        // Earn the feat, THEN read its now-unmasked flavor from /api/achievements. The
+        // Konami punchline lives in the SEALED roster (the-konami-code's desc), not in this
+        // public source, so a clone can't read the egg's payoff before finding it. Fail-soft
+        // to a generic line if the fetch fails or the feat hasn't resolved yet.
+      }).catch(() => {}).then(() => fetch("/api/achievements").then((r) => r.json()).catch(() => null))
+        .then((data) => {
         const glyphs = ["✦", "✧", "★", "✪", "✺"];
         const stars = [];
         for (let i = 0; i < 46; i++) {
@@ -412,14 +417,16 @@ export default function App({ boot }) {
         nel.src = "/branding/ee_nelstarfall.png";
         nel.onerror = () => nel.remove();
         document.body.appendChild(nel);
-        // Built with DOM methods, not innerHTML -- both lines are fixed literals
-        // (no interpolated data), but this way there is nothing to ever audit.
+        // Built with DOM methods, not innerHTML. The greeting is a fixed literal; the
+        // punchline is the SEALED roster's desc for the-konami-code, set via textContent
+        // (so fetched data can never inject markup) -- it is not in this public source to spoil.
         const toast = document.createElement("div");
         toast.className = "ee-toast";
         toast.appendChild(document.createTextNode("✺ Elune-adore, Nelnamara ✺"));
         const sub = document.createElement("div");
         sub.style.cssText = "font-size:12.5px;color:var(--subtext);margin-top:7px;";
-        sub.textContent = "The Athenaeum casts Starfall. Moonfire spam remains a lifestyle.";
+        const feat = data && (data.achievements || []).find((a) => a.id === "the-konami-code");
+        sub.textContent = (feat && feat.desc) || "A hidden power stirs in the Athenaeum.";
         toast.appendChild(sub);
         document.body.appendChild(toast);
         let cast, loop;

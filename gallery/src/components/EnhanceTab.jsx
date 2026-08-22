@@ -43,6 +43,8 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
   const [lines, openLine] = useResultLines();
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
+  const [emotions, setEmotions] = useState(null);   // Change Emotion options; null = not loaded
+  const [emotionKey, setEmotionKey] = useState("");
 
   useEffect(() => {
     if (!armed) { setPresets(null); return undefined; }
@@ -53,6 +55,17 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
       .catch(() => { if (live) setPresets([]); });
     return () => { live = false; };
   }, [armed]);
+
+  // Lazily load the staged Change-Emotion options the first time that preset is opened.
+  useEffect(() => {
+    if (!armed || sel !== "emotion" || emotions !== null) return undefined;
+    let live = true;
+    fetch("/api/enhance/emotions")
+      .then((r) => r.json())
+      .then((d) => { if (live) setEmotions((d && d.emotions) || []); })
+      .catch(() => { if (live) setEmotions([]); });
+    return () => { live = false; };
+  }, [armed, sel, emotions]);
 
   const loading = presets === null;
   const rows = presets && presets.length ? presets : SKELETON;
@@ -81,11 +94,15 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
     const body = priced.workflow_name
       ? { source, workflow_name: priced.workflow_name }
       : { source, workflow_id: priced.workflow_id };
+    if (sel === "emotion" && emotionKey) body.emotion = emotionKey;
     await submitTask("/api/enhance", body, { label: priced.label, emit });
     busyRef.current = false; setBusy(false);
   };
 
-  const genOff = !source || loading || busy || !priced;
+  // Only block on picking an expression when options are actually staged; with none staged,
+  // the preset still runs on PixAI's default emotion (unchanged behaviour).
+  const needEmotion = sel === "emotion" && Array.isArray(emotions) && emotions.length > 0 && !emotionKey;
+  const genOff = !source || loading || busy || !priced || needEmotion;
 
   return (
     <div className="mgdock-slab mgdock-enhslab">
@@ -112,9 +129,36 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
             ))}
           </div>
 
+          {sel === "emotion" && (
+            <div className="mgdock-emopick">
+              <div className="mgdock-enhsub">TARGET EXPRESSION</div>
+              {emotions === null ? (
+                <div className="mgdock-enhsecs">Loading expressions…</div>
+              ) : emotions.length === 0 ? (
+                <div className="mgdock-enhsecs">No expression art staged yet — expression
+                  thumbnails ship in the app's asset bundle.</div>
+              ) : (
+                <div className="mgdock-aigrid">
+                  {emotions.map((e) => (
+                    <button key={e.key} type="button"
+                      className={"mgdock-aitile" + (emotionKey === e.key ? " on" : "")}
+                      onClick={() => setEmotionKey(e.key)}
+                      title={e.membership ? e.label + " — needs a PixAI membership" : e.label}>
+                      <img className="mgdock-aithumb" src={e.img} alt="" loading="lazy"
+                        onError={(ev) => { ev.currentTarget.style.display = "none"; }} />
+                      {e.membership && <span className="mgdock-aigate" title="Membership required">★</span>}
+                      <span className="mgdock-aimeta"><span className="mgdock-ainame">{e.label}</span></span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <button type="button" className={"mgdock-enhgen" + (genOff ? " off" : "")} disabled={genOff}
             title={!source ? "Add a source image in SOURCE above"
-              : loading ? "Pricing…" : "Generate " + selRow.label + " — runs on the mirror"}
+              : needEmotion ? "Pick a target expression first"
+                : loading ? "Pricing…" : "Generate " + selRow.label + " — runs on the mirror"}
             onClick={run}>
             <span>&#10022; Generate {selRow ? selRow.label : ""}</span>
             <span className="mgdock-enhgencost">{loading ? "…" : cost(priced)}</span>

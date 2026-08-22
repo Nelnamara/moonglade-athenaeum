@@ -8,10 +8,20 @@ import datetime as _dt
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
-from tests.conftest import login_client
+from tests.conftest import login_client, _SEALED_DONOR
+
+# The 57-roster is sealed in the container (built from the private donor), not in source.
+# Gate ONLY the tests that assert sealed roster/skin/criteria CONTENT -- NOT the whole
+# module: the persisted-store, SQL-metric, time-capsule and badge-thumb tests below are
+# donor-independent and must keep running in public CI, or a fail-soft regression merges
+# behind a green-but-quietly-reduced check (finding #3).
+needs_donor = pytest.mark.skipif(not _SEALED_DONOR.is_file(),
+                                 reason="sealed-definitions donor (private repo) not present")
 
 
 class _FixedNoon(_dt.datetime):
@@ -71,15 +81,17 @@ def test_store_corrupt_and_unset_fail_soft(tmp_path):
 
 # ---- the 57 roster + compute post-passes ------------------------------------
 
+@needs_donor
 def test_roster_shape():
-    assert len(g.ACHIEVEMENTS) == 57
-    feats = [a for a in g.ACHIEVEMENTS if a["tier"] == "feat"]
+    assert len(g._roster()) == 57
+    feats = [a for a in g._roster() if a["tier"] == "feat"]
     assert len(feats) == 11 and all(a.get("hidden") for a in feats)
-    assert sum(1 for a in g.ACHIEVEMENTS if a.get("banner_reward")) == 1
-    assert all(a["threshold"] >= 1 for a in g.ACHIEVEMENTS)
-    assert all(a.get("roast") and a.get("roast_nsfw") for a in g.ACHIEVEMENTS)
+    assert sum(1 for a in g._roster() if a.get("banner_reward")) == 1
+    assert all(a["threshold"] >= 1 for a in g._roster())
+    assert all(a.get("roast") and a.get("roast_nsfw") for a in g._roster())
 
 
+@needs_donor
 def test_skin_changer_counts_unlocked_skins():
     out = g.compute_achievements({}, [])
     sc = [a for a in out["achievements"] if a["id"] == "skin-changer"][0]
@@ -91,9 +103,10 @@ def test_skin_changer_counts_unlocked_skins():
     assert sc["current"] == 5 and sc["earned"]
 
 
+@needs_donor
 def test_completionist_requires_every_non_feat():
     # every non-feat, non-banner achievement satisfied -> completionist earns
-    full = {a["metric"]: 10 ** 9 for a in g.ACHIEVEMENTS}
+    full = {a["metric"]: 10 ** 9 for a in g._roster()}
     out = g.compute_achievements(full, [])
     by = {a["id"]: a for a in out["achievements"]}
     assert by["completionist"]["earned"]
@@ -115,6 +128,7 @@ def _client(tmp_path, rows):
     return login_client(tmp_path), tmp_path
 
 
+@needs_donor
 def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
@@ -124,9 +138,9 @@ def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
     # (2026-08-13): the payload must not reveal how many remain undiscovered --
     # previously the array carried one hidden-feat-N entry per secret, so its
     # length counted them for anyone reading devtools
-    n_hidden = sum(1 for a in g.ACHIEVEMENTS if a.get("hidden"))
+    n_hidden = sum(1 for a in g._roster() if a.get("hidden"))
     assert n_hidden > 1                     # the collapse is genuinely collapsing
-    assert len(d["achievements"]) == len(g.ACHIEVEMENTS) - n_hidden + 1
+    assert len(d["achievements"]) == len(g._roster()) - n_hidden + 1
     hidden = [a for a in d["achievements"] if a["tier"] == "feat" and not a["earned"]]
     assert len(hidden) == 1 and hidden[0]["name"] == "???"
     # devtools must not spoil the secrets: no real id/metric on the masked card,
@@ -145,24 +159,26 @@ def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
     assert g.telemetry_metrics(out)["days_used"] == 1
 
 
+@needs_donor
 def test_points_rung_scaled_feats_zero_and_aggregates():
-    from moonglade_gallery import compute_achievements, achievement_points, ACHIEVEMENTS
-    by_id = {a["id"]: a for a in ACHIEVEMENTS}
+    from moonglade_gallery import compute_achievements, achievement_points, _roster
+    by_id = {a["id"]: a for a in _roster()}
     # the Archive (images) ladder reproduces the owner's locked example exactly
     seq = ["first-light", "archivist", "hoardsmith", "loremaster", "the-great-library"]
     assert [achievement_points(by_id[i]) for i in seq] == [5, 15, 35, 65, 70]
     # every feat scores 0 (pure flair; keeps the points total from hinting at hidden feats)
-    assert all(achievement_points(a) == 0 for a in ACHIEVEMENTS if a["tier"] == "feat")
+    assert all(achievement_points(a) == 0 for a in _roster() if a["tier"] == "feat")
     # a single-step milestone/mastery = flat tier base (rung 1)
     assert achievement_points(by_id["master-of-the-loom"]) == 25   # epic
     assert achievement_points(by_id["keeper-of-order"]) == 10       # rare
     # compute emits per-achievement points + self-consistent aggregates
     r = compute_achievements({}, seen=())
     assert all("points" in a for a in r["achievements"])
-    assert r["possible_points"] == sum(achievement_points(a) for a in ACHIEVEMENTS) == 960
+    assert r["possible_points"] == sum(achievement_points(a) for a in _roster()) == 960
     assert r["earned_points"] == sum(a["points"] for a in r["achievements"] if a["earned"])
 
 
+@needs_donor
 def test_api_masked_feats_leak_no_points(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
@@ -173,6 +189,7 @@ def test_api_masked_feats_leak_no_points(tmp_path):
     assert masked and all(a["points"] == 0 for a in masked)
 
 
+@needs_donor
 def test_earn_dates_stamped_persisted_and_no_leak(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
@@ -190,14 +207,24 @@ def test_earn_dates_stamped_persisted_and_no_leak(tmp_path):
 
 def test_badge_thumb_cache(tmp_path):
     from PIL import Image
-    bdir = tmp_path / "branding" / "badges"; bdir.mkdir(parents=True)
+    # bundle-v2: badge masters live at the CODED badges dir (built via
+    # g._role_dir, never a hardcoded hex literal)
+    bdir = g._role_dir("badges"); bdir.mkdir(parents=True)
     Image.new("RGBA", (2000, 2000), (10, 20, 30, 255)).save(bdir / "loremaster.png")
     p = g._badge_thumb(tmp_path, "loremaster", size=256)
     assert p and Path(p).exists() and max(Image.open(p).size) <= 256
     assert g._badge_thumb(tmp_path, "loremaster") == p     # cached copy reused
     assert g._badge_thumb(tmp_path, "does-not-exist") is None
+    # The cache lives OUTSIDE the coded branding tree (SCOPE_bundle-v2-branding
+    # constraint 3: the tree must keep reading as the empty scaffold), under
+    # out_dir/gallery/cache/_badges/ -- gallery/ being what every walker skips.
+    assert Path(p) == g.badge_cache_dir(tmp_path) / "loremaster.png"
+    assert Path(p).parent == tmp_path / "gallery" / "cache" / "_badges"
+    assert g.branding_root() not in Path(p).parents
+    assert not (g.branding_root() / "_thumbs").exists()
 
 
+@needs_donor
 def test_api_ach_event_beacon(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
@@ -219,6 +246,7 @@ def test_api_ach_event_beacon(tmp_path):
     assert cli.post("/api/ach-event", json={"event": "nope"}).status_code == 400
 
 
+@needs_donor
 def test_api_skin_change_bumps_interior_decorator(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
@@ -257,6 +285,7 @@ def test_time_capsule_only_fires_on_old_insert(tmp_path):
 
 # ---- per-criterion checklists (closed-universe set masteries) ----------------
 
+@needs_donor
 def test_achievement_criteria_pure():
     from moonglade_gallery import achievement_criteria
     c = achievement_criteria({"tools": ["edit", "fix"], "video_modes": ["i2v"]})
@@ -271,6 +300,7 @@ def test_achievement_criteria_pure():
     assert [x["label"] for x in c["full-toolbox"]] == ["Edit", "Enhance", "Fix"]
 
 
+@needs_donor
 def test_compute_attaches_criteria_only_with_sets():
     from moonglade_gallery import compute_achievements
     r = compute_achievements({"tools_used": 2}, sets={"tools": ["edit", "enhance"]})
@@ -283,6 +313,7 @@ def test_compute_attaches_criteria_only_with_sets():
     assert all("criteria" not in a for a in compute_achievements({"tools_used": 3})["achievements"])
 
 
+@needs_donor
 def test_api_criteria_on_set_masteries(tmp_path):
     g.telem_set_add("tools", "edit", out_dir=tmp_path)
     g.telem_set_add("tools", "fix", out_dir=tmp_path)

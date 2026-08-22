@@ -5,10 +5,19 @@ import datetime as _dt
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
-from tests.conftest import login_client
+from tests.conftest import login_client, _SEALED_DONOR
+
+# The 57-roster is sealed in the container (built from the private donor), not in source.
+# Gate ONLY the tests that assert sealed roster/skin CONTENT -- NOT the whole module: the
+# store/SQL/badge tests here are donor-independent and must keep running in public CI, or a
+# fail-soft regression merges behind a green-but-quietly-reduced check (finding #3).
+needs_donor = pytest.mark.skipif(not _SEALED_DONOR.is_file(),
+                                 reason="sealed-definitions donor (private repo) not present")
 
 
 class _FixedNoon(_dt.datetime):
@@ -29,6 +38,7 @@ def _row(**kw):
 
 # ---- pure compute -----------------------------------------------------------
 
+@needs_donor
 def test_compute_earns_by_threshold_and_flags_newly():
     m = {"images": 1200, "videos": 0, "collections": 0,
          "models": 0, "published": 0, "tagged": 0}
@@ -45,6 +55,7 @@ def test_compute_earns_by_threshold_and_flags_newly():
     assert out2["newly"] == [] and by["archivist"]["earned"] is True
 
 
+@needs_donor
 def test_ladder_achievements_carry_track_rung_and_rungs_total():
     """The Folio of Honors' ladder carousel/grid groups achievements by track and
     orders them by rung -- added 2026-07-22 for the redesign. Non-ladder
@@ -60,6 +71,7 @@ def test_ladder_achievements_carry_track_rung_and_rungs_total():
     assert "track" not in non_ladder and "rung" not in non_ladder and "rungs_total" not in non_ladder
 
 
+@needs_donor
 def test_ladders_list_matches_every_ladder_achievements_track():
     """The top-level 'ladders' list is the source of truth for track display
     names -- every ladder achievement's 'track' id must resolve to one of
@@ -73,6 +85,7 @@ def test_ladders_list_matches_every_ladder_achievements_track():
     assert achievement_tracks == ladder_ids
 
 
+@needs_donor
 def test_ladder_rungs_are_contiguous_within_each_track():
     """Each track's rungs must run 1..rungs_total with no gaps or duplicates --
     the carousel's tier-pip navigation assumes a dense, correctly-ordered
@@ -88,6 +101,7 @@ def test_ladder_rungs_are_contiguous_within_each_track():
         assert all(r["rungs_total"] == len(rows) for r in rows), track
 
 
+@needs_donor
 def test_epic_feats_unlock_skins():
     free = {s["id"] for s in g.compute_achievements({}, [])["skins"] if s["earned"]}
     assert free == {"moonglade", "nightfallen"}          # the two free skins
@@ -120,6 +134,7 @@ def test_achievement_metrics_counts(tmp_path):
 
 # ---- persisted state --------------------------------------------------------
 
+@needs_donor
 def test_state_roundtrip_and_soft_fail(tmp_path):
     assert g.load_ach_state(tmp_path) == {"seen": [], "skin": "moonglade", "earned_at": {}}
     g.save_ach_state(tmp_path, {"seen": ["a", "a", "b"], "skin": "ember",
@@ -127,12 +142,34 @@ def test_state_roundtrip_and_soft_fail(tmp_path):
     st = g.load_ach_state(tmp_path)
     assert st["seen"] == ["a", "b"] and st["skin"] == "ember"      # deduped + sorted
     assert st["earned_at"] == {"a": "2026-07-13"}                  # earn-dates round-trip
-    # an unknown skin id falls back to the default on read
+    # a stored skin id is PRESERVED on read, even if it isn't in the current
+    # _skin_ids() -- read is trust, the /api/skin write gate is what rejects a
+    # bogus/locked skin. (Coercing here would wipe an earned skin during an
+    # undressed window and persist the reset -- adversarial M1, 2026-08-22.) An
+    # id with no CSS rule just renders the default tokens, harmlessly.
     g.save_ach_state(tmp_path, {"seen": [], "skin": "not-a-skin"})
+    assert g.load_ach_state(tmp_path)["skin"] == "not-a-skin"
+    # missing / non-string / empty -> default
+    g.save_ach_state(tmp_path, {"seen": [], "skin": ""})
     assert g.load_ach_state(tmp_path)["skin"] == "moonglade"
     # corrupt file -> default, never raises
     (tmp_path / "achievements.json").write_text("{not json", encoding="utf-8")
     assert g.load_ach_state(tmp_path)["skin"] == "moonglade"
+
+
+def test_earned_skin_survives_an_undressed_window(tmp_path, monkeypatch):
+    """M1 (adversarial, 2026-08-22): while the sealed pack is downloading or briefly
+    unreadable, _skin_ids() collapses to the free skins. An earned skin the user
+    picked must NOT be coerced to the default and persisted -- that was permanent
+    loss of a cosmetic choice the art container has nothing to do with."""
+    import moonglade_gallery as g
+    monkeypatch.setattr(g, "_skin_ids", lambda: {"moonglade", "nightfallen"})  # undressed
+    g.save_ach_state(tmp_path, {"seen": [], "skin": "ember"})   # an earned skin, now unvalidatable
+    assert g.load_ach_state(tmp_path)["skin"] == "ember"        # preserved, not reset
+    # and a save triggered while undressed (e.g. the mark path) must not rewrite it
+    st = g.load_ach_state(tmp_path)
+    g.save_ach_state(tmp_path, st)
+    assert g.load_ach_state(tmp_path)["skin"] == "ember"        # still ember after the pack returns
 
 
 # ---- routes -----------------------------------------------------------------
@@ -163,6 +200,7 @@ def test_the_hall_was_renamed_the_folio_of_honors():
     assert "Trophy Hall" not in bundle
 
 
+@needs_donor
 def test_api_achievements_marks_seen_once(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
@@ -181,6 +219,7 @@ def test_api_achievements_marks_seen_once(tmp_path):
     assert "first-light" in g.load_ach_state(out)["seen"]
 
 
+@needs_donor
 def test_first_sync_gate_withholds_celebrations_until_complete(tmp_path):
     """first-light is images>=1, so without a gate it pops seconds into a fresh install's
     first sync (as images climb from 0). While the first sync is still running -- no
@@ -198,6 +237,7 @@ def test_first_sync_gate_withholds_celebrations_until_complete(tmp_path):
     assert "first-light" in d2["newly"]                         # now the earned rung fires
 
 
+@needs_donor
 def test_first_sync_gate_backfills_for_preexisting_install(tmp_path):
     """A pre-existing install (an achievement already recognized) is never gated: the flag
     backfills off prior `seen`/`earned_at`, so an established library neither suppresses nor
@@ -214,6 +254,7 @@ def test_first_sync_gate_backfills_for_preexisting_install(tmp_path):
     assert g.load_telemetry(out)["flags"].get("first_sync_done")  # gate backfilled to done
 
 
+@needs_donor
 def test_api_skin_rejects_locked_accepts_earned(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
@@ -226,3 +267,30 @@ def test_api_skin_rejects_locked_accepts_earned(tmp_path):
     assert g.load_ach_state(out)["skin"] == "nightfallen"
     # unknown skin id -> 400
     assert cli.post("/api/skin", json={"skin": "bogus"}).status_code == 400
+
+
+# ---- robustness: a malformed sealed roster must degrade, never 500 -----------
+
+def test_malformed_sealed_roster_degrades_not_500(tmp_path):
+    """A checksum-valid but MALFORMED achievements payload (valid JSON that clears the
+    dict/"roster" gate but whose roster is not a list of well-shaped entries) must NOT 500
+    the Folio -- it degrades to the empty free-skins fallback, exactly like a missing
+    container. Donor-INDEPENDENT: it packs its own bad container, so CI runs it. (Guards
+    finding: build_container validates only top-level keys, so a bad donor could ship a
+    container that opens fine but derives badly, and _sealed_defs only wrapped json.loads.)"""
+    import json as _json
+    import moonglade_container as mc
+    cpath = g._container_path()          # tmp_path/moonglade.dat via _isolated_branding
+    # "roster" is a string -> `a["id"] for a in roster` iterates characters -> TypeError.
+    for bad in (_json.dumps({"roster": "not-a-list"}).encode(),
+                _json.dumps({"roster": [{"name": "x"}]}).encode()):     # entry lacks "id"
+        mc.write_container(cpath, {"seed.txt": b"x"}, {"achievements": bad})
+        g._sealed_cache.update(path=None, mtime=None, defs=None)
+        g._container_cache.update(path=None, mtime=None, box=None)
+        defs = g._sealed_defs()                     # must fall back, not raise
+        assert defs["roster"] == [] and defs["_ach_ids"] == frozenset()
+    # and the live route serves 200 on the degraded roster, never a 500
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    cli = login_client(tmp_path)
+    assert cli.get("/api/achievements").status_code == 200

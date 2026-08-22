@@ -35,7 +35,12 @@ def _client(tmp_path):
 
 
 def _cut_fake_marks(tmp_path, ids=("mark_4", "mark_7"), ico=True):
-    mdir = tmp_path / "branding" / "marks"
+    # Seeds land in the CODED marks dir (bundle-v2 rewire): on-disk paths come
+    # from the ROLE_CODE map via g._role_dir, never a retyped hex literal --
+    # retyping the codes in tests would recreate the exact scatter the map
+    # removed. (branding_root() is tmp_path/branding under conftest's
+    # _isolated_branding, so this stays fully hermetic.)
+    mdir = g._role_dir("marks")
     mdir.mkdir(parents=True)
     for i in ids:
         (mdir / (i + ".png")).write_bytes(b"\x89PNG fake")
@@ -153,7 +158,7 @@ def test_branding_survives_corrupt_manifests(tmp_path):
     logo.png defaults -- never 500 every page via the context processor
     (_inject_branding still runs brand_context() on every rendered template;
     the React shell at /next is the surviving page that proves it)."""
-    mdir = tmp_path / "branding" / "marks"
+    mdir = g._role_dir("marks")
     mdir.mkdir(parents=True)
     (mdir / "marks.json").write_text('{"marks": ["not-a-dict", 42]}', encoding="utf-8")
     (tmp_path / "branding.json").write_text('["not", "an", "object"]', encoding="utf-8")
@@ -184,14 +189,19 @@ def test_branding_root_is_the_app_folder_not_the_library(tmp_path):
     looking. Nobody hit it because only one library has ever existed, which is exactly why it
     needs a test rather than a memory.
 
+    Since the bundle-v2 rewire the folder itself carries the coded goods name
+    (g._GOODS_ROOT_NAME, asserted through the module so the test can never
+    drift from the map) -- but the LOCATION contract this test pins is
+    unchanged: the app dir, never the library.
+
     Deliberately calls the CAPTURED resolver: conftest redirects the module attribute to tmp_path
     for every other test, so asserting through the module here would only re-test the fixture."""
     root = _REAL_BRANDING_ROOT()
     app_dir = pathlib.Path(g.__file__).resolve().parent
 
-    assert root == app_dir / "branding"
+    assert root == app_dir / g._GOODS_ROOT_NAME
     # The point of the move: it does NOT live under any library, including this test's.
-    assert tmp_path not in root.parents and root != tmp_path / "branding"
+    assert tmp_path not in root.parents and root != tmp_path / g._GOODS_ROOT_NAME
     # It takes no arguments at all, so there is no library value that could steer it.
     assert _REAL_BRANDING_ROOT.__code__.co_argcount == 0
 
@@ -248,12 +258,14 @@ def test_branding_slot_upload_becomes_active(tmp_path):
     item = d["item"]
     # uploads start at the neutral transform (the DC's own slider defaults)
     assert (item["zoom"], item["cropX"], item["cropY"]) == (100, 50, 50)
+    # the PUBLIC URL keeps the role vocabulary (bundle-v2: the /branding/ route
+    # translates to the coded tree internally, the browser never sees a code)
     assert item["png"] == "/branding/banner_main/%s.png" % item["id"]
     assert d["assets"] == [item]
     # really on disk as a real PNG, re-encoded through Pillow regardless of the
-    # upload's own (wrong) extension/content-type
+    # upload's own (wrong) extension/content-type -- stored in the CODED slot dir
     from PIL import Image
-    png_path = tmp_path / "branding" / "banner_main" / (item["id"] + ".png")
+    png_path = g._role_dir("banner_main") / (item["id"] + ".png")
     assert png_path.exists()
     with Image.open(png_path) as im:
         assert im.format == "PNG"
@@ -335,7 +347,7 @@ def test_branding_slots_survive_corrupt_manifest(tmp_path):
     """A hand-edited/corrupt <slot>/manifest.json or branding_slots.json must
     degrade to empty/None, never a 500 -- the same contract
     test_branding_survives_corrupt_manifests already pins for marks.json."""
-    sdir = tmp_path / "branding" / "banner_main"
+    sdir = g._role_dir("banner_main")
     sdir.mkdir(parents=True)
     (sdir / "manifest.json").write_text('{"items": ["not-a-dict", 42]}', encoding="utf-8")
     (tmp_path / "branding_slots.json").write_text('["not", "an", "object"]', encoding="utf-8")
@@ -352,30 +364,49 @@ def test_branding_slots_survive_corrupt_manifest(tmp_path):
 # which sits behind the very unlock this earns.
 # ---------------------------------------------------------------------------
 
-def test_discovery_tree_creates_empty_slot_folders_and_one_readme(tmp_path):
+def test_discovery_tree_creates_empty_slot_folders_and_one_readme(tmp_path, monkeypatch):
     cli = _client(tmp_path)          # create_app() calls ensure_branding_discovery_tree()
-    root = tmp_path / "branding"
-    for slot in ("banner_main", "banner_login", "mascots", "rewards", "marks"):
-        assert (root / slot).is_dir()
-        assert list((root / slot).iterdir()) == []   # empty -- nothing to find yet
-    assert (root / "README.txt").read_text(encoding="utf-8") == g._BRANDING_README
+    # The scaffold is the CODED tree now (bundle-v2): the same six discovery
+    # roles as before, their folders derived from the ROLE_CODE map -- a
+    # tinkerer finds codes on disk, never role names.
+    for slot in ("banner_main", "banner_login", "banner_loom",
+                 "mascots", "rewards", "marks"):
+        d = g._role_dir(slot)
+        assert d.is_dir()
+        assert list(d.iterdir()) == []   # empty -- nothing to find yet
+    # The one breadcrumb now lives at the GONK spot inside the coded tree...
+    crumb = tmp_path / "branding" / g._role_rel("breadcrumb", "README.txt")
+    assert crumb.is_file()
+    # ...and the old root-level README is NO LONGER written.
+    assert not (tmp_path / "branding" / "README.txt").exists()
+    # Container-less install: the breadcrumb text degrades to the public
+    # one-liner (the real cryptic content is a sealed asset -- spoiler hygiene
+    # keeps it out of source, so the fallback is the only text pin possible).
+    monkeypatch.setattr(g, "branding_root", lambda: tmp_path / "fresh" / "branding")
+    g.ensure_branding_discovery_tree()
+    crumb2 = tmp_path / "fresh" / "branding" / g._role_rel("breadcrumb", "README.txt")
+    assert crumb2.read_text(encoding="utf-8") == g._BRANDING_README
 
 
 def test_discovery_tree_never_overwrites_real_content(tmp_path):
     """Idempotent: a real install's existing README/art must survive every
     server start, not just the first one."""
-    root = tmp_path / "branding" / "marks"
-    root.mkdir(parents=True)
-    (tmp_path / "branding" / "README.txt").write_text("owner's own note", encoding="utf-8")
-    (root / "mark_4.png").write_bytes(_png_bytes())
+    mdir = g._role_dir("marks")
+    mdir.mkdir(parents=True)
+    crumb = tmp_path / "branding" / g._role_rel("breadcrumb", "README.txt")
+    crumb.parent.mkdir(parents=True)
+    crumb.write_text("owner's own note", encoding="utf-8")
+    (mdir / "mark_4.png").write_bytes(_png_bytes())
     g.ensure_branding_discovery_tree()
-    assert (tmp_path / "branding" / "README.txt").read_text(encoding="utf-8") == "owner's own note"
-    assert (root / "mark_4.png").exists()
+    assert crumb.read_text(encoding="utf-8") == "owner's own note"
+    assert (mdir / "mark_4.png").exists()
 
 
-def test_dropped_file_in_a_new_slot_is_adopted_and_earns_the_achievement(tmp_path):
+def test_dropped_file_in_a_new_slot_is_adopted_and_earns_the_achievement(tmp_path, sealed_donor_present):
     cli = _client(tmp_path)
-    (tmp_path / "branding" / "banner_login" / "my_art.png").write_bytes(_png_bytes())
+    # The drop lands in the CODED slot folder -- that's the tree a tinkerer
+    # actually finds on disk now, and the tree the sweep scans.
+    (g._role_dir("banner_login") / "my_art.png").write_bytes(_png_bytes())
 
     d = cli.get("/api/achievements").get_json()
     uth = next(a for a in d["achievements"] if a["id"] == "under-the-hood")
@@ -385,8 +416,8 @@ def test_dropped_file_in_a_new_slot_is_adopted_and_earns_the_achievement(tmp_pat
     assert len(slot["assets"]) == 1
     assert slot["active"] == slot["assets"][0]["id"]
     # the raw drop is consumed, not left sitting alongside the adopted copy
-    assert not (tmp_path / "branding" / "banner_login" / "my_art.png").exists()
-    assert (tmp_path / "branding" / "banner_login" / (slot["assets"][0]["id"] + ".png")).exists()
+    assert not (g._role_dir("banner_login") / "my_art.png").exists()
+    assert (g._role_dir("banner_login") / (slot["assets"][0]["id"] + ".png")).exists()
 
 
 def test_dropped_jpeg_is_re_encoded_to_real_png(tmp_path):
@@ -397,10 +428,10 @@ def test_dropped_jpeg_is_re_encoded_to_real_png(tmp_path):
     buf = io.BytesIO()
     Image.new("RGB", (4, 4), (5, 5, 5)).save(buf, format="JPEG")
     cli = _client(tmp_path)
-    (tmp_path / "branding" / "banner_main" / "photo.jpg").write_bytes(buf.getvalue())
+    (g._role_dir("banner_main") / "photo.jpg").write_bytes(buf.getvalue())
     d = cli.get("/api/branding").get_json()["slots"]["banner_main"]
     assert len(d["assets"]) == 1
-    with Image.open(tmp_path / "branding" / "banner_main" / (d["assets"][0]["id"] + ".png")) as im:
+    with Image.open(g._role_dir("banner_main") / (d["assets"][0]["id"] + ".png")) as im:
         assert im.format == "PNG"
 
 
@@ -416,8 +447,10 @@ def test_dropped_jpeg_is_re_encoded_to_real_png(tmp_path):
 
 def test_sweep_never_touches_mascots_or_rewards(tmp_path):
     cli = _client(tmp_path)
-    real_mascot = tmp_path / "branding" / "mascots" / "gen_nel.png"
-    real_reward = tmp_path / "branding" / "rewards" / "claim.png"
+    # The real role-bound files live in the CODED mascots/rewards dirs now --
+    # the never-swept property has to hold exactly where the sweep would look.
+    real_mascot = g._role_dir("mascots") / "gen_nel.png"
+    real_reward = g._role_dir("rewards") / "claim.png"
     real_mascot.write_bytes(_png_bytes())
     real_reward.write_bytes(_png_bytes())
 
@@ -442,11 +475,11 @@ def test_sweep_never_touches_mascots_or_rewards(tmp_path):
 
 def test_dropped_file_in_marks_registers_a_real_mark_and_activates_it(tmp_path):
     cli = _client(tmp_path)
-    (tmp_path / "branding" / "marks" / "my_custom_mark.png").write_bytes(_png_bytes())
+    (g._role_dir("marks") / "my_custom_mark.png").write_bytes(_png_bytes())
     d = cli.get("/api/branding").get_json()
     assert d["mark"] == "my_custom_mark"       # underscores pass the sanitizer unchanged
     assert {m["id"] for m in d["marks"]} == {"my_custom_mark"}
-    assert (tmp_path / "branding" / "marks" / "my_custom_mark.png").exists()
+    assert (g._role_dir("marks") / "my_custom_mark.png").exists()
 
 
 def test_dropped_mark_id_collision_gets_a_random_suffix(tmp_path):
@@ -457,7 +490,7 @@ def test_dropped_mark_id_collision_gets_a_random_suffix(tmp_path):
     # variant ("Logo.png"): Windows/NTFS treats that as the SAME on-disk file as
     # the existing marks/logo.png and silently overwrites it before the sweep
     # ever runs, which would test a filesystem quirk instead of the code.
-    (tmp_path / "branding" / "marks" / "logo!!.png").write_bytes(_png_bytes())
+    (g._role_dir("marks") / "logo!!.png").write_bytes(_png_bytes())
     marks = cli.get("/api/branding").get_json()["marks"]
     ids = {m["id"] for m in marks}
     assert "logo" in ids            # the original, untouched
@@ -466,17 +499,17 @@ def test_dropped_mark_id_collision_gets_a_random_suffix(tmp_path):
 
 def test_non_image_drop_is_left_alone_not_crashed_on_or_adopted(tmp_path):
     cli = _client(tmp_path)
-    (tmp_path / "branding" / "banner_main" / "notes.txt").write_text("todo: draw something", encoding="utf-8")
+    (g._role_dir("banner_main") / "notes.txt").write_text("todo: draw something", encoding="utf-8")
     r = cli.get("/api/achievements")
     assert r.status_code == 200      # a garbage drop must never 500 the achievements fetch
-    assert (tmp_path / "branding" / "banner_main" / "notes.txt").exists()  # left alone, not eaten
+    assert (g._role_dir("banner_main") / "notes.txt").exists()  # left alone, not eaten
     slot = cli.get("/api/branding").get_json()["slots"]["banner_main"]
     assert slot["assets"] == []
 
 
 def test_repeated_sweeps_do_not_re_adopt(tmp_path):
     cli = _client(tmp_path)
-    (tmp_path / "branding" / "banner_main" / "a.png").write_bytes(_png_bytes())
+    (g._role_dir("banner_main") / "a.png").write_bytes(_png_bytes())
     cli.get("/api/achievements")
     cli.get("/api/achievements")
     cli.get("/api/achievements")
@@ -628,8 +661,9 @@ def test_branding_slot_from_gallery_sources_by_media_id(tmp_path):
                  content_type="multipart/form-data")
     assert r.status_code == 200
     item = r.get_json()["item"]
-    assert (tmp_path / "branding" / "banner_main" / (item["id"] + ".png")).exists()
-    assert (tmp_path / "branding" / "banner.png").exists()   # write-through fired too
+    assert (g._role_dir("banner_main") / (item["id"] + ".png")).exists()
+    # the write-through flat stays a top-level loose file at the coded root
+    assert (tmp_path / "branding" / "banner.png").exists()
     r = cli.post("/api/branding/slot", data={"slot": "banner_main", "media_id": "nope404"},
                  content_type="multipart/form-data")
     assert r.status_code == 400
@@ -641,7 +675,7 @@ def test_legacy_crop_manifest_migrates_to_transform(tmp_path):
     keep displaying unchanged until re-tuned."""
     import json as _json
     import moonglade_gallery as g
-    sdir = tmp_path / "branding" / "banner_main"
+    sdir = g._role_dir("banner_main")
     sdir.mkdir(parents=True)
     (sdir / "abcd1234.png").write_bytes(_png_bytes())
     (sdir / "manifest.json").write_text(
@@ -685,7 +719,7 @@ def test_add_custom_mark_writes_manifest_and_becomes_active(tmp_path):
     mark = g.add_custom_mark(tmp_path, _png_bytes(), label="My mark")
     assert mark["kind"] == "upload" and mark["label"] == "My mark"
     from PIL import Image
-    png = tmp_path / "branding" / "marks" / (mark["id"] + ".png")
+    png = g._role_dir("marks") / (mark["id"] + ".png")
     assert png.exists()
     with Image.open(png) as im:
         assert im.format == "PNG"
@@ -701,7 +735,7 @@ def test_add_custom_mark_replaces_not_accumulates(tmp_path):
     second = g.add_custom_mark(tmp_path, _png_bytes((2, 2, 2)))
     marks = g.list_marks(tmp_path)
     assert {m["id"] for m in marks} == {second["id"]}
-    assert not (tmp_path / "branding" / "marks" / (first["id"] + ".png")).exists()
+    assert not (g._role_dir("marks") / (first["id"] + ".png")).exists()
     assert g.load_branding(tmp_path)["mark"] == second["id"]
 
 
@@ -709,7 +743,7 @@ def test_remove_custom_mark_reverts_active_mark_to_logo(tmp_path):
     mark = g.add_custom_mark(tmp_path, _png_bytes())
     assert g.remove_custom_mark(tmp_path, mark["id"]) is True
     assert g.list_marks(tmp_path) == []
-    assert not (tmp_path / "branding" / "marks" / (mark["id"] + ".png")).exists()
+    assert not (g._role_dir("marks") / (mark["id"] + ".png")).exists()
     assert g.load_branding(tmp_path)["mark"] == "logo"
 
 

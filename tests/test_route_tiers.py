@@ -219,6 +219,10 @@ ROUTE_TIERS = {
     # The Bridge Enhance preset list + LIVE per-preset cost (price + free-card). Read-only,
     # owner's key, spends nothing -- same tier as api_workflows below and the other read-only feeds.
     ("api_enhance_presets", "GET"): LOGIN,
+    # The Change-Emotion picker options (staged emotion-role art, served under the public
+    # /branding/bridge/emotion/ URLs). Read-only, spends nothing -- LOGIN like the rest of
+    # the Enhance surface.
+    ("api_enhance_emotions", "GET"): LOGIN,
     # The Bridge AI-Tools scene catalog (browse) + scene submit (generate). GET is read-only;
     # POST spends. LOGIN like the Enhance pair -- the panelplugin-style safety (never on the API
     # key) is each route's own mirror gate, not a URL-tier question.
@@ -331,11 +335,12 @@ ROUTE_TIERS = {
     ("api_snippets", "POST"): LOGIN,
     ("api_branding", "GET"): LOGIN,
     ("api_branding", "POST"): LOGIN,
-    # Branding-tab slot uploads (banner_main/banner_login/mascots/rewards,
-    # 2026-08-05) -- same trust level as api_branding just above: cosmetic app
-    # data written into branding/, not config.json, not a host-filesystem
-    # action outside that tree (unlike api_branding_shortcut, which stays
-    # LOCALHOST for shelling out to PowerShell/COM).
+    # Branding-tab slot uploads (banner_main/banner_login/banner_loom since the
+    # 2026-08-13 unlock split; originally 2026-08-05) -- same trust level as
+    # api_branding just above: cosmetic app data written into the branding tree
+    # under branding_root(), not config.json, not a host-filesystem action
+    # outside that tree (unlike api_branding_shortcut, which stays LOCALHOST
+    # for shelling out to PowerShell/COM).
     ("api_branding_slot_upload", "POST"): LOGIN,
     ("api_branding_slot_crop", "POST"): LOGIN,
     ("api_branding_slot_active", "POST"): LOGIN,
@@ -344,6 +349,13 @@ ROUTE_TIERS = {
     # achievement-earned check (see api_branding_mark_custom's docstring).
     ("api_branding_mark_custom", "POST"): LOGIN,
     ("api_branding_mark_custom_remove", "POST"): LOGIN,
+    # Earned-banner pick (the-great-library reward, bundle-v2 2026-08-21) --
+    # LOGIN, mirroring api_branding_mark_custom above: GET lists the picks
+    # (read-only, and the png URL it returns is itself seal-gated by the
+    # /branding/ route), POST's real protection is its own server-side
+    # achievement-earned check (403 until the-great-library is earned).
+    ("api_branding_banners_earned", "GET"): LOGIN,
+    ("api_branding_banner_earned", "POST"): LOGIN,
     ("api_skin", "POST"): LOGIN,
     ("api_ach_event", "POST"): LOGIN,
     # api_users_remove is LOGIN, not LOCALHOST, because it is genuinely reachable

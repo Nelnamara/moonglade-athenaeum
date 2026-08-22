@@ -3,7 +3,7 @@ year dropdowns, and per-page (via query_catalog)."""
 import pytest
 
 from moonglade_gallery import (CATALOG_FIELDS, init_db, save_catalog, query_catalog,
-                           catalog_years, _like_pattern, collection_health)
+                           catalog_years, _like_pattern, collection_health, _role_dir)
 
 
 def _row(**kw):
@@ -192,9 +192,13 @@ def test_collection_health_counts_and_missing(tmp_path):
 
 
 def test_collection_health_excludes_deleted_and_branding(tmp_path):
-    # _deleted/ (purge_media_local's recoverable trash) and branding/ (UI art assets,
-    # not user content) both used to be tallied into "Images on disk", inflating it far
-    # past the Panel's catalog-row count — see the Health-vs-Panel discrepancy fix.
+    # _deleted/ (purge_media_local's recoverable trash) and the branding tree (UI art
+    # assets, not user content) both used to be tallied into "Images on disk", inflating
+    # it far past the Panel's catalog-row count — see the Health-vs-Panel discrepancy fix.
+    # Re-pinned for bundle-v2: marks now live in their CODED dir (seeded via _role_dir,
+    # never a retyped hex path). collection_health prunes the literal out_dir/"branding"
+    # (kept for legacy installs), which covers the coded tree here because conftest's
+    # _isolated_branding redirects branding_root() to tmp_path/"branding".
     db = tmp_path / "catalog.db"
     save_catalog(db, [
         _row(media_id="111", filename="111.webp", created_at="2024-03-01", model_name="ModelA"),
@@ -203,8 +207,8 @@ def test_collection_health_excludes_deleted_and_branding(tmp_path):
     (tmp_path / "2024-03" / "111.webp").write_bytes(b"data")
     (tmp_path / "_deleted").mkdir()
     (tmp_path / "_deleted" / "999.webp").write_bytes(b"data")
-    (tmp_path / "branding" / "marks").mkdir(parents=True)
-    (tmp_path / "branding" / "marks" / "logo.png").write_bytes(b"data")
+    _role_dir("marks").mkdir(parents=True)
+    (_role_dir("marks") / "logo.png").write_bytes(b"data")
     h = collection_health(tmp_path, db)
     assert h["total_files"] == 1   # only the real, non-deleted, non-branding image counts
 

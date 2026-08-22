@@ -7025,7 +7025,7 @@ def build_panelplugin_parameters(media_id, workflow_id="", *, workflow_name="",
 BRIDGE_ENHANCE_PRESETS = (
     {"key": "handfix",     "label": "Handfix",           "workflow_name": "mymusise/hand-fix:v1"},
     {"key": "face",        "label": "Face Enhance",      "workflow_name": "kyo/face-detailer:v4.0"},
-    {"key": "emotion",     "label": "Change Emotion",    "workflow_name": "kyo/emotionlab",
+    {"key": "emotion",     "label": "Change Emotion",    "workflow_name": "kyo/emotionlab:633acbbb",
      "has_control": True},
     {"key": "bg_remove",   "label": "Background Remover", "workflow_name": "mymusise/39a2c67c:unet-0.1.3.2"},
     {"key": "line_art",    "label": "Convert to Line Art",
@@ -7033,6 +7033,81 @@ BRIDGE_ENHANCE_PRESETS = (
     {"key": "sketch_color", "label": "Sketch Coloring",
      "workflow_name": "pixai-official/sketch-coloring-workflow:d40e38f8"},
 )
+
+# Change Emotion is the one preset with a control (has_control): the user picks a target
+# expression. The workflow_name is derived from the preset row so it can't drift.
+ENHANCE_EMOTION_WORKFLOW = next(
+    p["workflow_name"] for p in BRIDGE_ENHANCE_PRESETS if p["key"] == "emotion")
+# The panelplugin input key emotionlab reads the chosen expression from is `prompt`, and the
+# value is a danbooru TAG STRING (NOT the option key). DISPATCH-PROVEN 2026-08-20 against three
+# completed website submits recovered via getTaskById (--dump-params): the real submit is
+#   inputs.prompt = "<tag string>"   e.g. Upset -> "sad, crying", Aroused -> "sexy, steam,
+#   half-closed eyes, torogao, heavy breathing"   addressed by workflowName kyo/emotionlab:633acbbb.
+# The prior `inputs.emotion = <filename stem>` wiring was wrong on all three axes (arg name, value,
+# AND a versionless workflow address) -- which is why every earlier API attempt charged 2000
+# credits and never applied an expression (the "dispatch-verify" note it was built on read a FAILED
+# job's acceptance as proof). Source of truth for the option->tag map and the workflow version is
+# PixAI's PUBLIC config: GET https://api.pixai.art/config/constants -> imageEnhancementPlugins ->
+# emotion (workflowName/workflowVersion, and args.prompt.options[].value keyed by the
+# options.<key> i18n label path). Re-pull that endpoint to refresh if PixAI edits the set.
+ENHANCE_EMOTION_ARG = "prompt"
+
+# option key (the staged branding/bridge/emotion/<key> filename stem, i.e. the value the picker
+# sends up) -> the danbooru tag string emotionlab's `prompt` arg expects. Captured verbatim from
+# config/constants imageEnhancementPlugins.emotion (2026-08-20). An unknown key falls back to
+# itself at the route, so a custom-staged expression still submits *something* rather than erroring.
+ENHANCE_EMOTION_PROMPTS = {
+    "happy": "smile",
+    "upset": "sad, crying",
+    "mad": "angry, annoyed, angry symbol",
+    "smug": "smug, laughing, smirk, grin",
+    "laughing": "closed eyes, laughing, open mouth",
+    "playful": ";d, open mouth",
+    "sassy": ":q",
+    "sympathy": "sad smile",
+    "cute": ":3",
+    "moved": "smile crying",
+    "afraid": "constricted pupils, scared, trembling, open mouth, wavy mouth, tearing up",
+    "shocked": "surprised, :o, \U0001f626, constricted pupils",
+    "pumped": "excited, happy, :d, sparkling eyes",
+    "awkward": "nervous, sweat, v-shaped eyebrows, frown, open mouth, wavy mouth",
+    "confused": "@ @, trembling, confused, misunderstanding, puzzle",
+    "nervous": "full-face blush, looking to the side, sideways glance, half-closed eyes",
+    "sickened": "grimace, gloom (expression), embarrassed, dark persona, jitome",
+    "speechless": "depressed, sanpaku, jitome, looking to the side, sideways glance, ",
+    "annoyed": "scowl, >:(, v-shaped eyebrows",
+    "aroused": "sexy, steam, half-closed eyes, torogao, heavy breathing",
+    "shy": "open mouth, wavy mouth, full-face blush, v-shaped eyebrows",
+    "affection": "heart-shaped eyes, smile",
+    "focused": "v-shaped eyebrows, frown, looking to the side, sideways glance, half-closed eyes",
+    "naughty": "fang, tongue out, half-closed eyes",
+    "amazed": "+ +, open mouth, mouth drool",
+    "stunned": "wide-eyed",
+    "aggrieved": ">_<",
+    "doubt": ";o",
+    "pouting": ":t [ :T ]",
+    "glasgow-smile": "glasgow smile",
+    "mania": "crazy smile",
+    "impatience": "rolling eyes",
+    "nosebleed": "nosebleed",
+    "scowl": "grimace",
+    "blush-stickers": "blush stickers",
+}
+
+# The 25 (of 35) emotions PixAI marks membership-gated (config/constants -> ...emotion.args.prompt
+# .options[].membership == True); the other 10 are free. A gated pick on a non-member account is
+# REJECTED by PixAI -- but a rejected panelplugin job refunds its credits at the ~60-min reap, so
+# this is a picker HINT (badge the tile), not a submit block. The owner's account carries a
+# membership, so all 35 dispatch for them; the flag exists so the surface stays honest if that lapses.
+ENHANCE_EMOTION_MEMBERSHIP = frozenset({
+    "afraid", "shocked", "pumped", "awkward",
+    "confused", "nervous", "sickened", "speechless",
+    "annoyed", "aroused", "shy", "affection",
+    "focused", "naughty", "amazed", "stunned",
+    "aggrieved", "doubt", "pouting", "glasgow-smile",
+    "mania", "impatience", "nosebleed", "scowl",
+    "blush-stickers",
+})
 
 
 # The CLI --enhance command stays gone -- both halves of it. Only the WEB /api/enhance route
@@ -7746,7 +7821,7 @@ def run_generate(args):
             print("  The clip is still on PixAI and costs nothing to re-fetch: "
                   "`--generate-video --task-id {}`".format(task_id))
 
-    # Against the Void: a stranded task pulled back by id. Counted once per RECOVERY, whatever
+    # A hidden recovery feat: a stranded task pulled back by id. Counted once per RECOVERY, whatever
     # kind of output it turned out to hold -- this used to live inside `if rows:`, so a
     # video-only task (rows is empty by construction for one) recovered nothing as far as the
     # ledger was concerned, and the achievement that exists to reward exactly that rescue
@@ -11472,9 +11547,15 @@ def run_backfill_phash(args):
 
 
 def _check_time_capsule(created_at, out_dir):
-    """Time Capsule feat: a NEWLY-downloaded piece created >2 years ago. Fires
+    """A hidden anniversary feat: fires when a NEWLY-downloaded piece is old enough,
     only on the download event, never on a full-catalog rescan (old rows already
-    on disk must not earn it). Fail-soft; never slows the download loop."""
+    on disk must not earn it). Fail-soft; never slows the download loop.
+
+    The feat's NAME, roast, criteria label and points are sealed in the container. The
+    trigger's comparison constant (below) and its flag name are NOT -- they run in the
+    public download loop with no container, so they are an accepted, un-sealable residual
+    plaintext leak (recorded as such in the sealing definition-of-done). Do not describe
+    them as sealed; the spoiler-leak guard can't catch a bare integer either."""
     try:
         from datetime import datetime
         s = str(created_at or "")[:19]

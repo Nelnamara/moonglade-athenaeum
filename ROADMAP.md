@@ -21,7 +21,7 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   all achievement / feat / ladder **definitions**, spoiler strings, and spoiler art into the sealed
   container, leaving only opaque ids + metric keys public. Per the red-team sequencing this runs
   **with** the ladder-rung redefinition + 57→60 roster growth, and it **absorbs the earned-rewards
-  item** below. Owner prereqs in progress: `branding/` folder cleared, Under-the-Hood nearly ready,
+  item** below. Owner prereqs in progress: `branding/` folder cleared, the hidden branding surface nearly ready,
   and the enhance-picker preset/scene thumbnails still to be added to the bundle. Scope underway
   (full codebase sweep of every achievement/feat/spoiler surface + the container mechanism).
 
@@ -55,7 +55,34 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 - **Marks render too small, everywhere they appear** *(scope + workshop the right size — owner, 2026-08-19)*
   A recurring, real sizing defect ("song as old as time"), long deprioritised as cosmetic. The header
   is the worst example. Owner call: **workshop it and settle the right size**, then apply everywhere
-  marks appear — don't spot-fix one surface.
+  marks appear — don't spot-fix one surface. **Same workshop, added 2026-08-22:** the mark
+  *animations* — the 16 picks in the Branding tab save but nothing applies them since the 3.0 header,
+  and the header draws an accent tile + "M" behind alpha marks ([#24](https://github.com/Nelnamara/moonglade-athenaeum/issues/24)).
+  Owner: "many if not all look janky now — workshop fixes or new ones", so this is a design pass
+  (which animations survive, which are new, what the mark sits on), not a port of the classic CSS.
+
+- **Login page: render the Banner — login slot, restore the welcome hold** ([#25](https://github.com/Nelnamara/moonglade-athenaeum/issues/25))
+  The Branding tab sells three banner slots; since the 3.0 React login nothing draws the login one
+  (the card shows the header mark instead), and the designed welcome hold was removed for a test
+  expectation, so the login mascot barely plays. The hold is a small fix; the banner needs a design
+  call first (`Login.dc.html` has no banner element). Separate from the bundle-v2 merge.
+
+- **Let LAN clients trigger the asset-pack download** ([adversarial review, 2026-08-22]) *(fast-follow, own branch)*
+  The default-art pack (`moonglade.dat`) auto-downloads on the **server** machine's first launch after an
+  update (the Setup Wizard checks `/api/assets/status` and starts the fetch itself). But `/api/assets/fetch`
+  is **localhost-only**, so a LAN device that opens the app *before* the server ever did can't kick off the
+  download — it has to be done from the server. Owner: it's a vital package function; allow LAN clients to
+  trigger it. Low-risk (the route pulls one fixed, sha-verified, pinned Release asset to one known path,
+  single-flight), but it's a **security-tier change** (`api_assets_fetch` LOCALHOST → LOGIN) so it gets its
+  own tiny branch + sanity check: `tests/test_route_tiers.py:113`, the route's `_is_local_request` guard, the
+  wizard calling it on a non-local device, and a confirm that repeat 685 MB fetches can't be weaponised
+  (single-flight already blocks concurrency). Not bolted onto the bundle-v2 merge.
+
+- **Reward icons: the claim chip lost its icon in the React port; no claimable-reward notice in the activity tracker** ([#26](https://github.com/Nelnamara/moonglade-athenaeum/issues/26))
+  The claim ribbon icon belongs on the "+N claim" chip beside the credits (classic drew it), on the
+  toast when credits become claimable, and on an activity-tracker notice that doesn't exist yet; the
+  gift icon belongs on achievement reward lines and future promo gifts (card claims unwired). Chip
+  icon = small; notice + promos = design step. Separate from the bundle-v2 merge.
 
 - **Real generation progress — build the honest "starts in ~N" from the wait estimate** *(owner call, 2026-08-19)*
   PixAI does **not** expose true render progress. It once showed the image taking shape (a blurred
@@ -140,6 +167,13 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   only when a real second provider actually lands (so two concrete cases shape it). Low priority.
 - **Themed progress bar art.** A moon-phase gauge (near-finished art already banked) for
   generation/render/job progress. Decided in principle, unbuilt.
+- **Give the asset pack a real file type.** In Explorer `moonglade.dat` shows a blank Type column and
+  a generic icon (owner nitpick, 2026-08-22). `.dat` is too generic to claim system-wide, so the clean
+  fix is an app-specific extension (`.mgpack` or similar) plus a ProgID the app registers for the
+  current user on first run / from the launcher-shortcut path (friendly name "Moonglade asset pack",
+  the app icon) — the same per-user registry spot the Desktop-shortcut code already writes. Touches the
+  manifest/downloader file name, `_container_path()`, the builder's default `--out`, and the Release
+  asset name, so it rides a pack rebuild, not a point release. Cosmetic; low priority.
 - **Real unlock SFX.** The loader ships and falls back to a synth chime; the actual sound assets are
   still to be sourced/added.
 - **BlurHash grid placeholders.** A `blurhash` column is stored but there's no front-end decoder /

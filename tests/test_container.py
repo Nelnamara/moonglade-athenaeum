@@ -24,19 +24,23 @@ PNG_1PX = bytes.fromhex(
 
 
 def _build(tmp_path, assets=None, payloads=None):
-    """A container in the isolated app root (branding_root().parent)."""
+    """A container in the isolated app root (branding_root().parent). Keys are
+    CODED rels built from the ROLE_CODE map (bundle-v2: loose disk path ==
+    container key == coded rel, always); only the rendered banner FLAT stays a
+    bare top-level name. Never hardcode the hex here -- that recreates the
+    scatter the map removed."""
     box_path = g._container_path()
     default_assets = {
-        "marks/marks.json": json.dumps(
+        g._role_rel("marks", "marks.json"): json.dumps(
             {"marks": [{"id": "mark_4", "label": "Crescent", "kind": "tile"},
                        {"id": "mark_7", "label": "Tile Seven", "kind": "tile"}]}).encode(),
-        "marks/mark_4.png": PNG_1PX,
-        "marks/mark_7.png": PNG_1PX,
+        g._role_rel("marks", "mark_4.png"): PNG_1PX,
+        g._role_rel("marks", "mark_7.png"): PNG_1PX,
         "banner.png": PNG_1PX,
-        "badges/first-light.png": PNG_1PX,
-        "banner_main/manifest.json": json.dumps(
+        g._role_rel("badges", "first-light.png"): PNG_1PX,
+        g._role_rel("banner_main", "manifest.json"): json.dumps(
             {"items": [{"id": "deadbeef", "zoom": 100, "cropX": 50, "cropY": 50}]}).encode(),
-        "banner_main/deadbeef.png": PNG_1PX,
+        g._role_rel("banner_main", "deadbeef.png"): PNG_1PX,
     }
     mc.write_container(box_path,
                        assets if assets is not None else default_assets,
@@ -107,22 +111,22 @@ def test_deterministic_build(tmp_path):
 # ---------------------------------------------------------------------------
 def test_container_answers_when_no_loose_file_exists(tmp_path):
     _build(tmp_path)
-    assert not (g.branding_root() / "marks" / "mark_4.png").exists()
-    assert g._branding_exists("marks/mark_4.png")
-    assert g._branding_bytes("marks/mark_4.png") == PNG_1PX
+    assert not (g._role_dir("marks") / "mark_4.png").exists()
+    assert g._branding_exists(g._role_rel("marks", "mark_4.png"))
+    assert g._branding_bytes(g._role_rel("marks", "mark_4.png")) == PNG_1PX
 
 
 def test_loose_file_always_wins(tmp_path):
     _build(tmp_path)
-    loose = g.branding_root() / "marks" / "mark_4.png"
+    loose = g._role_dir("marks") / "mark_4.png"
     loose.parent.mkdir(parents=True, exist_ok=True)
     loose.write_bytes(b"LOOSE WINS")
-    assert g._branding_bytes("marks/mark_4.png") == b"LOOSE WINS"
+    assert g._branding_bytes(g._role_rel("marks", "mark_4.png")) == b"LOOSE WINS"
 
 
 def test_no_container_no_loose_means_absent(tmp_path):
-    assert g._branding_bytes("marks/mark_4.png") is None
-    assert not g._branding_exists("marks/mark_4.png")
+    assert g._branding_bytes(g._role_rel("marks", "mark_4.png")) is None
+    assert not g._branding_exists(g._role_rel("marks", "mark_4.png"))
 
 
 def test_container_swap_is_picked_up_without_restart(tmp_path):
@@ -170,9 +174,9 @@ def test_write_banner_flat_renders_a_container_sourced_active_asset(tmp_path):
     buf = io.BytesIO()
     Image.new("RGB", (400, 100), (90, 60, 140)).save(buf, format="PNG")
     _build(tmp_path, assets={
-        "banner_main/manifest.json": json.dumps(
+        g._role_rel("banner_main", "manifest.json"): json.dumps(
             {"items": [{"id": "deadbeef", "zoom": 100, "cropX": 50, "cropY": 50}]}).encode(),
-        "banner_main/deadbeef.png": buf.getvalue(),
+        g._role_rel("banner_main", "deadbeef.png"): buf.getvalue(),
     })
     assert g._write_banner_flat(tmp_path, "banner_main") is True
     assert (g.branding_root() / "banner.png").is_file(), (
@@ -198,7 +202,7 @@ def test_a_real_loose_mark_still_earns_the_discovery_flag(tmp_path):
     """...and the guard must not overcorrect: an actual on-disk mark (manifest
     entry + loose png) still fires the flag exactly as before."""
     _build(tmp_path)
-    mdir = g.branding_root() / "marks"
+    mdir = g._role_dir("marks")
     mdir.mkdir(parents=True, exist_ok=True)
     (mdir / "marks.json").write_text(json.dumps(
         {"marks": [{"id": "dropped", "label": "dropped", "kind": "tile"}]}))

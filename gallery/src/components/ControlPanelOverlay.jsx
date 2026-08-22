@@ -1076,7 +1076,7 @@ function SkinsSection({ skins, activeSkin, onPickSkin }) {
   );
 }
 
-function BannerEditor({ summary, onSaved }) {
+function BannerEditor({ summary, onSaved, achievements }) {
   const [slotIdx, setSlotIdx] = useState(0);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -1084,6 +1084,12 @@ function BannerEditor({ summary, onSaved }) {
   // Live slider state: local while dragging (the preview must track the thumb with no
   // network in the loop), committed to /api/branding/slot/crop on release.
   const [t, setT] = useState(null);       // {zoom, cropX, cropY} or null = mirror server
+  // Earned-banner picks (SCOPE_bundle-v2-contract.md §6). Roster + per-banner earned
+  // bools come from the server -- the same _mark_earned check that 403s the POST
+  // below -- so a tile can never promise what a click would then be refused.
+  // `achievements` is only the refetch trigger (its reference changes when earned
+  // state could have); the lock here is cosmetic, the server gate is authoritative.
+  const [earnedBanners, setEarnedBanners] = useState([]);
 
   const cfg = BANNER_SLOTS[slotIdx];
   const data = (summary.branding.slots || {})[cfg.slot] || { assets: [], active: null };
@@ -1092,6 +1098,10 @@ function BannerEditor({ summary, onSaved }) {
   const shown = t || active || { zoom: 100, cropX: 50, cropY: 50 };
 
   useEffect(() => { setT(null); setMsg(""); }, [slotIdx, data.active]);
+  useEffect(() => {
+    fetch("/api/branding/banners/earned").then((r) => r.json())
+      .then((d) => setEarnedBanners(d.banners || [])).catch(() => {});
+  }, [achievements]);
 
   const refresh = async (d) => { if (d && d.error) { setMsg("⚠ " + d.error); } else { setMsg(""); onSaved(); } };
   const upload = async (file) => {
@@ -1118,6 +1128,10 @@ function BannerEditor({ summary, onSaved }) {
   const pickActive = async (id) => {
     setBusy(true); setMsg("");
     refresh(await postJSON("/api/branding/slot/active", { slot: cfg.slot, id }));
+  };
+  const pickEarned = async (id) => {
+    setBusy(true); setMsg("");
+    refresh(await postJSON("/api/branding/banner/earned", { id }));
   };
 
   const slider = (label, key, min, max) => (
@@ -1200,6 +1214,36 @@ function BannerEditor({ summary, onSaved }) {
           })}
         </div>
       )}
+      {/* Earned row (banner_main only): shipped reward banners, gated per-banner.
+          Locked wears the same mystery mask the Folio puts on hidden feats -- and,
+          deliberately, NO reward name in the tooltip (the art is sealed until
+          earned; a title would spoil what the mask exists to hide). Earned is a
+          live preview tile: click stamps it onto the banner flat server-side
+          (same ratio pipeline as an upload), then the normal onSaved refresh
+          repaints. */}
+      {cfg.slot === "banner_main" && earnedBanners.length > 0 && (
+        <>
+          <div className="mgcp-mkick">Earned</div>
+          <div className="mgcp-slotcard-thumbs">
+            {earnedBanners.map((b) =>
+              b.earned ? (
+                <button type="button" key={b.id} className="mgcp-slotcard-thumb"
+                  /* 120px puts the 30px-tall thumb at the banner's own 4:1, not the row's near-square crop */
+                  style={{ width: 120 }}
+                  onClick={() => pickEarned(b.id)} disabled={busy} title={b.label}>
+                  <img src={b.png} alt="" />
+                </button>
+              ) : (
+                <button type="button" key={b.id} className="mgcp-markbig locked" disabled
+                  title="Hidden until earned">
+                  <img src="/branding/mystery/secret_feat.png" alt=""
+                    onError={(e) => e.currentTarget.remove()} />
+                </button>
+              )
+            )}
+          </div>
+        </>
+      )}
       {msg && <div className="mgcp-tilenote">{msg}</div>}
       {picking && <GalleryPicker defaultType="image"
         onPick={(m) => { setPicking(false); fromGallery(m.media_id); }}
@@ -1216,9 +1260,9 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
   // The-Great-Library gate for the Custom Mark tile -- real earned state, the
   // exact same array/shape brandingUnlocked already reads off useControlPanel's
   // achievements for the whole tab, just checked for a different id. (The
-  // banner row's per-asset "earned art" masking stays a local/no-real-content
-  // concept below -- see BannerEditor's own comment -- because unlike this,
-  // there is no seeded earned banner art yet for a real check to gate.)
+  // banner row's earned art is REAL now too -- BannerEditor's Earned row -- but
+  // it reads per-banner earned bools off /api/branding/banners/earned rather
+  // than this check; `achievements` is threaded there only as a refetch trigger.)
   const greatLibrary = (achievements?.achievements || []).some(
     (a) => a.id === "the-great-library" && a.earned
   );
@@ -1289,7 +1333,7 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
           <SkinsSection skins={skins} activeSkin={activeSkin} onPickSkin={onPickSkin} />
         )}
         {section === "banners" && (
-          <BannerEditor summary={summary} onSaved={onSaved} />
+          <BannerEditor summary={summary} onSaved={onSaved} achievements={achievements} />
         )}
       </div>
     </div>

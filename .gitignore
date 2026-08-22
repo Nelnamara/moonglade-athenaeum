@@ -114,6 +114,10 @@ static/_mockup_*.html
 /branding/
 /branding.json
 /branding_slots.json
+# The coded branding root the app builds on first run (bundle-v2 "goods" tree). Intended to live at
+# the INSTALL, not here -- but a dev/test launch from the repo DOES create it beside the server, and it
+# is the very secret the coding exercise hides, so it must never reach this PUBLIC repo. Regenerable.
+/0x676F6F6473/
 
 # The asset container (tools/build_container.py -> moonglade.dat). NOT committed BY DECISION
 # (docs/DECISIONS.md "The asset container, re-scoped from scratch", 2026-08-10): delivery is a
@@ -144,3 +148,9 @@ static/_mockup_*.html
 # it is a snapshot of defects, and a stale copy in the repo would be exactly the kind of
 # contradictory state doc this review was scoped to avoid.
 /bugreview.md
+
+# Local-only working dirs that can hold pre-seal plaintext (an old roster) or bulk
+# art output -- never committed. Belt-and-suspenders against a stray `git add`
+# sweeping a spoiler or a large binary into this PUBLIC repo (adversarial, 2026-08-22).
+/_backups/
+/_2000/
