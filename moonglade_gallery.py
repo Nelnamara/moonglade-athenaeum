@@ -2424,7 +2424,7 @@ def badge_cache_dir(out_dir):
 
 
 def _badge_thumb(out_dir, aid, size=256):
-    """Lazily cache a ~size px copy of a badge master and return its Path. The 57
+    """Lazily cache a ~size px copy of a badge master and return its Path (or PNG bytes when the cache dir can't be written). The 57
     badge masters are 2000px (~300 MB total); the Folio of Honors renders these thumbs so
     a full open doesn't pull the masters. Masters stay the source of truth; the cache
     self-heals when a master is re-cut (mtime check). Falls back to the master on any
@@ -2433,7 +2433,7 @@ def _badge_thumb(out_dir, aid, size=256):
     if not _branding_exists(rel):
         return None
     src = _role_dir("badges") / (aid + ".png")
-    dst = badge_cache_dir(out_dir) / (aid + ".png")
+    dst = badge_cache_dir(out_dir) / ((aid + ".png") if size == 256 else (aid + "." + str(size) + ".png"))
     src_mtime = _branding_mtime(rel)   # loose master's own mtime, or the container file's
     try:
         if dst.is_file() and src_mtime is not None and dst.stat().st_mtime >= src_mtime:
@@ -2451,18 +2451,23 @@ def _badge_thumb(out_dir, aid, size=256):
     except Exception:
         if src.is_file():
             return src         # loose master exists -- serve it full-size
-        # Container-sourced master that failed to thumbnail (P3-review lesson:
-        # this fell through to a 404 before): write the raw bytes out as the
-        # last resort so a tile still resolves to *something*.
+        # Container-sourced master AND a cache we couldn't write (unwritable dir,
+        # read-only mount, full disk): don't fall through to a 404 -> emoji. Hand
+        # bytes back for the route to serve from memory -- resized if PIL can, else
+        # the raw master (adversarial-review 2026-08-22).
+        raw = _branding_bytes(rel)
+        if raw is None:
+            return None
         try:
-            raw = _branding_bytes(rel)
-            if raw is not None:
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                dst.write_bytes(raw)
-                return dst
+            import io
+            from PIL import Image
+            im = Image.open(io.BytesIO(raw))
+            im.thumbnail((size, size))
+            buf = io.BytesIO()
+            im.save(buf, format="PNG")
+            return buf.getvalue()
         except Exception:
-            pass
-        return None
+            return raw
 
 
 # ---------------------------------------------------------------------------
@@ -8071,7 +8076,16 @@ def create_app(out_dir: Path):
         if aid in _ach_hidden() and aid not in _earned_achievement_ids(
                 out_dir, db_path, need=aid):
             abort(404)
-        p = _badge_thumb(out_dir, aid)
+        # The celebration toast asks for 384px so the enlarged medallion stays crisp
+        # on HiDPI; the Folio grid keeps the 256 default. Allowlisted to those two so
+        # the cache can't be spammed into unbounded sizes.
+        size = 384 if request.args.get("size") == "384" else 256
+        p = _badge_thumb(out_dir, aid, size)
+        if isinstance(p, (bytes, bytearray)):
+            # cache unwritable -> _badge_thumb handed us the image in memory
+            resp = app.response_class(bytes(p), mimetype="image/png")
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
         if not p or not Path(p).is_file():
             abort(404)
         p = Path(p)
