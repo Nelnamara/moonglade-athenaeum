@@ -55,7 +55,17 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 - **Marks render too small, everywhere they appear** *(scope + workshop the right size — owner, 2026-08-19)*
   A recurring, real sizing defect ("song as old as time"), long deprioritised as cosmetic. The header
   is the worst example. Owner call: **workshop it and settle the right size**, then apply everywhere
-  marks appear — don't spot-fix one surface.
+  marks appear — don't spot-fix one surface. **Same workshop, added 2026-08-22:** the mark
+  *animations* — the 16 picks in the Branding tab save but nothing applies them since the 3.0 header,
+  and the header draws an accent tile + "M" behind alpha marks ([#24](https://github.com/Nelnamara/moonglade-athenaeum/issues/24)).
+  Owner: "many if not all look janky now — workshop fixes or new ones", so this is a design pass
+  (which animations survive, which are new, what the mark sits on), not a port of the classic CSS.
+
+- **Login page: render the Banner — login slot, restore the welcome hold** ([#25](https://github.com/Nelnamara/moonglade-athenaeum/issues/25))
+  The Branding tab sells three banner slots; since the 3.0 React login nothing draws the login one
+  (the card shows the header mark instead), and the designed welcome hold was removed for a test
+  expectation, so the login mascot barely plays. The hold is a small fix; the banner needs a design
+  call first (`Login.dc.html` has no banner element). Separate from the bundle-v2 merge.
 
 - **Real generation progress — build the honest "starts in ~N" from the wait estimate** *(owner call, 2026-08-19)*
   PixAI does **not** expose true render progress. It once showed the image taking shape (a blurred
