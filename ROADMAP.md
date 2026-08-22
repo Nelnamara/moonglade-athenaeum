@@ -67,6 +67,12 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   expectation, so the login mascot barely plays. The hold is a small fix; the banner needs a design
   call first (`Login.dc.html` has no banner element). Separate from the bundle-v2 merge.
 
+- **Reward icons: the claim chip lost its icon in the React port; no claimable-reward notice in the activity tracker** ([#26](https://github.com/Nelnamara/moonglade-athenaeum/issues/26))
+  The claim ribbon icon belongs on the "+N claim" chip beside the credits (classic drew it), on the
+  toast when credits become claimable, and on an activity-tracker notice that doesn't exist yet; the
+  gift icon belongs on achievement reward lines and future promo gifts (card claims unwired). Chip
+  icon = small; notice + promos = design step. Separate from the bundle-v2 merge.
+
 - **Real generation progress — build the honest "starts in ~N" from the wait estimate** *(owner call, 2026-08-19)*
   PixAI does **not** expose true render progress. It once showed the image taking shape (a blurred
   wireframe resolving into focus), but that's gone; today it gives only a **start time + an estimated
