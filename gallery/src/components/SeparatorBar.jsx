@@ -214,7 +214,7 @@ export default function SeparatorBar({
         {claimCredits ? (
           <button type="button" className="mgx-claim" onClick={onClaim} disabled={claiming}
             title="Claim your free daily credits">
-            <span className="coin">◈</span>
+            <i className="mgx-claimribbon" aria-hidden="true" />
             {claiming ? "claiming…" : "+" + Number(claimCredits).toLocaleString() + " claim"}
           </button>
         ) : null}
