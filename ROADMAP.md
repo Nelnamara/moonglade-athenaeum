@@ -176,6 +176,13 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   asset name, so it rides a pack rebuild, not a point release. Cosmetic; low priority.
 - **Real unlock SFX.** The loader ships and falls back to a synth chime; the actual sound assets are
   still to be sourced/added.
+- **Animated achievement-toast badges (exploring).** The mascot already takes an animated
+  `<id>.webp` (drop it beside the stills and it moves); the badge does not -- the toast loads a
+  static `/badge-thumb/<id>.png` and the server PIL-thumbnails masters to PNG, so an animated master
+  would flatten to one frame. Owner is playing with animating the medallions for fun (the ornate-frame
+  direction for the Legendary/feat tiers was dropped). To wire it: a webp-first client chain like the
+  mascot's, plus a badge-serve path that passes an animated webp through (bypass the PNG thumbnail for
+  webp -- serve the webp master or an animated thumb). For funsies; low priority.
 - **BlurHash grid placeholders.** A `blurhash` column is stored but there's no front-end decoder /
   placeholder render. Low ROI; revisit if it matters.
 - **Loom preview / placement follow-ups.** A handful of small Loom tweaks on a surface the owner
