@@ -147,7 +147,7 @@ function _mkMoment(a, opts) {
       e.textContent = a.icon || "🏆";
       if (this.parentNode) this.parentNode.replaceChild(e, this);
     };
-    b.src = "/branding/badges/" + encodeURIComponent(a.id) + ".png";
+    b.src = "/badge-thumb/" + encodeURIComponent(a.id) + ".png";   // 256px cached thumb, not the 5.6MB master (a toast fires only for an EARNED feat, so the seal serves it); matches every other badge render
     cap.appendChild(b);
     const ring = document.createElement("div"); ring.className = "ring"; cap.appendChild(ring);
     // Badge-local ambient decoration, legendary/feat only -- positions/counts verbatim from
