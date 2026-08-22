@@ -53,6 +53,9 @@
 @keyframes m2sweep{0%{opacity:0;transform:translateX(255px) scale(.82);}70%{opacity:1;transform:translateX(-11px) scale(1.06);}100%{opacity:1;transform:translateX(0) scale(1);}}
 @keyframes m2bding{0%{filter:drop-shadow(0 5px 12px rgba(0,0,0,.5)) brightness(1);}26%{filter:drop-shadow(0 0 14px var(--tc)) brightness(1.65);}100%{filter:drop-shadow(0 5px 12px rgba(0,0,0,.5)) brightness(1);}}
 .ach-m2 .ring{position:absolute;width:136px;height:136px;border-radius:50%;border:3px solid var(--tc);opacity:0;transform:scale(.4);pointer-events:none;}
+/* Phones: the 140px medallion + 158px cap would squeeze the text column, so pull the
+   badge/cap/ring back to the shipped size on small screens (desktop keeps the big one). */
+@media (max-width:480px){.ach-m2 .cap{width:118px;}.ach-m2 .badge{width:100px;height:100px;}.ach-m2 .ring{width:96px;height:96px;}}
 .ach-m2 .tw.go .ring{animation:m2ring .6s ease-out .76s;}
 @keyframes m2ring{0%{opacity:0;transform:scale(.4);}22%{opacity:.85;}100%{opacity:0;transform:scale(1.75);}}
 .ach-m2 .m2-halo{position:absolute;top:50%;left:50%;width:208px;height:208px;margin:-104px 0 0 -104px;border-radius:50%;pointer-events:none;z-index:0;background:radial-gradient(circle,transparent 55%,rgba(255,244,209,.42) 64%,rgba(255,244,209,.14) 73%,transparent 82%);filter:blur(2px);animation:m2halopulse 3.2s ease-in-out infinite;}
