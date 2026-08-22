@@ -156,6 +156,13 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   only when a real second provider actually lands (so two concrete cases shape it). Low priority.
 - **Themed progress bar art.** A moon-phase gauge (near-finished art already banked) for
   generation/render/job progress. Decided in principle, unbuilt.
+- **Give the asset pack a real file type.** In Explorer `moonglade.dat` shows a blank Type column and
+  a generic icon (owner nitpick, 2026-08-22). `.dat` is too generic to claim system-wide, so the clean
+  fix is an app-specific extension (`.mgpack` or similar) plus a ProgID the app registers for the
+  current user on first run / from the launcher-shortcut path (friendly name "Moonglade asset pack",
+  the app icon) — the same per-user registry spot the Desktop-shortcut code already writes. Touches the
+  manifest/downloader file name, `_container_path()`, the builder's default `--out`, and the Release
+  asset name, so it rides a pack rebuild, not a point release. Cosmetic; low priority.
 - **Real unlock SFX.** The loader ships and falls back to a synth chime; the actual sound assets are
   still to be sourced/added.
 - **BlurHash grid placeholders.** A `blurhash` column is stored but there's no front-end decoder /
