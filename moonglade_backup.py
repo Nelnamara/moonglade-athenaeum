@@ -35,7 +35,7 @@ QUICK START
   python moonglade_backup.py --max 40    # small test first
 """
 
-__version__ = "3.1.0"
+__version__ = "3.5.0"
 
 import argparse
 import base64
