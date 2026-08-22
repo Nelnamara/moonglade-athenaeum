@@ -67,6 +67,17 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   expectation, so the login mascot barely plays. The hold is a small fix; the banner needs a design
   call first (`Login.dc.html` has no banner element). Separate from the bundle-v2 merge.
 
+- **Let LAN clients trigger the asset-pack download** ([adversarial review, 2026-08-22]) *(fast-follow, own branch)*
+  The default-art pack (`moonglade.dat`) auto-downloads on the **server** machine's first launch after an
+  update (the Setup Wizard checks `/api/assets/status` and starts the fetch itself). But `/api/assets/fetch`
+  is **localhost-only**, so a LAN device that opens the app *before* the server ever did can't kick off the
+  download — it has to be done from the server. Owner: it's a vital package function; allow LAN clients to
+  trigger it. Low-risk (the route pulls one fixed, sha-verified, pinned Release asset to one known path,
+  single-flight), but it's a **security-tier change** (`api_assets_fetch` LOCALHOST → LOGIN) so it gets its
+  own tiny branch + sanity check: `tests/test_route_tiers.py:113`, the route's `_is_local_request` guard, the
+  wizard calling it on a non-local device, and a confirm that repeat 685 MB fetches can't be weaponised
+  (single-flight already blocks concurrency). Not bolted onto the bundle-v2 merge.
+
 - **Reward icons: the claim chip lost its icon in the React port; no claimable-reward notice in the activity tracker** ([#26](https://github.com/Nelnamara/moonglade-athenaeum/issues/26))
   The claim ribbon icon belongs on the "+N claim" chip beside the credits (classic drew it), on the
   toast when credits become claimable, and on an activity-tracker notice that doesn't exist yet; the

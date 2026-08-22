@@ -142,12 +142,34 @@ def test_state_roundtrip_and_soft_fail(tmp_path):
     st = g.load_ach_state(tmp_path)
     assert st["seen"] == ["a", "b"] and st["skin"] == "ember"      # deduped + sorted
     assert st["earned_at"] == {"a": "2026-07-13"}                  # earn-dates round-trip
-    # an unknown skin id falls back to the default on read
+    # a stored skin id is PRESERVED on read, even if it isn't in the current
+    # _skin_ids() -- read is trust, the /api/skin write gate is what rejects a
+    # bogus/locked skin. (Coercing here would wipe an earned skin during an
+    # undressed window and persist the reset -- adversarial M1, 2026-08-22.) An
+    # id with no CSS rule just renders the default tokens, harmlessly.
     g.save_ach_state(tmp_path, {"seen": [], "skin": "not-a-skin"})
+    assert g.load_ach_state(tmp_path)["skin"] == "not-a-skin"
+    # missing / non-string / empty -> default
+    g.save_ach_state(tmp_path, {"seen": [], "skin": ""})
     assert g.load_ach_state(tmp_path)["skin"] == "moonglade"
     # corrupt file -> default, never raises
     (tmp_path / "achievements.json").write_text("{not json", encoding="utf-8")
     assert g.load_ach_state(tmp_path)["skin"] == "moonglade"
+
+
+def test_earned_skin_survives_an_undressed_window(tmp_path, monkeypatch):
+    """M1 (adversarial, 2026-08-22): while the sealed pack is downloading or briefly
+    unreadable, _skin_ids() collapses to the free skins. An earned skin the user
+    picked must NOT be coerced to the default and persisted -- that was permanent
+    loss of a cosmetic choice the art container has nothing to do with."""
+    import moonglade_gallery as g
+    monkeypatch.setattr(g, "_skin_ids", lambda: {"moonglade", "nightfallen"})  # undressed
+    g.save_ach_state(tmp_path, {"seen": [], "skin": "ember"})   # an earned skin, now unvalidatable
+    assert g.load_ach_state(tmp_path)["skin"] == "ember"        # preserved, not reset
+    # and a save triggered while undressed (e.g. the mark path) must not rewrite it
+    st = g.load_ach_state(tmp_path)
+    g.save_ach_state(tmp_path, st)
+    assert g.load_ach_state(tmp_path)["skin"] == "ember"        # still ember after the pack returns
 
 
 # ---- routes -----------------------------------------------------------------

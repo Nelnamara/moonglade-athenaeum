@@ -2378,7 +2378,19 @@ def load_ach_state(out_dir):
     try:
         d = json.loads(_ach_state_path(out_dir).read_text(encoding="utf-8"))
         seen = [s for s in (d.get("seen") or []) if isinstance(s, str)]
-        skin = d.get("skin") if d.get("skin") in _skin_ids() else "moonglade"
+        # Preserve the stored skin id verbatim -- do NOT coerce it to the default
+        # just because it isn't in the CURRENT _skin_ids(). That set comes from the
+        # sealed container, so during an undressed window (the pack still
+        # downloading, or briefly unreadable) it collapses to the two free skins;
+        # coercing here would rewrite a legitimately-earned skin to "moonglade" and
+        # the next save_ach_state would PERSIST that reset -- permanent loss for a
+        # purely cosmetic value the container has nothing to do with. Every skin's
+        # CSS is hard-coded server-side (html[data-skin=...]) and applied client-
+        # side, so an id we can't validate right now still renders correctly; a
+        # genuinely unknown id just renders the default tokens, harmlessly. The
+        # write gate (/api/skin: earned + known) is what refuses a bogus/locked
+        # skin -- read is trust, write is checked. (Adversarial M1, 2026-08-22.)
+        skin = d.get("skin") if isinstance(d.get("skin"), str) and d.get("skin") else "moonglade"
         earned_at = {k: v for k, v in (d.get("earned_at") or {}).items()
                      if isinstance(k, str) and isinstance(v, str)}
         return {"seen": seen, "skin": skin, "earned_at": earned_at}
