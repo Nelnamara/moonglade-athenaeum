@@ -3611,7 +3611,7 @@ ${"=".repeat(48)}
         e.textContent = a.icon || "\u{1F3C6}";
         if (this.parentNode) this.parentNode.replaceChild(e, this);
       };
-      b.src = "/branding/badges/" + encodeURIComponent(a.id) + ".png";
+      b.src = "/badge-thumb/" + encodeURIComponent(a.id) + ".png";
       cap.appendChild(b);
       const ring = document.createElement("div");
       ring.className = "ring";
@@ -3712,7 +3712,7 @@ ${"=".repeat(48)}
     const BAND = 158, TARGET = 150;
     const h = Math.max(140, Math.min(260, TARGET / opFrac));
     img.style.height = h + "px";
-    img.style.top = (BAND - h * topFrac - 0.75 * (h * opFrac)).toFixed(1) + "px";
+    img.style.top = (BAND - h * topFrac - 0.85 * (h * opFrac)).toFixed(1) + "px";
   }
   function _fanfare(m, tier) {
     const glyphs = ["\u2726", "\u2727", "\u2B50"];
