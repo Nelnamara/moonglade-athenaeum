@@ -15,6 +15,7 @@ git tags. Full prose notes for tagged versions live on
 > commits reached master as part of **v2.0.0**, which does). There is **no v1.7.x** (1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- Fixed: a video **Remix** whose references were uploads (not in your library) no longer silently inherits the *previous* remix’s reference tiles into the new, paid render. Every remix now writes its reference banks authoritatively — image, video, and audio — so an unrecoverable ref clears the slot (and says so) instead of leaving a stale one from the last clip to be priced and generated.
 
 ## [3.5.0] - 2026-08-22 — Across the Bridge: the Mirror opens PixAI's AI Tools and Enhance, a History dock, Remix, four gallery layouts, and the art goes incognito
 

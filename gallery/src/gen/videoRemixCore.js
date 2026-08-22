@@ -98,29 +98,37 @@ export function videoRemixFromRow(row, taskParams) {
   prefill.is_private = !!tp.is_private;
   prefill.prompt = tp.prompt || row.prompt_full || row.prompt_preview || "";
 
+  // Every branch writes its ref keys UNCONDITIONALLY -- an empty list is the complete,
+  // authoritative "no refs" for this shot, and applyPrefill CLEARS the matching bank from it
+  // (images -> applySetRefs([]) empties the primary bank; video_refs:[] empties vidSlots;
+  // audio_ref:null empties audSlot). Setting them only when something was recovered let the
+  // PREVIOUS remix's tiles survive into THIS shot's PAID payload when the new clip's refs were
+  // uploads (in_lib:false) -- the wrong-shot spend bug the flf branch's positional-null already
+  // avoided; the r2v/i2v branches just didn't pass the empties. (Adversarial, 2026-08-22.)
   if (tp.kind === "r2v") {
     // referenceImageMediaIds may be upload ids PixAI won't hand back as library media (issue
     // #7, unsettled -- §2.5). Restore the refs we actually hold; disclose the rest rather than
     // wiring an id we can't resolve into a paid submission.
     const imgs = (tp.image_refs || []).filter((x) => x && x.in_lib).map((x) => libRef(x.media_id));
-    if (imgs.length) prefill.images = imgs;
+    prefill.images = imgs;   // empty -> clears the r2v image bank
     if ((tp.image_refs || []).some((x) => x && !x.in_lib)) notes.push("reference images were uploads — pick them again");
     const vids = (tp.video_refs || []).filter((x) => x && x.in_lib).map((x) => libRef(x.media_id));
-    if (vids.length) prefill.video_refs = vids;
+    prefill.video_refs = vids;   // empty -> clears vidSlots
     if ((tp.video_refs || []).some((x) => x && !x.in_lib)) notes.push("reference videos were uploads — pick them again");
     const aud = (tp.audio_refs || []).find((x) => x && x.in_lib);
-    if (aud) prefill.audio_ref = { media_id: String(aud.media_id), filename: "audio ref" };
-    else if ((tp.audio_refs || []).length) notes.push("the audio reference was an upload — pick it again");
+    prefill.audio_ref = aud ? { media_id: String(aud.media_id), filename: "audio ref" } : null;   // null -> clears audSlot
+    if (!aud && (tp.audio_refs || []).length) notes.push("the audio reference was an upload — pick it again");
   } else if (tp.kind === "flf") {
-    // Positional [start, end]; a null is a deliberate empty slot the flf branch keeps.
+    // Positional [start, end]; a null is a deliberate empty slot. Written unconditionally so a
+    // frame-less flf remix still clears both slots rather than inheriting the prior shot's.
     const start = (tp.start && tp.start.in_lib) ? libRef(tp.start.media_id) : null;
     const end = (tp.end && tp.end.in_lib) ? libRef(tp.end.media_id) : null;
     if (tp.start && !tp.start.in_lib) notes.push("start frame isn't in your library");
     if (tp.end && !tp.end.in_lib) notes.push("end frame isn't in your library");
-    if (tp.start || tp.end) prefill.images = [start, end];
-  } else {   // i2v: start frame only (never pass a null through applySetRefs -- refItem would throw)
-    if (tp.start && tp.start.in_lib) prefill.images = [libRef(tp.start.media_id)];
-    else if (tp.start) notes.push("start frame isn't in your library");
+    prefill.images = [start, end];
+  } else {   // i2v: start frame only. [] (never [null]) clears -- an empty list won't call refItem.
+    prefill.images = (tp.start && tp.start.in_lib) ? [libRef(tp.start.media_id)] : [];
+    if (tp.start && !tp.start.in_lib) notes.push("start frame isn't in your library");
   }
 
   clampNote(prefill, engine, notes);
