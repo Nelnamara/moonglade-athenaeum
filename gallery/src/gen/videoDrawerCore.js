@@ -96,12 +96,6 @@ export function snapDuration(d) {
   return DURATIONS.reduce((best, v) => (Math.abs(v - d) < Math.abs(best - d) ? v : best));
 }
 
-// "a" / "a and b" / "a, b and c" -- the mode-switch hold notice reads like a sentence.
-export function joinAnd(parts) {
-  if (parts.length < 2) return parts[0] || "";
-  return parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1];
-}
-
 // A slot item: {media_id, thumb, is_nsfw}. Accepts either media_id or the mid alias, and fills a
 // default /thumbs/<id>.jpg when no thumb is given (a prefilled slot may carry a local data-URL).
 export function refItem(r) {

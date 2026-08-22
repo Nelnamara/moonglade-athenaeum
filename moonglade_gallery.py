@@ -123,7 +123,6 @@ CATALOG_FIELDS = [
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
 THUMB_SIZE = (768, 768)
 THUMB_QUALITY = 90
-PAGE_SIZE = 100
 DHASH_SIZE = 8  # compute_dhash()'s hash dimension: 8x8 -> 64-bit hash, 16 hex chars
 
 
@@ -2862,18 +2861,6 @@ def backfill_batches(out_dir, db_path):
             updated += cur.rowcount
         con.commit()
         return updated
-    finally:
-        con.close()
-
-
-def unique_batches(db_path):
-    """Return sorted list of distinct non-empty batch names in the catalog."""
-    con = _connect(db_path)
-    try:
-        rows = con.execute(
-            "SELECT DISTINCT batch FROM catalog WHERE batch != '' ORDER BY batch"
-        ).fetchall()
-        return [r[0] for r in rows]
     finally:
         con.close()
 
