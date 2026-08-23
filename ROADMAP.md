@@ -34,6 +34,15 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   rows the image can't fit. Measured live; a two-line CSS fix (`grid-template-rows: auto minmax(0,1fr)`,
   frame `align-self: start`). Small, real, no design gate.
 
+- **Does a tablet tier exist?** *(tabled — owner wants to play in the app on the iPad first, 2026-08-23)*
+  Today one hook (`MOBILE_QUERY` 430px + a coarse-pointer fallback that also requires width ≤ 430)
+  routes every tablet to the DESKTOP build in both orientations. Three coherent answers: raise the
+  breakpoint so tablets get the mobile build (one number, least work, most side effects on a
+  desktop-shaped surface); add a real third tier; or keep the split and port touch affordances
+  (always-visible card controls on coarse pointers, 44px targets) into the desktop components.
+  The input for the call: `../moonglade-internal/QA_tablet-2026-08-23.md` — a targeted poke list
+  built from the refit review's findings; which sections bite decides which answer.
+
 - **Per-batch / per-task grid stacking** *(standalone — kept, owner 2026-08-19)*
   Collapse the gallery wall so a multi-image generation (a batch of, say, 4) shows as **one
   stack/card** instead of N flat tiles — de-cluttering the grid for batch gens. Kept as its own
