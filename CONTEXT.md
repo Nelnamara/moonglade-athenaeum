@@ -144,3 +144,25 @@ the HTTP status was (this app's spend routes refuse with HTTP 200 `{error}`), a 
 no body error becomes `{error: "<status> <statusText>"}`, and a transport failure becomes
 `{error: "network error: …"}`. Three files keep their own `fetch` by name, each because its
 contract needs a distinction that rule deliberately collapses.
+
+**PixAI client** — `PixAIClient`, in the delimited `pixai_client` section of
+`moonglade_backup.py`: the one seam every byte this app exchanges with PixAI leaves through.
+Five verbs — `query` / `mutate` (the ad-hoc GraphQL POST), `persisted` (the persisted-hash
+GET the personal-history operations ride), `rest_get` / `rest_post` (the oRPC `/v2` road) —
+plus `for_create()`, which picks the browser-JWT mirror session over the API key when the
+Mirror toggle is on, and the identity a caller can ask for (`user_id`, `auth_kind`,
+`session`). `_make_session()` returns one; the five module-level primitives
+(`gql`, `gql_adhoc`, `gql_mutate`, `_rest_get`, `_rest_post`) are thin delegates onto it, so
+every function that still takes a `session` positionally keeps working. **`mutate` has no
+`retries` parameter** — not defaulted to zero, absent — which is where the spend rule lives
+now: a caller cannot ask for the value that pays twice.
+
+**FakePixAI** — `tests/fake_pixai.py`, the second implementation of that same interface:
+canned answers instead of a socket. It is keyed by GraphQL operation name (an anonymous
+document by its first root field) and by REST path, it records every call, and it **refuses
+anything nobody registered**, by name. That refusal is what makes the suite offline by
+construction rather than by habit; it is an `AssertionError`, deliberately not a
+`PixAIError`, so the app's many fail-soft handlers cannot swallow a missing registration into
+a pretend empty answer. The `pixai` fixture installs one as what `_make_session()` — and so
+the gallery's `_gen_session()` — hands out.
+
