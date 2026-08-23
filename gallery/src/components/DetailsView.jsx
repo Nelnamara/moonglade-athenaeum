@@ -32,7 +32,7 @@ function playReveal(root) {
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   if (reduced) {
-    qa(".p-kicker, .p-title, .p-fact, .p-tag, .p-footer")
+    qa(".p-kicker, .p-title, .p-fact, .p-tag, .p-actions")
       .forEach((n) => { n.style.opacity = 1; n.style.transform = "none"; });
     const rule = q(".p-rule");
     if (rule) rule.style.clipPath = "inset(0 0% 0 0)";
@@ -91,13 +91,14 @@ function playReveal(root) {
   ], { duration: P(200), delay: lastFactDelay + i * P(28) }));
   const tagsDoneDelay = lastFactDelay + Math.max(0, tags.length - 1) * P(28) + P(200);
 
-  // the closing beat: pops up from below and bounces into place
-  play(q(".p-footer"), [
+  // the closing beat: the action groups pop up from below and bounce into place,
+  // one after another (primary, record, more) -- the same bounce, staggered
+  qa(".p-actions").forEach((g, i) => play(g, [
     { opacity: 0, transform: "translateY(30px) scale(.97)" },
     { opacity: 1, transform: "translateY(-7px) scale(1.01)", offset: 0.55 },
     { opacity: 1, transform: "translateY(2px) scale(.997)", offset: 0.8 },
     { opacity: 1, transform: "translateY(0) scale(1)" },
-  ], { duration: P(440), delay: tagsDoneDelay + P(140), easing: "ease-out" });
+  ], { duration: P(440), delay: tagsDoneDelay + P(140) + i * P(90), easing: "ease-out" }));
 }
 
 /* The Details view -- "the layer deeper" (owner, 2026-07-30). Classic's
@@ -108,7 +109,9 @@ function playReveal(root) {
 
    Design pass (locked, docs/DECISIONS.md "Direction C"): a museum-placard
    composition -- the art framed beside a record, one confident headline, actions
-   demoted to a footer strip. Direction C's own entry (restored in full in
+   demoted below the record (the DC's two action groups -- file actions led by the
+   metal Download, then the record actions -- plus a quieter More row for what the
+   app carries beyond the design's ten). Direction C's own entry (restored in full in
    docs/DECISIONS.md after going missing from the live file for a while -- it was
    never actually lost, a prior session just mis-cited which prune removed it) is
    a motion/composition decision, not a field-hiding one: it never called for a
@@ -372,6 +375,30 @@ export default function DetailsView({
               </div>
             ) : null}
 
+            {/* PRIMARY ACTIONS -- Image Details.dc.html:389-396 fileActions, the first of
+                the design's two groups (ten actions, two groups, two places -- not one
+                flat strip; "Where the Refit Broke" #5). Download is THE metal button
+                (the DC's `metal` const = shell.css's shared .mgx-metal face); Delete
+                locally is the red-outline danger chip. Directly after the record's facts,
+                before lineage. */}
+            <div className="p-actions p-actions-primary">
+              <a className="btn mgx-metal" title="Full-resolution file"
+                href={"/full/" + encodeURIComponent(row.media_id) + "?dl=1"}>⬇ Download</a>
+              {/* ☁ Publish -- cross-page hand-off (Image Details.dc.html:391), REAL since
+                  2026-08-06. Already-published rows say so instead of offering it twice;
+                  this row is the full catalog row, so artwork_id is right here. */}
+              {(row.artwork_id || "").trim()
+                ? <span className="btn is-off" title="Already on your PixAI profile — manage it from My Art">☁ Published</span>
+                : <button className="btn" title="Publish this image to PixAI"
+                    onClick={() => onPublish && onPublish(row.media_id)}>☁ Publish</button>}
+              <button className="btn" title="Copy the full prompt"
+                onClick={() => copy(promptText, "prompt")}>{copied === "prompt" ? "Copied!" : "⧉ Copy prompt"}</button>
+              <button className={"btn" + (upscaleOpen ? " btn-primary" : "")} title="Upscale or Hires"
+                onClick={toggleUpscale}>⇱ Upscale</button>
+              <button className="btn btn-danger" disabled={busy} title="Remove from your library only"
+                onClick={deleteLocal}>Delete locally</button>
+            </div>
+
             {/* LINEAGE (Image Details.dc.html:108-123) -- where this image came from and
                 what came from it, REAL: batch siblings (same task_id) before "this",
                 derivatives (edit/upscale/video, source_media_id) after. A linear strip
@@ -423,41 +450,13 @@ export default function DetailsView({
               </div>
             ) : null}
 
-            <div className="p-footer">
-              <a className="btn" href={"/full/" + encodeURIComponent(row.media_id) + "?dl=1"}>⬇ Download</a>
-              {/* ☁ Publish -- cross-page hand-off (Image Details.dc.html:391), REAL since
-                  2026-08-06. Already-published rows say so instead of offering it twice;
-                  this row is the full catalog row, so artwork_id is right here. */}
-              {(row.artwork_id || "").trim()
-                ? <span className="btn is-off" title="Already on your PixAI profile — manage it from My Art">☁ Published</span>
-                : <button className="btn" title="Publish this image to PixAI"
-                    onClick={() => onPublish && onPublish(row.media_id)}>☁ Publish</button>}
-              <a className="btn" href={"/full/" + encodeURIComponent(row.media_id)} target="_blank" rel="noreferrer">Open Full Size</a>
-              {row.url ? <a className="btn" href={row.url} target="_blank" rel="noreferrer">Open on PixAI</a> : null}
-              <button className="btn" onClick={() => copy(promptText, "prompt")}>{copied === "prompt" ? "Copied!" : "Copy Prompt"}</button>
-              {/* Seed/Task ID/Media ID/Filename each have their own per-row ⧉ copy icon
-                  now (Image Details.dc.html:95-97's row.copyable pattern) -- removed from
-                  here 2026-08-04 to avoid duplicating the same action in two places. */}
-              <button className="btn" onClick={() => window.print()}>🖨 Print</button>
-              <button className="btn" onClick={() => setSimilarOpen(true)}>✧ Similar</button>
-              {row.is_video !== "1" && (
-                <>
-                  <a className="btn" href={"/contact-sheet?ids=" + encodeURIComponent(row.media_id) + "&format=photo"} target="_blank" rel="noreferrer">4×6 photo</a>
-                  <a className="btn" href={"/contact-sheet?ids=" + encodeURIComponent(row.media_id) + "&format=strip"} target="_blank" rel="noreferrer">Photo strip</a>
-                </>
-              )}
-              <button className="btn" disabled={suggestBusy} onClick={runSuggest}>{suggestBusy ? "Reading…" : "✎ Suggest prompt"}</button>
-              <button className="btn" onClick={() => { onClose(); onEdit(row.media_id); }}>✧ Edit this</button>
-              {/* Remix (issue #4, extended to video by SCOPE_2026-08-17 §2): the full
-                  recipe into the Generate drawer -- an image's prompt/negative/size/
-                  steps/cfg/seed/model + LoRAs into the Image tab, a video's engine/
-                  duration/mode/camera/audio/prompt into the Video tab. Prefill only;
-                  the drawer routes by kind (GenerateDrawer.prefillRun). Ordered
-                  Remix · Send to Video per the respec's action row (§2.6 default). */}
-              <button className="btn" title={row.is_video === "1"
-                ? "Load this video's full recipe into the Video composer"
-                : "Load this picture's full recipe into Generate"}
-                onClick={() => { onClose(); onRemix && onRemix(row.media_id); }}>↺ Remix</button>
+            {/* RECORD ACTIONS -- Image Details.dc.html:397-403 recordActions, the second
+                of the design's two groups; after lineage (and the Similar strip), at the
+                end of the record. "Find similar (model)" is the DC's "every image from
+                this model" (onFilterByModel), the same filter the kicker's "find more"
+                link applies -- NOT the visual-similarity modal, which lives in More. */}
+            <div className="p-actions p-actions-record">
+              <button className="btn" onClick={() => setEditingPrompt((v) => !v)}>✎ Edit prompt</button>
               {/* Send to Video: an image sends ITSELF as the first frame; a video sends its
                   own SOURCE frame (source_media_id), never the clip -- a clip is not a valid
                   i2v input. Hidden when a video has no recorded source frame (r2v shots). */}
@@ -470,6 +469,45 @@ export default function DetailsView({
                     onClick={() => { onClose(); onVideo && onVideo(svid, "/thumbs/" + encodeURIComponent(svid) + ".jpg"); }}>▶ Send to Video</button>
                 ) : null;
               })()}
+              {row.model_name ? <button className="btn" title="Every image from this model"
+                onClick={() => onFilterByModel(row.model_name)}>Find similar (model)</button> : null}
+              {/* task_id, not the batch COLUMN: --organize blanks `batch`, so the old gate hid the
+                  button (and its filter matched nothing) on every organized library. The server's
+                  batch filter now matches either column (issue #30). */}
+              {row.task_id ? <button className="btn" title="The rest of this batch"
+                onClick={() => onFilterByBatch(row.task_id)}>View batch</button> : null}
+              <button className="btn" disabled={suggestBusy} title="Reverse a prompt out of this image"
+                onClick={runSuggest}>{suggestBusy ? "Reading…" : "Suggest prompt"}</button>
+            </div>
+
+            {/* MORE -- the app's actions the DC never drew (it designs ten; the app
+                carries more, each with real function). A quieter third row so the
+                designed groups keep their shape; nothing here lost its handler.
+                Delete from PixAI stays danger-styled and LAST (the irreversible one). */}
+            <div className="p-actions p-actions-more">
+              <a className="btn" href={"/full/" + encodeURIComponent(row.media_id)} target="_blank" rel="noreferrer">Open Full Size</a>
+              {row.url ? <a className="btn" href={row.url} target="_blank" rel="noreferrer">Open on PixAI</a> : null}
+              {/* Seed/Task ID/Media ID/Filename each have their own per-row ⧉ copy icon
+                  now (Image Details.dc.html:95-97's row.copyable pattern) -- removed from
+                  here 2026-08-04 to avoid duplicating the same action in two places. */}
+              <button className="btn" onClick={() => window.print()}>🖨 Print</button>
+              <button className="btn" title="Visually similar images" onClick={() => setSimilarOpen(true)}>✧ Similar</button>
+              {row.is_video !== "1" && (
+                <>
+                  <a className="btn" href={"/contact-sheet?ids=" + encodeURIComponent(row.media_id) + "&format=photo"} target="_blank" rel="noreferrer">4×6 photo</a>
+                  <a className="btn" href={"/contact-sheet?ids=" + encodeURIComponent(row.media_id) + "&format=strip"} target="_blank" rel="noreferrer">Photo strip</a>
+                </>
+              )}
+              <button className="btn" onClick={() => { onClose(); onEdit(row.media_id); }}>✧ Edit this</button>
+              {/* Remix (issue #4, extended to video by SCOPE_2026-08-17 §2): the full
+                  recipe into the Generate drawer -- an image's prompt/negative/size/
+                  steps/cfg/seed/model + LoRAs into the Image tab, a video's engine/
+                  duration/mode/camera/audio/prompt into the Video tab. Prefill only;
+                  the drawer routes by kind (GenerateDrawer.prefillRun). */}
+              <button className="btn" title={row.is_video === "1"
+                ? "Load this video's full recipe into the Video composer"
+                : "Load this picture's full recipe into Generate"}
+                onClick={() => { onClose(); onRemix && onRemix(row.media_id); }}>↺ Remix</button>
               {/* Rebuild poster (videos only): re-extract the thumbnail from the file. For a
                   clip whose cached poster is wrong -- a fade-in that was thumbnailed black --
                   without a full --rebuild-thumbs pass. (owner, 2026-08-22) */}
@@ -486,13 +524,6 @@ export default function DetailsView({
                     if (d && d.ok && d.thumb) setPosterSrc(d.thumb);
                   }}>{posterBusy ? "Rebuilding…" : "🖼 Rebuild poster"}</button>
               ) : null}
-              <button className={"btn" + (upscaleOpen ? " btn-primary" : "")} onClick={toggleUpscale}>⇱ Upscale</button>
-              {/* task_id, not the batch COLUMN: --organize blanks `batch`, so the old gate hid the
-                  button (and its filter matched nothing) on every organized library. The server's
-                  batch filter now matches either column (issue #30). */}
-              {row.task_id ? <button className="btn" onClick={() => onFilterByBatch(row.task_id)}>View Batch</button> : null}
-              <button className="btn" onClick={() => setEditingPrompt((v) => !v)}>Edit Prompt</button>
-              <button className="btn btn-danger" disabled={busy} onClick={deleteLocal}>Delete locally</button>
               {state.data.can_delete_cloud && row.task_id ? (
                 <button className="btn btn-danger" disabled={busy} onClick={deleteCloud}>Delete from PixAI</button>
               ) : null}

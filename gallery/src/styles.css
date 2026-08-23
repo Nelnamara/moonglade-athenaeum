@@ -809,15 +809,41 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
 .p-lin-chip.this .cap { color: var(--text); }
 .p-lin-arrow { flex: none; color: var(--overlay0); font-size: 13px; }
 
-/* actions demoted: the same capability as before, quieter and smaller -- a
-   glass-chip strip like .card/.gd-chip elsewhere, not a wall of solid buttons. */
-.p-footer { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px; padding-top: 12px;
-  border-top: 1px solid var(--surface0); opacity: 0; }
-.p-footer .btn { padding: 6px 12px; font-size: 11px; border-radius: 14px;
-  background: rgba(33, 31, 58, .38); border-color: rgba(255, 255, 255, .14); }
-.p-footer .btn-primary { background: color-mix(in srgb, var(--accent) 30%, transparent);
-  border-color: var(--accent); color: var(--text); }
-.p-footer .btn-danger { background: color-mix(in srgb, var(--red) 12%, transparent); }
+/* ACTIONS -- Image Details.dc.html:318-324 btn() (plain / metal / danger faces) in
+   the DC's two groups (:56-60 fileActions, :102-106 recordActions: flex-wrap, gap
+   7px, padding-top 4px), plus the app's own quieter More row. Not one flat strip
+   of equal chips ("Where the Refit Broke" #5). The groups start hidden -- the
+   reveal's closing beat (DetailsView.playReveal) pops each one in. */
+.p-actions { display: flex; flex-wrap: wrap; gap: 7px; padding-top: 4px; opacity: 0; }
+.p-actions .btn { font-size: 11px; font-weight: 700; white-space: nowrap; padding: 8px 14px;
+  border-radius: 9px; transition: border-color .2s, color .2s, background .2s; }
+/* the plain face (the DC's `plain` const) */
+.p-actions .btn:not(.mgx-metal):not(.btn-danger) { border: 1px solid rgba(255,255,255,.12);
+  background: rgba(12,10,28,.72); color: rgba(226,222,238,.82); }
+.p-actions .btn:not(.mgx-metal):not(.btn-danger):not(.is-off):hover {
+  border-color: rgba(255,255,255,.28); color: var(--text); }
+/* the metal face: Download is the one promoted action. .mgx-metal (shell.css) owns
+   the recipe; re-assert what .btn's later-loaded base (border/color/background and
+   .btn:hover's flat surface) would otherwise paint over. */
+.p-actions .btn.mgx-metal, .p-actions .btn.mgx-metal:hover {
+  border-color: rgba(255,255,255,.3); color: var(--mm-ink);
+  background: var(--mm-grad); background-size: 220% 100%; }
+.p-actions .btn.mgx-metal:hover { filter: brightness(1.08); }
+/* the danger face (the DC's red outline) */
+.p-actions .btn-danger, .p-actions .btn-danger:hover { border: 1px solid rgba(243,139,168,.35);
+  background: rgba(243,139,168,.1); color: var(--red); }
+.p-actions .btn-danger:hover { border-color: rgba(243,139,168,.6); }
+/* the record group sits under lineage, ruled off like the old footer was */
+.p-actions-record { margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--surface0); }
+/* More: everything the design doesn't draw, visibly second-tier -- smaller, dimmer,
+   tighter; Delete from PixAI keeps its red but at the row's quieter weight */
+.p-actions-more { gap: 5px; padding-top: 2px; }
+.p-actions-more .btn { font-size: 10px; font-weight: 600; padding: 5px 10px; border-radius: 7px; }
+.p-actions-more .btn:not(.mgx-metal):not(.btn-danger) { color: var(--overlay0);
+  background: rgba(12,10,28,.45); border-color: rgba(255,255,255,.08); }
+.p-actions-more .btn:not(.mgx-metal):not(.btn-danger):not(.is-off):hover { color: var(--text); }
+.p-actions-more .btn-danger { opacity: .8; }
+.p-actions-more .btn-danger:hover { opacity: 1; }
 
 .btn { border-radius: 8px; border: 1px solid var(--surface1); color: var(--text);
   background: var(--surface0); padding: 7px 13px; font-size: 12.5px; cursor: pointer;
@@ -852,7 +878,7 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
    meaningless on a fixed root; the collapse itself (record hidden, 1fr grid, taller
    image cap) is handled above. */
 @media print {
-  header, .detail-nav, .p-footer, .p-vitals { display: none !important; }
+  header, .detail-nav, .p-actions, .p-vitals { display: none !important; }
   /* Print escapes the fixed takeover -- position:static restores normal document
      flow so the browser paginates the record instead of clipping one viewport. */
   .detail-wrap { position: static; height: auto; overflow: visible; max-width: 100%; animation: none; }
@@ -863,7 +889,7 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
   .p-title, .p-facts b, .p-prompts { color: #000 !important; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .p-kicker, .p-title, .p-fact, .p-tag, .p-footer { opacity: 1; }
+  .p-kicker, .p-title, .p-fact, .p-tag, .p-actions { opacity: 1; }
   .p-rule { clip-path: inset(0 0% 0 0); }
 }
 
