@@ -3536,7 +3536,16 @@ def make_video_thumbnail(video_path, thumb_path):
     """Poster fallback for videos PixAI gave no poster frame: extract an early
     frame via ffmpeg (already a dependency for Loom export), then run it through
     the SAME Pillow thumbnail path as images so size/quality stay uniform.
-    Returns False (never raises) when ffmpeg is missing or the extract fails."""
+    Returns False (never raises) when ffmpeg is missing or the extract fails.
+
+    Picks a REPRESENTATIVE early frame, not a fixed timestamp. A clip that fades
+    in from black used to get a black poster, because the old `-ss 0.5` landed
+    inside the fade (owner, 2026-08-22). ffmpeg's `thumbnail` filter scans a batch
+    of frames and keeps the one closest to the batch average -- near-solid frames
+    (a fade, a flash) lose that contest by construction. The window is the first
+    ~3s (72 frames at 24fps) so the poster still reads as the clip's opening,
+    not a random mid-clip moment. The literal-first-frame fallback stays for
+    clips too short for the filter to get a batch."""
     import shutil as _sh
     import subprocess
     import tempfile
@@ -3547,8 +3556,8 @@ def make_video_thumbnail(video_path, thumb_path):
         fd, tmp = tempfile.mkstemp(suffix=".jpg")
         os.close(fd)
         r = subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-ss", "0.5",
-             "-i", str(video_path), "-frames:v", "1", tmp],
+            ["ffmpeg", "-y", "-loglevel", "error",
+             "-i", str(video_path), "-vf", "thumbnail=72", "-frames:v", "1", tmp],
             capture_output=True, timeout=90, creationflags=_NO_WINDOW)
         if r.returncode != 0 or not os.path.getsize(tmp):
             # clips shorter than the seek point: take the literal first frame
@@ -7033,6 +7042,38 @@ def create_app(out_dir: Path):
             return json.dumps({"ok": False}), 400, {"Content-Type": "application/json"}
         update_rating(db_path, media_id, value)
         return json.dumps({"ok": True, "rating": value}), 200, {"Content-Type": "application/json"}
+
+    @app.route("/api/rebuild-poster/<media_id>", methods=["POST"])
+    def rebuild_poster(media_id):
+        """Regenerate ONE video's poster thumbnail from its file, replacing the cached
+        one. For a clip whose cached poster is wrong -- e.g. a fade-in that was
+        thumbnailed inside the fade before the representative-frame pick shipped
+        (owner, 2026-08-22) -- without a whole --rebuild-thumbs pass. LOGIN tier like
+        /api/rate: it only rewrites a regenerable local cache file, touches nothing on
+        PixAI and no config. Videos only; an image's thumb is a straight resize and
+        never wrong in this way."""
+        if not media_id or "/" in media_id or "\\" in media_id or ".." in media_id:
+            return json.dumps({"ok": False, "error": "bad id"}), 400, {"Content-Type": "application/json"}
+        row = get_row(db_path, media_id)
+        if not row:
+            return json.dumps({"ok": False, "error": "not in the catalog"}), 404, {"Content-Type": "application/json"}
+        if str(row.get("is_video") or "") != "1":
+            return json.dumps({"ok": False, "error": "not a video"}), 400, {"Content-Type": "application/json"}
+        # The catalog row's filename is canonical; the matcher is the fallback if the
+        # file moved (and it must be told to look for VIDEO extensions -- its default
+        # set is images only).
+        src = out_dir / str(row.get("filename") or "")
+        if not (row.get("filename") and src.is_file()):
+            import moonglade_backup as core   # lazy, like every other gallery use of it
+            files = find_files_for_media_id(out_dir, media_id, exts=core._VIDEO_EXTS)
+            if not files:
+                return json.dumps({"ok": False, "error": "video file not found"}), 404, {"Content-Type": "application/json"}
+            src = Path(files[0])
+        thumb = out_dir / "gallery" / "thumbs" / (media_id + ".jpg")
+        ok = make_video_thumbnail(src, thumb)
+        if not ok:
+            return json.dumps({"ok": False, "error": "ffmpeg extract failed (is ffmpeg on PATH?)"}), 200, {"Content-Type": "application/json"}
+        return json.dumps({"ok": True, "thumb": "/thumbs/" + media_id + ".jpg?v=" + str(int(time.time()))}), 200, {"Content-Type": "application/json"}
 
     @app.route("/api/edit-prompt/<media_id>", methods=["POST"])
     def edit_prompt(media_id):

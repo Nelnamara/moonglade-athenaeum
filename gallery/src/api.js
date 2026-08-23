@@ -87,6 +87,12 @@ export async function resolveVideoIds(idList, known) {
   return vids;
 }
 
+// Regenerate one video's poster thumb from its file (e.g. a fade-in that was thumbnailed
+// black). Returns {ok, thumb} -- thumb carries a cache-buster so the new frame shows at once.
+export async function rebuildPoster(mediaId) {
+  return postJSON("/api/rebuild-poster/" + encodeURIComponent(mediaId), {});
+}
+
 export async function rateImage(mediaId, rating) {
   const r = await fetch("/api/rate/" + mediaId, {
     method: "POST",
