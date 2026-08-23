@@ -661,6 +661,17 @@ export default function App({ boot }) {
     onCopyId: (mid) => { try { navigator.clipboard.writeText(String(mid)); } catch { /* no-op */ } },
     onDetails: openDetails,
   };
+  /* ✧ Similar from the Lightbox's chip or Details' "see all N" NAVIGATES here: the viewer
+     (and the record) close and the gallery's own lookalike set -- the same SimilarModal the
+     grid's right-click "Find similar" opens, over the grid -- takes over. Lightbox.dc.html:354
+     sends Similar to Frontend Gallery.dc.html and Image Details.dc.html:127-140 keeps only
+     the inline 8-strip in the record; the refit had both stacking the modal on the open
+     surface instead ("Where the Refit Broke" #6). */
+  const showSimilar = (mid) => {
+    setLbIndex(null);
+    if (detailsFor) closeDetails();
+    setSimilarFor(mid);
+  };
 
   const dockActive = dockOpen && !dockClosing;
 
@@ -758,6 +769,8 @@ export default function App({ boot }) {
                 const i = items.findIndex((it) => it.media_id === mid);
                 if (i >= 0) setLbIndex(i);
               }}
+              onSimilar={showSimilar}
+              morph={lbIndex == null}
             />, document.body)
         ) : (
           <Grid
@@ -797,6 +810,7 @@ export default function App({ boot }) {
           onEdit={requestEdit} onToVideo={requestVideo}
           onOpenDetails={openDetails}
           onPublish={openPublish}
+          onSimilar={showSimilar}
         />
       )}
 

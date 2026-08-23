@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
 import useImageDetails from "../hooks/useImageDetails.js";
-import SimilarModal from "./SimilarModal.jsx";
+import useSimilar from "../hooks/useSimilar.js";
 import UpscalePanel from "./UpscalePanel.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
 import { rebuildPoster } from "../api.js";
@@ -134,7 +134,8 @@ function playReveal(root) {
 export default function DetailsView({
   mediaId, onClose, onNavigate, onRate, onEdit, onRemix, onVideo, onDeleted,
   onFilterByModel, onFilterByBatch, advParams,
-  items, onOpenLightbox, onPublish,
+  items, onOpenLightbox, onPublish, onSimilar,
+  morph = true,
 }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const [focusMode, setFocusMode] = useState(
@@ -143,11 +144,6 @@ export default function DetailsView({
   const [mediaOk, setMediaOk] = useState(true);
   const [posterBusy, setPosterBusy] = useState(false);
   const [posterSrc, setPosterSrc] = useState(null);   // set by Rebuild poster (cache-busted)
-  // Image Details.dc.html:127-139's SIMILAR section -- entirely absent on desktop before
-  // this (mobile already has it working with real /api/similar data). Reusing the exact
-  // real SimilarModal.jsx already proven by Lightbox.jsx's own "✧ Similar" button, not a
-  // rebuilt strip -- fits Direction C's own "actions demoted to a footer strip" idiom.
-  const [similarOpen, setSimilarOpen] = useState(false);
   // LINEAGE (Image Details.dc.html:108-123, 2026-08-06): where this image came from and
   // what came from it -- GET /api/lineage/<mid>, a pure catalog read (batch siblings via
   // task_id, derivation chain via source_media_id). Real data, fetched per image.
@@ -166,6 +162,11 @@ export default function DetailsView({
     upscaleOpen, upEl, toggleUpscale,
     handleRate,
   } = useImageDetails({ mediaId, advParams, onRate, onDeleted });
+
+  // ✧ SIMILAR (Image Details.dc.html:127-140): the same /api/similar data path the mobile
+  // record's strip already uses (hooks/useSimilar.js). The first 8 render inline below;
+  // "see all N" hands the full set to the gallery via onSimilar.
+  const similar = useSimilar(row ? row.media_id : null);
 
   // this component's OWN local reset on navigate (mediaOk isn't shared with the
   // mobile surface -- see useImageDetails.js for what is).
@@ -262,7 +263,13 @@ export default function DetailsView({
       </div>
 
       <div className={"placard" + (wide ? " placard-wide" : "")}>
-        <div className="placard-frame" style={{ viewTransitionName: "vt-reveal" }}>
+        {/* `morph` (App.jsx: the Lightbox is NOT mounted) gates the name: while the viewer
+            sits on top of this record -- opened from the ⛶ link -- its stage image carries
+            vt-reveal too, and the View Transitions spec SKIPS a transition whose old state
+            has two elements under one name. Dropping the name here while the destination is
+            mounted keeps exactly one per view, so the viewer's Details link still morphs
+            back into this frame ("Where the Refit Broke" #6). */}
+        <div className="placard-frame" style={{ viewTransitionName: morph ? "vt-reveal" : "none" }}>
           {!mediaOk ? (
             <div className="gd-note">{row.is_video === "1" ? "Video file not found on disk." : "Image file not found on disk."}</div>
           ) : row.is_video === "1" ? (
@@ -450,11 +457,48 @@ export default function DetailsView({
               </div>
             ) : null}
 
+            {/* ✧ SIMILAR (Image Details.dc.html:127-140) -- the eight closest by eye, INLINE
+                in the record: the LINEAGE header idiom, a lavender "see all N" pushed right,
+                then a horizontal strip of 78px tiles fading down the row as the DC draws
+                them. The refit had this inverted -- a "✧ Similar" BUTTON here opening the
+                48-grid modal, and the Lightbox stacking that same modal on the viewer
+                ("Where the Refit Broke" #6). Now the strip lives here, and "see all" /
+                the Lightbox's chip both NAVIGATE to the gallery's own lookalike set.
+                Gated on the route's own availability signal (no CLIP index, empty index, no
+                hits -> images: []): the whole section goes, header included -- never an
+                empty rail, same as .p-lineage. */}
+            {similar.images.length ? (
+              <div className="p-similar">
+                <div className="p-similar-head">
+                  <span className="k">✧ SIMILAR</span>
+                  <span className="s">the closest by eye, not by model</span>
+                  <span className="sp" />
+                  {onSimilar && similar.images.length > 8 ? (
+                    <button type="button" className="p-seeall" title="The 48 closest, over the gallery"
+                      onClick={() => onSimilar(row.media_id)}>
+                      see all {similar.images.length}
+                    </button>
+                  ) : null}
+                </div>
+                <div className="p-similar-strip">
+                  {similar.images.slice(0, 8).map((it, k) => (
+                    <button key={it.media_id} type="button" className="p-sim-tile"
+                      style={{ "--sim-o": 0.9 - k * 0.06 }}
+                      title={it.score != null ? "✧ " + it.score : "Open"}
+                      onClick={() => onNavigate(it.media_id)}>
+                      <img src={it.thumb} alt="" loading="lazy" decoding="async" />
+                      {it.is_video === "1" ? <span className="vbadge">▶</span> : null}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             {/* RECORD ACTIONS -- Image Details.dc.html:397-403 recordActions, the second
                 of the design's two groups; after lineage (and the Similar strip), at the
                 end of the record. "Find similar (model)" is the DC's "every image from
                 this model" (onFilterByModel), the same filter the kicker's "find more"
-                link applies -- NOT the visual-similarity modal, which lives in More. */}
+                link applies -- NOT visual similarity, which is the ✧ SIMILAR strip above. */}
             <div className="p-actions p-actions-record">
               <button className="btn" onClick={() => setEditingPrompt((v) => !v)}>✎ Edit prompt</button>
               {/* Send to Video: an image sends ITSELF as the first frame; a video sends its
@@ -491,7 +535,6 @@ export default function DetailsView({
                   now (Image Details.dc.html:95-97's row.copyable pattern) -- removed from
                   here 2026-08-04 to avoid duplicating the same action in two places. */}
               <button className="btn" onClick={() => window.print()}>🖨 Print</button>
-              <button className="btn" title="Visually similar images" onClick={() => setSimilarOpen(true)}>✧ Similar</button>
               {row.is_video !== "1" && (
                 <>
                   <a className="btn" href={"/contact-sheet?ids=" + encodeURIComponent(row.media_id) + "&format=photo"} target="_blank" rel="noreferrer">4×6 photo</a>
@@ -564,11 +607,6 @@ export default function DetailsView({
             <span id="save-status">{saveStatus}</span>
           </div>
         </div>
-      )}
-
-      {similarOpen && (
-        <SimilarModal mediaId={row.media_id} onClose={() => setSimilarOpen(false)}
-          onOpenDetails={(mid) => { setSimilarOpen(false); onNavigate(mid); }} />
       )}
     </div>
   );

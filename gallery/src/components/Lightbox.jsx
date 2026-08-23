@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
-import SimilarModal from "./SimilarModal.jsx";
 import UpscalePanel from "./UpscalePanel.jsx";
 import "../styles/lightbox.css";
 import useScrollLock from "../hooks/useScrollLock.js";
@@ -30,7 +29,7 @@ import useScrollLock from "../hooks/useScrollLock.js";
    page-level close back to the gallery. */
 export default function Lightbox({
   items, index, setIndex, onClose, onRate, page, pages, loadPage, onEdit, onToVideo,
-  onOpenDetails, onPublish,
+  onOpenDetails, onPublish, onSimilar,
 }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const it = items[index];
@@ -46,7 +45,6 @@ export default function Lightbox({
       if (n && !n.is_video) { const im = new Image(); im.src = "/full/" + n.media_id; }
     }
   }, [items, index]);
-  const [similarFor, setSimilarFor] = useState(null);
   const [slideOn, setSlideOn] = useState(false);
   const [closing, setClosing] = useState(false);
   const [dragDX, setDragDX] = useState(0);
@@ -86,8 +84,8 @@ export default function Lightbox({
 
   /* Page-level close plays the exit (overlay law: both directions animate) and
      defers the real unmount 340ms so the lbxOut window has a mounted element.
-     Edit/To Video/Details leave through App's own paths (dock open / the
-     vt-reveal morph) and are not routed through this. */
+     Edit/To Video/Similar/Details leave through App's own paths (dock open / the
+     gallery's lookalike set / the vt-reveal morph) and are not routed through this. */
   const close = useCallback(() => {
     if (closingRef.current) return;
     closingRef.current = true;
@@ -110,7 +108,6 @@ export default function Lightbox({
         return;
       }
       if (document.activeElement && /^(input|textarea|select)$/i.test(document.activeElement.tagName)) return;
-      if (similarFor) return; // SimilarModal owns its own Escape; stay inert under it
       if (e.key === "ArrowRight") step(1);
       else if (e.key === "ArrowLeft") step(-1);
       else if (e.key === "f" || e.key === "F") setSlideOn((v) => !v);
@@ -123,7 +120,7 @@ export default function Lightbox({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [close, step, similarFor, slideOn, zoom]);
+  }, [close, step, slideOn, zoom]);
 
   /* 4200ms per slide (DC). A timeout keyed on the index, not an interval, so a
      manual step/filmstrip jump restarts the clock -- and the 2px progress bar
@@ -246,14 +243,20 @@ export default function Lightbox({
               onClick={() => onEdit(it.media_id)}>✎ Edit</button>
             <button className="lbx-chip" title="Send as a start frame"
               onClick={() => onToVideo(it.media_id, it.thumb)}>▶ To Video</button>
+            {/* ✧ Similar NAVIGATES (Lightbox.dc.html:354 sends it to the gallery): the viewer
+                closes and the gallery's own 48-lookalike set opens over the grid -- the same
+                destination as Details' "see all". It no longer stacks a modal on the viewer
+                ("Where the Refit Broke" #6). */}
             <button className="lbx-chip" title="Lookalikes by eye — the 48 closest"
-              onClick={() => setSimilarFor(it.media_id)}>✧ Similar</button>
+              onClick={() => onSimilar && onSimilar(it.media_id)}>✧ Similar</button>
             <button className="lbx-chip" title="Upscale or Hires this picture"
               onClick={() => upEl.current && upEl.current.open(it.media_id)}>⇱ Upscale</button>
             {/* ☁ Publish -- the cross-page hand-off (Lightbox.dc.html:357), REAL since
                 2026-08-06: it hands this image to the Publish panel, which runs the actual
-                createArtworkFromTaskV2 pipeline (preview, then confirm). */}
-            <button className="lbx-chip" title="Publish this image to PixAI"
+                createArtworkFromTaskV2 pipeline (preview, then confirm). The DC builds it
+                with btn(..., true) -- the PRIMARY/metal treatment, same as Slideshow -- which
+                the refit had dropped to a plain chip ("Where the Refit Broke" #6). */}
+            <button className="lbx-chip lbx-chip-metal" title="Publish this image to PixAI"
               onClick={() => onPublish && onPublish(it.media_id)}>☁ Publish</button>
             <a className="lbx-chip" title="Open the full record"
               href={"/?image=" + encodeURIComponent(it.media_id)}
@@ -333,7 +336,6 @@ export default function Lightbox({
       {/* flyout mode (no inline): a fixed top-layer modal. The wrapper stops a click inside
           it from reaching the stage's click-to-close; the panel's own scrim closes it. */}
       <div onClick={(e) => e.stopPropagation()}><UpscalePanel ref={upEl} /></div>
-      <SimilarModal mediaId={similarFor} onClose={() => setSimilarFor(null)} onOpenDetails={onOpenDetails} />
     </div>
   );
 }

@@ -63,7 +63,7 @@
 .lbx-fig { font-size: 10.5px; color: rgba(214,210,226,.45);
   font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-/* action chips: only Slideshow wears the metal */
+/* action chips: Slideshow and Publish wear the metal (the DC's two btn(..., true)) */
 .lbx-acts { display: flex; align-items: center; gap: 6px; flex: none; }
 .lbx-chip { font-size: 11px; font-weight: 700; white-space: nowrap; padding: 7px 13px;
   border-radius: 9px; cursor: pointer; transition: border-color .2s, color .2s, background .2s;
