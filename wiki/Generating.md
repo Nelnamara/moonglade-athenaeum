@@ -480,6 +480,13 @@ elsewhere on your LAN — can open the drawer and spend credits or cards. That's
 so a tablet or second device can generate too; see [Trust & Safety](Trust-and-Safety) for
 what *is* restricted to the server's own machine.
 
+Every submit button here — Generate, ✦ Edit, ✦ Fix, and the Upscale panel's — **waits for a
+price that belongs to what it is about to send.** Change a setting and the cost line blanks to
+"Checking cost…" and the button greys out for as long as the check takes, so a quote can never
+be spent against a job it wasn't for. Typing a prompt or an edit instruction doesn't trigger
+that (the wording never changes the price), and if a check fails the badge says so in red and
+the button comes back — the app will tell you it doesn't know rather than leave you stuck.
+
 - **Generate** — pick a base model in the pop-out browser (hover any card for a full preview),
   attach **LoRAs with weights** up to your account's own limit (read live from your PixAI
   membership and shown as `LORAS · n/max` — it is not a fixed number, and Generate blocks
