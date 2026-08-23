@@ -156,26 +156,38 @@ export function FilterTray({ closing, media, shelf, perPage, adv, collections, m
   );
 }
 
-/* The library bar (DC drift §10). Same prop names as Strip.jsx so the swap-in
-   is a one-line App change; `account`, `blur/setBlur`, `onGenerate` are
-   accepted for that compatibility but unused — the shell's separator bar and
-   banner own blur, credits and Generate now. Strip's Import stub is dropped:
-   the NavSpine carries Import (gated on boot.is_true_local). */
+/* The library bar (DC drift §10).
+
+   INTERFACE. Sixteen of its props were one object taken apart: it is a view of the LIBRARY --
+   filters, query, selection, the flyout -- so it takes `lib`, the useLibrary() return, whole.
+   The rest is what the library does not own: `boot` (models, is_true_local), `actions` (App's
+   verb table, which the Flyout and the actions menu both read), `collections`, the grid
+   `layout` pair, and the two optional post-mutation hooks a mount may supply.
+
+   Eight props went away entirely rather than being folded in, because nothing here ever read
+   them: `account`, `blur`/`setBlur` and `onGenerate` were Strip.jsx swap-in compatibility that
+   outlived the swap (the separator bar and banner own blur, credits and Generate); `setMedia`,
+   `setPerPage` and `setShelf` were dead because every tray chip commits through applyAdvanced,
+   not a setter; `selectedCount` was never read at all. Five of the eight sat behind
+   eslint-disable no-unused-vars, which is how they survived this long.
+
+   Strip's Import stub is dropped: the NavSpine carries Import (gated on boot.is_true_local). */
 export function LibraryBar({
-  boot, account, // eslint-disable-line no-unused-vars
-  media, setMedia, // setMedia unused directly: media commits via applyAdvanced
-  perPage, setPerPage, // eslint-disable-line no-unused-vars
-  shelf, setShelf, // eslint-disable-line no-unused-vars
-  query, setQuery, submitQuery, resetAll,
-  blur, setBlur, // eslint-disable-line no-unused-vars
-  selectMode, setSelectMode,
-  selectedCount, selectedIds, clearSelection,
-  collections, actions,
-  adv, advCount, flyOpen, setFlyOpen, applyAdvanced,
-  onGenerate, // eslint-disable-line no-unused-vars
-  onSendVideo, onMutated,
+  lib, boot, actions, collections,
   layout, setLayout,
+  onSendVideo, onMutated,
 }) {
+  const {
+    media, perPage, shelf,
+    query, setQuery, submitQuery, resetAll,
+    selectMode, setSelectMode, selected, setSelected,
+    adv, advCount, flyOpen, setFlyOpen, applyAdvanced,
+  } = lib;
+  // The two selection verbs the bar needs, off the same Set the grid toggles -- App used to
+  // spell both out as props and hand down a fresh closure on every render.
+  const selectedIds = [...selected];
+  const clearSelection = () => setSelected(new Set());
+
   const [trayOpen, setTrayOpen] = useState(false);
   const [trayClosing, setTrayClosing] = useState(false);
   const trayTimer = useRef(null);

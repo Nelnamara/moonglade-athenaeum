@@ -56,17 +56,20 @@ import useLibrary, { filterQueryString } from "./hooks/useLibrary.js";
      <main>; shell.css maps it onto the existing .grid columns until then. */
 
 export default function App({ boot }) {
+  /* The library state, kept whole as `lib` AND spread for this file's own use. The whole
+     object is what surfaces built ON the library take (LibraryBar); the spread is what the
+     shell reads directly. One source, two views of it -- not two copies. */
+  const lib = useLibrary();
   const {
     // filters
-    media, setMedia, shelf, setShelf, perPage, setPerPage,
-    query, setQuery, applied, setApplied, adv, setAdv, flyOpen, setFlyOpen,
+    media, shelf, perPage, query, applied, adv, setAdv,
     // data
     items, setItems, total, page, pages, loading,
     // load + filter verbs
-    load, applyAdvanced, advCount, submitQuery, resetAll,
+    load, applyAdvanced,
     // selection
-    selectMode, setSelectMode, selected, setSelected, toggleSelected,
-  } = useLibrary();
+    selectMode, selected, setSelected, toggleSelected,
+  } = lib;
   const [account, setAccount] = useState(null);
   const refreshAccount = () => fetchAccount().then(setAccount);
   const claimModal = useClaimModal(account, refreshAccount);
@@ -649,22 +652,10 @@ export default function App({ boot }) {
           onFolio={() => openOverlay("folio")}
           libraryBar={
             <LibraryBar
-              boot={boot} account={account}
-              media={media} setMedia={setMedia}
-              perPage={perPage} setPerPage={setPerPage}
-              shelf={shelf} setShelf={setShelf}
-              query={query} setQuery={setQuery} submitQuery={submitQuery} resetAll={resetAll}
-              blur={blur} setBlur={setBlur}
-              selectMode={selectMode} setSelectMode={setSelectMode}
-              selectedCount={selected.size}
-              selectedIds={selIds}
-              clearSelection={() => setSelected(new Set())}
-              collections={collections}
+              lib={lib}
+              boot={boot}
               actions={actions}
-              adv={adv} advCount={advCount}
-              flyOpen={flyOpen} setFlyOpen={setFlyOpen}
-              applyAdvanced={applyAdvanced}
-              onGenerate={openDock}
+              collections={collections}
               layout={layout} setLayout={setLayout}
             />
           }

@@ -40,11 +40,11 @@ import "../styles/librarybar.css";
                                           disabled (the GenerateDock retab owns
                                           the bulk→video prefill contract).
      onMutated, clearSelection          — optional post-mutation hooks.
-     onAddCollection / onRemoveCollection / onReplacePrompt / onDeleteLocal /
-     onDeleteCloud                      — legacy delegation props (Strip's old
-                                          contract): accepted so existing
-                                          mounts compile, but NO LONGER CALLED —
-                                          the JSON flows above replaced them. */
+   Nine props, and every one of them is read. Five more (onAddCollection /
+   onRemoveCollection / onReplacePrompt / onDeleteLocal / onDeleteCloud) were Strip's old
+   delegation contract, kept "so existing mounts compile" after the JSON flows above replaced
+   them; no mount has passed one since, so they are gone (2026-08-23). Both mounts --
+   FiltersPanel's LibraryBar and GalleryMobile's actions sheet -- speak this one contract. */
 
 function plural(v, one, many) { return v + " " + (v === 1 ? one : many); }
 
@@ -137,8 +137,6 @@ export default function ActionsMenu({
   ids, shelf, isTrueLocal,
   onSendCast, onPrintSheet, onDownloadZip, onSendVideo,
   onMutated, clearSelection,
-  /* legacy delegation props — accepted, not called (see header comment) */
-  onAddCollection, onRemoveCollection, onReplacePrompt, onDeleteLocal, onDeleteCloud, // eslint-disable-line no-unused-vars
 }) {
   const count = ids.length;
   const [open, setOpen] = useState(false);
