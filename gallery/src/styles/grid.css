@@ -42,6 +42,16 @@
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent), 0 10px 26px rgba(0, 0, 0, .5);
 }
+/* Keyboard focus ring (#31, "Where the Refit Broke" #7): the arrows move real DOM
+   focus between cards (Grid.jsx). :focus-visible ONLY -- a mouse click focuses the
+   card too (tabIndex=0) and must not paint it. scroll-margin keeps a card the
+   handler scrolls to clear of the sticky header (App publishes --mgx-chrome-h). */
+.mgg-card:focus { outline: none; }
+.mgg-card:focus-visible {
+  outline: 2px solid var(--lavender, var(--accent));
+  outline-offset: 2px;
+}
+.mgg-card { scroll-margin-top: calc(var(--mgx-chrome-h, 0px) + 12px); scroll-margin-bottom: 12px; }
 
 /* the art fills the fixed grid cell; the caption overlays it */
 .mgg-art {

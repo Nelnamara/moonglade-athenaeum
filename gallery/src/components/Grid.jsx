@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { localDay, localDayTime } from "../gen/dates.js";
+import { buildUrl } from "../gen/urlState.js";
 import { fetchSiblings } from "../api.js";
 import Stars from "./Stars.jsx";
 import "../styles/grid.css";
@@ -102,6 +103,9 @@ export default function Grid({
   blur, thumb, layout = "masonry",
   selectMode, selected, toggleSelected, openLightbox, onRate,
   onOpenDetails, onContextMenu,
+  // App says whether the grid is the top layer (no lightbox/details/overlay/dock):
+  // the arrow-key handler below stays silent otherwise.
+  keysEnabled = true,
 }) {
   const go = (p) => {
     if (p < 1 || p > pages || p === page) return;
@@ -298,8 +302,9 @@ export default function Grid({
 
   // The shift-range anchor is an INDEX into the current page's cells -- carrying
   // it across a page flip (or a layout re-lay, which reorders cells) would
-  // range-add against a stale anchor.
-  useEffect(() => { lastPickRef.current = null; }, [items, layout]);
+  // range-add against a stale anchor. Same for the keyboard's last-focused card.
+  const lastFocusRef = useRef(null);
+  useEffect(() => { lastPickRef.current = null; lastFocusRef.current = null; }, [items, layout]);
 
   const togglePick = (i) => {
     lastPickRef.current = i;
@@ -381,9 +386,125 @@ export default function Grid({
      App's own listener reads back into state. Same destination, no new API. */
   const goDetails = (mid) => {
     if (typeof onOpenDetails === "function") { onOpenDetails(mid); return; }
-    window.history.pushState({}, "", "/?image=" + encodeURIComponent(mid));
+    // App passes onOpenDetails today; this fallback rides the same URL builder App
+    // does, so even the bridge keeps ?page= (#31, Refit #7).
+    window.history.pushState({}, "", buildUrl({ image: mid }, window.location.search, window.location.pathname));
     window.dispatchEvent(new PopStateEvent("popstate"));
   };
+
+  /* ---- Arrow-key navigation (#31, "Where the Refit Broke" #7) ----
+     The classic grid had a keyboard focus ring the arrows moved; the refit shipped
+     with no grid keydown at all. Real DOM focus IS the ring: every card is
+     tabIndex=0 (so Tab reaches it too), this handler moves focus between cards,
+     and grid.css paints the lavender outline on :focus-visible only -- a mouse
+     click never shows it.
+       ArrowLeft/Right  +-1 card in visual (cells) order;
+       ArrowUp/Down     the nearest card above/below sharing horizontal ground,
+                        read off the RENDERED rects -- so masonry's staggered
+                        columns and a 2-col feature slot resolve to what the eye
+                        sees; falls back to +- the first row's card count;
+       Home/End         first/last card on the page;
+       Enter            opens the Lightbox on the focused card;
+       Right past the last card / Left before the first: flip the page (the
+       smaller "arrows flip pages" build), landing on the new page's first/last
+       card once it renders.
+     Window-level, like the classic, so the arrows work before anything is
+     focused (the first press lands on the last card focused, else the first).
+     Never steals a key from an input/textarea/select/contenteditable, a
+     modified chord (Alt+Left is the browser's Back), or while App says another
+     layer is up (keysEnabled). */
+  const pendingFocus = useRef(null);   // "first" | "last": where to land after a keyboard page flip
+  const focusCard = (idx) => {
+    const root = gridRef.current;
+    const el = root && root.querySelector('.mgg-card[data-laid-index="' + idx + '"]');
+    if (!el) return false;
+    el.focus({ preventScroll: true });
+    // scroll-margin-top in grid.css keeps the card clear of the sticky header
+    el.scrollIntoView({ block: "nearest", inline: "nearest" });
+    return true;
+  };
+  useEffect(() => {
+    if (!pendingFocus.current || loading || !cells.length) return;
+    const want = pendingFocus.current;
+    pendingFocus.current = null;
+    focusCard(want === "last" ? cells.length - 1 : 0);
+  }, [cells, loading]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!keysEnabled) return undefined;
+    const NAV_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "Enter"];
+    // The card above/below: strictly past this card's top edge in `dir`, overlapping
+    // it horizontally; nearest row wins, then the closest center within that row.
+    const verticalNeighbor = (root, el, dir) => {
+      const me = el.getBoundingClientRect();
+      if (!me.width && !me.height) return undefined;   // not laid out: caller falls back to row math
+      const cx = (me.left + me.right) / 2;
+      let best = null, bestDy = Infinity, bestDx = Infinity;
+      root.querySelectorAll(".mgg-card").forEach((c) => {
+        if (c === el) return;
+        const r = c.getBoundingClientRect();
+        if (dir > 0 ? r.top <= me.top + 1 : r.top >= me.top - 1) return;
+        if (Math.min(r.right, me.right) - Math.max(r.left, me.left) <= 0) return;
+        const dy = Math.abs(r.top - me.top);
+        const dx = Math.abs((r.left + r.right) / 2 - cx);
+        if (dy < bestDy - 0.5 || (Math.abs(dy - bestDy) <= 0.5 && dx < bestDx)) {
+          best = c; bestDy = dy; bestDx = dx;
+        }
+      });
+      return best ? Number(best.getAttribute("data-laid-index")) : null;
+    };
+    // Cards per row, from the rendered layout: how many share the first card's top.
+    const colsOnScreen = (root) => {
+      const all = root.querySelectorAll(".mgg-card");
+      if (!all.length) return 1;
+      const top = all[0].getBoundingClientRect().top;
+      let n = 0;
+      all.forEach((c) => { if (Math.abs(c.getBoundingClientRect().top - top) <= 1) n++; });
+      return Math.max(1, n);
+    };
+    const onKey = (e) => {
+      const k = e.key;
+      if (!NAV_KEYS.includes(k) || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+      const t = e.target;
+      if (t && t.closest && t.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']")) return;
+      const root = gridRef.current;
+      if (!root || loading || !cells.length) return;
+      const card = t && t.closest ? t.closest(".mgg-card") : null;
+      const cur = card && root.contains(card) ? Number(card.getAttribute("data-laid-index")) : -1;
+      const last = cells.length - 1;
+      if (k === "Enter") {
+        // only the card ITSELF: a chip/checkbox/star inside it keeps its own Enter
+        if (cur < 0 || t !== card) return;
+        e.preventDefault();
+        openLightbox(origIndexByMid.get(cells[cur].it.media_id));
+        return;
+      }
+      let next = null;
+      if (cur < 0) {
+        // nothing focused: resume where the keyboard last was on this page, else land
+        const back = lastFocusRef.current;
+        next = k === "End" ? last : k === "Home" ? 0 : (back != null && back <= last ? back : 0);
+      } else if (k === "Home") next = 0;
+      else if (k === "End") next = last;
+      else if (k === "ArrowLeft") {
+        if (cur > 0) next = cur - 1;
+        else if (page > 1) { pendingFocus.current = "last"; go(page - 1); }
+      } else if (k === "ArrowRight") {
+        if (cur < last) next = cur + 1;
+        else if (page < pages) { pendingFocus.current = "first"; go(page + 1); }
+      } else {
+        const dir = k === "ArrowDown" ? 1 : -1;
+        next = verticalNeighbor(root, card, dir);
+        if (next === undefined) {   // unmeasurable only; a measured "nothing there" stays put
+          const byRow = cur + dir * colsOnScreen(root);
+          if (byRow >= 0 && byRow <= last) next = byRow;
+        }
+      }
+      e.preventDefault();
+      if (next != null) focusCard(next);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [keysEnabled, cells, loading, page, pages, origIndexByMid, openLightbox]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- Timeline jump rail: sticky vertical band list; click scrolls the tiles
      pane to that band. The pane is an internal scroll context (grid.css) so the
@@ -460,6 +581,9 @@ export default function Grid({
       <figure
         key={it.media_id}
         data-laid-index={i}
+        // keyboard-reachable (Tab) and the arrow handler's focus target (#31, Refit #7)
+        tabIndex={0}
+        onFocus={(ev) => { if (ev.target === ev.currentTarget) lastFocusRef.current = i; }}
         // aspect-true / uniform-cell row span; a feature or wide cell spans 2 cols.
         style={{
           gridRow: "span " + cell.span,
