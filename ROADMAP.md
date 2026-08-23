@@ -43,17 +43,19 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   The input for the call: `../moonglade-internal/QA_tablet-2026-08-23.md` — a targeted poke list
   built from the refit review's findings; which sections bite decides which answer.
 
-- **Per-image naming — the real fix for "four identical titles"** *(owner decisions 2026-08-23: filenames untouched;
-  tell-apart over describe, as a POC; LOCAL only, no third-party cost ever)*
-  Two tiers. **Tier 0, free, first** — the batch index ([#33](https://github.com/Nelnamara/moonglade-athenaeum/issues/33)):
-  `getTaskById`'s `outputs.batch[]` IS the site's own output order (verified against `from-PixAI-<task>-<n>`
-  downloads), recoverable for every task; the stamp and Details headline gain `· 3 of 4`. **Tier 1, the POC**
-  — one local in-process VLM call per image returns a 3-word *discriminator* ("what makes this one different
-  from its siblings") AND structured flags (subject count · orientation · palette · has-text) in one JSON;
-  shown as a visibly separate class from a typed title, one click promotes it. Bake-off first (the
-  "Naming 35,815 Images" artifact's Next, adjusted): real-catalog collision + curation counts, a
-  stratified 200 of whole batches, Qwen2.5-VL-7B / MiniCPM-V 2.6 / Florence-2, scored on collisions removed
-  then s/image + VRAM, never beside the embed job. Needs the owner's GPU for an evening.
+- **Per-image naming — NOT DECIDED; constraints captured, brainstorm open** *(owner, 2026-08-23)*
+  The problem: four siblings share one prompt, so any prompt-derived title is identical ×4 (card stamp,
+  Details headline). **Constraints the owner has set:** filenames are NOT touched (separate workshop below);
+  the goal is to *tell siblings apart* more than to describe each (explore as a POC, not a commitment);
+  LOCAL only — no third-party cost, ever, for any user. **Facts established:** the prompt is batch-level
+  (84% collide; cleaning makes it worse); only the picture or the batch position can distinguish siblings;
+  the batch index IS recoverable ([#33](https://github.com/Nelnamara/moonglade-athenaeum/issues/33) —
+  `outputs.batch[]` is the site's own order). **Options on the table, none chosen:** a batch-index suffix
+  (`· 3 of 4`, free); a local-VLM 3-word *discriminator*; structured *flags* (subject · orientation ·
+  palette · has-text); AI-suggest-then-human-promote as the UI contract; the strip alone. Claude's
+  recommendation was the discriminator + flags in one call with the index as the free floor — the owner
+  has not picked. Next step is the brainstorm/workshop, not a build; a local bake-off (the "Naming 35,815
+  Images" artifact's Next) is the cheapest test of whichever direction he picks.
 
 - **The filename convention — workshop** *(owner, 2026-08-23)*
   `build_stem_name` (`<prompt-slug>_<task>_<media>`) dates from the backup-tool era and was never revisited.
