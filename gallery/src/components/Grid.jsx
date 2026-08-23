@@ -92,6 +92,11 @@ function bandFor(date, today, yesterday) {
   return { key: ym, label: ym, tier: 1, monthKey: ym };
 }
 
+// Smallest thumb size (the SIZE slider value) at which the Sibling Strip renders. The
+// default is 210; the slider floor is 152. Measured: a strip card's slab overflows the
+// fixed-height grid cell from ~172 down, so the gate sits above that with margin.
+const STRIP_MIN_THUMB = 190;
+
 export default function Grid({
   items, total, loading, page, pages, goToPage,
   blur, thumb, layout = "masonry",
@@ -426,7 +431,11 @@ export default function Grid({
     // four -> four and a "+N"; self always sits among the four shown.
     const sibs = it.task_id ? siblings[it.task_id] : null;
     let strip = null;
-    if (Array.isArray(sibs) && sibs.length >= 2) {
+    // Owner call (a), 2026-08-22: below STRIP_MIN_THUMB the fixed-height grid/hero cell
+    // can no longer hold the slab + a strip (it clips the stamp at the card top), and at
+    // that size 30px sibling thumbs are noise anyway. The stamp -- the part that fixes
+    // the naming problem -- survives at every size; only the strip steps aside.
+    if (Array.isArray(sibs) && sibs.length >= 2 && (thumb || 210) >= STRIP_MIN_THUMB) {
       const shown = sibs.slice(0, 4);
       if (sibs.length > 4 && !shown.some((s) => s.media_id === it.media_id)) {
         const self = sibs.find((s) => s.media_id === it.media_id);
