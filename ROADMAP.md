@@ -23,6 +23,15 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Next — scoped, not started
 
+- **Image Details: stamp headline + the wide-image layout** ([#31](https://github.com/Nelnamara/moonglade-athenaeum/issues/31)) *(owner-reported live, 2026-08-22)*
+  Two defects in the most prominent spot. The Details headline still leads with the word-salad
+  **filename** for every untitled image — #30 fixed the card, not this; apply the same rule (a typed
+  title only, else the accession stamp; never a machine name). And a **wide** image (ratio > 1.6)
+  clips off the top of the viewport while the record paints over its lower half: `.placard-wide`
+  stacks the columns but never sizes the rows, so the art and the record auto-split into two equal
+  rows the image can't fit. Measured live; a two-line CSS fix (`grid-template-rows: auto minmax(0,1fr)`,
+  frame `align-self: start`). Small, real, no design gate.
+
 - **Per-batch / per-task grid stacking** *(standalone — kept, owner 2026-08-19)*
   Collapse the gallery wall so a multi-image generation (a batch of, say, 4) shows as **one
   stack/card** instead of N flat tiles — de-cluttering the grid for batch gens. Kept as its own
