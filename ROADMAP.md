@@ -43,6 +43,24 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   The input for the call: `../moonglade-internal/QA_tablet-2026-08-23.md` — a targeted poke list
   built from the refit review's findings; which sections bite decides which answer.
 
+- **Per-image naming — the real fix for "four identical titles"** *(owner decisions 2026-08-23: filenames untouched;
+  tell-apart over describe, as a POC; LOCAL only, no third-party cost ever)*
+  Two tiers. **Tier 0, free, first** — the batch index ([#33](https://github.com/Nelnamara/moonglade-athenaeum/issues/33)):
+  `getTaskById`'s `outputs.batch[]` IS the site's own output order (verified against `from-PixAI-<task>-<n>`
+  downloads), recoverable for every task; the stamp and Details headline gain `· 3 of 4`. **Tier 1, the POC**
+  — one local in-process VLM call per image returns a 3-word *discriminator* ("what makes this one different
+  from its siblings") AND structured flags (subject count · orientation · palette · has-text) in one JSON;
+  shown as a visibly separate class from a typed title, one click promotes it. Bake-off first (the
+  "Naming 35,815 Images" artifact's Next, adjusted): real-catalog collision + curation counts, a
+  stratified 200 of whole batches, Qwen2.5-VL-7B / MiniCPM-V 2.6 / Florence-2, scored on collisions removed
+  then s/image + VRAM, never beside the embed job. Needs the owner's GPU for an evening.
+
+- **The filename convention — workshop** *(owner, 2026-08-23)*
+  `build_stem_name` (`<prompt-slug>_<task>_<media>`) dates from the backup-tool era and was never revisited.
+  PixAI's own download names are `from-PixAI-<task>-<index>`; the API sends no filename (a media object +
+  CDN URL), the site synthesizes one client-side. Workshop what ours should be — the batch index is now a
+  known fact — before anything touches 43k files (`--organize` makes any rename reversible).
+
 - **Per-batch / per-task grid stacking** *(standalone — kept, owner 2026-08-19)*
   Collapse the gallery wall so a multi-image generation (a batch of, say, 4) shows as **one
   stack/card** instead of N flat tiles — de-cluttering the grid for batch gens. Kept as its own
